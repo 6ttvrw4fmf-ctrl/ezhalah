@@ -58,7 +58,11 @@ console.log("\n── the client quotes ONLY that number, and stays silent when 
 const ui = readFileSync(new URL("../src/app/agent.tsx", import.meta.url), "utf8");
 check("the intro count comes from quotableTotal", /const introTotal = quotableTotal\(m\.result\);/.test(ui));
 check("a NULL total falls back to non-numeric text, never a number",
-  /introTotal != null\s*\n?\s*\? t\('We found \{n\} listings matching your search\.'[\s\S]{0,80}?: m\.text/.test(ui),
+  // Owner rule 2026-09-19: the fixed «We found {n} listings…» sentence was replaced by
+  // pickResultsFoundSentence (the four-pool Results-Found rotation). The invariant is unchanged —
+  // introTotal != null gates the count-bearing sentence; the null branch still falls through to
+  // m.text. Only the count-bearing branch's identity moved from t('We found {n}…') to the picker.
+  /introTotal != null\s*\n?\s*\? pickResultsFoundSentence\(\{[\s\S]{0,400}?count: introTotal\.toLocaleString\('en-US'\),[\s\S]{0,600}?stableKey: m\.id,\s*\n?\s*\}\)\s*\n?\s*: m\.text/.test(ui),
   "when no honest count exists the reply must say something truthful and non-numeric");
 // A second count source is how two numbers describing the SAME search end up on screen.
 check("the intro never quotes result.total (this page's buffer length, <= QUERY_LIMIT)",
@@ -69,9 +73,17 @@ check("the mining beat uses the SAME arbiter (one number for one search)",
   /const honestTotal = quotableTotal\(result\);/.test(ui));
 
 console.log("\n── zero results: honest, and relaxation is an OFFER ──");
-check("zero results renders the suggestion, not a count",
+// Owner rule 2026-09-26: the true generic catch-all (tagged NO_RESULTS_GENERIC_FALLBACK_EN — the
+// LAST of noResultsSuggestion()'s ~9 branches, reached only when none of the 8 specific diagnoses
+// apply) now rotates across the owner's 80-message pool instead of one fixed sentence. The invariant
+// is unchanged — a zero-result reply never states a count — only the generic branch's identity moved
+// from a fixed t(...) string to pickNoResultsSentence(); the 8 specific diagnoses still render
+// m.result.suggestion exactly as before.
+check("zero results renders the suggestion (or the rotation for the generic fallback), not a count",
   /const introZeroResult = m\.result\.listings\.length === 0;/.test(ui)
-  && /introZeroResult\s*\n?\s*\? \(m\.result\.suggestion \?\? t\('No exact matches/.test(ui));
+  && /introZeroResult\s*\n?\s*\? \(isGenericNoResults\s*\n?\s*\? pickNoResultsSentence\([\s\S]{0,200}?\)\s*\n?\s*: \(m\.result\.suggestion \?\? replyT\('No exact matches/.test(ui));
+check("the No-Results rotation pool never carries a count placeholder (zero results must stay non-numeric)",
+  !readFileSync(new URL("../src/data/noResultsRotation.ts", import.meta.url), "utf8").includes("{count}"));
 const search = readFileSync(new URL("../src/data/search.ts", import.meta.url), "utf8");
 // STRUCTURAL GUARANTEE: a suggestion is a STRING on SearchResult. It cannot carry a query change, so
 // it is incapable of silently widening anything — the user must act on it.

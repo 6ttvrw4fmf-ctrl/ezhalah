@@ -76,36 +76,36 @@ check(`MEANINGFUL_NARROWING_FRACTION is the owner's 10% (got ${MEANINGFUL_NARROW
   'src/lib/afRanking.ts — the owner set this threshold on 2026-08-24 and extended it to the ask gate '
   + 'on 2026-08-25; changing it needs their decision');
 
-check(`INTERVIEW_STOP_AT is 50 (got ${INTERVIEW_STOP_AT}) — owner product rule 2026-09-04 (was 25)`,
-  INTERVIEW_STOP_AT === 50,
-  'src/lib/afRanking.ts — the round target and this gate\'s "finishes the job" clause both hang off it; '
-  + 'above 50 rounds continue while truthful questions remain, at ≤50 the interview finishes and reveals all');
+check(`INTERVIEW_STOP_AT is 25 (got ${INTERVIEW_STOP_AT}) — owner 2026-09-20 (50 → 25)`,
+  INTERVIEW_STOP_AT === 25,
+  'src/lib/afRanking.ts — this gate\'s "finishes the job" clause hangs off it; above 25 a question may '
+  + 'be asked and «تحديد أكثر» may be offered, at ≤25 the interview finishes and reveals all');
 
-// "Example at N=50: an option yielding <=45 qualifies; one yielding 47 does not." Exactly 10% must
-// qualify — the boundary is `>=`, so 50→45 is the last qualifying answer, not the first rejected one.
-// (Owner's original worked example was at N=50 with a 25 target; re-expressed at N=100 for the 50
-// target — same inclusive 10% boundary: 100→90 is the last qualifying answer, 100→94 is not.)
+// Exactly 10% must qualify — the boundary is `>=`. Expressed at N=100 so the fraction is isolated
+// from the ≤ INTERVIEW_STOP_AT escape clause below (90 and 94 are both far above 25, so only the
+// fraction can decide them): 100→90 is the last qualifying answer, 100→94 is not.
 check('N=100, best option yields 90 (exactly 10% removed) ⇒ OFFERED',
   offersMeaningfulNarrowing(100, opts(90, 99)) === true,
   'the 10% boundary is inclusive; a `>` here would silently drop the owner\'s own worked example');
 check('N=100, best option yields 94 (6% removed) ⇒ HIDDEN — a round that moves 100→94 is not worth a tap',
   offersMeaningfulNarrowing(100, opts(94, 99)) === false);
 
-// "Example at N=27: an option yielding 24 qualifies" — it both clears 10% and finishes the job.
-check('N=52, best option yields 49 ⇒ OFFERED',
-  offersMeaningfulNarrowing(52, opts(49)) === true);
+// "Example at N=27: an option yielding 24 qualifies" — it both clears 10% (3 of 27) and finishes
+// the job (24 ≤ 25). BOTH clauses fire, which is the common case.
+check('N=27, best option yields 24 ⇒ OFFERED',
+  offersMeaningfulNarrowing(27, opts(24)) === true);
 
 // THE SECOND CLAUSE ALONE. 26→25 removes 3.8% — well under the fraction — but it lands AT the target,
 // which is the entire point of the round. Only 26/27-sized sets can isolate this clause, which is
 // exactly why it is easy to delete by accident.
-check('N=51, best option yields 50 (only 2% removed, but it lands AT the ≤50 target) ⇒ OFFERED',
-  offersMeaningfulNarrowing(51, opts(50)) === true,
+check('N=26, best option yields 25 (only 3.8% removed, but it lands AT the ≤25 target) ⇒ OFFERED',
+  offersMeaningfulNarrowing(26, opts(25)) === true,
   'the `|| o.count <= INTERVIEW_STOP_AT` clause: finishing the job always qualifies, however small the step');
 
 // ── 2. The gate's own floor and its no-op guard ──────────────────────────────────────────────────
 check('at exactly INTERVIEW_STOP_AT results nothing is ever offered, however good the option',
-  offersMeaningfulNarrowing(50, opts(1)) === false,
-  'the ≤50 hide is `total <= INTERVIEW_STOP_AT`; a `<` would offer a round on an already-finished set');
+  offersMeaningfulNarrowing(25, opts(1)) === false,
+  'the ≤25 hide is `total <= INTERVIEW_STOP_AT`; a `<` would offer a round on an already-finished set');
 check('below the target either — the button is gone, only «عرض المزيد» remains',
   offersMeaningfulNarrowing(10, opts(1)) === false);
 check('a no-op option (count === total, 100% of the set already has it) never earns an offer',
@@ -204,8 +204,11 @@ check('…and it earns an OFFER too — offer and ask agree on it',
   check('offersMeaningfulNarrowing is called in exactly ONE place outside the imports (the offer probe)',
     (noImports.match(/offersMeaningfulNarrowing/g) ?? []).length === 1,
     'a second call site means the fraction has escaped into the round itself (presentGuided/commitGuidedStep)');
+  // 2026-09-21: the probe now captures the SAME survivor as `.find(...)` (was `.some(...)`) so it can
+  // hand the winning question to primeFooterCounts — still exactly `offersMeaningfulNarrowing`, still
+  // the ask gate's own output, so the two gates still cannot disagree.
   check('the probe feeds it rankQuestions\' OWN surviving options, so offer and round cannot disagree',
-    /ranked\.some\(\(r\) => offersMeaningfulNarrowing\(r\.total, r\.options\)\)/.test(agent),
+    /ranked\?\.find\(\(r\) => offersMeaningfulNarrowing\(r\.total, r\.options\)\)/.test(agent),
     'src/app/agent.tsx — probing with anything other than the ask gate\'s output re-splits the two gates');
 
   // Name-agnostic, matching verify-narrow-cta-count-gate.ts: what matters is that the SAME
@@ -226,8 +229,19 @@ check('…and it earns an OFFER too — offer and ask agree on it',
   // structural pins below read THAT body; the effect itself must route through it.
   const assessFrom = agent.indexOf('const assessNarrowing = async');
   const assess = assessFrom < 0 ? '' : agent.slice(assessFrom, agent.indexOf('const afProbedRef', assessFrom));
+  // The effect stopped calling assessNarrowing inline on 2026-09-20: the probe is now PREFETCHED
+  // alongside the search (owner — "let the 2.5 be part of" the wait the user is already serving),
+  // and the effect CLAIMS that promise when its key matches, falling back to an inline call when it
+  // does not. The rule this check exists for is unchanged and is still exactly what is asserted:
+  // the verdict must come from the ONE shared assessment on BOTH paths, never a second walk.
+  // 2026-09-21: assessNarrowing gained a third argument (`key`, the SAME afPrefetchKey both call
+  // sites already compute) so its background tap-priming walk (primeFooterCounts) can tell when a
+  // newer search has superseded it. Both call sites still pass afPrefetchKey(q, asked) — one via the
+  // local `key`, one by recomputing it inline — so the pattern now accepts either spelling.
   check('the offer effect routes through the ONE shared assessment (assessNarrowing), not a private walk',
-    assessFrom >= 0 && /void assessNarrowing\(q, asked\)/.test(probe),
+    assessFrom >= 0
+    && /pre\.key === afPrefetchKey\(q, asked\) \? pre\.p : assessNarrowing\(q, asked, afPrefetchKey\(q, asked\)\)/.test(probe)
+    && /afPrefetchRef\.current = \{ key, p: assessNarrowing\(q, asked, key\)/.test(agent),
     'src/app/agent.tsx — two walks drift; the button must promise exactly the round that finishGuided would continue');
   check('the offer probe exists and only records a verdict (setAfCanNarrow)',
     probeFrom >= 0 && probe.includes('setAfCanNarrow'),
@@ -257,13 +271,18 @@ check('…and it earns an OFFER too — offer and ask agree on it',
     !/if \(nextScopeTier\(.*\)\) \{ setAfCanNarrow/.test(probe) && !/if \(nextScopeTier\(.*\)\) return 'yes'/.test(assess),
     'src/app/agent.tsx offer probe — a tier that resolves to ≤1 option is AUTO-COMMITTED and walked '
     + 'past, so its existence never proves a round follows (الطائف/شهري/الاستراحات والريف, 43 matches)');
+  // 2026-09-21: the probe resolves through resolveScopeOptionsInBackground(tier, scoped) — the SAME
+  // scopeQuestionOptions the card's resolveOptions calls, with the background count budget, since the
+  // probe has nobody waiting on it. Either spelling resolves the tier against the carried scope.
   check('…it RESOLVES each tier instead, against a scope it carries forward itself',
     /nextScopeTier\(scoped, seen\)/.test(assess)
-    && /scopeQuestionFor\(tier\)\.resolveOptions\(scoped\)/.test(assess),
+    && /(?:scopeQuestionFor\(tier\)\.resolveOptions\(scoped\)|resolveScopeOptionsInBackground\(tier, scoped\))/.test(assess),
     'src/app/agent.tsx offer probe — resolving is the only way to know whether a tier is a real '
     + 'question or a scope the user already has');
+  // 2026-09-21: the branch also kicks off primeFooterCounts (fire-and-forget) before returning —
+  // the yes/no verdict and its threshold (`> 1`, never `>= 1`) are exactly what this check still pins.
   check('a tier with a REAL choice (more than one option) is what earns the offer',
-    /if \(res\.options\.length > 1\) return 'yes';/.test(assess),
+    /if \(res\.options\.length > 1\) \{[\s\S]{0,200}?return 'yes';/.test(assess),
     'src/app/agent.tsx offer probe — `>= 1` would re-admit the auto-commit case this fix removed');
   check('a ≤1-option tier is AUTO-COMMITTED onto the local scope and the walk continues, exactly as presentGuided does',
     /seen\.add\(tier\)/.test(assess)
@@ -273,7 +292,7 @@ check('…and it earns an OFFER too — offer and ask agree on it',
   check('UNKNOWN still never hardens into NO: an UNMEASURABLE tier is `unknown`, only a MEASURED one may say no',
     /if \(!res \|\| res\.probeFailed\) return 'unknown';/.test(assess)
     && /if \(ranked && !ranked\.probeFailed\) return 'no';/.test(assess)
-    && /verdict === 'yes'/.test(probe),
+    && /offersNarrowing\(verdict\)/.test(probe),   // 317: unknown offers, only a decided no hides
     'src/app/agent.tsx offer probe — a turn showing >INTERVIEW_STOP_AT matches cannot truthfully have '
     + 'an empty scope, so total===0 is a failed count RPC, not a fact (permanent fleet rule)');
   check('the advanced-pool rank runs against the RESOLVED scope and the walked asked-set',

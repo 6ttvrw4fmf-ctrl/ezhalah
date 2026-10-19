@@ -242,7 +242,7 @@ listing's data.
 
 ## 15. Arabic user experience
 The product is Arabic. Test and report using real labels («تصفية» «شراء» «إيجار» «سنوي» «شهري»
-«بحث» «عرض المزيد» «مسح الكل» · فئة العقار · نوع العقار · المدينة · الحي · السعر · المساحة ·
+«بحث» «عرض المزيد» · فئة العقار · نوع العقار · المدينة · الحي · السعر · المساحة ·
 غرف النوم). Accidental English in user-facing UI where Arabic belongs = production bug → fix,
 barrier, test, deploy.
 
@@ -810,6 +810,58 @@ appears broken.
     defect and one real one from the same journey, and stopping at "the harness was wrong" would have
     shipped the real one straight past.
 
+20. **A check's SETUP must resolve its scope in the SAME terms as the COMPARISON it feeds — the two
+    halves can each be correct while only the relationship between them is wrong** (found 2026-09-26,
+    `ops_incident` #782). The layer-5 oracle resolves each requested حي to the label the index really
+    serves (trap 15) and then compares that label exactly. The RESOLUTION ran in
+    `scope = &city_ar=in.("الاحساء")` — the LABEL arm alone — while the COMPARISON it handed those
+    labels to used all three city arms, `city_ar` **and** `city_id` **and** `match_city_ids &&`. That
+    third arm is the one carrying the owner-approved al_ahsa cluster, and `dbFilterFromRequest` had
+    been taught all three on 2026-09-01 after a label-only filter produced eleven false COUNT
+    MISMATCHes. The resolution step was never given the same treatment, for 25 days.
+
+    Measured on trending-district الاحساء/بيع/«الدانة»: الاحساء (city_id 3677) renders that token
+    «الدانة» (181 production_ready rows) and الهفوف (12) renders the SAME token «حي الدانة» (69, all
+    carrying `match_city_ids ⊇ {3677}`). `servedLabelExists('حي الدانة', '&city_ar=in.("الاحساء")')`
+    is FALSE, so the variant machinery that exists for exactly this resolved «الدانة» alone. The sweep
+    then reported `RPC 157 vs independent DB 113` and **«44 served listing(s) fail the user's own
+    filters»** — forty-four healthy listings named as defects, against a perfectly correct product.
+
+    Sharper than a missed variant, and this is the part worth remembering: **the app had already sent
+    BOTH labels** (`p_districts: ["الدانة","حي الدانة"]`) and the narrow resolution scope *deleted*
+    one. A setup step that "normalises" its input can silently discard something the product supplied
+    correctly, and every downstream layer then agrees with the reduced version.
+
+    The fix is ONE definition of the scope (`cityScopeArm`, used by both the filter and the
+    resolution), never normalising the token in the oracle — that would reimplement
+    `norm_district_tok` and turn agreement into self-confirmation, which is the whole reason the الحي
+    arm compares served labels. Proven against production with the real captured request: old scope →
+    113, new scope → 157, RPC → 157. Pinned by
+    `scripts/verify-live-sweep-district-scope-spans-the-cluster.ts`, mutation-proven on both halves
+    (degrade the rule → the executed checks go red; rebuild the label-only scope at the call site →
+    the call-site checks go red).
+
+21. **A SUBSTRING equality test cannot judge a prefix, and nine production city pairs are prefixes**
+    (found 2026-09-26, `ops_incident` #783 — the open second half of #733). `assertChain` judged
+    INTENT→UI with `!ui.city.includes(intent.city) && !intent.city.includes(ui.city)`, and
+    `'الخبراء'.includes('الخبر')` is TRUE. A journey that asked for الخبر (15,254 production_ready
+    rows) and actually searched الخبراء (17) reported `ok`, and `ops_qa_coverage_ledger` recorded
+    coverage for a city that was never searched. Measured the same day over distinct
+    production_ready cities: الخبر/الخبراء 15,254/17 · الجبيل/الجبيلة 1,229/29 · صبيا/صبياء 256/10 ·
+    بيش/بيشة 162/160 · الخرماء · السلام · العمار · الجلة · القاع.
+
+    **Why it survived a fix that named it.** Routine #9 fixed which option `pickCity` clicks
+    (`e2e/live-sweep/cityOption.mjs`) and recorded that the guard itself «remains blind by
+    construction» — then justified that module's prefix FALLBACK with *«let the caller's own INTENT→UI
+    comparison be the thing that judges the result»*. The fallback was delegated to precisely the test
+    that could not judge a prefix, eleven lines under a comment documenting that blindness. When a fix
+    delegates its residual risk to another guard, go READ that guard.
+
+    Compare EXACT normalised names (`cityIntentMismatch`, `cityLookupKey`) — normalised so أ/إ/آ,
+    ة/ه, ى/ي, tatweel and spacing are not false defects, and never with a fold that could SHORTEN a
+    name, or the prefix pairs collapse back into equality. Pinned and mutation-proven by
+    `scripts/verify-live-sweep-city-intent-is-exact.ts` over all nine real pairs, both directions.
+
 ## 42. THE VISIBLE OUTPUT CONTRACT (owner permanent rule, 2026-08-22)
 
 > **What the user sees must match the actual listing/search truth exactly, in clean Arabic, with no
@@ -997,24 +1049,36 @@ cards actually grow · the headline total never moves · المدينة/الحي
 all survive · no HTML entities or `undefined` appear in later batches · the request's predicate does
 not drift (same `p_deal`/`p_rent_period`/`p_cities`/`p_districts`/`p_category`/`p_types`, later
 offset only) · no duplicate `source_table:listing_id` in the served set (§30 identity, never card
-text). **A healthy first page is 10 → 100 cards on exactly ONE pager click. The SECOND press then
-DRAINS — it is not another hundred** (owner 2026-09-11, Task 4 rev. 2, PR #2330, superseding the
-2026-08-29 "clean 100-batches 100 → 200 → 300 …" rule this paragraph described until 2026-09-12, which
-had itself superseded the 2026-08-20 lifetime cap). «خلّنا نحدد الطلب أكثر» is offered alongside,
-never instead of, continued browsing.
+text). **«عرض المزيد» gives at most TWO reveals and never shows more than 500 cards: 10 → 100 on the
+first press, up to `SECOND_PAGE_CAP` (500) or the true end on the second, and then the pager RETIRES**
+(owner 2026-09-14, PR #2618). This supersedes the 2026-09-11 Task 4 rev. 2 "the SECOND press DRAINS
+every remaining page" rule this paragraph described until 2026-09-14, which had itself superseded the
+2026-08-29 "clean 100-batches 100 → 200 → 300 …" shape and, before that, the 2026-08-20 lifetime cap.
+«خلّنا نحدد الطلب أكثر» is offered alongside, never instead of, continued browsing — and at the cap
+it is the user's ONLY forward path, so it must be on screen.
 
-**Two bounds sit on that drain, both earned on production 2026-09-12 (PR #2377), and a run that does
-not know about them will file false defects — or miss real ones:**
-- **`DRAIN_REVEAL_MAX` (2,000) — the reveal ceiling.** The results list is UNVIRTUALIZED, so
-  "reveal every remaining match" is not implementable at scale: الرياض/إيجار/سنوي (20,782 matching)
-  drained 40 pages and **crashed the renderer**, while الخبر's 5,706 rendered fine. A press over the
-  ceiling reveals the ceiling, keeps «عرض المزيد», and is NOT marked finished. Every cohort at or
-  under it still drains and finishes in one press, which is the common case. The owner's rule is kept
-  wherever it CAN hold and stops short of a crash where it cannot — flagged to the owner, not
-  silently redefined; the ceiling value and whether to virtualize the list are owner calls.
-- **`drainPageBudget(LOAD_MORE_PAGE_SIZE)` — the page backstop.** It must never DISCARD what it
-  fetched: it used to `return` past the merge, so الرياض (37,532) pulled 50 pages, showed none of
-  them, and stranded the user at 100 cards permanently.
+**The cap is a mount-safety bound, not a preference (ops_incident #212).** The results list is
+UNVIRTUALIZED, so "reveal every remaining match" is not implementable at scale: الرياض/إيجار/سنوي
+(20,782 matching) drained 40 pages and **crashed the renderer**, while الخبر's 5,706 rendered fine.
+500 sits far under that only-proven-safe mount size AND under the 1,500-row page-0 buffer, so no
+press mounts an unrenderable list and **«عرض المزيد» never pages the network at all** — measured on
+production 2026-09-14, الرياض/إيجار/سنوي (20,658 matching): two presses → 500 cards on exactly ONE
+result RPC for the whole journey. The interim `DRAIN_REVEAL_MAX` (2,000) ceiling and the
+`drainPageBudget(LOAD_MORE_PAGE_SIZE)` page backstop that PR #2377 added on 2026-09-12 are both
+RETIRED by this cap; the backstop's own lesson stands on the record — it used to `return` past the
+merge, so الرياض (37,532) pulled 50 pages, showed none of them, and stranded the user at 100 cards
+permanently. Whether to virtualize the list, and the cap's value, remain owner calls.
+
+**A stale pager model in the HARNESS costs a run in both directions, and has, twice.** On
+2026-09-10..12 `showmore.mjs` asserted the superseded drain shape and filed a false
+PAGINATION/PAGER-MISSING pair against a healthy production. On 2026-09-14 it failed the opposite
+way and went GREEN on a contract it no longer reached: its caller passed `batches: 2`, so the loop
+ended on the second press and never probed the retired pager — the terminal block was UNREACHABLE
+for every cohort over the cap, and a build that kept offering «عرض المزيد» past 500, or retired it
+with no «تحديد أكثر», would have read as a clean sweep. Fixed the same day: `batches: 3`, a
+`CAP-STRANDS-USER` verdict, a per-batch `CAP-EXCEEDED` bound, and the mirrored cap pinned against
+the shipped `SECOND_PAGE_CAP` by `scripts/verify-live-sweep-coverage-contract.ts`. **When the owner
+changes the pager rule, the sweep's model is part of the change.**
 
 **A flat card count is NOT by itself a pagination defect** — a drain is legitimately minutes long with
 nothing on screen until it lands. The discriminator is whether the app is still FETCHING (§41.19's

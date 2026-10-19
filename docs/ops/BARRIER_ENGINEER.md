@@ -74,17 +74,17 @@ now EXECUTES every grandfather claim this file makes against the actual list, so
 cannot drift back out of truth without a red check.
 
 And the second measured fact: `scripts/verify-new-barriers-are-mutation-proven.ts` prints, on every
-run, `barriers: N · grandfathered: N · held to the rule: N`. Measured 2026-09-12 it reads
-**492 · 310 · 182** (it read 363 · 333 · 30 when this spec was written, and 362 · 333 · 29 in the
-audit that authorised the routine). **Read the printed line every run; never quote a number from
-prose, including this paragraph** — the refresh above is a courtesy to the next reader, not a source.
+run, `barriers: N · grandfathered: N · held to the rule: N`. Measured 2026-09-14 it reads
+**524 · 305 · 219** (492 · 310 · 182 on 2026-09-12; 363 · 333 · 30 when this spec was written, and
+362 · 333 · 29 in the audit that authorised the routine). **Read the printed line every run; never
+quote a number from prose, including this paragraph** — the refresh above is a courtesy to the next reader, not a source.
 The gap between "held to the rule" and "barriers" IS this routine's backlog, and the number is
 supposed to move.
 
 A second ratchet worth reading on the way in, same rule — never quote it from here:
 `scripts/verify-required-suite-is-hermetic.ts` prints
-`required run set · live-reaching candidates · production-dependent (ceiling)`, which on 2026-09-12
-reads **436 · 9 · 4 (ceiling 4)**. `production-dependent` is shrink-only and every member is a check
+`required run set · live-reaching candidates · production-dependent (ceiling)`, which on 2026-09-14
+reads **464 · 9 · 4 (ceiling 4)**. `production-dependent` is shrink-only and every member is a check
 in the REQUIRED `npm test` whose verdict is decided by production rather than by the diff. Shrink it
 by SPLITTING, never by weakening: see AGENTS.md, "The required suite is HERMETIC".
 
@@ -184,10 +184,11 @@ audit (#2), the post-source-death lifecycle (#11).
 over one; #10 owns a different OBJECT entirely, so it can audit every surface's guards without owning
 any surface's behaviour.
 
-## PART 3 — THE STANDING BACKLOG: THREE RATCHETS
+## PART 3 — THE STANDING BACKLOG: FOUR RATCHETS
 
-This routine's backlog is not a list someone maintains. It is three counters, and the run's worth is
-mostly measured by whether they moved in the right direction.
+This routine's backlog is not a list someone maintains. It is four counters, and the run's worth is
+mostly measured by whether they moved in the right direction. (It was three until 2026-09-20; R4
+below is the fourth, and it is the largest of them.)
 
 ### R1 — SHRINK `scripts/mutation-proof-grandfathered.txt`. Never grow it.
 
@@ -263,6 +264,45 @@ was written, and made stale by the arrival of `liftSymbols`:
 `scripts/verify-failed-location-index-is-not-a-load.ts` covers the SAME function,
 `ensureLocationIndex()`, by execution. **Hunt for that shape everywhere: a "not practical" note
 written before the tool that made it practical existed.**
+
+### R4 — SHRINK `scripts/source-window-baseline.txt`. A raw source window may not widen.
+
+**The defect, watched by execution on 2026-09-20.** Forty-three barriers narrow a product file with
+
+```ts
+const sig = index.slice(index.indexOf(START), index.indexOf(END));
+```
+
+`indexOf` returns **-1** for a marker it cannot find and `slice` reads a negative end as an offset
+from the END of the string — so the day the END marker is renamed or destructured, the window becomes
+almost the whole file and every `window.includes(…)` under it passes against unrelated source. With
+`query.priceMinRent, query.priceMaxRent` DELETED from `districtNarrowingSig` (the 2026-08-22 حي
+العارض 2,914-vs-1,231 count-honesty defect) **and** `const hasDistrictNarrowing = useMemo(` refactored
+to `const [hasDistrictNarrowing] = useMemo(`, `verify-district-counts-honest.ts` printed
+`PASS  districtNarrowingSig includes query.priceMinRent` and **all 486 checks of `npm run test:all`
+passed**. `verify-district-field.ts` guarded the same signature through the same window and was blind
+in the same place.
+
+The blinding refactor is innocent in isolation and the defect is caught in isolation; they need never
+be made by the same person or in the same month. That is the whole hazard.
+
+**Technique.** Replace the raw slice with `windowBetween()` / `windowUpTo()` from
+`scripts/lib/sourceWindow.ts` — they THROW a `MarkerMissing` naming the marker, and search for the end
+marker AFTER the start (closing the sibling bug where an end marker above the start yields an empty
+window). Extract the barrier's verdict as a pure function so a proof can hand it a broken copy of the
+REAL shipped file, then prove all four directions: the defect, the blinding refactor, both together,
+and a negative control that the shipped file is not flagged. Then lower that file's row in
+`scripts/source-window-baseline.txt` **in the same diff** — a row the tree has outgrown is RED as
+STALE, so the ledger can never read better than reality.
+
+**Measured 2026-09-20 after the first two conversions: 63 sites in 41 files, ceiling 63.** Read the
+number the ratchet prints, never this paragraph. **Also measured that day, and the reason this is a
+latent risk rather than a live outage: of the 61 statically resolvable end markers, ZERO are missing
+from the tree today.** Every remaining window is currently pointing where its author meant. Do not
+report them as blind guards; report them as guards one rename away from being blind.
+
+**Do NOT flag the offset form.** `slice(i, i + 700)` with a missing marker yields an end BELOW the
+start, i.e. an EMPTY window, which fails closed. A ratchet that cries wolf gets lowered.
 
 ## PART 4 — DAILY APPARATUS SWEEP
 

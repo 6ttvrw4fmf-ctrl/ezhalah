@@ -16,6 +16,12 @@ The grace period is what keeps us correct even when Aqar's site has a brief outa
 their pagination glitches, or a single curl request randomly times out: a real removed
 listing fails THREE runs in a row; a temporary blip recovers on the next run.
 
+Work is split across 16 parallel shards by `id % 16` (scrapers/common/shard_partition.py). That
+file carries the measurement that made it a modulo rather than a row-offset window: ownership has
+to be a property of the row, because sixteen runners reading sixteen snapshots of a table they are
+all mutating cannot agree on a shared boundary, and the rows between two disagreeing boundaries
+were swept by nobody for fifty-one days.
+
 Designed to be cron-driven from the VPS — once a day at 04:00 KSA time.
 
 Run it locally for testing:
@@ -32,11 +38,15 @@ import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Optional
+from typing import Optional
 
-from scrapers.common.db import begin_run, end_run, sb
+from scrapers.aqar.enrich_residential import (_html_to_text, _listing_json, _structured_price, headline_is_rate,
+                                              parse_price_per_meter)
+from scrapers.common.db import _TRANSIENT_MARKERS, begin_run, end_run, sb
 from scrapers.common.http import get
+from scrapers.common.liveness_trust import canary_environment_ok
 from scrapers.common.liveness_contract import direct_alive_patch
+from scrapers.common.shard_partition import shard_worklist
 
 
 # Phrases Aqar puts on a removed/expired listing page (both languages).
@@ -83,74 +93,28 @@ def evidence_row(source_table: str, listing_id: int, http_status: Optional[int],
 
 def _run_with_retry(fn, tries: int = 5):
     """Run a DB call, retrying on Postgres statement-timeout (57014) — these come from transient
-    lock contention when the 4h sweep is mid-upsert on the same table. Back off and try again."""
+    lock contention when the 4h sweep is mid-upsert on the same table. Back off and try again.
+
+    Also retries every transport-level transient that `db._execute` already treats as one
+    (`_TRANSIENT_MARKERS`: a terminated HTTP/2 connection, 5xx gateway, PGRST002, …). Before
+    2026-10-02 only 57014 was retried, so one `httpx.RemoteProtocolError: <ConnectionTerminated>`
+    on a single `update ... eq(id)` killed a whole shard mid-sweep (aqar_residential shard 7 on
+    2026-10-02 after 500 reads, aqar_commercial shard 12 on 2026-09-30) and its remaining rows went
+    unchecked for the night. Every call routed here is a select or an idempotent update by id."""
     for i in range(tries):
         try:
             return fn()
         except Exception as e:  # noqa: BLE001
-            if "57014" in str(e) and i < tries - 1:
+            msg = str(e).lower()
+            transient = "57014" in msg or any(m in msg for m in _TRANSIENT_MARKERS)
+            if transient and i < tries - 1:
                 time.sleep(2.0 * (i + 1))
                 continue
             raise
 
 
-def shard_row_window(total_rows: int, shards: int, shard: int) -> tuple[int, int]:
-    """This shard's window [start, end) of ROW OFFSETS into the active rows ordered by id — a
-    COUNT-balanced split (fix 2026-07-16, bug B1).
-
-    History: the split used to be geometric over the ID RANGE (bucket = (max_id-min_id)//shards+1,
-    anchored at min_id since the morning fix for high-start tables). But aqar ids are dense at the
-    low end and sparse above: on 2026-07-16 shard 0's geometric window [1, ~193k) held 70,427 of
-    the 86,464 active aqar_residential rows (81%) — a ~16h sweep against the workflow's
-    timeout-minutes: 120, so shard 0 was SIGKILLed every day (live proof: run 13176 started 01:00,
-    finished_at NULL, rows_seen 0) and those ~70k rows were never liveness-checked — the 44.6%
-    stale-active backlog. Splitting by ROW COUNT instead gives every shard ~total/shards rows
-    (~5.4k at 16 shards, ~60-80 min at the observed 1.2-3 rows/s) regardless of how ids cluster.
-
-    floor(shard*N/S) arithmetic ⇒ windows are contiguous, disjoint, jointly cover [0, N), and any
-    two shards' row counts differ by at most 1. A shard's window is empty only when N < S (fewer
-    active rows than shards) — for these tables that means the source is effectively dead, and the
-    empty shard's 0-row run is honestly demoted by end_run's RC-B rule, same as before.
-    """
-    shards = max(1, shards)
-    total_rows = max(0, total_rows)
-    start = (shard * total_rows) // shards
-    end = ((shard + 1) * total_rows) // shards
-    return start, end
-
-
-def shard_id_window(
-    id_at: Callable[[int], Optional[int]],
-    total_rows: int,
-    shards: int,
-    shard: int,
-) -> Optional[tuple[int, Optional[int]]]:
-    """Translate this shard's row-offset window into a keyset ID window [lo, hi).
-
-    `id_at(offset)` returns the id of the offset-th active row ordered by id ascending (None if
-    the active set shrank below that offset since `total_rows` was counted — concurrent shards
-    deactivate rows while we compute). Returns None when this shard owns no rows; hi is None for
-    the tail shard = sweep unbounded to the top of the table.
-
-    Boundary tolerance (documented, deliberate): each parallel shard counts + probes at its OWN
-    start time, so if rows are deactivated in between, adjacent windows can gap/overlap by a few
-    rows. An overlap double-checks a row (idempotent — same alive/dead verdict); a gap skips a row
-    for ONE daily run, and the grace=3 consecutive-miss rule means a skip can never kill or revive
-    anything by itself. Exact partition of a moving set isn't achievable without a lock and isn't
-    needed here.
-    """
-    start, end = shard_row_window(total_rows, shards, shard)
-    if start >= end:
-        return None
-    lo = id_at(start)
-    if lo is None:  # active set shrank below our window's start — nothing left for this shard
-        return None
-    hi = id_at(end) if end < total_rows else None  # None ⇒ unbounded tail
-    return lo, hi
-
-
-# A begin_run() stub whose process was SIGKILLed (the exact fate of shard 0 above: GitHub Actions
-# timeout-minutes kills the job, end_run never runs) sits finished_at=NULL/ok=NULL forever —
+# A begin_run() stub whose process was SIGKILLed (a job that outlives GitHub Actions'
+# timeout-minutes is killed outright, so end_run never runs) sits finished_at=NULL/ok=NULL forever —
 # invisible to the failure detectors, which key on ok=false. Must comfortably exceed the workflow
 # timeout (120 min) so a live concurrent run can never be finalized out from under itself.
 ORPHAN_STUB_HOURS = 6
@@ -186,6 +150,37 @@ def reconcile_orphaned_stubs(client, platform: str, *, older_than_hours: int = O
     return n
 
 
+# aqar's own `closed` flag. The listing payload is streamed inside `self.__next_f` chunks with its
+# quotes backslash-escaped, so `\"closed\":true` is the shape actually seen on the wire; the bare
+# form is accepted too in case a future render stops escaping. Requiring the BOOLEAN is what keeps
+# the i18n bundle's «مغلق» string label (`"closed":"مغلق"`, present on every page) from matching.
+_CLOSED_FLAG_RE = re.compile(r'\\?"closed\\?"\s*:\s*true')
+
+# The pre-2026-09-25 server-rendered form of the same fact: the badge, not the bare word. «مغلق»
+# appears in live listings' own descriptions («مطبخ مغلق» = closed kitchen, «مجمع سكني مغلق» = gated
+# compound) and, since aqar's client-side rewrite, in an i18n label bundle on every page — so the
+# markup is what carries the meaning. Measured 0/77 false fires on live pages (2026-08-04) and it
+# matches neither real page stored under scrapers/aqar/testdata/, so keeping it adds no risk.
+_CLOSED_BADGE_RE = re.compile(
+    r"(?:badge|chip|tag|status)[^<>]{0,80}مغلق|مغلق[^<>]{0,40}</(?:span|div|p)>")
+
+
+def _closed_badge(body: str) -> bool:
+    return "مغلق" in body and bool(_CLOSED_BADGE_RE.search(body))
+
+# Deactivating on the repaired factor 1 is a BULK listing operation — the measured firing rate is
+# 5.3% of never-re-enriched priced rows (4/75 sampled 2026-09-25), i.e. order 2,500 aqar rows — and
+# AGENTS.md puts bulk listing operations behind owner approval. So the repaired oracle ships
+# DISARMED: the verdict is computed and written to aqar_liveness_detail on every sweep, but a
+# soft-closed page is treated as UNKNOWN rather than DEAD, which per docs/ops/LISTING_LIVENESS.md
+# neither deactivates the row NOR certifies it alive. That is already strictly better than the
+# broken state it replaces, where the same page took the ALIVE branch and had
+# last_verified_alive_at written onto it. Set AQAR_SOFT_CLOSE_ARMED=1 to let it strike and kill
+# under aqar's declared 3-strike / 48h grace once the owner has approved the volume
+# (ops_incident: aqar_soft_close_oracle_dead).
+SOFT_CLOSE_ARMED = os.environ.get("AQAR_SOFT_CLOSE_ARMED", "0") == "1"
+
+
 def looks_closed(body: str) -> bool:
     """True iff this 200-OK page is aqar's SOFT-CLOSED state (2026-08-04).
 
@@ -203,12 +198,53 @@ def looks_closed(body: str) -> bool:
 
     «طلب تسويق» (marketing-request) pages are deliberately NOT treated as closed: the ad exists,
     the owner simply publishes no price. Those stay active with an honest «السعر عند الطلب».
+    That exemption still holds — it is now enforced by factor 1 reading aqar's OWN `closed` flag
+    instead of the price slot, so an open ad that merely withholds its price can never be killed.
+
+    FACTOR 1 WAS REWRITTEN 2026-09-25 (routine #3) BECAUSE IT HAD STOPPED MATCHING ANYTHING —
+    and the sweep's kill count could not show it. looks_dead() reaches DEAD on a 200 by two
+    independent paths, a DEAD_MARKERS phrase or this predicate; the marker path was unaffected and
+    produced 8,845 kills in the 30 days to 2026-09-25, so the oracle looked healthy by volume while
+    this half was blind. An aqar soft-closed page carries no DEAD_MARKER, so that cohort escaped
+    both paths.
+    The badge regex above looked for server-rendered markup around «مغلق». aqar has since moved the
+    listing page to client-side rendering: the closed banner is painted by JS from the payload, so
+    no badge markup reaches the HTML at all. What DOES reach it is an i18n label bundle shipped to
+    EVERY page, live ones included, carrying «مغلق» as a dictionary value
+    (`listing_status.closed`, `closed_banner.title`). So the old factor 1 was false on closed pages
+    and the word-presence pre-check was true on live ones — the detector could not fire, and the
+    sweep took the ALIVE branch and wrote last_verified_alive_at onto ads aqar had closed.
+    Measured that day on live pages: 2/2 source-confirmed closed ads scored badge_match=False.
+    Rows 874 and 882 had been affirmatively certified ALIVE that morning while aqar served
+    `closed:true` with price, area, content and create_time all null.
+
+    THE REPAIR ADDS AQAR'S OWN STATE FLAG; IT DOES NOT DELETE THE BADGE. Factor 1 is now satisfied
+    by EITHER expression of the same fact, and the two-factor design is intact:
+      • factor 1 — the payload states `"closed": true` (escaped as \"closed\":true in the stream),
+        OR the old server-rendered «مغلق» badge markup is present;
+      • factor 2 — unchanged: no offers node.
+    The badge branch is kept deliberately rather than replaced. It costs nothing (measured 0/77
+    false fires on live pages in 2026-08, and it matches neither of the real pages stored under
+    scrapers/aqar/testdata/), it is what `scrapers/common/tests/test_aqar_soft_close_detection.py`
+    and `test_cleanup.py` pin, and a signal that has stopped appearing on the page shapes we sampled
+    is not the same thing as a signal that can never appear again — a cached page, a different
+    render path or another aqar surface may still carry it. Retiring it would be a claim this run
+    did not measure.
+    Measured 2026-09-25 over 75 random active rows plus 6 source-confirmed closed ads:
+    6/6 closed → True, 2/2 live controls → False, and 0 pages anywhere carried `closed:true`
+    beside a published price, so the two factors never disagreed. The i18n label is a STRING value
+    («مغلق»), never the boolean, so the bundle cannot trip factor 1.
+
+    aqar states what the flag means, in the same bundle: a closed ad
+    «يظهر هذا الإعلان في صفحة حسابك فقط (لا يظهر على الخريطة أو عند البحث)» — it is gone from the
+    source's own search, which is exactly the condition this oracle exists to detect.
     """
-    if "مغلق" not in body:
-        return False
-    # Factor 1: the badge, not the word — the description text never carries this markup.
-    badge = re.search(r"(?:badge|chip|tag|status)[^<>]{0,80}مغلق|مغلق[^<>]{0,40}</(?:span|div|p)>", body)
-    if not badge:
+    # Factor 1: aqar says closed, by EITHER of the two ways it has expressed that. The structured
+    # flag arrives inside `self.__next_f` chunks with its quotes backslash-escaped; the badge is the
+    # pre-2026-09-25 server-rendered form, kept because it costs nothing and its absence today is a
+    # measurement, not a guarantee. The badge branch keeps its own «مغلق» pre-check so the word
+    # alone can never satisfy factor 1 — the markup must be there too.
+    if not (_CLOSED_FLAG_RE.search(body) or _closed_badge(body)):
         return False
     # Factor 2: a live ad always publishes an offers node; a closed one has none.
     has_offer = '"offers"' in body or '"price"' in body
@@ -282,6 +318,53 @@ def is_price_refresh_artifact(new_price: int, area_m2, price_per_meter) -> bool:
     return False
 
 
+def refresh_decision(body: str, old_price, area_m2, stored_ppm) -> tuple[str, Optional[int]]:
+    """What the price refresh does with the page it already holds: ('write', P) | ('clear', None) |
+    ('reject', None) | ('keep', None).
+
+    aqar's RSC payload is read FIRST — the same reader the enricher trusts (`_structured_price`), not the first
+    «"price":N» in the body. Read live 2026-10-18 (aqar-price-probe 39148998971): 6903628 publishes price 1,575,000
+    with meter_price 3,500, while we still held 3,500 as its TOTAL — the source moved from a rate to a total and
+    the refresh never followed. The reverse move is handled too: a headline that IS the rate (`headline_is_rate`)
+    clears the stored total instead of keeping a figure the page no longer calls a total. aqar stating no price
+    at all is the enricher's retraction to make, never this refresh's. The body regex stays the fallback for a
+    page whose payload we could not read, behind the artifact guard as before."""
+    obj = _listing_json(body)
+    s_price, s_auth = _structured_price(obj)
+    if s_auth and s_price is None:
+        return "keep", None
+    if s_auth:
+        if headline_is_rate(obj, s_price, parse_price_per_meter(_html_to_text(body))):
+            return ("clear", None) if old_price is not None else ("keep", None)
+        new_price: Optional[int] = s_price
+    else:
+        new_price = price_from_body(body)
+    if new_price is None:
+        return "keep", None
+    if is_price_refresh_artifact(new_price, area_m2, stored_ppm):
+        return "reject", None
+    if old_price is not None and int(old_price) != new_price:
+        return "write", new_price
+    return "keep", None
+
+
+CONTROLS = 5
+# The recheck (--min-strikes) reads a struck row only if nothing looked at it for this long, so the
+# three strikes stay three SEPARATE readings (the fleet recheck uses 6 h too).
+RECHECK_MIN_GAP_HOURS = 6
+
+
+def _known_live_controls(client, tbl: str) -> list[dict]:
+    """Candidate known-live controls: the most recently seen UNSTRUCK active ads. Deliberately NOT
+    the sweep cohort (_cohort): under --only-struck the cohort is struck rows, and a control must be
+    an ad we have reason to believe is live. READ-ONLY by contract (no update/insert); the
+    scoped-verification barrier excludes only this body from its sweep-read count and pins that."""
+    return _run_with_retry(lambda: client.table(tbl)
+                           .select("id, listing_url, last_seen_at, missing_count")
+                           .eq("active", True).eq("missing_count", 0)
+                           .order("last_seen_at", desc=True).limit(40).execute()).data or []
+
+
 def looks_dead(status: int, body: str) -> bool:
     """True iff the response confirms this listing is gone (vs a transient hiccup)."""
     if status in (404, 410):
@@ -303,6 +386,9 @@ def main() -> None:
                     help="Consecutive sweeps a listing must be missing before we kill it.")
     ap.add_argument("--table", default="aqar_residential_listings",
                     choices=["aqar_residential_listings", "aqar_commercial_listings",
+                             # Aqar Monthly's ads ARE sa.aqar.fm pages: same site, same checker,
+                             # same markers, same 3 strikes (owner, 2026-09-28).
+                             "aqarmonthly_residential_listings",
                              "wasalt_residential_listings", "wasalt_commercial_listings"],
                     help="Which listings table to sweep. Run once per table to cover both verticals.")
     ap.add_argument("--shards", type=int, default=1,
@@ -321,6 +407,12 @@ def main() -> None:
                          "which is why wasalt-liveness.yml is unscheduled (cost guard, 2026-06). "
                          "The struck backlog is ~3.4k rows, roughly 1.3 GB, which answers 'are "
                          "these actually dead?' without the full sweep's cost.")
+    ap.add_argument("--min-strikes", type=int, default=0,
+                    help="RECHECK: examine only active rows already carrying at least this many "
+                         "direct strikes (missing_count >= N). Strictly NARROWING, like "
+                         "--only-struck: the same reader, the same known-live controls, the same "
+                         "3-strike grace. It lets the second and third readings of an ad aqar "
+                         "removed land ~12 h apart instead of a day apart (fast confirm, 2026-10-06).")
     ap.add_argument("--report-only", action="store_true",
                     help="VERIFY without deactivating. Suppresses the dead path entirely — no "
                          "active=false, no missing_count increment — and reports the verdicts it "
@@ -331,7 +423,10 @@ def main() -> None:
     args = ap.parse_args()
 
     table = args.table
-    platform = f"aqar_liveness:{table}:{args.shard}/{args.shards}"
+    # A recheck gets its OWN run label (LISTING_LIVENESS.md §9: a liveness job needs its own label,
+    # or its silence hides inside the daily sweep's rows).
+    kind = "aqar_liveness_recheck" if args.min_strikes > 0 and not args.only_struck else "aqar_liveness"
+    platform = f"{kind}:{table}:{args.shard}/{args.shards}"
     client = sb()
     # Before opening our own run row: finalize any stub WE left behind on a previous day —
     # a timeout-killed job never reaches end_run, so its ok=NULL stub would sit silent forever.
@@ -339,50 +434,102 @@ def main() -> None:
     run_id = begin_run(platform)
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    # ── Row-count-balanced shard window (fix 2026-07-16, bug B1 — see shard_row_window) ─────────
-    # One count + at most two single-row offset probes. The probes run on the same
-    # (active, id) access path the keyset loop below uses — live-verified as an Index Only Scan
-    # on idx_aqar_active_id, ~40 ms at the worst-case mid-table offset.
-    # --only-struck narrows the cohort. The count probe, the offset probes and the keyset loop
-    # below must ALL apply the identical filter, or the shard windows are computed over one
-    # population and walked over another — the exact class of bug B1 above.
+    # --only-struck narrows the cohort. The id walk below and the row fetch must apply the
+    # IDENTICAL filter, or the worklist is built over one population and probed over another.
+    recheck_cut = (datetime.now(timezone.utc) - timedelta(hours=RECHECK_MIN_GAP_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     def _cohort(q):
         q = q.eq("active", True)
+        if args.min_strikes > 0 and not args.only_struck:
+            # Three SEPARATE readings: a row looked at in the last RECHECK_MIN_GAP_HOURS waits.
+            q = (q.gte("missing_count", args.min_strikes)
+                 .or_(f"last_liveness_probe_at.is.null,last_liveness_probe_at.lt.{recheck_cut}"))
         return q.gte("missing_count", args.grace) if args.only_struck else q
 
-    count_res = _run_with_retry(
-        lambda: _cohort(client.table(table).select("id", count="exact")).limit(1).execute())
-    total_rows = int(count_res.count or 0)
+    # ── PHASE 1: this shard's worklist, by id modulo (fix 2026-09-24, see shard_partition.py) ────
+    # Ownership is `id % shards == shard` — a property of the ROW, so the sixteen parallel runners
+    # need not agree about anything. The offset-window split this replaced asked each shard to
+    # compute a SHARED boundary from its OWN snapshot of a table the other fifteen were mutating,
+    # and whenever shard k's `lo` landed above shard k-1's `hi` the rows in between were swept by
+    # nobody: 920 aqar_residential rows had gone 51 days unprobed when this was measured.
+    #
+    # Walking every active id costs 16x an id-only keyset scan (~93k ids, ~95 pages of 1000, a few
+    # seconds) against a sweep that spends half an hour on HTTP. The full rows are still fetched
+    # only for the ~1/16 this shard owns, so the probe volume is unchanged.
+    worklist: list[int] = []
+    total_rows = 0
+    cursor = -1
+    while True:
+        res = _run_with_retry(lambda c=cursor: _cohort(client.table(table).select("id"))
+                              .gt("id", c).order("id", desc=False).limit(1000).execute())
+        page = res.data or []
+        if not page:
+            break
+        cursor = int(page[-1]["id"])
+        total_rows += len(page)
+        worklist.extend(shard_worklist((int(r["id"]) for r in page), args.shards, args.shard))
 
-    def _id_at(offset: int) -> Optional[int]:
-        res = _run_with_retry(
-            lambda: _cohort(client.table(table).select("id"))
-            .order("id", desc=False).range(offset, offset).execute())
-        return int(res.data[0]["id"]) if res.data else None
-
-    window = shard_id_window(_id_at, total_rows, args.shards, args.shard)
-    if window is None:
-        lo, hi = 0, 0  # empty shard (total_rows < shards): sweep nothing, finalize honestly below
-    else:
-        lo, hi = window
-    row_lo, row_hi = shard_row_window(total_rows, args.shards, args.shard)
-    print(f"shard {args.shard}/{args.shards} → rows [{row_lo}, {row_hi}) of {total_rows} active "
-          f"→ id window [{lo}, {'∞' if hi is None else hi})", flush=True)
+    print(f"shard {args.shard}/{args.shards} → {len(worklist)} of {total_rows} active rows "
+          f"(id % {args.shards} == {args.shard % max(1, args.shards)})", flush=True)
 
     seen = 0
     killed = 0
     refreshed = 0
     transient = 0
     pending_kill = 0  # missing this run but not yet past grace
+    unknown_soft_closed = 0  # aqar says closed, oracle disarmed → UNKNOWN: row left untouched
     alive_ids: list[int] = []  # batched "still alive" ids → one UPDATE per 200 (see flush below)
     price_updated = 0   # prices re-read from the page we already fetched (owner-approved 2026-08-04)
     price_capped = 0    # changes seen past PRICE_REFRESH_CAP — next sweep picks them up
     price_artifact_rejected = 0  # refresh matched a proven artifact class (P1 2026-08-11) — skipped
+    price_rate_cleared = 0       # the headline is the rate: a stored total cleared (2026-10-18)
     # aqar only: aqar's JSON-LD offers.price is the published sale price. wasalt rows are swept by
     # this same script but their price comes from the wasalt API payload, so JSON-LD is not their
     # source of truth and must not overwrite it.
     price_refresh_on = table.startswith("aqar_")
+    # http.get() turns every 4xx into None, so without `keep` a 404/410 reached this sweep as "no
+    # answer" (transient) and looks_dead()'s 404 branch could never fire (found 2026-09-28: 1 of 15
+    # visible aqarmonthly ads answered 404 to lifecycle-spot-check). sa.aqar.fm tables only: wasalt
+    # rows run through here too, and their dead check is measured on their own transport.
+    gone_statuses = () if table.startswith("wasalt_") else (404, 410)
     started = time.time()
+
+    # ── OPENING CONTROLS (2026-10-05, Lifecycle Engineer) ───────────────────────────────────────
+    # This sweep hid ads inline with no known-live control at all (LIFECYCLE_ENGINEER.md,
+    # protection 1: every big site's run carries controls, and one wrong control means the run
+    # hides nothing). The controls are the freshest ads its crawl saw in the last 24 h with no
+    # strike; each is read through the SAME get() + looks_dead() as the worklist. If they do not
+    # read live (canary_environment_ok), the shard runs REPORT-ONLY: no strike, no hide, the alive
+    # refresh still lands (restorative). Strictly tightening: it can only stop a hide. A table with
+    # no fresh control (a crawl outage) keeps today's behaviour and says so in the run notes.
+    controls_note = ""
+    if not args.report_only and gone_statuses:
+        day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
+
+        def _fresh(r) -> bool:
+            try:
+                return datetime.fromisoformat(str(r.get("last_seen_at")).replace("Z", "+00:00")) >= day_ago
+            except ValueError:
+                return False
+        try:
+            cands = _known_live_controls(client, table)
+        except Exception as exc:  # noqa: BLE001 — unreadable controls hide nothing
+            cands, controls_note = [], f"controls unreadable ({str(exc)[:80]}) "
+            args.report_only = True
+        ctl = [r for r in cands if r.get("listing_url") and r.get("last_seen_at") and _fresh(r)][:CONTROLS]
+        if ctl:
+            alive_ctl = 0
+            for r in ctl:
+                c = get(r["listing_url"], max_retries=2, keep=gone_statuses)
+                if c is not None and c.status_code == 200 and not looks_dead(200, c.text or ""):
+                    alive_ctl += 1
+            controls_note = f"controls={alive_ctl}/{len(ctl)} "
+            if not canary_environment_ok(alive_ctl, len(ctl)):
+                args.report_only = True
+                controls_note = f"CONTROLS-QUARANTINED {controls_note}(report-only: nothing struck or hidden) "
+                print(f"✗ {controls_note}", flush=True)
+        elif not controls_note:
+            controls_note = "controls=none-fresh "
 
     # ── Per-row evidence (aqar_liveness_detail, migration 20260831003901) ─────────────────────────
     # That migration created the table, the ops_aqar_recent_kills view over it, and four arms of
@@ -403,17 +550,22 @@ def main() -> None:
     # flush is best-effort for the same reason gathern's is — an audit-log write must never fail or
     # roll back a liveness sweep. `applied` is False under --report-only, where the row is
     # untouched, so a verify run can never be read back as a real deactivation.
-    detail_on = table.startswith("aqar_")  # wasalt rows swept by this same script have their own
+    detail_on = table.startswith(("aqar_", "aqarmonthly_"))  # wasalt rows swept by this same script have their own
     detail_buf: list[dict] = []            # ledger (wasalt_liveness_pilot_detail); never cross them
 
     def _flush_detail() -> None:
-        """Best-effort: an audit-log write must never fail or roll back a liveness sweep."""
+        """Best-effort: an audit-log write must never fail or roll back a liveness sweep.
+
+        Retried like every other statement: the hide after it IS retried, so a transient on the
+        insert alone (the 2026-10-02 ConnectionTerminated shape) would drop the kill row and let
+        the hide land anyway — an orphaned hide, the exact thing evidence-before-hide prevents."""
         if not detail_buf:
             return
         for i in range(0, len(detail_buf), 500):
             chunk = detail_buf[i:i + 500]
             try:
-                client.table("aqar_liveness_detail").insert(chunk).execute()
+                _run_with_retry(lambda c=chunk: client.table("aqar_liveness_detail")
+                                .insert(c).execute())
             except Exception as exc:  # noqa: BLE001 — logging must not break the lifecycle
                 print(f"⚠ detail-log insert failed (non-fatal, {len(chunk)} rows): "
                       f"{str(exc)[:160]}", flush=True)
@@ -429,40 +581,46 @@ def main() -> None:
             _flush_detail()
 
     try:
-        # Pull active rows in pages of 1000 via KEYSET pagination (walk forward by id) — NOT offset.
-        # Offset pagination on a 77k+ row table re-scans and skips `offset` rows every page, getting
-        # slower the deeper it goes until it hits the DB statement timeout (error 57014). Keyset is
-        # O(page_size) per page regardless of depth, AND it's more correct here: the sweep flips rows
-        # to active=false as it runs, which would shift an offset window and skip rows — a forward id
-        # cursor never does. (fix: liveness statement-timeout failure as the table grew.)
-        page_size = 1000
-        last_id = lo - 1  # start the cursor at the bottom of this shard's ID window
-        while window is not None:
-            q = (
-                _cohort(client.table(table)
-                        .select("id, ad_number, listing_url, missing_count, transaction_type,"
-                                " price_total, area_m2, price_per_meter"))
-                .gt("id", last_id)
+        # PHASE 2: fetch the full rows for THIS shard's ids, 200 at a time. The cohort filter is
+        # re-applied, so a row another shard deactivated between the two phases is dropped rather
+        # than probed — the only rows that can go unprobed in a run are rows that stopped being
+        # this shard's business, never rows that fell between two shards' boundaries.
+        # 200 is not a guess: it is the batch size the alive flush below has been sending through
+        # `.in_("id", …)` against this same table for months, so the query-string length is proven.
+        page_size = 200
+        for i in range(0, len(worklist), page_size):
+            chunk = worklist[i:i + page_size]
+            res = _run_with_retry(
+                lambda ids=chunk: _cohort(
+                    client.table(table)
+                    .select("id, ad_number, listing_url, missing_count, transaction_type,"
+                            " price_total, area_m2, price_per_meter"))
+                .in_("id", ids)
                 .order("id", desc=False)
-                .limit(page_size)
-            )
-            if hi is not None:
-                q = q.lt("id", hi)  # stay within this shard's window (tail shard is unbounded)
-            res = q.execute()
+                .limit(len(ids))
+                .execute())
             rows = res.data or []
-            if not rows:
-                break
 
             for row in rows:
-                last_id = row["id"]  # advance the cursor (rows are id-ascending)
                 seen += 1
                 url = (row.get("listing_url") or "").strip()
                 if not url:
                     continue  # no URL → can't check, skip
 
-                r = get(url, max_retries=2)
+                r = get(url, max_retries=2, keep=gone_statuses)
                 status = r.status_code if r is not None else 0
                 body = r.text if r is not None else ""
+
+                # Soft-closed and not armed ⇒ UNKNOWN. Falling through to the ALIVE branch is what
+                # this run had to fix: it wrote last_verified_alive_at onto ads aqar had closed.
+                # UNKNOWN writes nothing to the row — no strike, no kill, no alive patch — so the
+                # row keeps exactly the state it had, and the verdict is still recorded as evidence.
+                if (r is not None and status == 200 and not SOFT_CLOSE_ARMED
+                        and looks_closed(body)):
+                    mc_now = row.get("missing_count") or 0
+                    _detail(row["id"], status, "unknown_soft_closed", mc_now, mc_now, applied=False)
+                    unknown_soft_closed += 1
+                    continue
 
                 if r is not None and looks_dead(status, body):
                     mc_before = row.get("missing_count") or 0
@@ -480,12 +638,21 @@ def main() -> None:
                         else:
                             pending_kill += 1
                     else:
-                        upd: dict = {"missing_count": new_missing}
+                        # last_liveness_probe_at = "we LOOKED" (never evidence of life); on a strike
+                        # it is what keeps the recheck's readings >= 6 h apart (--min-strikes).
+                        upd: dict = {"missing_count": new_missing, "last_liveness_probe_at": now_iso}
                         if new_missing >= args.grace:
                             upd["active"] = False
                             killed += 1
                         else:
                             pending_kill += 1
+                        # EVIDENCE BEFORE THE HIDE. The ledger row lands before the row changes, so
+                        # a shard that dies on a later statement leaves no hide without its reason.
+                        # 2026-10-02 01:07 UTC: aqar_residential shard 7 hid 66 rows, then died on
+                        # a dropped connection with those 66 kill rows still buffered — evidence
+                        # written AFTER the hide is evidence written never. Same end state when
+                        # nothing fails; only the order of two writes differs.
+                        _flush_detail()
                         _run_with_retry(lambda u=upd, i=row["id"]:
                                         client.table(table).update(u).eq("id", i).execute())
                 elif r is not None and status == 200:
@@ -503,25 +670,24 @@ def main() -> None:
                     # Scope is deliberately narrow: aqar BUY rows only. aqar's JSON-LD offers.price
                     # is the sale price (verified against the visible badge on 150+ pages during the
                     # 2026-08-04 repair); for rentals the same field's period is ambiguous, so those
-                    # are left to the enricher, which knows سنوي/شهري. Never writes NULL over an
-                    # existing price, and never writes when unchanged.
+                    # are left to the enricher, which knows سنوي/شهري. Writes NULL over an existing
+                    # price only when the page's own headline is its per-metre rate (refresh_decision),
+                    # and never writes when unchanged.
                     if price_refresh_on and (row.get("transaction_type") == "Buy"):
-                        new_price = price_from_body(body)
-                        old_price = row.get("price_total")
-                        if (new_price is not None
-                                and is_price_refresh_artifact(new_price, row.get("area_m2"),
-                                                               row.get("price_per_meter"))):
+                        verdict, new_price = refresh_decision(body, row.get("price_total"),
+                                                              row.get("area_m2"), row.get("price_per_meter"))
+                        if verdict == "reject":
                             # Proven-live artifact class (P1 2026-08-11, see is_price_refresh_
                             # artifact docstring) — reject the write, keep the old value, count it
                             # so a spike is visible in scrape_runs.notes.
                             price_artifact_rejected += 1
-                            new_price = None
-                        if new_price and old_price is not None and int(old_price) != new_price:
+                        elif verdict in ("write", "clear"):
                             if price_updated < PRICE_REFRESH_CAP:
                                 _run_with_retry(lambda i=row["id"], p=new_price:
                                                 client.table(table)
                                                 .update({"price_total": p}).eq("id", i).execute())
                                 price_updated += 1
+                                price_rate_cleared += verdict == "clear"
                             else:
                                 price_capped += 1
 
@@ -529,6 +695,7 @@ def main() -> None:
                         batch = list(alive_ids)
                         _run_with_retry(lambda ids=batch: client.table(table)
                                         .update({"last_seen_at": now_iso, "missing_count": 0,
+                                                 "last_liveness_probe_at": now_iso,
                                                  **direct_alive_patch(now_iso=now_iso)})
                                         .in_("id", ids).execute())
                         alive_ids.clear()
@@ -549,6 +716,7 @@ def main() -> None:
                     print(
                         f"  [{seen}] refreshed={refreshed} killed={killed} "
                         f"pending_kill={pending_kill} transient={transient} "
+                        f"unknown_soft_closed={unknown_soft_closed} "
                         f"({rate:.1f}/s)",
                         flush=True,
                     )
@@ -560,23 +728,28 @@ def main() -> None:
         pass
     except KeyboardInterrupt:
         print("\nInterrupted — finalizing run row.")
+    finally:
+        # Flush the remaining per-row evidence (transient / unknown / report-only readings; every
+        # applied strike or kill already flushed before its own write). A `finally` so the trail is
+        # durable for a shard that ended on StopIteration, Ctrl-C OR an unhandled exception — the
+        # plain call that used to sit after this block was skipped on the third, which is how the
+        # 66 orphaned hides of 2026-10-02 happened. Best-effort, so it can never mask the error.
+        _flush_detail()
 
     # Flush any remaining batched "alive" refreshes.
     if alive_ids:
         _run_with_retry(lambda ids=list(alive_ids): client.table(table)
                         .update({"last_seen_at": now_iso, "missing_count": 0,
+                                 "last_liveness_probe_at": now_iso,
                                  **direct_alive_patch(now_iso=now_iso)})
                         .in_("id", ids).execute())
 
-    # Flush the remaining per-row evidence. Runs after the alive flush and before end_run so the
-    # audit trail is durable even for a shard that ended on StopIteration or Ctrl-C.
-    _flush_detail()
-
     notes = (
-        f"refreshed={refreshed} killed={killed} "
+        f"{controls_note}refreshed={refreshed} killed={killed} "
         f"pending_kill={pending_kill} transient={transient} "
+        f"unknown_soft_closed={unknown_soft_closed} "
         f"price_updated={price_updated} price_capped={price_capped} "
-        f"price_artifact_rejected={price_artifact_rejected}"
+        f"price_artifact_rejected={price_artifact_rejected} price_rate_cleared={price_rate_cleared}"
     )
     print(f"\n✓ Liveness sweep done. scanned={seen} {notes}")
     end_run(run_id, ok=True, rows_seen=seen, rows_upserted=killed, notes=notes)

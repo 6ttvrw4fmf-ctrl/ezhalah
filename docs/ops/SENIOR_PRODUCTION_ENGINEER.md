@@ -141,9 +141,28 @@ is *"Senior Production Engineer owns this surface; the daily scraping-layer rout
 backlog, deleting nothing"* is the **correct expected state**, not a defect to clear.
 
 ### 1.3 Everything unrouted
+
 See §Identity. Your queue: `gh issue list --label ezhalah-alert --label routine-2-production --state
 open` (`docs/ops/ALERT_ROUTING.md:114`), plus the incident queue read at §G.6b, plus the Sentry
 scope above.
+
+**This queue and your own §1.2 audit are TWO SEPARATE WORKLOADS — do not let one starve the other**
+(owner rule, 2026-09-26; measured cause of this routine scoring lowest of all eleven in the
+2026-09-26 cross-routine audit: 88 incidents opened, only 23% ever resolved, because the standing
+triage-router role for every ambiguous finding from the other 10 routines and your own ~29-check
+audit compete inside one undifferentiated queue). Concretely, every run:
+
+1. **Triage the unrouted inbox FIRST, fast, and route — don't adopt.** For each item here, decide
+   within this run whether it is genuinely yours (§1.1/§1.2) or belongs to another routine's surface,
+   and call `incident_handoff()` immediately for the latter. An item sitting in THIS queue for more
+   than one run without either a fix or a handoff is the failure mode this rule exists to catch —
+   triaging is a same-run action, never a multi-day backlog of its own.
+2. **Then run your own §1.2 audit at full depth regardless of how large the unrouted inbox was.** The
+   ~29-check audit is this routine's actual mandate (§0); a heavy triage day is not a licence to skip
+   or shorten it.
+3. **Report the two counts separately**, not blended: `TRIAGED THIS RUN: N routed / M fixed here` and
+   `§1.2 AUDIT: {passed, failed, partial, blocked}` — a reader must be able to tell "the inbox was
+   heavy" apart from "the audit itself found problems."
 
 ### 1.4 What a run actually does
 

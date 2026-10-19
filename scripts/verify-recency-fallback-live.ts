@@ -26,6 +26,7 @@
 //   node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
 //     scripts/verify-recency-fallback-live.ts
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
 
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase();
 const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
@@ -50,7 +51,7 @@ function check(name: string, ok: boolean, detail = '') {
 }
 
 async function rpc(args: Record<string, unknown>): Promise<Row[]> {
-  const res = await fetch(`${URL_BASE}/rest/v1/rpc/location_search_candidates_ar`, {
+  const res = await postgrestFetch(`${URL_BASE}/rest/v1/rpc/location_search_candidates_ar`, {
     method: 'POST',
     headers: HEADERS,
     body: JSON.stringify(args),

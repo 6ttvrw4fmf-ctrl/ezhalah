@@ -3,32 +3,29 @@ import { getLocale } from '@/i18n';
 
 // The real, resolvable share target (the deployed app).
 export const SHARE_LINK = 'https://ezhalah-app.vercel.app';
-// The picture people actually SEE in WhatsApp / iMessage / X / Telegram / LinkedIn. It must be an
-// ABSOLUTE url — a crawler fetching the page has no origin to resolve "/og-image.jpg" against — and
-// it is a composed card: the existing eagle mark from assets/images/ezhalah-logo.png, knocked out
-// white on the brand green, over the name and the one-line promise. No new logo was drawn — the mark
-// is the project's own file. It replaced a crop of the eagle-night artwork (owner, 2026-09-05: "just
-// include the logo, let it look professional") because a photographic crop reads as a stock image at
-// thumbnail size, while a logo card reads as a brand.
+// Owner-approved share artwork (2026-10-11): the existing green eagle on white,
+// identical to the app icon. The in-app preview uses the same image as external cards.
 // THE FILENAME CARRIES A VERSION, AND THAT IS LOAD-BEARING. WhatsApp, Facebook and LinkedIn cache a
 // link's preview card KEYED BY URL and re-fetch it on their own schedule — the same trap Chrome's
 // favicon store sprang on 2026-09-05, where correct new bytes at an unchanged path stayed invisible
 // for months. Replacing the bytes of og-image.jpg would leave everyone who has ever shared the link
 // on the old picture. RENAME THE FILE when the artwork changes; never overwrite it in place.
-export const OG_IMAGE = `${SHARE_LINK}/og-image-v4.jpg`;
-// ONE message, owner-authored 2026-09-05, used everywhere that used to keep its own copy and drift:
-// the OS share text, the in-app sheet, X/Telegram/WhatsApp/Mail, and the og: card. The LEAD is the
-// sentence alone — targets that take the link in their own `url=` parameter must not be handed it
-// twice — and MESSAGE is that lead plus the link, for targets that carry everything in one string.
-export const SHARE_LEAD_AR = 'إزهله. موقع واحد. كل إعلانات العقار في السعودية، بثواني.\nجرّبه الآن 👇';
-export const SHARE_LEAD_EN = 'Ezhalah. One site. Every property listing in Saudi Arabia, in seconds.\nTry it now 👇';
+// v6 = 192×192 (owner 2026-10-18: «look how big … keep it small»). WhatsApp draws a BIG banner for an
+// og:image ≥ ~300px wide and a small side thumbnail below that — the same 192px card the search-share
+// links (/s/…) already get. Keep it under 300px.
+export const OG_IMAGE = `${SHARE_LINK}/og-image-v6.png`;
+// Owner-approved original wording, without the AI sentence or dashes (2026-10-11), shared by metadata and every share target.
+// No emoji (owner 2026-10-18: «remove the emoji … make it professional»).
+export const SHARE_BLURB_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى للبحث على العقار في المملكة.';
+// The preview CARD's own line (owner 2026-10-18: the card repeated the sent message and was cut off).
+// middleware.ts serves link-preview bots the same line WITH live numbers (src/lib/homeCard.ts); this
+// number-free form is the static fallback. Pinned equal to HOME_CARD_FALLBACK_AR.
+export const SHARE_CARD_DESC_AR = 'كل مواقع العقار في السعودية في مكان واحد.';
+export const SHARE_BLURB_EN = 'Looking for a property and want to see everything on offer in one place? Ezhalah, the smarter way to find properties in the Kingdom.';
+export const SHARE_LEAD_AR = SHARE_BLURB_AR;
+export const SHARE_LEAD_EN = SHARE_BLURB_EN;
 export const SHARE_MESSAGE_AR = `${SHARE_LEAD_AR}\n${SHARE_LINK}`;
 export const SHARE_MESSAGE_EN = `${SHARE_LEAD_EN}\n${SHARE_LINK}`;
-// og:description and the in-app preview get the sentence WITHOUT the emoji or the link: a preview
-// card already shows the domain under it, and repeating the url inside the description is the mark
-// of a page that was never actually looked at in a chat window.
-export const SHARE_BLURB_AR = 'موقع واحد. كل إعلانات العقار في السعودية، بثواني. جرّبه الآن.';
-export const SHARE_BLURB_EN = 'One site. Every property listing in Saudi Arabia, in seconds. Try it now.';
 export const SHARE_TITLE_AR = 'إزهله';
 const SHARE = {
   en: {

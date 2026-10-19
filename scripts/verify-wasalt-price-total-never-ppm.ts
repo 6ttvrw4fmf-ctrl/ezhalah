@@ -34,6 +34,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { replayFunction } from './lib/rpcReplay.ts';
 
 let failed = 0;
 const ok = (label: string, pass: boolean, detail = '') => {
@@ -44,23 +45,32 @@ const ok = (label: string, pass: boolean, detail = '') => {
 const MIGRATIONS_DIR = join(import.meta.dirname, '..', 'supabase', 'migrations');
 const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
 
-/** Body of the LAST `CREATE OR REPLACE FUNCTION <name>` across all migrations (filename order). */
+/** Body of the LAST `CREATE OR REPLACE FUNCTION <name>`, with later needle-edits replayed on top.
+ *
+ *  BLIND-GUARD REPAIR, 2026-09-24 (routine-10-barrier). This used to be a hand-rolled reader that
+ *  ended the body at the literal tag `$function$` and, when it could not find one, FELL BACK TO THE
+ *  REST OF THE FILE:
+ *
+ *      found = { file: f, body: close ? rest.slice(0, close.index! + close[0].length) : rest };
+ *                                                                                      ^^^^
+ *  A definition written with the ordinary `$$` — the style most hand-written migrations in this tree
+ *  use — therefore made every assertion below match text that is not in the function at all. The
+ *  identical line in scripts/verify-nonprice-price-monitor.ts was REPRODUCED on 2026-09-24: with the
+ *  P0 phone/ID-price guard deleted from the winning body, that barrier printed PASS on every check.
+ *  This is the R4 window-widening hazard (scripts/lib/sourceWindow.ts) in a second mechanism.
+ *
+ *  `replayFunction()` in scripts/lib/rpcReplay.ts — which already existed, exported, while three
+ *  barriers hand-rolled a broken copy beside it — finds the ACTUAL dollar tag, requires its matching
+ *  close, and reports anything it could not interpret in `unresolved`, which is a FAILURE here and
+ *  never a pass. It also replays later `replace(src, …)` patches, which the hand-rolled reader could
+ *  not see at all. */
 function lastDefinitionOf(name: string): { file: string; body: string } | null {
-  let found: { file: string; body: string } | null = null;
-  for (const f of files) {
-    const sql = readFileSync(join(MIGRATIONS_DIR, f), 'utf8');
-    const header = new RegExp(
-      `CREATE\\s+OR\\s+REPLACE\\s+FUNCTION\\s+(?:public\\.)?${name}\\s*\\(`,
-      'gi',
-    );
-    let m: RegExpExecArray | null;
-    while ((m = header.exec(sql)) !== null) {
-      const rest = sql.slice(m.index);
-      const close = rest.match(/\$function\$\s*;/i);
-      found = { file: f, body: close ? rest.slice(0, close.index! + close[0].length) : rest };
-    }
+  const played = replayFunction(MIGRATIONS_DIR, name);
+  if (played.unresolved.length > 0) {
+    ok(`every migration touching ${name}() was interpretable`, false, played.unresolved.join(' · '));
   }
-  return found;
+  if (played.body === null) return null;
+  return { file: played.touchedBy.join(' → '), body: played.body };
 }
 
 console.log('wasalt-price-total-never-ppm: the list-crawl must not overwrite a source-published total\n');

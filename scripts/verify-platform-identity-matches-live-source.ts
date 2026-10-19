@@ -42,6 +42,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { liftSymbols } from './lib/liftSymbols.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { platformIdentity, distinctPlatformCount } from '../src/lib/platformDiversity.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const { url: BASE, key: KEY } = resolvePublicSupabase(process.env);
@@ -128,6 +129,52 @@ for (const a of seenSources) {
       `both "${a.source}" and "${stolen.source}" resolve to ${a.host}`);
     break;                                      // one report is enough; the fix is the same edit
   }
+}
+
+// ── IDENTITY HEALTH, ON THE LIVE STRINGS — the half that let the 2026-09-26 P0 through ──────────
+// The checks above ask "does this card carry its OWN publisher's brand". They all passed on
+// 2026-09-26 while a second, quieter failure was live: platformDiversity's platformToken() was
+// `[^a-z0-9]`, a LATIN-ONLY filter, so a platform whose stored `source` is Arabic tokenised to the
+// EMPTY STRING. distinctPlatformCount() skips empty identities by design (a blank source must not
+// invent a slot), so those platforms were NOT COUNTED, initialReveal() sized the first screen from
+// that count, and they got no first-screen card at all — measured on الرياض/تجاري/بيع: 21 matching
+// platforms, 11 of them Arabic-named, 10 cards shown. Nothing rendered under the wrong brand, so
+// nothing above fired.
+//
+// These run HERE, in the live barrier, rather than only in the hermetic ones, because a hermetic
+// test can only assert about the names the repo already knows. The roster is heading for ~136 sites
+// and new entries are increasingly Arabic-named; this is the only check that sees a platform added
+// TOMORROW, with a name shape nobody anticipated, in whatever encoding its scraper stores.
+{
+  const blank = seenSources.filter((s) => platformIdentity(s.source) === '');
+  check('every LIVE source string produces a non-empty platform identity',
+    blank.length === 0,
+    blank.map((b) => `${b.platform} stores "${b.source}" → ''`).join(' | ')
+    + (blank.length ? ' — these platforms are invisible to the first-screen count' : ''));
+
+  // A live source colliding with a DIFFERENT website's identity costs the second one its slot in
+  // exactly the same way. Same-domain folds (Aqar / Aqar Monthly) are correct and excluded.
+  const byIdentity = new Map<string, Set<string>>();
+  for (const s of seenSources) {
+    const id = platformIdentity(s.source);
+    if (!id) continue;
+    if (!byIdentity.has(id)) byIdentity.set(id, new Set());
+    byIdentity.get(id)!.add(s.host);
+  }
+  const collided = [...byIdentity].filter(([, hosts]) => hosts.size > 1);
+  check('no two LIVE source strings from different websites share one identity',
+    collided.length === 0,
+    collided.slice(0, 3).map(([id, h]) => `${id} ← ${[...h].join(' + ')}`).join(' | '));
+
+  // The end-to-end property the owner's rule actually depends on: the number the first screen is
+  // sized from must equal the number of distinct websites live in the fleet. Counted through the
+  // REAL distinctPlatformCount(), on the REAL strings, with legitimate same-domain folds allowed.
+  const distinctHosts = new Set(seenSources.map((s) => s.host)).size;
+  const counted = distinctPlatformCount(seenSources.map((s) => ({ source: s.source })));
+  check('the first-screen platform count sees EVERY live website (no platform is erased)',
+    counted >= distinctHosts,
+    `distinctPlatformCount saw ${counted} of ${distinctHosts} live websites`
+    + (counted < distinctHosts ? ` — ${distinctHosts - counted} would get no first-screen card` : ''));
 }
 
 console.log(failures === 0

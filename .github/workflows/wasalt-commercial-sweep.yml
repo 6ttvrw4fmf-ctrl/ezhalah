@@ -35,14 +35,35 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
+      # Cloudflare path (issue #1019): wasalt.sa cannot be read by any http client any
+      # more, so this sweep drives a real Chromium. --with-deps pulls the system
+      # libraries Chromium needs on the runner image.
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
       - name: Sweep ${{ matrix.slug }} ${{ matrix.deal }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # BROWSER + PROXY. Measured 2026-09-18, in this order:
+          #   headed Chromium, laptop IP, no proxy   -> 200, challenge cleared, 32 listings
+          #   headed Chromium, RUNNER IP, no proxy   -> 403, challenge NEVER clears (29KB shell)
+          # So a real browser is necessary but not sufficient: Cloudflare also judges the IP, and a
+          # GitHub datacenter IP is refused however real the browser is. That is the same two-factor
+          # shape issue #1019 found, with the factors now being (IP reputation) x (JS execution)
+          # rather than (IP) x (TLS fingerprint).
+          #
+          # Real-browser + residential-proxy is the ONE cell #1019 never tested — it tried
+          # plain-TLS+proxy, chrome124+proxy, no-impersonate+proxy and chrome124+direct, all of
+          # which either 403 or hang. The browser supplies the JS execution the challenge demands
+          # and the proxy supplies the residential IP it demands.
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
           SCRAPE_MIN_INTERVAL: "0.4"
         run: |
-          exec python -m scrapers.wasalt.run \
+          # headless=False is what clears the Cloudflare challenge (headless is detected
+          # and never clears — measured 2026-09-18). The runner has no display, so the
+          # browser needs a virtual one; xvfb-run supplies it.
+          exec xvfb-run -a python -m scrapers.wasalt.run \
             --type commercial \
             --slug ${{ matrix.slug }} \
             --deal ${{ matrix.deal }} \

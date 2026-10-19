@@ -24,7 +24,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { liftSymbols } from './liftSymbols.ts';
 import { COHORT_QUESTIONS } from '../../src/lib/afCohorts.ts';
-import { CLEAN_MACRO, ALL_CLEAN_TYPES, HIERARCHY, groupsOf, groupMembers } from '../../src/data/propertyTypes.ts';
+import { CLEAN_MACRO, ALL_CLEAN_TYPES, HIERARCHY, UNBOXED_TYPES, groupsOf, groupMembers } from '../../src/data/propertyTypes.ts';
 import type { SearchQuery } from '../../src/data/search.ts';
 
 export type Leg = 'Buy' | 'RentAnnual' | 'RentMonthly';
@@ -59,11 +59,13 @@ export function tableAllows(type: string, mode: Mode, id: string): boolean {
 
 export type Scope = { kind: 'type' | 'group'; label: string; types: string[]; category: 'Residential' | 'Commercial'; query: SearchQuery };
 
-/** Every clean type and every group, each as the SearchQuery the Filter screen would hold. */
+/** Every clean type and every group, each as the SearchQuery the Filter screen would hold. A type offered as no box
+ *  (UNBOXED_TYPES — «أرض», owner 2026-10-11: «not searchable by property type») is no scope: the Filter cannot hold it,
+ *  so no user can open an Advanced Filter round on it. */
 export function allScopes(): Scope[] {
   const base = { location: 'الرياض', type: null, detail: null, priceInput: '', priceBand: null } as Partial<SearchQuery>;
   const out: Scope[] = [];
-  for (const type of ALL_CLEAN_TYPES) {
+  for (const type of ALL_CLEAN_TYPES.filter((t) => !UNBOXED_TYPES.includes(t))) {
     const category = CLEAN_MACRO[type];
     out.push({ kind: 'type', label: type, types: [type], category,
       query: { ...base, deal: 'Buy', category, typeGroups: groupsOf([type]), types: [type] } as SearchQuery });
@@ -122,7 +124,7 @@ export async function loadLifted(root: string): Promise<Lifted> {
   const lifted = await liftSymbols(
     join(root, 'src/data/advancedFilters.ts'),
     [
-      { header: 'const AGE_BUCKETS', endsWith: /^\];$/ },
+      { header: 'const AGE_LADDER', endsWith: /^\];$/ },
       { header: 'const DIRECTION_DEFS', endsWith: /^\];$/ },
       { header: 'function addAmenities' },
       ...QUESTION_CONSTS.map((h) => ({ header: `const ${h}` })),
@@ -192,6 +194,9 @@ export type FieldMeaning = {
   paramsBoth: (a: Record<string, unknown>, b: Record<string, unknown>) => Record<string, unknown>;
   /** fields whose options + unknown PARTITION the scope (options are disjoint and exhaustive over known) */
   partition: boolean;
+  /** a NESTED «up to» ladder (each option contains the one before it): the options are not disjoint, so the
+   *  scope is the WIDEST rung + the rows past the top rung (`beyond`, a PostgREST filter) + unknown */
+  nested?: { beyond: string };
   /** the count columns the card's "did not mention" caption must derive from (null = no caption) */
   unknownCols: string[] | null;
   totalCol: string;
@@ -213,8 +218,14 @@ const DIR_COL: Record<string, string> = {
   'شمال شرق': 'cnt_dir_ne', 'شمال غرب': 'cnt_dir_nw', 'جنوب شرق': 'cnt_dir_se', 'جنوب غرب': 'cnt_dir_sw',
 };
 const SUBTYPE_COL: Record<string, string> = { 'استديو': 'cnt_sub_studio', 'شقق مخدومة': 'cnt_sub_serviced', 'شقة': 'cnt_sub_regular' };
-const AGE: Record<string, { params: Record<string, unknown>; lo: number | null; hi: number | null; exact?: number }> = {
+// The age question is a one-tap cumulative «up to» ladder (owner 2026-10-05): new · upto2 · upto5 · upto9.
+// A rung's count is the SUM of its bucket columns; the recording proxy hands back column NAMES, so the
+// sum reads as their concatenation — `cntCols.join('')` is that exact recorded value.
+const AGE: Record<string, { params: Record<string, unknown>; lo: number | null; hi: number | null; exact?: number; cntCols?: string[] }> = {
   new: { params: { p_is_new_construction: true }, lo: null, hi: null, exact: 0 },
+  upto2: { params: { p_age_buckets: ['new', '1_2'] }, lo: 0, hi: 2, cntCols: ['cnt_new', 'cnt_1_2'] },
+  upto5: { params: { p_age_buckets: ['new', '1_2', '3_5'] }, lo: 0, hi: 5, cntCols: ['cnt_new', 'cnt_1_2', 'cnt_3_5'] },
+  upto9: { params: { p_age_buckets: ['new', '1_2', '3_5', '6_9'] }, lo: 0, hi: 9, cntCols: ['cnt_new', 'cnt_1_2', 'cnt_3_5', 'cnt_6_9'] },
   '1_2': { params: { p_age_min: 1, p_age_max: 2 }, lo: 1, hi: 2 },
   '3_5': { params: { p_age_min: 3, p_age_max: 5 }, lo: 3, hi: 5 },
   '6_9': { params: { p_age_min: 6, p_age_max: 9 }, lo: 6, hi: 9 },
@@ -285,12 +296,28 @@ export function optionMeaning(field: string, key: string): Meaning | null {
         : a.hi == null
           ? { rest: `property_age=gte.${a.lo}`, notMatching: `property_age=lt.${a.lo}`, ok: (v: number) => v >= (a.lo as number) }
           : { rest: `property_age=gte.${a.lo}&property_age=lte.${a.hi}`, notMatching: `or=(property_age.lt.${a.lo},property_age.gt.${a.hi})`, ok: (v: number) => v >= (a.lo as number) && v <= (a.hi as number) };
-      return { params: a.params, cntCol: `cnt_${key}`, cols: ['property_age'], rest: range.rest, notMatching: range.notMatching,
+      return { params: a.params, cntCol: a.cntCols ? a.cntCols.join('') : `cnt_${key}`, cols: ['property_age'], rest: range.rest, notMatching: range.notMatching,
         unknown: 'property_age=is.null', satisfies: (r) => typeof r.property_age === 'number' && range.ok(r.property_age) };
     }
     default: return null;
   }
 }
+
+// Helpers for the union of two options of one field (owner 2026-10-03, every question multi-select).
+const RATING: Record<string, Record<string, unknown>> = {
+  '9.5': { p_rating_min: 9.5 }, '9.0': { p_rating_min: 9 }, '9.0_rc10': { p_rating_min: 9, p_reviews_min: 10 },
+};
+const sameParams = (x: Record<string, unknown>, y: Record<string, unknown>) => {
+  const kx = Object.keys(x).sort(), ky = Object.keys(y).sort();
+  return kx.length === ky.length && kx.every((k, i) => k === ky[i] && JSON.stringify(x[k]) === JSON.stringify(y[k]));
+};
+/** PostgREST union of two single-option filters: `or=(and(a…),and(b…))`. */
+const orBoth = (a: string, b: string) => {
+  const inner = (r: string) => `and(${r.split('&').map((c) => c.replace('=', '.')).join(',')})`;
+  return `or=(${inner(a)},${inner(b)})`;
+};
+/** Two «at least» rungs: the lower one IS their union. */
+const lowerRung = (a: string, b: string) => (Number(a.split('gte.')[1]) <= Number(b.split('gte.')[1]) ? a : b);
 
 export function fieldMeaning(field: string): FieldMeaning | null {
   const single = (totalCol = 'cnt_total_base', unknownCols: string[] | null = null, partition = false): FieldMeaning => ({
@@ -299,7 +326,7 @@ export function fieldMeaning(field: string): FieldMeaning | null {
     paramsBoth: (a, b) => ({ ...a, ...b }),
   });
   switch (field) {
-    case 'amenities': return { ...single(), combine: 'and',
+    case 'amenities': return { ...single('cnt_total_base', ['cnt_amen_unknown']), combine: 'and',
       paramsBoth: (a, b) => ({ p_amenities: [...(a.p_amenities as string[]), ...(b.p_amenities as string[])] }) };
     case 'direction': return {
       combine: 'or', partition: true, totalCol: 'cnt_total_base',
@@ -308,9 +335,30 @@ export function fieldMeaning(field: string): FieldMeaning | null {
       restBoth: (a, b) => `direction_ar=in.(${a.slice('direction_ar=in.('.length, -1)},${b.slice('direction_ar=in.('.length, -1)})`,
       paramsBoth: (a, b) => ({ p_directions: [...(a.p_directions as string[]), ...(b.p_directions as string[])] }),
     };
-    case 'furnished': return single('cnt_total_base', ['cnt_total_base', 'cnt_furnished', 'cnt_unfurnished'], true);
-    case 'property_age': return single('cnt_total', ['cnt_unknown'], true);
-    case 'rnpl': case 'bathrooms': case 'street_width': case 'rating': case 'unit_subtype': return single();
+    // EVERY QUESTION TAKES SEVERAL ANSWERS = their exact UNION (owner 2026-10-03: «never force the user to
+    // select one thing»). «At least» ladders union to the LOWEST pick; buckets with no single-range form
+    // carry the picked keys (p_age_buckets / p_rating_buckets / p_furnished_in); subtypes were an array.
+    case 'furnished': return { ...single('cnt_total_base', ['cnt_total_base', 'cnt_furnished', 'cnt_unfurnished'], true), combine: 'or',
+      restBoth: () => 'furnished=not.is.null',
+      paramsBoth: (a, b) => ({ p_furnished_in: [a.p_furnished, b.p_furnished].sort((x, y) => Number(y) - Number(x)) }) };
+    // A NESTED LADDER since the owner's 2026-10-05 rule (src/data/advancedFilters.ts AGE_LADDER: جديد ⊂ حتى سنتين ⊂
+    // حتى ٥ ⊂ حتى ٩). Summing its options counted one flat up to four times: af-live-truth-check run 38215288912
+    // read «70441 + 3318 vs 23048» on Riyadh apartments/Buy while the RPC's own disjoint buckets summed exactly
+    // (16043 + 1072 + 1256 + 541 + 818 + 3317 = 23047 = search total). A check bug, not a product bug.
+    case 'property_age': return { ...single('cnt_total', ['cnt_unknown'], true), combine: 'or', restBoth: orBoth,
+      nested: { beyond: 'property_age=gte.10' },
+      paramsBoth: (a, b) => ({ p_age_buckets: Object.keys(AGE).filter((k) => sameParams(AGE[k].params, a) || sameParams(AGE[k].params, b)) }) };
+    // «😔 on every question» (owner 2026-10-03): these read a DB IS NULL column (migration 20261003184909),
+    // so «did not mention» means exactly that column — never a subtraction over the rungs.
+    case 'rnpl': return single('cnt_total_base', ['cnt_rnpl_unknown']);
+    case 'bathrooms': return { ...single('cnt_total_base', ['cnt_bath_unknown']), combine: 'or', restBoth: lowerRung,
+      paramsBoth: (a, b) => ({ p_bath_min: Math.min(Number(a.p_bath_min), Number(b.p_bath_min)) }) };
+    case 'street_width': return { ...single('cnt_total_base', ['cnt_stw_unknown']), combine: 'or', restBoth: lowerRung,
+      paramsBoth: (a, b) => ({ p_street_width_min: Math.min(Number(a.p_street_width_min), Number(b.p_street_width_min)) }) };
+    case 'rating': return { ...single('cnt_total_base', ['cnt_rating_unknown']), combine: 'or', restBoth: orBoth,
+      paramsBoth: (a, b) => ({ p_rating_buckets: Object.keys(RATING).filter((k) => sameParams(RATING[k], a) || sameParams(RATING[k], b)) }) };
+    case 'unit_subtype': return { ...single('cnt_total_base', ['cnt_sub_unknown']), combine: 'or', restBoth: orBoth,
+      paramsBoth: (a, b) => ({ p_unit_subtypes: [...(a.p_unit_subtypes as string[]), ...(b.p_unit_subtypes as string[])] }) };
     default: return null;
   }
 }

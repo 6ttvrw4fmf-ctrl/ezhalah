@@ -250,10 +250,54 @@ export function initObservability(): void {
   }
 }
 
+// ── A THIRD-PARTY TRANSPORT FAILURE IS NOT AN EZHALAH EXCEPTION (🔧 2026-10-19) ──────────────────
+// Sentry REACT-NATIVE-D/E were bare «NetworkError: A network error occurred.» rejections (DOMException
+// code 19, no stack, url=/). The 2026-10-16 context carried the code but not the origin, and the origin
+// showed up verbatim on the webkit journey sweep (run 39236332307): Google One Tap's own status call
+// «XMLHttpRequest cannot load https://accounts.google.com/gsi/status?… due to access control checks»,
+// refused by the engine's privacy rules (ITP / third-party cookies). Our own fetches never reach the
+// global handler (src/data/locations.ts and friends catch them — proven 2026-09-03 by aborting the
+// RPC on Chromium: 0 page errors), so a NetworkError that escapes to `unhandledrejection` on a page
+// that carries the GSI script is Google's request, not ours. D's two events were our own Firefox sweep.
+//
+// THIS IS A DISCRIMINATOR, NOT A SWALLOW. The event is still sent — as a warning with its own
+// fingerprint, so a real spike stays visible and never hides under an app-error group — and only
+// the exact shape (name NetworkError, code 19, GSI script on the page) is reclassified. A NetworkError
+// on a page WITHOUT the GSI script keeps the error level and the default grouping: its origin is
+// unknown, and unknown is reported loudly. Anything that is not a NetworkError is untouched.
+export type RejectionClass = {
+  thirdPartyTransport: boolean;
+  level: 'warning' | 'error';
+  fingerprint?: string[];
+  tags?: Record<string, string>;
+};
+export function classifyRejection(reason: unknown, gsiScriptPresent: boolean): RejectionClass {
+  const r: any = reason;
+  const isNetworkError = !!r && typeof r === 'object' && r.name === 'NetworkError' && Number(r.code) === 19;
+  if (isNetworkError && gsiScriptPresent) {
+    return {
+      thirdPartyTransport: true,
+      level: 'warning',
+      fingerprint: ['third-party-transport', 'gsi', 'NetworkError'],
+      tags: { third_party_transport: 'gsi' },
+    };
+  }
+  return { thirdPartyTransport: false, level: 'error' };
+}
+
+export type ReportOptions = { level?: 'warning' | 'error'; fingerprint?: string[]; tags?: Record<string, string> };
+
 /** Report an error. No-op when Sentry is not initialized (no DSN, no package, or non-web). */
-export function reportError(err: unknown, context?: Record<string, unknown>): void {
+export function reportError(err: unknown, context?: Record<string, unknown>, opts?: ReportOptions): void {
   if (SentryImpl) {
-    try { SentryImpl.captureException(err, context ? { extra: scrubValue(context) } as any : undefined); } catch {}
+    try {
+      const ctx: Record<string, unknown> = {};
+      if (context) ctx.extra = scrubValue(context);
+      if (opts?.level) ctx.level = opts.level;
+      if (opts?.fingerprint) ctx.fingerprint = opts.fingerprint;
+      if (opts?.tags) ctx.tags = opts.tags;
+      SentryImpl.captureException(err, Object.keys(ctx).length ? (ctx as any) : undefined);
+    } catch {}
   }
 }
 

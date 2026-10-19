@@ -32,7 +32,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  bottomPromptInset, topPromptInset, promptInsets, promptMeasurementTarget,
+  bottomPromptInset, topPromptInset, promptInsets, promptMeasurementTarget, centredDialogBox,
   ONE_TAP_IFRAME_SELECTOR, AUTH_PROMPT_SELECTOR, OWN_DOCKED_PROMPT_SELECTOR, DOCKED_PROMPT_SELECTOR,
 } from '../src/lib/bottomPromptInset.ts';
 import { npmTestRuns } from './lib/testRegistry.ts';
@@ -295,12 +295,44 @@ const CORNER_CARD = { top: 20, bottom: 200, height: 180, width: 391 };
     eq(promptInsets([{ top: 0, bottom: VH_PHONE, height: VH_PHONE, width: VW_PHONE }], VH_PHONE, VW_PHONE), 0, 0));
   check('G6. two prompts docked at once are both reserved',
     eq(promptInsets([TOP_SHEET, BOTTOM_SHEET], VH_PHONE, VW_PHONE), 170, 144));
-  // 300 + 300 exceeds half the viewport; the larger survives whole and the app keeps the rest.
+  // 300 + 300 = 600 exceeds the 568 px budget (812 less the 30% the app keeps); the larger survives
+  // whole and the app keeps the rest. This is the genuinely unsatisfiable case — the only one where
+  // clamping still happens at all.
   check('G7. the COMBINED reservation is capped, so an app always remains',
     eq(promptInsets([
       { top: 0, bottom: 300, height: 300, width: 375 },
       { top: VH_PHONE - 300, bottom: VH_PHONE, height: 300, width: 375 },
-    ], VH_PHONE, VW_PHONE), 300, 106));
+    ], VH_PHONE, VW_PHONE), 300, 268));
+
+  // ── THE MEASURED REAL-WORLD BOTH-EDGES CASE (ops_incident #202 follow-up, 2026-09-13) ───────────
+  // One Tap's WebKit container docked TOP (fixed, 375x158 at 0,20 → reaches 178) and our own cookie
+  // consent card docked BOTTOM (272 px). Demand 178 + 272 = 450.
+  //
+  // Under the old clamp this budgeted 406 (half the viewport) for the pair, kept the larger band
+  // whole and clipped the top to 406 - 272 = 134 — so the app reserved 134 against an overlay
+  // reaching 178 and laid 44 px of live controls under it. MEASURED on production, Chromium,
+  // 375x812, fresh context, 2/2: reservedTop 134 with 8 controls stranded at cy=173, against
+  // reservedTop 178 and 0 stranded once the consent card was dismissed. The eight are the same
+  // eight, at the same y, that journey-sweep 34750102523 reports blocked on WebKit.
+  //
+  // G9 IS THE LOAD-BEARING ONE: under-reserving an occupied edge is never a safe degradation, so the
+  // top must come back 178 — the full band the overlay occupies — not 134.
+  const ONE_TAP_TOP_WEBKIT = { top: 20, bottom: 178, height: 158, width: 375 };
+  const CONSENT_CARD_BOTTOM = { top: VH_PHONE - 272, bottom: VH_PHONE, height: 272, width: 375 };
+  check('G9. the measured both-edges case reserves the FULL top band, not a clipped one',
+    eq(promptInsets([ONE_TAP_TOP_WEBKIT, CONSENT_CARD_BOTTOM], VH_PHONE, VW_PHONE), 178, 272),
+    JSON.stringify(promptInsets([ONE_TAP_TOP_WEBKIT, CONSENT_CARD_BOTTOM], VH_PHONE, VW_PHONE)));
+  // The user-facing consequence, stated as the arithmetic that decides it: every control the sweep
+  // found blocked sits at cy=173, which must fall INSIDE the reserved top band.
+  {
+    const reservedTop = promptInsets([ONE_TAP_TOP_WEBKIT, CONSENT_CARD_BOTTOM], VH_PHONE, VW_PHONE).top;
+    check('G10. the 8 controls stranded at cy=173 are inside the reservation (134 left them outside)',
+      reservedTop >= 173, `reservedTop=${reservedTop}`);
+  }
+  // And the counterfactual that isolates the cap as the cause: with the card gone, the top was
+  // always correct — so nothing about the TOP measurement was ever the defect.
+  check('G11. top-only was already correct, which is what makes G9 about the COMBINED clamp',
+    eq(promptInsets([ONE_TAP_TOP_WEBKIT], VH_PHONE, VW_PHONE), 178, 0));
   check('G8. a hidden prompt beside a real one does not disturb it',
     eq(promptInsets([{ ...TOP_SHEET, hidden: true }, BOTTOM_SHEET], VH_PHONE, VW_PHONE), 0, 144));
 }
@@ -469,8 +501,17 @@ const CORNER_CARD = { top: 20, bottom: 200, height: 180, width: 391 };
   check('I2. THE DEFECT: a foreign prompt must not collapse the card\'s reservation to its own height',
     promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom !== 144,
     `got ${promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom}`);
-  check('I3. the stack reserves up to the TOP of the upper prompt, clamped by the combined cap',
-    promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom === Math.min(VH_PHONE - CARD_LIFTED.top, CAP));
+  // The band the stack actually occupies — card top (396) to the viewport bottom — is 416 px, and
+  // that is now what is reserved. It used to be clipped to the 406 px combined cap, which left a
+  // 10 px strip of live app content under the card: the same under-reservation class that stranded
+  // eight controls at the TOP edge (section G9-G11, ops_incident #202 follow-up, 2026-09-13). The
+  // expectation moved because the clamp was wrong, not because the check was loosened — CAP is kept
+  // below purely to assert that the old clipped answer is no longer produced.
+  check('I3. the stack reserves the band it actually occupies, unclipped',
+    promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom === VH_PHONE - CARD_LIFTED.top,
+    `got ${promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom}, want ${VH_PHONE - CARD_LIFTED.top}`);
+  check('I3b. …and specifically no longer the old cap-clipped answer, which hid 10px of app under the card',
+    promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom !== CAP);
   check('I4. …and the answer does not depend on enumeration order',
     promptInsets([ONE_TAP_DOCKED, CARD_LIFTED], VH_PHONE, VW_PHONE).bottom
       === promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom);
@@ -595,6 +636,52 @@ const CORNER_CARD = { top: 20, bottom: 200, height: 180, width: 391 };
                .promptMeasurementTarget(f as never, (n: never) => (n as { position: string }).position) !== c; },
   );
 
+  // ── K. THE COMBINED-CLAMP DEFECT ITSELF (ops_incident #202 follow-up, 2026-09-13) ───────────────
+  const PHONE_H = 812, PHONE_W = 375;
+  const TOP_178 = { top: 20, bottom: 178, height: 158, width: 375 };
+  const BOTTOM_272 = { top: PHONE_H - 272, bottom: PHONE_H, height: 272, width: 375 };
+
+  // K1 — THE SHIPPED DEFECT, restored verbatim: budget the two bands against the SINGLE-band cap.
+  // This is what was live on production, and it must turn the measured case red at 134.
+  await withMutation(
+    'the combined clamp budgets MAX_INSET_FRACTION for the pair (the defect that stranded 8 controls)',
+    (src) => src.replace(
+      'const cap = viewportHeight > 0 ? Math.floor(viewportHeight * (1 - MIN_APP_FRACTION)) : 0;',
+      'const cap = viewportHeight > 0 ? Math.floor(viewportHeight * MAX_INSET_FRACTION) : 0;'),
+    (m) => {
+      const got = (m as never as typeof import('../src/lib/bottomPromptInset.ts'))
+        .promptInsets([TOP_178, BOTTOM_272] as never, PHONE_H, PHONE_W);
+      // The defect's exact signature: the top clipped to 134, leaving cy=173 outside it.
+      return got.top === 134 && got.top < 173;
+    },
+  );
+
+  // K2 — the floor is raised until the real case clamps again. Guards against "fix" by a number
+  // that happens to clear 450 today and would strand the same controls on a shorter viewport.
+  await withMutation(
+    'the app-retained floor is widened until the measured 450px demand is clamped again',
+    (src) => src.replace('const MIN_APP_FRACTION = 0.3;', 'const MIN_APP_FRACTION = 0.5;'),
+    (m) => (m as never as typeof import('../src/lib/bottomPromptInset.ts'))
+      .promptInsets([TOP_178, BOTTOM_272] as never, PHONE_H, PHONE_W).top < 178,
+  );
+
+  // K3 — the clamp drops the top entirely rather than the bottom. The tie-break must never zero an
+  // occupied edge; a band reserved at 0 strands every control under it.
+  await withMutation(
+    'the combined clamp sacrifices the whole top band',
+    (src) => src.replace(
+      'if (top >= bottom) { top = Math.min(top, cap); bottom = Math.max(0, cap - top); }',
+      'if (top >= bottom) { top = 0; bottom = Math.min(bottom, cap); }'),
+    (m) => {
+      const got = (m as never as typeof import('../src/lib/bottomPromptInset.ts'))
+        .promptInsets([
+          { top: 0, bottom: 300, height: 300, width: 375 },
+          { top: PHONE_H - 300, bottom: PHONE_H, height: 300, width: 375 },
+        ] as never, PHONE_H, PHONE_W);
+      return got.top === 0;
+    },
+  );
+
   // J12 — the walk runs past the nearest fixed node to the outermost one, over-reserving.
   await withMutation(
     'the walk keeps going after the nearest fixed ancestor and returns the outermost',
@@ -608,6 +695,68 @@ const CORNER_CARD = { top: 20, bottom: 200, height: 180, width: 391 };
         .promptMeasurementTarget(f as never, (n: never) => (n as { position: string }).position) !== inner;
     },
   );
+}
+
+// ── §K — A CENTRED DIALOG NEEDS BOTH NUMBERS, AND ONE OF THEM IS A TRAP (ops_incident #670) ─────
+// InfoModal's × is pinned to the card's own top-right. `_layout.tsx` reserves a top-docked prompt's
+// band as the ROOT's paddingTop, which moves everything laid out inside it — and this overlay is
+// not: it resolves against the viewport, so the band passes straight through and the × sits under
+// Google's frame. Measured on production 2026-09-24, 375x812, signed out, 2/2 fresh contexts each,
+// with the WebKit top-dock shape injected into the served bundle:
+//
+//   no fix                         × y 63  | elementsFromPoint → iframe(gsi) on top, × index 3 | click FAILS
+//   paddingTop ONLY (16+178)       × y 152 | iframe STILL on top, × index 3                    | click FAILS
+//   paddingTop AND availH − band   × y 219 | div on top, × index 1                             | click LANDS
+//
+// The middle row is the whole reason this is one function returning two numbers: the card is
+// centred in the overlay's content box, so a card whose maxHeight still assumes the full viewport
+// OVERFLOWS that box and re-centres symmetrically, putting its top back above the padding. A fix
+// applying one half looks like progress and ships a still-dead control.
+const K_SAFE = { top: 0, bottom: 0 };
+const K_VH = 812, K_PAD = 16, K_CHROME = 48, K_BAND = 178;
+
+{
+  const none = centredDialogBox(K_VH, K_PAD, K_SAFE, { top: 0, bottom: 0 }, K_CHROME);
+  check('K1 nothing docked → the original numbers, unchanged',
+    none.paddingTop === 16 && none.availHeight === 812 - 48);
+
+  const docked = centredDialogBox(K_VH, K_PAD, K_SAFE, { top: K_BAND, bottom: 0 }, K_CHROME);
+  check('K2 a top band is added to the overlay padding', docked.paddingTop === 16 + K_BAND);
+  check('K3 …AND removed from the height the card may use (the half-fix trap)',
+    docked.availHeight === 812 - K_BAND - 48,
+    `got ${docked.availHeight}, expected ${812 - K_BAND - 48}`);
+  // The measured geometry: card top = paddingTop + (contentBox − cardHeight)/2, and it must clear
+  // the band. With both halves the card fits its box, so its top IS the padding edge or below.
+  const contentBox = K_VH - docked.paddingTop - K_PAD;
+  const cardH = Math.min(docked.availHeight, 720);
+  check('K4 with both halves the card FITS its content box (so it cannot re-centre upward)',
+    cardH <= contentBox, `card ${cardH} vs box ${contentBox}`);
+  check('K5 …and its top edge clears the band', docked.paddingTop >= K_BAND);
+
+  // The half-fix, executed: padding applied but the card still sized for the whole viewport.
+  const halfCardH = Math.min(812 - 48, 720);
+  check('K6 THE HALF FIX IS CAUGHT: padding alone leaves the card overflowing its box',
+    halfCardH > contentBox, `card ${halfCardH} vs box ${contentBox} — overflow re-centres it upward`);
+
+  const bottomOnly = centredDialogBox(K_VH, K_PAD, K_SAFE, { top: 0, bottom: 271 }, K_CHROME);
+  check('K7 a BOTTOM band costs height but no top padding',
+    bottomOnly.paddingTop === 16 && bottomOnly.availHeight === 812 - 271 - 48);
+  check('K8 safe-area insets still count',
+    centredDialogBox(K_VH, K_PAD, { top: 47, bottom: 34 }, { top: 0, bottom: 0 }, K_CHROME)
+      .availHeight === 812 - 47 - 34 - 48);
+  check('K9 a nonsense band is ignored rather than shrinking the dialog to nothing',
+    centredDialogBox(K_VH, K_PAD, K_SAFE, { top: -50, bottom: NaN } as never, K_CHROME).paddingTop === 16);
+}
+
+// The component must actually USE it — a pure function nothing calls is decoration.
+{
+  const modal = readFileSync(join(ROOT, 'src/components/InfoModal.tsx'), 'utf8');
+  check('K10 InfoModal calls centredDialogBox() for BOTH numbers',
+    /centredDialogBox\(/.test(modal)
+    && /dialogBox\.availHeight/.test(modal)
+    && /dialogBox\.paddingTop/.test(modal));
+  check('K11 …and reads FOREIGN prompt insets, never the combined set (the #163 self-reference trap)',
+    /useForeignPromptInsets\(\)/.test(modal) && !/usePromptInsets\(\)/.test(modal));
 }
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nAll bottom-prompt-inset checks passed.');

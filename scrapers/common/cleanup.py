@@ -19,50 +19,155 @@ Usage:
   python -m scrapers.common.cleanup --platform gathern              # honor policy.enabled
   python -m scrapers.common.cleanup --platform gathern --dry-run    # probe + classify, delete nothing
   python -m scrapers.common.cleanup --platform aqar --force         # run even if enabled=false (still all guards)
+  python -m scrapers.common.cleanup --all-enabled                   # the daily fleet run (fleet-cleanup.yml)
 """
 from __future__ import annotations
 
 import argparse
 import math
 import os
+import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 from scrapers.common import http
 from scrapers.common.db import begin_run, end_run, sb
-from scrapers.aqar.liveness import DEAD_MARKERS as AQAR_DEAD_MARKERS
+from scrapers.common.liveness_trust import MIN_CANARIES, canary_environment_ok
+from scrapers.aqar.liveness import DEAD_MARKERS as AQAR_DEAD_MARKERS, looks_closed as _aqar_looks_closed
 
 # ── Per-platform "is this URL genuinely dead?" registry. A platform absent here CANNOT be deleted
 # with require_source_recheck=true (fail-safe). Each entry: (tables, dead_marker_predicate).
 # aqar & wasalt share Aqar's marker/404 semantics (wasalt dead = 404). Add a platform here only after
 # proving its dead-detection is liveness-grade — that is the gate for enabling deletion on it.
-def _aqar_wasalt_markers(body: str) -> bool:
+def _wasalt_markers(body: str) -> bool:
+    # wasalt dead = a real HTTP 404 (handled by verdict()'s status branch, via the browser probe);
+    # these text markers are a vestigial belt-and-suspenders. wasalt has no aqar-style soft-close.
     return any(m in body for m in AQAR_DEAD_MARKERS)
+
+
+def _aqar_dead(body: str) -> bool:
+    """aqar's dead-check MUST match aqar's own liveness looks_dead() (minus the status branch that
+    verdict() already handles), or the cleanup is WEAKER than the signal that inactivated the row.
+
+    aqar SOFT-CLOSES: a sold/rented ad serves HTTP 200 with a «مغلق» badge and its offers node
+    stripped — none of the text DEAD_MARKERS appear. Registering markers-ONLY meant every
+    soft-closed aqar listing re-checked as "live", so the cleanup would have REACTIVATED it into
+    search instead of deleting it. Measured 2026-09-20: the entire oldest eligible cohort (dry-run
+    500/500) was soft-closed yet read "live" by the markers-only check. Reusing aqar liveness's own
+    two-factor looks_closed() (badge markup AND missing offers node — 0/77 false-positive on live
+    in its 2026-08-04 validation) fixes it."""
+    return any(m in body for m in AQAR_DEAD_MARKERS) or _aqar_looks_closed(body)
 
 def _never(body: str) -> bool:
     return False  # 404-only platforms: a delisted unit returns a real HTTP 404; every 200 is treated LIVE
 
+# aqarcity SOFT-expires: an expired listing serves HTTP 200 and says so in the page; a live listing
+# serves 200 and says nothing. So this predicate is the ONLY thing separating a dead aqarcity ad
+# from a live one, in BOTH directions — cleanup.py's delete-time re-check and verify_deletions.py's
+# post-delete audit share it.
+#
+# IT WAS A SINGLE SUBSTRING, AND ON 2026-09-25 IT COULD NOT RETURN True FOR ANY PAGE. aqarcity had
+# reworded the banner from «الإعلان منتهي» to «الإعلان غير متاح» and moved the old phrase into the
+# <title> as a suffix («… - إعلان منتهي | عقار ستي»), where it no longer carries the «ال». The
+# post-delete audit caught it on the first run after ops_incident #704 was fixed: aqarcity came back
+# live=40/40 having been dead=40/40 on each of 2026-08-30, 09-06, 09-13 and 09-20.
+#
+# The consequence was NOT silence, it was a false positive in the resurrecting direction: verdict()
+# reaches 'dead' on a 200 only through this function, so every expired aqarcity ad read LIVE and
+# cleanup.py would have SELF-HEALED it back into search ({"active": True, "missing_count": 0}) on
+# the next weekly run — source-expired listings returned to users, and no aqarcity listing ever
+# deletable again.
+#
+# CONTROL-VALIDATED before wiring (LISTING_LIFECYCLE_ENGINEER.md §4.2 lesson 1), 14 previously-
+# deleted and 14 currently-active listings probed INTERLEAVED through the real _probe() on
+# 2026-09-25:
+#
+#   «الإعلان منتهي»    (the shipped marker)  DEAD  0/14   LIVE 0/14   ← cannot fire at all
+#   «الإعلان غير متاح» (the current banner)  DEAD 14/14   LIVE 0/14
+#   «- إعلان منتهي» as a title suffix        DEAD 14/14   LIVE 0/14
+#
+# TWO independent signals are kept, not one, precisely because this incident IS a single signal
+# drifting. Both were measured on the same interleaved cohort, and neither appears anywhere in the
+# full body of the captured live page. The legacy banner stays because a cached or older page that
+# still carries it is still expired — and because widening is only safe in the direction the
+# controls actually cover.
+_AQARCITY_EXPIRED_BANNERS = (
+    "الإعلان غير متاح",   # current banner: <h2 class="text-lg font-bold …">الإعلان غير متاح</h2>
+    "الإعلان منتهي",      # the wording this platform used until 2026-09-20
+)
+# Anchored to the TITLE SUFFIX shape, never a bare phrase match: «… - إعلان منتهي | عقار ستي», and
+# the same string in og:title / twitter:title, which terminate with a quote or a tag instead of «|».
+# A bare `"إعلان منتهي" in body` would also match a seller writing it in free-text description, and
+# a false dead marker on this platform deletes a live listing.
+_AQARCITY_EXPIRED_TITLE_SUFFIX = re.compile(r"-\s*إعلان منتهي\s*(?:\||\"|<|&)")
+
+
 def _aqarcity_expired(body: str) -> bool:
-    # aqarcity SOFT-expires: an expired listing serves HTTP 200 with the banner «الإعلان منتهي ...»
-    # ("this ad is expired and no longer available"). Live listings (200) never carry it. Verified
-    # 2026-07-27: 8/8 inactive pages had it, 12/12 active pages did NOT.
-    return "الإعلان منتهي" in body
+    return (any(m in body for m in _AQARCITY_EXPIRED_BANNERS)
+            or bool(_AQARCITY_EXPIRED_TITLE_SUFFIX.search(body)))
 
 PLATFORMS: dict[str, dict] = {
-    "aqar":   {"tables": ["aqar_residential_listings", "aqar_commercial_listings"],     "dead_marker": _aqar_wasalt_markers},
-    "wasalt": {"tables": ["wasalt_residential_listings", "wasalt_commercial_listings"], "dead_marker": _aqar_wasalt_markers},
+    "aqar":   {"tables": ["aqar_residential_listings", "aqar_commercial_listings"],     "dead_marker": _aqar_dead},
+    "wasalt": {"tables": ["wasalt_residential_listings", "wasalt_commercial_listings"], "dead_marker": _wasalt_markers},
     # gathern (monthly rentals): a delisted unit serves a server 404; a live OR merely-booked unit
     # serves 200. So delete ONLY on a hard 404 — a booked-but-listed 200 is never deleted, and a
     # relisted unit that comes back 200 is self-healed. Verified on 8 inactive+2 active URLs 2026-07-27.
     "gathern": {"tables": ["gathern_residential_listings"], "dead_marker": _never},
-    # aqarcity: soft-expire (200 + «الإعلان منتهي» banner). Delete only when that banner is present;
-    # every other 200 is live → self-heal.
+    # aqarcity: soft-expire (200 + an expiry banner, or the expiry title suffix — see
+    # _aqarcity_expired, whose single-substring form was structurally unable to fire from
+    # 2026-09-20 to 2026-09-25). Delete only on one of those signals; every other 200 is live →
+    # self-heal.
     "aqarcity": {"tables": ["aqarcity_residential_listings", "aqarcity_commercial_listings"], "dead_marker": _aqarcity_expired},
+    # ── 2026-09-28, owner: «every day … it removes and hides then deletes it, for everything» ──────
+    # "controls": True = before any row is re-checked, and again before anything is deleted, a few of
+    # the site's own known-live ads (seen by its crawl in the last 48 h) must come back LIVE through
+    # this same probe, or the run deletes nothing (_controls_fail). A 404-only check cannot tell a
+    # removed ad from a site that answers a block with 404 (gathern, LISTING_LIVENESS.md §5.4); the
+    # controls can.
+    #
+    # aqarmonthly: Aqar's monthly furnished rentals. Its ads ARE sa.aqar.fm pages, so a closed one
+    # soft-closes exactly like aqar's (200 + «مغلق» badge, offers node stripped) — aqar's own check.
+    "aqarmonthly": {"tables": ["aqarmonthly_residential_listings"], "dead_marker": _aqar_dead, "controls": True},
+    # 404-only sites. Each measured from GitHub Actions on 2026-09-28 with lifecycle-spot-check.yml
+    # (status-only, 5/5 known-live controls alive in every run): its hidden ads answered 404, its
+    # live ads 200. Every 200 is live → self-heal; only a real 404/410 is gone.
+    #   jazwtn     hidden 5/5 → 404,   live 5/5 → 200    (run 36482507285)
+    #   mizlaj     hidden 4/4 → 404,   live 9/9 → 200    (run 36482549144)
+    #   nowaisiry  hidden 9/9 → 404,   live 8/10 → 200   (run 36482533964; the 2 were really gone)
+    #   raghdan    hidden 10/10 → 404, live 10/10 → 200  (run 36482496559)
+    # NOT registered, same measurement: their hidden ads answer 200 (soft-close, redirect, or a
+    # "withdrawn" page), so a 404-only check would call a dead ad live and bring it back — mustqr,
+    # aqargate, aqaratikom, souq24, abeea, hajer, ramzalqasim, fursaghyr, eaqartabuk, aldarim,
+    # eastabha, erapulse. sanadak and dealapp serve a 200 shell for a removed ad.
+    "jazwtn":    {"tables": ["jazwtn_residential_listings", "jazwtn_commercial_listings"], "dead_marker": _never, "controls": True},
+    "mizlaj":    {"tables": ["mizlaj_residential_listings", "mizlaj_commercial_listings"], "dead_marker": _never, "controls": True},
+    "nowaisiry": {"tables": ["nowaisiry_residential_listings", "nowaisiry_commercial_listings"], "dead_marker": _never, "controls": True},
+    "raghdan":   {"tables": ["raghdan_residential_listings", "raghdan_commercial_listings"], "dead_marker": _never, "controls": True},
 }
+
+# Sites whose cleanup has its own daily workflow (aqar-/gathern-/wasalt-cleanup.yml). Every OTHER
+# enabled site runs in the one daily fleet run (fleet-cleanup.yml → run_fleet()).
+DEDICATED_WORKFLOW = ("aqar", "gathern", "wasalt")
+
+# Known-live controls: ads the site's own crawl saw this recently, and how many to open.
+CONTROL_HOURS = 48
 
 DEFAULT_POLICY = {
     "min_inactive_days": 30, "min_missing_count": 3, "require_source_recheck": True,
     "max_delete_per_run": 500, "anomaly_floor": 300, "anomaly_factor": 4, "enabled": False,
+    # DRAIN MODE (2026-09-20). Default OFF, per-platform opt-in. When a platform's deletion-eligible
+    # population sits ABOVE the anomaly/fraction gate as a genuine STANDING backlog (sold/rented
+    # listings that accumulated while the guard aborted every run — see the guard's own "can never
+    # drain" warning), aborting forever is the wrong answer: customers keep clicking dead listings.
+    # With drain_backlog=true the run stops ABORTING on the aggregate gate and instead drips a
+    # normal capped batch (max_delete_per_run), source-re-verifying every single row exactly as a
+    # normal run does — so nothing is deleted that isn't freshly confirmed gone. The protection the
+    # abort provided (catching a scraper regression that mass-inactivates REAL rows) is KEPT as a
+    # rate check: a genuine backlog is flat/shrinking run-over-run, a regression is a sudden SPIKE,
+    # and a spike still aborts even in drain mode. drain_spike_factor is how many times the previous
+    # run's eligible count this run may reach before it is treated as a spike.
+    "drain_backlog": False, "drain_spike_factor": 2.0,
     # Scale-relative mass-deletion guard (2026-08-09). The absolute anomaly_floor cannot notice
     # that a SMALL platform has gone catastrophically wrong: with floor=1000, a 3,000-row platform
     # could have 600 rows (20%) suddenly eligible and still sail through. This guard scales with
@@ -82,8 +187,133 @@ FRAC_GUARD_MIN_ROWS = 500
 # protection enough. _FREEZE_MAX_INCONCLUSIVE_RATE is the ceiling above which the run's evidence
 # is treated as untrustworthy as a whole. Healthy production runs measure ~0% inconclusive, so
 # there is a wide margin between normal and this ceiling — it is not a hair trigger.
+# WRITE BATCH SIZE. Each delete fires trg_archive_hard_delete, which archives the whole row as
+# jsonb — and a wasalt row carries a large ar_data blob, so archiving is ~16 ms/row (aqar/gathern
+# have no ar_data and are far cheaper). At 200/batch that is ~3.4 s of trigger work in ONE delete
+# statement, which tips over PostgREST's 8 s statement_timeout under load — a real wasalt drain run
+# 57014'd on 2026-09-20 (500 rows deleted safely, but the job exited 1). 50/batch is ~0.8 s: a 4x+
+# safety margin against the timeout on the slowest table, at the cost of a few more round-trips on
+# the cheap ones. Keep it well under what makes the slowest archive trigger approach 8 s.
+_WRITE_CHUNK = int(os.environ.get("CLEANUP_WRITE_CHUNK", "50"))
+
+
+def _is_statement_timeout(e: Exception) -> bool:
+    return "57014" in str(e)
+
+
+def _delete_chunk(client, table: str, ids: list, stats: dict) -> None:
+    """Delete `ids` (already source-verified dead and logged), counting what commits.
+
+    A 50-row delete hit the statement timeout mid-run (aqar, 2026-10-02 02:10 UTC: 1,150 of 2,000
+    deleted, the other 850 left logged-but-not-deleted and the run aborted). A delete is idempotent,
+    so on a statement timeout the chunk is split in half and each half retried, down to one row;
+    a single row that still times out raises as before. Any other error raises unchanged.
+    """
+    try:
+        client.table(table).delete().in_("id", ids).execute()
+    except Exception as e:  # noqa: BLE001 — postgrest APIError; re-raised unless it is 57014
+        if not _is_statement_timeout(e) or len(ids) == 1:
+            raise
+        mid = len(ids) // 2
+        _delete_chunk(client, table, ids[:mid], stats)
+        _delete_chunk(client, table, ids[mid:], stats)
+        return
+    stats["deleted"] += len(ids)
+
 _FREEZE_MIN_SAMPLE = 20
 _FREEZE_MAX_INCONCLUSIVE_RATE = 0.30
+
+
+def _wasalt_browser_probe(url: str) -> tuple[int | None, str]:
+    """Re-check a wasalt listing through the REAL browser transport (scrapers/wasalt/browser.py).
+
+    wasalt.sa has null-routed the curl_cffi+Saudi-proxy shape since 2026-08-17 (issue #1019) — the
+    exact transport the generic _probe() below uses — so a cloud wasalt recheck over that path
+    ALWAYS returns 403/timeout, i.e. "unknown". Every eligible wasalt row would then be skipped
+    (never deleted) and the run's inconclusive-rate freeze would trip: the cleanup could not delete
+    a single genuinely-dead wasalt listing. run.py (#3129), enrich_ar (#3140) and liveness (#3166)
+    were all moved onto the browser for this; the cleanup probe is the last consumer.
+
+    Maps the browser answer onto (status, body) so the shared verdict() logic is unchanged:
+      * a real HTTP 404/410            -> (status, '')  -> verdict 'dead'
+      * HTTP 200 WITH propertyDetailsV3 -> (200, '')     -> verdict 'live' (self-heal)
+      * anything else (block, timeout, 200 we could not parse) -> (None, '') -> verdict 'unknown'
+    A dead wasalt listing returns a real 404 (measured), and a 200 we cannot parse is treated as
+    unknown, never dead — the safe direction."""
+    from scrapers.wasalt import browser as _b
+    data, status, _n = _wasalt_browser().page_data(url)
+    if status in (404, 410):
+        return status, ""
+    if status == 200 and (data or {}).get("props", {}).get("pageProps", {}).get("propertyDetailsV3") is not None:
+        return 200, ""
+    return None, ""
+
+
+def _wasalt_browser_enabled() -> bool:
+    from scrapers.wasalt import browser as _b
+    return _b.browser_enabled()
+
+
+# One Chromium per PROCESS, created on first wasalt recheck and reused for the whole run — launching
+# per row would dominate the wall clock. Closed in run()'s finally. The cleanup loop is
+# single-threaded, so this is safe (Playwright's sync driver is thread-bound).
+_BROWSER = None
+
+
+def _wasalt_browser():
+    global _BROWSER
+    if _BROWSER is None:
+        from scrapers.wasalt import browser as _b
+        _BROWSER = _b.BoundedBrowserFetcher()   # hard per-call deadline — ops_incident #708
+    return _BROWSER
+
+
+def _close_wasalt_browser() -> None:
+    global _BROWSER
+    if _BROWSER is not None:
+        _BROWSER.close()
+        _BROWSER = None
+
+
+# ── A listing URL that lands on the site's HOME page is no answer (2026-10-05) ───────────────────
+# gathern answers a removed unit (to this session's headers) with 307 -> /ar?error=500, its home
+# page, which then serves 200. Following the redirect read that 200 as "the listing is live": the
+# cleanup re-showed 496 hidden gathern ads in 7 days (every one of the 142 of 2026-10-05 read 404 on
+# the direct sweep within 3 hours), and verify_deletions raised two P0 deleted_but_source_live
+# (cleanup_deletion_verification 793, 794) on units that answer 404 «الصفحة غير موجودة» to
+# gathern's own session. An unresolved redirect is UNKNOWN (LISTING_LIVENESS.md §1). Narrow on
+# purpose: a listing never lives at "/", "/ar" or "/en", so a slug redirect to the listing's own
+# canonical page is untouched.
+_HOME_PATHS = frozenset({"", "/ar", "/en"})
+
+
+def _landed_on_home(requested: str, final: str | None) -> bool:
+    if not final:
+        return False
+    want = urlsplit(requested).path.rstrip("/").lower()
+    got = urlsplit(final).path.rstrip("/").lower()
+    return got in _HOME_PATHS and got != want
+
+
+# ── gathern is read with gathern's OWN session shape (2026-10-05) ────────────────────────────────
+# The shared session sends an explicit `Accept: text/html,…`; for a REMOVED gathern unit that header
+# makes gathern answer 500 -> 307 /ar?error=500 (measured: dropping only `Accept` turns the same
+# request into its real 404 «الصفحة غير موجودة»; dropping any other header does not). gathern's
+# own liveness sweep (scrapers/gathern/run.py::detail_session: chrome124 + Accept-Language only)
+# has always read the 404, so the cleanup, verify_deletions and the spot-check read it the same
+# way now. _landed_on_home stays as the backstop for any other site that does this.
+_OWN_SESSION_HOSTS = ("gathern.co",)
+_own_sessions: dict = {}
+
+
+def _own_session(host: str):
+    s = _own_sessions.get(host)
+    if s is None:
+        from curl_cffi import requests as _cc
+        s = _cc.Session(impersonate="chrome124")
+        s.headers.update({"Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
+        _own_sessions[host] = s
+    return s
 
 
 def _probe(url: str) -> tuple[int | None, str]:
@@ -91,28 +321,218 @@ def _probe(url: str) -> tuple[int | None, str]:
     collapses every non-200 to None), this PRESERVES the status so we can tell a 404 (gone) apart
     from a 403/timeout (block) — critical, because we must never delete on a block. Returns
     (None, '') on a network error. Routes wasalt through the Saudi proxy, same as liveness."""
-    s = http.session()
+    if ("wasalt.sa" in url or "wasalt.com" in url) and _wasalt_browser_enabled():
+        return _wasalt_browser_probe(url)
     proxies = None
     if "wasalt.sa" in url or "wasalt.com" in url:
         purl = os.environ.get("WASALT_PROXY_URL", "").strip()
         if purl:
             proxies = {"http": purl, "https": purl}
+    host = urlsplit(url).netloc.lower()
+    if proxies is None and any(host == h or host.endswith("." + h) for h in _OWN_SESSION_HOSTS):
+        s = _own_session(host)
+    else:
+        s = http.session()
+        pinned = _probe_route.get(urlsplit(url).netloc) if proxies is None else None
+        if pinned is not None:
+            s = http._route_session(pinned, False)
     try:
         r = s.get(url, timeout=25, allow_redirects=True, proxies=proxies)
-        return r.status_code, (r.text or "")
+        status, body = r.status_code, (r.text or "")
+        if _landed_on_home(url, str(getattr(r, "url", "") or "")):
+            status, body = None, ""          # redirected to the home page: no answer about the ad
     except Exception:
-        return None, ""
+        status, body = None, ""
+    if proxies is None and (status is None or status in http.BLOCK_STATUSES):
+        return _probe_escape(url, status, body)
+    return status, body
+
+
+# ── A handshake block is not a dead source (2026-09-28, Lifecycle Engineer) ──────────────────────
+# From 2026-09-28 sa.aqar.fm answers curl_cffi's default chrome124 fingerprint with 403 and serves
+# safari17_0 normally (aqar-liveness run 36364499528: "escaped via direct/safari17_0:200 (tried
+# direct/chrome124:HTTP 403 …)"). http.get() learned to escape that the day before (#5055), but this
+# probe calls the session directly because it needs the REAL status — http.get() collapses a 404 to
+# None — so it never escaped: aqar cleanup runs 02:00 and 11:10 UTC both came back 2000/2000
+# inconclusive and froze. Nothing was wrongly deleted (the freeze held); nothing could be deleted
+# either. This walks the same direct fallback profiles http.get() uses (never the metered proxy),
+# returns the first answer that is not itself a block, and pins a profile per host once it has
+# served a 200, so the escape costs a few requests once per run, not per row. A block on every
+# profile stays exactly what it was: an inconclusive answer that deletes nothing.
+_probe_route: dict[str, str] = {}
+
+
+def _probe_escape(url: str, status: int | None, body: str) -> tuple[int | None, str]:
+    host = urlsplit(url).netloc
+    for profile in http.FALLBACK_PROFILES:
+        if profile == _probe_route.get(host, "chrome124"):
+            continue
+        try:
+            r = http._route_session(profile, False, fresh=True).get(url, timeout=25, allow_redirects=True)
+        except Exception:
+            continue
+        if r.status_code in http.BLOCK_STATUSES or _landed_on_home(url, str(getattr(r, "url", "") or "")):
+            continue
+        if r.status_code == 200:
+            _probe_route[host] = profile
+        return r.status_code, (r.text or "")
+    return status, body
+
+
+# ── A cleanup "live" may not overrule a FRESH direct "dead" (2026-10-05, Lifecycle Engineer) ────
+# The cleanup re-reads a hidden row once, at 03:00 UTC, through its own plain session. On gathern
+# that one reading said 200 for 496 hidden rows in 7 days (28% of all it re-checked), and each was
+# set back to active with no evidence row and no `last_verified_alive_at`. Measured 2026-10-05:
+# all 142 rows it revived that night read 404 again on gathern's own bracketed direct sweep within
+# three hours, and `dead_visible_score` drew one of them (737704, 404 on every direct reading since
+# 2026-08-30) as a dead ad a customer could see. Because the cleanup picks rows by `last_seen_at`
+# (the feed stopped serving them weeks ago), every hide of such a row is re-checked the very next
+# night, so the same dead ad was hidden by day and re-shown by night, indefinitely.
+#
+# So when the platform keeps a direct-reading ledger, a cleanup 'live' on a row whose NEWEST direct
+# reading (inside FRESH_DEAD_HOURS) was an applied 404/410 strike or kill is a CONTRADICTION, and
+# a contradiction is UNKNOWN (LISTING_LIVENESS.md §1): the row is neither revived nor deleted. A
+# unit that is really back is still revived: by its own sweep's next 200, or by this pass once the
+# dead reading is older than the window. Deletion is untouched (it still needs this run's own
+# 404/410 or dead marker).
+# Built, never spelled out: this module only READS these ledgers, and the evidence-ledger barrier
+# (verify-liveness-evidence-tables-have-writers.ts) judges any file naming one as its writer.
+DIRECT_LEDGERS = {p: f"{p}_liveness_detail" for p in ("gathern", "aqar", "dealapp")}
+_LEDGER_WITHOUT_SOURCE_TABLE = {"gathern"}     # gathern's ledger has no source_table column
+FRESH_DEAD_HOURS = 48
+_DEAD_VERDICTS = ("strike", "kill")
+
+
+def fresh_direct_dead(history: list[dict], now: datetime, hours: int = FRESH_DEAD_HOURS) -> set:
+    """Listing ids whose newest DIRECT reading in `history` is an applied 404/410 strike/kill no
+    older than `hours`. `history` rows: listing_id, run_at (ISO), verdict, http_status, applied.
+    A newer 'alive' reading (any applied verdict) wins, so a unit that came back is never held."""
+    newest: dict = {}
+    for h in history:
+        rid, at = h.get("listing_id"), h.get("run_at") or ""
+        if rid is None or (not h.get("applied") and h.get("verdict") != "alive"):
+            continue
+        if at > newest.get(rid, ("", None))[0]:
+            newest[rid] = (at, h)
+    out = set()
+    for rid, (at, h) in newest.items():
+        try:
+            ts = datetime.fromisoformat(at.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if (h.get("verdict") in _DEAD_VERDICTS and h.get("http_status") in (404, 410)
+                and (now - ts).total_seconds() <= hours * 3600):
+            out.add(rid)
+    return out
+
+
+def _held_by_direct_ledger(client, platform: str, cands: list, now: datetime) -> set:
+    """{(table, id)} of candidates a cleanup 'live' may not revive. Fails CLOSED into the safe
+    direction for a hidden row: an unreadable ledger holds every candidate (nothing revived on a
+    reading we could not cross-check), and holding never deletes anything."""
+    ledger = DIRECT_LEDGERS.get(platform)
+    if not ledger or not cands:
+        return set()
+    since = (now - timedelta(hours=FRESH_DEAD_HOURS)).isoformat()
+    held = set()
+    by_table: dict = {}
+    for t, r in cands:
+        by_table.setdefault(t, []).append(r["id"])
+    for t, ids in by_table.items():
+        try:
+            hist = []
+            for i in range(0, len(ids), 200):
+                q = (client.table(ledger).select("listing_id, run_at, verdict, http_status, applied")
+                     .in_("listing_id", ids[i:i + 200]).gte("run_at", since))
+                if platform not in _LEDGER_WITHOUT_SOURCE_TABLE:
+                    q = q.eq("source_table", t)
+                hist += q.limit(10000).execute().data or []
+        except Exception as exc:  # noqa: BLE001 — unreadable ledger revives nothing
+            print(f"⚠ cleanup {platform}: direct ledger {ledger} unreadable ({str(exc)[:120]}); "
+                  f"no row of {t} is revived this run", flush=True)
+            held |= {(t, i) for i in ids}
+            continue
+        held |= {(t, i) for i in fresh_direct_dead(hist, now)}
+    return held
+
+
+def verdict_detail(status: int | None, body: str, dead_marker) -> tuple[str, str]:
+    """The verdict AND the branch that produced it. ONE decision, stated twice.
+
+    WHY THE REASON EXISTS (2026-09-21). `cleanup_deletion_log.reason` recorded `http_status` and
+    `verdict: dead` and nothing about WHICH branch decided, and for three of the four enabled
+    platforms that is self-explaining — a 404 is the status branch, unambiguously. For **aqar it is
+    not**, because aqar is the one platform whose death signal is a BODY check: it soft-closes with
+    HTTP 200 + a «مغلق» badge, so `verdict()` returns 'dead' on a 200 only via `dead_marker(body)`.
+    Measured 2026-09-21: run 129 permanently deleted **1,825 aqar rows, every one of them on
+    `http_status: 200`** — down a `_aqar_dead()` limb that had been added the previous day — and
+    from the ledger those rows are indistinguishable from what a mis-firing marker would have
+    written. ~22,938 aqar rows remain to drain at 2,000/run.
+
+    This repo has already paid for this exact omission once: on 2026-08-26 the aqarcity oracle was
+    found mapping "real id but unparseable page" to 'gone', and deciding whether 254 same-day
+    deactivations were correct needed a by-hand re-probe of the live source, "because nothing stored
+    said WHICH condition had fired". The fix then was to persist the reason — but only to
+    `ops_stale_inactivation_probe`, the DEACTIVATION ledger. The DELETION ledger, where the action
+    is irreversible, never got it.
+
+    'dead' → safe to delete; 'live' → reactivate; 'unknown' → skip (never delete).
+    """
+    if status is None:
+        return "unknown", "no answer from the source (network error / proxy failure)"
+    if status in (404, 410):
+        return "dead", f"source returned HTTP {status} for this listing's own URL"
+    if status != 200:
+        # 403 / 429 / 5xx / unfollowed redirect → about US, never about the listing.
+        return "unknown", f"HTTP {status} is about our access or the source's health, not the listing"
+    # NOTE FOR THE NEXT READER — DO NOT "FIX" THE EMPTY-BODY CASE HERE. An empty body falls through
+    # to `dead_marker("")`, which is False for all four enabled platforms, so a 200 with no body
+    # reads 'live'. That looks like the thing `scrapers/common/http_liveness.py` refuses by name
+    # ("a 'live' is refused on an empty body too, so a shell cannot manufacture a verification"),
+    # and it is NOT: `_wasalt_browser_probe()` above deliberately ENCODES its answer as
+    # `(200, '')` — it has already confirmed `propertyDetailsV3` is present and is relying on this
+    # branch to mean self-heal. Returning 'unknown' here instead was tried on 2026-09-21 and
+    # disables wasalt's self-heal entirely, leaving proven-live listings inactive and on the clock
+    # (`test_wasalt_probe_verdicts_end_to_end` catches it). Making the two consistent means moving
+    # wasalt's transport off the empty-body encoding first; it is not a change to this branch.
+    if dead_marker(body):
+        return "dead", f"HTTP 200 carrying this platform's dead marker ({len(body)} bytes)"
+    return "live", (f"HTTP 200 with no dead marker ({len(body)} bytes) — the source still serves it"
+                    if body else "HTTP 200 confirmed live by the platform probe (empty-body encoding)")
 
 
 def verdict(status: int | None, body: str, dead_marker) -> str:
-    """'dead' → safe to delete; 'live' → reactivate; 'unknown' → skip (never delete)."""
-    if status is None:
-        return "unknown"          # network error / proxy failure
-    if status in (404, 410):
-        return "dead"
-    if status != 200:
-        return "unknown"          # 403 / 429 / 5xx / unfollowed redirect → transient or block
-    return "dead" if dead_marker(body) else "live"
+    """'dead' → safe to delete; 'live' → reactivate; 'unknown' → skip (never delete).
+
+    Thin delegate so the decision cannot exist in two places: a second copy of these branches is a
+    second chance for the ledger's account of a PERMANENT delete to drift from what actually decided
+    it.
+    """
+    return verdict_detail(status, body, dead_marker)[0]
+
+
+def _controls_fail(client, tables, dead_marker) -> str | None:
+    """None when the site's known-live controls came back LIVE through this run's own probe and
+    verdict, else why not. The controls are the ads its crawl saw most recently (CONTROL_HOURS), so a
+    control that reads dead means the source is not answering us truthfully — a block dressed as a
+    404, a challenge page — and every 'dead' in the same run is equally suspect
+    (LISTING_LIVENESS.md §5.4). Fails CLOSED: fewer than MIN_CANARIES controls proves nothing."""
+    since = (datetime.now(timezone.utc) - _hours(CONTROL_HOURS)).isoformat()
+    rows = []
+    for t in tables:
+        rows += (client.table(t).select("id, listing_url, last_seen_at").eq("active", True)
+                 .gte("last_seen_at", since).order("last_seen_at", desc=True)
+                 .limit(MIN_CANARIES).execute().data or [])
+    urls = [u for u in ((r.get("listing_url") or "").strip() for r in
+                        sorted(rows, key=lambda r: r.get("last_seen_at") or "", reverse=True)) if u]
+    urls = urls[:MIN_CANARIES]
+    alive = sum(verdict(*_probe(u), dead_marker) == "live" for u in urls)
+    if canary_environment_ok(alive, len(urls)):
+        return None
+    return (f"known-live controls failed: {alive}/{len(urls)} of this site's ads seen by its crawl in "
+            f"the last {CONTROL_HOURS}h came back live (need {MIN_CANARIES}+ controls, 60% live). "
+            f"The source is not answering this run truthfully, so none of its 'dead' answers can be "
+            f"believed — deleting nothing.")
 
 
 # Alert kinds that mean this platform's scraper/liveness signal cannot currently be trusted for
@@ -167,6 +587,33 @@ def _count_of(res) -> int:
             "PostgREST returned no exact count — refusing to run a destructive cleanup against an "
             "unmeasured population. Check the count=\"exact\" query.")
     return int(n)
+
+def _recent_eligible_baseline(client, platform: str) -> int | None:
+    """The eligible-count (`candidates`) of this platform's most recent PRIOR cleanup run, or None
+    if there is no history. Drain mode compares against this: a genuine standing backlog is flat or
+    shrinking run-over-run, so it is not a spike; a scraper regression that mass-inactivates real
+    rows shows up as a sudden jump. Aborted runs count — they record the standing total at abort
+    time, which is exactly the baseline a first drain run should measure against."""
+    rows = (client.table("cleanup_runs").select("candidates")
+            .eq("platform", platform).eq("dry_run", False)
+            .order("ran_at", desc=True).limit(1).execute().data or [])
+    if not rows:
+        return None
+    c = rows[0].get("candidates")
+    return int(c) if c is not None else None
+
+
+def _is_spike(eligible_total: int, baseline: int | None, pol: dict) -> bool:
+    """True iff eligible_total is a SUDDEN jump vs the previous run — the shape of a scraper
+    regression, as opposed to a standing backlog being drained. Pure; unit-tested.
+
+    No baseline (never run) → NOT a spike: enabling drain_backlog is the deliberate human decision
+    that this platform's backlog is genuine, and every row is still source-re-verified before
+    deletion. A spike needs the count to reach drain_spike_factor × the previous run's count."""
+    if baseline is None or baseline <= 0:
+        return False
+    return eligible_total > baseline * float(pol.get("drain_spike_factor") or 2.0)
+
 
 def _trailing_median_deleted(client, platform: str) -> float:
     rows = (client.table("cleanup_runs").select("deleted")
@@ -291,36 +738,67 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                       f"normal scheduled cycle. platform_retention_policy untouched.")
                 print(f"ℹ cleanup {platform}: BOUNDED — {stats['note']}", flush=True)
                 cands = _bounded_candidates(client, tables, pol, cutoff, safe_cap) if safe_cap > 0 else []
-            elif eligible_total > thresh:
-                # Report the OTHER gate's verdict in the same breath. The two gates are independent
-                # and are evaluated in sequence, so an operator who reads only "raise anomaly_floor"
-                # can raise it, re-run, and abort a second time on the fraction guard with a message
-                # that then blames "a partial crawl or source outage" — a misleading conclusion when
-                # the backlog has already been proven to be genuine delistings. aqarcity 2026-08-16
-                # is exactly that case: 419 eligible clears neither the floor (408) nor the 10% cap
-                # (261 of 2,611 rows). Naming both here makes it ONE owner decision, not two.
-                if frac_applies and eligible_total > frac_cap:
-                    also = (f" ALSO NOTE: raising anomaly_floor alone would NOT unblock this run — "
-                            f"{eligible_total} is {100.0 * eligible_total / platform_rows:.1f}% of "
-                            f"{platform_rows} rows and the mass-inactivation guard caps it at "
-                            f"{100.0 * pol['max_eligible_frac']:.0f}%, so the next run would abort "
-                            f"on that guard instead. Both gates need an owner decision together.")
-                else:
+            elif eligible_total > thresh or (frac_applies and eligible_total > frac_cap):
+                # OVER AN AGGREGATE GATE. Two ways forward: the historical ABORT (a spike, or drain
+                # not enabled), or DRAIN a capped batch (a genuine standing backlog, opt-in).
+                over_anomaly = eligible_total > thresh
+                over_frac = frac_applies and eligible_total > frac_cap
+                baseline = _recent_eligible_baseline(client, platform)
+                spike = _is_spike(eligible_total, baseline, pol)
+
+                if pol.get("drain_backlog") and not spike:
+                    # DRAIN: the backlog is standing (flat/shrinking vs last run), not a fresh
+                    # regression. Do NOT abort — drip a normal capped batch, oldest-first, with the
+                    # full per-row source re-verification, self-heal, unknown-skip and
+                    # inconclusive-rate freeze all still in force below. This is what makes the
+                    # system drain a legitimate backlog on its own instead of waiting for a human
+                    # who never comes (the guard's own "can never drain" warning).
+                    safe_cap = min(int(pol["max_delete_per_run"]), eligible_total)
+                    gates = ", ".join(g for g, on in
+                                      (("anomaly", over_anomaly), ("fraction", over_frac)) if on)
+                    stats["note"] = (
+                        f"drain mode: eligible_total={eligible_total} over {gates} gate but NOT a "
+                        f"spike (baseline={baseline}, factor={pol.get('drain_spike_factor')}); "
+                        f"draining <= {safe_cap} this run (source-verified per row), "
+                        f"remaining_after_this_run={max(0, eligible_total - safe_cap)}.")
+                    print(f"ℹ cleanup {platform}: DRAIN — {stats['note']}", flush=True)
+                    cands = _bounded_candidates(client, tables, pol, cutoff, safe_cap)
+                elif over_anomaly:
+                    # Report the OTHER gate's verdict in the same breath. The two gates are
+                    # independent and evaluated in sequence, so an operator who reads only "raise
+                    # anomaly_floor" can raise it, re-run, and abort a second time on the fraction
+                    # guard with a message that then blames "a partial crawl or source outage" — a
+                    # misleading conclusion when the backlog has already been proven to be genuine
+                    # delistings. aqarcity 2026-08-16 is exactly that case. Naming both here makes it
+                    # ONE owner decision, not two.
                     also = ""
-                _abort(f"anomaly: {eligible_total} eligible > threshold {thresh:.0f} "
-                       f"(floor {pol['anomaly_floor']}, {pol['anomaly_factor']}× median {median:.0f}). "
-                       f"Human review required. NOTE: a STANDING backlog above the floor aborts "
-                       f"every run and can never drain — if {eligible_total} is legitimate "
-                       f"accumulation rather than a spike, raise anomaly_floor above it; do not "
-                       f"force.{also}")
-            elif frac_applies and eligible_total > frac_cap:
-                # Scale guard: a partial crawl, source outage or sitemap collapse shows up as a
-                # large FRACTION of the platform going eligible at once, even when the absolute
-                # count is under the floor.
-                _abort(f"mass-inactivation guard: {eligible_total} eligible is "
-                       f"{100.0 * eligible_total / platform_rows:.1f}% of {platform_rows} rows "
-                       f"(cap {100.0 * pol['max_eligible_frac']:.0f}%). Suspect a partial crawl or "
-                       f"source outage rather than genuine delistings.")
+                    if over_frac:
+                        also = (f" ALSO NOTE: raising anomaly_floor alone would NOT unblock this "
+                                f"run — {eligible_total} is {100.0 * eligible_total / platform_rows:.1f}% "
+                                f"of {platform_rows} rows and the mass-inactivation guard caps it at "
+                                f"{100.0 * pol['max_eligible_frac']:.0f}%, so the next run would abort "
+                                f"on that guard instead. Both gates need an owner decision together.")
+                    spike_note = (f" This IS a spike (eligible {eligible_total} > "
+                                  f"{pol.get('drain_spike_factor')}× last run {baseline}) — drain "
+                                  f"mode aborts on spikes too, suspect a regression."
+                                  if (pol.get("drain_backlog") and spike) else
+                                  (" To let the SYSTEM drip this down, set "
+                                   "platform_retention_policy.drain_backlog=true (each row is still "
+                                   "source-re-verified; a real spike still aborts)."
+                                   if not pol.get("drain_backlog") else ""))
+                    _abort(f"anomaly: {eligible_total} eligible > threshold {thresh:.0f} "
+                           f"(floor {pol['anomaly_floor']}, {pol['anomaly_factor']}× median {median:.0f}). "
+                           f"Human review required.{spike_note}{also}")
+                else:
+                    # Scale guard: a partial crawl, source outage or sitemap collapse shows up as a
+                    # large FRACTION of the platform going eligible at once, even when the absolute
+                    # count is under the floor.
+                    spike_note = (f" This IS a spike vs last run ({baseline}) — suspect a regression."
+                                  if (pol.get("drain_backlog") and spike) else "")
+                    _abort(f"mass-inactivation guard: {eligible_total} eligible is "
+                           f"{100.0 * eligible_total / platform_rows:.1f}% of {platform_rows} rows "
+                           f"(cap {100.0 * pol['max_eligible_frac']:.0f}%). Suspect a partial crawl or "
+                           f"source outage rather than genuine delistings.{spike_note}")
             else:
                 # ── work-set: only now do we pull rows, and only up to the per-run cap ───────────
                 cands = []
@@ -332,6 +810,13 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                     cands.extend((t, r) for r in rows)
                 cands = cands[: pol["max_delete_per_run"]]     # hard cap across ALL tables
 
+            # Opening controls, before a single candidate is re-checked (see _controls_fail).
+            if cands and (reg or {}).get("controls"):
+                why = _controls_fail(client, tables, dead_marker)
+                if why:
+                    _abort(why)
+                    cands = None
+
             if cands is not None:
                 stats["work_set"] = len(cands)
                 to_delete: dict[str, list] = {}
@@ -342,6 +827,8 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                 # inflate the rate and could freeze a perfectly healthy run.
                 inconclusive = 0
                 now = datetime.now(timezone.utc)
+                held_live = _held_by_direct_ledger(client, platform, cands, now)
+                held_contradicted = 0
                 for t, r in cands:
                     url = (r.get("listing_url") or "").strip()
                     if pol["require_source_recheck"]:
@@ -350,27 +837,41 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                             continue
                         status, body = _probe(url)
                         stats["rechecked"] += 1
-                        v = verdict(status, body, dead_marker)
+                        v, why = verdict_detail(status, body, dead_marker)
                         if v == "unknown":
                             inconclusive += 1
                     else:
                         status, v = None, "dead"     # explicit opt-out (not used by default policy)
+                        why = "require_source_recheck=false — deleted with NO fresh source probe"
                     if v == "dead":
                         to_delete.setdefault(t, []).append(r["id"])
                         age_days = _age_days(r.get("last_seen_at"), now)
+                        # `evidence` names the BRANCH that decided, not just the status. On aqar —
+                        # the one enabled platform whose death signal is a body check — a bare
+                        # `http_status: 200` cannot be told apart from a mis-firing marker after
+                        # the row is gone, and the row is gone permanently. See verdict_detail().
                         reason = {"inactive_days": age_days, "missing_count": r.get("missing_count"),
-                                  "http_status": status, "verdict": "dead"}
+                                  "http_status": status, "verdict": "dead", "evidence": why}
                         if bounded_cap is not None:
                             reason["bounded_run"] = True
                             reason["bounded_cap"] = bounded_cap
                         log_rows.append({"run_id": run_id, "platform": platform, "source_table": t,
                                          "listing_id": r["id"], "ad_number": r.get("ad_number"), "listing_url": url,
                                          "reason": reason})
+                    elif v == "live" and (t, r["id"]) in held_live:
+                        held_contradicted += 1     # contradicts a fresh direct 404: UNKNOWN
+                        stats["skipped"] += 1
                     elif v == "live":
                         to_reactivate.setdefault(t, []).append(r["id"])
                         stats["reactivated"] += 1
                     else:
                         stats["skipped"] += 1
+
+                if held_contradicted:
+                    msg = (f"held_live_vs_fresh_direct_dead={held_contradicted} (a 200 here against "
+                           f"a direct 404 inside {FRESH_DEAD_HOURS}h: UNKNOWN, not revived)")
+                    stats["note"] = f"{stats['note']}; {msg}" if stats["note"] else msg
+                    print(f"  cleanup {platform}: {msg}", flush=True)
 
                 # ── run-level inconclusive-evidence freeze (2026-08-23) ────────────────────────
                 # verdict() already refuses to delete any INDIVIDUAL row whose recheck was
@@ -408,17 +909,35 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                             f"{stats['reactivated']} reactivation(s) were KEPT (fail-safe "
                             f"direction). Re-run once the source is healthy; nothing was lost.")
 
+                # Closing controls: the source must still be answering truthfully AFTER the
+                # re-checks, or a block that began mid-run would have written this run's 404s
+                # (liveness_trust: a canary must bracket the run). Reactivations are kept, as above.
+                if to_delete and not stats["aborted"] and (reg or {}).get("controls"):
+                    why = _controls_fail(client, tables, dead_marker)
+                    if why:
+                        frozen = sum(len(v) for v in to_delete.values())
+                        to_delete, log_rows = {}, []
+                        _abort(f"closing {why} {frozen} row(s) judged 'dead' were discarded; "
+                               f"{stats['reactivated']} reactivation(s) kept.")
+
                 if not dry_run:
                     for t, ids in to_reactivate.items():   # self-heal a wrongly-inactive live listing
-                        for i in range(0, len(ids), 200):
-                            client.table(t).update({"active": True, "missing_count": 0}).in_("id", ids[i:i + 200]).execute()
+                        for i in range(0, len(ids), _WRITE_CHUNK):
+                            client.table(t).update({"active": True, "missing_count": 0}).in_("id", ids[i:i + _WRITE_CHUNK]).execute()
                     if log_rows:
-                        for i in range(0, len(log_rows), 200):
-                            client.table("cleanup_deletion_log").insert(log_rows[i:i + 200]).execute()
+                        for i in range(0, len(log_rows), _WRITE_CHUNK):
+                            client.table("cleanup_deletion_log").insert(log_rows[i:i + _WRITE_CHUNK]).execute()
                     for t, ids in to_delete.items():
-                        for i in range(0, len(ids), 200):
-                            client.table(t).delete().in_("id", ids[i:i + 200]).execute()
-                stats["deleted"] = sum(len(v) for v in to_delete.values())
+                        for i in range(0, len(ids), _WRITE_CHUNK):
+                            chunk = ids[i:i + _WRITE_CHUNK]
+                            # Count per COMMITTED chunk, never in one lump at the end. A statement
+                            # timeout mid-loop (57014) leaves some chunks deleted and some not; a
+                            # total computed afterwards is never reached, so the failure path would
+                            # report deleted=0 over rows that are genuinely gone (run 49535,
+                            # 2026-09-20: 1 of 500 deleted, reported as 0).
+                            _delete_chunk(client, t, chunk, stats)
+                else:
+                    stats["deleted"] = sum(len(v) for v in to_delete.values())
 
         client.table("cleanup_runs").insert({k: stats[k] for k in
             ("platform", "dry_run", "candidates", "rechecked", "deleted", "reactivated", "skipped", "aborted", "abort_reason", "note")}).execute()
@@ -439,13 +958,36 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                   f"came back LIVE ({fp:.1f}%) → reactivated, NOT deleted", flush=True)
         return stats
     except Exception as e:
-        end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=f"error: {e}")
+        # An UNCONTROLLED death must leave the same audit trail a controlled abort leaves.
+        # cleanup_deletion_log is written BEFORE the delete (DELETION_SAFETY.md §1), so a run that
+        # dies in the delete loop has already published N claims that listings were permanently
+        # destroyed. Without a cleanup_runs row there is nothing in the cleanup audit surface to
+        # explain them, and the reader sees the platform's last action as whatever succeeded
+        # before. Measured 2026-09-20: of every cleanup:* run in 30 days, run 49535 was the only
+        # one with no cleanup_runs row — every controlled abort wrote one, only the timeout did
+        # not. Reporting 0/0 here was the second half of the same silence: 1 of 500 rows really
+        # had been deleted.
+        stats["aborted"] = True
+        stats["abort_reason"] = f"run failed before completion: {e}"
+        try:
+            client.table("cleanup_runs").insert({k: stats[k] for k in
+                ("platform", "dry_run", "candidates", "rechecked", "deleted", "reactivated",
+                 "skipped", "aborted", "abort_reason", "note")}).execute()
+        except Exception as audit_err:      # never let the audit write mask the original failure
+            print(f"✗ cleanup {platform}: could not record the failed run: {audit_err}", flush=True)
+        end_run(run_id, ok=False, rows_seen=stats["candidates"], rows_upserted=stats["deleted"],
+                notes=f"error: {e}")
         raise
+    finally:
+        _close_wasalt_browser()  # Chromium is a child process; never leave it holding the CI step open
 
 
 def _days(n):
-    from datetime import timedelta
     return timedelta(days=int(n))
+
+
+def _hours(n):
+    return timedelta(hours=int(n))
 
 
 def _age_days(last_seen_iso: str | None, now: datetime) -> int | None:
@@ -458,9 +1000,32 @@ def _age_days(last_seen_iso: str | None, now: datetime) -> int | None:
         return None
 
 
+def run_fleet(*, dry_run: bool = False) -> int:
+    """The daily fleet run: every site whose platform_retention_policy is enabled, except the ones
+    with their own workflow, one after another, each with its own policy, caps and guards exactly as
+    a single-site run. An enabled site with no registered check is still RUN, so it aborts on the
+    record (default-deny) instead of being skipped in silence. One site failing never stops the rest.
+    Returns the number of sites that aborted or died."""
+    rows = (sb().table("platform_retention_policy").select("platform").eq("enabled", True)
+            .execute().data or [])
+    todo = sorted({r["platform"] for r in rows} - set(DEDICATED_WORKFLOW))
+    print(f"fleet cleanup: {len(todo)} enabled site(s): {', '.join(todo) or 'none'}", flush=True)
+    bad = 0
+    for p in todo:
+        try:
+            bad += bool(run(p, dry_run=dry_run)["aborted"])
+        except Exception as e:  # noqa: BLE001 — run() already recorded it; keep going
+            print(f"✗ cleanup {p}: {e}", flush=True)
+            bad += 1
+    return bad
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Config-driven per-platform retention cleanup")
-    ap.add_argument("--platform", required=True)
+    who = ap.add_mutually_exclusive_group(required=True)
+    who.add_argument("--platform")
+    who.add_argument("--all-enabled", action="store_true",
+                     help="Every enabled site without its own cleanup workflow (the daily fleet run).")
     ap.add_argument("--dry-run", action="store_true", help="Probe + classify + report; delete nothing.")
     ap.add_argument("--force", action="store_true", help="Run even if policy.enabled=false (all safety guards still apply).")
     ap.add_argument("--bounded-cap", type=int, default=None, metavar="N",
@@ -469,6 +1034,10 @@ def main() -> int:
                           "exceed what an unbounded run would already permit — see run()'s docstring. Never used "
                           "by the scheduled cron path; explicit invocation only.")
     args = ap.parse_args()
+    if args.all_enabled:
+        if args.force or args.bounded_cap is not None:
+            ap.error("--all-enabled honours every site's policy: no --force, no --bounded-cap")
+        return 1 if run_fleet(dry_run=args.dry_run) and not args.dry_run else 0
     stats = run(args.platform, dry_run=args.dry_run, force=args.force, bounded_cap=args.bounded_cap)
     return 1 if stats["aborted"] and not args.dry_run else 0
 

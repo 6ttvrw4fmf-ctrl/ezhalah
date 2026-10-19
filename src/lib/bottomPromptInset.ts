@@ -124,6 +124,41 @@ const MIN_SHEET_SPAN_FRACTION = 0.8;
  *  must degrade to "a bit of wasted space", never to an app squeezed into nothing. */
 const MAX_INSET_FRACTION = 0.5;
 
+/**
+ * The share of the viewport the app keeps for itself when BOTH edges are docked at once
+ * (ops_incident #202 follow-up, measured 2026-09-13).
+ *
+ * WHY THIS EXISTS, AND WHY IT IS NOT `1 - MAX_INSET_FRACTION`. The combined clamp used to budget
+ * `MAX_INSET_FRACTION` — half the viewport — for the two bands TOGETHER, while each band is already
+ * capped at half on its own. On a 375x812 phone with One Tap docked TOP (a 158 px fixed container
+ * ending at 178) and our own cookie consent card docked BOTTOM (272 px), the demand is 178 + 272 =
+ * 450 against a budget of 406. The tie-break then kept the larger band whole and handed the top the
+ * remainder — 406 - 272 = **134** — so the app reserved 134 px against an overlay that reaches 178
+ * and laid 44 px of live, tappable controls underneath it.
+ *
+ * MEASURED on production, Chromium, 375x812, fresh context, 2/2, with the WebKit container shape
+ * injected (a STATIC gsi iframe inside a `position:fixed` #credential_picker_container):
+ *   both docked  → reservedTop 134, reservedBottom 272, **8 controls stranded** at cy=173
+ *   card dismissed → reservedTop 178, reservedBottom 0,   **0 stranded**
+ * The eight are «إنشاء حساب / تسجيل الدخول», «مشاركة» and the top-bar controls — the same eight, at
+ * the same y, that journey-sweep run 34750102523 reports blocked on WebKit. That sweep is why this
+ * was found; the defect itself is engine-independent, and Chromium reproduces it exactly.
+ *
+ * So the old clamp did the precise harm its own comment warned about — "a sheet that is only half
+ * accounted for still eats the controls under its remaining half" — to whichever edge lost the
+ * tie-break. Under-reserving is never a safe degradation: it does not cost layout comfort, it puts
+ * controls under an opaque `pointer-events:auto` overlay, which is what the owner rule of
+ * 2026-09-11 forbids outright («must never cover, block, or intercept any Ezhalah controls»).
+ *
+ * The budget is therefore stated as what the APP keeps rather than what the prompts may take: both
+ * bands are honoured in full whenever the app still retains 30% of the viewport (on 812 px that is
+ * a 568 px budget, comfortably above the 450 px real-world worst case), and the app scrolls within
+ * what is left. Clamping now happens only when the two bands genuinely cannot both fit — a state no
+ * observed configuration reaches — and that remains the one case where a control can still be
+ * stranded, which is stated here rather than hidden, and is preferred to an app of zero height.
+ */
+const MIN_APP_FRACTION = 0.3;
+
 export type PromptRect = {
   top: number;
   bottom: number;
@@ -296,7 +331,10 @@ export function promptInsets(
     if (t > top) top = t;
   }
   let bottom = bottomStackInset(list, viewportHeight, viewportWidth);
-  const cap = viewportHeight > 0 ? Math.floor(viewportHeight * MAX_INSET_FRACTION) : 0;
+  // The two bands together may take everything the app does not need to keep — NOT the single-band
+  // cap, which budgeted one band's worth for two and clipped whichever edge lost the tie-break to
+  // less than the overlay actually occupies (ops_incident #202 follow-up; see MIN_APP_FRACTION).
+  const cap = viewportHeight > 0 ? Math.floor(viewportHeight * (1 - MIN_APP_FRACTION)) : 0;
   if (top + bottom > cap) {
     // Keep the larger reservation whole rather than halving both into uselessness — a sheet that is
     // only half accounted for still eats the controls under its remaining half.
@@ -384,6 +422,25 @@ function readPromptRects(selector: string = DOCKED_PROMPT_SELECTOR): PromptRect[
 }
 
 /**
+ * Can this mutation batch change a prompt's presence, rect or visibility? True when a prompt node
+ * (or a subtree holding one) was ADDED, a watched node was REMOVED (or sits in a removed subtree),
+ * or a `style`/`class` change landed ON a watched node or an ANCESTOR of one (an ancestor can hide,
+ * move or re-anchor it). Everything else — a card mounting, an animation frame — cannot.
+ * Exported so `verify-bottom-prompt-inset.ts` executes it.
+ */
+export function mutationTouchesPrompt(
+  records: ArrayLike<Pick<MutationRecord, 'type' | 'target' | 'addedNodes' | 'removedNodes'>>,
+  selector: string,
+  watched: readonly Node[],
+): boolean {
+  const holdsWatched = (n: Node) => watched.some((w) => n === w || n.contains(w));
+  return Array.from(records).some((r) => r.type === 'childList'
+    ? Array.from(r.addedNodes).some((n) => n.nodeType === 1 && ((n as Element).matches(selector) || !!(n as Element).querySelector(selector)))
+      || Array.from(r.removedNodes).some(holdsWatched)
+    : holdsWatched(r.target));
+}
+
+/**
  * Watch the bottom-docked prompt and report its inset whenever it changes.
  *
  * The sheet ARRIVES late (~1.3 s after load here) and then ANIMATES its height from 0 to 144 px, so
@@ -428,7 +485,13 @@ export function observePromptInsets(
 
   const tick = () => { retarget(); emit(); };
 
-  const mo = typeof MutationObserver === 'function' ? new MutationObserver(tick) : null;
+  // Only mutations that CAN change a prompt re-measure (owner 2026-10-05: «عرض المزيد takes time»).
+  // Measured on a production export at 4× CPU, 100 → 500 cards: 12.6 s of 15.6 s main-thread time
+  // was this observer — every card mount and every animation frame (reanimated writes `style`)
+  // re-ran two document-wide querySelectorAll over ~50k nodes, so cards arrived seconds late.
+  const mo = typeof MutationObserver === 'function'
+    ? new MutationObserver((records) => { if (mutationTouchesPrompt(records, selector, watched)) tick(); })
+    : null;
   mo?.observe(document.documentElement, {
     childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'],
   });
@@ -484,6 +547,49 @@ export function dockedEdgeOffset(base: number, edgeInset: number): number {
   const b = Number.isFinite(base) && base > 0 ? base : 0;
   const band = Number.isFinite(edgeInset) && edgeInset > 0 ? edgeInset : 0;
   return b + band;
+}
+
+/**
+ * Where a CENTRED, VIEWPORT-ANCHORED dialog must lay itself out so a docked prompt cannot cover it
+ * (ops_incident #670).
+ *
+ * `dockedEdgeOffset` above answers this for a component that pins itself to an edge. A centred
+ * modal is the other shape, and it needs BOTH numbers — which is the whole lesson here:
+ *
+ *  · `paddingTop` alone is NOT enough. The card is centred inside the overlay's content box; if its
+ *    maxHeight still assumes the full viewport it simply OVERFLOWS that box and re-centres
+ *    symmetrically, putting its top edge — and the × pinned to it — back above the padding.
+ *  · shrinking the card alone is not enough either: centred in an unpadded box it stays centred.
+ *
+ * MEASURED on production, 375x812, signed out, 2/2 fresh contexts each, 2026-09-24, with the
+ * WebKit top-dock shape injected into the served bundle (the same pre-deploy technique this file's
+ * own header used). The × is at [308,63,34,34] and `elementsFromPoint` at its centre returns
+ * `iframe(accounts.google.com/gsi/iframe/select)` on top, the × at index 3, real click TimeoutError:
+ *
+ *   padding only (16+178)            → × y 63 → 152 | still iframe on top, index 3 | click FAILS
+ *   padding AND availHeight − band   → × y 63 → 219 | div on top, index 1         | click LANDS
+ *
+ * So a fix that applies one half looks like progress and ships a still-dead control. Both, or
+ * neither. Returns today's numbers unchanged whenever nothing is docked.
+ *
+ * PURE, so `verify-bottom-prompt-inset.ts` can EXECUTE it — including the half-fix case, which is
+ * the one a future edit is most likely to reintroduce.
+ */
+export function centredDialogBox(
+  viewportHeight: number,
+  basePad: number,
+  safe: { top: number; bottom: number },
+  prompt: PromptInsets,
+  chrome: number,
+): { paddingTop: number; availHeight: number } {
+  const vh = Number.isFinite(viewportHeight) && viewportHeight > 0 ? viewportHeight : 0;
+  const pad = Number.isFinite(basePad) && basePad > 0 ? basePad : 0;
+  const top = Number.isFinite(prompt?.top) && prompt.top > 0 ? prompt.top : 0;
+  const bottom = Number.isFinite(prompt?.bottom) && prompt.bottom > 0 ? prompt.bottom : 0;
+  return {
+    paddingTop: pad + top,
+    availHeight: vh - (safe?.top ?? 0) - (safe?.bottom ?? 0) - top - bottom - chrome,
+  };
 }
 
 /** Both insets, as React state. Zeroes on native and whenever no prompt is docked over the app. */

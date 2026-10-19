@@ -155,18 +155,30 @@ def check_stale_index(client, counts: dict) -> bool:
 
 
 def check_unverified_inactivations(client) -> bool:
-    """True = OK. NO listing may be deactivated without a liveness signal.
+    """True = OK. NO listing may be hidden without a reading of its own page on record.
 
-    Every source-verified kill path writes missing_count >= 3 (prune_unseen's 3-strike grace, the
-    sold-pin, the aqar/wasalt liveness passes, the awal link-rot inactivation). The ONLY path that
-    ever wrote 0 was the time-based mark_stale_listings_inactive sweep, which is plpgsql and so can
-    never re-fetch a listing_url to check. On 2026-07-28 it deactivated 59 dealapp_commercial rows
-    that were verified ALIVE at source (12/12 sampled returned availability=InStock). That flip was
-    removed the same day; this check is the tripwire that keeps it removed.
+    A deactivation is VERIFIED when a ledger row for THAT listing is stamped from 96 hours before to
+    15 minutes after its `deactivated_at`, and is not older than the listing's newest alive reading
+    (`last_verified_alive_at`, or a LIVE row in the probe ledger). The four ledgers:
+      * ops_stale_inactivation_probe: verdict GONE or SUPERSEDED, by listing_id or ad_number;
+      * aqar_liveness_detail, dealapp_liveness_detail: verdict 'kill', applied;
+      * gathern_liveness_detail: verdict 'kill' or 'dead_confirmed', applied.
+    Everything else is counted by `mon_unverified_inactivation_counts()`, which the view reads.
 
-    So `active=false AND missing_count<3` in the last 24h == an unverified kill, by construction.
-    Expect non-zero for up to 24h after the fix ships (today's 59 are still in the window); a
-    non-zero reading after that is a real regression.
+    `missing_count` is NOT the test. Until 2026-10-02 this check read `missing_count < 3`, so a hide
+    stamped 3 with no reading behind it was invisible (66 aqar rows that day: a sweep shard died
+    with its kill rows unflushed) and a hide with a reading but a counter under 3 was an alarm (653
+    gathern rows, 2026-09-28). The counter is still read in one place: a platform registered
+    SOURCE_LIST_PRESENCE or CRAWL_PRESENCE_ONLY hides on three complete-crawl misses and has no
+    per-listing ledger, so only its rows with `missing_count < 3` are counted here
+    (mon_detect_unknown_treated_as_dead grades the rest, per table).
+
+    It is still the tripwire for the flip it was written for: on 2026-07-28 the time-based
+    mark_stale_listings_inactive sweep (plpgsql, so it can never fetch a page) hid 59
+    dealapp_commercial rows that were alive at source. Such a hide leaves no ledger row.
+
+    A copy whose listing_url is still active in the sibling table is reported as deduplicated, not
+    here. Pinned offline by scripts/verify-unverified-inactivation-reads-evidence.ts.
     """
     rows = client.table("mon_unverified_inactivations_24h").select(
         "unverified_inactivations_24h").limit(1).execute().data
@@ -177,11 +189,14 @@ def check_unverified_inactivations(client) -> bool:
         return False
     n = rows[0].get("unverified_inactivations_24h") or 0
     if n == 0:
-        print("OK  unverified-inactivation invariant: 0 listings deactivated without a liveness "
-              "signal (missing_count >= 3 on every kill).")
+        print("OK  unverified-inactivation invariant: 0 listings deactivated in the last 24h without "
+              "a ledger row for the listing.")
         return True
-    detail = (f"{n} listing(s) were deactivated in the last 24h with missing_count < 3 — i.e. WITHOUT "
-              f"the source being re-fetched. Some path is killing listings it never verified.")
+    detail = (f"{n} listing(s) were deactivated in the last 24h with NO ledger row for the listing "
+              f"stamped from 96 h before to 15 min after deactivated_at (ops_stale_inactivation_probe "
+              f"GONE/SUPERSEDED; aqar_/dealapp_/gathern_liveness_detail applied kill). Some path is "
+              f"hiding listings with no page reading on record. missing_count does not tell them "
+              f"apart: group the rows by table and exact deactivated_at to find the job.")
     print(f"FAIL unverified-inactivation invariant: {detail}")
     _alert(client, "unverified_inactivation", n, detail)
     return False

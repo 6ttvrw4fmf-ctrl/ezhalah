@@ -61,11 +61,11 @@ WORKERS = int(os.environ.get("SANADAK_WORKERS", "4"))
 TYPE_MAP = {
     "Apartment": "Apartment", "Villa": "Villa", "Floor": "Floor", "Building": "Building",
     # Duplex + Studio are their OWN clean types since the 2-macro filter split — no longer folded
-    # into Villa/Apartment. Townhouse/Palace/House stay Villa-folds per the locked canon rule.
+    # into Villa/Apartment. Palace/House stay Villa-folds per the locked canon rule; Townhouse keeps its own name (owner 2026-10-12).
     # (canon unification, audit item 7d, 2026-07-27.)
     "Duplex": "Duplex", "Palace": "Villa", "Room": "Room", "RestHouse": "Rest House",
     "Chalet": "Chalet", "Farm": "Farm", "Land": "Residential Land", "House": "House",
-    "Townhouse": "Villa", "Studio": "Studio", "Penthouse": "Apartment",
+    "Townhouse": "تاون هاوس", "Studio": "Studio", "Penthouse": "Apartment",
     # commercial
     "Office": "Office", "Shop": "Shop", "Showroom": "Showroom", "Warehouse": "Warehouse",
     "CommercialLand": "Commercial Land", "CommercialBuilding": "Commercial Building",
@@ -265,6 +265,15 @@ def _verify_gone(ad_number: str, url: Optional[str] = None) -> tuple[str, str]:
             return decided
         time.sleep(1.2 * (attempt + 1))
     return "unknown", f"no answer after 2 attempts ({last})"
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The same oracle for a caller with no crawl of its own (the daily direct check,
+    scrapers/common/fleet_liveness.py). A crawl hands the oracle listings it has just parsed as its
+    canaries; here the caller's known-live control row is that canary. Called bare, `_verify_gone`
+    had no canary and withheld every removal, so the daily check could stamp but never strike."""
+    set_liveness_canaries([control.get("listing_url")] if control else [])
+    return _verify_gone
 
 
 def _listing_url_for(ad_number: str) -> Optional[str]:
@@ -581,6 +590,18 @@ def _all_images(body: str) -> list[str]:
     return out
 
 
+# «امارة منطقة الرياض - الدرعيه» (6696714, 12586935): the emirate's name, then the city it governs. The
+# city is the part after the dash; the whole label resolves to nothing, so both ads sat with no city and
+# no customer could find them in a city search (owner 10-17, 24 sanadak ads with no city). The other 22
+# name villages and farms the catalog does not hold («قريه ديراب», «مزارع وادى العماريه»): honest unknown.
+_EMIRATE = re.compile(r"^\s*[اإأ]مار[ةه]\s+منطق[ةه]\s+\S+(?:\s+\S+)?\s*[-–]\s*(.+?)\s*$")
+
+
+def _emirate_city(raw: str) -> str:
+    m = _EMIRATE.match(raw)
+    return m.group(1) if m else raw
+
+
 def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
     if not o.get("isPublished", True):
         return None, "residential"
@@ -596,7 +617,7 @@ def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
     is_rent = (o.get("listingType") or "").strip().lower() == "rent" or "إيجار" in (o.get("listingTypeText") or "")
 
-    raw_city = (o.get("city") or "").strip()
+    raw_city = _emirate_city((o.get("city") or "").strip())
     # Forward-fix (2026-07-10 location-data-quality audit): an honest None beats the literal "Other"
     # sentinel on this legacy column — the additive city_ar/city_id columns below already resolve
     # most rows independently; this just closes the remaining leak on the raw-column read path.
@@ -759,6 +780,9 @@ def main() -> int:
                     continue
                 if args.type != "all" and cat != args.type:
                     continue
+                # fetch_one returned only on HTTP 200 carrying the object whose own
+                # advertisementNumber equals this URL's (a soft-404 shell carries none).
+                db.mark_direct_alive(row, oracle="sanadak.listing_page.advertisementNumber")
                 (com_buf if cat == "commercial" else res_buf).append(row)
                 (com if cat == "commercial" else res).append(row)
                 seen += 1
@@ -796,6 +820,18 @@ def main() -> int:
         # started serving shells cannot be mistaken for a catalogue that emptied (§5.4).
         set_liveness_canaries([r.get("listing_url") for r in (res + com)[:3]])
         pruned = 0
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+        # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+        # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+        # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+        superseded = db.retire_superseded_siblings(
+            res_table="sanadak_residential_listings", com_table="sanadak_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source="Sanadak")
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
         for tbl, rows_seen in (("sanadak_residential_listings", res), ("sanadak_commercial_listings", com)):
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Sanadak",
                                 verify_gone=_verify_gone)

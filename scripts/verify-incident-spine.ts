@@ -63,12 +63,36 @@ const migrationNamed = (...needles: string[]): string => {
 // has been redefined twice since the spine (the surface vocabulary, then the four new routines), and
 // reading the original is how this check came to assert "all seven routines" against an eleven-routine
 // system.
+//
+// The needle names a FUNCTION, so it must be followed by that function's argument list. A plain
+// substring test is a PREFIX test, and `_` makes prefix collisions ordinary rather than exotic:
+// `function public.incident_resolve_routine_slug(` contains `function public.incident_resolve`.
+// Because this finder deliberately keeps the LAST match, a sibling added later WINS — the finder
+// silently starts reading a different function's migration.
+//
+// MEASURED 2026-09-22: adding incident_resolve_routine_slug() in 20260922104925 pointed this check
+// at that migration. gateSatisfiableByOmission()'s own regex is precise (`incident_resolve\s*\(`),
+// so it found no signature there, fell to its fail-closed branch, and reported TWO standing
+// guarantees as violated — "the production verification cannot be supplied by the function itself"
+// and "a verification dated in the FUTURE is refused" — while the real incident_resolve was
+// untouched and correct. A loose finder feeding a precise predicate is a false RED; the same pair
+// pointed the other way would be a false GREEN.
+//
+// Requiring the open paren is strictly MORE precise, the same move (and the same reasoning) as the
+// roster needle tightened above: every intended file still matches, and a migration that stopped
+// defining the function would still go unmatched.
+// Exported as its own function so the mutation proof at the bottom tests THE predicate the finder
+// uses, not a second copy of it — a duplicated safety predicate that drifts is its own defect.
+const definesFunctionRe = (needle: string): RegExp =>
+  new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + String.raw`\s*\(`, 'i');
+
 const latestMigrationDefining = (needle: string): string => {
+  const re = definesFunctionRe(needle);
   let last = '';
   for (const f of readdirSync(migDir).sort()) {
     if (!f.endsWith('.sql')) continue;
     const body = readFileSync(join(migDir, f), 'utf8');
-    if (body.includes(needle)) last = body;
+    if (re.test(body)) last = body;
   }
   return last;
 };
@@ -89,7 +113,17 @@ const routing = latestMigrationDefining('function public.incident_route_owner');
 // The surface VOCABULARY, added 2026-09-04 after a coverage audit found ~9 real user-reachable
 // surfaces with no name — so findings on them fell through to the routine-2 fallback and arrived
 // indistinguishable from noise.
-const vocab = latestMigrationDefining('incident_known_surfaces');
+// `function public.incident_known_surfaces` rather than the bare name, for the same reason the
+// `routine` needle above is a pg_proc lookup: the needle must match a migration that DEFINES the
+// vocabulary, not one that merely mentions it in prose. On 2026-09-13 migration 20260913141149
+// (the owner roster) explained itself as mirroring "the existing incident_known_surfaces()
+// exactly"; it sorts last, so the bare needle resolved the vocabulary to that file, found no
+// `select array[...]` in it, and reported 0 surfaces — turning 11 checks red on a migration that
+// changed nothing about surfaces. That migration is a mirror of what production ran and is
+// therefore byte-frozen, so the fix belongs here. This is strictly more precise, not looser: the
+// defining migration still matches, and a migration that stopped defining it would go unmatched
+// and fail the non-trivial check below.
+const vocab = latestMigrationDefining('function public.incident_known_surfaces');
 const guard = migrationNamed('unknown incident surface');
 
 console.log('\nIncident spine — resolution stays earned, and ownership stays total\n');
@@ -250,6 +284,19 @@ const mustCatch = (label: string, brokenIsCaught: boolean) => {
   mutFail++;
   console.error(`FAIL  (mutation) BLIND to ${label}`);
 };
+
+// The function finder must name a FUNCTION, not a PREFIX of one — the defect of 2026-09-22, where
+// incident_resolve_routine_slug() hijacked the incident_resolve finder and turned two real
+// guarantees falsely RED. Both directions are proven: the sibling must not match, and the genuine
+// definition must still be found, or "does not match a sibling" would be satisfied by a regex that
+// matches nothing at all.
+const FINDER_NEEDLE = 'function public.incident_resolve';
+const SIBLING_DEF = 'create or replace function public.incident_resolve_routine_slug(p_routine text)\nreturns text';
+const REAL_DEF = 'create or replace function public.incident_resolve(p_id bigint, p_barrier_script text)\nreturns void';
+mustCatch('a prefix-colliding sibling hijacking the function finder (incident_resolve_routine_slug)',
+  !definesFunctionRe(FINDER_NEEDLE).test(SIBLING_DEF));
+mustCatch('…while the REAL definition is still found (the finder is not vacuously narrow)',
+  definesFunctionRe(FINDER_NEEDLE).test(REAL_DEF));
 
 const dropConstraint = spine.replace(
   /constraint\s+ops_incident_resolution_is_earned\s+check\s*\([\s\S]*?\)\s*,/, '');

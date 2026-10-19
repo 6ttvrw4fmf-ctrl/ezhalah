@@ -18,6 +18,11 @@ STRATEGY tiers, strongest first:
                               owner rule and is recorded as a known gap, not as an approved design.
                               Rows on these platforms are reported as unverified by the staleness
                               monitor rather than being quietly counted as healthy.
+  SOURCE_LIST_PRESENCE        The crawl re-reads the site's OWN COMPLETE list every day, and a row
+                              that list serves is stamped verified-alive (presence_patch). Owner
+                              decision 2026-10-02 — the rule wasalt already has — for small sites
+                              admitted ONE BY ONE (SOURCE_LIST_DAILY below). It changes what counts
+                              as verified, never what counts as dead.
 
 `max_verification_age_hours` is the SLA: an active row not positively verified within it is STALE
 and must surface on monitoring. It is a MONITORING threshold — nothing here ever deactivates a row.
@@ -30,6 +35,7 @@ from scrapers.common.liveness_contract import LivenessPolicy
 DIRECT_REVISIT = "DIRECT_REVISIT"
 CANDIDATE_PLUS_DIRECT = "CANDIDATE_PLUS_DIRECT"
 CRAWL_PRESENCE_ONLY = "CRAWL_PRESENCE_ONLY"
+SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 
 # REGISTERED IS NOT THE SAME AS SEARCHABLE (2026-09-03, corrected 2026-09-04). abralosol, aouj,
 # arkaan, rawasidark and therc have 4,314 production_ready rows live in search_listings_ar and rows in
@@ -75,7 +81,12 @@ CRAWL_PRESENCE_ONLY = "CRAWL_PRESENCE_ONLY"
 # amlakalahsa JOINS this set on 2026-09-12 (single-office Al-Ahsa WordPress+ACF listing site).
 # CRAWL_PRESENCE_ONLY for the same reason as remal/amaall above: a small WordPress REST catalogue
 # (6 CPTs, ~260 posts) re-read in full each run, with no per-listing revisit endpoint of its own.
-NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common"})
+# propertyfinder (2026-10-10) is a SHADOW reader only (its shadow.py writes nothing): it gets its liveness
+# policy in the same change that makes it production-searchable. haraj LEFT this set on 2026-10-16 (owner:
+# licensed offers only go live) with its CANDIDATE_PLUS_DIRECT entry below.
+# moj (2026-10-10) is not a listing platform at all: it reads the Ministry of Justice's district sales
+# aggregates into moj_district_sales (scrapers/moj/sales.py) and writes no listing.
+NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "propertyfinder", "moj"})
 
 
 class _P(dict):
@@ -97,21 +108,38 @@ POLICIES: dict[str, _P] = {
         "Daily sharded sweep (16 shards, ~97k probes/day) covers the active population each day.",
     ),
     "gathern": _P(
-        _pol("gathern", 3, 96), DIRECT_REVISIT,
+        _pol("gathern", 3, 24), DIRECT_REVISIT,
         "hard 404 only — a booked-but-listed 200 is NOT death on this platform",
         "Source rate-limits detail pages globally (~2 req/s). Coverage rate is the binding "
         "constraint, not signal quality: at 1,500 probes/day against 29k active the cycle was "
         "19.5 days and ~1,260 dead rows stayed searchable (measured 2026-08-30).",
     ),
     "wasalt": _P(
-        _pol("wasalt", 3, 96), DIRECT_REVISIT,
+        # presence_is_positive_evidence=True — OWNER DECISION 2026-10-02, the first platform to
+        # declare it (SOURCE_LIST_DAILY below declares it for the small full-list sites). A row Wasalt's own search results serve is stamped verified-alive
+        # (presence_patch, in db.upsert_wasalt_*_batch). Measured before deciding: of rows read
+        # directly in the last 30 days, in-feed rows were live (51/51 in one run, and every run's 30
+        # in-feed controls) and rows the feed had dropped were dead (8,128 of 8,137). The claim is
+        # re-tested on every enum-strike run: 30 in-feed controls are read directly and the run
+        # aborts its flips under 90% live. Reading all ~69k pages directly would cost ~12 GB/day of
+        # paid proxy. Removal is unchanged: a row leaves search only on a DIRECT 404 (3 strikes).
+        LivenessPolicy(platform="wasalt", grace=3, max_verification_age_hours=48,
+                       presence_is_positive_evidence=True), DIRECT_REVISIT,
         "404 (shares aqar's marker set)",
         "Requires the Saudi residential proxy (WASALT_PROXY_URL); datacenter IPs get HTTP 403, "
-        "which is UNKNOWN and must never be read as death.",
+        "which is UNKNOWN and must never be read as death. Feed presence is positive evidence "
+        "(owner 2026-10-02); the direct read is spent on rows the feed dropped and on controls.",
+    ),
+    "aqarmonthly": _P(
+        _pol("aqarmonthly", 3, 24), DIRECT_REVISIT,
+        "aqar's own: 404/410; DEAD_MARKERS phrases (the soft-close limb stays UNKNOWN, as on aqar)",
+        "Its ads ARE sa.aqar.fm pages, so aqar's daily sweep reads them (scrapers/aqar/liveness.py, "
+        "aqar-liveness.yml, one extra shard; owner 2026-09-28: «Aqar Monthly must work like Aqar»). "
+        "Its crawl still prunes on feed absence (scrapers/absence-only-prune.txt).",
     ),
     # ── Tier 2: source-published candidate set, then a direct confirm ───────────────────────────
     "dealapp": _P(
-        _pol("dealapp", 3, 96), CANDIDATE_PLUS_DIRECT,
+        _pol("dealapp", 3, 48), CANDIDATE_PLUS_DIRECT,
         "sitemap absence selects candidates; deactivation needs a DIRECT confirm "
         "(redirected_away, or a hydrated ng-state with no listing schema, or offers.availability "
         "SoldOut/OutOfStock)",
@@ -142,8 +170,912 @@ POLICIES: dict[str, _P] = {
     # would raise a guaranteed P1 liveness_verification_sla from 2026-09-13 (floor 50%, actual ~0%),
     # which LISTING_LIVENESS.md §7 forbids answering with a label change. Promoting it is earned by
     # adding a sweep that verifies the population, not by editing this string.
+    "aqaralsaudia": _P(
+        _pol("aqaralsaudia", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "wp-json post status: a 404 the API itself attributes to rest_post_invalid_id (post deleted "
+        "at source), or HTTP 200 carrying a status of trash/draft/pending/private/expired. A 404 "
+        "WITHOUT that code, any 401/403/408/429/5xx, an unparseable body, an id mismatch and an "
+        "unrecognised status are all UNKNOWN and hold the strike without deactivating.",
+        "Absence from the crawl only SELECTS candidates; scrapers/aqaralsaudia/run.py::_verify_gone "
+        "gives each at-grace row a DIRECT confirm before prune_unseen may deactivate it. "
+        "Control-validated live 2026-09-13 against this platform's real retirement behaviour: it "
+        "HARD-DELETES rather than flipping a status — id 9071 (live) answered HTTP 200 status=publish, "
+        "while id 8990 (present in the feed earlier the same day, since removed) and a "
+        "never-existing id 999999 both answered HTTP 404 rest_post_invalid_id. The status limb is "
+        "implemented too so a future draft/trash post cannot read as alive."),
+    "akariyoun": _P(
+        _pol("akariyoun", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the listing's OWN url: akariyoun hard-404s a page it no longer serves, so a 404 on that "
+        "url is a real death signal. A 200 that still renders «رقم الاعلان» is LIVE. A 200 without "
+        "it (a shell, a routing change), any 401/403/408/429/5xx, a transport failure, and a row "
+        "whose listing_url we cannot look up are all UNKNOWN and hold the strike without "
+        "deactivating.",
+        "Absence from the crawl only SELECTS candidates; scrapers/akariyoun/run.py::_verify_gone "
+        "gives each at-grace row a DIRECT confirm before prune_unseen may deactivate it. "
+        "Control-validated live 2026-09-18: fyla-llbyaa-fy-hy-alghnamy-6 and ard-llbyaa-fy-hy-bdr "
+        "(both live) answered HTTP 200 carrying the ad number, while this-slug-never-existed-zzz99 "
+        "answered a clean HTTP 404. Unlike the WordPress siblings there is no REST api to attribute "
+        "the 404 to, so the ad-number check on a 200 is what keeps a shell from reading as alive."),
+    "ksaaqar": _P(
+        _pol("ksaaqar", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the listing's OWN url: ksaaqar.com hard-404s an ad it no longer serves, so a 404 on that "
+        "url is a real death signal. A 200 that still renders the spec block (the «النوع» / "
+        "«رقم رخصة فال» labels) is LIVE. A 200 WITHOUT those labels is a shell or a routing change "
+        "and is UNKNOWN, as are any 401/403/408/429/5xx, a transport failure, and a row whose "
+        "listing_url we cannot look up — all hold the strike without deactivating.",
+        "Absence from the crawl only SELECTS candidates. Control-validated live 2026-09-19: a real "
+        "ad url answered HTTP 200 carrying the spec labels (191,125 bytes), while "
+        "/ad/this-slug-never-existed-zzz99/ answered a clean HTTP 404 with none of them."),
+    "sadiqeltajer": _P(
+        _pol("sadiqeltajer", 3, 168), CRAWL_PRESENCE_ONLY,
+        "«كود الاعلان» ON A 200 — NOT a 404. This source does NOT 404 a removed ad: control-"
+        "validated live 2026-09-19, /ads/this-slug-never-existed-zzz99 answered HTTP **200** with "
+        "3,892 bytes and no «كود الاعلان», while a real ad answered 200 with 233,232 bytes and the "
+        "code present. A policy keyed on 404 would therefore NEVER retire anything here and sold "
+        "listings would stay up forever. CORRECTED 2026-10-02, measured on 24 ads the sitemap had "
+        "dropped: the office KEEPS a closed ad's page, code and all, and replaces its call button "
+        "with «غير متاح» (10 of 10 dropped ads; 0 of 12 live ads; «منتهي» is on every page). So, "
+        "reading only the ad's own part of the page: the call button AND the code AND no «غير متاح» "
+        "is LIVE; no call button with «غير متاح», or the «غير موجود» shell without a code, is GONE; "
+        "a 404, any 401/403/408/429/5xx, a transport failure, an unlookupable row and every other "
+        "200 are UNKNOWN and hold the strike without deactivating.",
+        "Absence from the crawl only SELECTS candidates; the direct confirm above decides. The "
+        "asymmetry with ksaaqar is the point — the death signal was measured per platform, not "
+        "assumed from the sibling."),
+    # ── 2026-09-19 batch: seven small platforms ────────────────────────────────────────────────
+    # The inblaj.net trio (gudai/safera/alhumaidan) share a PARSER, not a death signal — each was
+    # control-validated on its own host.
+    "gudai": _P(
+        _pol("gudai", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the listing's OWN /property/ url. WordPress hard-404s a deleted post, so a 404 there is a "
+        "real death signal. A 200 that still renders the detail block («تفاصيل العقار» on this "
+        "theme variant) is LIVE; a 200 WITHOUT it is a shell or a theme change and is UNKNOWN, as "
+        "are any 401/403/408/429/5xx, a transport failure and an unlookupable row.",
+        "Absence from the crawl only SELECTS candidates. Tenant of the inblaj.net WordPress "
+        "product; theme variant A (labelled, colon-separated)."),
+    "safera": _P(
+        _pol("safera", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the listing's OWN /property/ url; a deleted post 404s. On this tenant the detail block is "
+        "«نظرة عامة» (theme variant B: no colons, and a «عروض مشابهه» tail), so THAT is the marker "
+        "a 200 must carry to read as LIVE. Same UNKNOWN set as its siblings.",
+        "Absence from the crawl only SELECTS candidates. The marker differs from gudai's because "
+        "the THEME differs — the same product does not imply the same page."),
+    "alhumaidan": _P(
+        _pol("alhumaidan", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the listing's OWN /property/ url; a deleted post 404s, and a 200 must carry the detail "
+        "block to read as LIVE. SEPARATELY from liveness, a title containing «تم الإيجار» / «تم "
+        "البيع» is a TRANSACTED ad the office still displays: the scraper never ingests it, so it "
+        "never becomes a row this policy has to retire.",
+        "All 3 of this office's listings were «تم الإيجار» at onboarding, so it contributes 0 "
+        "active rows today. That is its inventory, not a fault."),
+    "aqarnajran": _P(
+        _pol("aqarnajran", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the post's own url: a removed wp/v2 post 404s (control-validated live 2026-09-19 — "
+        "/this-never-existed-xyz/ answered a clean 404 while a real post answered 200). A 200 "
+        "without the «البند/التفاصيل» table is a shell and is UNKNOWN, as are any "
+        "401/403/408/429/5xx, a transport failure and an unlookupable row.",
+        "Absence from the REST listing only SELECTS candidates; the direct confirm decides."),
+    "fahadalshahri": _P(
+        _pol("fahadalshahri", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the product's own url: a removed WooCommerce product 404s (control-validated live "
+        "2026-09-19). *** A 403 IS NOT DEATH ON THIS PLATFORM *** — the Store API and the site "
+        "answer a BARE session and return 403 to curl_cffi's impersonated TLS fingerprint. A 403 "
+        "here means the fingerprint, and is UNKNOWN. So are 401/408/429/5xx, a transport failure "
+        "and an unlookupable row.",
+        "Same shape as amlakalahsa: the working transport is the bare one, and 'fixing' a 403 by "
+        "adding impersonation is how this source gets misread as blocked."),
+    "compoundin": _P(
+        _pol("compoundin", 3, 168), CRAWL_PRESENCE_ONLY,
+        "«This compound is no longer listed» ON A 200 — NOT a 404. Control-validated live "
+        "2026-09-19: a delisted compound answers HTTP **200** with that sentence in its <h1> and a "
+        "strip of OTHER compounds beneath it, and 62 of the 129 compounds in the sitemap are in "
+        "that state right now. A policy keyed on 404 would never retire anything here. So, read on "
+        "the row's stored listing_url: 200 WITH that sentence is GONE; 200 carrying THIS unit's own "
+        "data-cin-contact-unit card is LIVE; a listed page without it (not yet measured), a 404, any "
+        "401/403/408/429/5xx, a transport failure and an unlookupable row are UNKNOWN. Wired into "
+        "prune_unseen 2026-09-28, complete crawls only.",
+        "Rows are UNITS, not compounds, so one delisted compound retires every unit that belonged "
+        "to it — which is correct: the units went with it."),
+    "wslnaa": _P(
+        _pol("wslnaa", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the tRPC record itself: /api/trpc/properties.bySlug returns status, active and deletedAt "
+        "as FIELDS, so death is data here, not an HTTP code. status <> 'available', active false, "
+        "or a non-null deletedAt is GONE. A transport failure, any non-200, and an unparseable "
+        "body are UNKNOWN and hold the strike without deactivating.",
+        "The served HTML carries no listing values at all, so the API is not an optimisation here "
+        "— it is the only source of truth this platform has."),
+    # ── 2026-09-21 batch: eleven platforms ─────────────────────────────────────────────────────
+    # All eleven prune ONLY with a verify_gone oracle, routed through the shared law in
+    # scrapers/common/http_liveness.py (a 401/403/429/5xx, a timeout or an empty body can never
+    # read as a death). Every death signal below was measured live on 2026-09-21 against that
+    # platform's own dead cohort (ids inside the live range the catalogue no longer carries) with
+    # interleaved known-live controls; the numbers are in each scraper's LIVENESS block. TIER
+    # UNCHANGED, for the aqargate reason: an at-grace oracle does not verify the population.
+    # Three of them do NOT 404 a removed ad (ialqarawi, sakan, gomenassat), so their removals are
+    # also gated by an in-run positive control that fails CLOSED.
+    "alsidra": _P(
+        _pol("alsidra", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the post's own wp/v2 REST record: HTTP 404 carrying rest_post_invalid_id (deleted), or a "
+        "200 for this id whose status is not publish, whose property_status is «مزاد», or whose "
+        "own title/body says it closed (تم البيع/الإيجار…). A 404 without that code, a 401 (a "
+        "trashed/draft post to a guest), any 403/429/5xx and an unparseable body are UNKNOWN.",
+        "Measured: 26 of 26 sellable posts read LIVE, 20 of 20 auction posts GONE, a missing id "
+        "404 rest_post_invalid_id. WordPress empties its trash to a real 404 within 30 days."),
+    "moftah": _P(
+        _pol("moftah", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the product's own WooCommerce Store API record: HTTP 404 carrying "
+        "woocommerce_rest_product_invalid_id, or a 200 for this id whose own words carry «مزاد» / "
+        "a closed-deal phrase. The CDN's 6,192-byte fingerprint interstitial is a 403 and is "
+        "UNKNOWN, as are 401/429/5xx and an unparseable body.",
+        "Measured: 13 of 13 live products read LIVE; a missing id answers the invalid-id 404. The "
+        "probe runs on the TLS profile session() negotiates (safari/firefox are served, chrome* "
+        "is challenged from some networks)."),
+    "masar": _P(
+        _pol("masar", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the post's own wp/v2/aqar REST record: HTTP 404 carrying rest_post_invalid_id, or a 200 "
+        "for this id whose status is not publish or whose own words carry «مزاد» / a closed-deal "
+        "phrase. The hcdn challenge page (served with HTTP 200, never JSON), a 401 for a "
+        "trashed/draft post, any 403/429/5xx and an unparseable body are UNKNOWN.",
+        "Measured: 9 of 9 live posts read LIVE; a missing id answers the invalid-id 404. The probe "
+        "session clears the hcdn challenge before it asks."),
+    "gomenassat": _P(
+        _pol("gomenassat", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "*** NOT A 404 *** — a deleted offer answers HTTP 200 with «نأسف! هذه الصفحة غير متوفرة». "
+        "The offer's OWN purpose badge (offer-header-info .property-badge, never the «عروض أخرى "
+        "قريبة» cards) reading تم البيع / تم الإيجار / مزاد is GONE; any other badge is LIVE. "
+        "Removals are gated by an in-run positive control that fails CLOSED.",
+        "Measured over 516 ids the catalogue no longer offers: 21 of 21 answered the soft-404; 8 "
+        "of 8 transacted offers carry their تم البيع/تم الإيجار badge; 10 of 10 live offers carry "
+        "للبيع/للإيجار."),
+    "sakan": _P(
+        _pol("sakan", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "*** NOT A 404 *** — a removed listing 301s to the listings index (/ar/properties/buy, "
+        "canonical /ar/properties/…, no SingleFamilyResidence payload). This id's own page whose "
+        "«الحالة» has left «فعال», or whose title/description carries an auction/transacted token, "
+        "is GONE; this id's own page otherwise is LIVE. Removals are gated by an in-run positive "
+        "control that fails CLOSED.",
+        "THE SITEMAP IS NOT THE CATALOGUE: of 40 ids sampled from the gaps inside the live range, "
+        "37 redirected to the index and 3 were live «فعال» listings pdpmap.xml does not carry, so "
+        "absence-only pruning would retire live inventory here — the probe self-heals them. 30 of "
+        "30 live controls read LIVE."),
+    "bossbih": _P(
+        _pol("bossbih", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the node's own /<nid> url: HTTP 404 (Drupal's themed 404 — the status decides, never "
+        "whether the page parsed). A 200 carrying data-history-node-id=<nid> is LIVE unless its "
+        "own title/description carries RETIRED_TOKENS (retired in place). Any 401/403/429/5xx, a "
+        "transport failure and a 200 for another node are UNKNOWN.",
+        "Measured: the office deletes nodes — 30 of 30 sampled from the 5,295 nids in the live "
+        "range the catalogue no longer carries answered 404; 15 of 15 live controls read LIVE."),
+    "alshawaf": _P(
+        _pol("alshawaf", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the node's own /<nid> url: HTTP 404 (Drupal's themed 404). A 200 that passes "
+        "parse_detail's own proof (article node id AND the node block's wa.me link both name this "
+        "nid) is LIVE unless its own h1/«العقار» line says مزاد / تم البيع… (closed in place). "
+        "Any 401/403/429/5xx, a transport failure and an unproven 200 are UNKNOWN.",
+        "Measured: 31 of 31 sampled from the 4,569 nids in the live range the catalogue no longer "
+        "carries answered 404; 15 of 15 live controls read LIVE."),
+    "ialqarawi": _P(
+        _pol("ialqarawi", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "*** NOT A 404 *** — an id the site no longer serves answers HTTP 200 with the HOMEPAGE "
+        "(its myCarousel slider, no «رقم العقار»), and a listing taken out of every category "
+        "still serves its own page with «القسم» EMPTY; both are GONE. This id's own page with a "
+        "category is LIVE unless its title/«تفاصيل العقار» carries the crawl's auction/sold "
+        "words. Removals are gated by an in-run positive control that fails CLOSED.",
+        "Measured over 120 of the 1,132 ids in the live range the catalogue no longer carries: "
+        "111 homepage, 9 uncategorised pages; 60 of 60 indexed listings carry «القسم». Without the "
+        "empty-category limb the probe would self-heal a delisted row forever, since no index can "
+        "reach it again."),
+    "haraj": _P(
+        _pol("haraj", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the post's own /<id>/ page: HTTP 404/410; a 200 that prints «العرض محذوف او قديم» with no "
+        "RealEstateListing (measured 2026-10-16 on 3 removed ids); or, for a licensed ad, its own «تاريخ "
+        "انتهاء رخصة الإعلان» has passed. Any other 200 with its RealEstateListing is LIVE (since 2026-10-17 "
+        "unlicensed offers are listings too); anything else is UNKNOWN.",
+        "A STREAM (hourly sitemap files of new posts), never a catalogue: absence from a crawl is not a "
+        "candidate and nothing is pruned on it. scrapers/common/fleet_liveness.py reads every active row "
+        "through scrapers/haraj/run.py:_verify_gone with the honest bot UA at ≤1 read/s; shadow first."),
+    "aljassim": _P(
+        _pol("aljassim", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the node's own /<nid> url: HTTP 404 (Drupal's themed 404). A 200 that passes "
+        "parse_detail's own proof (the article's data-history-node-id names this nid) is LIVE "
+        "unless the crawl's own _AUCTION/_GONE patterns fire on its title/blocks. The hcdn "
+        "challenge is a 403 and is UNKNOWN (the probe session clears it first), as are "
+        "401/429/5xx, a transport failure and an unproven 200.",
+        "Measured: 31 of 31 sampled from the 2,468 nids in the live range the catalogue no longer "
+        "carries answered 404; 15 of 15 live controls read LIVE."),
+    "almotmkenah": _P(
+        _pol("almotmkenah", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the source's own archive banner «هذا الاعلان لم يعد صالح تم نقله للأرشيف» on the ad's "
+        "own page, read by THIS run's crawl (scrapers/almotmkenah/run.py::_verify_gone answers "
+        "from the run's own per-ad status map). An ad this run did not reach is probed at its OWN "
+        "stored listing_url under the shared law: HTTP 404 (a slug the site no longer has) or the "
+        "archive banner is GONE, the ad's own page without it is LIVE, anything else UNKNOWN.",
+        "339 of the 361 ads in the index are archived by the site itself; ~22 are live. Measured "
+        "2026-09-21: a live slug with its tail changed and an invented slug both answer HTTP 404; "
+        "6 of 6 live ads probed at their own URL read LIVE."),
+    "nufouth": _P(
+        _pol("nufouth", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "DATA, not an HTTP code (the wslnaa shape): the property's own API record "
+        "(get_property_data) no longer carries this row's ad (by its digits), the ad's status has "
+        "left «نشط», the unit (by the hash of its name) is gone from the ad, or the property now "
+        "has no ads at all — GONE. The ad «نشط» with this unit is LIVE. A 403 from that API "
+        "(Frappe's 'no such property') stays UNKNOWN by law; a property deleted outright is then "
+        "retired by its own public page /B/<code> answering 200 «عذرًا، العقار المطلوب غير "
+        "موجود.», gated fail-closed on the API disowning the same code (403 PermissionError).",
+        "Measured: of 36 codes sampled between the 270 indexed ones, 8 answered 200 with zero ads "
+        "(GONE) and 28 answered 403 (UNKNOWN by law); 25 of 25 live units read LIVE. 2026-09-21: "
+        "/B/<code> read «غير موجود» on 13 of 13 gap codes and HTTP 500 on 6 of 6 live codes."),
+    # ── 2026-09-24 batch: thirty-five platforms ─────────────────────────────────────────────────
+    # All thirty-five prune ONLY with a verify_gone oracle handed to db.prune_unseen(), routed
+    # through the shared law in scrapers/common/http_liveness.py (a 401/403/429/5xx, a timeout or
+    # an empty body can never read as a death). Every death signal below is the one
+    # scrapers/<slug>/run.py IMPLEMENTS and the numbers are the ones its own docstring MEASURED
+    # (2026-09-23/24); nothing here is inferred. Same tier as the 2026-09-21 batch for the same
+    # reason: absence from the crawl only SELECTS candidates and each gets a DIRECT re-fetch of its
+    # own record before it may be deactivated; coverage is measured separately. Eleven of them
+    # (dwelleo, justsa, jawher, m3tmd, senan, eilmalriyada, villassa, marksa, rightcompound,
+    # livingcompound, azure) also build every row from a DIRECT fetch of its own record and stamp
+    # it through db.mark_direct_alive — zero extra requests. Eight do NOT hard-404 a removed
+    # listing and say so below: justsa, marksa, eydah, sodasyat, alrifai, villassa (the death is a
+    # served 200), albdah (a 500 body, which the law never reads as a death — its GONE limb is
+    # unreachable in production) and flow (a 404 is UNKNOWN there; only a 200 whose page JSON
+    # names another fid is GONE). scrapers/common/tests/test_batch_2026_09_24_liveness_oracles.py
+    # executes every signal below against its measured shapes and the law.
+    "dwelleo": _P(
+        _pol("dwelleo", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the record's own API route GET api.dwelleo.sa/api/v1/properties/<id>: HTTP 422 carrying "
+        "«The selected id is invalid.» or HTTP 404 carrying «العقار غير موجود» is GONE; a 200 whose "
+        "data.id is this id is LIVE only while status is publish AND availability is available, "
+        "otherwise GONE (sold/rented in place); a 200 for another id, an unparseable body and any "
+        "401/403/429/5xx are UNKNOWN. Removals are canary-gated on a row THIS run mapped still "
+        "answering live (fails CLOSED) and run only after a COMPLETE walk that collected >=98% of "
+        "the site's own pagination.total, never on --limit or a single --type.",
+        "RE-ONBOARDED 2026-09-24 (owner decision) after the 2026-06-23 removal. Measured 2026-09-24 "
+        "over 30 ids drawn from the 7,926 gaps inside the completed 11,480-row walk: 28 answered "
+        "422, 2 answered 404, 0 answered 200; 4 live controls → 200 publish/available. Every row "
+        "built from its own detail record carries the direct-alive stamp."),
+    "aqalemhajer": _P(
+        _pol("aqalemhajer", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the node's own /<nid> url: HTTP 404 (the office's themed «تم بيع العقار أو تأجيرة» page — "
+        "the status decides). A 200 carrying data-history-node-id=<nid> is LIVE unless its own "
+        "title/fields carry RETIRED_TOKENS (مزاد / تم البيع / مباع / محجوز …). A 200 for another "
+        "node, any 401/403/429/5xx and a transport failure are UNKNOWN. Removals are gated on a "
+        "complete enumeration (cards == the site's printed «عدد العقارات») and an in-run positive "
+        "control (a card this crawl just enumerated re-read live) that fails CLOSED.",
+        "Measured 2026-09-23 over a 30-id stride sample of the 1,568 ids inside the live range the "
+        "catalogue no longer carries: 29 answered 404, 1 answered 200 for a NON-listing node (read "
+        "LIVE, never pruned — and never in our tables); 3 of 3 live controls read LIVE."),
+    "sakani": _P(
+        _pol("sakani", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the unit's own DETAIL API route (the SPA's only data call): HTTP 404 «not found» is GONE; "
+        "a 200 whose attributes have left status published / publish true is GONE; a 200 whose "
+        "REGA licence names a purpose other than rent is GONE (the unit lives on, the rental does "
+        "not); a 200 published rent is LIVE. A Cloudflare challenge (403 text/html, once a 500 "
+        "wrapping one) and a hidden unit's 403 are about OUR access and UNKNOWN by law. Pruning "
+        "runs only after a complete, unlimited enumeration and only when three units parsed live "
+        "THIS run answer LIVE through ONE warmed session — fails CLOSED.",
+        "Measured 2026-09-23: 6 of 6 old ids and a bogus id → 404 not found; live rent 24858 and "
+        "sale 24798 → 200 published; hidden 20250 → 403. Market-unit ids are SHARED with the sale "
+        "marketplace, so absence from the rent catalogue alone is never death."),
+    "shatri": _P(
+        _pol("shatri", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the post's own wp/v2/properties REST record: HTTP 404 carrying rest_post_invalid_id is "
+        "GONE; a 200 for this id whose status is not publish, or whose property_label terms carry "
+        "«تم البيع» (resolved through the live taxonomy), is GONE; otherwise LIVE. A 200 for "
+        "another id, an unparseable body and any 401/403/429/5xx are UNKNOWN.",
+        "Measured 2026-09-24: 74 posts on one REST page, 22 already labelled «تم البيع» — a skip at "
+        "crawl and a death in the probe. The office retires in place by label; the invalid-id 404 "
+        "is WordPress's own."),
+    "alqasem": _P(
+        _pol("alqasem", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the post's own page (its stored listing_url, else /?p=<id>): HTTP 404 carrying the theme's "
+        "«الصفحة غير موجودة» is GONE; a 200 whose body class carries single-property … "
+        "postid-<id> is LIVE. A 404 without that title, a 200 for another post and any "
+        "401/403/429/5xx are UNKNOWN. The REST API is walled (403 from a security plugin for every "
+        "fingerprint), so the page is the only route.",
+        "Measured 2026-09-24: /property-sitemap.xml == the /property/ archive (29 == 29) and the run "
+        "refuses to prune when the two disagree."),
+    "fkralemar": _P(
+        _pol("fkralemar", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "THIS run's own complete catalogue read first: a card ribbon «مباع» is GONE (a sold "
+        "product's own page is byte-identical in shape to a live one, so the page cannot say it). "
+        "Otherwise the product's own /offers/<slug> page: HTTP 404 carrying «لم يتم العثور على "
+        "الصفحة» is GONE; a 200 whose product-container carries data-unique-id=<id> is LIVE; "
+        "anything else UNKNOWN.",
+        "Measured 2026-09-24: 38 unique products across the three catalogue pages (10 «للبيع», 28 "
+        "«مباع»), every page asserting data-pagination-products-left=0 (a page that says otherwise "
+        "aborts the run). The sitemap lists 7 hidden products no catalogue page shows and is NOT "
+        "the enumeration."),
+    "wadod": _P(
+        _pol("wadod", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the listing's own /property/<id> page: HTTP 404 carrying the site's «غير متوفر» page is "
+        "GONE; a 200 carrying «المعلومات الأساسية للعقار» is LIVE. An id that never existed answers "
+        "HTTP 500, which the shared law reads as no opinion — as are 401/403/429 and a transport "
+        "failure.",
+        "Measured 2026-09-24: rented/sold ids 84, 48, 82 → 404 (3/3); live 92, 93, 80 → 200 (3/3); "
+        "999999 → 500. Rented/sold cards carry no href on the catalogue, so the crawl never links "
+        "them either."),
+    "almuteb": _P(
+        _pol("almuteb", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the post's own wp/v2/properties REST record: HTTP 404 carrying rest_post_invalid_id is "
+        "GONE; a 200 for this id whose status is not publish or whose property_status terms match "
+        "the closed-deal vocabulary (تم البيع / تم الإيجار / مباع / مؤجر) is GONE; for a -U<i> "
+        "multi-unit row, the parent 200 with fewer fave_multi_units than the unit's index is GONE "
+        "(the post lives on, the unit was removed). Otherwise LIVE; a 200 for another id, an "
+        "unparseable body and 401/403/429/5xx are UNKNOWN.",
+        "Measured 2026-09-24: 10 posts, all publish, one carrying a Houzez multi-unit; the "
+        "closed-deal ids are resolved from the live property_status taxonomy each run."),
+    "aalbarrak": _P(
+        _pol("aalbarrak", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the post's own wp/v2/properties REST record: HTTP 404 carrying rest_post_invalid_id is "
+        "GONE; a 200 for this id whose status is not publish or whose property_status terms carry "
+        "the source's own «تم البيع» / «تم الايجار» flag is GONE; otherwise LIVE. A 200 for another "
+        "id, an unparseable body and 401/403/429/5xx are UNKNOWN.",
+        "Measured 2026-09-24: 10 posts (5 للبيع, 5 للإيجار); the «تم …» status terms exist in the "
+        "taxonomy at 0 posts — the source's own SOLD/RENTED flag is a skip at crawl and a death in "
+        "the probe."),
+    "alrifai": _P(
+        _pol("alrifai", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "*** NOT A 404 *** — the listing's own index.php?page=property-detail&id=<n> page, read "
+        "under the shared law (blocked/throttled, 5xx and an empty body → UNKNOWN): a 200 "
+        "rendering the EMPTY SHELL (no title) is GONE; a full page is GONE only when the site's "
+        "complete, positive-controlled catalogue (index.php?page=properties) no longer lists this "
+        "id, LIVE when it does. A catalogue that is unreadable or fails its control holds the "
+        "verdict UNKNOWN.",
+        "Measured 2026-09-24: one unpaginated catalogue page, 21 distinct ids; the office's own "
+        "removal is delisting from that page, so the catalogue is re-read (cached per run) as the "
+        "second limb."),
+    "sodasyat": _P(
+        _pol("sodasyat", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "*** NOT A 404 *** — the listing's own /single/<id> page: a 200 that arrived by a redirect "
+        "OFF this path onto /search (its title «سداسيات - جميع العقارات») is GONE; a 200 carrying "
+        "«اعلان رقم» is LIVE; anything else UNKNOWN. Removals run only when the site's printed «N "
+        "نتيجه» counter equals the links enumerated.",
+        "Measured 2026-09-24: 4 of 4 gone ids 302 → /search; 11 live cards on the one /search page, "
+        "11/11 carrying «اعلان رقم»."),
+    "hasaad": _P(
+        _pol("hasaad", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the unit's PROJECT page via /?p=<project post id>: HTTP 404 carrying WordPress's own "
+        "error404 body class is GONE (a bare 404 from a WAF/CDN says nothing); a 200 for THIS "
+        "project (postid-<id>) whose «الوحدات» card for unit-modal-<unit id> is green «متاح» is "
+        "LIVE; the same page with the unit absent, red, or «مباع» / «تم البيع» is GONE; anything "
+        "else UNKNOWN.",
+        "Measured 2026-09-24: 3 live projects → 200 with their unit cards (3/3); 5 non-post ids and "
+        "a fabricated slug → 404 error404 (6/6). Row grain is the UNIT MODEL (HSD<project>U<unit>), "
+        "listing_url the project page where the price is shown."),
+    "aqaralriyadh": _P(
+        _pol("aqaralriyadh", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the post's own wp/v2/posts REST record: HTTP 404 carrying rest_post_invalid_id is GONE; a "
+        "200 publish record on this id's own route is LIVE; a 200 with any other status, a 401/403 "
+        "(a post moved to draft/trash answers rest_forbidden to guests), any 429/5xx and an "
+        "unparseable body are UNKNOWN. Pruning runs only after a complete, non-limited "
+        "enumeration.",
+        "Measured 2026-09-24: 15 non-post ids → 404 rest_post_invalid_id (15/15); 3 live controls → "
+        "200 publish (3/3); the page side agrees (/?p=311 → 404, /?p=332 → 200)."),
+    "justsa": _P(
+        _pol("justsa", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "*** NOT A 404 *** — the unit's own /l/<id> page always answers HTTP 200: a body that is the "
+        "25-byte «لم يتم العثور على الوحدة» with no «تفاصيل سريعة» is GONE; a page carrying "
+        "«تفاصيل سريعة», the unit's J-number and status «متاح» is LIVE; the same page with status "
+        "«مباع» / «مؤجر» is GONE (retired in place); anything else UNKNOWN. Pruning runs only after "
+        "a complete, non-limited enumeration.",
+        "Measured 2026-09-24: 4 of 4 non-unit ids → the not-found sentence; 5 of 5 live controls → "
+        "57-64 KB naming their J-number; sold 624 / rented 674 still render with their status. "
+        "Every row built from its own detail page carries the direct-alive stamp."),
+    "snam": _P(
+        _pol("snam", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the unit's PROJECT record GET /api/public/projects/<id>: HTTP 404 carrying «تعذر العثور "
+        "على المشروع» is GONE (the whole project is gone); a 200 project record in which this unit "
+        "id is absent from properties[], or present with a status other than available or "
+        "isArchived, is GONE; present and available is LIVE; an unparseable 200 and "
+        "401/403/429/5xx are UNKNOWN. The site's /ar/properties/<id> page is NOT an oracle — the "
+        "same app shell for any id.",
+        "Measured 2026-09-24: 7 non-project ids → 404 (7/7); all 29 listed projects → 200 (29/29); "
+        "72 units across them: 51 available, 11 reserved, 10 sold. Row grain is the UNIT "
+        "(SNM<project>U<unit>)."),
+    "jawher": _P(
+        _pol("jawher", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the record's own API detail route /api/public/v2/properties/<id>: HTTP 404 JSON carrying a "
+        "«message» («No query results for model … Property N») is GONE; a 200 whose data.id is "
+        "this id is LIVE only while availability_status == available, otherwise GONE "
+        "(sold/reserved/unavailable rows stay served with a badge); a 200 for another record and "
+        "401/403/429/5xx are UNKNOWN. The HTML page is a SOFT 404 (200 «Property Not Found») and "
+        "never a death on its own. Removals are canary-gated on a row THIS run mapped (fails "
+        "CLOSED) and run only after a complete, un-limited enumeration.",
+        "Measured 2026-09-24: gone 24916/1/99999999 → 404 (3/3); sold 48506/45942/44329, "
+        "unavailable 39450/26004, reserved 48840/36684 → 200 with that status (7/7); live "
+        "24915/42818/52519 → 200 available (3/3). Every row built from its own record carries the "
+        "direct-alive stamp. This file is also the engine m3tmd and senan import."),
+    "m3tmd": _P(
+        _pol("m3tmd", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the same engine as jawher (scrapers/jawher/run.py::make_verify_gone on this tenant's host): "
+        "the record's own API detail route — a 404 JSON with a «message» is GONE; a 200 for THIS id "
+        "is LIVE only while availability_status == available, otherwise GONE; another record, an "
+        "unparseable body and 401/403/429/5xx are UNKNOWN; canary-gated (fails CLOSED), after a "
+        "complete enumeration only.",
+        "Measured 2026-09-24 on this host: gone 37985/1/99999999 → 404 JSON (3/3); live "
+        "37993/37767/37614 → 200 available (3/3); the HTML route soft-404s with 200 «Property Not "
+        "Found». 46/46 available today. Every row built from its own record carries the "
+        "direct-alive stamp."),
+    "october": _P(
+        _pol("october", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the same Nuzul engine as m3tmd (scrapers/jawher/run.py::make_verify_gone on "
+        "www.1october.com.sa): the record's own API detail route — a 404 JSON with a «message» is "
+        "GONE; a 200 for THIS id is LIVE only while availability_status == available, otherwise "
+        "GONE; another record and 401/403/429/5xx are UNKNOWN; canary-gated (fails CLOSED), after a "
+        "complete enumeration only. PLUS a sold pin: a unit the API still lists with a status other "
+        "than available (its own record, fetched this run) is pinned inactive the same run.",
+        "Moved off the HTML list 2026-09-28 (it saw 9 of meta.total 18 and never read the status: "
+        "8 of 12 active rows were rented/sold/reserved). Tier stays CRAWL_PRESENCE_ONLY until the "
+        "ops_liveness_registry row is re-tiered by migration; the scraper stamps no "
+        "last_verified_alive_at of its own meanwhile."),
+    "senan": _P(
+        _pol("senan", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the same engine as jawher (scrapers/jawher/run.py::make_verify_gone on this tenant's host): "
+        "the record's own API detail route — a 404 JSON with a «message» is GONE; a 200 for THIS id "
+        "is LIVE only while availability_status == available, otherwise GONE (a sold unit stays "
+        "published with a «مباعة» badge); another record, an unparseable body and 401/403/429/5xx "
+        "are UNKNOWN; canary-gated (fails CLOSED), after a complete enumeration only.",
+        "Measured 2026-09-24 on this host: gone 44629 (archived, 404 with an empty message) / 1 / "
+        "99999999 → 404 JSON (3/3); sold 41223/41222/44628 and unavailable 44610/44591/44579 → 200 "
+        "with that status (6/6); live 44630/45254/41522 → 200 available (3/3). Every row built "
+        "from its own record carries the direct-alive stamp."),
+    "goldendeal": _P(
+        _pol("goldendeal", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the Nuzul tenant's own API record GET goldendeal.nzl-backend.com/api/public/properties/"
+        "<id>: HTTP 404 carrying «No query results» is GONE; a 200 whose data.id is this id is "
+        "LIVE only while availability_status is available AND published_on_website is not 0, "
+        "otherwise GONE (the office's own «مباع» / «مؤجر» / «غير متاح» badge, served in place; or "
+        "the ad taken off the website while still «available» — GDL52019/52111/53568, 2026-09-28; "
+        "_withdrawn() is the crawl's gate too); another record, an unparseable body and "
+        "401/403/429/5xx are UNKNOWN. The WEB page cannot be the oracle (an unknown id renders a "
+        "200 «Property Not Found» shell; a retired id renders the full listing). Removals are "
+        "canary-gated on an id THIS run mapped echoing itself (memoised, fails CLOSED) and run "
+        "only after a complete enumeration (len(items) == meta.total, no --limit).",
+        "Measured 2026-09-23: 4/4 live controls → 200 available; 2/2 retired in place (sold, "
+        "unavailable) → 200 status ≠ available; 6/6 not-served ids (3 yameen ids + 3 in-range gaps "
+        "53007/53011/53019) → 404. This file is also the engine yameen imports."),
+    "thousand": _P(
+        _pol("thousand", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the listing's own /property/<cuid> page: HTTP 404 (a themed 23 KB page) is GONE; a 200 "
+        "whose body echoes THIS listing's data-listing-id is LIVE; anything else (another listing, "
+        "401/403/429/5xx, a transport failure) is UNKNOWN. Removals are canary-gated on one live "
+        "control re-fetched in-run (memoised, fails CLOSED) and prune runs only after a complete "
+        "enumeration (cards == the page's printed counter).",
+        "Measured 2026-09-23: 3/3 mutated cuids → 404; 6/6 live controls in the probe and 105/105 "
+        "detail pages in the full crawl → 200 echoing their id."),
+    "yameen": _P(
+        _pol("yameen", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the same Nuzul engine as goldendeal (scrapers/goldendeal/run.py::verify_gone_for on tenant "
+        "4561, host meteen.nzl-backend.com): a 404 «No query results» is GONE; a 200 for THIS id is "
+        "LIVE only while the engine's _withdrawn() is empty (available AND published_on_website "
+        "not 0), otherwise GONE (12 rented + 2 "
+        "unavailable of 27 are served in place); another record and 401/403/429/5xx are UNKNOWN; "
+        "canary-gated (fails CLOSED), complete enumeration only.",
+        "Measured 2026-09-23: live 3/3 → 200 available; rented 3/3 → 200 status rented; "
+        "cross-tenant goldendeal ids 3/3 → 404; the web page for a rented id renders the full "
+        "listing (never gone)."),
+    "ebriza": _P(
+        _pol("ebriza", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "DATA on the POST-only detail route (action=get_property_data, judged through the shared "
+        "law's decide/read_is_unbelievable): HTTP 404 carrying «No property found» is GONE; a 200 "
+        "whose id echoes this id is LIVE while status is \"1\", otherwise GONE; an unparseable "
+        "body, a 400 «Invalid ID», 401/403/429/5xx and no answer are UNKNOWN. The HTML page is NOT "
+        "the oracle (a gone id still renders the shell with 200). Prune runs only after a COMPLETE "
+        "walk (distinct ids == the site's own totals) and after three rows parsed live this run "
+        "answer LIVE through the same route (fails CLOSED).",
+        "Measured 2026-09-24: sitemap ids 59/67/68 (no longer on the API) → 404 «No property "
+        "found»; ids 0 and -1 the same; live 770/769/308 → 200 with their id and status \"1\". The "
+        "sitemap lists 574 ids of which only 207 exist — never enumerated from."),
+    "eilmalriyada": _P(
+        _pol("eilmalriyada", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the record's own GET api.eilmalriyada.com/api/recent/<id>: HTTP 404 carrying «غير موجود» "
+        "is GONE; a 200 whose id echoes this id is LIVE; an unparseable body, another record and "
+        "401/403/429/5xx are UNKNOWN. The HTML is not the oracle (a gone id serves the bare shell "
+        "with 200). Prune runs only after the one-shot catalogue parsed as a non-empty array AND "
+        "three rows parsed live this run answer LIVE through the same route (fails CLOSED).",
+        "Measured 2026-09-24: sitemap ids 136/169/170 and 999999 → 404 «العقار غير موجود»; "
+        "controls 134/403/664 → 200 echoing their id. Every row built from its own record carries "
+        "the direct-alive stamp."),
+    "daryusuf": _P(
+        _pol("daryusuf", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the post's own wp/v2/portfolio REST record: HTTP 404 carrying rest_post_invalid_id is "
+        "GONE; a 200 echoing this id is LIVE while status is publish, GONE with any other status; "
+        "another id, an unparseable body and 401/403/429/5xx are UNKNOWN. Prune runs only after a "
+        "COMPLETE walk (distinct ids == x-wp-total) AND three rows parsed live this run answer "
+        "LIVE through the same route (fails CLOSED).",
+        "Measured 2026-09-24: 9300/9200/9000 (not portfolio posts) → 404 rest_post_invalid_id; "
+        "9338/9355/9329 → 200 publish."),
+    "albdah": _P(
+        _pol("albdah", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "*** NOT A 404 *** — the listing's own /property/<id>/details/ page. The signal reads HTTP "
+        "500 carrying «DoesNotExist» (Django DEBUG is on — the site's own not-found) as GONE and a "
+        "200 carrying the page's own «إعلان رقم <id>» as LIVE; any other 500, 401/403/429 and a "
+        "transport failure are UNKNOWN. The shared law refuses a death on ANY 5xx, so that 500 "
+        "limb alone is held UNKNOWN; the SECOND limb certifies the removal: this run's COMPLETE "
+        "catalogue (per-type counters sum to the homepage's printed total) no longer lists the id, "
+        "gated on a row THIS run mapped reading live (fails CLOSED).",
+        "Measured 2026-09-24: 4/4 fabricated ids → 500 DoesNotExist; 10/10 live ids → 200 «إعلان "
+        "رقم». The 5xx body is held by http_liveness read_is_unbelievable() as «the source is "
+        "broken, not the listing», so the catalogue limb (alrifai's pattern) is the removal path "
+        "production actually takes."),
+    "eydah": _P(
+        _pol("eydah", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "*** NOT A 404 *** — the offer's own stored listing_url (the host is case-sensitive, so "
+        "never rebuilt from the ad number): a 200 carrying a RealEstateListing JSON-LD whose url is "
+        "this url is LIVE; a 200 without one — the HOMEPAGE the site serves for a missing offer (a "
+        "RealEstateAgent @graph, no RealEstateListing) — is GONE; a 404 is GONE; a 200 whose "
+        "listing names another url and 401/403/429/5xx are UNKNOWN. Canary-gated on a row THIS run "
+        "mapped (fails CLOSED); prune only when the index count equals the printed «N عرض "
+        "مرخّص».",
+        "Measured 2026-09-24: /offers/EY-9999.html, /offers/EY-1003.html and the wrong-case "
+        "EY-1001 all → 200 with the homepage (89,891 B); both live pages → 200 with their own "
+        "RealEstateListing."),
+    "tamyaz": _P(
+        _pol("tamyaz", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the record's own GET /api/properties/<id>: HTTP 404 carrying «غير موجود» is GONE; a 200 "
+        "JSON whose id is this id is LIVE unless published is false (the UI never shows it) — then "
+        "GONE; another id, an unparseable body and 401/403/429/5xx are UNKNOWN. Canary-gated on a "
+        "row THIS run mapped (fails CLOSED).",
+        "Measured 2026-09-24: 3/3 fabricated ids → 404 «العقار غير موجود»; the live id → 200 with "
+        "the same id. A 9-object catalogue read in one call."),
+    "hazim": _P(
+        _pol("hazim", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the entity's own Base44 record GET …/entities/Property/<id>: HTTP 404 carrying «not "
+        "found» is GONE; a 200 JSON whose id is this id is LIVE while status is «متاح», GONE with "
+        "status مباع / مؤجر / محجوز (the admin form's closed list, which the crawl skips on "
+        "sight), UNKNOWN with any other status; another id, an unparseable body and "
+        "401/403/429/5xx are UNKNOWN. Canary-gated on a row THIS run mapped (fails CLOSED).",
+        "Measured 2026-09-24: 4/4 fabricated 24-hex ids → 404 «Entity Property with ID … not "
+        "found»; the live id → 200 status «متاح». A 6-row catalogue."),
+    "villassa": _P(
+        _pol("villassa", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "DATA, not an HTTP code: the record's own API detail — a 200 whose data.main.id is this id "
+        "is LIVE while main.status == \"1\" and GONE whenever main.status is not \"1\" (measured: "
+        "delisted rows read \"0\" — delisted in place, the record otherwise intact). A "
+        "never-existing id answers HTTP 500 (Laravel «Undefined array "
+        "key»), which the shared law can never read as a death, so such a row sits UNKNOWN; "
+        "another record and 401/403/429 are UNKNOWN too. Canary-gated on a row THIS run mapped "
+        "still reading \"1\" (fails CLOSED); prune only after the complete, non-limited "
+        "enumeration.",
+        "Measured 2026-09-23: 14/14 catalogue ids → 200 status \"1\"; 3/3 delisted ids (surfaced "
+        "only inside similar_ads) → 200 status \"0\"; 4/4 never-existing ids → 500. The realistic "
+        "removal on this source is the status flip. Every row built from its own record carries "
+        "the direct-alive stamp."),
+    "marksa": _P(
+        _pol("marksa", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "*** NOT A 404 *** — the offer's own /ar/property/showitem/<id> page: a 200 whose <title> "
+        "is the site's «الصفحة الرئيسية» soft-404 shell (blank spec cells, the logo as the only "
+        "slide) is GONE; a 200 with a project title and populated cells is LIVE; a 200 that is not "
+        "this site's page at all, and any non-200 (Mod_Security 406, 401/403/429/5xx, a transport "
+        "failure), are UNKNOWN. Catalogue absence only SELECTS candidates — unlisted ids keep "
+        "rendering full offers. Canary-gated on a row THIS run mapped (fails CLOSED); prune only "
+        "after the complete, non-limited enumeration.",
+        "Measured 2026-09-23: 4/4 never-existing ids → 200 soft-404 shell; 10/10 catalogue ids and "
+        "4/4 unlisted-but-kept ids (500, 800, 878, 879) → LIVE. Every row built from its own page "
+        "carries the direct-alive stamp."),
+    "rightcompound": _P(
+        _pol("rightcompound", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the unit's COMPOUND page at the row's own stored listing_url: HTTP 404/410 is GONE; a 200 "
+        "carrying the rc-cd-units list in which this villa id's block reads data-is-available=True "
+        "is LIVE, the same page with the block absent or not available is GONE; a 200 without the "
+        "unit list, and 401/403/429/5xx, are UNKNOWN. Canary-gated on a row THIS run mapped (fails "
+        "CLOSED); the site's own /api/v1/compounds total is the completeness check.",
+        "Measured 2026-09-24: 3/3 invented slugs → 404; /api/v1/compounds answers total 254 and the "
+        "sitemap carries 254 compound pages. Row grain is the UNIT (RCP<villa id>, owner decision "
+        "for compound sites); listing_url is the compound page. Every row built from its own "
+        "compound page carries the direct-alive stamp."),
+    "livingcompound": _P(
+        _pol("livingcompound", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "WordPress's own /?p=<post id>: a REAL HTTP 404/410 is GONE; a 200 that landed on a page "
+        "whose body class carries postid-<id> is LIVE unless its own status/label reads sold / "
+        "rented / leased (then GONE); any other 200 and 401/403/429/5xx are UNKNOWN. Canary-gated "
+        "on a row THIS run mapped (fails CLOSED); absence from the sitemap alone is never death.",
+        "Measured 2026-09-24: 3/3 live ids → 301 to the property's own URL; 3/3 invented ids → a "
+        "real 404. wp/v2/property REST is not exposed (rest_no_route), so the page is the route. "
+        "Every row built from its own page carries the direct-alive stamp."),
+    "azure": _P(
+        _pol("azure", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the unit type's COMPOUND page at the row's own stored listing_url: HTTP 404/410 is GONE; a "
+        "200 carrying the unit panels whose hero badge reads Fully Leased / Coming Soon is GONE "
+        "(the same status words the crawl skips on sight); otherwise LIVE when this unit type's "
+        "key (the literal key first, then the ordinal-stripped one) is among the page's "
+        "annual-panel unit names and GONE when the page lists units and this one is not among "
+        "them; a 200 without a unit list and 401/403/429/5xx are UNKNOWN. Canary-gated on a row "
+        "THIS run mapped (fails CLOSED).",
+        "Row grain is the UNIT TYPE (AZR<compound slug>-<unit key>); the key is recovered from the "
+        "stored listing_url because both slug and key can contain hyphens (al-reem, palma-i). "
+        "Measured 2026-09-24 on all 16 compound pages. Every row built from its own compound page "
+        "carries the direct-alive stamp."),
+    "expattrusted": _P(
+        _pol("expattrusted", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the residence's COMPOUND page /p/en/property/<slug> (Next.js SSR, read from its "
+        "__NEXT_DATA__ pageProps.property only — never the recommendations block): HTTP 404 is "
+        "GONE; a 200 whose page JSON lists this residence id under residences[] is LIVE, the same "
+        "page without it is GONE; a 200 without the page JSON and 401/403/429/5xx are UNKNOWN. "
+        "Canary-gated on a row THIS run mapped (fails CLOSED).",
+        "Row grain is the residence (unit type): measured 2026-09-24, 43 compounds, 55 residences on "
+        "16 of them; 27 compounds publish no residence and yield no row."),
+    # ── WAVE 1, onboarded 2026-09-25 ────────────────────────────────────────────────────────────
+    # Ten platforms, and NOT ONE of them can use 'is it 200?' as its oracle: every one of the ten
+    # keeps serving a de-listed listing, or serves a soft-404 shell for ids that never existed, or
+    # both. Each entry below names what the source says about ITSELF instead, with the sample it
+    # was measured on. Absence from the crawl only SELECTS candidates; the platform's own
+    # verify_gone gives the verdict, canary-gated on a row THIS run mapped, and fails CLOSED.
+    "alsaedan": _P(
+        _pol("alsaedan", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the unit's OWN `/sales/unit/<id>` PATH, not its status code. *** A 200 IS NOT A LIFE HERE *** "
+        "an unavailable unit stops having a page: the URL answers 302 to its PROJECT page, which then "
+        "answers 200, so an \"is it 200?\" oracle following redirects would call every sold unit alive "
+        "forever. The signal is the PATH CHANGE. A 302 to another path is GONE; a 404 is GONE; a 200 on "
+        "the unit's own path carrying its own `aup-h1` unit block is LIVE (and self-heals a row absent "
+        "from OUR crawl); anything else is UNKNOWN.",
+        "Measured 2026-09-24 through the shipping _make_verify_gone: 14/14 unavailable ids redirected "
+        "to their project (69→/sales/deem-01, 158→/sales/deem-06, 3270→/sales/deem-11, the sama-najd "
+        "block), 3/3 never-existed ids answered 404, 6/6 available controls answered 200 with no "
+        "redirect. This platform publishes NO REGA ad licence on any of its 332 pages, so the "
+        "licence-expiry oracle abaad uses is unavailable here — ask آل سعيدان for that field."),
+    "ego": _P(
+        _pol("ego", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the ad's own API detail record, NOT the web page. *** A 200 ON THE WEB URL IS WORTH NOTHING "
+        "*** `/unit-details/<anything>` serves the same shell with 200 (verified on a fabricated id "
+        "999999). The API answers three ways: 200 whose `data.id` equals the probed id is LIVE, a 409 "
+        "saying «This unit is inactive» is GONE, a 404 is GONE, and anything else is UNKNOWN under the "
+        "shared law.",
+        "Measured 2026-09-24 on 73 ids with zero counter-examples: 33/33 of the catalogue answered 200 "
+        "with a matching data.id; 40/40 ids absent from the catalogue answered 409 «inactive» (25 "
+        "interleaved through the live block 2340-2460, 15 drawn at random from 1-2339); ids past the id "
+        "space (2500, 9999) answered 404."),
+    "muhaysini": _P(
+        _pol("muhaysini", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the API record the listing page itself loads. *** THE LISTING PAGE IS WORTHLESS AS AN ORACLE "
+        "*** the site is a client-rendered SPA: /propertydetails/<id>, /robots.txt and /anything-at-all "
+        "all return the SAME 200 with the same 3,399-byte shell, so an HTTP oracle on the listing URL "
+        "reads 'live' for every id that has ever existed, fabricated ones included. HTTP 400 carrying "
+        "`error_number` 229 («لم يتم العثور على العقار») is GONE; a 200 whose `property.id` matches the "
+        "probed id is LIVE and self-heals; anything else is UNKNOWN.",
+        "Measured 2026-09-24: ids 10-4,071 exist, 2,827 live and 1,235 gone inside that range. 14 gone "
+        "ids sampled at random plus fabricated 0 / 4,200 / 999,999 gave 17/17 HTTP 400 with "
+        "error_number 229, zero counter-examples; every live id answered 200 with a matching "
+        "property.id."),
+    "nofodh": _P(
+        _pol("nofodh", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the sale state the page prints about ITSELF, read from the platform's own «حالة البيع» enum "
+        "(taken off its filter checkboxes, so the list is the platform's and complete). *** A 200 IS "
+        "NOT PROOF OF LIFE *** a SOLD unit keeps its page: id 531729 answers 200 with full content, "
+        "«حالة العقار: مباع» and its «السعر» row simply gone, so an \"is it 200?\" oracle would never "
+        "retire anything this developer sells. A real 404 is GONE; a 200 saying «للبيع»/«للإيجار» is "
+        "LIVE and self-heals; a 200 saying مباع/مؤجر/محجوز/مدفوع is GONE; anything else is UNKNOWN.",
+        "Measured 2026-09-24: 7/7 fabricated or adjacent ids (999999999, 0, 1, abc, 111111, and 149627 "
+        "/ 149629 either side of a live one) returned an identical 23,648-byte hard 404 page — no "
+        "soft-404 shell exists on this host."),
+    "razre": _P(
+        _pol("razre", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the unit's PROJECT page, read back from the row's own stored listing_url (the _id alone does "
+        "not name the project), and the status that page prints about the unit. A 404/410 on the "
+        "project page is GONE; the unit present with status «متاح» is LIVE; present with «مباع» or "
+        "«محجوز» is GONE — the source's own statement; absent from the page's own data is a death "
+        "signal on ONE family only, and every removal is additionally gated by an in-run positive "
+        "control that fails CLOSED.",
+        "Measured 2026-09-24: 4/4 fabricated ids answered 404 (/onepro-1/9999, /onepro-1/58, /com/99, "
+        "/com/7) and 0 of 35 real pages did. The probe runs through the shared law in http_liveness, so "
+        "a 403/429/5xx/timeout/empty body can never read as a death."),
+    "reinvest": _P(
+        _pol("reinvest", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the detail API, which states removal in words. A 404 saying «هذا الاعلان لم يعد متوفر» (the "
+        "record is known, the ad is withdrawn) or «لم يتم العثور على البيانات» (no such record) is "
+        "GONE; a 200 carrying a `data` object is LIVE and self-heals; a 200 WITHOUT one is UNKNOWN, "
+        "because that shape has not been measured; anything else is UNKNOWN under the shared law. The "
+        "verdict is taken from the STATUS and the message only recorded, so a third message could never "
+        "turn a 404 into a life.",
+        "Measured 2026-09-24: 4/4 ads that left the catalogue mid-capture and 16/16 never-existed slugs "
+        "answered 404 with one of those two messages; 20/20 sampled catalogue rows answered 200 with "
+        "data."),
+    "safa": _P(
+        _pol("safa", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the SURFACE'S OWN ROSTER — a DIRECT walk of every page of the list named by the row's own "
+        "stored listing_url. *** THE SHEET ENDPOINT IS NOT AN ORACLE *** /unit/details answers 200 with "
+        "a complete sheet for units the site publishes nowhere (12828, a SOLD SF050 unit at 762,000, "
+        "plus 12236, 12237, 13208, 14149, 19222 all rendered in full), so \"the sheet still loads\" would "
+        "resurrect sold inventory forever. Card present on the surface is LIVE; card absent with the "
+        "WHOLE surface walked is GONE; any page non-200 or empty body is UNKNOWN, because an incomplete "
+        "walk returns an empty body which read_is_unbelievable() turns into a retry and then UNKNOWN.",
+        "Measured 2026-09-24: a unit id the ERP has never held answers HTTP 500 (0, 1, 100, 5000, "
+        "12000, 19220, 999999) — and a 5xx can never kill a row under the shared law in any case."),
+    "sokok": _P(
+        _pol("sokok", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the status the piece's detail page prints about ITSELF, which agreed with the list endpoint on "
+        "every status measured. A 404 is GONE; a 200 with status «متاحة» is LIVE and self-heals; a 200 "
+        "with «مباعة»/«محجوزة»/«قريباً»/«موقفة من الشركة» is GONE — the source itself saying it is not "
+        "on the market; a 200 with no status in the props is UNKNOWN.",
+        "Measured 2026-09-25, all five statuses fetched on a real piece: ids 99999 and 999999999 "
+        "answered 404 with Laravel's own 6,603-byte error page while id 1 is a REAL piece and answered "
+        "200, which is what proves the 404 is about the id and not the route; 234328899 answered "
+        "«متاحة»; 1522 / 1581 / 1757 / 234327981 answered مباعة/محجوزة/قريباً/موقفة and none of the "
+        "four publishes a price."),
+    "sukna": _P(
+        _pol("sukna", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the API, never the rendered page. *** THE RENDERED PAGE CANNOT BE IT *** "
+        "sukna.app/unit-details?id=<anything> answers 200 with the full app shell — fabricated ids 0 "
+        "and 999999 both did — because the route is client-rendered and fetches its data afterwards, so "
+        "a page-status oracle here would resurrect every dead row forever. API 404 «resource not found» "
+        "is GONE; API 200 with `case` == 2 is GONE (the source's own «مباعة»); API 200 with `case` in "
+        "(0, 1) is LIVE and self-heals («متاحة»/«محجوزة» are both still published); API 200 with no "
+        "readable case is UNKNOWN.",
+        "Measured 2026-09-25: ids 0, 99999 and 999999 answered API 404; case == 2 agreed with absence "
+        "from the source's OWN sitemap on 227/227 with zero counter-examples. Note id 1 answers HTTP "
+        "500 with a null-property error, which is a missing record and not a death — the shared law "
+        "keeps it UNKNOWN."),
+    "tuba": _P(
+        _pol("tuba", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "a banner the ad's own page prints about ITSELF: «هذا العقار لم يعد متاحًا.» together with "
+        "«منتهي الصلاحية». *** A DE-LISTED AD KEEPS ITS PAGE AND ANSWERS 200 WITH FULL CONTENT *** so "
+        "\"is it 200?\" would retire nothing and \"200 means live\" would resurrect the dead forever. "
+        "Banner present is GONE; a 200 with the banner ABSENT is LIVE and self-heals; anything else is "
+        "UNKNOWN. The row's URL comes from the shared stored_listing_url reader rather than a rebuilt "
+        "one, because the slug is not derivable.",
+        "Measured 2026-09-25 with NO fabricated ids — the slug is not derivable, so the gone sample was "
+        "built from the numeric GAPS in the platform's own sequential slug families "
+        "(«apartment-for-rent-in-jeddah-N», «Floor-For-Sale-الرياض-N»): 55/55 gap slugs answered 200 + "
+        "the banner (reason «منتهي الصلاحية» extracted on 25/25) against 40/40 interleaved known-live "
+        "controls from the same crawl that answered 200 with the banner absent, zero counter-examples."),
+    # ── WAVE 2, onboarded 2026-09-26 ────────────────────────────────────────────────────────────
+    # Four platforms. ibaax and qmra both keep serving a de-listed/sold-out unit forever — the
+    # oracle is a structured field, never the status code, and each has an in-run verify_gone that
+    # candidate-selects from absence then confirms directly: CANDIDATE_PLUS_DIRECT. remaxsa's detail
+    # URL is byte-identical for a live, sold and fabricated id — a real page never exists to read
+    # at all, only the index record does, but that record IS re-queried per id: CANDIDATE_PLUS_DIRECT
+    # too. alajlan is DIFFERENT IN KIND, not just in URL shape: it has no per-listing surface to
+    # re-query at all — every run re-fetches the platform's ENTIRE catalogue in one shot, and that
+    # one fetch already IS the final, complete answer (status:true/false/absent), with no separate
+    # candidate-selection step and no separate direct-confirm step to write code for. Honestly
+    # CRAWL_PRESENCE_ONLY, even though the signal it gets that way is stronger than most
+    # CRAWL_PRESENCE_ONLY platforms' (a real status flip, not just absence) — the tier describes
+    # the CODE PATH, not the confidence, and no direct-revisit code exists nor can exist here.
+    "ibaax": _P(
+        _pol("ibaax", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the ad's own detail endpoint's STATUS CODE — no page content to interpret. A 200 with «status: "
+        "success» is LIVE; a 422 error body is GONE. A fully fabricated id gets the identical 422 a "
+        "real gap id gets.",
+        "Measured 2026-09-25/26: 40 ids sampled from 411 numeric gaps inside the live catalogue's own "
+        "204-774 range answered 422, 0 counter-examples; 25 interleaved known-live ids answered 200 "
+        "(19) or a connection timeout the shared law already treats as UNKNOWN, never as a kill (6). 0 "
+        "of the 40 gap ids and 0 of the 19 responsive live ids crossed into the other's verdict."),
+    "remaxsa": _P(
+        _pol("remaxsa", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the listing's OWN index record, queried by exact MLSID. *** A PLAIN GET PROVES NOTHING HERE, "
+        "NOT EVEN \"IS A LISTING PAGE\" *** every detail URL — live, sold, cancelled, or fabricated — "
+        "returns the identical 2,589-byte SPA shell (verified on 5 URLs), so there is no page body to "
+        "read a signal from. A record count of 0 is GONE (a fabricated MLSID); IsViewable=true + "
+        "OnHoldListing=false + ListingStatusUID 160 (Active) is LIVE; IsViewable=false + "
+        "OnHoldListing=true + a non-160 status is GONE — the source's own statement; anything else is "
+        "UNKNOWN under the shared law.",
+        "Measured 2026-09-25 on 4 real historical Saudi MLS ids: Cancelled/161, Expired/162, Rented/167 "
+        "and Proposal/1616 all answered IsViewable=false, OnHoldListing=true, 4/4. Full measured status "
+        "vocabulary: 160 Active, 161 Cancelled, 162 Expired, 165 Partially Rented, 166 Prospective, 167 "
+        "Rented, 168 Exchanged, 169 Sold, 1616 Proposal — none treated individually, "
+        "IsViewable/OnHoldListing already collapse every one."),
+    "qmra": _P(
+        _pol("qmra", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the same first-class «property-status» taxonomy field the mapper itself gates on, re-read "
+        "fresh on the post's own REST endpoint. *** A SOLD-OUT UNIT KEEPS SERVING 200 FOREVER *** its "
+        "status term just changes. HTTP 404 with `rest_post_invalid_id` is GONE (a hard delete); any "
+        "other 404 shape is UNKNOWN (a WAF/routing 404 is not this platform's own statement); 200 "
+        "naming a READY term is LIVE; 200 naming anything else is GONE — the source's own current "
+        "statement; 200 with no status at all is UNKNOWN.",
+        "Measured 2026-09-25: three units that sold out mid-session (ids 853, 837, 820) still answer "
+        "200 with a complete, valid body — their property-status simply moved to «تم البيع»/«مُباع»/«تم "
+        "التأجير». 8/8 fabricated or gap ids answered the hard 404 shape."),
+    "alajlan": _P(
+        _pol("alajlan", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set — there is no separate detail endpoint or per-listing URL to "
+        "re-probe. The entire catalogue is one JSON array fetched whole each run, so a unit keeping "
+        "status:true, flipping to status:false, or dropping out of the array is the complete liveness "
+        "signal; db.prune_unseen's own 3-strike/coverage/collapse guards are the only additional "
+        "protection, the same shape ~40 other single-fetch platforms in this fleet already use.",
+        "Owner-approved 2026-09-26: this platform ALSO has no per-listing URL at all — every row's "
+        "listing_url is the bare homepage, deliberately, because a constructed #fragment or ?id= the "
+        "site does not read would look like a real deep link and silently fail. Measured 13 total "
+        "records (10 rent status:true/3 false, 1 investment status:true, 0 sale) across all three "
+        "categories."),
+    "squares": _P(
+        _pol("squares", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the WordPress catalogue is fetched WHOLE each run and the source declares its own size in "
+        "X-WP-Total (18, which matched the 18 rows returned), so absence from a complete, "
+        "self-declaring enumeration SELECTS a candidate — and the candidate is then confirmed "
+        "directly, because every post has a real per-listing URL (/property/<slug>/) that can be "
+        "re-fetched on its own.",
+        "Measured 2026-09-26: 18 posts, 16 listable (2 «مول» have no type in our taxonomy and are "
+        "skipped, not forced). Prices are printed on the listing PAGE (10 of 16), not in the REST "
+        "payload; presence in the catalogue, not a price change, is the liveness signal."),
+    "rawaf": _P(
+        _pol("rawaf", 3, 168), CRAWL_PRESENCE_ONLY,
+        "every run re-reads all 11 projects and each project's full unit list, and each unit states "
+        "its OWN status (AVAILABLE/SOLD/NOT_AVAILABLE) in that payload — so a unit leaving our index "
+        "is normally the source itself saying SOLD, not an inference from absence. The project "
+        "endpoint /api/deals/<projectId> is a real per-project surface that can be re-queried to "
+        "confirm a candidate — but no such probe is written yet, so this is registered "
+        "CRAWL_PRESENCE_ONLY rather than claiming a direct check the scraper does not perform. "
+        "Upgrade it by adding verify_gone= (re-read the unit's status from its project endpoint) "
+        "and then move the entry out of absence-only-prune.txt.",
+        "Measured 2026-09-26 over all 11 projects: 215 units — SOLD 171, NOT_AVAILABLE 25, "
+        "AVAILABLE 19; only AVAILABLE is listed. Two operational hazards are handled in run.py "
+        "rather than here: the endpoint alternates between JSON and XML, and a project that fails "
+        "to serve its units suppresses prune_unseen entirely so a bad response cannot retire live "
+        "stock."),
+    "wahadat": _P(
+        _pol("wahadat", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the unit's OWN status in its project's record, read every run (2026-10-07): a unit the "
+        "source states as sold or reserved, in a project whose is_active is true, is gone and "
+        "takes a strike; a unit that merely drops out of the list, or whose project is unread, is "
+        "UNKNOWN and is never hidden (absence only selects candidates). prune_unseen's 3-strike, "
+        "coverage and collapse guards still apply.",
+        "Not CANDIDATE_PLUS_DIRECT even though a project page can be re-fetched: the unit-level "
+        "detail endpoint (pro.wahadat.sa/ar/unit/api/units/<uuid>/) answers 403 unauthenticated, so "
+        "there is no per-unit surface to re-probe INDEPENDENTLY of the crawl — a 'direct' check "
+        "would just be the same project-page read the crawl already did, which would dress a "
+        "presence signal up as a second opinion. Measured 2026-09-26 over 14 projects: 128 units, "
+        "available 90 / reserved 28 / sold 10; only `available` is ever listed, per the owner's "
+        "ready-only rule, so a unit selling out leaves our index by changing its own status."),
+    "abaad": _P(
+        _pol("abaad", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the ad's OWN /api/v1/estate/get-estate/<id> record. *** A 200 IS NOT A LIFE HERE *** a "
+        "de-listed abaad ad keeps serving its full detail page, so the decider is the REGA ad "
+        "licence the record publishes about ITSELF: an HTTP 404 is GONE, and a 200 whose end_date "
+        "(«تاريخ انتهاء رخصة الإعلان») has already passed is GONE; a 200 whose licence is still "
+        "valid is LIVE; a licence expiring TODAY is held as UNKNOWN (the measured boundary, never "
+        "resolved either way); a 200 without a readable end_date, a body that will not parse, and "
+        "401/403/429/5xx are UNKNOWN. Canary-gated on a row THIS run mapped (fails CLOSED).",
+        "Measured 2026-09-25: the catalogue went 405 -> 400 inside ~25 minutes and the five ids "
+        "that left were EXACTLY the five whose end_date was that day, with zero of the remaining "
+        "400 carrying a past expiry; validated on 12 sampled absent ids (4 x 404, 8 x "
+        "200-with-lapsed-licence, 12/12). Absence from the catalogue only SELECTS candidates — "
+        "scrapers/abaad/run.py::verify_gone gives the verdict."),
+    "flow": _P(
+        _pol("flow", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the home type's own /home/fid/<fid> page under its property's available-homes route "
+        "(Next.js SSR): a 200 whose page JSON externalRefId is this fid is LIVE, a 200 whose page "
+        "JSON names another fid is GONE; a 200 without page JSON (the site's own 200 «Oops!» "
+        "shell) and any non-200 — a 404 included, as well as 401/403/429/5xx — are UNKNOWN. "
+        "Canary-gated on a row THIS run mapped (fails CLOSED).",
+        "Measured 2026-09-24: 15 floorplans across riyadh-granada/narjis/olaya, all status "
+        "available; riyadh-science-park's page is the site's own 200 «Oops!» shell (floorplans "
+        "null) — a sitemap entry, not a catalogue member. Only riyadh-* slugs whose JSON region "
+        "reads Riyadh are enumerated."),
+    "rakez": _P(
+        _pol("rakez", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "wp-json unit status: a 404 the API itself attributes to rest_post_invalid_id (the unit was "
+        "deleted at source), OR an HTTP 200 whose acf.unit_status has left 'available' for "
+        "'reserved'/'sold-out' — on this platform a unit stops being purchasable far more often "
+        "than it is deleted. ALSO (2026-09-28): a REST 401 rest_forbidden (unit unpublished) ONLY "
+        "when its public /?p=<id> answers the site's own 404; an available unit whose project is "
+        "unpublished ONLY when the listing's own /ar/project/<id>/ answers 404; and an available "
+        "unit whose project terms exclude it exactly as the crawl does (soon / sold / marketing "
+        "stopped / off-plan). A bare 404, any other 401/403/408/429/5xx, an unparseable body, an "
+        "id mismatch and an unrecognised status are all UNKNOWN and hold the strike without "
+        "deactivating.",
+        "Absence from the crawl only SELECTS candidates; scrapers/rakez/run.py::_verify_gone gives "
+        "each at-grace row a DIRECT confirm before prune_unseen may deactivate it. Measured "
+        "2026-09-14 over all 14,319 units: 8,549 available, 4,030 reserved, 1,740 sold-out — the "
+        "status flip is the dominant death signal here, which is why it is read as authoritative "
+        "while a bare 404 is not."),
+    "suwar": _P(
+        _pol("suwar", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "wp-json post status: a 404 the API itself attributes to rest_post_invalid_id (post deleted "
+        "at source), or HTTP 200 carrying a status of trash/draft/pending/private/expired. A 404 "
+        "WITHOUT that code, any 401/403/408/429/5xx, an unparseable body, an id mismatch and an "
+        "unrecognised status are all UNKNOWN and hold the strike without deactivating.",
+        "Absence from the crawl only SELECTS candidates; scrapers/suwar/run.py::_verify_gone gives "
+        "each at-grace row a DIRECT confirm before prune_unseen may deactivate it. "
+        "Control-validated live 2026-09-14 against this platform's real retirement behaviour: it "
+        "HARD-DELETES rather than flipping a status — id 22413 (live) answered HTTP 200 "
+        "status=publish, while id 22400 (absent from the feed) and a never-existing id 999999 both "
+        "answered HTTP 404 rest_post_invalid_id. The status limb is implemented too so a future "
+        "draft/trash post cannot read as alive. NOTE this source ALSO states availability in its "
+        "own page markup (<span class=\"status\">غير متاح</span>, 63 of 167 at onboarding); that is "
+        "SOURCE-STATED retirement and deactivates through the scraper, never through this tier."),
     "aqargate": _P(
-        _pol("aqargate", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("aqargate", 3, 168), CANDIDATE_PLUS_DIRECT,
         "wp-json post status: `expired` (and draft/pending/private/trash/future), or a 404 the API "
         "itself attributes to rest_post_invalid_id (post deleted). A 404 WITHOUT that code, any "
         "401/403/408/429/5xx, an unparseable body, an id mismatch and an unrecognised status are all "
@@ -158,6 +1090,193 @@ POLICIES: dict[str, _P] = {
         "carrying strikes (1 expired, 2 hard-deleted). Population coverage is still 0% — see the "
         "tier note above.",
     ),
+    "vmksa": _P(
+        _pol("vmksa", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over a complete, self-declaring index: every run walks /ar/ads "
+        "pages 1..lastPage exactly as the page's own pagination object declares them "
+        "({total:163,lastPage:11} when measured) and re-reads every ad page. run.py suppresses "
+        "prune_unseen unless every listed ad was readable and the walk reached the declared total.",
+        "Not CANDIDATE_PLUS_DIRECT: an ad page that no longer exists answers 200 with the site's "
+        "generic shell (ad 551, 2026-09-26), so a re-fetch cannot tell 'gone' from 'blipped' without "
+        "a parser-level oracle that is not written yet. The ads carry REGA licence expiry dates "
+        "(«تاريخ انتهاء ترخيص الاعلان»), kept in license_expiry for a future oracle."),
+    "dallali": _P(
+        _pol("dallali", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the storefront's complete JSON feed: "
+        "p1.dallali.com/listings/public?purpose=all&page=N walked until it declares `total` (7 when "
+        "measured). run.py suppresses prune_unseen unless the walk reached that total.",
+        "An oracle is possible — /listings/public/<uuid> answers HTTP 404 for an id that does not "
+        "exist — but it is not written yet, so this does not claim a direct check."),
+    "muajarh": _P(
+        _pol("muajarh", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over admin.muajarh.com/api/v1/properties (limit=50, "
+        "meta.totalPages) against the API's own `total` (18 when measured, 7 of them demo rows "
+        "skipped by rule). run.py suppresses prune_unseen unless the walk reached that total and "
+        "every by-slug detail was readable.",
+        "An oracle is possible — /properties/by-slug/<slug> for a removed listing — but it is not "
+        "written yet, so this does not claim a direct check."),
+    "mobasher": _P(
+        _pol("mobasher", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the discovery API's direct-sale feed (status=ACTIVE, "
+        "categoryType=RealEstate), cursor-walked to the end, checked against its own totalItems (28 "
+        "when measured). run.py suppresses prune_unseen unless the walk reached totalItems.",
+        "An oracle is possible — the feed row's own `status` and the listing page — but it is not "
+        "written yet, so this does not claim a direct check."),
+    "nafithh": _P(
+        _pol("nafithh", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the gallery's complete index: /web/gallery/index?page=N (the "
+        "list clamps past its end, so the walk stops on the first page adding no new id — 30 ids = "
+        "12 + 12 + 6, matching the site's own 22 sale + 8 rent buckets). run.py suppresses "
+        "prune_unseen unless every detail page was readable.",
+        "An oracle is possible — /web/gallery/<id> answers HTTP 404 for an unknown id — but it is "
+        "not written yet, so this does not claim a direct check."),
+    "opensooq": _P(
+        _pol("opensooq", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the real-estate SERP's inline JSON (/ar/عقارات?page=N, "
+        "__NEXT_DATA__ serpApiResponse) walked to meta.pages and checked against meta.count (78 "
+        "when measured). run.py suppresses prune_unseen unless the walk reached meta.count.",
+        "An oracle is possible — /ar/search/<id> for a removed post — but it is not written yet, so "
+        "this does not claim a direct check."),
+    "holoul": _P(
+        _pol("holoul", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over app.holoul.io/customer/api/v1/units/ (per_page=100, `pages`) "
+        "checked against the API's own `total` (238 when measured — the feed ignores every filter, "
+        "so listed/licensed/Sale is applied here). run.py suppresses prune_unseen unless the walk "
+        "reached that total.",
+        "An oracle is possible — /customer/api/v1/units/<uuid> answers 404 unit__not_found for a "
+        "removed unit — but it is not written yet, so this does not claim a direct check."),
+    "eightfloor": _P(
+        _pol("eightfloor", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the Nuzul public API www.8floor.sa/api/public/v2/properties "
+        "(per_page=50, meta.last_page) checked against meta.total (2 when measured). run.py "
+        "suppresses prune_unseen unless the walk reached that total and every detail was readable.",
+        "An oracle is possible — /api/public/v2/properties/<id> for a removed property — but it is "
+        "not written yet, so this does not claim a direct check."),
+    "manzo": _P(
+        _pol("manzo", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over api.manzo.com.sa/property/v1/properties/search/ walked while "
+        "pagination.has_next, checked against pagination.total_count (1 when measured). run.py "
+        "suppresses prune_unseen unless the walk reached that total and every detail was readable.",
+        "An oracle is possible — the details endpoint's own display_status / ad_licence_status — "
+        "but it is not written yet, so this does not claim a direct check."),
+    "sirdab": _P(
+        _pol("sirdab", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's own list pages /ar/ads?page=N (24 per page, a declared "
+        "totalCount). run.py suppresses prune_unseen unless the walk reached the declared total.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "ashab": _P(
+        _pol("ashab", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's own list /properties?page=N (447 ads, 51 pages) and "
+        "each building's unit cards. run.py suppresses prune_unseen unless every page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "manafe": _P(
+        _pol("manafe", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over /manafemar/project/1…N (the index links only 40; the walk is checked "
+        "against the index's per-section counters). run.py suppresses prune_unseen unless those match and every page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "wajaf": _P(
+        _pol("wajaf", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over /properties?page=N (41 ads) and each subdivision's plot pages. "
+        "run.py suppresses prune_unseen unless every page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "albukaeri": _P(
+        _pol("albukaeri", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's own list /properties («البيع المباشر», 31). "
+        "run.py suppresses prune_unseen unless every detail page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "ryadah": _P(
+        _pol("ryadah", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the WP REST property posts (Arabic only). "
+        "run.py suppresses prune_unseen unless every detail page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "sqcc": _P(
+        _pol("sqcc", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the realestate sitemap (33). "
+        "run.py suppresses prune_unseen unless every detail page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "daraa": _P(
+        _pol("daraa", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over /projects?page=N (33 projects). "
+        "run.py suppresses prune_unseen unless every project page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "tawia": _P(
+        _pol("tawia", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the sitemap + /properties list (5). "
+        "run.py suppresses prune_unseen unless every detail page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "superoffice": _P(
+        _pol("superoffice", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the sitemap's 184 Arabic office pages; a booked office drops out of it. "
+        "run.py suppresses prune_unseen unless every page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "shomou": _P(
+        _pol("shomou", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set of in-date ads over the 26-page index; an ad past its own «تاريخ إنتهاء الإعلان» drops out. "
+        "run.py suppresses prune_unseen unless every page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "maktab": _P(
+        _pol("maktab", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the public offices feed read to its own `total`; an office whose REGA ad licence ends drops out. "
+        "run.py suppresses prune_unseen unless the total matched.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "arsh": _P(
+        _pol("arsh", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's own property index /عقارات-عرش (a single "
+        "server-rendered Duda page listing every property link; 23 when measured, 21 mappable). "
+        "run.py suppresses prune_unseen unless every linked page was readable.",
+        "An oracle is possible — a removed page drops off the index and its URL stops rendering the "
+        "property header — but it is not written yet, so this does not claim a direct check."),
+    "maqrat": _P(
+        _pol("maqrat", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over a complete, self-declaring index: the page script's own POST "
+        "paging (/Property/_Properities, start=1..N, length=12) walked until a page is empty, checked "
+        "against #TotalRecord (83 when measured), then every /Property/Details/<id> page re-read. "
+        "run.py suppresses prune_unseen unless the walk reached TotalRecord and every page was readable.",
+        "Measured 2026-10-07 (oracle-feasibility-probe 37618176662): a hidden ad's details page still "
+        "answers 200 like a live one, with no marker between them, so NO death signal exists and "
+        "prune_unseen's verify_gone answers UNKNOWN for every row: absence counts strikes and hides "
+        "nothing. The ads carry REGA licence expiry dates (license_expiry) for a future oracle."),
+    "macsaib": _P(
+        _pol("macsaib", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over Taearif's complete, self-declaring JSON feed: "
+        "api.taearif.com/api/v1/tenant-website/macsaib.sa/properties pages 1..last_page with "
+        "pagination.total (77 when measured, 48 sale + 29 rent), and every record states its own "
+        "status (all 77 `available`; status=unavailable returned 0). run.py suppresses prune_unseen "
+        "unless the walk reached the declared total and every detail record was readable.",
+        "An oracle is possible — GET …/properties/<slug> answers RESOURCE_NOT_FOUND for a slug that "
+        "does not exist — but it is not written yet, so this does not claim a direct check."),
+    "maqam": _P(
+        _pol("maqam", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the same Nuzul engine as goldendeal/yameen (scrapers/goldendeal/run.py::verify_gone_for on "
+        "tenant maqamco, host maqamco.nzl-backend.com), wired exactly as yameen wires it: "
+        "prune_unseen(..., verify_gone=verify_gone_for(TENANT, make_canary(TENANT, control))). A 404 "
+        "is GONE; a 200 for THIS id is LIVE only while availability_status is available and "
+        "published_on_website is not 0, otherwise GONE; another record and 401/403/429/5xx are "
+        "UNKNOWN; canary-gated (fails CLOSED), complete enumeration only. The feed itself states "
+        "availability for every record (130 = 50 available, "
+        "59 sold, 10 unavailable, 7 reserved, 4 rented, measured 2026-09-26).",
+        "The oracle's semantics are the engine's, measured on yameen 2026-09-23; the canary gate means "
+        "maqam prunes nothing unless its own control answers correctly on the first crawl."),
+    "earthapp": _P(
+        _pol("earthapp", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over earthapp.com.sa/api/offer-list-by-area (pagination.total 54 when measured), which the server itself filters to status=active AND an unexpired REGA licence. run.py prunes only when every list page was read.",
+        'The detail endpoint adds only GIS features, so it cannot act as a liveness oracle.'),
+    "fursaghyr": _P(
+        _pol("fursaghyr", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the post's own WordPress record, /wp-json/wp/v2/properties/<id>: status `expired`, or a 404 "
+        "rest_post_invalid_id (deleted). Its page answers 200 either way, so the page is never read "
+        "as evidence. `publish` is live; any other status, 401/403/429/5xx or an id mismatch is "
+        "UNKNOWN. Measured 2026-09-28: 11/11 feed posts `publish`, the 8 active rows out of the "
+        "feed since 08-27 all `expired`.",
+        "scrapers/fursaghyr/run.py hands prune_unseen this oracle and the crawl skips a feed item the "
+        "record calls expired. TIER NOT YET PROMOTED: CANDIDATE_PLUS_DIRECT needs the registry "
+        "migration applied and mirrored (AGENTS.md, apply-and-mirror in one change). And on an "
+        "18-row table 8 missing trips prune_unseen's collapse guard BEFORE the oracle is asked, so "
+        "those 8 are not retired by this path."),
+    "nawafeth": _P(
+        _pol("nawafeth", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the antiforgery-token POST listing (Home/FilterAdvertisment, 20 ads when measured), walked until hasMoreAds=0. Each ad page states its REGA licence expiry. run.py prunes only on a complete walk with every ad page readable.",
+        'An unknown advertisement id answers 404, so an oracle is feasible, but it is not written yet.'),
     # ── Tier 3a: the deactivation path IS direct, but the population is still unverified ─────────
     # Same reasoning as aqargate immediately above, applied to every other platform whose prune
     # gained an oracle. These are NOT relabelled tier 2: CANDIDATE_PLUS_DIRECT would be a claim
@@ -169,8 +1288,8 @@ POLICIES: dict[str, _P] = {
     # each of them the day its oracle shipped, and a registry that misdescribes its own evidence is
     # the same failure as a dark detector reading as a clean bill of health.
     **{
-        p: _P(_pol(p, 3, 168), CRAWL_PRESENCE_ONLY, sig,
-              "Absence from the crawl now only SELECTS candidates: scrapers/" + p + "/run.py hands "
+        p: _P(_pol(p, 3, 168), CANDIDATE_PLUS_DIRECT, sig,
+              "Absence from the crawl only SELECTS candidates: scrapers/" + p + "/run.py hands "
               "prune_unseen a verify_gone oracle, so a row at grace gets a DIRECT re-fetch of its "
               "own URL and an affirmative answer before it may be deactivated. Every oracle here "
               "was EITHER control-validated against interleaved known-alive rows, OR — where the "
@@ -179,9 +1298,18 @@ POLICIES: dict[str, _P] = {
               "validation inside every run (see that platform's own signal string). And every "
               "UNKNOWN shape "
               "(no answer, 401/403/407/408/429, 5xx, empty body, unresolved redirect) holds the "
-              "strike without deactivating. TIER UNCHANGED and that is honest: the population still "
-              "carries no recent affirmative verification, so these rows are reported as unverified "
-              "— never as verified-alive.")
+              "strike without deactivating. "
+              "TIER CORRECTED 2026-09-21 (ops_incident #248/#578). This block used to end «TIER "
+              "UNCHANGED and that is honest: the population still carries no recent affirmative "
+              "verification», and that sentence was true only because of a DEFECT: prune_unseen's "
+              "self-heal wrote missing_count/last_seen_at and threw the ALIVE verdict away, so no "
+              "oracle on this list could ever record a verification no matter how well it ran. The "
+              "tier grades the MECHANISM — the file's own definition of CANDIDATE_PLUS_DIRECT is "
+              "«an absence signal selects candidates cheaply; each candidate then gets a DIRECT "
+              "re-fetch before anything is deactivated», which is exactly this — and coverage is "
+              "measured separately by pct_verified_in_sla. Whether a given platform's chain has "
+              "actually RUN in production is the second, independent question, tracked in "
+              "scrapers/oracle-never-observed.txt; a mechanism is not a coverage claim.")
         for p, sig in (
             ("abeea", "the listing's own page answering with an affirmative removal; a 200 we cannot "
                       "recognise is UNKNOWN (9 rows were once wrongly restored by a 200-means-alive rule)"),
@@ -192,7 +1320,25 @@ POLICIES: dict[str, _P] = {
                         "block IS proof of life. Measured on 50 live controls and 6 not-served ids; "
                         "the removal limb has no real dead cohort — this platform has never "
                         "deactivated a listing — which is why it is gated"),
-            ("aqarcity", "the «الإعلان منتهي» expiry banner on the listing's own page, plus 404/410"),
+            ("aqarcity", "the expiry banner on the listing's own page — «الإعلان غير متاح» since "
+                         "2026-09-20, «الإعلان منتهي» before that, plus the «- إعلان منتهي» title "
+                         "suffix — plus 404/410. Both banner wordings are kept and the title arm is "
+                         "anchored to the suffix shape: naming ONE of them is what took the marker "
+                         "dark for five days (ops_incident #730)"),
+            ("eaqartabuk", "the application's OWN removal code on this property's public record: "
+                           "HTTP 403 `rh_not_public` (withdrawn — «العقار غير متاح.») or HTTP 404 "
+                           "`rh_not_found` (deleted — «العقار غير موجود.»). A 403 or 404 carrying "
+                           "NO such code — an edge block, a WAF, a rate-limiter, a misrouted path — "
+                           "is UNKNOWN, and that distinction is the whole safety margin here, "
+                           "because a blocked run and a withdrawn ad both answer 403. A 200 proves "
+                           "life only when the payload echoes the id asked for. "
+                           "Control-validated live 2026-09-26, 9/9 through the shipped function "
+                           "with live controls interleaved: 10221/10306 403 rh_not_public, 10181 "
+                           "and a never-existing 999999 404 rh_not_found, 8329/5664/5702/5727 200. "
+                           "THE ENRICH PATH'S OWN ENDPOINT WOULD HAVE LIED: candles-map/v1, which "
+                           "this scraper calls «the authoritative record», answers 200 with a full "
+                           "record for a WITHDRAWN property, so an oracle built on it would have "
+                           "certified every dead ad ALIVE (the aqargate/abeea trap)"),
             ("eastabha", "this listing's OWN slider-property-status ribbon reading تأجرت / تم البيع "
                          "(the related-listings carousel's ribbons are explicitly not read), plus 404/410"),
             ("hajer", "this listing's OWN property-status-badge reading status-sold / status-rented, "
@@ -208,6 +1354,18 @@ POLICIES: dict[str, _P] = {
                         "row's own stored listing_url is used, because 39 of 1,724 rows store another "
                         "listing's URL. Removals are additionally gated by an in-run canary"),
             ("souq24", "a redirect OFF this ad's own path (14/14 dead rows, 0/40 controls), plus 404/410"),
+            ("muktamel", "a redirect OFF this listing's own path — measured from the crawl's own "
+                         "outcome counters, where `redirect_404` fired 84-98 times per shard across "
+                         "all four 2026-09-21 runs while `dead_404` (a bare 404/410 status) fired "
+                         "ZERO times; the URL is /real-estates/<id> with no slug, so the path cannot "
+                         "change for a benign reason. 404/410 is kept as a second limb at no cost. "
+                         "NOT pre-validated against a dead cohort — the host answers 403 CONNECT "
+                         "from our cloud egress — so removals are gated by an in-run canary drawn "
+                         "from ids this same run read as LIVE, failing CLOSED: no control, no "
+                         "removal. `not_available_or_zero_price` is deliberately NOT a death: the "
+                         "measured dead shape is the CONJUNCTION (isAvailable false AND price null) "
+                         "while fetch_one()'s skip gate is a disjunction, and separating them needs "
+                         "the Nuxt payload the signal is not handed"),
             ("mustqr", "a per-id PostgREST read with NO status filter — the row absent from the "
                        "source's own table, or present with a `status` other than «متاح». Identity "
                        "is guaranteed by construction (queried by primary key, and the returned "
@@ -225,14 +1383,138 @@ POLICIES: dict[str, _P] = {
               "reported as unverified, never as verified-alive.")
         for p in (
             "abralosol", "abwbna", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "amlakalahsa", "aouj", "aqaratikom",
-            "aqarmonthly", "arkaan", "awal", "azdad", "bahadhabab", "eaqartabuk", "erapulse",
-            "fursaghyr", "jurash", "muktamel",
-            "october",
+            "arkaan", "awal", "azdad", "bahadhabab", "erapulse",
+            "jurash",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
             "shmoualshmal", "therc",
         )
     },
 }
+
+# ── Daily DIRECT revisit through each site's OWN oracle (owner, 2026-09-28: «every website must be as
+# strong as Aqar») ──────────────────────────────────────────────────────────────────────────────────
+# scrapers/common/fleet_liveness.py reads EVERY active listing of these sites every day through the
+# verify_gone their own scraper hands to prune_unseen (never a copy): three direct "gone" answers hide
+# a listing, a live answer stamps last_verified_alive_at. That is aqar's mechanism and aqar's window,
+# so they are DIRECT_REVISIT/48h. Each was admitted after a shadow run (GitHub Actions run
+# 36490769167, 2026-09-28; registry migration 20260929000852) with its known-live controls right, 100% of its active listings read, and
+# every listing it would have hidden confirmed gone by a second transport (lifecycle-spot-check.yml).
+# fleet_liveness.APPLY IS this tuple: one list, so the tier and the writes cannot disagree.
+FLEET_DAILY_DIRECT: tuple[str, ...] = (
+    "abaad", "akariyoun", "albdah", "aldarim", "aljassim", "almotmkenah", "alsaedan", "alshawaf",
+    "aqaralriyadh", "aqargate", "azure", "bossbih", "daryusuf", "eaqartabuk", "ebriza", "ego",
+    "eilmalriyada", "expattrusted", "flow", "gomenassat", "hajer", "hasaad", "hazim", "ialqarawi",
+    "ibaax", "jazwtn", "justsa", "livingcompound", "marksa", "moftah", "qmra", "raghdan", "razre",
+    "remaxsa", "rightcompound", "safa", "snam", "sodasyat", "souq24", "suwar", "tamyaz",
+    # 2026-09-29: shadow read (runs 36490769167) with controls right, every would-hide re-read gone
+    # by its own record AND a second route, and the dead signal seen on a real removed ad.
+    "dwelleo", "muhaysini", "nofodh", "nufouth", "reinvest", "sokok", "sukna", "villassa", "wadod",
+    # 2026-10-02: five shadow runs (09-29..10-02) with controls right and 0 unknown; run
+    # 36977747732's would-hides (36, cap 428) re-read from a second network: 20 of 20 print their
+    # own removal banner, 8 of 8 live controls live.
+    "tuba",
+    # 2026-10-03: shadow run of 10-03 07:25/07:31 UTC read 100% of both with controls right.
+    # sadiqeltajer's 32 would-hides (cap 173) are its «غير متاح» ads: the 34 its crawl stopped seeing
+    # were re-read from a second network the same day, 32 gone and 2 redirects (unknown), 8 of 8
+    # live controls live. ksaaqar's one would-hide (cap 145) answered 404 from the second network,
+    # 5 of 5 live controls live.
+    "ksaaqar", "sadiqeltajer",
+    # 2026-10-06: shadow runs of 10-04..10-06 read 100% of rakez's ~3,600 active units with its own
+    # 3-argument oracle (07:29 UTC 10-06: alive 3,585, dead 37, unknown 9, would_hide 26).
+    # NEEDS INTERACTIVE APPLY: the registry reseed's DELETE clause is held by the DB connector for a
+    # human (LIFECYCLE_ENGINEER.md, 2026-10-05 lesson).
+    "rakez",
+    # 2026-10-08: shadow runs read 100% with controls right and nothing to hide — goldendeal
+    # 37769087242 (293/293 live), mustqr 37770177620 (1,282 live, 1 first strike), maqam
+    # 37772746090 (42/42), yameen 37773056567 (10/10), shatri 11:55 UTC (50/50). Their oracles
+    # became callable by the daily check that night (#6436).
+    "goldendeal", "maqam", "mustqr", "yameen", "shatri",
+    # 2026-10-09: three shadow runs (10-08 12:10, 10-08 19:19 recheck, 10-09 07:18) with controls
+    # right and 100% read; 10-09 would_hide 46 of 1,111, all missing from the site's complete
+    # 1,119-card list. A second read (lifecycle-spot-check 37943565545, controls 5/5) read 22 of 22
+    # sampled ones gone. Its oracle became callable by the daily check on 10-08 (#6438).
+    "aqalemhajer",
+    # 2026-10-17: Haraj. Shadow read locally with its own-hour controls (CONTROL_POOLS, 5/5 live):
+    # 680 probed, 408 live, 272 gone, 0 unknown; gone = «العرض محذوف او قديم», re-read gone by a second
+    # client (curl) 4/4 + the 2 first-run controls. 0 of 680 had ever been removed before this.
+    "haraj",
+)
+for _p in FLEET_DAILY_DIRECT:
+    POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
+                      "Daily direct revisit of every active listing (fleet_liveness.py, 2026-09-28). "
+                      + POLICIES[_p]["note"])
+
+
+# remal and shmoualshmal gained a prune-time oracle on the ad's OWN url on 2026-10-02 (until then
+# neither crawler removed anything), so "absence only" no longer describes them. Tier unchanged.
+# arkaan joined 2026-10-06 (its prune had no oracle; its own page answers 410 for a removed ad).
+# abralosol joined 2026-10-07 (same hole: its crawl read the 404/410 but its prune had no oracle).
+for _p, _sig in (
+    ("remal", "the ad's OWN url answering 404/410. Measured 2026-10-02: a never-existed slug, a "
+              "wrong post id and the REST record all answer 404, while 12 of 12 live ads answer "
+              "200 on their own path with the single-estate postid body class (LIVE). No removed "
+              "ad existed to measure, so nothing but a hard 404/410 is read as gone: a redirect, a "
+              "block, a 5xx and every other 200 are UNKNOWN, and a removal is believed only while "
+              "an in-run known-live control still reads live"),
+    ("shmoualshmal", "the ad's OWN url answering 404/410. Measured 2026-10-02: a never-existed "
+                     "slug, a wrong post id and the REST record all answer 404, while 6 of 6 live "
+                     "ads answer 200 with the single-property postid body class (LIVE). No removed "
+                     "ad existed to measure, so nothing but a hard 404/410 is read as gone: a "
+                     "redirect, a block, a 5xx and every other 200 are UNKNOWN, and a removal is "
+                     "believed only while an in-run known-live control still reads live"),
+    ("arkaan", "the ad's OWN /property/{id} url answering 404/410. Measured from CI 2026-10-06 "
+               "(oracle-feasibility-probe run 37456672928): 12 of 12 removed ads answer 410 and 12 "
+               "of 12 live ads answer 200 with the RealEstateListing JSON-LD (LIVE). A block, a 5xx, "
+               "a redirect and any other 200 are UNKNOWN, and a removal is believed only while an "
+               "in-run known-live control still reads live"),
+    ("abralosol", "the ad's OWN /{nid} url answering 404/410, the reading its crawl already makes "
+                  "for every listed ad (crawler audit 2026-10-02: a removed ad's page answers "
+                  "404/410). 200 on that url whose <article> carries a node id is LIVE; a block, a "
+                  "5xx, a redirect and any other 200 are UNKNOWN, and a removal is believed only "
+                  "while an in-run known-live control still reads live (2026-10-07)"),
+):
+    POLICIES[_p] = _P(POLICIES[_p]["policy"], POLICIES[_p]["strategy"], _sig,
+                      "Removal is confirmed on the ad's own url at prune time (2026-10-02); the full "
+                      "feed is re-read each run and absence only selects candidates.")
+
+
+# THE SITE'S OWN FULL LIST IS THE CHECK (owner, 2026-10-02: «yes do that for all 60 sites … check
+# them every single day»). The same rule wasalt has, for a small site with no per-listing checker:
+# its crawl re-reads the site's complete list every day, and a row the crawl upserts as ACTIVE is
+# stamped verified-alive (db._wasalt_batch → presence_patch), 48 h window.
+#
+# ADMITTED ONE BY ONE, never by a comprehension over a tier. On 2026-10-02 every crawler was read
+# twice (an auditor, then a second reader told to break the verdict). A site is here only if both
+# found that a row cannot be upserted active unless THIS run observed it at the source, and that the
+# crawler excludes every unavailable state the source publishes. The same day 6 in-list ads per
+# site were opened at their own URL from a second network: 488 reads, none answered "gone".
+# Not admitted, each for a named reason in scrapers/lifecycle-gaps.txt: a status or end-date field
+# the crawler ignores, a sold filter that fails open, a catalogue that never changes. A site with
+# an oracle (CANDIDATE_PLUS_DIRECT) is never moved here — it belongs on the daily direct check.
+#
+# 2026-10-03, 22 more, each crawler read again by an auditor told to break it, after the 10-03
+# 04:00 UTC crawl of each finished clean. What was still open is closed by ONE rule in the stamp
+# itself: a row its list served but whose own page or record was not read this run, or that carries
+# a status nobody measured or a licence that ended, is written as before and marked
+# db.mark_presence_unproven() — the list sighting does not certify it (abralosol, arkaan,
+# aqaratikom, satel; squares, muajarh, opensooq, fahadalshahri, shmoualshmal; maqrat, nafithh).
+SOURCE_LIST_DAILY: tuple[str, ...] = (
+    "abwbna", "alajlan", "alkhaas", "alobid", "amaall", "amlakalahsa", "aouj", "arsh", "ashab",
+    "azdad", "bahadhabab", "compoundin", "daraa", "earthapp", "eightfloor", "erapulse", "gudai",
+    "jurash", "macsaib", "maktab", "manafe", "manzo", "mobasher", "nawafeth", "rawaf", "rawasidark",
+    "remal", "ryadah", "sirdab", "superoffice", "tawia", "wajaf", "wslnaa",
+    # 2026-10-03
+    "abralosol", "albukaeri", "aqaratikom", "aqarnajran", "arkaan", "awal", "dallali",
+    "fahadalshahri", "fursaghyr", "maqrat", "muajarh", "nafithh", "october", "opensooq",
+    "ramzalqasim", "safera", "satel", "shmoualshmal", "shomou", "squares", "vmksa", "wahadat",
+)
+for _p in SOURCE_LIST_DAILY:
+    assert POLICIES[_p]["strategy"] == CRAWL_PRESENCE_ONLY, _p      # never demote an oracle tier
+    POLICIES[_p] = _P(LivenessPolicy(platform=_p, grace=3, max_verification_age_hours=48,
+                                     presence_is_positive_evidence=True),
+                      SOURCE_LIST_PRESENCE, POLICIES[_p]["death_signals"],
+                      "The site's own full list, re-read daily, is the check (owner 2026-10-02). "
+                      + POLICIES[_p]["note"])
 
 
 def policy_for(platform: str) -> LivenessPolicy:

@@ -77,12 +77,14 @@ def _fetch_one_with_fake_response(adid, resp):
     fake_session = MagicMock()
     fake_session.get.return_value = resp
     import scrapers.dealapp.run as run_mod
-    orig_session = run_mod._session
+    from scrapers.dealapp.liveness import OriginBudget
+    orig_session, orig_budget = run_mod._session, run_mod._ORIGIN
     try:
         run_mod._session = lambda: fake_session
+        run_mod._ORIGIN = OriginBudget(per_min=10**6)   # canned responses, no real origin to spare
         return run_mod.fetch_one(adid)
     finally:
-        run_mod._session = orig_session
+        run_mod._session, run_mod._ORIGIN = orig_session, orig_budget
 
 
 def test_fetch_one_classifies_a_404_separately_from_a_block_page():

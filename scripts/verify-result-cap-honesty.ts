@@ -1,18 +1,21 @@
-// BROWSE-CONTINUATION HONESTY (owner 2026-08-29 — supersedes the 2026-08-20 lifetime cap this file
-// used to pin; the owner explicitly reversed that decision, so this file now locks the NEW contract
-// with the same rigor it used to lock the old one).
+// BROWSE-CONTINUATION HONESTY (owner 2026-09-14 — re-introduced a DISPLAY CAP, superseding the
+// 2026-08-29 no-lifetime-ceiling decision this file used to pin; the owner explicitly reversed the
+// reversal, so this file now locks the NEW two-tap/500 contract with the same rigor).
 //
-// THE RULE. «عرض المزيد» keeps working while matching listings genuinely exist: batches land on
-// clean 100 boundaries (…→100→200→300) and reach the LAST real match — no lifetime ceiling. The
-// honesty half is unchanged and non-negotiable: the closing message states the TRUE matched total,
-// never a batch size, never a buffer length, and "more" is never offered when nothing more exists.
+// THE RULE. «عرض المزيد» gives at most TWO reveals and never shows more than 500:
+//   first tap → the 100 boundary; last tap → up to 500, then the button retires. A search with ≤500
+//   matches finishes on whichever tap first shows them all; a bigger one caps at 500 and the terminal
+//   state takes over (Advanced Filter if unseen inventory remains, else a new search via the menu).
+// The honesty half is unchanged and non-negotiable: the closing message states the TRUE matched
+// total, never a batch size, never a buffer length, and "more" is never offered when nothing more
+// exists (or when the 500 cap is reached).
 //
 //   node --experimental-strip-types scripts/verify-result-cap-honesty.ts   (runs by existence)
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripTypeScriptTypes } from 'node:module';
-import { BROWSE_BATCH, nextBatchTarget, resultCounts, LOAD_MORE_PAGE_SIZE } from '../src/data/resultCount.ts';
+import { BROWSE_BATCH, SECOND_PAGE_CAP, nextBatchTarget, revealTarget, resultCounts, LOAD_MORE_PAGE_SIZE } from '../src/data/resultCount.ts';
 
 const root = join(import.meta.dirname, '..');
 const code = readFileSync(join(root, 'src', 'app', 'agent.tsx'), 'utf8')
@@ -39,15 +42,20 @@ check('the final batch clamps to the true last match (…→437), never past it'
   nextBatchTarget(400, 437) === 437 && nextBatchTarget(437, 437) === 437);
 check('a small set clamps immediately (23 available → 23)', nextBatchTarget(10, 23) === 23);
 
-// ── 2. NO LIFETIME CEILING — the exact behavior the owner ordered ───────────────────────────────
+// ── 2. TWO TAPS, MAX 500 (owner 2026-09-14 — re-introduced a display cap) ────────────────────────
+// The UI walks with revealTarget(): under 100 → the 100 boundary (first tap); at/after 100 → up to
+// the 500 cap (the LAST tap). A big search stops at 500; a ≤500 search shows everything.
+check('the display cap is 500', SECOND_PAGE_CAP === 500, `got ${SECOND_PAGE_CAP}`);
+check('first tap (10 shown) reveals the first 100', revealTarget(10, 5000) === 100);
+check('the LAST tap (100 shown) reveals up to the 500 cap, never 200/300…', revealTarget(100, 5000) === 500);
+check('there is no third tap — at 500 the target does not advance', revealTarget(500, 5000) === 500);
+check('a ≤500 search finishes on the tap that shows them all (100→340, 10→47)',
+  revealTarget(100, 340) === 340 && revealTarget(10, 47) === 47);
 {
-  // Walk a 2,223-match search the way the UI does: press → boundary → press …
-  let shown = 10;
-  let presses = 0;
-  while (shown < 2223 && presses < 50) { shown = nextBatchTarget(shown, 2223); presses++; }
-  check('a 2,223-match search is walkable to ALL 2,223 (was capped at 100 before)',
-    shown === 2223, `reached ${shown} in ${presses} presses`);
-  check('it takes the honest number of presses (23 boundaries)', presses === 23, `presses=${presses}`);
+  // Walk a 2,223-match search the way the UI does now: it caps at 500 in exactly two taps.
+  let shown = 10; let taps = 0;
+  while (shown < Math.min(SECOND_PAGE_CAP, 2223) && taps < 10) { shown = revealTarget(shown, 2223); taps++; }
+  check('a 2,223-match search shows at most 500, reached in two taps', shown === 500 && taps === 2, `reached ${shown} in ${taps} taps`);
 }
 for (const trueTotal of [0, 7, 99, 100, 101, 200, 201, 437, 9892]) {
   const rc = resultCounts({ trueTotal, shown: trueTotal, fetched: trueTotal, serverMore: false });
@@ -55,13 +63,20 @@ for (const trueTotal of [0, 7, 99, 100, 101, 200, 201, 437, 9892]) {
     rc.endKind === 'all' && rc.endTotal === trueTotal && !rc.hasMore && rc.reachable === trueTotal);
 }
 
-// ── 3. hasMore is exactly "matches remain" — alive at 100/200/300, dead at the end ──────────────
-check('hasMore stays TRUE at 100 shown of 9,892 (the cap used to kill it here)',
+// ── 3. hasMore is exactly "under the cap AND matches remain" — alive at 100, dead at 500 ─────────
+check('hasMore is TRUE at 100 shown of 9,892 (the last tap, up to 500, is still to come)',
   resultCounts({ trueTotal: 9892, shown: 100, fetched: 1500, serverMore: true }).hasMore === true);
-check('hasMore stays TRUE at 1,500 shown when the server has more pages',
-  resultCounts({ trueTotal: 9892, shown: 1500, fetched: 1500, serverMore: true }).hasMore === true);
-check('hasMore goes FALSE only when the last match is on screen',
-  resultCounts({ trueTotal: 9892, shown: 9892, fetched: 9892, serverMore: false }).hasMore === false);
+check('hasMore goes FALSE at the 500 cap — there is no third tap (owner 2026-09-14)',
+  resultCounts({ trueTotal: 9892, shown: 500, fetched: 1500, serverMore: true }).hasMore === false);
+check('at the cap, cappedAtCap is TRUE (more still matches) — the terminal that keeps Advanced Filter',
+  resultCounts({ trueTotal: 9892, shown: 500, fetched: 1500, serverMore: true }).cappedAtCap === true);
+check('everything shown in a ≤500 set → NOT capped (nothing left to narrow into)',
+  resultCounts({ trueTotal: 340, shown: 340, fetched: 340, serverMore: false }).cappedAtCap === false);
+check('the last-tap wording turns on once 100 is shown and more remains, off before that',
+  resultCounts({ trueTotal: 9892, shown: 100, fetched: 1500, serverMore: true }).lastTapOffer === true
+  && resultCounts({ trueTotal: 9892, shown: 20, fetched: 1500, serverMore: true }).lastTapOffer === false);
+check('hasMore goes FALSE when the last match is on screen (small set)',
+  resultCounts({ trueTotal: 340, shown: 340, fetched: 340, serverMore: false }).hasMore === false);
 check('hasMore is never fabricated: nothing buffered and no server pages → false even if total says more',
   resultCounts({ trueTotal: 500, shown: 200, fetched: 200, serverMore: false }).hasMore === false);
 
@@ -73,17 +88,15 @@ for (const [trueTotal, shown] of [[9892, 100], [9892, 300], [437, 437], [46, 46]
 }
 
 // ── 5. the shipped wiring uses the module (never a re-derived local rule) ───────────────────────
-// «عرض المزيد» was REDEFINED 2026-09-11 (Task 4), then REVISED the same day, before Task 4's
-// one-tap-drains-everything version ever reached production (Task 4 rev. 2): the FIRST tap on a
-// turn reveals only the next 100-boundary — nextBatchTarget is back in loadMore, not retired — and
-// only a SECOND tap (the turn already past its initial-reveal floor) drains to the true end. The
-// honesty check: loadMore reveals exactly `min(target, mergedLen)` on BOTH the instant-reveal path
-// (a new turn started mid-fetch) and the cascade path — the boundary on a first press, the full
-// merge on a later one — never a re-derived number, never a partial count silently mislabelled whole.
-check('nextBatchTarget decides the FIRST-press reveal target (rev. 2 — no longer retired)',
-  /nextBatchTarget\(cur, m\.result\.matchTotal \?\? Infinity\)/.test(code));
-check('a first vs. later press is told apart by the turn\'s OWN reveal state, not new component state',
-  /const alreadyExpandedOnce = cur > initialReveal\(m\.result\);/.test(code));
+// «عرض المزيد» reveals via revealTarget() (owner 2026-09-14, superseding the Task 4 drain model): the
+// FIRST tap on a turn reveals the next 100-boundary, the LAST tap reveals up to the 500 cap, and then
+// the button retires. The honesty check: loadMore reveals exactly `min(target, mergedLen)` on BOTH the
+// instant-reveal path (a new turn started mid-fetch) and the cascade path — the boundary on a first
+// press, min(500,total) on the last — never a re-derived number, never a partial count mislabelled whole.
+check('revealTarget decides the reveal target — first tap → 100, last tap → up to 500 (owner 2026-09-14)',
+  /const target = requestedTarget == null \? revealTarget\(cur, m\.result\.matchTotal \?\? Infinity\) : Math\.min\(SECOND_PAGE_CAP, requestedTarget, m\.result\.matchTotal \?\? Infinity\);/.test(code));
+check('a first vs. later press is still told apart by the turn\'s OWN reveal state, not new component state',
+  /const alreadyExpandedOnce = cur > initialReveal\(m\.result, m\.afCompleted\);/.test(code));
 check('loadMore reveals exactly min(target, mergedLen) on BOTH the instant and cascade reveal paths',
   /setRevealCount\(\(c\) => \(\{ \.\.\.c, \[mid\]: revealTo \}\)\)/.test(code)
   && /cascadeIn\(mid, cur, revealTo\)/.test(code)
@@ -109,7 +122,11 @@ check('no hardcoded 100 stands in for a result count in the closing message bloc
 // function, lifted out of src/store.tsx (it is a closure inside AppProvider and cannot be imported),
 // against a fetch that FAILS.
 const loadMore = (() => {
-  const m = storeSrc.match(/loadMoreListings: async \(q: SearchQuery, offset: number\) => \{[\s\S]*?\n {6}\},/);
+  // The third parameter is OPTIONAL in this pattern on purpose: `seed` arrived with ops_incident #796
+  // (a walk pages with its own rotation seed, not the app's latest) and a lift that hard-codes the old
+  // two-parameter signature dies with "could not lift" on a change that has nothing to do with the
+  // cursor arithmetic measured here — a barrier failing for a reason it is not about.
+  const m = storeSrc.match(/loadMoreListings: async \(q: SearchQuery, offset: number(?:, seed\?: string)?\) => \{[\s\S]*?\n {6}\},/);
   if (!m) {
     console.error('FAIL  could not lift loadMoreListings out of src/store.tsx — was it moved or renamed?');
     process.exit(1);
@@ -120,9 +137,17 @@ const loadMore = (() => {
   // be independent literals, which is how a backstop sized in its comment against 1,500 came to
   // cover a 500-row pager. Handing the lift the REAL constant keeps this check measuring the shipped
   // arithmetic; a stub here would re-open exactly the drift the shared constant closed.
-  const raw = new Function('fetchListingsForQuery', 'runSearch', 'buildPools', 'LOAD_MORE_PAGE_SIZE',
+  // searchSeedRef IS stubbed (unlike LOAD_MORE_PAGE_SIZE above): since 2026-09-26 load-more carries
+  // the search's rotation seed so every page of one walk keeps the same server ORDER BY. That seed
+  // cannot influence the cursor/hasMore arithmetic measured here — it only picks WHICH listings the
+  // (stubbed) fetch would have returned — so a fixed value keeps this lift faithful, and the `seed`
+  // argument is simply not passed below. WHICH seed reaches the fetch is two other contracts, both
+  // owned elsewhere: that it VARIES per search (verify-rotation-seed-is-per-search.ts) and that it is
+  // the paged SET's own rather than the app's latest (verify-loadmore-pages-with-its-own-search-seed.ts,
+  // ops_incident #796).
+  const raw = new Function('fetchListingsForQuery', 'runSearch', 'buildPools', 'LOAD_MORE_PAGE_SIZE', 'searchSeedRef',
     `${js}\nreturn surface.loadMoreListings;`);
-  return ((f: unknown, r: unknown, b: unknown) => raw(f, r, b, LOAD_MORE_PAGE_SIZE)) as
+  return ((f: unknown, r: unknown, b: unknown) => raw(f, r, b, LOAD_MORE_PAGE_SIZE, { current: 'lifted-test-seed' })) as
     (f: unknown, r: unknown, b: unknown) => (q: unknown, offset: number) =>
       Promise<{ listings: unknown[]; nextOffset: number; hasMore: boolean; failed?: boolean }>;
 })();
@@ -181,15 +206,16 @@ const mustCatch = (label: string, caught: boolean) => {
   console.error(`  FAIL  BLIND to: ${label}`);
 };
 
-// (a) the old cap sneaking back as a resultCounts ceiling
+// (a) the NO-CAP behaviour sneaking back — hasMore alive past the 500 cap (the owner's reversal)
 {
-  const capped = (a: { trueTotal: number; shown: number; fetched: number; serverMore: boolean }) => {
+  const uncapped = (a: { trueTotal: number; shown: number; fetched: number; serverMore: boolean }) => {
     const r = resultCounts(a);
-    const reachable = Math.min(a.trueTotal, 100);
-    return { ...r, reachable, hasMore: r.hasMore && a.shown < reachable };
+    // the pre-2026-09-14 hasMore: alive while any match remains, no 500 ceiling.
+    return { ...r, hasMore: a.shown < a.trueTotal && (a.shown < a.fetched || a.serverMore) };
   };
-  mustCatch('a min(trueTotal, 100) ceiling re-imposed on reachability',
-    capped({ trueTotal: 9892, shown: 100, fetched: 1500, serverMore: true }).hasMore === false);
+  mustCatch('hasMore left alive past the 500 cap (the no-lifetime-ceiling behaviour the owner reversed)',
+    uncapped({ trueTotal: 9892, shown: 500, fetched: 1500, serverMore: true }).hasMore === true
+    && resultCounts({ trueTotal: 9892, shown: 500, fetched: 1500, serverMore: true }).hasMore === false);
 }
 // (b) boundary math drifting to cur+100 (110/210 instead of 100/200)
 mustCatch('drifted boundaries (10+100=110 instead of completing the hundred)',
@@ -235,6 +261,60 @@ mustCatch('a genuinely empty page mislabelled as a failure (the retry loop that 
 mustCatch('`rows ?? []` creeping back into loadMoreListings',
   !/if \(rows === null\) return \{ listings: \[\], nextOffset: offset, hasMore: true, failed: true \};/.test(
     storeSrc.replace('if (rows === null) return { listings: [], nextOffset: offset, hasMore: true, failed: true };', 'const r0 = buildPools(rows ?? []);')));
+
+// ── THE SENTENCE STATES THE REAL NUMBER — cumulative on the first tap, REMAINING on the last ──────
+// (owner 2026-09-13 → 2026-09-15). A tap advances to revealTarget(): the next 100-boundary on a FIRST
+// tap, min(500,total) on the LAST. Two DIFFERENT real numbers reach the two messages, never a hardcode:
+//   • FIRST tap → «بعرض لك أول {next}»  — the CUMULATIVE target (revealTarget): 47 on a 47-match
+//     search, 100 on a 9,892-match one. Never a fixed 100 ("funny to say 100 and show 20").
+//   • LAST tap  → «بنعرض لك حتى {rest}» — the REMAINING this tap ADDS on top of the {shown} already on
+//     screen = revealTarget − shown (owner 2026-09-15): 100 shown of 387 → 287, of 9,892 → 400. Never
+//     the cumulative total (which double-counts the 100 already shown), never a fixed 500.
+console.log('\nThe «عرض المزيد» sentence states the real next-tap target\n');
+const i18nSrc = readFileSync(join(root, 'src', 'i18n.tsx'), 'utf8');
+const arOf = (k: string) => i18nSrc.match(new RegExp(`'${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}':\\s*'([^']*)'`))?.[1] ?? '';
+const firstTapKeys = [
+  'I showed you the first {shown} of {total} matching listings. Want me to show more? I will show the first {next}.',
+  'I showed you the first {shown} of {total} matching listings. Want me to show more? I will show the first {next}, or help you find more precise ones.',
+];
+const lastTapKeys = [
+  'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {rest} at once. Want me to show more, or help you find more precise ones?',
+  'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {rest} at once. Want me to show more?',
+];
+for (const k of firstTapKeys) {
+  const ar = arOf(k);
+  check(`first-tap AR carries {next} (cumulative), not a fixed number: "${k.slice(60, 82)}…"`,
+    ar.includes('{next}') && !/\b(100|500)\b/.test(ar), `got: "${ar}"`);
+}
+for (const k of lastTapKeys) {
+  const ar = arOf(k);
+  check(`last-tap AR carries {rest} (the remaining), not a fixed number and not {next}: "${k.slice(55, 77)}…"`,
+    ar.includes('{rest}') && !ar.includes('{next}') && !/\b(100|500)\b/.test(ar), `got: "${ar}"`);
+}
+check('the retired «بعرض لك كل الإعلانات» one-tap-shows-everything promise is gone from every key',
+  !i18nSrc.includes('إذا عرضت لك المزيد بعرض لك كل الإعلانات'));
+check('agent.tsx fills {next} from revealTarget(endShown, endTotal) — the first-tap cumulative target',
+  /next: revealTarget\(rc\.endShown, rc\.endTotal\)/.test(code));
+check('agent.tsx fills {rest} from revealTarget(endShown, endTotal) − endShown — the last-tap remaining',
+  /rest: Math\.max\(0, revealTarget\(rc\.endShown, rc\.endTotal\) - rc\.endShown\)/.test(code));
+// EXECUTED — first-tap {next} = revealTarget (cumulative); last-tap {rest} = revealTarget − shown.
+for (const [shown, total] of [[13, 437], [13, 47], [10, 9892]] as const) {
+  check(`first tap: shown ${shown} of ${total} → «first ${revealTarget(shown, total)}»`,
+    revealTarget(shown, total) === Math.min(BROWSE_BATCH, total));
+}
+for (const [shown, total] of [[100, 387], [100, 9892], [100, 340], [100, 437]] as const) {
+  const rest = Math.max(0, revealTarget(shown, total) - shown);
+  check(`last tap: shown ${shown} of ${total} → «up to ${rest} more» (= min(500,total) − shown)`,
+    rest === Math.min(SECOND_PAGE_CAP, total) - shown);
+}
+mustCatch('a hardcoded 100 standing in for the first-tap target on a 47-match search (the "funny" case)',
+  revealTarget(13, 47) !== 100);
+mustCatch('the last tap stating the cumulative TOTAL (387) instead of the remaining (287) is a different number',
+  (revealTarget(100, 387) - 100) !== revealTarget(100, 387));
+mustCatch('a hardcoded 500 standing in for a 340-match last tap (remaining is 240, not 500)',
+  (revealTarget(100, 340) - 100) !== 500);
+mustCatch('a last tap claiming it adds the whole set (9,892) when it only adds 400 to reach the cap',
+  (revealTarget(100, 9892) - 100) !== 9892);
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }

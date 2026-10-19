@@ -55,8 +55,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize  # noqa: E402
-
+from scrapers.common import db, normalize, sold_pin  # noqa: E402
 BASE = "https://awaalun.com"
 LIST_API = f"{BASE}/wp-json/wp/v2/rtcl_listing"
 WORKERS = int(os.environ.get("AWAL_WORKERS", "5"))
@@ -164,11 +163,75 @@ CLASS_LIST_RE = re.compile(r'class="([^"]*\brtcl-listing-item\b[^"]*)"')
 
 _local = threading.local()
 
+# ── Handshake negotiation (docs/ops/SCRAPING_ENGINEER.md step 5a) ─────────────────────────────────
+# awal failed every crawl from 2026-09-24 to 2026-09-27 with «stop=http_status page=1 | HTTP 500»
+# and was set dormant, but the crawl had only ever asked with ONE fingerprint (chrome124), directly,
+# once. The rulebook's bar for calling a site "down on their side" is 2+ browser profiles AND the
+# residential proxy; this crawl could never have met it, so "down" was an assumption. The list
+# endpoint is now probed with each profile on a fresh session, then through the proxy when the
+# workflow provides one, and the route that answers is used for the whole run (list AND detail
+# pages). When none answers, every attempt — with the start of the body the source sent — lands in
+# scrape_runs.notes, so "their server is erroring" and "they refused our handshake" read differently.
+PROBE_PROFILES = ("chrome124", "safari17_0", "firefox133")
+_ROUTE: dict = {"profile": "chrome124", "proxies": None}
+
+
+def _proxies() -> Optional[dict]:
+    url = (os.environ.get("AWAL_PROXY_URL") or os.environ.get("WASALT_PROXY_URL") or "").strip()
+    return {"http": url, "https": url} if url else None
+
+
+def _make_session(profile: str, proxies: Optional[dict] = None) -> cc.Session:
+    s = cc.Session(impersonate=profile, proxies=proxies)   # impersonate OWNS the User-Agent
+    s.headers.update({
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
+    })
+    return s
+
+
+def negotiate_list_session(diag: dict, *, make=_make_session, proxies: Optional[dict] = None,
+                           pause: float = 2.0) -> Optional[cc.Session]:
+    """Return a session whose route the list endpoint answers with a JSON list, else None.
+
+    Tries PROBE_PROFILES directly, then the same profiles through `proxies` (if any). Each attempt is
+    recorded in diag["probes"] as "<profile>[+proxy]:<outcome>"; a non-200 outcome carries the first
+    40 visible characters of the body so the ledger shows what the source actually said."""
+    probes: list[str] = diag.setdefault("probes", [])
+    routes = [(prof, None) for prof in PROBE_PROFILES]
+    if proxies:
+        routes += [(prof, proxies) for prof in PROBE_PROFILES]
+    for i, (prof, px) in enumerate(routes):
+        tag = prof + ("+proxy" if px else "")
+        if i and pause:
+            time.sleep(pause)
+        sess = make(prof, px)
+        try:
+            r = sess.get(f"{LIST_API}?per_page=1&page=1", timeout=60,
+                         headers={"Accept": "application/json"})
+        except Exception as e:                          # noqa: BLE001 — recorded, next route
+            probes.append(f"{tag}:{type(e).__name__}")
+            continue
+        if r.status_code == 200:
+            try:
+                ok = isinstance(r.json(), list)
+            except Exception:                           # noqa: BLE001 — not JSON: parked/shell
+                ok = False
+            if ok:
+                probes.append(f"{tag}:200")
+                _ROUTE.update(profile=prof, proxies=px)
+                return sess
+            probes.append(f"{tag}:200 not a JSON list")
+            continue
+        head = _clean(getattr(r, "text", "") or "")[:40]
+        probes.append(f"{tag}:HTTP {r.status_code}" + (f" «{head}»" if head else ""))
+    return None
+
 
 def _session() -> cc.Session:
     s = getattr(_local, "s", None)
     if s is None:
-        s = cc.Session(impersonate="chrome124")
+        s = cc.Session(impersonate=_ROUTE["profile"], proxies=_ROUTE["proxies"])
         s.headers.update({
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
@@ -213,21 +276,45 @@ def _redact(text: Optional[str]) -> Optional[str]:
 
 
 # ── REST listing enumeration ──────────────────────────────────────────────────
-def fetch_listings(s: cc.Session) -> list[dict]:
-    """Every rtcl_listing via the default WP REST. Returns the raw post dicts."""
+def fetch_listings(s: cc.Session, diag: Optional[dict] = None) -> list[dict]:
+    """Every rtcl_listing via the default WP REST. Returns the raw post dicts.
+
+    `diag`, when passed, is filled with WHY enumeration stopped. Five very different things used to
+    leave this function by the same door — all of them returning `[]`:
+
+        transport died · non-200 · 200 but not JSON (parked) · 200 but not a list · 200 with []
+
+    Only the last one means "the source itself published zero listings". The other four mean WE
+    FAILED TO READ IT, which is UNKNOWN and must never be reported as an empty answer (AGENTS.md,
+    "A FAILED FETCH IS NOT AN EMPTY ANSWER"). The caller's note used to say
+    "(source down, parked, or blocked)" — three guesses, listed because the evidence that separates
+    them had already been discarded here. awal has now failed three consecutive runs on exactly
+    that sentence, and it is still unknown which of the five it is.
+
+    Nothing about the enumeration changes: every `break` breaks where it broke before.
+    """
+    d = diag if diag is not None else {}
+    d.setdefault("stop", "ok")
+    d.setdefault("pages_ok", 0)
     out: list[dict] = []
     page = 1
     while True:
+        last_exc: Optional[Exception] = None
         for attempt in range(3):
             try:
                 r = s.get(f"{LIST_API}?per_page=50&page={page}", timeout=60,
                           headers={"Accept": "application/json"})
                 break
-            except Exception:
+            except Exception as e:                      # noqa: BLE001 — recorded, then re-reported
+                last_exc = e
                 time.sleep(2 * (attempt + 1))
         else:
+            d.update(stop="transport", page=page,
+                     detail=f"3 attempts raised, last {type(last_exc).__name__}: "
+                            f"{str(last_exc)[:160]}")
             break
         if r.status_code != 200:
+            d.update(stop="http_status", page=page, detail=f"HTTP {r.status_code}")
             break
         # A 200 is not a promise of JSON: on 2026-07-27 the domain was parked and every page
         # answered 200 text/html with a 133-byte redirect stub, so the bare r.json() raised
@@ -235,19 +322,58 @@ def fetch_listings(s: cc.Session) -> list[dict]:
         # "no more real pages" signal and let the caller's 0-post check fail the run cleanly.
         try:
             arr = r.json() or []
-        except Exception:
+        except Exception as e:                          # noqa: BLE001 — recorded, then re-reported
+            body = getattr(r, "text", "") or ""
+            ctype = (getattr(r, "headers", None) or {}).get("content-type", "?")
+            d.update(stop="not_json", page=page,
+                     detail=f"200 but body is not JSON ({ctype}, {len(body)} bytes, "
+                            f"{type(e).__name__}) — the 2026-07-27 parked-page shape was "
+                            f"200 text/html at 133 bytes",
+                     body_head=body[:200])
             break
         # WP can answer 200 with an ERROR OBJECT (e.g. rest_post_invalid_page_number) instead of a
         # list; `out += dict` would extend with its string KEYS and crash `.get()` later (CI 2026-07-01).
         # A non-list payload means "no more real pages" — stop and keep what we have.
         if not isinstance(arr, list):
+            code = arr.get("code") if isinstance(arr, dict) else None
+            d.update(stop="not_a_list", page=page,
+                     detail=f"200 but payload is {type(arr).__name__}"
+                            + (f" (WP error code {code!r})" if code else ""))
+            break
+        if page == 1 and not arr:
+            # The ONE shape that is an answer rather than a failure: the source answered correctly
+            # and published nothing. Recorded distinctly so it is never read as a fetch failure.
+            d.update(stop="empty_first_page", page=page,
+                     detail="200 with an EMPTY list on page 1 — the SOURCE published zero listings")
             break
         arr = [p for p in arr if isinstance(p, dict)]
         out += arr
+        d["pages_ok"] = page
         if len(arr) < 50:
             break
         page += 1
     return out
+
+
+def why_no_listings(diag: dict) -> str:
+    """One line naming which of the five cases emptied the crawl, for scrape_runs.notes.
+
+    The distinction that matters to a responder is the first word: `empty_first_page` is the source
+    speaking, everything else is us failing to hear it. UNKNOWN is never DEAD (LISTING_LIVENESS.md),
+    so no caller may deactivate anything on the strength of the other four.
+    """
+    stop = diag.get("stop", "ok")
+    detail = diag.get("detail", "")
+    if diag.get("probes"):
+        detail = (detail + " | " if detail else "") + "probes: " + "; ".join(diag["probes"])
+    verdict = ("SOURCE-TRUTH: the site answered and published nothing"
+               if stop == "empty_first_page" else
+               "UNKNOWN: we could not read the source — this is NOT evidence it is empty")
+    page = diag.get("page")
+    return (f"stop={stop}"
+            + (f" page={page}" if page else "")
+            + (f" | {detail}" if detail else "")
+            + f" | {verdict}")
 
 
 def fetch_detail(link: str) -> tuple[Optional[str], str]:
@@ -326,9 +452,24 @@ def _images(body: Optional[str]) -> list[str]:
     return out[:25]
 
 
-def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, bool]:
+def sold_state(body: Optional[str], post_id: Any) -> Optional[bool]:
+    """True = sold, False = on offer, None = NOT READ. The sold flag lives only on the ad's own page,
+    as the `is-sold` class of its own listing element (`post-<id>`); the REST feed never carries it.
+
+    Measured 2026-10-02 on 75 detail pages: every page has exactly one such element and it is the
+    ad's own; `is-sold` is on 24 of 24 hidden ads and appears nowhere at all on 51 of 51 live ones.
+    An unfetched page, or one without that element, says nothing — and nothing is never "on offer"."""
+    for cls in CLASS_LIST_RE.findall(body or ""):
+        tokens = cls.split()
+        if not post_id or f"post-{post_id}" in tokens:
+            return "is-sold" in tokens
+    return None
+
+
+def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, Optional[bool]]:
     """Combine the REST post `p` with its detail-page `body` (images + sold flag) into a canonical
-    row. Returns (row, category, gone)."""
+    row. Returns (row, category, gone); gone is None when the page's sold flag could not be read —
+    main() must not upsert such a row (see sold_state)."""
     title_raw = _clean((p.get("title") or {}).get("rendered", ""))
     content = _clean((p.get("content") or {}).get("rendered", ""))
     link = p.get("link")
@@ -417,11 +558,8 @@ def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, bool
     title = _redact(title_raw) or title_raw
     description = _redact(content)
 
-    # sold detection: the detail page's listing-item element carries an `is-sold` class.
-    gone = False
-    if body:
-        m = CLASS_LIST_RE.search(body)
-        gone = bool(m and "is-sold" in m.group(1))
+    # sold detection: the detail page's own listing-item element carries an `is-sold` class.
+    gone = sold_state(body, p.get("id"))
 
     # deterministic, globally-unique ad number (md5 of slug/id) — stable across runs, upserts on it.
     key = _slug_or_id(p)
@@ -443,7 +581,7 @@ def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, bool
         "ad_number": f"AWL{ad_id}",
         "listing_url": link,
         "source": "Awal",
-        "active": not gone,
+        "active": None if gone is None else not gone,   # None = unread; main() never upserts it
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": int(round(area)) if area else None,
@@ -463,10 +601,23 @@ def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, bool
         "photo_urls": _images(body),
         "additional_info": info,
     }
+    # awal publishes no structured amenity field, but its ad text lists the rooms («مجلس – مطبخ – 2 غرف»,
+    # «يوجد مدخل كراج»): YES-only from the ad's own words (ADVANCED_FILTER_SOURCE_TRUTH §2), 2026-10-17.
+    row.update(prose_answers((p.get("content") or {}).get("rendered", "")))
     return row, category, gone
 
 
-def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+# The amenity columns search reads (listing_extra_attrs); prose may answer only these, YES-only.
+_PROSE_COLS = ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "private_entrance")
+
+
+def prose_answers(content_html: Optional[str]) -> dict[str, bool]:
+    yes = normalize.prose_amenities_yes(normalize.html_block_lines(content_html))
+    return {c: True for c in _PROSE_COLS if yes.get(c)}
+
+
+def _pin_sold_inactive(table: str, ad_numbers: list[str],
+                       seen_ad_numbers: list[str]) -> None:
     """Make source-confirmed SOLD rows survive the nightly auto_recover_false_inactive() sweep.
 
     That pg_cron job (05:20 UTC) re-activates any active=false row with
@@ -477,13 +628,18 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     prune_unseen() never undoes this: it only selects active=true rows and only updates ids NOT
     in its seen set. When a sold listing is later relisted, its next upsert carries active=true
     and the upsert's own missing_count=0 reset applies — the pin is only written for ids that are
-    sold THIS crawl."""
-    for i in range(0, len(ad_numbers), 200):
-        db._execute(
-            db.sb().table(table).update({"active": False, "missing_count": 3})
-            .in_("ad_number", ad_numbers[i:i + 200]),
-            what=table + ".sold_pin",
-        )
+    sold THIS crawl.
+
+    The `seen_ad_numbers` half is what makes this oracle three-valued instead of one-way: the same
+    status field that publishes a removal also publishes the reversal, and until 2026-09-23 the
+    reversal was read, used, and thrown away — leaving ops_lifecycle_false_resurrection() with a
+    GONE latest verdict that no amount of correct behaviour could clear. See scrapers/common/
+    sold_pin.py. It writes evidence only: never active, never missing_count, never
+    last_verified_alive_at.
+    """
+    sold_pin.pin_source_confirmed_gone(
+        table, ad_numbers, oracle="awal.sold_pin.detail_is_sold_class", seen_ad_numbers=seen_ad_numbers,
+    )
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────────
@@ -494,7 +650,6 @@ def main() -> int:
                     help="small validation run: upsert only the first N parsed listings, NO prune")
     args = ap.parse_args()
 
-    s = session()
     # begin_run BEFORE the REST fetch (2026-07-28 audit, same defect jazwtn fixed on 07-27): when
     # awaalun.com was parked on 07-27 the unguarded r.json() crashed the process before begin_run
     # ever ran, so TWO days of failures produced ZERO scrape_runs rows — run-based monitoring saw a
@@ -507,8 +662,18 @@ def main() -> int:
     sold_com: list[str] = []
     gone_ct = 0
     seen = 0
+    # In the feed, but the ad's own page (the only place the sold flag lives) was not read this run.
+    # Until 2026-10-02 such a row was upserted active=True, which un-hid a pinned SOLD ad on one
+    # failed fetch. Now it is not written at all; it still counts as present for prune, because the
+    # feed did list it and an unread page is our failure, not the ad's absence.
+    unread: dict[str, set[str]] = {"residential": set(), "commercial": set()}
     try:
-        posts = fetch_listings(s)
+        diag: dict = {}
+        s = negotiate_list_session(diag, proxies=_proxies())
+        print(f"Awal: list route probes — {'; '.join(diag.get('probes', []))}", flush=True)
+        if s is None:
+            diag.update(stop="no_route", detail="no profile or route answered the list endpoint")
+        posts = fetch_listings(s, diag) if s is not None else []
         # WP REST occasionally returns error strings/fragments inside the list (seen 2026-07-01:
         # a str where a post object was expected → AttributeError crash at the link comprehension).
         # Degrade to skipping the junk items; if NOTHING valid remains, the 0-post raise below
@@ -517,7 +682,10 @@ def main() -> int:
         if not posts:
             # Raise rather than return: the except-arm owns end_run(ok=False), so a dead/parked
             # source is recorded as a failed run instead of a silent exit.
-            raise RuntimeError("REST returned no listings (source down, parked, or blocked)")
+            # Was: "(source down, parked, or blocked)" — three guesses in place of the one fact the
+            # fetch already had. Now it names which door the crawl left by, so the next responder
+            # reads a measurement instead of re-deriving it from an ambiguous sentence.
+            raise RuntimeError(f"REST returned no listings — {why_no_listings(diag)}")
         if args.limit:
             posts = posts[: args.limit]
         print(f"Awal: {len(posts)} listings from WP REST ({WORKERS} workers)"
@@ -538,6 +706,9 @@ def main() -> int:
                 gone_ct += 1
             if args.type != "all" and cat != args.type:
                 continue
+            if gone is None:
+                unread[cat].add(row["ad_number"])
+                continue
             (com if cat == "commercial" else res).append(row)
             if gone:
                 (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
@@ -549,10 +720,10 @@ def main() -> int:
             db.upsert_awal_commercial_batch(com)
         # Pin sold rows immediately after the upsert (which reset their missing_count to 0), so
         # the 05:20 auto-recover job can never flip them back to active. See _pin_sold_inactive.
-        if sold_res:
-            _pin_sold_inactive("awal_residential_listings", sold_res)
-        if sold_com:
-            _pin_sold_inactive("awal_commercial_listings", sold_com)
+        _pin_sold_inactive("awal_residential_listings", sold_res,
+                           [r["ad_number"] for r in res])
+        _pin_sold_inactive("awal_commercial_listings", sold_com,
+                           [r["ad_number"] for r in com])
 
         if args.limit:
             print(f"✓ Awal VALIDATION: {len(res)} residential + {len(com)} commercial upserted "
@@ -570,17 +741,31 @@ def main() -> int:
         # above; prune_unseen never touches them (it only reads active=true rows and only updates
         # ids missing from the seen set), so passing their ad_numbers here is harmless.
         pruned = 0
-        for tbl, rows_seen in (("awal_residential_listings", res),
-                               ("awal_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Awal")
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+        # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+        # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+        # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+        superseded = db.retire_superseded_siblings(
+            res_table="awal_residential_listings", com_table="awal_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source="Awal")
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
+        for tbl, rows_seen, cat in (("awal_residential_listings", res, "residential"),
+                                    ("awal_commercial_listings", com, "commercial")):
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen} | unread[cat], source="Awal")
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
                 pruned += n
+        n_unread = len(unread["residential"]) + len(unread["commercial"])
         print(f"✓ Awal: {len(res)} residential + {len(com)} commercial upserted, "
-              f"{gone_ct} sold (inactive), {pruned} stale pruned")
+              f"{gone_ct} sold (inactive), {n_unread} sold-flag unread (not written), "
+              f"{pruned} stale pruned")
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
-                   notes=f"sold={gone_ct} pruned={pruned}", check_tables=["awal_residential_listings", "awal_commercial_listings"])
+                   notes=f"sold={gone_ct} pruned={pruned} status_unread={n_unread}", check_tables=["awal_residential_listings", "awal_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

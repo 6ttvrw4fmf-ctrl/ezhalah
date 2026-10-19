@@ -115,8 +115,14 @@ export function directionVariantsFrom(observed: Iterable<string>): Record<string
   return map;
 }
 
+/** The «Raw Land» filter token; matched against the index's unit_subtype_ar TAG, not type_ar. */
+export const RAW_LAND_TAG = 'أرض خام';
+
 export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string; unhandled: string[] } {
   const parts = ['production_ready=is.true'];
+  // Mixture params (owner 2026-10-03) are each ONE disjunction; collected and emitted once at the end so
+  // two of them never become two competing `or=` keys.
+  const orGroups: string[] = [];
   const unhandled: string[] = [];
 
   // `production_ready=is.true` IS NOT THE WHOLE ADMISSION RULE (found live 2026-09-01).
@@ -199,7 +205,10 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
     const m = macros[type];
     if (m === undefined) return true;              // unknown to the reference table → leave as-is
     if (m === category) return true;
-    return m === 'both' && arm === 'A';
+    // A `both`-macro type is permitted on EITHER arm; which SOURCE TABLE it may come from is the
+    // separate question, and `typeConjunct` below answers it — exactly as production does. See the
+    // arm-B block for why this used to read `&& arm === 'A'` and why that was wrong (2026-09-14, #9).
+    return m === 'both';
   };
   if (category && !macros) unhandled.push(`p_category=${category} (no typeMacros supplied — category purity cannot be applied)`);
 
@@ -244,6 +253,70 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
   // wrong number for another.
   const purityTypes = (arm: 'A' | 'B'): string[] | null =>
     (category && macros) ? Object.keys(macros).filter((t) => keepFor(t, arm)) : null;
+
+  // ── A `both`-MACRO TYPE IS RESOLVED BY SOURCE-TABLE KIND, AND ARM A IS NOT ALWAYS ONE KIND ──────
+  // (found live 2026-09-14, routine #10, by the untyped-category journey ops_incident #176 added.)
+  //
+  // The split above is sound only under the reason stated for it: *"scope A reads the category's OWN
+  // tables, so macro === 'both' survives purity there."* That premise is FALSE for the commonest
+  // request shape in the product. On a category search with no نوع picked the app sends ONE scope —
+  // `p_tables2`/`p_types2` null, so there is no arm B — and `p_tables` carrying ALL 88 tables, BOTH
+  // kinds. Arm A is then not the category's own tables at all, and every `both`-macro type leaks in
+  // from the wrong kind.
+  //
+  // MEASURED on production, الرياض / بيع / Residential, from the app's own captured request:
+  //   production (RPC total_count, and the count on screen) ......... 23,400
+  //   this oracle before the fix ................................... 23,410
+  //   missing 10 · extra 0 — all ten `type_ar = «عمارة»` (macro `both`) in aldarim_COMMERCIAL_listings
+  //   on a RESIDENTIAL search. Production correctly excluded them; the oracle wrongly kept them.
+  //
+  // This is the SAME defect this module's header already records finding once
+  // (dealapp_commercial_listings:8218315, «عمارة», 708 vs 707) and believed it had fixed. The repair
+  // read as complete because its mechanism was stated as a premise nobody tested: every journey in
+  // the daily corpus narrowed to a SPECIFIC نوع, so no `both`-macro type ever reached arm A on a
+  // mixed-kind table set. A fix whose correctness depends on an untested request shape is not a fix.
+  //
+  // WHY IT MATTERS BEYOND THE TEN ROWS: if production ever started leaking commercial-table rows
+  // into a Residential search, the oracle would have AGREED with the leak. That is PART 2.2's
+  // "agrees with it for the wrong reason" — the green over the exact regression this exists to catch.
+  //
+  // The restriction is expressed with `like` rather than a table list so it holds identically when
+  // `p_tables` is null (which also means "all tables, both kinds").
+  const KIND_SUFFIX: Record<string, string> = { Residential: '_residential_listings', Commercial: '_commercial_listings' };
+  /** Tables of a kind OTHER than the requested category are present in this list (or it is null = all). */
+  const mixedKind = (tables: string[] | null | undefined): boolean => {
+    if (!category || !KIND_SUFFIX[category]) return false;
+    if (tables == null) return true;
+    return tables.some((t) => !t.endsWith(KIND_SUFFIX[category]));
+  };
+  /**
+   * The type predicate for an arm, honouring source-table kind for `both`-macro types.
+   * Returns a single PostgREST conjunct. When no `both`-macro type is in play, or the arm really is
+   * one-kind (the two-scope case this module already handled), it is byte-identical to the old
+   * `type_ar.in.(…)` — so this changes NOTHING except the mixed-kind case it was written for.
+   */
+  // RAW LAND IS A TAG, NOT A TYPE (🔬 AF engineer, 2026-10-12). The «Raw Land» box sends the token «أرض خام»,
+  // which no index row stores as type_ar: a raw plot keeps its source type and is TAGGED
+  // unit_subtype_ar = 'أرض خام'. Production's type arm reads (live location_search_candidates_ar)
+  //     s.type_ar = any(p_types) or (s.unit_subtype_ar = 'أرض خام' and 'أرض خام' = any(p_types))
+  // and this oracle emitted the first half only, so it counted 0 where the RPC counted the tagged plots. It
+  // agreed while no row was tagged; once 281 were, every Raw Land cell of af-live-truth-check went red
+  // (run 38215288912, «base count RPC == oracle» rpc=11 oracle=0 in جدة) — a tool undercount, not a product bug.
+  const typeConjunct = (permitted: string[], tables: string[] | null | undefined): string => {
+    const c = typeConjunctNoTag(permitted, tables);
+    return permitted.includes(RAW_LAND_TAG) ? `or(${c},unit_subtype_ar.eq.${enc(`"${RAW_LAND_TAG}"`)})` : c;
+  };
+  const typeConjunctNoTag = (permitted: string[], tables: string[] | null | undefined): string => {
+    const plain = `type_ar.in.(${permitted.map((x) => enc(`"${x}"`)).join(',')})`;
+    if (!macros || !category || !mixedKind(tables)) return plain;
+    const both = permitted.filter((t) => macros[t] === 'both');
+    if (!both.length) return plain;
+    const rest = permitted.filter((t) => macros[t] !== 'both');
+    const bothClause = `and(type_ar.in.(${both.map((x) => enc(`"${x}"`)).join(',')}),source_table.like.*${KIND_SUFFIX[category]})`;
+    // Every permitted type was `both`: there is no unrestricted half to or() with.
+    if (!rest.length) return bothClause;
+    return `or(type_ar.in.(${rest.map((x) => enc(`"${x}"`)).join(',')}),${bothClause})`;
+  };
   /** Arm A's conjuncts, honouring null-vs-empty on BOTH lists. Empty ⇒ the arm is unrestricted. */
   const armAParts = (): string[] => {
     const rawTables = reqBody.p_tables as string[] | null | undefined;
@@ -251,10 +324,10 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
     const out: string[] = [];
     if (rawTables != null) out.push(`source_table.in.(${rawTables.map((x) => enc(x)).join(',')})`);
     if (rawTypes != null) {
-      out.push(`type_ar.in.(${rawTypes.filter((t) => keepFor(t, 'A')).map((x) => enc(`"${x}"`)).join(',')})`);
+      out.push(typeConjunct(rawTypes.filter((t) => keepFor(t, 'A')), rawTables));
     } else {
       const allowed = purityTypes('A');
-      if (allowed) out.push(`type_ar.in.(${allowed.map((x) => enc(`"${x}"`)).join(',')})`);
+      if (allowed) out.push(typeConjunct(allowed, rawTables));
     }
     return out;
   };
@@ -262,10 +335,48 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
   if (hasScopeB) {
     const aParts = armAParts();
     const t2 = (types2 as string[]).filter((t) => keepFor(t, 'B'));
-    // Scope B can legitimately empty out — every requested type being `both`-macro means the
-    // commercial arm contributes nothing, which is what production computes too.
+    // ── ARM B IS NOT ALWAYS "THE OTHER CATEGORY'S TABLES" EITHER ────────────────────────────────
+    // (found live 2026-09-14, routine #9 red team — production_truth; the ARM-B MIRROR of the arm-A
+    // defect fixed hours earlier in ops_incident #270, whose repair did not check this variant.)
+    //
+    // `keepFor(t,'B')` used to end `return m === 'both' && arm === 'A'`, dropping every `both`-macro
+    // type from arm B outright. The premise stated for that, in this module's own header, is *"scope
+    // B reads the OTHER category's tables, so ONLY macro === category survives"*. That premise is
+    // FALSE for the broad «فئة تجاري» search: searchTableScope() (src/data/remote.ts) sets
+    // `p_tables2 = the COMMERCIAL tables` and `p_types2 = COMMERCIAL_TYPE_AR_COM`, which the product
+    // deliberately defines as "commercial tables: incl عمارة" (remote.ts:1280) — because in a
+    // commercial table عمارة IS a commercial building. Arm B there is the category's OWN kind.
+    //
+    // Production agrees, and says so in one place for BOTH arms: af_eligibility_clause() applies
+    // category purity to the ROW, not per-arm — `k.macro = 'both' AND s.source_table like
+    // '%\_commercial\_listings'` for p_category='Commercial', whichever arm matched the row.
+    //
+    // MEASURED on production, حائل / بيع / فئة تجاري with no نوع, from the app's own captured request:
+    //   production (RPC total_count, and the count on screen) ........... 330
+    //   this oracle before the fix ...................................... 291
+    //   missing 0 · extra 39 — every one of them `type_ar = «عمارة»` in alobid_/mustqr_
+    //   commercial_listings. Production correctly INCLUDED them; the oracle wrongly dropped them.
+    //
+    // WHY IT IS A FALSE-GREEN MECHANISM AND NOT MERELY A FALSE RED. Today it reddens a correct
+    // production. But let production regress so those rows stop being recovered from arm B and it
+    // would return 291 too — and this oracle would report AGREEMENT over a silent loss of 70 rows
+    // across every broad-Commercial search. That is PART 2.2's "agrees with it for the wrong reason".
+    //
+    // WHY NO JOURNEY SAW IT: the only broad-Commercial cell in the daily corpus is Rent-Annual/الرياض,
+    // and of the 70 عمارة rows in commercial tables just 2 are الرياض/إيجار. The 56 BUY rows — 39 of
+    // them حائل — were never driven. Same shape as #270: a premise left untested by the corpus.
+    //
+    // The repair needs no new machinery: `typeConjunct` already pins a `both` type to the requested
+    // category's kind whenever the arm carries tables of another kind, and leaves it unrestricted
+    // when the arm is genuinely one-kind. Arm B now goes through it, so
+    //   • broad Commercial (tables2 = commercial) → عمارة unrestricted → the 39 rows are kept;
+    //   • Residential misfile-recovery (tables2 = commercial) → عمارة pinned to `%_residential_
+    //     listings`, contradicting `source_table.in.(commercial…)` → contributes nothing, which is
+    //     what production computes too.
+    // Scope B can still legitimately empty out, and an empty arm is still `null`, never an empty
+    // in-list (the ops_incident #270-era rule above).
     const b = t2.length
-      ? `and(source_table.in.(${(tables2 as string[]).map((x) => enc(x)).join(',')}),type_ar.in.(${t2.map((x) => enc(`"${x}"`)).join(',')}))`
+      ? `and(source_table.in.(${(tables2 as string[]).map((x) => enc(x)).join(',')}),${typeConjunct(t2, tables2 as string[])})`
       : null;
     // An arm with NO conjuncts is unconditionally true, so `A or B` is true and the whole scope
     // predicate drops out — pushing nothing is the correct translation, never an empty in-list.
@@ -282,7 +393,10 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
     // category-purity clause. That over-counts instead of under-counting, and an oracle that is
     // wrong in either direction is not an independent reading.
     const allowed = purityTypes('A');
-    if (allowed) parts.push(`type_ar=in.(${allowed.map((x) => enc(`"${x}"`)).join(',')})`);
+    if (allowed) {
+      const c = typeConjunct(allowed, reqBody.p_tables as string[] | null | undefined);
+      parts.push(c.startsWith('type_ar.in.(') ? `type_ar=in.(${allowed.map((x) => enc(`"${x}"`)).join(',')})` : `or=(${c.replace(/^or\(/, '').replace(/\)$/, '')})`);
+    }
   }
 
   // ── NUMERIC NARROWING, TRANSLATED VERBATIM FROM af_eligibility_clause() (2026-09-01) ────────────
@@ -376,7 +490,17 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
     switch (k) {
       case 'p_deal': parts.push(`deal_ar=eq.${enc(v)}`); break;
       case 'p_tables': if (!hasScopeB) parts.push(`source_table=in.(${(v as string[]).map((x) => enc(x)).join(',')})`); break;
-      case 'p_types': if (!hasScopeB) parts.push(`type_ar=in.${inList((v as string[]).filter((t) => keepFor(t, 'A')))}`); break;
+      case 'p_types': {
+        if (hasScopeB) break;
+        const permitted = (v as string[]).filter((t) => keepFor(t, 'A'));
+        const c = typeConjunct(permitted, reqBody.p_tables as string[] | null | undefined);
+        // `typeConjunct` returns a bare `type_ar.in.(…)` unless a `both`-macro type needs its
+        // source-table kind pinned; only then does it become a logic tree needing `or=`/`and=`.
+        if (c.startsWith('type_ar.in.(')) parts.push(`type_ar=in.${inList(permitted)}`);
+        else if (c.startsWith('or(')) parts.push(`or=(${c.slice(3, -1)})`);
+        else parts.push(`and=(${c.slice(4, -1)})`);
+        break;
+      }
       case 'p_tables2': case 'p_types2': break; // folded into the or=() above when hasScopeB
       case 'p_region_ids': parts.push(`region_id=in.(${(v as number[]).join(',')})`); break;
       // A CITY IS NOT MATCHED BY ITS LABEL ALONE (found live 2026-09-06, routine #9 red team).
@@ -481,15 +605,17 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
         // wrongly filter Buy rows by a rent column. The app never sends a period without
         // p_deal='إيجار' (rentPeriodParam returns null otherwise), so this is refused, not modelled.
         if (reqBody.p_deal !== 'إيجار') { unhandled.push(`p_rent_period=${v} with p_deal=${JSON.stringify(reqBody.p_deal ?? null)} (the clause only applies a period to Rent rows)`); break; }
-        if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`);
-        else if (v === 'شهري') parts.push(`payment_monthly=is.true&rent_now_pay_later=not.is.true`);
+        // Every period arm also admits price on request (price_annual NULL) — the one line the clause
+        // gained 2026-09-28 (owner: «سعر عند الطلب … both monthly and yearly»).
+        if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`);
+        else if (v === 'شهري') parts.push(`or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),price_annual.is.null)`);
         // BOTH periods (rentPeriod 'both' → 'كلاهما'), translated VERBATIM from the clause (2026-09-02):
         //   p_rent_period = 'كلاهما' and (s.payment_monthly = true
         //                                 or s.rent_period_ar = 'سنوي'
         //                                 or (s.rent_period_ar = 'شهري' and coalesce(s.rent_now_pay_later,false)))
         // It is the union of the two single-period arms — NOT "no period filter": a rent row whose
         // source published no period at all stays OUT (R1.5.1; migration rent_period_both_monthly_and_annual).
-        else if (v === 'كلاهما') parts.push(`or=(payment_monthly.is.true,rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`);
+        else if (v === 'كلاهما') parts.push(`or=(payment_monthly.is.true,rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`);
         else unhandled.push(`p_rent_period=${v}`);
         break;
       // beds/bath/price/floor are handled ABOVE, where the clause's exact-vs-min and
@@ -536,6 +662,37 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       case 'p_rating_min': parts.push(`rating=gte.${v}`); break;
       case 'p_reviews_min': parts.push(`reviews_count=gte.${v}`); break;
       case 'p_unit_subtypes': parts.push(`unit_subtype_ar=in.${inList(v as string[])}`); break;
+      // SEVERAL ANSWERS = THEIR UNION (owner 2026-10-03, migration af_every_question_multi_select_unions).
+      // Bucket edges restated from the age/rating questions' own option meanings, not from our SQL.
+      case 'p_age_buckets': {
+        const AGE_OR: Record<string, string> = {
+          new: 'property_age.eq.0', '1_2': 'and(property_age.gte.1,property_age.lte.2)',
+          '3_5': 'and(property_age.gte.3,property_age.lte.5)', '6_9': 'and(property_age.gte.6,property_age.lte.9)',
+          '10p': 'property_age.gte.10',
+        };
+        const ks = v as string[];
+        const bad = ks.filter((k) => !AGE_OR[k]);
+        if (bad.length) { unhandled.push(`p_age_buckets:${bad.join('|')}`); break; }
+        if (ks.length) orGroups.push(ks.map((k) => AGE_OR[k]).join(','));
+        break;
+      }
+      case 'p_rating_buckets': {
+        const RATE_OR: Record<string, string> = {
+          '9.5': 'rating.gte.9.5', '9.0': 'rating.gte.9', '9.0_rc10': 'and(rating.gte.9,reviews_count.gte.10)',
+        };
+        const ks = v as string[];
+        const bad = ks.filter((k) => !RATE_OR[k]);
+        if (bad.length) { unhandled.push(`p_rating_buckets:${bad.join('|')}`); break; }
+        if (ks.length) orGroups.push(ks.map((k) => RATE_OR[k]).join(','));
+        break;
+      }
+      // furnished = any([true,false]) — the listings that STATED either way; NULL is in neither.
+      case 'p_furnished_in': {
+        const bs = v as boolean[];
+        if (bs.includes(true) && bs.includes(false)) parts.push('furnished=not.is.null');
+        else if (bs.length) parts.push(`furnished=is.${bs[0]}`);
+        break;
+      }
       // MULTI-AMENITY IS AND (R7.2.2). Each ticked chip is its own boolean column, so every token
       // appends its OWN conjunctive part — PostgREST joins top-level filters with AND, matching the
       // clause's `and (not ('tok' = any(p_amenities)) or s.col)` chain. Collapsing these into one
@@ -568,5 +725,7 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       default: unhandled.push(`${k}=${JSON.stringify(v)}`);
     }
   }
+  if (orGroups.length === 1) parts.push(`or=(${orGroups[0]})`);
+  else if (orGroups.length > 1) parts.push(`and=(${orGroups.map((g) => `or(${g})`).join(',')})`);
   return { qs: parts.join('&'), unhandled };
 }

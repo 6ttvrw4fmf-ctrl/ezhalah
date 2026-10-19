@@ -151,40 +151,8 @@ function optionCardProblems(src: string): string[] {
   return p;
 }
 
-/**
- * The remove-last-pill journey carried the IDENTICAL fail-open read (a 12s budget and `return last`)
- * and failed in CI on 2026-09-04 in the same run, from the same cause: its first-card read and its
- * re-open read both assert the card's own chip against N0, so a card that never finished rendering
- * printed `chip=null` as a product failure.
- *
- * Its ledger differs in one way that matters: `skip()` there does NOT count against the exit code,
- * so a NOT EXERCISED routed through `skip` would have been a route to GREEN. It therefore counts
- * `undecided` separately, and that counter MUST reach the exit code.
- */
-function removeLastPillProblems(src: string): string[] {
-  const p: string[] = [];
-  if (!/const readCardSettled = /.test(src)) p.push('no readCardSettled read — the journey cannot know whether the card it asserted on ever arrived');
-  if (!/settleUntil/.test(src)) p.push('the settled read does not go through the shared settleUntil primitive');
-  for (const fn of ['readCardSettled', 'readCardUntil']) {
-    const decl = src.match(new RegExp(`const ${fn} = [^\\n]*`))?.[0] ?? '';
-    if (!decl) p.push(`${fn} is gone`);
-    else if (!/timeoutMs = AGENT_TURN_MS/.test(decl)) p.push(`${fn} does not default to a full agent turn — its budget is sized for a render`);
-  }
-  if (!/if \(!fr\.settled\)/.test(src)) p.push('the first-card read no longer abandons on a card that never rendered — chip=null would be reported against N0 again');
-  if (!/if \(!ag\.settled\)/.test(src)) p.push('the re-open read no longer abandons on a card that never rendered');
-  // THE ONE THAT WOULD SILENTLY GO GREEN: undecided must reach the exit code.
-  if (!/process\.exit\(failures \+ undecided \? 1 : 0\)/.test(src)) {
-    p.push('NOT EXERCISED does not reach the exit code — a journey that observed nothing would report success');
-  }
-  const unobs = src.match(/const unobserved = async[\s\S]*?\n\};/)?.[0] ?? '';
-  if (!unobs) p.push('no unobserved() classifier');
-  else {
-    if (!/verdictForNonArrival/.test(unobs)) p.push('unobserved() does not consult production load — it decides red-vs-inconclusive on its own opinion');
-    if (!/check\(label, false/.test(unobs)) p.push('unobserved() never reports a real FAILURE');
-    if (!/undecided\+\+/.test(unobs)) p.push('unobserved() does not COUNT the non-arrival, so it cannot reach the exit code');
-  }
-  return p;
-}
+// remove-last-pill journey: RETIRED 2026-10-03 with the pill removal itself (owner: no ✕ anywhere); its
+// fail-closed pins went with it. Every other live journey below is still held to the same rule.
 
 /**
  * THE CLASS IS NOT ONE FILE, AND RUN #144 PROVED IT TWICE MORE (2026-09-04).
@@ -224,11 +192,41 @@ function journeyFailsClosed(src: string, name: string, sites: [string, string][]
   return p;
 }
 
+/**
+ * THE DISTRICT HALF OF THE SAME JOURNEY (2026-09-18, routine #5).
+ *
+ * TF_SITES above covers the CITY panel, which run #144 caught. The DISTRICT read three blocks later
+ * kept the original shape — focus the field, `waitForTimeout(4000)`, assert on whatever was on
+ * screen — and on 2026-09-18 it reported «Trending Districts rendered» RED for الرياض (desktop,
+ * price 900k + area>=120) and for الدمام (mobile 390x844). BOTH accusations were false. Re-driven at
+ * the identical precondition with a poll, the rows arrived at 2,428 ms and 1,620 ms and
+ * district_options_ar had returned 200 with 230 and 104 rows carrying the narrowing.
+ *
+ * The cause is not "4,000 ms was too short" — the rows beat that budget both times. Selecting the
+ * property type RE-RENDERS the district field, so a click landing mid-render is simply LOST, and
+ * once it is lost no amount of extra waiting helps. That is why this rule demands a re-open inside
+ * the loop and not a bigger sleep: raising a timeout would have left the defect exactly where it was.
+ */
+function trendingDistrictProblems(src: string): string[] {
+  const p: string[] = [];
+  const helper = src.match(/const districtsWhenRendered = async[\s\S]*?\n\s*\};/)?.[0] ?? '';
+  if (!helper) {
+    p.push('no districtsWhenRendered poll — the district panel is read after a fixed sleep, the exact shape that called a correct production broken on 2026-09-18');
+    return p;
+  }
+  if (!/for \(;;\)|while \(/.test(helper)) p.push('districtsWhenRendered does not loop — it is a single read wearing a helper name');
+  if (!/READ_TRENDING_ROWS/.test(helper)) p.push('districtsWhenRendered does not read the trending rows — the read escaped the helper');
+  if (!/district-input/.test(helper)) p.push('districtsWhenRendered never RE-OPENS the field inside the loop — a click swallowed by the property-type re-render is never recovered, and a longer budget cannot fix a lost click');
+  if (!/Date\.now\(\) >= until/.test(helper)) p.push('districtsWhenRendered has no finite budget — a panel that never opens would hang the job instead of failing it');
+  if (!/arrivedMs: null/.test(helper)) p.push('districtsWhenRendered cannot report a non-arrival — the caller cannot tell "never rendered" from "rendered late"');
+  if (!/district\.arrivedMs === null/.test(src)) p.push('the district assertion does not distinguish never-arrived from arrived-late, so it cannot say what was OBSERVED');
+  return p;
+}
+
 // ── the real files must be clean ─────────────────────────────────────────────────────────────────
 const CE = read('verify-af-card-evidence-live.ts');
 const LT = read('verify-af-live-truth.ts');
 const OC = read('verify-af-option-card-truth-live.ts');
-const RL = read('verify-af-remove-last-pill-live.ts');
 const CB = read('verify-combined-budget-live.ts');
 const TF = read('verify-trending-live-four-way-truth.ts');
 
@@ -254,16 +252,16 @@ const TF_SITES: [string, string][] = [
   check('verify-af-option-card-truth-live.ts fails CLOSED on a state that never arrived', p.length === 0, p.join(' | '));
 }
 {
-  const p = removeLastPillProblems(RL);
-  check('verify-af-remove-last-pill-live.ts fails CLOSED, and NOT EXERCISED reaches its exit code', p.length === 0, p.join(' | '));
-}
-{
   const p = journeyFailsClosed(CB, 'verify-combined-budget-live.ts', CB_SITES);
   check('verify-combined-budget-live.ts polls for its committed search and fails CLOSED', p.length === 0, p.join(' | '));
 }
 {
   const p = journeyFailsClosed(TF, 'verify-trending-live-four-way-truth.ts', TF_SITES);
   check('verify-trending-live-four-way-truth.ts polls for the Trending panel and fails CLOSED', p.length === 0, p.join(' | '));
+}
+{
+  const p = trendingDistrictProblems(TF);
+  check('verify-trending-live-four-way-truth.ts polls for the DISTRICT panel too, and re-opens it', p.length === 0, p.join(' | '));
 }
 
 // ── mutation proofs — each reversion to the bug class must turn this barrier RED ──────────────────
@@ -297,6 +295,26 @@ mustReject('the advance poll stops requiring the question to have CHANGED',
 mustReject('a round that never advances is silently skipped instead of reported NOT EXERCISED',
   liveTruthProblems(LT.replace(/unexercised\(/g, 'ignore(')), 'NOT EXERCISED');
 
+// ── the district half: every way back to the 2026-09-18 shape must turn this RED ─────────────────
+mustReject('the district panel is read after a fixed sleep again (the 2026-09-18 shape)',
+  trendingDistrictProblems(TF.replace(/const districtsWhenRendered = async[\s\S]*?\n\s*\};/, '')),
+  'read after a fixed sleep');
+
+mustReject('the district poll stops looping (a single read wearing a helper name)',
+  trendingDistrictProblems(TF.replace('for (;;) {', 'if (true) {')), 'does not loop');
+
+mustReject('the district poll stops RE-OPENING the field — the lost click is never recovered',
+  trendingDistrictProblems(TF.replace(`await page.click('[data-testid="district-input"]').catch(() => {});`, '')),
+  'RE-OPENS');
+
+mustReject('the district poll loses its finite budget',
+  trendingDistrictProblems(TF.replace('if (Date.now() >= until) return { rows: [] as { label: string; count: number }[], arrivedMs: null };', '')),
+  'no finite budget');
+
+mustReject('the district check stops telling never-arrived from arrived-late',
+  trendingDistrictProblems(TF.replace('district.arrivedMs === null', 'false')),
+  'what was OBSERVED');
+
 // ── and the fail-closed half, on the journey that proved it was needed ────────────────────────────
 mustReject('the settled read goes back to returning the last state it happened to see',
   optionCardProblems(OC.replace(/const readCardSettled = [\s\S]*?;\n/, '')), 'ever arrived');
@@ -318,23 +336,6 @@ mustReject('the non-arrival classifier stops consulting production and decides o
 
 mustReject('the classifier can no longer report a REAL failure (everything becomes inconclusive)',
   optionCardProblems(OC.replace(/check\(label, false[\s\S]*?\n {4}return;/, '    return;')), 'read as inconclusive forever');
-
-// ── remove-last-pill: the same class, plus the exit-code trap its ledger made possible ────────────
-mustReject('the remove-last-pill settled read is reverted to the 12s fail-open one',
-  removeLastPillProblems(RL.replace(/const readCardSettled = [\s\S]*?;\n/, '')), 'ever arrived');
-
-mustReject('NOT EXERCISED stops reaching the exit code (a journey that observed nothing reads GREEN)',
-  removeLastPillProblems(RL.replace('process.exit(failures + undecided ? 1 : 0)', 'process.exit(failures ? 1 : 0)')),
-  'would report success');
-
-mustReject('the first-card read stops abandoning on a card that never rendered',
-  removeLastPillProblems(RL.replace('if (!fr.settled) {', 'if (false) {')), 'chip=null');
-
-mustReject('the re-open read stops abandoning on a card that never rendered',
-  removeLastPillProblems(RL.replace('if (!ag.settled) {', 'if (false) {')), 're-open read no longer abandons');
-
-mustReject('the remove-last-pill classifier stops counting the non-arrival',
-  removeLastPillProblems(RL.replace('undecided++;', '')), 'cannot reach the exit code');
 
 // ── the two journeys run #144 caught, each mutated back to the sleep-then-assert it came from ─────
 mustReject('the combined-budget journey stops abandoning when no search was captured',

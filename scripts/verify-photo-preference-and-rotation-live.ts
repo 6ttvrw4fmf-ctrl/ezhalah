@@ -22,6 +22,7 @@
 //   node --experimental-strip-types scripts/verify-photo-preference-and-rotation-live.ts
 
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase();
 
 const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
@@ -36,7 +37,7 @@ type Row = {
 };
 
 async function rpc(args: Record<string, unknown>): Promise<Row[]> {
-  const res = await fetch(`${URL_BASE}/rest/v1/rpc/location_search_candidates_ar`, {
+  const res = await postgrestFetch(`${URL_BASE}/rest/v1/rpc/location_search_candidates_ar`, {
     method: 'POST',
     headers: HEADERS,
     body: JSON.stringify({ p_per_platform: null, p_limit: 200, p_offset: 0, ...args }),
@@ -56,7 +57,7 @@ async function hasPhotoMap(rows: { source_table: string; listing_id: number }[])
     a.push(r.listing_id);
   }
   for (const [table, ids] of byTable) {
-    const res = await fetch(
+    const res = await postgrestFetch(
       `${URL_BASE}/rest/v1/search_listings_ar?select=source_table,listing_id,has_photo&source_table=eq.${encodeURIComponent(table)}&listing_id=in.(${ids.join(',')})`,
       { headers: HEADERS },
     );

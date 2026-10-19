@@ -9,8 +9,9 @@ Data path (auth-free, static HTML):
   pages — /category/0 (للبيع · Buy), /category/1 (للايجار · Rent), /category/2 (للاستثمار ·
   Invest) — but they render only the FRONT page of each category (no working pagination), so they
   surface ~33 of the ~239 listings. The ad ids are sequential and dense in the 31..1004 range, so
-  we ENUMERATE the id range and keep every page that renders the detail table. A missing/invalid
-  id silently serves the homepage shell (no detail table) — we detect that by the absence of the
+  we ENUMERATE the id range and keep every page that renders the detail table. The range's top
+  is the newest id those index pages link + a margin, re-read every run (discover_id_end). A
+  missing/invalid id silently serves the homepage shell (no detail table) — we detect that by the absence of the
   "<th>نوع العقار</th>" row and skip it.
 
 Each /ads/<id> detail page carries a clean spec table of <th>LABEL</th><td>VALUE</td> pairs:
@@ -63,10 +64,18 @@ from scrapers.common import db, normalize  # noqa: E402
 
 BASE = "https://alkhaas.net"
 WORKERS = int(os.environ.get("ALKHAAS_WORKERS", "8"))
-# Dense id window for this broker (observed valid ids 31..1004). A small headroom (+30) future-proofs
-# new listings without a meaningful extra cost (missing ids serve a cheap shell page).
+# Dense id window for this broker (observed valid ids 31..1004).
 ID_START = int(os.environ.get("ALKHAAS_ID_START", "1"))
-ID_END = int(os.environ.get("ALKHAAS_ID_END", "1040"))
+# THE TOP IS READ FROM THE SOURCE EVERY RUN (discover_id_end, 2026-09-28). A hard-coded 1040 left
+# 36 ids of headroom above the newest ad (1004) and would have silently stopped the sweep as the
+# office posted more. The home and category pages list the newest ads, so their highest /ads/<id>
+# plus ID_MARGIN is the ceiling (missing ids serve a cheap ~35 KB shell). ID_END_FLOOR (the last
+# hard-coded value) only guarantees a run never sweeps LESS than before; ALKHAAS_ID_END still
+# overrides everything for a manual run.
+ID_END = int(os.environ["ALKHAAS_ID_END"]) if os.environ.get("ALKHAAS_ID_END") else None
+ID_END_FLOOR = 1040
+ID_MARGIN = 100
+INDEX_PATHS = ("/", "/category/0", "/category/1", "/category/2")
 
 # قسم العقار (Arabic plural section word) → canonical English property type. The site groups by
 # plural-noun "sections", so these are NOT the singular words in normalize.TYPE_MAP_AR.
@@ -255,6 +264,22 @@ def fetch_one(adid: int) -> Optional[tuple[int, str]]:
     return None
 
 
+def discover_id_end() -> int:
+    """Newest /ads/<id> the site links from its own index pages, + ID_MARGIN; never below the floor.
+    A page that fails to load contributes nothing — the floor still holds."""
+    newest = 0
+    for path in INDEX_PATHS:
+        try:
+            r = _session().get(BASE + path, timeout=40, allow_redirects=True)
+        except Exception:  # noqa: BLE001 — an unreachable index page is not evidence of no ads
+            continue
+        if r.status_code == 200:
+            newest = max([newest, *(int(x) for x in re.findall(r"/ads/(\d+)", r.text))])
+    if not newest:
+        print(f"⚠ Al Khaas: no /ads/<id> on any index page — sweeping to the floor {ID_END_FLOOR}", flush=True)
+    return max(newest + ID_MARGIN, ID_END_FLOOR)
+
+
 def _spec_table(body: str) -> dict[str, str]:
     """Parse the listing's own <th>/<td> spec table. We slice from 'تفاصيل العقار' to the end of
     that table so we never pick up any unrelated table elsewhere on the page."""
@@ -423,6 +448,12 @@ def map_listing(adid: int, body: str) -> tuple[Optional[dict], str]:
         "description": description,
         "photo_urls": _images(body),
         "additional_info": info,
+        # The ad's own words are al-khaas's ONLY statement of kitchen / AC / parking / rooms: its page carries
+        # title, area and the free-text body, no amenity field (source-reread 38229066757: «تتكون من : مجلس و
+        # مطبخ», «وراكب التكييف مكيفات شباك»). Prose is lawful there, YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH
+        # §2). 93 of 187 active ads named one and all were NULL, so the Advanced Filter never found them
+        # (🔬 2026-10-12). The table has no furnished column, so that key is never written.
+        **{k: v for k, v in normalize.prose_amenities_yes(description).items() if k != "furnished"},
     }
     if rega_license:
         row["additional_info"]["rega_ad_license_number"] = rega_license
@@ -437,8 +468,9 @@ def main() -> int:
                     help="validation run: upsert only the first N parsed listings, NO prune")
     args = ap.parse_args()
 
-    ids = list(range(ID_START, ID_END + 1))
-    print(f"Al Khaas: scanning ids {ID_START}..{ID_END} ({WORKERS} workers)"
+    id_end = ID_END or discover_id_end()
+    ids = list(range(ID_START, id_end + 1))
+    print(f"Al Khaas: scanning ids {ID_START}..{id_end} ({WORKERS} workers)"
           f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
 
     run_id = None if args.limit else db.begin_run("alkhaas")
@@ -489,6 +521,18 @@ def main() -> int:
 
         # Full run: prune listings active before but not seen this crawl (full id sweep).
         pruned = 0
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+        # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+        # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+        # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+        superseded = db.retire_superseded_siblings(
+            res_table="alkhaas_residential_listings", com_table="alkhaas_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source="Al Khaas")
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
         for tbl, rows_seen in (("alkhaas_residential_listings", res),
                                ("alkhaas_commercial_listings", com)):
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Al Khaas")

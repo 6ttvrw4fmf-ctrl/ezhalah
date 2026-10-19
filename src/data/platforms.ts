@@ -41,6 +41,12 @@ export const PLATFORMS: Platform[] = [
   { name: 'Remal', domain: 'remalre.com', brand: 'Remal Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Amaall', domain: 'amaall.com', brand: 'Amaall Real Estate Services', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Amlakalahsa', domain: 'amlakalahsa.com', brand: 'Amlak Al-Ahsa Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Aqaralsaudia', domain: 'aqaralsaudia.com', brand: 'Aqar Al Saudia Real Estate', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'Suwar', domain: 'suwar.sa', brand: 'Suwar Real Estate', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'Rakez', domain: 'rakez.sa', brand: 'Rakez Real Estate', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'Akariyoun', domain: 'akariyoun.sa', brand: 'Akariyoun', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'KSA Aqar', domain: 'ksaaqar.com', brand: 'KSA Aqar Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Sadiq Eltajer', domain: 'sadiq-eltajer.sa', brand: 'Sadiq Eltajer Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Alta', domain: 'alta.com.sa', brand: 'Alta Real Estate Services', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Shmou Al Shmal', domain: 'shmoua-alshmal.com', brand: 'Shmou Al Shmal Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Awal', domain: 'awaalun.com', brand: 'Awal United for Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
@@ -62,8 +68,153 @@ export const PLATFORMS: Platform[] = [
   { name: 'Aouj', domain: 'aoujestates.com', brand: 'Aouj Estates', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Abralosol', domain: 'abralosol.com', brand: 'Abr Al Osol Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Arkaan', domain: 'arkaanalaqar.com', brand: 'Arkaan Al Aqar', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // onboarded 2026-09-21. `name` is the EXACT stored db `source` (the scraper's SOURCE constant), so
+  // supports(l.source) resolves these rows by name and verify-platform-registration-complete.ts
+  // runs the card matchers over the real stored strings, not a spelling this file chose.
+  { name: 'Al Sidra', domain: 'alsidra.com.sa', brand: 'Al Sidra Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Moftah', domain: 'moftah-aleaqar.com', brand: 'Moftah Al Aqar', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'مسار المستقبل', domain: 'masaraqarat.com', brand: 'Masar Al Mustaqbal Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'منصات', domain: 'gomenassat.com', brand: 'Menassat Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Sakan Saudi', domain: 'sa.sakan.co', brand: 'Sakan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'مكتب بوصبيح', domain: 'bossbihoffice.com.sa', brand: 'Bossbih Real Estate Office', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Al Shawaf', domain: 'alshawaf.com.sa', brand: 'Al Shawaf Real Estate Office', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Ibrahim Alqarawi', domain: 'ialqarawi.com', brand: 'Ibrahim Alqarawi Real Estate Investments', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Al Jassim', domain: 'aljassimaqar.com', brand: 'Al Jassim Real Estate Services', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Almotmkenah', domain: 'almotmkenah.com', brand: 'Almotmkenah Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'نفوذ', domain: 'nufouth.com', brand: 'Nufouth Development Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // onboarded 2026-09-24 (batch 36). Same contract as 2026-09-21: `name` is the EXACT stored db `source`
+  // (the scraper's SOURCE constant). allowsRent/allowsBuy follow what each run.py can EMIT — a
+  // scraper that hardcodes transaction_type (Rent-only compounds; Buy-only developers) can never
+  // produce the other row, exactly the CompoundIn precedent below. Everything else maps both.
+  { name: 'دويليو', domain: 'dwelleo.sa', brand: 'Dwelleo', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'مكتب أقاليم هجر للخدمات العقارية', domain: 'aqalemhajer.com', brand: 'Aqalem Hajer Real Estate Services Office', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'سكني', domain: 'sakani.sa', brand: 'Sakani', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  { name: 'الشاطري للتطوير العقاري', domain: 'shatrirealestate.com', brand: 'Shatri Real Estate Development', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'القاسم العقارية', domain: 'alqasem.com.sa', brand: 'Alqasem Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'فكر الإعمار', domain: 'fkralemar.com', brand: 'Fkr Alemar', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'ودود العقارية', domain: 'wadod.sa', brand: 'Wadod Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'آل متعب العقارية', domain: 'almuteb.sa', brand: 'Al Muteb Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'البراك للعقارات', domain: 'aalbarrak.com', brand: 'Al Barrak Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'الرفاعي للعقار', domain: 'alrifai.com.sa', brand: 'Al Rifai Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'سداسيات العقارية', domain: 'sodasyat.sa', brand: 'Sodasyat Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'حصاد الاقتصادية للعقارات', domain: 'hasaadestate.com', brand: 'Hasaad Economic Real Estate', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'عقار الرياض', domain: 'aqaralriyadh.com', brand: 'Aqar Alriyadh', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'فقط نقطة العقارية', domain: 'just.sa', brand: 'Just Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'سنام العقارية', domain: 'snam.sa', brand: 'Snam Real Estate', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'جواهر للوساطة والتسويق العقاري', domain: 'jawher2030.com', brand: 'Jawher Real Estate Brokerage', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'مقر المعتمد', domain: 'm3tmd.com', brand: 'Maqar Al Motamad', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'سنان العقارية', domain: 'senanrealestate.sa', brand: 'Senan Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'الصفقة الذهبية العقارية', domain: 'goldendeal.sa', brand: 'Golden Deal Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: '1000 العقارية', domain: '1000.com.sa', brand: '1000 Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'يمين العقارية', domain: 'yameen.sa', brand: 'Yameen Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'إبريزة العقارية', domain: 'ebriza.com.sa', brand: 'Ebriza Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'علم الريادة الإدارية', domain: 'eilmalriyada.com', brand: 'Eilm Alriyada', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'دار يوسف العقارية', domain: 'daryusuf.com', brand: 'Dar Yusuf Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'البداح للعقارات', domain: 'albdah.sa', brand: 'Albdah Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'الإيضاح', domain: 'eydah.com', brand: 'Eydah', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'تمايز العقارية', domain: 'tamyaz-sa.com', brand: 'Tamyaz Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'حازم', domain: 'hazim.sa', brand: 'Hazim', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'فلل', domain: 'villas-sa.com', brand: 'Villas SA', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'مار العقارية', domain: 'mar-ksa.com', brand: 'Mar Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'RightCompound', domain: 'rightcompound.com', brand: 'RightCompound', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  { name: 'LivingCompound', domain: 'livingcompound.com', brand: 'LivingCompound', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Azure', domain: 'azure.sa', brand: 'Azure', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  { name: 'Expat Trusted Housing', domain: 'expattrustedhousingriyadh.com', brand: 'Expat Trusted Housing', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  { name: 'Flow', domain: 'flow.life', brand: 'Flow', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  { name: 'أبعاد', domain: 'app.abaadapp.sa', brand: 'Abaad', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // WAVE 1, 2026-09-25. allowsRent/allowsBuy state what each SCRAPER actually writes, not what the
+  // company could in principle offer: razre, sokok and sukna are sale-side developers whose parsers
+  // never emit a Rent row, so claiming rent support would advertise inventory that cannot appear.
+  { name: 'آل سعيدان', domain: 'alsaedan.com', brand: 'Al Saedan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'إيجو عقار', domain: 'ego-aqar.com', brand: 'Ego Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'أحمد المحيسني العقارية', domain: 'aqaralmuhaysini.com', brand: 'Ahmed Almuhaysini', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'نفوذ للاستثمار العقاري', domain: 'nofodh.sa', brand: 'Nofodh Investment', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'راز العقارية', domain: 'razre.sa', brand: 'Razre', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'ري إنفست', domain: 'reinvest.sa', brand: 'Reinvest', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'صفا للاستثمار', domain: 'safainv.sa', brand: 'Safa Investment', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'صكوك العقارية', domain: 'sokok.sa', brand: 'Sokok', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'سكنة', domain: 'sukna.app', brand: 'Sukna', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'طوبة العقارية', domain: 'tuba.com.sa', brand: 'Tuba', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'RawasiDark', domain: 'rawasi-dark.com', brand: 'Rawasi Dark Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: '1 October', domain: '1october.com.sa', brand: '1 October Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // WAVE 2, 2026-09-26. remaxsa allowsRent=false: its parser writes 0 live Rent rows for this
+  // tenant/region today; qmra allowsRent=false: its readiness gate found 0 ready Rent units.
+  { name: 'آي باكس', domain: 'ibaax.sa', brand: 'iBaax', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'RE/MAX', domain: 'remax.sa', brand: 'RE/MAX Saudi', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'قمرا', domain: 'qmra.sa', brand: 'Qmra', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // wahadat allowsRent=false: measured 2026-09-26 over ALL 100 project pages, advertisement_purpose
+  // is 'sale' on 100/100 — the platform is a new-build developer marketplace with no rental stock.
+  { name: 'وحدات', domain: 'wahadat.sa', brand: 'Wahadat', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // squares: 18 posts, 17 «للبيع» + 1 «للإيجار» measured on every title, so both deals are on.
+  { name: 'شركة المربعات العقارية', domain: 'squares.com.sa', brand: 'Squares', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // rawaf allowsRent=false: contractType is SALE on all 215 units measured across its 11 projects.
+  { name: 'رواف', domain: 'rawaf.ai', brand: 'Rawaf', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // vm-ksa: 109 rent + 54 sale of 163 REGA-licensed ads measured 2026-09-26 (99 offices for rent).
+  { name: 'المسوق الافتراضي', domain: 'vm-ksa.com', brand: 'Virtual Marketer', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // macsaib: 48 sale + 29 rent of 77 measured 2026-09-26 (Taearif feed).
+  { name: 'مكسب العقارية', domain: 'macsaib.sa', brand: 'Macsaib', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // maqrat: 83 REGA-licensed ads measured 2026-09-26 (58 sale + 24 rent + 1 «مجمع» left unmapped).
+  { name: 'MAQRAT', domain: 'maqrat.com', brand: 'MAQRAT', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // arsh: 21 land listings measured 2026-09-27 (no prices — «السعر عند الطلب»; owner: include, treat as for sale).
+  { name: 'عرش العقارية', domain: 'arshglobal.com.sa', brand: 'Arsh', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // superoffice: 12 available private offices in Riyadh (of 177 offices; 165 booked, 7 meeting rooms skipped) measured 2026-09-27.
+  { name: 'سوبر أوفيس', domain: 'superoffice.sa', brand: 'SuperOffice', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  // haraj: حراج — public classifieds; ONLY REGA-licensed property offers are listed (owner 2026-10-16), ~7 of every 150 property-titled posts read on 2026-10-16.
+  { name: 'حراج', domain: 'haraj.com.sa', brand: 'Haraj', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // shomou: مكتب شموع العقار (Al-Ahsa) — 142 in-date ads of 1,028 listed (835 past their own end date) measured 2026-09-28.
+  { name: 'شموع العقار', domain: 'shomoalaqar.com.sa', brand: 'Shomou', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // maktab: منصة مكتب — 11 offices with in-date REGA ad licences (Riyadh + Tabuk) measured 2026-09-28.
+  { name: 'منصة مكتب', domain: 'maktab.sa', brand: 'Maktab', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // sirdab: 549 warehouses/shops/workshops/factories measured 2026-09-27 (15 storage units skipped).
+  { name: 'سرداب', domain: 'marketplace.sirdab.co', brand: 'Sirdab', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // ashab: 575 listings measured 2026-09-27 (239 single ads + 336 available units of 56 buildings; Buraidah/Qassim).
+  { name: 'عشاب العقارية', domain: 'ashab.sa', brand: 'Ashab', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // manafe: 77 listings measured 2026-09-27 (210 Jeddah buildings; only REGA-licensed, available units).
+  { name: 'منافع العقارية', domain: 'manafe.com.sa', brand: 'Manafe', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // wajaf: 44 Buraidah land/commercial listings measured 2026-09-27 (sold/reserved/let skipped).
+  { name: 'وجف العقارية', domain: 'wajaf.sa', brand: 'Wajaf', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // albukaeri: 28 direct-sale listings measured 2026-09-27 (Eastern Province, Riyadh).
+  { name: 'البكيري العقارية', domain: 'albukaeri.sa', brand: 'AlBukairi', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // ryadah: 18 buildings/compounds offering units measured 2026-09-27 (Khobar/Dammam; every price «عند الاتصال»).
+  { name: 'ريادة العقارية', domain: 'ryadah.com.sa', brand: 'Ryadah', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // sqcc: 31 listings measured 2026-09-27 (Dammam/Eastern Province; auctions excluded).
+  { name: 'مجموعة صالح القرشي العقارية', domain: 'sqcc.sa', brand: 'SQCC', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // daraa: 6 ready Makkah apartment projects measured 2026-09-27 (22 sold, 2 off-plan, 3 under construction skipped).
+  { name: 'دارا للتطوير العقاري', domain: 'daraa.sa', brand: 'Dara', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // tawia: 5 Jubail listings measured 2026-09-27.
+  { name: 'مكتب طوية للعقار', domain: 'tawia.sa', brand: 'Tawia', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // manzo: 1 listing measured 2026-09-27 (Dhahran apartment, 48,000/yr). Owner: include.
+  { name: 'مانزو', domain: 'manzo.com.sa', brand: 'Manzo', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  // eightfloor: 2 Riyadh rentals measured 2026-09-27 (its 9 projects are off-plan — owner: excluded). Bare 8floor.sa has no DNS; www works.
+  { name: 'الطابق الثامن', domain: 'www.8floor.sa', brand: '8Floor', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  // holoul: 30 developer units for sale measured 2026-09-27 (of 238 feed rows: project+unit listed, REGA licence, ad type Sale).
+  { name: 'حلول', domain: 'holoul.io', brand: 'Holoul', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // opensooq: 78 real-estate items measured 2026-09-26 (72 kept: 2 under construction, 1 deal conflict, 1 multi-use plot, 2 duplicate posts skipped).
+  { name: 'السوق المفتوح', domain: 'sa.opensooq.com', brand: 'OpenSooq', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // nafithh: 30 measured 2026-09-26 (22 sale + 8 rent; 2 «مجمع» unmapped). Server-rendered REGA blocks.
+  { name: 'معرض نافذة', domain: 'nafithh.sa', brand: 'Nafithh', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // mobasher: 28 DIRECT-SALE real estate measured 2026-09-26 (auctions are a separate feed and never read). Owner 2026-09-25: keep.
+  { name: 'مباشر', domain: 'mobasher.sa', brand: 'Mobasher', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // muajarh: 11 real of 18 feed rows measured 2026-09-26 (7 are the platform's own demo records, no REGA licence); all Riyadh yearly rents.
+  { name: 'مؤاجرة', domain: 'muajarh.com', brand: 'Muajarh', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  // dallali: 7 measured 2026-09-26 (3 rent: 2 offices + 1 apartment; 4 KAEC plots). Open JSON API p1.dallali.com.
+  { name: 'دلّالي', domain: 'dallali.com', brand: 'Dallali', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // maqam: Nuzul tenant, 50 of 130 `available` (47 kept: 3 Wafi off-plan excluded), measured 2026-09-26. NOT «مقام الوسام» (fahadalshahri).
+  { name: 'شركة مقام للتطوير العقاري', domain: 'property.maqamco.sa', brand: 'Maqam Development', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // earthapp: 54 active ads, 51 kept (47 land priced per m²), measured 2026-09-26. No listing photos exist on the source.
+  { name: 'تطبيق أرض', domain: 'earthapp.com.sa', brand: 'Earth App', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // nawafeth: 20 REGA-licensed ads, 9 kept — 11 state neither sale nor rent in the title and are skipped, never guessed.
+  { name: 'نوافذ الوطن', domain: 'nawafethalwatan.com', brand: 'Nawafeth Alwatan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'العجلان', domain: 'alajlan-re.com', brand: 'Al Ajlan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // Onboarded 2026-09-20 (#3320). Deals from production search_listings_ar, except Fahadalshahri:
+  // 0 rent rows today, but its scraper maps «للإيجار» to Rent — absence is not incapability.
+  // CompoundIn's scraper hardcodes Rent, so it can never produce a Buy row.
+  { name: 'Gudai', domain: 'gudai.inblaj.net', brand: 'Gudai Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Safera', domain: 'safera.inblaj.net', brand: 'Safera Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Aqarnajran', domain: 'aqarnajran.com', brand: 'Aqar Najran', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Fahadalshahri', domain: 'fahadalshahri.com', brand: 'Maqam Al Wisam Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'CompoundIn', domain: 'compoundin.com', brand: 'CompoundIn', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  { name: 'Waslna', domain: 'wslnaa.com', brand: 'Waslna Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
 ];
 
 const BY_NAME: Record<string, Platform> = Object.fromEntries(PLATFORMS.map((p) => [p.name, p]));

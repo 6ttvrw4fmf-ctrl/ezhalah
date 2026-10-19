@@ -25,6 +25,12 @@ check(`scanned a real fleet (${pyFiles.length} python files)`, pyFiles.length >=
 // A DERIVATION is an assignment to a price field whose right side does arithmetic (/ or *).
 // Reading a source field verbatim (row["price_per_meter"] = spec_value / p.get("ppm")) has no
 // arithmetic operator, so faithful captures pass. Comment lines are ignored.
+//
+// MUTATION-PROVEN 2026-09-14 (routine #10 / R1). This guard covers the owner-locked PRICE = SOURCE
+// rule across the whole scraper fleet and nobody had ever watched it go red. The three scanners are
+// extracted as PURE predicates over a line of code precisely so the proofs at the bottom can feed
+// them REAL lines from REAL scrapers, mutated into the four derivation shapes, the prose shape and
+// the ppm-as-total shape — and feed them the shipped lines as a negative control.
 const offenders: string[] = [];
 const DERIVE = [
   /price_per_meter[^=\n]*=(?![=])[^\n#]*[/*]/,          // ppm = …/… or …*…
@@ -35,16 +41,39 @@ const DERIVE = [
 // The ONE sanctioned arithmetic: annualizing a stated rent via the shared, golden-tested
 // normalize.annualize_rent (monthly→×12 semantics, not a fabricated signal).
 const SANCTIONED = /annualize_rent|\*\s*12\b/;
+
+// BLIND SPOT closed 2026-09-21: every DERIVE pattern needs an ASSIGNMENT to a price-named variable,
+// so a helper that RETURNS the product walked straight past them — `return round(meta_price * area),
+// "per_metre_x_area"` in a resolve_price() whose caller writes row["price_total"], and `return ((ppm
+// * area_m2) if (ppm and area_m2) else None), ppm` in a parse_price(). Any `return` that multiplies a
+// rate-named operand by an area-named one (either order) is that shape. ppm × area belongs to the
+// SEARCH/DISPLAY layer only (owner 2026-09-03: price_total_effective + derivedTotalFromPerMeter).
+const TIMES = /([\w.'"\[\]()]+)\s*\*(?!\*)\s*([\w.'"\[\]()]+)/g; // the two operands around one `*`
+const RATE_NAME = /ppm|rate|met(?:er|re)|price/i;
+const AREA_NAME = /area|space|sqm|size/i;
+
+/** The code part of a line, or '' when it can never STORE a price: a comment, an `a = b = None`
+ *  reset, a module CONSTANT (a regex/label table, e.g. `_PRICE_ATTR_RE = re.compile(r'…content=…')`)
+ *  or a print (output only). An f-string keeps only its {expressions} — its text is prose. */
+function codeOf(line: string): string {
+  const code = line.split('#')[0];
+  if (/=\s*None\s*$/.test(code) || /^\s*_?[A-Z][A-Z0-9_]*\s*=(?!=)/.test(code) || /^\s*print\(/.test(code)) return '';
+  return code.replace(/\b[rR]?[fF][rR]?(["'])(?:\\.|(?!\1).)*\1/g, (s) => (s.match(/\{[^{}]*\}/g) ?? []).join(' '));
+}
+
+/** True iff this ONE line of python derives a price signal. Pure, so a proof can feed it a mutant. */
+export function derivesAPrice(line: string): boolean {
+  const code = codeOf(line);
+  const returnsRateTimesArea = /^\s*return\b/.test(code) && [...code.matchAll(TIMES)].some(([, a, b]) =>
+    (RATE_NAME.test(a) && AREA_NAME.test(b)) || (AREA_NAME.test(a) && RATE_NAME.test(b)));
+  return (DERIVE.some((rx) => rx.test(code)) && !SANCTIONED.test(code)) || returnsRateTimesArea;
+}
+
 for (const f of pyFiles) {
   if (f.includes('/tests/')) continue; // the fleet's own guard tests contain sample violation strings
   const lines = readFileSync(f, 'utf8').split('\n');
   lines.forEach((line, i) => {
-    const code = line.split('#')[0];
-    if (!code.trim()) return;
-    if (/=\s*None\s*$/.test(code)) return; // chained `a = b = c = None` resets, not derivations
-    for (const rx of DERIVE) {
-      if (rx.test(code) && !SANCTIONED.test(code)) { offenders.push(`${f.replace(root, 'scrapers')}:${i + 1}: ${code.trim().slice(0, 90)}`); break; }
-    }
+    if (derivesAPrice(line)) offenders.push(`${f.replace(root, 'scrapers')}:${i + 1}: ${line.split('#')[0].trim().slice(0, 90)}`);
   });
 }
 check('no scraper derives a price signal (ppm↔total↔area, any direction)', offenders.length === 0);
@@ -66,15 +95,18 @@ check('mustqr no longer computes price_per_meter', !/price_per_meter[^=\n]*=(?![
 const PROSE_SRC = /(description|desc_raw|desc_html|excerpt|og:?description|body_text|content)/i;
 const PRICE_ASSIGN = /^\s*(?:row\[["'])?[A-Za-z_]*price[A-Za-z_]*(?:["']\])?\s*=(?!=)/i;
 const proseOffenders: string[] = [];
+
+/** True iff this ONE line assigns a listing price out of prose. Pure, for the proofs below. */
+export function assignsPriceFromProse(line: string): boolean {
+  const code = codeOf(line);
+  return PRICE_ASSIGN.test(code) && PROSE_SRC.test(code);
+}
+
 for (const f of pyFiles) {
   if (f.includes('/tests/')) continue;
   const lines = readFileSync(f, 'utf8').split('\n');
   lines.forEach((line, i) => {
-    const code = line.split('#')[0];
-    if (/=\s*None\s*$/.test(code)) return;
-    if (!PRICE_ASSIGN.test(code)) return;
-    if (!PROSE_SRC.test(code)) return;
-    proseOffenders.push(`${f.replace(root, 'scrapers')}:${i + 1}: ${code.trim().slice(0, 90)}`);
+    if (assignsPriceFromProse(line)) proseOffenders.push(`${f.replace(root, 'scrapers')}:${i + 1}: ${line.split('#')[0].trim().slice(0, 90)}`);
   });
 }
 // DECLARED EXCEPTION, pending an owner decision (raised 2026-08-04). sadin publishes «السعر عند
@@ -107,26 +139,42 @@ for (const f of pyFiles) {
 // and 629 -> 660 on 2026-09-12 when the daily engineer added _fetch_page() (retries a transient
 // list-fetch 5xx/503 instead of failing on the first one — the same fix already applied to
 // ramzalqasim/eastabha) 31 lines above the call; re-verified: still the file's ONLY
-// _extract_price(desc_raw) call, ninth shift, same exception.
-const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:660']);
+// _extract_price(desc_raw) call, ninth shift, same exception. 660 -> 663 on 2026-09-27 when the
+// scraping engineer hoisted session()'s headers into a shared _HEADERS dict (for the
+// retry_smarter_session() profile/proxy probe); re-verified: still the file's ONLY
+// _extract_price(desc_raw) call, tenth shift, same exception.
+// SECOND DECLARED EXCEPTION — an OWNER DECISION, not a pending one (2026-10-17: «Haraj = ALL real-estate offers …
+// read the facts from the seller's own words … price only when a number is tied to a price word»). An
+// unlicensed Haraj post has no price field at all; scrapers/haraj/prose.py:asking_price() is the narrow,
+// tested reader the owner specified (a price word + one figure; a bid, a range, two figures, a deposit,
+// a phone or a count → NULL; pinned by scrapers/common/tests/test_haraj_prose_offers.py). Line-anchored like
+// sadin's: re-verify it is still the file's ONLY asking_price(title, description) call before re-pinning.
+// (2026-10-18: 332 → 338 — the district-precedence change above it added six lines; still the only call.)
+// (2026-10-19: 349 → 379 — licence_district() and its hook above it added thirty lines; still the only call.)
+// (2026-10-19: 379 → 400 — deal_conflict() above map_post (backlog 656/672) added 21 lines; still the only call.)
+const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:663', 'scrapers/haraj/run.py:400']);
 const proseUnapproved = proseOffenders.filter(o => !PROSE_ALLOWLIST.has(o.split(': ')[0]));
 check('no scraper assigns a listing price from prose (outside the declared, dated exception)',
   proseUnapproved.length === 0);
 for (const o of proseUnapproved) console.error('  PROSE-PRICE  ' + o);
-check('the sadin exception is still the ONLY one, and still present (so it cannot be forgotten)',
-  proseOffenders.length === 1 && PROSE_ALLOWLIST.has(proseOffenders[0]?.split(': ')[0]));
+check('the declared exceptions (sadin, haraj) are the ONLY ones, and both still present (so neither is forgotten)',
+  proseOffenders.length === PROSE_ALLOWLIST.size && proseOffenders.every(o => PROSE_ALLOWLIST.has(o.split(': ')[0])));
 
 // LAYER 3 — a per-square-metre rate may never be stored AS the total. Found live in wasalt (7
 // land rows held averageSalePricePerSqm in price_total) and aqar (20 rows held «سعر المتر»).
 const PPM_AS_TOTAL = /^\s*(?:row\[["'])?(price_total|price_annual)(?:["']\])?\s*=(?!=)[^\n#]*(price_per_meter|per_?sqm|per_?meter|سعر\s*المتر|averageSalePricePerSqm)/i;
 const ppmOffenders: string[] = [];
+
+/** True iff this ONE line stores a per-m² rate as the total/annual price. Pure, for the proofs. */
+export function storesPpmAsTotal(line: string): boolean {
+  return PPM_AS_TOTAL.test(codeOf(line));
+}
+
 for (const f of pyFiles) {
   if (f.includes('/tests/')) continue;
   const lines = readFileSync(f, 'utf8').split('\n');
   lines.forEach((line, i) => {
-    const code = line.split('#')[0];
-    if (/=\s*None\s*$/.test(code)) return;   // `a = b = c = None` resets, not a derivation
-    if (PPM_AS_TOTAL.test(code)) ppmOffenders.push(`${f.replace(root, 'scrapers')}:${i + 1}: ${code.trim().slice(0, 90)}`);
+    if (storesPpmAsTotal(line)) ppmOffenders.push(`${f.replace(root, 'scrapers')}:${i + 1}: ${line.split('#')[0].trim().slice(0, 90)}`);
   });
 }
 check('no scraper stores a per-m² rate as the total/annual price', ppmOffenders.length === 0);
@@ -144,5 +192,80 @@ check('normalize.price_evidence exists and BANS origin="description"',
 check('evidence is folded into source_capture (never written as a column)',
   /cap\.setdefault\("price_evidence"/.test(dbPy) && /r\.pop\("price_evidence"/.test(dbPy));
 
-if (failed) { console.error(`\n✗ ${failed} price-fidelity assertion(s) FAILED`); process.exit(1); }
-console.log('\n✓ all PRICE = SOURCE assertions passed (no derived, no prose, no ppm-as-total, evidence wired)');
+// ─────────────────────────────────────────────────────────────────────────────
+// MUTATION PROOFS. Each takes a REAL line out of a REAL scraper and mutates it into the exact
+// defect the layer above exists to stop — a proof that supplies its own invented input proves
+// nothing (BARRIER_ENGINEER PART 3, R1: "feed a predicate what PRODUCTION actually stores").
+// The controls at the end assert the shipped lines are NOT flagged.
+// ─────────────────────────────────────────────────────────────────────────────
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`PASS  (mutation) catches ${label}`); return; }
+  mutFail++;
+  console.error(`FAIL  (mutation) BLIND to ${label}`);
+};
+
+// A real, faithful capture from the fleet: eastabha stores the source-published rate verbatim.
+const realPpmLine = readFileSync(join(root, 'eastabha/run.py'), 'utf8')
+  .split('\n').find((l) => /out\["price_per_meter"\] = /.test(l)) ?? '';
+mustCatch('a real capture line mutated into ppm = total / area (the mustqr straggler shape)',
+  derivesAPrice(realPpmLine.replace(/= .*$/, '= out["price"] / area')));
+mustCatch('…and the mirror direction: total = area * ppm',
+  derivesAPrice('    row["price_total"] = area * row["price_per_meter"]'));
+mustCatch('…and annual fabricated from a per-metre rate',
+  derivesAPrice('    row["price_annual"] = row["price_per_meter"] * area_m2'));
+mustCatch('…and a per-metre rate fabricated by division anywhere on the line',
+  derivesAPrice('        price_per_meter = total_price / float(area)'));
+// The two RETURN shapes that walked past every assignment pattern (verbatim, found 2026-09-21).
+mustCatch('a helper RETURNING rate × area for its caller to store as price_total (resolve_price)',
+  derivesAPrice('        return round(meta_price * area), "per_metre_x_area"'));
+mustCatch('…and the conditional-tuple return shape (parse_price)',
+  derivesAPrice('    return ((ppm * area_m2) if (ppm and area_m2) else None), ppm'));
+mustCatch('…and the mirror order, area × rate, through wrapped operands',
+  derivesAPrice('    return float(row["area_m2"]) * float(row["price_per_meter"])'));
+// A real, faithful return from the fleet — annualize_rent's weekly limb (price × periods) — mutated
+// into the shape. (Was october's `return round(price * periods)`, gone with its HTML reader 2026-09-28.)
+const realReturnLine = readFileSync(join(root, 'common/normalize.py'), 'utf8')
+  .split('\n').find((l) => /^\s+return price \* 52$/.test(l)) ?? '';
+mustCatch('a real annualize_rent return line mutated into price × area',
+  derivesAPrice(realReturnLine.replace('52', 'area')));
+
+mustCatch('a price assigned out of the DESCRIPTION (the 47 aqar rows that stored a rental income as the sale price)',
+  assignsPriceFromProse('    row["price_total"] = _extract_price(description)'));
+mustCatch('…and the same shape through a differently-named prose field',
+  assignsPriceFromProse('    price = _first_number(og_description)'));
+
+mustCatch('a per-m² rate stored AS the total (wasalt averageSalePricePerSqm, aqar «سعر المتر»)',
+  storesPpmAsTotal('    row["price_total"] = d.get("averageSalePricePerSqm")'));
+mustCatch('…and the annual variant of the same confusion',
+  storesPpmAsTotal('    row["price_annual"] = specs.get("سعر المتر")'));
+
+// NEGATIVE CONTROLS. A predicate red for everything protects nothing, and this is the line that
+// catches an over-broad repair — the fleet's faithful captures must still pass.
+mustCatch('…while the REAL eastabha capture line (a verbatim source rate) is NOT flagged',
+  !derivesAPrice(realPpmLine) && !storesPpmAsTotal(realPpmLine));
+mustCatch('…and the ONE sanctioned arithmetic (annualize_rent / monthly ×12) is still allowed',
+  !derivesAPrice('    row["price_annual"] = annualize_rent(monthly, "شهري")')
+  && !derivesAPrice('    row["price_annual"] = monthly * 12'));
+mustCatch('…and a reset (`a = b = c = None`) is not mistaken for a derivation',
+  !derivesAPrice('    row["price_per_meter"] = row["price_total"] = None'));
+mustCatch('…and a COMMENT describing the banned shape is prose, not an offence',
+  !derivesAPrice('    x = 1  # never: price_per_meter = price_total / area')
+  && !assignsPriceFromProse('    x = 1  # never read price from the description'));
+mustCatch('…and the REAL annualize_rent return (price × periods — not an area) is NOT flagged',
+  realReturnLine !== '' && !derivesAPrice(realReturnLine));
+// The two false positives found 2026-09-21: output and a regex CONSTANT never store a price.
+mustCatch('…and a debug print / f-string naming both price fields is NOT flagged',
+  !derivesAPrice(`        print(f"[dbg] price_total={row['price_total']} price_per_meter={row['price_per_meter']}")`)
+  && !derivesAPrice('    msg = f"price_total={total} price_per_meter={ppm}"'));
+mustCatch('…while a derivation INSIDE an f-string\'s {expression} is still caught',
+  derivesAPrice('    return f"{ppm * area}"'));
+mustCatch('…and a regex CONSTANT matching a content= attribute is NOT a prose price',
+  !assignsPriceFromProse(`_PRICE_ATTR_RE = re.compile(r'<meta[^>]+itemprop="price"[^>]+content="([\\d.,]+)"')`));
+
+if (failed || mutFail) {
+  if (failed) console.error(`\n✗ ${failed} price-fidelity assertion(s) FAILED`);
+  if (mutFail) console.error(`✗ ${mutFail} mutation(s) went UNCAUGHT — this guard cannot see the defects it exists for.`);
+  process.exit(1);
+}
+console.log('\n✓ all PRICE = SOURCE assertions passed (no derived, no prose, no ppm-as-total, evidence wired), and proven to fail on each');

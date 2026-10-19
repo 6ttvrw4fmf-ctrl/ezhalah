@@ -236,5 +236,31 @@ export function registryProblems(
       + 'genuinely moved tier that is an owner product decision, not a registry edit');
   }
 
+  // ── the tier rule over the WHOLE exposed surface, not five hand-listed ids (2026-09-13, #217) ──
+  // The loop above walks INTERVIEW_FIELDS: five question ids written out by hand. That is the SAME
+  // blind spot the two exposure rules had before routine #9 widened them one day earlier — and it is
+  // why 'more_options' survived on two fields the interview auto-asks. 20260811181508 defines the
+  // vocabulary, and the distinction is not cosmetic:
+  //     advanced     = the interview's question pool
+  //     more_options = manual «خيارات إضافية» sheet only, NEVER auto-asked
+  // MEASURED against the live registry on 2026-09-13, with the widened exposure rules GREEN on it:
+  // direction_ar and street_width_m were filter_tier='more_options' while COHORT_QUESTIONS puts both
+  // in front of real users automatically, and no «خيارات إضافية» sheet exists anywhere in src/ — the
+  // tier named a UI that was never built. Fixed by 20260913111514.
+  //
+  // So every control the app can put in front of a user — amenity chip or ranked question alike —
+  // must be 'advanced'. A key with no row is NOT reported here: `undescribed` above already owns
+  // that case, and saying it twice would make one defect read as two.
+  const exposedKeys = [...new Set([...chipKeys, ...controlFields])].map((k) => REGISTRY_KEY[k] ?? k);
+  for (const key of exposedKeys) {
+    if (!tier.has(key)) continue;
+    const t = tier.get(key);
+    if (t !== 'advanced') {
+      problems.push(`'${key}' is a user-facing Advanced Filter control but filter_tier='${t}' — `
+        + "'advanced' is the interview's own pool; 'more_options' means a manual sheet that is never "
+        + 'auto-asked, and no such sheet exists in the app (owner tier vocabulary, 20260811181508)');
+    }
+  }
+
   return problems;
 }

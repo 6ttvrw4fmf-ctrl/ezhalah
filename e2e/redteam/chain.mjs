@@ -15,6 +15,7 @@
 
 import { chromium, devices } from 'playwright';
 import { parseVisibleState } from '../live-sweep/visibleState.mjs';
+import { settledSource } from '../lib/resultsSentence.mjs';
 
 export const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';
 const SUPA = 'https://aannarbkwcymrotzwdbo.supabase.co';
@@ -131,8 +132,10 @@ export async function runSearch(page, budgetMs = 45000) {
   const ok = await tap(page, 'بحث');
   if (!ok) return false;
   const settled = await page.waitForFunction(
-    () => /لقينا|ما لقيت|ما فيه/.test(document.body.innerText || ''),
-    null, { timeout: budgetMs },
+    // Derived from the shipped pool (2026-09-19, routine #5) — the retired clock
+    // /لقينا|ما لقيت|ما فيه/ is defeated by 6 of the 10 AR guest templates.
+    (src) => new RegExp(src).test(document.body.innerText || ''),
+    settledSource(), { timeout: budgetMs },
   ).then(() => true).catch(() => false);
   await sleep(1500);
   return settled;
@@ -188,7 +191,7 @@ export function oracleFilterFromRequest(p, typesForCategory = null) {
   const inList = (vals) => `(${vals.map((v) => `"${String(v).replace(/"/g, '')}"`).join(',')})`;
   const parts = [];
   if (p.p_deal) parts.push(`deal_ar=eq.${encodeURIComponent(p.p_deal)}`);
-  if (p.p_rent_period) parts.push(`rent_period_ar=eq.${encodeURIComponent(p.p_rent_period)}`);
+  if (p.p_rent_period) parts.push(`or=(rent_period_ar.eq.${encodeURIComponent(p.p_rent_period)},price_annual.is.null)`); // price on request: every period (owner 2026-09-28)
   if (p.p_cities?.length) parts.push(`city_ar=in.${encodeURIComponent(inList(p.p_cities))}`);
   if (p.p_districts?.length) parts.push(`district_ar=in.${encodeURIComponent(inList(p.p_districts))}`);
   if (p.p_platforms?.length) parts.push(`platform=in.${encodeURIComponent(inList(p.p_platforms))}`);

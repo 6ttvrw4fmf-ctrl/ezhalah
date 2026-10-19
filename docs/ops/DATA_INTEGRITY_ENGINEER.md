@@ -238,6 +238,20 @@ as city · city never used as district · duplicate names resolved via hierarchy
 Confident match → canonical ID. Ambiguous/unverifiable → NULL. **Never guess.** An unresolved
 district must not delete the listing from city-level search.
 
+**"A bare adjective is never a city" is now a standing, roster-wired check (§32 below), not just a
+prose rule.** `select mon_detect_ambiguous_adjective_resolved_as_city();` must always read 0 — it
+fires on ANY production_ready row whose city_ar is a bare directional/age/position adjective
+(`scrapers.common.arabic_location.AMBIGUOUS_STANDALONE_WORDS`), fleet-wide, not just ialqarawi. If
+a new platform's resolver free-text-scans a title/description for a city (the ialqarawi
+`city_from_title()` shape), it MUST call `is_ambiguous_standalone_word()` on every scan candidate
+before accepting it — see that module's docstring for the full list and reasoning, and extend the
+list (never the detector's SQL) if the audit finds a new member of the same closed class.
+`select mon_detect_aqar_shadow_resolution_drift();` must always read 0 new growth past its pinned
+baseline — aqar's `aqar_shadow_resolved.parsed_city_id` is frozen by a deliberate 2026-07-08 owner
+decision (never re-checked once resolved) and can silently drift from `loc_city_map`/
+`loc_catalog_city` corrections; this only detects new drift, it does not auto-correct the
+historical backlog (§32).
+
 ## 7. Normal Filter data fidelity
 Verify all core normal-search fields across all platforms: Buy/Rent · Annual/Monthly · Region ·
 City · District · Category · Property group · Property type · Price · Price per m² · Area ·
@@ -1148,6 +1162,162 @@ touched at any point, so no period is fabricated even transiently. **Note the as
 omitted there:** inside one transaction Postgres freezes `now()`, so a raise-then-resolve *necessarily*
 shares a timestamp; the insta-resolve check is only meaningful across transactions, and asserting it
 in-migration fails on a transaction artifact (it did, and the migration was rolled back).
+
+## 32. "الشرقية" resolved as a city in Asir — a bare adjective bug class, and a frozen resolver found holding 2,146 rows of drift (settled 2026-09-25)
+
+**Owner-reported:** clicking "الشرقية" (Eastern Province) in the city picker showed it as a
+selectable *city* with 2 listings, claiming region = عسير (Asir) — the opposite side of the
+country from the real Eastern Province.
+
+**Root cause.** ialqarawi's `city_from_title()` scans a title's tokens right-to-left for a catalog
+city. Its `_CITY_STOP` set already excluded the bare directional NOUNS (شرق/غرب/شمال/جنوب/وسط)
+from ever being treated as a city — a half-finished pattern that never added their ال-prefixed
+ADJECTIVE forms. Two live listings' titles trailed off with «...حي النوارية الشرقية مخطط اللابة»
+(a Makkah plot) and «...في الشرقيه امام شاطئ نصف القمر» (a Khobar plot). Neither «الشرقية» names a
+place on its own — one modifies a subdivision name, the other is the colloquial whole-Eastern-
+Province sense — but the catalog also holds one real, obscure Asir-region village of that exact
+spelling (`city_id 14645`), and the scanner matched it.
+
+**Verified before touching anything (owner asked specifically):** «حي النوارية» IS a real Makkah
+district (`loc_catalog_district`, `city_id=6`) — the fixed scanner correctly recovers it once the
+adjective is skipped. «شاطئ نصف القمر» is a genuine Khobar/Dammam beach but NOT a catalog district
+at all (checked live, zero matches); its listing's own «الحي» field plainly said «الدمام» — a real
+catalog city that nothing in the scraper used for city resolution, only for district-vs-
+neighbourhood classification after a city already existed.
+
+**Fix, generalised — not a one-scraper patch.** Audited the WHOLE catalog for the same word class
+(relative/comparative Arabic adjectives: direction, age/currency, relative position) live against
+`loc_catalog_city`: 18 exact collisions across 10 distinct words (`الوسطى`→Qassim, `الجديدة`→5
+different cities, `العليا`→4, `الحديثة`→Jouf, `المحدثة`→Asir, ...). Built
+`scrapers.common.arabic_location.AMBIGUOUS_STANDALONE_WORDS` /
+`is_ambiguous_standalone_word()` — the SHARED, fleet-wide version of ialqarawi's local fix — and a
+second fallback: when a title scan finds nothing at all, try the listing's own district/city field
+as a last-resort city (only when the title found NOTHING, so it can never override a correct
+title-based answer — proven against the pre-existing «الحي: الدوادمي, 500km from the title's own
+عنيزة» regression guard, untouched). Fleet-swept: `city_from_title`/`_CITY_STOP` is unique to
+ialqarawi — nobody else duplicates the anti-pattern.
+
+**A second, larger, DIFFERENT bug surfaced auditing aqar's own separate resolver** (not the same
+mechanism — aqar has no `city_ar` column at all, its location comes from
+`aqar_shadow_resolved.parsed_city_id`, populated by `resolve_aqar_locations()`). The 3 aqar rows
+the owner also asked about: `aqar_residential_listings.city = 'Al Hariq'` (correct, unchanged) but
+`aqar_shadow_resolved.parsed_city_id` pointed to `city_id 643` = «الجديدة», an unrelated Riyadh-
+region town — because `loc_city_map`/`loc_catalog_city` had since been corrected, but
+`resolve_aqar_locations()` **never re-checks a row once resolved** (`WHERE
+aqar_shadow_resolved.parsed_city_id IS NULL`) — a DELIBERATE 2026-07-08 owner decision
+("a row is only ever filled in, never overwritten once resolved"), not a bug in itself. Re-running
+the exact same proven join logic fresh against every currently-active row found **2,146 rows**
+(2,063 residential + 83 commercial) where the frozen answer now genuinely disagrees with a fresh
+resolution (excluding pure ة/ه spelling drift, which is ~91k rows and harmless). Sampled and
+cross-checked against the LIVE `aqar.city` text directly (not a stale snapshot) — 97%+ agreement
+that the fresh answer is correct, not the frozen one.
+
+**Did NOT reverse the 2026-07-08 freeze** — that is an explicit stability decision, not this run's
+call to make. Fixed the 3 owner-reported rows directly (verified: city, district, AND region all
+now agree, and the district is catalog-proven to belong to that exact city). Added
+`mon_detect_aqar_shadow_resolution_drift()` as a **growth ratchet** pinned to the measured
+2,146-row baseline — it alerts only on NEW drift past that baseline, so a live gap that was
+previously invisible is now visible without either silently mass-correcting 2,146 historical rows
+or leaving the pattern able to recur undetected. Whether to bulk-backfill the historical 2,146 is
+an explicit, separate owner decision — not something a detector or this routine should do alone
+given ~20% of the sample looked like a deliberate governorate→specific-city map refinement
+(`الأحساء`→`الهفوف`, 426 rows) rather than an unambiguous bug.
+
+**Barriers (superseded by §33's more precise pair — see below):**
+`mon_detect_ambiguous_adjective_resolved_as_city()` (P1, standing-0, roster-wired, still live) and
+the original `mon_detect_aqar_shadow_resolution_drift()` (P2 growth-ratchet pinned to the raw
+2,146-row baseline) —
+`supabase/migrations/20260925171201_location_barriers_ambiguous_adjective_and_aqar_drift.sql`.
+`scrapers/common/tests/test_ambiguous_standalone_words.py` (35 tests, mutation-proven: removing an
+entry from the set is watched to flip detection to False) +
+`scrapers/common/tests/test_ialqarawi_source_traps.py`'s directional-adjective and
+district-field-fallback tests (mutation-proven against the real pre-fix code, not a synthetic
+copy). Full suite 4,504 passed / 3 skipped at ship time.
+
+## 33. The 2,146-row aqar backlog, classified row-by-row and 1,322 of them repaired (settled 2026-09-25, same day as §32)
+
+**Owner's follow-up, verbatim intent:** don't bulk-fix the 2,146 blindly — audit every row, compare
+aqar's source city/district/region against our catalog and the listing's own title/address text,
+classify into PROVEN WRONG / SPELLING-ONLY / GOVERNORATE-vs-CITY / AMBIGUOUS / SOURCE CONFLICT, and
+only auto-correct the first bucket. Strengthen the barriers so district must belong to the resolved
+city, region must agree with city, and a stale aqar resolution is caught automatically.
+
+**Method.** `resolve_aqar_locations()`'s own join is deterministic per raw English `city` field
+(`aqar_residential_listings.city`/`aqar_commercial_listings.city` → `loc_city_map` →
+`loc_catalog_region`/`loc_catalog_city`), so the 2,146 drifted rows collapse to 256 distinct
+`(old_city_ar, fresh_city_ar)` pairs across only 68 distinct raw English city strings — not 2,146
+independent judgement calls. Per row, the listing's OWN `neighborhood` field (source data, not a
+guess) was matched against `loc_catalog_district` under both the frozen city and the freshly
+re-resolved one:
+
+| category | rule | count |
+|---|---|---:|
+| **PROVEN_WRONG** | neighborhood matches a real district under the FRESH city and NOT under the old one — concrete per-row proof | 1,322 (177 pairs) |
+| **GOVERNORATE** | old value is a real region name, or the specific «الاحساء»→«الهفوف» pair (see below) | 406 (10 pairs) |
+| **AMBIGUOUS** | neighborhood matches districts under BOTH cities, or under NEITHER with no recognizable region/governorate name | 335 (77 pairs) |
+| **SOURCE_CONFLICT** | neighborhood matches a district under the OLD city, not fresh — the ad's own data contradicts the fresh recompute | 83 (3 pairs) |
+| **SPELLING_ONLY** | 0 by construction — a normalize_ar()-identical old/fresh pair was already excluded before the 2,146 was ever measured; the adjacent «duplicate catalog city name, same spelling, different city_id» class (191 such names fleet-wide, e.g. «البدائع»→«البدائع») is a SEPARATE, out-of-scope catalog-quality issue, already flagged by `docs/ops/DERIVED_STORE_FRESHNESS.md` §4 Q4 | 0 |
+
+**Spot-checked the highest-risk pairs by hand before trusting the mechanical rule** (the Dammam/
+Khobar/Dhahran metro, since `DERIVED_STORE_FRESHNESS.md` §3 already flagged that trio as
+"proximity/geocode drift"): every sampled title EXPLICITLY names its own city (e.g. «...حي القصور,
+مدينة الظهران...», «...حي الثقبة, مدينة الخبر...») and the matched neighborhood is a real,
+non-generic district of that same city (الثقبة/الخزامى are iconic Khobar districts, not shared
+names) — triple-confirmed (raw field + title text + catalog district), not a bare district-string
+coincidence.
+
+**Caught a near-miss before committing it: «الاحساء»→«الهفوف» (456 rows, the largest pair) almost
+got reclassified to PROVEN_WRONG.** `loc_city_cluster` history looked decisive at first — the July
+2026-07-20 migration `20260720171946` removed the al_ahsa cluster ("never merge two different
+cities just because they have the same/related name") and `الاحساء` (`city_id 3677`) has ZERO
+catalog districts of its own. But `docs/ops/DERIVED_STORE_FRESHNESS.md` §3/§6 (written 2026-08-31,
+independently) had ALREADY investigated this exact pair and explicitly preserved it as **"the
+reserved taxonomy question — owner's decision, untouched"** — and `loc_city_cluster` currently
+carries city_id 3677+12 under `cluster_key='al_ahsa'` AGAIN, written by a LATER migration
+(`20260831195108`, reversing the July removal), annotated in its own `note` column as
+"الاحساء — governorate/oasis name". The owner's own decision on this exact pair has already
+flip-flopped once. Stayed GOVERNORATE, untouched — reading repo history before trusting a
+mechanical rule is what caught this.
+
+**Repaired the 1,322 PROVEN_WRONG rows** — `aqar_shadow_resolved.{city_ar_parsed,
+region_ar_parsed, parsed_city_id}`, the matching `search_listings_ar` row (`city_ar/city_id/
+region_ar/region_id` — `match_city_ids` recomputed automatically by the existing
+`composite_match_city_ids()` trigger, verified), and logged to `aqar_resolver_log`. Verified live
+via a real browser search on `ezhalah-app.vercel.app` after the repair (e.g. searching «الحريق»
+correctly returns 9 results with city=الحريق/region=الرياض, not the earlier bad state).
+
+**Barriers, replacing §32's coarser pair (`mon_detect_aqar_shadow_resolution_drift` dropped):**
+`supabase/migrations/20260925175109_aqar_drift_precise_classifier_and_repair_barriers.sql` adds
+the reusable `aqar_classify_shadow_drift()` classifier plus:
+- `mon_detect_aqar_proven_wrong_resolution()` — P1, standing-0. Fires on NEW rows with concrete
+  per-row district proof of a wrong city — never on the GOVERNORATE/AMBIGUOUS/SOURCE_CONFLICT
+  backlog, so it can never demand a guess.
+- `mon_detect_aqar_unresolved_drift_backlog()` — P3 growth ratchet pinned to 824 (the remaining
+  GOVERNORATE+AMBIGUOUS+SOURCE_CONFLICT rows measured immediately after the repair). Tracks the
+  deliberately-untouched backlog so it cannot silently grow, without ever demanding it reach zero.
+- `mon_detect_city_region_mismatch()` — P1, standing-0, **fleet-wide** (every platform, not just
+  aqar): a production_ready row's `region_id` must match its own `city_id`'s region in
+  `loc_catalog_city`. A naive fleet-wide DISTRICT-level version of this ("does this district exist
+  under some other city") was tried first and rejected — Saudi district names repeat so heavily
+  across unrelated cities (generic names like حي النزهة) that even restricting to cross-REGION
+  matches produced 92,400+ false positives. City→region is a clean catalog FK with no such
+  ambiguity, so it stays a hard zero-tolerance check; a general district-level fleet-wide barrier
+  remains unbuilt (see `docs/ops/DERIVED_STORE_FRESHNESS.md` §7 Q4 — 191 duplicate catalog city
+  names is the same underlying data-quality gap).
+
+**Mutation-proven, live, both directions.** All three detectors read 0 before touching anything.
+Reproduced the exact historic bug shape (wrong city + a cross-region `region_id`) on one real,
+already-repaired row (id 23460, the Dhahran example) — `mon_detect_aqar_proven_wrong_resolution()`
+and `mon_detect_city_region_mismatch()` both flipped to 1, then back to 0 the instant the row was
+restored. Codified as `scripts/verify-aqar-drift-detectors-live.ts`
+(`.github/workflows/aqar-drift-detector-mutation-proof.yml`, daily + on change — live/write-capable,
+so it is out of the required `npm test`, same precedent as `verify-repair-guarantee-enrollment-live.ts`).
+
+**Left deliberately untouched — 824 rows, an explicit owner decision, not an oversight:** 406
+GOVERNORATE (incl. all 456 of «الاحساء»→«الهفوف», per the near-miss above), 335 AMBIGUOUS (no
+reliable evidence either way), 83 SOURCE_CONFLICT (the ad's own neighborhood contradicts the fresh
+recompute — 60 of them «Dammam»→«الخبر» reversed, `DERIVED_STORE_FRESHNESS.md`'s own "proximity/
+geocode drift, not source truth" call, independently reached).
 
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the

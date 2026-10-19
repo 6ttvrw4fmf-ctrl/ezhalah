@@ -238,6 +238,7 @@ if (import.meta.filename === process.argv[1]) {
     for (const d of diverged) {
       console.error(`    [${d.kind === 'code' ? 'CODE' : 'comments'}] ${d.file}`);
       console.error(`      repo md5 ${d.repoMd5} vs applied ${d.appliedMd5} at version ${d.appliedVersion} (matched by ${d.matchedBy})`);
+      if (d.candidates) console.error(`      its NAME matches ${d.candidates.length} applied versions (${d.candidates.join(', ')}) and the file mirrors NONE of them`);
     }
     console.error(`  Fix by making the file match what production ran — recover it verbatim from`);
     console.error(`  supabase_migrations.schema_migrations.statements — or apply the part production never got.`);

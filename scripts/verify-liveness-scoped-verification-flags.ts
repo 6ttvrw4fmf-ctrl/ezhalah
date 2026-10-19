@@ -79,12 +79,31 @@ check('#3 the ALIVE path is untouched and still uses the sanctioned contract hel
   SRC.includes('direct_alive_patch(now_iso=now_iso)')
   && SRC.includes('from scrapers.common.liveness_contract import direct_alive_patch'));
 
-// ── 4. COHORT CONSISTENCY — shard windows and the walk must see the same population ──────────────
-const cohortUses = (SRC.match(/_cohort\(/g) || []).length;
-check(`#4 the cohort filter is applied in all three places (count, offset probe, keyset loop) — found ${cohortUses}`,
-  cohortUses >= 4); // 1 definition + 3 call sites
+// ── 4. COHORT CONSISTENCY — every read of the listing population must see the same population ────
+// This used to count call sites ("all three places: count, offset probe, keyset loop"), which is a
+// fact about one implementation rather than the invariant: when the offset-probe sharding was
+// replaced by an id-modulo partition on 2026-09-24 there were two reads left, and a call-site count
+// cannot tell that from a read that has escaped the scope. Assert the invariant instead — EVERY
+// select on the swept table is wrapped in _cohort — so adding a fourth read is covered for free and
+// an unwrapped one is red however many there are.
+//
+// ONE named exception (2026-10-05): `_known_live_controls()` reads the most recently seen UNSTRUCK
+// ads as the run's known-live controls. It is deliberately not the cohort (under --only-struck the
+// cohort is struck rows, and a control must be a live ad), so its body is excluded from the sweep
+// count below, and pinned instead: it is read-only, and it is the ONLY body excluded.
+const CONTROLS_FN = /\ndef _known_live_controls\([^)]*\)[^\n]*:\n(?:(?:[ \t]+[^\n]*|)\n)+/;
+const controlsBody = (SRC.match(CONTROLS_FN) || [''])[0];
+check('#4 the known-live controls helper exists and is read-only (no update/insert/delete)',
+  controlsBody.length > 0 && !/\.(update|insert|delete|upsert)\(/.test(controlsBody));
+const SWEEP = SRC.replace(CONTROLS_FN, '\n');
+const selects = (SWEEP.match(/client\.table\(table\)\s*\.select\(/g) || []).length;
+const scopedSelects = (SWEEP.match(/_cohort\(\s*client\.table\(table\)\s*\.select\(/g) || []).length;
+check(`#4 every read of the swept table is inside _cohort — ${scopedSelects} of ${selects} selects`,
+  selects >= 2 && scopedSelects === selects);
 check('#4 no raw .eq("active", True) survives on the sweep queries (all go through _cohort)',
-  (SRC.match(/\.eq\("active",\s*True\)/g) || []).length === 1); // only the one inside _cohort
+  (SWEEP.match(/\.eq\("active",\s*True\)/g) || []).length === 1); // only the one inside _cohort
+check('#4 the controls exception is the only excluded body (exactly one extra active filter)',
+  (SRC.match(/\.eq\("active",\s*True\)/g) || []).length === 2);
 
 // ── 5. MUTATION PROOF — the dangerous shapes must fail ───────────────────────────────────────────
 {

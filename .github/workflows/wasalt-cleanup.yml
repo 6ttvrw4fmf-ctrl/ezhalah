@@ -38,7 +38,10 @@ concurrency:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 180 min (was 60): the re-check drives a real browser per candidate (~15-20s each through the
+    # Cloudflare path), so a drain batch of ~500 needs ~2.5h. 60 min cancelled the first drain
+    # dry-run mid-recheck (2026-09-20). Still far under GitHub's 6h ceiling.
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -48,11 +51,20 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
+      # Cloudflare path (issue #1019): the cleanup RE-CHECK re-fetches each candidate's real wasalt
+      # URL, and wasalt.sa null-routes the curl_cffi+proxy shape — so without a real browser every
+      # recheck returns 403/timeout ("unknown"), nothing dead is ever deleted, and the run's
+      # inconclusive freeze trips. cleanup.py routes wasalt through scrapers/wasalt/browser.py when
+      # WASALT_BROWSER=1, exactly as run.py (#3129), enrich_ar (#3140) and liveness (#3166) do.
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
       - name: Run wasalt cleanup
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
         run: |
-          exec python -m scrapers.common.cleanup --platform wasalt \
+          # headless=False clears the challenge; the runner has no display, so xvfb-run supplies one.
+          exec xvfb-run -a python -m scrapers.common.cleanup --platform wasalt \
             ${{ inputs.dry_run == 'true' && '--dry-run' || '' }}

@@ -92,12 +92,31 @@ import { join, extname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { readRestoredFormState } from '../e2e/lib/formRestoreOracle.mjs';
+// One dismissal, one owner (verify-live-journeys-answer-the-consent-card.ts pins this). Every live
+// journey imports the shared helper rather than hand-rolling a private copy — the smoke used to
+// only see the cookie card indirectly (search-auto-dismiss cleared it and localStorage kept it away
+// on later reloads), but after owner rule 2026-09-13 the card returns on every visit, so the smoke
+// is now a live consumer like every other journey and must call THE shared helper here.
+import { dismissCookieConsent } from './lib/liveConsent.ts';
+import { armForSubmit, classifyRapidCancelEntry } from './lib/armedSubmit.ts';
+// THE STOP LINE IS IMPORTED, NEVER RETYPED (2026-09-20). This journey hardcoded `50` in four
+// places; when the owner moved the line to 25 the app behaved correctly and this file failed,
+// asserting a rule that no longer existed. Every other AF barrier already imports it for exactly
+// this reason — see scripts/verify-af-rounds-never-self-reopen-and-finish-at-25.ts.
+import { INTERVIEW_STOP_AT } from '../src/lib/afRanking.ts';
 
 const DIST = new URL('../dist/', import.meta.url).pathname;
 let failed = 0;
+let skipped = 0;
 const check = (label, ok, detail = '') => {
   if (!ok) failed++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail && !ok ? `\n        ${detail}` : ''}`);
+};
+// A measurement that did not happen is a SKIP, never a pass and never a defect (PART 9.5 / 9.1).
+// It must always carry its reason: an unexplained skip is the failure mode that reads as coverage.
+const skipCheck = (label, reason) => {
+  skipped++;
+  console.log(`SKIP  ${label}\n        ${reason}`);
 };
 
 if (!existsSync(join(DIST, 'index.html'))) {
@@ -163,6 +182,31 @@ const BENIGN = /Minified React error #(418|423|425)/;
 // 3000 while the beat was 2200; when the beat became 10s [J] read start=232 final=232 and failed on
 // a harness race, not a product defect. Named once so both journeys move together next time.
 const SEARCH_BEAT_FLOOR_MS = 12000;
+
+// The September passive probe hides the CTA when its bounded retry is UNKNOWN. The old
+// journey inferred UNKNOWN only from a CTA coming back after a click, so it misdiagnosed
+// this earlier timeout as a broken open. Require network evidence for BOTH complete rounds;
+// a missing request, pending request, HTTP error, or any answered probe still fails closed.
+function observeAfProbeTimeouts(page) {
+  const attempts = new Map();
+  const names = ['apartment_guided_counts_ar', 'property_age_option_counts_ar'];
+  const onRequest = (request) => {
+    const name = new URL(request.url()).pathname.split('/rpc/')[1];
+    if (names.includes(name)) attempts.set(request, { name, start: Date.now(), timedOut: false });
+  };
+  const onFailed = (request) => {
+    const attempt = attempts.get(request);
+    if (attempt) attempt.timedOut = Date.now() - attempt.start >= 3500
+      && /ERR_ABORTED|ERR_TIMED_OUT/.test(request.failure()?.errorText ?? '');
+  };
+  page.on('request', onRequest);
+  page.on('requestfailed', onFailed);
+  return {
+    undetermined: () => names.every((name) => [...attempts.values()].filter((p) => p.name === name).length >= 2)
+      && [...attempts.values()].every((p) => p.timedOut),
+    dispose: () => { page.off('request', onRequest); page.off('requestfailed', onFailed); },
+  };
+}
 
 const launchOpts = { args: ['--no-sandbox', '--ignore-certificate-errors', '--disable-quic'] };
 if (process.env.PW_CHROMIUM) launchOpts.executablePath = process.env.PW_CHROMIUM;
@@ -244,7 +288,14 @@ const waitForBody = async (re, timeoutMs) => {
   }
   return false;
 };
-const RESULT_COUNT = /لقينا|ما لقينا/;
+// A "results are on screen" signal — any of the 10 rotating AR Results-Found templates (owner rule
+// 2026-09-19, src/data/resultsFoundRotation.ts) plus the "no results" surface. Every AR results
+// template contains the word «نتيجة» (or its plural «نتائج»); «ما لقينا / ما لقيت / ما فيه» handles
+// honest zero. Matching «لقينا» alone (the pre-rotation regex) missed half the pool — five of the
+// ten AR-guest templates ("أبشر، طلع لنا N نتيجة …", "عندنا N نتيجة …" etc.) have no «لقينا» at all.
+// Arabic-only on purpose: the app is Arabic-only in production (memory feedback), and the token
+// "results" leaks into non-results HTML (data-testid attributes, marketing copy) if we widened it.
+const RESULT_COUNT = /نتيجة|نتائج|ما لقينا|ما لقيت|ما فيه/;
 // Input snapshots deliberately EXCLUDE the sign-in card's own phone field (owner 2026-08-29): the
 // card is a floating auth overlay, not filter state — and it legitimately disappears when a
 // journey's own send dismisses it, which would otherwise shift these snapshots mid-journey
@@ -268,6 +319,7 @@ try {
   // ---- Journey A: the primary CTA must produce results, not a blank page. ----
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(5000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   check('home renders', (await body()).includes('تصفية'));
   await dismissAuthPopup(); // a real guest closes the sign-in prompt before searching
 
@@ -328,19 +380,40 @@ try {
   });
   // Key-order-insensitive signature of a search request body, so an incidental serializer reorder
   // can never masquerade as a query change. A body that does not parse is compared verbatim.
+  //
+  // p_rotation_seed is EXCLUDED on purpose (2026-09-26). What E/F/H below actually assert is that a
+  // mid-flight cancel does not mutate FILTER STATE — an untouched resubmit must ask for the same
+  // THING. The rotation seed is not part of what the user asked for: it is per-search entropy that
+  // the owner requires to CHANGE on every search ("I do a search, it shows عقار first. I refresh —
+  // the same exact one shouldn't show عقار first"), so a byte-identical body is now the wrong
+  // oracle. Leaving it in would have forced that feature to be reverted to make this pass.
+  //
+  // Dropping a key from a signature can only ever WEAKEN a guard, so seedOf() below re-adds the lost
+  // coverage as its own, sharper assertion: the seed must be PRESENT in both bodies and must DIFFER
+  // between two searches. Net effect is strictly stronger than the old whole-body compare, which
+  // could not tell a missing seed from a reused one.
+  const ROT_SEED_KEY = 'p_rotation_seed';
   const reqSig = (body) => {
     if (body == null) return null;
-    try { const o = JSON.parse(body); return JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]])); }
-    catch { return body; }
+    try {
+      const o = JSON.parse(body);
+      return JSON.stringify(Object.keys(o).filter((k) => k !== ROT_SEED_KEY).sort().map((k) => [k, o[k]]));
+    } catch { return body; }
+  };
+  const seedOf = (body) => {
+    if (body == null) return null;
+    try { const v = JSON.parse(body)[ROT_SEED_KEY]; return typeof v === 'string' && v.length > 0 ? v : null; }
+    catch { return null; }
   };
 
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(12000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   const afterRefresh = await body();
 
   check('a refresh issues ZERO search/AI requests', searchCalls === 0,
     `${searchCalls} search/AI request(s) fired on reload — a refresh must never count as a user search`);
-  check('a refresh does not re-render the previous results', !/لقينا|ما لقينا/.test(afterRefresh));
+  check('a refresh does not re-render the previous results', !RESULT_COUNT.test(afterRefresh));
   // Owner rule 2 (2026-08-16, same day as rule 1): "when i refresh takes me to the filter page …
   // not this here" — an emptied AI chat is a dead end, so the refresh lands on the Filter home.
   check('a refresh lands on the FILTER HOME (owner 2026-08-16 rule 2)',
@@ -373,15 +446,56 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(5000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   check('[mobile] home renders', (await body()).includes('تصفية'));
   await pickCity('الرياض');
   await tap('بحث');
   const mobResults = await waitForBody(RESULT_COUNT, 40000);
   check('[mobile] a search produces results', mobResults);
 
+  // ---- Journey D2: «عرض المزيد» 100 → 500 must not download every new card's photo (2026-10-06). ----
+  // Each card's web probe (ResultCard ListingPhoto, the CORP / 404 safety net) used to start on
+  // mount, so the second press fetched ~325 photos at once (200–470 KB each) and the photo actually
+  // on screen waited 8–35 s behind them on a phone network. Photos must load as cards come NEAR the
+  // screen (src/lib/nearViewport.ts). This counts what the BUILT app really fetches, so it also
+  // catches the flood coming back by any other road: a prefetch, an eager <img>, an expo-image change.
+  {
+    const PHOTO_BUDGET = 100; // fixed build 14–31 (cards on and ~6 below the screen, broken-photo retries); flood 326–367
+    const cardsShown = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="result-card-grid"]')].pop()
+      ?.querySelectorAll('[data-testid^="card-listing-"]').length ?? 0);
+    const pressPager = async () => {
+      const pager = page.locator('[data-testid="results-load-more"]').last();
+      await pager.waitFor({ state: 'attached', timeout: 40000 });
+      await pager.evaluate((el) => el.scrollIntoView({ block: 'center' })); // the inner ScrollView moves only this way
+      await page.waitForTimeout(600);
+      await pager.click({ timeout: 15000 });
+    };
+    const waitCards = async (min, ms) => { const until = Date.now() + ms; let n = 0;
+      while (Date.now() < until && (n = await cardsShown()) < min) await page.waitForTimeout(400); return n; };
+    try {
+      await pressPager();
+      const first = await waitCards(100, 30000);
+      await page.waitForTimeout(3000);
+      const photos = [];
+      const onReq = (r) => { const u = r.url();
+        if (r.resourceType() === 'image' && !u.startsWith(BASE) && !/^(data|blob):/.test(u)) photos.push(u); };
+      page.on('request', onReq);
+      await pressPager();
+      const second = await waitCards(first + 1, 20000);
+      await page.waitForTimeout(6000);
+      page.off('request', onReq);
+      if (second <= first) skipCheck('[mobile] «عرض المزيد» photo budget', `the second press revealed nothing (${first} → ${second} cards) — no reveal to measure`);
+      else check(`[mobile] «عرض المزيد» ${first} → ${second} downloads only the photos near the screen (${photos.length} ≤ ${PHOTO_BUDGET})`,
+        photos.length <= PHOTO_BUDGET, `${photos.length} photo requests in 6 s — every new card is downloading its photo at once`);
+    } catch (e) {
+      skipCheck('[mobile] «عرض المزيد» photo budget', `the pager was not reachable: ${String(e).split('\n')[0].slice(0, 140)}`);
+    }
+  }
+
   searchCalls = 0;
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(12000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   check('[mobile] a refresh issues ZERO search/AI requests', searchCalls === 0, `${searchCalls} fired`);
   check('[mobile] a refresh does not re-render the previous results', !RESULT_COUNT.test(await body()));
   check('[mobile] a refresh lands on the FILTER HOME', !page.url().includes('/agent'), `url = ${page.url()}`);
@@ -404,8 +518,15 @@ try {
   // did. E/F/H-mobile below use browser back as the canonical user path.
   const cancelViaNav = async () => { await page.goBack({ waitUntil: 'domcontentloaded' }); await page.waitForTimeout(600); };
   const landedCount = async () => {
-    const m = [...(await body()).matchAll(/لقينا ([\d,٬،]+) إعلان/g)];
-    return m.length ? parseInt(m[m.length - 1][1].replace(/[^\d]/g, ''), 10) : null;
+    // Results-Found sentence is now a rotation (owner rule 2026-09-19, src/data/resultsFoundRotation
+    // .ts). The 10 AR templates end with «N نتيجة» in various framings — the retired fixed
+    // «لقينا N إعلان» is gone. What every AR template has in common is a formatted digit run
+    // followed by «نتيجة». Take the LAST such match on the page: there is only one Results-Found
+    // sentence, but robustly picking the tail avoids being fooled by any earlier card that happens
+    // to include the same shape. Arabic-only (see RESULT_COUNT note above).
+    const txt = await body();
+    const arMatches = [...txt.matchAll(/([\d,٬،]+)\s*نتيجة/g)];
+    return arMatches.length ? parseInt(arMatches[arMatches.length - 1][1].replace(/[^\d]/g, ''), 10) : null;
   };
   // Poll for the count directly instead of `waitForBody(RESULT_COUNT,...)` + an immediate
   // `landedCount()` read. The result intro line types itself out character-by-character, so the
@@ -424,6 +545,14 @@ try {
     }
     return null;
   };
+  // ARM: prove the app's own commit marker is present before tapping «بحث», re-priming the city when
+  // it is not. `onSearch` returns at `if (!citySelected)` with a validation message and fires ZERO
+  // requests, and every keystroke in the city field clears `citySelected`. Verdicts are decided by
+  // scripts/lib/armedSubmit.ts so a barrier can EXECUTE that rule rather than grep it.
+  const armSearch = () => armForSubmit(
+    async () => (await page.locator('[data-testid="selected-city-visual"]').count()) > 0,
+    () => pickCity('الرياض'),
+  );
   // Submit that CONFIRMS a search request left the app, re-tapping when one did not (2026-08-24).
   // Four CI runs failed [H mobile] with a tap that fired nothing while the same build+script+backend
   // passed locally end to end: after Stop's restore the form REHYDRATES citySelected in an effect
@@ -431,9 +560,40 @@ try {
   // the app correctly refuses to search with an unresolved city, exactly once. A real user's second
   // tap succeeds; so does this one. A genuinely wedged app fires nothing in 3 attempts and still
   // fails — and every capture window starts null, so the sig oracle only ever sees THIS submit.
+  //
+  // RE-ARM BETWEEN ATTEMPTS (2026-09-14). Retrying the TAP was never a retry: if the city is
+  // uncommitted, all three taps hit a form the app refuses and the loop spends its whole budget on
+  // three no-ops — the same shape PART 11.2 rule 2 records for a control that unmounts. Measured on
+  // this branch, CI run 34833233410: the BASELINE submit did exactly that, `baselineReq` stayed
+  // null, and all three request-signature oracles downstream ([E], [F], [H mobile]) then failed
+  // comparing against that null while each resubmit had fired a perfectly good request. One null
+  // baseline, seven reported failures, and nothing wrong with the app.
+  // The district twin of pickCity: type → tap the suggestion → CONFIRM the app committed it, using
+  // the app's OWN restored-form oracle (readRestoredFormState's `districts`), not a DOM guess.
+  // Returns false rather than throwing when it cannot commit, so a caller can say so instead of
+  // asserting on a form that is not the one it thinks it primed.
+  const pickDistrict = async (typed, row) => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await page.click('input >> nth=1');
+      await page.fill('input >> nth=1', '');
+      await page.type('input >> nth=1', typed, { delay: 60 });
+      await tapWhenRendered(row).catch(() => {}); // the confirmation below decides; a miss retries
+      const until = Date.now() + 4000;
+      while (Date.now() < until) {
+        const snap = await visibleInputs();
+        if ((snap?.districts || []).length > 0) return true;
+        await page.waitForTimeout(250);
+      }
+    }
+    check(`the district «${row}» was committed before the form was used`, false,
+      'the app never showed it as a committed district after 3 attempts — every assertion below '
+      + 'would be comparing against a form that was never actually primed');
+    return false;
+  };
   const submitSearch = async () => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       lastSearchBody = null;
+      await armSearch();
       await tap('بحث');
       const until = Date.now() + 5000;
       while (Date.now() < until) {
@@ -446,12 +606,20 @@ try {
   const fillOwnerExample = async () => {
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(5000);
+    // Every page.goto reintroduces the cookie card (owner 2026-09-13); on the mobile viewport the
+    // bottom-sheet form occludes the area inputs and «بحث», so answer it before the fill sequence.
+    await dismissCookieConsent(page);
     // Same two-tap deal sequence as journey A above (Buy+Rent combined multi-select, 2026-08-20).
     await tap('إيجار'); await tap('شراء'); await tap('سنوي');
     await pickCity('الرياض');
-    await page.click('input >> nth=1');
-    await page.type('input >> nth=1', 'النرجس', { delay: 60 });
-    await tapWhenRendered('حي النرجس');
+    // CONFIRM THE DISTRICT COMMIT, exactly as pickCity confirms the city. The suggestion row can
+    // render after the tap fires on a loaded runner, and an uncommitted district is not a milder
+    // version of a committed one — it is a DIFFERENT form. Measured, CI run 34833233410:
+    // «[E] rapid-cancel restores city/district/area EXACTLY» failed with
+    // pre=…"النرجس" districts:[] vs post=…"" districts:["حي النرجس"] — the snapshot was taken with
+    // the district still raw text in the input, so the restore, which committed it properly, read
+    // as a mismatch. The app was right and the primed form was wrong.
+    await pickDistrict('النرجس', 'حي النرجس');
     await tap('الشقق والسكن المشترك'); await tap('شقة');
     await tap('3');
     await page.fill('input >> nth=2', '80');
@@ -470,9 +638,24 @@ try {
 
   // ---- E: rapid cancel — navigate back the instant the search starts (Stop button removed 2026-09-12). ----
   await fillOwnerExample();
+  const armE = await armSearch();
   await tap('بحث');
   await page.waitForTimeout(300); // land on /agent before navigating back — real user cancel timing
-  check('[E] Filter search landed on /agent before cancellation', page.url().includes('/agent'), `url=${page.url()}`);
+  const verdictE = classifyRapidCancelEntry({ armed: armE.armed, landedOnAgent: page.url().includes('/agent') });
+  if (verdictE !== 'pass') {
+    // Never let an unstarted search cascade into four "failures" about cancel and restore — that is
+    // exactly what CI run 34791858611 reported, with the app behaving correctly throughout.
+    if (verdictE === 'defect') {
+      check('[E] Filter search landed on /agent before cancellation', false,
+        `url=${page.url()} — DEAD CONTROL: the app reported a COMMITTED city (${armE.reason}) and «بحث» still fired nothing`);
+    } else {
+      skipCheck('[E] Filter search landed on /agent before cancellation',
+        `the form was never primed — ${armE.reason}`);
+    }
+    skipCheck('[E] rapid-cancel + exact-restore + untouched-resubmit assertions (4)',
+      'the search never started, so cancellation, restore and resubmit measured nothing here');
+  } else {
+  check('[E] Filter search landed on /agent before cancellation', true);
   await cancelViaNav();
   check('[E] rapid-cancel-via-back lands back on the Filter home', page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
   check('[E] rapid-cancel shows no results/partial text', !RESULT_COUNT.test(await body()));
@@ -489,10 +672,19 @@ try {
   // What Stop must actually guarantee is that the QUERY survived intact — so the oracle is the
   // serialized search request, compared key-order-insensitively. The count stays only as a
   // liveness check: the resubmit must land real results, whatever today's inventory is.
-  check('[E] resubmitting untouched after rapid-cancel fires the EXACT SAME serialized search request as the uninterrupted baseline',
+  check('[E] resubmitting untouched after rapid-cancel fires the EXACT SAME serialized search request as the uninterrupted baseline (rotation seed aside)',
     reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
     `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
+  // The coverage reqSig() gave up by excluding p_rotation_seed, re-added sharper: both searches must
+  // CARRY a seed, and the two must DIFFER — a resubmit is a new search, so it re-rolls which listing
+  // fronts each platform (owner 2026-09-26). A dropped seed or a frozen one both fail here.
+  check('[E] both searches carry a rotation seed', seedOf(baselineReq) != null && seedOf(lastSearchBody) != null,
+    `baseline=${seedOf(baselineReq)} resubmit=${seedOf(lastSearchBody)}`);
+  check('[E] the resubmit is a NEW search, so its rotation seed differs from the baseline’s',
+    seedOf(lastSearchBody) !== seedOf(baselineReq),
+    `both=${seedOf(baselineReq)}`);
   check('[E] the rapid-cancel resubmit still lands a real result count', Number.isFinite(rapidResubmitCount), `count=${rapidResubmitCount}`);
+  }
 
   // ---- F: Stop pressed mid-flight (network artificially slowed), and the late response — which
   // resolves AFTER the user is already back on Filter — must never repopulate results or write history.
@@ -500,7 +692,12 @@ try {
   const delayRoute = async (route) => {
     inFlightSeen = true;
     await new Promise((r) => setTimeout(r, 6000));
-    await route.continue();
+    // The page.unroute() below auto-continues every matching request still inside this sleep (the
+    // Filter home fires location_search_candidates_ar count probes after the cancel), so this
+    // continue() can find the route already handled. Uncaught, that rejection killed the whole run
+    // (CI run 35567960105 attempt 1). It can only happen after unroute — after every [F] late-response
+    // assertion — so only that one message is tolerated; anything else still throws.
+    await route.continue().catch((e) => { if (!/Route is already handled/.test(e.message)) throw e; });
   };
   await page.route('**/rest/v1/rpc/location_search_candidates_ar', delayRoute);
   await fillOwnerExample();
@@ -521,9 +718,12 @@ try {
   await page.unroute('**/rest/v1/rpc/location_search_candidates_ar', delayRoute);
   await submitSearch();
   const midResubmitCount = await waitForCount(90000);
-  check('[F] resubmitting untouched after a mid-flight cancel still fires the EXACT SAME serialized search request',
+  check('[F] resubmitting untouched after a mid-flight cancel still fires the EXACT SAME serialized search request (rotation seed aside)',
     reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
     `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
+  check('[F] the mid-flight-cancel resubmit carries a rotation seed, and a NEW one',
+    seedOf(lastSearchBody) != null && seedOf(lastSearchBody) !== seedOf(baselineReq),
+    `baseline=${seedOf(baselineReq)} resubmit=${seedOf(lastSearchBody)}`);
   check('[F] the mid-flight-cancel resubmit still lands a real result count', Number.isFinite(midResubmitCount), `count=${midResubmitCount}`);
 
   // ---- G: a CHAT-originated Stop must NOT navigate home — origin-tracking must not over-apply. ----
@@ -544,6 +744,7 @@ try {
   });
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(5000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   await tap('الوسيط الذكي');
   await page.waitForTimeout(2000);
   await page.click('textarea');
@@ -564,9 +765,22 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await fillOwnerExample();
   const preStopInputsMobile = await visibleInputs();
+  const armH = await armSearch();
   await tap('بحث');
   await page.waitForTimeout(300);
-  check('[H mobile] Filter search landed on /agent before cancellation', page.url().includes('/agent'), `url=${page.url()}`);
+  const verdictH = classifyRapidCancelEntry({ armed: armH.armed, landedOnAgent: page.url().includes('/agent') });
+  if (verdictH !== 'pass') {
+    if (verdictH === 'defect') {
+      check('[H mobile] Filter search landed on /agent before cancellation', false,
+        `url=${page.url()} — DEAD CONTROL: the app reported a COMMITTED city (${armH.reason}) and «بحث» still fired nothing`);
+    } else {
+      skipCheck('[H mobile] Filter search landed on /agent before cancellation',
+        `the form was never primed — ${armH.reason}`);
+    }
+    skipCheck('[H mobile] rapid-cancel + exact-restore + untouched-resubmit assertions (4)',
+      'the search never started, so cancellation, restore and resubmit measured nothing here');
+  } else {
+  check('[H mobile] Filter search landed on /agent before cancellation', true);
   await cancelViaNav();
   check('[H mobile] rapid-cancel-via-back lands back on the Filter home', page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
   check('[H mobile] rapid-cancel shows no results/partial text', !RESULT_COUNT.test(await body()));
@@ -575,14 +789,18 @@ try {
     JSON.stringify(postMobileInputs) === JSON.stringify(preStopInputsMobile));
   await submitSearch(); // never inherit [F]/[G] traffic — this window proves the MOBILE resubmit
   const mobResubmitCount = await waitForCount(90000);
-  check('[H mobile] resubmitting untouched after rapid-cancel fires the EXACT SAME serialized search request as baseline',
+  check('[H mobile] resubmitting untouched after rapid-cancel fires the EXACT SAME serialized search request as baseline (rotation seed aside)',
     reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
     `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
+  check('[H mobile] the mobile resubmit carries a rotation seed, and a NEW one',
+    seedOf(lastSearchBody) != null && seedOf(lastSearchBody) !== seedOf(baselineReq),
+    `baseline=${seedOf(baselineReq)} resubmit=${seedOf(lastSearchBody)}`);
   // Failed twice in CI (2026-08-24) while the request fired+matched, [E] desktop landed, a direct
   // prod repro rendered in 5s, and [I] read a fresh count seconds later — so on a null read, dump
   // the page state: the next failure must explain itself instead of costing another guessing round.
   check('[H mobile] the mobile resubmit still lands a real result count', Number.isFinite(mobResubmitCount),
     `count=${mobResubmitCount} url=${page.url()} body=${(await body()).slice(0, 400).replace(/\n/g, ' | ')}`);
+  }
 
   // ---- Journey I: Advanced Filter reentrancy — a rapid double-tap on «متابعة»/confirm must never
   // downgrade or lose an already-recorded answer (bug-hunt 2026-08-23, fixed in commitGuidedStep's
@@ -609,6 +827,7 @@ try {
   });
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   await tap('إيجار'); await tap('شراء'); await tap('سنوي');
   await pickCity('الرياض');
   // District suggestion rows render async (same case documented at line 194 for «حي النرجس»),
@@ -621,6 +840,7 @@ try {
     await page.waitForTimeout(300);
   }
   await tap('الفلل والبيوت'); await tap('فيلا');
+  const afProbeTimeouts = observeAfProbeTimeouts(page);
   await tap('بحث');
   const reentrancyStart = await waitForCount(45000);
   check('[I] reentrancy-journey scope lands with a real start count', Number.isFinite(reentrancyStart), `start=${reentrancyStart}`);
@@ -649,18 +869,21 @@ try {
   //
   // So: tap ONCE, then poll on the same 45s budget the count waits already use, and say WHY on
   // failure instead of printing a bare `false` (the [H mobile] precedent).
-  await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+  // The total can render before the passive probes finish and before this CTA exists.
+  // Wait for the actual control; never swallow a missing click and pretend an open ran.
+  const narrowButton = page.getByTestId('results-narrow');
+  const ctaReady = await narrowButton.waitFor({ state: 'visible', timeout: 45000 }).then(() => true, () => false);
+  if (ctaReady) await narrowButton.click();
   let afOpened = false;
-  const afOpenUntil = Date.now() + 45000;
+  const afOpenUntil = Date.now() + (ctaReady ? 45000 : 0);
   while (Date.now() < afOpenUntil) {
     afOpened = await afPresent();
     if (afOpened) break;
     await page.waitForTimeout(500);
   }
   if (!afOpened) {
-    // Distinguish the two ways this legitimately ends up false, so the next failure explains itself:
-    // the CTA coming BACK means AF opened and closed again (fell back to refine), which is a real
-    // product signal; the CTA still absent means the open is simply still in flight.
+    // Presence alone cannot diagnose this: the passive probe can withhold the CTA before
+    // any click. Only the recorded timeout evidence below permits an UNKNOWN skip.
     const ctaBack = await page.evaluate(() =>
       Array.from(document.querySelectorAll('div,span,button,a,[role="button"]'))
         .some((e) => (e.innerText || '').trim().includes('خلّنا نحدد الطلب أكثر') && e.getBoundingClientRect().width > 0));
@@ -675,15 +898,15 @@ try {
       const t = document.body.innerText;
       return ['أي حي تفضّل', 'كم ميزانيتك', 'كم غرفة'].some((c) => t.includes(c));
     });
-    if (ctaBack && !refineChipsShown) {
-      console.log('SKIP  [I] Advanced Filter opens on this large multi-district scope '
-        + '— AF declined on an UNDETERMINED probe batch (no refine chips offered), which is the '
+    if (!refineChipsShown && afProbeTimeouts.undetermined()) {
+      skipCheck('[I] Advanced Filter opens on this large multi-district scope',
+        'BOTH count RPCs timed out in BOTH bounded attempts (no refine chips offered), which is the '
         + 'specified behaviour under «UNKNOWN must never become NO». This is an environment/latency '
         + 'symptom, not a product defect: the per-question count probes did not answer within 4s. '
         + 'A REAL regression would instead show the refine chips (a probe-backed "nothing to narrow").');
     } else
     check('[I] Advanced Filter opens on this large multi-district scope', false,
-      `af-card never appeared within 45s. cta-returned=${ctaBack}\n`
+      `af-card never appeared within 45s. cta-ready=${ctaReady} cta-returned=${ctaBack}\n`
       + `        cta-returned=true  => startAgeFlow RAN and DECLINED: its ranked plan came back shorter\n`
       + `                              than MIN_USEFUL_QUESTIONS_TO_SHOW, so it setAgeFlow(null) and fell\n`
       + `                              back to refine. That has TWO causes and they look identical here:\n`
@@ -692,11 +915,13 @@ try {
       + `                                     AGE_COUNT_TIMEOUT_MS) so every question lost its options.\n`
       + `                              (ii) is a load artefact being rendered as a data verdict — see the\n`
       + `                              JOURNEY I note in this file's header before calling it a regression.\n`
-      + `        cta-returned=false => the open never landed at all (still in flight / crashed).\n`
+      + `        cta-ready=false => no click ran; the passive probe never exposed the control.\n`
+      + `        cta-ready=true, cta-returned=false => the clicked interview never landed.\n`
       + `        url=${page.url()} body=${(await body()).slice(0, 300).replace(/\n/g, ' | ')}`);
   } else {
     check('[I] Advanced Filter opens on this large multi-district scope', true);
   }
+  afProbeTimeouts.dispose();
   // `afOpened` is the interview LOOP's own variable below and flips to false the moment the card
   // closes — which is the normal, successful end of the interview. The gates further down must ask
   // "did it ever open?", so latch that here rather than re-reading a variable that means something
@@ -804,16 +1029,17 @@ try {
   // source-adjudicated 6/6 against hajerhouses' own «دورات المياه») and a scope ABOVE the new stop
   // line (measured 2026-09-04: base 231, every bathroom rung 48). The previous fixture,
   // Factory/RentAnnual/الرياض, is 33 rows — a FINISHED set under the 50 rule, so the interview
-  // correctly no longer opens there. This one also lands ≤ 50 after its single answer (231 → 48),
+  // correctly no longer opens there. This one also lands low after its single answer (231 → 48-50),
   // which is exactly the completion the rule promises — asserted below.
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   await tap('الفلل والبيوت'); await page.waitForTimeout(300);   // Buy + سكني are the defaults
   await tap('دوبلكس'); await page.waitForTimeout(300);
   await pickCity('الهفوف');
   await tap('بحث');
   const jStart = await waitForCount(45000);
-  check('[J] 1-question scope (Duplex/Buy/الهفوف) lands with a real start count ABOVE the 50 stop line', Number.isFinite(jStart) && jStart > 50, `start=${jStart}`);
+  check(`[J] 1-question scope (Duplex/Buy/الهفوف) lands with a real start count ABOVE the ${INTERVIEW_STOP_AT} stop line`, Number.isFinite(jStart) && jStart > INTERVIEW_STOP_AT, `start=${jStart}`);
 
   let jOpened = false;
   for (let i = 0; i < 6 && !jOpened; i++) {
@@ -888,14 +1114,22 @@ try {
     check('[J] the closed interview lands on a genuinely narrowed, non-null result',
       !jFinalOpen && Number.isFinite(jFinal) && jFinal < jStart,
       `answered=${jAnswered ?? '(none)'} start=${jStart} final=${jFinal}`);
-    // THE 50 RULE, END TO END (owner 2026-09-04; rendering restyled 2026-09-05): a round that lands
-    // at ≤ 50 FINISHES the chat — every remaining listing is revealed with no «عرض المزيد», and the
+    // THE STOP-LINE RULE, END TO END (owner 2026-09-04; rendering restyled 2026-09-05; the line
+    // itself moved 50 → 25 on 2026-09-20): a round that lands at or below it FINISHES the chat — every remaining listing is revealed with no «عرض المزيد», and the
     // composer LOCKS in place (owner request 2026-09-05: no replacement card): the same box goes
     // readOnly with the closed-chat placeholder «أُغلقت هذه المحادثة…» pointing at the ☰, and the
-    // send arrow becomes a disabled lock. Asserted only when the landed count really is ≤ 50 (DB
-    // truth today is 48; if inventory grows past 50 the interview is right to keep going and this
-    // block simply does not apply — it never demands a completion the data does not owe).
-    if (Number.isFinite(jFinal) && jFinal <= 50) {
+    // send arrow becomes a disabled lock. Asserted only when the landed count really is at or below
+    // the line — if the scope lands above it the interview is right to keep going and this block
+    // does not apply; it never demands a completion the data does not owe. That is now the LIVE
+    // case: this scope landed at exactly 50, which was terminal at the old line and is a browsable
+    // set at 25, so the block SKIPS LOUDLY below rather than vanishing from the log.
+    if (Number.isFinite(jFinal) && jFinal > INTERVIEW_STOP_AT) {
+      skipCheck(`[J] the ≤ ${INTERVIEW_STOP_AT} completion assertions`,
+        `this scope landed at ${jFinal}, above the ${INTERVIEW_STOP_AT} stop line, so the interview is `
+        + 'right to keep going and owes no completion. Not a regression — but this journey is no longer '
+        + 'exercising the completion rule end to end, and wants a scope that lands at or below the line.');
+    }
+    if (Number.isFinite(jFinal) && jFinal <= INTERVIEW_STOP_AT) {
       // Assert the PAGER specifically, by its testid — not the substring «عرض المزيد» in the body.
       // That phrase is ALSO the label of the per-card "See more" details expander
       // (t('See more') === t('Load more') === «عرض المزيد»; ResultCard.tsx renders it for any Wasalt
@@ -903,7 +1137,7 @@ try {
       // toggles whenever a Wasalt listing was in the ≤50 set — nothing to do with pagination. The
       // owner's rule is about the pagination loop; `results-load-more` is exactly that control.
       const loadMorePager = await page.locator('[data-testid="results-load-more"]:visible').count();
-      check('[J] ≤ 50 → no «عرض المزيد» pager is offered — every remaining listing is already revealed',
+      check(`[J] ≤ ${INTERVIEW_STOP_AT} → no «عرض المزيد» pager is offered — every remaining listing is already revealed`,
         loadMorePager === 0, `final=${jFinal} pager=${loadMorePager}`);
       // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11 — supersedes the "locked composer" look
       // asserted here until the same day): this whole journey is Filter-originated (started via
@@ -923,10 +1157,10 @@ try {
         if (composerEls === 0) break;
         await page.waitForTimeout(1_000);
       }
-      check('[J] ≤ 50, Filter-origin → once the reveal settles, there is NO composer at all (not even a locked one)',
+      check(`[J] ≤ ${INTERVIEW_STOP_AT}, Filter-origin → once the reveal settles, there is NO composer at all (not even a locked one)`,
         composerEls === 0, `composerEls=${composerEls}`);
     } else if (Number.isFinite(jFinal)) {
-      console.log(`NOTE  [J] landed at ${jFinal} (> 50) — completion assertions not owed; the interview is right to continue`);
+      console.log(`NOTE  [J] landed at ${jFinal} (> ${INTERVIEW_STOP_AT}) — completion assertions not owed; the interview is right to continue`);
     }
   }
 
@@ -937,6 +1171,7 @@ try {
   // than mutating the just-finished journey's state — a clean, independently reproducible scope.
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   await tap('تجاري');
   await tap('الصناعة واللوجستيات'); await page.waitForTimeout(300);
   await tap('مصنع'); await page.waitForTimeout(300);
@@ -963,5 +1198,8 @@ try {
   server.close();
 }
 
+// Skips are printed in the summary, never only inline: a run whose coverage is skips has proven
+// nothing, and the thing that hides that is a summary which only ever counts failures (PART 9.5).
+if (skipped) console.log(`\n${skipped} SKIPPED — measurements that did not happen (reasons above)`);
 console.log(failed ? `\n${failed} FAILED — the built app does not run correctly` : '\nweb runtime smoke passed — the built app runs and survives a refresh');
 process.exit(failed ? 1 : 0);

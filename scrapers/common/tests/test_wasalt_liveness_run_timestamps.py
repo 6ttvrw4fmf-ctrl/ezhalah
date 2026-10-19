@@ -13,7 +13,7 @@ a time one full runtime too early, any duration is negative, and "when did we la
 liveness?" cannot be answered correctly from our own data — the same class of gap that
 test_wasalt_enum_strike_kill_evidence.py exists to close for the per-row evidence.
 
-Contract locked here, for every mode (pilot / enforce / enum-strike):
+Contract locked here, for every mode (pilot / enforce / enum-strike / repair-clock-bug-backlog):
   1. the insert sends BOTH `started_at` and `finished_at` — neither is left to a column default;
   2. `started_at` is the run-start stamp (`now_iso`), not a fresh clock read;
   3. `finished_at` is a FRESH clock read taken at insert time, never `now_iso`.
@@ -54,10 +54,10 @@ def _by_key(d: ast.Dict) -> dict[str, ast.expr]:
             if isinstance(k, ast.Constant) and isinstance(k.value, str)}
 
 
-def test_all_three_modes_are_covered() -> None:
-    assert len(_insert_dicts()) == 3, (
-        "expected the pilot, enforce and enum-strike inserts; a new mode must carry the same "
-        "timestamp contract")
+def test_all_four_modes_are_covered() -> None:
+    assert len(_insert_dicts()) == 4, (
+        "expected the pilot, enforce, enum-strike and repair-clock-bug-backlog inserts; a new mode "
+        "must carry the same timestamp contract")
 
 
 def test_both_timestamps_are_sent_explicitly() -> None:

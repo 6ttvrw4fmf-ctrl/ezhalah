@@ -34,6 +34,7 @@
 // as "nothing to report" — that is the exact class this repo has been burned by five times.
 
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { resultsFoundCount } from '../e2e/lib/resultsSentence.mjs';
 
 const CITY = 'الرياض';
 const FLOOR = 20000;          // SAR/year. A monthly card prints price_annual÷12, so on the pre-fix
@@ -169,8 +170,10 @@ if (process.argv.includes('--browser')) {
       `last request carried p_rent_period=${JSON.stringify(sent.p_rent_period)}, p_price_min=${JSON.stringify(sent.p_price_min)}`);
 
     const text = await page.locator('body').innerText();
-    const m = text.match(/لقينا\s*([\d,٠-٩]+)/);
-    const shown = m ? Number(m[1].replace(/[,،]/g, '').replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))) : null;
+    // Derived from the shipped pool (2026-09-19, routine #10). The retired /لقينا\s*([\d,٠-٩]+)/
+    // matched 3 of the 10 AR guest templates after PR #3186, so `shown` read null and check (a)
+    // below failed — accusing a correct production of quoting the wrong headline.
+    const shown = resultsFoundCount(text);
 
     check('(a) the headline count on the served page equals the RPC total for the same search',
       shown === advertised, `page said ${shown}, RPC says ${advertised}`);

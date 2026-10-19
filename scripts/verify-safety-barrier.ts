@@ -23,6 +23,7 @@
 // scripts/verify-live-checks-self-sufficient.ts for why that matters — a live barrier
 // that cannot obtain an endpoint fails on every run, and "always red" carries no signal.
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { fetchRetryingSchemaCacheReload } from './lib/postgrestRetry.ts';
 
 const { url: URL, key: KEY } = resolvePublicSupabase(process.env);
 
@@ -33,14 +34,19 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.error(`FAIL  ${label}${detail ? `\n      ${detail}` : ''}`);
 };
 
+// Every live read below goes through fetchRetryingSchemaCacheReload: it absorbs PostgREST's
+// 503/PGRST002 schema-cache reload (which any function-creating migration triggers, reddening this
+// REQUIRED check for every open PR — ops_incident #573) and NOTHING else. Any other status still
+// throws on the first attempt, exactly as before. Proven in
+// scripts/verify-schema-cache-retry-is-not-fail-open.ts.
 async function rpc(fn: string, body: Record<string, unknown> = {}) {
-  const r = await fetch(`${URL}/rest/v1/rpc/${fn}`, {
+  const r = await fetchRetryingSchemaCacheReload(`${URL}/rest/v1/rpc/${fn}`, {
     method: 'POST',
     headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!r.ok) throw new Error(`${fn} -> HTTP ${r.status} ${await r.text()}`);
-  return r.json();
+  if (!r.ok) throw new Error(`${fn} -> HTTP ${r.status} ${r.body}`);
+  return JSON.parse(r.body);
 }
 
 console.log('\nField-level Safety Barrier — asserted against the LIVE database\n');
@@ -49,9 +55,27 @@ console.log('\nField-level Safety Barrier — asserted against the LIVE database
 // (detect_manufactured_negatives / detect_boolean_column_defaults) full-scan ~66
 // tables x 18 columns and time out through PostgREST, so refresh_safety_barrier_state()
 // runs on cron (jobid: safety_barrier_state, 03:23 UTC) and CI reads the cheap row.
-const state = await fetch(`${URL}/rest/v1/mon_safety_barrier_state?select=*&id=eq.1`, {
-  headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
-}).then((r) => r.json()).then((rows) => rows[0]);
+// A FAILED FETCH IS NOT AN EMPTY ANSWER (AGENTS.md). This read used to be a bare
+// `.then(r => r.json()).then(rows => rows[0])` with no `ok` test, so a REST error body parsed to a
+// non-array, `rows[0]` came back undefined, and the check below reported it as
+// "the cron refresh never ran" — a real failure misattributed to a different condition, which is
+// the manufactured-negative shape this very file exists to police (BARRIER_ENGINEER.md PART 1.5).
+const stateProbe = await fetchRetryingSchemaCacheReload(
+  `${URL}/rest/v1/mon_safety_barrier_state?select=*&id=eq.1`,
+  { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } },
+);
+if (!stateProbe.ok) {
+  throw new Error(
+    `mon_safety_barrier_state -> HTTP ${stateProbe.status} ${stateProbe.body.slice(0, 300)}. ` +
+      'The barrier state could not be READ; that is not the same fact as the cron refresh not ' +
+      'having run, so this is RED rather than a misattributed staleness failure.',
+  );
+}
+const stateRows: unknown = JSON.parse(stateProbe.body);
+if (!Array.isArray(stateRows)) {
+  throw new Error(`mon_safety_barrier_state returned ${stateProbe.body.slice(0, 200)}, not a row array`);
+}
+const state = stateRows[0] as { checked_at: string } | undefined;
 
 check('barrier state is present and fresh (< 48h)',
   !!state && (Date.now() - Date.parse(state.checked_at)) < 48 * 3600_000,
@@ -79,10 +103,10 @@ async function countAnnualApts(extra: string): Promise<number> {
     + `&rent_period_ar=eq.${encodeURIComponent('سنوي')}`
     + `&type_ar=eq.${encodeURIComponent('شقة')}`
     + `&production_ready=is.true${extra}`;
-  const r = await fetch(q, {
+  const r = await fetchRetryingSchemaCacheReload(q, {
     headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, Prefer: 'count=exact', Range: '0-0' },
   });
-  if (!r.ok) throw new Error(`REST ${r.status} ${await r.text()}`);
+  if (!r.ok) throw new Error(`REST ${r.status} ${r.body}`);
   return Number((r.headers.get('content-range') ?? '/0').split('/')[1] ?? 0);
 }
 
@@ -105,8 +129,8 @@ check('RNPL "yes" side preserved (the honesty fix must not remove real offers)',
 async function countRent(extra: string): Promise<number> {
   const q = `${URL}/rest/v1/search_listings_ar?select=listing_id`
     + `&deal_ar=eq.${encodeURIComponent('إيجار')}${extra}`;
-  const r = await fetch(q, { headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, Prefer: 'count=exact', Range: '0-0' } });
-  if (!r.ok) throw new Error(`REST ${r.status} ${await r.text()}`);
+  const r = await fetchRetryingSchemaCacheReload(q, { headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, Prefer: 'count=exact', Range: '0-0' } });
+  if (!r.ok) throw new Error(`REST ${r.status} ${r.body}`);
   return Number((r.headers.get('content-range') ?? '/0').split('/')[1] ?? 0);
 }
 

@@ -109,6 +109,54 @@ console.log('§1 the three answers a probed point can give');
     Object.keys(r.blind).length === 5 && Object.keys(r.stolen).length === 0);
 }
 
+// ═══ §1b · the FOURTH answer: the control is not painted at the probed point ════════════════════
+// PART 5 shape 13. Measured on production 2026-09-21, 2/2 fresh contexts, with the One Tap band
+// injected so the consent card lifts to 286-558 and the root reserves the combined 526 px:
+// «تصفية» rect [82,269,106,36] — elementFromPoint at (135,287) returns the card, elementsFromPoint
+// returns [card, root, root] with the tab ABSENT. The tab is clipped by the correctly-shortened
+// 286 px content box, not covered by anything.
+console.log('\n§1b a control that is not painted at the probed point is clipped, not blocked');
+const CARD = '<div.css-g5y9jx> 375x272 at 0,286 z=38 pos=fixed pointer-events=auto';
+{
+  const r = classifyTapOwnership({ centre: { hitNull: false, hitTag: CARD, ownerLabel: null, paintedHere: false } });
+  check('a point where the control is absent from a NON-EMPTY painted stack is clipped, not a finding',
+    Object.keys(r.stolen).length === 0 && Object.keys(r.blind).length === 0
+      && r.clipped.centre.includes('clipped out of view, not covered'));
+  check('the clipped message still names what IS painted there, so the reading can be checked',
+    r.clipped.centre.includes('z=38') && r.clipped.centre.includes('0,286'));
+}
+{
+  // THE LINE THAT MUST NOT MOVE. An EMPTY stack is the #120 WebKit shape and stays a finding — the
+  // probe reports `paintedHere: null` there precisely so it cannot be folded into the clipped bucket.
+  const r = classifyTapOwnership({ centre: { hitNull: true, hitTag: null, ownerLabel: null, paintedHere: null } });
+  check('an EMPTY painted stack is still blind — the 12 WebKit findings are not silenced by this bucket',
+    r.blind.centre === 'the hit test returned no element at all' && Object.keys(r.clipped).length === 0);
+}
+{
+  // A control that IS painted and has something above it stays exactly what it was.
+  const r = classifyTapOwnership({ centre: { hitNull: false, hitTag: CARD, ownerLabel: null, paintedHere: true } });
+  check('a control PAINTED at the point with an overlay above it is still a finding, not clipped',
+    r.blind.centre.includes('which is inside no control') && Object.keys(r.clipped).length === 0);
+  const s = classifyTapOwnership({ left: { hitNull: false, hitTag: 'div', ownerLabel: 'sidebar-toggle', paintedHere: true } });
+  check('a real neighbour capture on a PAINTED control is still a capture',
+    s.stolen.left === 'sidebar-toggle' && Object.keys(s.clipped).length === 0);
+}
+{
+  // Back-compatibility, stated as a test: a caller that does not measure paint is unchanged.
+  const r = classifyTapOwnership({ centre: { hitNull: false, hitTag: CARD, ownerLabel: null } });
+  check('a point with NO paintedHere field keeps today\'s verdict exactly — undefined is not false',
+    r.blind.centre.includes('which is inside no control') && Object.keys(r.clipped).length === 0);
+}
+{
+  const r = classifyTapOwnership({
+    centre: { hitNull: false, hitTag: CARD, ownerLabel: null, paintedHere: false },
+    right: { hitNull: false, hitTag: 'div', ownerLabel: 'another control', paintedHere: true },
+  });
+  check('clipped and captured points on one control are reported separately, neither contaminating the other',
+    Object.keys(r.clipped).length === 1 && r.stolen.right === 'another control'
+      && Object.keys(r.blind).length === 0);
+}
+
 // ═══ §2 · mutations — the real file is edited and re-executed ═══════════════════════════════════
 console.log('\n§2 mutations');
 {
@@ -164,8 +212,8 @@ console.log('\n§2 mutations');
   await withMutation(
     'folding a null hit test back into the capture bucket (#120: «nothing» reported as a neighbour stealing the press)',
     (s) => s.replace(
-      "    if (p && p.ownerLabel) stolen[k] = p.ownerLabel;\n    else if (p && p.hitNull) blind[k] = 'the hit test returned no element at all';",
-      "    if (p && p.ownerLabel) stolen[k] = p.ownerLabel;\n    else if (p && p.hitNull) stolen[k] = 'nothing';"),
+      "    } else if (p && p.ownerLabel) stolen[k] = p.ownerLabel;\n    else if (p && p.hitNull) blind[k] = 'the hit test returned no element at all';",
+      "    } else if (p && p.ownerLabel) stolen[k] = p.ownerLabel;\n    else if (p && p.hitNull) stolen[k] = 'nothing';"),
     (r) => r.stolen.centre !== undefined && r.blind.centre === undefined,
     NULL_PT,
   );
@@ -185,10 +233,42 @@ console.log('\n§2 mutations');
   // retire the finding this journey was built for.
   await withMutation(
     'demoting a real neighbour capture to a blind hit test, retiring the journey\'s original finding',
-    (s) => s.replace('    if (p && p.ownerLabel) stolen[k] = p.ownerLabel;',
-      '    if (p && p.ownerLabel) blind[k] = p.ownerLabel;'),
+    (s) => s.replace('    } else if (p && p.ownerLabel) stolen[k] = p.ownerLabel;',
+      '    } else if (p && p.ownerLabel) blind[k] = p.ownerLabel;'),
     (r) => Object.keys(r.stolen).length === 0,
     { left: { hitNull: false, hitTag: 'div', ownerLabel: 'sidebar-toggle' } },
+  );
+
+  const CLIPPED_PT = { centre: { hitNull: false, hitTag: '<div> 375x272 at 0,286 z=38', ownerLabel: null, paintedHere: false } };
+  const EMPTY_STACK_PT = { centre: { hitNull: true, hitTag: null, ownerLabel: null, paintedHere: null } };
+
+  // M4 — THE DEFECT THIS BUCKET REPAIRS: drop the paint test and a clipped control is a finding
+  // again, which is the «تصفية» / «الوسيط الذكي» half of ops_incident #262, filed three times.
+  await withMutation(
+    'removing the paint test, so a control clipped out of view is filed as covered again (#262)',
+    (s) => s.replace('    if (p && p.paintedHere === false) {', '    if (false) {'),
+    (r) => Object.keys(r.clipped).length === 0 && Object.keys(r.blind).length === 1,
+    CLIPPED_PT,
+  );
+
+  // M5 — THE QUIET DIRECTION, and the dangerous one: widen the bucket so a TRUTHY-but-not-false
+  // paintedHere (undefined from an old caller, null from an empty stack) is excused as clipped.
+  // That would silence the twelve #120 WebKit findings under a message that sounds benign.
+  await withMutation(
+    'widening the clipped bucket to any falsy paintedHere, which would silence the #120 empty-stack findings',
+    (s) => s.replace('    if (p && p.paintedHere === false) {', '    if (p && !p.paintedHere) {'),
+    (r) => Object.keys(r.clipped).length === 1 && Object.keys(r.blind).length === 0,
+    EMPTY_STACK_PT,
+  );
+
+  // M6 — the same widening seen from the other side: an old caller that supplies no paintedHere at
+  // all must keep today's verdict. This is the back-compatibility claim, mutation-proven rather than
+  // asserted, because it is what lets every pre-existing case in §1 stand unchanged.
+  await withMutation(
+    'excusing a point with NO paintedHere field as clipped, changing the verdict for every unmeasured caller',
+    (s) => s.replace('    if (p && p.paintedHere === false) {', '    if (p && p.paintedHere !== true) {'),
+    (r) => Object.keys(r.clipped).length === 1 && Object.keys(r.blind).length === 0,
+    { centre: { hitNull: false, hitTag: 'div', ownerLabel: null } },
   );
 }
 
@@ -206,6 +286,16 @@ console.log('\n§3 the journey uses the classifier and reports what it measured'
     /rect\(x,y,w,h\)=\$\{JSON\.stringify\(c\.rect\)\} viewport=\$\{JSON\.stringify\(vp\)\}/.test(runner));
   check('the probe still reports raw facts (hitNull / ownerLabel), so the verdict stays in one place',
     runner.includes('hitNull: !hit') && runner.includes('ownerLabel: o ?'));
+  // PAINT IS A QUESTION ABOUT `e` AND ITS OWN SUBTREE — never the ownership index. `outer()` walks
+  // to the OUTERMOST control, so a single `findIndex(n => outer(n) === e)` never matches a NESTED
+  // `e` and would silence a real capture as «clipped»; verify-ownership-probes-use-the-painted-
+  // stack.ts scenario E executes that case.
+  check('the probe MEASURES paint (paintedHere) rather than inferring it from the bounding rect',
+    runner.includes('stack.some((n) => n === e || e.contains(n))')
+      && runner.includes('const paintedHere = stack.length === 0 ? null :'));
+  check('a clipped point is counted and said out loud in the pass line — a skip is never a silent pass (PART 9.5)',
+    runner.includes('clippedPts += Object.keys(clipped).length')
+      && runner.includes('not painted — clipped out of view, ownership not asserted there'));
   check('the probe NAMES and MEASURES what it hit (src, box, z-index) — the half that ended #120\'s diagnosis',
     runner.includes('hitTag: hit ? desc(hit) : null')
       && /src=.*String\(el\.src\)/.test(runner) && runner.includes("' z=' + cs.zIndex"));

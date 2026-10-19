@@ -56,6 +56,16 @@ jobs:
       # `always()` so a failure of the narrow check never hides the answer to the broad one.
       - name: Merged but never served — is any user-visible commit on main unshipped?
         if: always()
+        env:
+          # Reads deploy-frontend.yml's own run history, to test whether docs/DEPLOY_BASELINE.txt is
+          # still CURRENT rather than assuming it (routine #2, 2026-09-15: the recorder cannot push
+          # to main, so it opens a deploy/baseline-* PR and exits 0 — seventeen were open while the
+          # record sat four successful deploys behind production, and the stale floor made this very
+          # check report 13 shipped files as "merged and not shipped"). Read-only; actions: read is
+          # already covered by the default token's permissions for this repo's own runs. Without it
+          # the shared predicate reports the record's currency as UNANSWERED, which is a failure by
+          # design — never a quiet pass.
+          GITHUB_TOKEN: ${{ github.token }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-undeployed-user-visible-drift-live.ts
 
       # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────

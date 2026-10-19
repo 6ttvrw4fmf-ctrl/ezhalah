@@ -196,6 +196,31 @@ const sessionObj = () => ({
 });
 
 /**
+ * A SESSION THAT HAS EXPIRED — the PART 1 auth surface ("token expiry") that had no journey at all
+ * until 2026-09-27. Two shapes, because they fail through two DIFFERENT paths in @supabase/auth-js
+ * and only one of them is self-healing:
+ *
+ *   'empty-refresh'  expired, `refresh_token: ''`. _isValidSession() tests key PRESENCE only, so the
+ *                    slot passes as valid; _callRefreshToken('') then THROWS AuthSessionMissingError
+ *                    BEFORE the try/catch that converts errors into `{ error }`, and neither
+ *                    __loadSession nor _useSession carries a catch — so getSession() REJECTS.
+ *   'server-rejects' expired with a refresh_token the server will refuse. Pair it with
+ *                    `abort: '**\/auth/v1/token**'` to model the request FAILING instead (offline,
+ *                    captive portal, blocking extension, 5xx), which auth-js retries for up to
+ *                    AUTO_REFRESH_TICK_DURATION_MS (30_000) — so getSession() simply never settles.
+ *
+ * Measured on production 2026-09-27 (Chromium 1440x900, 2/2 fresh contexts per arm): the first arm
+ * left the gate closed at 20s, 40s AND 75s; the second at 20s and 40s, recovering by 75s.
+ */
+export const expiredSession = (kind = 'empty-refresh') => ({
+  access_token: 'x.y.z', token_type: 'bearer',
+  refresh_token: kind === 'empty-refresh' ? '' : 'rt-the-server-will-refuse',
+  expires_in: 0, expires_at: Math.floor(Date.now() / 1000) - 3600,
+  user: { id: 'qa-user', aud: 'authenticated', email: SUB,
+          app_metadata: { provider: 'google' }, user_metadata: { name: 'QA', full_name: 'QA' } },
+});
+
+/**
  * One journey, one FRESH browser + context (PART 11.4: a reproduction is a new context, never a
  * retry inside the same page). Collects page errors, failed requests, and the RPC bodies the app
  * actually sent, so a journey can assert on the request rather than on a live count the world is
@@ -263,7 +288,13 @@ export const seedInitScript = ([sess, hist, sub, wantAuth]) => {
 export const ENGINE = process.env.JOURNEY_ENGINE || 'chromium';
 
 export async function withPage(opts, fn) {
-  const { engine = ENGINE, mobile = false, signedIn = false, history = null, path = '/' } = opts;
+  const { engine = ENGINE, mobile = false, signedIn = false, history = null, path = '/',
+          // TOKEN EXPIRY NEEDS A SESSION THE DEFAULT FIXTURE CANNOT EXPRESS. `session` replaces the
+          // seeded object wholesale (an EXPIRED one, a refresh_token the server will reject, a
+          // malformed slot) and `abort` fails matching requests, which is how a blocked token refresh
+          // is reproduced without waiting for a real outage. Both default to today's behaviour, so
+          // every existing journey is untouched.
+          session = null, abort = null } = opts;
   const browser = await ENGINES[engine].launch(launchOpts(engine));
   const device = mobile ? devices['iPhone 13'] : devices['Desktop Chrome'];
   // FIREFOX REJECTS `isMobile` OUTRIGHT — `browser.newContext: options.isMobile is not supported in
@@ -288,7 +319,8 @@ export async function withPage(opts, fn) {
     // WebKit/Firefox reject Chromium's UA string from the device profile; let them use their own.
     ...(engine === 'chromium' ? {} : { userAgent: undefined }),
   });
-  await ctx.addInitScript(seedInitScript, [sessionObj(), history, SUB, signedIn]);
+  if (abort) await ctx.route(abort, (r) => r.abort('failed'));
+  await ctx.addInitScript(seedInitScript, [session ?? sessionObj(), history, SUB, signedIn]);
 
   // A SEEDED SESSION MUST NOT SUMMON A PROMPT A REAL SIGNED-IN USER NEVER SEES.
   //
@@ -348,16 +380,132 @@ export async function withPage(opts, fn) {
 export async function settle(page, timeout = 30_000) {
   const t0 = Date.now();
   try {
-    await page.waitForFunction(() => {
+    // The floor is BLANK_BODY_MAX, passed IN rather than retyped inside the browser callback —
+    // PART 5 shape #14: if the harness needs a number, derive it or pin it, never mirror it.
+    await page.waitForFunction((min) => {
       const t = document.body?.innerText || '';
-      return t.length > 200;
-    }, { timeout });
+      return t.length > min;
+    }, BLANK_BODY_MAX, { timeout });
   } catch { /* fall through — caller sees an empty body and files it */ }
   await sleep(1500);
   return Date.now() - t0;
 }
 
 export const bodyText = (page) => page.evaluate(() => document.body.innerText);
+
+// ═══ WHICH SCREEN IS ON THE PAGE ════════════════════════════════════════════════════════════════
+//
+// THE SUBSTRING «بحث» IS NOT A SCREEN, AND IT IS NOT A CONTROL (routine #6, 2026-09-26).
+//
+// Three journeys decided "the Filter home and its primary control are on screen" with
+// `bodyText(page).includes('بحث')`: `cold-open` («missing primary control»), `back-after-search`
+// («Back landed off-route») and `adv-background-tab` («controls missing after backgrounding»).
+// Arabic is agglutinative, and «بحث» is a proper substring of «أبحث», «البحث», «للبحث» and «بحثك» —
+// all four of which this product renders. So the test was answering a question about VOCABULARY
+// while its failure message claimed a question about a BUTTON.
+//
+// MEASURED on production, Chromium, a fresh context per run, real clicks, pane foregrounded:
+//   · Filter home   — includes('بحث') true  · exact «بحث» nodes 1 · city-input 1   (4/4)
+//   · agent screen  — includes('بحث') TRUE  · exact «بحث» nodes 0 · city-input 0   (4/4, both
+//     viewports; the greeting reads «وأنا أبحث لك بين المنصات العقارية»)
+//   · Filter home with its primary control DELETED out of the live DOM — exact nodes 1 → 0 and
+//     includes('بحث') still TRUE (2/2). So cold-open's own named defect, «missing primary control»,
+//     could not fire. That mutation was WATCHED on production, not inferred from reading the copy.
+//
+// `back-after-search` exists for PART 5 shape 9 — «Browser Back stranding the user off-route» — and
+// would have reported `pass` for a Back that landed on the agent screen. PART 9.5's class exactly:
+// not a red, a PASS that asserted something other than what it claimed.
+//
+// THE RULE: screen identity is decided by interrogating ELEMENTS, never by an innerText substring of
+// a control's label. `scripts/verify-screen-identity-is-an-element-not-a-substring.ts` enforces it
+// as a class — it discovers every ambiguous substring oracle in `e2e/` by asking the PRODUCT whether
+// a longer word carries the same token, so the rule stays true as the copy changes.
+//
+// AND THE VERDICT IS THREE-VALUED, because the three call sites need two different failures told
+// apart: a wrong SCREEN and a missing CONTROL are not the same bug, and one vague sentence standing
+// in for both is how neither could be reported. Same unknown→NO discipline, applied to a screen.
+
+/** The blank-body floor, defined ONCE — `settle()` waits on it and the verdict below reports it. */
+export const BLANK_BODY_MAX = 200;
+
+/** The Filter home's own two identities. Elements, not words. */
+export const FILTER_HOME_CITY_INPUT = '[data-testid="city-input"]';
+export const FILTER_HOME_SEARCH_LABEL = 'بحث';
+
+/**
+ * Pure, so the barrier EXECUTES the real decision rather than grepping for it.
+ * 'blank' · 'home' · 'home-missing-search-control' · 'not-home'.
+ */
+export function filterHomeVerdict({ exactSearchNodes, cityInputs, bodyLength }) {
+  if (!(bodyLength > BLANK_BODY_MAX)) return 'blank';
+  if (cityInputs > 0) return exactSearchNodes > 0 ? 'home' : 'home-missing-search-control';
+  return 'not-home';
+}
+
+/** Ask the page by ELEMENT. `exact: true` is what makes «أبحث» not a «بحث» button. */
+export async function filterHomeState(page) {
+  const [exactSearchNodes, cityInputs, bodyLength] = await Promise.all([
+    page.getByText(FILTER_HOME_SEARCH_LABEL, { exact: true }).count(),
+    page.locator(FILTER_HOME_CITY_INPUT).count(),
+    page.evaluate(() => (document.body?.innerText || '').length),
+  ]);
+  return { verdict: filterHomeVerdict({ exactSearchNodes, cityInputs, bodyLength }),
+           exactSearchNodes, cityInputs, bodyLength };
+}
+
+/** Arabic letters — what makes a WORD longer. Shared with scripts/lib/productStrings.ts's rule. */
+const ARABIC_LETTER_SRC = '\\u0621-\\u063A\\u0641-\\u064A\\u0671-\\u06D3';
+
+/**
+ * How many PAINTED, non-decorative leaf elements carry `token` as its own Arabic word.
+ *
+ * Three discriminators the page-wide `innerText.includes(token)` it replaces had none of, each one
+ * measured rather than assumed:
+ *
+ *  · WORD BOUNDARY. «أبحث عن» is carried by «وسأبحث عنه», which src/i18n.tsx renders in two greeting
+ *    strings — so the old test could answer yes on a chat that holds only a greeting.
+ *  · NOT A DECORATION. src/data/introExamples.ts rotates «أبحث عن أرض سكنية في الرياض وميزانيتي مليون
+ *    ونص» through the composer's placeholder, `aria-hidden` with `pointerEvents: none` (agent.tsx).
+ *    That is the product working, and it carries both halves of the old predicate.
+ *  · PAINTED. This harness already records that «a CSS-faded toast stays in innerText», so presence
+ *    is never the oracle. A zero-area node is not on screen.
+ *
+ * Measured on production while repairing `adv-newchat-mid-restore` (2026-09-26, desktop1440, 2/2,
+ * five samples across 21 s of example rotation): the city conjunct that predicate ANDed in was
+ * permanently true — «جدة», «الرياض» and «الخبر» are all present from the sidebar's own saved-chat
+ * titles — so it could never narrow anything and only read as extra rigour.
+ */
+export async function paintedTextCarriers(page, token) {
+  return page.evaluate(({ tok, letters }) => {
+    const boundary = new RegExp(`(^|[^${letters}])${tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
+    const out = [];
+    for (const el of document.querySelectorAll('*')) {
+      if (el.children.length) continue;                        // leaf text only
+      const s = (el.textContent || '').trim();
+      if (!boundary.test(` ${s}`)) continue;
+      if (el.closest('[aria-hidden="true"]')) continue;        // the rotating example is a decoration
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue;               // present but not painted
+      out.push(s.slice(0, 120));
+    }
+    return out;
+  }, { tok: token, letters: ARABIC_LETTER_SRC });
+}
+
+/** A sentence that names WHICH failure, so a defect message cannot be read two ways. */
+export const filterHomeWhy = (s) => {
+  if (s.verdict === 'blank') return `body innerText is ${s.bodyLength} chars`;
+  if (s.verdict === 'home-missing-search-control') {
+    return `the Filter home rendered (city input \u00d7${s.cityInputs}) but its primary `
+      + `«${FILTER_HOME_SEARCH_LABEL}» control does not exist — 0 exact label nodes`;
+  }
+  if (s.verdict === 'not-home') {
+    return `this is not the Filter home — no «${FILTER_HOME_CITY_INPUT}» and `
+      + `${s.exactSearchNodes} exact «${FILTER_HOME_SEARCH_LABEL}» control node(s), body ${s.bodyLength} chars`;
+  }
+  return `Filter home with its primary control (city input \u00d7${s.cityInputs}, `
+    + `exact «${FILTER_HOME_SEARCH_LABEL}» node(s) \u00d7${s.exactSearchNodes}, body ${s.bodyLength} chars)`;
+};
 
 /** LocalStorage history as the app itself stored it — the persistence oracle. */
 export const storedHistory = (page) => page.evaluate((sub) => {
@@ -713,6 +861,12 @@ export const isTransportError = (err) => {
 // of disappearing.
 const TRANSPORT_PAGE_ERROR_SHAPES = [
   /Fetch API cannot load [\s\S]*due to access control checks/i, // WebKit's wording for a dead fetch
+  // WebKit's wording for a dead XHR — measured 2026-10-19 (sweep 39236332307, webkit mobile): Google's own
+  // One Tap status call «XMLHttpRequest cannot load https://accounts.google.com/gsi/status?… due to access
+  // control checks» (ITP, has_opted_out_fedcm=true) was filed as an Ezhalah defect on two journeys. It is the
+  // same class as the fetch line above (a third-party request the engine blocked), and the same class as
+  // Sentry REACT-NATIVE-D/E (a bare NetworkError DOMException, code 19, from our own Firefox sweep).
+  /XMLHttpRequest cannot load [\s\S]*due to access control checks/i,
   /\bLoad failed\b/,                                            // WebKit's generic fetch failure
   /The network connection was lost/i,                           // WebKit/CFNetwork
   /Failed to fetch/i,                                           // Blink
@@ -773,6 +927,33 @@ export async function settledCount(readCount, { budgetMs = 45_000, stableMs = 5_
   return { n: readCount(), settled: false };
 }
 
+/**
+ * Did `readCount` stay at ZERO for a bounded observation window?
+ *
+ * THE MIRROR OF settledCount, AND A DIFFERENT QUESTION. Settling is defined over a count that GROWS,
+ * so by its own contract it can never settle on zero — «an early zero means not started, not fired
+ * nothing» (PART 11.2 rule 1). An ABSENCE claim has no condition to wait for: nothing is going to
+ * happen, and the only honest measurement is «nothing happened for this long». So the window IS the
+ * oracle here, which PART 11.2 permits as a last resort on the condition that a finding resting on
+ * one SAYS so — hence `windowMs` is returned for the caller to print, never hidden inside.
+ *
+ * Used by `back-forward-no-duplicate-search` for the owner's 2026-08-16 rule: a history hop must fire
+ * no duplicate search, RPC or AI request. The PEAK is returned rather than the final count, so a call
+ * that fired and was then filtered out of the tally cannot pass as an absence.
+ *
+ * `sleepFn`/`now` are injectable so a barrier can EXECUTE this rather than grep it.
+ */
+export async function stayedAtZero(readCount, { windowMs = 8_000, sleepFn = sleep, now = () => Date.now() } = {}) {
+  const started = now();
+  let peak = readCount();
+  while (now() - started < windowMs) {
+    await sleepFn(250);
+    const n = readCount();
+    if (n > peak) peak = n;
+  }
+  return { peak, windowMs, zero: peak === 0 };
+}
+
 export function appPageErrors(bag, journey) {
   const app = [], transport = [], hydration = [];
   for (const e of bag.pageErrors) {
@@ -790,38 +971,202 @@ export function appPageErrors(bag, journey) {
   if (hydration.length) note(hydrationNoticeNote(journey, hydration));
   return app;
 }
-export async function gotoOrRetryTransport(page, url, { timeout = 90_000 } = {}) {
+// THE RETRY MUST BE A GENUINELY INDEPENDENT SAMPLE, AND AN IMMEDIATE ONE IS NOT (measured 2026-09-18).
+//
+// The block above always intended "exactly ONE genuinely fresh navigation". It was one navigation,
+// but it was not fresh: it fired microseconds after the failure, so it sampled the SAME egress blip
+// and recovered almost nothing. Measured, over two independent runs against production from this
+// container:
+//
+//   · a 112-journey sweep: 3 journeys failed the opening navigation, 0 recovered on the immediate
+//     retry — and so were filed as «journey threw», i.e. as three Ezhalah defects;
+//   · a 60-navigation probe: 1 first-attempt failure (1.7%), which ALSO failed the immediate retry
+//     and then SUCCEEDED when the same navigation was tried again after a 3 s pause.
+//
+// Across both: 0/4 recovered immediately, 1/1 recovered when spaced. The distribution is the tell —
+// independent failures at ~2-5% would produce many more SINGLE failures than double ones, and the
+// sweep recorded ZERO singles against three doubles. These failures are bursty, so the only retry
+// that carries information is one that lets the burst pass.
+//
+// THIS IS NOT A BIGGER TIMEOUT AND NOT MORE RETRIES (PART 11.2 rule 3). The 90 s budget is
+// unchanged and the retry is still exactly ONE, so the fail-closed property is untouched: a real
+// outage fails both attempts and still reads as a loud defect. Only the SPACING changes.
+export const TRANSPORT_RETRY_PAUSE_MS = 3_000;
+
+export async function gotoOrRetryTransport(
+  page, url, { timeout = 90_000, pauseMs = TRANSPORT_RETRY_PAUSE_MS, pause = sleep } = {},
+) {
   try {
     return await page.goto(url, { waitUntil: 'load', timeout });
   } catch (e) {
     if (!isTransportError(e)) throw e;              // a real app/navigation failure — unchanged
     const first = String(e).split('\n')[0];
-    const res = await page.goto(url, { waitUntil: 'load', timeout });
-    note(`TRANSPORT BLIP (not a product defect): the opening navigation to ${url} failed with «${first}» `
-      + `and succeeded on one immediate retry. Counted as neither pass nor defect — see harness.mjs.`);
-    return res;
+    await pause(pauseMs);                           // let the burst pass — see the note above
+    try {
+      const res = await page.goto(url, { waitUntil: 'load', timeout });
+      note(`TRANSPORT BLIP (not a product defect): the opening navigation to ${url} failed with «${first}» `
+        + `and succeeded on one retry ${pauseMs} ms later. Counted as neither pass nor defect — see harness.mjs.`);
+      return res;
+    } catch (e2) {
+      // PART 11.2 rule 4: the message must distinguish the two shapes. «failed twice, ${pauseMs} ms
+      // apart» is a different fact from a one-off blip, and the reader should not have to infer it.
+      throw new Error(`the opening navigation to ${url} failed TWICE, ${pauseMs} ms apart — `
+        + `egress was down for longer than one burst, or production is genuinely unreachable. `
+        + `first: «${first}» | second: «${String(e2).split('\n')[0]}»`);
+    }
   }
+}
+
+// ── THE TOP BAR IS NOT AT THE TOP OF THE VIEWPORT (ops_incident #593, routine #6, 2026-09-23) ────
+// This locator used to look for the hamburger in an ABSOLUTE window, `r.y < 80`. That constant is
+// only correct while nothing is docked over the app's top edge — and the app itself moves the whole
+// top bar down whenever something is. `src/app/_layout.tsx:103` applies `paddingTop:
+// promptInset.top` to the root View, which is `topPromptInset()` doing exactly what the owner rule
+// of 2026-09-06 demands («One Tap must never cover, block, or intercept any Ezhalah controls»).
+//
+// So the reservation working PERFECTLY is what hid the control from this probe — the same shape as
+// PART 5 #13 and ops_incident #262, where a clipped-by-a-working-inset control was filed as
+// «blocked»: a hardcoded viewport constant reads a correct app as a broken one.
+//
+// MEASURED on production, Chromium, 375x812, signed out, 2/2 fresh contexts, 2026-09-23, with the
+// WebKit top-dock shape injected (a static gsi iframe inside a fixed #credential_picker_container,
+// 375x158 at 0,20 — the shape ops_incident #202 measured on WebKit):
+//   no dock    → hamburger [18,22,34,34]   → the old locator finds it at (35,39)
+//   top dock   → hamburger [18,174,34,34]  → the old locator returns **null**, 2/2
+//   and clicking the REAL displaced hamburger opened the drawer **2/2**
+// i.e. the drawer was never broken. On WebKit, where One Tap docks to the TOP rather than the
+// bottom, this is why `support-draft-survives-dismiss` and `support-error-copy` — the only two
+// journeys that run SIGNED OUT on mobile (`guestOk: true`, so the only two that ever meet a One Tap
+// prompt) — skipped on every sweep with «the mobile drawer would not open», while Chromium stayed
+// green because its prompt docks to the BOTTOM and leaves the top bar where it was.
+//
+// THE FIX IS TO ASK WHERE THE APP'S CONTENT ACTUALLY STARTS, not to widen the window: a bigger
+// constant would re-break the moment a band is taller than it, and would also let a control from
+// the docked prompt itself win the sort. The band is derived with the SAME two rules
+// `topPromptInset()` uses — docked within TOP_ANCHOR_TOLERANCE, and spanning the viewport — so the
+// probe and the app agree on where the top edge is by construction rather than by coincidence.
+
+/** Mirrors `TOP_ANCHOR_TOLERANCE` in src/lib/bottomPromptInset.ts. */
+export const TOP_DOCK_ANCHOR_TOLERANCE = 32;
+/** Mirrors `MIN_SHEET_SPAN_FRACTION`: a docked SHEET spans the viewport; a corner CARD does not. */
+export const TOP_DOCK_MIN_SPAN_FRACTION = 0.8;
+
+/**
+ * Mirrors `MIN_APP_FRACTION` in `src/lib/bottomPromptInset.ts`: the app never reserves so much that
+ * less than this fraction of the viewport is left for its own content, so the combined docked band is
+ * capped at `floor(vh * (1 - MIN_APP_FRACTION))`.
+ *
+ * WHY IT IS HERE AND PINNED. `docked-prompts-stack` used to compute that cap as a retyped
+ * `floor(vh * 0.5)`. At 812px that is 406 rather than the app's 568 — the oracle was loose by 162px,
+ * so a genuine shortfall anywhere in (406, 568] would have passed. This is the retyped-constant
+ * hazard this repo keeps paying for (the smoke journey retyping INTERVIEW_STOP_AT; `r.y < 80` in
+ * ops_incident #593; the 660 literal beside it), so §D of
+ * `scripts/verify-journey-mobile-sidebar-oracle.ts` now asserts this and the span fraction above
+ * against the real values in `src/`, and turns RED if either drifts.
+ */
+export const APP_MIN_FRACTION = 0.3;
+export const dockedBandCap = (vh) => (vh > 0 ? Math.floor(vh * (1 - APP_MIN_FRACTION)) : 0);
+/** How deep below the content's top edge the top bar sits. The old absolute constant, now relative. */
+export const TOP_BAR_DEPTH = 80;
+
+/**
+ * The y at which the app's own content starts: the bottom of the tallest TOP-docked full-width
+ * prompt, or 0 when nothing is docked up there. PURE, so `verify-journey-mobile-sidebar-oracle.ts`
+ * can EXECUTE it against both engines' measured shapes rather than string-matching it.
+ */
+export function topDockBandBottom(promptRects, viewportWidth) {
+  let band = 0;
+  for (const r of promptRects || []) {
+    if (!r || r.hidden || !(r.height > 0)) continue;
+    if (r.top > TOP_DOCK_ANCHOR_TOLERANCE) continue;               // floating in the page, not docked
+    if (!(r.width >= viewportWidth * TOP_DOCK_MIN_SPAN_FRACTION)) continue;  // a card beside us
+    if (r.bottom > band) band = r.bottom;
+  }
+  return band;
+}
+
+/**
+ * Pick the hamburger out of the candidate boxes, given where the content actually starts. PURE and
+ * exported for the same reason as above. With `bandBottom === 0` this is the original behaviour.
+ */
+export function pickHamburgerRect(boxes, bandBottom) {
+  const lo = (bandBottom > 0 ? bandBottom : 0) - 4;   // sub-pixel slack against the band's edge
+  const hi = (bandBottom > 0 ? bandBottom : 0) + TOP_BAR_DEPTH;
+  const hit = (boxes || [])
+    .filter((b) => b && b.y >= lo && b.y < hi && b.x < 80
+      && b.width >= 18 && b.width <= 70 && b.height >= 18 && b.height <= 70)
+    .sort((a, b) => b.width - a.width);
+  if (!hit.length) return null;
+  const r = hit[0];
+  return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+}
+
+/** Mirrors `BOTTOM_ANCHOR_TOLERANCE` in src/lib/bottomPromptInset.ts. */
+export const BOTTOM_DOCK_ANCHOR_TOLERANCE = 2;
+
+/**
+ * Is this prompt docked to the BOTTOM of the viewport? The same question — and the same rule —
+ * `bottomPromptInset()` asks, so a journey and the app cannot disagree about what "docked" means.
+ *
+ * WHY IT IS A FUNCTION AND NOT A CONSTANT (routine #6, 2026-09-23, alongside ops_incident #593).
+ * `auth-overlay-clears-controls` decided this with `sheet.bottom < 660 && !mobile` — and the desktop
+ * viewport here is 1440x**1000**, so 660 does not mean "not docked to the bottom", it means "in the
+ * top two thirds of the screen". On the composer path that literal guarded a `pass(); return;`, so a
+ * prompt resting anywhere above y=660 recorded a PASS having asserted nothing about whether it
+ * covered the composer — PART 9.5's «a run that asserted nothing» wearing an explicit pass.
+ *
+ * This is the same CLASS as #593 in the function above and as ops_incident #262 before it: an
+ * absolute viewport literal standing in for a question that is inherently relative. Tightening it
+ * is a provable no-op on every measured configuration — the desktop corner prompt sits at bottom
+ * ~210 and a bottom-docked sheet at ~1000, both far from the 998 boundary — and it closes the gap
+ * between them, where a floating prompt used to collect a free pass.
+ */
+export function isBottomDocked(rect, viewportHeight) {
+  if (!rect || !(viewportHeight > 0) || !(rect.height > 0)) return false;
+  return rect.bottom >= viewportHeight - BOTTOM_DOCK_ANCHOR_TOLERANCE;
 }
 
 export async function openMobileSidebar(page, { guestOk = false } = {}) {
   const isOpen = () => sidebarIsOpen(page, { guestOk });
   if (await isOpen()) return true;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const rect = await page.evaluate(() => {
+    const seen = await page.evaluate(() => {
       // The hamburger is the LEADING small cursor:pointer box in the top bar (src/app/index.tsx
       // `s.hamb` → setSidebarOpen(true)). Matched on geometry + cursor only: it carries no testID,
       // no aria-label, and no text, and an innerText-emptiness clause measured as unreliable here.
-      const hit = [...document.querySelectorAll('*')]
+      // The DOM is only READ here; which box wins is decided by the pure functions above, so the
+      // decision that was wrong is the one a barrier can execute offline.
+      const boxes = [...document.querySelectorAll('*')]
         .filter((e) => {
           const r = e.getBoundingClientRect();
-          return r.y < 80 && r.x < 80 && r.width >= 18 && r.width <= 70
+          return r.x < 80 && r.width >= 18 && r.width <= 70
             && r.height >= 18 && r.height <= 70 && getComputedStyle(e).cursor === 'pointer';
         })
-        .sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width);
-      if (!hit.length) return null;
-      const r = hit[0].getBoundingClientRect();
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        .map((e) => {
+          const r = e.getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height };
+        });
+      // Resolve each matched prompt to its nearest FIXED ancestor-or-self before measuring — on
+      // WebKit the gsi iframe is `position: static` and the box that actually paints is the
+      // `#credential_picker_container` around it (src/lib/bottomPromptInset.ts, ops_incident #202).
+      const SEL = '#credential_picker_iframe,iframe[src*="accounts.google.com/gsi/"],'
+        + 'iframe[src*="appleid.apple.com"],[data-testid="cookie-consent"]';
+      const prompts = [...document.querySelectorAll(SEL)].map((matched) => {
+        let node = matched;
+        for (let hops = 0; node && hops <= 6; node = node.parentElement, hops++) {
+          if (getComputedStyle(node).position === 'fixed') break;
+        }
+        const el = node || matched;
+        const r = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        return {
+          top: r.top, bottom: r.bottom, height: r.height, width: r.width,
+          hidden: cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0',
+        };
+      });
+      return { boxes, prompts, viewportWidth: window.innerWidth };
     });
+    const rect = pickHamburgerRect(seen.boxes, topDockBandBottom(seen.prompts, seen.viewportWidth));
     if (!rect) { await sleep(1200); continue; }
     // The centre of the element's OWN getBoundingClientRect, in CSS pixel space — never a position
     // eyeballed off a screenshot, which is captured at devicePixelRatio (PART 9.2 (4)).
@@ -853,15 +1198,47 @@ export async function openMobileSidebar(page, { guestOk = false } = {}) {
 // rather than guess a third time).
 //
 // Neither shape is excused. Both still fail the journey.
+//
+// ── AND A THIRD SHAPE: THE CONTROL IS NOT PAINTED THERE AT ALL (routine #6, 2026-09-21) ──────────
+// The two buckets above split «who won this point» correctly and still shared one wrong premise:
+// that the control was PAINTED at the point being probed. A control clipped out of a shortened
+// scroll container keeps its full bounding rect — the rect is layout, the clip is paint — so the
+// probe happily tests a point the user can see nothing at, and whatever overlay IS painted there
+// wins. The singular `document.elementFromPoint` cannot tell that from a genuine cover-up, and
+// PART 5 shape 13 already records the cost, measured: «20 controls blocked» on a Chromium build
+// whose inset was working perfectly.
+//
+// MEASURED HERE, production, 375x812, 2/2 fresh contexts, 2026-09-21, with the One Tap band injected
+// so the consent card lifts to 286-558 and the app root correctly reserves the combined 526 px:
+//   «تصفية»       rect [82,269,106,36], centre (135,287)
+//   «الوسيط الذكي» rect [188,269,106,36], centre (241,287)
+//   elementFromPoint  → <div 375x272 at 0,286 z=38 pos=fixed>   (the consent card)  ⇒ DEFECT
+//   elementsFromPoint → [card, root, root] — the tab is ABSENT, selfIndex -1        ⇒ not painted
+// The app content box is 812 − 526 = 286 px and the tabs' lower half lies past it: clipped, exactly
+// as the reservation intends, and reachable by scrolling. That is the whole of the «تصفية» /
+// «الوسيط الذكي» half of ops_incident #262 — filed 1/2 on 09-14, 09-15 and 09-20 against a product
+// that was behaving correctly.
+//
+// So `paintedHere: false` is a MEASUREMENT, not an excuse, and it is deliberately narrow:
+//  · `false` — the painted stack was read, it is NON-EMPTY, and this control is not in it.
+//  · `null`  — the stack came back EMPTY. That is the #120 WebKit shape (all five points resolving
+//    to nothing) and it must stay a finding; folding it in here would silence twelve real results.
+//  · `undefined` — a caller that does not measure paint at all keeps today's behaviour, byte for
+//    byte, which is why every case §1 of the barrier already pins still reads the same.
 export function classifyTapOwnership(pts) {
   const stolen = {};
   const blind = {};
+  const clipped = {};
   for (const [k, p] of Object.entries(pts || {})) {
-    if (p && p.ownerLabel) stolen[k] = p.ownerLabel;
+    if (p && p.paintedHere === false) {
+      clipped[k] = `the control is not painted at this point — the painted stack there is `
+        + `${p.hitTag || 'an element it could not describe'}, and this control is absent from it `
+        + '(clipped out of view, not covered)';
+    } else if (p && p.ownerLabel) stolen[k] = p.ownerLabel;
     else if (p && p.hitNull) blind[k] = 'the hit test returned no element at all';
     else blind[k] = `the hit test landed on ${(p && p.hitTag) || 'an element it could not describe'}, which is inside no control`;
   }
-  return { stolen, blind };
+  return { stolen, blind, clipped };
 }
 
 // ── A BLOCKED CONTROL IS NOT AUTOMATICALLY ONE TAP'S FAULT ──────────────────────────────────────
@@ -881,7 +1258,50 @@ export function classifyTapOwnership(pts) {
 //
 // This is the decision alone, pulled out of the DOM-reading closure so it can be proven with plain
 // objects instead of a browser — the same precedent as `classifyTapOwnership` just above.
-export function classifyBlockedControl({ winnerIsSheet, sheetNow, top, bottom, winner }, controlLabel) {
+// A CONTROL ABSENT FROM THE PAINTED STACK IS CLIPPED, NOT COVERED (routine #6, 2026-09-25).
+//
+// ops_incident #377 settled this for `tap-targets-meet-44` and `classifyTapOwnership` above carries
+// the verdict. `onetap-clear-of-controls` never adopted it: it took the PLURAL
+// `document.elementsFromPoint(cx, cy)` and then read only `stack[0]`, which is by definition what
+// `elementFromPoint` returns — the singular question PART 5 shape 13 forbids for exactly this
+// question, asked in a form `scripts/verify-ownership-probes-use-the-painted-stack.ts` could not see,
+// because its §1 discovers `.elementFromPoint(` by CALL SHAPE. The rule was enforced as a class and
+// the class had a hole one level down, which is the PART 1.11 shape the spec keeps naming: a pointer
+// reads as coverage. The journey's own comment claimed the plural form as a virtue while its verdict
+// threw the rest of the stack away.
+//
+// The distinction is not cosmetic. A control clipped out of the app's shortened content box has a
+// rect but is NOT PAINTED, so it is absent from the stack entirely — #377 measured
+// `elementsFromPoint(135,287)` returning `[card, root, root]` with the tab absent, while the singular
+// form named the card and filed a DEFECT. A rect is LAYOUT; being painted is not.
+//
+// `selfIndex` is therefore the input, not `isSelf`: -1 means absent (clipped), 0 means the control
+// owns the point, > 0 means something paints above it (genuinely covered — still a real finding).
+export function classifyBlockedControl({ winnerIsSheet, sheetNow, top, bottom, winner, selfIndex }, controlLabel) {
+  // A PROBE THAT DID NOT REPORT MEMBERSHIP HAS NOT ANSWERED THE QUESTION. Defaulting a missing
+  // `selfIndex` to "covered" would be the same unknown -> NO move this whole verdict exists to undo,
+  // one layer up: the next probe to forget the field would get a confident cover verdict for free.
+  if (selfIndex === undefined || selfIndex === null) {
+    return {
+      what: `«${controlLabel}» failed its hit test, but the probe did not report stack membership`,
+      detail: `«${controlLabel}» ${top}-${bottom}, sheet ${sheetNow}, top of stack ${winner}. Without a `
+        + `selfIndex over the WHOLE painted stack this cannot tell COVERED from CLIPPED (ops_incident `
+        + `#377), so no verdict is asserted. Fix the probe, not this message.`,
+      isOneTap: false,
+      isUnreported: true,
+    };
+  }
+  if (selfIndex === -1) {
+    return {
+      what: `«${controlLabel}» is CLIPPED out of view, not covered`,
+      detail: `«${controlLabel}» ${top}-${bottom} has a rect but is absent from the painted stack at its `
+        + `own centre (the stack there is ${winner}); sheet reported at ${sheetNow}. A rect is LAYOUT and `
+        + `being painted is not — ops_incident #377. Reachability is what decides whether this matters, `
+        + `so the caller must scroll and click before concluding anything.`,
+      isOneTap: false,
+      isClipped: true,
+    };
+  }
   if (winnerIsSheet) {
     return {
       what: `the One Tap prompt is covering «${controlLabel}»`,

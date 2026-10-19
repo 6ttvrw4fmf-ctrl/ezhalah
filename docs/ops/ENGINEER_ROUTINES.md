@@ -1,3 +1,16 @@
+> **⛔ RETIRED 2026-09-27 — READ THIS FIRST.** The owner deleted all eleven routines described below
+> to start a smaller, clearer team. **Do NOT recreate them**, and ignore this file's instruction to
+> "restore the routine to match this file". The new team is being built one engineer at a time:
+>
+> | Engineer | Rulebook | Status |
+> |---|---|---|
+> | ⚡ Scraping Engineer | **`docs/ops/SCRAPING_ENGINEER.md`** | live, daily 2:00 AM Arizona |
+> | 🆕 New Listings Engineer | **`docs/ops/NEW_LISTINGS_ENGINEER.md`** | live, daily 3:00 AM Arizona |
+> | ♻️ Lifecycle Engineer | **`docs/ops/LIFECYCLE_ENGINEER.md`** | live, daily 4:00 AM Arizona |
+>
+> Everything below is kept as history (and because barriers still read its roster) until this file is
+> rewritten for the new team. The GLOBAL ENGINEERING POLICY (§G) remains good guidance.
+
 # ENGINEER ROUTINES — THE ELEVEN DAILY ENGINEERS (canonical, owner-locked 2026-08-11; extended 2026-08-23, 2026-08-26, and 2026-09-04)
 
 > Owner rule: there are **exactly ELEVEN separate cloud routines, all DAILY** (the fourth added by
@@ -10,16 +23,26 @@
 | # | Engineer | Trigger ID | Daily time (Arizona) | Daily time (UTC) | Model | Scope |
 |---|---|---|---|---|---|---|
 | 1 | ⚡ Daily JUNIOR SCRAPING Engineer | `trig_01NpFaJ1ALUZbZKdKpCdWF16` | 04:00 | 11:00 | claude-sonnet-5 | Daily scraping layer ONLY |
-| 2 | 🎖️ Daily SENIOR PRODUCTION Engineer — Deep Audit | `trig_01RCVx7ie1T1i5oPC6KzZAKd` | 04:30 | 11:30 | claude-opus-5 | Broad production engineering, **including AI Agent — Advanced Filter moved to routine #5 on 2026-08-23** |
-| 3 | 🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter) | `trig_01Tr6Rb6XPggFXqCf3EKG62y` | 05:00 | 12:00 | claude-opus-5 | Full scraped inventory / Normal Filter ONLY, **Advanced Filter explicitly out of scope (belongs to routine #5)** |
-| 4 | 🧪 مهندس اختبار البحث والتطابق اليومي — Search & Matching QA | `trig_016eagxsMuB2cCbMe9DK7JJD` | 05:30 | 12:30 | claude-opus-5 | Live production Normal Filter USED AS A REAL USER: matching → diversity → «عرض المزيد» → card click-through, end to end |
-| 5 | 🎯 Senior Advanced Filter + Trending Data Integrity Engineer | `trig_01FmaKmMVJgT5VHFj8Mk9q13` | 04:00 | 11:00 | claude-opus-5 | Advanced Filter + Trending Cities/Districts + the data integrity behind every AF predicate, end to end |
-| 6 | 👣 Daily Journey & Persistence Engineer | `trig_011mQL1FvMQiS8bwx2fp76QN` | 03:00 | 10:00 | claude-opus-5 | Real-user journeys: state, navigation, sessions, sidebar/history/Favorites, cross-browser/device — never search matching itself |
+| 2 | 🎖️ Daily SENIOR PRODUCTION Engineer — Deep Audit | `trig_01RCVx7ie1T1i5oPC6KzZAKd` | 04:30 | 11:30 | claude-sonnet-5 | Broad production engineering, **including AI Agent — Advanced Filter moved to routine #5 on 2026-08-23** |
+| 3 | 🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter) | `trig_01Tr6Rb6XPggFXqCf3EKG62y` | 05:00 | 12:00 | claude-sonnet-5 | Full scraped inventory / Normal Filter ONLY, **Advanced Filter explicitly out of scope (belongs to routine #5)** |
+| 4 | 🧪 مهندس اختبار البحث والتطابق اليومي — Search & Matching QA | `trig_016eagxsMuB2cCbMe9DK7JJD` | 05:30 | 12:30 | claude-sonnet-5 | Live production Normal Filter USED AS A REAL USER: matching → diversity → «عرض المزيد» → card click-through, end to end |
+| 5 | 🎯 Senior Advanced Filter + Trending Data Integrity Engineer | `trig_01FmaKmMVJgT5VHFj8Mk9q13` | 04:00 | 11:00 | claude-sonnet-5 | Advanced Filter + Trending Cities/Districts + the data integrity behind every AF predicate, end to end |
+| 6 | 👣 Daily Journey & Persistence Engineer | `trig_011mQL1FvMQiS8bwx2fp76QN` | 03:00 | 10:00 | claude-sonnet-5 | Real-user journeys: state, navigation, sessions, sidebar/history/Favorites, cross-browser/device — never search matching itself |
 | 7 | 🧵 Daily Systems Seam Engineer | `trig_01T5yuLGCj3yDqPDsVrPjNmd` | 03:30 | 10:30 | claude-opus-5 | Cross-system integration integrity: cron→detector→alert, migration→mirror→prod, deploy-claim-vs-served-bundle, RLS, orphaned guarantees |
 | 8 | 🔴 Daily REGRESSION HUNTER | _owner to create_ | 07:00 | 14:00 | claude-opus-5 | **The GAPS BETWEEN owned surfaces**, and fixes that did not hold. Adversarial, cross-boundary, assumes every previous fix is incomplete |
 | 9 | 🔬 Daily PRODUCTION RED TEAM | _owner to create_ | 08:00 | 15:00 | claude-opus-5 | **The AGREEMENT between layers on production**: action = request = RPC params = DB truth = displayed count = returned ids = card evidence. Distrusts every harness |
-| 10 | 🧱 Daily BUG PREVENTION & BARRIER | _owner to create_ | 06:30 | 13:30 | claude-opus-5 | **The VERIFICATION APPARATUS itself**, never the product: barriers that assert the bug, checks with no mutation proof, tests that pass while production is wrong |
-| 11 | ♻️ Daily LISTING LIFECYCLE | _owner to create_ | 07:30 | 14:30 | claude-opus-5 | **A listing AFTER its source confirms it is gone**: inactive → unsearchable → 30 days → deleted, and every way a dead listing can still be seen, counted or resurrected |
+| 10 | 🧱 Daily BUG PREVENTION & BARRIER | _owner to create_ | 06:30 | 13:30 | claude-sonnet-5 | **The VERIFICATION APPARATUS itself**, never the product: barriers that assert the bug, checks with no mutation proof, tests that pass while production is wrong |
+| 11 | ♻️ Daily LISTING LIFECYCLE | _owner to create_ | 07:30 | 14:30 | claude-sonnet-5 | **A listing AFTER its source confirms it is gone**: inactive → unsearchable → 30 days → deleted, and every way a dead listing can still be seen, counted or resurrected |
+
+**Model note (owner, 2026-09-18):** 8 of the 11 moved from `claude-opus-5` to `claude-sonnet-5` to
+cut daily token spend. The 3 that stayed on `claude-opus-5` — #7 Systems Seam, #8 Regression Hunter,
+#9 Production Red Team — are the ones whose job is explicitly adversarial/cross-boundary (assume the
+evidence lies, distrust every harness, hunt the gap between owned surfaces); the other 8 audit known
+data/UI/journey surfaces against a documented rulebook, which Sonnet handles at the same reliability
+for materially less cost. This does NOT change what any routine is required to do: §G.1's
+`FIX → REGRESSION → PERMANENT BARRIER → MUTATION-PROVE → MERGE → DEPLOY/APPLY → PRODUCTION VERIFY`
+chain binds all eleven regardless of model — a downgraded routine still finds, fixes, barriers, and
+ships a bug in the same run, never hands it back as a report item.
 
 **Schedule note (2026-08-23):** routine #5 runs at the SAME 04:00 Arizona slot as routine #1
 (owner's explicit instruction), not staggered 30 minutes like #1–#4 are from each other. It does
@@ -240,6 +263,29 @@ Report `INCIDENTS WORKED / RESOLVED / HANDED OFF / BLOCKED` in your §G.8 block.
 severity SLA (P0 4h, P1 24h, P2 72h, P3 14d), so an unworked queue is attributable rather than
 anonymous. Full contract: `docs/ops/AUTONOMOUS_INCIDENT_LOOP.md`.
 
+**Your ALERT queue too, not only incidents (owner, 2026-09-21).** Detectors raise into `alert_event`;
+a filed alert nobody claimed is the same failure as an unworked incident. Immediately after the
+incident queue, read your open alerts and work them the same way:
+
+```sql
+select id, severity, kind, dedup_key, created_at, last_affirmed_at, detail
+  from alert_event
+ where owner_routine = '<your routine slug>' and resolved_at is null
+ order by severity, created_at;
+```
+
+For each: if it is a real problem, drive it to a fix (§G.1) and let its detector's self-heal resolve
+it, or `incident_open()` it if the fix will span runs; if the condition is already gone, **run its
+detector so it self-resolves** — never hand-resolve an alert, which hides a detector that stopped; if
+it is a false positive, record why and route it to routine-10. **Acknowledge each by self-assigning
+its GitHub issue** (that stamps `acknowledged_at`; an unacknowledged queue is what
+`mon_detect_alert_queue_unworked()` escalates system-wide to a single P0 once the oldest passes 14
+days). A serious alert you leave open beyond its SLA is promoted into your incident queue
+automatically by `promote_aged_alerts_to_incidents()` — so ignoring `alert_event` does not make the
+work disappear, it reappears as an incident with your name on it. Report
+`ALERTS WORKED / RESOLVED / ACKED` in your §G.8 block. Resolution of either an alert or its incident
+comes ONLY from production evidence that the condition is gone — never from having looked at it.
+
 ### §G.2b — "A HUMAN COULD APPROVE THIS" IS NOT A REASON TO ASK (owner, 2026-09-04)
 
 The six reasons above are the whole list, and they are about the NATURE of the change, not about who
@@ -429,22 +475,27 @@ not help — routines #8 through #11 are guests too.**
 
 ## 1. ⚡ Daily JUNIOR SCRAPING Engineer (original, unmodified)
 Canonical spec: **`docs/ops/JUNIOR_SCRAPING_ENGINEER.md`** (file wins over the live prompt on any
-divergence). Written 2026-09-05 by RECONSTRUCTION from repo evidence, because this routine had no
-spec file at all and its instructions existed only in a cloud prompt outside this repo — the state
-the owner's audit called unauditable. Every claim in it carries a citation. Its
-`## UNRECOVERED — owner must supply` section lists what could NOT be recovered — roughly 9,700 of
-the prompt's 9,971 characters, the run procedure, the pass/fail thresholds, and the `[DEEP AUDIT]`
-escalation schema. **Until the owner pastes those in, that file is a partial spec and the live
-prompt is still the only complete copy.**
+divergence). First written 2026-09-05 as a RECONSTRUCTION from repo evidence (the routine's
+instructions had only ever lived in a cloud prompt), with an UNRECOVERED list of what could not be
+found. **Rewritten in full 2026-09-26 by owner instruction** ("I don't mind changing the junior
+scraping engineer routine instruction fully, just to make it better"): it is now the complete
+rulebook — daily run order, pass/fail thresholds, the revival ladder, the amended DOWN rule (a
+down site's listings AND logo leave, the platform count drops, and it is re-probed daily until it
+returns), the `[DEEP AUDIT]` handoff template, and the report shape. Nothing binding lives only in
+the cloud prompt any more. `daily-metrics.jsonl` (below) is retired — `ops_daily_engineer_run` is
+the only per-run record.
 
 
-Original owner prompt (9,971 chars), untouched since creation. Runs on branch `ops/daily-engineer`,
-writes `docs/ops/daily-metrics.jsonl`, escalates via `[DEEP AUDIT]` GitHub issues.
+History (superseded by the spec above): the original owner prompt (9,971 chars) ran on branch
+`ops/daily-engineer`, wrote `docs/ops/daily-metrics.jsonl` (dead since 2026-08-13, retired
+2026-09-26), and escalated via `[DEEP AUDIT]` GitHub issues (still the channel — the spec now fixes
+its template).
 
-Scope — the daily scraping layer, exactly as originally defined:
-scraper execution + health for every active platform, collection results, failures, missing runs,
-new-listing discovery, reachability. It does NOT do deep production audits, filter parity, or data
-integrity sweeps — it detects and escalates to the senior.
+Scope — the daily scraping layer: scraper execution + health for every active platform, collection
+results, failures, missing runs, new-listing discovery, reachability. It does NOT do deep production
+audits, filter parity, or data integrity sweeps. It FIXES every scraper failure it can in the same
+run (owner, 2026-09-24: "responsible for FIXING that, not just reporting") and escalates only a
+genuinely multi-system investigation to the senior.
 
 ## 2. 🎖️ Daily SENIOR PRODUCTION Engineer — Deep Audit (original prompt, made daily)
 Canonical spec: **`docs/ops/SENIOR_PRODUCTION_ENGINEER.md`** (file wins over the live prompt on any

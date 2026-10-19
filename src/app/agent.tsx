@@ -1,35 +1,52 @@
+import { agentResultRequest, resultQuantityChange } from '@/lib/agentResultRequest';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Easing,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  Share,
   TextInput,
   View,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { Image } from 'expo-image';
+import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, MAX_PICKER_SOURCES, platformRegionIds, platformRegionShare, platformRegionListings } from '@/data/platformPickerProfiles';
+import PickerRegionsMap, { regionLabel } from '@/components/PickerRegionsMap';
+import { pickAfCourtesyOpening } from '@/data/afCourtesyOpeners';
+import AfRoundLoader from '@/components/AfRoundLoader';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
-import { TAP44 } from '@/theme/palette';
+import { COMPOSER_INPUT, TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
+import { shouldRenderModeSwitch } from '@/lib/shouldRenderModeSwitch';
 import { isAppSessionStarted } from '@/lib/appSession';
 import { msgRTL } from '@/lib/textDirection';
-import { stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
+import { stopReadAloud, subscribeReadAloud, stripEmoji } from '@/lib/readAloud';
 import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupported } from '@/lib/voiceInput';
 import VoiceWaveform from '@/components/VoiceWaveform';
+import AgentModelSelector from '@/components/AgentModelSelector';
+import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
+import { livePickerNames, loadLivePickerNames, pickerMayOffer } from '@/data/pickerLivePlatforms';
+import { hiddenPlatformNames } from '@/data/loaderActivePlatforms';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
-import { initialReveal as initialRevealPure } from '@/lib/initialReveal';
+import { initialReveal as initialRevealPure, CASCADE_MAX } from '@/lib/initialReveal';
+import { glyphCount, revealPrefix } from '@/lib/typedReveal';
+import { createRevealHandoff } from '@/lib/revealHandoff';
 import { distinctPlatformCount } from '@/lib/platformDiversity';
+import { newerTurnPending as newerTurnPendingPure } from '@/lib/liveTurn';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
 import ReadAloudPlayer from '@/components/ReadAloudPlayer';
-import { CardIn, LoadingDots } from '@/components/CardReveal';
+import { CardIn, LoadingDots, GoldPulse, GoldShineButton } from '@/components/CardReveal';
 
 // Memoized card: during the reveal cascade the list re-renders every ~55ms — already-revealed cards
 // must skip reconciliation or 200+ cards stutter the very animation the cascade exists for (review
@@ -37,6 +54,7 @@ import { CardIn, LoadingDots } from '@/components/CardReveal';
 // render but behaves identically for the same listing.
 const MemoResultCard = memo(ResultCard, (prev, next) =>
   prev.listing === next.listing && prev.rank === next.rank && prev.variant === next.variant
+  && prev.row === next.row
   // activeAf is one frozen reference per results turn (afActive memoises on m.result.query), so
   // identity is the right comparison; without this term the card would swallow the prop.
   && prev.activeAf === next.activeAf);
@@ -45,34 +63,59 @@ import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard } from '@/components/ResultCard';
+import type { Listing } from '@/data/listings';
+import { ResultCardGrid } from '@/components/ResultCardGrid';
+import { DeadCardShade } from '@/components/DeadCardShade';
+import { cardKey, fetchGoneKeys } from '@/lib/deadCards';
 import { parseQuery, respond } from '@/data/agent';
 import { fetchListingsForQuery } from '@/data/remote';
 import { buildLocationProbeQuery, replyAfterLocationProbe } from '@/lib/agentLocationProbe';
+import { logZeroResult } from '@/data/zeroResultLog';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
-import { openListing } from '@/lib/openListing';
-import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
+import { listingOpenUrl, openListing } from '@/lib/openListing';
+import {
+  EMPTY_AD_PANE, closeAdTab, hideAdPane, inAppPreviewHost, inAppViewerHost, openAdTab, showAdPane, type AdPane, type AdTab,
+} from '@/lib/inAppViewer';
+import { PICKER_SHEET_BREAKPOINT, VIEWER_SPLIT_BREAKPOINT, CARDS_THREE_ACROSS_BREAKPOINT, SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
+import { useAtLeast } from '@/lib/useAtLeast';
+import AdViewer from '@/components/AdViewer';
+import { ConfettiOverlay } from '@/components/ConfettiOverlay';
+import { buildAfSummaryItems, buildAfBeatSteps } from '@/lib/afSummary';
+import { filterToChat, searchSummary, guidedSearchSummary, buildAfSummary, buildAfRoundLog, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, NO_RESULTS_GENERIC_FALLBACK_EN, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
 import { afActive } from '@/lib/afEvidence';
 import { toLatinDigits } from '@/lib/inputHygiene';
-import { resultCounts, closingNoteKey, nextBatchTarget, drainPageBudget, LOAD_MORE_PAGE_SIZE, DRAIN_REVEAL_MAX } from '@/data/resultCount';
+import { resultCounts, closingNoteKey, revealTarget, SECOND_PAGE_CAP, drainPageBudget, LOAD_MORE_PAGE_SIZE } from '@/data/resultCount';
 import { afInterviewOwnsBrowsing, searchIsFinishedAtThreshold, resultsActionsRowVisible } from '@/lib/afBrowsingGate';
 import { resultsRowIsReady } from '@/lib/afResultsRowGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
-import { screenKeyboardInset } from '@/lib/visualViewportFrame';
+import { pickResultsFoundSentence } from '@/data/resultsFoundRotation';
+import { pickNoResultsSentence } from '@/data/noResultsRotation';
+import { pickName } from '@/lib/nameSync';
+import { encodeSharePayload, shareLink, shareMessage } from '@/lib/shareSearch';
+import { SHARE_LINK, shareNative } from '@/lib/share';
+import { replayMsgIds } from '@/lib/replayIds';
+import { primeResultsFound } from '@/data/loaderResultsFound';
+import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
-import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
+import { createSharedChat } from '@/lib/sharedChat';
+import { useI18n, LocaleScope, detectLocale, resolveReplyLocale, getLocale, translate, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
+import { listingLocationAr, listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
+import { botMessage } from '@/lib/botMessage';
+import { cityQuestionAr, nearQuestionAr, geoQuestionAr, wholeCityQuestionText, twinRegionQuestion, twinDistrictQuestion, regionOrCityQuestion, regionQuestionWithHint, nextVariant, REFINE_DISTRICT_AR, REFINE_DISTRICT_EN, REFINE_BUDGET_AR, REFINE_BUDGET_EN, REFINE_BEDS_AR, REFINE_BEDS_EN, REFINE_FREE_AR, REFINE_FREE_EN, SEARCH_FAILED_AR, SEARCH_FAILED_EN, wholeCityQuestionSubject as wholeCitySubject, PIN } from '@/data/questionExamples';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard, type ShellPills } from '@/components/AdvancedQuestionCard';
-import MiningTransition from '@/components/MiningTransition';
-import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes } from '@/lib/afProbe';
-import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
+import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes, offersNarrowing } from '@/lib/afProbe';
+import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, resolveScopeOptionsInBackground, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, primeLiveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
+import { markSearchLeftBehind } from '@/lib/searchLeftBehind';
+import { PLATFORM_META, type LoaderPlatform } from '@/data/loaderPlatforms';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
 // below a results block — NEVER before first results. Its gate is cohortAllows(q, 'property_age')
@@ -102,6 +145,9 @@ function anyGuidedEligible(q: SearchQuery): boolean {
 }
 
 const IS_WEB = Platform.OS === 'web';
+// ChatGPT's own font list (system UI face), with the platform Arabic faces named so Arabic renders in
+// the system's modern Arabic type instead of a browser fallback. Native keeps the platform default.
+const CHAT_FONT = IS_WEB ? 'ui-sans-serif, -apple-system, system-ui, "Segoe UI", "SF Arabic", "Noto Sans Arabic", Helvetica, Arial, sans-serif' : undefined;
 // On the web the results tile into a wrap grid, so the conversation column is wider to give them
 // room (the user barely scrolls). On phone it stays a comfortable single-column reading width.
 const MAX_W = IS_WEB ? 940 : 560;
@@ -127,16 +173,21 @@ type RefinePrompt = { dim: string; baseQ: SearchQuery; options: { label: string;
 // One committed Advanced Filter answer: which question, which option keys, and the labels shown for
 // them. Skips never produce one (they write no predicate), which is what makes the summary EQUAL the
 // committed state by construction.
-type GuidedFacet = { id: string; keys: string[]; labels: string[] };
+type GuidedFacet = { id: string; keys: string[]; labels: string[]; total?: number };
 
 type ChatMsg =
   | { id: string; role: 'user'; text: string; typing?: boolean }
-  | { id: string; role: 'agent'; text: string; typing?: boolean; greeting?: boolean; refine?: RefinePrompt; refineDone?: boolean }
-  | { id: string; role: 'results'; text: string; result: SearchResult; typing?: boolean; slogan?: string; summary?: string }
+  | { id: string; role: 'agent'; text: string; typing?: boolean; greeting?: boolean; refine?: RefinePrompt; refineDone?: boolean; stopNote?: boolean }
+  | { id: string; role: 'results'; text: string; result: SearchResult; typing?: boolean; slogan?: string; summary?: string;
+      /** This turn was produced by a COMPLETED Advanced Filter round — it reveals up to AF_REVEAL_MAX
+       *  instead of the first-screen width (owner 2026-09-20). Carried ON the message, not in state:
+       *  the reveal is computed inside playListings BEFORE setGuidedPills lands, so reading it from
+       *  React state would race and silently fall back to a 10-card first screen. */
+      afCompleted?: boolean }
   // `query` + `resultSources` feed the search-loading animation's platform strip (which real
   // platforms to show while searching); they never affect the search itself. `exiting` tells the
   // loader to fade out softly just before the morph to results (owner v4: no hard cut).
-  | { id: string; role: 'status'; phase: 'thinking' | 'searching'; slogan?: string; summary?: string; query?: SearchQuery; resultSources?: string[]; exiting?: boolean };
+  | { id: string; role: 'status'; phase: 'thinking' | 'searching'; slogan?: string; summary?: string; query?: SearchQuery; resultSources?: string[]; exiting?: boolean; afRound?: { items: string[]; pools?: Array<number | null> } };
 
 const uid = () => 'm' + Date.now() + Math.round(Math.random() * 1e6);
 
@@ -155,16 +206,12 @@ const bedsLabel = (n: string, ar: boolean): string => {
 // playful "you got it" in Najdi colour, never a recommendation or any judgement on the search (user
 // request: speak in the Saudi dialect, plain and simple, never advise). The English locale gets
 // equivalent breezy one-liners so a non-Arabic user reads the same energy.
-// The opening greeting Ezhalah types into a fresh chat (owner-authored FINAL copy, 2026-08-23 —
-// verbatim, do not edit without an explicit owner instruction; the intro-rotator barrier pins it
-// byte-exact). One warm Saudi sentence that says exactly what Ezhalah does. Language follows the UI
-// locale — rendered live (not frozen at send time) so flipping language re-renders it. The English
-// branch stays the bare brand word: the product is Arabic-only and English is latent code — no
-// English marketing copy is invented here (owner brief §10).
+// Owner-approved static welcome (2026-10-03). Only the empty chat renders it;
+// conversation replies keep their existing typing and loading animations.
 const greetingText = (locale: Locale): string =>
   locale === 'ar'
-    ? 'ارحب، أنا إزهله. قلّي وش العقار اللي تدور عليه، وأنا أبحث لك بين المنصات العقارية وأطابق الخيارات مع طلبك لين نلقى اللي يناسبك… إزهلها وفالك الطيب.'
-    : 'Ezhalah';
+    ? 'وش العقار اللي في بالك؟\nقل لنا مواصفاته، وإزهله.'
+    : 'What property are you after?\nDescribe it and Ezhalah';
 
 // Ezhalah's SEARCHING-phase voice — one Najdi-flavoured swagger line chosen at random before each
 // search (its recognizable Saudi personality, NOT generic "searching now"). Shown ONLY while searching,
@@ -186,18 +233,25 @@ const HYPE_EN = ['Ezhalah'];
 // rendered as plain text directly under the Search Summary — NO "Ezhalah!" prefix, no sparkle icon,
 // so it doesn't look like a second slogan. The branded slogan above carries the personality. (user request.)
 const RESULT_AR = [
-  'وجدت بعض العقارات التي تطابق بحثك.',
-  'وجدت بعض الخيارات بناءً على طلبك.',
-  'هذه بعض العقارات التي قد تناسب بحثك.',
+  'وجدت بعض العقارات التي تطابق بحثك 🏡',
+  'وجدت بعض الخيارات بناءً على طلبك 🔍',
+  'هذه بعض العقارات التي تطابق بحثك ✨',
+  'طلعت لك عقارات حسب طلبك 🏘️',
 ];
 const RESULT_EN = [
-  'I found a few properties based on your search.',
-  'I found a few options based on what you asked for.',
-  'Here are some properties that match your search.',
+  'I found a few properties based on your search 🏡',
+  'I found a few options based on what you asked for 🔍',
+  'Here are some properties that match your search ✨',
+  'Here is what matches your request 🏘️',
 ];
+// Never the same line twice in a row (owner 2026-10-11: «not the same message, so it is not a chatbot that repeats itself»).
+let lastResultDone = -1;
 const resultDone = (locale: Locale): string => {
   const arr = locale === 'ar' ? RESULT_AR : RESULT_EN;
-  return arr[Math.floor(Math.random() * arr.length)];
+  let i = Math.floor(Math.random() * arr.length);
+  if (i === lastResultDone) i = (i + 1) % arr.length;
+  lastResultDone = i;
+  return arr[i];
 };
 // Pick a slogan in the LANGUAGE OF THE USER'S MESSAGE (not the UI locale). Counting Arabic vs
 // Latin word-runs in the text lets a user type "I want an apartment in Riyadh" inside an Arabic
@@ -228,12 +282,8 @@ const arLabel = (s: string) => arabicOrPlaceholder(s, 'ar', LOCATION_UNRESOLVED_
 // re-parsed that generic noun as المدينة المنورة and searched the wrong region entirely.
 // scripts/verify-agent-whole-city-answer.ts round-trips these two so the template cannot drift out
 // from under the parser.
-export const wholeCityQuestion = (cityAr: string) => `تقصد مدينة ${cityAr} كاملة، أو حي معيّن؟`;
-export function wholeCityQuestionSubject(text: string | null | undefined): string | null {
-  const m = /^تقصد مدينة (.+) كاملة، أو حي معيّن؟$/u.exec((text ?? '').trim());
-  const city = m?.[1]?.trim();
-  return city ? city : null;
-}
+export const wholeCityQuestion = (cityAr: string) => wholeCityQuestionText(cityAr);
+export const wholeCityQuestionSubject = (text: string | null | undefined): string | null => wholeCitySubject(text);
 
 // The region-AND-city TWIN NAME behind the «مدينة X ولا منطقة X كاملة؟» question (and behind the
 // whole-region question for the same names), so send() knows which name the user is answering about on
@@ -266,8 +316,8 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
     const prox = (q.proximity ?? [])
       .map((p) => (p.text || `${p.phrase} ${p.name || p.categoryAr}`).trim())
       .filter(Boolean);
-    if (prox.length) return `في أي مدينة تبحث عن عقار ${prox.join(' و')}؟`;
-    return 'في أي مدينة تبحث؟';
+    if (prox.length) return nearQuestionAr(prox.join(' و'), userText);
+    return cityQuestionAr(userText, '', q.type);
   }
   // The user asked for the whole CITY or REGION — honour it, don't ask to narrow. Kingdom-wide is
   // deliberately NOT in this test any more: «الرياض كاملة» is a supported scope, «كل المملكة» is not.
@@ -286,24 +336,24 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
     // audit #2 fix: show the REGIONS, not the city display labels (which are identical for twins and
     // dedupe to one blank option). «الهفوف موجودة في أكثر من منطقة (المنطقة الشرقية، منطقة الرياض)…»
     const regions = Array.from(new Set(lm.twinRegions));
-    return `«${arLabel(lm.label)}» موجودة في أكثر من منطقة (${regions.join('، ')}). أي منطقة تقصد؟`;
+    return twinRegionQuestion(arLabel(lm.label), regions.join('، '), userText);
   }
   // Region-vs-city SAME NAME (الرياض/جازان/تبوك/حائل/نجران/الباحة/الجوف) → ask مدينة ولا منطقة, never
   // default to the city. Must precede the generic city branch below. (audit #4 / Q38.)
   if (lm.regionOrCity) {
     if (scopeChoice) return null; // they picked one of the two options — search it, don't re-ask it
     const label = arLabel(lm.label);
-    return `«${label}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة ${label} ولا منطقة ${label} كاملة؟`;
+    return regionOrCityQuestion(label, userText);
   }
   // Geography cue (sea/mountain/desert) with NO city → ask the city; never auto-pick a default.
   // (audit #12 / Q39 case A.)
   if (lm.kind === 'geography' && lm.needsCity) {
-    return 'تقصد في أي مدينة أو منطقة؟';
+    return geoQuestionAr(userText);
   }
   // 1) A bare district shared by several cities → ask WHICH CITY (cities with listings first).
   if (lm.kind === 'district' && lm.ambiguous && lm.cities && lm.cities.length > 1) {
     const names = Array.from(new Set(lm.cities.slice(0, 8).map((c) => cityDisplay(c, 'ar')))).slice(0, 6);
-    return `«${arLabel(lm.label)}» موجود في أكثر من مدينة (${names.join('، ')}). أي مدينة تقصدها؟`;
+    return twinDistrictQuestion(arLabel(lm.label).replace(/^حي\s+/, ''), names.join('، '), userText);
   }
   // 2) A REGION → ask the WHOLE region or a specific city (name a couple of its real, in-inventory cities).
   if (lm.kind === 'region') {
@@ -318,7 +368,7 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
     if (scopeNamedForTwin(userText, regionOrCityTwin(loc)) === 'region') return null;
     const cities = topCitiesInRegion(lm.region ?? lm.city ?? loc, 2).map((c) => cityDisplay(c, 'ar'));
     const hint = cities.length ? ` مثل ${cities.join(' أو ')}` : '';
-    return `تقصد ${arLabel(lm.label)} كاملة، أو مدينة معيّنة${hint}؟`;
+    return regionQuestionWithHint(arLabel(lm.label), hint, userText);
   }
   // 3) A whole CITY with no neighbourhood → ask the WHOLE city or a specific district.
   if (lm.kind === 'city') {
@@ -328,14 +378,7 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
 }
 
 function detectMsgLang(s: string): 'en' | 'ar' | null {
-  const words = s.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  let ar = 0, en = 0;
-  for (const w of words) {
-    if (/[؀-ۿ]/.test(w)) ar++;
-    else if (/[A-Za-z]/.test(w)) en++;
-  }
-  if (ar === en) return null;
-  return ar > en ? 'ar' : 'en';
+  return detectLocale(s);
 }
 const hypePhrase = (locale: Locale, messageText?: string) => {
   const detected = messageText ? detectMsgLang(messageText) : null;
@@ -377,16 +420,36 @@ const SEARCH_MS = 600;
 // in the animation show clearly, cuz doing it quick will make them lost." The platform roster is the
 // product's primary trust signal — it is the moment the user learns Ezhalah searches the WHOLE Saudi
 // market — and at the old 2.2s floor the pills landed and were gone before any of them could be
-// read. The floor must therefore cover the full reveal AND at least one complete highlight sweep, so
-// every platform is individually lit at least once before the loader may exit:
-//     reveal (LOADER_REVEAL_MS) + one sweep (LOADER_SWEEP_MS = 7.4s) ≤ floor.
+// read. The floor must therefore outlast BOTH the reveal and the highlight wave, so every platform
+// is on screen and individually lit at least once before the loader may exit:
+//     floor ≥ max(lastPillAppearedMs(roster), lastPillLitMs(roster))   [searchLoaderTiming.ts]
 // scripts/verify-search-loader-shows-every-platform.ts executes that arithmetic against the shipped
 // constants, so the two files cannot drift apart silently.
 //
-// 10,000 → 10,600ms later the same day: MAX_ROSTER (searchLoaderTiming.ts) was raised 40→50 with
-// headroom for the platforms still queued in the 40-candidate audit, which raises LOADER_REVEAL_MS
-// to 3,200ms; the floor follows so REVEAL + SWEEP (3,200 + 7,400 = 10,600) still lands inside it.
-const SEARCH_MIN_MS = 10600;
+// 10,000 → 10,600ms later the same day, when MAX_ROSTER was raised 40→50.
+//
+// CORRECTED 2026-09-19 (the number is unchanged; what it means is not). This comment used to state
+// the contract as `reveal + sweep ≤ floor` with sweep = 7.4s. That was wrong twice over: the reveal
+// and the wave both start at mount and OVERLAP, so the deadline is the later of them rather than
+// their sum; and the wave's real length is (roster−1) × highlightStepMs(roster), which the 180ms
+// readable-step floor pushes past 7.4s for every roster above 41 — as ours has been since abwbna.
+// The two errors pointed opposite ways and nearly cancelled, which is why nothing caught it until the
+// catalogue reached 52. Under the corrected arithmetic 10,600ms genuinely serves up to 56 platforms
+// (the 52nd pill is lit at 9,740ms; a 57th roster would not be lit until 10,640ms). Platform #57
+// therefore needs a real decision — a longer floor, or a wave that lights more than one pill per
+// step — and MAX_ROSTER is the guard that will stop it silently slipping through.
+//
+// OWNER 2026-10-17 — RESULTS AS SOON AS THEY ARE READY, NEVER HELD PAST TEN SECONDS. This reverses
+// the 2026-09-06 "wait the full ten seconds" floor above (kept for history): the owner's goal is now
+// «less than 10 seconds, that's the max». So the floor becomes a short MINIMUM (the roster is never a
+// flash) and a hard MAXIMUM caps every artificial hold — the minimum beat AND the page-dwell gate
+// below. A slow network can still take longer; that is the network, not a hold. On a search that
+// resolves fast the user sees part of the logo wave; on a slow one the whole wave still fits inside
+// the cap (scripts/verify-search-loader-shows-every-platform.ts proves everyPlatformSeen(SEARCH_MAX_HOLD_MS)).
+const SEARCH_MIN_MS = 3000;
+const SEARCH_MAX_HOLD_MS = 10000;
+// An Advanced Filter round's search beat (owner 2026-10-11: 5 seconds, «نبحث عن …» changing pick by pick — AfRoundLoader).
+const AF_LOADER_MS = 5000;
 // Soft completion (owner v4): before morphing to results, flag the loader `exiting` and give its
 // fade-out this long — the strip glides away into the results state instead of vanishing in a frame.
 const LOADER_EXIT_MS = 450;
@@ -446,10 +509,15 @@ const STOP_PROCESSING_MS = 450;
 function runTypewriter(total: number, setN: (n: number) => void, onDone?: () => void): () => void {
   if (total <= 0) { onDone?.(); return () => {}; }
   let i = 0;
+  // finish() stops the interval too. When the fallback paid out first, the still-running interval
+  // used to keep calling setN(i) — rewinding the finished sentence — and its own last tick hit the
+  // `done` guard, leaving the reveal one tick short for good: the Results-Found emoji (always the
+  // last glyph) vanished (owner 2026-10-04: «sometimes doesn't show an emoji»).
   let done = false;
   const finish = () => {
     if (done) return;
     done = true;
+    clearInterval(id);
     setN(total);
     onDone?.();
   };
@@ -466,14 +534,39 @@ function runTypewriter(total: number, setN: (n: number) => void, onDone?: () => 
 // short or long sentence both take the same ~5s), making a filter search read as if Ezhalah is
 // writing it out (prototype parity: ezhalah-mobile.jsx Typer). Renders an unstyled <Text> so it
 // inherits the surrounding bubble/reply styling. onDone fires once the full text is shown.
+// THE REVEAL UNIT IS A GLYPH, NEVER A UTF-16 CODE UNIT (ops_incident #347, 2026-09-19). `text.slice`
+// counts code units, so a frame landing inside a surrogate pair renders half an emoji — the ▯ box.
+// Twenty of the forty Results-Found templates end in a non-BMP emoji, and that frame is not always
+// momentary: measured live, the reveal froze one tick short of the end under a 500-card render load
+// and a real user was left looking at «…تطابق بحثك ▯» indefinitely. See src/lib/typedReveal.ts.
+// THE HAND-OFF IS BOUNDED PER RENDERED TURN (ops_incident #347 part 3, #339, #323 — routine #4,
+// 2026-09-23). runTypewriter's ceiling is cleared by this effect's own cleanup, so a `text` that
+// changes faster than the ceiling restarted it forever and `onDone` never fired — measured 0 times
+// in 90 s against the real function. `onDone` sets doneTyping, which gates «عرض المزيد», so that
+// stall withheld the only control reaching the rest of the results. See src/lib/revealHandoff.ts.
 function Typer({ text, onDone }: { text: string; onDone?: () => void }) {
   const [n, setN] = useState(0);
+  // The denominator is the glyph count, so `n` and the slice below agree on what a step is.
+  const total = useMemo(() => glyphCount(text), [text]);
+  const handoff = useMemo(() => createRevealHandoff(), []);
+  // Latest-value refs so the ceiling, armed once on mount, always pays out the CURRENT text's
+  // hand-off rather than the one that happened to be showing when it was armed.
+  const latest = useRef({ total, onDone });
+  latest.current = { total, onDone };
+  useEffect(() => handoff.arm(() => {
+    setN(latest.current.total);
+    latest.current.onDone?.();
+    // Mount-only on purpose: re-arming per `text` IS the defect. eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
   useEffect(() => {
+    // Already handed off: show the text whole. Re-animating from 0 would put the user back on a
+    // half-written sentence after the UI has already moved on.
+    if (handoff.isSettled()) { setN(total); return; }
     setN(0);
-    return runTypewriter(text.length, setN, onDone);
+    return runTypewriter(total, setN, () => { handoff.settle(); onDone?.(); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
-  return <Text>{text.slice(0, n)}</Text>;
+  return <Text>{revealPrefix(text, n)}</Text>;
 }
 
 // Like Typer, but reveals "Ezhalah! " (styled as the brand) followed by the reply as one continuous
@@ -483,12 +576,27 @@ function Typer({ text, onDone }: { text: string; onDone?: () => void }) {
 function BrandReveal({ brand, text, onDone }: { brand: string; text: string; onDone?: () => void }) {
   const full = brand + text;
   const [n, setN] = useState(0);
+  // Glyph-stepped for the same reason as Typer above (ops_incident #347). Splitting `shown` at
+  // `brand.length` stays correct: `brand` is a literal prefix of `full`, and `shown` is now always a
+  // whole number of glyphs, so the split either lands exactly on the brand boundary or leaves the
+  // (still well-formed) partial brand in the first half.
+  const total = useMemo(() => glyphCount(full), [full]);
+  // Same per-turn hand-off bound as Typer above — identical structure, identical defect class.
+  const handoff = useMemo(() => createRevealHandoff(), []);
+  const latest = useRef({ total, onDone });
+  latest.current = { total, onDone };
+  useEffect(() => handoff.arm(() => {
+    setN(latest.current.total);
+    latest.current.onDone?.();
+    // Mount-only on purpose: re-arming per `full` IS the defect. eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
   useEffect(() => {
+    if (handoff.isSettled()) { setN(total); return; }
     setN(0);
-    return runTypewriter(full.length, setN, onDone);
+    return runTypewriter(total, setN, () => { handoff.settle(); onDone?.(); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [full]);
-  const shown = full.slice(0, n);
+  const shown = revealPrefix(full, n);
   return (
     <>
       <Text style={s.brand}>{shown.slice(0, brand.length)}</Text>
@@ -513,8 +621,9 @@ function BrandReveal({ brand, text, onDone }: { brand: string; text: string; onD
 // text is structurally impossible to overwrite.
 const INTRO_EX_FADE_MS = 220;
 function IntroExampleRotator({ reducedMotion }: { reducedMotion: boolean }) {
+  const { locale } = useI18n();
   const [w, setW] = useState(0);
-  const pool = useMemo(() => introExamplesForWidth(w), [w]);
+  const pool = useMemo(() => introExamplesForWidth(w, locale), [w, locale]);
   const [i, setI] = useState(0);
   const [phase, setPhase] = useState<'in' | 'shown' | 'out'>('shown');
   const text = pool.length ? pool[i % pool.length] : '';
@@ -556,7 +665,7 @@ function IntroExampleRotator({ reducedMotion }: { reducedMotion: boolean }) {
       onLayout={(e) => setW(e.nativeEvent.layout.width)}
     >
       {text ? (
-        <Text numberOfLines={1} ellipsizeMode="tail" style={[s.introRotatorText, ease, pose]}>
+        <Text numberOfLines={1} ellipsizeMode="tail" style={[s.introRotatorText, locale === 'en' && s.introRotatorTextEn, ease, pose]}>
           {text}
         </Text>
       ) : null}
@@ -567,7 +676,7 @@ function IntroExampleRotator({ reducedMotion }: { reducedMotion: boolean }) {
 export default function Agent() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { t, locale, setLocale } = useI18n();
+  const { t, locale } = useI18n();
   const { seed, filter, chatBubble, chatSub, replay, fresh, hid } = useLocalSearchParams<{
     seed?: string;
     filter?: string;
@@ -577,7 +686,69 @@ export default function Agent() {
     fresh?: string;
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
-  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript } = useApp();
+  const { user, authChecked, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript } = useApp();
+  // SHARE THIS SEARCH (owner 2026-10-17): a signed-in user's «مشاركة» sends the search itself with the
+  // approved line «عقارات من {name} لك على إزهله 🦅 …» (src/lib/shareSearch.ts). The link lands on
+  // Home, never on /agent — a pasted link must not run a search by itself (appSession gate). A guest,
+  // or a result whose query is unknown, keeps the plain homepage share.
+  const sharedCopyRef = useRef<{ j: string; url: string } | null>(null);
+  // Saves a COPY of this conversation (public.shared_chat) and returns its short /s/<code> link — one copy
+  // per unchanged conversation. q = the search the card names, or null for a chat with no search (the card
+  // then reads «محادثة من يوسف على إزهله», owner 2026-10-18 option A). null result = not saved.
+  const chatShareUrl = async (q: SearchQuery | null): Promise<string | null> => {
+    if (!user) return null;
+    const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
+    const name = pickName(user, loc);
+    if (!name.trim()) return null;
+    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow: afCanNarrow }); // same fields as the capture below
+    if (!t || !t.msgs.length) return null;
+    const j = JSON.stringify(t);
+    if (sharedCopyRef.current?.j === j) return sharedCopyRef.current.url;
+    const code = await createSharedChat(name, loc, q, t);
+    if (!code) return null;
+    const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;
+    const url = shareLink(origin, code);
+    sharedCopyRef.current = { j, url };
+    return url;
+  };
+  // THE TOP «مشاركة» INSIDE A CHAT (owner 2026-10-18): a signed-in user with a conversation on screen shares
+  // THAT chat — named after its latest search, or «محادثة من يوسف» when it has none. Guests and an empty
+  // screen keep the homepage share. Phone: the phone's own share menu with the link alone (the card holds
+  // the title). Desktop: the link is copied and the pill says so.
+  const [chatLinkCopied, setChatLinkCopied] = useState(false);
+  const shareThisChat = async (): Promise<boolean> => {
+    if (!user || !msgs.length) return false;
+    const lastQ = ([...msgs].reverse().find((m: any) => m?.result?.query) as any)?.result?.query ?? null;
+    const url = await chatShareUrl(lastQ);
+    if (!url) return false;
+    try {
+      if (Platform.OS === 'web') {
+        const nav: any = typeof navigator !== 'undefined' ? navigator : null;
+        const touch = typeof nav?.maxTouchPoints === 'number' ? nav.maxTouchPoints > 0 : false;
+        if (touch && nav?.share) { await nav.share({ url }); return true; }
+        await Clipboard.setStringAsync(url);
+        setChatLinkCopied(true);
+        setTimeout(() => setChatLinkCopied(false), 1800);
+        return true;
+      }
+      await Share.share({ message: url, url });
+      return true;
+    } catch { return true; /* cancelled — never fall through to a second share sheet */ }
+  };
+  const shareFor = (q: SearchQuery | undefined): { shareUrl?: string; shareText?: string; prepareShare?: () => Promise<string | null> } => {
+    if (!user || !q) return {};
+    const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
+    const name = pickName(user, loc);
+    const payload = encodeSharePayload(q, name, loc);
+    const text = shareMessage(name, q, loc);
+    if (!payload || !text) return {};
+    const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;
+    // THE WHOLE CHAT (owner 2026-10-17: «sharing it means I share the chat history»): pressing Share saves
+    // a COPY of this conversation (public.shared_chat) and shares its short /s/<code> link; the search
+    // link above is only the fallback when that save fails. One copy per unchanged conversation.
+    const prepareShare = () => chatShareUrl(q);
+    return { shareUrl: shareLink(origin, payload), prepareShare /* no text: the card shows the title — sending it too repeated it (owner 2026-10-18) */ };
+  };
   // THE ONE STORE WRITER FOR THIS SCREEN. Every write into the shared query the Filter home binds to
   // goes through here, always sanitized — enforced by verify-af-state-never-leaks-into-filter.ts,
   // which counts the `setQuery(` calls in this file precisely so a second, unsanitized writer cannot
@@ -592,7 +763,91 @@ export default function Agent() {
   // Per-message "Load More" in flight, so a double-tap can't double-fetch the same page.
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
+  // History chats (owner 2026-10-18): a reopened saved chat (`hid`) shows its cards frozen at search time.
+  // Ask once per opened chat (and again only when more cards appear) which were removed at their source
+  // since; those cards stay in place and are shaded «انتهى الإعلان» (DeadCardShade), never removed.
+  const [goneKeys, setGoneKeys] = useState<Set<string>>(() => new Set());
+  const goneCheckedRef = useRef<string>('');
+  useEffect(() => {
+    if (!hid) return;
+    const cards = msgs.flatMap((x) => (x.role === 'results' && !x.typing ? x.result.listings : []));
+    const stamp = `${hid}:${cards.length}`;
+    if (cards.length === 0 || goneCheckedRef.current === stamp) return;
+    goneCheckedRef.current = stamp;
+    // No cancel on re-render: «removed at the source» is a fact about the listing, true in any chat, so a
+    // late answer can only add correct marks (a cancelled first answer would leave this chat unchecked).
+    void fetchGoneKeys(cards).then((gone) => {
+      if (gone.size) setGoneKeys((prev) => new Set([...prev, ...gone]));
+    });
+  }, [hid, msgs]);
   const [typed, setTyped] = useState('');
+  // The source picker owns the exact websites selected for this conversation.
+  const [platformPickerOpen, setPlatformPickerOpen] = useState(false);
+  const [platformPickerSearch, setPlatformPickerSearch] = useState('');
+  // The picker's regions map (owner 2026-10-10): the tapped catalogue region, or null = whole kingdom.
+  const [pickerRegion, setPickerRegion] = useState<number | null>(null);
+  const [selectedSources, setSelectedSources] = useState<string[]>([]);
+  const [pickerSourceExplicit, setPickerSourceExplicit] = useState(false);
+  const selectedPlatforms = useMemo(
+    () => PLATFORM_META.filter((platform, index, all) => selectedSources.includes(platform.name) && all.findIndex(p => p.name === platform.name) === index),
+    [selectedSources],
+  );
+  // Bumped when the live-sites list lands, so the picker re-filters without a reopen.
+  const [pickerLiveTick, setPickerLiveTick] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    void loadLivePickerNames().then(() => { if (alive) setPickerLiveTick((n) => n + 1); });
+    return () => { alive = false; };
+  }, []);
+  const offeredPlatforms = useMemo(() => {
+    const needle = platformPickerSearch.replace(/\s+/g, '').toLocaleLowerCase();
+    const unique = new Map<string, LoaderPlatform>();
+    const liveNames = livePickerNames();
+    const downNames = hiddenPlatformNames();
+    for (const platform of PLATFORM_META) {
+      // `logoOnly` brands are intentionally advertised in the loader but have no searchable
+      // inventory. They must never be offered as a source restriction that would return nothing.
+      if (platform.logoOnly) continue;
+      // A DOWN or EMPTY site is never offered (owner 2026-10-09) — src/data/pickerLivePlatforms.ts.
+      if (!pickerMayOffer(platform.name, liveNames, downNames)) continue;
+      if (!unique.has(platform.name)) unique.set(platform.name, platform);
+    }
+    return Array.from(unique.values()).sort((a, b) => PLATFORM_PICKER_PROFILES[a.name].group.ar.order - PLATFORM_PICKER_PROFILES[b.name].group.ar.order).filter((platform) => {
+      if (!needle) return true;
+      return `${platform.name} ${t(platform.i18nKey)}`.replace(/\s+/g, '').toLocaleLowerCase().includes(needle);
+    });
+  }, [platformPickerSearch, t, pickerLiveTick]);
+  // THE REGIONS MAP (owner 2026-10-10: «highlight the entire region … so users are aware of where they
+  // cover»). A tapped region is a VIEW over the offered list — only the sites with listings there — and
+  // never a change to the search: the restriction still comes solely from selectedSources/choosePlatform.
+  const pickerRegionCounts = useMemo(() => {
+    const counts: Record<number, number> = {};
+    for (const platform of offeredPlatforms) for (const id of platformRegionIds(platform.name)) counts[id] = (counts[id] ?? 0) + 1;
+    return counts;
+  }, [offeredPlatforms]);
+  // Measured listings per region across the offered sites — the «4,120 إعلان» beside a tapped region.
+  const pickerRegionListings = useMemo(() => {
+    const sums: Record<number, number> = {};
+    for (const platform of offeredPlatforms) for (const id of platformRegionIds(platform.name)) sums[id] = (sums[id] ?? 0) + platformRegionListings(platform.name, id);
+    return sums;
+  }, [offeredPlatforms]);
+  // A tapped region lists the sites with listings there, its own offices first (the share of their
+  // inventory in that region, highest first), the nationwide portals after.
+  const pickerPlatforms = useMemo(
+    () => (pickerRegion === null ? offeredPlatforms : offeredPlatforms.filter((platform) => platformRegionIds(platform.name).includes(pickerRegion))
+      .sort((a, b) => platformRegionShare(b.name, pickerRegion) - platformRegionShare(a.name, pickerRegion))),
+    [offeredPlatforms, pickerRegion],
+  );
+  // The regions the lit sites cover — the map glows there so the user sees the reach of their picks.
+  // «كل المواقع» (nothing lit) = every site, so the whole kingdom glows (owner 2026-10-10).
+  const pickerCoveredRegions = useMemo(
+    () => new Set(selectedSources.length ? selectedSources.flatMap((name) => platformRegionIds(name)) : Object.keys(pickerRegionCounts).map(Number)),
+    [selectedSources, pickerRegionCounts],
+  );
+  const [loaderBottomInset, setLoaderBottomInset] = useState<number>();
+  // Where the logo grid's top will sit once the thread has glided down to it (window px) — the grid is sized for THAT, so every logo gets its full page (owner 2026-10-17).
+  const [loaderSettleTop, setLoaderSettleTop] = useState<number>();
+  const loaderNodeRef = useRef<any>(null);
   // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): a search that arrived via Normal Filter's
   // «بحث» (the `?filter=` param — see the effect below, the ONE place this flips true) shows its
   // results with no composer at all; free-text follow-up chat exists ONLY on a conversation that
@@ -616,6 +871,10 @@ export default function Agent() {
   const COMPOSER_MIN_H = 22;
   const COMPOSER_MAX_H = 112;
   const [inputH, setInputH] = useState(COMPOSER_MIN_H);
+  // EMPTY = ONE LINE (owner 2026-10-11, iPhone: placeholder at the top, buttons dropped to the bottom). An empty box's
+  // height never comes from measuring its PLACEHOLDER (iOS Safari wraps it onto a second line and reports that height):
+  // the box is as tall as the text typed, and exactly one line when nothing is typed.
+  const composerH = typed ? Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) : COMPOSER_MIN_H;
   // Focus glow — border eases fieldLine→primary and the lift deepens slightly (s.composerFocused +
   // COMPOSER_EASE). Same calm register as ModeSwitch's raised indicator: a state change you feel
   // more than notice.
@@ -627,6 +886,26 @@ export default function Agent() {
     Animated.spring(sendScale, { toValue, stiffness: 260, damping: 26, mass: 0.7, useNativeDriver: Platform.OS !== 'web' }).start();
   const [sendHover, setSendHover] = useState(false);
   const inputRef = useRef<any>(null);
+  // A tap ANYWHERE on the composer pill focuses the input (owner 2026-10-04, real iPhone: «I can't type
+  // using my phone»). The textarea is one 22px line inside a taller pill, so on iOS a finger landing
+  // on the pill's padding, the rotating examples or the row gap focused nothing. Controls (mic, Send,
+  // «بحث» — RNW renders them focusable) keep their own tap; the click handler runs inside the user's
+  // gesture, so iOS raises the keyboard. Callback ref: the pill remounts when filterOrigin flips.
+  const composerTapRef = useRef<{ node: any; onTap: (ev: Event) => void } | null>(null);
+  const composerRef = useCallback((node: any) => {
+    if (!IS_WEB) return;
+    const prev = composerTapRef.current;
+    if (prev) { prev.node.removeEventListener('click', prev.onTap); composerTapRef.current = null; }
+    if (!node?.addEventListener) return;
+    const onTap = (ev: Event) => {
+      const target = ev.target as HTMLElement | null;
+      if (!target || target.closest?.('textarea, button, a, [role="button"], [tabindex]')) return;
+      if (voiceActiveRef.current) return;
+      inputRef.current?.focus?.();
+    };
+    node.addEventListener('click', onTap);
+    composerTapRef.current = { node, onTap };
+  }, []);
   // Desktop-web keyboard contract (ChatGPT/Claude convention): Enter sends and KEEPS focus for the
   // next message; Shift+Enter makes a new line. Bound as a raw DOM keydown on the textarea because
   // RNW's onKeyPress normalization reported key: "" for Enter (observed live) — the DOM event is
@@ -672,12 +951,22 @@ export default function Agent() {
   const shareScale = useRef(new Animated.Value(1)).current;
   const shareSpring = (toValue: number) =>
     Animated.spring(shareScale, { toValue, stiffness: 260, damping: 26, mass: 0.7, useNativeDriver: Platform.OS !== 'web' }).start();
+  // Same rule as the Filter screen: «مشاركة» always shows; below this width the sign-in pill shortens.
+  const topBarRoomy = useAtLeast(SHARE_LABEL_BREAKPOINT);
   // Filter / AI ModeSwitch (owner 2026-08-16): the pill no longer lives in the top-right corner —
   // it sits CENTERED under the header, mirroring the home hero's centered pill, so switching modes
   // reads as one control staying in the middle rather than teleporting into the corner. And the
   // moment a search happens (any user message or results — same condition that hides the guest
   // chips), it fades + collapses away: mid-conversation the pill is noise. JS driver (height).
   const modeSearched = msgs.some((m) => m.role === 'user' || m.role === 'results');
+  // Once a search has LANDED here, the Filter home must open clean when the user comes back to it
+  // (owner 2026-10-03) — see src/lib/searchLeftBehind.ts. Keyed on each results turn that lands, never
+  // on the first message: a search the user cancels before its results arrive (Back or Stop during
+  // the loader) never happened, and the Filter must come back with their city, district and area
+  // EXACTLY as they left them (verify-web-runtime-smoke.mjs [E]/[F]/[H]). Counting the turns, not a
+  // boolean, so a second search landing on this same screen raises it again.
+  const landedResultsCount = msgs.filter((m) => m.role === 'results').length;
+  useEffect(() => { if (landedResultsCount > 0) markSearchLeftBehind(); }, [landedResultsCount]);
   // BUG (owner-reported 2026-09-11): opening an old chat from the sidebar made this pill visibly
   // pop up then collapse away — a "weird animation" on every single history open. Root cause: `msgs`
   // starts EMPTY (useState([]) above) and openSaved() fills it in ONE async setMsgs() call once the
@@ -691,14 +980,30 @@ export default function Agent() {
   // is untouched — modeGone still starts false, so its intentional collapse-on-first-message plays
   // exactly as before.
   const [modeGone, setModeGone] = useState(() => replay === '0');
+  // A SAVED CHAT IS OPENING (owner 2026-10-08: «when a logged-in user changes between chats, the empty
+  // home shows for a bit then goes away»). turnToSavedChat clears the old conversation and keeps the
+  // view invisible for a moment while the saved one restores (longer when its transcript comes from the
+  // server). In that gap `msgs` is empty and `?replay=0` has already been consumed, so
+  // every "is this a brand-new chat?" test said yes and painted the new-chat landing around the
+  // invisible conversation: the Filter / AI pill, the «بحث» chip and the rotating example text.
+  // True from the sidebar tap until the opened chat starts fading in; the ref is for effects.
+  const [openingSaved, setOpeningSavedState] = useState(false);
+  // The results turn whose saved cards are still coming back (restoreLeftState). Its closing line and
+  // buttons wait; a quiet loading line stands in, so nothing appears and then rearranges.
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const openingSavedRef = useRef(false);
+  const setOpeningSaved = (v: boolean) => { openingSavedRef.current = v; setOpeningSavedState(v); };
   useEffect(() => {
+    // A restored saved chat lands settled, with no collapse animation (same rule as replay === '0').
+    if (modeSearched && !modeGone && openingSavedRef.current) { setModeGone(true); return; }
     if (modeSearched && !modeGone) {
       // Let the CSS collapse (MODE_EASE, 200ms) finish, then unmount. setTimeout, not an animation
       // callback — hidden tabs freeze rAF, and unmount must never hang on one (see afterAnimation).
       const id = setTimeout(() => setModeGone(true), 220);
       return () => clearTimeout(id);
     }
-    if (!modeSearched && modeGone) setModeGone(false); // new chat — pill returns settled
+    // …but a saved chat in the middle of opening is not a new chat: its messages are about to land.
+    if (!modeSearched && modeGone && !openingSavedRef.current) setModeGone(false); // new chat — pill returns settled
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modeSearched]);
   // ChatGPT-style feedback confirmation: a small «شكراً على ملاحظتك» toast at the TOP of the chat
@@ -857,6 +1162,58 @@ export default function Agent() {
   // On desktop it's a permanent column → no button. (user: couldn't see the burger on the phone.)
   const docked = useDocked();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // IN-APP AD VIEWER, v2 (owner 2026-10-03, revised after review): a listing from an allowlisted
+  // site (lib/inAppViewer.ts) opens INSIDE Ezhalah — a tabbed mini-browser beside the results at/
+  // above VIEWER_SPLIT_BREAKPOINT («whenever I click a new tab pops up»), a partial sheet below it.
+  // Web only; every other site, and native, keep openListing() exactly as before. The results never
+  // unmount, so closing returns them at the same scroll position. trackOpen fires first either way.
+  // The pane's state (tabs, active tab, hidden) is ONE value driven by pure functions in
+  // lib/inAppViewer.ts — openAdTab (every click opens a new tab, MAX_AD_TABS cap, and a card click always SHOWS
+  // the pane), closeAdTab (one tab; the last one clears the pane), hideAdPane / showAdPane (the
+  // pane's own ✕ hides, nothing is deleted) — all executed by scripts/verify-in-app-viewer-allowlist.ts.
+  const [adPane, setAdPane] = useState<AdPane<AdTab<Listing>>>(EMPTY_AD_PANE);
+  const [adHint, setAdHint] = useState('');
+  const adHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // MemoResultCard's comparator deliberately IGNORES onOpen ("behaves identically for the same
+  // listing" — see its header). An openAd that read `adPane` from its own render would break that
+  // contract: an already-revealed card keeps the closure from the render it was memoised in, and a
+  // stale empty list REPLACED the first tab instead of appending the second (caught live in the v2
+  // harness). The ref mirror makes every closure read the same current pane, whenever it was made.
+  const adPaneRef = useRef<AdPane<AdTab<Listing>>>(EMPTY_AD_PANE);
+  const commitAdPane = (p: AdPane<AdTab<Listing>>) => { adPaneRef.current = p; setAdPane(p); };
+  const viewerSplit = useAtLeast(VIEWER_SPLIT_BREAKPOINT);
+  // Laptop photo-first cards: 3 across on a wide screen with nothing open beside them, else 2 across.
+  const cardsThreeAcross = useAtLeast(CARDS_THREE_ACROSS_BREAKPOINT);
+  // Phone: the site picker is a bottom sheet; wider: a floating card (owner 2026-10-09).
+  const pickerSheet = !useAtLeast(PICKER_SHEET_BREAKPOINT);
+  const pushAdTab = (tab: AdTab<Listing>) => {
+    const { evicted, ...next } = openAdTab(adPaneRef.current, tab);
+    commitAdPane(next);
+    if (evicted) {
+      // The cap's subtle hint: a small pill over the page, gone on its own.
+      setAdHint(t('Oldest tab closed'));
+      if (adHintTimer.current) clearTimeout(adHintTimer.current);
+      adHintTimer.current = setTimeout(() => setAdHint(''), 2200);
+    }
+  };
+  const openAd = (l: Listing) => {
+    const url = listingOpenUrl(l);
+    if (IS_WEB && inAppPreviewHost(url)) {
+      pushAdTab({ source: l.source, id: l.id, title: listingLocationAr(l), url: url ?? '', listing: l });
+      return;
+    }
+    if (!(IS_WEB && inAppViewerHost(url))) { void openListing(l); return; }
+    pushAdTab({ source: l.source, id: l.id, title: listingLocationAr(l), url: url ?? '' });
+  };
+  // LAPTOP CARDS ARE ALWAYS THE SMALL ROW (owner 2026-10-03: «for the laptop it should always be
+  // small … never make them big»), one step tighter while the pane is on screen beside them. Decided
+  // HERE, from the screen's already-mounted width gate, so a card mounts straight into its row and
+  // never paints one frame of the tall phone layout first. Phone and tablet pass nothing.
+  const adPaneBeside = viewerSplit && adPane.tabs.length > 0 && !adPane.hidden;
+  const cardRow = viewerSplit ? (adPaneBeside ? 'tight' as const : 'roomy' as const) : undefined;
+  // The photo-first grid shows only while nothing is open beside the results; with the ad pane open the cards
+  // go back to the compact rows (cardRow 'tight'), like before.
+  const cardCols = viewerSplit && !adPaneBeside ? (cardsThreeAcross ? 3 as const : 2 as const) : undefined;
   // Which result messages have finished typing their reply. The property cards stay hidden until the
   // words above them are fully written out, so listings never appear before Ezhalah has spoken (user
   // request). Keyed by message id.
@@ -866,6 +1223,41 @@ export default function Agent() {
   // time instead of a whole grid landing at once. (user request.) revealCount[id] = how many cards
   // are visible so far; absent = show all (used for replayed/history turns that don't type out).
   const REVEAL_STEP_MS = 130; // snappy one-by-one cascade (25 cards ≈ 3s), smooth not distracting
+  // THE CASCADE GREETS, THE SCROLL DELIVERS (owner 2026-09-20).
+  //
+  // REVEAL_STEP_MS was sized for a 25-card set — its own comment says so — and nothing re-sized it
+  // when a turn could hold 400 (AF_REVEAL_MAX). At 130ms/card a full 400 takes ~52s of pure clock,
+  // and the clock runs whether the user is looking or not: measured live, cards were still arriving
+  // a minute after the round ended, so a fast scroller outran them and hit blank space.
+  //
+  // The fix is not a faster clock — a faster clock still animates 390 cards nobody is looking at.
+  // The cascade now plays only for the FIRST screenful, which is the part anyone actually sees
+  // arrive, and everything after that is revealed by SCROLLING: approach the end of what is
+  // revealed and the next chunk appears. Cost is paid only for what the user asks to see, a set of
+  // any size feels identical, and outrunning the reveal is impossible by construction.
+  //
+  // This changes WHEN cards are revealed, never WHICH or in WHAT ORDER: revealCount still walks the
+  // one diversity-ordered list (platform → deal → type → district → photos) up to the SAME target
+  // initialReveal() returns, and «عرض المزيد» still owns everything past that target.
+  const SCROLL_REVEAL_CHUNK = 12;   // revealed per trigger; ≥ a screenful so the next one is armed early
+  // FAR ENOUGH AHEAD THAT THE ACTIONS ROW NEVER MOVES UNDER THE USER (owner 2026-09-20, reported:
+  // "whenever I scrolled, the advanced filter doesn't show, it shows later").
+  //
+  // «تحديد أكثر» and «عرض المزيد» render AFTER the cards, so every revealed chunk is inserted ABOVE
+  // them and pushes them down — at ~700px per card, one 12-card chunk moves that row ~8,000px. At a
+  // 1,200px trigger the chunk fired exactly as the row was entering the viewport, so the button the
+  // user was reaching for jumped off-screen: present the whole time, never catchable.
+  //
+  // The reveal must therefore happen while the row is still WELL below the fold, so the shove lands
+  // off-screen and the row is settled by the time it scrolls into view. 2600px is ~3.5 viewports of
+  // warning on a phone — comfortably more than the 1,200px that was landing in view, and still far
+  // short of revealing everything eagerly.
+  const SCROLL_REVEAL_SLACK_PX = 2600;
+  // A CHUNK ARRIVES CARD BY CARD, NOT AS A BLOCK (owner 2026-09-20: "when he scrolls, it slowly
+  // shows up next, next"). Revealing 12 at once lands a wall of cards in one frame — the thing the
+  // original cascade existed to avoid. Faster than the opening cascade (the user is already moving
+  // and must never catch the edge), slow enough to read as arriving rather than appearing.
+  const SCROLL_STEP_MS = 45;
   // LANDING A COMPLETED ADVANCED FILTER ROUND (owner 2026-08-24): "smoothly scroll the user down so
   // they land around the new result title / selection summary… NOT a harsh jump to the bottom."
   //
@@ -875,30 +1267,41 @@ export default function Agent() {
   // live 2026-08-24: ~715px of such growth, which left the new count line just under the fold every
   // time, at any single delay. Each pass re-measures and converges as fewer images remain; a pass that
   // has nothing left to correct scrolls to where the thread already is and is invisible. The first
-  // delay also clears the new turn's own card cascade (FIRST_PAGE × REVEAL_STEP_MS ≈ 1.3s), so the
+  // delay also clears the new turn's own card cascade (CASCADE_MAX × REVEAL_STEP_MS ≈ 1.6s), so the
   // first move already reads the settled height of the thing being landed on.
   const LAND_PASSES_MS = [1400, 3200];
-  // Beat between a round's count landing and the NEXT round's card opening (owner 2026-09-04): long
-  // enough to read «لقينا N عقار أقرب لطلبك», short enough that the interview reads as one flow.
-  const AF_NEXT_ROUND_DELAY_MS = 900;
-  const FIRST_PAGE = 10; // FLOOR for the initial batch, never a cap — initialReveal() widens it to the number of matching platforms (owner 2026-09-02). «عرض المزيد» pages the rest.
+  // NO FLOOR ANYMORE (owner PERMANENT rule 2026-09-25, reversing 2026-09-02's fixed floor of 10 —
+  // full history in src/lib/initialReveal.ts): the initial batch is exactly one card per matching
+  // platform, never padded. «عرض المزيد» pages the rest.
   // SMALL FINAL SET RENDERS IN FULL (owner 2026-08-30): "I can have 13 results, Ezhalah shows 10 and asks
   // me to press عرض المزيد. That is unnecessary." The cutoff is NOT a new number — it is the canonical
-  // INTERVIEW_STOP_AT (50, owner product rule 2026-09-04 — was 25): the same line at which Advanced
+  // INTERVIEW_STOP_AT (25, owner 2026-09-20 — briefly 50 under the 2026-09-04 rule): the line at which Advanced
   // Filter stops narrowing (R11.1) and the set
   // is by contract the FINAL one, so there is nothing left for a first page to be a preview OF. Gated
   // on quotableTotal() — the honest total, null whenever the RPC count would overstate (client-only
-  // narrowing, agent-annualized budgets) — and in those cases we fall back to FIRST_PAGE rather than
-  // reveal a page that might not be the whole set. QUERY_LIMIT (1,500) ≥ 50, so a ≤50 set is always
+  // narrowing, agent-annualized budgets) — and in those cases we fall back to the platform-count reveal
+  // rather than reveal a page that might not be the whole set. QUERY_LIMIT (1,500) ≥ 50, so a ≤50 set is always
   // fully buffered on page 0; revealing listings.length IS revealing every match, and resultCounts()
   // then reports hasMore=false on its own — «عرض المزيد» simply never appears. Larger sets are untouched.
-  const initialReveal = (r: SearchResult | undefined | null): number =>
-    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount(r?.listings) });
+  const initialReveal = (r: SearchResult | undefined | null, afCompleted = false): number =>
+    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount(r?.listings), requestedCount: r?.query?.count, afCompleted });
   // Page 0 fetches up to data/remote.ts QUERY_LIMIT (1500) MATCHING candidates (RPC filters before the cap).
   // If it fills that page the DB has more (m.result.hasMore) — the "how many" message then says «أكثر من N»
   // (never a faked exact total) and «عرض المزيد» fetches the next real page. Once fully paged, listings.length
   // IS the exact match count. (owner 2026-07-08: never hide a valid match behind the display limit.)
+  // One chunk eases in at a time — onScroll fires every frame and would otherwise start a new
+  // stagger on top of the running one, so cards would arrive in bursts instead of a steady line.
+  const scrollChunkRef = useRef(false);
+  const lastPaginationResultRef = useRef<string | null>(null);
+  // revealCount, readable SYNCHRONOUSLY. The scroll handler needs the current value to decide the
+  // next chunk; reading the state variable there would see the value from the render that installed
+  // the handler and re-reveal the same cards every scroll.
+  const revealCountRef = useRef<Record<string, number>>({});
   const [revealCount, setRevealCount] = useState<Record<string, number>>({});
+  // Keep the synchronous mirror honest. Every writer goes through setRevealCount, so mirroring on
+  // render covers all of them (cascade, scroll chunk, «عرض المزيد», restore) with one line and no
+  // second source of truth to drift.
+  revealCountRef.current = revealCount;
   const pendingRefineRef = useRef<{ q: SearchQuery; dim: string } | null>(null); // a >25 "refine" question awaiting the user's one-line answer
   const refineMsgIdRef = useRef<string | null>(null); // the results turn the latest runRefine is building
   // Advanced-question overlay (عمر العقار, apartment-only for now) — a transient card shown ON TOP of
@@ -918,7 +1321,6 @@ export default function Agent() {
     // final search runs behind it. Carries only the two counts it may speak — both handed in from
     // quotableTotal(), never computed in the overlay. Dismissal is driven by plain setTimeout
     // latches in finishGuided — NEVER an animation callback (src/lib/afterAnimation.ts rule).
-    | { phase: 'mining'; from: number | null; to: number | null }
     | null
   >(null);
   // The query accumulates answers as the flow advances; `token` supersedes a stale async fetch when a
@@ -927,6 +1329,21 @@ export default function Agent() {
   // question set resolved up front, so the progress bar reflects the questions that will actually show.
   const ageFlowQueryRef = useRef<SearchQuery | null>(null);
   const ageFlowTokenRef = useRef(0);
+  // WHICH CONVERSATION AN IN-FLIGHT CONTINUATION BELONGS TO (routine #8, 2026-09-22, ops_incident
+  // #602 — the FIFTH recurrence of the #211/#271/#319/#341 class).
+  //
+  // NOT `ageFlowTokenRef`, which is bumped ELEVEN times inside a single conversation (every AF
+  // Back, close, skip and re-tap supersedes the round in flight). That is the right token for a
+  // guided round and the wrong one for anything else: gating a «عرض المزيد» drain on it would
+  // cancel a legitimate page fetch merely because the user closed an AF card. This one moves for
+  // exactly one reason — the conversation itself ended — so `epoch !== captured` means, precisely,
+  // "the chat this work was started for is gone".
+  //
+  // resetConversationState() is its only writer (see the bump there). Every async continuation that
+  // writes conversation-scoped state after an `await` captures it on entry and re-checks it on the
+  // other side; verify-conversation-state-never-inherited.ts §E/§F discovers those continuations
+  // from the real source and fails on any that does not.
+  const conversationEpochRef = useRef(0);
   const ageFlowChangedRef = useRef(false);
   const ageFlowLabelsRef = useRef<string[]>([]);
   const ageFlowPlanRef = useRef<Array<{ question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number | null; total: number }>>([]);
@@ -940,7 +1357,7 @@ export default function Agent() {
   // {question id, picked keys, labels}. The results pills rebuild the query from baseQ by re-applying
   // the REMAINING facets — removal is pure recomputation, never an ad-hoc inverse per question.
   const ageFlowBaseQRef = useRef<SearchQuery | null>(null);
-  const ageFlowFacetsRef = useRef<Array<{ id: string; keys: string[]; labels: string[] }>>([]);
+  const ageFlowFacetsRef = useRef<Array<{ id: string; keys: string[]; labels: string[]; total?: number }>>([]);
   // THE interview record (owner 2026-08-22, «رجوع»): one ordered list of every question presented,
   // each carrying the answer given for it. `keys: null` = presented but not answered yet; `[]` =
   // skipped (no preference, NO predicate). A cursor walks it, so Back is simply "move the cursor
@@ -964,6 +1381,13 @@ export default function Agent() {
   //             ageFlowAskedRef in syncGuidedFromSteps, never mutated in place.)
   // Written on every tap before startAgeFlow, so a stale value can never be read.
   const afCarryRef = useRef<{ msgId: string; originQ: SearchQuery; facets: GuidedFacet[]; asked: string[] } | null>(null);
+  // SKIP-EVERYTHING ROUNDS, per results turn (2026-10-06, contract R6.2.2 / R8.1.3). A round that
+  // commits nothing returns early from finishGuided — no search, no new turn — so the turn it was
+  // opened from keeps «خلّنا نحدد الطلب أكثر», and that button's carry is built from the turn's
+  // guided record, which a skip-only round never writes. Without this record the next tap re-asked
+  // the SAME questions forever: on Annual Rent → Apartment (rnpl/furnished/age/bathrooms fill the
+  // 4-question round) a customer who only wanted AC or an elevator could never reach the amenities.
+  const afSkippedByMsgRef = useRef<Record<string, string[]>>({});
   // CONVERSATION IDENTITY (owner 2026-08-25 — «treat Ezhalah's chat like ChatGPT»). This screen owns
   // which sidebar chat the on-screen conversation belongs to. Every recorded turn passes it, so an
   // AF round / refine / follow-up UPDATES that one entry instead of minting a new one per narrowed
@@ -1102,7 +1526,66 @@ export default function Agent() {
     // Gentle one-time scroll: bring the response's top ~80px from the top of the viewport. Keeps the
     // slogan + summary + intro in view with the first cards just below — never the far bottom.
     easeToMsgTop(id, 60);
-    dripRange(id, 0, n, REVEAL_STEP_MS);
+    // Only the first screenful cascades. `n` (the full target) is deliberately NOT lowered — it is
+    // still what maybeRevealOnScroll walks toward, and what resultsRowIsReady measures against.
+    dripRange(id, 0, Math.min(n, CASCADE_MAX), REVEAL_STEP_MS);
+  };
+
+  // Reveal-on-approach. Fires from the ScrollView's onScroll: when the viewport comes within
+  // SCROLL_REVEAL_SLACK_PX of the bottom of what is currently laid out, the newest results turn
+  // reveals its next chunk — up to the target initialReveal() already decided, never past it
+  // («عرض المزيد» owns beyond the target, and still does).
+  //
+  // Guarded three ways, because onScroll fires on every frame: it does nothing while that turn's
+  // opening cascade still owns the reveal (letting both drive would fight over revealCount), nothing
+  // once the target is reached, and nothing if the chunk would not actually raise the count — so a
+  // scroll that changes nothing costs one comparison and no render.
+  const maybeRevealOnScroll = (e: { nativeEvent: { contentOffset: { y: number }; layoutMeasurement: { height: number }; contentSize: { height: number } } }) => {
+    const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+    if (contentOffset.y + layoutMeasurement.height + SCROLL_REVEAL_SLACK_PX < contentSize.height) return;
+    const m = lastResultsMsg;
+    // `m.typing` is set TRUE when the turn is created and is NEVER cleared — this file tracks the
+    // intro's completion in the separate `doneTyping[id]` map (same expression as the render gate at
+    // the actions row, and as resultsRowIsReady's `introStillTyping`). A bare `m.typing` check here
+    // therefore returns on EVERY scroll forever: live-tested, the cascade stopped at CASCADE_MAX and
+    // scrolling revealed nothing at all.
+    if (!m || (m.typing && !doneTyping[m.id])) return;
+    // AN OUTGOING TURN IS HISTORY, AND HISTORY IS NEVER REWRITTEN (R9.2.2 / R12.3; ops_incident
+    // #338, measured on production 2026-09-22, reproduced 4/4).
+    //
+    // `lastResultsMsg` is "the newest message whose role is 'results'" — and while a NEW turn is
+    // being born it is a 'status' message, so for the whole ~10s searching beat that getter still
+    // points at the turn the user just LEFT. Every other reveal path already knows this: runRefine,
+    // ask() and startFresh each open with finalizeReveal() ("stop the previous search's cards from
+    // drip-revealing now that the user moved on"). This one did not participate in that teardown,
+    // and the app's OWN programmatic scroll during the beat fires onScroll repeatedly — so the
+    // outgoing turn kept revealing into its own grave.
+    //
+    // Measured on الرياض/شراء/شقة: committing one AF answer landed a 2,925 turn showing 24 cards;
+    // tapping ✕ on its pill grew that SAME turn 24 → 30 → 36 → 40 → 47 → 48 during the beat, and
+    // its closing line rewrote itself «عرضت لك أول 24 من أصل 2,925» → «عرضت لك أول 48». The pill
+    // removal was correct on the wire (R9.2.1 held) while the transcript above it was edited.
+    if (newerTurnPending) return;
+    if (revealActiveRef.current?.id === m.id) return;   // its cascade still owns the reveal
+    if (scrollChunkRef.current) return;                  // a chunk is already easing in
+    const target = initialReveal(m.result, m.afCompleted);
+    const cur = revealCountRef.current[m.id] ?? 0;
+    if (cur >= target) return;                           // target reached — «عرض المزيد» owns the rest
+    const next = Math.min(cur + SCROLL_REVEAL_CHUNK, target);
+    if (next <= cur) return;
+    // Stagger the chunk one card at a time. Deliberately NOT dripRange(): that claims
+    // revealActiveRef and toggles `revealing`, which gates the actions row — flickering it on every
+    // scroll chunk would strobe «عرض المزيد». This only ever raises revealCount, and its timers join
+    // revealTimers so the existing clearReveals()/finalizeReveal() teardown already owns them.
+    scrollChunkRef.current = true;
+    let shown = cur;
+    const step = () => {
+      shown += 1;
+      setRevealCount((c) => ((c[m.id] ?? 0) >= shown ? c : { ...c, [m.id]: shown }));
+      if (shown < next) revealTimers.current.push(setTimeout(step, SCROLL_STEP_MS));
+      else scrollChunkRef.current = false;
+    };
+    revealTimers.current.push(setTimeout(step, 0));
   };
   const startReveal = (id: string, n: number) => {
     setDoneTyping((d) => (d[id] ? d : { ...d, [id]: true }));
@@ -1115,10 +1598,15 @@ export default function Agent() {
   };
   const markTyped = (id: string) => {
     const msg = msgs.find((m) => m.id === id);
-    startReveal(id, msg?.role === 'results' ? initialReveal(msg.result) : 0);
+    startReveal(id, msg?.role === 'results' ? initialReveal(msg.result, msg.afCompleted) : 0);
   };
   // Cancel any pending one-by-one reveals (on unmount, or when a new turn starts).
-  const clearReveals = () => { revealTimers.current.forEach(clearTimeout); revealTimers.current = []; };
+  // The scroll chunk's staggering timers live in `revealTimers` too (see maybeRevealOnScroll), so a
+  // teardown that clears them mid-chunk leaves `scrollChunkRef` latched TRUE with no `step()` left
+  // alive to ever reset it — and that ref is the "a chunk is already easing in" guard, so scroll
+  // reveal would be dead for the rest of the session. Releasing it here keeps the scroll path inside
+  // the same teardown every other reveal path already participates in.
+  const clearReveals = () => { revealTimers.current.forEach(clearTimeout); revealTimers.current = []; scrollChunkRef.current = false; };
   useEffect(() => clearReveals, []);
   // A new user turn must STOP the previous search's card drip immediately — show whatever that turn
   // had (all of it, so nothing is lost) and kill the pending timers. We never touch any other message.
@@ -1175,12 +1663,92 @@ export default function Agent() {
   // `animated: false` while a saved-chat landing is in flight (owner 2026-08-29: opening a chat must
   // BE at the latest message, never visibly drag the page down to it). Live turns keep the glide.
   const landInstantRef = useRef(false);
-  const toBottom = () => requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: !landInstantRef.current }));
+  // Search-loader layout and delayed landing callbacks must never pull the page down.
+  const searchingVisibleRef = useRef(false);
+  searchingVisibleRef.current = msgs.some((m) => m.role === 'status' && m.phase === 'searching');
+  const toBottom = () => requestAnimationFrame(() => {
+    if (searchingVisibleRef.current) return;
+    scrollRef.current?.scrollToEnd({ animated: !landInstantRef.current });
+  });
   const toTop = () => requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
   const onGrow = () => {
+    if (searchingVisibleRef.current) return;
     if (pinModeRef.current === 'top') toTop();
     else if (pinModeRef.current === 'bottom') toBottom();
   };
+
+  // A SLOW, FRIENDLY SCROLL THE USER CAN INTERRUPT (owner 2026-10-17: «take the user slowly down»). The browser's own
+  // smooth scroll is a quick flick; this eases over about a second and stops the instant a finger, wheel or key moves.
+  const glideRef = useRef<number | null>(null);
+  const glideTo = (target: number, ms = 1100) => {
+    const node = (scrollRef.current as any)?.getScrollableNode?.();
+    if (glideRef.current != null) { cancelAnimationFrame(glideRef.current); glideRef.current = null; }
+    if (!node) { scrollRef.current?.scrollTo({ y: target, animated: true }); return; }
+    const from = node.scrollTop;
+    const dist = Math.min(target, node.scrollHeight - node.clientHeight) - from;
+    if (Math.abs(dist) < 4) return;
+    const calm = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (calm) { node.scrollTop = from + dist; return; }
+    let stopped = false;
+    const stop = () => { stopped = true; };
+    const kinds = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+    kinds.forEach((k) => node.addEventListener(k, stop, { passive: true, once: true }));
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const p = Math.min(1, (now - t0) / ms);
+      if (stopped || p >= 1) {
+        kinds.forEach((k) => node.removeEventListener(k, stop));
+        glideRef.current = null;
+        if (!stopped) node.scrollTop = from + dist;
+        return;
+      }
+      node.scrollTop = from + dist * (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2);
+      glideRef.current = requestAnimationFrame(step);
+    };
+    glideRef.current = requestAnimationFrame(step);
+  };
+
+  // A SEARCH STARTS → THE LOADER GETS THE WHOLE SCREEN (owner 2026-10-17: «when you start the animation for the
+  // logos and search, make sure you show all animations and logos, no matter what, and take him down»). The thread
+  // glides down until the loader's top sits just under the header, and the logo grid is sized for that spot, so a
+  // long conversation can no longer squeeze the roster into two rows above the box.
+  const loaderId = msgs.find((m) => m.role === 'status' && m.phase === 'searching' && !m.afRound)?.id;
+  useEffect(() => {
+    if (!IS_WEB || !loaderId) { setLoaderSettleTop(undefined); return; }
+    const scNode = (scrollRef.current as any)?.getScrollableNode?.();
+    // The roster mounts and grows a moment AFTER the loader does (its site list loads first), so one glide would stop
+    // short of the room the grid later makes. Measure and glide again as it settles — until the user takes over.
+    let tookOver = false;
+    const take = () => { tookOver = true; };
+    const kinds = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+    kinds.forEach((k) => scNode?.addEventListener(k, take, { passive: true, once: true }));
+    const settle = (ms: number) => {
+      const wrap = loaderNodeRef.current;
+      if (tookOver || !wrap?.getBoundingClientRect || !scNode?.getBoundingClientRect) return;
+      const GAP = 8;
+      const sc = scNode.getBoundingClientRect();
+      const box = wrap.getBoundingClientRect();
+      const grid = wrap.querySelector?.('[data-testid="loader-roster"]')?.getBoundingClientRect();
+      const headlineH = grid ? Math.max(0, grid.top - box.top) : 48;
+      setLoaderSettleTop(Math.round(sc.top + GAP + headlineH));
+      glideTo(Math.max(0, box.top - sc.top + scNode.scrollTop - GAP), ms);
+    };
+    const timers = [280, 1200, 2400, 3800, 5500].map((at, n) => setTimeout(() => settle(n === 0 ? 1100 : 650), at));
+    return () => { timers.forEach(clearTimeout); kinds.forEach((k) => scNode?.removeEventListener(k, take)); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaderId]);
+
+  // THE KEYBOARD OPENS → THE CHAT GOES DOWN (owner 2026-10-17, screenshot: «when I click on it must take me down,
+  // not up, and I can't see anything»). The pinned root shrinks to the space above the keyboard and the thread
+  // stays where it was, so the newest answer sat behind the box. Settle at the newest message as the box takes
+  // focus and again as the visible window finishes resizing (iOS reports the keyboard late, in steps).
+  useEffect(() => {
+    if (!IS_WEB || !composerFocused) return;
+    const down = () => { if (!searchingVisibleRef.current) scrollRef.current?.scrollToEnd({ animated: true }); };
+    const ids = [0, 160, 380, 700].map((ms) => setTimeout(down, ms));
+    const off = onVisibleWindowResize(down);
+    return () => { ids.forEach(clearTimeout); off(); };
+  }, [composerFocused]);
 
   // OPEN A SAVED CHAT AT ITS LATEST CONTENT (owner 2026-08-29, supersedes the open-at-top rule):
   // tapping a sidebar conversation must land the viewport on the newest message, like every chat
@@ -1248,12 +1816,35 @@ export default function Agent() {
     if (!hadTurn) return; // cascade halted; cards stay frozen, «عرض المزيد» recovers via bufferMore
 
     if (wasFilterOrigin) {
-      // Erase the cancelled turn rather than freezing/annotating it — if the user opens الوكيل الذكي
+      // Erase the cancelled turn rather than freezing/annotating it — if the user opens الوسيط الذكي
       // again later, a dangling "بحث..." bubble from a search that (from their side) never completed
       // would contradict "it should feel like the search never completed". A bare `/agent` (no
       // filter/seed) then greets fresh, exactly like any other new chat.
-      setMsgs([]);
-      setBusy(false);
+      //
+      // THROUGH THE SHARED RESET, not a hand-written pair (ops_incident #341, the FOURTH recurrence
+      // of #211/#271/#319's class). This is a conversation EXIT: the transcript is erased and the
+      // user is sent to another route, so every conversation-scoped ref must die with it —
+      // chatIdRef, afCarryRef, pendingRefineRef/refineMsgIdRef, pendingScopeRef/pendingCityRef,
+      // lastQueryRef, saidRef/askCountRef, `completed`, and the ageFlowTokenRef bump that
+      // invalidates any guided round still in flight from the search just cancelled.
+      //
+      // MEASURED, because the honest answer used to be "undetermined" (routine #6, 2026-09-20):
+      // the agent screen DOES unmount on this router.replace('/'), so today every one of those refs
+      // is re-initialised by the remount anyway. Evidence: on production, Chromium, fresh context,
+      // 4/4 across both viewports, the greeting on the next /agent is TYPED FRESH (its paragraph
+      // grows 0 → 141 chars over ~1.5 s) rather than appearing whole — which only happens when
+      // sendGreeting() runs, which only happens when greetedRef is false, which only happens on a
+      // new component instance. So this call is a NO-OP on today's build.
+      //
+      // It is here because the invariant it upholds must not be a property of the router. Nothing
+      // enforces "leaving to a different route tears this screen down" — the sidebar path already
+      // navigates to /agent while ON /agent precisely BECAUSE the instance is reused, and a future
+      // tab navigator, keep-alive, or shared-layout change would make that true here too, silently,
+      // with the user landing in the abandoned chat. An exit that routes through the reset is
+      // correct under BOTH regimes; one that relies on unmounting is correct only by accident.
+      // (The hand-written `setMsgs([]); setBusy(false);` this replaces are both inside the shared
+      // reset — this branch loses nothing it used to do, and gains the fourteen clears it forgot.)
+      resetConversationState();
       // The just-cancelled filter's JSON is still sitting in lastFilterRef (set by the param-consuming
       // effect before sendFilter ran). Without clearing it, resubmitting the SAME filter unchanged would
       // match `filter !== lastFilterRef.current` as false and the effect would silently no-op — the
@@ -1277,11 +1868,12 @@ export default function Agent() {
 
     setStopped(true); // hide the "I can get you something more precise" CTA on the stopped results
     setBusy(false);   // search no longer running
-    // Drop the in-flight thinking/searching bubbles; the cards already shown stay frozen. Add Ezhalah's
-    // stop acknowledgement directly under the user's request (shown instantly, no typewriter). (user request.)
+    // Drop the in-flight thinking/searching bubbles; the cards already shown stay frozen. Then one quiet line
+    // under the request, like ChatGPT's «Stopped searching» (owner 2026-10-10) — not a full reply with a
+    // question; the composer is right there for whatever comes next.
     setMsgs((m) => [
       ...m.filter((x) => x.role !== 'status'),
-      { id: uid(), role: 'agent', text: tr("I've stopped the search. Is there anything else I can help you with today?"), typing: false },
+      { id: uid(), role: 'agent', text: tr('Search stopped'), typing: false, stopNote: true },
     ]);
     toBottom();
   };
@@ -1297,12 +1889,13 @@ export default function Agent() {
   // can see we understood, right before "Ezhalah is searching…". (user request.)
   // The structured "Search Summary" of exactly what we parsed — now shown WITH the results (under the
   // professional header), NOT with the slogan. The slogan lives only in the transient searching status.
-  const buildScrapeIntro = (q: SearchQuery) => searchSummary(q);
+  const buildScrapeIntro = (q: SearchQuery, replyLocale: Locale = locale) => searchSummary(q, replyLocale);
 
   // When each status bubble's SEARCHING phase became visible — playListings only waits out the
   // REMAINDER of SEARCH_MIN_MS from this moment, so the beat overlaps the real network time instead
   // of following it. (owner 2026-07-09: no artificial delays, results show as soon as ready.)
   const searchingAtRef = useRef<Record<string, number>>({});
+  const loaderPresentedRef = useRef<Record<string, boolean>>({});
   // Flip a chat-turn 'thinking' status into the live searching loader the moment the query is KNOWN
   // (right before runQuery) — the pills + min-beat then overlap the fetch exactly like the
   // filter/refine paths. Without this, chat searches only started their beat AFTER the results were
@@ -1315,18 +1908,19 @@ export default function Agent() {
 
   // Shared "found" choreography: the typed reply ("answer respond") → a held "Ezhalah is searching…"
   // beat → the results header + cards. `statusId` is the thinking bubble we morph into the reply.
-  const playListings = async (run: Run, statusId: string, summary: string, result: SearchResult, messageText?: string) => {
+  const playListings = async (run: Run, statusId: string, summary: string, result: SearchResult, messageText?: string, afCompleted = false) => {
     // 1) SEARCHING phase: status bubble shows the slogan + summary. Slogan language follows the
     // user's MESSAGE text (English message → English slogan) instead of the UI locale, so users
     // who chat in one language and have their UI in the other still get the matching slogan.
-    const slogan = hypePhrase(getLocale(), messageText);
+    const replyLocale: Locale = summary ? (msgRTL(summary) ? 'ar' : 'en') : ((messageText ? detectLocale(messageText) : null) ?? locale);
+    const slogan = hypePhrase(replyLocale, messageText);
     // The searching status renders the platform-checking ANIMATION (SearchLoader), not the slogan.
     // We still carry slogan + summary through so they appear in the RESULTS bubble below (unchanged).
     // `resultSources` only lets result-present platforms LEAD the (frozen) pill order — it is NOT a
     // completion signal and must never drive checkmarks (owner: no ✓ in the loader, ever).
     const resultSources = Array.from(new Set(result.listings.map((l) => l.source).filter(Boolean)));
     setMsgs((m) => m.map((x) => (x.id === statusId
-      ? { id: statusId, role: 'status', phase: 'searching', slogan, summary, query: result.query ?? (x.role === 'status' ? x.query : undefined), resultSources }
+      ? { id: statusId, role: 'status', phase: 'searching', slogan, summary, query: result.query ?? (x.role === 'status' ? x.query : undefined), resultSources, afRound: x.role === 'status' ? x.afRound : undefined }
       : x)));
     toBottom();
     // Wait only the REMAINDER of the minimum searching beat (counted from when the searching loader
@@ -1334,8 +1928,24 @@ export default function Agent() {
     // network, so in practice it's already consumed → results morph in IMMEDIATELY on resolve.
     const since = searchingAtRef.current[statusId] ?? Date.now();
     searchingAtRef.current[statusId] = since;
-    const remaining = SEARCH_MIN_MS - (Date.now() - since);
-    if (remaining > 0) await waitRun(run, remaining);
+    // A NEW search waits the 10.6 s every-platform floor + its page dwell. An Advanced Filter round
+    // (2026-10-05 skipped it; 10-10 10 s of logos; owner 2026-10-11: 5 s, one sentence) waits AF_LOADER_MS instead.
+    if (!afCompleted) {
+      const remaining = SEARCH_MIN_MS - (Date.now() - since);
+      if (remaining > 0) await waitRun(run, remaining);
+      // Presentation-only gate: each logo/name page must finish its actual visible dwell.
+      // The search has already completed; this changes only when its results are revealed.
+      // …but never past the owner's ten-second cap (2026-10-17): whatever page is up when the cap
+      // lands, the results come in.
+      while (!run.cancelled && loaderPresentedRef.current[statusId] !== true && Date.now() - since < SEARCH_MAX_HOLD_MS) await waitRun(run, 100);
+    } else {
+      // AN ADVANCED FILTER ROUND HOLDS ITS ONE-SENTENCE BEAT FOR 5 SECONDS (owner 2026-10-11: «make it 5
+      // seconds … one sentence of what he selected»; 10-10 was 10 s of logos, 10-05 skipped it). A plain
+      // floor from when the beat appeared — no page-dwell gate, so it is never longer than 5 s.
+      const remaining = AF_LOADER_MS - (Date.now() - since);
+      if (remaining > 0) await waitRun(run, remaining);
+    }
+    delete loaderPresentedRef.current[statusId];
     delete searchingAtRef.current[statusId];
     if (run.cancelled) return;
     // Soft completion (owner v4): the loader fades out gently instead of vanishing in a single
@@ -1347,10 +1957,11 @@ export default function Agent() {
     //    [slogan] → [Search Summary] → [Result intro] → [Sort line] → [Property cards].
     //    The slogan + summary CARRY OVER from the searching status into this same bubble — they don't
     //    disappear and don't appear as a duplicate block. (user-reported order bug.)
+    liveTurnsRef.current.add(statusId); // a live turn: its cards play the mount-in (cardInMotion)
     setMsgs((m) =>
       m.map((x) =>
         x.id === statusId
-          ? { id: statusId, role: 'results', text: resultDone(getLocale()), result, typing: true, slogan, summary }
+          ? { id: statusId, role: 'results', text: resultDone(replyLocale), result, typing: true, slogan, summary, afCompleted }
           : x,
       ),
     );
@@ -1363,7 +1974,7 @@ export default function Agent() {
     // Cards start appearing NOW — one by one, while the intro text is still typing above (owner
     // 2026-07-09: show the first card as soon as valid listings are ready; don't hold them hostage
     // to the typewriter). The more-message + feedback row still wait for the text (doneTyping).
-    beginCardDrip(statusId, initialReveal(result));
+    beginCardDrip(statusId, initialReveal(result, afCompleted));
     // A RESULTS TURN THAT ALREADY SHOWS EVERY MATCH IS A FINISHED SEARCH (owner rule 2026-09-11,
     // generalizing R11.1 to every entry point this shared renderer serves — plain Filter search,
     // a typed AI-Agent message, a refine chip — not just an Advanced Filter round). initialReveal's
@@ -1407,18 +2018,53 @@ export default function Agent() {
   // QUERY_LIMIT) — those extra rows are still merged into the buffer, just not revealed yet, so the
   // NEXT tap reveals from what is already fetched before ever asking the network for more.
   // loadingMore guards a double-tap from double-fetching.
-  // «عرض المزيد» cascade cadence — inside the owner's 40–80ms stagger window; each mounting card also
-  // fades+rises via CardIn, so the reveal flows in instead of landing at once. (owner 2026-07-09.)
+  // «عرض المزيد» cascade cadence — inside the owner's 40–80ms stagger window; each card fades+rises
+  // via CardIn, so the reveal flows in instead of landing at once. (owner 2026-07-09.)
   const LOAD_MORE_STEP_MS = 55;
-  // Only the VISIBLE screenful cascades one-by-one (~0.8s); the rest mount together right after,
-  // below the fold, each still fading in via CardIn. Keeps the premium feel without one sequential
-  // re-render per card of the whole unvirtualized list (review perf fix 2026-07-09).
+  // Only the VISIBLE screenful cascades; the rest mount right after, below the fold, with no animation.
   const CASCADE_VISIBLE = 14;
+  // Which cards the latest press staggers and which it mounts still, per turn (read by CardIn at mount).
+  const cascadeWindowRef = useRef<Record<string, { from: number; animEnd: number }>>({});
+  // Results turns a search produced LIVE in this conversation (added where the turn is created, cleared
+  // by resetConversationState). Only their cards play the mount-in.
+  const liveTurnsRef = useRef(new Set<string>());
+  const cardInMotion = (mid: string, i: number) => {
+    const w = cascadeWindowRef.current[mid];
+    // A still card's placeholder height until it nears the screen: the median phone card / laptop row.
+    const still = { stillHeight: cardRow ? 140 : 340 };
+    // A RESTORED turn (sidebar open, snapshot, replay) renders in its final state. Its cards used to replay
+    // the mount-in all at once, each held at opacity 0 by an animation that could not start while hundreds
+    // of cards mounted — switching chats went blank on the owner's iPhone (2026-10-10; measured locally:
+    // 8 frames in 5 s, the cards on screen at opacity 0 throughout).
+    if (!w || i < w.from) return liveTurnsRef.current.has(mid) ? {} : still;
+    return i >= w.animEnd ? still : { delayMs: (i - w.from) * LOAD_MORE_STEP_MS };
+  };
+  // TWO RENDERS PER PRESS, NOT FOURTEEN (owner 2026-10-05: «عرض المزيد takes time … should never
+  // ever have this»). The drip re-rendered the whole unvirtualized list once per card, then mounted
+  // everything else in one more render — measured at 4× CPU on a production export, the first new
+  // card took seconds. Now the on-screen cards mount in ONE render and CardIn staggers them by
+  // index (same 55ms cascade, played by CSS on web), and the rest mount once that frame has painted.
+  // WHICH cards and in WHAT order are unchanged: the same slice of the same list reaches `target`.
+  // Ownership/teardown unchanged too: revealActiveRef + `revealing` hold until the rest is mounted,
+  // and finalizeReveal()/Stop/new turn take over exactly as they did from dripRange().
   const cascadeIn = (mid: string, from: number, target: number) => {
-    const animEnd = Math.min(from + CASCADE_VISIBLE, target);
-    dripRange(mid, from, animEnd, LOAD_MORE_STEP_MS, () => {
-      if (target > animEnd) setRevealCount((c) => ({ ...c, [mid]: target }));
-    });
+    if (target <= from) return;
+    // A scroll chunk may have mounted past `from` since this press's render; stagger from there.
+    const start = Math.max(from, revealCountRef.current[mid] ?? 0);
+    const animEnd = Math.min(start + CASCADE_VISIBLE, target);
+    cascadeWindowRef.current[mid] = { from: start, animEnd };
+    setRevealCount((c) => ({ ...c, [mid]: Math.max(c[mid] ?? 0, animEnd) }));   // never un-mounts a card
+    if (animEnd >= target) return;   // the whole press fit on screen: one render, nothing pending
+    revealActiveRef.current = { id: mid, count: target };
+    setRevealing(true);
+    const rest = () => {
+      if (revealActiveRef.current?.id !== mid) return;   // finalize/Stop/new turn owns it now
+      revealActiveRef.current = null;
+      setRevealCount((c) => ({ ...c, [mid]: target }));
+      setRevealing(false);
+    };
+    // rAF runs just before the on-screen batch paints; the timeout lands just after that paint.
+    requestAnimationFrame(() => { revealTimers.current.push(setTimeout(rest, 0)); });
   };
   // A defensive backstop against a pathological `hasMore` that never clears, and a bound on how many
   // search RPCs ONE tap may cost production — NOT a real product ceiling (the 2026-08-29
@@ -1431,27 +2077,89 @@ export default function Agent() {
   // was 25,000 and the two biggest cities sit past it. See drainPageBudget()'s note for the live
   // measurement; the arithmetic lives there now so the constant and its justification cannot drift.
   const MAX_DRAIN_PAGES = drainPageBudget(LOAD_MORE_PAGE_SIZE);
-  const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>) => {
+  // A SAVED CHAT PRE-LOADS ITS NEXT PAGE (owner 2026-10-07: «show me more from a saved chat loads so
+  // long — this should never happen»). A reopened chat keeps only its first cards (TRANSCRIPT_LISTING_CAP
+  // in the transcript, SNAPSHOT_CAP in a legacy snapshot), so its first «عرض المزيد» used to start a
+  // 500-row page AT TAP TIME — seconds under load — while a live chat already holds that page. The open
+  // path now starts the exact page the tap would ask for (same query, offset and seed) the moment the chat
+  // is restored, and loadMore consumes it instead of fetching. Never trusted across conversations (epoch)
+  // or offsets, and a failed prefetch is never used: the tap then fetches live, exactly as before.
+  const prefetchRef = useRef(new Map<string, { epoch: number; offset: number; p: Promise<Awaited<ReturnType<typeof loadMoreListings>> | null> }>());
+  // ONE AT A TIME, ADVANCED FILTER FIRST (the #3420 lesson: heavy calls fired together slow each other).
+  // The «تحديد أكثر» probe starts first — the passive effect claims it by key, so the button shows as soon
+  // as on a live search — and the page fetch only starts once that probe has answered.
+  const prefetchNextPage = (list: ChatMsg[], asked: readonly string[] = []) => {
+    const last = [...list].reverse().find((mm) => mm.role === 'results') as Extract<ChatMsg, { role: 'results' }> | undefined;
+    const r = last?.result;
+    if (!last || !r?.query) return;
+    if ((r.matchTotal ?? r.listings.length) > INTERVIEW_STOP_AT) prefetchNarrowing(r.query, asked);
+    if (!r.hasMore || r.listings.length >= SECOND_PAGE_CAP) return;
+    const offset = r.pageOffset ?? 0;
+    const q = r.query;
+    // A chat that must bring back cards it had on screen fetches them first (the user is waiting on
+    // that); otherwise the «تحديد أكثر» probe goes first.
+    const restoring = (r.restoreTo ?? 0) > r.listings.length;
+    const afFirst: Promise<unknown> = restoring ? Promise.resolve() : (afPrefetchRef.current?.p ?? Promise.resolve());
+    prefetchRef.current.set(last.id, {
+      epoch: conversationEpochRef.current, offset,
+      p: afFirst.catch(() => null).then(() => loadMoreListings(q, offset, last.result.rotationSeed)).catch(() => null),
+    });
+  };
+
+  // A SAVED CHAT REOPENS EXACTLY AS IT WAS LEFT (owner 2026-10-07: «after the user is done and goes back,
+  // it shows what he did — signed in or not, the same»). The transcript keeps only the first cards; when
+  // the user had more on screen it records how many (restoreTo). This brings the rest back with no tap:
+  // it takes the page prefetchNextPage already started, merges it, re-reveals up to restoreTo and, if the
+  // chat had finished, finishes it again. A failed page leaves the honest pager in place instead.
+  const restoreLeftState = async (list: ChatMsg[]) => {
+    const last = [...list].reverse().find((mm) => mm.role === 'results') as Extract<ChatMsg, { role: 'results' }> | undefined;
+    const r = last?.result;
+    if (!last || !r?.restoreTo || r.restoreTo <= r.listings.length) return;
+    const pre = prefetchRef.current.get(last.id);
+    if (!pre) return;
+    prefetchRef.current.delete(last.id);
+    const epoch = conversationEpochRef.current;
+    setRestoringId(last.id);
+    const page = await pre.p;
+    if (conversationEpochRef.current !== epoch) return;
+    setRestoringId(null);
+    if (!page || page.failed) return;
+    const seen = new Set(r.listings.map((l) => `${l.source}:${l.id}`));
+    const add = page.listings.filter((l) => { const k = `${l.source}:${l.id}`; if (seen.has(k)) return false; seen.add(k); return true; });
+    const mergedLen = r.listings.length + add.length;
+    setMsgs((prev) => prev.map((mm) => (mm.id !== last.id || mm.role !== 'results' || !mm.result) ? mm
+      : { ...mm, result: { ...mm.result, listings: [...mm.result.listings, ...add], pageOffset: page.nextOffset, hasMore: page.hasMore } }));
+    const to = Math.min(r.restoreTo, mergedLen);
+    setRevealCount((c) => ({ ...c, [last.id]: Math.max(c[last.id] ?? 0, to) }));
+    // The same named terminal gate loadMore uses: the restored reveal reached the terminal it had when saved.
+    const revealIsTerminal = r.restoreCompleted === true && to >= r.restoreTo;
+    if (revealIsTerminal) setCompleted(true);
+  };
+
+  const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>, requestedTarget?: number) => {
     const mid = m.id;
     const q = m.result.query;
+    // THE CONVERSATION THIS PRESS BELONGS TO (ops_incident #599). Captured before the first await so
+    // the writes below can be told apart from writes into a chat the user has since left — see
+    // conversationEpochRef's declaration for the measurement.
+    const epoch = conversationEpochRef.current;
     if (runRef.current) return; // a real turn is mid-flight — never start a cascade under it (review fix)
     if (loadingMore[mid]) return;
-    const cur = revealCount[mid] ?? initialReveal(m.result);
+    const cur = revealCount[mid] ?? initialReveal(m.result, m.afCompleted);
     const fetched0 = m.result.listings.length;
-    // FIRST tap for this turn (still at the initial floor) stops at the next 100-boundary; any tap
-    // after that drains to the true end. `nextBatchTarget` clamps to the honest total when known
-    // (`matchTotal`), so a set under 100 still finishes on the first tap — there is no dummy second
-    // press to force when nothing is left to earn it. An unknown total (Infinity) just means "the
-    // plain next hundred," never a fabricated boundary.
-    const alreadyExpandedOnce = cur > initialReveal(m.result);
-    // A later press drains — but bounded by DRAIN_REVEAL_MAX, because the list is unvirtualized and
-    // revealing a whole 20,782-match cohort CRASHES the renderer (measured on production
-    // 2026-09-12; see the constant's note). Every cohort that fits under the ceiling still drains
-    // and finishes in one press exactly as the owner's 2026-09-11 rule says; a bigger one reveals
-    // the ceiling, keeps «عرض المزيد» offered and is never marked finished. Bounding the TARGET
-    // also bounds the fetch loop — the same press used to pull 40–50 pages (one tap = 50 search
-    // RPCs against a 2-vCPU instance); it now pulls the four or so it can actually show.
-    const target = alreadyExpandedOnce ? cur + DRAIN_REVEAL_MAX : nextBatchTarget(cur, m.result.matchTotal ?? Infinity);
+    // Whether the turn has been expanded past its initial floor — the ONLY thing that still tells the
+    // first tap from the last (the reveal target itself now comes from revealTarget below, not a
+    // per-tap flag). Kept because the completion check reads it.
+    const alreadyExpandedOnce = cur > initialReveal(m.result, m.afCompleted);
+    // TWO TAPS, MAX 500 (owner 2026-09-14). revealTarget() encodes it: under 100 shown → the next
+    // 100-boundary (first tap); at/after 100 → up to the 500 cap (the final tap). Clamped to the true
+    // total, so a small set finishes in one tap and never over-promises 500. This supersedes the old
+    // "first tap → 100, later taps drain to DRAIN_REVEAL_MAX and keep offering" model — 500 is a hard
+    // product ceiling and also sits well under the unvirtualised-render crash point, so the drain and
+    // its 2,000-card ceiling are retired. `alreadyExpandedOnce` still tells the two taps apart for the
+    // completion check below; the target itself now comes straight from revealTarget().
+    void alreadyExpandedOnce;
+    const target = requestedTarget == null ? revealTarget(cur, m.result.matchTotal ?? Infinity) : Math.min(SECOND_PAGE_CAP, requestedTarget, m.result.matchTotal ?? Infinity);
     // De-dup against the CLOSURE copy (same data the message holds) so the merge is exact.
     const seen = new Set(m.result.listings.map((l) => `${l.source}:${l.id}`));
     const add: typeof m.result.listings = [];
@@ -1487,7 +2195,25 @@ export default function Agent() {
         // store.tsx already refuses to treat a backend error as progress. Stop the drain here — say
         // so out loud (same wording/posture page 0's own fetch failure uses, src/data/search.ts) —
         // and never claim completion for a reveal that did not actually finish.
-        const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(q, pageOffset);
+        // THE SEED THIS SET WAS CUT FROM (ops_incident #796) — never the app's latest. m.result is the
+        // block being paged, so its own rotationSeed is the only one whose `pageOffset` means anything.
+        // The page a saved chat started loading when it was opened (prefetchNextPage) — used only for
+        // this exact conversation and offset, and only if it succeeded; otherwise fetch live as before.
+        const pre = prefetchRef.current.get(mid);
+        if (pre) prefetchRef.current.delete(mid);
+        let page = pre && pre.epoch === epoch && pre.offset === pageOffset ? await pre.p : null;
+        if (!page || page.failed) page = await loadMoreListings(q, pageOffset, m.result.rotationSeed);
+        const { listings: more, nextOffset, hasMore, failed } = page;
+        // THE USER LEFT THIS CONVERSATION WHILE THE PAGE WAS IN FLIGHT — every write below belongs
+        // to a chat that no longer exists, and this screen is now showing a different one
+        // (router.replace to the SAME route: same component instance, nothing remounted).
+        // Dropping the pages is the correct outcome and not a loss: the exit already called
+        // flushPendingCapture(), so the abandoned chat is saved with exactly what was on screen when
+        // the user left it, which is the product's own rule for an outgoing turn (finalizeReveal:
+        // "show whatever that turn had … and kill the pending timers"; R12.3: older turns are
+        // read-only history). Returning here also stops the drain from spending the rest of its page
+        // budget on a conversation nobody is looking at. ops_incident #599.
+        if (conversationEpochRef.current !== epoch) return;
         if (failed) {
           setMsgs((prev) => [...prev, { id: uid(), role: 'agent',
             text: t('Loading listings — please try again in a few seconds.') }]);
@@ -1514,7 +2240,7 @@ export default function Agent() {
       // started while pages were fetching, reveal instantly (no cascade) — the drip machinery
       // belongs to the new turn now; cards still fade in via CardIn. (review fix, unchanged.)
       const revealTo = Math.min(target, mergedLen);
-      if (runRef.current) setRevealCount((c) => ({ ...c, [mid]: revealTo }));
+      if (runRef.current || revealTo <= cur) setRevealCount((c) => ({ ...c, [mid]: revealTo }));
       else cascadeIn(mid, cur, revealTo);
       // FINISHED ONLY WHEN NOTHING IS LEFT TO REVEAL, PERIOD (owner rule 2026-09-11, Task 4 rev. 2).
       // Two conditions, both required: the server confirms no more pages exist (`!hasMoreNow`) AND
@@ -1523,8 +2249,22 @@ export default function Agent() {
       // a first press whose boundary happened to reach the genuine end). Gated on the real numbers,
       // never a bare `true`: a failed or backstop-truncated drain returns above and never reaches
       // this line, so completion can never be claimed for a reveal that did not actually finish.
-      const userChoseShowAllAndFinish = !hasMoreNow && revealTo >= mergedLen;
-      if (userChoseShowAllAndFinish) setCompleted(true);
+      // TERMINAL (owner 2026-09-14): the chat closes — composer locks, «عرض المزيد» retires — the
+      // moment either (a) we reveal up to the 500 cap (the final tap), or (b) we reveal every match
+      // in a set smaller than 500. Both collapse to `revealTo >= min(500, total)`. The old
+      // "no server pages AND buffer drained" condition is kept as a belt-and-braces limb for a
+      // client-narrowed search whose true total is unknown (Infinity), where the cap can't fire.
+      // Gated on the real numbers, never a bare `true`: a failed/backstopped fetch returns above and
+      // never reaches here, so completion is never claimed for a reveal that did not finish.
+      const totalForCap = m.result.matchTotal ?? Infinity;
+      // ONE named terminal gate (the barrier requires every setCompleted to sit behind a named
+      // predicate). Terminal when we reveal up to the 500 cap or the true end (owner 2026-09-14) — OR,
+      // for a client-narrowed search whose true total is unknown (Infinity, so the cap can't fire),
+      // when the server has no more pages and the buffer is fully revealed. The cap arithmetic is
+      // proven honest in verify-result-cap-honesty.ts; this line only wires it to completion.
+      const revealIsTerminal =
+        revealTo >= Math.min(SECOND_PAGE_CAP, totalForCap) || (!hasMoreNow && revealTo >= mergedLen);
+      if (revealIsTerminal) setCompleted(true);
     } finally {
       setLoadingMore((s) => ({ ...s, [mid]: false }));
     }
@@ -1560,13 +2300,13 @@ export default function Agent() {
         // city choice on the AI-agent path (the system prompt explicitly prefers English for known
         // cities) — arLabel() (already used elsewhere in this file for the same reason) falls back
         // to the unresolved placeholder instead of interpolating raw English into this Arabic chip.
-        ask = ar ? `أي حي تفضّل في ${arLabel(q.location)}؟` : `Which district in ${q.location}?`;
+        ask = ar ? nextVariant(REFINE_DISTRICT_AR, { c: arLabel(q.location) }) : nextVariant(REFINE_DISTRICT_EN, { c: q.location });
         options = ds.map((d) => ({ label: d, value: d }));
       }
     }
     if (!dim && !q.priceInput && !q.priceBand) {
       dim = 'budget';
-      ask = ar ? 'كم ميزانيتك تقريباً؟' : 'What is your approximate budget?';
+      ask = ar ? nextVariant(REFINE_BUDGET_AR) : nextVariant(REFINE_BUDGET_EN);
       const ceil = q.deal === 'Buy' ? [500_000, 1_000_000, 2_000_000, 5_000_000] : [30_000, 50_000, 80_000, 150_000];
       options = ceil.map((c) => ({ label: budgetLabel(c, ar), value: String(c) }));
     }
@@ -1579,7 +2319,7 @@ export default function Agent() {
       : (detailForContext(q.category ?? 'Residential', effectiveGroups(q))?.showBeds ?? true);
     if (!dim && !q.detail && bedsApplicable) {
       dim = 'beds';
-      ask = ar ? 'كم غرفة نوم تبغى؟' : 'How many bedrooms?';
+      ask = ar ? nextVariant(REFINE_BEDS_AR) : nextVariant(REFINE_BEDS_EN);
       options = ['1', '2', '3', '4', '5'].map((n) => ({ label: bedsLabel(n, ar), value: n }));
     }
     // THE LEGACY TYPE QUESTION IS DELETED (owner 2026-08-23). It hardcoded four labels
@@ -1593,8 +2333,7 @@ export default function Agent() {
     // free-text path, can still deliver a typed type answer.
     if (!dim) { // everything already specified → open free-form question (typed answer)
       dim = 'free';
-      ask = ar ? 'وش تحب نضيّق فيه أكثر؟ (الميزانية، الحي، عدد الغرف، نوع العقار…)'
-               : 'What would you like to narrow further? (budget, district, bedrooms, type…)';
+      ask = ar ? nextVariant(REFINE_FREE_AR) : nextVariant(REFINE_FREE_EN);
     }
     pendingRefineRef.current = { q, dim }; // typed-answer fallback; chips are the primary path
     const refine = options.length ? { dim, baseQ: q, options } : undefined;
@@ -1654,6 +2393,11 @@ export default function Agent() {
     return null;
   }, [msgs]);
 
+  // Has the user moved on from `lastResultsMsg`? The derivation is PURE and lives in
+  // src/lib/liveTurn.ts so a barrier executes the real rule instead of a copy of it — see that
+  // file's header for the production measurement this exists for (ops_incident #338).
+  const newerTurnPending = useMemo(() => newerTurnPendingPure(msgs), [msgs]);
+
   // FULL-CONVERSATION CAPTURE (owner 2026-08-25 — ChatGPT-grade persistence). After every settled
   // change to the conversation (a landed turn, a revealed page, a round receipt, a pill removal),
   // serialize the EXACT on-screen state and hand it to the store, which persists it locally and
@@ -1678,7 +2422,7 @@ export default function Agent() {
   useEffect(() => {
     const id = chatIdRef.current;
     if (!id) return;
-    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed });
+    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow });
     if (!t) return;
     const j = JSON.stringify(t);
     if (j === lastCapturedRef.current) return;
@@ -1700,7 +2444,7 @@ export default function Agent() {
     // `completed` was missing from these deps: a chat that ENDED (Advanced Filter narrowed it to the
     // final set) could keep a transcript that never recorded the ending, so it reopened with a live
     // composer on a finished search.
-  }, [busy, msgs, revealCount, afReceipt, guidedPills, completed]);
+  }, [busy, msgs, revealCount, afReceipt, guidedPills, completed, afCanNarrow]);
   // A refresh/close inside the debounce window must not lose the last settled state either.
   // saveTranscript writes localStorage synchronously up front (store.tsx), so this flush lands on
   // disk even during unload. pagehide, not beforeunload: it also covers bfcache navigations.
@@ -1729,16 +2473,45 @@ export default function Agent() {
   //   'yes'     a truthful, certified, unasked question exists for this scope → a round can follow
   //   'no'      MEASURED: nothing certified remains that narrows (never invented — R5 exhaustion)
   //   'unknown' a count could not be determined even after one bounded retry — no verdict earned
-  const assessNarrowing = async (q0: SearchQuery, asked: Iterable<string>): Promise<'yes' | 'no' | 'unknown'> => {
+  // THE FIRST TAP IS INSTANT TOO (owner 2026-09-21: "get the numbers for each single tick ready
+  // ahead of time … when a user does the first search, it already gets involved"). Fire-and-forget,
+  // SERIAL — one candidate at a time, never Promise.all — so this can never recreate the #3420
+  // contention bug (that was N heavy probes at once; this is N light probes, one after another,
+  // spread across the same wait). Also primes the OPENING «متابعة» number (zero ticks) up front —
+  // for a scope tier that call is genuinely new; for an advanced question it lands as a free cache
+  // hit, because rankQuestions already made the identical call to resolve THIS question's own option
+  // counts a moment earlier (see fetchApartmentGuidedCounts's remembered cache, src/data/remote.ts).
+  //
+  // `afPrefetchRef.current?.key !== key` is checked before every hop: the moment a NEWER search
+  // supersedes this one, the walk stops spending database time on a question nobody will see —
+  // reusing the same key the passive effect already uses to decide which verdict to claim, so one
+  // generation signal governs both.
+  const primeFooterCounts = async (
+    question: AdvancedQuestion, scoped: SearchQuery, keys: string[], key: string,
+  ) => {
+    primeLiveResultCount(scoped).catch(() => {});
+    for (const k of keys) {
+      if (afPrefetchRef.current?.key !== key) return;
+      try { await primeLiveResultCount(question.apply(scoped, [k])); } catch { /* best-effort */ }
+    }
+  };
+
+  const assessNarrowing = async (q0: SearchQuery, asked: Iterable<string>, key: string): Promise<'yes' | 'no' | 'unknown'> => {
     let scoped = q0;
     const seen = new Set<string>(asked);
     for (let tier = nextScopeTier(scoped, seen); tier; tier = nextScopeTier(scoped, seen)) {
       let res: AdvancedQuestionResult | null = null;
-      try { res = await scopeQuestionFor(tier).resolveOptions(scoped); } catch { res = null; }
+      // resolveScopeOptionsInBackground, not scopeQuestionFor(tier).resolveOptions: the same candidates
+      // with the BACKGROUND budget. This runs behind the reveal with nobody waiting on it, and at the
+      // card's 4 s it was being cut off at exactly 4,000 ms — so nothing was remembered for the tap.
+      try { res = await resolveScopeOptionsInBackground(tier, scoped); } catch { res = null; }
       // UNKNOWN MUST NOT HARDEN INTO NO. A turn showing more than INTERVIEW_STOP_AT matches cannot
       // truthfully have an empty scope, so a failed/timed-out tier count is not a fact.
       if (!res || res.probeFailed) return 'unknown';
-      if (res.options.length > 1) return 'yes';              // a real scope question follows
+      if (res.options.length > 1) {                          // a real scope question follows
+        primeFooterCounts(scopeQuestionFor(tier), scoped, res.options.map((o) => o.key), key);
+        return 'yes';
+      }
       seen.add(tier);                                        // resolved (auto-commit or open skip) —
       if (res.options.length === 1)                          // never re-asked, same as the walk
         scoped = scopeQuestionFor(tier).apply(scoped, [res.options[0].key]);
@@ -1749,11 +2522,58 @@ export default function Agent() {
     for (let attempt = 0; attempt < 2; attempt++) {
       let ranked: Awaited<ReturnType<typeof rankQuestions>> | null = null;
       try { ranked = await rankQuestions(scoped, seen); } catch { ranked = null; }
-      if (ranked && ranked.some((r) => offersMeaningfulNarrowing(r.total, r.options))) return 'yes';
+      const winner = ranked?.find((r) => offersMeaningfulNarrowing(r.total, r.options));
+      if (winner) {
+        primeFooterCounts(winner.question, scoped, winner.options.map((o) => o.key), key);
+        return 'yes';
+      }
       if (ranked && !ranked.probeFailed) return 'no';         // every probe ANSWERED: nothing narrows
       if (attempt === 0) await new Promise((r) => setTimeout(r, 2500));
     }
     return 'unknown';
+  };
+
+  // PREPARE ADVANCED FILTER DURING THE WAIT — BUT AFTER THE SEARCH, NEVER BESIDE IT.
+  //
+  // Owner 2026-09-21: "the wait when the user sits down and waits for the search … should give him
+  // what he wants and also prepare the advanced filter so that the second doesn't count." The user
+  // is still watching the loader and the cards reveal when the search's own query returns, so work
+  // started at THAT moment is still inside the wait they are already serving — and it is alone.
+  //
+  // PR #3420 (2026-09-20) started this probe BEFORE runQuery instead, to get «تحديد أكثر» on screen
+  // sooner. Measured on production 2026-09-21 that was the regression behind "it was working
+  // perfect, idk what happened": for a scope with no group chosen, assessNarrowing prices the group
+  // tier — 1 total + 4 groups = 5 location_search_candidates_ar calls, each a count(*) over() of the
+  // WHOLE matched set, i.e. each as expensive as the search itself. Fired beside the search they
+  // made ~7 heavy calls at once (plus a retry wave of 5 when the 4s timeout gave up on them), and the
+  // very same call measured 7-9 s under that pile-up versus 1.2-1.7 s on its own. The search slowed,
+  // the probes timed out, and the Advanced Filter card opened with blank numbers.
+  //
+  // Starting here also lets the prefetch use `result.query` — the query the passive effect below
+  // claims with — so the key matches exactly instead of hoping the pre-search input normalises the
+  // same way.
+  //
+  // WHY IT STILL LIVES HERE AND NOT IN THE EFFECT BELOW. That effect keys off lastResultsMsg, which
+  // exists only once playListings has finished revealing, so probing from there stacked the whole
+  // cost after the reveal and «تحديد أكثر» popped in late (owner 2026-09-20). Calling this the moment
+  // runQuery returns keeps that win — the probe overlaps the card reveal the user is watching — while
+  // no longer competing with the query itself. The 2026-09-20 note that "run concurrently it is free:
+  // the search is the longer of the two" is what the measurement above disproved: both share one
+  // database, and the probe slowed the search it was riding beside.
+  //
+  // One slot, not a map: searches are sequential, and a superseded search's verdict is simply never
+  // claimed. The key pins the exact (query, asked-set) the effect will ask for, so a stale answer
+  // can never be handed to a different search — on a miss the effect just probes as it always did.
+  const afPrefetchRef = useRef<{ key: string; p: Promise<'yes' | 'no' | 'unknown'> } | null>(null);
+  const afPrefetchKey = (q: SearchQuery, asked: readonly string[]) =>
+    `${JSON.stringify(q)}|${[...asked].sort().join(',')}`;
+  const prefetchNarrowing = (q: SearchQuery | null | undefined, asked: readonly string[] = []) => {
+    if (!q || !anyGuidedEligible(q)) return;   // the button is hidden anyway — do not spend the probes
+    const key = afPrefetchKey(q, asked);
+    if (afPrefetchRef.current?.key === key) return;
+    // `.catch` here, not at the await: an unhandled rejection on a promise nobody claims (a
+    // superseded search) would surface as a crash rather than the 'unknown' this already means.
+    afPrefetchRef.current = { key, p: assessNarrowing(q, asked, key).catch(() => 'unknown' as const) };
   };
 
   const afProbedRef = useRef<Record<string, true>>({});
@@ -1770,11 +2590,14 @@ export default function Agent() {
     // PASSIVE: renders the «تحديد أكثر» button and nothing else. Automatic continuation of an
     // interview the user already opened lives in finishGuided (owner 2026-09-04) — this effect
     // never opens the overlay on a plain search turn (owner 2026-08-19 stands).
-    void assessNarrowing(q, asked).then((verdict) => {
+    // Claim the verdict the search already paid for; probe here only if there is no match.
+    const pre = afPrefetchRef.current;
+    const claimed = pre && pre.key === afPrefetchKey(q, asked) ? pre.p : assessNarrowing(q, asked, afPrefetchKey(q, asked));
+    void claimed.then((verdict) => {
       // owner 2026-09-12: reverses the 2026-09-04 decision to narrate "nothing left" as a chat
       // bubble — too dense/confusing in practice. Silent now: afCanNarrow alone still correctly
       // hides «تحديد أكثر» when exhausted (line ~3418); «عرض المزيد» is untouched by this verdict.
-      setAfCanNarrow((c) => ({ ...c, [m.id]: verdict === 'yes' }));
+      setAfCanNarrow((c) => ({ ...c, [m.id]: offersNarrowing(verdict) }));   // unknown offers (backlog 317)
     });
   }, [lastResultsMsg, guidedPills]);
 
@@ -1784,7 +2607,7 @@ export default function Agent() {
   // `opts.guided` attaches the interview's facets to the results turn for the removable pills.
   const runRefine = async (
     baseQ: SearchQuery, dim: string, value: string, label: string,
-    opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] } },
+    opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] }; afRound?: { items: string[]; pools?: Array<number | null> } },
   ) => {
     pendingRefineRef.current = null;
     finalizeReveal();
@@ -1799,10 +2622,22 @@ export default function Agent() {
     refineMsgIdRef.current = statusId;
     // Guaranteed search → the searching loader (roster + wave) starts IMMEDIATELY, no thinking beat.
     searchingAtRef.current[statusId] = Date.now();
-    setMsgs((m) => [...m, { id: uid(), role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined }]);
+    const echoId = uid();
+    setMsgs((m) => [...m, { id: echoId, role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined, afRound: opts?.afRound }]);
     toBottom();
+    // STAY IN THE SECTION YOU ARE IN (owner 2026-10-03). The round just closed on the old turn's
+    // «تحديد أكثر» button, so the new answers bubble and the loader are appended directly below it —
+    // but a viewport parked at the old bottom would show none of it and the user would have to scroll
+    // to find their own search. Ease down to that bubble (one short glide, 80 px under the top):
+    // everything above is still there, one scroll up. Measured at scroll time, like the landing.
+    // Three passes, not one: the loader is short on the first frame and grows as its platform grid
+    // renders, so the first glide can be clamped by the end of the content and leave the bubble low
+    // on screen; the later passes settle it ~80 px under the top with the loader below it. All land
+    // within the first 1.5 s, long before the user has had reason to scroll.
+    for (const d of [80, 700, 1500]) easeToMsgTop(echoId, d);
     const result = await runQuery(refined, true, run.ac.signal, ensureChatId());
     if (run.cancelled) return;
+    prefetchNarrowing(result.query ?? refined, opts?.guided?.asked ?? []);  // AFTER the search — see prefetchNarrowing
     // quotableTotal, never `result.total` — that is this page's buffer length (≤ the 1500-row
     // QUERY_LIMIT), so the mining overlay quoted «لقينا 1,500 عقار» on every set larger than a page
     // while the results headline behind it stated the real match total. ONE total for both.
@@ -1826,7 +2661,11 @@ export default function Agent() {
       // through this one call — one writer, so the store can never hold a round this screen never ran.
       writeFilterStore({ ...refined, afFacets: opts.guided.facets });
     }
-    await playListings(run, statusId, buildScrapeIntro(result.query ?? refined), result, label);
+    // A round of the Advanced Filter reads the ORIGINAL summary plus every committed answer (owner
+    // 2026-10-03); any other refine keeps summarising the query it ran.
+    await playListings(run, statusId,
+      opts?.guided ? guidedSearchSummary(opts.guided.baseQ, opts.guided.facets) : buildScrapeIntro(result.query ?? refined),
+      result, label, !!opts?.guided);
     if (run.cancelled) return;
     void promptSignupSoon(run);
     // NO toBottom() here (owner 2026-08-24). It fired while the new turn's cards were still
@@ -1838,75 +2677,15 @@ export default function Agent() {
     setBusy(false); runRef.current = null;
   };
 
-  // Remove one interview facet from the results pills (owner 2026-08-16: «The user can remove any
-  // advanced choice and results should immediately update»). Pure recomputation: rebuild the query
-  // from the interview's baseQ by re-applying every REMAINING facet in order via its own question's
-  // apply() — never a hand-written inverse — then re-search through the same guided path so the
-  // pills row carries over minus the removed one. No mining beat here; removal is instant.
-  const removeGuidedFacet = (facetIndex: number) => {
-    if (!guidedPills || busy) return;
-    const removed = guidedPills.facets[facetIndex];
-    const remaining = guidedPills.facets.filter((_, i) => i !== facetIndex);
-    // A ROUND ON SCREEN IS PRICED ON A COHORT THIS REMOVAL JUST DESTROYED — CLOSE IT
-    // (ops_incident #242, measured on production 2026-09-13, reproduced 3/3).
-    //
-    // The owner's 2026-09-11 decision (#155) put the committed pills INTO the round overlay, so a
-    // user can delete an answer while a question is on screen. The removal widened the search
-    // correctly — but the round itself was never told: its plan, its header total, its option counts
-    // and its own facet list all still belonged to the pre-removal query, and nothing re-derived
-    // them. Measured live on جدة/الفلل والبيوت/فيلا/شراء, 390x844: round 1 committed four answers
-    // (125 results); removing «جديد» widened the search to 295 (headline 295, anon replay 295, DB
-    // truth 295) and 60s later the card still read «125 نتيجة», still drew FOUR committed pills
-    // including the deleted one, and was asking «وش الاتجاه اللي تفضله؟» priced on the 125 set —
-    // شمال 27 / جنوب 27 / شرق 27 / غرب 19 where the real set has 62 / 49 / 67 / 47. Tapping a
-    // number the user can read off the screen would have returned 2.3x that many listings, which is
-    // the one thing every AF count rule forbids (§2.5, §7: visible count = count RPC = request = DB
-    // truth), and R9.2.1 was false ON SCREEN while being true on the wire.
-    //
-    // So the round is ABANDONED, exactly as ✕ and «رجوع» from question one abandon it: bump the
-    // token first so any in-flight resolveOptions/rankQuestions probe for the dead cohort is
-    // discarded rather than painting over the close, then drop the card. Nothing is lost that was
-    // not already invalid — the committed ANSWERS live in `guidedPills`, which this function rebuilds
-    // and hands to runRefine below, and the asked-carry rides with them. What comes back is the
-    // «خلّنا نحدد الطلب أكثر» offer on the new, wider turn, and a fresh round priced on the set the
-    // user actually has (startAgeFlow re-seeds every round ref, so the next round is clean).
-    ageFlowTokenRef.current++;
-    setAgeFlow(null);
-    let q = guidedPills.baseQ;
-    for (const f of remaining) {
-      // SCOPE questions live outside ADVANCED_QUESTIONS, so the lookup must span BOTH pools: a
-      // surviving group/type facet whose question could not be resolved would be silently dropped
-      // from the rebuild and quietly widen the search (owner 2026-08-23).
-      const question = ADVANCED_QUESTIONS.find((x) => x.id === f.id) ?? SCOPE_QUESTIONS.find((x) => x.id === f.id);
-      if (question) q = question.apply(q, f.keys);
-    }
-    const label = t('Without: {label}', { label: removed.labels.join('، ') });
-    // The guided record is passed even when the LAST pill is removed (owner 2026-08-24): the pills
-    // row is gated on facets.length so nothing renders, but the carried asked-set survives — dropping
-    // it here would resurrect every question an earlier round already asked or skipped.
-    //
-    // …MINUS the removed question itself (review 2026-08-25). The carry exists to stop RE-asking what
-    // the user already RESOLVED; a facet the user just deleted is by definition unresolved again, and
-    // keeping its id in `asked` burned that dimension for the rest of the chat — remove «عمر ٣-٥
-    // سنوات» to pick a different bucket and property_age could never be offered again, and once the
-    // pool was spent that way «تحديد أكثر» disappeared entirely with no way back but a new search.
-    void runRefine(q, '__guided__', '', label,
-      { guided: { baseQ: guidedPills.baseQ, facets: remaining, asked: guidedPills.asked.filter((id) => id !== removed.id) } });
-  };
-
   // THE COMMITTED PILLS THE ROUND CARD MUST NOT COVER (owner decision 2026-09-11, #155).
-  // One source of truth: the SAME facets the transcript row renders and the SAME removal handler,
-  // handed to the overlay so it can draw them above its own scrim. A copy here would be a second
-  // place for the user's committed selections to live, and the two would drift.
-  // Declared HERE, after removeGuidedFacet: the useMemo factory runs during render, so referencing
-  // that `const` from above its declaration is a temporal-dead-zone throw, not a lint nit.
+  // One source of truth: the SAME facets the transcript row renders, handed to the overlay so it can
+  // draw them above its own scrim. A copy here would be a second place for the user's committed
+  // selections to live, and the two would drift.
+  // READ-ONLY (owner 2026-10-03: «we should not show any X button on this»). There is no removal
+  // handler any more: a committed answer is changed by going back through the round, never by a ✕.
   const afCardPills: ShellPills = useMemo(() => ({
     facets: guidedPills?.facets ?? [],
-    onRemove: removeGuidedFacet,
-    disabled: busy,
-    isScope: isScopeQuestionId,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [guidedPills, busy]);
+  }), [guidedPills]);
 
 
   // Present the step at `stepIndex`. A step the user has already seen (walked Back to, or one
@@ -2115,19 +2894,21 @@ export default function Agent() {
   };
 
   // End of the flow: if the user answered ≥1 step, re-search the accumulated query in ONE combined
-  // turn (runRefine's __guided__ passes it through unchanged) BEHIND the mining transition — the
-  // Ezhalah «digging through the market» beat (owner 2026-08-16). If they skipped everything, close.
+  // turn (runRefine's __guided__ passes it through unchanged). If they skipped everything, close.
   //
-  // TIMING (all plain setTimeout — never an animation callback, per src/lib/afterAnimation.ts):
-  //   finish → mining overlay (from = last known narrowed total) + the search starts immediately
-  //   search resolves → hold until ≥ 1.4s total has played (never artificially longer)
-  //   → swap copy to «لقينا N عقار أقرب لطلبك» → ~1.1s beat → dismiss, revealing the result cards.
-  // A 15s failsafe (and a catch on the search itself) dismisses the overlay even if the turn dies,
-  // so the user can never be trapped behind a stuck animation.
+  // THE TIMING NOTE THAT USED TO SIT HERE described the mining overlay's 1.4s hold, its «لقينا N
+  // عقار» beat and its 15s failsafe. That card was deleted on 2026-09-20 and the beat with it, so
+  // the note is gone rather than left to read as a contract this function no longer honours — a
+  // finished round now hands straight to the thread's own searching turn, on no timer at all.
   const finishGuided = (token: number) => {
     if (ageFlowTokenRef.current !== token) return;
     const q = ageFlowQueryRef.current;
-    if (!(q && ageFlowChangedRef.current)) { setAgeFlow(null); return; }
+    if (!(q && ageFlowChangedRef.current)) {
+      const from = afCarryRef.current?.msgId;
+      if (from) afSkippedByMsgRef.current[from] = [...ageFlowAskedRef.current];
+      setAgeFlow(null);
+      return;
+    }
     const startedAt = Date.now();
     // CUMULATIVE, ANCHORED TO THE TRUE PRE-AF ORIGIN (owner 2026-08-24). `ageFlowBaseQRef` stays the
     // ROUND's own start — deriveGuided rebuilds this round's query from it, and anchoring it to the
@@ -2143,10 +2924,23 @@ export default function Agent() {
     // reverted, and the restored card speaks no selections — but the dedupe rule is the PILLS' own
     // and is unaffected.)
     const dedupedFacets = dedupeFacetsByLabel([...(carry?.facets ?? []), ...ageFlowFacetsRef.current]);
-    setAgeFlow({ phase: 'mining', from: ageFlowTotalRef.current, to: null });
-    const timers = miningTimersRef.current;
+    // NO OVERLAY AT ALL WHEN A ROUND ENDS (owner 2026-09-20, third and final word on this card:
+    // "when the user clicks on what he wants, then there is this pop-up that pops up with a
+    // magnifying glass … this needs to be gone").
+    //
+    // Earlier passes removed the card's COMPLETION state (the green checkmark and «لقينا N عقار»).
+    // That was the wrong half: what the owner has been calling "the pop-up" is the card itself, in
+    // its searching state, magnifier and all. So the round now closes its question card and hands
+    // straight over — setAgeFlow(null), no phase, no timers, no scrim.
+    //
+    // NOTHING IS LOST BY REMOVING IT, which is why this is safe where it would not have been before:
+    // the overlay was translucent ON PURPOSE so "the searching turn behind the card — the platform
+    // roster included — reads through" (the deleted card's own header said so). That searching turn is the
+    // thread's own, rendered by runRefine below and not by this overlay. Taking the card away simply
+    // stops covering it, so the user still watches «نراجع N منصة عقارية» work — they just see it
+    // directly instead of through a scrim.
+    setAgeFlow(null);
     const stillMining = () => ageFlowTokenRef.current === token;
-    timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); }, 15000));
     const guided = ageFlowBaseQRef.current
       ? {
           baseQ: carry?.originQ ?? ageFlowBaseQRef.current,
@@ -2157,9 +2951,35 @@ export default function Agent() {
     // The turn the user opened this round FROM becomes history: it trades its action buttons for a
     // read-only receipt of what THIS round committed. buildAfSummary reads the committed facets only,
     // so a skipped question can never appear in it (summary == committed state, permanent rule).
-    if (carry) setAfReceipt((r) => ({ ...r, [carry.msgId]: buildAfSummary(ageFlowFacetsRef.current) }));
-    void runRefine(q, '__guided__', '', ageFlowLabelsRef.current.join('، '), {
+    //
+    // — AND THE SKIPS, IN THE ORDER THE ROUND ASKED (owner 2026-09-20: "you asked about apartment
+    // and then age, and he decided to skip, then he chose الواجهة ... you say: user decided to
+    // skip"). ONE sentence, not two piles, so the card reads as the story of the interview. It is a
+    // record of the ROUND and claims no predicate, which is why a skip may appear in it at all —
+    // summary == committed state remains the permanent rule, and it governs the PILLS, which are
+    // still built by buildAfSummary from the facets alone (see afSummary.ts's header).
+    //
+    // `askedThisRound` subtracts the carry so a second round names only its OWN questions; the
+    // previous round's receipt already named that round's, on its own turn.
+    //
+    // Only a round that COMMITTED something leaves a receipt. A skip-everything round changes
+    // nothing — same query, same cards — so the turn keeps its buttons and the user can open the
+    // interview again from it; replacing them with a receipt would strand them with no way back in.
+    const askedThisRound = [...ageFlowAskedRef.current].filter((id) => !(carry?.asked ?? []).includes(id));
+    const roundLog = buildAfRoundLog(askedThisRound, ageFlowFacetsRef.current, locale);
+    const roundCommitted = buildAfSummary(ageFlowFacetsRef.current);
+    if (carry && roundCommitted) setAfReceipt((r) => ({ ...r, [carry.msgId]: roundLog }));
+    // Each language opens with its rotating courtesy + request (owner 2026-10-14).
+    const roundLabel = ageFlowLabelsRef.current.join(locale === 'ar' ? '، ' : ', ');
+    void runRefine(q, '__guided__', '', roundLabel ? pickAfCourtesyOpening(Math.random, locale) + roundLabel : roundLabel, {
       guided,
+      // The picks in the chips' own words, without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات») — clearer than the raw labels.
+      // One beat per answered question, in the chips' own words without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات»),
+      // each with the size of the set it was checked against — the beat reads «نفحص 1,425 عقار…» → «نفحص 830 عقار…».
+      afRound: (() => {
+        const steps = buildAfBeatSteps(ageFlowFacetsRef.current).map((x) => ({ label: stripEmoji(x.label).trim(), pool: x.pool })).filter((x) => x.label);
+        return { items: steps.map((x) => x.label), pools: steps.map((x) => x.pool) };
+      })(),
       onFetched: (total) => {
         const msgId = refineMsgIdRef.current;
         if (!stillMining()) return;
@@ -2167,49 +2987,51 @@ export default function Agent() {
         // ≤ INTERVIEW_STOP_AT — the search is COMPLETE. Every remaining listing is revealed by
         // initialReveal (honestTotal ≤ stopAt ⇒ reveal all fetched — no «عرض المزيد»), the composer
         // is replaced by «محادثة جديدة», and the transcript is saved in that state.
-        if (searchIsFinishedAtThreshold(total, INTERVIEW_STOP_AT)) setCompleted(true);
-        // ROUNDS CONTINUE AUTOMATICALLY WHILE TRUTHFUL QUESTIONS REMAIN (owner product rule
-        // 2026-09-04, supersedes the 2026-08-24 "continuing is a manual tap" wording for a round the
-        // user has already opened; the 2026-08-19 "never auto-open on a plain search turn" rule is
-        // untouched — this only continues an interview the user started). After the count lands,
-        // the SAME assessment the offer button uses decides: 'yes' → the next round opens on the
-        // narrowed cohort with every answered AND skipped question carried (never re-asked; Back and
-        // pill-removal keep working through the same carry); 'no' → the offer effect says so and
-        // shows the genuine results; 'unknown' → the button stays, nothing is asserted.
-        const continueQ = q; const continueGuided = guided;
-        if (total != null && total > INTERVIEW_STOP_AT && continueGuided && msgId) {
-          void assessNarrowing(continueQ, continueGuided.asked).then((verdict) => {
-            if (!stillMining() || verdict !== 'yes') return;
-            timers.push(setTimeout(() => {
-              if (ageFlowTokenRef.current !== token) return;
-              afCarryRef.current = { msgId, originQ: continueGuided.baseQ, facets: continueGuided.facets, asked: continueGuided.asked };
-              void startAgeFlow(continueQ);
-            }, Math.max(0, 1400 - (Date.now() - startedAt)) + 1100 + AF_NEXT_ROUND_DELAY_MS));
-          });
-        }
+        // A COMPLETED ADVANCED FILTER ROUND ENDS THE CONVERSATION (owner 2026-09-20, shown the
+        // 400-card turn and its closing note: "that message should be gone. The chat gets closed. If
+        // you want to make a new chat, click on the top … you just have to do skip, and that's it").
+        //
+        // This WIDENS R11.1. The ≤ INTERVIEW_STOP_AT rule stays exactly as it was — it still ends a
+        // plain search, a typed message and a refine chip — but a round of Advanced Filter now ends
+        // the chat at ANY total, because the interview IS the end of that journey: the user answered
+        // (or skipped) every question the data could truthfully offer, and the set they are looking
+        // at is the answer. The old behaviour left them on a browsable turn whose closing note said
+        // «لسا عندنا لك المزيد … الجاية هي الأخيرة، بنعرض لك حتى 100» — an offer that contradicted
+        // itself and, at 400 of 13,203, could never be satisfied.
+        //
+        // NAMED, not bare, so verify-af-rounds-never-self-reopen-and-finish-at-25.ts's
+        // every-setCompleted-is-gated ratchet still means something: the defect that check exists for
+        // is a "nothing left to ask" VERDICT silently locking the chat (2026-09-12), which this is
+        // not — this fires on a round that actually landed results, never on a probe's opinion.
+        // OFF since 2026-10-05 (owner: re-offer «خلّنا نحدد الطلب أكثر» while >25 + a useful question; a tap, never a timer).
+        const afRoundEndsChat = false;
+        if (afRoundEndsChat || searchIsFinishedAtThreshold(total, INTERVIEW_STOP_AT)) setCompleted(true);
+        // A ROUND NEVER RE-OPENS ITSELF (owner 2026-09-20 — REVERSES the 2026-09-04 "rounds continue
+        // automatically" rule quoted below in git history). That rule popped a brand-new round of
+        // DIFFERENT questions onto the screen on a timer, with no tap from the user — indistinguishable
+        // from a stray popup, and it fired even when the round that just finished was mostly Skips.
+        // Skip means "not this question", never "ask me something else on your own initiative". A
+        // round ends here, full stop, whether it finished by running out of questions or by the user
+        // skipping to the end — that is the only outcome. Whether ANOTHER round is worth offering is
+        // still decided by assessNarrowing (unchanged) through the PASSIVE effect above it feeds,
+        // which only toggles the «تحديد أكثر» button visibility; opening a new round is a tap, always.
+        // There is no overlay left to dismiss — the card was removed at the top of finishGuided —
+        // so the only thing still owed here is the landing scroll. `startedAt` keeps its old job of
+        // spacing that scroll past the new turn's own card cascade, nothing more.
         const wait = Math.max(0, 1400 - (Date.now() - startedAt));
-        timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? { ...f, to: total } : f)); }, wait));
-        // RESTORED 2026-09-06 (owner rejected the 2026-08-31 direct hand-off along with the redesign
-        // it belonged to): `to` landing swaps the card's copy to the «لقينا N عقار أقرب لطلبك» beat,
-        // and the overlay then holds ~1.1s so that sentence is actually readable before the results
-        // are revealed. A 450ms seal was right for a card that said nothing on completion; it is too
-        // short to read a sentence.
-        timers.push(setTimeout(() => {
-          if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f));
-        }, wait + 1100));
-        timers.push(setTimeout(() => {
+        miningTimersRef.current.push(setTimeout(() => {
           if (!stillMining()) return;
           // LAND ON THE NEW TURN (owner 2026-08-24): the old cards stay exactly where they are, and the
           // thread eases down so the user reads their selection receipt → the new count → the new
           // cards. Never a jump to the bottom.
-          // The delay clears the new turn's own card cascade (FIRST_PAGE × REVEAL_STEP_MS ≈ 1.3s).
+          // The delay clears the new turn's own card cascade (CASCADE_MAX × REVEAL_STEP_MS ≈ 1.6s).
           // Measured live 2026-08-24: easing sooner read a `msgYRef` that predated the cascade — the
           // ref only refreshes when the message RESIZES, which is exactly what each revealed card
           // does — and landed ~300px short, with the new count line still under the fold.
           if (msgId) for (const d of LAND_PASSES_MS) easeToMsgTop(msgId, d);
         }, wait + 1100));
       },
-    }).catch(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); });
+    });
   };
 
   // Entry point for «خلّنا نحدد الطلب أكثر» (and the auto-open after an eligible Filter search). Build
@@ -2375,12 +3197,31 @@ export default function Agent() {
     }
   };
 
-  const onAgeConfirm = (keys: string[]) => { void commitGuidedStep(keys); };
+  const onAgeConfirm = (keys: string[]) => commitGuidedStep(keys);
+
+  // THE NEXT STEP IS READY BEFORE THE TAP (owner 2026-10-03: «when a user clicks المتابعة, it feels a
+  // bit stuck»). Committing an answer runs presentGuided → rankQuestions over the NEW scope, which is
+  // exactly `question.apply(current, keys)` with this question added to the asked set (deriveGuided).
+  // So the moment the footer has its count for a tick — and once at open, for the skip path (keys []) —
+  // the same rankQuestions call is made in the background; every count it learns is remembered
+  // (fetchApartmentGuidedCounts / fetchPropertyAgeOptionCounts), so the tap finds them ready. Serial by
+  // construction (it follows the footer's own call, one per tick) and de-duplicated by key, so it can
+  // never recreate the #3420 burst. A scope tier next is skipped: its counts are already remembered.
+  const nextStepPrefetchRef = useRef('');
+  const prefetchNextStep = (question: AdvancedQuestion, q: SearchQuery, keys: string[]) => {
+    const next = keys.length ? question.apply(q, keys) : q;
+    const asked = new Set([...ageFlowAskedRef.current, question.id]);
+    if (nextScopeTier(next, asked)) return;
+    const key = JSON.stringify([next, [...asked].sort()]);
+    if (nextStepPrefetchRef.current === key) return;
+    nextStepPrefetchRef.current = key;
+    rankQuestions(next, asked).catch(() => {});
+  };
 
   // Skip THIS question → next; skip-all → finish now; X (close) → abandon the flow.
   // Skip = NO PREFERENCE (owner): nothing is filtered, no false is written, the question is just
   // marked answered-as-open for this session — and walking Back to it restores it as skipped.
-  const onAgeSkip = () => { void commitGuidedStep([]); };
+  const onAgeSkip = () => commitGuidedStep([]);
 
   // «رجوع» — one question back (owner 2026-08-22). From the FIRST question it leaves the interview
   // entirely: the record is dropped and ageFlow goes null, which is exactly what the pre-AF CTA row
@@ -2418,10 +3259,71 @@ export default function Agent() {
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
-    // The user SENT something (typed or voice — sendVoice funnels in here): the small sign-in
-    // card retires for the rest of this load (owner 2026-08-29). After the guard, so an empty or
-    // busy-refused submit is not a send.
+    setFilterOrigin(false);
+    const selectedSourcesForTurn = pickerSourceSlugs(selectedSources);
+    const sourceChoiceForTurn = pickerSourceExplicit;
+    // Every accepted send, including pagination, dismisses the sign-in card.
     dismissSignInCard();
+    const latestResult = [...msgs].reverse().find((m): m is Extract<ChatMsg, {role:'results'}> => m.role === 'results');
+    if (latestResult && !pendingRefineRef.current && (msgs[msgs.length - 1]?.role === 'results' || lastPaginationResultRef.current === latestResult.id)) {
+      const shown = revealCount[latestResult.id] ?? initialReveal(latestResult.result, latestResult.afCompleted);
+      const target = agentResultRequest(v, Math.max(shown, initialReveal(latestResult.result, latestResult.afCompleted)), latestResult.result.query?.count ?? 100, !!latestResult.result.query?.count);
+      if (target != null) {
+        lastPaginationResultRef.current = latestResult.id;
+        const quantity = resultQuantityChange(v, !!latestResult.result.query?.count);
+        if (quantity != null && latestResult.result.query) {
+          const updatedQuery = {...latestResult.result.query, count:quantity};
+          lastQueryRef.current = updatedQuery;
+          setMsgs((m) => m.map(message => message.id === latestResult.id && message.role === 'results'
+            ? {...message, result:{...message.result, query:updatedQuery}} : message));
+        }
+        setTyped('');
+        recordChatTurn(v);
+        setMsgs((m) => [...m, {id:uid(),role:'user',text:v}]);
+        await loadMore(latestResult, target);
+        return;
+      }
+    }
+    lastPaginationResultRef.current = null;
+    const historyAll = msgs
+      .filter((m) => m.role === 'user' || m.role === 'agent' || m.role === 'results')
+      .map((m) => {
+        const role = m.role === 'user' ? ('user' as const) : ('model' as const);
+        // For a results turn, hand the agent the FACTS of the cards it showed (numbered #1..#N) so it
+        // can resolve later references like "the 2nd one", "#3", "the cheapest", "the Al Malqa one" —
+        // restating only what's on the card, never inventing. (user training decision.)
+        if (m.role === 'results') {
+          // JUNK_LOCATION_TOKENS guard, own display path (2026-07-10 location-data-quality audit):
+          // this text feeds straight into the AGENT's conversation memory (so it can later resolve
+          // "the Al Malqa one" etc.). l.city/l.district already went through remote.ts's junk guard,
+          // so a sentinel can't arrive as a literal string here, but an honestly-unresolved '' still
+          // needs a neutral label — otherwise this would show "in , " for a fully-unresolved location.
+          const cards = (m.result?.listings ?? []).flatMap((l, i) => {
+            // Keep initial examples and a specifically referenced card, never the whole broad search.
+            const referenced = new RegExp(`(?:#|رقم\\s*)${i + 1}(?![0-9])`).test(v);
+            if (i >= 12 && !referenced) return [];
+            const locationLabel = l.district && l.city ? `${l.district}, ${l.city}`
+              : (l.district || l.city || LOCATION_UNRESOLVED_AR);
+            return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel} — ${listingPrice(l, 'en')}` +
+              `${l.area ? `, ${l.area} m²` : ''}${l.beds ? `, ${l.beds} bed` : ''}, on ${l.source}`;
+          });
+          const text = cards.length ? `${m.text}\n${cards.join('\n')}` : m.text;
+          return { role, text };
+        }
+        return { role, text: (m as { text?: string }).text ?? '' };
+      })
+      .filter((h) => !!h.text.trim());
+    // HISTORY TRIMMING (owner-approved consolidation, 2026-08-30). describeKnownState()'s ~150-token
+    // knownState snapshot (built from lastQueryRef.current below) already carries every FACT from
+    // older turns, so sending the full window a second time as raw prose was pure token cost with no
+    // new information. Trimmed to the last 2 raw entries — in this alternating user/model list that
+    // is always the immediately-preceding user message and the model's immediately-preceding reply,
+    // KEPT VERBATIM (never paraphrased): pronoun resolution ("that one") and exact-phrase-triggered
+    // behavior (e.g. «خلها شهري» flipping the rent period) both depend on the model seeing the
+    // literal prior exchange, not a summary of it.
+    const history = historyAll.slice(-2);
+    const replyLocale = resolveReplyLocale(v, history, locale);
+    const t = (key: string, vars?: Record<string, string | number>) => translate(replyLocale, key, vars);
     // The CHAT agent accepts English as an input convenience: it normalizes any English place to the
     // canonical ARABIC location, searches in Arabic, and shows every location/result in Arabic (never an
     // English place name). The agent_notes location rules enforce the Arabic-canonical output. The FILTER
@@ -2432,12 +3334,19 @@ export default function Agent() {
     finalizeReveal(); // stop the previous search's cards from drip-revealing now that the user moved on
     stopReadAloud(); // a new turn starting is "another response" — stop any read-aloud from the last one
     setStopped(false); // new turn — re-enable the refine CTA and clear the stopped state
+    setCompleted(false); // a finished search never locks the chat: the next message reopens it (owner 2026-10-13)
     setBusy(true);
     // REFINE INTERCEPT: if we just asked a «نتائج أدق» clarifying question, read THIS message as the answer,
     // merge it into the SAME filter, and re-search — never run it through the normal agent path. (user 2026-06-27.)
     if (pendingRefineRef.current) {
+      { const rid = recordChatTurn(v); if (rid) chatIdRef.current = rid; }
       const { q: baseQ, dim } = pendingRefineRef.current;
-      await runRefine(baseQ, dim, v, v);
+      await runRefine(
+        applyPickerSources(baseQ, selectedSourcesForTurn, sourceChoiceForTurn),
+        dim,
+        v,
+        v,
+      );
       return;
     }
     // Sidebar Recent entry: title = the user's exact message. First send in a new chat creates the
@@ -2446,11 +3355,6 @@ export default function Agent() {
     { const rid = recordChatTurn(v); if (rid) chatIdRef.current = rid; } // keep this screen's conversation id aligned with the store's entry
     const run = makeRun();
     runRef.current = run;
-    // Switch the whole app to the language of THIS message — on Send, not per keystroke. An English
-    // message flips the UI to English and the reply comes back in English; an Arabic message to
-    // Arabic. (setLocale syncs the data-layer locale immediately, so respond() answers in kind.)
-    const loc = detectLocale(v);
-    if (loc && loc !== locale) setLocale(loc);
     pinModeRef.current = 'bottom';
     // First beat: "Ezhalah is thinking…" — the real respond() round-trip fills this pause.
     const statusId = uid();
@@ -2469,50 +3373,27 @@ export default function Agent() {
     const userMessageId = uid();
     // Build the conversation MEMORY from prior turns (before this new message) so the agent can
     // reason across the chat and never re-ask what was already said. The greeting (text:'') drops out.
-    const historyAll = msgs
-      .filter((m) => m.role === 'user' || m.role === 'agent' || m.role === 'results')
-      .map((m) => {
-        const role = m.role === 'user' ? ('user' as const) : ('model' as const);
-        // For a results turn, hand the agent the FACTS of the cards it showed (numbered #1..#N) so it
-        // can resolve later references like "the 2nd one", "#3", "the cheapest", "the Al Malqa one" —
-        // restating only what's on the card, never inventing. (user training decision.)
-        if (m.role === 'results') {
-          // JUNK_LOCATION_TOKENS guard, own display path (2026-07-10 location-data-quality audit):
-          // this text feeds straight into the AGENT's conversation memory (so it can later resolve
-          // "the Al Malqa one" etc.). l.city/l.district already went through remote.ts's junk guard,
-          // so a sentinel can't arrive as a literal string here, but an honestly-unresolved '' still
-          // needs a neutral label — otherwise this would show "in , " for a fully-unresolved location.
-          const cards = (m.result?.listings ?? []).map((l, i) => {
-            const locationLabel = l.district && l.city ? `${l.district}, ${l.city}`
-              : (l.district || l.city || LOCATION_UNRESOLVED_AR);
-            return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel} — ${l.price}` +
-              `${l.area ? `, ${l.area} m²` : ''}${l.beds ? `, ${l.beds} bed` : ''}, on ${l.source}`;
-          });
-          const text = cards.length ? `${m.text}\n${cards.join('\n')}` : m.text;
-          return { role, text };
-        }
-        return { role, text: (m as { text?: string }).text ?? '' };
-      })
-      .filter((h) => !!h.text.trim());
-    // HISTORY TRIMMING (owner-approved consolidation, 2026-08-30). describeKnownState()'s ~150-token
-    // knownState snapshot (built from lastQueryRef.current below) already carries every FACT from
-    // older turns, so sending the full window a second time as raw prose was pure token cost with no
-    // new information. Trimmed to the last 2 raw entries — in this alternating user/model list that
-    // is always the immediately-preceding user message and the model's immediately-preceding reply,
-    // KEPT VERBATIM (never paraphrased): pronoun resolution ("that one") and exact-phrase-triggered
-    // behavior (e.g. «خلها شهري» flipping the rent period) both depend on the model seeing the
-    // literal prior exchange, not a summary of it.
-    const history = historyAll.slice(-2);
     // Pass auth state: a guest searches on any property query; a logged-in user only gets listings
     // when their message is a direct order, otherwise Ezhalah replies conversationally. (user request.)
     // The conversation's accumulated canonical state. Without it a clarification turn resets
     // everything the user already said — «شهرية» came back as RentAnnual and a 9.5 rating vanished
     // after one more question (owner-reported 2026-08-29). Explicit changes in the new turn still win.
     let turn = await respond(v, {
-      loggedIn: !!user, history, attemptTexts: saidRef.current, prevQuery: lastQueryRef.current,
+      locale: replyLocale, loggedIn: !!user, history, attemptTexts: saidRef.current, prevQuery: lastQueryRef.current ? applyPickerSources(lastQueryRef.current, selectedSourcesForTurn, sourceChoiceForTurn) : null,
       askCount: askCountRef.current, userMessageId, historyTurnsRaw: historyAll.length,
     });
     if (run.cancelled) return;
+    // The website picker is a presentation layer over the existing canonical `sources` query field.
+    // Apply it after the agent has parsed the user's message so the model cannot widen the user's
+    // explicit choice, and so every downstream path (search, summary, history) sees one query.
+    if (turn.kind !== 'interview' && turn.query) {
+      if (turn.query.sourceSelectionChanged) {
+        setPickerSourceExplicit(false);
+        setSelectedSources([]);
+      } else {
+        turn = { ...turn, query: applyPickerSources(turn.query, selectedSourcesForTurn, sourceChoiceForTurn) };
+      }
+    }
     // The server is the single decision authority for askCount too (decide.ts) — store whatever it
     // last echoed back. Never reset mid-chat by the client (owner-confirmed default); a brand new
     // chat starts askCountRef at 0 by construction (a fresh screen mount / New Chat, not a reset here).
@@ -2596,11 +3477,12 @@ export default function Agent() {
       saidRef.current = [];
       beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)
       const result = await runQuery(turn.query, true, run.ac.signal, ensureChatId());
+      if (!run.cancelled) prefetchNarrowing(result.query ?? turn.query);  // AFTER the search — see prefetchNarrowing
       const reply = forcedBroad
-        ? `${getLocale() !== 'en'
+        ? `${replyLocale !== 'en'
             ? 'ما قدرت أحدد الموقع بدقة، فبحثت في نطاق أوسع — هذي اللي لقيتها.'
-            : "I couldn't narrow the location, so I searched a broader scope — here's what I found."}\n\n${buildScrapeIntro(result.query ?? turn.query)}`
-        : buildScrapeIntro(result.query ?? turn.query);
+            : "I couldn't narrow the location, so I searched a broader scope — here's what I found."}\n\n${buildScrapeIntro(result.query ?? turn.query, replyLocale)}`
+        : buildScrapeIntro(result.query ?? turn.query, replyLocale);
       // A rejection/honesty caveat (turn.notice) is a SEPARATE channel from turn.reply on purpose —
       // this deterministic `reply` headline can only ever say what actually ran (anti-hallucination:
       // buildScrapeIntro reflects result.query, never the model's own words) — but a real caveat the
@@ -2616,9 +3498,12 @@ export default function Agent() {
       // zero-result turn (see `introZeroResult ? m.result.suggestion` below), so overriding it HERE
       // scopes the change to exactly this call site — a fresh, free-text AI-Agent search — rather
       // than rewriting the shared module every other surface (Filter, AF) also depends on.
-      const zeroMatch = result.listings.length === 0
+      // A FAILED FETCH IS NOT AN EMPTY ANSWER (owner 2026-10-05: «we should never get this — is this true?»
+      // — a «حي الملك» search that timed out was told «ما لقينا نتائج» while the same search returns
+      // 16,874). runSearch already words a failure as «try again in a few seconds»; never overwrite it.
+      const zeroMatch = result.listings.length === 0 && !result.fetchFailed
         ? { ...result, suggestion: t('Sorry, no listings currently match your request. Try using the Filter to widen your search.') }
-        : result;
+        : result.fetchFailed ? { ...result, suggestion: t('Loading listings — please try again in a few seconds.') } : result;
       await playListings(run, statusId, withNotice, zeroMatch, v);
       if (run.cancelled) return;
       void promptSignupSoon(run);
@@ -2660,6 +3545,8 @@ export default function Agent() {
       if (turn.locationQuestion && turn.query) {
         const probe = await fetchListingsForQuery(buildLocationProbeQuery(turn.query), { signal: run.ac.signal });
         if (run.cancelled) return;
+        // This «no results» is shown too — the notebook notes it like any other (owner 2026-10-05).
+        if (probe.listings && probe.listings.length === 0) logZeroResult(buildLocationProbeQuery(turn.query), null, false);
         reply = replyAfterLocationProbe(
           turn.reply,
           t('Sorry, no listings currently match your request. Try using the Filter to widen your search.'),
@@ -2750,6 +3637,7 @@ export default function Agent() {
       try {
         const result = await runQuery(pending.q, true, run.ac.signal, ensureChatId());
         if (run.cancelled) return;
+        prefetchNarrowing(result.query ?? pending.q);  // AFTER the search — see prefetchNarrowing
         await playListings(run, statusId, buildScrapeIntro(result.query ?? pending.q), result);
         if (run.cancelled) return;
         // REMOVED (owner 2026-08-19): the auto-open AF intro popup after a filter search is killed.
@@ -2758,12 +3646,98 @@ export default function Agent() {
         void promptSignupSoon(run); // guest used their free search (filter) → prompt sign-up
       } catch {
         if (!run.cancelled) {
-          setMsgs((m) => m.filter((x) => x.id !== statusId).concat({ id: uid(), role: 'agent', text: 'تعذّر البحث، حاول مرة أخرى' } as ChatMsg));
+          setMsgs((m) => m.filter((x) => x.id !== statusId).concat({ id: uid(), role: 'agent', text: locale === 'en' ? nextVariant(SEARCH_FAILED_EN) : nextVariant(SEARCH_FAILED_AR) } as ChatMsg));
         }
       } finally {
         if (!run.cancelled) { setBusy(false); runRef.current = null; }
       }
     })();
+  };
+
+  // ONE DEFINITION OF "WHAT BELONGS TO THE CONVERSATION WE ARE LEAVING" (routine #8, 2026-09-14).
+  //
+  // There were TWO hand-maintained copies of this reset — `startFresh()` (every sidebar reopen, every
+  // «بحث» hop, every `?seed=` link) and the New Chat handler — and each one omitted what the other
+  // remembered. Neither omission is visible to tsc: they are statements, not a type, so the only thing
+  // keeping them in agreement was that someone editing one would remember the other. Measured on the
+  // live tree:
+  //   • startFresh forgot `completed` (the composer lock + the whole «عرض المزيد» row), and
+  //     `pendingScopeRef` / `pendingCityRef` / `lastQueryRef` — a half-asked clarifying question and
+  //     the accumulated filters of the chat being abandoned, which the NEXT conversation's first
+  //     `send()` then consumed as if they were its own (send() reads and immediately nulls both refs).
+  //   • New Chat forgot `afCarryRef` — the Advanced-Filter answered-set whose own comment in
+  //     startFresh explains exactly why inheriting it is a bug.
+  // Same mechanism as ops_incident #211 (a hand-written field list re-projecting an optional-field
+  // type): a list a human has to keep complete, where an omission reads as ordinary code.
+  //
+  // So there is ONE list now, and both callers route through it. Anything conversation-scoped added
+  // later is cleared for BOTH paths by construction instead of by memory.
+  // Deliberately NOT here: `lastFilterRef`/`lastSeedRef` (navigation-intent dedup — the effect sets
+  // them immediately BEFORE calling startFresh, so clearing them would re-fire the same navigation)
+  // and `filterOrigin` (screen-instance origin, not conversation state — left exactly as each caller
+  // had it). Lifecycle actions (flushPendingCapture, finalizeReveal, cancelling the in-flight run)
+  // stay with their callers too: they are things to DO on the way out, not state to clear.
+  const resetConversationState = () => {
+    setBusy(false);
+    setStopped(false);
+    setPlatformPickerOpen(false);
+    setPlatformPickerSearch('');
+    setSelectedSources([]);
+    setPickerSourceExplicit(false);
+    setMsgs([]);
+    liveTurnsRef.current = new Set(); // a reopened chat's turns are restored, never live — they mount still
+    setRestoringId(null);
+    setCompleted(false);      // terminality is per-conversation — never inherited (see openStatic/openSaved)
+    chatIdRef.current = null; // new conversation → new sidebar chat (a restore re-sets it)
+    afCarryRef.current = null;   // the AF answered-set belongs to the conversation being left
+    afSkippedByMsgRef.current = {}; // …and so do its skip-everything rounds
+    pendingScopeRef.current = null; // …and so does a half-answered clarifying question
+    pendingCityRef.current = null;  // …including the plain-city question's subject
+    lastQueryRef.current = null;    // …and the accumulated filters it narrowed
+    lastPaginationResultRef.current = null;
+    // THE THIRD RECURRENCE (routine #8, 2026-09-18, ops_incident #319). The list above was itself
+    // enumerated by hand — from the two defects in hand on 2026-09-14 — so it ended the class for
+    // the fields it named and for nothing else. Measured on main: `send()` reads NINE refs and this
+    // list cleared FOUR. The three below are the rest of what `send()` consumes.
+    //   • pendingRefineRef is the exact sibling of pendingScopeRef/pendingCityRef and the worst of
+    //     the three: send()'s REFINE INTERCEPT returns before the ordinary agent path, so with a
+    //     «نتائج أدق» question left unanswered in the chat being abandoned, the FIRST message typed
+    //     in the next conversation is swallowed — merged into the OLD chat's SearchQuery, re-searched
+    //     under the old filter instead of reaching the ordinary agent path.
+    //   • saidRef/askCountRef are the attempt's accumulated context, sent to the agent as
+    //     `attemptTexts`/knownState: without this, the next conversation's first message is
+    //     interpreted on top of everything the user said in the one they just left.
+    pendingRefineRef.current = null; // a «نتائج أدق» question dies with the conversation that asked it
+    refineMsgIdRef.current = null;   // …and so does the results turn it was building into
+    saidRef.current = [];            // what the user said THIS attempt is never context for the next chat
+    askCountRef.current = 0;
+    // AND THE CANCELLATION HALF, which is why this one lifecycle action does NOT stay with the
+    // callers like flushPendingCapture/finalizeReveal/runRef do. The screen owns TWO independent
+    // in-flight mechanisms and conversation exit reached only one: startFresh cancels `runRef`, but
+    // every guided/AF continuation is gated on `ageFlowTokenRef`, which no exit path bumped. An
+    // in-flight round from the ABANDONED chat therefore kept writing into the new conversation — it
+    // could setCompleted(true) (rebuilding the exact dead-end lock #211/#271 exist to prevent),
+    // auto-open a fresh card via startAgeFlow, and RE-ARM afCarryRef at the `continueGuided` timer
+    // below, undoing the very line six rows up. Clearing state is not durable while something the
+    // user has left can still write to it, so the invalidation belongs WITH the clear, not beside it.
+    ageFlowTokenRef.current++;      // every in-flight guided continuation is now superseded
+    setAgeFlow(null);               // …and the card it was driving belongs to the conversation left
+    // AND THE THIRD MECHANISM, which the sentence above ("the screen owns TWO independent in-flight
+    // mechanisms") counted by hand and therefore missed (routine #8, 2026-09-22, ops_incident #599 —
+    // the FIFTH recurrence of this class, and the second time the REPAIR for it was itself a
+    // hand-maintained list).
+    //
+    // `loadMore` — the «عرض المزيد» page fetch — awaits loadMoreListings() and then, on the other
+    // side of that await, writes conversation state unconditionally. Nothing cancelled it: it holds
+    // no token, `runRef` is null throughout by construction (it refuses to start while a turn is in
+    // flight), and clearReveals() only kills timers that already exist. MEASURED by lifting the real
+    // loadMore and exiting the conversation during the await: it called setCompleted(true) — locking
+    // the NEW conversation's composer and retiring its «عرض المزيد» row, then persisting that lock
+    // onto the new chat's saved transcript, because `completed` is a dependency of the capture
+    // effect and that effect writes to chatIdRef.current. It also re-armed revealActiveRef and
+    // setRevealing(true) through cascadeIn (the new chat's Send button becomes Stop with nothing to
+    // stop), and on a failed page appended «تعذّر البحث» into a transcript that never asked for it.
+    conversationEpochRef.current++; // every in-flight page fetch now belongs to a conversation that ended
   };
 
   // Reopening a past search from the sidebar (replay='0') just SHOWS the saved conversation — the
@@ -2777,24 +3751,90 @@ export default function Agent() {
   // with no transcript anywhere (legacy entry) falls back to the snapshot/replay view unchanged.
   const openSaved = async (entryId: string | undefined, q: SearchQuery, override?: { bubble: string; sub: string }) => {
     flushPendingCapture(); // leaving the previous chat mid-debounce must not drop its newest turn
+    // Captured AFTER startFresh() — the sidebar's own handler calls it immediately before this, so
+    // the epoch already names THIS open. See the check below the hydrate. ops_incident #599.
+    const epoch = conversationEpochRef.current;
     chatIdRef.current = entryId ?? null;
     const entry = entryId ? history.find((h) => h.id === entryId) : undefined;
-    let t: PersistedChat | null = entry?.transcript ?? null;
-    if (!t && entryId) t = await hydrateTranscript(entryId).catch(() => null);
+    // A STALE local copy must be re-checked against the server, not rendered (owner 2026-08-25,
+    // src/lib/chatMerge.ts). This line used to read `entry?.transcript ?? null` unconditionally, so
+    // a present-but-stale transcript short-circuited the hydrate and the whole `txStale` mechanism
+    // never engaged on the one path that actually opens a saved chat: the merge marked the copy
+    // stale, pickTranscript was ready to prefer the server, and nobody ever asked. The user saw the
+    // SHORTER conversation, and the first new turn cleared the flag (withFreshTranscript, via the
+    // capture effect) and pushed that truncated view over the server's longer one — permanently.
+    // Treating stale as "not held" hands the decision to hydrateTranscript, which owns it.
+    const heldStale = !!(entry as { txStale?: boolean } | undefined)?.txStale;
+    const local: PersistedChat | null = entry?.transcript ?? null;
+    let t: PersistedChat | null = heldStale ? null : local;
+    // NEVER AN EMPTY SCREEN WHILE THE SERVER ANSWERS (owner 2026-10-10, iPhone on LTE: «when I click on
+    // the side chat history and choose a chat, this pops up» — the hero header over a blank page). The
+    // page turn fades the chat in after 180 ms whether or not its messages exist yet, and this hydrate
+    // is a real round trip, so a held-but-stale copy (or a snapshot) used to sit unshown behind an
+    // empty transcript for seconds. Paint what this device already holds NOW; the server's answer
+    // below replaces it when it lands. lastCapturedRef is set to the painted copy, so nothing is
+    // written back until the hydrated one has taken its place.
+    if (!t && entryId) {
+      const early = local ? restoreChat(local) : null;
+      if (early) {
+        setMsgs(early.msgs as unknown as ChatMsg[]);
+        setDoneTyping(early.doneTyping);
+        setRevealCount(early.revealCount);
+        setCompleted(early.completed === true);
+        lastCapturedRef.current = JSON.stringify(local);
+        landAtLatest();
+      } else if (entry?.snapshot) {
+        void openStatic(q, override, entry.snapshot); // synchronous snapshot branch — zero network
+      } else if (q?.deal || q?.location || q?.category || q?.type || override) {
+        // Nothing held at all (a chat from another device): at least the request the user made.
+        const { bubble } = override ?? filterToChat(q);
+        setMsgs([{ id: replayMsgIds(entryId, uid).userId, role: 'user', text: bubble }]);
+      }
+      t = await hydrateTranscript(entryId).catch(() => null);
+      // A failed hydrate keeps the pre-existing fallback below (snapshot/replay) on purpose: adopting the
+      // stale copy as THE transcript would let the next turn write it over the server's longer one.
+    }
+    // THE USER OPENED SOMETHING ELSE WHILE THIS ONE WAS HYDRATING (ops_incident #599, the same
+    // mechanism as loadMore's guard). This is the path that reaches the network — a pruned cache, a
+    // new browser, a re-login or a second device — so the window is a real round trip, and the
+    // sidebar is fully live throughout it. Without this check the restore lands on whatever chat is
+    // NOW on screen: setMsgs/setRevealCount/setCompleted rewrite it wholesale while chatIdRef points
+    // at the OTHER entry, and the capture effect then serializes what is on screen and saves it
+    // under that other entry's id — this chat's conversation written over that one, permanently, the
+    // first time the user touches it. Returning leaves the chat they actually chose intact; this one
+    // re-hydrates when it is opened again.
+    if (conversationEpochRef.current !== epoch) return;
     const restored = t ? restoreChat(t) : null;
     if (restored) {
+      let restoringDone: Promise<void> = Promise.resolve();
       setMsgs(restored.msgs as unknown as ChatMsg[]);
+      {
+        // The same asked-set the passive «تحديد أكثر» effect will key on, so it claims this probe.
+        const rgp0 = restored.guidedPills as { msgId?: string; asked?: string[] } | null | undefined;
+        const lastRes = [...(restored.msgs as unknown as ChatMsg[])].reverse().find((mm) => mm.role === 'results');
+        prefetchNextPage(restored.msgs as unknown as ChatMsg[], rgp0 && lastRes && rgp0.msgId === lastRes.id ? rgp0.asked ?? [] : []);
+        restoringDone = restoreLeftState(restored.msgs as unknown as ChatMsg[]);
+      }
       setDoneTyping(restored.doneTyping);
       setRevealCount(restored.revealCount);
       setAfReceipt(restored.afReceipt);
+      // The «تحديد أكثر» verdict this chat already earned shows its button at once (owner 2026-10-07);
+      // the offer probe still re-runs for the restored turn and overwrites it with today's answer.
+      if (restored.afCanNarrow) setAfCanNarrow((c) => ({ ...c, ...restored.afCanNarrow }));
       setCompleted(restored.completed === true);
       // Dedup on restore too (owner audit, 2026-08-27): a chat saved before this fix shipped could
       // have a stray duplicate pill baked into its serialized transcript — restoring it verbatim
       // would resurrect exactly the bug this fix closes everywhere else. Deduping HERE (not just at
-      // render) keeps the array index-consistent for removeGuidedFacet's index-based removal.
+      // render) keeps the saved array and the chips drawn from it identical.
       const rgp = restored.guidedPills as { facets?: GuidedFacet[] } | null | undefined;
       setGuidedPills((rgp && rgp.facets ? { ...rgp, facets: dedupeFacetsByLabel(rgp.facets) } : rgp) as any);
       lastCapturedRef.current = JSON.stringify(t); // what's on screen IS what's stored — no echo write
+      // NEVER BLANK, NEVER A BUTTON THAT THEN VANISHES (owner 2026-10-07/08). The chat shows at once;
+      // while its remaining cards come back, its closing line and buttons wait behind a quiet loading
+      // line (restoringId), and it lands again once they are in.
+      landAtLatest();
+      await restoringDone;
+      if (conversationEpochRef.current !== epoch) return;
       landAtLatest();
       return;
     }
@@ -2807,19 +3847,47 @@ export default function Agent() {
   };
 
   const openStatic = async (q: SearchQuery, override?: { bubble: string; sub: string }, snapshot?: SearchResult) => {
+    // ops_incident #599 — see the check after runQuery below. The snapshot branch is synchronous and
+    // needs none; the replay branch re-runs a REAL search and is the longest await on this screen.
+    const epoch = conversationEpochRef.current;
     const { bubble, sub } = override ?? filterToChat(q);
-    const userId = uid();
-    const resultsId = uid();
+    // DERIVED FROM THE CONVERSATION, NOT MINTED (ops_incident #337). `uid()` here made the ids stable
+    // only within one invocation, so reopening the same legacy chat re-rolled the Results-Found
+    // rotation memo (keyed on the results message id, PR #3232) and re-worded a turn the user had
+    // already read. The transcript path never had this problem — restoreChat keeps the persisted ids.
+    const { userId, resultsId } = replayMsgIds(chatIdRef.current, uid);
     // A saved chat carries the results it already found — render them INSTANTLY, zero network,
     // no "searching…" beat of any kind (owner 2026-08-14: "it should already show him the property
     // because he already listed it. This is just saved."). «عرض المزيد» still pages live from here.
     if (snapshot) {
-      setMsgs([
+      const snapMsgs: ChatMsg[] = [
         { id: userId, role: 'user', text: bubble },
         { id: resultsId, role: 'results', text: sub, result: snapshot },
-      ]);
+      ];
+      setMsgs(snapMsgs);
+      prefetchNextPage(snapMsgs);
       setDoneTyping((d) => ({ ...d, [resultsId]: true }));
+      // NOT afCompleted-aware on purpose: a snapshot restored from the sidebar carries no record of
+      // whether an AF round produced it (afCompleted lives on the live ChatMsg, not in the saved
+      // snapshot), so a reopened AF chat reveals the first-screen width and pages the rest through
+      // «عرض المزيد» exactly as it does today. Nothing is hidden; only the no-tapping allowance is
+      // not re-granted. Persisting it would mean widening the transcript schema — a separate change.
       setRevealCount((c) => ({ ...c, [resultsId]: initialReveal(snapshot) }));
+      // DERIVED FROM THESE RESULTS, NEVER INHERITED FROM THE CHAT WE LEFT (see startFresh). There is
+      // no transcript on this path, so terminality is re-established from what is actually on screen,
+      // through the same named gate every live search uses (~1380). Two guards make it honest:
+      //   • `matchTotal != null` — recordHistory (store.tsx) TRUNCATES a snapshot to SNAPSHOT_CAP=20
+      //     cards, and quotableTotal falls back to `listings.length` when no total was recorded, so
+      //     without this a 20-card slice of a 9,892-match search reads as "≤50, finished" and locks
+      //     the chat: the dead end rebuilt out of its own fix. `matchTotal` itself SURVIVES the
+      //     truncation (it rides the `...result` spread), so the honest total is still available
+      //     whenever it was ever known — which is why this guards on the total's PRESENCE and not on
+      //     `hasMore`, the flag that truncation stamps `true` and which would therefore also throw
+      //     away the lock on a genuinely ≤50 chat that merely had more than 20 cards.
+      //   • quotableTotal() — null (⇒ never terminal) whenever the count would overstate.
+      // Together: a genuinely ≤50 saved chat reopens LOCKED, exactly as the owner's 2026-08-30 rule
+      // requires, and a big one reopens with its pager instead of the previous chat's lock.
+      setCompleted(snapshot.matchTotal != null && searchIsFinishedAtThreshold(quotableTotal(snapshot), INTERVIEW_STOP_AT));
       landAtLatest();
       return;
     }
@@ -2832,6 +3900,11 @@ export default function Agent() {
     pinModeRef.current = 'top';
     toTop();
     const result = await runQuery(q, false); // viewing a saved chat — don't create a new history entry
+    // THE CONVERSATION THIS REPLAY WAS OPENED FOR IS GONE (ops_incident #599). Every setMsgs below
+    // REPLACES the transcript rather than appending to it, so an un-checked landing does not merely
+    // add a stale bubble — it substitutes this legacy chat's replayed search for whatever the user
+    // opened instead, and setCompleted() re-derives that chat's terminality on top of it.
+    if (conversationEpochRef.current !== epoch) return;
     // Soft completion here too (review finding): history replay used to hard-cut the loader in a
     // single frame. Flag `exiting`, give the fade its beat, THEN swap to the final results state.
     // (History stays beat-free otherwise — no min-beat, no typewriter; this is just the fade.)
@@ -2840,6 +3913,7 @@ export default function Agent() {
       { id: resultsId, role: 'status', phase: 'searching', summary: buildScrapeIntro(q), query: q, exiting: true },
     ]);
     await new Promise((r) => setTimeout(r, LOADER_EXIT_MS));
+    if (conversationEpochRef.current !== epoch) return; // …and again across the loader's fade beat
     // Morph into the final results state — all cards at once, no typewriter (history view).
     setMsgs([
       { id: userId, role: 'user', text: bubble },
@@ -2847,24 +3921,18 @@ export default function Agent() {
     ]);
     setDoneTyping((d) => ({ ...d, [resultsId]: true }));
     setRevealCount((c) => ({ ...c, [resultsId]: initialReveal(result) }));
+    // Same derivation as the snapshot branch above, on a LIVE result — this replay re-ran the real
+    // search, so it is exactly the input playListings gates on at ~1380 and needs no hasMore guard.
+    setCompleted(searchIsFinishedAtThreshold(quotableTotal(result), INTERVIEW_STOP_AT));
     pinModeRef.current = 'top';
     toTop();
   };
 
-  // Ezhalah greets a fresh chat itself: after a short beat (~1.2s) it drops its opening message as a
-  // normal agent bubble that types itself out, with the quick-suggestion chips underneath. Only fires
-  // when the chat is still empty (a filter/seed/history open never gets the greeting on top).
+  // A fresh chat shows the complete welcome immediately, without a typing timer.
   const sendGreeting = () => {
     if (greetTimerRef.current) clearTimeout(greetTimerRef.current);
-    // Stay pinned to the TOP while the greeting types and the "Click here to start" cards pop in one
-    // by one — never glide the user downward as each box appears (web + phone). (user request.)
     pinModeRef.current = 'top';
-    // Drop the greeting almost immediately so the FIRST sentence starts typing right away — no blank
-    // screen on entering the agent. The example chips wait until this greeting finishes typing, then
-    // pop in one by one. (user request.)
-    greetTimerRef.current = setTimeout(() => {
-      setMsgs((m) => (m.length === 0 ? [{ id: uid(), role: 'agent', text: '', greeting: true, typing: true }] : m));
-    }, 150);
+    setMsgs((m) => (m.length === 0 ? [{ id: uid(), role: 'agent', text: '', greeting: true }] : m));
     // A genuinely fresh empty chat re-arms the rotating composer examples (owner brief §6) — the
     // ONLY re-arm point, so they can never restart while the user is mid-interaction.
     setIntroInteracted(false);
@@ -2903,17 +3971,20 @@ export default function Agent() {
       flushPendingCapture(); // the OLD conversation's last settled state must land before we leave it
       if (runRef.current) runRef.current.cancelled = true; // stop any in-flight previous search
       finalizeReveal();                                    // stop the prior search's drip-reveal/typing
-      setStopped(false);
-      setBusy(false);
-      setMsgs([]);                                         // new search = a clean chat view
-      chatIdRef.current = null;                            // new conversation → new sidebar chat (a restore re-sets it)
+      // THE conversation reset — one shared list, so this path can no longer forget a field the New
+      // Chat path remembers (see resetConversationState above). It clears `completed`, which is why
+      // reopening a chat from the sidebar while the previous one was TERMINAL no longer carries that
+      // chat's lock onto whatever opens next: the sidebar navigates with
+      // router.replace({pathname:'/agent'}) while ALREADY on /agent — same route, same component
+      // instance, nothing remounted — which is the whole reason this function exists at all.
+      // openSaved() re-sets `completed` from the restored transcript immediately after, so a chat
+      // that HAS one is unaffected; its two fallbacks (openStatic, sendGreeting) now derive or leave
+      // it false instead of inheriting it. Before this, a user who had just finished a search — and
+      // since the owner's 2026-09-14 two-tap/500-cap rule EVERY search now finishes — reopened a
+      // legacy, locally-pruned or guest chat into a dead end: locked composer, no «عرض المزيد» row,
+      // thousands of matches unreachable. (routine #8, ops_incident #211's class.)
+      resetConversationState();
       setFilterOrigin(false);                              // default: has a composer, until the `filter` branch below says otherwise
-      // The Advanced Filter carry belongs to the conversation being left. It is only ever WRITTEN on
-      // a «تحديد أكثر» tap, so without this a brand-new search inherited the previous chat's answered
-      // set and opened its first round already believing those questions were resolved — and, since
-      // startAgeFlow now also seeds from the incoming query's own receipt, a stale carry would beat
-      // the receipt that actually describes this search.
-      afCarryRef.current = null;
     };
     // THE GATE (owner 2026-08-16). Params that were in the URL when the DOCUMENT loaded — a refresh,
     // a restored tab, a pasted link — are not a user action, so they must not execute anything. Drop
@@ -2967,10 +4038,14 @@ export default function Agent() {
         // FULL q — the replay needs the AF predicates to reproduce the conversation.
         writeFilterStore(q);
         const override = chatBubble && chatSub ? { bubble: chatBubble, sub: chatSub } : undefined;
-        startFresh();
-        setFilterOrigin(true); // this whole screen instance came from «بحث» — no composer (see the flag's own comment above)
-        if (replay === '0') void openSaved(hid, q, override);
-        else sendFilter(q, override);
+        const open = () => {
+          startFresh();
+          setFilterOrigin(true); // this whole screen instance came from «بحث» — no composer (see the flag's own comment above)
+          if (replay === '0') void openSaved(hid, q, override);
+          else sendFilter(q, override);
+        };
+        if (replay !== '0') open();
+        else turnToSavedChat(open);
         // Intent consumed — including for a sidebar replay, so refreshing a REOPENED chat also lands
         // on a new blank chat rather than reopening it again (owner requirement 6).
         consumeSearchParams();
@@ -2999,12 +4074,46 @@ export default function Agent() {
   // if we were already on the agent screen (where the component doesn't remount). (user request.)
   // The wipe is a "fresh page turn", not a hard cut (owner 2026-08-14: the New Chat moment should
   // FEEL like a new chat): the old conversation breathes out (~110ms fade), the clean chat rises
-  // softly back in, and the greeting starts typing as it settles. The wipe itself rides
+  // softly back in, and the static welcome appears as it settles. The wipe itself rides
   // runAfterAnimation — the animation is decoration, the fresh chat is the function, so a frozen
   // rAF (hidden tab) can never leave the user stuck on the old conversation.
   const freshFade = useRef(new Animated.Value(1)).current;
   const freshRise = useRef(new Animated.Value(0)).current;
   const freshMountRef = useRef(true);
+  const savedOpenTokenRef = useRef(0); // counts sidebar chat-opens; only the latest may swap/fade in (see the replay branch)
+  const turnToSavedChat = (open: () => void) => {
+    // OPENING A SAVED CHAT FROM THE SIDEBAR IS A PAGE TURN, NOT A HARD CUT (owner 2026-10-03: «the
+    // animation feels too tough, it doesn't feel smooth»). It used to wipe the old chat in one
+    // frame, paint the new one at its TOP, then jump to the bottom up to five times while its
+    // cards measured. Now the old chat fades out (110 ms, like New Chat), the swap and the landing
+    // at the latest message happen while the view is invisible, and the opened chat fades and
+    // rises in once landAtLatest's first re-bottom (150 ms) has run. Decoration only:
+    // runAfterAnimation drives the swap from a timer too, and the fade-in is a plain timer.
+    // A second sidebar tap (savedOpenTokenRef) or New Chat (it bumps conversationEpochRef) during
+    // the fade drops this open instead of loading it over the newer screen.
+    const token = ++savedOpenTokenRef.current;
+    const epochAtTap = conversationEpochRef.current;
+    setOpeningSaved(true);
+    runAfterAnimation(
+      (onFinished) => Animated.timing(freshFade, { toValue: 0, duration: 110, useNativeDriver: true }).start(onFinished),
+      () => {
+        // stale: the newer open / New Chat runs its own fade on freshFade and brings the view back
+        if (token !== savedOpenTokenRef.current || epochAtTap !== conversationEpochRef.current) return;
+        open(); // startFresh bumps conversationEpochRef; this open owns the new value
+        const mine = conversationEpochRef.current;
+        freshRise.setValue(8);
+        setTimeout(() => {
+          if (token !== savedOpenTokenRef.current || mine !== conversationEpochRef.current) return;
+          setOpeningSaved(false);
+          Animated.parallel([
+            Animated.timing(freshFade, { toValue: 1, duration: 220, useNativeDriver: true }),
+            Animated.timing(freshRise, { toValue: 0, duration: 220, useNativeDriver: true }),
+          ]).start();
+        }, 180);
+      },
+      180,
+    );
+  };
   useEffect(() => {
     if (freshMountRef.current) { freshMountRef.current = false; return; }
     if (fresh === undefined) return;
@@ -3019,13 +4128,13 @@ export default function Agent() {
     runAfterAnimation(
       (onFinished) => Animated.timing(freshFade, { toValue: 0, duration: 110, useNativeDriver: true }).start(onFinished),
       () => {
-        setBusy(false);
-        setMsgs([]);
-        pendingScopeRef.current = null; // New Chat inherits nothing — not even a half-answered question
-        setCompleted(false);
-        lastQueryRef.current = null;    // …and not the previous conversation's accumulated filters
-        pendingCityRef.current = null;  // …including the plain-city question's subject
-        chatIdRef.current = null;       // …and not the previous conversation's sidebar identity
+        // New Chat inherits nothing — through the SAME one list every other conversation exit uses
+        // (resetConversationState above). It used to repeat the list here and, doing so, omitted
+        // `afCarryRef`: a New Chat kept the previous conversation's Advanced-Filter answered set and
+        // opened its first round already believing those questions were resolved — the exact bug
+        // startFresh's own comment describes, live on the other path. (routine #8, 2026-09-14.)
+        resetConversationState();
+        setOpeningSaved(false); // New Chat supersedes a saved chat still opening — its landing is real
         // Forget the last-handled filter/seed so a re-search AFTER New Chat re-runs even if it's
         // identical to a previous one (otherwise the change-detection would skip it and leave just
         // the greeting).
@@ -3072,9 +4181,39 @@ export default function Agent() {
   // replayed history are all excluded structurally), the composer is empty, the user hasn't
   // interacted, no recording, no turn in flight. Filter mode is a different screen (index.tsx) and
   // never renders this component at all.
-  const introLanding = msgs.every((m) => m.role === 'agent' && !!m.greeting);
+  const introLanding = !openingSaved && msgs.every((m) => m.role === 'agent' && !!m.greeting);
   const showIntroExamples =
     introLanding && !introInteracted && !typed && voiceState === 'idle' && !busy;
+  const pickerProgress = useRef(new Animated.Value(0)).current;
+  const [pickerVisible, setPickerVisible] = useState(false);
+  useEffect(() => {
+    if (platformPickerOpen) setPickerVisible(true);
+    // Calm and mirrored: the sheet eases OUT on the way up and IN on the way down — the same path
+    // both ways, no overshoot (nothing here carried a flick). Reduced motion: no motion at all.
+    const animation = Animated.timing(pickerProgress, {
+      toValue: platformPickerOpen ? 1 : 0,
+      duration: reducedMotion ? 0 : platformPickerOpen ? 240 : 170,
+      easing: platformPickerOpen ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    });
+    animation.start(({ finished }) => { if (finished && !platformPickerOpen) setPickerVisible(false); });
+    return () => animation.stop();
+  }, [platformPickerOpen, pickerProgress, reducedMotion]);
+  const openPlatformPicker = () => {
+    setPlatformPickerSearch('');
+    setPlatformPickerOpen(true);
+  };
+  const closePlatformPicker = () => {
+    setPlatformPickerOpen(false);
+    setPlatformPickerSearch('');
+  };
+  const choosePlatform = (source: string | null) => {
+    setPickerSourceExplicit(true);
+    setSelectedSources(names => source === null ? [] : togglePickerSource(names, source));
+    // Lighting a site keeps the sheet open so several can be picked in one visit; only «كل المواقع», the ✕
+    // or a tap outside closes it (owner 2026-10-10: «it doesn't take him out … till he clicks x»).
+    if (source === null) { setPickerRegion(null); closePlatformPicker(); }
+  };
 
   return (
     // DARK MODE IS GLOBAL AND STICKY (owner 2026-08-30, reverses the 2026-08-29 "white by design"
@@ -3085,7 +4224,13 @@ export default function Agent() {
     // color on this screen already flows through the `colors.*` CSS-var tokens (theme/tokens.ts),
     // which are dark-reactive by construction, so this screen was always dark-CAPABLE; only the
     // ForceLightTheme wrapper was overriding it back to light. See verify-theme-contract.ts.
-    <View style={{ flex: 1, backgroundColor: colors.paper }}>
+    // Owner 2026-10-03: «beside me on my right is the tabs» — the ad pane sits on the PHYSICAL right
+    // in BOTH languages (his explicit word, even in Arabic RTL; his reference is the Claude desktop
+    // app's layout). Under dir=rtl a plain 'row' flows right→left and would put the second child on
+    // the LEFT, so the direction is pinned per-locale instead of left to the document's dir.
+    <View style={{ flex: 1, flexDirection: locale === 'ar' ? 'row-reverse' : 'row', backgroundColor: colors.paper }}>
+    {/* The results column. A row so the in-app ad viewer can sit BESIDE it, full height (split). */}
+    <View style={{ flex: 1 }}>
       {/* Sketch backdrop behind the chat. The bottom fade is pushed all the way down (0.8→1, same as
           Home) so the landmarks fill the whole frame — including the center, which used to wash out
           to plain white during "Ezhalah is searching…". A light opacity + paper scrim keep it faint
@@ -3102,7 +4247,7 @@ export default function Agent() {
             // hitSlop is a NO-OP on react-native-web; the 44px floor comes from
             // TAP_TARGET_CSS via this marker (ops_incident #17).
             // @ts-expect-error web-only DOM props on the RNW host node
-            dataSet={{ ...TAP44 }}
+            dataSet={{ ...TAP44, consentKeep: '1' }}
             onPress={() => setSidebarOpen(true)}
           >
             <Ionicons name="menu" size={22} color={colors.ink} />
@@ -3114,19 +4259,22 @@ export default function Agent() {
             identifies the screen, so the old collapsing "✨ Ezhalah AI Agent"→"Ezhalah" title and the
             small تصفية button are both replaced by the shared two-tab control (same spot as home's,
             so switching reads as one continuous control). (owner top-nav redesign, 2026-07-24.) */}
-        <Text ref={noTranslateRef} style={s.title}>{t('Ezhalah')}</Text>
+        {/* PHONE ONLY (owner 2026-10-04: «for a phone show this ezhalah but laptop just show the ezhalah
+            near the logo»). On a laptop the docked sidebar already carries the logo + name. */}
+        {!docked ? <Text ref={noTranslateRef} style={s.title}>{t('Ezhalah')}</Text> : null}
         <View style={{ flex: 1 }} />
         {/* Logged-out sign-in (mobile only — desktop has the docked sidebar CTA). Owner 2026-08-19. */}
-        {!user && !docked && (
+        {/* NEVER FOR A SIGNED-IN USER, NOT EVEN FOR A MOMENT (owner 2026-10-18: «when I open Ezhalah logged in, the sign up / log in button shows then goes away»). During the session restore `user` is null, so `!user` alone drew it for every signed-in visitor; it waits for authChecked (store.tsx), exactly like SignInCard. */}
+        {authChecked && !user && !docked && (
           <Pressable
-            style={s.topSignIn}
+            style={[s.topSignIn, !topBarRoomy && s.topSignInNarrow]}
             onPress={openAuth}
             hitSlop={6}
             // @ts-expect-error web-only DOM props on the RNW host node
             dataSet={{ ...TAP44 }}
           >
-            <Ionicons name="person-outline" size={15} color="#fff" />
-            <Text style={s.topSignInText}>{t('Sign up / Log in')}</Text>
+            {topBarRoomy ? <Ionicons name="person-outline" size={15} color="#fff" /> : null}
+            <Text style={s.topSignInText}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
           </Pressable>
         )}
         {/* Note #5 — Share is ALWAYS visible the moment the user is in AI Agent mode. Not gated on
@@ -3134,15 +4282,29 @@ export default function Agent() {
         {/* Redesigned to match the home screen's share button (design review 2026-07-24) — same
             tint fill/hairline/height/radius as ModeSwitch's own track, so the pill + share cluster
             reads as one continuous control across both screens, not just within one. */}
+        {/* The SAME labelled «مشاركة» pill as the Filter screen (owner 2026-10-17: the bare box-arrow
+            glyph here was not read as "share"). Same icon, label, breakpoint and styles as index.tsx. */}
+        {/* The phone's OWN share menu first, exactly like the Filter screen (owner 2026-10-18: our drawn
+            WhatsApp/X/Telegram sheet looked «fake»). Our sheet stays only as the fallback where the
+            device has no usable share menu (desktop — see shareNative()). */}
         <Pressable
-          onPress={() => setShareOpen(true)}
-          style={({ pressed }) => [s.shareIcon, pressed && s.shareIconPressed]}
+          onPress={async () => { if (await shareThisChat()) return; if (!(await shareNative())) setShareOpen(true); }}
+          style={({ pressed, hovered }: any) => [
+            s.shareIcon,
+            s.shareIconWide,
+            !topBarRoomy && s.shareIconNarrow,
+            hovered && s.shareIconHover,
+            pressed && s.shareIconPressed,
+          ]}
           hitSlop={8}
           onPressIn={() => shareSpring(0.94)}
           onPressOut={() => shareSpring(1)}
+          accessibilityRole="button"
+          accessibilityLabel={t('Share')}
         >
-          <Animated.View style={{ transform: [{ scale: shareScale }] }}>
-            <Ionicons name="share-outline" size={19} color={colors.chipIcon} />
+          <Animated.View style={[s.shareInner, { transform: [{ scale: shareScale }] }]}>
+            <Ionicons name="share-social-outline" size={17} color={colors.primary} />
+            <Text style={s.shareText}>{chatLinkCopied ? t('Copied!') : t('Share')}</Text>
           </Animated.View>
         </Pressable>
       </View>
@@ -3150,13 +4312,178 @@ export default function Agent() {
           pill, owner 2026-08-16: "it stays in the middle, not far right"). Fades + collapses away
           the moment a search happens, in either mode; the wrapper's animated height keeps the chat
           area from snapping up when it leaves. */}
-      {!modeGone && (
+      {/* The SAME website strip as the Filter home, in the same spot under the header, on the EMPTY landing
+          only — it leaves with the landing title (introLanding). Its phase comes from the wall clock, so
+          Filter ⇄ الوسيط الذكي reads as one strip that never stopped (owner 2026-10-09 round 3). */}
+      {introLanding ? <View style={s.landingStrip}><HomeWebsiteStrip /></View> : null}
+      {shouldRenderModeSwitch(modeGone, replay, openingSaved) && (
         <View style={[s.modeWrap, MODE_EASE, modeSearched && s.modeWrapHidden]}>
           <ModeSwitch active="agent" onSwitch={() => router.replace('/')} t={t} />
         </View>
       )}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
+      {pickerVisible && (
+        <Animated.View style={[s.platformPickerOverlay, !pickerSheet && s.platformPickerOverlayCard, { opacity: pickerProgress }]} testID="platform-picker" pointerEvents="box-none">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('Close')}
+            onPress={closePlatformPicker}
+            style={s.platformPickerBackdrop}
+          />
+          {/* Perplexity-style mode menu (owner 2026-10-09): a bottom sheet on a phone, a compact floating
+              card on a laptop. Rows are logo + name (+ the measured coverage line, one quiet line) + a
+              check at the far end; the user may light several — each tap closes, the next opens again. */}
+          <Animated.View
+            style={[
+              s.platformPickerCard,
+              pickerSheet ? [s.platformPickerCardSheet, { paddingBottom: insets.bottom + 12 }] : s.platformPickerCardFloating,
+              {
+                opacity: pickerProgress,
+                transform: pickerSheet
+                  ? [{ translateY: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [36, 0] }) }]
+                  : [
+                      { translateY: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) },
+                      { scale: Platform.OS === 'web' ? 1 : pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) },
+                    ],
+              },
+            ]}
+          >
+            {pickerSheet ? <View style={s.platformPickerGrabber} /> : null}
+            <View style={s.platformPickerHeader}>
+              <View style={s.platformPickerHeading}>
+                <Text style={s.platformPickerTitle}>{t('Deep search across websites')}</Text>
+                <Text style={s.platformPickerSubtitle}>{t('Focus your search on one or more specific websites. We show only their listings.')}</Text>
+                <Text testID="platform-picker-limit" style={[s.platformPickerSubtitle, selectedSources.length >= MAX_PICKER_SOURCES && { color: colors.primary }]}>
+                  {t('You can choose up to 5 websites')}
+                </Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('Close')}
+                onPress={closePlatformPicker}
+                hitSlop={8}
+                style={({ pressed }: any) => [s.platformPickerClose, pressed && s.platformPickerClosePressed]}
+              >
+                <Ionicons name="close" size={18} color={colors.body} />
+              </Pressable>
+            </View>
+
+            <ScrollView
+              style={s.platformPickerList}
+              contentContainerStyle={s.platformPickerListContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={true}
+            >
+              <PickerRegionsMap
+                locale={locale}
+                t={t}
+                fontFamily={CHAT_FONT}
+                selectedRegion={pickerRegion}
+                coveredRegions={pickerCoveredRegions}
+                counts={pickerRegionCounts}
+                listings={pickerRegionListings}
+                totalCount={offeredPlatforms.length}
+                onSelectRegion={(id) => setPickerRegion((current) => (current === id ? null : id))}
+                compact={pickerSheet}
+              />
+
+              {/* Step 2 (owner 2026-10-10): the websites — searched by name or picked from the list below. */}
+              <Text accessibilityRole="header" style={[s.platformPickerStep, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>{t('Step 2 · Choose the websites')}</Text>
+              <View style={s.platformPickerSearchBox}>
+                <Ionicons name="search-outline" size={17} color={colors.muted} />
+                <TextInput
+                  value={platformPickerSearch}
+                  onChangeText={setPlatformPickerSearch}
+                  placeholder={t('Search websites…')}
+                  placeholderTextColor={colors.muted}
+                  style={s.platformPickerSearchInput}
+                  accessibilityLabel={t('Search websites…')}
+                  returnKeyType="search"
+                />
+                {platformPickerSearch ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('Clear all')}
+                    onPress={() => setPlatformPickerSearch('')}
+                    hitSlop={8}
+                  >
+                    <Ionicons name="close-circle" size={17} color={colors.muted} />
+                  </Pressable>
+                ) : null}
+              </View>
+              <Pressable
+                testID="platform-picker-all"
+                accessibilityRole="button"
+                accessibilityLabel={t('All websites')}
+                onPress={() => choosePlatform(null)}
+                style={({ pressed }: any) => [s.platformPickerItem, pressed && s.platformPickerItemPressed]}
+              >
+                <View style={s.platformPickerLogoFrame}>
+                  <Image source={require('../../assets/icons/eagle-search.svg')} style={{ width: 24, height: 24 }} contentFit="contain" tintColor={colors.primary} accessible={false} />
+                </View>
+                <View style={s.platformPickerItemCopy}>
+                  <Text style={[s.platformPickerItemName, !selectedSources.length && s.platformPickerItemNameOn]}>{t('All websites')}</Text>
+                  <Text style={s.platformPickerItemHint}>{t('Search across Saudi Arabia')}</Text>
+                </View>
+                {!selectedSources.length ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
+              </Pressable>
+
+              <View style={s.platformPickerRule} />
+              {pickerPlatforms.map((platform, index) => {
+                const selected = selectedSources.includes(platform.name);
+                // At the limit, a site not already chosen cannot be added: the row is dimmed and inert, so the
+                // tap neither closes the sheet nor silently does nothing (togglePickerSource refuses it too).
+                const atLimit = !selected && selectedSources.length >= MAX_PICKER_SOURCES;
+                const profile = PLATFORM_PICKER_PROFILES[platform.name];
+                // What the site is and where it covers — the measured coverage sentence, one quiet line
+                // under the name, never truncated (owner 2026-10-09 round 2: «it had a sentence and
+                // regions — I don't like how you removed it»). Regions head the sections: the nationwide
+                // sites first, then one section per region for the offices that cover one place.
+                const description = profile[locale];
+                const group = profile.group[locale];
+                // A tapped map region is the one heading (owner 2026-10-10: «say the region title, then the
+                // websites»); otherwise the measured-coverage sections.
+                const startsGroup = pickerRegion !== null ? index === 0 : index === 0 || PLATFORM_PICKER_PROFILES[pickerPlatforms[index - 1].name].group[locale].key !== group.key;
+                const sectionLabel = pickerRegion !== null ? t('Websites covering {region}', { region: regionLabel(pickerRegion, locale) }) : group.label;
+                // The reviewed 96×48 logo layout, drawn into a 56×28 slot.
+                const k = 28 / 48;
+                return (
+                  <View key={platform.name} style={{ width: '100%' }}>
+                    {startsGroup ? <Text accessibilityRole="header" style={[s.platformPickerSectionTitle, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>{sectionLabel}</Text> : null}
+                    <Pressable
+                      testID={`platform-picker-${platform.name}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${t(platform.i18nKey)}. ${description}`}
+                      accessibilityState={{ selected, disabled: atLimit }}
+                      aria-pressed={selected}
+                      disabled={atLimit}
+                      onPress={() => choosePlatform(platform.name)}
+                      style={({ pressed }: any) => [s.platformPickerItem, selected && s.platformPickerItemOn, pressed && s.platformPickerItemPressed, atLimit && { opacity: 0.4 }]}
+                    >
+                      <View style={s.platformPickerLogoFrame}>
+                        <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width * k, height: profile.layout.height * k, left: profile.layout.left * k, top: profile.layout.top * k }} contentFit="contain" accessible={false} />
+                      </View>
+                      <View style={s.platformPickerItemCopy}>
+                        <Text style={[s.platformPickerItemName, selected && s.platformPickerItemNameOn, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>
+                          {t(platform.i18nKey)}
+                        </Text>
+                        <Text style={[s.platformPickerItemHint, { textAlign: locale === 'ar' ? 'right' : 'left', writingDirection: locale === 'ar' ? 'rtl' : 'ltr' }]}>
+                          {description}
+                        </Text>
+                      </View>
+                      {/* While a region is tapped: this site's measured listings there (owner: real numbers). */}
+                      {pickerRegion !== null ? <Text style={s.platformPickerItemCount}>{t('{count} listings', { count: platformRegionListings(platform.name, pickerRegion).toLocaleString('en-US') })}</Text> : null}
+                      {selected ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
+                    </Pressable>
+                  </View>
+                );
+              })}
+              {!pickerPlatforms.length ? <Text style={s.platformPickerEmpty}>{t('No matching websites')}</Text> : null}
+            </ScrollView>
+          </Animated.View>
+        </Animated.View>
+      )}
 
       <KeyboardAvoidingView
         // iOS-NATIVE does its own lifting and still needs this. On WEB the root is pinned to the
@@ -3173,21 +4500,19 @@ export default function Agent() {
         <ScrollView
           ref={scrollRef}
           style={{ flex: 1 }}
-          contentContainerStyle={[s.scroll, { paddingBottom: 16 }]}
+          contentContainerStyle={[s.scroll, { paddingBottom: 16 }, introLanding && s.introScroll]}
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={onGrow}
+          onScroll={maybeRevealOnScroll}
+          scrollEventThrottle={64}
         >
           <View style={s.col}>
-            {(() => { const lastId = msgs[msgs.length - 1]?.id; return msgs.map((m) => {
+            {(() => { const lastId = msgs[msgs.length - 1]?.id; const latestResult = msgs.filter(x => x.role === 'results').slice(-1)[0]; return msgs.map((m) => {
               if (m.role === 'user') {
-                // User messages ALWAYS sit on the user side (alignSelf: 'flex-end') regardless of the
-                // message language — the page direction (RTL/LTR) decides which screen edge that is.
-                // Only the TEXT inside the bubble follows its own writingDirection so Arabic still reads
-                // right-to-left and English left-to-right. The bubble never jumps sides because the
-                // message language changed. (user request.)
+                // Owner: English bubbles sit on the left; Arabic bubbles sit on the right.
                 const rtl = msgRTL(m.text);
                 return (
-                  <View key={m.id} style={s.userBubble}>
+                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={[s.userBubble, { alignSelf: rtl ? 'flex-end' : 'flex-start' }]}>
                     <Text style={[s.userText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
                       {m.typing ? <Typer text={m.text} onDone={onBubbleDone} /> : m.text}
                     </Text>
@@ -3200,24 +4525,34 @@ export default function Agent() {
                 // The branded slogan + search summary are NOT shown here anymore (owner: keep loading
                 // clean/focused); they still appear in the RESULTS bubble below, unchanged. RTL is
                 // handled inside SearchLoader (the message column is LTR-pinned).
-                return <SearchLoader key={m.id} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} />;
+                // An Advanced Filter round: one sentence of the user's picks, each landing in turn (owner 2026-10-11).
+                if (m.afRound) return <AfRoundLoader key={m.id} items={m.afRound.items} pools={m.afRound.pools} exiting={m.exiting} fontFamily={CHAT_FONT} />;
+                return <View key={m.id} ref={m.id === loaderId ? loaderNodeRef : undefined} collapsable={false}><SearchLoader bottomInset={loaderBottomInset} settleTop={loaderSettleTop} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} /></View>;
               }
               if (m.role === 'agent') {
-                // Per-message direction: each AI reply renders in its OWN language's direction and
-                // stays put even if the next message flips. ARABIC reply → the whole row is RTL and
-                // anchored to the RIGHT (sparkle on far right, Arabic text flows right → left to its
-                // left). ENGLISH reply → row is LTR and anchored to the LEFT (sparkle on far left,
-                // English text flows left → right to its right). Earlier rows never move when a new
-                // message in the other language arrives. (user request.)
-                const txt = m.greeting ? greetingText(locale) : m.text;
+                if (m.greeting) {
+                  if (!introLanding) return null;
+                  const [title, subtitle] = greetingText(locale).split('\n');
+                  return (
+                    <View key={m.id} testID="intro-greeting" style={s.greeting}>
+                      <Text style={[s.greetingText, locale === 'en' && s.greetingEn]}>{title}</Text>
+                      {!!subtitle && <Text style={[s.greetingSubtitle, locale === 'en' && s.greetingEn]}>{subtitle}</Text>}
+                    </View>
+                  );
+                }
+                // Per-message direction: each reply follows its own language: Arabic on the right with the sparkle on the right; English on the left.
+                // The last gate (owner 2026-10-11): no dash mark in any message, and every message ends with an emoji.
+                const txt = botMessage(m.text);
                 const rtl = msgRTL(txt);
+                // Stop's quiet line: muted, no sparkle, the reply's own side (ChatGPT «Stopped searching»).
+                if (m.stopNote) {
+                  return <Text key={m.id} testID="chat-stop-note" style={[s.stopNote, { alignSelf: rtl ? 'flex-end' : 'flex-start', writingDirection: rtl ? 'rtl' : 'ltr' }]}>{txt}</Text>;
+                }
                 return (
-                  <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: '88%' }}>
+                  <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: IS_WEB ? '76%' : '88%' }}>
                     <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row' }]}>
-                      <View style={s.replyIcon}>
-                        <Ionicons name="sparkles" size={14} color={colors.primary} />
-                      </View>
-                      <Text testID={m.greeting ? 'intro-greeting' : undefined} style={[s.replyText, m.greeting && s.greetingText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
+                      <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
+                      <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
                         {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
                       </Text>
                     </View>
@@ -3238,7 +4573,7 @@ export default function Agent() {
               // results — STRICT ORDER (user request, repeated as a bug fix): slogan → summary →
               // result intro → sort line → property cards. Slogan + summary persist from the searching
               // status into the same bubble (no duplicate slogan/summary block, no out-of-order intro).
-              const rtl = msgRTL(m.text);
+              const rtl = msgRTL(m.summary || m.text);
               // Hoisted out of the RESULT INTRO block below (§3) so Read Aloud speaks the EXACT
               // same sentence the reply types on screen — one computation, never a second copy that
               // could drift from what's actually shown.
@@ -3252,41 +4587,72 @@ export default function Agent() {
               // Same helper the mining overlay quotes (src/data/search.ts) — one definition of "the
               // total we may state", so the interview's closing beat and this headline, describing the
               // SAME search, can never name two different numbers. null ⇒ no honest count ⇒ say nothing.
+              // Prime the DB-side Results-Found pool once — idempotent, fire-and-forget. The baked
+              // pool serves this render; a live DB edit reaches later renders without a deploy.
+              primeResultsFound();
               const introTotal = quotableTotal(m.result);
-              const introText = introZeroResult
-                ? (m.result.suggestion ?? t('No exact matches — try broadening your search.'))
+              // Results-Found rotation (owner rule 2026-09-19): four pools keyed on (lang, hasName)
+              // via pickResultsFoundSentence. {count} = the exact backend total, formatted here so
+              // digits stay English-locale consistent with the rest of the app. {name} for the
+              // logged-in variants comes from the SAME AuthUser field the account menu already
+              // renders — nameAr for ar, nameEn for en. A guest (or a missing display name) picks
+              // the guest pool and no name substitution runs. The retired fixed sentence
+              // «لقينا {n} إعلان يطابق طلبك.» has no baked/DB fallback: the picker rotates from
+              // search #1.
+              const rfLang: 'ar' | 'en' = msgRTL(m.summary || m.text) ? 'ar' : 'en';
+              const replyT = (key: string, vars?: Record<string, string | number>) => translate(rfLang, key, vars);
+              // pickName = the SAME function the sidebar and account menu print the name with. The
+              // old fallback (nameAr, else the raw name) printed the Latin name whenever nameAr was not filled
+              // yet, so an Arabic sentence greeted «يا Yusuf Saleh …» while the sidebar said «يوسف» (owner
+              // screenshot 2026-10-03). pickName never returns Latin letters for Arabic.
+              const rfName = user ? pickName(user, rfLang) : null;
+              // No-Results rotation (owner rule 2026-09-26): noResultsSuggestion() in src/data/search.ts
+              // has ~9 branches — 8 give an EARNED, specific diagnosis ("this district has other
+              // types", "did you mean X city") and stay exactly as they render today. Only its LAST
+              // branch — the true generic catch-all, tagged by NO_RESULTS_GENERIC_FALLBACK_EN — is a
+              // rotation across the owner's 80 messages, same (lang, hasName) shape as
+              // pickResultsFoundSentence above.
+              const isGenericNoResults = introZeroResult && m.result.suggestion === replyT(NO_RESULTS_GENERIC_FALLBACK_EN);
+              const introTextRaw = introZeroResult
+                ? (isGenericNoResults
+                    ? pickNoResultsSentence({ lang: rfLang, name: rfName ?? null, stableKey: m.id })
+                    : (m.result.suggestion ?? replyT('No exact matches — try broadening your search.')))
                 : introTotal != null
-                  ? t('We found {n} listings matching your search.', { n: introTotal.toLocaleString('en-US') })
+                  ? pickResultsFoundSentence({
+                      lang: rfLang,
+                      name: rfName ?? null,
+                      count: introTotal.toLocaleString('en-US'),
+                      // stableKey pins the pick to this message. Without it the typewriter
+                      // re-renders (~40 Hz) re-invoke the picker, so the sentence flips
+                      // template mid-typing — the "weird animation glitch" (owner 2026-09-19).
+                      stableKey: m.id,
+                    })
                   : m.text;
+              const introText = botMessage(introTextRaw); // same last gate as every agent bubble
               return (
-                // ARABIC: the whole assistant response (slogan + summary + intro) sits on the RIGHT,
-                // directly under the user's right-aligned message — so alignItems flex-end clusters the
-                // text blocks to the right edge with the sparkle on the right. ENGLISH: flex-start (left).
-                // The property-cards View below opts back out with alignSelf:'stretch' so cards stay
-                // full-width regardless. (user request: Arabic assistant reply on the right, not left.)
+                // Assistant text follows each message language; cards remain full width.
                 <View
                   key={m.id}
                   ref={(n: any) => { msgNodeRef.current[m.id] = n; }}
                   onLayout={(e) => { msgYRef.current[m.id] = e.nativeEvent.layout.y; }}
+                  // NEVER REMOVED, NEVER DIMMED. Removed (owner 2026-10-03: «he shouldn't go up — he's still in
+                  // that same screen»): #5400 hid every earlier results turn (`display:'none'`) while a search
+                  // loaded, which collapsed an 8,800 px thread to one screen and threw the browser to the top.
+                  // Dimmed (the fix after that) read as a washed-out ghost over the whole turn — image, text,
+                  // buttons — every time an Advanced Filter round started (owner 2026-10-11: «I don't like this
+                  // highlight … fix it»). Now an earlier turn is simply left alone: no layout change, no fade. What
+                  // marks the NEW answer is the new turn itself — the answers bubble, then its own loader and count.
                   style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%' }}
                 >
-                  {/* 1) BRANDED SLOGAN — sparkle icon + Ezhalah's personality line. The row sizes to its
+                  {/* 1) BRANDED SLOGAN — the Ezhalah mark + its personality line. The row sizes to its
                       content and is pushed to the correct edge by the parent's alignItems. ENGLISH →
-                      icon then text (reads left-to-right, clustered left). ARABIC → text then icon
-                      (icon on the far right, clustered right). */}
+                      mark then text (reads left-to-right, clustered left). ARABIC → reversed row
+                      (sparkle on the far right). */}
                   {m.slogan ? (
-                    <View style={[s.reply, { flexDirection: 'row', alignItems: 'center' }]}>
-                      {!msgRTL(m.slogan) && (
-                        <View style={s.replyIcon}>
-                          <Ionicons name="sparkles" size={14} color={colors.primary} />
-                        </View>
-                      )}
+                    <View style={[s.reply, { flexDirection: msgRTL(m.slogan) ? 'row-reverse' : 'row', alignItems: 'center' }]}>
+                      <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
                       <Text style={[s.sloganText, { writingDirection: msgRTL(m.slogan) ? 'rtl' : 'ltr', textAlign: msgRTL(m.slogan) ? 'right' : 'left' }]}>{m.slogan}</Text>
-                      {msgRTL(m.slogan) && (
-                        <View style={s.replyIcon}>
-                          <Ionicons name="sparkles" size={14} color={colors.primary} />
-                        </View>
-                      )}
+
                     </View>
                   ) : null}
                   {/* 2) SEARCH SUMMARY — what Ezhalah understood, directly under the slogan. */}
@@ -3302,33 +4668,18 @@ export default function Agent() {
                       {m.typing ? <Typer text={introText} onDone={() => markTyped(m.id)} /> : introText}
                     </Text>
                   ))()}
-                  {/* GUIDED SUMMARY + REMOVABLE PILLS (owner 2026-08-16): after the interview, briefly
-                      show what Ezhalah understood — «بناءً على: …» — and each committed answer as a
-                      removable pill. Removing one rebuilds the query from the interview's baseQ with
-                      the remaining facets and re-searches immediately. */}
+                  {/* COMMITTED ANSWERS AS CHIPS (owner 2026-10-03). The «بناءً على: …» sentence that used
+                      to sit here is now part of the summary above — «ملخص البحث» continues with one
+                      labelled line per answer — so it is not said twice. The chips stay, read-only. */}
                   {guidedPills && guidedPills.msgId === m.id && guidedPills.facets.length ? (
                     <View style={{ alignSelf: 'stretch', gap: 7, marginTop: 2 }}>
-                      <Text style={[s.guidedBasedOn, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
-                        {buildAfSummary(guidedPills.facets)}
-                      </Text>
                       <View style={[s.guidedPillRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
+                        {/* Plain chips, never pressable and never a ✕ (owner 2026-10-03). The same chip
+                            for every answer, scope or not: nothing on this row removes anything. */}
                         {guidedPills.facets.map((f, i) => (
-                          // SCOPE facets (group/type) are deliberately NOT removable (owner
-                          // 2026-08-23). Every other advanced answer only ever NARROWS, so removing
-                          // its pill widens back to a scope the user already had; removing a TYPE
-                          // pill would instead broaden the search past anything they ever asked for,
-                          // with no re-interview and no control to get it back. It renders as a plain
-                          // chip — same row, no «×», not pressable.
-                          isScopeQuestionId(f.id) ? (
-                            <View key={`${f.id}-${i}`} style={s.guidedPill}>
-                              <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
-                            </View>
-                          ) : (
-                            <Pressable key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill} onPress={() => removeGuidedFacet(i)} disabled={busy}>
-                              <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
-                              <Ionicons name="close" size={13} color={colors.primary} />
-                            </Pressable>
-                          )
+                          <View key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill}>
+                            <Text style={s.guidedPillTx}>{buildAfSummaryItems([f], rfLang).join(rfLang === 'ar' ? '، ' : ', ')}</Text>
+                          </View>
                         ))}
                       </View>
                     </View>
@@ -3342,7 +4693,7 @@ export default function Agent() {
                     // but the RESPONSE-level feedback row still belongs to this turn (owner 2026-08-30: thumbs
                     // must not vanish merely because listing count = 0; the user is rating the answer, and
                     // "nothing matched" IS an answer). Read-aloud reads the zero-result intro alone.
-                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined)} />
+                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined, locale)} />
                   ) : (
                     <>
                       {/* The default "مرتبة حسب الأقرب لطلبك" note was removed per owner request (2026-07-07).
@@ -3353,27 +4704,34 @@ export default function Agent() {
                       ) : null}
                       {/* All result cards render AT ONCE — the per-card pop-in animation was removed
                           per user request ("remove that, not nice"). The cards just appear, no fade,
-                          no scale, no stagger. Cards stay FULL-WIDTH via alignSelf:stretch even though
-                          the parent clusters text to the right for Arabic. */}
-                      <View style={{ gap: 12, marginTop: 12, alignSelf: 'stretch' }}>
+                          no scale, no stagger. The responsive grid fills the available result width
+                          while keeping the original card order in either language. */}
+                      {/* THE CARDS FOLLOW THE REPLY'S LANGUAGE (owner 2026-10-17: «the property cards should follow the language»):
+                          an English message in the Arabic app gets English cards, an Arabic one in the English app Arabic cards. */}
+                      <LocaleScope locale={(m.summary || m.text) ? (msgRTL(m.summary || m.text) ? 'ar' : 'en') : locale}>
+                      <ResultCardGrid wide={viewerSplit} cols={cardCols}>
                         {/* Live typed turn: default to 0 visible until startReveal begins the one-by-one
                             drip (prevents a full-grid flash if setDoneTyping flushes a render before
                             setRevealCount(0)). History/replay turns (not typing) show all immediately. */}
-                        {m.result.listings.slice(0, revealCount[m.id] ?? (m.typing ? 0 : initialReveal(m.result))).map((l, i) => (
+                        {m.result.listings.slice(0, revealCount[m.id] ?? (m.typing ? 0 : initialReveal(m.result, m.afCompleted))).map((l, i) => (
                           // CardIn = soft mount-in (fade + slight rise). Keyed by source:id (ids are
                           // only unique per source table — matches the de-dup identity), so cards
                           // already on screen NEVER re-animate — only newly-revealed ones enter softly.
-                          <CardIn key={`${l.source}:${l.id}`}>
+                          <CardIn key={`${l.source}:${l.id}`} {...cardInMotion(m.id, i)}>
+                            <DeadCardShade dead={goneKeys.has(cardKey(l) ?? '')}>
                             <MemoResultCard
                               listing={l}
                               variant="compact"
                               rank={i + 1}
+                              row={cardRow}
                               activeAf={activeAf}
-                              onOpen={() => { trackOpen(l); void openListing(l); }}
+                              onOpen={() => { trackOpen(l); openAd(l); }}
                             />
+                            </DeadCardShade>
                           </CardIn>
                         ))}
-                      </View>
+                      </ResultCardGrid>
+                      </LocaleScope>
                       {/* MORE-RESULTS message + actions (user 2026-06-27, paging owner 2026-07-08): a NORMAL
                           assistant message shown once the first 10 are on screen and MORE matches exist.
                           Correctness: the RPC filtered the FULL matching set before any cap, so we page it —
@@ -3382,12 +4740,12 @@ export default function Agent() {
                           ألقى نتائج أدق» asks ONE clarifying question then re-searches. */}
                       {(() => {
                         const fetched = m.result.listings.length;
-                        const shown = revealCount[m.id] ?? (m.typing ? 0 : initialReveal(m.result));
+                        const shown = revealCount[m.id] ?? (m.typing ? 0 : initialReveal(m.result, m.afCompleted));
                         const serverMore = !!m.result.hasMore; // the DB still has more matching pages to fetch
                         // Show once this page's cards are on screen. Gate on (typing && !doneTyping) — the SAME
                         // condition the cards use — NOT on `m.typing` alone: a live results message keeps typing=true
                         // even after the intro finishes (only doneTyping flips), so gating on m.typing hid this block.
-                        // min(FIRST_PAGE, fetched): a search with <10 matches still gets its closing message.
+                        // min(platforms, fetched): a search with fewer matches than the reveal target still gets its closing message.
                         // ALSO gates FeedbackRow/Read Aloud below (merged into one block, owner 2026-08-23 — the
                         // spoken closing note must reuse this SAME computed text, never re-derive it separately).
                         //
@@ -3401,10 +4759,18 @@ export default function Agent() {
                         // `[data-testid="results-load-more"]` matched zero elements anywhere. 20 cards, no way
                         // to reach the other 6,703. The decision now lives in one pure, exhaustively-tested
                         // predicate that withholds only while THIS turn's cascade is genuinely still running.
+                        if (restoringId === m.id) {
+                          return (
+                            <View testID="results-restoring" style={{ flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 8, marginTop: 14 }}>
+                              <ActivityIndicator size="small" color={colors.muted} />
+                              <Text style={[s.replyText, { color: colors.muted }]}>{replyT('Loading the rest of your listings…')}</Text>
+                            </View>
+                          );
+                        }
                         if (!resultsRowIsReady({
                           introStillTyping: !!(m.typing && !doneTyping[m.id]),
                           shown,
-                          initialReveal: initialReveal(m.result),
+                          initialReveal: initialReveal(m.result, m.afCompleted),
                           cascadeStarted: !!dripStartedRef.current[m.id],
                           cascadeRunningForThisTurn: revealing && revealActiveRef.current?.id === m.id,
                         })) return null;
@@ -3431,20 +4797,27 @@ export default function Agent() {
                         const hasMore = rc.hasMore && isLatestResults;
                         // Quote an exact match total ONLY when it is trustworthy (whole filter ran server-side).
                         const quoteTotal = !clientNarrowed;
-                        // ≤50 RULE (owner brief 2026-08-19 item 4, threshold raised 25 → 50 by the owner product
-                        // rule of 2026-09-04; the live value is INTERVIEW_STOP_AT in src/lib/afRanking.ts):
+                        // THE STOP-LINE RULE (owner brief 2026-08-19 item 4; the threshold went 25 → 50 on
+                        // 2026-09-04 and back to 25 on 2026-09-20 — never quote a digit here, the live value
+                        // is INTERVIEW_STOP_AT in src/lib/afRanking.ts):
                         // the auto-opening AF intro already
                         // correctly gated on this same threshold (agent.tsx ~1375) — this SEPARATE manual
                         // button did not, and its click path (startAgeFlow → rankQuestions, which itself
-                        // floors on the SAME MIN_TOTAL_TO_SHOW=51 constant) fell through to the plain
-                        // refine-chip flow for any ≤50 scope rather than doing nothing. A ≤50 result set
+                        // floors on the SAME MIN_TOTAL_TO_SHOW constant, INTERVIEW_STOP_AT + 1) fell through
+                        // to the plain refine-chip flow for any at-or-below-the-line scope rather than doing
+                        // nothing. A result set at or below the line
                         // gets ONLY the normal lightweight actions (Load more if genuinely more exists,
                         // FeedbackRow below) — never a "narrow further" prompt when there is nothing
                         // useful left to narrow.
                         // …AND (owner 2026-08-24) only when a round would actually have something
                         // truthful to ask: afCanNarrow[m.id] is the offer probe's verdict (above).
                         // Absent = not yet resolved ⇒ hidden, never a button that cannot deliver.
-                        const canNarrowFurther = rawTotal > INTERVIEW_STOP_AT && isLatestResults && afCanNarrow[m.id] === true;
+                        // …AND only while there is UNSEEN inventory to narrow into (owner 2026-09-14):
+                        // once every match is on screen (a ≤500 search fully shown), narrowing can
+                        // reveal nothing new, so «تحديد أكثر» retires and the terminal message points
+                        // to a fresh search via ☰. It STAYS in the >500 terminal (shown 500 < total),
+                        // which is the only terminal that keeps the button.
+                        const canNarrowFurther = rawTotal > INTERVIEW_STOP_AT && isLatestResults && shown < trueTotal && afCanNarrow[m.id] === true;
                         // fetching = THIS message's page fetch; cascading = THIS message's card drip.
                         // Only the owning message's button shows the dots (review fix: a global flag
                         // was falsely lighting every visible «عرض المزيد»).
@@ -3460,12 +4833,27 @@ export default function Agent() {
                         // withhold the pager from a user with thousands of matches. The predicate is
                         // now exhaustive over the phase union and fails the BUILD if a new phase is
                         // added without a decision. Behaviour today is identical by construction.
-                        // ONE terminal signal for the composer lock AND the pager (owner 2026-09-06,
-                        // `final=50`): once the AF round narrows to ≤ INTERVIEW_STOP_AT the chat is
+                        // ONE terminal signal for the composer lock AND the pager (owner 2026-09-06; the
+                        // rule was named `final=50` after the stop line OF THAT DAY — the live line is
+                        // INTERVIEW_STOP_AT, never a digit written here):
+                        // once the AF round narrows to ≤ INTERVIEW_STOP_AT the chat is
                         // completed — the composer locks and every match is already revealed, so the
                         // «عرض المزيد» row must be gone too. `completed` gates it here, alongside the
                         // existing interview-owns-browsing and has-something-to-offer clauses.
-                        const showActionsRow = resultsActionsRowVisible({
+                        //
+                        // A TURN THAT ALREADY HAS A RECEIPT HAS NO ACTIONS LEFT (owner 2026-09-20:
+                        // "once user finishes with the advanced filter … let this message immediately
+                        // show"). The receipt string is written the instant finishGuided runs, but it
+                        // renders in the `else` of this flag — so until today the origin turn kept its
+                        // «عرض المزيد / خلّنا نحدد الطلب أكثر» row for the whole ~10s the new search
+                        // took, because `chatCompleted` only flips in runRefine's onFetched. The wait
+                        // was never a timer to tune; it was this gate resolving late.
+                        //
+                        // Gating HERE, not by reordering the JSX below, is what keeps the closing note
+                        // honest: `showActionsRow` also feeds `moreNoteText` and the Read-Aloud script,
+                        // so the note drops its «تبي أعرض لك المزيد؟» offer in the same frame the buttons
+                        // go — never promising a button that is not on screen (§42 visible-output contract).
+                        const showActionsRow = !afReceipt[m.id] && resultsActionsRowVisible({
                           hasMore,
                           canNarrowFurther,
                           afPhase: ageFlow?.phase ?? null,
@@ -3497,24 +4885,39 @@ export default function Agent() {
                         const offersNarrow = canNarrowFurther && showActionsRow;
                         // The KEY comes from the pure module that already owns the counts, so the gate and
                         // the sentence can never disagree and one exhaustive test locks both.
-                        const moreNoteText = t(
-                          closingNoteKey({ endKind: rc.endKind, quoteTotal, offersMore, offersNarrow }),
+                        const moreNoteText = replyT(
+                          // `chatClosed` is the ONE fact here that is about the conversation rather
+                          // than this turn: with the composer locked this turn will never gain a
+                          // button, so a button-less note is the end of the road and must name the
+                          // way out (ops_incident #598). In an OPEN chat a button-less older turn
+                          // stays quiet exactly as before — the newest turn below it is where the
+                          // user acts.
+                          closingNoteKey({ endKind: rc.endKind, quoteTotal, offersMore, offersNarrow, lastTapOffer: rc.lastTapOffer, cappedAtCap: rc.cappedAtCap, chatClosed: completed }),
                           {
                             shown: rc.endShown.toLocaleString('en-US'),
                             total: rc.endTotal.toLocaleString('en-US'),
                             n: (rc.endKind === 'more' ? rc.endShown : (clientNarrowed ? rc.endShown : rc.endTotal)).toLocaleString('en-US'),
+                            // {next}: the FIRST-tap cumulative target — "I will show the first {next}"
+                            // — from the SAME function the button pages with (revealTarget), clamped to
+                            // what exists (47 on a 47-match search, 100 on a 9,892-match one).
+                            next: revealTarget(rc.endShown, rc.endTotal).toLocaleString('en-US'),
+                            // {rest}: the LAST-tap REMAINING — how many MORE this final tap adds on top
+                            // of the {shown} already on screen = revealTarget − shown (owner 2026-09-15).
+                            // 100 shown of 387 → «حتى 287» (387−100); of 9,892 → «حتى 400» (500−100).
+                            // NOT the cumulative total, which double-counts the 100 already displayed.
+                            rest: Math.max(0, revealTarget(rc.endShown, rc.endTotal) - rc.endShown).toLocaleString('en-US'),
                           },
                         );
                         // Read Aloud closing note (owner request, 2026-08-23: "read the note... and say the
                         // button also") — names the SAME button label(s) actually rendered below, in the same
                         // order, so it can never mention an action that isn't on screen to tap.
-                        const spokenActionLabels = [hasMore && t('Load more'), canNarrowFurther && t('Let’s narrow it down')].filter(Boolean) as string[];
+                        const spokenActionLabels = [hasMore && replyT('Load more'), canNarrowFurther && replyT('Let’s narrow it down')].filter(Boolean) as string[];
                         const spokenActionsNote = !showActionsRow ? ''
                           : spokenActionLabels.length === 2
-                            ? t('You can tap {a} or {b}.', { a: spokenActionLabels[0], b: spokenActionLabels[1] })
-                            : t('You can tap {a}.', { a: spokenActionLabels[0] });
+                            ? replyT('You can tap {a} or {b}.', { a: spokenActionLabels[0], b: spokenActionLabels[1] })
+                            : replyT('You can tap {a}.', { a: spokenActionLabels[0] });
                         const readAloudClosingNote = [moreNoteText, spokenActionsNote].filter(Boolean).join(' ');
-                        const readAloudSegments = buildResultsReadAloudSegments(introText, m.result.listings.slice(0, shown), readAloudClosingNote);
+                        const readAloudSegments = buildResultsReadAloudSegments(introText, m.result.listings.slice(0, shown), readAloudClosingNote, locale);
                         return (
                           <>
                             <View style={{ gap: 8, marginTop: 14, alignSelf: 'stretch' }}>
@@ -3526,31 +4929,29 @@ export default function Agent() {
                                   المزيد» reveals everything up to the cap, so the button needs no count caption. */}
                               {/* «عرض المزيد» ALWAYS pages the next 100 (buffer reveal, then real DB fetch when spent);
                                   «خلّنا نحدد الطلب أكثر» asks ONE clarifying question then re-searches — but only
-                                  when there is genuinely more than INTERVIEW_STOP_AT=50 left to narrow. */}
+                                  when there is genuinely more than INTERVIEW_STOP_AT=25 left to narrow. */}
                               {/* HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21). Once the
                                   user taps «خلّنا نحدد الطلب أكثر», the AF interview owns this moment —
                                   the old CTA row must not sit behind it competing for the same decision.
-                                  `ageFlow` covers every AF phase (loading → intro → asking → mining), so
+                                  `ageFlow` covers every AF phase (loading → intro → asking), so
                                   the row is gone from the tap until the flow closes, and returns by itself
                                   afterwards because closing sets ageFlow back to null. The AF card is an
                                   absolute overlay, so without this gate the two buttons stayed rendered
                                   (and reachable) underneath it. */}
                               {showActionsRow ? (
-                                <View testID="results-actions" style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row', marginTop: 4 }]}>
+                                <View testID="results-actions" style={[s.mBtnRow, { flexDirection: locale === 'ar' ? 'row-reverse' : 'row', marginTop: 4 }]}>
                                   {hasMore ? (
-                                    // Active state = calm pulsing dots (owner 2026-07-09: the button must
-                                    // visibly work, not sit static) — while THIS message's page fetches or
-                                    // its new cards cascade in. Fixed min-size → zero layout shift on swap.
-                                    // Disabled during any reveal or a live turn (never two drips at once).
+                                    // Secondary now (owner 2026-09-20: gold primary is the narrow
+                                    // button below). Dots go colors.primary — the fill is white now.
                                     <Pressable
                                       testID="results-load-more"
-                                      style={({ hovered, pressed }: any) => [s.mBtnPrimary, (hovered || pressed) && !fetching && !revealing && s.mBtnPrimaryHover]}
+                                      style={s.mBtnAlt}
                                       disabled={fetching || revealing || busy}
                                       onPress={() => loadMore(m)}
                                     >
                                       {fetching || cascading
-                                        ? <LoadingDots />
-                                        : <Text style={s.mBtnPrimaryTx}>{t('Load more')}</Text>}
+                                        ? <LoadingDots color={colors.primary} />
+                                        : <Text style={s.mBtnAltTx}>{replyT('Load more')}</Text>}
                                     </Pressable>
                                   ) : null}
                                   {/* SEED THE CARRY (owner 2026-08-24) before the round opens: this
@@ -3561,22 +4962,25 @@ export default function Agent() {
                                       clean. Writing it on EVERY tap means a stale carry can never be
                                       read, and two fast taps write the same value. */}
                                   {canNarrowFurther ? (
-                                    <Pressable
-                                      testID="results-narrow"
-                                      onPress={() => {
-                                        const q = m.result.query;
-                                        const carried = guidedPills?.msgId === m.id ? guidedPills : null;
-                                        afCarryRef.current = q
-                                          ? { msgId: m.id, originQ: carried?.baseQ ?? q, facets: carried?.facets ?? [], asked: carried?.asked ?? [] }
-                                          : null;
-                                        if (q && anyGuidedEligible(q)) void startAgeFlow(q);
-                                        else startRefine(q);
-                                      }}
-                                      style={s.mBtnAlt}
-                                      disabled={busy}
-                                    >
-                                      <Text style={s.mBtnAltTx}>{t('Let’s narrow it down')}</Text>
-                                    </Pressable>
+                                    // Primary (owner 2026-09-20): gold shine + ambient pulse (CardReveal.tsx).
+                                    <GoldPulse>
+                                      <GoldShineButton
+                                        testID="results-narrow"
+                                        onPress={() => {
+                                          const q = m.result.query;
+                                          const carried = guidedPills?.msgId === m.id ? guidedPills : null;
+                                          afCarryRef.current = q
+                                            ? { msgId: m.id, originQ: carried?.baseQ ?? q, facets: carried?.facets ?? [], asked: [...new Set([...(carried?.asked ?? []), ...(afSkippedByMsgRef.current[m.id] ?? [])])] }
+                                            : null;
+                                          if (q && anyGuidedEligible(q)) void startAgeFlow(q);
+                                          else startRefine(q);
+                                        }}
+                                        style={s.mBtnPrimary}
+                                        disabled={busy}
+                                      >
+                                        <Text style={s.mBtnPrimaryTx}>{replyT('Let’s narrow it down')}</Text>
+                                      </GoldShineButton>
+                                    </GoldPulse>
                                   ) : null}
                                 </View>
                               ) : afReceipt[m.id] ? (
@@ -3589,16 +4993,19 @@ export default function Agent() {
                                    the pills use, so skipped answers can never appear here. */
                                 <View style={s.afReceipt} testID="af-round-receipt">
                                   <Text style={[s.afReceiptHead, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
-                                    {`✓ ${t('Continued with the advanced filter')}`}
+                                    {`✓ ${replyT('Continued with the advanced filter')}`}
                                   </Text>
-                                  {afReceipt[m.id] ? (
-                                    <Text
-                                      testID="af-round-receipt-choices"
-                                      style={[s.afReceiptTx, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}
-                                    >
-                                      {t('Your choices: {summary}', { summary: afReceipt[m.id] })}
-                                    </Text>
-                                  ) : null}
+                                  {/* The round, in the order it happened — answers and skips in ONE
+                                      sentence (see finishGuided). No «اخترت:» label any more: the line now
+                                      mixes both, and the head above already says what this card is.
+                                      New receipts use the interface language, including skip labels.
+                                      Older stored receipts remain verbatim as conversation history. */}
+                                  <Text
+                                    testID="af-round-receipt-choices"
+                                    style={[s.afReceiptTx, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}
+                                  >
+                                    {afReceipt[m.id]}
+                                  </Text>
                                 </View>
                               ) : null}
                             </View>
@@ -3613,7 +5020,7 @@ export default function Agent() {
                                 closing note + available actions above (owner 2026-08-23). Sliced to `shown`
                                 — never past what's actually rendered right now ("no hidden listing should be
                                 spoken") — but otherwise reads every visible card (owner 2026-08-22: no further cap). */}
-                            <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={readAloudSegments} />
+                            <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={readAloudSegments} {...shareFor(m.result.query)} />
                           </>
                         );
                       })()}
@@ -3641,16 +5048,12 @@ export default function Agent() {
             bottom edge as the box grows, and the input keeps paddingEnd so text never reaches it. */}
         {/* When the keyboard is open (web), the home-indicator safe area sits behind it, so drop
             insets.bottom and keep the composer tight above the keyboard instead of double-padding. */}
-        {/* COMPLETED SEARCH (owner 2026-08-30, composer restored 2026-09-05): Advanced Filter reached
-            the final set (R11.1) or no useful question remained (R11.2). The conversation is DONE, but
-            the composer keeps its normal look — no separate replacement card. The input goes inert
-            with an explanatory placeholder, the mic disappears, and the send arrow becomes a lock
-            (see the `completed` branches below). The real "start over" action is the hamburger, top
-            left, not a button inside the composer. The saved transcript stays readable; Back / reopen
-            restore this same state from `completed`. */}
-        <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
+        {/* COMPLETED SEARCH (owner 2026-08-30): Advanced Filter reached the final set (R11.1), or every match is
+            shown. `completed` still ends THAT search (no «عرض المزيد», the closing note), but since 2026-10-13 it
+            never locks the composer (owner: «remove the lock»): the user keeps typing, and send() reopens. */}
+        <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]} testID="agent-footer" onLayout={e => setLoaderBottomInset(Math.ceil(e.nativeEvent.layout.height))}>
           <View style={[s.col, s.composerCol]}>
-            {/* FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11; tightened 2026-09-12): the free-text
+            {/* FILTER RESULTS: after completion the composer is available below the final note (owner, 2026-10-13; supersedes the prior no-chat rule for completed searches): the free-text
                 composer never shows for a Filter-origin conversation — the disclaimer below stays
                 always-on regardless of origin (it's a listings-source legal notice, not part of
                 "the chat"). See filterOrigin's own comment above.
@@ -3663,8 +5066,11 @@ export default function Agent() {
                 undressed as a composer — no input, no pill, no placeholder — while the AI-Agent path
                 keeps its full composer (input + Stop while busy/revealing, input + mic/send once
                 idle) exactly as before. */}
-            {!filterOrigin ? (
-            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
+            {/* THE CHAT NEVER LOCKS (owner 2026-10-13: «remove the lock», superseding 2026-10-05 «hide it completely»): a
+                finished search keeps the box, and the next message simply starts the next search (send() clears
+                `completed`). ☰ still starts a clean chat. */}
+            {!filterOrigin || completed ? (
+            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused, modeSearched && s.composerNoModel]} ref={composerRef}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size
                   never jumps during the morph — one physical object changing state, not a component
@@ -3679,39 +5085,102 @@ export default function Agent() {
                   mid-transition heights and ratchets an empty box to max — observed live). The
                   textarea keeps the pre-redesign numeric-height contract; the wrapper eases to the
                   same target and clips the single frame of difference. */}
-              <View style={[s.inputGrow, INPUT_EASE, { height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) }]}>
+              {/* ONE ROW (owner 2026-10-05: «this box is still big» → «One row»): «بحث» at the far left,
+                  the text in the middle, mic + Send on the right. The chip is a flex SIBLING of the input,
+                  never laid over it, so English text starting at the left can't run into it.
+                  SHOWS ONLY AT THE START (owner 2026-10-17: «when a user sends a message, remove this search
+                  button, it just shows at the start» — supersedes 2026-10-10). While a search runs it is already
+                  gone, so nothing in the row moves mid-turn; the mic and Send/Stop keep their places. */}
+                {!modeSearched ? (
+                <Pressable
+                  testID="initial-chat-search"
+                  accessibilityRole="button"
+                  accessibilityLabel={selectedPlatforms.length ? `${t('Search')}: ${selectedPlatforms.map(p => t(p.i18nKey)).join('، ')}` : t('Search')}
+                  onPress={openPlatformPicker}
+                  hitSlop={5}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
+                  style={({ pressed }: any) => [s.initialSearch, selectedPlatforms.length > 0 && s.initialSearchSelected, pressed && s.initialSearchPressed]}
+                >
+                  {selectedPlatforms.length ? (
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={s.chipStack}
+                      contentContainerStyle={s.chipStackContent}
+                      accessible={false}
+                      importantForAccessibility="no-hide-descendants"
+                    >
+                      {/* EVERY picked site's logo, never a «+N» (owner 2026-10-09 round 2: «always show those
+                          small websites»). The strip keeps its width so the text box keeps its own; the logos
+                          shrink to fit it side by side (owner 2026-10-10: «try small … very small») — five fit
+                          at 14 px; only past the 12 px floor does it scroll sideways. */}
+                      {selectedPlatforms.map((platform, i) => {
+                        const { logo, layout } = PLATFORM_PICKER_PROFILES[platform.name];
+                        // ONE site: its logo fills the pill (owner 2026-10-10: «make it big; small only when
+                        // more than 1»). More share the strip: 22 px for two or three, smaller as more are lit.
+                        const n = selectedPlatforms.length;
+                        const single = n === 1;
+                        const W = single ? 74 : Math.max(12, Math.min(22, Math.floor((CHIP_STRIP_W - (n - 1) * CHIP_GAP) / n)));
+                        const H = single ? 24 : W;
+                        const k = Math.min((H - 2) / layout.height, (W - 2) / layout.width);
+                        return (
+                          <View key={platform.name} style={[s.chipBadge, { width: W, height: H }, i > 0 && s.chipBadgeOverlap]}>
+                            <Image source={logo} tintColor={layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: layout.width * k, height: layout.height * k, left: W / 2 - (48 - layout.left) * k, top: H / 2 - (24 - layout.top) * k }} contentFit="contain" accessible={false} />
+                          </View>
+                        );
+                      })}
+                    </ScrollView>
+                  ) : (
+                    <>
+                      <Image source={require('../../assets/icons/eagle-search.svg')} style={s.initialSearchIcon} contentFit="contain" tintColor={colors.ink} accessible={false} />
+                      <Text style={s.initialSearchText}>{t('Search')}</Text>
+                    </>
+                  )}
+                  <Ionicons name="chevron-down" size={13} color={colors.muted} />
+                </Pressable>
+                ) : null}
+              <View style={s.composerInputColumn}>
+              <View style={[s.inputGrow, INPUT_EASE, { height: composerH }]}>
               <TextInput
                 ref={inputRef}
                 // writingDirection RTL for Arabic (the parent col is LTR-pinned, so without this the
                 // placeholder's trailing «...» lands on the wrong side — it must read «…السعودية»). (owner 2026-07-09)
-                style={[s.input, { textAlign: locale === 'ar' ? 'right' : 'left', writingDirection: locale === 'ar' ? 'rtl' : 'ltr', height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) } as any]}
+                style={[s.input, { flex: 1, alignSelf: 'stretch', textAlign: typed.trim() ? (msgRTL(typed) ? 'right' : 'left') : (locale === 'en' ? 'left' : 'right'), writingDirection: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : (locale === 'en' ? 'ltr' : 'rtl'), direction: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : (locale === 'en' ? 'ltr' : 'rtl'), paddingRight: 0, paddingLeft: 0, height: composerH } as any]}
                 // While the rotating examples occupy the placeholder slot, the input's own static
                 // placeholder yields (empty string) so the two never overlap; the moment the
                 // rotation stops (any interaction) the familiar static placeholder returns.
                 // COMPLETED (owner request 2026-09-05): the box stays, it just goes inert — the
                 // placeholder explains why instead of inviting a message that can never send.
-                placeholder={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : (showIntroExamples ? '' : t("Type the property you're looking for in Saudi Arabia..."))}
+                placeholder={showIntroExamples ? '' : (modeSearched ? t("Type your property and Ezhalah...") : t("Type the property you're looking for in Saudi Arabia..."))}
                 placeholderTextColor={colors.muted}
                 selectionColor={colors.primary}
-                editable={!completed}
                 // Stable Arabic label (owner brief §11): a screen reader always hears this one
                 // sentence for the field — never the rotating examples (those are aria-hidden).
                 accessibilityLabel={t('Describe the property you are looking for')}
-                value={completed ? '' : typed}
+                value={typed}
                 onChangeText={(v: string) => { setIntroInteracted(true); setTyped(v); if (!v) setInputH(COMPOSER_MIN_H); }}
                 // Grows only as text wraps, capped at COMPOSER_MAX_H (then scrolls internally); the
                 // TARGET comes from RN's own line metrics (native + web), the MOTION from INPUT_EASE.
                 // (owner 2026-07-08 metrics; owner 2026-08-16 smooth growth.)
-                onContentSizeChange={(e: any) => setInputH(Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, e.nativeEvent.contentSize.height)))}
+                onContentSizeChange={(e: any) => setInputH(typed ? Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, e.nativeEvent.contentSize.height)) : COMPOSER_MIN_H)}
                 // Clicking/tapping into the composer counts as interaction — the rotating examples
                 // stop cleanly and the static placeholder takes over (owner brief §6).
                 onFocus={() => { setComposerFocused(true); setIntroInteracted(true); }}
                 onBlur={() => setComposerFocused(false)}
                 // The language does NOT flip while typing a chat message — it switches only when the
-                // message is SENT (see send(): an English message → English UI, Arabic → Arabic).
+                // message is SENT: replies follow its language while the interface stays unchanged.
                 // Live per-character switching is reserved for the Home filter's location field.
                 // (user request.)
                 multiline
+                // ONE line when empty (owner 2026-10-04: «when I write هلا it gets plugged in … I want the
+                // box smaller»). A <textarea> with no rows attribute is TWO lines tall, so RNW measured
+                // a 44px empty box and one word sat on the top line over a blank one. rows=1 makes the
+                // measured content height a single 22px line; growth with wrapping is unchanged.
+                // Web-only host props (RNW forwards both to the <textarea>): rows=1 and the one-line hint
+                // marker (COMPOSER_PLACEHOLDER_CSS, src/theme/palette.ts). Spread as one object because
+                // TypeScript reports two unknown props on the element itself, not per line.
+                {...({ rows: 1, dataSet: COMPOSER_INPUT } as any)}
                 // Desktop-web Enter handling lives in a raw DOM keydown listener (see the effect by
                 // inputRef): RNW's onKeyPress normalization delivered key: "" for Enter here, so the
                 // send shortcut binds below the framework. Native keeps the platform submit path.
@@ -3724,50 +5193,57 @@ export default function Agent() {
                   composer, push the mic/Send, or overflow horizontally (owner brief §7/§9). */}
               {showIntroExamples ? <IntroExampleRotator reducedMotion={reducedMotion} /> : null}
               </View>
+              </View>
+              {/* Mic — enters recording mode (owner brief §2): immediate press feedback, then the
+                  composer itself morphs. Sits immediately left of Send, same 34px control family.
+                  Hidden ONLY where isVoiceInputSupported() is false — a LIVE, capability-only
+                  runtime check with NO browser-name exclusion of any kind (owner ruling,
+                  2026-08-25: capability-based detection, never a UA guess — iOS Safari shows the
+                  mic like every other capable browser; a runtime failure there gets its own
+                  honest, specific message instead — see voiceInput.ts's own comment for the full
+                  evidence trail). Showing a mic that can only ever flash a failure toast and
+                  revert reads as broken — but hiding a mic the runtime genuinely supports, on a
+                  guess about the browser's name, is the same mistake in the other direction.
+                  While Ezhalah searches it stays in place, dimmed and inert (owner 2026-10-10: the row
+                  never rearranges mid-turn — «شاهين 2.2» sits under it). */}
+              {isVoiceInputSupported() ? (
+              <Pressable
+                testID="voice-mic"
+                onPress={() => { void startVoice(); }}
+                disabled={busy || revealing}
+                hitSlop={8}
+                // @ts-expect-error web-only DOM props on the RNW host node
+                dataSet={{ ...TAP44 }}
+                accessibilityLabel={t('Voice input')}
+                style={({ pressed }: any) => [s.micBtn, s.micLift, pressed && s.micBtnPressed, (busy || revealing) && s.sendDisabled]}
+              >
+                <Ionicons name="mic-outline" size={19} color={colors.body} />
+              </Pressable>
+              ) : null}
               {busy || revealing ? (
-                // While Ezhalah is thinking/searching OR the cards are still popping in, the Send button
-                // is a Stop box — tap it to cancel the search and freeze the cards shown. (user request.)
+                // While Ezhalah is thinking/searching OR the cards are still popping in, Send becomes Stop IN
+                // ITS OWN SLOT — same circle, same size, dark with a white square, like ChatGPT (owner
+                // 2026-10-10). Tap it to cancel the search and freeze the cards shown.
                 <Pressable
                   onPress={stop}
-                  style={s.stopBtn}
-                  hitSlop={8}
+                  style={s.rowBtnLift}
+                  hitSlop={6}
                   // @ts-expect-error web-only DOM props on the RNW host node
                   dataSet={{ ...TAP44 }}
                   accessibilityLabel={t('Stop')}
                 >
-                  <Ionicons name="stop" size={15} color="#fff" />
+                  <View style={[s.sendBtn, s.stopCircle]}>
+                    <Ionicons name="stop" size={14} color="#fff" />
+                  </View>
                 </Pressable>
               ) : (
                 <>
-                  {/* Mic — enters recording mode (owner brief §2): immediate press feedback, then the
-                      composer itself morphs. Sits immediately left of Send, same 34px control family.
-                      Hidden ONLY where isVoiceInputSupported() is false — a LIVE, capability-only
-                      runtime check with NO browser-name exclusion of any kind (owner ruling,
-                      2026-08-25: capability-based detection, never a UA guess — iOS Safari shows the
-                      mic like every other capable browser; a runtime failure there gets its own
-                      honest, specific message instead — see voiceInput.ts's own comment for the full
-                      evidence trail). Showing a mic that can only ever flash a failure toast and
-                      revert reads as broken — but hiding a mic the runtime genuinely supports, on a
-                      guess about the browser's name, is the same mistake in the other direction. */}
-                  {isVoiceInputSupported() && !completed ? (
-                  <Pressable
-                    testID="voice-mic"
-                    onPress={() => { void startVoice(); }}
-                    hitSlop={8}
-                    // @ts-expect-error web-only DOM props on the RNW host node
-                    dataSet={{ ...TAP44 }}
-                    accessibilityLabel={t('Voice input')}
-                    style={({ pressed }: any) => [s.micBtn, pressed && s.micBtnPressed]}
-                  >
-                    <Ionicons name="mic-outline" size={19} color={colors.body} />
-                  </Pressable>
-                  ) : null}
                   {/* COMPLETED (owner request 2026-09-05): the send arrow becomes a lock — same
                       composer, same button, no separate card. It never fires (the real "start
                       over" action is the hamburger, top left), so it always renders disabled. */}
                   <Pressable
                     onPress={() => send()}
-                    disabled={completed || !typed.trim()}
+                    disabled={!typed.trim()}
                     onPressIn={() => sendSpring(0.9)}
                     onPressOut={() => sendSpring(1)}
                     onHoverIn={() => { setSendHover(true); sendSpring(1.06); }}
@@ -3775,11 +5251,11 @@ export default function Agent() {
                     hitSlop={6}
                     // @ts-expect-error web-only DOM props on the RNW host node
                     dataSet={{ ...TAP44 }}
-                    accessibilityLabel={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : t('Search')}
-                    style={completed || !typed.trim() ? s.sendDisabled : undefined}
+                    accessibilityLabel={t('Search')}
+                    style={[s.rowBtnLift, !typed.trim() && s.sendDisabled]}
                   >
-                    <Animated.View style={[s.sendBtn, sendHover && !completed && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
-                      <Ionicons name={completed ? 'lock-closed' : 'arrow-up'} size={completed ? 15 : 17} color="#fff" />
+                    <Animated.View style={[s.sendBtn, sendHover && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
+                      <Ionicons name="arrow-up" size={17} color="#fff" />
                     </Animated.View>
                   </Pressable>
                 </>
@@ -3842,6 +5318,15 @@ export default function Agent() {
                   </Animated.View>
                 </Pressable>
               </View>
+              {/* «شاهين 2.2» ON ITS OWN LINE INSIDE THE BOX, under the mic (owner 2026-10-09: «the search button,
+                  the microphone and send all in the same line — the model only below»). A zero-width anchor
+                  centred on the mic (the row is LTR-pinned, so the same offset holds in both locales); the box's
+                  bottom padding makes the room, so the one-line row above it never moves. */}
+              {!modeSearched ? (
+              <View pointerEvents="box-none" style={s.composerModelAnchor}>
+                <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />
+              </View>
+              ) : null}
             </View>
             ) : null}
             {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY (owner, 2026-09-12, second tightening:
@@ -3899,8 +5384,6 @@ export default function Agent() {
               onClose={onIntroShowResults}
               pills={afCardPills}
             />
-          ) : ageFlow.phase === 'mining' ? (
-            <MiningTransition from={ageFlow.from} to={ageFlow.to} />
           ) : (
             <AdvancedQuestionCard
               titleKey={ageFlow.question.titleKey}
@@ -3911,12 +5394,53 @@ export default function Agent() {
               unknownCount={ageFlow.unknownCount}
               progressCur={ageFlow.progressCur}
               progressTotal={ageFlow.progressTotal}
-              liveCount={(keys) => (ageFlowQueryRef.current
-                ? liveResultCount(ageFlow.question.apply(ageFlowQueryRef.current, keys))
-                : Promise.resolve(null))}
+              liveCount={(keys) => {
+                const q = ageFlowQueryRef.current;
+                if (!q) return Promise.resolve(null);
+                const question = ageFlow.question;
+                // A COUNT THAT FAILS IS RETRIED, NEVER LEFT AS NOTHING (owner 2026-10-08, screenshot: the header
+                // chip and «متابعة · N نتيجة» both vanished). The 4 s card budget trips whenever the database is
+                // busy (robots, cron), and null means «no number». Two quiet retries with the longer background
+                // budget bring the number back; a retry only ever returns THIS selection's count, so the old
+                // «never show another selection's number» rule still holds (the effect clears it first).
+                // ONE COUNT, THE LONG BUDGET, FROM THE START (🔬 2026-10-09, backlog 281 root cause): the 4 s card
+                // budget aborted a count that was merely in the slow tenth (search p90 is 4.3-6.5 s at every hour,
+                // ops_search_latency_sample) and the retry then asked the busy database for the SAME count again.
+                // Asking once with the background budget shows the number as soon as it exists, with no rerun.
+                const scoped = question.apply(q, keys);
+                const p = (async () => {
+                  let n = await primeLiveResultCount(scoped);
+                  for (let i = 0; n === null && i < 2; i++) {
+                    await new Promise((r) => setTimeout(r, 700));
+                    n = await primeLiveResultCount(scoped);
+                  }
+                  return n;
+                })();
+                p.then(() => prefetchNextStep(question, q, keys), () => {});
+                return p;
+              }}
               initialKeys={ageFlow.initialKeys}
               onConfirm={onAgeConfirm}
               onSkip={onAgeSkip}
+              // NO SKIP ON A SCOPE QUESTION (owner 2026-09-20). The owner first asked for "the first
+              // question", then for "the first two" — both are the same boundary described by
+              // counting: the opening cards are the CATEGORY → GROUP → TYPE hierarchy, and only
+              // after them do the advanced questions begin.
+              //
+              // The distinction is real, not cosmetic. Skipping «bathrooms» is a usable answer — "I
+              // don't care" — and the interview carries on. Skipping «what type of property?» is
+              // not: the advanced pool cannot be ranked until the scope resolves (see the SCOPE
+              // PREFIX SHORT-CIRCUIT in presentGuided), so the round ends having done nothing, which
+              // is exactly the "he wont understand" the owner described.
+              //
+              // Keyed on isScopeQuestionId, NOT on stepIndex, because the count is not stable: a
+              // user who picked their group on the Filter screen never sees that question, so
+              // stepIndex 0 is already an advanced question and hiding Skip there would remove it
+              // from a question where skipping is perfectly sensible.
+              //
+              // «رجوع» still leaves the interview from the first card and the X still abandons it,
+              // so nobody is ever trapped into answering.
+              hideSkip={isScopeQuestionId(ageFlow.question.id)}
               onBack={onAgeBack}
               onClose={onAgeClose}
               pills={afCardPills}
@@ -3925,14 +5449,34 @@ export default function Agent() {
         </View>
       ) : null}
     </View>
+    {adPane.tabs.length > 0 && (
+      <AdViewer
+        tabs={adPane.tabs}
+        active={adPane.active}
+        split={viewerSplit}
+        hidden={adPane.hidden}
+        hint={adHint}
+        onSelect={(i) => commitAdPane({ ...adPaneRef.current, active: i })}
+        onCloseTab={(i) => commitAdPane(closeAdTab(adPaneRef.current, i))}
+        onCloseAll={() => commitAdPane({ ...EMPTY_AD_PANE, seq: adPaneRef.current.seq })}
+        onHide={() => commitAdPane(hideAdPane(adPaneRef.current))}
+        onShow={() => commitAdPane(showAdPane(adPaneRef.current))}
+      />
+    )}
+    {/* The party confetti over EVERYTHING — the ad sheet/pane included (owner 2026-10-17). Last child, so
+        it paints above the viewer; pointerEvents none, so it never intercepts a tap. */}
+    <ConfettiOverlay />
+    </View>
   );
 }
 
+// The composer chip's picked-logo strip: its width, and the gap between logos (see the chip's render).
+const CHIP_STRIP_W = 78;
+const CHIP_GAP = 2;
 const s = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.screenSide, paddingBottom: 8 },
   // Guided-interview summary + removable pills on the results turn (owner 2026-08-16). fontWeight
   // (not fontFamily) matches the idiom of every other text style in this sheet.
-  guidedBasedOn: { fontSize: 12.5, fontWeight: '500', color: colors.muted },
   guidedPillRow: { flexWrap: 'wrap', gap: 8, alignItems: 'center' },
   guidedPill: {
     flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.tint,
@@ -3954,12 +5498,13 @@ const s = StyleSheet.create({
   fbToastText: { fontSize: 12.5, fontWeight: '600', color: colors.ink },
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
-  title: { fontSize: 14, fontWeight: '700', color: colors.ink },
+  title: { fontSize: 22, fontWeight: '800', color: colors.dark },
   // Note #5 — share icon sits beside the Filter pill in the agent header.
   // Matches the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius, soft lift) so
   // the pill + share read as one cluster across both screens (owner redesign 2026-07-24 r2).
   shareIcon: {
-    width: 46,
+    // minWidth, not width — the labelled pill grows sideways (RNW won't release a fixed width; see index.tsx).
+    minWidth: 46,
     height: 46,
     borderRadius: radius.pill,
     alignItems: 'center',
@@ -3975,6 +5520,14 @@ const s = StyleSheet.create({
     elevation: 2,
   },
   shareIconPressed: { opacity: 0.85 },
+  shareIconWide: { paddingHorizontal: 15 },
+  // Small phones (<380px): the header holds menu + name + sign-in + «مشاركة»; tighten so nothing is cut off.
+  shareIconNarrow: { paddingHorizontal: 11, marginLeft: 0 },
+  topSignInNarrow: { marginRight: 0, paddingHorizontal: 11 },
+  shareIconHover: { backgroundColor: colors.tintFill, borderColor: colors.primary },
+  shareInner: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  shareText: { fontSize: 13.5, fontWeight: '700', color: colors.primary, includeFontPadding: false },
+  // Reopen chip for a hidden ad pane — the share button's own tint/hairline idiom, beside it.
   topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   preciseBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12, marginRight: 6 },
@@ -3983,9 +5536,8 @@ const s = StyleSheet.create({
   // Tight, connected vertical rhythm — the whole search flow (summary → phrase → searching →
   // results header → ranking → cards) reads as ONE section, not separated blocks. (user request.)
   // Chat column is LTR-pinned so flex alignment is consistent regardless of the UI language: user
-  // bubbles (alignSelf: 'flex-end') always end up on the RIGHT, AI replies (alignSelf: 'flex-start')
-  // always on the LEFT. Only the text INSIDE each bubble follows its own writingDirection. (user
-  // request: bubble position never changes per language; only text direction does.)
+  // bubbles always end up on the RIGHT. Assistant replies follow their own text: Arabic on the
+  // RIGHT, English on the LEFT, independently of the interface language or later messages.
   // LOAD-BEARING: the whole message column is pinned to LTR cross-axis so `alignSelf:'flex-end'` reliably
   // resolves to the RIGHT (user bubble + Arabic agent replies), regardless of the app's RTL root. RN-web
   // DROPS a raw `direction` style (it only warns), so we use `writingDirection:'ltr'`, which RN-web maps
@@ -4027,12 +5579,14 @@ const s = StyleSheet.create({
   // "Show more" pill, centered under the cards — neutral, never a "load best" CTA. (user request.)
   showMore: { alignSelf: 'center', marginTop: 14, paddingVertical: 9, paddingHorizontal: 22, borderRadius: 999, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
   showMoreTxt: { fontSize: 13, fontWeight: '700', color: colors.primary },
-  // The two actions under the «more than 25» message: primary (show all) + outline (refine). (user 2026-06-27.)
+  // The two actions under the «more than 25» message (owner 2026-09-20: gold primary + white
+  // secondary — see the JSX above for which button wears which now).
   mBtnRow: { flexWrap: 'wrap', gap: 8, marginTop: 2 },
-  // minWidth + centered content: the text↔dots swap never changes the button's size (no layout shift).
-  mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, backgroundColor: colors.selFill, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer', transitionProperty: 'background-color', transitionDuration: '150ms' } as any) : {}) },
-  mBtnPrimaryHover: { backgroundColor: colors.dark },
-  mBtnPrimaryTx: { fontSize: 13, fontWeight: '700', color: '#fff', lineHeight: 18 },
+  // PRIMARY = «خلّنا نحدد الطلب أكثر». Layout only — GoldShineButton (CardReveal.tsx) paints the
+  // actual gold gradient + shine sweep + hover/press darken; no flat backgroundColor here anymore.
+  mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}) },
+  mBtnPrimaryTx: { fontSize: 13, fontWeight: '700', color: colors.goldOnFill, lineHeight: 18 },
+  // SECONDARY = «عرض المزيد». Unchanged definition, just moved onto the demoted button.
   mBtnAlt: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
   mBtnAltTx: { fontSize: 13, fontWeight: '700', color: colors.primary },
   // Clickable refine answer chips (district/budget/beds/type) under a «more precise» question. (user 2026-06-27.)
@@ -4063,35 +5617,44 @@ const s = StyleSheet.create({
   promptSecondary: { paddingVertical: 8 },
   promptSecondaryTx: { color: colors.muted, fontSize: 13.5, fontWeight: '600' },
 
-  // marginTop adds breathing room above each user message so it isn't cramped against the property
-  // cards / reply text above it (on top of the column's 8px gap). (user request.)
-  // User message bubble — deliberately STRONGER light-green so it pops against the cream paper bg,
-  // like the selected recent-chat row in the sidebar. Dark green text for contrast. (user request.)
-  // User message bubble — soft light green pill, normal text weight (not heavy/black). (user request.)
-  userBubble: { alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: colors.userBubble, borderColor: colors.tintLine, borderWidth: 1, borderRadius: 16, borderBottomRightRadius: 5, paddingVertical: 10, paddingHorizontal: 14, marginTop: 10 },
-  userText: { color: colors.userBubbleText, fontSize: 14, lineHeight: 19, fontWeight: '500' },
+  // Conversation turns use a typographic transcript instead of repeated rounded chatbot tiles.
+  // The green edge keys the user's request to Ezhalah's identity while leaving the paper open.
+  // CHAT TEXT LIKE CHATGPT (owner 2026-10-04: «the font … not nice, we want text like ChatGPT»): the
+  // system UI face at regular weight, ~16px with an airy line height, and the user's turn in a soft
+  // rounded bubble — not bold, not a green-edged quote.
+  userBubble: { alignSelf: 'flex-end', maxWidth: IS_WEB ? '76%' : '88%', backgroundColor: colors.userBubble, borderRadius: 20, paddingVertical: 10, paddingHorizontal: 16, marginTop: 12 },
+  userText: { fontFamily: CHAT_FONT, color: colors.userBubbleText, fontSize: IS_WEB ? 16 : 15.5, lineHeight: IS_WEB ? 26 : 24, fontWeight: '400' },
 
   status: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 2 },
   statusText: { fontSize: 12.5, color: colors.muted },
   // The Ezhalah slogan during search — plain text, prominent, with the summary beneath it. No icon.
   sloganWrap: { gap: 8, paddingVertical: 2 },
-  sloganText: { fontSize: 15.5, fontWeight: '700', color: colors.dark, flexShrink: 1 },
+  sloganText: { fontFamily: CHAT_FONT, fontSize: IS_WEB ? 16 : 15.5, lineHeight: IS_WEB ? 28 : 26, fontWeight: '500', color: colors.ink, flexShrink: 1 },
   // The search summary shown under the results header (not with the slogan).
-  summaryText: { fontSize: 12.5, color: colors.muted, lineHeight: 18, marginTop: 2 },
+  summaryText: { fontFamily: CHAT_FONT, fontSize: IS_WEB ? 15 : 14, color: colors.body, lineHeight: IS_WEB ? 26 : 24, marginTop: 4 },
 
   reply: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
-  replyIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  replyText: { flex: 1, fontSize: 14, lineHeight: 20, color: colors.ink },
-  // The opening greeting is larger and a touch heavier than a normal reply so it reads as a proper
-  // welcome, not just another line. (user request: make it bigger.) 17/27 since the 2026-08-23 copy
-  // became a full marketing sentence — still clearly the welcome, without turning into a wall.
-  greetingText: { fontSize: 17, lineHeight: 27, fontWeight: '600', color: colors.dark },
+  replyBrandMark: { marginTop: 3, flexShrink: 0 },
+  // NO flex here (owner 2026-10-05: «the sentences that say تم — sometimes no emoji shows»). Two of the
+  // three users sit in COLUMNS (the results sentence, the closing note), where flex: 1 is a vertical
+  // flex-basis 0% that iOS Safari resolves to 0 — the box collapsed, and a wrapped second line (often
+  // just the emoji: «…حسب مواصفات بحثك 🏡») slid under the cards. The one ROW user (reply bubble beside
+  // the eagle mark) passes flex: 1 itself. Same iOS class as s.inputGrow.
+  replyText: { fontFamily: CHAT_FONT, minWidth: 0, fontSize: IS_WEB ? 16 : 15.5, lineHeight: IS_WEB ? 28 : 26, color: colors.ink },
+  introScroll: { flexGrow: 1, justifyContent: 'center' },
+  greeting: { width: '100%', alignItems: 'center', gap: 8, paddingVertical: 24 },
+  greetingText: { fontSize: 24, lineHeight: 36, fontWeight: '600', color: colors.dark, textAlign: 'center', writingDirection: 'rtl' as any },
+  greetingSubtitle: { fontSize: 16, lineHeight: 26, color: colors.body, textAlign: 'center', writingDirection: 'rtl' as any },
   // Rotating composer examples (owner brief 2026-08-23): the absolute overlay fills the input's own
   // clipped wrapper (inputGrow), so it is structurally unable to move the mic/Send or overflow; the
   // text mirrors the input's placeholder metrics exactly (16px web / muted / RTL right-aligned) so
   // it reads as the placeholder, not as a second element.
   introRotator: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, justifyContent: 'center' },
   introRotatorText: { fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.muted, paddingHorizontal: 2, textAlign: 'right', writingDirection: 'rtl' as any },
+  // English UI (owner 2026-10-10): the examples sit on the LEFT like any English placeholder, and the
+  // centred greeting reads left-to-right (otherwise the «?» lands at the start of the line).
+  introRotatorTextEn: { textAlign: 'left', writingDirection: 'ltr' as any },
+  greetingEn: { writingDirection: 'ltr' as any },
   brand: { fontWeight: '700', color: colors.primary },
 
   emptyRes: { fontSize: 14, color: colors.muted },
@@ -4104,48 +5667,108 @@ const s = StyleSheet.create({
   refineBtnTx: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   composerWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
-  // The send/stop button is pinned to the PHYSICAL right (right:4) and never mirrors — it stays on the
-  // right in Arabic too, so paddingRight leaves room for it regardless of text direction. (user request.)
-  // Inline row (no absolute button): input flexes, the send/stop button sits at the end, vertically
-  // centered with comfortable edge padding. flexDirection is set per language at the call site so the
-  // button lands on the correct side in both LTR and RTL. (user request: balanced, centered send button.)
-  // ChatGPT-style bar (owner 2026-07-08): single row, send button anchored on the far right (16px from
-  // the edge, vertically centered), thinner single-line input that grows on wrap. paddingRight 16 places
-  // the button; the input + button are flex siblings so text always stops before the button (never under).
-  // The composer sits inside the LTR-pinned `col`, so `row` (not row-reverse) is what puts the send
-  // button on the FAR RIGHT here; the input (flex:1) fills to its left and right-aligns its Arabic
-  // text next to the button. (owner 2026-07-09: send button must be far right.)
-  // Composer redesign (2026-08-16). The chat column is 940 wide on desktop — a full-width composer
-  // there reads as a search bar, not a place to talk. 720 keeps it a deliberate, centered object.
-  composerCol: { maxWidth: 720, alignSelf: 'center' },
-  // alignItems flex-end pins the send arrow to the BOTTOM edge as the box grows (the ChatGPT/Claude
-  // composer contract); the input's own marginVertical re-centers a single line against the 34px
-  // button, so idle still reads as one compact pill. borderColor/shadowOpacity/shadowRadius are
-  // ANIMATED inline (focus glow) — only the static halves live here.
-  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 24, paddingVertical: 8, paddingLeft: 18, paddingRight: 8, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.1, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 3 },
+  // The LTR-pinned column keeps mic/send on the physical right in either locale.
+  // Desktop welcome and composer share one compact column; messages still use MAX_W.
+  composerCol: { maxWidth: 620, alignSelf: 'center' },
+  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 16, paddingTop: 6, paddingBottom: 30, paddingHorizontal: 10, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
   // Focus glow target — COMPOSER_EASE (web) glides border-color and box-shadow between these two.
   // Carries the FULL shadow set: RNW compiles box-shadow per-style, so a partial override here
   // would win wholesale and drop the green tint + offset (observed live).
+  // «شاهين 2.2» is gone after the first message (owner 2026-10-17): the 24 px that made room for it go with it.
+  composerNoModel: { paddingBottom: 6 },
   composerFocused: { borderColor: colors.primary, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.2, shadowRadius: 18, shadowOffset: { width: 0, height: 6 } },
   // The wrapper owns the glide (INPUT_EASE) and the row position; marginVertical 6 =
   // (34 send-button − 22 line) / 2, the single-line centering trick above.
-  inputGrow: { flex: 1, overflow: 'hidden', marginVertical: 6 },
+  // NO flex: 1 here (owner 2026-10-04, real iPhone: «I can type but I don't see what I type»). Since #6009
+  // this wrapper lives inside composerInputColumn — a COLUMN — where flex: 1 means flex-basis 0% on the
+  // VERTICAL axis. iOS Safari resolves that 0% against the column's indefinite height as 0, so the row
+  // collapsed to 0px: keyboard up, text typed, nothing drawn (pill measured 53px on the phone, 82px in
+  // desktop WebKit, which treats the basis as content). The explicit height below is the only size.
+  inputGrow: { overflow: 'hidden', marginVertical: 3, minWidth: 0, alignSelf: 'stretch', flexShrink: 0 },
   // 15/22 breathes better for Arabic script than the old 14/20. Height is the same numeric target
   // as the wrapper's — set state-wise, never transitioned (see the JSX note on measurement).
   // fontSize MUST be >=16 on web: mobile Safari/Chrome auto-zoom the page when focusing an input under
   // 16px and never zoom back out — the single worst mobile-web chat bug. overflowY:'auto' gives the
   // internal scroll once the textarea reaches COMPOSER_MAX_H. (owner 2026-08-19)
-  input: { width: '100%', fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any, overflowY: 'auto' as any } : {}) },
-  sendBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
+  input: { width: '100%', fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any, overflowY: 'auto' as any, cursor: 'text' as any, position: 'relative' as any, zIndex: 2 } : {}) },
+  // A clear, compact search target: large enough to read and tap, small enough to leave the
+  // composer feeling like a focused property-search field rather than a chat card.
+  sendBtn: { width: 38, height: 38, borderRadius: radius.pill, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   sendBtnHover: { backgroundColor: colors.dark },
   sendDisabled: { opacity: 0.35 },
   // ── Voice recording composer (owner brief 2026-08-23) ──
   // composerInner keeps the normal controls' exact pre-voice layout (it owns the composer's size at
   // all times); the recording row overlays it absolutely so the morph never changes the surface.
-  composerInner: { flex: 1, flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
+  // Nudged left of the mic (owner 2026-10-10: «move it a bit left — too much on the right»).
+  composerModelAnchor: { position: 'absolute', bottom: 3, right: 92, width: 0, alignItems: 'center' },
+  composerInner: { flex: 1, flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'flex-end', alignItems: 'flex-end', minHeight: 44, gap: 6 },
   composerInnerHidden: { opacity: 0 },
+  // alignSelf center: one line of text sits on the same middle line as «بحث», mic and Send; taller
+  // (wrapped) text simply fills the row, and the buttons stay bottom-aligned.
+  composerInputColumn: { flex: 1, minWidth: 0, alignItems: 'stretch', position: 'relative', alignSelf: 'center' },
+  // One pill, one width, whatever is picked: «بحث» + eagle, or every picked site's logo disc in a
+  // strip capped at five (22px discs on a 14px pitch) that scrolls sideways past the cap. minWidth 118
+  // = the capped strip's width, so the text box keeps ONE width from 0 to 20 picks; minWidth (not
+  // width) so an English «Search» can never be squeezed. (owner 2026-10-09)
+  initialSearch: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, height: 30, minWidth: 118, paddingHorizontal: 9, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
+  // Picked sites: the pill keeps the plain box fill — no tinted background behind the logos (owner 2026-10-10).
+  initialSearchSelected: { backgroundColor: colors.surface, borderColor: colors.fieldLine },
+  initialSearchPressed: { backgroundColor: colors.segTrack },
+  initialSearchIcon: { width: 17, height: 17 },
+  initialSearchText: { color: colors.ink, fontSize: 14, lineHeight: 20, maxWidth: 148, flexShrink: 1 },
+  // flexGrow 0: the strip hugs its discs (a ScrollView grows by default) so the pill stays centred.
+  chipStack: { maxWidth: CHIP_STRIP_W, flexGrow: 0, flexShrink: 1 },
+  chipStackContent: { flexDirection: 'row', alignItems: 'center' },
+  // A 22px disc with a 1.5px ring in the pill's own fill, so overlapping marks stay separated.
+  // No disc behind the logo (owner 2026-10-10: «I don't like how the logo has a background behind it») — the mark
+  // sits straight on the pill; with at most 3 picks they stand side by side instead of overlapping.
+  chipBadge: { width: 22, height: 22, overflow: 'hidden' },
+  // The FIRST pick sits on top (zIndex inline), the rest peek out from behind it.
+  chipBadgeOverlap: { marginLeft: CHIP_GAP },
+  // The row is 44 px and its buttons hug the bottom, so the 38 px Send/Stop circle sat 3 px (the 34 px mic 5 px) below the
+  // text's centre line — «it doesn't feel like it's in the same sentence» (owner 2026-10-17). Lift them onto it.
+  rowBtnLift: { marginBottom: 3 },
+  micLift: { marginBottom: 5 },
   micBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   micBtnPressed: { backgroundColor: colors.segTrack, transform: [{ scale: 0.96 }] },
+
+  // Website picker (owner reference 2026-10-09: Perplexity's mode sheet): an off-white panel with large
+  // rounded top corners and a thin ✕; rows are a small logo slot + the name + the measured coverage
+  // sentence (what the site is, where it covers — one quiet line, never truncated) + a thin green ✓ on
+  // a lit row; region section headers, nationwide first. One hairline under «كل المواقع».
+  // platformPickerItem may reference colors.* ONLY — verify-platform-picker-profiles.ts evaluates it in isolation.
+  platformPickerOverlay: { ...StyleSheet.absoluteFill, zIndex: 80, alignItems: 'center', justifyContent: 'flex-end' },
+  platformPickerOverlayCard: { padding: 16 },
+  platformPickerBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: colors.scrim },
+  platformPickerCard: { width: '100%', backgroundColor: colors.paper, paddingHorizontal: 16, ...cardShadow, shadowOpacity: 0.18, shadowRadius: 28, shadowOffset: { width: 0, height: -4 }, elevation: 12 },
+  platformPickerCardSheet: { maxHeight: '84%', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingTop: 8 },
+  platformPickerCardFloating: { maxWidth: 400, maxHeight: '74%', borderRadius: 24, paddingTop: 16, paddingBottom: 14 },
+  platformPickerGrabber: { alignSelf: 'center', width: 36, height: 5, borderRadius: 3, backgroundColor: colors.line, marginBottom: 12 },
+  platformPickerHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12, paddingLeft: 4 },
+  platformPickerHeading: { flex: 1, minWidth: 0, paddingTop: 6 },
+  platformPickerTitle: { fontFamily: CHAT_FONT, fontSize: 18, lineHeight: 25, fontWeight: '600', color: colors.ink, textAlign: 'right' },
+  platformPickerSubtitle: { fontFamily: CHAT_FONT, fontSize: 13, lineHeight: 19, color: colors.muted, marginTop: 3, textAlign: 'right' },
+  platformPickerClose: { width: 44, height: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', marginRight: -10 },
+  platformPickerClosePressed: { backgroundColor: colors.segTrack },
+  platformPickerSearchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 38, borderRadius: 12, backgroundColor: colors.segTrack, paddingHorizontal: 12, marginBottom: 8 },
+  platformPickerSearchInput: { flex: 1, minWidth: 0, fontFamily: CHAT_FONT, fontSize: 16, lineHeight: 22, color: colors.ink, paddingVertical: 6, textAlign: 'right', writingDirection: 'rtl', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  platformPickerList: { minHeight: 0 },
+  platformPickerListContent: { paddingBottom: 4 },
+  platformPickerItem: { width: '100%', minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: colors.paper },
+  platformPickerItemPressed: { backgroundColor: colors.segTrack },
+  platformPickerItemOn: { backgroundColor: colors.tint },
+  platformPickerLogoFrame: { width: 56, height: 28, alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
+  // A column (name over sentence) — no flex: 1 on either Text (iOS collapses a column child to 0px).
+  platformPickerItemCopy: { flex: 1, minWidth: 0 },
+  // Names in body ink, the lit row (and «كل المواقع» when nothing is picked) in full ink; the sentence muted.
+  platformPickerItemName: { fontFamily: CHAT_FONT, color: colors.body, fontSize: 17, lineHeight: 24, fontWeight: '400', textAlign: 'right' },
+  platformPickerItemNameOn: { color: colors.ink, fontWeight: '500' },
+  platformPickerItemHint: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 1, textAlign: 'right' },
+  platformPickerItemCount: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 16, flexShrink: 0 },
+  platformPickerStep: { fontFamily: CHAT_FONT, color: colors.ink, fontSize: 13, lineHeight: 18, fontWeight: '600', paddingHorizontal: 10, paddingTop: 14, paddingBottom: 8 },
+  platformPickerSectionTitle: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 16, fontWeight: '500', paddingHorizontal: 10, paddingTop: 14, paddingBottom: 4 },
+  platformPickerRule: { height: 1, backgroundColor: colors.line, marginVertical: 6, marginHorizontal: 10 },
+  platformPickerEmpty: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: 'center', paddingVertical: 28 },
   // The LTR pin that fixes the physical order lives INLINE on the row (Sidebar's LTR_PIN idiom —
   // RNW rejects `direction` inside StyleSheet.create but honours it as an inline style).
   voiceRow: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 8, paddingRight: 8 },
@@ -4156,9 +5779,16 @@ const s = StyleSheet.create({
   // fixed-width controls, whatever the amplitude (owner brief §1/§4).
   voiceWaveWrap: { flex: 1, alignSelf: 'stretch', minHeight: 34, overflow: 'hidden' },
   stopBtn: { width: 34, height: 34, borderRadius: 12, backgroundColor: colors.dark, alignItems: 'center', justifyContent: 'center' },
-  disc: { fontSize: 11, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 10, paddingHorizontal: 12 },
+  // Send's own circle in Stop's colour (the composer's Stop shares sendBtn's size, so nothing moves).
+  stopCircle: { backgroundColor: colors.dark },
+  stopNote: { fontSize: 13, lineHeight: 18, color: colors.muted, paddingHorizontal: 4 },
+  // marginTop 2: the model label above is already the breathing room (owner 2026-10-09: no «big space»).
+  disc: { fontSize: 11, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 2, paddingHorizontal: 12 },
   // Centered Filter/AI pill band under the header (see the JSX note). Explicit height on BOTH ends
   // so MODE_EASE can glide it to 0; overflow hidden so the collapse clips instead of squashing.
+  // The landing's website strip in the Filter home's exact box: the home's side gutter, and −4 so the
+  // strip's top lands on the same y under this screen's taller header (measured 66px on both).
+  landingStrip: { paddingHorizontal: space.screenSide, marginTop: -4 },
   modeWrap: { alignSelf: 'center', alignItems: 'center', justifyContent: 'center', height: 58, overflow: 'hidden' },
   modeWrapHidden: { opacity: 0, height: 0, transform: [{ scale: 0.96 }] },
 });

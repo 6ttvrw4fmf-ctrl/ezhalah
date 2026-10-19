@@ -1,5 +1,24 @@
-3798d9dce7b594f1c36c196dc6a122b9d14d8336
+33ecb9cabcb4a40413d36168688528422a501df1
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
+# 2026-09-21  53e2ecb  advanced MANUALLY, AHEAD of its deploy, to clear preflight-verify.sh's
+#   deletion guard. preflight refused on run 35548585451 with exactly one deleted file:
+#   src/components/MiningTransition.tsx — the Advanced-Filter «digging» overlay, deleted on the
+#   owner's explicit instruction after three passes at it ("there is this pop-up that pops up with a
+#   magnifying glass … this needs to be gone, man. I told this 1,000 times"). Two earlier passes had
+#   removed only the card's COMPLETION state (the green checkmark and «لقينا N عقار أقرب لطلبك») and
+#   kept the card; what the owner had been calling "the pop-up" was the card in its SEARCHING state.
+#   Deliberate and reviewed, not data loss.
+#   Verified independently before advancing, the same way the 2026-09-11 entry below was:
+#   `git diff --diff-filter=D --name-only 18fd9974 HEAD -- src/ assets/` names ONLY that one file;
+#   it traces to exactly one commit (53e2ecb, PR #3420); no source file imports or renders it (the
+#   'mining' phase is gone from the ageFlow union and from AfPhase, and the three i18n keys it spoke
+#   are removed with it); the surface it covered is NOT lost, because the searching turn the overlay
+#   was translucent to reveal belongs to the thread (runRefine), not to the card, so a finished round
+#   now hands straight to it. All 7 required checks were green on the merge, and
+#   scripts/verify-af-deep-search-transition.ts was rewritten to assert the ABSENCE so the overlay
+#   cannot return unreviewed. The authoritative live-prod containment check passed on the SAME
+#   refused run: HEAD contains the currently-live production commit (d8ce52c).
+#   This deploy follows immediately; if it fails this line must be reverted to 18fd9974.
 # 2026-09-11  faf768e  advanced MANUALLY, AHEAD of its deploy, to clear preflight-verify.sh's
 #   deletion guard before the FIRST deploy attempt since 3db1802 (2026-09-06, 31 commits/5 days of
 #   concurrent-session work, none of it previously deployed). preflight refused on run 34620128468
@@ -339,3 +358,47 @@
 # 2026-09-13  95bed23  deployed via safe-deploy.sh
 # 2026-09-13  82832cb  deployed via safe-deploy.sh
 # 2026-09-13  3798d9d  deployed via safe-deploy.sh
+# 2026-09-14  b455a08  deployed via safe-deploy.sh
+# 2026-09-14  ebfbe5d  deployed via safe-deploy.sh
+# 2026-09-14  18fd997  deployed via safe-deploy.sh
+# 2026-09-23  929c937  deployed via safe-deploy.sh
+# 2026-09-24  7434ddb  deployed via safe-deploy.sh
+# 2026-09-28  457f840  deployed via safe-deploy.sh
+# 2026-09-28  e8141ce  deployed via safe-deploy.sh
+# 2026-10-02  2e2414a  deployed via safe-deploy.sh
+# 2026-10-03  ce09dd5  deployed via safe-deploy.sh
+# 2026-10-03  6311a9f  deployed via safe-deploy.sh
+# 2026-10-03  f7953d0  deployed via safe-deploy.sh
+# 2026-10-03  d8cccd2  deployed via safe-deploy.sh
+# 2026-10-03  1ae96e5  deployed via safe-deploy.sh
+# 2026-10-04  02afe9b  deployed via safe-deploy.sh
+# 2026-10-04  7cb4a99  deployed via safe-deploy.sh
+# 2026-10-06  c87429f  deployed via safe-deploy.sh
+# 2026-10-07  bb2a1eb  deployed via safe-deploy.sh
+# 2026-10-07  4096567  deployed via safe-deploy.sh
+# 2026-10-07  00b062c  deployed via safe-deploy.sh
+# 2026-10-08  6d1a5bc  deployed via safe-deploy.sh
+# 2026-10-09  996a7b7  deployed via safe-deploy.sh
+# 2026-10-09  c91c406  deployed via safe-deploy.sh
+# 2026-10-09  0302aac  deployed via safe-deploy.sh
+# 2026-10-09  7233593  deployed via safe-deploy.sh
+# 2026-10-09  0766fbf  deployed via safe-deploy.sh
+# 2026-10-09  76cad9c  deployed via safe-deploy.sh
+# 2026-10-09  da05a78  deployed via safe-deploy.sh
+# 2026-10-10  5729634  deployed via safe-deploy.sh
+# 2026-10-10  584ad22  deployed via safe-deploy.sh
+# 2026-10-10  9029043  deployed via safe-deploy.sh
+# 2026-10-10  5e4ace4  deployed via safe-deploy.sh
+# 2026-10-10  f3265d6  deployed via safe-deploy.sh
+# 2026-10-10  f0568b6  deployed via safe-deploy.sh
+# 2026-10-10  538ae1d  deployed via safe-deploy.sh
+# 2026-10-11  de92846  deployed via safe-deploy.sh
+# 2026-10-11  df6ffe0  deployed via safe-deploy.sh
+# 2026-10-11  5507cc0  deployed via safe-deploy.sh
+# 2026-10-11  cedb4f6  deployed via safe-deploy.sh
+# 2026-10-11  b5a32ac  deployed via safe-deploy.sh
+# 2026-10-11  2e9f689  deployed via safe-deploy.sh
+# 2026-10-12  a2f6895  deployed via safe-deploy.sh
+# 2026-10-13  2e06b67  deployed via safe-deploy.sh
+# 2026-10-16  609121d  deployed via safe-deploy.sh
+# 2026-10-19  33ecb9c  deployed via safe-deploy.sh

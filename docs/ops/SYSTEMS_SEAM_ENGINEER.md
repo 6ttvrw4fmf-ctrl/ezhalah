@@ -212,6 +212,33 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
   about itself: **if the channel is down, this alert cannot be delivered either** — which is exactly
   why `open_alerts` must be read directly and never inferred from a quiet inbox.
 
+- **DELIVERED IS NOT OWNED, AND THE OWNER USED TO ARRIVE A CYCLE LATE (found 2026-09-14, fixed the
+  same run).** `alert-dispatch.yml` files the issue and then, in a separate idempotent sweep, applies
+  the `routine-N-*` owner label. That sweep read its worklist from `gh issue list`, which goes
+  through GitHub's **search index** — and that index lags issue creation by a few seconds while the
+  routing step starts ~1 s after the filing step ends. **So the sweep could never see the issues its
+  own run had just filed**, and every alert issue was filed unrouted and picked up an owner only on
+  the NEXT dispatch cycle (up to ~60 min on the hourly backstop).
+
+  Proven from the workflow's own log rather than inferred: run 34835208275 filed #2646 (**P0**) and
+  #2647 at 10:51:28-30, then at 10:51:31 routed only #2641-#2643 — the *previous* cycle's issues.
+  Two earlier instances match exactly, so it was systematic, not a race. The cost is the one this
+  routine exists to catch: a P0 reached GitHub in 31 s and reached its OWNER an hour later, invisible
+  to that routine's queue and reading as `'(unrouted)'` to `mon_detect_alert_queue_unworked()`
+  meanwhile. **"Delivered is not owned" surviving inside its own fix, one layer down.**
+
+  The repair keeps the sweep's deliberate design — ONE idempotent labelling mechanism, still no
+  `--label` on the create call, so no create-path/backfill-path skew — and corrects only its INPUT:
+  the filing step records what it created and `routingWorklist()`
+  (`scripts/lib/alertRouting.ts`, executed by `scripts/alert-routing-worklist.ts`) unions those in.
+  `scripts/verify-alert-routing-worklist.ts` pins it by **executing the rule against the exact
+  broken world** — a listing that omits a just-created issue — because a grep for the filename would
+  pass against a workflow that wrote the file and never read it. Mutation-proven 6/6 on the rule,
+  and both halves of the real defect were restored and watched to go red.
+
+  **Generalise it:** any sweep that reads back a list it just wrote to is suspect. Ask whether the
+  read path is the same store as the write path, and whether it is eventually consistent.
+
 - **THE P0 DELIVERY SLO — 5 MINUTES (owner decision, 2026-08-28).** **A P0 alert must be delivered
   to its destination within 5 minutes of detection**, measured from `alert_event.created_at` to a
   confirmed delivery (a 2xx recorded in `net._http_response`, or the GitHub issue existing). The
@@ -262,6 +289,28 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
   (daily jobs like `30 2 * * *` are not counted at all). Measured on the live roster: **49 of 60
   minutes sit at ≤ 1** and can accept one more. The design space was never two slots; it was 49.
 
+  **THAT 49 IS A 2026-08-30 MEASUREMENT AND IT HAS EXPIRED — RE-MEASURE, AND ONLY WITH THE
+  DETECTOR'S OWN EXPANSION (routine #7, 2026-09-13).** Re-run against the live roster today:
+  **exactly ONE minute (`:32`) carries zero hourly jobs, and only nine carry ≤ 1.** The roster grew;
+  the number did not follow it. Reading the stale 49 as current is how this section stops being a
+  measurement and becomes folklore.
+
+  **The trap is sharper than staleness, and it cost a wrong migration in the run that found it.**
+  `mon_detect_cron_minute_collision()` expands **five** minute-field shapes — `*`, `N`, `N,M,…`,
+  `*/N`, and `N-59/N`. An ad-hoc query that matches only a literal minute and a comma list
+  *undercounts*, and the two shapes it misses are the common ones: `3-59/10` occupies
+  3/13/23/33/43/53, and a comma list like `2,6,9,12,14,23,30,33,40,…` occupies eleven minutes at
+  once. On 2026-09-13 a re-slot off the 3-job `:25` collision landed on `:33` on exactly that bad
+  count — and `:33` already held two, so the move traded one collision for an identical one.
+  **Ask the detector, or reuse its CTE verbatim. Never hand-roll the count.**
+
+  **And do not read the detector's return value as the answer.** After that wrong move it still
+  returned **0**, because `mon_raise()` returns 0 on an already-open dedup key and alert 2725 was
+  still open — so "0 raised" meant "already reported", not "no collision". Re-run the expansion, or
+  check that the alert actually **resolved**; a cleared condition must release its key, and only
+  `resolved_at` does that (PART 1, acknowledgment → detector self-clear). The corrective migration
+  asserts both, which is why the second attempt could not repeat the first.
+
   So `mon-p0-fast-lane` (jobid 86) now runs `mon_dispatch_p0_fast()` on
   `1,4,7,10,13,15,18,21,24,26,28,31,34,35,38,40,42,44,46,48,51,54,57,58 * * * *` — **24 slots, worst
   gap 3 minutes including the wrap past the top of the hour**, avoiding minute 0, the ten minutes
@@ -277,6 +326,43 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
   `gap × 60 + 60 s` no longer fits the SLO — so the "delay" mutation (slowing the cadence) goes red,
   including the subtle one where a single minute is removed and only the wrap-around gap breaks.
   **Fix the SCHEDULE, never the SLO.**
+
+  **"SWEEP DURATION NO LONGER A TERM AT ALL" IS FALSE IN PRODUCTION, AND HAS BEEN SINCE THE
+  DECOUPLING SHIPPED (measured 2026-09-21, routine #7).** The sentence four paragraphs up describes
+  the *schedule*; it does not describe what pg_cron actually runs. The lane's slots are only a
+  promise to start, and this instance does not keep it while the sweep's backend holds the
+  scheduler. Measured over 24 h: **48 sweeps totalling 12,823 s = 14.8 % of the day, and ZERO
+  fast-lane runs started inside any of them** against 82.5 expected from the lane's own cadence —
+  coverage ratio **0.000**. Over 7 days: 10 of 824 expected, **1.2 %**. So for roughly a seventh of
+  the clock the P0 fast lane is dark, and a condition that flips in that window is first observed by
+  the SWEEP, in the sweep's transaction, with `created_at` = transaction start.
+
+  The cost is not theoretical. Of P0s raised since 2026-08-30: **58 born in the lane — avg 28.3 s,
+  worst 249 s, zero breaches**; **3 born in the sweep**, of which the two that outlived their sweep
+  (1166 at 371 s, 4392 at 665 s) **both breached the 300 s SLO**. The third was raised and resolved
+  inside one sweep transaction and never needed delivery.
+
+  This is the same mechanism `mon_detect_cron_starvation_risk()` reports (alert 3844), which names
+  `mon-p0-fast-lane` as a victim of hog 38 at minutes 1,4,7,10,31,34,35,38,40. Worked example, alert
+  4392: sweep started 06:29:00.025 and ran 516.5 s; the alert's `created_at` is 06:29:00.026; the
+  lane's `:31`, `:34` and `:35` slots produced **no run rows at all** — not failures, no rows — and
+  the lane next ran at 06:38, after the sweep committed. Issue filed 06:40:05: **665 s**.
+
+  **LIMB 4 was blind to all of it until 2026-09-21**, because `mon_p0_sweep_exposure_should_raise()`
+  exempted it whenever every P0-capable detector also appeared in `mon_run_p0_detectors()`'s list.
+  That is a set-membership PROXY: the sweep still runs the same detectors, so the raise goes to
+  whichever caller observes the condition first (`mon_raise()` dedups, first observer wins).
+  Migration `20260921104912` makes the exemption carry EVIDENCE instead — `ops_p0_lane_contract()`
+  now publishes `lane_runs_inside_sweeps`, `lane_runs_expected_inside_sweeps` and
+  `lane_sweep_coverage_ratio`, and the exemption is withdrawn when the lane is demonstrably starved.
+  A missing key is unreadable and therefore exposed, like every other branch there. Barrier:
+  `scripts/verify-p0-sweep-exposure-evidence.ts`, mutation-proven 9/9.
+
+  **Do not "fix" this by widening anything.** The 300 s SLO, the 40 s overhead and the 0.5 coverage
+  threshold all stay. The two real remedies are to make the SWEEP faster (routine-3 owns the two
+  detectors that dominate its runtime — GitHub #1348) or to give the lane a slot outside every hog
+  window, which is a **cron schedule change and therefore OWNER-ONLY**. Until one of those happens,
+  LIMB 4 raising is the system telling the truth, not a false positive to be silenced.
 
   **THE DECOUPLING IS NECESSARY BUT NOT SUFFICIENT — GitHub Actions latency is now the dominant
   term, and it is not ours to fix (measured 2026-08-30).** Proving the lane end to end measured the
@@ -426,6 +512,26 @@ wrong" or "the search predicate is wrong" rather than "a handoff between two cor
 failed," that finding belongs to whichever of #3/#4/#5 owns it — file it there.
 
 ## PART 3 — DAILY SEAM SWEEP
+
+**Backlog gate, checked BEFORE step 1 (owner rule, 2026-09-26).** This routine runs more often than
+any of the other ten, yet the 2026-09-26 cross-routine audit found it carrying the single largest
+unfixed pile — 55 open incidents on its own surfaces, several with zero progress recorded since the
+day they were filed. PART 3 and PART 4 are both open-ended discovery with no built-in brake, so a
+routine that is good at finding seams and behind on fixing them just keeps finding more. Count your
+open incidents on owned surfaces (§G.6b's read, already mandatory) before doing anything else this
+run:
+
+- **Above ~20 open:** skip PART 3/4 discovery entirely this run. Spend the whole run driving existing
+  incidents to a terminal state (`incident_advance`/`incident_resolve`/`incident_handoff`/
+  `incident_block`/`incident_wont_fix` — never leave one merely re-read). Report
+  `BACKLOG GATE: N open, discovery skipped, cleared M this run`.
+- **20 or fewer:** run PART 3/4 as written, but do not open a NEW incident for a low-severity finding
+  (P2/P3 exploratory) if it would push the count back over ~20 — note it in the report instead and
+  pick it up next run.
+
+This gate does not apply to a genuine P0/P1 you find mid-run — fix or escalate that immediately,
+gate or no gate (§0's stop conditions still govern). The threshold is a rule of thumb, not a barrier;
+adjust it in this file if the real backlog shape changes, rather than silently ignoring it.
 
 1. Every scheduled cron job's actual execution log for the last 24h — fired, on time, succeeded.
 2. `mon_run_all_detectors()`: `failed` is empty, every count reflects genuinely NEW/escalated

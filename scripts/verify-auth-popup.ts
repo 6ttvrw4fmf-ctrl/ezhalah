@@ -26,6 +26,9 @@ import {
   signInCardDefaultPos,
   AUTH_POPUP_EDGE,
   SIGNIN_CARD_W,
+  SIGNIN_CARD_H,
+  COOKIE_RESERVED,
+  CARD_GAP,
   type SignInCardGate,
 } from '../src/lib/authPopupBehavior.ts';
 
@@ -115,9 +118,48 @@ check('drag DISABLED on native mobile', !canDragAuthPopup({ isWeb: false, docked
     if (!inBounds(clampAuthPopupOffset({ x, y }, card, vp))) all = false;
   check('card: every offset in a ±2000px sweep clamps fully on-screen', all);
   const dp = signInCardDefaultPos(vp.w, vp.h);
-  check('card: the DEFAULT position is the retired dock’s side slot (right edge, mid-height) and in bounds',
-    dp.x === vp.w - SIGNIN_CARD_W - AUTH_POPUP_EDGE && Math.abs(dp.y - Math.round(vp.h * 0.46)) <= 1
+  const expectedY = Math.max(AUTH_POPUP_EDGE,
+    Math.min(Math.round(vp.h * 0.46), vp.h - COOKIE_RESERVED - SIGNIN_CARD_H - CARD_GAP));
+  check('card: the DEFAULT position is the retired dock’s side slot (right edge), height-aware, and in bounds',
+    dp.x === vp.w - SIGNIN_CARD_W - AUTH_POPUP_EDGE && dp.y === expectedY
     && inBounds(clampAuthPopupOffset(dp, card, vp)));
+
+  // ── 3b. COOKIE-COLLISION GUARD (owner-reported 2026-09-19) — SignInCard and CookieConsent are
+  // BOTH right-anchored in the same corner (SignInCard: SIGNIN_CARD_W wide at AUTH_POPUP_EDGE from
+  // the right edge; CookieConsent: 280 wide at `right:20`), so whenever their Y ranges overlap they
+  // visually collide — reproduced live at 1280×720 production before this fix (card top landed at
+  // the fixed-0.46 fraction, well inside the cookie card's own reserved band). The guard is a pure
+  // Y-axis check: the card's default position must never let its (padded) bottom edge cross into
+  // the cookie card's reserved band, across every realistic desktop/laptop viewport height.
+  //
+  // MIN_COLLISION_FREE_H is the shortest viewport where avoiding the overlap is even POSSIBLE:
+  // stacking SIGNIN_CARD_H + CARD_GAP + COOKIE_RESERVED with AUTH_POPUP_EDGE of top margin literally
+  // does not fit in anything shorter, no matter where the card sits — that is a fixed-size layout
+  // running out of room, not a positioning defect, so the sweep starts there rather than at 0.
+  {
+    const w = 1280; // width only has to clear DOCK_BREAKPOINT; the collision itself is Y-axis only
+    const MIN_COLLISION_FREE_H = SIGNIN_CARD_H + CARD_GAP + COOKIE_RESERVED + AUTH_POPUP_EDGE;
+    let clean = true;
+    let checked = 0;
+    for (let h = MIN_COLLISION_FREE_H; h <= 1400; h += 20) {
+      checked++;
+      const pos = signInCardDefaultPos(w, h);
+      const cardBottom = pos.y + SIGNIN_CARD_H;
+      const cookieTop = h - COOKIE_RESERVED;
+      if (cardBottom > cookieTop) clean = false;
+    }
+    check(`card default position never overlaps the cookie card's reserved band across ${checked} viewport heights (${MIN_COLLISION_FREE_H}–1400px, 20px steps — the range where avoiding it is physically possible)`,
+      clean);
+
+    // MUTATION — reproduce the EXACT reported bug: a fixed fraction with no height/other-card
+    // awareness overlaps the cookie card on an ordinary laptop-height viewport. Proves the sweep
+    // above is not vacuously green.
+    const retiredFormulaY = Math.round(720 * 0.46); // the exact expression this file used to assert
+    const retiredOverlaps = (retiredFormulaY + SIGNIN_CARD_H) > (720 - COOKIE_RESERVED);
+    check('MUTATION — the retired fixed-0.46-fraction formula DOES overlap the cookie card at 720px tall (the reported bug, proving the sweep catches it)',
+      retiredOverlaps);
+  }
+
   // THE CENTERED MODAL (offset mode) keeps its own bounds.
   const modal = { left: 435, top: 160, width: 470, height: 400 };
   const mIn = (o: { x: number; y: number }) => {

@@ -171,3 +171,28 @@ export async function mergePr(slug: string, n: string, sha: string): Promise<{ s
   })) as { sha: string; merged: boolean };
   return r;
 }
+
+
+/** The head sha of the newest SUCCESSFUL run of a workflow file, or null when it cannot be read.
+ *
+ *  WHY (routine #2, 2026-09-15). `docs/DEPLOY_BASELINE.txt` is the only thing this repo consults to
+ *  answer "what is production serving", and it is advanced by a recorder that CANNOT push to main —
+ *  so it opens a `deploy/baseline-*` PR and exits 0, and the floor moves only when a human merges
+ *  that PR. Seventeen were open on 2026-09-15 while production sat four successful deploys ahead of
+ *  the record. Nothing compared the record against the deploy pipeline's own run history, so a stale
+ *  floor read as "13 user-visible files merged and never shipped" over work that was in fact live.
+ *  This is that comparison's transport.
+ *
+ *  Returns null — never a fallback that looks like an answer — on any unreadable history, so the
+ *  caller reports an UNANSWERED question rather than assuming the record is fine. */
+export async function lastSuccessfulRunHeadSha(slug: string, workflowFile: string): Promise<string | null> {
+  try {
+    const r = (await api(
+      `/repos/${slug}/actions/workflows/${workflowFile}/runs?status=success&per_page=1`,
+    )) as { workflow_runs?: { head_sha?: string }[] } | null;
+    const sha = r?.workflow_runs?.[0]?.head_sha;
+    return typeof sha === 'string' && /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+  } catch {
+    return null;
+  }
+}

@@ -20,15 +20,23 @@ from scrapers.common import arabic_location as al
 from scrapers.aqarmonthly.run import _district_from_address
 
 
+# (city_id, district_ar) exactly as loc_catalog_district spells them.
+_CATALOG = [
+    (3, "حي الصحافة"), (3, "حي قرطبة"),     # الرياض
+    (18, "حي الفردوس"), (18, "ذهبان"),       # جدة — ذهبان is catalogued WITHOUT «حي»
+    (13, "حى أحد"),                           # الدمام — catalog spells حي with ى
+    (5, "المروج"), (6, "حي المروج"),          # one key, «حي» in one city's spelling only
+    (99, "حي حلباء"),                         # a 2-segment-address city (street segment omitted)
+]
+
+
 @pytest.fixture(autouse=True)
 def fake_catalog(monkeypatch):
-    # _DISTRICT_BY_CITY stores district_norm (normalize_ar()'d — ة→ه folded), exactly like the real
-    # loc_catalog_district table, e.g. real row: district_ar="حي الصحافة" / district_norm="حي الصحافه".
-    monkeypatch.setattr(al, "_DISTRICT_BY_CITY", {
-        3: {"حي الصحافه", "حي قرطبه"},    # الرياض
-        18: {"حي الفردوس"},               # جدة
-        99: {"حي حلباء"},                 # a 2-segment-address city (street segment omitted)
-    })
+    # KEYED WITH norm_district_tok() — what production stores in district_norm («حي الصحافة» →
+    # «صحافه»). This fixture used to seed normalize_ar()-shaped keys («حي الصحافه»), a key production
+    # never holds, so these tests stayed green while the live fallback matched no «ال» district.
+    monkeypatch.setattr(al, "_DISTRICT_AR_BY_CITY",
+                        {(c, al.norm_district_tok(ar)): ar for c, ar in _CATALOG})
     yield
 
 
@@ -41,6 +49,17 @@ def test_three_segment_address_resolves_catalogued_district():
 def test_district_already_prefixed_in_source_matches_directly():
     r = _district_from_address("مكتب تأجير, حي الفردوس, جدة", 18)
     assert r == "حي الفردوس"
+
+
+def test_source_spelling_is_kept_and_prefixed_only_when_the_catalog_is():
+    assert _district_from_address("شارع جدة 819 ، ذهبان ، جدة", 18) == "ذهبان"
+    assert _district_from_address("طريق الخوارزمي, أحد, الدمام", 13) == "حي أحد"   # «حى» counts as «حي»
+    assert _district_from_address("شارع, المروج, س", 5) == "المروج"
+    assert _district_from_address("شارع, المروج, ص", 6) == "حي المروج"
+
+
+def test_a_district_of_another_city_is_never_borrowed():
+    assert _district_from_address("شارع, الصحافة, جدة", 18) is None   # «صحافه» is Riyadh's, not Jeddah's
 
 
 def test_district_equal_to_city_stays_null():

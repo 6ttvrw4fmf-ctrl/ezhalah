@@ -1,15 +1,25 @@
-// THE COOKIE CONSENT CARD — Perplexity-style, signed-out first-time web visitors (owner 2026-09-06).
+// THE COOKIE CONSENT CARD — signed-out web visitors, EVERY visit (owner 2026-09-06, extended 2026-09-13).
 //
 // A compact card in the bottom corner (end side, so bottom-left in Arabic RTL / bottom-right in EN).
-// Web-only, like GoogleOneTap and SignInCard — a cookie banner is a browser convention; native has no
-// cookies. All lifecycle gates are the PURE `shouldShowCookieBanner` in lib/cookieConsent (barrier-
-// executed in scripts/verify-cookie-consent-gating.ts):
-//   appears   signed-out + web + no choice recorded yet, once the session restore settles (authChecked).
-//   goes away "Allow all" → records 'all'; "Only necessary" → records 'necessary'; a SEARCH → 'all'
-//             (owner's "left without choosing = allow all"). All three persist, so it is once-per-visitor.
-//   never     for signed-in users, on native, or once a choice is stored (survives reloads).
-import { useCallback, useEffect, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+// SIGNED-IN USERS NEVER SEE THIS CARD (the pure gate requires `user == null`), on native there are
+// no cookies to consent to. Every gate lives in the pure `shouldShowCookieBanner` in lib/cookieConsent
+// (barrier-executed in scripts/verify-cookie-consent-gating.ts):
+//   appears   signed-out + web, once the session restore settles (authChecked). Appears on EVERY
+//             page load — the in-memory `consent` state resets to null on mount, so a refresh brings
+//             the card back (owner 2026-09-13). This matches SignInCard's own in-memory dismissal.
+//   goes away Three ways, all recording 'all' or 'necessary' in localStorage so `analyticsAllowed()`
+//             keeps the visitor's preference across visits:
+//              (1) "Allow all" → 'all' with a fade+slide-down exit animation (owner 2026-09-13)
+//              (2) "Only necessary" → 'necessary', same exit animation
+//              (3) ANY tap outside the card (city dropdown, filter button, «بحث», sidebar…) → 'all'
+//                  (owner 2026-09-13: "when he taps on the button in the filter it goes away, and
+//                   when it goes away, it means that he agrees"). EXCEPT the ☰ menu button and the
+//                  language switch (owner 2026-10-17: the card must not disappear when the page is
+//                  translated to English) — both carry data-consent-keep and leave the card up.
+//   never     for signed-in users, on native. The tap-outside listener is gated on `visible`, which
+//             is itself gated on `user == null` — a signed-in user's app is completely untouched.
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useApp } from '@/store';
 import { useI18n } from '@/i18n';
@@ -18,11 +28,16 @@ import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { colors, radius, font } from '@/theme/tokens';
 import {
   shouldShowCookieBanner,
-  getCookieConsent,
+  earlyTapConsent,
   setCookieConsent,
   type CookieConsent as Consent,
 } from '@/lib/cookieConsent';
 import { useForeignPromptInsets, dockedEdgeOffset } from '@/lib/bottomPromptInset';
+import { runAfterAnimation } from '@/lib/afterAnimation';
+
+const SYSTEM_FONT = Platform.OS === 'web'
+  ? 'ui-sans-serif, -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif'
+  : undefined;
 
 const COPY = {
   ar: {
@@ -41,12 +56,14 @@ const COPY = {
   },
   en: {
     title: 'Cookie Policy',
+    // A faithful translation of the Arabic above (owner 2026-10-16) — the English card used to say
+    // something different (pixels, server-to-server, no mention of the platform traffic we measure).
     body:
-      'Ezhalah uses cookies, pixels, SDKs, APIs, local storage, and server-to-server integrations for ' +
-      'the correct functioning of our app, including keeping you signed in, saving your searches and ' +
-      'conversations, and diagnosing crashes. With your permission, we also use these technologies to ' +
-      'understand how the app is used and to improve our services. Ezhalah does not serve third-party ' +
-      'ads and does not sell your personal data.',
+      'Ezhalah uses cookies and technologies such as SDKs, APIs and caching to run the platform ' +
+      'properly, keep you signed in, save your preferences, diagnose faults and improve the service. ' +
+      'We also measure the searches, clicks and visits Ezhalah sends to real-estate platforms, and we ' +
+      'may share aggregated traffic statistics with them without sharing any data that identifies you. ' +
+      'We do not sell your personal data or use it to show third-party ads.',
     all: 'Allow all',
     necessary: 'Only necessary',
   },
@@ -65,7 +82,14 @@ export default function CookieConsent() {
   // ABOVE it rather than under it. Routed through useAtLeast() like every width-gated flag, so the
   // first client render still reproduces the server's (React #418 — see lib/responsive.ts).
   const beside = useAtLeast(DOCK_BREAKPOINT);
-  const [consent, setConsent] = useState<Consent | null>(() => getCookieConsent());
+  // SESSION-ONLY, deliberately not seeded from getCookieConsent() (owner 2026-09-13, permanent):
+  // the cookie card must appear on EVERY signed-out visit and disappear only when the visitor signs
+  // in, mirroring SignInCard's own dismissal (which is also meant to return). Reading the persisted
+  // choice at mount would hide the card on the second visit — the very thing the owner asked to stop.
+  // localStorage is still WRITTEN by choose() so `analyticsAllowed()` keeps the user's real
+  // preference across visits; only the SHOW gate here is per-pageload, and the reload naturally
+  // resets `consent` back to null so the card comes up again.
+  const [consent, setConsent] = useState<Consent | null>(null);
   // The band a THIRD-PARTY docked prompt (Google/Apple One Tap) has reserved — never the combined
   // usePromptInsets(), which now also counts this very card's own rect (ops_incident #152 made this
   // card a member of DOCKED_PROMPT_SELECTOR) and would fold the card's reservation back into itself.
@@ -74,11 +98,16 @@ export default function CookieConsent() {
   // foreign prompt's way before — the root's reservation protects everything ELSE, not this card.)
   const foreignInset = useForeignPromptInsets();
 
+  // A tap that landed BEFORE the card rose (e.g. «English» while the session restore was settling).
+  // Owner 2026-10-16: it counts as agreement, so the card never rises afterwards — see earlyTapConsent.
+  const [tappedEarly, setTappedEarly] = useState(false);
+
   const visible = shouldShowCookieBanner({
     isWeb: Platform.OS === 'web',
     authChecked,
     user,
     consent,
+    tappedBeforeShown: tappedEarly,
   });
 
   const choose = useCallback((c: Consent) => {
@@ -86,23 +115,112 @@ export default function CookieConsent() {
     setConsent(c);
   }, []);
 
+  useEffect(() => {
+    const c = earlyTapConsent({
+      isWeb: Platform.OS === 'web', authChecked, user, consent, tappedBeforeShown: tappedEarly,
+    });
+    if (c) choose(c);
+  }, [tappedEarly, authChecked, user, consent, choose]);
+
   // A search dismisses the card and counts as ALLOW ALL (owner: "no selection = allow all").
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     if (searchCount > 0 && consent == null && authChecked && user == null) choose('all');
   }, [searchCount, consent, authChecked, user, choose]);
 
-  if (!visible) return null;
+  // ANY tap on the app (city/district field, «بحث» button, category pill, sidebar, anything at
+  // all outside the card itself) counts as consent — owner rule 2026-09-13: "when he taps on the
+  // button in the filter it goes away, and when it goes away, it means that he agrees". The
+  // listener attaches only while `visible` is true, which is only true for signed-out web visitors —
+  // a signed-in user's app is completely untouched. Capture phase → runs before the target's own
+  // click handler, so the same tap still fires the filter/search/sign-in action; the card just
+  // disappears. `once` is intentionally NOT set: a tap on the card's OWN body (not a button) must
+  // return early WITHOUT consuming the one-shot, or a subsequent tap outside would find no listener
+  // to dismiss it. Removal is handled by the effect's own cleanup once a choice exists.
+  // The listener is live from the first client render, not only while the card is up (owner
+  // 2026-10-16): a tap before the card rose is remembered in `tappedEarly` and resolved by
+  // earlyTapConsent once the restore proves the visitor signed out. A known signed-in user gets none.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || consent != null || (authChecked && user != null)) return;
+    const onDocClick = (e: Event) => {
+      const card = document.querySelector('[data-testid="cookie-consent"]');
+      // A click on the card itself is handled by its own onPress — never treat it as an outside tap.
+      if (card && e.target instanceof Node && card.contains(e.target)) return;
+      // LANGUAGE AND THE MENU THAT HOLDS IT ARE NOT AGREEMENT (owner 2026-10-17: «we don't want it to disappear when it's
+      // translated into English»). Opening the ☰ menu and switching language leave the card up (it re-renders in the new
+      // language); the Filter, «بحث», the city field and every other tap still count as before. The controls opt in with
+      // data-consent-keep, so a new control can never exempt itself by accident.
+      if (e.target instanceof Element && e.target.closest('[data-consent-keep]')) return;
+      if (visible) choose('all');
+      else setTappedEarly(true);
+    };
+    document.addEventListener('click', onDocClick, true);
+    return () => document.removeEventListener('click', onDocClick, true);
+  }, [visible, consent, authChecked, user, choose]);
+
+  // EXIT ANIMATION — owner 2026-09-13: "I want to feel like an animation when I click «السماح بالكل»".
+  // A soft 220 ms fade+slide-down when the card goes away (from a button tap OR a tap outside),
+  // then unmount. `mounted` lingers a beat past `visible` so the exit is visible; `anim` drives
+  // opacity 1→0 and translateY 0→12. useNativeDriver=false on web (RNW rAF-drives it there anyway).
+  //
+  // THE UNMOUNT MUST NOT DEPEND ON THE ANIMATION FINISHING. On React Native Web, Animated is driven
+  // by requestAnimationFrame, which browsers suspend for a backgrounded tab, minimised window or OS
+  // power throttling. A .start(cb) that never fires would leave `mounted` true forever — the card
+  // gone visually but the invisible <Animated.View> still occupying its z-index and swallowing
+  // input at the bottom of the app. runAfterAnimation() plays the animation AND drives the unmount
+  // from a setTimeout fallback (320 ms, a hair past the 220 ms animation) so exactly one of the two
+  // paths fires, always. Same rule that fixed the "I press بحث and nothing happens" bug 2026-08-07;
+  // enforced fleet-wide by scripts/verify-nav-not-gated-on-animation.ts.
+  const [mounted, setMounted] = useState(visible);
+  const anim = useRef(new Animated.Value(visible ? 1 : 0)).current;
+  // Tracks whether the card was EVER shown in this pageload. Guards the exit branch: on the very
+  // first render `visible` is false (authChecked=false), and without this ref the useEffect would
+  // schedule a setMounted(false) via the 320 ms fallback that fires AFTER authChecked flips true
+  // and the card just mounted — unmounting it instantly. (Repro'd live 2026-09-14: card never
+  // rendered on first visit; only shown here on a second render for the fix that lets it show.)
+  const wasVisible = useRef(visible);
+  useEffect(() => {
+    if (visible) {
+      wasVisible.current = true;
+      setMounted(true);
+      Animated.timing(anim, {
+        toValue: 1, duration: 220, easing: Easing.out(Easing.cubic),
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+      return;
+    }
+    // Never rose in this pageload → nothing to bring down.
+    if (!wasVisible.current) return;
+    runAfterAnimation(
+      (onFinished) => Animated.timing(anim, {
+        toValue: 0, duration: 220, easing: Easing.in(Easing.cubic),
+        useNativeDriver: Platform.OS !== 'web',
+      }).start(onFinished),
+      () => setMounted(false),
+      320,
+    );
+  }, [visible, anim]);
+
+  if (!mounted) return null;
 
   const c = isRTL ? COPY.ar : COPY.en;
   const textAlign = isRTL ? 'right' : 'left';
+  // Poppins is not loaded on the web, so English fell back to Times New Roman. Same repair as
+  // ModeSwitch: English uses the page's system stack; Arabic keeps what it has.
+  const en = !isRTL && SYSTEM_FONT ? { fontFamily: SYSTEM_FONT } : null;
 
   return (
-    <View
+    <Animated.View
       // @ts-expect-error web-only DOM props on the RNW host node
       dataSet={{ testid: 'cookie-consent' }}
       style={[
         st.host,
+        {
+          opacity: anim,
+          transform: [{
+            translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }),
+          }],
+        },
         // DESKTOP: the owner's corner card — far right in both languages, 280 wide, beside the app.
         // NARROW: a docked sheet across the bottom, and every part of that is load-bearing rather
         // than cosmetic. It must SPAN (left and right pinned, no `width`) or bottomPromptInset()
@@ -128,10 +246,10 @@ export default function CookieConsent() {
     >
       <View style={[st.headRow, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
         <Image source={require('../../assets/images/cookies-green.png')} style={st.icon} contentFit="contain" />
-        <Text style={[st.title, { textAlign }]}>{c.title}</Text>
+        <Text style={[st.title, { textAlign }, en && { ...en, fontWeight: '600' }]}>{c.title}</Text>
       </View>
 
-      <Text style={[st.body, { textAlign, writingDirection: isRTL ? 'rtl' : 'ltr' }]}>{c.body}</Text>
+      <Text style={[st.body, { textAlign, writingDirection: isRTL ? 'rtl' : 'ltr' }, en]}>{c.body}</Text>
 
       <View style={[st.btnRow, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
         <Pressable
@@ -140,7 +258,7 @@ export default function CookieConsent() {
           dataSet={{ testid: 'cookie-allow-all' }}
           style={({ pressed }) => [st.btn, st.btnPrimary, pressed && st.pressed]}
         >
-          <Text style={[st.btnText, st.btnPrimaryText]}>{c.all}</Text>
+          <Text style={[st.btnText, st.btnPrimaryText, en && { ...en, fontWeight: '600' }]}>{c.all}</Text>
         </Pressable>
         <Pressable
           onPress={() => choose('necessary')}
@@ -148,10 +266,10 @@ export default function CookieConsent() {
           dataSet={{ testid: 'cookie-only-necessary' }}
           style={({ pressed }) => [st.btn, st.btnGhost, pressed && st.pressed]}
         >
-          <Text style={[st.btnText, st.btnGhostText]}>{c.necessary}</Text>
+          <Text style={[st.btnText, st.btnGhostText, en && { ...en, fontWeight: '600' }]}>{c.necessary}</Text>
         </Pressable>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 

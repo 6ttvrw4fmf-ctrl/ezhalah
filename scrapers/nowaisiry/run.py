@@ -341,7 +341,14 @@ def fetch_lands(s: cc.Session) -> list[dict]:
 
 def map_listing(p: dict) -> tuple[Optional[dict], str]:
     """Combine the REST `lands` post into a canonical row. Returns (row, category)."""
-    if (p.get("status") or "publish") != "publish":
+    # FAIL CLOSED (audit 2026-10-02): a post with NO status used to be read as "publish". The
+    # publish state is the only availability this source states (measured: 17 of 17 posts carry
+    # status=publish, X-WP-Total 17, no sold/reserved word in any title or text; the 5 dead rows
+    # were deleted posts answering 404). A missing status is unreadable, not available.
+    if not p.get("status"):
+        raise RuntimeError(f"lands post {p.get('id')!r} carries no status — refusing to upsert on a "
+                           "publish state that could not be read")
+    if p["status"] != "publish":
         return None, "residential"
     title_raw = _clean((p.get("title") or {}).get("rendered", ""))
     content = _clean((p.get("content") or {}).get("rendered", ""))
@@ -492,6 +499,18 @@ def main() -> int:
 
         # Full run: prune listings active before that weren't seen this crawl (full catalog fetched).
         pruned = 0
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+        # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+        # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+        # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+        superseded = db.retire_superseded_siblings(
+            res_table="nowaisiry_residential_listings", com_table="nowaisiry_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source=SOURCE)
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
         for tbl, rows_seen in (("nowaisiry_residential_listings", res),
                                ("nowaisiry_commercial_listings", com)):
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE,

@@ -23,7 +23,7 @@ const check = (label: string, ok: boolean) => {
 console.log('\nclient folds mirror the DB district token — user spelling matches our catalog\n');
 
 const FOLDS: Array<[string, string]> = [
-  ['src/data/locations.ts',  'norm (locations)'],
+  ['src/lib/locationSuggest.ts', 'norm (locations)'], // moved out of src/data/locations.ts 2026-10-03 so a barrier can execute it
   ['src/lib/chatSearch.ts',  'normalizeArabic (chat)'],
   ['src/lib/translitPlace.ts','normAr (landmark)'],
 ];
@@ -32,6 +32,20 @@ for (const [rel, label] of FOLDS) {
   check(`${label}: ئ→ي`,             /\.replace\(\/ئ\/g, ?['"]ي['"]\)|split\(['"]ئ['"]\)\.join\(['"]ي['"]\)/.test(src));
   check(`${label}: ء dropped`,        /\.replace\(\/ء\/g, ?['"]{2}\)|split\(['"]ء['"]\)\.join\(['"]{2}\)/.test(src));
   check(`${label}: Arabic-Indic digits ٠-٩ → 0-9`, /\[٠-٩\]/.test(src));
+}
+// District-match path only (owner 2026-09-14, migration 20260914204035): our list never shows a
+// number, so «المحمدية 1/2/3» is one entry «المحمدية» — and a user typing the number they read off
+// a card must still match it. chatSearch normalises CONVERSATION TITLES and translitPlace matches a
+// listing's RAW text against the static catalog json; neither is the district token, so neither
+// folds digits — asserted here so the asymmetry is deliberate, not drift.
+{
+  const loc = readFileSync(join(root, 'src/lib/locationSuggest.ts'), 'utf8');
+  check('norm (locations): trailing number folded (المحمدية 2 → المحمدية)', /\.replace\(\/\[0-9\]\+\$\/, ?['"]{2}\)/.test(loc));
+  check('norm (locations): LEADING number folded too (1النرجس → النرجس)', /\.replace\(\/\^\[0-9\]\+\/, ?['"]{2}\)/.test(loc));
+  for (const [rel, label] of [['src/lib/chatSearch.ts', 'normalizeArabic (chat)'], ['src/lib/translitPlace.ts', 'normAr (landmark)']] as const) {
+    check(`${label}: does NOT fold digits (not the district token)`,
+      !/\.replace\(\/\[0-9\]\+\$\/, ?['"]{2}\)/.test(readFileSync(join(root, rel), 'utf8')));
+  }
 }
 
 // EXECUTE a faithful replica of the client fold on the exact user-vs-catalog pairs the DB
@@ -47,12 +61,17 @@ const clientNorm = (s: string) =>
    .replace(/ئ/g, 'ي')
    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
    .replace(/ء/g, '')
-   .replace(/[^\p{L}\p{N}]/gu, '');
+   .replace(/[^\p{L}\p{N}]/gu, '')
+   .replace(/^[0-9]+/, '')
+   .replace(/[0-9]+$/, '');
 
 const eqPairs: Array<[string, string, string]> = [
   ['الصفاء', 'الصفا', 'ء drop'],
   ['شرايع المجاهدين', 'شرائع المجاهدين', 'ئ→ي'],
   ['الزهراء1', 'الزهراء ١', 'digit script'],
+  ['المحمدية 2', 'المحمدية', 'trailing number folded away'],
+  ['البصر1', 'البصر 1', 'missing space + trailing number'],
+  ['1النرجس', 'النرجس', 'number in FRONT — real production data, city 67'],
 ];
 for (const [a, b, why] of eqPairs) {
   const na = clientNorm(a), nb = clientNorm(b);

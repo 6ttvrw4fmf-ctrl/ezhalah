@@ -37,10 +37,23 @@
 // bugs they covered. Importing is not calling, so the graph finds CANDIDATES and
 // scripts/live-reaching-required-checks.txt records each candidate's MEASURED verdict. An
 // undeclared candidate fails this check, which is what stops the class growing.
+//
+// AND THE CANDIDATE SET ITSELF WAS A BLIND SPOT (routine #10, 2026-09-23, ops_incident #391's
+// pattern turned on this file). The module-graph walk above decides WHO the predicate is applied to,
+// and everything reaching production by another route was excluded before any assertion ran.
+// Measured by planting the mutant: a four-line check in scripts/ doing a bare
+// `await fetch('https://<project>.supabase.co/rest/v1/')` really reached production — HTTP 401 from
+// the live endpoint — and this barrier exited 0, as did verify-test-registry-complete.ts and (once
+// one mustCatch line was added) verify-new-barriers-are-mutation-proven.ts. So there is now a SECOND
+// discovery arm, scripts/lib/liveReach.ts, asking whether a production host reaches a NETWORK CALL.
+// Neither arm is exhaustive alone and neither is a grep: arm 1 is a computed property of the module
+// graph, arm 2 is a quote-aware read of what is passed to fetch/execSync. Their residual gaps are
+// stated in liveReach.ts rather than hidden.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { loadRegistry } from './lib/testRegistry.ts';
 import { transitivelyReaches } from './lib/importGraph.ts';
+import { reachersOutsideResolver, reachesProductionOutsideResolver } from './lib/liveReach.ts';
 
 // The ratchet. Pinned in SOURCE so a name cannot be appended quietly — the same device
 // GRANDFATHERED_CEILING uses in verify-new-barriers-are-mutation-proven.ts. Lower it as splits land;
@@ -123,8 +136,25 @@ check('no declared name has stopped being a candidate (stale rows must be delete
   stale.map((n) => `${n} no longer reaches the live endpoint from the required suite — delete its `
     + 'row; a list that over-reports makes the ratchet look worse than it is and hides real growth').join('\n      '));
 
+// ── 4. THE SECOND ARM. A check that reaches production WITHOUT the resolver is invisible to the
+// module graph, and that exclusion is decided before any assertion above runs. Measured 2026-09-23:
+// zero real offenders, and a planted one really reached the live endpoint while this file exited 0.
+// This is deliberately NOT a declarable class: the repair is to route through the resolver (which
+// makes it arm 1's business, declarable and ratcheted) or to move the check to a workflow. There is
+// no row you can add to make a hardcoded production endpoint acceptable inside the required suite.
+// ───────────────────────────────────────────────────────────────────────────────────────────────
+const offResolver = reachersOutsideResolver(runSet, (name) => readFile(join(ROOT, 'scripts', name)));
+check('no required check reaches a production host OUTSIDE the canonical resolver',
+  offResolver.length === 0,
+  offResolver.map((o) => `${o.name} — ${o.why}. A hardcoded endpoint is invisible to the module-graph `
+    + 'walk above AND to the blackhole measurement scripts/live-reaching-required-checks.txt '
+    + 'documents, so it can gate every unrelated PR on production\'s state with nothing watching. '
+    + 'Route it through scripts/lib/public-supabase.ts, or move it to a workflow home declared in '
+    + 'scripts/test-exclusions.txt. Do NOT add a row to make this green.').join('\n      '));
+
 console.log(`\n  required run set: ${runSet.length} · live-reaching candidates: ${candidates.length} `
-  + `· production-dependent: ${productionDependent.length} (ceiling ${PRODUCTION_DEPENDENT_CEILING})\n`);
+  + `· production-dependent: ${productionDependent.length} (ceiling ${PRODUCTION_DEPENDENT_CEILING}) `
+  + `· off-resolver reachers: ${offResolver.length}\n`);
 
 // ── MUTATION PROOF — every predicate above, against a world that must be caught ─────────────────
 console.log('  mutation proof — the same predicates, against a suite that reaches production\n');
@@ -179,6 +209,46 @@ mustCatch('a STALE row left behind after a check was split (the ratchet reading 
   staleIn(['still-here.ts'], declaredOf([['still-here.ts', 'production-dependent'], ['already-split.ts', 'production-dependent']])).length > 0);
 mustCatch('...and a list with no stale rows is NOT flagged',
   staleIn(['still-here.ts'], declaredOf([['still-here.ts', 'production-dependent']])).length === 0);
+
+// ── ARM 2's proofs. The EXACT mutant that survived this barrier on 2026-09-23, plus the four real
+// files in the tree that name a production host innocently. Both directions, and the negatives are
+// read off DISK rather than invented here — a predicate proved only against strings its own author
+// wrote proves something about the author's imagination. ─────────────────────────────────────────
+const THE_SURVIVING_MUTANT = `
+const r = await fetch('https://aannarbkwcymrotzwdbo.supabase.co/rest/v1/', { signal: AbortSignal.timeout(5000) });
+console.log('reached production:', r.status);
+`;
+mustCatch('THE MUTANT THAT SURVIVED: a bare fetch() of a production host in the required suite',
+  reachesProductionOutsideResolver(THE_SURVIVING_MUTANT) !== null);
+mustCatch('the same endpoint hidden behind a const, then handed to fetch',
+  reachesProductionOutsideResolver(
+    "const ENDPOINT = 'https://x.supabase.co/rest/v1/';\nawait fetch(ENDPOINT);") !== null);
+mustCatch('a shell-out — execSync(`curl https://…supabase.co…`) reaches production exactly as fetch does',
+  reachesProductionOutsideResolver(
+    "execSync('curl -s https://x.supabase.co/rest/v1/ > /tmp/o');") !== null);
+mustCatch('the production FRONTEND host, not just the database one',
+  reachesProductionOutsideResolver("await fetch('https://ezhalah-app.vercel.app/');") !== null);
+mustCatch('a host inside a COMMENT is not a reach (the reader strips comments first)',
+  reachesProductionOutsideResolver(
+    "// await fetch('https://x.supabase.co/');\nconsole.log('hi');") === null);
+mustCatch('a hermetic check naming no host at all is NOT flagged',
+  reachesProductionOutsideResolver("const x = 1;\nconsole.log(x);") === null);
+mustCatch('an UNREADABLE file in the run set is reported as UNKNOWN, never assumed clean',
+  reachersOutsideResolver(['gone.ts'], () => null).length > 0);
+
+// The four measured negative controls, read from the real tree. Each names a production host and
+// none of them reaches it: a fixture env object, an error-message fixture, and two assertions about
+// a shell script's source. If this barrier ever starts flagging one of them it has become a grep.
+for (const name of [
+  'verify-account-deletion.ts',
+  'verify-deploy-bundle-check-pipeline.ts',
+  'verify-journey-page-error-discriminator.ts',
+  'verify-safe-deploy-postcheck-hardened.ts',
+]) {
+  const src = readFile(join(ROOT, 'scripts', name));
+  mustCatch(`the real ${name} names a production host but does NOT reach it (negative control)`,
+    src !== null && reachesProductionOutsideResolver(src) === null);
+}
 
 if (mutFail > 0) failed += mutFail;
 

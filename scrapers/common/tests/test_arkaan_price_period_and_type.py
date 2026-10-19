@@ -224,3 +224,28 @@ def test_json_ld_never_supplies_a_total_when_the_card_printed_only_a_rate():
     assert row["price_total"] is None            # absent key ⇒ NULL, no stored value clobbered
     assert row["area_m2"] == 400                 # and never 930 × 400 = 372,000
     assert row["price_total"] != 930 * row["area_m2"]
+
+
+# ── 7. The facade is the ad's own bearing beside its one street (🔬 AF engineer, 2026-10-08) ─────
+# «شارع 15 م شمالًا»: the spec cell holds the width only, the site has no facade field, and 1,079 of
+# 1,482 live ads state the bearing — 0 were stored, so «الواجهة: شمال» never found an arkaan listing.
+def _land(ad_text, street="15 م"):
+    return map_listing(
+        _item("1106", ptype="أرض", deal="للبيع", hood="النزهة", title="أرض للبيع",
+              specs={"المساحة": "460 م²", "الشارع": street}, price_text="300,000"),
+        _detail(type_text="أرض سكنية للبيع", price_card="السعر 300,000 ريال",
+                ad_text=ad_text, offers={"price": 300000}))[0]
+
+
+def test_the_ads_own_bearing_is_the_facade():
+    assert _land("للبيع ارض سكنية في حي النزهة المساحة 460 م² شارع 15 م شمالًا السعر 300 ألف")["direction"] == "شمال"
+    assert _land("المساحة 250 م² شارع 15م جنوبًا السعر 160 الف")["direction"] == "جنوب"
+
+
+def test_a_corner_plot_has_no_single_facade():
+    assert _land("شارع 15 م شمالًا وشارع 15 م غربًا", street="15 × 15 م")["direction"] is None
+    assert _land("شارع 15 م شمالًا", street="15 × 15 م")["direction"] is None
+
+
+def test_no_bearing_writes_no_facade():
+    assert _land("للبيع ارض سكنية المساحة 460 م² شارع 15 م")["direction"] is None

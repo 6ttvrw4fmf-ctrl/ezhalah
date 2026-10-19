@@ -35,6 +35,8 @@ export const VIEWPORTS = [
 
 /** The property-search RPC. Journeys count these to prove "no search fired" / "no duplicate". */
 import { isHydrationNoticePageError, hydrationNoticeNote } from '../lib/pageErrors.mjs';
+import { resultsFoundCount, settledSource, zeroRendered } from '../lib/resultsSentence.mjs';
+import { pickCityOptionIndex } from '../live-sweep/cityOption.mjs';
 
 export const SEARCH_RPC = '/rpc/location_search_candidates_ar';
 
@@ -316,8 +318,15 @@ export async function dismissAuthInvitation(page, budgetMs = 6000) {
 }
 
 // ── driving a real search ────────────────────────────────────────────────────────────────────────
-/** Every terminal state the results screen can reach. Shared with the live sweep's SETTLED_RE. */
-export const SETTLED_RE = /لقينا|ما لقيت|ما فيه/;
+/**
+ * Every terminal state the results screen can reach — DERIVED from the pool the app ships.
+ *
+ * It used to read `/لقينا|ما لقيت|ما فيه/`. PR #3186 turned the Results-Found sentence into a
+ * rotation, and only 4 of the 10 AR guest templates still contain «لقينا» — so this clock tested
+ * false on ~60% of real settled searches and `runSearch()` threw «the results screen never settled»
+ * at a perfectly healthy production. Derived, not restated: a template added tomorrow extends it.
+ */
+export const SETTLED_RE = new RegExp(settledSource());
 
 /**
  * Type a city and commit it. Returns true only when the APP confirmed the selection (the field
@@ -331,14 +340,31 @@ export async function pickCity(page, city) {
   const optionSrc = (c) => [...document.querySelectorAll('div')].filter((e) => {
     const t = (e.innerText || '').trim();
     return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
-  }).pop();
+  });
   const appeared = await page.waitForFunction(
     (c) => [...document.querySelectorAll('div')].some((e) => {
       const t = (e.innerText || '').trim();
       return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
     }), city, { timeout: 20000 }).then(() => true).catch(() => false);
   if (!appeared) return false;
-  const handle = await page.evaluateHandle(optionSrc, city);
+  // WHICH option is decided by the shared, mutation-proven rule — not by `.pop()`, which this
+  // function also used until 2026-09-25 and which selects «الخبراء» (13 إعلان) when a journey asks
+  // for «الخبر» (6,606). Guardian asserts product INVARIANTS, so a silently substituted city makes
+  // every one of them an assertion about a different place. Same defect as e2e/live-sweep/sweep.mjs,
+  // same fix, one rule: e2e/live-sweep/cityOption.mjs, proven in
+  // scripts/verify-city-option-pick-is-exact.ts.
+  const texts = await page.evaluate(
+    (c) => [...document.querySelectorAll('div')].filter((e) => {
+      const t = (e.innerText || '').trim();
+      return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
+    }).map((e) => (e.innerText || '').trim()), city);
+  const idx = pickCityOptionIndex(texts, city);
+  if (idx < 0) return false;
+  const handle = await page.evaluateHandle(
+    ({ c, i }) => [...document.querySelectorAll('div')].filter((e) => {
+      const t = (e.innerText || '').trim();
+      return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
+    })[i], { c: city, i: idx });
   const option = handle.asElement();
   if (!option) return false;
   // Scroll the option with the DOM, not Playwright. `scrollIntoViewIfNeeded()` does NOT move a
@@ -394,12 +420,17 @@ export async function runSearch(page, budgetMs = 90000) {
  * silently sees 11% of the evidence is barely an oracle at all. So wait for the count to STOP
  * changing, and take an honest zero as its own settled state rather than burning the budget on it.
  */
-const ZERO_STATE_RE = /ما فيه نتائج|ما لقيت|ما لقينا/;
+// The zero check is DERIVED, for the same reason SETTLED_RE above is. This was a hand-written
+// /ما فيه نتائج|ما لقيت|ما لقينا/, and when the app's no-results sentence became an 80-template
+// rotation on 2026-09-26 it silently stopped matching — so the early return below never fired and
+// every honest-zero journey burned the whole 30s budget waiting for cards that were never coming,
+// which is precisely what this function's comment says it exists to avoid. Milder than its sibling
+// in journeys.mjs (that one ACCUSED the product), but the same defect and the same repair.
 export async function waitForCards(page, budgetMs = 30000) {
   let last = -1;
   let stable = 0;
   await until(async () => {
-    if (ZERO_STATE_RE.test(await bodyText(page))) return true;
+    if (zeroRendered(await bodyText(page))) return true;
     const n = await countVisible(page, '[data-testid^="card-listing-"]');
     if (n > 0 && n === last) stable += 1; else { stable = 0; last = n; }
     return stable >= 2;
@@ -417,8 +448,22 @@ export async function searchAsGuest(page, { city = 'الرياض', priceMin, pri
   await runSearch(page);
 }
 
-/** The results screen's own state, as the user sees it. */
-export const resultsState = (page) => page.evaluate(() => {
+/**
+ * The results screen's own state, as the user sees it.
+ *
+ * `countChip` is read NODE-SIDE by the derived matcher rather than by a regex inside the page, for
+ * two reasons. The pool alternation carries one capture group PER TEMPLATE, so `m[1]` in the page
+ * would be `undefined` for every template but the first — a silent null dressed as a parse. And
+ * `resultsFoundCount()` picks the LAST sentence by document position, which is what a growing
+ * transcript requires; the retired in-page `.match()` took the first. It is a NUMBER now (it was
+ * the raw «41,330» string); every caller either tests truthiness, compares two of them, or
+ * interpolates, and all three are unaffected.
+ *
+ * null still means "no shipped Results-Found sentence is on this screen" — never "the screen says
+ * zero". journeys.mjs treats that as a defect, which is the correct reading.
+ */
+export const resultsState = async (page) => {
+  const s = await page.evaluate(() => {
   const vis = (e) => {
     const r = e.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return false;
@@ -428,14 +473,17 @@ export const resultsState = (page) => page.evaluate(() => {
   const text = document.body.innerText;
   return {
     url: location.href,
-    countChip: (text.match(/لقينا\s+([\d,٬]+)\s+إعلان/) || [])[1] ?? null,
+    bodyText: text,
     cards: [...document.querySelectorAll('[data-testid^="card-listing-"]')].filter(vis).length,
     firstCard: document.querySelector('[data-testid^="card-listing-"]')?.getAttribute('data-testid') ?? null,
     loadMore: [...document.querySelectorAll('[data-testid="results-load-more"]')].filter(vis).length,
     afCards: [...document.querySelectorAll('[data-testid="af-card"]')].filter(vis).length,
     composers: [...document.querySelectorAll('textarea')].filter(vis).map((e) => e.value),
   };
-});
+  });
+  const { bodyText, ...rest } = s;
+  return { ...rest, countChip: resultsFoundCount(bodyText) };
+};
 
 // ── loading affordances ──────────────────────────────────────────────────────────────────────────
 // A "loader" is anything that says work is in flight. Named explicitly rather than guessed at from

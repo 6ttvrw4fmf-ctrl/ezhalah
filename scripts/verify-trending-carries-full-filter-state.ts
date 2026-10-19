@@ -38,9 +38,11 @@
 //
 //   node --experimental-strip-types scripts/verify-trending-carries-full-filter-state.ts
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { liftSearchScope } from './lib/liftSearchScope.ts';
+import { windowBetween } from './lib/sourceWindow.ts';
+import { npmTestRuns } from './lib/testRegistry.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 
@@ -74,12 +76,28 @@ check('rpcAllNarrowingParams spreads the ADVANCED answers',
 // silently stopped reaching Trending, which is the original defect wearing a different hat. So the
 // contract is pinned from both ends: the normal builder must PRODUCE each narrowing key, and the
 // all-inclusive builder may drop ONLY the two keys it is documented to drop.
-const normalBuilder = remote.slice(remote.indexOf('function rpcFilterParams'),
-                                   remote.indexOf('function rpcCountFilterParams'));
+const normalBuilder = windowBetween(remote, 'function rpcFilterParams', 'function rpcCountFilterParams',
+  'src/data/remote.ts');
+// THIS LOOP CHECKS THAT THE KEY IS *MENTIONED*, WHICH IS NOT THE CONTRACT (routine #10, 2026-09-22).
+// `\bp_beds_exact\b` matches the local `const p_beds_exact = …` declaration as happily as the
+// returned object, so a key that is COMPUTED and then dropped on the way out keeps this green.
+// Measured: deleting `p_beds_exact,` from rpcFilterParams's return — the very mutation the comment
+// above cites as justification — left this file printing PASS and exiting 0.
+// The emission contract is now proven BY EXECUTION in
+// scripts/verify-narrowing-builders-really-emit-their-keys.ts, which lifts these builders and reads
+// the KEYS OF THE RETURNED OBJECT. The loop stays as a cheap early signal, with its claim narrowed
+// to what it can actually see, and the companion's existence is ENFORCED rather than cited.
 for (const key of ['p_beds_exact', 'p_beds_min', 'p_price_min', 'p_price_max', 'p_area_min', 'p_area_max']) {
-  check(`rpcFilterParams still produces ${key}`, new RegExp(`\\b${key}\\b`).test(normalBuilder),
+  check(`rpcFilterParams still MENTIONS ${key} (source-text only — emission is proven by execution elsewhere)`,
+    new RegExp(`\\b${key}\\b`).test(normalBuilder),
     'the normal-narrowing builder feeds BOTH search and Trending — losing a key here loses it everywhere');
 }
+check('the EXECUTING emission proof that this loop cannot stand in for still exists and still runs',
+  existsSync(join(ROOT, 'scripts/verify-narrowing-builders-really-emit-their-keys.ts'))
+    && npmTestRuns(ROOT, 'verify-narrowing-builders-really-emit-their-keys'),
+  'scripts/verify-narrowing-builders-really-emit-their-keys.ts is the only check that RUNS these ' +
+    'builders and reads the returned keys. Without it, the MENTIONS loop above is the only cover, ' +
+    'and it passes over a builder that computes a narrowing key and then drops it.');
 const dropped = (builder.match(/const \{([^}]*)\}\s*=\s*\n?\s*rpcFilterParams/)?.[1] ?? '')
   .split(',').map((x) => x.trim().split(':')[0].trim()).filter((x) => x && x !== '...normal');
 // UNSET PREDICATES MUST BE OMITTED, NOT SENT AS NULL. Two things depend on it: the trending pool
@@ -129,9 +147,23 @@ check('the Trending params carry the search TABLE scope, from searchTableScope(q
   new RegExp(`const cityAfRaw = \\{ \\.\\.\\.rpcAllNarrowingParams\\(${NORMALISED_Q}\\), \\.\\.\\.cityTableScope \\}`).test(index)
   && new RegExp(`= searchTableScope\\(${NORMALISED_Q}\\) \\?\\? \\{\\}`).test(index),
   'without p_tables, Trending counts platform tables the results RPC excludes');
+// STATED STRUCTURALLY, NOT AS A SPELLING (ops_incident #305, the #136 sibling shape, repaired
+// 2026-09-18). This check used to read `/const tableScope = searchTableScope\(q\);/` — pinning BOTH
+// a local variable name (`tableScope`) and a local argument name (`q`). Renaming either is a correct
+// refactor that leaves the invariant intact and turned this check RED; a genuine second copy of the
+// table lists introduced under the same spelling would have kept it GREEN. That is #136 exactly.
+// The invariant is countable: ONE exported resolver, and remote.ts's own results path CALLS it.
+export const sharedTableScopeProblems = (rem: string): string[] => {
+  const out: string[] = [];
+  const defs = (rem.match(/export function searchTableScope\b/g) || []).length;
+  if (defs !== 1) out.push(`expected exactly ONE exported searchTableScope definition, found ${defs}`);
+  // A call with any argument spelling, anywhere OUTSIDE the definition line itself.
+  const calls = (rem.match(/(?<!function )\bsearchTableScope\s*\(\s*[A-Za-z_$][\w$.]*\s*\)/g) || []).length;
+  if (calls < 1) out.push('remote.ts never CALLS searchTableScope — the results path is reading a second copy of the table lists');
+  return out;
+};
 check('searchTableScope is the SHARED resolver, not a second copy of the table lists',
-  /export function searchTableScope/.test(strip(read('src/data/remote.ts')))
-  && /const tableScope = searchTableScope\(q\);/.test(strip(read('src/data/remote.ts'))),
+  sharedTableScopeProblems(strip(read('src/data/remote.ts'))).length === 0,
   'resolveSearchScope and Trending must read ONE definition — a copy is the drift class itself');
 check('isBroadCommercial is stripped before the scope reaches the RPC',
   /isBroadCommercial: _cityScopeFlag/.test(index),
@@ -151,12 +183,36 @@ check('the table-scope keys do NOT count as user narrowing',
 // silently, because a fallback looks like a success. So each is gated on the user not being narrowed.
 // (ensureDistrictOptions has its own fallbacks, but the district NUMBER the user sees comes from
 // fetchDistrictEligibleCounts below, not from that pool, whenever any narrowing is active.)
-const cityFn = locations.slice(locations.indexOf('export async function ensureCityFieldIndex'),
-                               locations.indexOf('export function topCitiesByListings'));
+const cityFn = windowBetween(locations, 'export async function ensureCityFieldIndex',
+  'export function topCitiesByListings', 'src/data/locations.ts');
 const cityFallbacks = [...cityFn.matchAll(/if \(res\.error[^)]*\)/g)].map((m) => m[0]);
 check('every widening fallback in the CITY pool is gated on the user NOT being narrowed',
   cityFallbacks.length >= 3 && cityFallbacks.every((f) => /!hasNarrowing/.test(f)),
   `found ${cityFallbacks.length}; ungated: ${cityFallbacks.filter((f) => !/!hasNarrowing/.test(f)).join(' | ') || '(none)'}`);
+
+// WHAT THE CHECK ABOVE DOES *NOT* SEE, SAID OUT LOUD (ops_incident #385, routed here by routine-8).
+//
+// It asserts that each widening rung carries the `!hasNarrowing` GATE. It never runs the ladder, so
+// it cannot see what the gated call SENDS — and on 2026-09-21 the city ladder's last rung sent
+// `{ p_deal }` alone, dropping p_tables/p_tables2/p_types2 entirely. This check was GREEN for every
+// day that defect was live, and so was verify-af-city-counts-carry-advanced.ts, because the text
+// they pin is the text that produces the gap. Measured then: scoped 25,581 listings across 107
+// cities vs deal-only 82,704 across 204 — a 3.2x over-promise across 97 cities holding no matching
+// apartment at all.
+//
+// The ARGS invariant is now proven BY EXECUTION in verify-count-pool-fallbacks-keep-the-table-scope.ts,
+// which lifts the real ensureCityFieldIndex/ensureDistrictOptions and runs them against an injected
+// all-failing client. A cross-reference in a comment is a CLAIM, though, and BARRIER_ENGINEER.md
+// PART 1.11 is precisely about a named guard that reads as coverage — so the link is ENFORCED here
+// rather than asserted: if that file is deleted, renamed, or stops running, this check goes red and
+// says the gate assertion above is once again the only thing standing over the ladder.
+check('the ARGS-level companion that this gate check CANNOT see still exists and still runs',
+  existsSync(join(ROOT, 'scripts/verify-count-pool-fallbacks-keep-the-table-scope.ts'))
+    && npmTestRuns(ROOT, 'verify-count-pool-fallbacks-keep-the-table-scope'),
+  'verify-count-pool-fallbacks-keep-the-table-scope.ts is the only check that EXECUTES the fallback ' +
+    'ladders and asserts the args each rung sends. Without it, the `!hasNarrowing` assertion above is ' +
+    'a source-TEXT tripwire over a code path nothing runs — the ops_incident #385 state, in which a ' +
+    'last rung that drops the whole table scope keeps this file green.');
 
 // DISTRICT side. The visible district number must likewise describe the user's exact set: it is
 // fetched from the RESULTS RPC itself, and must carry BOTH halves of the params (2026-08-20: it
@@ -261,6 +317,35 @@ for (const [label, q, wantMonthly] of [
     `got [${got.join(', ')}]`);
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MUTATIONS (ops_incident #305). The repaired predicate is applied to deliberately broken and
+// deliberately RENAMED copies of the real remote.ts — both directions, because the defect this
+// repair fixes was an INVERSION: red on a correct rename, green on the real drift.
+const mustCatch = (what: string, caught: boolean) => {
+  if (caught) { console.log(`PASS  (mutation) catches ${what}`); return; }
+  failures++;
+  console.error(`FAIL  (mutation) did NOT catch ${what}`);
+};
+const REM = strip(read('src/data/remote.ts'));
+
+check('NEGATIVE CONTROL — the real shipped remote.ts is NOT flagged',
+  sharedTableScopeProblems(REM).length === 0, sharedTableScopeProblems(REM).join('; '));
+
+// The renames the OLD check inverted on. Each leaves the invariant fully intact.
+check('a correct rename of the local variable (tableScope -> scope) is NOT reported as drift',
+  sharedTableScopeProblems(REM.replace(/const tableScope = searchTableScope\(/, 'const scope = searchTableScope(')).length === 0);
+check('a correct rename of the ARGUMENT (q -> query) is NOT reported as drift',
+  sharedTableScopeProblems(REM.replace(/searchTableScope\(q\)/, 'searchTableScope(query)')).length === 0);
+
+// The drift the check exists for.
+mustCatch('the results path inlining the table lists instead of calling the shared resolver',
+  sharedTableScopeProblems(REM.replace(/\bsearchTableScope\s*\(\s*[A-Za-z_$][\w$.]*\s*\)/g,
+    '({ p_tables: RES_TABLES, p_tables2: COM_TABLES })')).length > 0);
+mustCatch('a SECOND exported searchTableScope definition (two copies of the scope rule)',
+  sharedTableScopeProblems(`${REM}\nexport function searchTableScope(q2: SearchQuery) { return null; }\n`).length > 0);
+mustCatch('the shared resolver no longer exported (Trending forced to keep its own copy)',
+  sharedTableScopeProblems(REM.replace(/export function searchTableScope\b/, 'function searchTableScope')).length > 0);
 
 console.log(failures === 0
   ? '\n✓ Trending is built from the full filter state (live honouring: verify-trending-filter-state-live.ts)\n'

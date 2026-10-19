@@ -48,7 +48,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, http_liveness, normalize
+from scrapers.common import db, http_liveness, normalize, sold_pin
 from scrapers.common.arabic_location import to_catalog
 
 BASE = "https://hajerhouses.com"
@@ -127,6 +127,15 @@ _OWN_BADGE_RE = re.compile(r'class="property-status-badge status-([a-z-]+)"')
 # opinion rather than an unmeasured one. Having no opinion can never contradict the crawl path.
 _GONE_BADGE = ("sold", "rented")
 _ALIVE_BADGE = ("available",)
+# THE LISTING'S OWN PAGE RENDERED (2026-10-05, Lifecycle Engineer; owner rule «a page that loads
+# with its ad body is a live answer»). Only 13 of 121 active pages carry any badge, so with the badge
+# as the only "live" signal 107 ads were never verified and the known-live controls read 1/5, voiding
+# the nightly dead-ads measurement. Measured 2026-10-05 from a plain connection: 10 of 10 active ads
+# answered 200 with WordPress's single-property body class (`single-rem_property postid-<n>`), one
+# with «available», nine with no badge; 3 of 4 hidden ads carried «sold»/«rented» (still gone: the
+# badge is read FIRST); an unknown slug answered 404 with no such class. The class is the template
+# WordPress picks for THIS post, so neither the theme's CSS palette nor a listing grid can produce it.
+_OWN_PROPERTY_PAGE_RE = re.compile(r'<body[^>]*\bclass="[^"]*\bsingle-rem_property\b')
 
 
 _oracle_sess: Any = None
@@ -157,7 +166,9 @@ def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[st
         return "gone"                    # THIS listing's own badge says sold/rented
     if any(b in _ALIVE_BADGE for b in badges):
         return "live"                    # THIS listing's own badge says available
-    return None                          # no badge at all — the common case; hold at UNKNOWN
+    if _OWN_PROPERTY_PAGE_RE.search(body or ""):
+        return "live"                    # no badge, but the listing's own page rendered (the common case)
+    return None                          # not this listing's page: hold at UNKNOWN
 
 
 _probe = http_liveness.LivenessProbe(
@@ -182,6 +193,24 @@ def _throttle() -> None:
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
     return s
+
+
+# OUR DISTRICT NEVER CARRIES A NUMBER (owner rule 2026-09-14, migration 20260914204035): «we just match it with
+# ours, and in their property card, if they kept a number, we include that number». hajer writes a subdivision
+# plan number into أسم الحي — «الورود (1100/4)», «الصقور (787/4)», «مخطط النخيل (الجشة) 258/4». Stored verbatim
+# in district_ar, norm_district_tok() kept the number, so no district option reached these listings and a
+# customer who picked «حي الورود» never saw them (🔬 backlog 184/247, journey FAIL hajer_residential_listings:
+# 584515). Only the «n/m» plan number is dropped; every word the source wrote stays, and `neighborhood` keeps the
+# whole string for the card.
+_PLAN_NUMBER = re.compile(r"[\s\-–]*[(\[]?\s*[0-9٠-٩]+\s*/\s*[0-9٠-٩]+\s*[)\]]?")
+
+
+def _district_without_plan_number(raw: Optional[str]) -> Optional[str]:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    out = re.sub(r"\s{2,}", " ", _PLAN_NUMBER.sub(" ", s)).strip(" -–")
+    return out or None
 
 
 def _clean(s: str) -> str:
@@ -303,6 +332,14 @@ def _image(p: dict, html_text: str) -> list[str]:
     return out
 
 
+def _body_lines(p: dict) -> str:
+    """The ad body as plain text, one line per block/bullet — so a negation never crosses a line."""
+    raw = ((p.get("content") or {}).get("rendered") or "")
+    raw = re.sub(r"(?i)<br\s*/?>|</(?:p|li|div|h\d)>", "\n", raw)
+    txt = ihtml.unescape(re.sub(r"<[^>]+>", " ", raw))
+    return "\n".join(x.strip() for x in re.split(r"[\n•▪️]+", txt) if x.strip())
+
+
 def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     """Return (row, category, gone). gone=True → sold/rented, mark inactive."""
     f = rem_fields(html_text)
@@ -328,7 +365,7 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     # region hint = the scraper's region (twin disambiguation). source_capture = the full REM field table +
     # WP basics (the source spec table carries NO broker PII). Numbers unchanged.
     city_ar = raw_city or "الأحساء"
-    district_ar = (f.get("أسم الحي") or "").strip() or None
+    district_ar = _district_without_plan_number(f.get("أسم الحي"))
     cid, rid = to_catalog(city_ar, region_hint=region)
     cap = {"rem_fields": f, "wp_id": p.get("id"), "link": p.get("link"),
            "title": _clean((p.get("title") or {}).get("rendered", ""))}
@@ -371,6 +408,20 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         "area_m2": _num(f.get("المساحة")),
         "bedrooms": _num(f.get("عدد غرف النوم")),
         "bathrooms": _num(f.get("عدد دورات المياه")),
+        # «واجهة العقار» is a structured REM field (114 of 120 live rows publish it: جنوب / شمال / شرق /
+        # غرب, or two joined by «*»). It used to reach only additional_info, so every hajer listing was
+        # invisible to the Advanced Filter's direction question (🔬 AF engineer, 2026-10-06). Stored as
+        # published; canon_direction_ar() folds it for search, and a two-way «جنوب*غرب» stays unknown there.
+        "direction": (f.get("واجهة العقار") or "").strip() or None,
+        # «عرض الشارع» is a structured REM cell on 113 of 120 live ads but reached additional_info only, so the
+        # street-width question never found a hajer listing (🔬 2026-10-11). One width or nothing: «15م*20م» is
+        # two streets → NULL, the raw cell stays in additional_info.
+        "street_width_m": normalize.one_street_width(f.get("عرض الشارع")),
+        # Amenities from the ad's own body (WordPress `content`): «مطبخ مغلق», «غرفة خادمة», «غرفة غسيل».
+        # hajer's REM block has NO amenity field (its 20 labels are rooms/area/facade/street/age/…), so
+        # the law allows prose here, four outcomes, line by line (🔬 AF engineer 2026-10-07: 0/4 hajer
+        # findability, source-reread 37608383084). The body itself is not stored (PDPL: free text).
+        **normalize.amenities_from_lines(_body_lines(p)),
         # A per-metre rate is never a total and never an annual rent — see `rate_only` above.
         "price_total": None if (is_rent or rate_only) else price,
         "price_annual": price_annual,
@@ -393,7 +444,8 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     return row, category, gone
 
 
-def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+def _pin_sold_inactive(table: str, ad_numbers: list[str],
+                       seen_ad_numbers: list[str]) -> None:
     """Make source-confirmed SOLD/RENTED rows inactive NOW and survivors of the nightly
     auto_recover_false_inactive() sweep.
 
@@ -407,13 +459,18 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     stuck in on 2026-07-16). prune_unseen() never undoes the pin: it only selects active=true
     rows. When a listing is later relisted, its next upsert carries active=true and the upsert's
     own missing_count=0 reset applies — the pin is only written for ids that are gone THIS
-    crawl."""
-    for i in range(0, len(ad_numbers), 200):
-        db._execute(
-            db.sb().table(table).update({"active": False, "missing_count": 3})
-            .in_("ad_number", ad_numbers[i:i + 200]),
-            what=table + ".sold_pin",
-        )
+    crawl.
+
+    The `seen_ad_numbers` half is what makes this oracle three-valued instead of one-way: the same
+    status field that publishes a removal also publishes the reversal, and until 2026-09-23 the
+    reversal was read, used, and thrown away — leaving ops_lifecycle_false_resurrection() with a
+    GONE latest verdict that no amount of correct behaviour could clear. See scrapers/common/
+    sold_pin.py. It writes evidence only: never active, never missing_count, never
+    last_verified_alive_at.
+    """
+    sold_pin.pin_source_confirmed_gone(
+        table, ad_numbers, oracle="hajer.sold_pin.status_badge", seen_ad_numbers=seen_ad_numbers,
+    )
 
 
 def main() -> int:
@@ -472,15 +529,27 @@ def main() -> int:
         # Pin sold/rented rows immediately after the upserts: gone rows are never upserted here,
         # but without the pin an already-listed row stays active for 3 more crawls (prune's
         # 3-strike) while the site explicitly says gone. See _pin_sold_inactive.
-        if sold_res:
-            _pin_sold_inactive("hajer_residential_listings", sold_res)
-        if sold_com:
-            _pin_sold_inactive("hajer_commercial_listings", sold_com)
+        _pin_sold_inactive("hajer_residential_listings", sold_res,
+                           [r["ad_number"] for r in res])
+        _pin_sold_inactive("hajer_commercial_listings", sold_com,
+                           [r["ad_number"] for r in com])
         # Gone rows are already active=false + missing_count=3 by now; prune_unseen never touches
         # them (it only reads active=true rows), so their absence from the seen set is harmless.
         # verify_gone makes the OTHER path direct too: a row missing from this crawl is re-fetched
         # at its own URL and only its own badge may retire it. Absence alone no longer decides.
         pruned = 0
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+        # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+        # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+        # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+        superseded = db.retire_superseded_siblings(
+            res_table="hajer_residential_listings", com_table="hajer_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source="Hajer")
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
         for tbl, rows_seen in (("hajer_residential_listings", res), ("hajer_commercial_listings", com)):
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Hajer",
                                 verify_gone=_probe.verify_gone)

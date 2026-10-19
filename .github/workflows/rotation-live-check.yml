@@ -1,0 +1,69 @@
+# ROTATION REALLY VARIES WHAT IS SERVED — asked of production, not of the repo.
+#
+# Owner rule 2026-09-26: a repeat of the same search must not front the same houses, and must not
+# always lead with the same website. The client half (one seed per search, held across that
+# search's pages) is pinned hermetically by scripts/verify-rotation-seed-is-per-search.ts inside
+# `npm test`. This is the other half: the DEPLOYED ORDER BY must actually let that seed choose
+# WHICH listing fronts each platform.
+#
+# Neither half can stand in for the other. Before the 2026-09-26 SQL change the client could thread
+# a perfect per-search seed into an ORDER BY that structurally ignored it — rot_key sat BELOW
+# div_rank, so it reordered platforms while every platform kept fronting the identical house.
+# Measured against production the day this shipped: 0% of 52 platforms changed their front listing.
+# Only a live call can see that.
+#
+# NOT IN THE REQUIRED `npm test` (scripts/test-exclusions.txt records this file as its home): the
+# verdict depends on production inventory, which moves on every scrape, so inside the required
+# suite it would fail unrelated PRs. Same placement precedent as migration-drift-guard.yml.
+#
+# Anon key only — this is the exact path a visitor's browser takes, and reading it through a
+# privileged key would mask an RLS regression. It needs no repo secret, so a fork PR can run it.
+name: Rotation live check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/**'
+      - 'src/lib/rotationSeed.ts'
+      - 'src/data/remote.ts'
+      - 'scripts/verify-rotation-varies-the-listings-live.ts'
+      - '.github/workflows/rotation-live-check.yml'
+  schedule:
+    - cron: '37 */6 * * *'   # 4x a day, offset off the :00/:29/:59 monitoring slots
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rotation-live-check
+  cancel-in-progress: false
+
+jobs:
+  rotation:
+    name: A different seed really serves different listings
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      # No `npm ci`: the script imports nothing outside node builtins and scripts/lib.
+      - name: Two seeds, same totals, different houses, clean paging
+        run: |
+          node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+            scripts/verify-rotation-varies-the-listings-live.ts
+
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind seam_check_failed
+          --workflow rotation-live-check.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

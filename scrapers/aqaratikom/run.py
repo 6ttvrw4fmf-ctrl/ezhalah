@@ -55,7 +55,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, normalize, sold_pin  # noqa: E402
 from scrapers.common.arabic_location import to_catalog  # noqa: E402
 
 BASE = "https://nawait.sa/api/v1"
@@ -466,6 +466,21 @@ def _video(estate: dict) -> Optional[str]:
 
 
 # ── Mapping ────────────────────────────────────────────────────────────────────
+def row_for(ad: dict, status: str, detail: Optional[dict]):
+    """map_listing for one ad of the first pass, or None when its OWN record said gone.
+
+    A terminal 404 on the ad's own record in this very run means it must never be written active
+    from the list summary (crawler audit 2026-10-02, scrapers/lifecycle-gaps.txt). Left out of the
+    seen set, prune_unseen's 3-strike guard ages it out; one reading hides nothing. "missing" (no
+    answer) is UNKNOWN and keeps the summary row, as before."""
+    if status == "gone":
+        return None
+    out = map_listing(ad, detail)
+    if status != "ok" and out and out[0]:
+        db.mark_presence_unproven(out[0])       # its own record was not read: written, not stamped
+    return out
+
+
 def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, bool]:
     """Combine the /ad summary with its /ad/<id> detail into a canonical row.
     Returns (row, category, sold) — `sold` feeds the post-upsert inactive pin in main."""
@@ -656,7 +671,8 @@ def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
     return row, category, sold
 
 
-def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+def _pin_sold_inactive(table: str, ad_numbers: list[str],
+                       seen_ad_numbers: list[str]) -> None:
     """Make source-confirmed SOLD rows survive the nightly auto_recover_false_inactive() sweep.
 
     That pg_cron job (05:20 UTC) re-activates any active=false row with
@@ -668,13 +684,18 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     prune_unseen() never undoes this: it only selects active=true rows and only updates ids NOT
     in its seen set. When a sold listing is later relisted, its next upsert carries active=true
     and the upsert's own missing_count=0 reset applies — the pin is only written for ids that are
-    sold THIS crawl."""
-    for i in range(0, len(ad_numbers), 200):
-        db._execute(
-            db.sb().table(table).update({"active": False, "missing_count": 3})
-            .in_("ad_number", ad_numbers[i:i + 200]),
-            what=table + ".sold_pin",
-        )
+    sold THIS crawl.
+
+    The `seen_ad_numbers` half is what makes this oracle three-valued instead of one-way: the same
+    status field that publishes a removal also publishes the reversal, and until 2026-09-23 the
+    reversal was read, used, and thrown away — leaving ops_lifecycle_false_resurrection() with a
+    GONE latest verdict that no amount of correct behaviour could clear. See scrapers/common/
+    sold_pin.py. It writes evidence only: never active, never missing_count, never
+    last_verified_alive_at.
+    """
+    sold_pin.pin_source_confirmed_gone(
+        table, ad_numbers, oracle="aqaratikom.sold_pin.is_sold", seen_ad_numbers=seen_ad_numbers,
+    )
 
 
 # ── Main ────────────────────────────────────────────────────────────────────────
@@ -752,7 +773,7 @@ def main() -> int:
                 detail_stats[status] += 1
                 if status == "missing":
                     missed.append(ad)
-            return map_listing(ad, det)
+            return row_for(ad, status, det)
 
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
             for result in ex.map(work, ads):
@@ -820,10 +841,10 @@ def main() -> int:
 
         # Pin sold rows immediately after the upserts (which reset their missing_count to 0), so
         # the 05:20 auto-recover job can never flip them back to active. See _pin_sold_inactive.
-        if sold_res:
-            _pin_sold_inactive("aqaratikom_residential_listings", sold_res)
-        if sold_com:
-            _pin_sold_inactive("aqaratikom_commercial_listings", sold_com)
+        _pin_sold_inactive("aqaratikom_residential_listings", sold_res,
+                           [r["ad_number"] for r in res])
+        _pin_sold_inactive("aqaratikom_commercial_listings", sold_com,
+                           [r["ad_number"] for r in com])
         sold_ct = len(sold_res) + len(sold_com)
 
         if args.limit:
@@ -842,6 +863,18 @@ def main() -> int:
         # prune_unseen never touches them (it only reads active=true rows and only updates ids
         # missing from the seen set), so passing their ad_numbers here is harmless.
         pruned = 0
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+        # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+        # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+        # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+        superseded = db.retire_superseded_siblings(
+            res_table="aqaratikom_residential_listings", com_table="aqaratikom_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source="Aqaratikom")
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
         for tbl, rows_seen in (("aqaratikom_residential_listings", res),
                                ("aqaratikom_commercial_listings", com)):
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Aqaratikom")

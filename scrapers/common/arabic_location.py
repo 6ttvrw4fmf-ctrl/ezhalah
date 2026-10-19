@@ -21,6 +21,9 @@ and Jazan). For those, this NEVER guesses — it resolves only when a region hin
 """
 from __future__ import annotations
 
+import json
+import math
+import os
 import re
 import threading
 import time
@@ -44,6 +47,44 @@ def norm_ar(s: Optional[str]) -> str:
     return re.sub(r"\s+", " ", s)
 
 
+_TASHKEEL = "ًٌٍَُِّْٰ"
+_AR_DIGITS = str.maketrans("ئ٠١٢٣٤٥٦٧٨٩", "ي0123456789")
+
+
+def norm_district_tok(s: Optional[str]) -> str:
+    """Mirror SQL public.norm_district_tok() — the key `loc_catalog_district.district_norm` is built
+    with, and therefore the ONLY key a catalog district lookup may use.
+
+    norm_ar() mirrors normalize_ar(), which is only the FIRST of this function's eight steps. Using
+    norm_ar() against district_norm silently fails for any district whose name starts with «ال» (the
+    great majority) or carries ء/ئ/tashkeel — see find_district_in_text() for the live regression
+    that caused.
+
+    Steps, in the SQL's own order (as of migration 20260914204035):
+      1. normalize_ar()            lowercase, أإآٱ→ا, ة→ه, ى→ي, strip tatweel/bidi, collapse spaces
+      2. strip tashkeel            [ًٌٍَُِّْٰ]
+      3. translate                 ئ→ي and ٠-٩ → 0-9
+      4. drop ء
+      5. split letter|digit AND digit|letter   «الرحاب2» → «الرحاب 2», «1النرجس» → «1 النرجس»
+      6. strip a digit run at EITHER END, then btrim — THE NUMBER FOLD (owner rule 2026-09-14: our
+         district list never shows a number). «الهاشمية 1», «الرحاب2», «1النرجس» key exactly like
+         the bare name, so the catalog key has no number to miss on. The card still shows the
+         source's own number; this key only MATCHES. Word numerals («مصيف الاول») stay unfolded.
+      7. strip leading «حي »       one or more
+      8. strip leading «ال», then btrim
+    Mid-name digits are left alone, exactly as in SQL («حي 3 المحمدية» → «3 المحمديه»).
+    """
+    s = norm_ar(s)
+    for t in _TASHKEEL:
+        s = s.replace(t, "")
+    s = s.translate(_AR_DIGITS).replace("ء", "")
+    s = re.sub(r"([ء-ي])([0-9])", r"\1 \2", s)
+    s = re.sub(r"([0-9])([ء-ي])", r"\1 \2", s).strip()
+    s = re.sub(r"\s*[0-9]+$", "", re.sub(r"^[0-9]+\s*", "", s)).strip()
+    s = re.sub(r"^(حي\s+)+", "", s)
+    return re.sub(r"^ال", "", s).strip()
+
+
 # English region label → catalog region_id. Scrapers compute English regions today; this lets them
 # pass that as a twin-disambiguation hint without re-deriving. (Curated, 13 stable catalog regions.)
 REGION_EN_TO_ID: dict[str, int] = {
@@ -58,6 +99,7 @@ _REGION_AR_FOR: dict[int, str] = {}                      # region_id → canonic
 _CID_AR: dict[int, str] = {}                             # catalog city_id → canonical city_ar
 _DISTRICT_BY_CITY: dict[int, set[str]] = {}              # city_id → {district_norm, …} (disambiguation only)
 _DISTRICT_AR_BY_NORM: dict[str, str] = {}                # district_norm → canonical district_ar (catalog spelling)
+_DISTRICT_AR_BY_CITY: dict[tuple[int, str], str] = {}    # (city_id, district_norm) → THAT city's catalog spelling
 
 
 _LOAD_LOCK = threading.Lock()
@@ -91,6 +133,7 @@ def _load() -> None:
                 for r in (c.table("loc_catalog_district").select("city_id,district_norm,district_ar").execute().data or []):
                     _DISTRICT_BY_CITY.setdefault(r["city_id"], set()).add(r["district_norm"])
                     _DISTRICT_AR_BY_NORM.setdefault(r["district_norm"], r["district_ar"])
+                    _DISTRICT_AR_BY_CITY[(r["city_id"], r["district_norm"])] = r["district_ar"]
                 return
             except Exception as e:  # transient network/DB hiccup → clear partials, back off, retry
                 last = e
@@ -100,9 +143,18 @@ def _load() -> None:
                 _CID_AR.clear()
                 _DISTRICT_BY_CITY.clear()
                 _DISTRICT_AR_BY_NORM.clear()
+                _DISTRICT_AR_BY_CITY.clear()
                 time.sleep(1.5 * (attempt + 1))
         if last is not None:
             raise last
+
+
+def same_city(a: Optional[str], b: Optional[str]) -> bool:
+    """Two written city names are one city when they share a catalogue id — by name or through
+    loc_catalog_city_alias (جيزان = جازان). Never by edit distance."""
+    _load()
+    ids = lambda n: {cid for cid, _ in _CITY.get(norm_ar(n), [])}  # noqa: E731
+    return bool(a and b and ids(a) & ids(b))
 
 
 def city_ar_for(city_id: Optional[int]) -> Optional[str]:
@@ -116,6 +168,13 @@ _SLUG_STOP = {"شارع", "طريق", "حي", "امارة", "منطقه", "مد�
 
 # Trailing admin markers, in NORMALISED form (norm_ar folds ة→ه, so «منطقة»→«منطقه»).
 _ADMIN_SUFFIX_TOKENS = ("اماره", "منطقه")
+
+
+# LEADING street markers, in NORMALISED form. A «حي X» capture that OPENS with one of these is a
+# street Aqar glued onto an empty «حي» label (see resolve_slug step 3), never a district name — no
+# catalog district starts with any of them (checked live against loc_catalog_district, 2026-09-27).
+# «مدينة» is deliberately NOT here: «حي مدينة العمال» (الخبر, AQM6288645) is a real district.
+_STREET_MARKERS = frozenset({"شارع", "طريق", "ممر"})
 
 
 def strip_city_suffix(district_ar: Optional[str], city_ar: Optional[str]) -> Optional[str]:
@@ -217,11 +276,29 @@ def resolve_slug(text: Optional[str], region_hint: Union[int, str, None] = None)
     if region_id is None and region_hint is not None:
         region_id = _hint_to_id(region_hint)
 
-    # 3) district from «حي Y» (keep the original spelling from raw, up to 3 words).
+    # 3) district from «حي Y» (original spelling from raw, up to 3 words) — the first «حي» that
+    # introduces a DISTRICT rather than a street.
+    #
+    # Aqar builds the slug by joining its own address segments with «-», and the first segment is the
+    # district-TYPE label «حي» carrying NO value whenever the ad names only a street. Address
+    # «حي ، شارع ابن هلال الفلالي ، حي الرمال ، الرياض ، منطقة الرياض» becomes slug
+    # «حي-شارع-ابن-هلال-الفلالي-حي-الرمال-الرياض-منطقة-الرياض», so a first-match capture reads the
+    # STREET and silently ignores the real district named later in the SAME slug. Found live
+    # 2026-09-27: 34 active aqarmonthly rows sat in search_listings_ar — and on the card — as
+    # «حي شارع ابن هلال», «حي شارع جبل اجا», or just «حي شارع», the word "street" as a district.
+    #
+    # So skip a capture that OPENS with a street marker and read the next «حي …». The capture is a
+    # zero-width LOOKAHEAD on purpose: a skipped 3-token window swallows the very «حي» that follows
+    # it («حي شارع النرجس حي الصحافة …»), and a consuming match would eat the district's own marker
+    # and find nothing after it. Nothing is invented — when no «حي» in the slug names a district this
+    # stays None, and the caller's catalog-validated address fallback decides, else the value is NULL.
     district_ar = None
-    md = re.search(r"\bحي\s+([؀-ۿ]+(?:\s+[؀-ۿ]+){0,2})", raw)
-    if md:
-        district_ar = "حي " + re.sub(r"\s+", " ", md.group(1)).strip()
+    for md in re.finditer(r"\bحي\s+(?=([؀-ۿ]+(?:\s+[؀-ۿ]+){0,2}))", raw):
+        cand = re.sub(r"\s+", " ", md.group(1)).strip()
+        if norm_ar(cand.split()[0]) in _STREET_MARKERS:
+            continue
+        district_ar = "حي " + cand
+        break
 
     def _scan(tokens: list[str]) -> Optional[tuple[int, int]]:
         """Find a WHOLE-NAME catalog city in tokens, region-scoped to region_id when known. Picks the
@@ -281,6 +358,32 @@ def resolve_slug(text: Optional[str], region_hint: Union[int, str, None] = None)
             "district_ar": district_ar, "confidence": "slug"}
 
 
+# «مدينة الرياض», «بمدينة بريدة», «لمدينة الرياض», «مــدينة بريــدة» (tatweel) — the listing
+# NAMING its city. The lookbehind keeps «المدينة المنورة»'s own «مدينة» from being read as a phrase.
+_STATED_CITY_RE = re.compile(r"(?<![\u0621-\u064a])(?:ب|ل|و)?مدين[ةه]\s*[:\-.]?\s*"
+                             r"([\u0621-\u064a]+(?:\s+[\u0621-\u064a]+)?)")
+
+
+def stated_city(text: Optional[str]) -> tuple[Optional[str], Optional[int], Optional[int]]:
+    """(city_ar, city_id, region_id) for a city the text STATES with «مدينة X», catalog-validated —
+    else (None, None, None).
+
+    For listing PROSE, where resolve_slug() is the wrong tool: resolve_slug is built for Aqar-style
+    slugs and, on prose, takes ANY whole word that is also a catalog town. On squares (2026-09-26)
+    that filed 9 of 16 listings in the wrong city: «العمارة» (the word for the building), «الخرج»
+    (from «طريق الخرج»), «حجاب» (from «سوق حجاب»), «العروس» (from «درة العروس»), «الخليج» and
+    «السلام» (the DISTRICT names). Only an explicit «مدينة X» counts here; a listing that never
+    names its city keeps NULL rather than borrowing a town from its street names."""
+    s = re.sub(r"\s+", " ", (text or "").replace("\u0640", ""))
+    for m in _STATED_CITY_RE.finditer(s):
+        words = m.group(1).split()
+        for cand in (" ".join(words), words[0]):
+            cid, rid = to_catalog(cand)
+            if cid:
+                return cand, cid, rid
+    return None, None, None
+
+
 def _hint_to_id(region_hint: Union[int, str, None]) -> Optional[int]:
     if region_hint is None:
         return None
@@ -291,7 +394,11 @@ def _hint_to_id(region_hint: Union[int, str, None]) -> Optional[int]:
         return REGION_EN_TO_ID[s]
     n = norm_ar(s)
     stripped = n[len("منطقه "):] if n.startswith("منطقه ") else n
-    return _REGION_NORM.get(n) or _REGION_NORM.get(stripped)
+    # The catalog names regions «منطقة القصيم» / «المنطقة الشرقية»; sources print the bare name
+    # («القصيم - بريدة - الغدير»). Without these two forms a bare region never became a hint, so a
+    # twin city stayed unresolved (sadiqeltajer «الطرفية» in القصيم: Qassim 941 vs Riyadh 3874, 2026-10-08).
+    return (_REGION_NORM.get(n) or _REGION_NORM.get(stripped)
+            or _REGION_NORM.get("منطقه " + stripped) or _REGION_NORM.get("المنطقه " + stripped))
 
 
 def _pick_candidate(
@@ -305,6 +412,12 @@ def _pick_candidate(
     if not cands:
         return None
     if len(cands) == 1:
+        # A lone catalog namesake in ANOTHER region than the one the source published is a different
+        # place, not this one (muktamel, 2026-10-07: «بحرة» in «منطقة مكة المكرمة» resolved to the
+        # only exact «بحرة» in the catalog, which is in Jazan, and ~21 listings were served under
+        # منطقة جازان). With a region hint, the city must be inside it; otherwise unknown.
+        if hint is not None and cands[0][1] is not None and cands[0][1] != hint:
+            return None
         return cands[0]
     regions = {rid for _, rid in cands}
     if hint is not None:
@@ -353,6 +466,10 @@ def to_catalog(city_ar: Optional[str], region_hint: Union[int, str, None] = None
     stripped = n
     if n.startswith("محافظه "):
         stripped = n[len("محافظه "):]
+    elif n.startswith("مركز "):
+        # «مركز X» (an administrative centre, sadiqeltajer «القصيم - مركز قصيباء - …», 2026-10-08) is
+        # named after its seat town exactly as a governorate is; the same exact-name + hint rules apply.
+        stripped = n[len("مركز "):]
     if stripped != n:
         hit = _pick_candidate(stripped, hint)
         if hit:
@@ -399,7 +516,9 @@ def resolve(
         return dict(empty)
     hint = _hint_to_id(region_hint)
     d_ar = None if is_placeholder(district_ar) else (district_ar or None)
-    d_norm = norm_ar(d_ar) if d_ar else None
+    # norm_district_tok(), NOT norm_ar(): _pick_candidate() tests this against catalog district_norm
+    # keys, and norm_ar() mirrors only the first step of the function that built them.
+    d_norm = norm_district_tok(d_ar) if d_ar else None
 
     def _finish(cid: int, rid: Optional[int], confidence: str) -> dict:
         return {
@@ -446,6 +565,83 @@ _PLAN_WORD = "مخطط"  # a subdivision-PLAN reference ("مخطط الربوة"
 # (20260911201847) for the same rule enforced DB-side on already-stored text.
 
 
+def catalog_district(city_id: Optional[int], district_ar: Optional[str]) -> Optional[str]:
+    """THAT city's catalogue spelling of a district FIELD the source states («الحي: الروابي», «حي
+    الوفاء», «المحمدية 3»), matched on the catalogue's own key (norm_district_tok: «حي»/«ال», hamza,
+    trailing numbers folded). Not in the catalogue for this city → None: never a guess (Haraj, 2026-10-16)."""
+    _load()
+    if not city_id or not district_ar:
+        return None
+    n = norm_district_tok(district_ar)
+    return _DISTRICT_AR_BY_CITY.get((city_id, n)) if n in _DISTRICT_BY_CITY.get(city_id, ()) else None
+
+
+def only_city_with_district(district_ar: Optional[str], region_id: Optional[int]) -> Optional[int]:
+    """The ONE catalogue city of `region_id` that has `district_ar` as a district, else None (owner 2026-10-18, the
+    المبرز pattern): a source that names a district and its region but no city — rakez «الخور , الشرقية» — is placed
+    only when the catalogue leaves exactly one candidate. Two cities with that district, or none, place nothing."""
+    _load()
+    n = norm_district_tok(district_ar) if district_ar else ""
+    if not n or region_id is None:
+        return None
+    region_of = {cid: rid for pairs in _CITY.values() for cid, rid in pairs}
+    hits = {cid for cid, keys in _DISTRICT_BY_CITY.items() if n in keys and region_of.get(cid) == region_id}
+    return next(iter(hits)) if len(hits) == 1 else None
+
+
+def catalog_district_keys(city_id: Optional[int]) -> frozenset[str]:
+    """Every district_norm key the catalogue attests for `city_id`; empty when the city is unknown. For a
+    caller that must test MANY candidate spans against one town (abralosol's title fallback)."""
+    _load()
+    return frozenset(_DISTRICT_BY_CITY.get(city_id, ())) if city_id else frozenset()
+
+
+_KNOWN_KEYS: dict[int, frozenset[str]] = {}
+
+
+def known_district_keys(city_id: Optional[int]) -> frozenset[str]:
+    """The catalogue's district keys for `city_id` PLUS every district word the served index already carries there
+    (public.loc_canonical_district: catalogue ∪ live, the list the Filter offers) — abralosol's title-fallback set
+    («catalogue + seen neighbourhoods», 2026-10-18), for every source. Read once per city per run; a failed read logs
+    once and answers the catalogue alone, so an outage fills less, never crashes and never guesses."""
+    if not city_id or not os.environ.get("SUPABASE_URL"):     # no database configured (a unit test): nothing known
+        return frozenset()
+    if city_id not in _KNOWN_KEYS:
+        keys = set()
+        try:
+            keys.update(catalog_district_keys(city_id))
+            from scrapers.common import db
+            page = db._execute(db.sb().table("loc_canonical_district").select("district_norm").eq("city_id", city_id)
+                               .range(0, 4999), what="loc_canonical_district.known").data or []
+            keys.update(r["district_norm"] for r in page if r.get("district_norm"))
+        except Exception as e:  # noqa: BLE001
+            print(f"⚠ known-district read failed for city {city_id}: {str(e)[:160]} — catalogue only", flush=True)
+        keys.discard("")
+        _KNOWN_KEYS[city_id] = frozenset(keys)
+    return _KNOWN_KEYS[city_id]
+
+
+# «بحي المليداء بمدينة بريدة», «للبيع أرض بحي شعب عامر …»: the words right after «حي». A direction or a place
+# word is never a district's name («بحي شرق الرياض» is east of the city, not a district called الشرق).
+_TITLE_HAYY = re.compile(r"(?:^|\s)(?:ب|و)?حي\s+([\u0621-\u064A0-9]+)(?:\s+([\u0621-\u064A0-9]+))?")
+_NOT_A_NAME = frozenset({"شمال", "جنوب", "شرق", "غرب", "وسط", "قرب", "بالقرب", "مدينة", "بمدينة", "محافظة", "بمحافظة",
+                         "مركز", "طريق", "على", "علي", "في", "خارج", "راقي", "جديد", "مميز", "هادئ"})
+
+
+def title_hayy_district(title: Optional[str], known: frozenset[str]) -> Optional[str]:
+    """«حي X [Y]» from the ad's own title, in the title's spelling, when its key is EXACTLY one `known` key — two words
+    first, then one; never fuzzy, never a direction or a place word, never a word glued to «ب» (a preposition)."""
+    for m in _TITLE_HAYY.finditer(title or ""):
+        w1, w2 = m.group(1), m.group(2)
+        if w1 in _NOT_A_NAME or w1.startswith("ب"):
+            continue
+        spans = [f"{w1} {w2}"] if w2 and w2 not in _NOT_A_NAME and not w2.startswith("ب") else []
+        for span in spans + [w1]:
+            if norm_district_tok(span) in known:
+                return f"حي {span}"
+    return None
+
+
 def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Optional[str]:
     """Recognizes a REAL district of `city_id` mentioned in free text (a title, a description) — for
     sources that publish no separate district field/taxonomy at all (remal: class_list gives only an
@@ -489,10 +685,142 @@ def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Option
                 continue
             for first in _forms(window[0]):
                 candidate = " ".join([first, *window[1:]])
-                for form in (candidate, f"حي {candidate}"):
-                    n = norm_ar(form)
-                    if n in known:
-                        ar = _DISTRICT_AR_BY_NORM.get(n)
-                        if ar:
-                            return ar
+                # norm_district_tok(), NOT norm_ar(): `known` holds catalog district_norm values, and
+                # district_norm = norm_district_tok(district_ar). norm_ar() mirrors only that
+                # function's first step, so every «ال»-prefixed or hamza-bearing district silently
+                # failed to match — see the note above.
+                n = norm_district_tok(candidate)
+                if n in known:
+                    ar = _DISTRICT_AR_BY_NORM.get(n)
+                    if ar:
+                        return ar
     return None
+
+
+# ── AMBIGUOUS STANDALONE WORDS — a bare occurrence is never enough to be a CITY (found 2026-09-25,
+# ialqarawi) ───────────────────────────────────────────────────────────────────────────────────
+#
+# THE BUG THIS CLOSES. ialqarawi's own city_from_title() scans a title's tokens for a catalog city
+# and already stopped the bare directional NOUNS (شرق/غرب/شمال/جنوب/وسط) from ever being treated as
+# one — a half-finished pattern that never added their ال-prefixed ADJECTIVE forms. Two live
+# listings' titles trailed off with «...حي النوارية الشرقية مخطط اللابة» (a Makkah plot) and
+# «...في الشرقيه امام شاطئ نصف القمر» (a Khobar plot). Neither «الشرقية» is a place on its own —
+# one modifies a subdivision name, the other is the colloquial whole-Eastern-Province sense — but
+# the catalog also has one real, obscure Asir-region village of that exact spelling (city_id
+# 14645), and the scanner matched it: both listings were served as being IN ASIR REGION.
+#
+# THE WORD CLASS, not a one-off list. Arabic relative/comparative adjectives — direction (شرقي/
+# غربي/شمالي/جنوبي/وسطى), age/currency (جديد/قديم/حديث/محدث), relative position (عليا/سفلى/كبرى/
+# صغرى) — grammatically require a head noun to name a place ("الحي الشرقي", "المدينة الجديدة"). A
+# BARE occurrence in free listing text is overwhelmingly a truncated modifier, never the place
+# itself. Checked live against the whole catalog 2026-09-25 (src/data/sa-locations.json /
+# loc_catalog_city): every word below is a REAL, if obscure, standalone town somewhere in Saudi
+# Arabia — الوسطى (Qassim), الجديدة (5 different cities), الجديد (1), العليا (4), الحديثة (Jouf),
+# المحدثة (Asir) — so a naive "is this in the catalog" check alone cannot tell a genuine reference
+# apart from a truncated one. This is why the fix is a STOPLIST, not a catalog fix: these ARE real
+# towns, and normalize_ar()/to_catalog() must keep answering for them honestly when a caller
+# deliberately asks for the bare word — the risk is ONLY in accepting one as a free-text scan's
+# unsupervised guess.
+#
+# NOT the same problem as a popular REUSED neighbourhood name (الروضة/النزهة/الصفا/الفيصلية exist
+# in 40-60 different cities each) — those are complete, legitimate standalone place names on their
+# own; their risk is "which of the 40 did they mean" (a twin-name disambiguation `resolve()`
+# already handles via region_hint/district narrowing), not "is this a place at all". Do not add
+# popular-but-real place names to this set — audited and deliberately excluded 2026-09-25.
+#
+# KEEP IN SYNC with the SQL mirror: the risky[] array literal inside
+# mon_detect_ambiguous_adjective_resolved_as_city() (supabase/migrations/
+# 20260925171201_location_barriers_ambiguous_adjective_and_aqar_drift.sql) — that function is the
+# production backstop that must always read 0 across the WHOLE fleet, not just this module's
+# callers, so a word added here without also being added there is a silent gap in that guard.
+AMBIGUOUS_STANDALONE_WORDS: frozenset[str] = frozenset({
+    "الجديد", "الجديدة", "الجديده",
+    "الحديثة", "الحديثه", "الحديث",
+    "المحدثة", "المحدثه", "المحدث",
+    "الشرقي", "الشرقية", "الشرقيه",
+    "الغربي", "الغربية", "الغربيه",
+    "الشمالي", "الشمالية", "الشماليه",
+    "الجنوبي", "الجنوبية", "الجنوبيه",
+    "الوسطى", "الوسطي",
+    "العليا", "العلياء",
+    "السفلى", "السفلي",
+    "الكبرى", "الصغرى",
+    "القديم", "القديمة", "القديمه",
+})
+
+
+_AMBIGUOUS_NORMALIZED = {norm_ar(w) for w in AMBIGUOUS_STANDALONE_WORDS}
+
+
+def is_ambiguous_standalone_word(word: Optional[str]) -> bool:
+    """True when `word` (any spelling/normalization state) is in the closed class of relative/
+    comparative Arabic adjectives that must never be accepted as a CITY from an unsupervised
+    free-text scan — see AMBIGUOUS_STANDALONE_WORDS above. Any scraper doing its own title/
+    description token-scan for a city (the ialqarawi city_from_title() shape) should skip a
+    candidate this returns True for and keep scanning, exactly like an ordinary stopword — never
+    treat it as a resolved city on its own, no matter what to_catalog() would say about it."""
+    if not word:
+        return False
+    return norm_ar(word) in _AMBIGUOUS_NORMALIZED
+
+
+# ── A town name that is a city in several regions, placed by the ad's OWN pin (owner 2026-10-18) ──
+# Region outlines: src/data/saRegionPaths.json (geoBoundaries ADM1, built by scripts/generate-sa-region-paths.ts with the
+# projection below and simplified by up to ~5 km). PIN_MARGIN_KM keeps a pin near another candidate's border unplaced.
+PIN_MARGIN_KM = 15.0
+_REGION_PATHS = os.path.join(os.path.dirname(__file__), "..", "..", "src", "data", "saRegionPaths.json")
+_PK = math.cos(math.radians((16.2 + 32.3) / 2))
+_PSCALE = 400 / ((55.8 - 34.4) * _PK)
+_KM_PER_UNIT = 111.2 / _PSCALE
+_REGION_RINGS: dict[int, list[list[tuple[float, float]]]] = {}
+
+
+def _rings() -> dict[int, list[list[tuple[float, float]]]]:
+    if not _REGION_RINGS:
+        with open(_REGION_PATHS, encoding="utf-8") as f:
+            for r in json.load(f)["regions"]:
+                _REGION_RINGS[r["id"]] = [[tuple(map(float, p.split())) for p in sub.split("L")]
+                                          for sub in re.findall(r"M([^MZ]+)Z", r["d"])]
+    return _REGION_RINGS
+
+
+def _inside(x: float, y: float, rings: list) -> bool:
+    c = False
+    for ring in rings:
+        for (x0, y0), (x1, y1) in zip(ring, ring[1:] + ring[:1]):
+            if (y0 > y) != (y1 > y) and x < x0 + (y - y0) * (x1 - x0) / (y1 - y0):
+                c = not c
+    return c
+
+
+def _km_to(x: float, y: float, rings: list) -> float:
+    best = math.inf
+    for ring in rings:
+        for (x0, y0), (x1, y1) in zip(ring, ring[1:] + ring[:1]):
+            dx, dy = x1 - x0, y1 - y0
+            t = max(0.0, min(1.0, ((x - x0) * dx + (y - y0) * dy) / ((dx * dx + dy * dy) or 1.0)))
+            best = min(best, math.hypot(x - x0 - t * dx, y - y0 - t * dy))
+    return best * _KM_PER_UNIT
+
+
+def city_by_own_pin(city_ar: Optional[str], lat, lng) -> Optional[int]:
+    """The catalogue city a town name means when that name is a city in SEVERAL regions (dealapp «الكهفة»: Eastern and
+    Hail), decided by the ad's own pin. The pin must fall inside exactly one candidate's region (so inside KSA), at least
+    PIN_MARGIN_KM from every other candidate's region, and that region must hold exactly one city of that name
+    («الرويضة» is twice in Riyadh: never placed). A one-city name returns None: it needs no pin."""
+    _load()
+    try:
+        lat, lng = float(lat), float(lng)
+    except (TypeError, ValueError):
+        return None
+    cands = {(cid, rid) for cid, rid in _CITY.get(norm_ar(city_ar), []) if rid is not None}
+    if len({cid for cid, _ in cands}) < 2:
+        return None
+    x, y = (lng - 34.4) * _PK * _PSCALE, (32.3 - lat) * _PSCALE
+    rings = _rings()
+    regions = {rid for _, rid in cands if rid in rings}
+    home = [rid for rid in regions if _inside(x, y, rings[rid])]
+    if len(home) != 1 or any(_km_to(x, y, rings[rid]) < PIN_MARGIN_KM for rid in regions - set(home)):
+        return None
+    hits = [cid for cid, rid in cands if rid == home[0]]
+    return hits[0] if len(hits) == 1 else None

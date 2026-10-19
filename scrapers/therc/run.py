@@ -148,6 +148,34 @@ def _text(fragment: str) -> str:
     return re.sub(r"[ \t]+", " ", html_mod.unescape(t)).strip()
 
 
+# The office publishes NO amenity field (see «NOT PUBLISHED» above), so the ad's own «الوصف» block is the
+# only statement of kitchen / lift / parking / maid room and prose is lawful there — YES or nothing, never
+# no (ADVANCED_FILTER_SOURCE_TRUTH §2). Its bullets («*», «•», «✔️», «✅») are statements of their own, so a
+# negation in one never reaches the next. 236 of 447 live descriptions name a kitchen; 0 were stored
+# (ops_af_score 2026-10-08 therc 0 of 5 findable, 🔬 AF engineer).
+_BULLETS = re.compile(r"\s[*•]\s|[✔✅☑]\ufe0f?")
+
+
+# The amenities are read from the WHOLE «الوصف» card, before redaction (🔬 2026-10-12, backlog 460). The stored
+# description is cut at the first contact marker (_redact), so an ad that OPENS with «للتواصل واتس :» stored
+# NULL and one with a marker after line one stored that line only — and the amenity reader, fed the stored
+# text, lost every «مصعد متوفر» / «مطبخ راكب» / «مؤثثة بالكامل» below it (therc 11241522, 10283456;
+# source-reread 38231173123). Reading for yes/no stores no text, so no contact detail is ever kept.
+# It ends at the next card, the next header, or the «عقارات مشابهة» strip (another listing's text).
+_DESC_CARD = re.compile(r'>الوصف</h2>(.*?)(?:<div class="bg-white|<h2|عقارات مشابهة|$)', re.S)
+
+
+def card_amenities(body: str) -> dict[str, bool]:
+    m = _DESC_CARD.search(body)
+    return description_amenities(_text(m.group(1))) if m else {}
+
+
+def description_amenities(description: Optional[str]) -> dict[str, bool]:
+    if not description:
+        return {}
+    return N.prose_amenities_yes(_BULLETS.sub("\n", description))
+
+
 def _jsonld_listing(page: str) -> dict:
     """The per-listing RealEstateListing block. The page also carries a site-level RealEstateAgent
     block (office name/phone) and a BreadcrumbList — both deliberately ignored."""
@@ -267,6 +295,7 @@ def map_listing(url: str, page: str, lastmod: Optional[str]) -> Optional[tuple[d
         price_total = price
 
     description = _redact(_text(_DESC.search(body).group(1))) if _DESC.search(body) else None
+    said = card_amenities(body)
     photos = _gallery(body)
     if not photos and isinstance(ld.get("image"), str):
         photos = [ld["image"]]
@@ -329,6 +358,7 @@ def map_listing(url: str, page: str, lastmod: Optional[str]) -> Optional[tuple[d
         "photo_urls": photos,
         "title": _redact(title),
         "description": description,
+        **said,
         "additional_info": extra,
         "source_capture": capture,
         "price_evidence": N.price_evidence(
@@ -402,6 +432,18 @@ def main() -> int:
             return 0
 
         pruned = 0
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+        # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+        # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+        # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+        superseded = db.retire_superseded_siblings(
+            res_table="therc_residential_listings", com_table="therc_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source=SOURCE)
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
         for tbl, rows_seen in (("therc_residential_listings", res),
                                ("therc_commercial_listings", com)):
             nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE)

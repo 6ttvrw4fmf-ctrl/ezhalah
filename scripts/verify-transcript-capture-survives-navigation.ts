@@ -105,7 +105,7 @@ export function auditCapture(agentSrc: string): string[] {
   if (guardAt < 0) bad.push('the busy guard is gone — the debounced write would fire once per revealed card');
   if (stageAt > -1 && guardAt > -1 && stageAt > guardAt)
     bad.push('the busy guard sits ABOVE the staging: leaving mid-search stages nothing and loses the whole turn');
-  if (!/\}, \[busy, msgs, revealCount, afReceipt, guidedPills, completed\]\);/.test(agentSrc))
+  if (!/\}, \[busy, msgs, revealCount, afReceipt, guidedPills, completed, afCanNarrow\]\);/.test(agentSrc))
     bad.push('`completed` is missing from the capture deps — a finished chat can reopen with a live composer');
   if ((agentSrc.match(/flushPendingCapture\(\)/g) ?? []).length < 4)
     bad.push('an abandon path no longer flushes before leaving');
@@ -125,7 +125,7 @@ mustCatch('the staging is deleted, so a flush has nothing to write',
 mustCatch('the busy guard is deleted, so the write fires once per revealed card',
   auditCapture(src.replace('if (busy) return;\n    const timer', 'const timer')));
 mustCatch('`completed` drops out of the capture deps',
-  auditCapture(src.replace(', guidedPills, completed]);', ', guidedPills]);')));
+  auditCapture(src.replace(', guidedPills, completed, afCanNarrow]);', ', guidedPills, afCanNarrow]);')));
 mustCatch('reopening stops preferring the stored transcript',
   auditCapture(src.replace('restoreChat(t)', 'null')));
 check('the audit passes on the real, unmodified source', auditCapture(src).length === 0,
@@ -141,8 +141,18 @@ check('reopening hydrates from the server when this device no longer holds it',
   /hydrateTranscript\(entryId\)/.test(openSaved));
 check('a restored chat returns WITHOUT running a search', /landAtLatest\(\);\s*\n\s*return;/.test(openSaved));
 const openStatic = src.slice(src.indexOf('const openStatic = async'));
-check('a saved snapshot renders with no network and no loader',
-  /if \(snapshot\) \{[\s\S]{0,400}?return;/.test(openStatic));
+// The invariant is "the snapshot branch returns without touching the network", NOT "the branch is
+// under 400 characters". A `[\s\S]{0,400}?` window made comment length load-bearing: routine #8's
+// 2026-09-14 terminality fix added an explanatory block inside the branch and this went red while the
+// behaviour was untouched. Slice the ACTUAL branch and assert what it does and does not do.
+{
+  const start = openStatic.indexOf('if (snapshot) {');
+  const branch = start < 0 ? '' : openStatic.slice(start, openStatic.indexOf('\n    }', start));
+  const code = branch.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  check('a saved snapshot renders with no network and no loader',
+    start > -1 && /\n\s*return;\s*$/.test(branch) && !/await |runQuery\(|fetch\(|phase: 'searching'/.test(code),
+    JSON.stringify(code.slice(0, 400)));
+}
 
 if (failed) {
   console.error(`\n${failed} check(s) FAILED — a saved chat could re-run its search`);

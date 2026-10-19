@@ -107,7 +107,10 @@ check('it never falls back to a spelling-blind String.replace for the city keys'
   !/probe\s*=\s*probe\.replace\(city(Key|KeyAr)/.test(fn) && !/probe\.replace\(cityKeyAr/.test(fn),
   'THIS IS THE ORIGINAL BUG — replace() cannot see «أبها» inside «ابها»');
 const cutAt = fn.indexOf('cutPlaceName');
-const guardAt = fn.indexOf('if (probe.length < 2) return [];');
+// 2026-10-05: the guard returns [] for a bare city unless the user explicitly wrote «حي X» (then X is a
+// district literally named that — «حي العقيق» is Riyadh's, not the town). A bare «العقيق» stays the town;
+// verify-zero-never-contradicts-shelf.ts executes both on the real resolver.
+const guardAt = fn.indexOf('if (probe.length < 2) return DISTRICT_MARKER.test(raw) ? namedExactly() : [];');
 check('the "input is just a city" guard still exists', guardAt >= 0,
   'without it a bare city name reaches the district matcher no matter how the probe was built');
 check('the guard runs AFTER the subtraction', cutAt >= 0 && guardAt > cutAt,

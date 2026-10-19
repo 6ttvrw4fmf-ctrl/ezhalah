@@ -79,7 +79,9 @@ check('all four share targets were extracted (WhatsApp / X / Telegram / Mail)',
 // The sheet's wording now lives in lib/share.ts, so the extracted statements reference imported
 // names. Feed the REAL exported values into the sandbox — extracted from share.ts, never retyped —
 // so this still executes the component's own template literals rather than a paraphrase of them.
-const shareConst = (name: string) => {
+const shareConst = (name: string): string => {
+  const alias = new RegExp(`export const ${name} = (SHARE_BLURB_AR|SHARE_BLURB_EN);`).exec(shareSrc);
+  if (alias) return shareConst(alias[1]);
   const m = new RegExp(`export const ${name} = '([\\s\\S]*?)';`).exec(shareSrc)
     ?? new RegExp(`export const ${name} = \`([\\s\\S]*?)\`;`).exec(shareSrc);
   if (!m) check(`lib/share.ts exports ${name}`, false, 'not found');
@@ -128,8 +130,11 @@ for (const locale of ['ar', 'en'] as const) {
       u.searchParams.get('url') === LINK && !(u.searchParams.get('text') ?? '').includes(LINK),
       `text=${u.searchParams.get('text')}`);
   }
+  // The property is LOCALE, not word order: the English post must be English and must name the
+  // brand — it used to demand `^Ezhalah`, which pinned the first word and went red when the owner
+  // rewrote the sentence to open with the home screen's question (2026-09-23).
   check(`[${locale}] the sentence is still in the user's own language`,
-    locale === 'ar' ? /[؀-ۿ]/.test(out.msg) : /^Ezhalah/.test(out.msg));
+    locale === 'ar' ? /[؀-ۿ]/.test(out.msg) : (!/[؀-ۿ]/.test(out.msg) && /Ezhalah/.test(out.msg)));
 }
 
 // mutation — the exact defect: hand the url=-carrying targets the link-bearing text as well.

@@ -24,6 +24,7 @@
 //   node --experimental-strip-types scripts/verify-live-sweep-visible-state-scope.ts
 
 import { parseVisibleState } from '../e2e/live-sweep/visibleState.mjs';
+import { shippedTemplates } from '../e2e/lib/resultsSentence.mjs';
 
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -78,7 +79,28 @@ check('المدينة comes from the summary, exactly as the app rendered it',
 check('نوع العقار / نوع العملية / الإقليم are read from the summary',
   real.type === 'فيلا' && real.deal === 'للبيع' && real.region === 'مكة',
   `type=${real.type} deal=${real.deal} region=${real.region}`);
-check('the headline is still read from the whole document', real.headline === '12');
+// THE HEADLINE IS READ WHOLE-DOCUMENT — proven with the wording the product ships TODAY.
+// The REAL fixture above is a verbatim capture from 2026-08-28 and is kept as provenance, so it
+// still carries the retired «لقينا 12 إعلان يطابق طلبك.» That sentence no longer exists in the
+// product (PR #3186 made it a rotation), so asserting the scope property through it would only
+// re-test a string nothing renders. Same property, current sentence, and the sentence is taken from
+// the shipped pool rather than retyped here — the exact drift that darkened this field on 2026-09-19.
+{
+  const guest = shippedTemplates().find((t) => t.lang === 'ar' && !t.hasName)!;
+  const today = [
+    'ملخص البحث',
+    '• نوع العقار: فيلا',
+    '• المدينة: مدينة الملك عبدالله الاقتصادية',
+    guest.template.replace('{count}', '12'),   // OUTSIDE the summary block — that is the point
+    '#1',
+    'الضغط على هذا الإعلان سيأخذك إلى sa.aqar.fm',
+  ].join('\n');
+  const t = parseVisibleState(today);
+  check('the headline is still read from the whole document, not the summary block',
+    t.headline === 12, `got ${JSON.stringify(t.headline)} from «${guest.template}»`);
+  check('a summary-only read would MISS it (the scope claim is not vacuous)',
+    !/^[•·]/.test(guest.template.replace('{count}', '12')));
+}
 check('summaryFound is true when the app rendered a summary', real.summaryFound === true);
 
 // ── 2. THE WATCH STILL BITES — a real re-scope is still detected ─────────────────────────────────

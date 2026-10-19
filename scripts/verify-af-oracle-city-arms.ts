@@ -92,7 +92,7 @@ console.log('\nThe oracle matches a city the way production does\n');
 // ── 4. THE ARMS SURVIVE A REAL, FULLY-PARAMETERISED REQUEST ─────────────────────────────────────
 {
   const { qs, unhandled } = decoded(
-    { p_cities: [HUFUF], p_deal: 'بيع', p_types: ['فيلا', 'تاون هاوس', 'بيت'], p_limit: 1500, p_offset: 0 },
+    { p_cities: [HUFUF], p_deal: 'بيع', p_types: ['فيلا', 'بيت'], p_limit: 1500, p_offset: 0 },
     { cityScope: SCOPE });
   check('a full request still carries all three city arms alongside its other predicates',
     unhandled.length === 0 && qs.includes('city_id.in.(12,501)') && qs.includes('match_city_ids.ov.{12,501}')

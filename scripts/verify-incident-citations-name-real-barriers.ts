@@ -32,7 +32,7 @@ import { join } from 'node:path';
 import { loadRegistry } from './lib/testRegistry.ts';
 import { liveHalfProblems } from './lib/liveHalf.ts';
 import {
-  citedArtifacts, citationProblems, CLAIMED_STATES,
+  citedArtifacts, citationProblems, CLAIMED_STATES, treeMentionTest,
   type Artifact, type IncidentRow,
 } from './lib/barrierCitations.ts';
 
@@ -174,6 +174,161 @@ check('every claimed state is judged (fixed, verifying, resolved)',
 
 check('a row citing nothing at all is not invented into a problem',
   citationProblems([row(1, 'resolved', null)], nonePresent).length === 0);
+
+// ── THE EXTRACTOR MUST NOT INVENT A PHANTOM (repaired 2026-09-20, routine #10) ───────────────────
+// A guard that cries wolf is not a stricter guard. Two extractor bugs reported CORRECT citations as
+// phantoms, kept incident-citation-guard.yml red, and left a P1 `barrier_check_failed` alert open
+// and unacknowledged from 2026-09-14 to 2026-09-20 — six days in which the workflow's red said
+// nothing a reader could act on, and during which two GENUINE phantoms (#140, #55) sat in the same
+// list unnoticed. Both directions are proven: the false positives are gone AND the real shapes are
+// still found. Fed the verbatim production citations, not strings invented for the test.
+const ARTEFACTS = (s: string) => citedArtifacts(s).map((a) => `${a.kind}:${a.name}`);
+
+check('a .tsx citation survives intact — ordered alternation put `ts` first and truncated it, '
+  + 'inventing src/app/agent.ts (incident #260, whose citation was right all along)',
+  ARTEFACTS("render conditions in src/app/agent.tsx (load-more iff hasMore)")
+    .join() === 'path:src/app/agent.tsx');
+check('…and a real .ts citation is still extracted (the repair is not a silencer)',
+  ARTEFACTS('scripts/verify-x.ts and src/data/remote.ts').join()
+    === 'path:scripts/verify-x.ts,path:src/data/remote.ts');
+check('a `mon_detect_*` GLOB is prose, not a claim that a function named `mon_detect_` exists '
+  + '(incident #335, likewise correct all along)',
+  ARTEFACTS('the standing migration-drift-guard.yml + mon_detect_* continue watching this class')
+    .length === 0);
+check('…nor is a bare trailing-underscore prefix',
+  ARTEFACTS('covered by mon_detect_ and friends').length === 0);
+check('…while a fully spelled detector is still extracted (the direction that must keep working)',
+  ARTEFACTS('covered by mon_detect_price_fidelity() on the twice-hourly roster').join()
+    === 'fn:mon_detect_price_fidelity');
+
+mustCatch('a phantom .tsx file — the repair widened the alphabet, never the verdict',
+  citationProblems([row(1, 'resolved', 'src/app/nope.tsx')], nonePresent).length === 1);
+mustCatch('the two GENUINE phantoms this repair must keep catching (#140 stale rename, #55 never '
+  + 'landed on main)',
+  citationProblems([row(140, 'resolved', 'scripts/verify-af-terminal-at-50-no-load-more.ts'),
+                    row(55, 'resolved', 'scripts/verify-search-index-single-writer.ts')],
+                   nonePresent).length === 2);
+
+// ── THE FOURTH SHAPE: A BARRIER CITED AS SOMETHING OTHER THAN `mon_*` (incident #364) ───────────
+// Until 2026-09-21 `DBFN` recognised `mon_*` and nothing else, so a barrier cited as any other
+// database object yielded NO artefact and was neither verified nor flagged — the check read as
+// covering citations it had never looked at. The previous version of this file asserted that gap as
+// a passing check (`…length === 0`), which is BARRIER_ENGINEER.md PART 1.2 in miniature: a
+// predicate that would pass on a version of the code that has the bug, because it WAS the bug.
+//
+// The rejected repair — "any identifier followed by ()" — manufactures phantoms out of camelCase
+// prose. Snake_case is the shape that distinguishes, and the widening was MEASURED against the real
+// queue before it was written: 85 distinct tokens over the 193 claimed-state citations live on
+// 2026-09-21, all 85 resolving. Every fixture below is a VERBATIM production citation.
+
+// #324 — a constraint function and a table, the two shapes that were completely invisible.
+check('a non-mon database object IS extracted now (incident #324, verbatim)',
+  ARTEFACTS('enforce_price_size_sanity() + ops_price_source_verified (existing barrier); '
+    + 'verified against production').join()
+    === 'symbol:enforce_price_size_sanity,symbol:ops_price_source_verified');
+
+// #134 — a TRIGGER cited as the barrier, plus the table it writes to.
+check('a trigger citation IS extracted now (incident #134, verbatim)',
+  ARTEFACTS('tg_archive_hard_deleted_listing propagates to listings_arabic_locations '
+    + '(migration 20260911141903)').join()
+    === 'symbol:tg_archive_hard_deleted_listing,symbol:listings_arabic_locations');
+
+// #233 — a pytest FUNCTION inside a file: the file is the path, the function is the symbol, and
+// neither swallows the other. Asserted as a set; extraction order is not part of the contract.
+const py = ARTEFACTS('scrapers/common/tests/test_retire_superseded_siblings.py (shape discovery) '
+  + 'and mon_detect_res_com_collision_repair_regression() (reads retired_side)');
+check('a path, a mon_ function and a bare symbol coexist without swallowing each other (#233)',
+  py.length === 3
+  && py.includes('path:scrapers/common/tests/test_retire_superseded_siblings.py')
+  && py.includes('fn:mon_detect_res_com_collision_repair_regression')
+  && py.includes('symbol:retired_side'));
+
+// THE CRYING-WOLF CONTROLS. A guard people learn to scroll past is a guard that gets deleted; these
+// are the shapes the rejected "any identifier" repair would have invented phantoms out of.
+check('camelCase prose written with parens is NOT a claim (the rejected repair\'s false positive)',
+  ARTEFACTS('citedArtifacts() returns the artefacts and probeVerdict() reads them').length === 0);
+check('ordinary English prose yields no symbol',
+  ARTEFACTS('verified against production; the fix is green and nothing was loosened').length === 0);
+check('a `mon_detect_*` glob is STILL prose under the widened reader (incident #335 stays fixed)',
+  ARTEFACTS('the standing migration-drift-guard.yml + mon_detect_* continue watching').length === 0);
+check('`mon_` names stay in DBFN\'s lane and are NOT downgraded to the weaker symbol test',
+  ARTEFACTS('mon_unverified_inactivation_counts(interval) + mon_detect_unverified_inactivation()')
+    .every((a) => a.startsWith('fn:')));
+check('a bare filename is not ALSO read as a symbol (test_x.py yields one artefact, not two)',
+  ARTEFACTS('mutation-proven in test_sold_pin_records_evidence.py').join()
+    === 'bare:test_sold_pin_records_evidence.py');
+
+// M8 — the defect itself: a closed incident whose cited barrier is a database object nobody built.
+mustCatch('a resolved incident citing a TRIGGER that does not exist (the #364 hole)',
+  citationProblems([row(1, 'resolved', 'tg_nobody_ever_created_this')], nonePresent).length === 1);
+mustCatch('…and a constraint-function citation that names nothing',
+  citationProblems([row(1, 'resolved', 'enforce_a_rule_nobody_wrote()')], nonePresent).length === 1);
+
+// M9 — the symbol limb obeys the same UNKNOWN rule as every other limb. An unlistable tree must
+// never resolve to "absent" (a false phantom) OR to "present" (the hole re-opened).
+mustCatch('a symbol whose existence could not be DETERMINED being resolved either way',
+  citationProblems([row(1, 'resolved', 'tg_some_trigger')], () => null)
+    .some((p) => p.includes('COULD NOT BE DETERMINED')));
+
+// NEGATIVE CONTROL, on the REAL tree rather than a stub: every symbol the production queue actually
+// cites resolves. This is the measurement that authorised the widening, executed rather than quoted
+// — if the reader ever starts inventing names out of these citations, this line goes red first.
+const REAL_CITATIONS = [
+  'enforce_price_size_sanity() + ops_price_source_verified (existing barrier)',
+  'tg_archive_hard_deleted_listing propagates to listings_arabic_locations; snapshotted to '
+    + 'ops_orphan_location_repair; requires a cleanup_deletion_log row',
+  'mon_detect_res_com_collision_repair_regression() (reads retired_side, every platform)',
+  'a new P2 deduplicated_copy_flood fires if de-duplication ever dominates a day',
+  'reads evidence_fetched_at and row_captured_at; alert kind barrier_check_failed on alert_event',
+];
+const mention = treeMentionTest(ROOT);
+const unresolved = REAL_CITATIONS.flatMap((c) => citedArtifacts(c))
+  .filter((a) => a.kind === 'symbol' && mention(a.name) !== true)
+  .map((a) => a.name);
+check(`every symbol in the real production citations resolves against this checkout `
+  + `(${REAL_CITATIONS.flatMap((c) => citedArtifacts(c)).filter((a) => a.kind === 'symbol').length} symbols)`,
+  unresolved.length === 0, `unresolved: ${unresolved.join(', ')}`);
+
+// …and the same test says NO to a name nothing mentions, so the control above is not vacuous.
+// ASSEMBLED AT RUNTIME, and that is load-bearing rather than cute: `git grep` reads the WORKING
+// TREE, so a literal spelled out here would be found in this very file and the control would pass
+// by describing itself. It did, on the first run of this check — the self-reference is the same
+// shape as a barrier asserting the bug, caught by its own negative control.
+const INVENTED = ['tg', 'no', 'such', 'object', 'exists', 'anywhere', '404'].join('_');
+check('treeMentionTest is not vacuously true — an invented name resolves to false',
+  mention(INVENTED) === false);
+
+// ── THE RED SENTENCE MUST BE TRUE OF THE TREE (routine #10, 2026-09-27) ──────────────────────────
+//
+// Every existence test here reads the COMMITTED CHECKOUT, so a red line means "no committed artefact
+// defines this" — a strict superset of "this does not exist". Two citations measured that day
+// (#839 mon_detect_price_drift_predicate_is_blind, #858 mon_detect_cron_abort_classifier_selftest)
+// named functions that are ALIVE in production and merely never mirrored to supabase/migrations, and
+// the old wording told their authors the barrier DOES NOT EXIST. The verdict was right; the sentence
+// sent them hunting for a barrier they knew they had written, when the real repair was the drift.
+// A guard whose red sentence is not true of the tree is a guard people learn to scroll past — this
+// same file spent six days red for that reason in 2026-09-14.
+{
+  const row = (citation: string) => [{ id: 1, state: 'resolved', owner_routine: 'r', citation }];
+  const say = (citation: string) =>
+    citationProblems(row(citation), () => false)[0] ?? '';
+  check('a missing DB-function citation blames the MIGRATION, not the object\'s existence',
+    say('mon_detect_nothing_at_all').includes('NO COMMITTED MIGRATION')
+    && say('mon_detect_nothing_at_all').includes('migration drift')
+    && !say('mon_detect_nothing_at_all').includes('DOES NOT EXIST'));
+  check('…and it still says the incident is not covered (the verdict is unchanged, nothing weakened)',
+    say('mon_detect_nothing_at_all').includes('reads as covered and is not')
+    && citationProblems(row('mon_detect_nothing_at_all'), () => false).length === 1);
+  check('a missing FILE citation says it is not in the checkout',
+    say('scripts/verify-not-a-real-file-at-all.ts').includes('NOT IN THE CHECKOUT'));
+  check('a missing SYMBOL citation says it is mentioned nowhere in the checkout',
+    say('some_invented_symbol_name').includes('MENTIONED NOWHERE'));
+  check('an UNKNOWN verdict still reads as UNKNOWN, never as either answer',
+    citationProblems(row('mon_detect_nothing_at_all'), () => null)[0]
+      .includes('COULD NOT BE DETERMINED'));
+  check('a resolvable citation produces no sentence at all (the wording change is not a new red)',
+    citationProblems(row('mon_detect_nothing_at_all'), () => true).length === 0);
+}
 
 console.log(failed === 0
   ? '\n✅ citation predicate proven in both directions\n'

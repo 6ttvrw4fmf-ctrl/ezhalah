@@ -63,7 +63,39 @@ PERIOD_DEFAULT_ALLOWLIST = {
     "ramzalqasim", "toor",
 }
 # Platforms whose ENTIRE catalogue is one period by construction (short-stay marketplaces).
-SINGLE_PERIOD_PLATFORMS = {"gathern", "aqarmonthly"}
+# compoundin added 2026-09-20. Its entire catalogue is ANNUAL compound rent, and that is the
+# platform's own statement rather than our inference: every unit page carries "Pay your annual rent
+# in easy monthly installments with Ejari" beside an RNPL badge, and the unit price itself carries
+# no period label of its own — so there is no per-listing token to read and nothing is being
+# overridden. Consistent with the standing RNPL→ANNUAL reading. If compoundin ever lists a monthly
+# contract, this entry is what must be revisited.
+SINGLE_PERIOD_PLATFORMS = {
+    "gathern", "aqarmonthly", "compoundin",
+    # azure/rightcompound added 2026-09-24. Both compound sites publish their rent as ONE period,
+    # site-wide, and each has its own explicit source statement (not an inference):
+    #   rightcompound — every unit page carries the literal disclaimer "Prices are ANNUAL rent in
+    #     Saudi Riyals (SAR), not monthly"; the "monthly" figure beside it is that same annual total
+    #     broken into an INSTALLMENT plan, kept in additional_info, never a separate lease term.
+    #   azure — the price is read ONLY from the page's own "Paid Annually" tab
+    #     (data-tabs-content-id="paid-type-tab-annually"); its "monthly" tab is likewise an
+    #     installment breakdown of the same annual figure (additional_info.monthly_installment_raw).
+    #   No per-listing token is being overridden on either — same reading as compoundin's RNPL
+    #     entry above. If either site ever lists a genuine standalone monthly-only contract, this
+    #     entry is what must be revisited.
+    #   wadod (added 2026-09-24) — pages state only the payment split («دفعة واحدة»/«دفعتين»);
+    #     the OWNER read the 7 pages and attested they are yearly (ops_rent_period_single_value_ok
+    #     20260924224146). A named period on a page still wins in scrapers/wadod/run.py.
+    "wadod",
+    #   manafe (added 2026-09-28) — no page states a period; OWNER attested yearly on the company's own
+    #     Aqar cross-post (REGA 7200942068: «125000 ر.س» here = «125,000 /سنوي» there). A period the page
+    #     ties to the price still wins in scrapers/manafe/run.py.
+    "manafe",
+    #   tamyaz (added 2026-09-24) — the UI's universal «/ سنة» applies to every rent row alike; the
+    #     OWNER checked the live site and attested it is yearly (ops_rent_period_single_value_ok
+    #     20260924231422). A period the listing states, or a daily/weekly rate, still wins.
+    "tamyaz",
+    "azure", "rightcompound",
+}
 
 _HARDCODED_PERIOD_RE = re.compile(r'"rent_period"\s*:\s*"(annual|monthly)"\s*if\b')
 

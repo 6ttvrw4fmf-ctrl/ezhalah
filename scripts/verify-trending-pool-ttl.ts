@@ -35,8 +35,20 @@ check('the OLD unconditional "if (cached) return cached;" city-pool bug is gone'
   !/const cached = CITY_FIELD_POOLS\.get\(key\);\s*\n\s*if \(cached\) return cached;/.test(locSrc));
 check('city pool: a hit is only served inside POOL_TTL_MS (else falls through and actually refetches)',
   /const cachedAt = _cityPoolFetchedAt\.get\(key\);\s*\n\s*if \(cached && cachedAt !== undefined && Date\.now\(\) - cachedAt < POOL_TTL_MS\) return cached;/.test(locSrc));
-check('city pool: fetchedAt is stamped at the same moment the pool itself is populated',
-  /CITY_FIELD_POOLS\.set\(key, opts\);\s*\n\s*_cityPoolFetchedAt\.set\(key, Date\.now\(\)\);/.test(locSrc));
+// The city pool's freshness clock is stamped on the SAME success path that populates it — but since
+// ops_incident #268 that stamp carries ONE documented guard: `if (clusterMapLoaded())`. A pool built
+// while loc_city_cluster could not be read is served (uncollapsed beats blank) yet deliberately NOT
+// pinned, so the next focus rebuilds it with its cluster unions instead of holding a count→click
+// mismatch for the full TTL. That direction is strictly SAFER than the rule this check was written
+// for — an unpinned pool refetches sooner, it can never go stale — so the check pins the PROPERTY
+// (the stamp is on the success path, and nothing but that one guard may gate it) rather than the
+// adjacency of two lines. The behaviour itself is EXECUTED, against an injected failing client, by
+// scripts/verify-trending-pool-caches-recover.ts; this stays as the cheap source-level tripwire.
+const cityStamp = locSrc.match(/\n\s*(?:if \((\w+)\(\)\) )?_cityPoolFetchedAt\.set\(key, Date\.now\(\)\);/);
+check('city pool: fetchedAt is stamped on the path that populates the pool',
+  /CITY_FIELD_POOLS\.set\(key, opts\);[\s\S]{0,1200}?\n\s*(?:if \(clusterMapLoaded\(\)\) )?_cityPoolFetchedAt\.set\(key, Date\.now\(\)\);/.test(locSrc));
+check('city pool: the freshness stamp is gated by NOTHING, or by clusterMapLoaded() and nothing else',
+  cityStamp !== null && (cityStamp[1] === undefined || cityStamp[1] === 'clusterMapLoaded'));
 
 // ── 3. district pool: same two properties ──
 check('the OLD unconditional "if (cached) return cached;" district-pool bug is gone',

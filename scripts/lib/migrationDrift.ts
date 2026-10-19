@@ -160,6 +160,8 @@ export type ContentDivergence = {
   repoMd5: string;
   appliedMd5: string;
   kind: DivergenceKind;
+  /** Every applied version carrying this file's NAME, when the name matched more than one. */
+  candidates?: string[];
 };
 
 // FAILS CLOSED. A divergence is only ever downgraded to 'comments' on positive proof that both
@@ -178,7 +180,12 @@ export function classifyDivergence(repoCodeMd5?: string, appliedCodeMd5?: string
 // NAME. That name fallback is not a nicety — the 5 files whose hand-authored timestamp never matched
 // how they were applied (the class commit 6ef5e79 was fixing) are reachable ONLY by name, and they
 // are precisely the ones most likely to have drifted. A name that is ambiguous in prod (>1 row) is
-// skipped rather than guessed.
+// NOT skipped: a file is faithful iff its bytes equal ONE OF the rows carrying that name, which needs
+// no guess. Skipping it was a real blind spot until 2026-09-24 — alert_to_incident_bridge was applied
+// three times (184644 / 184842 / 191914) and the repo carried ONE 9,135-byte composite file, named
+// for a version apply_migration never minted, whose bytes matched none of the three. The ambiguous
+// name meant it was compared to nothing and read as clean. When no candidate matches, the report
+// names the closest row (same code digest if any, else the newest) and carries `candidates`.
 export function findContentDivergence(
   repoFiles: RepoMigrationContent[],
   appliedDigests: AppliedDigest[],
@@ -201,11 +208,22 @@ export function findContentDivergence(
 
     let applied = byVersion.get(f.version);
     let matchedBy: 'version' | 'name' = 'version';
+    let candidates: string[] | undefined;
     if (!applied) {
       const named = byName.get(f.name) ?? [];
-      if (named.length !== 1) continue; // never applied (condition #2's job) or ambiguous — not ours
-      applied = named[0];
+      if (named.length === 0) continue;   // never applied at all — condition #2's job, not ours
       matchedBy = 'name';
+      if (named.length === 1) {
+        applied = named[0];
+      } else {
+        // Ambiguous NAME, still decidable: the file is faithful iff it mirrors one of the rows.
+        if (named.some((d) => d.md5 === f.md5)) continue;
+        // None matches. Report against the closest row — one whose CODE digest agrees (so the
+        // divergence classifies comment-only) if there is one, else the newest applied version.
+        const newest = [...named].sort((a, b) => a.version.localeCompare(b.version)).at(-1)!;
+        applied = named.find((d) => d.codeMd5 && d.codeMd5 === f.codeMd5) ?? newest;
+        candidates = named.map((d) => d.version).sort();
+      }
     }
     if (applied.md5 === f.md5) continue;
     out.push({
@@ -216,6 +234,7 @@ export function findContentDivergence(
       repoMd5: f.md5,
       appliedMd5: applied.md5,
       kind: classifyDivergence(f.codeMd5, applied.codeMd5),
+      ...(candidates ? { candidates } : {}),
     });
   }
   return out.sort((a, b) => a.file.localeCompare(b.file));

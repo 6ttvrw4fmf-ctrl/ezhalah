@@ -47,11 +47,17 @@ import { liftSearchScope } from './lib/liftSearchScope.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import {
+  afProbeFetch, contentRangeTotal, isSchemaCacheReload, isSchemaCacheUnresolved,
+  SchemaCacheUnresolved, type Probe,
+} from './lib/afLiveProbe.ts';
+import {
   loadLifted, buildMatrix, recorder, allScopes, optionMeaning, fieldMeaning, paramsAcross, sortedJson, type Cell,
 } from './lib/afMatrix.ts';
 import { typeArForTypes } from '../src/data/propertyTypes.ts';
 import { certifiedAmenityKeys } from '../src/lib/afCohorts.ts';
 import type { SearchQuery } from '../src/data/search.ts';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { judgeCellOnOneIndex, UNREADABLE_STAMP } from './lib/afSurfaceJudge.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const { url: REST, key: KEY } = resolvePublicSupabase(process.env);
@@ -64,40 +70,86 @@ const CONCURRENCY = Number(process.env.AF_MATRIX_CONCURRENCY || 3);
 
 let failures = 0, passes = 0;
 const failed: string[] = [];
-const check = (label: string, ok: boolean, detail = '') => {
-  if (ok) { passes++; return; }
+// Cells the SCHEMA CACHE was reloading through. Not `failures`, because they are not a statement
+// about the product — but counted, printed, and gated below, because unmeasured is never green.
+const unmeasured: string[] = [];
+// A cell's checks are first collected in its own buffer and only committed once the cell has been
+// judged on ONE index state (judgeCellOnOneIndex, scripts/lib/afSurfaceJudge.ts — 2026-10-13: two runs
+// that day failed 81 and 28 checks on DIFFERENT cells, and every one passed in full when re-run alone).
+type CellRun = { fails: { label: string; detail: string }[]; passes: number };
+const cellRun = new AsyncLocalStorage<CellRun>();
+const undecidedCells: string[] = [];
+let reconciledCells = 0;
+const commitFail = (label: string, detail: string) => {
   failures++; failed.push(label);
   console.log(`FAIL  ${label}${detail ? `\n      ${detail}` : ''}`);
 };
+const check = (label: string, ok: boolean, detail = '') => {
+  const run = cellRun.getStore();
+  if (run) { if (ok) run.passes++; else run.fails.push({ label, detail }); return; }
+  if (ok) { passes++; return; }
+  commitFail(label, detail);
+};
+
+/** An exact fingerprint of the searchable index (row count @ newest write), as the differential uses. */
+async function indexStamp(): Promise<string> {
+  const [count, newest] = await Promise.all([
+    fetch(`${REST}/rest/v1/search_listings_ar?select=listing_id`, { headers: { ...H, Prefer: 'count=exact', Range: '0-0' } })
+      .then((r) => (r.headers.get('content-range') || '').split('/')[1] || '?').catch(() => '?'),
+    fetch(`${REST}/rest/v1/search_listings_ar?select=last_updated&order=last_updated.desc.nullslast&limit=1`, { headers: H })
+      .then((r) => r.json()).then((r: any) => r?.[0]?.last_updated ?? '?').catch(() => '?'),
+  ]);
+  return count === '?' && newest === '?' ? UNREADABLE_STAMP : `${count}@${newest}`;
+}
 const same = (a: unknown, b: unknown) => sortedJson(a) === sortedJson(b);
 
 // ── HTTP, with retries (a production hiccup is not a predicate defect) ───────────────────────────
-async function http(path: string, init: RequestInit & { rawHeaders?: boolean } = {}): Promise<Response> {
+//
+// THE BUDGET USED TO BE GUESSED, AND THE GUESS WAS TOO SHORT (fixed 2026-09-26, ops_incident #563).
+// This loop is unchanged for the failures it was written for — a generic 5xx, a 429 — but it used to
+// own the PGRST002 case too, on 4 attempts of 800/1600/2400/3200ms ≈ 8s. REPRODUCED against a stub
+// holding a schema-cache reload for 15s: 4 probes, all 503, then throw. That is what named
+// «Warehouse/Buy: cell completed without a harness error» on production at 10:05:48Z, three cells at
+// once (= CONCURRENCY), inside the window another routine's wahadat_* migrations opened.
+//
+// The reload now belongs to the ONE measured driver (scripts/lib/postgrestRetry.ts via
+// scripts/lib/afLiveProbe.ts): ~15s wall-clock of patience across 5 attempts, retrying ONLY a 503
+// whose JSON `code` is exactly PGRST002. Same stub, same 15s window: 200 at 15,086ms. A reload that
+// outlasts even that raises SchemaCacheUnresolved — an UNMEASURED cell, never an accusation naming a
+// cohort. The outer loop deliberately does NOT retry it a second time: two nested budgets is how a
+// bounded wait becomes an unbounded one.
+async function http(path: string, init: RequestInit = {}): Promise<Probe> {
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
-      const r = await fetch(`${REST}/rest/v1/${path}`, { ...init, headers: { ...H, ...(init.headers as Record<string, string> | undefined) } });
-      if (r.status < 500 && r.status !== 429) return r;
-      last = new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
-    } catch (e) { last = e; }
+      const p = await afProbeFetch(`${REST}/rest/v1/${path}`, {
+        ...init,
+        headers: { ...H, ...(init.headers as Record<string, string> | undefined) },
+      });
+      if (p.status < 500 && p.status !== 429) return p;
+      if (isSchemaCacheReload(p.status, p.body)) throw new SchemaCacheUnresolved(path.slice(0, 120), p.body);
+      last = new Error(`HTTP ${p.status}: ${p.body.slice(0, 200)}`);
+    } catch (e) {
+      if (isSchemaCacheUnresolved(e)) throw e;
+      last = e;
+    }
     await new Promise((res) => setTimeout(res, 800 * (attempt + 1)));
   }
   throw last instanceof Error ? last : new Error(String(last));
 }
 async function rpc<T = unknown>(name: string, body: Record<string, unknown>): Promise<T> {
-  const r = await http(`rpc/${name}`, { method: 'POST', body: JSON.stringify(body) });
-  if (!r.ok) throw new Error(`${name} ${r.status}: ${(await r.text()).slice(0, 300)}`);
-  return r.json() as Promise<T>;
+  const p = await http(`rpc/${name}`, { method: 'POST', body: JSON.stringify(body) });
+  if (!p.ok) throw new Error(`${name} ${p.status}: ${p.body.slice(0, 300)}`);
+  return JSON.parse(p.body) as T;
 }
 async function rpcTotal(body: Record<string, unknown>): Promise<number> {
   const rows = await rpc<{ total_count: number }[]>('location_search_candidates_ar', { ...body, p_per_platform: null, p_limit: 1, p_offset: 0 });
   return rows.length ? Number(rows[0].total_count) : 0;
 }
 async function restCount(qs: string): Promise<number> {
-  const r = await http(`search_listings_ar?select=listing_id&${qs}`, { headers: { Prefer: 'count=exact', Range: '0-0' } });
-  if (!r.ok && r.status !== 416) throw new Error(`REST ${r.status} on ${qs.slice(0, 160)}: ${(await r.text()).slice(0, 200)}`);
-  const cr = r.headers.get('content-range') || '';
-  return cr.includes('/') ? Number(cr.split('/')[1]) : 0;
+  const p = await http(`search_listings_ar?select=listing_id&${qs}`, { headers: { Prefer: 'count=exact', Range: '0-0' } });
+  if (!p.ok && p.status !== 416) throw new Error(`REST ${p.status} on ${qs.slice(0, 160)}: ${p.body.slice(0, 200)}`);
+  return contentRangeTotal(p) ?? 0;
 }
 const key = (r: { source_table: string; listing_id: unknown }) => `${r.source_table}:${r.listing_id}`;
 async function rpcIds(body: Record<string, unknown>, cap: number): Promise<{ ids: string[]; total: number }> {
@@ -113,9 +165,10 @@ async function rpcIds(body: Record<string, unknown>, cap: number): Promise<{ ids
 async function restIds(qs: string, cap: number): Promise<string[]> {
   const out: string[] = [];
   for (let off = 0; off < cap; off += 1000) {
-    const r = await http(`search_listings_ar?select=source_table,listing_id&${qs}&order=source_table,listing_id`, { headers: { Range: `${off}-${off + 999}` } });
-    if (r.status === 416) break;
-    const rows = await r.json() as any[];
+    const p = await http(`search_listings_ar?select=source_table,listing_id&${qs}&order=source_table,listing_id`, { headers: { Range: `${off}-${off + 999}` } });
+    if (p.status === 416) break;
+    if (!p.ok) throw new Error(`REST ${p.status} on ${qs.slice(0, 160)}: ${p.body.slice(0, 200)}`);
+    const rows = JSON.parse(p.body) as any[];
     rows.forEach((x) => out.push(key(x)));
     if (rows.length < 1000) break;
   }
@@ -131,9 +184,9 @@ async function fetchCols(ids: string[], cols: string[]): Promise<Map<string, Rec
     for (let i = 0; i < list.length; i += 200) {
       const chunk = list.slice(i, i + 200).map((v) => (/^\d+$/.test(v) ? v : `"${v}"`)).join(',');
       jobs.push((async () => {
-        const r = await http(`search_listings_ar?select=source_table,listing_id,${cols.join(',')}&source_table=eq.${encodeURIComponent(table)}&listing_id=in.(${encodeURIComponent(chunk)})`);
-        if (!r.ok) throw new Error(`fetchCols ${r.status}: ${(await r.text()).slice(0, 200)}`);
-        for (const row of await r.json() as any[]) out.set(key(row), row);
+        const p = await http(`search_listings_ar?select=source_table,listing_id,${cols.join(',')}&source_table=eq.${encodeURIComponent(table)}&listing_id=in.(${encodeURIComponent(chunk)})`);
+        if (!p.ok) throw new Error(`fetchCols ${p.status}: ${p.body.slice(0, 200)}`);
+        for (const row of JSON.parse(p.body) as any[]) out.set(key(row), row);
       })());
     }
   }
@@ -143,7 +196,7 @@ async function fetchCols(ids: string[], cols: string[]): Promise<Map<string, Rec
 
 // ── reference data + the app's own table lists ───────────────────────────────────────────────────
 const TYPE_MACROS: Record<string, string> = Object.fromEntries(
-  (await (await http('known_type_ar?select=type_ar,macro')).json() as any[]).map((x) => [x.type_ar, x.macro]));
+  (JSON.parse((await http('known_type_ar?select=type_ar,macro')).body) as any[]).map((x) => [x.type_ar, x.macro]));
 // THE ONE LIFT SPEC (scripts/lib/liftSearchScope.ts). This file used to carry its own copy, pinned
 // to `endsWith: /\];$/` — a terminator no line matches since RES_TABLES/COM_TABLES became derived
 // one-liners (#1653). The slice then ran on to DEEPLINK_TABLES, swallowed COM_TABLES, and the lifted
@@ -202,13 +255,13 @@ async function verifyCell(cell: Cell) {
     L.setCounts(guided, age);
     const res = await f.question.resolveOptions(cell.query);   // REAL numbers from the REAL row
     check(`${tag}/${fid}: the question's total is the scope`, res.total === baseRpc, `total=${String(res.total)} base=${baseRpc}`);
-    let sum = 0;
+    let sum = 0, widest = 0;
     for (const o of res.options) {
       const m = optionMeaning(fid, o.key);
       if (!m) { check(`${tag}/${fid}=${o.key}: option has a meaning`, false); continue; }
       optionsChecked++;
       const chip = Number(o.count);
-      sum += chip;
+      sum += chip; widest = Math.max(widest, chip);
       const q1 = f.question.apply(cell.query, [o.key]);
       const params = L.rpcAdvancedFilterParams(q1);
       // (2) selection = predicate
@@ -298,7 +351,13 @@ async function verifyCell(cell: Cell) {
       const unknownFilter = optionMeaning(fid, res.options[0].key)!.unknown;
       const unkRest = await restCount(`${scopeQS}&${unknownFilter}`);
       check(`${tag}/${fid}: «did not mention» == NULL count`, Number(res.unknownCount) === unkRest, `caption=${String(res.unknownCount)} null=${unkRest}`);
-      check(`${tag}/${fid}: options + unknown == scope`, sum + Number(res.unknownCount) === baseRpc, `${sum} + ${String(res.unknownCount)} vs ${baseRpc}`);
+      if (fm.nested) {
+        const beyond = await restCount(`${scopeQS}&${fm.nested.beyond}`);
+        check(`${tag}/${fid}: widest rung + beyond the ladder + unknown == scope`,
+          widest + beyond + Number(res.unknownCount) === baseRpc, `${widest} + ${beyond} + ${String(res.unknownCount)} vs ${baseRpc}`);
+      } else {
+        check(`${tag}/${fid}: options + unknown == scope`, sum + Number(res.unknownCount) === baseRpc, `${sum} + ${String(res.unknownCount)} vs ${baseRpc}`);
+      }
     }
     // (4) two options of ONE field
     if (f.question.selection === 'multi' && res.options.length >= 2) {
@@ -331,8 +390,40 @@ async function verifyCell(cell: Cell) {
 const queue = [...cells];
 await Promise.all(Array.from({ length: CONCURRENCY }, async () => {
   for (let c = queue.shift(); c; c = queue.shift()) {
-    try { await verifyCell(c); }
-    catch (e: any) { check(`${c.scope.label}/${c.mode.mode}: cell completed without a harness error`, false, e.message); }
+    try {
+      const tag = `${c.scope.label}/${c.mode.mode}`;
+      let last: CellRun = { fails: [], passes: 0 };
+      const attempt = async () => {
+        const run: CellRun = { fails: [], passes: 0 };
+        await cellRun.run(run, () => verifyCell(c));
+        last = run;
+        return run.fails.map((f) => f.label);
+      };
+      const v = await judgeCellOnOneIndex(indexStamp, attempt);
+      if (v.verdict === 'undecided') {
+        undecidedCells.push(`${tag} (${v.firstFailures.length} check(s) disagreed; index ${v.stamp})`);
+        console.log(`UNDECIDED  ${tag} — the searchable index was rebuilt under both reads, no verdict in either direction`);
+        continue;
+      }
+      if (v.verdict === 'pass' && v.reconciled) {
+        reconciledCells++;
+        console.log(`RECONCILED  ${tag} — disagreed on the first read, agreed on a re-read proven to span no index rebuild`);
+      }
+      passes += last.passes;
+      for (const f of last.fails) commitFail(f.label, f.detail);
+    }
+    catch (e: any) {
+      // A schema-cache reload that outlasted the measured budget is the INSTRUMENT being
+      // unavailable, so it must not wear this label: «cell completed without a harness error» both
+      // names a product cohort and asserts the harness was fine, and on 2026-09-26 it said exactly
+      // that about three healthy cohorts while PostgREST was reloading (ops_incident #563).
+      if (isSchemaCacheUnresolved(e)) {
+        unmeasured.push(`${c.scope.label}/${c.mode.mode}`);
+        console.log(`UNMEASURED  ${c.scope.label}/${c.mode.mode} — ${e.message}`);
+        continue;
+      }
+      check(`${c.scope.label}/${c.mode.mode}: cell completed without a harness error`, false, e.message);
+    }
   }
 }));
 
@@ -340,6 +431,29 @@ console.log(`\n${passes} checks passed · ${optionsChecked} options measured · 
   `${rowsVerified} returned rows verified on canonical columns · ${emptyCells} empty cell(s) in ${CITY} · ${cappedWalks} walk(s) capped at ${WALK_CAP} · ` +
   `${unverifiable} cell(s) the oracle could not express · ${trendingSkipped} bothDeals cell(s) SKIPPED the Trending check — reason: bothDeals is agent-only, sanitizeForFilterRestore drops it so the Filter home (the only Trending surface) can never hold it, and its results body reads RES_TABLES while the un-tabled Trending call spans the monthly-only sources (adjudicated 2026-09-02, pinned by verify-af-matrix-truth.ts §8)`);
 if (failed.length) console.log(`\nFAILED:\n${failed.map((l) => `  • ${l}`).join('\n')}`);
+// UNMEASURED IS NOT A PASS. A reload lasts seconds against this job's ~27 minutes, so one or two
+// cells is ordinary and says nothing; more than that means the cache never settled and this run
+// certified little. Either way the message stays about the INSTRUMENT, never about a cohort.
+if (unmeasured.length) {
+  console.log(`\nUNMEASURED (PostgREST schema cache reloading past the full retry budget — NOT a product verdict):\n${unmeasured.map((l) => `  • ${l}`).join('\n')}`);
+  const floor = Math.max(3, Math.round(cells.length * 0.05));
+  if (unmeasured.length > floor) {
+    check(`schema cache availability: ${unmeasured.length} of ${cells.length} cell(s) went unmeasured (floor ${floor})`, false,
+      'the schema cache did not settle within the measured budget for a meaningful share of the sweep, so this run did not certify the matrix — this is NOT a finding about any cohort named above');
+  }
+}
+// UNDECIDED IS NOT A PASS either: a cell whose re-read still straddled a rebuild certified nothing.
+// One or two in a ~40-minute sweep that spans the :22 sync is ordinary; more means this run did not
+// certify the matrix. The message stays about the INSTRUMENT, never about a cohort.
+console.log(`\nRECONCILED ACROSS AN INDEX REBUILD: ${reconciledCells} cell(s)   UNDECIDED (index moved, no verdict): ${undecidedCells.length}`);
+if (undecidedCells.length) {
+  console.log(undecidedCells.map((l) => `  • ${l}`).join('\n'));
+  const floor = Math.max(3, Math.round(cells.length * 0.05));
+  if (undecidedCells.length > floor) {
+    check(`index stability: ${undecidedCells.length} of ${cells.length} cell(s) undecided (floor ${floor})`, false,
+      'the searchable index kept moving under the re-reads, so this run did not certify the matrix — NOT a finding about any cohort named above');
+  }
+}
 console.log(failures === 0
   ? `\n✅ verify-af-matrix-truth-live: every certified option in ${CITY} shows, sends, applies, returns and carries one truth\n`
   : `\n✗ verify-af-matrix-truth-live: ${failures} check(s) failed\n`);

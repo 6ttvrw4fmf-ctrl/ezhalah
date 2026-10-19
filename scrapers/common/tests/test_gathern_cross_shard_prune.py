@@ -102,11 +102,48 @@ def test_prune_from_fails_closed_on_a_partial_union() -> None:
 
 
 def test_prune_from_prunes_the_real_table_with_the_union() -> None:
+    """STRUCTURAL, not textual — read the AST of the real call.
+
+    This assertion used to be the literal string
+    `db.prune_unseen("gathern_residential_listings", seen, source=SOURCE)`, which pinned the
+    SPELLING of the call rather than the property it cares about. On 2026-09-21 it went red for a
+    change that strictly IMPROVED that call — adding the `verify_gone=` oracle so the cross-shard
+    prune stops deactivating on crawl absence alone — while it would have stayed green for a
+    reformat, a renamed variable holding a DIFFERENT set, or a keyword quietly removed. That is the
+    source-TEXT tripwire class AGENTS.md names: "a barrier that reads source as TEXT can pass for
+    the entire time the defect is live".
+
+    The property is unchanged and now actually enforced: the union job prunes THAT table, with the
+    variable the union was accumulated into, scoped to SOURCE — and, since 2026-09-21, never
+    without a source oracle.
+    """
+    import ast
+
+    tree = ast.parse(RUN_PY)
+    call = None
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.If) and ast.unparse(node.test) == "args.prune_from"):
+            continue
+        for n in ast.walk(node):
+            if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "prune_unseen":
+                call = n
+    assert call is not None, "the --prune-from branch no longer calls prune_unseen at all"
+
+    # Compare the literal VALUE, not its rendering — ast.unparse normalises quote style, and
+    # re-introducing a text comparison here is the exact thing this rewrite removes.
+    got = [a.value if isinstance(a, ast.Constant) else ast.unparse(a) for a in call.args]
+    assert got == ["gathern_residential_listings", "seen"], (
+        f"the union job must prune the real table with the UNIONED seen-set, got {got}"
+    )
+    kw = {k.arg: ast.unparse(k.value) for k in call.keywords}
+    assert kw.get("source") == "SOURCE", f"the prune must stay scoped to SOURCE, got {kw}"
+    assert "verify_gone" in kw, (
+        "the cross-shard prune can deactivate on crawl absence alone — it must pass a source "
+        "oracle (docs/ops/LISTING_LIVENESS.md §1-§3, ops_incident #372)"
+    )
+
     body = RUN_PY[RUN_PY.index("if args.prune_from:") :]
     body = body[: body.index("\n    ci, co = ") if "\n    ci, co = " in body else len(body)]
-    assert 'db.prune_unseen("gathern_residential_listings", seen, source=SOURCE)' in body, (
-        "the union job must call prune_unseen with the UNIONED seen-set"
-    )
     assert "if pruned < 0:" in body, "prune_unseen's guard-tripped return must still be handled"
 
 

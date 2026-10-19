@@ -57,16 +57,37 @@ check('stop() reads run.origin captured before runRef is cleared', /const wasFil
 // The real stop-in-place bubble text (as opposed to a comment that merely quotes the same phrase,
 // e.g. the pre-existing "must NOT claim ... or hide CTAs" note above) — anchored on the actual
 // rendered-string call shape so it can't be fooled by prose mentioning the same words.
-const bubbleTextIdx = stopFn.search(/text:\s*tr\("I've stopped the search/);
-check('the filter branch is reached BEFORE the generic "I\'ve stopped the search" bubble',
+const bubbleTextIdx = stopFn.search(/text:\s*tr\('Search stopped'\), typing: false, stopNote: true/);
+check('the filter branch is reached BEFORE the generic «وقفت البحث» stop line',
   bubbleTextIdx > 0 && stopFn.indexOf('if (wasFilterOrigin)') < bubbleTextIdx);
+// THE BRANCH IS EXTRACTED BY BRACE MATCHING, NOT BY A CHARACTER BUDGET (routine #6, 2026-09-20).
+// This used to be `[\s\S]{0,2200}?` on both the return check and the extraction below. A 2200-char
+// ceiling is a silent dependency on how much PROSE the branch carries: documenting the branch
+// (ops_incident #341) pushed it past the cap, the match returned undefined, `filterBranch` became
+// the empty string — and FOUR checks went red naming router.replace, lastFilterRef, the erase and
+// the spinner, none of which had changed. The failure direction was safe here, but the shape is the
+// dangerous one: had the cap been generous instead of tight, an empty extraction would have made
+// every `!/…/.test(filterBranch)` check pass vacuously. Brace matching has no budget to outgrow.
+const braceBody = (src: string, opener: RegExp): string => {
+  const m = opener.exec(src);
+  if (!m) return '';
+  let i = src.indexOf('{', m.index); if (i < 0) return '';
+  let depth = 0;
+  for (let j = i; j < src.length; j++) {
+    if (src[j] === '{') depth++;
+    else if (src[j] === '}') { depth--; if (depth === 0) return src.slice(i + 1, j); }
+  }
+  return '';                                   // unbalanced — report empty and let the checks fail
+};
+const filterBranch = braceBody(stopFn, /if \(wasFilterOrigin\) \{/);
+check('the filter branch was extracted at all (a vacuous empty body must never read as a pass)',
+  filterBranch.trim().length > 0);
 check('the filter branch returns (never falls through to the chat-stop message)',
-  /if \(wasFilterOrigin\) \{[\s\S]{0,2200}?return;\s*\n\s*\}/.test(stopFn));
+  /\breturn;/.test(filterBranch));
 
 // 3) Requirements 1-6, read directly off the filter branch. `code` strips `//` line comments so a
 //    check like "no setQuery call" isn't fooled by this branch's own prose explaining the design
 //    (which necessarily mentions setQuery when describing why it's absent).
-const filterBranch = (stopFn.match(/if \(wasFilterOrigin\) \{([\s\S]{0,2200}?)return;\s*\n\s*\}/) ?? [, ''])[1];
 const code = (s: string) => s.replace(/\/\/[^\n]*/g, '');
 check('1. cancels the active run for real: run.cancelled + run.ac.abort() before the branch runs',
   /run\.cancelled = true;/.test(stopFn) && /run\.ac\.abort\(\)/.test(stopFn));
@@ -81,13 +102,25 @@ check('3c. clears lastFilterRef/lastSeedRef so an identical resubmitted filter i
   /lastFilterRef\.current = undefined/.test(filterBranch) && /lastSeedRef\.current = undefined/.test(filterBranch));
 check('4/5. never renders partial results or a completion message on this path (no results/agent bubble appended)',
   !/role:\s*'results'/.test(filterBranch) && !/text:\s*tr\(/.test(filterBranch));
-check('5b. the conversation is erased, not frozen/annotated as a completed turn', /setMsgs\(\[\]\)/.test(filterBranch));
-check('6. never leaves busy=true (no infinite spinner) once this path is taken', /setBusy\(false\)/.test(filterBranch));
+// 5b/6 — ASSERTED THROUGH THE SHARED RESET, not against an inline pair (ops_incident #341).
+// These pinned `setMsgs([])` and `setBusy(false)` as literal text inside the branch. That is the
+// hand-written reset this repo has now paid for four times (#211/#271/#319/#341): the branch is a
+// conversation EXIT, so erasing the transcript is the shared reset's job, and a check that demands
+// the two calls INLINE actively rewards forgetting the other twelve. The invariant is unchanged and
+// the check is strictly stronger — the branch must route through resetConversationState(), and that
+// function must really do both things. Where the calls live is no longer the assertion.
+const resetBody = braceBody(agent, /const resetConversationState = \(\) => \{/);
+check('5b/6a. the filter branch routes through the shared conversation reset',
+  /^\s*resetConversationState\(\);\s*$/m.test(code(filterBranch)));
+check('5b. …and that reset erases the conversation, not freezes/annotates it as a completed turn',
+  resetBody.trim().length > 0 && /setMsgs\(\[\]\)/.test(resetBody));
+check('6. …and that reset never leaves busy=true (no infinite spinner) once this path is taken',
+  resetBody.trim().length > 0 && /setBusy\(false\)/.test(resetBody));
 
 // 4) The chat path is UNCHANGED — same message, same screen, no navigation.
 const chatBranch = stopFn.slice(stopFn.indexOf('setStopped(true)'));
-check("chat-originated Stop keeps the existing stop-in-place message and does NOT navigate",
-  /I've stopped the search/.test(chatBranch) && !/router\.replace/.test(chatBranch));
+check("chat-originated Stop keeps its stop-in-place line («وقفت البحث», ChatGPT-style, owner 2026-10-10) and does NOT navigate",
+  /tr\('Search stopped'\), typing: false, stopNote: true/.test(chatBranch) && !/router\.replace/.test(chatBranch));
 
 // 5) CANCELLATION IS REAL, not just "stop waiting on it" — traced end to end from the Stop button
 //    down to the actual HTTP layer, and independently down to the write-guard that survives a race.
@@ -98,18 +131,25 @@ check('bounded() accepts an external AbortSignal and forwards it into the SAME c
 check('an already-aborted signal aborts immediately, before the network call even starts',
   /if \(signal\.aborted\) ctrl\.abort\(\);/.test(remote));
 check('fetchRawByIds checks the signal between chunked requests, not only at the start',
-  /for \(let i = 0; i < ids\.length; i \+= ID_CHUNK\) \{\s*\n\s*if \(signal\?\.aborted\)/.test(remote));
+  // The chunk loop became a bounded worker pool on 2026-10-10 (verify-raw-card-chunks-run-concurrently);
+  // every worker still checks the signal before EACH chunk request it starts.
+  /while \(!failed && next \* ID_CHUNK < ids\.length\) \{\s*\n\s*if \(signal\?\.aborted\)/.test(remote));
 check('fetchListingsForQuery threads the SAME signal into both the main RPC call and the raw-card fetch',
   /opts\?\.signal/.test(remote) && /fetchRawByIds\(q, tbl, ids, signal\)/.test(remote)
-  // Budget widened 400->900 (2026-08-29, controlled-rotation change): the RPC call block grew a new
-  // p_rotation_seed param + its explanatory comment. Widen again if it grows further — the point of
-  // this check is that `signal` is still the trailing arg to the SAME bounded() call, not a specific
-  // byte count; a comment block between the call's start and its close is not a regression.
-  && /supabase\.rpc\('location_search_candidates_ar'[\s\S]{0,900}\), RPC_TIMEOUT_MS, signal\)/.test(remote));
+  // Budget widened 400->900 (2026-08-29, controlled-rotation change), then 900->1400 (2026-09-26,
+  // per-search rotation): the RPC call block grew the threaded `opts?.rotationSeed ?? rotationSeed()`
+  // fallback and its explanatory comment. Widen again if it grows further — the point of this check
+  // is that `signal` is still the trailing arg to the SAME bounded() call, not a specific byte
+  // count; a comment block between the call's start and its close is not a regression.
+  && /supabase\.rpc\('location_search_candidates_ar'[\s\S]{0,1400}\), RPC_TIMEOUT_MS, signal\)/.test(remote));
 check('runQuery accepts a signal and passes it all the way down',
   // signature gained a trailing chatId (conversation identity, owner 2026-08-25) — signal position unchanged.
   /runQuery: \(q: SearchQuery, record\?: boolean, signal\?: AbortSignal, chatId\?: string \| null\)/.test(store)
-  && /fetchListingsForQuery\(q, \{ signal \}\)/.test(store));
+  // `{ signal }` became `{ signal, rotationSeed: … }` on 2026-09-26 (one rotation seed minted per
+  // search). What this line guards is that the signal is STILL the first thing handed to the page-0
+  // fetch — not that the options object has exactly one key — so it now allows further options
+  // after it rather than pinning the whole literal.
+  && /fetchListingsForQuery\(q, \{ signal[,\s}]/.test(store));
 check('recordHistory/setSearchCount are gated on !signal?.aborted — a cancelled run can NEVER write, even on a late-resolving race',
   /if \(record && !signal\?\.aborted\) \{[\s\S]{0,600}?setSearchCount/.test(store)
   && /if \(record && !signal\?\.aborted\) \{[\s\S]{0,600}?recordHistory/.test(store));

@@ -72,6 +72,41 @@ export type DriftReading = {
    * at production at all.
    */
   liveEntryBundle: string | null;
+  /**
+   * IS THE RECORD ITSELF CURRENT? — the head sha of the newest SUCCESSFUL production deploy, as the
+   * deploy pipeline's own run history reports it. `null` means that history could not be read, which
+   * is UNKNOWN and therefore a problem, never "there were no deploys".
+   *
+   * WHY THIS READING EXISTS (routine #2, 2026-09-15). `docs/DEPLOY_BASELINE.txt` is advanced by
+   * scripts/record-deploy-baseline.sh, which CANNOT push to main (branch protection + a read-only
+   * GITHUB_TOKEN) and therefore falls back to opening a PR — and then `exit 0`. Nobody merges those
+   * PRs: seventeen `deploy/baseline-*` PRs were open on 2026-09-15, the oldest from 09-11, while the
+   * file still recorded 18fd9974 and production had moved four successful deploys ahead to 07c6104.
+   *
+   * The consequence was not a missed alarm but a FALSE one. This check reported «13 user-visible
+   * file(s) … MERGED AND NOT SHIPPED», naming two new platform launches and a P1 chat-lock repair —
+   * all of which were live. Verified the same morning: the served bundle carried 07c6104's own
+   * values (logoOverride 34×34, pillLogo 24×24) and NOT the 26×26/18×18 they replaced, and a real
+   * anonymous search returned 3,670 rakez and 96 suwar listings. Four separate routines spent a day
+   * reasoning about a blockage that did not exist, and ops_incident #264 stood P1 on it.
+   *
+   * So the stale-record case must be told APART from real unshipped work rather than collapsed into
+   * it. Both still FAIL — a wrong record is dangerous in its own right — but the failure now names
+   * the recorder rather than the innocent commits.
+   */
+  lastDeploySha?: string | null;
+  /**
+   * True when `baselineSha` is strictly behind `lastDeploySha` — i.e. the recorded floor is older
+   * than a deploy that provably succeeded, so the record is stale. `null` = undetermined (which is
+   * not "no"). `undefined` = the caller supplied no corroboration evidence at all.
+   */
+  baselineIsBehindLastDeploy?: boolean | null;
+  /**
+   * The file list from `lastDeploySha..headSha` — the drift question asked against the commit
+   * production DEMONSTRABLY serves rather than against a record known to be stale. Only consulted
+   * when `baselineIsBehindLastDeploy` is true. `null` = undeterminable.
+   */
+  changedPathsSinceLastDeploy?: string[] | null;
 };
 
 const SHA = /^[0-9a-f]{40}$/;
@@ -154,25 +189,116 @@ export function undeployedDriftProblems(r: DriftReading): string[] {
     );
   }
 
+  // ── IS THE RECORD CURRENT? ─────────────────────────────────────────────────────────────────────
+  // Asked BEFORE the drift itself, because a diff computed from a stale floor accuses the wrong
+  // commits. Skipped entirely when the caller supplies no corroboration evidence (`undefined`), so
+  // this predicate stays usable by callers that only have the two shas.
+  const corroborationSupplied = r.lastDeploySha !== undefined || r.baselineIsBehindLastDeploy !== undefined;
+  if (corroborationSupplied) {
+    if (r.lastDeploySha === null) {
+      problems.push(
+        'the production deploy history could not be read, so whether docs/DEPLOY_BASELINE.txt is '
+        + 'still CURRENT is unknown. The record is this check\'s only claim about what users are '
+        + 'served; an unverifiable record is an unanswered question, not a pass.',
+      );
+    } else if (r.lastDeploySha !== null && !SHA.test(r.lastDeploySha)) {
+      problems.push(`the last successful deploy's head is not a 40-hex commit sha: ${JSON.stringify(r.lastDeploySha)}`);
+    }
+    if (r.baselineIsBehindLastDeploy === null) {
+      problems.push(
+        'could not determine whether the recorded baseline is behind the last successful deploy — '
+        + 'an undetermined answer must not read as "the record is current".',
+      );
+    }
+  }
+
+  // THE RECORD IS STALE. Report the recorder, and judge real drift against the commit production
+  // demonstrably serves. Never announce shipped work as unshipped — that is what cost 2026-09-14.
+  if (r.baselineIsBehindLastDeploy === true) {
+    const since = r.changedPathsSinceLastDeploy;
+    const reallyUnshipped = since === null || since === undefined ? null : since.filter(isUserVisible);
+    problems.push(
+      `docs/DEPLOY_BASELINE.txt is STALE: it records ${r.baselineSha} as live, but a production `
+      + `deploy of ${r.lastDeploySha} succeeded after that. The record — not the merged work — is `
+      + 'what is wrong here.'
+      + (reallyUnshipped === null
+        ? '\n      Drift against the actually-deployed commit could not be computed, so whether any '
+          + 'user-visible work is genuinely unshipped remains UNKNOWN.'
+        : reallyUnshipped.length === 0
+          ? '\n      Measured against the actually-deployed commit, NOTHING user-visible is unshipped — '
+            + 'so any "merged and not shipped" reading from the stale floor would have been false.'
+          : `\n      Measured against the actually-deployed commit, ${reallyUnshipped.length} user-visible `
+            + `file(s) are genuinely unshipped: ${reallyUnshipped.slice(0, 12).join(', ')}`
+            + `${reallyUnshipped.length > 12 ? ` … +${reallyUnshipped.length - 12} more` : ''}`)
+      + '\n      Root cause: scripts/record-deploy-baseline.sh cannot push to main (branch protection '
+      + '+ read-only GITHUB_TOKEN), so it opens a deploy/baseline-* PR and exits 0. The floor only '
+      + 'advances when a human merges that PR. Remedy: merge the open deploy/baseline-* PR for '
+      + `${r.lastDeploySha?.slice(0, 7) ?? 'the deployed commit'}, or give the pipeline the `
+      + 'BASELINE_PR_TOKEN secret so it can advance the floor itself. Never edit the baseline by hand '
+      + 'to clear this check.',
+    );
+  }
+
   // ── THE DRIFT ITSELF. ──────────────────────────────────────────────────────────────────────────
   if (r.changedPaths === null) {
     problems.push('the baseline..head file list could not be computed — the drift question was not answered');
-  } else {
+  } else if (r.baselineIsBehindLastDeploy !== true) {
     const visible = r.changedPaths.filter(isUserVisible);
     if (visible.length > 0) {
+      // WAS THE RECORD ACTUALLY CORROBORATED? — routine #9, 2026-09-18, ops_incident #227.
+      //
+      // The 2026-09-15 guard above tells a PROVABLY stale record (`true`) apart from real unshipped
+      // work. It left the third answer collapsed into the second: when corroboration was ASKED FOR and
+      // came back UNDETERMINED — `lastDeploySha === null` (the deploy history could not be read) or
+      // `baselineIsBehindLastDeploy === null` — `!== true` is satisfied and this branch emitted the
+      // same flat accusation it emits for a record confirmed CURRENT. This type's own doc says
+      // «`null` = undetermined (which is not "no")» and the problem text twenty lines up says «an
+      // undetermined answer must not read as "the record is current"»; the accusation site did exactly
+      // that. It is AGENTS.md's owner-locked UNKNOWN→NO class — a failed read rendered as a confident
+      // negative — inside the barrier built to stop this very accusation being false.
+      //
+      // Measured on 2026-09-18 from a cloud session, which cannot reach the deploy history at all and
+      // therefore hits this path EVERY run: the check named 11 commits and 16 user-visible files as
+      // MERGED AND NOT SHIPPED. Probing the served bundle for per-commit discriminators showed 10 of
+      // the 11 were live — `rakez`/`suwar` (70ae4dc, 76fdf71), `{rest} at once` and not `{next} at
+      // once` (753bdfa), `id, meta, updated_at` (f9ef500) — while production carried neither
+      // `loc_city_cluster:` nor `resolved without data`, so exactly ONE commit (3e93123) was genuinely
+      // unshipped. ops_incident #227 has stood P1 since 2026-09-13 on a reader trying to disprove this
+      // list by hand, and #264 before it cost four routines a day.
+      //
+      // Both answers still FAIL — an unverifiable record is an unanswered question (the problem for
+      // that is pushed above, and is what keeps this red). What changes is only what a FAILING path
+      // CLAIMS: the diff is still named in full, file for file and commit for commit, so no signal is
+      // lost; it is simply no longer asserted to be unshipped when nothing established that it is.
+      const recordCorroborated = !(r.lastDeploySha === null || r.baselineIsBehindLastDeploy === null);
+      // The commit list carries the same claim as the sentence above it, so its LABEL moves with the
+      // branch too — «not served» is an assertion, and an uncorroborated record cannot make it.
       const commits = (r.commitLine ?? []).length
-        ? `\n      commits merged and not served:\n        ${(r.commitLine ?? []).join('\n        ')}`
+        ? `\n      commits ${recordCorroborated ? 'merged and not served' : 'in this diff (served or not — UNKNOWN this run)'}:`
+          + `\n        ${(r.commitLine ?? []).join('\n        ')}`
         : '';
       problems.push(
-        `${visible.length} user-visible file(s) differ between the commit production is recorded to `
-        + `serve (${r.baselineSha}) and the head under test (${r.headSha}) — that work is MERGED AND `
-        + 'NOT SHIPPED, so every user is still meeting the behaviour it repairs.'
-        + `\n      files: ${visible.slice(0, 12).join(', ')}${visible.length > 12 ? ` … +${visible.length - 12} more` : ''}`
-        + commits
-        + '\n      Remedy: dispatch .github/workflows/deploy-frontend.yml (reason, confirm=DEPLOY) once '
-        + 'the deploy gates are clear, then let scripts/record-deploy-baseline.sh advance the record. '
-        + 'If the gates are NOT clear (e.g. migration_drift is red), that blockage is the finding — '
-        + 'never clear this check by editing the baseline.',
+        recordCorroborated
+          ? `${visible.length} user-visible file(s) differ between the commit production is recorded to `
+            + `serve (${r.baselineSha}) and the head under test (${r.headSha}) — that work is MERGED AND `
+            + 'NOT SHIPPED, so every user is still meeting the behaviour it repairs.'
+            + `\n      files: ${visible.slice(0, 12).join(', ')}${visible.length > 12 ? ` … +${visible.length - 12} more` : ''}`
+            + commits
+            + '\n      Remedy: dispatch .github/workflows/deploy-frontend.yml (reason, confirm=DEPLOY) once '
+            + 'the deploy gates are clear, then let scripts/record-deploy-baseline.sh advance the record. '
+            + 'If the gates are NOT clear (e.g. migration_drift is red), that blockage is the finding — '
+            + 'never clear this check by editing the baseline.'
+          : `${visible.length} user-visible file(s) differ between the commit production is RECORDED to `
+            + `serve (${r.baselineSha}) and the head under test (${r.headSha}) — but that record could `
+            + 'NOT be corroborated this run, so whether this work is genuinely unshipped is UNKNOWN. It '
+            + 'is therefore NOT asserted to be unserved: the record may simply be stale, and naming '
+            + 'shipped commits as unshipped is what cost 2026-09-14 (ops_incident #264) and #227.'
+            + `\n      files: ${visible.slice(0, 12).join(', ')}${visible.length > 12 ? ` … +${visible.length - 12} more` : ''}`
+            + commits
+            + '\n      Resolve the UNKNOWN first: read the deploy history (a full checkout plus GitHub API '
+            + 'access), or probe the served bundle for a string that the recorded commit does not '
+            + 'contain — a match proves the record stale without deriving a sha from bundle bytes. '
+            + 'Only then is the list above an accusation. Never clear this check by editing the baseline.',
       );
     }
   }

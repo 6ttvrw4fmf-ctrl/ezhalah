@@ -38,7 +38,8 @@
 // src/data/propertyTypes.ts — the SAME pure function src/data/remote.ts:352 uses to build `p_types`.
 // Several folds are deliberate owner rules, and hard-coding a naive one-label-per-type expectation
 // here would manufacture false leaks:
-//   • Villa  = فيلا + قصر + تاون هاوس + بيت      (owner 2026-07-20)
+//   • Villa  = فيلا + قصر + بيت                   (owner 2026-07-20)
+//   • Duplex = دوبلكس + تاون هاوس                 (owner 2026-10-12: town house is under Duplex)
 //   • Apartment = شقة + مبنى شقق مخدومة + ملحق علوي
 //   • Rest House = استراحة + إستراحة              (hamza spelling variant, aqarcity)
 // Importing the real function instead of restating it means this barrier cannot drift from the

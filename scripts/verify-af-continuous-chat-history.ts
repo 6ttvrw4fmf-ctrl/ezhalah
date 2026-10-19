@@ -25,7 +25,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildAfSummary } from '../src/lib/afSummary.ts';
+import { buildAfSummary, buildAfRoundLog } from '../src/lib/afSummary.ts';
 import { deriveGuided, type GuidedStep } from '../src/lib/afSteps.ts';
 import { resultCounts, closingNoteKey } from '../src/data/resultCount.ts';
 
@@ -76,7 +76,7 @@ check('«تحديد أكثر» is offered by the newest turn only',
 // Read Aloud must describe the buttons that are actually there — it reads the SAME two flags, so a
 // history turn is never spoken as if it still had actions.
 check('the spoken closing note names the same two latest-turn-aware flags',
-  /const spokenActionLabels = \[hasMore && t\('Load more'\), canNarrowFurther && t\('Let’s narrow it down'\)\]/.test(agent),
+  /const spokenActionLabels = \[hasMore && replyT\('Load more'\), canNarrowFurther && replyT\('Let’s narrow it down'\)\]/.test(agent),
   'agent.tsx: reading rc.hasMore instead of hasMore would announce buttons an old turn does not render');
 
 // ── 2. THE HONESTY BOUNDARY: latest-only touches the BUTTONS and nothing else ────────────────────
@@ -108,7 +108,7 @@ check('a results turn renders its cards from its own reveal count, ungated by re
   // renders in full — src/lib/initialReveal.ts). The INVARIANT this check guards is unchanged and still
   // pinned: the turn's OWN revealCount[m.id] leads, a typing turn starts at 0, and nothing about recency
   // (isLatestResults) may appear in the slice bound.
-  /m\.result\.listings\.slice\(0, revealCount\[m\.id\] \?\? \(m\.typing \? 0 : initialReveal\(m\.result\)\)\)\.map\(/.test(agent)
+  /m\.result\.listings\.slice\(0, revealCount\[m\.id\] \?\? \(m\.typing \? 0 : initialReveal\(m\.result, m\.afCompleted\)\)\)\.map\(/.test(agent)
   && !/listings\.slice\(0, [^)]*isLatestResults/.test(agent),
   'agent.tsx: an old turn must keep showing exactly the cards it was showing — never 0, never re-collapsed');
 check('the cards render ABOVE the actions/receipt slot, so swapping that slot cannot take them with it',
@@ -126,28 +126,56 @@ check('the receipt is the ELSE branch of the actions row (the two can never rend
   const receipt = block(agent, 'af-round-receipt', '</View>');
   check('the receipt block is present and holds the choices line',
     receipt !== '' && /testID="af-round-receipt-choices"/.test(receipt),
-    'agent.tsx: af-round-receipt must contain the «اختياراتك: …» line');
+    'agent.tsx: af-round-receipt must contain the «اخترت: …» line');
+  // Added 2026-09-20 — the card replays the round IN ASK ORDER, answers and skips in ONE sentence
+  // (a first two-line «اخترت»/«تخطيت» version was replaced by the owner the same day). Its own
+  // barrier is verify-af-receipt-shows-skips.ts; pinned here too so the card cannot quietly shrink
+  // back to half a record, or re-split into piles.
+  check('the receipt holds ONE line, and it is the round log',
+    receipt !== '' && !/af-round-receipt-skipped/.test(receipt)
+    && /buildAfRoundLog|afReceipt\[m\.id\]\}/.test(receipt),
+    'agent.tsx: the record must name what the round SKIPPED as well as what it committed, in order');
   check('the receipt has nothing to tap (no Pressable, no press handler)',
     receipt !== '' && !/Pressable|onPress|<Tap\b|TouchableOpacity/.test(receipt),
     'agent.tsx: the receipt is a RECORD of a finished round — making it interactive re-opens the fork this rule closes');
-  check('the receipt states the round\'s choices through the shared summary builder',
-    /t\('Your choices: \{summary\}', \{ summary: afReceipt\[m\.id\] \}\)/.test(receipt),
-    'agent.tsx: the choices line must render the stored buildAfSummary() string, never a re-derived one');
+  // The stored value became the ask-ordered ROUND LOG on 2026-09-20, printed verbatim with no label
+  // (the line mixes answers and skips, so «اختياراتك» would mislabel half of it). The invariant is
+  // unchanged and is what this still pins: the card renders what was STORED at finish time, never a
+  // re-derivation from live state — a re-derived sentence would drift the moment a pill is removed.
+  check('the receipt states the round from the STORED string, never a re-derived one',
+    /\{afReceipt\[m\.id\]\}/.test(receipt)
+    && !/buildAfSummary\(|buildAfRoundLog\(/.test(receipt),
+    'agent.tsx: the card must render the stored string, never call a builder at render time');
   check('an empty summary renders NO receipt at all (nothing committed ⇒ nothing to record)',
     /\) : afReceipt\[m\.id\] \? \(/.test(agent),
     'agent.tsx: gating on the summary string means an all-skipped round shows no «اختياراتك: » with an empty tail');
 }
-check('the receipt is written for the ORIGIN turn from the COMMITTED facets only',
-  /setAfReceipt\(\(r\) => \(\{ \.\.\.r, \[carry\.msgId\]: buildAfSummary\(ageFlowFacetsRef\.current\) \}\)\)/.test(agent),
-  'agent.tsx (finishGuided): keyed on carry.msgId = the turn the round was opened FROM; built from facets, which skips never enter');
-check('the receipt strings are translated with the owner\'s exact wording',
-  /'Continued with the advanced filter': 'تابع المستخدم باستخدام التصفية المتقدمة'/.test(i18n)
-  && /'Your choices: \{summary\}': 'اختياراتك: \{summary\}'/.test(i18n),
+check('the receipt is written for the ORIGIN turn, from THIS round\'s ask order and facets',
+  /\[carry\.msgId\]: roundLog/.test(agent)
+  && /const roundLog = buildAfRoundLog\(askedThisRound, ageFlowFacetsRef\.current, locale\)/.test(agent),
+  'agent.tsx (finishGuided): keyed on carry.msgId = the turn the round was opened FROM; answers still come from the facets, which skips never enter');
+check('only a round that committed something leaves a receipt at all',
+  /if \(carry && roundCommitted\) setAfReceipt/.test(agent),
+  'agent.tsx: a skip-everything round changes nothing, so its turn must keep the buttons — a receipt there leaves the user no way back into the interview');
+check('the receipt heading is translated with the owner\'s exact wording',
+  /'Continued with the advanced filter': 'تابع المستخدم باستخدام التصفية المتقدمة'/.test(i18n),
   'src/i18n.tsx: Arabic is the product language — an untranslated key renders the English source string');
+// The body is NOT translated, by design: buildAfRoundLog writes finished Arabic, exactly as
+// buildAfSummary always did. The label keys it used to sit under are retired, and a retired key left
+// behind is how a deleted surface quietly comes back.
+check('the retired «اختياراتك» / «تخطيت» label keys are gone',
+  !/Your choices: \{summary\}/.test(i18n) && !/Skipped: \{summary\}/.test(i18n) && !/اختياراتك/.test(i18n));
 
-// ── 5. EXECUTED: summary == committed state, so a SKIPPED answer can never reach the receipt ─────
+// ── 5. EXECUTED: summary == committed state, so a SKIP never reaches the CHOICES sentence ────────
 // Not a grep: run the real pipeline the receipt is built from (deriveGuided → facets → buildAfSummary)
-// with a skipped question in the middle and prove the skip leaves no trace in the rendered string.
+// with a skipped question in the middle and prove the skip leaves no trace in that sentence.
+//
+// SCOPE NARROWED 2026-09-20, deliberately. The receipt gained a second sentence that DOES name the
+// skipped questions (buildAfSkipped, asserted below and in verify-af-receipt-shows-skips.ts). The
+// permanent rule it would otherwise contradict is about the PILLS sentence — a claim about the live
+// predicate — and buildAfSummary is still the only thing that feeds it. Naming a skip in a record of
+// what the interview DID claims no filter, which is why the two can coexist. What must never happen
+// is the two sentences blurring, so this section now pins BOTH directions.
 {
   type Q = GuidedStep['question'];
   const q = (id: string, apply: (x: any, keys: string[]) => any): Q =>
@@ -175,12 +203,21 @@ check('the receipt strings are translated with the owner\'s exact wording',
   check('a skipped question commits NO facet (the receipt has nothing to print for it)',
     d.facets.length === 2 && !d.facets.some((f) => f.id === 'furnished'),
     `facets=${JSON.stringify(d.facets.map((f) => f.id))}`);
-  check('the receipt string lists both committed answers',
+  check('the CHOICES sentence lists both committed answers',
     summary.includes('+٣') && summary.includes('٣-٥ سنوات'),
     `summary="${summary}"`);
-  check('the receipt string never mentions the SKIPPED answer',
+  check('the CHOICES sentence never mentions the skipped answer\'s VALUE',
     !summary.includes('مفروشة') && !summary.includes('🛋️'),
-    `a skip leaked into the receipt: "${summary}"`);
+    `a skip leaked into the choices sentence: "${summary}"`);
+  // THE OTHER DIRECTION (2026-09-20). The ROUND LOG replays the same three steps in ask order:
+  // bathrooms answered, furnished SKIPPED, age answered. It names the skipped QUESTION by its noun
+  // («الفرش») and never the value the user declined to pick («مفروشة»), and it keeps the skip in
+  // the middle — where it happened. Without these the card could satisfy §5 by dropping the skips.
+  const roundLog = buildAfRoundLog(d.askedIds, d.facets);
+  check('the ROUND LOG replays all three steps, skip in the middle, in ask order',
+    roundLog === '+٣ حمامات 🚿، تخطى الفرش ⏭️، وعمر ٣-٥ سنوات 🏗️', `log="${roundLog}"`);
+  check('the log names the skipped QUESTION, never the value the user declined',
+    roundLog.includes('تخطى الفرش') && !roundLog.includes('مفروشة') && !roundLog.includes('🛋️'), roundLog);
   check('a round that skipped everything produces an EMPTY summary (⇒ no receipt renders)',
     buildAfSummary(deriveGuided({} as any, [step(BATH, opts(['3', '+٣']), []), step(FURN, opts(['yes', 'مفروشة']), [])], 2).facets) === '');
 }
@@ -199,10 +236,14 @@ check('the receipt strings are translated with the owner\'s exact wording',
   // Since 2026-09-05 it comes from the pure `closingNoteKey` (src/data/resultCount.ts) — the old
   // inline wording was blind to `isLatestResults`/`!ageFlow` and promised buttons that were not
   // rendered. EXECUTE the exhausted case instead of grepping for it; the Arabic half is unchanged.
+  // TERMINAL wording changed with the 500-cap rule (owner 2026-09-14): everything-shown now points to
+  // a NEW search from the ☰ menu instead of re-offering the retired «تحديد أكثر». The invariant this
+  // check owns is unchanged — the exhausted state still produces an Arabic sentence that states the
+  // true count {n} — only the exact string moved. cappedAtCap:false is the everything-shown terminal.
   check('the exhausted case has an explicit Arabic all-shown message',
-    closingNoteKey({ endKind: 'all', quoteTotal: true, offersMore: false, offersNarrow: false })
-      === 'I showed you all {n} matching listings.'
-    && /'I showed you all \{n\} matching listings\.': 'عرضت لك كل النتائج المطابقة \(\{n\} إعلان\)\.'/.test(i18n),
+    closingNoteKey({ endKind: 'all', quoteTotal: true, offersMore: false, offersNarrow: false, lastTapOffer: false, cappedAtCap: false })
+      === 'That is every matching listing ({n}). For a new search, open the menu and choose Search.'
+    && /'That is every matching listing \(\{n\}\)\. For a new search, open the menu and choose Search\.':\s*'عرضنا لك كل النتائج المتوفرة \(\{n\} إعلان\)\. تبي بحث جديد؟ افتح القائمة ☰ فوق واختر «بحث»\.'/.test(i18n),
     'agent.tsx / src/i18n.tsx: when nothing is left the user must be told so in Arabic, with the true count');
 }
 // EXECUTED (logic owned by verify-result-cap-honesty.ts; asserted here only where THIS feature reads it):
@@ -232,13 +273,13 @@ check('the round cap ends the round through the shared terminator, not through t
   /const askedThisRound = steps\.filter\(\(st\) => st\.keys != null && !isScopeQuestionId\(st\.question\.id\)\)\.length;\s*\n\s*if \(askedThisRound >= AF_ROUND_MAX_QUESTIONS\) \{ finishGuided\(token\); return; \}/.test(agent),
   'agent.tsx (presentGuided): the cap must be a presentGuided exit calling finishGuided — never a flag handed to the question card');
 check('a confirm still advances one question (the primary is never terminal)',
-  /const onAgeConfirm = \(keys: string\[\]\) => \{ void commitGuidedStep\(keys\); \}/.test(agent),
+  /const onAgeConfirm = \(keys: string\[\]\) => (?:\{ void commitGuidedStep\(keys\); \}|commitGuidedStep\(keys\);)/.test(agent),
   'agent.tsx: see verify-af-primary-advances-not-shows.ts — «متابعة · N نتيجة» must commit WITHOUT the finish flag');
 check('the question card is never told where it sits in the round',
   !/AF_ROUND_MAX_QUESTIONS/.test(codeOnly(read('src/components/AdvancedQuestionCard.tsx'))),
   'src/components/AdvancedQuestionCard.tsx: one shared card that never branches on position or question id (design contract §1)');
 
 console.log(failures === 0
-  ? '\n✓ old turns keep their cards and lose their controls; the receipt records only what was committed; every turn still tells the truth about its own count\n'
+  ? '\n✓ old turns keep their cards and lose their controls; the receipt replays the round in ask order, skips marked as skips, without claiming a filter it does not hold; every turn still tells the truth about its own count\n'
   : `\n✗ ${failures} check(s) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

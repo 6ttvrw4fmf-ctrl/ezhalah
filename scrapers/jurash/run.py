@@ -66,8 +66,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize  # noqa: E402
-
+from scrapers.common import db, normalize, sold_pin  # noqa: E402
 BASE = "https://jurash.sa"
 INDEX = f"{BASE}/العقارات"
 WORKERS = int(os.environ.get("JURASH_WORKERS", "5"))
@@ -337,7 +336,10 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
     # ── floor / parking ──
     floor_no = _to_int(f.get("pt_floor"))
     garage_txt = (f.get("pt_garages") or "").strip()
-    parking = bool(garage_txt and garage_txt not in ("-", "—", "0"))
+    # pt_garages is jurash's ONE structured parking field: a printed garage → True, a printed «0» → False,
+    # an empty or «-» field is silence → NULL (🔬 AF engineer, 2026-10-14). It used to be bool(...), so
+    # 5 of 5 active ads with no garage field stored parking = False, «no» the source never said.
+    parking = parking_answer(garage_txt)
 
     # ── location ── city (Arabic) → English; region DERIVED from the city.
     city_ar = (f.get("city") or "").strip()
@@ -405,10 +407,27 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
         "photo_urls": _images(body),
         "additional_info": info,
     }
+    # Every other amenity has NO structured field on jurash; the ad's own «مكونات العقار» prose is the
+    # statement (law §2), yes-or-nothing: 15321317 «… صالة 3 غرف نوم مطبخ 4 دورات مياه …» stored kitchen
+    # NULL, and jurash scored 0 of 4 findable on 10-14 with kitchen missed on 3 of 5. Parking stays
+    # structured-only (above).
+    row.update(prose_answers(description))
     return row, category, gone
 
 
-def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+_PROSE_COLS = ("kitchen", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance")
+
+
+def parking_answer(garage_txt: str) -> Optional[bool]:
+    return True if garage_txt and garage_txt not in ("-", "—", "0") else (False if garage_txt == "0" else None)
+
+
+def prose_answers(description: Optional[str]) -> dict[str, bool]:
+    return {c: v for c, v in normalize.prose_amenities_yes(description, skip=("parking",)).items() if c in _PROSE_COLS}
+
+
+def _pin_sold_inactive(table: str, ad_numbers: list[str],
+                       seen_ad_numbers: list[str]) -> None:
     """Make source-confirmed SOLD/RENTED rows inactive NOW and survivors of the nightly
     auto_recover_false_inactive() sweep.
 
@@ -422,13 +441,18 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     stuck in on 2026-07-16). prune_unseen() never undoes the pin: it only selects active=true
     rows. When a listing is later relisted, its next upsert carries active=true and the upsert's
     own missing_count=0 reset applies — the pin is only written for ids that are gone THIS
-    crawl."""
-    for i in range(0, len(ad_numbers), 200):
-        db._execute(
-            db.sb().table(table).update({"active": False, "missing_count": 3})
-            .in_("ad_number", ad_numbers[i:i + 200]),
-            what=table + ".sold_pin",
-        )
+    crawl.
+
+    The `seen_ad_numbers` half is what makes this oracle three-valued instead of one-way: the same
+    status field that publishes a removal also publishes the reversal, and until 2026-09-23 the
+    reversal was read, used, and thrown away — leaving ops_lifecycle_false_resurrection() with a
+    GONE latest verdict that no amount of correct behaviour could clear. See scrapers/common/
+    sold_pin.py. It writes evidence only: never active, never missing_count, never
+    last_verified_alive_at.
+    """
+    sold_pin.pin_source_confirmed_gone(
+        table, ad_numbers, oracle="jurash.sold_pin.status_title", seen_ad_numbers=seen_ad_numbers,
+    )
 
 
 # ── Main ────────────────────────────────────────────────────────────────────────
@@ -504,10 +528,10 @@ def main() -> int:
         # Pin sold/rented rows immediately after the upserts: gone rows are never upserted here,
         # but without the pin an already-listed row stays active for 3 more crawls (prune's
         # 3-strike) while the site explicitly says gone. See _pin_sold_inactive.
-        if sold_res:
-            _pin_sold_inactive("jurash_residential_listings", sold_res)
-        if sold_com:
-            _pin_sold_inactive("jurash_commercial_listings", sold_com)
+        _pin_sold_inactive("jurash_residential_listings", sold_res,
+                           [r["ad_number"] for r in res])
+        _pin_sold_inactive("jurash_commercial_listings", sold_com,
+                           [r["ad_number"] for r in com])
 
         if args.limit:
             print(f"✓ Jurash VALIDATION: {len(res)} residential + {len(com)} commercial upserted "
@@ -525,6 +549,18 @@ def main() -> int:
         # Gone rows are already active=false + missing_count=3 by now; prune_unseen never touches
         # them (it only reads active=true rows), so their absence from the seen set is harmless.
         pruned = 0
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+        # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+        # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+        # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+        superseded = db.retire_superseded_siblings(
+            res_table="jurash_residential_listings", com_table="jurash_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source="Jurash")
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
         for tbl, rows_seen in (("jurash_residential_listings", res),
                                ("jurash_commercial_listings", com)):
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Jurash")

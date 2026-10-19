@@ -26,6 +26,7 @@
 // it scans far more than it needs to.
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { rpcProbeOutcome, outcomeIsUsable } from './lib/liveHalf.ts';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
 import {
   attributeViewGaps,
   describeAttributeGaps,
@@ -42,7 +43,7 @@ console.log('\nEvery searchable platform appears in BOTH Advanced Filter attribu
 
 const { url, key } = resolvePublicSupabase();
 const rpc = async (fn: string, body: unknown) => {
-  const r = await fetch(`${url}/rest/v1/rpc/${fn}`, {
+  const r = await postgrestFetch(`${url}/rest/v1/rpc/${fn}`, {
     method: 'POST',
     headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

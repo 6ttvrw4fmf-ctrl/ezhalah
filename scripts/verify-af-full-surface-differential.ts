@@ -68,6 +68,9 @@ import { buildOracleQS, CANONICAL_DIRECTIONS } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import {
+  afProbeOk, afRpcOk, contentRangeTotal, isSchemaCacheUnresolved,
+} from './lib/afLiveProbe.ts';
+import {
   judgeOption, judgeUnion, judgeIntersection, judgeZero, judgeUnknownCaption, boundaryReport,
   optionWouldRender, settleOnOneIndex, UNREADABLE_STAMP, type Pred, type Row,
 } from './lib/afSurfaceJudge.ts';
@@ -93,6 +96,10 @@ const M = {
   // A comparison that straddled an index rebuild: settled on a stable re-read (reconciled) or not
   // settled at all (undecided). Neither is ever a silent pass — both are printed in the summary.
   reconciled: 0, undecided: 0,
+  // A cell the SCHEMA CACHE was reloading through. Kept apart from `undecided` (index moved)
+  // because the causes are different, and apart from `failures` because neither is a statement
+  // about the product. Both feed the floor below: unmeasured is never green.
+  unmeasuredReload: 0,
 };
 
 // ── env ──────────────────────────────────────────────────────────────────────────────────────────
@@ -109,15 +116,18 @@ const SCOPES: Scope[] = (process.env.AF_FSD_SCOPES || 'region:1').split(',').map
 });
 
 // ── live reference data ──────────────────────────────────────────────────────────────────────────
+// Both readers go through scripts/lib/afLiveProbe.ts, which retries ONLY a 503/PGRST002
+// schema-cache reload on the ONE measured budget (scripts/lib/postgrestRetry.ts) and raises a
+// DISTINCT SchemaCacheUnresolved when even that is outlasted. Before 2026-09-26 these threw on the
+// first non-ok of any kind: a reload triggered by another session's migration killed the sweep
+// mid-flight (reproduced — 1 probe, uncaught throw) and discarded every check already done.
 async function rest(path: string, extra: Record<string, string> = {}): Promise<any> {
-  const r = await fetch(`${REST}/rest/v1/${path}`, { headers: { ...H, ...extra } });
-  if (!r.ok) throw new Error(`REST ${r.status} on ${path.slice(0, 140)}: ${(await r.text()).slice(0, 200)}`);
-  return r.json();
+  const p = await afProbeOk(`REST ${path.slice(0, 140)}`, `${REST}/rest/v1/${path}`, { headers: { ...H, ...extra } });
+  return JSON.parse(p.body);
 }
 async function rpc(name: string, body: Record<string, unknown>): Promise<any> {
-  const r = await fetch(`${REST}/rest/v1/rpc/${name}`, { method: 'POST', headers: H, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error(`RPC ${name} ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  return r.json();
+  const p = await afRpcOk(REST, H, name, body);
+  return JSON.parse(p.body);
 }
 
 const TYPE_MACROS: Record<string, string> = Object.fromEntries(
@@ -152,7 +162,10 @@ const registry = [...readFileSync(join(import.meta.dirname, '..', 'sql/mirrors/a
 const enabledRows = new Set(registry.filter((r) => r.enabled).map((r) => `${r.deal}|${r.period}|${r.type}`));
 
 // ── the option catalog — mirrors src/data/advancedFilters.ts one-for-one ─────────────────────────
-type Opt = { key: string; col: string | null; countRpc: 'guided' | 'age' | null; params: Record<string, unknown>; pred: Pred };
+// `col` is the chip's count column; a cumulative age rung (owner 2026-10-05) is the SUM of `col` and `plus`.
+type Opt = { key: string; col: string | null; plus?: string[]; countRpc: 'guided' | 'age' | null; params: Record<string, unknown>; pred: Pred };
+const chipOf = (row: Record<string, unknown>, opt: Opt): number =>
+  [opt.col, ...(opt.plus ?? [])].reduce((sum, c) => sum + Number(row[c as string]), 0);
 const AMENITY_COL: Record<string, string> = {
   kitchen: 'kitchen', parking: 'parking', elevator: 'elevator', ac: 'air_conditioner', private_entrance: 'private_entrance',
   maid_room: 'maid_room', driver_room: 'driver_room', car_entrance: 'car_entrance', sanitation: 'sanitation',
@@ -202,6 +215,10 @@ function optionsFor(qid: string, types: string[], q: any): Opt[] | null {
       { key: 'property_age:3_5', col: 'cnt_3_5', countRpc: 'age', params: { p_age_min: 3, p_age_max: 5 }, pred: { kind: 'between', col: 'property_age', lo: 3, hi: 5 } },
       { key: 'property_age:6_9', col: 'cnt_6_9', countRpc: 'age', params: { p_age_min: 6, p_age_max: 9 }, pred: { kind: 'between', col: 'property_age', lo: 6, hi: 9 } },
       { key: 'property_age:10p', col: 'cnt_10p', countRpc: 'age', params: { p_age_min: 10 }, pred: { kind: 'gte', col: 'property_age', n: 10 } },
+      // The card's one-tap «up to» ladder (owner 2026-10-05): each rung = every newer bucket.
+      { key: 'property_age:upto2', col: 'cnt_new', plus: ['cnt_1_2'], countRpc: 'age', params: { p_age_buckets: ['new', '1_2'] }, pred: { kind: 'between', col: 'property_age', lo: 0, hi: 2 } },
+      { key: 'property_age:upto5', col: 'cnt_new', plus: ['cnt_1_2', 'cnt_3_5'], countRpc: 'age', params: { p_age_buckets: ['new', '1_2', '3_5'] }, pred: { kind: 'between', col: 'property_age', lo: 0, hi: 5 } },
+      { key: 'property_age:upto9', col: 'cnt_new', plus: ['cnt_1_2', 'cnt_3_5', 'cnt_6_9'], countRpc: 'age', params: { p_age_buckets: ['new', '1_2', '3_5', '6_9'] }, pred: { kind: 'between', col: 'property_age', lo: 0, hi: 9 } },
     ];
     default: return null;
   }
@@ -283,9 +300,17 @@ async function oracle(body: Record<string, unknown>, cols: string[] = []): Promi
 async function oracleCount(body: Record<string, unknown>, extraQs = ''): Promise<number | null> {
   const { qs, unhandled } = buildOracleQS(body, { typeMacros: TYPE_MACROS, ...(DIRECTION_VARIANTS.map ? { directionVariants: DIRECTION_VARIANTS.map } : {}) });
   if (unhandled.length) return null;
-  const r = await fetch(`${REST}/rest/v1/search_listings_ar?select=listing_id&${qs}${extraQs ? `&${extraQs}` : ''}`, { headers: { ...H, Prefer: 'count=exact', Range: '0-0' } });
-  const cr = r.headers.get('content-range') || '';
-  return cr.includes('/') ? Number(cr.split('/')[1]) : null;
+  // THIS USED TO NEVER CHECK `ok` (fixed 2026-09-26). It read content-range off whatever came back,
+  // so a 503/PGRST002 yielded `null` — the SAME value this function returns for "the oracle cannot
+  // express this predicate", which its callers then reported as an unknown-caption DEFECT reading
+  // "DB has null". A failed fetch is not an empty answer; a reload now raises through afProbeOk.
+  const p = await afProbeOk(
+    `oracle count ${qs.slice(0, 120)}`,
+    `${REST}/rest/v1/search_listings_ar?select=listing_id&${qs}${extraQs ? `&${extraQs}` : ''}`,
+    { headers: { ...H, Prefer: 'count=exact', Range: '0-0' } },
+    [416],
+  );
+  return contentRangeTotal(p);
 }
 const strictColsOf = (p: Pred): string[] => (p.kind === 'and' ? [...new Set(p.preds.flatMap(strictColsOf))] : [p.col]);
 
@@ -320,6 +345,14 @@ async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
 // and is still reported the first time it survives one.
 const undecided: string[] = [];
 const undecide = (label: string, why: string) => { undecided.push(`${label}: ${why}`); console.log(`UNDECIDED  ${label} — ${why}`); };
+// A reload that outlasted the measured budget means this cell was NOT MEASURED. Reporting it as
+// `fail(label, ...)` is what named healthy cohorts as defective on 2026-09-26 — the cause is the
+// database's schema cache, and the cohort in the label had nothing to do with it.
+const unmeasured = (label: string, e: unknown) => {
+  M.unmeasuredReload++;
+  undecided.push(`${label}: schema-cache reload (NOT a product verdict)`);
+  console.log(`UNMEASURED  ${label} — ${(e as Error).message}`);
+};
 
 /**
  * A cheap exact fingerprint of the searchable index: how many rows it holds, and its newest write.
@@ -341,7 +374,7 @@ const onOneIndex = <T>(take: () => Promise<T>) => settleOnOneIndex(indexStamp, t
 async function chipNow(base: Record<string, unknown>, opt: Opt): Promise<number | null> {
   if (!opt.col || !opt.countRpc) return null;
   const row = (await rpc(opt.countRpc === 'age' ? 'property_age_option_counts_ar' : 'apartment_guided_counts_ar', countBody(base, {})))?.[0];
-  return row ? Number(row[opt.col]) : null;
+  return row ? chipOf(row, opt) : null;
 }
 
 /** One option, five witnesses, one verdict. Returns the RPC id set so combos can do set algebra. */
@@ -405,7 +438,10 @@ async function verifyOption(label: string, base: Record<string, unknown>, opt: O
         pass(label, `chip=${chip ?? '—'} = rpc ${r.total} = oracle ${o.ids.length} · ${v.nullLeaks} null-leaks · ${v.rowViolations} violations`);
       }
       return { ids: r.ids, total: r.total };
-    } catch (e: any) { fail(label, `probe error: ${e.message}`); return null; }
+    } catch (e: any) {
+      if (isSchemaCacheUnresolved(e)) { unmeasured(label, e); return null; }
+      fail(label, `probe error: ${e.message}`); return null;
+    }
   });
 }
 
@@ -450,7 +486,10 @@ for (const scope of SCOPES) {
     try {
       guided = (await rpc('apartment_guided_counts_ar', countBody(base, {})))?.[0] ?? null;
       if (c.qids.includes('property_age')) age = (await rpc('property_age_option_counts_ar', countBody(base, {})))?.[0] ?? null;
-    } catch (e: any) { fail(`${tag} · count RPCs`, e.message); continue; }
+    } catch (e: any) {
+      if (isSchemaCacheUnresolved(e)) { unmeasured(`${tag} · count RPCs`, e); continue; }
+      fail(`${tag} · count RPCs`, e.message); continue;
+    }
     const total = guided ? Number(guided.cnt_total_base) : null;
 
     // baseline: type purity + the headline itself, before any option
@@ -499,7 +538,7 @@ for (const scope of SCOPES) {
       if (!opts) { fail(`${tag} · ${qid}`, 'certified question with NO catalog entry in this sweep — add it to optionsFor(); an unmapped question is a certified predicate this sweep never tests'); continue; }
       for (const opt of opts) {
         const counts = opt.countRpc === 'age' ? age : guided;
-        const chip = counts && opt.col ? Number(counts[opt.col]) : null;
+        const chip = counts && opt.col ? chipOf(counts, opt) : null;
         if (chip == null) { fail(`${tag} · ${opt.key}`, `the count RPC returned no ${opt.col} — a chip with no count path`); continue; }
         jobs.push(verifyOption(`${tag} · ${opt.key}`, base, opt, chip, true, total).then((r) => {
           if (r && !result.firstIds[qid] && chip >= 5) result.firstIds[qid] = { opt, ids: r.ids, total: r.total, chip };
@@ -598,7 +637,10 @@ if (!SKIP_MULTI) {
       try {
         guided = (await rpc('apartment_guided_counts_ar', countBody(base, {})))?.[0] ?? null;
         if (qids.includes('property_age')) age = (await rpc('property_age_option_counts_ar', countBody(base, {})))?.[0] ?? null;
-      } catch (e: any) { fail(`${tag} · count RPCs`, e.message); continue; }
+      } catch (e: any) {
+        if (isSchemaCacheUnresolved(e)) { unmeasured(`${tag} · count RPCs`, e); continue; }
+        fail(`${tag} · count RPCs`, e.message); continue;
+      }
       const total = guided ? Number(guided.cnt_total_base) : null;
       if (!total) { info(`${tag}: empty in this scope`); continue; }
       // baseline union purity: the pair's set must be exactly the union of the two types' sets
@@ -697,7 +739,8 @@ UNKNOWN CAPTIONS VERIFIED:        ${M.unknownCaptions}
 BOUNDARIES EXERCISED/UNEXERCISED: ${M.boundariesExercised}/${M.boundariesUnexercised}
 MISSING: ${M.missing}   EXTRA: ${M.extra}   DUPLICATES: ${M.dupes}   COUNT MISMATCHES: ${M.countMismatch}
 NULL→VALUE LEAKS: ${M.nullLeaks}   ROW VIOLATIONS: ${M.rowViolations}
-RECONCILED ACROSS AN INDEX REBUILD: ${M.reconciled}   UNDECIDED (index moved, no verdict): ${M.undecided}${undecided.length ? '\n  ' + undecided.slice(0, 10).join('\n  ') : ''}
+RECONCILED ACROSS AN INDEX REBUILD: ${M.reconciled}   UNDECIDED (index moved, no verdict): ${M.undecided}
+UNMEASURED (schema cache reloading, NOT a product verdict): ${M.unmeasuredReload}${undecided.length ? '\n  ' + undecided.slice(0, 10).join('\n  ') : ''}
 ORACLE REFUSALS (SKIP): ${skipped.length}${skipped.length ? '\n  ' + skipped.slice(0, 10).join('\n  ') : ''}
 `);
 
@@ -709,6 +752,12 @@ const attempted = M.options + M.predicateOnly;
 const undecidedFloor = Math.max(5, Math.round(attempted * 0.01));
 if (M.undecided > undecidedFloor) {
   fail('index stability', `${M.undecided} comparison(s) could not be settled on one index state (floor ${undecidedFloor} of ${attempted} attempted) — this run did not certify the surface`);
+}
+// The SAME rule for the schema cache, with its own name so the summary says which instrument was
+// unavailable. A reload lasts seconds and this sweep runs ~28 minutes, so a handful is ordinary; a
+// pile means the cache never settled and this run certified little — loud, never green.
+if (M.unmeasuredReload > undecidedFloor) {
+  fail('schema cache availability', `${M.unmeasuredReload} cell(s) went unmeasured because the PostgREST schema cache was reloading past the full retry budget (floor ${undecidedFloor} of ${attempted} attempted) — this run did not certify the surface, and this is NOT a finding about any cohort named above`);
 }
 
 console.log(failures

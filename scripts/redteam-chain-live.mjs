@@ -32,6 +32,7 @@
 //
 // A layer this run could not reach is printed as NOT REACHED and counted separately. It is never
 // folded into the passes (PART 7): a rule this run could not reach is not a rule this run proved.
+import { readFileSync } from 'node:fs';
 import { chromium, devices } from 'playwright';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { loadCityScope } from './lib/afOracleLive.ts';
@@ -40,9 +41,22 @@ import { dismissCookieConsent } from './lib/liveConsent.ts';
 // The REAL clean-type → type_ar expansion the app itself ships (src/data/propertyTypes.ts has no
 // imports, so it loads directly under Node's type stripping — no copy, no lift needed). See the
 // L1==L3 assertion below for why a substring test over p_types was wrong.
-import { CLEAN_MACRO, EN_TO_AR, typeArForSelection } from '../src/data/propertyTypes.ts';
+import { CLEAN_MACRO, EN_TO_AR, HIERARCHY, typeArForSelection } from '../src/data/propertyTypes.ts';
+// The product's own opening-cascade size. IMPORTED, never re-typed: a live journey that hardcodes
+// it ends up asserting a contract production retired (src/lib/initialReveal.ts says so above the
+// constant, and scripts/verify-cards-reveal-on-scroll.ts imports it for the same reason).
+// initialReveal.ts is pure and import-free, so it loads directly under Node's type stripping.
+import { CASCADE_MAX } from '../src/lib/initialReveal.ts';
 import { parseVisibleState } from '../e2e/live-sweep/visibleState.mjs';
 import { setDifferential, differentialIsClean, describeDifferential } from './lib/setDifferential.ts';
+import { settledSource } from '../e2e/lib/resultsSentence.mjs';
+
+// The GROUP tier of «نوع العقار» is labelled in src/i18n.tsx, not in propertyTypes.ts's EN_TO_AR.
+// i18n.tsx imports React and react-native, so it cannot be imported under Node's type stripping;
+// its shipped table is read as text and looked up by the group names HIERARCHY itself declares —
+// discovery, not a list. Same technique as e2e/lib/resultsSentence.mjs reading the shipped pool.
+const I18N_SRC = readFileSync(new URL('../src/i18n.tsx', import.meta.url), 'utf8');
+const ALL_GROUPS = Object.values(HIERARCHY).flat().map((g) => g.group);
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: REST, key: KEY } = resolvePublicSupabase(process.env);
@@ -181,6 +195,47 @@ async function settleCards(page, { tries = 60, stableFor = 4, everyMs = 700 } = 
   return last;
 }
 
+/**
+ * SCROLL UNTIL THE OPENING REVEAL CASCADE HAS FINISHED, then report the card count.
+ *
+ * A turn ARRIVES with only `min(initialReveal(...), CASCADE_MAX)` cards — CASCADE_MAX is imported
+ * from the product, never re-typed — and `maybeRevealOnScroll` walks the rest up to the turn's real
+ * target as the reader approaches it (owner 2026-09-20). `settleCards` above waits for growth to
+ * STOP but never scrolls, so on a turn whose target exceeds the cascade it settles at exactly
+ * CASCADE_MAX and reports a screenful as if it were the whole reveal.
+ *
+ * MEASURED, 2026-09-24, on this instrument: two of twelve chains — حفر-الباطن/إيجار-سنوي/شقة and
+ * الخبر/تجاري/مستودع, both with an honest total of 18 — reported
+ *     «pager absent while 18 > 12 shown»
+ * and the run recorded a NOT REACHED against a production that was entirely correct. Driven by hand
+ * in the same browser immediately afterwards, the arrival showed 12, and after scrolling the page
+ * showed all 18. Nothing was unreachable and no user was stranded; the harness had simply stopped
+ * reading at the first screenful. `src/lib/initialReveal.ts` says so in the comment above the
+ * constant: *"Live journeys must therefore expect a screenful ON ARRIVAL and scroll to reach the
+ * target — asserting the whole first page renders immediately is the PRE-2026-09-20 contract."*
+ * This driver was still asserting the pre-2026-09-20 contract.
+ *
+ * WHY THAT IS THE WORST KIND OF HARNESS BUG HERE. PRODUCTION_RED_TEAM_ENGINEER.md PART 7: "an oracle
+ * that accuses the product for its own imprecision is worse than no oracle." The window is narrow
+ * and exactly where it hurts — a total of 13..25 closes the chat (≤ INTERVIEW_STOP_AT), so no pager
+ * is rendered BY DESIGN and every one of those cells would have been read as a dead end.
+ *
+ * It bounds itself: growth is re-read after every wheel, and a screen that stops growing ends the
+ * walk. A cascade that is genuinely stuck still returns its last real count, so a real failure still
+ * fails — the fix removes a false accusation without buying a pass.
+ */
+async function revealAll(page, { rounds = 60, stableFor = 3, everyMs = 500, dy = 1400 } = {}) {
+  let last = -1, stable = 0;
+  for (let i = 0; i < rounds; i++) {
+    const n = (await page.evaluate(CARD_IDS)).length;
+    if (n === last) { if (++stable >= stableFor) break; } else { stable = 0; }
+    last = n;
+    await page.mouse.wheel(0, dy);
+    await sleep(everyMs);
+  }
+  return (await page.evaluate(CARD_IDS)).length;
+}
+
 const launchOpts = () => ({
   ...(process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {}),
   ...(process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY } } : {}),
@@ -259,12 +314,22 @@ async function runChain(cell) {
     }
     if (!picked) throw new Error(`the app never confirmed the city selection: ${cell.city}`);
     await sleep(800);
-    if (!await tap(cell.group)) throw new Error(`group never rendered: ${cell.group}`);
-    if (!await tap(cell.type)) throw new Error(`type never rendered: ${cell.type}`);
+    // GROUP/TYPE ARE OPTIONAL (2026-09-14, routine #9 — ops_incident #277). Every one of the twelve
+    // default cells narrowed to a SPECIFIC نوع, so this instrument could not drive the UNTYPED shape
+    // at all — the same corpus gap ops_incident #176 found in verify-af-live-truth.ts, standing in
+    // #9's OWN chain driver. That is not academic: the arm-B oracle defect of #277 fires ONLY on the
+    // untyped broad-Commercial request, and it survived here for exactly this reason. A corpus that
+    // always narrows on every axis cannot see a bug that only fires on the unnarrowed case.
+    // Omitting both sends p_types: null — the single most common real search a user makes.
+    if (cell.group && !await tap(cell.group)) throw new Error(`group never rendered: ${cell.group}`);
+    if (cell.type && !await tap(cell.type)) throw new Error(`type never rendered: ${cell.type}`);
     if (!await tap('بحث')) throw new Error('«بحث» never rendered');
 
     // Wait for the app to SETTLE on a terminal state, not for a guessed number of seconds.
-    await page.waitForFunction(() => /لقينا|ما لقيت|ما فيه/.test(document.body.innerText), null, { timeout: 90000 });
+    // Derived from the shipped pool (2026-09-19, routine #5). The retired clock
+    // /لقينا|ما لقيت|ما فيه/ is defeated by 6 of the 10 AR guest templates, so after PR #3186 it
+    // failed to see a settled search most of the time and judged a half-painted screen.
+    await page.waitForFunction((src) => new RegExp(src).test(document.body.innerText), settledSource(), { timeout: 90000 });
     // …AND THEN WAIT FOR THE CARD CASCADE (§41.4). A terminal headline is not a settled screen: the
     // cards drip in one by one, so a fixed sleep here samples a PARTIAL list. This cost a false
     // product finding on its first run — الطائف/تجاري/محل read 32 cards under a «37» headline with
@@ -317,16 +382,87 @@ async function runChain(cell) {
       // CLEAN_TO_QUERY['Villa'].rawTypes mapped through EN_TO_AR). Restricting the inversion to
       // CLEAN_MACRO's key set — the clean types, and nothing else — is what makes it single-valued.
       const cleanEn = Object.keys(CLEAN_MACRO).find((k) => EN_TO_AR[k] === vs.type) ?? null;
-      const expected = cleanEn ? (typeArForSelection(cleanEn) ?? []) : null;
+      // «نوع العقار» HAS THREE TIERS, NOT ONE (2026-09-14, routine #9 — ops_incident #277).
+      //
+      // buildSummary() (src/data/search.ts:600-602) fills that line from the narrowest thing the
+      // user actually chose, in three explicit branches: the selected TYPES, else the selected
+      // GROUPS, else the CATEGORY. This check modelled branch 1 only, so as soon as the untyped
+      // cells above became drivable it reported «the summary and the taxonomy disagree about what
+      // was searched» on all four — against a production doing exactly what it ships. That is §41.15's
+      // trap: an oracle that accuses the product for its own imprecision is worse than no oracle.
+      //
+      // NOT WEAKENED. Branch 1 keeps the exact set equality unchanged. Branch 3 gets the assertion
+      // that actually matters there, and that branch 1's form could never have made: the summary is
+      // claiming the WHOLE category, so the request must not be secretly narrower than that claim.
+      // That is the invisible-filter class (PART 1.1 class 3) — «ملخص البحث» saying «تجاري» while
+      // p_types carries one type would be a filter the user was never shown, and it is now caught:
+      //   · every raw type sent must belong to a clean type of that category (or a `both` macro), and
+      //   · the request must span MORE THAN ONE clean type, i.e. it is genuinely un-narrowed.
+      const CATEGORY_AR = { Residential: 'سكني', Commercial: 'تجاري' };   // src/i18n.tsx:204-205
       const sent = first.body.p_types ?? [];
-      const same = expected !== null
-        && expected.length === sent.length
-        && [...expected].sort().every((v, i) => v === [...sent].sort()[i]);
-      eq(name, 'L1 type == L3 p_types (clean label expands to exactly the raw set sent)', !!same,
-        cleanEn === null
-          ? `the app rendered «${vs.type}», which is not a clean type label in the shipped EN_TO_AR map `
-            + '— the summary and the taxonomy disagree about what was searched'
-          : `ui=${vs.type} (${cleanEn}) expands to ${JSON.stringify(expected)}  rpc=${JSON.stringify(sent)}`);
+      const cat = first.body.p_category ?? null;
+      // BRANCH 2 — THE GROUP TIER, WHICH THIS FILE HAS NAMED SINCE 2026-09-14 AND NEVER IMPLEMENTED
+      // (routine #9, 2026-09-21). The comment above says «نوع العقار» has three tiers and that
+      // branch 1 was the only one modelled; the 2026-09-14 repair added branch 3 and stopped. So the
+      // first cell that ever picked a GROUP and no TYPE — الجبيل / بيع / «الأراضي السكنية» — was
+      // told «the summary and the taxonomy disagree about what was searched» while every other layer
+      // of that chain agreed exactly (L4 = L5 = L6 = 26, set differential clean, all cards reached).
+      // §41.15 again: an oracle that accuses the product for its own imprecision is worse than none,
+      // and a documented-but-unimplemented branch is the version of that a reader cannot see.
+      //
+      // The group's Arabic label lives in src/i18n.tsx, not in EN_TO_AR, which is why inverting
+      // EN_TO_AR could never resolve it. i18n.tsx imports React and react-native so it cannot be
+      // imported under plain Node; its shipped table is read instead — the same technique
+      // e2e/lib/resultsSentence.mjs already uses to derive matchers from the shipped rotation pool.
+      // The GROUP NAMES are discovered from HIERARCHY, never listed here, so a group added tomorrow
+      // is covered without editing this file.
+      //
+      // NOT WEAKENED: the assertion is the same SET EQUALITY branch 1 makes. typeArForSelection()
+      // expands a group through the app's own CLEAN_TO_TYPE_AR, so a request secretly narrower or
+      // wider than the group the summary names still fails.
+      const groupArLabel = (groupEn) => {
+        const m = I18N_SRC.match(
+          new RegExp(`'${groupEn.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}':\\s*'([^']+)'`));
+        return m ? m[1] : null;
+      };
+      const groupEn = cleanEn === null
+        ? (ALL_GROUPS.find((g) => groupArLabel(g) === vs.type) ?? null)
+        : null;
+      if (groupEn) {
+        const expanded = typeArForSelection(groupEn) ?? [];
+        const same = expanded.length === sent.length
+          && [...expanded].sort().every((v, i) => v === [...sent].sort()[i]);
+        eq(name, 'L1 group == L3 p_types (the group label expands to exactly the raw set sent)', same,
+          `ui=«${vs.type}» (${groupEn}) expands to ${JSON.stringify(expanded)}  rpc=${JSON.stringify(sent)}`);
+      } else if (cleanEn === null && cat && CATEGORY_AR[cat] === vs.type) {
+        // Branch 3 — the CATEGORY tier. Build raw → the macros of every clean type claiming it.
+        const rawMacros = new Map();
+        const cleanOf = new Map();
+        for (const k of Object.keys(CLEAN_MACRO)) {
+          for (const raw of (typeArForSelection(k) ?? [])) {
+            if (!rawMacros.has(raw)) { rawMacros.set(raw, new Set()); cleanOf.set(raw, new Set()); }
+            rawMacros.get(raw).add(CLEAN_MACRO[k]); cleanOf.get(raw).add(k);
+          }
+        }
+        const foreign = sent.filter((r) => rawMacros.has(r)
+          && !rawMacros.get(r).has(cat) && !rawMacros.get(r).has('both'));
+        const cleanSpan = new Set(sent.flatMap((r) => [...(cleanOf.get(r) ?? [])]));
+        eq(name, 'L1 category tier == L3 (summary claims the whole category; the request is not narrower)',
+          foreign.length === 0 && (first.body.p_types == null || cleanSpan.size > 1),
+          `ui=«${vs.type}» p_category=${cat} p_types=${sent.length} raw spanning ${cleanSpan.size} clean type(s)`
+          + (foreign.length ? `  FOREIGN-MACRO RAWS: ${JSON.stringify(foreign.slice(0, 8))}` : ''));
+      } else {
+        const expected = cleanEn ? (typeArForSelection(cleanEn) ?? []) : null;
+        const same = expected !== null
+          && expected.length === sent.length
+          && [...expected].sort().every((v, i) => v === [...sent].sort()[i]);
+        eq(name, 'L1 type == L3 p_types (clean label expands to exactly the raw set sent)', !!same,
+          cleanEn === null
+            ? `the app rendered «${vs.type}», which is neither a clean type label in the shipped `
+              + `EN_TO_AR map nor the label of the requested p_category (${cat ?? 'null'}) `
+              + '— the summary and the taxonomy disagree about what was searched'
+            : `ui=${vs.type} (${cleanEn}) expands to ${JSON.stringify(expected)}  rpc=${JSON.stringify(sent)}`);
+      }
     }
     eq(name, 'L3 carries the scope key p_tables', Array.isArray(first.body.p_tables) && first.body.p_tables.length > 0,
       `p_tables=${JSON.stringify(first.body.p_tables)}`);
@@ -385,7 +521,7 @@ async function runChain(cell) {
 
     // ── L8 : «عرض المزيد» for real ───────────────────────────────────────────────────────────────
     const seen = new Set(returned);
-    let clicks = 0, prevOffset = 0;
+    let clicks = 0, prevOffset = 0, wireHalfUnreached = false;
     const basePredicates = JSON.stringify(predicatesOf(first.body));
     for (let i = 0; i < PAGES; i++) {
       const y = await page.evaluate(PAGER, 30);
@@ -413,6 +549,48 @@ async function runChain(cell) {
       await sleep(2500);
 
       const more = searches.slice(before);
+      // ── WHICH PAGING MODE DID THAT CLICK PRODUCE, AND SAY IT (2026-09-27, routine #9) ───────────
+      //
+      // «عرض المزيد» has two legitimate implementations and this driver only ever asserted one of
+      // them. When the first response already carries the rows (p_limit is large), the click reveals
+      // them from the client's own buffer and NO new RPC goes out — so `searches.slice(before)` is
+      // empty, the whole `for (const s of more)` loop below never executes, and the five WIRE-LEVEL
+      // assertions inside it record nothing at all: not a pass, not a failure, not a NOT REACHED.
+      //
+      // MEASURED THIS RUN, before this fix: 16 chains, 244 equalities, the pager clicked for real in
+      // 14 of them — and `L8 page@…` appeared ZERO times. The run printed «every equality held»
+      // while the only assertions that can catch a predicate silently dropped mid-browse, an offset
+      // that does not advance, a total_count that moves under the user, or a later page adding a row
+      // outside the truth set had not run once. PART 7 names exactly this: *a rule this run could not
+      // reach is not a rule this run proved — print it, count it separately, never fold it into the
+      // passes.* The instrument was folding it in by silence.
+      //
+      // Production is NOT at fault: revealing from an already-fetched page is correct, and the
+      // card-level assertions below do hold it to «every card came from a captured response», «no
+      // duplicate card» and «the headline did not move». The defect is the instrument's honesty about
+      // which half of L8 it reached.
+      if (!more.length) {
+        if (!wireHalfUnreached) {
+          wireHalfUnreached = true;
+          unreached(name, 'L8 wire-level page assertions (predicates / offset / total_count / dup ids / outside-truth-set)',
+            'the click revealed rows from the FIRST response\'s own buffer and issued no new RPC, so there is '
+            + 'no second request to compare — this chain proves L8 at CARD level only');
+        }
+        // …and close the half that IS closable without a second request: every row the reader can now
+        // see must still be inside the independent L4 truth set. That is what the skipped
+        // `adds no row outside the L4 truth set` existed for, and it needs no new RPC to ask.
+        if (o.ids) {
+          const shownNow = await page.evaluate(CARD_IDS);
+          const firstById = new Map(first.json.map((r) => [String(r.listing_id), `${r.source_table}:${r.listing_id}`]));
+          const outsideTruth = shownNow.filter((id) => {
+            const k = firstById.get(id);
+            return k === undefined || !o.ids.has(k);
+          });
+          eq(name, `L8 client-paged reveal ${clicks}: every revealed card is inside the L4 truth set`,
+            outsideTruth.length === 0,
+            `rendered=${shownNow.length} outside-oracle=${outsideTruth.length} ${outsideTruth.slice(0, 4).join(',')}`);
+        }
+      }
       for (const s of more) {
         const off = Number(s.body.p_offset ?? 0);
         eq(name, `L8 page@${off} carries the SAME predicates`, JSON.stringify(predicatesOf(s.body)) === basePredicates,
@@ -445,26 +623,54 @@ async function runChain(cell) {
         `unexplained=${outOfSet.length} ${outOfSet.slice(0, 4).join(',')}`);
     }
     if (clicks === 0) {
-      await settleCards(page);
+      // EXHAUST THE REVEAL CASCADE BEFORE JUDGING "how much did the user get to see" — the arrival
+      // is a screenful, not the turn's whole reveal (see revealAll's header). Every assertion below
+      // is about what is REACHABLE without a pager, and a reader reaches it by scrolling.
+      const arrival = await settleCards(page);
+      const walked = await revealAll(page);
+      console.log(`  (reveal cascade: arrived with ${arrival}, walked to ${walked}`
+        + ` — the product's CASCADE_MAX is ${CASCADE_MAX})`);
+      // …and ask the pager question AGAIN now that the walk is done. If one only becomes reachable
+      // after the cascade, that is not a pass and not an accusation — it is a layer this run did not
+      // page, said out loud.
+      const lateY = await page.evaluate(PAGER, 30);
       const onScreen = await page.evaluate(CARD_IDS);
       const shown = onScreen.length;
-      // THE HONESTY EQUALITY (scripts/verify-result-cap-honesty.ts, asserted live). With no pager the
-      // app must either have shown the whole matched set, or say so honestly — a closing line that
-      // claims «كل النتائج» over fewer cards than the headline counted is the count/set disagreement
-      // this routine exists to find, and it is the shape ops_incident #66 took.
-      const closing = (await text()).match(/عرضت لك[^\n]*/g) ?? [];
-      const claimsAll = closing.some((l) => /كل النتائج|جميع الإعلانات/.test(l));
-      if (claimsAll) {
-        const unreachable = first.json.filter((r) => !onScreen.includes(String(r.listing_id)))
-          .map((r) => `${r.source_table}:${r.listing_id}`);
-        eq(name, 'L8 a closing line claiming ALL is backed by the whole matched set on screen',
-          shown === rpcTotal && unreachable.length === 0,
-          `closing=${JSON.stringify(closing.slice(-1))} shown=${shown} total=${rpcTotal} ` +
-          `counted-but-never-rendered=${unreachable.length} ${unreachable.slice(0, 6).join(' ')}`);
-      } else if (rpcTotal > shown) {
-        unreached(name, 'L8 «عرض المزيد»', `pager absent while ${rpcTotal} > ${shown} shown, and the ` +
-          `closing line does not claim completion: ${JSON.stringify(closing.slice(-1))}`);
-      } else console.log(`  (L8 n/a — every match is on screen: ${shown} of ${rpcTotal})`);
+      if (lateY != null) {
+        unreached(name, 'L8 «عرض المزيد»',
+          `the pager was absent on arrival and present after the reveal cascade finished `
+          + `(${shown} of ${rpcTotal} on screen) — this run did not page it`);
+      } else {
+        // THE HONESTY EQUALITY (scripts/verify-result-cap-honesty.ts, asserted live). With no pager the
+        // app must either have shown the whole matched set, or say so honestly — a closing line that
+        // claims «كل النتائج» over fewer cards than the headline counted is the count/set disagreement
+        // this routine exists to find, and it is the shape ops_incident #66 took.
+        const closing = (await text()).match(/عرضت لك[^\n]*/g) ?? [];
+        const claimsAll = closing.some((l) => /كل النتائج|جميع الإعلانات/.test(l));
+        if (claimsAll) {
+          const unreachable = first.json.filter((r) => !onScreen.includes(String(r.listing_id)))
+            .map((r) => `${r.source_table}:${r.listing_id}`);
+          eq(name, 'L8 a closing line claiming ALL is backed by the whole matched set on screen',
+            shown === rpcTotal && unreachable.length === 0,
+            `closing=${JSON.stringify(closing.slice(-1))} shown=${shown} total=${rpcTotal} ` +
+            `counted-but-never-rendered=${unreachable.length} ${unreachable.slice(0, 6).join(' ')}`);
+        } else if (rpcTotal > shown) {
+          unreached(name, 'L8 «عرض المزيد»', `pager absent while ${rpcTotal} > ${shown} shown even after `
+            + `the reveal cascade was walked to its end, and the closing line does not claim `
+            + `completion: ${JSON.stringify(closing.slice(-1))}`);
+        } else {
+          // EVERY MATCH IS REACHABLE WITHOUT A PAGER — assert it as an EQUALITY rather than log it.
+          // This is the branch a ≤ INTERVIEW_STOP_AT turn lands in (the chat closes, so no pager is
+          // rendered BY DESIGN), and it is exactly where a row counted but never reachable would
+          // hide. Before 2026-09-24 it printed a note and asserted nothing.
+          const unreachable = first.json.filter((r) => !onScreen.includes(String(r.listing_id)))
+            .map((r) => `${r.source_table}:${r.listing_id}`);
+          eq(name, 'L8 with no pager, every counted match is reachable on screen',
+            shown === rpcTotal && unreachable.length === 0,
+            `shown=${shown} total=${rpcTotal} counted-but-never-rendered=${unreachable.length} `
+            + unreachable.slice(0, 6).join(' '));
+        }
+      }
     }
   } catch (e) {
     // A harness failure is UNDETERMINED, never a product bug (AUTONOMOUS_INCIDENT_LOOP.md §6).
@@ -488,10 +694,36 @@ const DEFAULT_CELLS = [
   { label: 'MOB عرعر/بيع/شقة',        city: 'عرعر', mobile: true, deal: [],                              group: 'الشقق والسكن المشترك', type: 'شقة' },
   { label: 'MOB القطيف/بيع+إيجار/فيلا', city: 'القطيف', mobile: true, deal: ['إيجار'],                    group: 'الفلل والبيوت',        type: 'فيلا' },
   { label: 'MOB الجبيل/إيجار-سنوي/شقة', city: 'الجبيل', mobile: true, deal: ['إيجار', 'شراء', 'سنوي'],    group: 'الشقق والسكن المشترك', type: 'شقة' },
+  // ── THE UNTYPED AXIS (2026-09-14, routine #9 — ops_incident #277) ──────────────────────────────
+  // No نوع picked at all, so the app sends p_types: null. The twelve cells above all narrow, which
+  // is why this instrument could not see the arm-B `both`-macro defect: it fires only here, and only
+  // on the COMMERCIAL side, where p_tables2 carries the category's own kind with «عمارة» in
+  // p_types2. حائل/بيع is the cell that measured it (production 330, oracle 291, extra 39); الهفوف
+  // re-proves it on a CLUSTERED city, where the oracle's three-arm city translation must also hold.
+  { label: 'حائل/بيع/تجاري-broad (untyped, arm-B)',  city: 'حائل',   category: 'تجاري', deal: [] },
+  { label: 'الهفوف/بيع/تجاري-broad (untyped, cluster)', city: 'الهفوف', category: 'تجاري', deal: [] },
+  { label: 'تبوك/بيع+إيجار/سكني-broad (untyped)',     city: 'تبوك',   deal: ['إيجار'] },
+  { label: 'MOB بريدة/بيع/سكني-broad (untyped)',      city: 'بريدة',  mobile: true, deal: [] },
 ];
 
 const CELLS = (process.env.RT_CELLS ? JSON.parse(process.env.RT_CELLS) : DEFAULT_CELLS)
   .filter((c) => !process.env.RT_ONLY || c.label.includes(process.env.RT_ONLY));
+
+// AN EMPTY RUN SET IS A FAILURE, NEVER A CLEAN BILL OF HEALTH (2026-09-14, routine #9).
+// Caught on this very tool, by this very routine, while using it to production-verify its own fix:
+// an RT_ONLY that matched nothing ran zero chains and printed
+//     ──── 0 equalities asserted across 0 chain(s) ────
+//     ✓ every equality held
+// and exited 0. That is a VACUOUS PASS — the shape this routine exists to hunt — and it is worse
+// here than almost anywhere, because the thing being falsely certified is production itself. It
+// nearly laundered a stale checkout into "the fix is verified on main".
+// scripts/run-tests.mjs already fails closed on an empty run set for exactly this reason
+// (AGENTS.md: "an EMPTY run set is itself a failure"); this instrument now does too.
+if (CELLS.length === 0) {
+  console.error(`\n✗ NO CHAINS SELECTED — ${process.env.RT_ONLY ? `RT_ONLY=${JSON.stringify(process.env.RT_ONLY)} matched none of the ${(process.env.RT_CELLS ? JSON.parse(process.env.RT_CELLS) : DEFAULT_CELLS).length} cells` : 'the cell list is empty'}.\n`
+    + '  Zero chains proves nothing. Refusing to exit 0 over an empty run set.\n');
+  process.exit(1);
+}
 
 for (const c of CELLS) {
   await runChain(c);

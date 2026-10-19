@@ -49,8 +49,10 @@ import sys
 import threading
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from itertools import zip_longest
 from pathlib import Path
+from typing import Any
 
 from curl_cffi import requests as cc
 
@@ -60,6 +62,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db  # noqa: E402
 from scrapers.common.liveness_contract import direct_alive_patch
+from scrapers.common.shard_partition import shard_worklist
 
 BASE = "https://wasalt.sa"
 NEXT_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
@@ -104,6 +107,31 @@ _seen_exc_kinds: set[tuple[str, str]] = set()
 _seen_exc_lock = threading.Lock()
 
 
+def _pmap(fn, items, workers: int):
+    """map(fn, items) across `workers` threads — but INLINE, on the calling thread, at workers==1.
+
+    NOT a micro-optimisation. Playwright's sync driver is bound to the thread that started it, and
+    this module opens a FRESH ThreadPoolExecutor at four separate call sites, so a "pool of one"
+    hands the browser to a different worker thread each time and the second one dies with
+    `greenlet.error: cannot switch to a different thread (which happens to have exited)` —
+    measured on the AR enricher, 2026-09-18, before the same mistake shipped there (PR #3140).
+    A pool of one looks single-threaded and is not.
+    """
+    return list(_imap(fn, items, workers))
+
+
+def _imap(fn, items, workers: int):
+    """_pmap, but LAZY — each result is yielded as it is produced. A loop that writes as it goes
+    must use this: over _pmap its body only starts once EVERY row has been checked (ops_incident
+    #708 — 87 minutes of real checks sat in memory, unwritten, and read from outside as a hang)."""
+    if workers <= 1:
+        for x in items:
+            yield fn(x)
+        return
+    with cf.ThreadPoolExecutor(max_workers=workers) as ex:
+        yield from ex.map(fn, items)
+
+
 def _note_exc(where: str, exc: BaseException) -> None:
     kind = type(exc).__name__
     key = (where, kind)
@@ -112,6 +140,73 @@ def _note_exc(where: str, exc: BaseException) -> None:
             return
         _seen_exc_kinds.add(key)
     print(f"  (diagnostic) {where}: first {kind} this run — {exc}", file=sys.stderr, flush=True)
+
+
+# ── CLOUDFLARE PATH (WASALT_BROWSER=1) ──────────────────────────────────────────────────────────
+# wasalt.sa has been unreachable by every http client since 2026-08-17 (issue #1019), and THIS
+# module's `_session()` is the blocked shape exactly: curl_cffi impersonate="chrome124" through the
+# Saudi residential proxy. run.py moved to a real browser in PR #3129 and enrich_ar.py in PR #3140;
+# liveness was the third consumer of the blocked transport and nothing listed it.
+#
+# The consequence was not "liveness is a bit stale". Every read came back 403/timeout, which
+# get_verdict() correctly calls 'failed' (transient, never dead), so NO wasalt row could accumulate
+# a strike and NO dead wasalt listing could EVER be retired — they stayed active AND searchable
+# indefinitely. Six such rows were found and repaired by hand on 2026-09-19 (migration
+# 20260919010944); this is the fix that stops the next one.
+_BROWSER: Any = None
+
+
+def _browser_enabled() -> bool:
+    from scrapers.wasalt import browser as _b
+    return _b.browser_enabled()
+
+
+def _browser() -> Any:
+    global _BROWSER
+    if _BROWSER is None:
+        from scrapers.wasalt import browser as _b
+        _BROWSER = _b.BoundedBrowserFetcher()   # hard per-listing deadline — ops_incident #708
+    return _BROWSER
+
+
+def _browser_deadline_kills() -> int:
+    return int(getattr(_BROWSER, "deadline_kills", 0) or 0)
+
+
+def close_browser() -> None:
+    global _BROWSER
+    if _BROWSER is not None:
+        _BROWSER.close()
+        _BROWSER = None
+
+
+def browser_verdict(url: str):
+    """Browser-transport twin of get_verdict(). Returns (verdict, status, nbytes).
+
+    THE ONE RULE THIS FUNCTION EXISTS TO HOLD: a browser that produced no parseable answer is OUR
+    failure, never the listing's. `page_data()` returns None for a challenge shell, a dead proxy
+    exit and a navigation timeout alike, and none of the three is evidence about the ad. They all
+    map to 'failed' — transient — because the alternative is a blocked run striking every row it
+    touches and, at grace, deactivating live inventory in bulk. That is the single worst outcome
+    this whole module can produce, and it is one wrong branch away.
+
+    Status is load-bearing and is NOT redundant with the payload. Measured 2026-09-19 through a
+    headed Chromium: a dead listing answers HTTP 404 with a parseable __NEXT_DATA__ (`page:"/404"`,
+    propertyDetailsV3 null, 211KB); a live one answers 200 with the payload (326KB). So a returned
+    dict alone cannot decide anything — a 404 carries one too.
+    """
+    data, status, nbytes = _browser().page_data(url)
+    if status in (404, 410):
+        return ("dead", status, nbytes)          # the source answered: it is gone
+    if data is None:
+        return ("failed", status or 0, nbytes)   # no parseable answer → UNKNOWN, never dead
+    if status != 200:
+        return ("failed", status or 0, nbytes)   # 5xx/403/redirect → transient, never dead
+    try:
+        pdv = (data.get("props", {}).get("pageProps", {}) or {}).get("propertyDetailsV3")
+    except Exception:
+        pdv = None
+    return ("live" if pdv else "dead", status, nbytes)
 
 
 def head_status(url: str, tries: int = 3):
@@ -131,6 +226,9 @@ def head_status(url: str, tries: int = 3):
 
 def get_verdict(url: str, tries: int = 3):
     """Return (verdict, status, nbytes). verdict ∈ {'live','dead','failed'} — GET is the ground truth."""
+    if _browser_enabled():
+        _throttle()
+        return browser_verdict(url)
     s = _session()
     for attempt in range(tries):
         try:
@@ -168,6 +266,17 @@ def check_hybrid(row):
     head_code/get_code are carried out (not just the verdict) so a kill can be re-checked later from
     the status that actually caused it — 404 vs 200-without-propertyDetailsV3 are different evidence."""
     tbl, lid, url, cur = row
+    # ponytail: the browser path has no cheap HEAD, so it always pays for the GET. Playwright has
+    # no HEAD primitive, and curl_cffi's HEAD is the blocked transport — a HEAD there returns the
+    # same 403 the GET does, so short-circuiting on it would be worse than useless. The cost is
+    # bounded because only the enum-ABSENT candidates are confirmed (--confirm-limit, default
+    # 1500), not the whole table: ~1500 × ~300KB ≈ 450MB/run, ~7GB/month at the 2-day cadence,
+    # against the ~700GB/month that got per-listing liveness disabled in the first place.
+    # Upgrade path if that ever matters: context.request.head() reuses the browser context's
+    # cf_clearance cookie, which may pass once a navigation has solved the challenge — untested.
+    if _browser_enabled():
+        verdict, st, nbytes = get_verdict(url)
+        return (tbl, lid, cur, verdict, True, nbytes, None, st)
     hc = head_status(url)
     if hc == 200:
         return (tbl, lid, cur, "live", False, 0, hc, None)
@@ -347,6 +456,7 @@ def _flush_alive(tbl: str, ids: list[int], now_iso: str) -> None:
         if chunk:
             db._execute(
                 db.sb().table(tbl).update({"last_seen_at": now_iso, "missing_count": 0,
+                                           "last_liveness_probe_at": now_iso,
                                            **direct_alive_patch(now_iso=now_iso)}).in_("id", chunk),
                 what=f"{tbl}.touch_alive",
             )
@@ -362,8 +472,7 @@ def run_pilot(args) -> int:
     head_agree = 0
     alive_ids: dict[str, list[int]] = {t: [] for t in TABLES}
     now_iso = datetime.now(timezone.utc).isoformat()
-    with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
-        for tbl, lid, verdict, hc, nbytes in ex.map(check_one, rows):
+    for tbl, lid, verdict, hc, nbytes in _pmap(check_one, rows, args.workers):
             checked += 1
             total_bytes += nbytes
             if hc is not None:
@@ -421,8 +530,7 @@ def run_enforce(args) -> int:
     alive_ids: dict[str, list[int]] = {t: [] for t in TABLES}
     dead_rows: list[tuple[str, int, int]] = []  # (tbl, id, cur_missing) — confirmed dead this run
 
-    with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
-        for tbl, lid, cur, verdict, used_get, nbytes, _hc, _gc in ex.map(check_hybrid, rows):
+    for tbl, lid, cur, verdict, used_get, nbytes, _hc, _gc in _pmap(check_hybrid, rows, args.workers):
             checked += 1
             total_bytes += nbytes
             if verdict == "live":
@@ -581,6 +689,138 @@ def control_ok(live: int, dead: int, failed: int, n: int, min_live: float) -> bo
     return (live / decided) >= min_live
 
 
+SHARD_PLATFORM = "wasalt_enum_shard"
+
+
+def rollup_ok(shards_seen: int, shards_expected: int, rows: int, min_rows: int) -> tuple[bool, str]:
+    """Pure: may these shard runs be published as ONE qualifying enumeration?
+
+    Both conditions are load-bearing and neither implies the other:
+      * EVERY shard must have reported. A missing shard is a whole slice of the catalogue nobody
+        looked at, and every active listing in it would be counted "unseen by the enum" and struck.
+        `needs:` in the workflow already gates on job success, but a job can succeed having written
+        no run row at all, so the count is re-checked here against the DB rather than against CI.
+      * The SUM must still clear the absolute floor, so a set of shards that all ran but returned
+        almost nothing cannot publish a row the coverage guard would then bless.
+
+    Deliberately does NOT re-implement coverage_ok(): the relative-to-median guard downstream is
+    unchanged and is still what decides whether a complete-LOOKING enumeration is trustworthy.
+    This only decides whether the shards ADD UP to one enumeration at all.
+    """
+    if shards_expected <= 0:
+        return False, "shards_expected must be positive — refusing to publish an unbounded rollup"
+    if shards_seen < shards_expected:
+        return False, (f"only {shards_seen}/{shards_expected} shards reported — a missing slice is "
+                       f"a slice nobody enumerated, and every live listing in it would be struck")
+    if rows < min_rows:
+        return False, f"shards summed to {rows} rows < floor {min_rows}"
+    return True, f"{shards_seen}/{shards_expected} shards, {rows} rows"
+
+
+def rollup_started_at(shard_started_ats: list[str]) -> str:
+    """Pure: the enumeration's real start is the EARLIEST of its shards' own started_at — never the
+    rollup job's own clock (bug found 2026-09-24, ops_incident, routine #11).
+
+    THE BUG. run_enum_rollup() used to stamp its published `platform='wasalt'` row with
+    `db.begin_run("wasalt")`, which sets `started_at = now()` at the moment the ROLLUP job runs —
+    the summing step, which by design runs AFTER every shard has already finished
+    (`needs: [enum, rollup]` in the workflow). Measured 2026-09-24: the 34 shards started
+    2026-09-23T21:03:07 through 21:50:24; the rollup that summed them ran at 2026-09-24T00:38:56 —
+    almost 3 HOURS after enumeration actually began. `run_enum_strike()` then reads that row's
+    `started_at` as "when the enumeration started" for two queries that must answer "was this row
+    just seen": the control group (`last_seen_at >= enum_start`, proving the checker is healthy on
+    known-live rows) and the strike scan (`last_seen_at < enum_start` = "unseen by the enum" ⇒
+    +1 strike). Every listing genuinely refreshed during the real 3-hour enumeration window has a
+    `last_seen_at` BEFORE the rollup's clock and therefore AFTER none of it — it reads as "not seen"
+    on both queries at once. Reproduced live and read-only against production the same day: with the
+    rollup's own timestamp as the cutoff the control-group query returns 0 (bit-for-bit the
+    `control group=0` the job actually logged); with the earliest shard's timestamp it returns
+    49,782. Real listing id 475284 was refreshed at 00:37:51 — 65 seconds before the wrong cutoff —
+    and was struck as "unseen" for it.
+
+    Consequence, all from one wrong clock: the CONTROL GUARD (`control_ok`) always sees an empty
+    sample, so `aborted_flips=True` on every run since the sharded design shipped (2026-09-20) —
+    zero confirms, zero self-heals, zero kills — while the STRIKE step (which is NOT gated by that
+    guard) keeps incrementing `missing_count` on nearly the whole active table every single run,
+    because on this wrong clock nearly every row looks unseen. Neither guard is loosened by this fix;
+    both keep exactly the logic they had. Only the timestamp they are FED is corrected.
+    """
+    if not shard_started_ats:
+        raise ValueError("rollup_started_at() called with no shard rows — refuse rather than guess")
+    return min(shard_started_ats)
+
+
+def run_enum_rollup(args) -> int:
+    """Sum this dispatch's shard runs into ONE `platform='wasalt'` scrape_runs row.
+
+    WHY THIS EXISTS. The enumeration used to be one job walking ~3,300 pages; through the browser
+    that is 10-16h against a 6h runner ceiling (measured 2026-09-19 — run 35416642741 died at the
+    330-minute wall, two-thirds through). Sharding it one job per slice is the only way it
+    completes. But run_enum_strike()'s coverage guard reads the single newest `platform='wasalt'`
+    run with rows_seen >= enum_min_rows, and twenty ~3k-row shards would each look like a
+    catastrophically partial crawl.
+
+    Rather than loosen that guard — it is the one thing standing between a partial crawl and
+    mass-deactivating live inventory — the shards publish under a DIFFERENT platform and are rolled
+    up here into the single row the guard already expects. THE GUARD'S CODE IS UNTOUCHED.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=args.enum_window_hours)
+    # THIS DISPATCH ONLY (2026-09-28). The 36h window alone also sums the PREVIOUS dispatch's shards
+    # whenever two dispatches land <36h apart — a manual dispatch (09-27 21:03 → 09-28 22:02 = 25h),
+    # or the cron's own `*/2` day-of-month wrap (the 31st → the 1st = 24h). Then a slice missing
+    # from this dispatch is backfilled by yesterday's row (rollup_ok sees 67 ≥ 34), rows_seen
+    # doubles into coverage_ok's median (two doubled rows refuse every normal enum after them), and
+    # started_at becomes the previous dispatch's start. The workflow passes its own start as --since.
+    since = getattr(args, "since", "") or ""
+    if since:
+        cutoff = max(cutoff, datetime.fromisoformat(since.replace("Z", "+00:00")))
+    cutoff = cutoff.isoformat()
+    runs = db._execute(
+        db.sb().table("scrape_runs").select("id, started_at, rows_seen, ok")
+        .eq("platform", SHARD_PLATFORM).gte("started_at", cutoff)
+        .order("started_at", desc=True).limit(200),
+        what="scrape_runs.enum_shards",
+    ).data or []
+    good = [r for r in runs if r.get("ok")]
+    rows = sum(int(r.get("rows_seen") or 0) for r in good)
+    ok, why = rollup_ok(len(good), args.shards_expected, rows, args.enum_min_rows)
+
+    print(f"enum-rollup: {len(good)}/{args.shards_expected} ok shards in the last "
+          f"{args.enum_window_hours}h, {rows} rows summed → {'PUBLISH' if ok else 'REFUSE'} ({why})",
+          flush=True)
+    if args.dry_run:
+        print("  [DRY-RUN] no scrape_runs row written", flush=True)
+        return 0
+    if not ok:
+        # Refusing is not something to hide: record the attempt so the shard set stays auditable,
+        # but NEVER as a row the coverage guard could bless.
+        rid = db.begin_run("wasalt_enum_rollup_refused")
+        db.end_run(rid, ok=False, rows_seen=rows, rows_upserted=0, notes=f"refused: {why}",
+                   allow_empty=True)
+        return 1
+
+    rid = db.begin_run("wasalt")
+    db.end_run(rid, ok=True, rows_seen=rows, rows_upserted=rows,
+               notes=f"enum-rollup of {len(good)} shards ({why})",
+               check_tables=["wasalt_residential_listings", "wasalt_commercial_listings"])
+    # begin_run() stamped started_at=now() — the ROLLUP's own clock, ~3h after the shards it is
+    # summing actually ran. run_enum_strike() reads this row's started_at as "when the enumeration
+    # began" for both its control-group and its strike queries; left as the rollup's own timestamp,
+    # every listing genuinely refreshed during the real enumeration window reads as unseen by BOTH
+    # (see rollup_started_at()'s docstring for the measured 2026-09-24 proof). Overwrite it with the
+    # true start: the earliest of the shards actually being published.
+    db._execute(
+        db.sb().table("scrape_runs")
+        .update({"started_at": rollup_started_at([r["started_at"] for r in good])})
+        .eq("id", rid),
+        what="scrape_runs.enum_rollup_started_at_fix",
+    )
+    return 0
+
+
+_CONFIRM_FLUSH_EVERY = 100
+
+
 def run_enum_strike(args) -> int:
     started = time.time()
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -614,15 +854,20 @@ def run_enum_strike(args) -> int:
           f"{' [DRY-RUN]' if args.dry_run else ''}", flush=True)
 
     # 2) STRIKE — descending missing_count so one run can never double-increment a row.
+    # --confirm-only skips it: a second run against the SAME enumeration must not strike again, or
+    # one missed enumeration would count as two (2026-10-02: an extra drain of 3,841 waiting rows).
     struck = {n: 0 for n in range(args.grace)}
-    for mc in range(args.grace - 1, -1, -1):
+    for mc in (() if getattr(args, "confirm_only", False) else range(args.grace - 1, -1, -1)):
         for tbl in TABLES:
             ids = _keyset_ids(tbl, mc=mc, before_iso=enum_start)
             struck[mc] += len(ids)
             if args.dry_run or not ids:
                 continue
             for i in range(0, len(ids), 200):
-                db._execute(db.sb().table(tbl).update({"missing_count": mc + 1}).in_("id", ids[i:i + 200]),
+                # We LOOKED, whatever the verdict — see migration 20260924. Not evidence of life.
+                db._execute(db.sb().table(tbl).update(
+                    {"missing_count": mc + 1,
+                     "last_liveness_probe_at": datetime.now(timezone.utc).isoformat()}).in_("id", ids[i:i + 200]),
                             what=f"{tbl}.enum_strike")
     print(f"  strikes (unseen by enum): " +
           ", ".join(f"mc{mc}→{mc+1}: {n}" for mc, n in sorted(struck.items())), flush=True)
@@ -646,7 +891,13 @@ def run_enum_strike(args) -> int:
                 cand.append((tbl, x["id"], url, int(x.get("missing_count") or 0)))
         per_table.append(cand)
     take = plan_confirm_budget([len(p) for p in per_table], args.confirm_limit)
-    cohort: list[tuple[str, int, str, int]] = [r for p, k in zip(per_table, take) for r in p[:k]]
+    # ROUND-ROBIN across tables (2026-09-28). --max-seconds stops the loop after ~800 browser
+    # confirms, so a table-by-table list (1,446 residential, THEN 54 commercial) never reaches
+    # commercial while residential has a backlog — the starvation plan_confirm_budget() exists to
+    # prevent, reintroduced by the clock.
+    picked = [p[:k] for p, k in zip(per_table, take)]
+    cohort: list[tuple[str, int, str, int]] = [
+        r for grp in zip_longest(*picked) for r in grp if r is not None]
     if any(len(p) > k for p, k in zip(per_table, take)):
         print("  confirm budget split " +
               ", ".join(f"{t}: {k}/{len(p)}" for t, p, k in zip(TABLES, per_table, take)) +
@@ -672,16 +923,23 @@ def run_enum_strike(args) -> int:
     killed = 0
     total_bytes = 0
     aborted_flips = False
+    budget_stopped = False
     if args.dry_run:
         print(f"  DRY-RUN: skipping network confirm; {len(cohort)} rows WOULD be HEAD/GET-verified "
               f"(flips only for GET-confirmed dead).", flush=True)
     elif cohort:
         # 3a) control first — if the checker can't see known-live rows as live, trust nothing.
         c_live = c_dead = c_failed = 0
-        with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
-            for _tbl, _lid, _cur, verdict, _g, nbytes, _hc, _gc in ex.map(check_hybrid, control):
+        c_alive: dict[str, list[int]] = {t: [] for t in TABLES}
+        for _tbl, _lid, _cur, verdict, _g, nbytes, _hc, _gc in _pmap(check_hybrid, control, args.workers):
                 total_bytes += nbytes
                 c_live += verdict == "live"; c_dead += verdict == "dead"; c_failed += verdict == "failed"
+                if verdict == "live":
+                    c_alive[_tbl].append(_lid)
+        # A control read IS a direct read of that listing's own page: a live one is verified, not
+        # just "seen". It cost the same bandwidth whether we record it or not.
+        for tbl, ids in c_alive.items():
+            _flush_alive(tbl, ids, now_iso)
         if not control_ok(c_live, c_dead, c_failed, len(control), args.control_min_live):
             aborted_flips = True
             print(f"⚠ enum-strike CONTROL GUARD: known-live controls verified live={c_live} dead={c_dead} "
@@ -690,11 +948,38 @@ def run_enum_strike(args) -> int:
             print(f"  control healthy: live={c_live}/{len(control)} (dead={c_dead} failed={c_failed})",
                   flush=True)
             # 3b) verify the cohort; flip ONLY GET-confirmed dead. live → self-heal. failed → untouched.
+            #
+            # WRITTEN AS IT GOES, AND BOUNDED BY THE CLOCK (2026-09-28). This loop used to hold
+            # every verdict in memory and write once at the end. Through the browser a confirm is
+            # ~5 s, so the 1,500-row cohort needs ~2 h against the job's 90-minute timeout: run
+            # 36350303259 was cancelled at 90:00 and every one of its ~1,000 paid-for direct reads
+            # was thrown away — no kill, no self-heal, no evidence row, no run row. Same shape as
+            # ops_incident #708, fixed in the repair mode above but never here. Now each batch is
+            # flushed before the next row is checked, and the loop stops at --max-seconds so the
+            # run ends by itself and records what it did; unreached rows wait for the next run.
+            deadline = (started + args.max_seconds) if args.max_seconds > 0 else None
             alive_ids: dict[str, list[int]] = {t: [] for t in TABLES}
             dead_ids: dict[str, list[int]] = {t: [] for t in TABLES}
             detail: list[dict] = []
-            with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
-                for tbl, lid, _cur, verdict, used_get, nbytes, hc, gc in ex.map(check_hybrid, cohort):
+
+            def flush() -> int:
+                _flush_detail(detail)   # evidence first: written even if a flip below fails
+                for tbl, ids in alive_ids.items():
+                    _flush_alive(tbl, ids, now_iso)          # missing_count=0 + fresh last_seen
+                n = 0
+                for tbl, ids in dead_ids.items():
+                    for i in range(0, len(ids), 200):
+                        db._execute(db.sb().table(tbl).update(
+                            {"active": False,
+                             "last_liveness_probe_at": datetime.now(timezone.utc).isoformat()}).in_("id", ids[i:i + 200]),
+                                    what=f"{tbl}.enum_kill")
+                    n += len(ids)
+                detail.clear()
+                for t in TABLES:
+                    alive_ids[t] = []; dead_ids[t] = []
+                return n
+
+            for tbl, lid, _cur, verdict, used_get, nbytes, hc, gc in _imap(check_hybrid, cohort, args.workers):
                     checked += 1
                     total_bytes += nbytes
                     detail.append({
@@ -710,19 +995,20 @@ def run_enum_strike(args) -> int:
                         dead += 1; dead_ids[tbl].append(lid)
                     else:
                         failed += 1
-            _flush_detail(detail)   # evidence first: written even if a flip below fails
-            for tbl, ids in alive_ids.items():
-                _flush_alive(tbl, ids, now_iso)          # missing_count=0 + fresh last_seen
-            for tbl, ids in dead_ids.items():
-                for i in range(0, len(ids), 200):
-                    db._execute(db.sb().table(tbl).update({"active": False}).in_("id", ids[i:i + 200]),
-                                what=f"{tbl}.enum_kill")
-                killed += len(ids)
+                    if len(detail) >= _CONFIRM_FLUSH_EVERY:
+                        killed += flush()
+                    if deadline is not None and time.time() >= deadline:
+                        budget_stopped = True
+                        print(f"  ⏳ out of time budget ({args.max_seconds:.0f}s) after {checked}/"
+                              f"{len(cohort)} — the rest wait for the next run", flush=True)
+                        break
+            killed += flush()
 
     runtime = round(time.time() - started, 1)
     notes = (f"mode=enum-strike enum_run={cur['id']} enum_rows={cur['rows_seen']} "
              f"struck={sum(struck.values())} cohort={len(cohort)} killed={killed} "
-             f"aborted_flips={aborted_flips} dry_run={args.dry_run} runtime_s={runtime}")
+             f"aborted_flips={aborted_flips} budget_stopped={budget_stopped} "
+             f"dry_run={args.dry_run} runtime_s={runtime}")
     if not args.dry_run:
         db._execute(db.sb().table("wasalt_liveness_runs").insert({
             "started_at": now_iso, "finished_at": datetime.now(timezone.utc).isoformat(),
@@ -736,9 +1022,176 @@ def run_enum_strike(args) -> int:
     return 0
 
 
+def run_repair_clock_bug_backlog(args) -> int:
+    """ONE-TIME repair for the confirm-eligible backlog the enum-rollup clock bug produced
+    (ops_incident, routine #11, 2026-09-24 — see rollup_started_at() for the full writeup).
+
+    Every row this cohort selects reached `missing_count >= grace` via strikes computed against the
+    WRONG clock (the rollup's own start time, measured ~3h later than the enumeration it was
+    summarising), so an ordinary enum-strike confirm cannot be trusted to decide them: it would treat
+    three clock-bug strikes as three legitimately earned ones and deactivate on the very first
+    post-fix confirm. This mode instead:
+
+      * confirmed LIVE  → full self-heal (missing_count=0, last_seen_at refreshed). Correct
+                          regardless of how the row was flagged — a true "it's fine" is a true
+                          "it's fine".
+      * confirmed DEAD  → missing_count=1, and active is NEVER touched. This is real, honestly
+                          obtained evidence — a direct GET performed right now, this run — and it is
+                          not thrown away. But it counts as exactly ONE freshly earned strike under
+                          the now-fixed pipeline, not three unearned ones inherited from the bug. It
+                          must reach grace again through correctly-clocked runs (or another confirm)
+                          before this listing can ever be deactivated.
+      * FAILED/unclear  → missing_count=0. Nothing was proven either way, and the existing value was
+                          already unproven — the safe direction wins, exactly as everywhere else in
+                          this module (LISTING_LIVENESS.md: absence of an answer is never evidence of
+                          death).
+
+    `active` DOES NOT APPEAR as a key anywhere a write happens in this function. That is not
+    discipline this run happens to exercise — it is structurally absent from the code, so this mode
+    cannot deactivate a single listing no matter what the checks return.
+
+    A degenerate read (checker apparently unable to distinguish anything — overwhelmingly dead, or
+    overwhelmingly failed) skips even the missing_count writes: it means don't trust today's DEAD
+    verdicts as freshly-earned strikes either, not just "don't kill anyone" (which was never on the
+    table). Mirrors the collapse guard in run_enforce() at the same 90% degenerate threshold used
+    there is deliberately stricter (that guard's job is to stop a kill; this one has no kill to stop,
+    so it only needs to protect the QUALITY of the strike it is about to hand back to the ordinary
+    pipeline).
+    """
+    # INCREMENTAL FLUSH (added after the 2026-09-24 first attempt). That attempt held every verdict
+    # in memory and wrote NOTHING until the whole cohort was checked — so when the real per-check
+    # latency turned out far higher than estimated and the job hit its 3h timeout, THREE HOURS of
+    # real browser checks were thrown away: 0 rows written, 0 evidence rows, because the process was
+    # killed before it ever reached the write. Every FLUSH_EVERY checks are now written and cleared
+    # immediately, so a kill at any point loses at most one partial batch, never the whole run — and
+    # a second dispatch of the same --shard/--shards slice picks up wherever the cohort query (which
+    # only selects rows STILL at missing_count>=grace) shows work remaining.
+    FLUSH_EVERY = 100
+    started = time.time()
+    now_iso = datetime.now(timezone.utc).isoformat()  # the RUN-START stamp — see
+    # test_wasalt_liveness_run_timestamps.py: started_at below must be this, never a fresh read
+    # taken when the summary row is finally inserted.
+    cohort: list[tuple[str, int, str, int]] = []
+    for tbl in TABLES:
+        rows = db._execute(
+            db.sb().table(tbl).select("id, listing_url, missing_count")
+            .eq("active", True).gte("missing_count", args.grace)
+            .order("id", desc=False).limit(100_000),
+            what=f"{tbl}.repair_backlog_cohort",
+        ).data or []
+        for x in rows:
+            url = (x.get("listing_url") or "").strip()
+            if url:
+                cohort.append((tbl, x["id"], url, int(x.get("missing_count") or 0)))
+
+    # Reuses --shards/--shard/--limit already defined for `enforce` — a fixed, already-fetched list
+    # partitioned by id%shards (scrapers/common/shard_partition.py: the same proven-safe partition
+    # the 2026-09-24 aqar liveness fix uses), never a row-offset window computed from a live table.
+    if args.shards > 1:
+        mine = set(shard_worklist((r[1] for r in cohort), args.shards, args.shard))
+        cohort = [r for r in cohort if r[1] in mine]
+    if args.limit:
+        cohort = cohort[:args.limit]
+
+    print(f"repair-clock-bug-backlog: {len(cohort)} rows at missing_count>={args.grace}, "
+          f"shard {args.shard}/{args.shards} (this mode can only ever write missing_count=0 or 1 — "
+          f"never active)", flush=True)
+    if args.dry_run or not cohort:
+        print("  [DRY-RUN or empty cohort] no checks performed, no writes", flush=True)
+        return 0
+
+    checked = live = dead = failed = 0
+    total_bytes = 0
+    degenerate_batches = 0
+    b_checked = b_live = b_dead = b_failed = 0
+    b_detail: list[dict] = []
+    b_alive: dict[str, list[int]] = {t: [] for t in TABLES}
+    b_fresh: dict[str, list[int]] = {t: [] for t in TABLES}   # dead → mc=1, never a kill
+    b_reset: dict[str, list[int]] = {t: [] for t in TABLES}   # failed → mc=0
+
+    def flush_batch() -> None:
+        nonlocal b_checked, b_live, b_dead, b_failed, b_detail, b_alive, b_fresh, b_reset
+        nonlocal degenerate_batches
+        if b_checked == 0:
+            return
+        _flush_detail(b_detail)  # evidence written even for a degenerate batch — never hidden
+        decided = b_live + b_dead
+        degenerate = decided >= 20 and (b_dead > 0.9 * decided or b_failed > 0.9 * b_checked)
+        if degenerate:
+            degenerate_batches += 1
+            print(f"⚠ REPAIR GUARD (batch of {b_checked}): live={b_live} dead={b_dead} "
+                  f"failed={b_failed} — reads as a broken checker for this batch, not a broken "
+                  f"backlog. Skipping this batch's missing_count writes.", flush=True)
+        else:
+            now = datetime.now(timezone.utc).isoformat()
+            for tbl, ids in b_alive.items():
+                _flush_alive(tbl, ids, now)
+            for tbl, ids in b_fresh.items():
+                if ids:
+                    db._execute(db.sb().table(tbl).update({"missing_count": 1}).in_("id", ids),
+                                what=f"{tbl}.repair_fresh_strike")
+            for tbl, ids in b_reset.items():
+                if ids:
+                    db._execute(db.sb().table(tbl).update({"missing_count": 0}).in_("id", ids),
+                                what=f"{tbl}.repair_reset_unproven")
+        b_checked = b_live = b_dead = b_failed = 0
+        b_detail = []
+        for t in TABLES:
+            b_alive[t] = []; b_fresh[t] = []; b_reset[t] = []
+
+    for tbl, lid, _cur, verdict, used_get, nbytes, hc, gc in _imap(check_hybrid, cohort, args.workers):
+            checked += 1; b_checked += 1
+            total_bytes += nbytes
+            b_detail.append({
+                "tbl": tbl, "listing_id": lid, "head_status": hc, "get_status": gc,
+                "get_verdict": verdict, "nbytes": nbytes,
+                "has_property_details": (verdict == "live") if used_get else None,
+            })
+            if verdict == "live":
+                live += 1; b_live += 1; b_alive[tbl].append(lid)
+            elif verdict == "dead":
+                dead += 1; b_dead += 1; b_fresh[tbl].append(lid)
+            else:
+                failed += 1; b_failed += 1; b_reset[tbl].append(lid)
+            if checked % 25 == 0:
+                el = max(1e-6, time.time() - started)
+                print(f"  [{checked}/{len(cohort)}] live={live} dead={dead} failed={failed} "
+                      f"({checked / el:.2f}/s, {el / max(1, checked):.1f}s/check)", flush=True)
+            if b_checked >= FLUSH_EVERY:
+                flush_batch()
+    flush_batch()  # the final partial batch
+
+    runtime = round(time.time() - started, 1)
+    degenerate = degenerate_batches > 0
+    notes = (f"mode=repair-clock-bug-backlog shard={args.shard}/{args.shards} checked={checked} "
+             f"live={live} dead={dead} failed={failed} degenerate_batches={degenerate_batches} "
+             f"browser_deadline_kills={_browser_deadline_kills()} runtime_s={runtime}")
+    db._execute(db.sb().table("wasalt_liveness_runs").insert({
+        "started_at": now_iso,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "shard": f"repair-{args.shard}/{args.shards}", "mode": "repair-clock-bug-backlog",
+        "checked": checked, "live": live, "dead": dead, "failed": failed,
+        "skipped": int(degenerate), "bytes_downloaded": total_bytes, "notes": notes}),
+        what="wasalt_liveness_runs.insert")
+    print(f"\n✓ repair-clock-bug-backlog shard {args.shard}/{args.shards}: checked={checked} "
+          f"live(self-healed)={live} dead(ONE fresh strike, never killed)={dead} "
+          f"failed(reset to 0)={failed} degenerate_batches={degenerate_batches} runtime_s={runtime}",
+          flush=True)
+    return 0 if not degenerate else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Wasalt hybrid liveness (HEAD-first, GET-confirm)")
-    ap.add_argument("--mode", default="pilot", choices=["pilot", "enforce", "enum-strike"])
+    ap.add_argument("--mode", default="pilot",
+                    choices=["pilot", "enforce", "enum-strike", "enum-rollup",
+                             "repair-clock-bug-backlog"])
+    ap.add_argument("--shards-expected", type=int, default=20,
+                    help="enum-rollup: how many shard runs MUST have reported before their sum may "
+                         "be published as one enumeration. A missing shard is a slice nobody "
+                         "enumerated, whose live listings would then all be struck.")
+    ap.add_argument("--since", default="",
+                    help="enum-rollup: count only shard runs started at/after this ISO time — the "
+                         "dispatch's own start, so an earlier dispatch's shards are never summed in.")
     ap.add_argument("--limit", type=int, default=0,
                     help="Cap rows checked (0 = all). pilot defaults to 800 when unset.")
     ap.add_argument("--workers", type=int, default=4, help="Low concurrency; each worker gets its own session.")
@@ -764,18 +1217,41 @@ def main() -> int:
     ap.add_argument("--confirm-limit", type=int, default=1500,
                     help="ENUM-STRIKE: max rows HEAD/GET-verified per run (bounds proxy bandwidth; the "
                          "backlog simply drains across days).")
+    ap.add_argument("--max-seconds", type=float, default=0.0,
+                    help="ENUM-STRIKE: stop confirming once the run is this old (0 = no budget) and "
+                         "record what was done; must sit under the job's timeout-minutes.")
     ap.add_argument("--control-n", type=int, default=30,
                     help="ENUM-STRIKE: known-live control rows verified first; flips abort if they fail.")
     ap.add_argument("--control-min-live", type=float, default=0.90,
                     help="ENUM-STRIKE control guard: required live fraction among decided controls.")
     ap.add_argument("--dry-run", action="store_true",
                     help="ENUM-STRIKE: print what would be struck/verified; write NOTHING.")
+    ap.add_argument("--confirm-only", action="store_true",
+                    help="ENUM-STRIKE: skip the strike step and only page-confirm rows already at "
+                         "grace. For an extra drain between enumerations: re-striking against the "
+                         "same enumeration would count one missed enumeration twice.")
     args = ap.parse_args()
     if args.mode == "pilot" and not args.limit:
         args.limit = 800
-    if args.mode == "enum-strike":
-        return run_enum_strike(args)
-    return run_enforce(args) if args.mode == "enforce" else run_pilot(args)
+    # ONE BROWSER, ONE THREAD. See _pmap(): Playwright's sync driver is bound to the thread that
+    # started it, and this module maps over rows from four separate call sites. Serialising here is
+    # not a throughput regression to apologise for — a browser confirm is seconds either way, and
+    # the cohort is bounded by --confirm-limit.
+    if _browser_enabled() and args.workers != 1:
+        print(f"ⓘ browser transport → --workers {args.workers} forced to 1 "
+              f"(Playwright's sync API is thread-bound)", flush=True)
+        args.workers = 1
+    try:
+        if args.mode == "enum-rollup":
+            return run_enum_rollup(args)
+        if args.mode == "enum-strike":
+            return run_enum_strike(args)
+        if args.mode == "repair-clock-bug-backlog":
+            return run_repair_clock_bug_backlog(args)
+        return run_enforce(args) if args.mode == "enforce" else run_pilot(args)
+    finally:
+        # Chromium is a child process, not a socket — an un-closed one can hold the CI step open.
+        close_browser()
 
 
 if __name__ == "__main__":

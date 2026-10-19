@@ -38,8 +38,47 @@ check('a single runTypewriter() helper exists, carrying both the interval AND a 
 check('the fallback ceiling is derived from the SAME TYPE_CHARS/TYPE_TICK_MS cadence the interval itself uses — never a hand-picked, driftable second constant', /const expectedMs = Math\.ceil\(total \/ TYPE_CHARS\) \* TYPE_TICK_MS;/.test(agent));
 check('finish() is idempotent (a `done` latch) — the fallback and a late-but-real interval completion can never both fire onDone/setN', /let done = false;\s*const finish = \(\) => \{\s*if \(done\) return;\s*done = true;/.test(agent));
 check('the returned cleanup clears BOTH the interval and the fallback timeout — an unmounted/superseded Typer can never fire onDone after the fact', /return \(\) => \{ clearInterval\(id\); clearTimeout\(fallback\); \};/.test(agent));
-check('Typer delegates to runTypewriter (no re-inlined duplicate interval that could go unpatched)', /function Typer\(\{ text, onDone \}[\s\S]{0,200}?return runTypewriter\(text\.length, setN, onDone\);/.test(agent));
-check('BrandReveal delegates to runTypewriter too (the listings-reply path, not just plain chat replies)', /function BrandReveal\(\{ brand, text, onDone \}[\s\S]{0,300}?return runTypewriter\(full\.length, setN, onDone\);/.test(agent));
+// DELEGATION IS THE INVARIANT — THE ARGUMENT EXPRESSION IS NOT (repaired 2026-09-19, routine #9).
+//
+// These two checks used to pin the literal `return runTypewriter(text.length, setN, onDone);` and
+// `runTypewriter(full.length, setN, onDone)`. That made them a PART 3.3 shape-2 false green: the
+// expected text WAS a defect. `text.length` is a UTF-16 CODE UNIT count, so the reveal it drives
+// steps through surrogate pairs and can render half an emoji — measured frozen on production for
+// 90+ seconds (ops_incident #347). Fixing that bug turned this barrier RED, which is the wrong way
+// round: a check must fail when the product breaks, not when it is repaired.
+//
+// The invariant these checks actually exist to protect is in their own labels — ONE shared helper,
+// no re-inlined duplicate interval that a future edit could patch in only one place. That is now
+// asserted directly and by SHAPE rather than by a quoted argument list: each component must call
+// runTypewriter(, and must NOT carry a setInterval/setTimeout of its own. That is strictly stronger
+// than the pinned string (which a refactor preserving the text would have walked straight through)
+// and it no longer has an opinion about how the total is counted.
+// Whether the total is counted in glyphs is a different rule with its own barrier —
+// scripts/verify-typewriter-never-reveals-half-a-glyph.ts.
+// THE WINDOW IS THE FUNCTION, NOT A CHARACTER BUDGET (repaired 2026-09-23, routine #4).
+// This used to slice a fixed 700/1000 characters from `function Typer(`. That is a guess about how
+// long the body happens to be, and it expired the moment the body grew: adding the per-turn
+// hand-off bound (src/lib/revealHandoff.ts, ops_incident #646) pushed `return runTypewriter(` past
+// the 700th character, so both checks went RED while the invariant they NAME — one shared helper,
+// no re-inlined duplicate interval — was fully intact. That is the same failure mode the comment
+// above already records twice: a pin that matches text rather than meaning. A function ends at `}`
+// in column 0 (the terminator idiom scripts/lib/liftSymbols.ts uses on this very file), so the
+// window is now exactly the declaration — it cannot expire, and it cannot bleed into the next
+// function and let `delegates` pass vacuously on a neighbour's call.
+const componentBody = (name: string) => {
+  const lines = agent.split('\n');
+  const start = lines.findIndex((l) => l.startsWith(`function ${name}(`));
+  if (start < 0) return '';
+  const end = lines.findIndex((l, i) => i > start && l === '}');
+  return end < 0 ? '' : lines.slice(start, end + 1).join('\n');
+};
+for (const name of ['Typer', 'BrandReveal'] as const) {
+  const body = componentBody(name);
+  const delegates = /return runTypewriter\(/.test(body);
+  const ownTimer = /\bsetInterval\(/.test(body) || /\bsetTimeout\(/.test(body);
+  check(`${name} delegates to runTypewriter (no re-inlined duplicate interval that could go unpatched)`,
+    body.length > 0 && delegates && !ownTimer);
+}
 // 2026-08-30: the gate's second clause now falls back to initialReveal(m.result) (a ≤INTERVIEW_STOP_AT set renders
 // in full — src/lib/initialReveal.ts). The invariant pinned here is the FIRST clause: still gated on doneTyping[m.id].
 //

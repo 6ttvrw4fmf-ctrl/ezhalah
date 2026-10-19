@@ -79,16 +79,18 @@ check(
   const wrapper = remoteSrc.match(/function ageAgnostic<[\s\S]*?\n\}/)?.[0] ?? '';
   const stripped = [...wrapper.matchAll(/\bp_[a-z_]+/g)].map((m) => m[0]).sort();
   check(
-    'ageAgnostic() strips exactly the three age params it prices — nothing else',
+    'ageAgnostic() strips exactly the age params it prices (incl. the 2026-10-03 mixture p_age_buckets) — nothing else',
     !viaSharedHelperAge
-    || JSON.stringify(stripped) === JSON.stringify(['p_age_max', 'p_age_min', 'p_is_new_construction']),
+    || JSON.stringify(stripped) === JSON.stringify(['p_age_buckets', 'p_age_max', 'p_age_min', 'p_is_new_construction']),
   );
 }
 
 // Sibling parity check: fetchApartmentGuidedCounts() must still pass both too (the pattern this fix
 // was modeled on) — catches an accidental regression to THAT call site instead.
+// 2026-09-21: gained a second param (timeoutMs, defaulted) so a background caller can give it a
+// longer budget than the card's own 4s — the signature match now allows an optional trailing arg.
 const guidedMatch = remoteSrc.match(
-  /export async function fetchApartmentGuidedCounts\(q: SearchQuery\): Promise<[^>]*> \{[\s\S]*?\n\}/,
+  /export async function fetchApartmentGuidedCounts\(\s*q: SearchQuery,?[\s\S]{0,80}?\): Promise<[^>]*> \{[\s\S]*?\n\}/,
 );
 check('fetchApartmentGuidedCounts() is still defined (the sibling pattern this fix mirrors)', guidedMatch !== null);
 if (guidedMatch) {

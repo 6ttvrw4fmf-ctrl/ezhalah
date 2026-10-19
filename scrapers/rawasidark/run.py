@@ -66,13 +66,13 @@ RSC_UNDEFINED = "$undefined"
 #   «عمارة تجارية» — the shared map's substring pass reads the «عمارة» inside it and returns
 #       Building (residential). The source says تجارية, so it is the canonical Commercial Building.
 #   «محطة وقود»   — same station the shared map already knows as «محطة بنزين» → Gas Station.
-#   «تاون هاوس»   — the fleet-wide Townhouse fold (TYPE_MAP_EN 'Townhouse': 'Villa').
+#   «تاون هاوس»   — kept under its own name, fleet wide (TYPE_MAP_EN 'Townhouse': «تاون هاوس»; owner 2026-10-12).
 #   «شقق مفروشة»  — resolves to Apartment by substring anyway; pinned so a future map edit can't
 #       silently move it. Furnishing itself is NOT captured as a field (the source has no such flag).
 TYPE_OVERRIDES = {
     "عمارة تجارية": "Commercial Building",
     "محطة وقود": "Gas Station",
-    "تاون هاوس": "Villa",
+    "تاون هاوس": "تاون هاوس",
     "شقق مفروشة": "Apartment",
 }
 
@@ -303,6 +303,11 @@ def map_object(o: dict) -> Optional[tuple[dict, str]]:
         "photo_urls": _photos(o),
         "title": _redact(o.get("title")),
         "description": _redact(o.get("description")),
+        # The catalog object carries no amenity key (source_capture: area / city / location / price /
+        # streetWidth / title / type / description), so the ad's own words are the only statement of
+        # kitchen / lift / parking / rooms: YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2). 36 of 101
+        # active ads named one and all were NULL (🔬 2026-10-12, «12 شقة من غرفتين وصاله وحمام ومطبخ»).
+        **N.prose_amenities_yes(o.get("description")),
         "additional_info": info,
         "source_capture": capture,
         "price_evidence": N.price_evidence(
@@ -450,6 +455,18 @@ def main() -> int:
             return 0
 
         pruned = 0
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+        # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+        # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+        # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+        superseded = db.retire_superseded_siblings(
+            res_table="rawasidark_residential_listings", com_table="rawasidark_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source=SOURCE)
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
         for tbl, rows_seen in (("rawasidark_residential_listings", res),
                                ("rawasidark_commercial_listings", com)):
             nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE)

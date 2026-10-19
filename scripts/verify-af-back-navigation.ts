@@ -137,7 +137,7 @@ check('the double tap rides the SAME onPress path — no rival dbl-click/long-pr
 // One onConfirm call per double tap: the confirm sits inside the double-tap branch and returns
 // immediately, so the same tap cannot also fall through to the select branch and advance twice.
 check('the double-tap branch commits once and returns (cannot advance two questions)',
-  /if \(last && last\.key === key && now - last\.at <= DOUBLE_TAP_MS\) \{[\s\S]{0,240}?onConfirm\(\[key\]\);\s*\n\s*return;/.test(cardSrc));
+  /if \(last && last\.key === key && now - last\.at <= DOUBLE_TAP_MS\) \{[\s\S]{0,240}?(?:advance\(\(\) => )?onConfirm\(\[key\]\)\)?;\s*\n\s*return;/.test(cardSrc));
 check('the tap log is cleared when the question changes (no cross-question double tap)',
   /lastTapRef\.current = null;/.test(cardSrc));
 
@@ -201,7 +201,7 @@ const backToStartCancels = (src: string) =>
   // The actions-row visibility moved into the pure resultsActionsRowVisible() gate (owner 2026-09-06,
   // `final=50`), but agent.tsx still feeds it the interview phase — so cancelling the round (phase → null)
   // still restores the row. Assert the phase is passed to that gate (afInterviewOwnsBrowsing now lives
-  // inside it and is proven in verify-af-terminal-at-50-no-load-more.ts).
+  // inside it and is proven in verify-af-terminal-at-25-no-load-more.ts).
   && /resultsActionsRowVisible\(\{[\s\S]{0,220}?afPhase: ageFlow\?\.phase \?\? null/.test(src)
   && /ageFlowStepsRef\.current = \[\];/.test(cancelBranch(src))
   && /syncGuidedFromSteps\(0\);/.test(cancelBranch(src))

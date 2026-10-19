@@ -1,5 +1,15 @@
 // A COMMITTED ADVANCED FILTER MUST SURVIVE A RETURN TO THE FILTER SCREEN — Trending included.
 //
+// AMENDED 2026-10-03 — READ THIS FIRST. The owner ruled that coming back to the Filter after a search
+// always opens a CLEAN form: no carried answers, no chips, no «مسح الكل» (the last search lives in the
+// sidebar history when signed in, and is not saved for a guest). The carry below is therefore no
+// longer SHOWN on the Filter screen — src/app/index.tsx resets the form (src/lib/searchLeftBehind.ts)
+// and renders no chip row. What this file still holds, and why it stays: the library that carries and
+// re-certifies an answer (afCarry.ts, sanitizeForFilterRestore, every question's apply(),
+// rpcAdvancedFilterParams) is executed here against the real functions, and the store write in
+// agent.tsx still funnels through one place. If a return-with-answers behaviour is ever wanted again,
+// this is the proof it must keep passing. The defect described next is the history that produced it.
+//
 // THE DEFECT (owner P0, reproduced live on production 2026-09-01, six ways out of six):
 //   الرياض / إيجار / سنوي / تجاري / محل  →  566 listings
 //   «خلّنا نحدد الطلب أكثر» → «كم عمر العقار؟» → «جديد»  →  243
@@ -63,7 +73,7 @@ const lifted = await liftSymbols(
   join(ROOT, 'src/data/advancedFilters.ts'),
   // addAmenities is a plain function two questions use as their whole apply(); the rest are object
   // literals whose members are all lazily evaluated, so apply() needs no prelude at all.
-  [{ header: 'function addAmenities' }, ...QUESTION_CONSTS.map((header) => ({ header: `const ${header}` }))],
+  [{ header: 'function addAmenities' }, { header: 'const AGE_LADDER', endsWith: /^\];$/ }, ...QUESTION_CONSTS.map((header) => ({ header: `const ${header}` }))],
   ['addAmenities', ...QUESTION_CONSTS],
   // §12 also CALLS AMENITIES_QUESTION.resolveOptions, to read the token set the card can offer from
   // the question itself rather than hand-listing it here. Its cohort logic is imported REAL; only
@@ -107,6 +117,7 @@ const LOADED: SearchQuery = {
   ageMin: 3, ageMax: 5, isNewConstruction: true, amenities: ['elevator', 'parking'], bathMin: 3,
   ratingMin: 9, reviewsMin: 10, unitSubtypes: ['استديو'], furnishedPref: false,
   streetWidthMin: 20, directions: ['شمال', 'غرب'],
+  ageBuckets: ['new', '6_9'], ratingBuckets: ['9.5', '9.0_rc10'], furnishedIn: [true, false],
 };
 const loadedParams = rpcAdvancedFilterParams(LOADED);
 // THE SET IS DERIVED FROM THE BUILDER, NOT COUNTED OFF A FIXTURE. This used to be
@@ -175,7 +186,7 @@ console.log('\n── 3. EVERY question, on a cohort the registry itself certifi
 // draft used the Arabic display name «محل» where the code holds the clean key `Shop`, so
 // cohortAllows() refused everything and eight of these checks failed for the wrong reason).
 const ANSWER_KEYS: Record<string, string[]> = {
-  property_age: ['3_5'], amenities: ['elevator'], rnpl: ['rnpl'], bathrooms: ['3'],
+  property_age: ['upto5'], amenities: ['elevator'], rnpl: ['rnpl'], bathrooms: ['3'],
   furnished: ['no'], street_width: ['20'], direction: ['شمال'], rating: ['9.0_rc10'], unit_subtype: ['استديو'],
 };
 const LEGS = {
@@ -363,13 +374,13 @@ assert(spreadName === 'query'
 assert(spreadName === 'query'
   || !new RegExp(`const ${spreadName}\\b[^=\\n]*=[^;\\n]*\\bstoreQuery\\b`).test(indexTsx),
   `«بحث» must NOT be built from the raw store («${spreadName}» derives from storeQuery)`);
-// THE CHIP ROW MAPS THE FACET LIST ITSELF, so the index it renders is the index withoutFacet() takes.
-// It used to map with a `null` hole for scope facets, and the obvious tidy-up — filter first, then
-// map — silently re-indexed: tapping the «×» on «جديد» deleted a DIFFERENT facet while the chip and
-// its predicate stayed. The hole is gone because scope facets are no longer carried at all (§6), so
-// there is nothing to skip; this pins that the row still renders the list one-to-one.
-assert(/query\.afFacets\.map\(\(f, i\) =>/.test(indexTsx),
-  'the chip row maps query.afFacets one-to-one, so chip index i IS facet index i');
+// RETIRED 2026-10-03: there is no chip row on the Filter screen to map. It used to render
+// query.afFacets one-to-one so chip index i was facet index i, which is what a «×» handed to
+// withoutFacet(). The owner ruled that coming back to the Filter always opens a CLEAN form (no chips,
+// no ✕, no «مسح الكل»), so nothing is rendered from the facet list here at all. This pins the absence:
+// a chip row coming back would need that indexing re-proven.
+assert(!/query\.afFacets/.test(indexTsx.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n')),
+  'the Filter screen renders no chip row from query.afFacets (a return to the Filter is a clean form)');
 // rpcAllNarrowingParams is what turns that object into the Trending request; it must keep spreading
 // the AF half, or the reconciliation above would be feeding a builder that throws the answers away.
 assert(/rpcAllNarrowingParams[\s\S]{0,1400}rpcAdvancedFilterParams\(q\)/.test(read('src/data/remote.ts')),

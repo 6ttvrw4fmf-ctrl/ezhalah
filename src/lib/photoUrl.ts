@@ -18,6 +18,10 @@
 // This is the shared/canonical layer: every photo entering the client (remote.ts finalize) passes
 // through here, so a card, a share image, or any future photo consumer all get the renderable URL.
 const SADIN_HOSTS = new Set(['sadin.com.sa', 'www.sadin.com.sa']);
+// eydah.com joined Sadin on 2026-09-24 (batch-36 onboarding): its listing photos
+// (eydah.com/assets/listings/*.jpg) answer with `cross-origin-resource-policy: same-origin`, measured
+// live — the same blocking CORP, the same same-origin rewrite (`/_img/eydah/*`, vercel.json).
+const EYDAH_HOSTS = new Set(['eydah.com', 'www.eydah.com']);
 
 export function photoDisplayUrl(raw: string): string {
   if (!raw || typeof raw !== 'string') return raw;
@@ -29,5 +33,24 @@ export function photoDisplayUrl(raw: string): string {
     // is serving the app (prod, preview, or localhost), never a hardcoded domain.
     return `/_img/sadin${u.pathname}${u.search}`;
   }
+  if (EYDAH_HOSTS.has(u.hostname)) {
+    return `/_img/eydah${u.pathname}${u.search}`;
+  }
   return raw;
+}
+
+// Aqar rows scraped before the 2026-10-10 extractor fix carry JSON-escape junk ending in a backslash
+// («https://images.aqar.fm\») and up to 7 CDN size variants (/webp/750x0/, /300x0/, /50x0/ …) of
+// every photo. Drop the junk and keep the FIRST URL per photo file (on those rows the 750px copy
+// comes first). It never judges WHICH photos belong to the ad — the scraper and the re-scrape own
+// that, a client-side guess would hide real photos. Guarded by scripts/verify-aqar-photos-are-the-ads-own.ts.
+export function dedupePhotoUrls(urls: string[]): string[] {
+  const seen = new Set<string>();
+  return urls.filter((u) => {
+    if (u.endsWith('\\')) return false;
+    const key = u.replace(/^(https:\/\/images\.aqar\.fm\/webp\/)\d+x\d+\//, '$1');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }

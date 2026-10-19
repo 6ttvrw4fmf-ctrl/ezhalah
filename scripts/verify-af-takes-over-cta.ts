@@ -7,7 +7,7 @@
 // row under a results turn. That row was gated ONLY on `(hasMore || canNarrowFurther)`. The AF card is
 // an ABSOLUTE overlay (StyleSheet.absoluteFill) drawn on top, so the row kept rendering — and stayed
 // reachable — underneath the flow the user had just opened. `ageFlow` is non-null for every AF phase
-// (loading → intro → asking → mining) and returns to null when the flow closes, so gating on it hides
+// (loading → intro → asking) and returns to null when the flow closes, so gating on it hides
 // the row for exactly the duration of the interview and restores it afterwards with no extra state.
 //
 // This is a FLOW/STATE cleanup only: no AF answer semantics, no Skip semantics, no count logic, and no
@@ -39,10 +39,15 @@ console.log('\nAdvanced Filter takes over the CTA space\n');
 // into a named `showActionsRow` const (Read Aloud's spoken closing note needed the SAME gate, to
 // decide whether it may mention the buttons) — same gate, same semantics, just named. Accept either
 // shape: the definition carrying the exact boolean expression, and the JSX still branching on it.
+// The call gained a local `!afReceipt[m.id] &&` conjunct on 2026-09-20 so a spent turn swaps its
+// buttons for the completed-round receipt at once, instead of waiting for `chatCompleted` to land a
+// whole search later. The rule this check owns is unchanged — the gate is still the executable
+// `resultsActionsRowVisible` and still carries the interview phase — so the pattern tolerates that
+// one conjunct and nothing else.
 check('the pre-AF CTA row is hidden while the AF flow is open',
   // Gate hoisted into the pure resultsActionsRowVisible() (owner 2026-09-06, `final=50`); agent.tsx
   // still feeds it the interview phase, so an open AF flow (phase ≠ null) still hides the row.
-  /const showActionsRow = resultsActionsRowVisible\(\{[\s\S]{0,240}?afPhase: ageFlow\?\.phase \?\? null/.test(code)
+  /const showActionsRow = (?:!afReceipt\[m\.id\] && )?resultsActionsRowVisible\(\{[\s\S]{0,240}?afPhase: ageFlow\?\.phase \?\? null/.test(code)
   && /\{showActionsRow \? \(/.test(code),
   'without the interview phase in the gate (or a branch that no longer uses it) the two buttons keep rendering underneath the AF overlay');
 
@@ -56,7 +61,11 @@ check('the gate wraps BOTH buttons (Load more + the AF launcher)',
   'gating only one leaves the other competing with the AF card');
 
 // ── the flow must still own every phase, and still close back to null ────────────────────────────
-for (const phase of ['loading', 'intro', 'asking', 'mining']) {
+// 'mining' left this list on 2026-09-20 with the overlay itself (owner: the magnifying-glass card
+// "needs to be gone"). A round now closes its card and hands straight to the thread's own searching
+// turn, so there is no fourth phase for the CTA gate to cover — and the gate is not weakened by its
+// absence: the CTA is hidden for every phase that still exists, which is what this loop asserts.
+for (const phase of ['loading', 'intro', 'asking']) {
   check(`ageFlow still models the '${phase}' phase (the gate covers it)`,
     new RegExp(`phase: '${phase}'`).test(code));
 }
@@ -71,7 +80,7 @@ check('closing the flow restores the CTA by setting ageFlow back to null',
 // it is recorded on the step (walking Back restores it AS a skip) while still contributing no
 // predicate, because the query rebuild skips empty-keyed steps outright.
 check('Skip still advances without applying a restriction, and stays recorded as open',
-  /onAgeSkip = \(\) => \{ void commitGuidedStep\(\[\]\); \}/.test(code)
+  /onAgeSkip = \(\) => (?:\{ void commitGuidedStep\(\[\]\); \}|commitGuidedStep\(\[\]\);)/.test(code)
   && /if \(!st\.keys\.length\) continue;/.test(stepsSrc),
   'Skip must keep meaning "no preference", never a filter');
 check('the AF card still receives its live count callback',

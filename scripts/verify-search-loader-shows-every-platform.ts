@@ -7,9 +7,17 @@
 // searches the WHOLE Saudi market rather than one site. Two things have to be true for that to land,
 // and BOTH are arithmetic between two files that nothing previously tied together:
 //
-//   1. Every pill has appeared          — reveal    = (roster−1) × PILL_STAGGER + PILL_FADE
-//   2. Every pill has been HIGHLIGHTED  — sweep     = LOADER_SWEEP_MS (one full travelling pass)
-//   … before the loader is allowed to leave:  SEARCH_MIN_MS ≥ reveal + sweep.
+//   1. Every pill has appeared          — lastPillAppearedMs(roster)
+//   2. Every pill has been HIGHLIGHTED  — lastPillLitMs(roster)
+//   … before the loader is allowed to leave:  SEARCH_MIN_MS ≥ max(1, 2).
+//
+// CORRECTED 2026-09-19. This used to read `SEARCH_MIN_MS ≥ reveal + sweep`, with sweep taken as the
+// nominal LOADER_SWEEP_MS. Both halves were wrong: the two phases both start at mount and OVERLAP
+// (so the deadline is the later of them, not their sum), and the wave's real length is
+// (roster−1) × highlightStepMs(roster), which the 180ms readable-step floor pushes past the nominal
+// 7,400ms for every roster above 41 — as the catalogue has been since abwbna. The two errors pointed
+// opposite ways and roughly cancelled, so this barrier stayed green while describing an animation
+// nobody shipped. Section D now feeds it that old model and requires it to be rejected.
 //
 // Before this barrier the floor was 2,200ms and the sweep 3,600ms: the wave could not finish even
 // once, so on a fast query the pills at the END of the roster were never lit at all — the platforms
@@ -21,10 +29,12 @@
 //   node --experimental-strip-types scripts/verify-search-loader-shows-every-platform.ts   (npm test)
 
 import { readFileSync } from 'node:fs';
+import { windowBetween } from './lib/sourceWindow.ts';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  LOADER_REVEAL_MS, LOADER_SWEEP_MS, everyPlatformSeen, highlightStepMs,
+  LOADER_REVEAL_MS, LOADER_SWEEP_MS, MAX_ROSTER, WAVE_LIT_MS, PILL_GROUP,
+  everyPlatformSeen, highlightStepMs, lastPillAppearedMs, lastPillLitMs, waveDelayMs,
 } from '../src/lib/searchLoaderTiming.ts';
 
 
@@ -53,24 +63,41 @@ const floorMatch = agentSrc.match(/^const SEARCH_MIN_MS = (\d+);/m);
 const SEARCH_MIN_MS = Number(floorMatch?.[1]);
 check('SEARCH_MIN_MS is readable from agent.tsx (a floor nobody can find is a floor nobody maintains)',
   Number.isFinite(SEARCH_MIN_MS) && SEARCH_MIN_MS > 0, String(floorMatch?.[1]));
+const capMatch = agentSrc.match(/^const SEARCH_MAX_HOLD_MS = (\d+);/m);
+const SEARCH_MAX_HOLD_MS = Number(capMatch?.[1]);
+check('SEARCH_MAX_HOLD_MS is readable from agent.tsx (the cap is a real constant, not a comment)',
+  Number.isFinite(SEARCH_MAX_HOLD_MS) && SEARCH_MAX_HOLD_MS > 0, String(capMatch?.[1]));
 
-console.log('\n── A. the owner\'s ten seconds ──');
-check(`the searching beat lasts at least 10s (owner 2026-09-06) — SEARCH_MIN_MS = ${SEARCH_MIN_MS}`,
-  SEARCH_MIN_MS >= 10000,
-  'the roster is the trust signal; at 2.2s it was gone before it could be read');
+// OWNER 2026-10-17 — this section REVERSES the 2026-09-06 "wait ten seconds" floor: «less than 10
+// seconds, that's the max … results as soon as they are ready». The floor is now a short minimum so
+// the roster is never a flash, and a hard cap bounds every artificial hold. The "every platform gets
+// its moment" arithmetic still holds — against the CAP: on a slow search the whole wave fits inside it.
+console.log('\n── A. the owner\'s ten seconds — now a MAXIMUM, not a floor (2026-10-17) ──');
+check(`the artificial hold never exceeds ten seconds — SEARCH_MAX_HOLD_MS = ${SEARCH_MAX_HOLD_MS}`,
+  SEARCH_MAX_HOLD_MS <= 10000, 'the owner\'s goal is "less than 10 seconds, that\'s the max"');
+check(`the minimum beat keeps the roster from being a flash and sits under the cap — SEARCH_MIN_MS = ${SEARCH_MIN_MS}`,
+  SEARCH_MIN_MS >= 2500 && SEARCH_MIN_MS <= SEARCH_MAX_HOLD_MS,
+  'at 2.2s (pre-2026-09-06) the pills landed and were gone before any could be read');
 
 console.log('\n── B. the arithmetic that makes "all the platforms show clearly" true ──');
 // everyPlatformSeen() is the SHIPPED predicate, imported — not a replica. Section D feeds it the
-// pre-fix numbers to prove it rejects them.
-check(`every pill has appeared by ${LOADER_REVEAL_MS}ms and been highlighted by ${LOADER_REVEAL_MS + LOADER_SWEEP_MS}ms, inside the ${SEARCH_MIN_MS}ms floor`,
-  everyPlatformSeen(SEARCH_MIN_MS, ROSTER),
-  `reveal ${LOADER_REVEAL_MS} + sweep ${LOADER_SWEEP_MS} = ${LOADER_REVEAL_MS + LOADER_SWEEP_MS} > floor ${SEARCH_MIN_MS}`);
+// pre-fix numbers and the pre-fix MODEL to prove it rejects both.
+const appeared = lastPillAppearedMs(ROSTER);
+const litBy = lastPillLitMs(ROSTER);
+check(`every one of the ${ROSTER} pills has appeared by ${appeared}ms and been lit by ${litBy}ms, inside the ${SEARCH_MAX_HOLD_MS}ms cap (a slow search still shows them all)`,
+  everyPlatformSeen(SEARCH_MAX_HOLD_MS, ROSTER),
+  `the last pill needs ${Math.max(appeared, litBy)}ms but the loader must leave by ${SEARCH_MAX_HOLD_MS}ms`);
 
-// The reveal budget is computed from a MAX_ROSTER assumption inside the component; if the real
-// catalogue outgrows it the reveal silently overruns and the tail pills land late.
-check(`the reveal budget covers the real catalogue (${ROSTER} platforms)`,
-  LOADER_REVEAL_MS >= (ROSTER - 1) * 60 + 260,
-  `${ROSTER} platforms need ${(ROSTER - 1) * 60 + 260}ms, budget is ${LOADER_REVEAL_MS}ms`);
+// The wave's tail is the binding deadline, and it grows with the roster. MAX_ROSTER is the largest
+// catalogue this cap can serve; onboarding past it is a real product decision (a longer cap, or a
+// wave that lights more than one pill per step), never a nudged constant.
+check(`the catalogue (${ROSTER}) is inside the ceiling this cap can serve (${MAX_ROSTER})`,
+  ROSTER <= MAX_ROSTER,
+  `at step ${highlightStepMs(ROSTER)}ms/pill a ${ROSTER}-roster needs ${litBy}ms; the cap is ${SEARCH_MAX_HOLD_MS}ms`);
+// …and MAX_ROSTER must itself be honest about that cap, or the check above is theatre.
+check(`MAX_ROSTER (${MAX_ROSTER}) is the TRUE ceiling of the ${SEARCH_MAX_HOLD_MS}ms cap, not a round number`,
+  lastPillLitMs(MAX_ROSTER) <= SEARCH_MAX_HOLD_MS && lastPillLitMs(MAX_ROSTER + 1) > SEARCH_MAX_HOLD_MS,
+  `roster ${MAX_ROSTER} lit by ${lastPillLitMs(MAX_ROSTER)}ms, roster ${MAX_ROSTER + 1} by ${lastPillLitMs(MAX_ROSTER + 1)}ms`);
 
 // Per-pill dwell: the sweep must be slow enough to read, not a strobe across a big roster.
 const perPill = highlightStepMs(ROSTER);
@@ -83,11 +110,27 @@ const loaderSrc = readFileSync(join(root, 'src/components/SearchLoader.tsx'), 'u
 check('SearchLoader takes its stagger and its highlight step from lib/searchLoaderTiming',
   /from '@\/lib\/searchLoaderTiming'/.test(loaderSrc)
   && /const step = highlightStepMs\(total\);/.test(loaderSrc)
+  && /WAVE_RISE, WAVE_HOLD, WAVE_FALL/.test(loaderSrc)
+  && /withDelay\(waveDelayMs\(index, step\)/.test(loaderSrc)
+  && /Math\.ceil\(total \/ PILL_GROUP\) \* step/.test(loaderSrc)
   && /delay=\{index \* \(reduced \? 25 : PILL_STAGGER\)\}/.test(loaderSrc),
   'a local copy of either number divorces the wave from the floor this barrier checks');
 check('no second, private copy of the timing constants survives in the component',
-  !/const (PILL_STAGGER|PILL_FADE|LOADER_SWEEP_MS|LOADER_REVEAL_MS)\s*=/.test(loaderSrc),
+  !/const (PILL_STAGGER|PILL_FADE|LOADER_SWEEP_MS|LOADER_REVEAL_MS|WAVE_RISE|WAVE_HOLD|WAVE_FALL)\s*=/.test(loaderSrc),
   'two sources for one number is how the sweep and the floor drifted apart in the first place');
+
+// The grouped wave is the owner's answer to the 56-platform ceiling, so it is asserted, not assumed.
+// Asserted AGAINST PILL_GROUP, not against the number 2. The shape is what matters: the first
+// PILL_GROUP pills share step 0, and the pill right after them starts step 1. Hardcoding
+// waveDelayMs(2) === 180 silently encoded "the wave is exactly 2 wide", so widening the wave to 3 —
+// the very change this file exists to keep honest — failed here instead of being checked.
+check(`the wave lights ${PILL_GROUP} pills per step, which is what lifts the ceiling to ${MAX_ROSTER}`,
+  PILL_GROUP >= 2
+  && waveDelayMs(PILL_GROUP - 1, 180) === 0          // the last pill of the first group shares step 0
+  && waveDelayMs(PILL_GROUP, 180) === 180            // the next pill starts step 1
+  && waveDelayMs(0, 180) === 0,
+  `group=${PILL_GROUP} waveDelayMs(${PILL_GROUP - 1})=${waveDelayMs(PILL_GROUP - 1, 180)} `
+  + `waveDelayMs(${PILL_GROUP})=${waveDelayMs(PILL_GROUP, 180)}`);
 
 console.log('\n── D. mutation proofs ──');
 const mustCatch = (what: string, caught: boolean) =>
@@ -99,16 +142,63 @@ const mustCatch = (what: string, caught: boolean) =>
 mustCatch('the old 2,200ms floor, where the wave never reached the last platform',
   !everyPlatformSeen(2200, ROSTER));
 
-// A floor raised to 10s but a sweep left fast enough to finish early would still "lose" nobody, so
-// the real risk is the other direction: a sweep slowed past the floor.
-mustCatch('a floor one millisecond short of reveal + sweep',
-  !everyPlatformSeen(LOADER_REVEAL_MS + LOADER_SWEEP_MS - 1, ROSTER));
+// A floor raised to 10s but a wave fast enough to finish early would still "lose" nobody, so the
+// real risk is the other direction: a tail that is lit one millisecond after the loader may leave.
+mustCatch('a floor one millisecond short of the real last-pill deadline',
+  !everyPlatformSeen(lastPillLitMs(ROSTER) - 1, ROSTER));
+
+// THE MODEL ITSELF. This is the defect found on 2026-09-19: an arithmetic that adds the two phases
+// and takes the sweep as the nominal constant. It is reproduced here exactly, and it must disagree
+// with the shipped predicate at the shipped roster — otherwise the predicate has silently reverted to
+// it. (At ROSTER 52 the old model demands 10,600ms for an animation that really finishes at 9,740ms,
+// and above ~56 it UNDER-states the need, which is the direction that loses platforms.)
+const oldModel = (floorMs: number, roster: number) =>
+  (roster - 1) * 60 + 260 <= LOADER_REVEAL_MS && floorMs >= LOADER_REVEAL_MS + LOADER_SWEEP_MS;
+mustCatch('the pre-2026-09-19 model (phases added, nominal sweep) — it must no longer be what we ship',
+  oldModel(SEARCH_MAX_HOLD_MS, ROSTER) !== everyPlatformSeen(SEARCH_MAX_HOLD_MS, ROSTER)
+  || oldModel(lastPillLitMs(ROSTER) - 1, ROSTER) !== everyPlatformSeen(lastPillLitMs(ROSTER) - 1, ROSTER));
+
+// A pill that is technically "reached" but never actually held lit is not seen. The envelope is part
+// of the deadline, so a predicate that ignores it must fail.
+// A regression to one-pill-per-step is the specific way this ceiling comes back. Proven where it
+// MATTERS — at the shipped ceiling: an ungrouped wave must NOT be able to serve MAX_ROSTER, which
+// is exactly what makes the grouping load-bearing rather than decorative.
+const ungroupedLit = (roster: number) =>
+  Math.max(0, roster - 1) * highlightStepMs(roster) + WAVE_LIT_MS;
+mustCatch('a wave that reverts to ONE pill per step (the 56-platform ceiling returning)',
+  ungroupedLit(MAX_ROSTER) > SEARCH_MAX_HOLD_MS);
+
+mustCatch('a deadline that forgets the wave still has to RISE and HOLD on the last pill',
+  !everyPlatformSeen(waveDelayMs(ROSTER - 1, highlightStepMs(ROSTER)) + WAVE_LIT_MS - 1, ROSTER));
 
 // A roster that outgrows the reveal budget.
 mustCatch('a catalogue that outgrows the reveal budget',
-  !everyPlatformSeen(SEARCH_MIN_MS, 200));
+  !everyPlatformSeen(SEARCH_MAX_HOLD_MS, 200));
+
+// THE CAP MUST BE REAL (owner 2026-10-17). The page-dwell gate used to wait for every logo page with no
+// upper bound — that is what pushed a live Filter search past 11 s on 2026-10-17. The gate must carry
+// the cap in its own condition; a gate without it is the old unbounded wait.
+const gateRe = /loaderPresentedRef\.current\[statusId\] !== true && Date\.now\(\) - since < SEARCH_MAX_HOLD_MS\) await waitRun/;
+check('the page-dwell gate is bounded by SEARCH_MAX_HOLD_MS (results are never held past the cap)', gateRe.test(agentSrc));
+mustCatch('the old unbounded page-dwell gate',
+  !gateRe.test(agentSrc.replace(' && Date.now() - since < SEARCH_MAX_HOLD_MS', '')));
+
+// AN ADVANCED FILTER ROUND HOLDS A 5-SECOND ONE-SENTENCE BEAT (owner 2026-10-11; 10-10 was 10 s of logos,
+// 10-05 skipped it). The 10.6 s floor + page-dwell gate are for a NEW search; an AF round waits a plain
+// AF_LOADER_MS = 5000 from when its beat appeared, never more, and renders AfRoundLoader, not the logos.
+{
+  const play = windowBetween(agentSrc, 'const playListings = async', '// 2) RESULTS: ONE consolidated bubble', 'src/app/agent.tsx playListings');
+  check('a NEW search still waits the minimum beat and the (capped) page-dwell gate', /if \(!afCompleted\) \{[\s\S]{0,200}SEARCH_MIN_MS - \(Date\.now\(\) - since\)[\s\S]{0,600}loaderPresentedRef\.current\[statusId\] !== true && Date\.now\(\) - since < SEARCH_MAX_HOLD_MS/.test(play));
+  check('…and only an Advanced Filter round (afCompleted) skips them — no other condition widens the skip',
+    (play.match(/if \(!afCompleted\) \{/g) ?? []).length === 1 && !/if \(!afCompleted \|\|/.test(play) && !/if \(!afCompleted &&/.test(play));
+  const afTen = (src: string, body: string) => /const AF_LOADER_MS = 5000;/.test(src) && /if \(m\.afRound\) return <AfRoundLoader /.test(src) && /\} else \{[\s\S]{0,400}const remaining = AF_LOADER_MS - \(Date\.now\(\) - since\);\s*if \(remaining > 0\) await waitRun\(run, remaining\);\s*\}/.test(body);
+  check('an Advanced Filter round holds its one-sentence beat for 5 seconds (owner 2026-10-11)', afTen(agentSrc, play));
+  mustCatch('an AF round that skips the animation again', !afTen(agentSrc, play.replace(/\} else \{[\s\S]{0,400}?await waitRun\(run, remaining\);\s*\}/, '}')));
+  mustCatch('an AF beat that is not 5 seconds', !afTen(agentSrc.replace('const AF_LOADER_MS = 5000;', 'const AF_LOADER_MS = 10000;'), play));
+  mustCatch('an AF round showing the logo loader again', !afTen(agentSrc.replace('if (m.afRound) return <AfRoundLoader ', 'if (false) return <AfRoundLoader '), play));
+}
 
 console.log(failures === 0
-  ? '\n✓ ten seconds, and every platform both appears and is highlighted before the loader may leave\n'
+  ? '\n✓ results as soon as ready, never held past ten seconds; on a slow search every platform still appears and is highlighted inside the cap; an AF round holds a 5 s one-sentence beat\n'
   : `\n✗ ${failures} check(s) FAILED — a search could hide platforms the owner asked to be shown\n`);
 process.exit(failures === 0 ? 0 : 1);

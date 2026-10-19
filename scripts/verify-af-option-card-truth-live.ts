@@ -58,14 +58,19 @@
 
 import { chromium } from 'playwright';
 import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
+import { dismissStrayOverlay, STRAY_OVERLAY_SRC } from './lib/liveClick.ts';
 import { gotoLive } from './lib/liveNav.ts';
+import { classifySkip, NOT_APPLICABLE, runFails, unknownColumnFilter } from './lib/afLiveSkipLedger.ts';
 import { buildOracleQS, AMENITY_TOKEN_COL } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 // The SHIPPED per-press reveal ceiling, imported from the module production uses — never a
 // re-typed number. Raising or lowering it moves this journey's assertion with it.
-import { DRAIN_REVEAL_MAX } from '../src/data/resultCount.ts';
+import { SECOND_PAGE_CAP } from '../src/data/resultCount.ts';
+/** backlog 597: force the stray-viewer case once (see section 4). Off by default. */
+const FORCE_STRAY_OVERLAY = process.env.AF_FORCE_STRAY_OVERLAY === '1';
 import { AGENT_TURN_MS, PACE_BUDGET_MS, PACE_POLL_MS, describeLoad, paceUntilHealthy, readSearchLoad, settleUntil, verdictForNonArrival } from './lib/afJourneyPacing.ts';
+import { resultsFoundCount, resultsSentenceAtStartSource } from '../e2e/lib/resultsSentence.mjs';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: SUPABASE_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -104,14 +109,16 @@ const FIRST_PAGE = 10;
 // backend round trip plus a ~100-card cascade, so it is budgeted as a backend turn rather than a
 // paint — the shared constant, not a number typed here (owner rule 2026-09-06).
 const REVEAL_SETTLE_MS = AGENT_TURN_MS;
+/** Consecutive unchanged polls (700 ms apart) before a reveal counts as settled. */
+const REVEAL_QUIET_POLLS = 3;
 const ID_CAP = 30000;
 
 const AF_PREDICATE_KEYS = [
-  'p_bath_min', 'p_bath_exact', 'p_age_min', 'p_age_max', 'p_is_new_construction', 'p_age_unknown',
+  'p_bath_min', 'p_bath_exact', 'p_age_min', 'p_age_max', 'p_is_new_construction', 'p_age_unknown', 'p_age_buckets',
   'p_amenities', 'p_furnished', 'p_rating_min', 'p_reviews_min', 'p_unit_subtypes',
   'p_street_width_min', 'p_street_width_max', 'p_directions', 'p_rnpl',
 ];
-const AGE_KEYS = ['p_age_min', 'p_age_max', 'p_is_new_construction'];
+const AGE_KEYS = ['p_age_min', 'p_age_max', 'p_is_new_construction', 'p_age_buckets'];
 const SCOPE_KEYS = ['p_cities', 'p_types', 'p_deal', 'p_rent_period', 'p_category'];
 // Every non-AF key that narrows a search: a pill click, a confirm or a later page may move NONE of them.
 const SCOPE_ALL_KEYS = [...SCOPE_KEYS, 'p_tables', 'p_tables2', 'p_types2', 'p_region_ids', 'p_districts', 'p_platforms',
@@ -138,6 +145,7 @@ const EXPECTED_LABEL: Record<string, string[]> = {
   yes: ['مفروشة', 'مفروش'], no: ['غير مفروشة'],
   '9.5': ['9.5+'], '9.0': ['9.0+'], '9.0_rc10': ['9.0+ مع 10 تقييمات'],
   'استديو': ['استديو'], 'شقق مخدومة': ['شقة مخدومة'], 'شقة': ['شقة عادية'],
+  upto2: ['حتى سنتين'], upto5: ['حتى ٥ سنوات'], upto9: ['حتى ٩ سنوات'],
   new: ['جديد'], '1_2': ['1-2 سنوات'], '3_5': ['3-5 سنوات'], '6_9': ['6-9 سنوات'], '10p': ['10 سنوات فأكثر'],
 };
 
@@ -188,6 +196,18 @@ const OPTION_COL: Record<string, { rpc: Rpc; col: string }> = {
   'شقة': { rpc: 'guided', col: 'cnt_sub_regular' },
   new: { rpc: 'age', col: 'cnt_new' }, '1_2': { rpc: 'age', col: 'cnt_1_2' }, '3_5': { rpc: 'age', col: 'cnt_3_5' },
   '6_9': { rpc: 'age', col: 'cnt_6_9' }, '10p': { rpc: 'age', col: 'cnt_10p' },
+  // THE «UP TO» AGE LADDER (owner 2026-10-05, src/data/advancedFilters.ts AGE_LADDER). Each option's
+  // pill is the exact SUM of the disjoint buckets under it, and its query is p_age_buckets. A `+` in
+  // `col` names that sum. Unknown to this file until 2026-10-16, so every run failed «unknown key»
+  // on three correct options (af-card-state, runs 38723916365 and 38878124643).
+  upto2: { rpc: 'age', col: 'cnt_new+cnt_1_2' }, upto5: { rpc: 'age', col: 'cnt_new+cnt_1_2+cnt_3_5' },
+  upto9: { rpc: 'age', col: 'cnt_new+cnt_1_2+cnt_3_5+cnt_6_9' },
+};
+/** The count a spec reads off a count row: one column, or the sum a `+`-joined spec names. */
+const specValue = (row: any, col: string): number =>
+  row == null ? NaN : col.split('+').reduce((s, c) => s + Number(row?.[c]), 0);
+const AGE_LADDER_BUCKETS: Record<string, string[]> = {
+  upto2: ['new', '1_2'], upto5: ['new', '1_2', '3_5'], upto9: ['new', '1_2', '3_5', '6_9'],
 };
 const DIRECTION_KEYS = new Set(['شمال', 'جنوب', 'شرق', 'غرب', 'شمال شرق', 'شمال غرب', 'جنوب شرق', 'جنوب غرب']);
 const BATH_KEYS = new Set(['1', '2', '3', '4']);
@@ -208,6 +228,7 @@ const predicateFor = (key: string, base: any): Record<string, unknown> => {
   if (key === '9.5') return { p_rating_min: Math.max(9.5, Number(base?.p_rating_min ?? 0)) };
   if (key === '9.0') return { p_rating_min: Math.max(9, Number(base?.p_rating_min ?? 0)) };
   if (key === '9.0_rc10') return { p_rating_min: Math.max(9, Number(base?.p_rating_min ?? 0)), p_reviews_min: Math.max(10, Number(base?.p_reviews_min ?? 0)) };
+  if (AGE_LADDER_BUCKETS[key]) return { p_is_new_construction: null, p_age_min: null, p_age_max: null, p_age_buckets: AGE_LADDER_BUCKETS[key] };
   if (key === 'new') return { p_is_new_construction: true, p_age_min: null, p_age_max: null };
   if (key === '1_2') return { p_is_new_construction: null, p_age_min: 1, p_age_max: 2 };
   if (key === '3_5') return { p_is_new_construction: null, p_age_min: 3, p_age_max: 5 };
@@ -230,6 +251,17 @@ const check = (label: string, ok: boolean, detail = '') => {
 const skip = (label: string, reason: string) => {
   console.log(`SKIP  ${label}\n      inconclusive: ${reason}`);
   skips++; skippedLabels.push(label);
+};
+/** NOT APPLICABLE is narrower than SKIP (🔬 2026-10-17, backlog 598): only a case registered in
+ *  NOT_APPLICABLE (scripts/lib/afLiveSkipLedger.ts) whose code fact HOLDS on this run. Anything else
+ *  falls back to an inconclusive SKIP and still fails the run. */
+let notApplicable = 0;
+const naLabels: string[] = [];
+const notApplicableOr = (id: string, factHolds: boolean, label: string, inconclusiveReason: string) => {
+  if (classifySkip(id, factHolds) === 'not-applicable') {
+    console.log(`N/A   ${label}\n      not applicable: ${NOT_APPLICABLE[id].reason}`);
+    notApplicable++; naLabels.push(label);
+  } else skip(label, inconclusiveReason);
 };
 
 // ── A UI STATE THAT NEVER ARRIVED IS NOT A MEASUREMENT ─────────────────────────────────────────
@@ -354,12 +386,24 @@ const CLICK_LEAF = (txt: string) => {
   return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
 };
 
-/** Every «لقينا N إعلان» headline currently rendered, oldest first. */
-const READ_HEADLINES = () => {
+// DERIVED FROM THE SHIPPED POOL, NEVER RESTATED (2026-09-19, routine #5). This file pinned
+// «لقينا N إعلان» in FOUR places, and PR #3186 retired that wording the same morning for a
+// four-pool rotation (src/data/resultsFoundRotation.ts). Measured live that afternoon on a healthy
+// الرياض/شقة search returning 13,489: the retired regex matched nowhere on the settled page. One of
+// the four spots (READ_TURN_CARDS) does not merely go blind when it misses — it falls back to
+// counting EVERY card on the page, which silently inflates the newest turn's reveal. See
+// e2e/lib/resultsSentence.mjs and scripts/verify-results-sentence-parsers-track-the-pool.ts.
+// ANCHORED: the per-node reader below must not match a wrapper whose innerText merely
+// CONTAINS a headline — see resultsSentenceAtStartSource() for what that costs.
+const SENTENCE_SRC = resultsSentenceAtStartSource();
+
+/** Every results headline currently rendered, oldest first (any shipped template, any rotation). */
+const READ_HEADLINES = (src: string) => {
+  const re = new RegExp(src);
   const out: string[] = [];
   document.querySelectorAll('div,span,p').forEach((e: any) => {
     const t = (e.innerText || '').trim();
-    if (!/^لقينا\s+[\d,٬٠-٩۰-۹]+\s+إعلان/.test(t)) return;
+    if (!re.test(t)) return;
     if (e.children.length > 2) return;
     if (!out.includes(t)) out.push(t);
   });
@@ -414,11 +458,12 @@ type CardState = ReturnType<typeof READ_CARD>;
  * the previous-turn cards in one move: the returned length IS the newest turn's reveal, and the ids
  * let the run prove the user sees the fetched set exactly — in order, once each.
  */
-const READ_TURN_CARDS = () => {
+const READ_TURN_CARDS = (src: string) => {
+  const re = new RegExp(src);
   let last: Element | null = null;
   document.querySelectorAll('div,span,p').forEach((e: any) => {
     if (e.children.length) return;
-    if (/لقينا\s*[\d,٠-٩۰-۹]+\s*(إعلان|عقار)/.test((e.innerText || '').trim())) last = e;
+    if (re.test((e.innerText || '').trim())) last = e;
   });
   const head = last as Element | null;
   const cards = [...document.querySelectorAll('[data-testid^="card-listing-"]')];
@@ -441,11 +486,8 @@ const COUNT_CARDS = () => {
   return n;
 };
 
-const digits = (s: string) => s.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x660)).replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x6f0)).replace(/[^\d]/g, '');
-const headlineNum = (h: string | undefined): number | null => {
-  const m = (h ?? '').match(/لقينا\s*([\d,٬٠-٩۰-۹]+)/);
-  return m ? Number(digits(m[1])) : null;
-};
+/** The count a headline quotes, read through the same pool the app renders from. */
+const headlineNum = (h: string | undefined): number | null => resultsFoundCount(h ?? '');
 
 // ── the independent oracle ─────────────────────────────────────────────────────────────────────
 const TYPE_MACROS: Record<string, string> = await (async () => {
@@ -624,7 +666,7 @@ const waitForHeadline = async (total: number | null, timeoutMs = 25_000): Promis
   const until = Date.now() + timeoutMs;
   let last: number | null = null;
   while (Date.now() < until) {
-    const hs: string[] = await page.evaluate(READ_HEADLINES);
+    const hs: string[] = await page.evaluate(READ_HEADLINES, SENTENCE_SRC);
     last = headlineNum(hs[hs.length - 1]);
     if (last != null && last === total) return last;
     await page.waitForTimeout(500);
@@ -701,7 +743,7 @@ const proveQuestion = async (label: string, st: CardState, ctxBody: any, ctxTota
     if (!spec) return;
     o.col = spec.col;
     const c = pairCount(spec.rpc, ctxBody);
-    o.rpcVal = c ? Number(c.row?.[spec.col]) : NaN;
+    o.rpcVal = c ? specValue(c.row, spec.col) : NaN;
     const body = { ...ctxBody, ...predicateFor(o.key, ctxBody) };
     const { count, unhandled } = await oracleCount(body);
     o.oracle = count; o.unhandled = unhandled;
@@ -730,15 +772,19 @@ const proveQuestion = async (label: string, st: CardState, ctxBody: any, ctxTota
   // whose source did not state the fact, in the CURRENT search body. The column is implied by the
   // option keys on the card (age buckets → property_age, yes/no → furnished, compass → direction_ar).
   if (st.unknown != null) {
-    const keys = st.options.map((o) => o.key);
-    const col = keys.some((k) => ['new', '1_2', '3_5', '6_9', '10p'].includes(k)) ? 'property_age'
-      : keys.some((k) => k === 'yes' || k === 'no') ? 'furnished'
-      : keys.some((k) => DIRECTION_KEYS.has(k)) ? 'direction_ar' : null;
-    if (!col) skip(`${label}: R7.1.3 — the unknown caption (${st.unknown}) is the DB's NULL count`, 'this question has no single unknown column');
+    // THE COLUMN IS NAMED, NEVER SKIPPED (🔬 2026-10-17, backlog 598). Amenities, bathrooms, street
+    // width, rating, unit type and RNPL used to SKIP here as «no single unknown column», on every run.
+    // They have one: the RPC counts each with its own IS NULL (cnt_*_unknown). scripts/lib/afLiveSkipLedger.ts.
+    const u = unknownColumnFilter(st.options.map((o) => o.key), AMENITY_KEYS);
+    if (!u) skip(`${label}: R7.1.3 — the unknown caption (${st.unknown}) is the DB's NULL count`, `no known question owns the keys ${J(st.options.map((o) => o.key))}`);
     else {
-      const { count, unhandled } = await oracleCount(ctxBody, `${col}=is.null`);
+      const { count, unhandled } = await oracleCount(ctxBody, u.qs);
       if (unhandled.length) skip(`${label}: R7.1.3 — the unknown caption is the DB's NULL count`, unhandled.join(', '));
-      else check(`${label}: R7.1.3 — the unknown caption (${st.unknown}) == rows with NULL ${col} in this search`, count === st.unknown, `caption=${st.unknown} db=${count}`);
+      else check(`${label}: R7.1.3 — the unknown caption (${st.unknown}) == rows with NULL ${u.what} in this search`, count === st.unknown, `caption=${st.unknown} db=${count}`);
+      if (u.rpcCol) {
+        const c = pairCount('guided', ctxBody);
+        if (c) check(`${label}: R7.1.3 — the unknown caption == ${u.rpcCol} the app was handed`, Number(c.row?.[u.rpcCol]) === st.unknown, `caption=${st.unknown} ${u.rpcCol}=${c.row?.[u.rpcCol]}`);
+      }
     }
   }
   return reads;
@@ -784,6 +830,7 @@ try {
   {
     const family = (col: string) => col.startsWith('cnt_bath') ? 'p_bath_min' : col.startsWith('cnt_stw') ? 'p_street_width_min' : col.startsWith('cnt_dir_') ? 'p_directions'
       : col.startsWith('cnt_sub_') ? 'p_unit_subtypes' : col.startsWith('cnt_rating') ? 'p_rating_min' : col === 'cnt_unfurnished' ? 'p_furnished'
+      : col.includes('+') ? 'p_age_buckets'
       : ['cnt_new', 'cnt_1_2', 'cnt_3_5', 'cnt_6_9', 'cnt_10p'].includes(col) ? (col === 'cnt_new' ? 'p_is_new_construction' : 'p_age_min') : null;
     const drift = Object.entries(OPTION_COL).filter(([key, spec]) => {
       const p = predicateFor(key, {});
@@ -809,6 +856,7 @@ try {
     throw new Error('AF did not open — the card assertions cannot run');
   }
   const seenQ: string[] = [];
+  let poolBurnedBySkips = false;
   let roundEnd: Search | null = null;
   let roundClosed = false;
   let roundCardNeverArrived = false;
@@ -855,7 +903,7 @@ try {
       check('2. R8.1.1 — the all-skip search carries NO predicate', R.noPredicate(roundEnd.body), `AF keys: ${afKeysOn(roundEnd.body).join(', ') || '(none)'}`);
       check('2. R8.1.2 — the all-skip search total == baseline total', roundEnd.total === baseline.total, `baseline=${baseline.total} after skips=${roundEnd.total}`);
     } else console.log('      [diag] no search fired after the all-skip round — nothing committed, nothing re-searched');
-    const hsAfterSkips: string[] = await page.evaluate(READ_HEADLINES);
+    const hsAfterSkips: string[] = await page.evaluate(READ_HEADLINES, SENTENCE_SRC);
     check('2. R8.1.2 — after skipping every question the newest headline is still the baseline number',
       R.chipEquals(headlineNum(hsAfterSkips[hsAfterSkips.length - 1]), baseline.total), `headline=${headlineNum(hsAfterSkips[hsAfterSkips.length - 1])} baseline=${baseline.total}`);
   }
@@ -879,7 +927,13 @@ try {
   // and the pagination proof is vacuous; prefer the largest such option, else the smallest real one.
   const overBuffer = eligible.filter((o) => o.count! > PAGE0_BUFFER).sort((a, b) => (b.count! - a.count!));
   const target = overBuffer[0] ?? eligible.sort((a, b) => (a.count! - b.count!))[0];
-  const paginationPossible = !!overBuffer.length;
+  // A network page (p_offset>0) fires only when «عرض المزيد» spends the 1,500-row page-0 buffer. But
+  // the owner's 2026-09-14 cap reveals at most SECOND_PAGE_CAP (500) cards total — far under the buffer
+  // — so the «عرض المزيد» path never pages the network. Predicate-continuity across network pages is
+  // proven directly (RPC vs PostgREST) in verify-af-compound-predicate*.ts; it can no longer be
+  // exercised through this UI path, so the network-page assertion below stands down.
+  const capReachesNetwork = SECOND_PAGE_CAP > PAGE0_BUFFER;
+  const paginationPossible = !!overBuffer.length && capReachesNetwork;
   check('3. a real (≥5) option exists to click', !!target, target ? `clicking «${target.key}» (${target.label}) = ${target.count}${paginationPossible ? ` (> ${PAGE0_BUFFER}: a network page is reachable)` : ''}` : 'no rendered option at or above the floor');
   if (!target) throw new Error('nothing to click');
   clickedPred = predicateFor(target.key, base2.body);
@@ -890,14 +944,27 @@ try {
   const armed3 = searches.length;
   await page.click('[data-testid="af-confirm"]');
   await page.waitForTimeout(1200);
+  // Every question this session answered or skipped — so section 4 can tell «the pool is spent»
+  // (R8.1.3 → R11.2, AF retired by contract) from «a question is still unasked» (a stranded user).
+  const asked3 = new Set<string>([q1.q].filter(Boolean) as string[]);
   for (let hop = 0; hop < 8 && searches.length === armed3; hop++) {
     const open = await page.evaluate(() => !!document.querySelector('[data-testid="af-card"]'));
     if (!open) break;
+    // The title is read once it has rendered (up to 4 s): a card mid-transition reads empty, and a question
+    // missed here would read «a question is still unasked» against a spent pool (seen once, 2026-10-16).
+    let hq = '';
+    for (let w = 0; w < 10 && !hq; w++) {
+      hq = await page.evaluate(() => (document.querySelector('[data-testid="af-card"] [data-testid="af-question-title"]') as any)?.innerText?.trim() || '');
+      if (!hq) await page.waitForTimeout(400);
+    }
+    if (hq) asked3.add(hq);
     const sk = await page.$('[data-testid="af-skip"]');
     if (!sk) break;
     await sk.click();
     await page.waitForTimeout(1200);
   }
+  poolBurnedBySkips = roundClosed && seenQ.length > 0 && seenQ.every((q) => asked3.has(q));
+  console.log(`      [diag] session-2 questions answered or skipped: ${[...asked3].join(' | ')} · round-1 pool: ${seenQ.join(' | ')} · pool spent=${poolBurnedBySkips}`);
   landed = await waitForSearch(armed3, 40_000, (s) => afKeysOn(s.body).length > 0);
   check('3. confirming the answer produced a search', !!landed);
   if (!landed) throw new Error('no search after confirm');
@@ -965,8 +1032,36 @@ try {
       }
     }
     if (!btn) break;
-    const shownBefore: number = (await page.evaluate(READ_TURN_CARDS)).length;
-    await btn.click();
+    const shownBefore: number = (await page.evaluate(READ_TURN_CARDS, SENTENCE_SRC)).length;
+    // A BUTTON THAT WILL NOT TAKE A CLICK IS RETRIED ONCE, THE WAY A PERSON WOULD (🔬 2026-10-16, backlog 597).
+    // A local production run spent Playwright's whole 30 s waiting on the first «عرض المزيد» and died as a
+    // harness error. Close a listing a stray tap may have opened, find the button again, try once more.
+    // FORCING THE CASE (🔬 2026-10-17, backlog 597). The retry above is only proven when it has run.
+    // AF_FORCE_STRAY_OVERLAY=1 lays, before the FIRST press only, a full-screen sheet carrying the ad
+    // viewer's testid that swallows every tap and closes on Escape, exactly as the real viewer does.
+    // The first press must then time out, and the retry must close it and land.
+    const forcing = FORCE_STRAY_OVERLAY && i === 0;
+    if (forcing) await page.evaluate(() => {
+      const d = document.createElement('div');
+      d.setAttribute('data-testid', 'ad-viewer');
+      d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.01)';
+      const close = (e: KeyboardEvent) => { if (e.key === 'Escape') { d.remove(); window.removeEventListener('keydown', close, true); } };
+      window.addEventListener('keydown', close, true);
+      document.body.appendChild(d);
+    });
+    let retried = false;
+    try {
+      await btn.click({ timeout: forcing ? 3_000 : 10_000 });
+    } catch {
+      retried = true;
+      await dismissStrayOverlay(page);
+      await scrollToBottom();
+      const again = (await page.$$('[data-testid="results-load-more"]')).at(-1);
+      if (!again) break;
+      await again.click({ timeout: 10_000 });
+    }
+    if (forcing) check('4. backlog 597 — a press swallowed by a stray ad viewer is retried after closing it, and lands',
+      retried && !(await page.evaluate(STRAY_OVERLAY_SRC)), retried ? 'the first press timed out under the sheet; Escape closed it; the second press landed' : 'the first press was NOT blocked, so the forced case did not happen');
     clicks++;
     // OBSERVE THE REVEAL SETTLING; NEVER SAMPLE A MOVING CASCADE (owner rule, 2026-09-06: the
     // ten-second searching beat is INTENTIONAL product behaviour, so an AF/Trending journey observes
@@ -977,13 +1072,18 @@ try {
     // The wait is QUIESCENCE (grew, then stopped moving, with the button idle), never "reached the
     // number I am about to assert" — waiting for the boundary would hide a genuine under-reveal by
     // turning it into a timeout. A cascade that never settles FAILS below with what it reached.
+    // QUIET MEANS QUIET FOR A WHILE (🔬 2026-10-16, backlog 594). One unchanged 700 ms poll is not rest: the
+    // cascade pauses between batches longer than that, and a local production run read «revealed=114» after
+    // the second click while the same turn held 500 distinct cards moments later. Three polls in a row.
     let shown = shownBefore;
+    let still = 0;
     const settled = await settleUntil(
       async () => {
-        const ids: number[] = await page.evaluate(READ_TURN_CARDS);
+        const ids: number[] = await page.evaluate(READ_TURN_CARDS, SENTENCE_SRC);
         const n = ids.length;
         const busy = await page.evaluate(() => { const b = document.querySelector('[data-testid="results-load-more"]') as any; return !!b && (b.getAttribute('aria-disabled') === 'true' || b.disabled === true); });
-        const quiet = n > shownBefore && n === shown && !busy;
+        still = n > shownBefore && n === shown && !busy ? still + 1 : 0;
+        const quiet = still >= REVEAL_QUIET_POLLS;
         shown = n;
         return { n, ids, quiet };
       },
@@ -1013,7 +1113,7 @@ try {
   // «لقينا … عقار أقرب لطلبك» found-beat it swaps to on completion. (Between 2026-08-31 and
   // 2026-09-06 that headline was «إزهله يدقّق في …»; the owner reverted that redesign, so matching
   // it alone would leave this diagnostic blind to the phase it exists to name.)
-  const absentDiag = clicks > 0 ? '' : await page.evaluate(() => {
+  const absentDiag = clicks > 0 ? '' : await page.evaluate((SRC: string) => {
     const q = (s: string) => document.querySelectorAll(s).length;
     const body = document.body.innerText || '';
     const mining = /ندور لك على الأقرب لطلبك/.test(body)
@@ -1024,8 +1124,9 @@ try {
     // (owner 2026-08-24). So a NEWER results turn that renders nothing would silently retire the
     // pager on the turn the user is actually looking at. Counting the result headlines distinguishes
     // that from a pager the newest turn simply refused to draw.
+    const headRe = new RegExp(SRC);
     const heads = [...document.querySelectorAll('*')]
-      .filter((e) => e.children.length === 0 && /لقينا/.test(e.textContent || ''))
+      .filter((e) => e.children.length === 0 && headRe.test(e.textContent || ''))
       .map((e) => (e.textContent || '').trim());
     // THE DISCRIMINATOR. The closing note («عرضت لك أول …») is rendered by the SAME block as the
     // buttons, and that block bails early on `(m.typing && !doneTyping) || shown < initialReveal(...)`.
@@ -1044,7 +1145,7 @@ try {
            ` · af pills=${q('[data-testid^="af-pill-"]')}` +
            ` · result headlines=${heads.length} [${heads.join(' | ')}]` +
            ` · CLOSING NOTES=${closingNotes.length} [${closingNotes.join(' | ')}]`;
-  }).catch(() => ' · (diagnostic unavailable)');
+  }, SENTENCE_SRC).catch(() => ' · (diagnostic unavailable)');
   check('4. R10.1.1 — «عرض المزيد» was exercised (the button was there to click)', clicks > 0 || (landed.total ?? 0) <= FIRST_PAGE,
     clicks ? `${clicks} click(s), ${pages.length} network page(s) fired (p_offset ${pages.map((p) => p.body.p_offset).join(',') || '— buffer served every click'})` : `no button and total=${landed.total} > ${FIRST_PAGE}${absentDiag}`);
   // THE NETWORK PAGE IS THE POINT. Below the buffer every click is served from page 0 and nothing
@@ -1052,7 +1153,8 @@ try {
   if (paginationPossible) {
     check(`4. R10.1.1 — a NETWORK page (p_offset > 0) actually fired after ${clicks} click(s) on a ${landed.total}-row set`, pages.length > 0,
       pages.length ? `p_offset ${pages.map((p) => p.body.p_offset).join(',')}` : `no p_offset > 0 request within ${MAX_LOAD_MORE_CLICKS} clicks`);
-  } else skip('4. R10.1.1 — a NETWORK page (p_offset > 0) fired', `no option on Q1 exceeds the ${PAGE0_BUFFER}-row buffer in this scope (largest ${eligible[eligible.length - 1]?.count ?? '?'}); the page-continuity assertions cannot be exercised here`);
+  } else notApplicableOr('network-page-below-cap', !capReachesNetwork, '4. R10.1.1 — a NETWORK page (p_offset > 0) fired',
+    `no option on Q1 exceeds the ${PAGE0_BUFFER}-row buffer in this scope (largest ${eligible[eligible.length - 1]?.count ?? '?'}); the page-continuity assertions cannot be exercised here`);
   for (const [i, pb] of pageBodies.entries()) {
     check(`4. R10.1.1 — page ${i + 1} (p_offset=${pb.p_offset}) carries the SAME whole predicate as page 0 (only paging differs)`, R.samePredicate(landed.body, pb) && R.scopeIs(pb),
       [...SCOPE_ALL_KEYS, ...AF_PREDICATE_KEYS].filter((k) => JN(landed!.body[k]) !== JN(pb[k])).map((k) => `${k}: ${J(landed!.body[k])} → ${J(pb[k])}`).join(' · ') || 'identical');
@@ -1062,45 +1164,61 @@ try {
     // sample of something still moving, which is exactly how #125 was written.
     check('4. R10.1.1 — every «عرض المزيد» came to rest before it was judged', settleFailures.length === 0,
       settleFailures.join(' · ') || `${clicks} click(s) all settled within ${REVEAL_SETTLE_MS}ms`);
-    // ── THE REVEAL RULE, AS PRODUCTION ACTUALLY SHIPS IT (corrected 2026-09-13, routine #5) ──────
-    // These two assertions encoded the Task-4 rule of 2026-09-11 — «one tap drains every remaining
-    // page and finishes the search», so `revealed === total` and `clicks === 1`. That rule was
-    // SUPERSEDED four days later by a shipped safety cap, and these lines had been red daily ever
-    // since on a production that was behaving exactly as designed:
+    // ── THE REVEAL RULE, AS PRODUCTION SHIPS IT (owner 2026-09-14: the two-tap 500 cap) ──────────
+    // «عرض المزيد» reveals at most SECOND_PAGE_CAP (500) cards total across at most two taps, then the
+    // chat COMPLETES and the terminal state (Advanced Filter when unseen inventory remains, or a new
+    // search from the ☰ menu) takes over. Two earlier rules are superseded: Task-4's "one tap drains
+    // everything" (2026-09-11), and the 2,000-card DRAIN_REVEAL_MAX drain ceiling that briefly
+    // replaced it. 500 sits under the only proven-safe mount size (5,706) AND under the 1,500-row
+    // page-0 buffer, so no press mounts an unrenderable list and none pages the network. SECOND_PAGE_CAP
+    // is IMPORTED from the module production uses — never re-typed — so the assertion moves with the
+    // shipped cap. Cumulative-mount safety across the whole sequence is owned by
+    // verify-loadmore-cumulative-mount-is-bounded.ts (ops_incident #212, now CLOSED by this cap).
     //
-    //   الرياض/إيجار/سنوي, 20,782 matches → press 2 drained 40 pages and CRASHED the renderer
-    //   (measured on production 2026-09-12; ops_incident #199, P1). The list is unvirtualized, so
-    //   the cost is mounting ~20,000 cards, not the rows. DRAIN_REVEAL_MAX (src/data/resultCount.ts)
-    //   now bounds ONE press to 2,000 new cards; if matches remain the pager STAYS offered and the
-    //   search is NOT marked finished, so nothing is stranded — the user simply presses again.
+    // THE STRADDLE IS GONE (ops_incident #260, routed here by routine #4 under G.2(d), 2026-09-14).
+    // These two checks were deliberately written to pass on BOTH the pre-cap and post-cap builds
+    // while the cap deploy was in flight. That build has SHIPPED — confirmed by decoding the served
+    // entry bundle, which carries the PR#2618 i18n strings — so the straddle no longer buys
+    // anything and only removes coverage: at revealed===500 the first check passed via its bare
+    // `cap` disjunct and the second via its `revealed === SECOND_PAGE_CAP` disjunct, so NEITHER
+    // asserted anything about the terminal state. A regression that kept offering «عرض المزيد» past
+    // 500 (re-opening the #212 renderer crash) or retired it with no forward path would have passed.
     //
-    // Measured here 2026-09-13 on الرياض/شراء/شقة + an amenity, eligible 6,319: press 1 → 100,
-    // press 2 → 2,100, pages p_offset 1500 and 2000. `revealed === 6319` is now a statement about a
-    // retired contract, and `clicks === 1` was additionally FALSE BY CONSTRUCTION — the loop above
-    // breaks on `networkPageSeen`, not on the button vanishing, so its own failure text («before the
-    // button/row disappeared») described something it had not observed.
-    //
-    // What is asserted instead is the rule that IS shipped, and it is strictly more than the old
-    // one: each press reveals everything remaining UNLESS it hits the ceiling, and hitting the
-    // ceiling is only allowed while there is genuinely more to come. DRAIN_REVEAL_MAX is IMPORTED
-    // from the module production uses — never re-typed here — so raising or lowering the ceiling
-    // moves this assertion with it. The set-level guarantees (no duplicates, monotone growth, every
-    // visible card inside the independent oracle) are asserted below and are untouched.
-    //
-    // NOT ASSERTED HERE, deliberately: whether the ACCUMULATED mount across many presses is safe.
-    // That is ops_incident #212 (P1, routine #4) and it is an open owner decision, not something to
-    // pin from this surface while it is still being settled.
-    const cap = revealed >= DRAIN_REVEAL_MAX;
-    check('4. R10.1.1 — «عرض المزيد» revealed everything remaining, or stopped exactly at the safety ceiling',
-      revealed === (landed.total ?? 0) || cap,
-      `revealed=${revealed} total=${landed.total} clicks=${clicks} ceiling=${DRAIN_REVEAL_MAX}`
-      + (cap ? ' — at the ceiling, which is allowed only while matches remain (asserted next)' : ''));
-    check('4. R10.1.1 — a press that stopped at the ceiling left the pager OFFERED (nothing stranded)',
-      !cap || revealed >= (landed.total ?? 0)
-        || (await page.$$('[data-testid="results-load-more"]')).length > 0,
-      cap
-        ? `revealed ${revealed} of ${landed.total} and NO «عرض المزيد» remains — ${(landed.total ?? 0) - revealed} eligible listing(s) are unreachable on this turn`
-        : 'the whole set was revealed, so there is no ceiling case to judge');
+    // What the terminal state is, read from the product rather than assumed (src/app/agent.tsx):
+    // «عرض المزيد» renders iff `hasMore`, «تحديد أكثر» iff `canNarrowFurther`. So at the cap with
+    // inventory still unseen, the pager must be RETIRED and the narrow CTA must be OFFERED — that
+    // pair IS the "user is never stranded" invariant, now asserted instead of assumed.
+    const atCap = revealed === SECOND_PAGE_CAP;
+    const moreRemains = revealed < (landed.total ?? 0);
+    check('4. R10.1.1 — «عرض المزيد» revealed everything remaining, or stopped EXACTLY at the 500 cap',
+      revealed === (landed.total ?? 0) || atCap,
+      `revealed=${revealed} total=${landed.total} clicks=${clicks} cap=${SECOND_PAGE_CAP}`
+      + (atCap ? ' — exactly at the cap; the terminal state is asserted next' : ''));
+    if (atCap && moreRemains) {
+      const pagerEls = (await page.$$('[data-testid="results-load-more"]')).length;
+      const narrowEls = (await page.$$('[data-testid="results-narrow"]')).length;
+      // The anti-regression for ops_incident #212: the cap exists to stop the unvirtualized list
+      // mounting an unrenderable number of cards. A pager still offered at the cap re-opens it.
+      check('4. R10.1.1 — at the cap the pager is RETIRED (zero «عرض المزيد» anywhere in the DOM)',
+        pagerEls === 0,
+        `revealed=${revealed} of ${landed.total} at the ${SECOND_PAGE_CAP} cap, but ${pagerEls} «عرض المزيد» element(s) remain — pressing again would mount past the only proven-safe size`);
+      // THE CONTRACT DECIDES WHEN «تحديد أكثر» MAY BE ABSENT (🔬 2026-10-16). Section 2 walked EVERY
+      // question of the round with Skip, and section 3 skipped out the rest, so this session has
+      // burned the whole pool (R8.1.3: a skipped question is never asked again). R11.2 then retires
+      // AF, so an absent offer HERE is the contract working, not a stranded user. It failed every
+      // run from 10-14 to 10-16 (runs 38723916365, 38878124643) against a correct production. An
+      // absent offer is a defect only while a question is still unasked, which this journey can
+      // never reach, so it is reported as NOT EXERCISED, never as PASS. A present offer still passes.
+      if (narrowEls > 0 || !poolBurnedBySkips) {
+        check('4. R10.1.1 — at the cap the user is NOT stranded: «تحديد أكثر» offers the forward path',
+          narrowEls > 0,
+          `revealed=${revealed} of ${landed.total} at the cap, pager retired, and NO «تحديد أكثر» — ${(landed.total ?? 0) - revealed} eligible listing(s) are unreachable from this turn`);
+      } else {
+        notApplicableOr('cap-offer-after-pool-burned', poolBurnedBySkips && narrowEls === 0,
+          '4. R10.1.1 — at the cap the user is NOT stranded: «تحديد أكثر» offers the forward path',
+          `NOT EXERCISED: this journey skipped all ${seenQ.length} question(s) of the round (R8.1.3), so R11.2 retires AF by contract; the offer can only be judged while a question is unasked`);
+      }
+    }
   }
 
   // ── THE VISIBLE SET IS THE FETCHED SET, EXACTLY (owner checklist, 2026-09-06) ──────────────────
@@ -1108,7 +1226,7 @@ try {
   // browser actually rendered on the newest turn and hold them to the rows the backend actually
   // returned, in order — so a duplicate, a skipped row, a missing row, or a stale card left over
   // from an earlier turn is a named failure rather than a number that happens to add up.
-  const turnIds: number[] = clicks > 0 ? await page.evaluate(READ_TURN_CARDS) : [];
+  const turnIds: number[] = clicks > 0 ? await page.evaluate(READ_TURN_CARDS, SENTENCE_SRC) : [];
   if (turnIds.length) {
     const dupes = turnIds.filter((id, i) => turnIds.indexOf(id) !== i);
     check('4. R10.1.1 — no listing is revealed twice on the newest turn',
@@ -1357,7 +1475,8 @@ try {
   await browser.close();
 }
 
-const bad = failures + skips;
+const bad = runFails(failures, skips);
+if (notApplicable) console.log(`\n(${notApplicable} case(s) NOT APPLICABLE by a registered rule:\n${naLabels.map((l) => `    • N/A ${l}`).join('\n')})`);
 console.log(bad
   ? `\n✗ ${failures} check(s) FAILED, ${skips} SKIPPED (inconclusive):\n` +
     failedLabels.map((l) => `    • FAIL ${l}`).concat(skippedLabels.map((l) => `    • SKIP ${l}`)).join('\n') + '\n'

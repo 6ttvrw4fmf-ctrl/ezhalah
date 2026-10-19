@@ -31,6 +31,7 @@
 //   node --experimental-strip-types scripts/verify-region-scoped-city-live.ts
 
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
 
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase();
 const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
@@ -67,7 +68,7 @@ const ok = (m: string) => console.log(`  ok   ${m}`);
 const bad = (m: string, d = '') => { failures++; console.error(`  FAIL ${m}${d ? `\n       ${d}` : ''}`); };
 
 async function rpc(fn: string, args: Record<string, unknown>): Promise<any> {
-  const res = await fetch(`${URL_BASE}/rest/v1/rpc/${fn}`, {
+  const res = await postgrestFetch(`${URL_BASE}/rest/v1/rpc/${fn}`, {
     method: 'POST', headers: HEADERS, body: JSON.stringify(args),
   });
   if (!res.ok) throw new Error(`${fn} -> HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);

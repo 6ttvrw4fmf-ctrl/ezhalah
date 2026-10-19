@@ -47,7 +47,7 @@ export async function loadRealAlreadyRestates(): Promise<AgentRestateModule> {
 
 /** The exact call-site line in respond() that must gate withRestate() on this real function. */
 export function callSiteWiresAlreadyRestates(agentTsSrc: string): boolean {
-  return /if\s*\(\s*backend\.kind === 'listings' && !loggedIn && !alreadyRestates\(backend\.reply\)\s*\)\s*\{\s*\n\s*backend\.reply = withRestate\(v, backend\.reply\);/.test(
+  return /if\s*\(\s*backend\.kind === 'listings' && !loggedIn && !alreadyRestates\(backend\.reply\)\s*\)\s*\{\s*\n\s*backend\.reply = withRestate\(v, backend\.reply, replyLocale\);/.test(
     agentTsSrc,
   );
 }

@@ -21,6 +21,7 @@ import {
   FALLBACK_ROUTINE,
   routineForKind,
   labelForKind,
+  routingWorklist,
 } from './lib/alertRouting.ts';
 
 let failed = 0;
@@ -108,8 +109,21 @@ check('workflow EXECUTES scripts/alert-routing-label.ts rather than restating th
   /scripts\/alert-routing-label\.ts/.test(wf));
 check('workflow creates the routine labels from ALERT_ROUTINE_LABELS', /ALERT_ROUTINE_LABELS/.test(wf));
 check('workflow applies the label to the issue', /gh issue edit .*--add-label/.test(wf));
+// The "already routed?" decision moved out of inline jq and into routingWorklist() on 2026-09-14,
+// because the jq version could only see what `gh issue list` returned — and that listing cannot
+// contain the issues the same run just filed (GitHub's search index lags creation by seconds), so
+// every alert issue went unrouted for a full dispatch cycle. The PROPERTY is unchanged and is
+// asserted here by EXECUTING the real rule rather than by matching its old source text, which is
+// strictly stronger: a regex over `startswith("routine-")` would pass against an implementation
+// that computed the flag and then ignored it.
 check('workflow only routes issues that have no routine label yet (a human re-route is respected)',
-  /startswith\("routine-"\)/.test(wf));
+  routingWorklist(
+    [{ number: 1, title: '[alert] a', labels: [{ name: 'ezhalah-alert' }, { name: 'routine-7-seam' }] },
+     { number: 2, title: '[alert] b', labels: [{ name: 'ezhalah-alert' }] }],
+    [],
+  ).map((w) => `${w.number}:${w.routed}`).join(',') === '1:true,2:false');
+check('workflow EXECUTES that rule instead of restating it in jq',
+  /alert-routing-worklist\.ts/.test(wf) && !/startswith\("routine-"\)/.test(wf));
 check('workflow still selects only unrouted issues from the ezhalah-alert queue',
   /--label ezhalah-alert/.test(wf));
 

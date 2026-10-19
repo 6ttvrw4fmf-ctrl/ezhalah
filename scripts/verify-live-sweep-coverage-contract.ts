@@ -17,6 +17,8 @@
 //   node --experimental-strip-types scripts/verify-live-sweep-coverage-contract.ts
 
 import { readFileSync } from 'node:fs';
+import { shippedTemplates, resultsFoundCount, shippedNoResultsTemplates, settledSource, ZERO_RE } from '../e2e/lib/resultsSentence.mjs';
+import { SECOND_PAGE_CAP as SHIPPED_SECOND_PAGE_CAP } from '../src/data/resultCount.ts';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -117,6 +119,51 @@ check('the «عرض المزيد» journey asserts continuation (pager present w
   /TRUE-TOTAL/.test(showMore) && /PAGER-MISSING/.test(showMore),
   'the continuation is only honest while a missing pager with matches remaining is a defect');
 
+// ── 1a. THE 500-CAP TERMINAL MUST BE REACHED, AND JUDGED (owner 2026-09-14, PR #2618) ───────────
+//
+// PR #2618 made «عرض المزيد» a TWO-TAP, 500-card affordance: the pager retires at the cap and
+// «تحديد أكثر» becomes the user's forward path. The journey's caller still passed `batches: 2`,
+// which was exactly right under the superseded drain model and silently wrong under this one — the
+// loop ended on the second press and never probed the pager again, so the terminal block was
+// UNREACHABLE for every cohort over the cap. Measured on production 2026-09-14
+// (الرياض/إيجار/سنوي, 20,658 matching): two presses → 500 cards → pager gone → «تحديد أكثر».
+//
+// Nothing in the browser layer asserted any of that. A build that kept offering «عرض المزيد» past
+// 500 (re-opening the ops_incident #212 renderer crash) or retired it with no «تحديد أكثر» (500 of
+// 20,658 shown and no way on) would have read as a clean sweep. So the reachability of the terminal
+// is itself part of the contract, not a tuning knob.
+{
+  const plainCall = runner.match(
+    /showMoreJourney\(\{(?![^}]*\baf:\s*true)[^}]*\bbatches:\s*(\d+)[^}]*\}\)/,
+  );
+  check('the plain «عرض المزيد» journey is configured to REACH the terminal (batches >= 3)',
+    plainCall != null && Number(plainCall[1]) >= 3,
+    plainCall
+      ? `the runner presses ${plainCall[1]}× — the pager retires on press 2, so the terminal state is never probed`
+      : 'could not find the plain showMoreJourney call in the runner');
+
+  check('the «عرض المزيد» journey judges the 500-cap terminal instead of standing down',
+    /CAP-STRANDS-USER/.test(showMore) && /results-narrow/.test(showMore),
+    'a retired pager with inventory unreached is only correct while «تحديد أكثر» is on screen — assert it, do not assume it');
+
+  check('the «عرض المزيد» journey bounds the reveal (the ops_incident #212 mount-crash class)',
+    /CAP-EXCEEDED/.test(showMore),
+    'every other per-batch assertion is happy when cards GROW, so an unbounded reveal passes unless the cap is asserted by number');
+}
+
+// The cap is ONE definition (src/data/resultCount.ts). showmore.mjs is plain ESM and cannot import
+// it, so it MIRRORS the number — and a mirror nothing checks is drift waiting to happen. Compare the
+// mirrored literal against the constant production actually ships, EXECUTED, not grepped: raising or
+// lowering SECOND_PAGE_CAP turns this red until the sweep follows.
+{
+  const mirrored = showMore.match(/^const SECOND_PAGE_CAP = (\d+);/m);
+  check('the sweep mirrors the SHIPPED reveal cap, with no drift',
+    mirrored != null && Number(mirrored[1]) === SHIPPED_SECOND_PAGE_CAP,
+    mirrored
+      ? `e2e/live-sweep/showmore.mjs mirrors ${mirrored[1]} but src/data/resultCount.ts ships ${SHIPPED_SECOND_PAGE_CAP}`
+      : 'showmore.mjs no longer declares the mirrored cap, so nothing pins it to the shipped one');
+}
+
 // ── 1b. THE CLOSING LINE AND THE HEADLINE MUST BE READ THE SAME WAY (2026-09-05) ────────────────
 // The journey used to read the closing line with `.match()` — the FIRST «من أصل|لقينا N إعلان» in
 // the document — while `visibleState.headline` is `[...matchAll].pop()`, the LAST. The results
@@ -130,23 +177,60 @@ check('the «عرض المزيد» journey asserts continuation (pager present w
 // a product failure.
 //
 // EXECUTED, not asserted about: both readings are run against a synthetic two-message transcript.
+// THE TRANSCRIPT IS BUILT FROM THE SHIPPED POOL, and the journey's OWN closing regex is lifted out
+// of showmore.mjs and EXECUTED against it (routine #10, 2026-09-19). Both halves used to be pinned
+// text: the headline was hand-written as the retired «لقينا N إعلان» — a sentence production has not
+// rendered since PR #3186 — and the reading rule was asserted by grepping showmore.mjs for the
+// literal `[...txt.matchAll(/(?:من أصل|لقينا)`. That pin failed the moment the journey's regex was
+// correctly narrowed to the closing sentence's real wording, and it could never have failed for the
+// thing it names: a closing regex that goes BLIND still contains the text it was grepped for.
+const headlineTemplate = shippedTemplates().find((t) => t.lang === 'ar' && !t.hasName)!.template;
+const headline = (n: string) => headlineTemplate.replace('{count}', n);
 const TRANSCRIPT = [
-  'لقينا 11,254 إعلان', '…cards…', 'عرضت لك أول 13 من أصل 11,254 إعلان مطابق.',
-  'لقينا 5,970 إعلان', '…cards…', 'عرضت لك أول 10 من أصل 5,970 إعلان مطابق.',
+  headline('11,254'), '…cards…', 'عرضت لك أول 13 من أصل 11,254 إعلان مطابق.',
+  headline('5,970'), '…cards…', 'عرضت لك أول 10 من أصل 5,970 إعلان مطابق.',
 ].join('\n');
-const CLOSING_RE = /(?:من أصل|لقينا)\s+([\d,٬]+)\s+إعلان/g;
-const HEADLINE_RE = /لقينا\s+([\d,٬]+)\s+إعلان/g;
-const firstRead = (TRANSCRIPT.match(new RegExp(CLOSING_RE.source)) ?? [])[0];
+
+// The journey's real reader, recovered from its source rather than restated here.
+const closingSrc = /closing: \(\[\.\.\.txt\.matchAll\((\/.+?\/)g\)\]\.pop\(\)/.exec(showMore)?.[1];
+check('the journey\'s closing-line reader can be recovered from showmore.mjs',
+  !!closingSrc, 'the `closing:` reader no longer has the matchAll(...).pop() shape — read it and re-pin it');
+const CLOSING_RE = new RegExp(closingSrc!.slice(1, -1), 'g');
+const firstRead = (TRANSCRIPT.match(new RegExp(CLOSING_RE.source)) ?? [])[1];
 const lastRead = ([...TRANSCRIPT.matchAll(CLOSING_RE)].pop() ?? [])[1];
-const headlineRead = ([...TRANSCRIPT.matchAll(HEADLINE_RE)].pop() ?? [])[1];
+const headlineRead = String(resultsFoundCount(TRANSCRIPT) ?? '');
+check('the shipped closing regex can actually READ the shipped closing sentence',
+  lastRead != null, 'showmore.mjs\'s closing reader matched nothing on a real transcript — it is blind');
 check('MUTATION — the OLD first-match reading really disagrees with the headline (the false defect)',
-  /11,254/.test(String(firstRead)) && headlineRead === '5,970',
-  'if these agreed, the barrier below would prove nothing');
-check('the FIXED last-match reading agrees with the headline on the same transcript',
-  lastRead === headlineRead, `closing=${lastRead} headline=${headlineRead}`);
+  /11,?254/.test(String(firstRead)) && headlineRead === '5970',
+  `if these agreed, the barrier below would prove nothing (first=${firstRead} headline=${headlineRead})`);
 check('the journey reads the closing line LAST-first, the same way visibleState reads the headline',
-  /\[\.\.\.txt\.matchAll\(\/\(\?:من أصل\|لقينا\)/.test(showMore) && /\.pop\(\)/.test(showMore),
-  'a first-match read compares two different messages and accuses production of its own imprecision');
+  String(lastRead).replace(/[,\u066c]/g, '') === headlineRead,
+  `closing=${lastRead} headline=${headlineRead} — a first-match read compares two different messages `
+  + 'and accuses production of its own imprecision');
+
+// MUTATION PROOFS for the three checks above — the two ways this reader has actually broken, each
+// EXECUTED against the same shipped-pool transcript rather than asserted about. Watched red on the
+// real file 2026-09-19 and restored; these keep the proof permanent.
+{
+  const mut = (label: string, caught: boolean) => {
+    if (caught) { console.log(`  ✓ MUTATION caught: ${label}`); return; }
+    check(`MUTATION NOT caught: ${label}`, false);
+  };
+  // (1) A closing regex that goes blind — the retired noun, which the shipped sentence never uses.
+  const blindRe = /لقينا\s+([\d,٬]+)\s+إعلان/g;
+  mut('a closing reader that matches NOTHING on a real transcript',
+    ([...TRANSCRIPT.matchAll(blindRe)].pop() ?? [])[1] === undefined);
+  // (2) The first-match read — the false «TRUE TOTAL» defect of 2026-09-05, which reports the
+  //     PRODUCT for the harness's own imprecision.
+  const realRe = new RegExp(CLOSING_RE.source, 'g');
+  const firstMatch = ([...TRANSCRIPT.matchAll(realRe)].shift() ?? [])[1];
+  mut('a FIRST-match closing read disagreeing with the headline',
+    String(firstMatch).replace(/[,\u066c]/g, '') !== headlineRead);
+  // (3) …and the control: the shipped last-match read agrees, so (2) is not vacuously red.
+  mut('the shipped LAST-match read is NOT flagged (the negative control)',
+    String(lastRead).replace(/[,\u066c]/g, '') === headlineRead);
+}
 
 // The Advanced Filter interview deliberately hides the whole actions row (owner 2026-08-21), so a
 // missing pager THERE is intended. The journey must consult that state before accusing — and must
@@ -158,6 +242,30 @@ check('the «عرض المزيد» journey checks whether the AF interview is op
 check('the journey still fails when the closing line offers «عرض المزيد» with no button rendered',
   /PROMISE-WITHOUT-BUTTON/.test(showMore) && /results-load-more/.test(showMore),
   'standing down on the AF case must not mean standing down on the defect inside it');
+
+// ── 1d. THE «عرض المزيد» JOURNEY COUNTS THE TURN IT PAGES, NOT THE TRANSCRIPT (2026-10-06) ──────
+// Counted document-wide, the AF cohort's pre-AF turn (24 cards) was added to the AF turn's 500 and
+// reported CAP-EXCEEDED «524» on a turn that stopped at exactly 500 (measured: grids [24, 500]).
+// EXECUTED: countCards()'s in-page function is lifted from showmore.mjs and run on a two-turn DOM.
+{
+  const body = /const countCards = \(page\) => page\.evaluate\(\(\) =>([\s\S]*?)\);\n/.exec(showMore)?.[1];
+  const twoTurns = (older: number, newest: number) => {
+    const grid = (n: number) => ({ cards: Array.from({ length: n }, () => ({})),
+      querySelectorAll(sel: string) { return sel.includes('card-listing-') ? this.cards : []; } });
+    const grids = [grid(older), grid(newest)];
+    return { querySelectorAll: (sel: string) => (sel.includes('result-card-grid') ? grids
+      : sel.includes('card-listing-') ? grids.flatMap((g) => g.cards) : []) };
+  };
+  const run = (src: string | undefined, doc: unknown) => (src ? new Function('document', `return (${src});`)(doc) : NaN);
+  check('the «عرض المزيد» journey\'s countCards() is found in showmore.mjs', body != null);
+  check('…and counts ONLY the newest results turn (pre-AF 24 + AF 500 reads 500, not 524)',
+    run(body, twoTurns(24, 500)) === 500, `read ${run(body, twoTurns(24, 500))}`);
+  check('…and that per-turn hook is still rendered by the product (ResultCardGrid testID)',
+    /testID="result-card-grid"/.test(read('src/components/ResultCardGrid.tsx')));
+  const docWide = "document.querySelectorAll('[data-testid^=\"card-listing-\"]').length";
+  check('(mutation) the document-wide count that reported CAP-EXCEEDED «524» is caught',
+    run(docWide, twoTurns(24, 500)) === 524 && run(docWide, twoTurns(24, 500)) !== run(body, twoTurns(24, 500)));
+}
 
 // ── 2. the floors, at or above the values the owner set ─────────────────────────────────────────
 const REQUIRED_FLOORS: Record<string, number> = {
@@ -239,8 +347,13 @@ check('the sweep declares ONE shared settle predicate (not a copy per journey)',
   /export const SETTLED_RE/.test(sweep)
   && !/\/لقينا\|ما لقينا\|ما فيه\//.test(sweep + journeys),
   'two hand-maintained copies is how one of them silently rots');
+// 2026-09-19: the shared in-page predicate is now settledSource() — GENERATED from the shipped
+// Results-Found pool rather than hand-written — because the hand-written one could not see 6 of the
+// 10 AR guest templates once the sentence became a rotation. The contract is unchanged and still the
+// point of this check: every journey waits on the ONE shared predicate, never a copy of its own.
 check('every journey waits on that shared predicate',
-  (sweep.match(/SETTLED_RE\.source/g) ?? []).length + (journeys.match(/SETTLED_RE\.source/g) ?? []).length >= 2);
+  (sweep.match(/settledSource\(\)/g) ?? []).length + (journeys.match(/settledSource\(\)/g) ?? []).length >= 2,
+  'a journey that builds its own wait regex is a copy that will rot separately');
 check('the product actually publishes terminal phrasings to check against',
   arabicTerminalPhrases.length >= 6, `found ${arabicTerminalPhrases.length} in src/i18n.tsx`);
 {
@@ -250,6 +363,56 @@ check('the product actually publishes terminal phrasings to check against',
   check('the settle predicate recognises EVERY result/zero state src/i18n.tsx can render',
     re != null && unseen.length === 0,
     unseen.length ? `unrecognised → the sweep would hang on:\n      ${unseen.slice(0, 4).join('\n      ')}` : 'could not parse SETTLED_RE');
+  // ── THE ZERO SENTENCE IS A ROTATION TOO (routine-4, 2026-09-27) ───────────────────────────────
+  //
+  // The i18n scan above discovers its population with a regex SEEDED ON THE PREDICATE'S OWN
+  // ALTERNATIVES (`لقينا|ما لقيت|ما لقينا|ما فيه`), so by construction it can only ever find phrases
+  // the predicate already matches: the check could not fail. Meanwhile `noResultsSuggestion()`'s
+  // catch-all became an 80-template ROTATION on 2026-09-26 (src/data/noResultsRotation.ts, owner
+  // rule) and nothing here looked at that file at all.
+  //
+  // MEASURED on production 2026-09-27: ثادق with an impossible budget rendered
+  // «ما طلع لنا تطابق في بحث العقار، جرّب توسّع نطاق البحث وإزهله 😢» — a correct, honest zero that
+  // the clock could not see. The wait timed out at 70s, the honest-zero journey died as a harness
+  // error, and the sweep went RED on a missed floor while the PRODUCT was perfectly healthy. The
+  // same city's sibling سيهات rendered «ما لقينا تطابق …» and passed, which is why the failure is
+  // intermittent and why five earlier runs looked fine.
+  //
+  // This half is now enumerated FROM THE POOL, so it is predicate-independent and cannot go vacuous.
+  {
+    const zero = shippedNoResultsTemplates();
+    check('the zero-state rotation pool parses COMPLETELY (a partial pool shrinks the clock silently)',
+      zero.length === 80 && zero.filter((t) => t.lang === 'ar').length === 40
+        && zero.filter((t) => t.lang === 'en').length === 40,
+      `parsed ${zero.length} (ar ${zero.filter((t) => t.lang === 'ar').length}, `
+      + `en ${zero.filter((t) => t.lang === 'en').length}) — 40 EN templates are DOUBLE-quoted `
+      + 'because they contain apostrophes, and a single-quote-only parser returned 40 of 80 while '
+      + 'staying non-empty, so the "refusing to run blind" guard never fired');
+
+    // What the app really renders: {name} substituted, exactly as a logged-in user would see it.
+    const rendered = zero.map((t) => t.template.replace(/\{name\}/g, 'سارة'));
+    const clock = new RegExp(settledSource());
+    const blind = rendered.filter((r) => !clock.test(r));
+    check('the settle clock recognises EVERY shipped zero-state template, guest and logged-in',
+      blind.length === 0,
+      blind.length ? `${blind.length} would hang the sweep, e.g.:\n      ${blind.slice(0, 3).join('\n      ')}` : '');
+
+    // MUTATION — the hand-written zero regex that shipped before today must FAIL against the pool,
+    // and must fail specifically on the sentence measured on production.
+    const preFix = /ما لقينا|ما لقيت|ما فيه نتائج|ما فيه إعلانات/;
+    const measured = 'ما طلع لنا تطابق في بحث العقار، جرّب توسّع نطاق البحث وإزهله 😢';
+    const missedByPreFix = rendered.filter((r) => !preFix.test(r));
+    check('MUTATION: the pre-2026-09-27 hand-written zero regex is rejected by the pool it must cover',
+      missedByPreFix.length > 0 && !preFix.test(measured) && clock.test(measured),
+      `pre-fix regex missed ${missedByPreFix.length} of ${rendered.length} shipped zero templates`);
+
+    // …and the discovery must not be seedable back into vacuity: the pool is read from the app's own
+    // file, so a template added tomorrow in ANY wording is covered without editing this check.
+    check('the zero population comes from the shipped pool, not from the predicate',
+      /shippedNoResultsTemplates/.test(read('scripts/verify-live-sweep-coverage-contract.ts')),
+      'enumerating from the predicate is how this check passed for a rotation it could not see');
+  }
+
   // MUTATION — the pre-2026-08-26 predicate must FAIL this check.
   const old = /لقينا|ما لقينا|ما فيه/;
   check('MUTATION: the old predicate is rejected (it could not see «ما لقيت …»)',

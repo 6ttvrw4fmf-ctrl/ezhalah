@@ -47,6 +47,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import unquote
 
 from curl_cffi import requests as cc
 
@@ -59,6 +60,8 @@ from scrapers.common.arabic_location import to_catalog  # noqa: E402
 
 BASE = "https://mizlaj.com.sa"
 MAP_DATA = f"{BASE}/api/guest/listings/map-data"
+SITEMAP = f"{BASE}/sitemap.xml"
+LISTING_URL_RE = re.compile(r"/guest/listings/([^/?#]+)")
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 
 # propertyType.code (Arabic type word) → canonical English type. عمارة/ارض get usage-routed below.
@@ -246,8 +249,46 @@ def fetch_map_data(s: cc.Session) -> list[dict]:
             j = r.json()
         except Exception:
             return []
-        return j.get("data") or (j if isinstance(j, list) else [])
+        # 2026-09-18: the endpoint started answering with the OFFICES layer — real-estate agencies,
+        # not properties. Their `slug` ("office-5") looks exactly like a listing slug, so without
+        # this guard the caller fetches /guest/listings/office-5, gets a 404 for every record and
+        # reports a clean "0 listings" run against a source that still publishes 30. Only trust a
+        # payload that says it is the listings layer; anything else is NOT discovery.
+        if isinstance(j, dict):
+            layer = (j.get("layer") or "").strip().lower()
+            if layer and layer != "listings":
+                print(f"   ⚠ mizlaj map-data returned the '{layer}' layer, not listings")
+                return []
+            return j.get("data") or []
+        return j if isinstance(j, list) else []
     return []
+
+
+def fetch_sitemap_slugs(s: cc.Session) -> list[str]:
+    """Discover listing slugs from sitemap.xml — the fallback when map-data stops carrying them.
+
+    The detail parser is unaffected by the map-data change: /guest/listings/<slug> still serves the
+    same Inertia props.listing, and map_listing() already treats the map-data record as an optional
+    fallback for location only, so {} is a valid record. That makes the sitemap a complete
+    substitute for discovery alone.
+    """
+    _throttle()
+    try:
+        r = s.get(SITEMAP, timeout=30)
+    except Exception:
+        return []
+    if r.status_code != 200:
+        return []
+    out, seen = [], set()
+    for loc in re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", r.text):
+        m = LISTING_URL_RE.search(loc)
+        if not m:
+            continue
+        slug = unquote(m.group(1)).strip("/")
+        if slug and slug not in seen:
+            seen.add(slug)
+            out.append(slug)
+    return out
 
 
 def fetch_detail(s: cc.Session, slug: str) -> Optional[dict]:
@@ -272,6 +313,32 @@ def fetch_detail(s: cc.Session, slug: str) -> Optional[dict]:
         if isinstance(listing, dict) and "data" in listing and isinstance(listing["data"], dict):
             listing = listing["data"]  # tolerate an Inertia resource wrapper
         return listing if isinstance(listing, dict) else None
+    return None
+
+
+# ── availability: the listing page's OWN flags (crawler audit 2026-10-02) ──────────────────────
+# Every /guest/listings/<slug> page carries is_sold / is_reserved / deleted_at in props.listing.
+# Measured on all 34 live pages 2026-10-02: is_sold False ×34, is_reserved False ×34, deleted_at
+# null ×34 — so that triple is the one state known to mean "on the market", and until now none of
+# the three was read: a listing sold or reserved in place kept being upserted ACTIVE. Any other
+# value has never been observed, so it is not declared gone either: the row is simply NOT WRITTEN
+# this run (never re-asserted alive) and counted in the run notes. Its lifecycle stays with
+# prune_unseen + the 404/410 oracle (_probe), which cannot deactivate a page that still answers 200.
+# An unreadable page (no props.listing) is the same: could-not-read is never "available". This
+# also closes the map-data-mode hole where a row whose page fetch FAILED was written from the list
+# record alone. NOT used: listing_status_id (28 ×31, 31 ×2, 35 ×1 — opaque ids, no label published).
+_AVAILABLE_FLAGS = {"is_sold": False, "is_reserved": False, "deleted_at": None}
+
+
+def held_reason(listing: Optional[dict]) -> Optional[str]:
+    """None when the page itself states the measured available state; else why the row is held."""
+    if not isinstance(listing, dict):
+        return "page_unreadable"
+    for key, available in _AVAILABLE_FLAGS.items():
+        if key not in listing:
+            return f"{key}_missing"
+        if listing[key] is not available:
+            return key
     return None
 
 
@@ -548,7 +615,14 @@ def main() -> int:
 
     md_rows = fetch_map_data(s)
     if not md_rows:
-        msg = "map-data returned no listings (source unreachable, blocking, or schema change)"
+        # Discovery fell over, but the source may be perfectly healthy — recover slugs from the
+        # sitemap before declaring the run dead. A failed discovery is not an empty source.
+        slugs = fetch_sitemap_slugs(s)
+        if slugs:
+            print(f"Mizlaj: map-data carried no listings; recovered {len(slugs)} slugs from sitemap.xml")
+            md_rows = [{"slug": sl} for sl in slugs]
+    if not md_rows:
+        msg = "map-data AND sitemap returned no listings (source unreachable, blocking, or schema change)"
         print(f"✗ Mizlaj: {msg}")
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=msg[:300])
@@ -561,12 +635,17 @@ def main() -> int:
     res: list[dict] = []
     com: list[dict] = []
     seen = 0
+    held: dict[str, int] = {}          # held_reason → count (not upserted, not declared gone)
     try:
         for md in md_rows:
             slug = md.get("slug")
             if not slug:
                 continue
             listing = fetch_detail(s, slug)
+            why = held_reason(listing)
+            if why:
+                held[why] = held.get(why, 0) + 1
+                continue
             row, cat = map_listing(md, listing)
             if not row:
                 continue
@@ -575,6 +654,11 @@ def main() -> int:
             (com if cat == "commercial" else res).append(row)
             seen += 1
 
+        if held:
+            print(f"  held, page does not state the available flags (not upserted, not guessed): {held}")
+            if not (res or com):
+                # fail closed: not one page states the flags → the status source is unreadable.
+                raise RuntimeError(f"no listing page states is_sold/is_reserved/deleted_at: {held}")
         if res:
             db.upsert_mizlaj_residential_batch(res)
         if com:
@@ -592,6 +676,18 @@ def main() -> int:
 
         # Full run: prune listings active before but not seen this crawl (we fetched the FULL catalog).
         pruned = 0
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+        # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+        # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+        # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+        superseded = db.retire_superseded_siblings(
+            res_table="mizlaj_residential_listings", com_table="mizlaj_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source="Mizlaj")
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
         for tbl, rows_seen in (("mizlaj_residential_listings", res),
                                ("mizlaj_commercial_listings", com)):
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Mizlaj",
@@ -601,7 +697,7 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ Mizlaj: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["mizlaj_residential_listings", "mizlaj_commercial_listings"])
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}" + (f" held={held}" if held else ""), check_tables=["mizlaj_residential_listings", "mizlaj_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

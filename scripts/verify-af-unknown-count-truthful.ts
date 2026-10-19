@@ -30,19 +30,24 @@
 //     A 9th bucket would silently inflate "did not mention", so the 8-value domain is pinned below.
 //   • PROPERTY AGE has a real `cnt_unknown` column and needs no arithmetic.
 //
-// THE ABSENCES, AND WHY EACH IS RIGHT
-//   • AMENITIES — no single unknown exists; each chip is its own column, so one number would be a
-//     lie about the others.
+// THE OTHER SIX READ A REAL DB COLUMN (owner 2026-10-03: «😔 on every advanced filter question»)
+//   None of them can be derived client-side without lying, which is why they showed nothing until
+//   migration 20261003184909 made apartment_guided_counts_ar count `IS NULL` in the committed scope:
 //   • BATHROOMS / STREET_WIDTH / RATING — threshold ladders: total − (≥1) conflates NULL with rows
-//     genuinely below the threshold.
-//   • UNIT_SUBTYPE — total − Σ(3) is right only while the value domain has exactly 3 members. True
-//     today, but a data fact rather than an invariant, so it must not be published as truth.
-//   • RNPL — false and null are inseparable from cnt_rnpl alone.
+//     genuinely below the threshold (393 real zero-bathroom rows) → cnt_bath/stw/rating_unknown.
+//   • UNIT_SUBTYPE — total − Σ(3) is right only while the domain has 3 members → cnt_sub_unknown.
+//   • RNPL — false and null are inseparable from cnt_rnpl alone → cnt_rnpl_unknown.
+//   • AMENITIES — one column per chip, so no subtraction is honest → cnt_amen_unknown = every amenity
+//     column NULL (the listing stated no amenity at all).
+//   Section 5 pins that each reads ITS column and never falls back to a subtraction.
 //
 //   node --experimental-strip-types scripts/verify-af-unknown-count-truthful.ts   (in `npm test`)
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
+import { liftSymbols } from './lib/liftSymbols.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -134,24 +139,40 @@ function callArgCounts(body: string, fn: string): number[] {
     from = i + 1;
   }
 }
-const MUST_NOT_CLAIM: Array<[string, string, string]> = [
-  ['AMENITIES_QUESTION', 'const BATHROOMS_QUESTION', 'each chip is its own column — no single unknown exists'],
-  ['BATHROOMS_QUESTION', 'const FURNISHED_QUESTION', 'threshold ladder — NULL and below-threshold are not separable'],
-  ['STREET_WIDTH_QUESTION', 'const DIRECTION_DEFS', 'threshold ladder'],
-  ['RATING_QUESTION', 'const UNIT_SUBTYPE_QUESTION', 'threshold ladder'],
-  ['UNIT_SUBTYPE_QUESTION', 'export const ADVANCED_QUESTIONS', 'value domain is a data fact, not an invariant'],
-  ['RNPL_QUESTION', 'const AMENITIES_QUESTION', 'false and null inseparable from cnt_rnpl'],
+// Each of these must pass a THIRD argument that reads its own DB unknown column — a bare column read,
+// never arithmetic (a subtraction is exactly the lie the column exists to replace).
+const MUST_READ_COLUMN: Array<[string, string, string]> = [
+  ['AMENITIES_QUESTION', 'const BATHROOMS_QUESTION', 'cnt_amen_unknown'],
+  ['BATHROOMS_QUESTION', 'const FURNISHED_QUESTION', 'cnt_bath_unknown'],
+  ['STREET_WIDTH_QUESTION', 'const DIRECTION_DEFS', 'cnt_stw_unknown'],
+  ['RATING_QUESTION', 'const UNIT_SUBTYPE_QUESTION', 'cnt_rating_unknown'],
+  ['UNIT_SUBTYPE_QUESTION', 'export const ADVANCED_QUESTIONS', 'cnt_sub_unknown'],
+  ['RNPL_QUESTION', 'const AMENITIES_QUESTION', 'cnt_rnpl_unknown'],
 ];
-for (const [q, end, why] of MUST_NOT_CLAIM) {
-  const body = questionBody(`const ${q}`, end);
-  const calls = callArgCounts(body, 'guidedOptions');
-  // Every guidedOptions call in this question must pass exactly 2 args (counts, defs). A third is
-  // an unknown-count claim. Requiring calls.length > 0 is what stops the check going vacuous if the
-  // question is ever restructured out from under it.
-  check(`${q} reports NO unknown count — ${why}`,
-    body.length > 0 && calls.length > 0 && calls.every((n) => n === 2),
-    calls.length ? `guidedOptions arg counts: ${calls.join(', ')}` : 'NO guidedOptions call found — check went vacuous');
-}
+const columnProblems = (src: string): string[] => {
+  const out: string[] = [];
+  const bodyIn = (marker: string, end: string) => {
+    const i = src.indexOf(marker);
+    return i < 0 ? '' : src.slice(i, src.indexOf(end, i) > 0 ? src.indexOf(end, i) : i + 1400);
+  };
+  for (const [q, end, col] of MUST_READ_COLUMN) {
+    const body = bodyIn(`const ${q}`, end);
+    const calls = callArgCounts(body, 'guidedOptions');
+    if (!body || !calls.length) { out.push(`${q}: NO guidedOptions call found — check went vacuous`); continue; }
+    if (!calls.every((n) => n === 3)) out.push(`${q}: a guidedOptions call has no unknown resolver (arg counts ${calls.join(', ')}) — its 😔 line disappears`);
+    const reads = body.match(/\(c\) => c\.cnt_\w+_unknown\b[^,)]*/g) ?? [];
+    if (reads.length !== calls.length || !reads.every((r) => r.trim() === `(c) => c.${col}`))
+      out.push(`${q}: the unknown resolver is not the bare ${col} read (${reads.join(' | ') || 'none'})`);
+  }
+  return out;
+};
+const colReal = columnProblems(af);
+check('the six DB-backed questions each read their own IS NULL column, never a subtraction',
+  colReal.length === 0, colReal.join('; '));
+check('the client type carries every DB unknown column the questions read',
+  MUST_READ_COLUMN.every(([, , col]) => new RegExp(`\\b${col}: number`).test(read('src/data/remote.ts'))));
+check('the migration that creates those columns is in the repo (mirror rule)',
+  MUST_READ_COLUMN.every(([, , col]) => read('supabase/migrations/20261003184909_af_guided_counts_unknown_count_for_every_question.sql').includes(`as ${col}`)));
 // And the two that DO claim one must genuinely pass the third argument, or the derivations above are
 // dead prose describing code that no longer runs.
 for (const [q, end] of [['FURNISHED_QUESTION', 'const STREET_WIDTH_QUESTION'], ['DIRECTION_QUESTION', 'const RATING_QUESTION']] as const) {
@@ -164,7 +185,152 @@ for (const [q, end] of [['FURNISHED_QUESTION', 'const STREET_WIDTH_QUESTION'], [
 check('guidedOptions carries the owner rule in prose at the point of temptation',
   /never display a fake unknown count|NEVER GUESSED/i.test(af));
 
+// ── 7. EXECUTION: RUN THE REAL guidedOptions ─────────────────────────────────────────────────────
+// Everything above this line reads TEXT. That is not nothing — the structural checks balance
+// brackets and one of them already caught a vacuous green — but a regex over a file is a statement
+// about the file, and the rule this barrier enforces is about a VALUE the user is shown. On
+// 2026-09-04 an audit found five barriers that ASSERTED THE BUG rather than catching it, and every
+// one was a source-TEXT tripwire over a path that was broken the whole time it was green
+// (docs/ops/BARRIER_ENGINEER.md §0.1). Converted by routine #10, 2026-09-18 (ops_incident #136).
+//
+// The REAL guidedOptions is lifted and run. Its three real collaborators are IMPORTED, not shimmed —
+// isProbeFailure, meaningful and MIN_TOTAL_TO_SHOW are the actual shipped implementations, so this
+// cannot drift from production the way a hand-copied duplicate did on 2026-08-29 with extractPrice.
+// Only `t` is shimmed, because it translates a LABEL and cannot influence a count.
+const AF_PATH = join(root, 'src/data/advancedFilters.ts');
+const url = (p: string) => pathToFileURL(join(root, p)).href;
+const PRELUDE = `
+import { isProbeFailure } from '${url('src/lib/afProbe.ts')}';
+import { meaningful, MIN_TOTAL_TO_SHOW } from '${url('src/lib/afRanking.ts')}';
+const t = (k: string) => k;
+type GuidedCounts = Record<string, number>;
+type AdvancedQuestionResult = { options: unknown[]; unknownCount: number | null; total: number; probeFailed?: boolean };
+`;
+
+const liftFrom = async (file: string) =>
+  (await liftSymbols(file, [{ header: 'function guidedOptions(' }], ['guidedOptions'], PRELUDE))
+    .guidedOptions as (c: unknown, d: unknown[], u?: (c: any) => number) => {
+      options: unknown[]; unknownCount: number | null; total: number; probeFailed?: boolean };
+
+const guidedOptions = await liftFrom(AF_PATH);
+
+// REAL PRODUCTION COUNTS, not a fixture this barrier invented. Measured 2026-09-18 against
+// search_listings_ar for deal_ar='إيجار' AND city_ar='الرياض' — the scope a Riyadh rent search hits:
+//
+//   total 33,464 · furnished 2,266 · unfurnished 8,397 · furnished IS NULL 22,801
+//
+// and 33,464 − 2,266 − 8,397 = 22,801 EXACTLY. So the FURNISHED derivation is checked against the
+// database's own answer to "how many listings never said", not against arithmetic this file chose.
+// A barrier that supplies its own input proves nothing (PART 6, Prohibition 2.3).
+const PROD = { cnt_total_base: 33464, cnt_furnished: 2266, cnt_unfurnished: 8397 };
+const PROD_TRUE_UNKNOWN = 22801;
+const FURNISHED_UNKNOWN = (c: any) => c.cnt_total_base - c.cnt_furnished - c.cnt_unfurnished;
+const DEFS = [
+  { key: 'furnished', labelKey: 'Furnished', count: (c: any) => c.cnt_furnished },
+  { key: 'unfurnished', labelKey: 'Unfurnished', count: (c: any) => c.cnt_unfurnished },
+];
+
+check('the FURNISHED derivation, RUN over real production counts, equals the DB\'s own "never said" count',
+  guidedOptions(PROD, DEFS, FURNISHED_UNKNOWN).unknownCount === PROD_TRUE_UNKNOWN,
+  `got ${guidedOptions(PROD, DEFS, FURNISHED_UNKNOWN).unknownCount}, production says ${PROD_TRUE_UNKNOWN}`);
+
+// THE RULE ITSELF, EXECUTED: no resolver means "no honest number exists", and that is null — never 0.
+const absent = guidedOptions(PROD, DEFS);
+check('a question with NO unknown resolver returns null, not a fabricated 0',
+  absent.unknownCount === null, `got ${JSON.stringify(absent.unknownCount)}`);
+
+// A probe that never completed is UNKNOWN. This is the owner-locked silent→NULL, never unknown→NO
+// rule at the exact line that decides it, and the one this file's prose says would be "worse than
+// the missing caption" if it printed 0.
+const failed = guidedOptions({ __probeFailed: true }, DEFS, FURNISHED_UNKNOWN);
+check('a FAILED probe yields null + probeFailed, never 0 (a failed fetch is not an empty answer)',
+  failed.unknownCount === null && failed.probeFailed === true,
+  `got unknownCount=${JSON.stringify(failed.unknownCount)} probeFailed=${JSON.stringify(failed.probeFailed)}`);
+
+check('a scope below MIN_TOTAL_TO_SHOW reports null rather than inventing a number',
+  guidedOptions({ ...PROD, cnt_total_base: 3 }, DEFS, FURNISHED_UNKNOWN).unknownCount === null);
+
+// The clamp, executed rather than grepped: arithmetic that stops partitioning must not print a
+// negative "did not mention".
+check('arithmetic that no longer partitions is clamped at 0, never rendered negative',
+  guidedOptions({ cnt_total_base: 100, cnt_furnished: 80, cnt_unfurnished: 80 }, DEFS, FURNISHED_UNKNOWN)
+    .unknownCount === 0);
+
+// ── MUTATION PROOFS: the real file, really mutated, really re-executed ───────────────────────────
+// Not a synthetic predicate fed a broken value — the SHIPPED source with the defect written back
+// into it, lifted and run. This is the strongest form available and it is what "watched to fail"
+// means (PART 5).
+const mutations: string[] = [];
+
+// THE ANCHOR MUST LAND INSIDE THE LIFTED FUNCTION, and this is not pedantry — it caught a real
+// no-op proof while this section was being written. `isProbeFailure(counts)) return { options: [],
+// unknownCount: null, total: 0, probeFailed: true };` appears TWICE in advancedFilters.ts, in two
+// different functions. String.replace takes the FIRST, which is outside guidedOptions, so the
+// mutant was written to a region liftSymbols never lifts: the proof reported the defect as
+// SURVIVING when in truth it had never been introduced. A whole-file `mutated !== src` guard is not
+// enough — the file DID change. Only the lifted slice counts.
+const guidedSlice = (s: string) => {
+  const a = s.indexOf('function guidedOptions(');
+  const b = s.indexOf('\n}\n', a);
+  return a < 0 || b < 0 ? '' : s.slice(a, b);
+};
+
+const mustCatch = async (what: string, anchor: string, replacement: string, broken: (r: any) => boolean) => {
+  const src = readFileSync(AF_PATH, 'utf8');
+  const slice = guidedSlice(src);
+  const hits = slice.split(anchor).length - 1;
+  if (hits !== 1) {
+    failures++;
+    console.log(`  ❌ MUTATION ANCHOR NOT UNIQUE INSIDE guidedOptions (${hits} occurrence(s)): ${what} — ` +
+      `nothing was proven; a mutant outside the lifted region reads as a surviving defect`);
+    return;
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'ezhalah-af-mutant-'));
+  const p = join(dir, 'advancedFilters.ts');
+  const mutated = src.replace(slice, slice.replace(anchor, replacement));
+  if (mutated === src) { failures++; console.log(`  ❌ MUTATION NO-OP: ${what}`); return; }
+  writeFileSync(p, mutated);
+  let caught = false;
+  try { caught = broken(await liftFrom(p)); } catch { caught = true; }
+  if (caught) { mutations.push(what); return; }
+  failures++;
+  console.log(`  ❌ MUTATION SURVIVED: ${what} would NOT be caught`);
+};
+
+await mustCatch('the fabricated zero returning instead of null — the exact regression this file exists for',
+  'unknownCount: unknownOf ? Math.max(0, unknownOf(counts)) : null,',
+  'unknownCount: unknownOf ? Math.max(0, unknownOf(counts)) : 0,',
+  (g) => g(PROD, DEFS).unknownCount !== null);
+await mustCatch('a failed probe being reported as an honest zero',
+  'return { options: [], unknownCount: null, total: 0, probeFailed: true };',
+  'return { options: [], unknownCount: 0, total: 0, probeFailed: true };',
+  (g) => g({ __probeFailed: true }, DEFS, FURNISHED_UNKNOWN).unknownCount !== null);
+await mustCatch('the clamp removed, so a broken partition renders a negative "did not mention"',
+  'Math.max(0, unknownOf(counts))', 'unknownOf(counts)',
+  (g) => (g({ cnt_total_base: 100, cnt_furnished: 80, cnt_unfurnished: 80 }, DEFS, FURNISHED_UNKNOWN)
+    .unknownCount ?? 0) < 0);
+await mustCatch('the MIN_TOTAL_TO_SHOW floor inverted, so a tiny scope publishes a number anyway',
+  'counts.cnt_total_base < MIN_TOTAL_TO_SHOW', 'false',
+  (g) => g({ ...PROD, cnt_total_base: 3 }, DEFS, FURNISHED_UNKNOWN).unknownCount !== null);
+
+const colMut = (what: string, from: string, to: string) => {
+  const mutated = af.replace(from, to);
+  if (mutated === af) { failures++; console.log(`  ❌ MUTATION NO-OP: ${what}`); return; }
+  if (columnProblems(mutated).length > 0) mutations.push(what);
+  else { failures++; console.log(`  ❌ MUTATION SURVIVED: ${what} would NOT be caught`); }
+};
+colMut('bathrooms losing its resolver (the 😔 line silently vanishes)',
+  "rungs.filter((d) => parseInt(d.key, 10) > floor), (c) => c.cnt_bath_unknown)", "rungs.filter((d) => parseInt(d.key, 10) > floor))");
+colMut('bathrooms going back to the threshold subtraction (folds real zeros into "did not mention")',
+  '(c) => c.cnt_bath_unknown', '(c) => c.cnt_total_base - c.cnt_bath1');
+colMut('one amenities branch dropping its resolver',
+  'chosen, (c) => c.cnt_amen_unknown)', 'chosen)');
+colMut('RNPL reading another question\'s column',
+  '(c) => c.cnt_rnpl_unknown', '(c) => c.cnt_amen_unknown');
+
+for (const m of mutations) console.log(`  ✓ mutation caught: ${m}`);
+
 console.log(failures === 0
-  ? '\n✅ verify-af-unknown-count-truthful: all checks passed.'
+  ? `\n✅ verify-af-unknown-count-truthful: all checks passed (${mutations.length} mutations, real symbol executed).`
   : `\n❌ verify-af-unknown-count-truthful: ${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

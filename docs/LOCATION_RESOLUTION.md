@@ -19,7 +19,10 @@ recurring in any form, on any field.
    `resolve_slug()` (pre-existing, unchanged) are the ONLY sanctioned way to turn a source's raw
    city/district text into a catalog id. Never-guess by construction: a twin city name (ambiguous
    across regions) only resolves via a `region_hint` or (new) a matching `district_ar` that narrows
-   the candidate set to exactly one city — never a coin-flip. `PLACEHOLDER_TOKENS`/`is_placeholder()`
+   the candidate set to exactly one city — never a coin-flip. Aqar Monthly (2026-10-18): when its
+   slug resolves no city, `_resolve_location()` retries once with the region of Aqar's own
+   `city_id` (`AQAR_CITY_REGION`, measured ≥ 96% one region per id) as the hint — it never overrides
+   a city the slug resolved. `PLACEHOLDER_TOKENS`/`is_placeholder()`
    (in the dependency-free `scrapers/common/placeholder_tokens.py`, imported by both this module and
    `db.py` with zero circular-import risk) mean a placeholder value showing up as raw input is
    treated as absent, never "resolved" to itself.
@@ -171,6 +174,32 @@ memory `project-city-ar-district-ar-root-cause-2026-07-16` (Supabase project `aa
    Sequence migration scraper-by-scraper, starting with already-Arabic-native ones (sanadak, hajer,
    aldarim, aqargate, alhoshan, aqarmonthly — already call `to_catalog()` today), and design an
    explicit English-bridge (or defer entirely) for Wasalt rather than swapping it blind.
+
+## A bare directional/age/position adjective must never win as a CITY (found 2026-09-25)
+
+A different failure mode from twin-city ambiguity below: some Arabic relative/comparative
+adjectives (direction: شرقي/غربي/شمالي/جنوبي/وسطى; age: جديد/قديم/حديث/محدث; relative position:
+عليا/سفلى/كبرى/صغرى) grammatically require a head noun to name a place ("الحي الشرقي", "المدينة
+الجديدة"). A bare occurrence in free listing text is overwhelmingly a truncated modifier — but the
+catalog ALSO happens to hold each of these, once, as a real (obscure, low-population) standalone
+town. A resolver that free-text-scans a title and accepts the first catalog hit (ialqarawi's
+`city_from_title()`, the shape any future title-scanning scraper would reach for) can match the
+adjective instead of the real city the rest of the sentence names — found live: a Makkah plot and
+a Khobar plot both served as being in an unrelated Asir village of that literal spelling.
+
+**Use `arabic_location.is_ambiguous_standalone_word()`** on every free-text scan candidate before
+accepting it as a city, exactly like an ordinary stopword — see `AMBIGUOUS_STANDALONE_WORDS` for
+the full word list and the reasoning for why this is a closed linguistic class (not an
+open-ended list) and NOT the same problem as a popular reused neighbourhood name (الروضة/النزهة
+exist in 40-60 different cities each and ARE legitimate standalone place names — their risk is
+twin-city disambiguation below, not "is this a place at all"). Fleet-wide backstop:
+`mon_detect_ambiguous_adjective_resolved_as_city()` (P1, must always read 0).
+
+**If the free-text scan finds no city at all**, try the listing's own structured district/city
+field as a last resort (`to_catalog(district_field)`) — but ONLY when the title-scan result is
+empty, never to override a title that already resolved a real city (a naive "prefer the field"
+rule would break the pre-existing "«الحي» field secretly holds a wrong city 500km away" guard —
+see `test_a_district_field_holding_a_city_never_reaches_the_card` in ialqarawi's test file).
 
 ## District-based disambiguation — a known limitation, not a defect
 

@@ -54,6 +54,22 @@ const CASES: Array<[string, { areaMin?: number; areaMax?: number }]> = [
   ['فيلا بسعر فوق مليون ريال', {}],
   ['فيلا للبيع فوق 500 الف', {}],
   ['فيلا 300 متر', {}],
+  // «م» is the unit «m» AND the first letter of «مليون»: a budget in millions must never be read as an area (found live 2026-10-11:
+  // «فيلا للبيع في جدة تحت ٣ مليون» searched «up to 3 m²» and returned nothing)
+  ['فيلا للبيع في جدة تحت ٣ مليون', {}],
+  ['فيلا من ٢ الى ٣ مليون', {}],
+  ['شقة اقل من ٥ مليون', {}],
+  ['بين ٢ و ٣ مليون ريال', {}],
+  ['ارض فوق ٢ مليون', {}],
+  ['فيلا تحت ٣ ملايين', {}],
+  ['فيلا اقل من 400 م', { areaMax: 400 }],
+  // the user's own ways of saying «at most» / «at least» (found by the live UI battery: «ما تزيد عن ١٢٠ متر» showed «المساحة: 120 م²», an exact size)
+  ['شقة في الرياض ما تزيد عن ١٢٠ متر', { areaMax: 120 }], ['شقة ما يزيد عن 150 م', { areaMax: 150 }], ['فيلا لا تتجاوز ٤٠٠ متر', { areaMax: 400 }], ['ارض بحد اقصى ٨٠٠ متر', { areaMax: 800 }],
+  ['شقة لا تزيد عن ١٠٠ متر', { areaMax: 100 }], ['house not more than 300 sqm', { areaMax: 300 }], ['ما تتعدى ٢٠٠ متر', { areaMax: 200 }],
+  ['فيلا لا تقل عن ٣٠٠ متر', { areaMin: 300 }], ['ارض ما تقل عن ٦٠٠ متر', { areaMin: 600 }], ['شقة على الاقل ١٥٠ متر', { areaMin: 150 }], ['villa at least 400 sqm', { areaMin: 400 }],
+  ['فيلا ما تزيد عن ٣ مليون', {}], ['فيلا لا تتجاوز ٥ مليون', {}], ['ارض لا تقل عن ٢ مليون', {}],
+  ['ارض ٦٠٠ م وفوق', { areaMin: 600 }],
+  ['شقة من ١٠٠ الى ٢٠٠ م', { areaMin: 100, areaMax: 200 }],
   ['شقة 3 غرف في الرياض', {}],
   ['فيلا في الرياض', {}],
 ];
@@ -83,6 +99,20 @@ const mustCatch = (label: string, invariantHeldOnBrokenInput: boolean) =>
 mustCatch('«فوق N متر» must not parse as empty', eq(parseAreaConstraint('مساحتها فوق 1000 متر'), {}));
 // If a budget were read as area, «فوق مليون ريال» would yield a min → it must stay empty.
 mustCatch('a riyal budget must not become an area', parseAreaConstraint('فوق 900 ريال').areaMin != null);
+
+// the REAL bug: with the old unit («م» with no letter guard) «تحت ٣ مليون» is read as «under 3 m²» — prove the table above would have caught it
+{
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const mutFile = join(mkdtempSync(join(tmpdir(), 'ez-area-')), 'agent.ts');
+  const mutated = src.replace('م(?![ء-ي])\\\\.?', 'م\\\\.?');
+  writeFileSync(mutFile, mutated);
+  const mut = await liftSymbols(mutFile, [{ header: 'export function parseAreaConstraint', endsWith: /^\}$/ }], ['parseAreaConstraint'],
+    "const _AR_DIGITS = '\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669'; const _n = (x) => parseInt(String(x).replace(/[,\u060C\s]/g, ''), 10) || 0;");
+  const old = mut.parseAreaConstraint as (t: string) => { areaMin?: number; areaMax?: number };
+  check('the unguarded «م» unit really did read a budget as an area (so this fix is proven)', mutated !== src && !eq(old('فيلا للبيع في جدة تحت ٣ مليون'), {}));
+  check('…and the guarded real parser does not', eq(parseAreaConstraint('فيلا للبيع في جدة تحت ٣ مليون'), {}));
+}
 
 console.log(failed
   ? `\n✗ verify-agent-area-constraint: ${failed} check(s) failed.\n`

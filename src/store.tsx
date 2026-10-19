@@ -1,6 +1,6 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } from '@/i18n';
+import { useI18n, LOCALE_KEY, getLocale, getLocaleRevision, detectLocale, setLocalePersistence, type Locale } from '@/i18n';
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
 import { HOME_DEFAULT_QUERY, migrateGroups } from '@/lib/searchDefaults';
 import { isSameSavedSearch } from '@/lib/savedSearchIdentity';
@@ -9,18 +9,24 @@ import { autoTitleForQuery, autoTitleForPrompt, canAutoRetitle, type TitleSource
 import { dismissalOutlivesTransition } from '@/lib/authPopupBehavior';
 import { buildPools, type Listing } from '@/data/listings';
 import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
-import { resolveLocation, ensureLocationIndex } from '@/data/locations';
+import { newSearchSeed } from '@/lib/rotationSeed';
+import { resolveLocation, ensureLocationIndex, liveShelfCount } from '@/data/locations';
+import { shelfCount, zeroContradictsShelf } from '@/lib/shelfCheck';
+import { logZeroResult } from '@/data/zeroResultLog';
 import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
 import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/auth';
 import { setThemeAuthState, resetThemeForSignOut } from '@/theme/theme';
-import { restoreChat, persistedOnly, LOCAL_TRANSCRIPT_ENTRIES, type PersistedChat } from '@/lib/chatTranscript';
-import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, type ChatMeta } from '@/lib/chatSync';
-import { mergeOne, pickTranscript, withFreshTranscript } from '@/lib/chatMerge';
-import { buildSyncedName } from '@/lib/nameSync';
-import { identifyUser } from '@/lib/observability';
+import { restoreChat, persistedOnly, pickLocalTranscripts, type PersistedChat } from '@/lib/chatTranscript';
+import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, chatsToDelete, type ChatMeta } from '@/lib/chatSync';
+import { beginSessionRestore } from '@/lib/sessionRestore';
+import { mergeOne, pickTranscript, mayPromoteTranscript, withFreshTranscript } from '@/lib/chatMerge';
+import { PROBE_FAILED, isProbeFailure } from '@/lib/afProbe';
+import { buildSyncedName, type BilingualName } from '@/lib/nameSync';
+import { identifyUser, reportMessage } from '@/lib/observability';
 import { forgetSupportDraft } from '@/lib/supportDraft';
 import { LOAD_MORE_PAGE_SIZE } from '@/data/resultCount';
+import { truncateGlyphs } from '@/lib/typedReveal';
 
 type DataSource = 'local' | 'supabase';
 
@@ -81,13 +87,20 @@ type AppState = {
   runQuery: (q: SearchQuery, record?: boolean, signal?: AbortSignal, chatId?: string | null) => Promise<SearchResult>;
   // Persist the serialized conversation for a chat (agent.tsx captures it after each settled turn).
   saveTranscript: (id: string, transcript: PersistedChat) => void;
+  // A chat someone SHARED with this user (owner 2026-10-17): becomes a NEW entry in their own history,
+  // holding the copied conversation — theirs from now on, never synced back. Returns the new entry id.
+  // q = null: a shared chat with no search in it — saved like any chat-only row (emptyQuery, titled from its first message).
+  importSharedChat: (q: SearchQuery | null, transcript: PersistedChat) => string;
   // Fetch a transcript this device no longer holds locally (pruned cache / fresh sign-in) from the
   // server, validate it, and attach it to the entry. Resolves to the transcript or null.
   hydrateTranscript: (id: string) => Promise<PersistedChat | null>;
   // `failed` = the backend page errored. Nothing advanced: `nextOffset` and `hasMore` come back
   // exactly as they went in, so the caller re-offers «عرض المزيد» on the same page instead of
   // recording a failure as "that was the last page".
-  loadMoreListings: (q: SearchQuery, offset: number) => Promise<{ listings: Listing[]; nextOffset: number; hasMore: boolean; failed?: boolean }>;
+  // `seed` = the result set's own `rotationSeed` (ops_incident #796). The caller passes the seed of
+  // the SET it is paging, not the app's most recent one, so a later or cancelled search cannot
+  // re-key this walk's server ORDER BY mid-flight.
+  loadMoreListings: (q: SearchQuery, offset: number, seed?: string) => Promise<{ listings: Listing[]; nextOffset: number; hasMore: boolean; failed?: boolean }>;
   dataSource: DataSource;
   // Auth. SEARCH IS FREE, ALWAYS (owner rule 2026-08-15, retiring the PRD §9 gate): a guest can run
   // unlimited searches; sign-in only adds persistence (saved history/language). The old `gated`
@@ -96,6 +109,15 @@ type AppState = {
   user: AuthUser | null;
   signIn: (u: AuthUser) => void;
   updateUser: (patch: Partial<AuthUser>) => void;
+  // THE ONE WAY A TRANSLITERATION RESULT REACHES THE USER (ops_incident #319/#599/#648 class,
+  // routine #8 2026-09-24). `buildSyncedName()` is a network round trip, so two renames in quick
+  // succession put two continuations in flight and the SLOWER one lands last. Applying it with a
+  // plain `updateUser` therefore reverts the display name — and the avatar initial — to a value the
+  // user has already replaced. The staleness check lives HERE, in the single writer both call sites
+  // route through, rather than in each caller: `synced.name` is the value the patch was computed
+  // for, so a patch whose name is no longer the current one is dropped. A caller cannot forget a
+  // guard it does not have to write.
+  applySyncedName: (synced: BilingualName & { initials?: string }) => void;
   signOut: () => void;
   // Permanently delete the account: delete the auth user on the SERVER, then wipe ALL on-device
   // state (history, parked message, saved language) from both memory AND storage. Distinct from
@@ -155,8 +177,11 @@ type AppState = {
   // closeModal above — never a route, so the screen underneath (the Filter page, wherever the user
   // actually is) is never navigated away from or unmounted. See src/components/AuthModal.tsx.
   authOpen: boolean;
-  openAuth: () => void;
+  // `note` (owner 2026-10-18): a line shown on top of the sign-in popup — a shared-chat link opens the
+  // popup with «يوسف شاركك: …» so the visitor knows what they will see once they are in.
+  openAuth: (note?: unknown) => void; // non-string (a press event when passed as onPress) = no note
   closeAuth: () => void;
+  authNote: string | null;
   // Read-only exposure for the popup's auto-show gate (shouldAutoShowAuthPopup, owner 2026-08-28):
   // null = the hasSeenIntro flag is still being read, false = the intro is pending/playing, true =
   // done. The popup may only auto-raise on `true`, so it never covers the intro film.
@@ -192,9 +217,19 @@ const historyKey = (sub: string) => 'history:' + sub;
 // hydrateTranscript() refetches a pruned one when its chat is opened. Pruning happens ONLY at the
 // serialization boundary — in-memory state keeps every transcript, so switching between chats in
 // one session never loses anything regardless of age.
+// A BYTE BUDGET ON TOP OF THE COUNT (2026-10-08). A saved chat now keeps everything the user saw — up to 500
+// cards, ~1.3 MB — and a browser gives localStorage ~5 MB for the WHOLE history. One write over the quota
+// fails for ALL of it (the catch below swallows it), so the heavy part must never be able to take the chat
+// list down with it: pickLocalTranscripts keeps transcripts newest-first until the budget is spent (the
+// newest is always kept), the rest stay on the server and hydrate on open. Metas are never pruned.
+const transcriptSize = new WeakMap<object, number>();
+const sizeOfTranscript = (t: object): number => {
+  let n = transcriptSize.get(t);
+  if (n === undefined) { n = JSON.stringify(t).length; transcriptSize.set(t, n); }
+  return n;
+};
 const serializeHistoryForDisk = (items: HistoryItem[]): string => {
-  const byActivity = items.slice().sort((a, b) => (b.tRev ?? b.ts) - (a.tRev ?? a.ts));
-  const keep = new Set(byActivity.filter((it) => it.transcript).slice(0, LOCAL_TRANSCRIPT_ENTRIES).map((it) => it.id));
+  const keep = pickLocalTranscripts(items, sizeOfTranscript);
   return JSON.stringify(items.map((it) => (it.transcript && !keep.has(it.id) ? { ...it, transcript: undefined } : it)));
 };
 
@@ -257,6 +292,7 @@ const removeKeysSync = (keys: string[]) => {
 // The old shared key. We proactively purge it so its stale, cross-account contents never reappear.
 const LEGACY_HISTORY_KEY = 'history';
 
+
 export function AppProvider({ children }: { children: ReactNode }) {
   // The FILTER (home) defaults to Buy highlighted (user request). emptyQuery() stays Rent-default for
   // the agent/chat base — this override is only the filter form's starting state. Single source of
@@ -285,6 +321,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [modal, setModal] = useState<'support' | 'about' | 'legal' | 'privacy' | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
+  const [authNote, setAuthNote] = useState<string | null>(null);
   const [pendingMessage, setPendingMessageState] = useState<string | null>(null);
   // `null` while the saved flag is still being read from storage; the intro stays hidden until then.
   const [introSeen, setIntroSeen] = useState<boolean | null>(null);
@@ -326,6 +363,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSignInCardDismissed(false);
   }, [user]);
 
+  // THE SINGLE GUARDED WRITER for a `buildSyncedName()` result — see the context type declaration.
+  // Both continuations that exist (this file's backfill effect below, and AccountMenu's rename) route
+  // through this one function, so the staleness check cannot be present at one call site and absent
+  // at the other. That asymmetry was the defect: this effect carried the check and the rename did
+  // not, so a rename's slower transliteration overwrote a newer name.
+  const applySyncedName = useCallback((synced: BilingualName & { initials?: string }) => {
+    setUser((u) => (u && u.name === synced.name ? { ...u, ...synced } : u));
+  }, []);
+
   // Backfill the missing-script spelling of the user's name (once per name) so both stay synced.
   useEffect(() => {
     const nm = user?.name?.trim();
@@ -333,20 +379,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (nameSyncRef.current === nm) return;
     nameSyncRef.current = nm;
     let cancelled = false;
-    buildSyncedName(nm).then((synced) => {
-      if (!cancelled) setUser((u) => (u && u.name === synced.name ? { ...u, ...synced } : u));
-    });
+    buildSyncedName(nm).then((synced) => { if (!cancelled) applySyncedName(synced); });
     return () => { cancelled = true; };
-  }, [user?.name, user?.nameEn, user?.nameAr]);
+  }, [user?.name, user?.nameEn, user?.nameAr, applySyncedName]);
 
-  // Language persistence is auth-gated. A SIGNED-IN user keeps their chosen/detected language across a
-  // refresh. A GUEST is ALWAYS Arabic-first on a fresh load — typing an English letter in the filter,
-  // or sending an English message to the agent, flips the UI live for that session, but a refresh /
-  // leaving resets to the Arabic default (nothing is saved). On WEB the signed-in language is applied
-  // synchronously at first paint (i18n readSavedLocale, no flash); the effects below cover NATIVE and
-  // enforce the guest reset. (user request.)
+  // Only an explicit UI choice is saved for a signed-in user. Chat language never changes it.
+  // Guests start in Arabic on a fresh load; web restores signed-in preference at first paint.
   const { locale, setLocale } = useI18n();
-  const localeInitRef = useRef(false);
+  const localeInitRef = useRef<string | null>(null);
   // WHICH account's history is currently loaded — not merely "did we load once". A boolean here was
   // a real bug: the hydrate effect is one-shot, so a user who signed in DURING a session (the guard
   // already having run while they were a guest) never had their own saved history read, and the
@@ -358,23 +398,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // disable persistence, clear any saved value, and snap back to the Arabic default for this load.
   useEffect(() => {
     if (!authChecked) return;
+    let cancelled = false;
     if (user) {
       setLocalePersistence(true);
-      if (!localeInitRef.current) {
-        localeInitRef.current = true;
+      if (localeInitRef.current !== user.sub) {
+        localeInitRef.current = user.sub;
+        const revisionBeforeRead = getLocaleRevision();
         AsyncStorage.getItem(LOCALE_KEY)
-          .then((v) => { if (v === 'en' || v === 'ar') setLocale(v as Locale); })
+          .then((v) => {
+            if (!cancelled && getLocaleRevision() === revisionBeforeRead && (v === 'en' || v === 'ar')) setLocale(v as Locale);
+          })
           .catch(() => {});
       }
     } else {
       setLocalePersistence(false); // guest → never remember the language
-      localeInitRef.current = false;
+      localeInitRef.current = null;
       AsyncStorage.removeItem(LOCALE_KEY).catch(() => {});
       // Fresh guest load (or just logged out): start in Arabic. This runs only when auth state changes,
       // not on every locale change, so a guest's in-session switch to English is left untouched.
       if (getLocale() !== 'ar') setLocale('ar');
     }
-  }, [authChecked, user, setLocale]);
+    return () => {
+      cancelled = true;
+      if (localeInitRef.current === user?.sub) localeInitRef.current = null;
+    };
+  }, [authChecked, user?.sub, setLocale]);
 
   // Persist the active language ONLY for a signed-in user (native; web persists synchronously via the
   // auth-gated persistLocale in setLocale). A guest never writes their language.
@@ -507,14 +555,69 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // by id — the newer side (per-entry activity stamp) wins; server-only chats appear, local-only
   // chats stay and get pushed. Transcripts are NOT pulled here (metas stay small) — hydrateTranscript
   // fetches one lazily when its chat is opened.
+  // ── THE ACCOUNT SCOPE TOKEN (ops_incident #693, routine-8 2026-09-25) ────────────────────────────
+  // The sync refs below are guards of the shape "have I already done this for this account?", and
+  // they were keyed on `historyKey(user.sub)` ALONE. An account key is not a session: it is identical
+  // before and after a sign-out, so every one of those guards silently answered a question nobody
+  // asked it — "same account" instead of "same signed-in session". Two consequences, both real:
+  //
+  //   · An in-flight `loadChatMetas()` (bounded at 15s, plus a 1.2s retry and a second 15s) that
+  //     resolved AFTER sign-out re-checked `serverMergedRef`, which sign-out never reset, passed its
+  //     own guard, and wrote the previous account's 50 chat metas into the live history state of the
+  //     GUEST session that replaced it.
+  //   · `serverMergedRef` never being reset made "merge once per account" really mean "merge once per
+  //     account PER PAGE LOAD": signing out and back into the SAME account in one tab skipped the
+  //     server pull entirely, so a chat created on another device since the last pull stayed missing
+  //     from the sidebar until a full reload — against the owner 2026-08-25 rule that conversations
+  //     survive "logging back in on any device".
+  //
+  // THE FIX IS NOT A LONGER RESET LIST IN signOut(). This is the EIGHTH recurrence of one class
+  // (ops_incident #211/#271/#319/#341/#599/#648/#692/#693 — an async continuation writing state that
+  // belongs to a context the user has already left), and #319's own repair was a hand-maintained
+  // reset list that turned out to be a subset of what needed resetting. A list that must be extended
+  // by hand every time a ref is added is the defect, not the cure.
+  //
+  // So the scope token carries a SEQUENCE NUMBER that advances on every account transition — sign-in,
+  // sign-out, and account switch alike — and `accountScopeRef` always holds the CURRENT one. Every
+  // guard below compares against `accountScopeRef.current` AT CONTINUATION TIME (the #648 lesson:
+  // re-check the cohort you are keyed on, not merely the value you can see), so work started in a
+  // session the user has left cannot pass, and a new session cannot inherit a previous one's answer.
+  // Nothing has to be remembered at sign-out: signOut() and deleteAccount() need no change, and a
+  // ref added here tomorrow is scope-safe by construction if it is compared the same way.
+  //
+  // Keyed on `user?.sub`, never on the user OBJECT: a profile patch (a rename via updateUser) makes a
+  // new object without changing who is signed in, and must not invalidate a merge that is still true.
+  const accountScopeRef = useRef<string | null>(null);
+  const scopeSeqRef = useRef(0);
+  useEffect(() => {
+    scopeSeqRef.current += 1;
+    accountScopeRef.current = user ? `${historyKey(user.sub)}#${scopeSeqRef.current}` : null;
+  }, [user?.sub]);
+
   const serverMergedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!authChecked || !user || !supabase) return;
-    const key = historyKey(user.sub);
-    if (serverMergedRef.current === key) return;
-    serverMergedRef.current = key;
-    loadChatMetas().then((rows) => {
-      if (!rows || serverMergedRef.current !== key) return;
+    const scope = accountScopeRef.current;
+    if (!scope) return;
+    if (serverMergedRef.current === scope) return;
+    serverMergedRef.current = scope;
+    // `null` from loadChatMetas means the LOAD FAILED — never "this account has no chats" (an empty
+    // account resolves as `[]`). A single transient blip used to strand the whole session on the
+    // local-only list with no retry and no sign anything was missing, because `serverMergedRef` was
+    // already stamped. One bounded retry absorbs the blip; a second failure still degrades to
+    // local-only, which is safe (the push effect stays disarmed, so nothing can overwrite or delete
+    // the server's copy) and the next sign-in tries again.
+    const pull = async () => {
+      const first = await loadChatMetas();
+      if (first) return first;
+      await new Promise((r) => setTimeout(r, 1200));
+      return loadChatMetas();
+    };
+    pull().then((rows) => {
+      // LIVE re-check, not a captured one: `accountScopeRef.current` is what the app is showing NOW.
+      // A sign-out makes it null and an account switch makes it a different token, so a pull that
+      // outlived its session is discarded here instead of landing on whoever replaced it.
+      if (!rows || accountScopeRef.current !== scope) return;
       setHistory((h) => {
         const byId = new Map(h.map((it) => [it.id, it] as const));
         for (const r of rows) {
@@ -532,7 +635,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Baseline AFTER the merge lands so the first push diff is against what the server now holds.
       syncBaselineRef.current = new Map(rows.map((r) =>
         [r.id, syncKeyOf({ ...r.meta, id: r.id } as unknown as HistoryItem)] as const));
-      syncReadyRef.current = key;
+      syncReadyRef.current = scope;
     }).catch(() => { /* offline → local-only session; next sign-in retries */ });
   }, [authChecked, user]);
 
@@ -544,11 +647,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // merged local list can never mass-delete the account's server history. Fire-and-forget with the
   // baseline updated per row on success; a failed write simply retries on the next change.
   const syncBaselineRef = useRef<Map<string, string>>(new Map());
+  // WHICH DELETIONS THE USER ACTUALLY ASKED FOR (ops_incident #297).
+  //
+  // The push effect used to derive deletions as a SET DIFFERENCE — every baseline id missing from
+  // the current list. That silently made the sidebar's 50-entry DISPLAY cap a permanent server
+  // delete: the 51st chat pushes the oldest id out of `history`, the diff sees it "missing", and
+  // 1,200 ms later the row is gone from user_chats for good, on every device, with no user action.
+  // The same fired for a merge whose union overflowed 50, and for a server row the merge skipped as
+  // malformed. Local eviction and user deletion are indistinguishable to a set difference, so the
+  // difference can never be the oracle: only INTENT can. Nothing reaches this set except
+  // deleteHistory() and clearHistory().
+  const pendingDeleteRef = useRef<Set<string>>(new Set());
   const syncReadyRef = useRef<string | null>(null);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // THE CURRENT SEARCH'S ROTATION SEED (owner rule 2026-09-26 — "I refresh, the same exact one
+  // shouldn't show عقار first"). Minted fresh in runQuery for every new search, then reused
+  // UNCHANGED by every «عرض المزيد» page of that same search: the server's ordering is a pure
+  // function of this seed, so holding it steady is exactly what keeps paging duplicate-free and
+  // gap-free, while a new search gets a new one. An Advanced Filter round re-runs the search
+  // through runQuery, so it mints its own seed and its Show More inherits it.
+  //
+  // Starts UNDEFINED rather than minting at render: a load-more that somehow precedes any search
+  // then passes undefined, and the RPC call site falls back to the device+week seed — a stable,
+  // correct order, just not a per-search one. (Minting here instead would also break
+  // verify-account-scope-invalidates-sync-continuations.ts, which lifts this region of the file out
+  // and executes it against stubs, where the generator is not in scope.)
+  const searchSeedRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!user || !supabase) return;
-    if (syncReadyRef.current !== historyKey(user.sub)) return; // push only after the pull merged
+    // Push only after the pull merged — and only after the pull that merged for THIS session. Keyed
+    // on the account alone, this armed the push against a baseline a previous session had built (see
+    // the scope-token note above), so a sign-out/sign-in round trip could write through against a
+    // server state nobody had re-read. `syncBaselineRef` needs no reset of its own for the same
+    // reason: it is only ever reachable behind this gate, and the pull that opens the gate replaces
+    // it wholesale.
+    if (syncReadyRef.current !== accountScopeRef.current) return;
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     syncTimerRef.current = setTimeout(() => {
       const items = historyRef.current;
@@ -560,8 +693,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const key = syncKeyOf(it);
         void upsertChat(it.id, chatMetaOf(it), pushableTranscript(it)).then((ok) => { if (ok) base.set(it.id, key); });
       }
-      const gone = [...base.keys()].filter((id) => !seen.has(id));
-      if (gone.length) void deleteChats(gone).then((ok) => { if (ok) for (const id of gone) base.delete(id); });
+      // Intent, never inference (#297). `seen` is built from a list the 50-cap has already trimmed,
+      // so a baseline id being absent from it means "not currently displayed", which is not the same
+      // claim as "the user deleted it". Only ids the user asked to remove are propagated, and only
+      // when the server is known to hold them. An id the server does not hold needs no delete, so it
+      // is dropped rather than retried forever; a delete that FAILS stays queued and retries on the
+      // next push, exactly as the upserts above do.
+      const { toDelete: gone, forget } = chatsToDelete(base, pendingDeleteRef.current);
+      for (const id of forget) pendingDeleteRef.current.delete(id);
+      if (gone.length) void deleteChats(gone).then((ok) => {
+        if (!ok) return;
+        for (const id of gone) { base.delete(id); pendingDeleteRef.current.delete(id); }
+      });
     }, 1200);
     return () => { if (syncTimerRef.current) clearTimeout(syncTimerRef.current); };
   }, [history, user]);
@@ -631,7 +774,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // name: canAutoRetitle() is the single place that rule lives, so re-running a renamed search
       // refreshes its results and timestamp WITHOUT reverting the title the user chose.
       const keepTitle = prior && !canAutoRetitle(prior);
-      const title = keepTitle ? prior!.title : autoTitleForQuery(q, getLocale());
+      const title = keepTitle ? prior!.title : chatId && prior?.title ? prior.title
+        : autoTitleForQuery(q, getLocale());
       const titleSource: TitleSource = keepTitle ? 'manual' : 'auto';
       const next: HistoryItem = {
         id, label, query: q, ts: Date.now(), starred,
@@ -661,16 +805,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setAuthChecked(true); // no backend → there is no session to wait for
       return;
     }
-    let cancelled = false;
-    supabase.auth.getSession().then(({ data }) => {
-      const su = data.session?.user;
-      if (!cancelled && su) {
+    // BOUNDED AND CAUGHT, in src/lib/sessionRestore.ts — which carries the production measurement
+    // this shape exists for. In one line: getSession() makes a NETWORK refresh call on an expired
+    // session, so an unbounded, un-caught wait here leaves the app in a state no gate in this file
+    // expects (`user === null && authChecked === false`) — rendering as a guest while withholding
+    // every guest affordance, with no error emitted. `onChecked` fires exactly once on all four
+    // paths: session, no session, rejection, timeout.
+    const cancelRestore = beginSessionRestore({
+      getSession: () => supabase!.auth.getSession(),
+      onUser: (su) => {
         // Apple stays Apple; everything else (Google, and the two internal email test accounts) reads as
         // Google — the only other provider the product offers since phone sign-in was removed.
         const method = su.app_metadata?.provider === 'apple' ? 'apple' : 'google';
-        setUser(mapSupabaseUser(su, method));
-      }
-      if (!cancelled) setAuthChecked(true);
+        setUser(mapSupabaseUser(su as never, method));
+      },
+      onChecked: () => setAuthChecked(true),
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       const su = session?.user;
@@ -683,7 +832,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUser(null);
       }
     });
-    return () => sub.subscription.unsubscribe();
+    return () => { cancelRestore(); sub.subscription.unsubscribe(); };
   }, []);
 
   const value = useMemo<AppState>(
@@ -725,6 +874,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       signIn: (u) => setUser(u),
       updateUser: (patch) => setUser((u) => (u ? { ...u, ...patch } : u)),
+      applySyncedName,
       signOut: () => {
         // Drop the session from MEMORY so the next guest never sees the previous user's chats: clear
         // history, search count, the open chat, and any parked message. This account's OWN saved
@@ -836,11 +986,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // became unbounded (PR #1267): windowing an in-memory array can't survive a real "next 100"
         // server page. The new seed varies per device from its very first search and is stable
         // across an entire browse/pagination walk by construction (same seed → same server ORDER BY).
-        const { listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal });
-        const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null });
+        //
+        // 2026-09-26: the seed is now minted PER SEARCH here (not derived from device+week at the
+        // RPC call site) and carried into every «عرض المزيد» page via searchSeedRef, so a repeat of
+        // the same search returns a different mix of houses and a different platform in front —
+        // while one browse walk stays internally stable.
+        //
+        // 2026-09-26 (ops_incident #796): the seed also RIDES OUT on the result. searchSeedRef alone
+        // could not carry this promise — it is one app-level slot, written here before the fetch is
+        // known to succeed, so any later runQuery re-keys the ORDER BY of a walk still on screen. The
+        // one that proved it is a search the user CANCELS: Stop leaves the earlier results block
+        // rendered and still pageable (it only drops `status` bubbles), while this line has already
+        // replaced the seed that block's page 1 was cut from. Measured live on الرياض/إيجار (42,101
+        // matches): the next «عرض المزيد» delivered 439 of the 500 cards it owed and left 434 the walk
+        // owed unfetched behind an advancing cursor. The seed belongs to the SET, so it travels with it.
+        searchSeedRef.current = newSearchSeed();
+        const searchSeed = searchSeedRef.current;
+        let { listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal, rotationSeed: searchSeedRef.current });
+        // CHECK THE SHELF BEFORE SAYING «NONE» (owner 2026-10-05 — src/lib/shelfCheck.ts). A zero for a
+        // place-only search whose place we KNOW holds listings is our failure, not an answer: ask once
+        // more, and if it is still zero, word it as a failure («try again»), report it, note it.
+        let shelfClash = false;
+        let shelf: number | null = null;
+        if (rows && rows.length === 0 && !signal?.aborted) {
+          const lm = q.locationMatch;
+          shelf = shelfCount(q, lm ? liveShelfCount(lm, q.districts) : null);
+          if (zeroContradictsShelf(shelf)) {
+            ({ listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal, rotationSeed: searchSeed }));
+            shelfClash = !!rows && rows.length === 0;
+            if (shelfClash) reportMessage('zero_contradicts_shelf', { place: lm?.label, kind: lm?.kind, districts: q.districts?.length ?? 0, shelf });
+          }
+        }
+        const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null || shelfClash });
+        // THE NOTEBOOK records the zero the USER SEES — measured live 2026-10-05: «فيلا … بسعر 5000» came
+        // back from the server with rows and the client's own filters emptied it, so a fetch-level hook
+        // never wrote it. A network failure is not «no results» (it reads «try again») and is not noted.
+        if (rows !== null && r.listings.length === 0 && !signal?.aborted) logZeroResult(q, shelf, shelfClash);
         // Attach the RESOLVED query so the caller renders the Search Summary from what actually ran
         // (the corrected city/region), not the raw pre-resolution text. (one-engine summary parity.)
-        const result: SearchResult = { ...r, query: q, pageOffset: pageCand, hasMore: pageCand >= 1500, matchTotal: pageTotal };
+        const result: SearchResult = { ...r, query: q, pageOffset: pageCand, hasMore: pageCand >= 1500, matchTotal: pageTotal, rotationSeed: searchSeed };
         // STOP-BUTTON GUARD (owner 2026-08-18): "A cancelled request must never later write results
         // into the UI or history." fetchListingsForQuery already aborts the underlying network calls
         // on `signal`, but a response can still be mid-flight (or already back) at the exact instant
@@ -893,6 +1077,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return next;
         });
       },
+      importSharedChat: (q, transcript) => {
+        const id = 'h' + Date.now();
+        const tRev = Date.now();
+        const firstAsk = String((transcript.msgs.find((m) => m.role === 'user') as { text?: unknown } | undefined)?.text ?? '').trim();
+        const next: HistoryItem = q
+          ? { id, label: queryLabel(q), query: q, ts: Date.now(), starred: false,
+              title: autoTitleForQuery(q, getLocale()), titleSource: 'auto', transcript, tRev }
+          : { id, label: firstAsk, query: emptyQuery(), ts: Date.now(), starred: false,
+              title: firstAsk ? autoTitleForPrompt(firstAsk, getLocale()) : (getLocale() === 'ar' ? 'محادثة' : 'Chat'),
+              titleSource: 'auto', transcript, tRev };
+        // Same direct-then-state write as saveTranscript, so the entry is on disk before the chat opens.
+        const merged = [next, ...historyRef.current].slice(0, 50);
+        historyRef.current = merged;
+        if (user) try {
+          if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(merged));
+        } catch {}
+        setHistory((h) => [next, ...h.filter((it) => it.id !== id)].slice(0, 50));
+        setActiveChatId(id);
+        return id;
+      },
       // Transcript pruned locally (older than LOCAL_TRANSCRIPT_ENTRIES) or absent on this device —
       // pull the server's copy, validate it, attach it. Returns null when the server has none
       // either (legacy chat) so the caller can fall back to the snapshot/replay path.
@@ -901,12 +1105,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // A trusted local copy renders instantly. A copy the merge marked STALE must lose to the
         // server's newer one — but if the server has none (legacy chat / offline), the local copy is
         // still the user's conversation and is kept rather than showing them a blank chat.
-        const t = await pickTranscript<PersistedChat>(
+        const picked = await pickTranscript<PersistedChat>(
           entry?.transcript,
           !!(entry as { txStale?: boolean } | undefined)?.txStale,
           async () => {
-            if (!user) return null;
+            if (!user) return null;      // signed out: there is genuinely no server copy to want
             const fetched = await fetchChatTranscript(id);
+            // Propagate UNKNOWN untouched. Mapping a failed read onto `null` here would rebuild the
+            // exact conflation the three-valued return exists to remove (ops_incident #272).
+            if (isProbeFailure(fetched)) return PROBE_FAILED;
             const valid = fetched ? restoreChat(fetched) : null;
             if (!valid) return null;
             // NEVER re-list the fields to keep — strip the one render-only field instead. Rebuilding
@@ -916,21 +1123,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
             return persistedOnly(valid);
           },
         );
+        const t = picked.transcript;
         if (!t) return null;
-        if (t !== entry?.transcript || (entry as { txStale?: boolean } | undefined)?.txStale)
+        // ONLY a verified transcript may be written back, because withFreshTranscript CLEARS
+        // `txStale` — and an entry without that flag is pushable (pushableTranscript above), so
+        // promoting an unverified copy is what overwrote the server's newer conversation. When the
+        // read failed we still RENDER what we hold (better than a blank chat) and change nothing:
+        // the entry stays stale, stays unpushable, and the next open retries the server.
+        if (mayPromoteTranscript(picked) && (t !== entry?.transcript || (entry as { txStale?: boolean } | undefined)?.txStale))
           setHistory((h) => h.map((it) => (it.id === id ? withFreshTranscript(it as never, t, it.tRev ?? Date.now()) as unknown as HistoryItem : it)));
         return t;
       },
       // Load More (owner 2026-07-08): fetch the NEXT real page of matching listings beyond `offset`
       // (filter-first, recency order) so broad searches page through the FULL set. Returns the ranked
       // page + the advanced cursor; the caller appends (de-duped) to the shown list.
-      loadMoreListings: async (q: SearchQuery, offset: number) => {
+      loadMoreListings: async (q: SearchQuery, offset: number, seed?: string) => {
         // ONE definition, shared with the «عرض المزيد» drain budget that is derived from it
         // (src/data/resultCount.ts). It was a second, private `500` here until 2026-09-12, while
         // agent.tsx's page-count backstop was sized in its comment against 1,500 — so the guard
         // covered 25,000 rows while believing it covered 75,000.
         const PAGE_MORE = LOAD_MORE_PAGE_SIZE;
-        const { listings: rows, pageCandidates: cand } = await fetchListingsForQuery(q, { offset, limit: PAGE_MORE });
+        // THE SAME SEED THE FIRST PAGE USED (2026-09-26). Re-minting here — or letting the RPC call
+        // site fall back to its own default — would re-shuffle the server ORDER BY between pages,
+        // which is exactly how «عرض المزيد» starts repeating cards and skipping others. Rotation
+        // belongs to the SEARCH, not to the page.
+        //
+        // AND THE SEARCH IS THE ONE BEING PAGED, NOT THE LAST ONE THE APP RAN (ops_incident #796,
+        // 2026-09-26). searchSeedRef is a single app-level slot that every runQuery overwrites before
+        // it knows whether its own fetch will survive — so reading it here paged the walk on screen
+        // with a seed belonging to some OTHER search, and the proven case is a search the user
+        // CANCELLED (Stop keeps the earlier results block rendered and pageable; the seed had already
+        // moved). Measured live on الرياض/إيجار, 42,101 matches, seed swapped between offset 0 and
+        // offset 500: the press added 439 of the 500 cards it owed, 61 already-shown rows came back and
+        // were de-duped away, and 434 rows the walk owed were delivered by neither page — unreachable
+        // once the cursor moved to 1000. `seed` is the result set's own; searchSeedRef remains the
+        // fallback ONLY for a transcript persisted before SearchResult carried one, which is exactly
+        // today's behaviour for those and strictly better for everything else.
+        const { listings: rows, pageCandidates: cand } = await fetchListingsForQuery(q, { offset, limit: PAGE_MORE, rotationSeed: seed ?? searchSeedRef.current });
         // A FAILED PAGE IS NOT PROGRESS (defect hunt-2026-09-04:pagination:06). `rows === null` is
         // this fetch's backend-error signal — the SAME one page 0 hands runSearch as `fetchFailed`
         // rather than a second invention. It used to be swallowed by `rows ?? []`, which made an
@@ -954,7 +1183,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return (await fetchListingById(id)) ?? undefined;
       },
       history,
-      clearHistory: () => setHistory([]),
+      // Clearing IS a user-intended deletion of everything currently held, so every id is recorded
+      // before the list is emptied — otherwise #297's intent-driven push would clear the sidebar
+      // locally and leave the server copies behind.
+      clearHistory: () => {
+        for (const it of historyRef.current) pendingDeleteRef.current.add(it.id);
+        setHistory([]);
+      },
       // Toggle/delete write to storage SYNCHRONOUSLY in addition to the React effect — so a refresh
       // immediately after the click can't lose the change (the useEffect persist is async; localStorage
       // is sync). Functional setHistory + the computed next array keep state and storage in lock-step.
@@ -977,12 +1212,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Clearing the name (empty input) drops back to auto-titling rather than saving a blank row.
       renameHistory: (id, title) =>
         setHistory((h) => {
-          const clean = (title ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+          // Cap by GLYPH, not by UTF-16 code unit (ops_incident #347): a rename ending on the 120th
+          // code unit could split a surrogate pair, and this value is PERSISTED to the server — so a
+          // ▯ box would be saved into the user's own chat title. No ellipsis: this is a cap on what
+          // the user typed, not a preview of a longer string.
+          const clean = truncateGlyphs((title ?? '').replace(/\s+/g, ' ').trim(), 120, '');
           const next = h.map((it) => {
             if (it.id !== id) return it;
+            const lastText = it.transcript?.msgs.filter(m => m.role === 'user').at(-1)?.text;
+            const prompt = typeof lastText === 'string' ? lastText : it.label;
             return clean
               ? { ...it, title: clean, titleSource: 'manual' as TitleSource, titleUpdatedAt: Date.now() }
-              : { ...it, title: autoTitleForQuery(it.query, getLocale()), titleSource: 'auto' as TitleSource, titleUpdatedAt: Date.now() };
+              : { ...it, title: autoTitleForPrompt(prompt, detectLocale(prompt) ?? getLocale()) || autoTitleForQuery(it.query, getLocale()), titleSource: 'auto' as TitleSource, titleUpdatedAt: Date.now() };
           });
           if (user) try {
             if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(next));
@@ -1016,6 +1257,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }),
       deleteHistory: (id) =>
         setHistory((h) => {
+          // The ONE place a single chat is deliberately removed, so the ONE place that may tell the
+          // server to drop it (#297).
+          pendingDeleteRef.current.add(id);
           const next = h.filter((it) => it.id !== id);
           if (user) try {
             if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(next));
@@ -1038,7 +1282,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // message (owner 2026-08-21: «ابي شقة بالرياض قريبة من المترو وتكون تحت 5000 بالشهر» →
           // «شقة بالرياض قرب المترو»). `label` keeps the raw text so nothing that reads the legacy
           // field loses information; only the displayed title is summarized.
-          const auto = autoTitleForPrompt(v, getLocale());
+          const auto = autoTitleForPrompt(v, detectLocale(v) ?? getLocale());
           if (idx >= 0) {
             const prev = h[idx];
             const keep = !canAutoRetitle(prev);
@@ -1071,10 +1315,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       openModal: (m) => setModal(m),
       closeModal: () => setModal(null),
       authOpen,
-      openAuth: () => setAuthOpen(true),
+      openAuth: (note?: unknown) => { setAuthNote(typeof note === 'string' && note.trim() ? note.trim() : null); setAuthOpen(true); },
+      authNote,
       // Plain close again (2026-08-29): the centered modal no longer auto-raises, so a close
       // needs no memory — reopening is always an explicit control away.
-      closeAuth: () => setAuthOpen(false),
+      closeAuth: () => setAuthOpen(false), // the note is reset by the next openAuth (always sets or clears it)
       signInCardDismissed,
       dismissSignInCard: () => setSignInCardDismissed(true),
       introSeen,
@@ -1084,7 +1329,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!INTRO_DEMO_MODE) AsyncStorage.setItem('hasSeenIntro', '1').catch(() => {});
       },
     }),
-    [query, dataSource, user, searchCount, history, modal, authOpen, introSeen, signInCardDismissed, authChecked, pendingMessage, activeChatId, setActiveChatId],
+    [query, dataSource, user, searchCount, history, modal, authOpen, authNote, introSeen, signInCardDismissed, authChecked, pendingMessage, activeChatId, setActiveChatId],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

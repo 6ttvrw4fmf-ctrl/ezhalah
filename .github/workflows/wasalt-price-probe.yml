@@ -1,0 +1,40 @@
+# Read-only wasalt price-source probe. Prints what wasalt publishes for the given listing URLs so a
+# suspected-bad price can be adjudicated against the SOURCE instead of against arithmetic.
+#
+# No database credentials are passed to this job on purpose: the script cannot write, and cannot
+# read, the rows it is being used to judge. Diagnosis only. Do NOT add a schedule.
+name: Wasalt price probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: "Space-separated wasalt listing URLs to read"
+        required: true
+        type: string
+
+jobs:
+  probe:
+    name: Read the published price
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Prove the payload walk picks the right number
+        run: exec python -m scrapers.wasalt.probe_price --selftest
+
+      - name: Probe
+        env:
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
+        # Deliberately unquoted: the input is a space-separated URL list, one argv entry each.
+        run: exec python -m scrapers.wasalt.probe_price ${{ inputs.urls }}

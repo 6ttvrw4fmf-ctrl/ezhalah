@@ -22,6 +22,7 @@
 //   node --experimental-strip-types scripts/verify-af-compound-predicates.ts   (wired into `npm test`)
 
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { fetchRetryingSchemaCacheReload } from './lib/postgrestRetry.ts';
 
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase(process.env);
 const H = { apikey: KEY, Authorization: `Bearer ${KEY}` };
@@ -53,7 +54,7 @@ type Case = {
 };
 
 const CASES: Case[] = [
-  { label: 'Villa/Buy · street width ≥25 AND bathrooms ≥4', types: ['فيلا', 'تاون هاوس', 'بيت'], deal: 'بيع',
+  { label: 'Villa/Buy · street width ≥25 AND bathrooms ≥4', types: ['فيلا', 'بيت'], deal: 'بيع',
     category: 'Residential', rpc: { p_street_width_min: 25, p_bath_min: 4 },
     restExtra: 'street_width_m=gte.25&bathrooms=gte.4',
     slices: [{ p_street_width_min: 25 }, { p_bath_min: 4 }] },
@@ -72,9 +73,10 @@ const CASES: Case[] = [
     slices: [{ p_amenities: ['electricity', 'water_supply'] }, { p_street_width_min: 10 }] },
 ];
 
+// Price on request (price_annual NULL) is in EVERY period (owner 2026-09-28): no figure to misstate.
 const periodRest = (p?: string) =>
-  p === 'سنوي'  ? '&or=(rent_period_ar.eq.سنوي,and(rent_period_ar.eq.شهري,rent_now_pay_later.is.true))'
-  : p === 'شهري' ? '&payment_monthly=is.true&rent_now_pay_later=not.is.true'
+  p === 'سنوي'  ? '&or=(rent_period_ar.eq.سنوي,and(rent_period_ar.eq.شهري,rent_now_pay_later.is.true),price_annual.is.null)'
+  : p === 'شهري' ? '&or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),price_annual.is.null)'
   : '';
 
 type RowKey = string;
@@ -86,22 +88,50 @@ async function restIds(c: Case): Promise<Set<RowKey> | null> {
     + `&production_ready=is.true&region_id=eq.${REGION}`
     + `&deal_ar=eq.${encodeURIComponent(c.deal)}&type_ar=in.(${encodeURIComponent(types)})`
     + periodRest(c.period) + `&${c.restExtra}&limit=5000`;
-  const r = await fetch(q, { headers: H });
-  const j = await r.json();
-  if (!Array.isArray(j)) return null;
+  return idsFrom('REST search_listings_ar', q, { headers: H });
+}
+
+// ONE reader for both sides. It absorbs PostgREST's 503/PGRST002 schema-cache reload — which any
+// function-creating migration triggers, and which reddened this REQUIRED check for EVERY open PR in
+// the repo (ops_incident #573) — and NOTHING else. A null still fails the "both returned a usable ID
+// set" check below, so the fail-CLOSED contract is unchanged; what is added is the REASON, because
+// "rest=null" alone cannot tell a transient reload from a renamed RPC from a rotated key.
+async function idsFrom(what: string, url: string, init: RequestInit): Promise<Set<RowKey> | null> {
+  const r = await fetchRetryingSchemaCacheReload(url, init);
+  if (!r.ok) {
+    console.error(`      ${what} -> HTTP ${r.status}: ${r.body.slice(0, 200)}`);
+    return null;
+  }
+  let j: unknown;
+  try { j = JSON.parse(r.body); } catch { console.error(`      ${what} -> unparseable body`); return null; }
+  if (!Array.isArray(j)) { console.error(`      ${what} -> ${r.body.slice(0, 200)}, not a row array`); return null; }
   return new Set(j.map((row: { source_table: string; listing_id: number }) => key(row)));
 }
 
-async function rpcIds(c: Case, answer: Record<string, unknown>): Promise<Set<RowKey> | null> {
+const PAGE = 5000;
+
+async function rpcIds(c: Case, answer: Record<string, unknown>, offset = 0): Promise<Set<RowKey> | null> {
   const body = {
     p_deal: c.deal, p_types: c.types, p_category: c.category, p_region_ids: [REGION],
-    p_rent_period: c.period ?? null, p_per_platform: null, p_limit: 5000, p_offset: 0, ...answer,
+    p_rent_period: c.period ?? null, p_per_platform: null, p_limit: PAGE, p_offset: offset, ...answer,
   };
-  const r = await fetch(`${URL_BASE}/rest/v1/rpc/location_search_candidates_ar`,
+  return idsFrom('RPC location_search_candidates_ar', `${URL_BASE}/rest/v1/rpc/location_search_candidates_ar`,
     { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const j = await r.json();
-  if (!Array.isArray(j)) return null;
-  return new Set(j.map((row: { source_table: string; listing_id: number }) => key(row)));
+}
+
+// A single-field slice is the LOOSER query, so it is the one that outgrows a page. Read with one
+// page it came back truncated at exactly PAGE rows and "every compound id is in the slice" failed by
+// construction (2026-09-25: Villa/Buy p_bath_min alone = 5000, full = 324, on unchanged code).
+// Page it to exhaustion; any failed page is null (never a partial set read as complete).
+async function rpcIdsAll(c: Case, answer: Record<string, unknown>): Promise<Set<RowKey> | null> {
+  const all = new Set<RowKey>();
+  for (let page = 0; page < 40; page++) {
+    const got = await rpcIds(c, answer, page * PAGE);
+    if (got == null) return null;
+    got.forEach((k) => all.add(k));
+    if (got.size < PAGE) return all;
+  }
+  return null;
 }
 
 const setEq = (a: Set<RowKey>, b: Set<RowKey>) => a.size === b.size && [...a].every((x) => b.has(x));
@@ -130,7 +160,7 @@ for (const c of CASES) {
   // not somehow match MORE than any one field alone allows (an OR-not-AND defect). Each slice is a
   // whole logical field (e.g. the age range as one unit), never a lone min/max half of a range.
   if (c.slices.length >= 2) {
-    const partials = await Promise.all(c.slices.map((s) => rpcIds(c, s)));
+    const partials = await Promise.all(c.slices.map((s) => rpcIdsAll(c, s)));
     partials.forEach((p, i) => {
       const label = Object.keys(c.slices[i]!).join('+');
       check(`${c.label} — single-field slice (${label} alone) is a SUPERSET of the full conjunction`,

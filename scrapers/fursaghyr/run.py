@@ -36,11 +36,13 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize
+from scrapers.common.http_liveness import stored_listing_url
 from scrapers.common.arabic_location import to_catalog
 
 BASE = "https://fursaghyr.com"
 LIST = f"{BASE}/wp-json/fgh/v1/properties"
 MEDIA = f"{BASE}/wp-json/wp/v2/media"  # standard WP core media, open, no auth
+POSTS = f"{BASE}/wp-json/wp/v2/properties"  # the post's own record: its WordPress `status`
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 
 # Fursaghyr rea.property_type (Arabic) → our canonical English taxonomy.
@@ -150,6 +152,73 @@ def fetch_all(s: cc.Session) -> list[dict]:
         items = j.get("items") if isinstance(j, dict) else j
         return items or []
     return []
+
+
+def _verify_gone(ad_number: str, s: Optional[cc.Session] = None) -> tuple[str, str]:
+    """The source's own status for ONE post. Its page answers 200 whether it is live or expired, so the
+    page proves nothing; WordPress's record says which (measured 2026-09-28: the 11 fgh-feed posts
+    read `publish`; FG24982/24984/24986/24993/25070/25111/25138/25158 — active here, out of the feed
+    since 08-27 — read `expired`; a made-up id reads 404 `rest_post_invalid_id`).
+    'publish' → live · 'expired' / rest_post_invalid_id → gone · anything else → UNKNOWN."""
+    pid = re.sub(r"\D", "", ad_number or "")
+    if not pid:
+        return "unknown", f"{ad_number!r} carries no post id"
+    _throttle()
+    try:
+        r = (s or session()).get(f"{POSTS}/{pid}", params={"_fields": "id,status"}, timeout=30)
+        body = r.json()
+    except Exception as e:
+        return "unknown", f"REST read failed ({type(e).__name__}) — never proof of removal"
+    if r.status_code == 200 and isinstance(body, dict) and str(body.get("id")) == pid:
+        st = body.get("status")
+        if st == "publish":
+            return "live", "REST 200 status=publish"
+        if st == "expired":
+            return "gone", "REST 200 status=expired — the source expired this ad (its page still answers 200)"
+        return "unknown", f"REST 200 with unrecognised status {st!r}"
+    if r.status_code == 404 and isinstance(body, dict) and body.get("code") == "rest_post_invalid_id":
+        return "gone", "REST 404 rest_post_invalid_id — the post was deleted at source"
+    if r.status_code == 401 and isinstance(body, dict) and body.get("code") == "rest_forbidden":
+        return _own_page_after_401(ad_number, s)
+    return "unknown", f"REST {r.status_code}"
+
+
+# A live ad's own page, set by main() from a post that read `publish` THIS run. The page fallback
+# below may only call a 404 "gone" after this control answered 200 through the same session.
+_CONTROL_URL: Optional[str] = None
+_control_ok: Optional[bool] = None
+_stored_url = stored_listing_url(("fursaghyr_residential_listings", "fursaghyr_commercial_listings"))
+
+
+def _own_page_after_401(ad_number: str, s: Optional[cc.Session]) -> tuple[str, str]:
+    """REST 401 rest_forbidden = the post is no longer public (trashed/draft). The law keeps a 401
+    UNKNOWN, so the ad's OWN page decides: 404/410 → gone, anything else → UNKNOWN (2026-10-19).
+    FG27710 left the feed 10-17, sat at 3 strikes shown for three nights, REST 401 on every read,
+    its page 404 (dead-visible 10-17/18/19). Same shape as daryusuf (2026-10-12)."""
+    global _control_ok
+    rest = "REST 401 rest_forbidden (post not public)"
+    url = _stored_url(ad_number)
+    if not url:
+        return "unknown", f"{rest}; no stored page URL"
+    sess = s or session()
+    if _control_ok is None:
+        _control_ok = False
+        if _CONTROL_URL:
+            _throttle()
+            try:
+                _control_ok = sess.get(_CONTROL_URL, timeout=30, allow_redirects=False).status_code == 200
+            except Exception:
+                _control_ok = False
+    if not _control_ok:
+        return "unknown", f"{rest}; live control page did not answer 200 — a 404 proves nothing"
+    _throttle()
+    try:
+        pr = sess.get(url, timeout=30, allow_redirects=False)
+    except Exception as e:
+        return "unknown", f"{rest}; own page read failed ({type(e).__name__})"
+    if pr.status_code in (404, 410):
+        return "gone", f"{rest}; its own page answers {pr.status_code} (control 200)"
+    return "unknown", f"{rest}; its own page answers {pr.status_code}"
 
 
 _FULLRES_RE = re.compile(r"-\d{2,4}x\d{2,4}(\.(?:png|jpe?g|webp))$", re.IGNORECASE)
@@ -270,31 +339,22 @@ def _utility_flags(utilities: Any) -> dict[str, bool]:
     return flags
 
 
-def _resolve_total(total: Optional[int], meter: Optional[int], area: Optional[int]) -> Optional[int]:
-    """REVERSED 2026-07-28 (owner decision, live evidence superseded the 07-26 conclusion this
-    replaces): fursaghyr.com never displays rea.total_price anywhere on its own listing pages — only
-    a per-m² rate (labeled "السعر"). When total_price genuinely IS populated, it already matches
-    rate×area (REGA's own disclosure payload pre-computes it), so this is effectively "the number a
-    user would calculate themselves from the two figures the site DOES show" — accepted as
-    source-faithful per the owner. But when total_price is missing entirely, the old code left
-    price_total NULL even for a listing with a real, live, displayed price (found live 2026-07-28:
-    ad FG26842, the platform's only active Rent listing, has total_price=null and meter_price=55000
-    — but fursaghyr.com's own page shows "55000 SAR" as THE price for this listing, not a per-m²
-    rate; 55,000 SAR/m² also fails the plausibility gate below, consistent with it being a raw
-    total, not a rate, sitting in the wrong field). Old 07-26 comment ("this synthesis was already
-    unreachable") was a code-only conclusion that didn't hold once a fresh live sample was checked."""
+def _resolve_total(total: Optional[int], meter: Optional[int]) -> Optional[int]:
+    """The total the SOURCE states, or None. Never rate × area.
+
+    fursaghyr.com's rea payload carries `total_price` (stored verbatim) and `meter_price`. Two cases:
+    - `meter_price` >= 50,000 is not a real SAR/m² rate. It is a raw total sitting in the wrong field.
+      Live 2026-07-28: ad FG26842 has total_price=null and meter_price=55000, and the page shows
+      "55000 SAR" as THE price. So it is used as-is, never multiplied.
+    - A plausible rate with no `total_price` stores NO total. From 2026-07-28 this returned
+      meter × area, but owner rule 2026-09-03 says ppm × area is derived only in the SEARCH/DISPLAY
+      layer (search_listings_ar.price_total_effective + derivedTotalFromPerMeter). The rate is kept in
+      price_per_meter, and a sale row shows the labelled ≈ total from there. Owner chose this on
+      2026-09-21 (PR #3450). A rent row with only a rate now shows no price, because display
+      derivation is sale-only. That affected 0 active rows on the day."""
     if total is not None:
         return total
-    if not meter:
-        return None
-    if meter < 50_000 and area:
-        # meter is a plausible per-m² rate → the site's own rate × the site's own area, same
-        # arithmetic REGA's payload does internally when total_price IS present.
-        return meter * area
-    if meter >= 50_000:
-        # meter fails the rate-plausibility gate (too high to be a real SAR/m² price) → it's more
-        # likely already a raw total sitting in the wrong field (FG26842's exact shape) than a
-        # genuine rate — use it directly, don't multiply by area again.
+    if meter and meter >= 50_000:
         return meter
     return None
 
@@ -320,7 +380,12 @@ def map_listing(item: dict, s: Optional[cc.Session] = None) -> tuple[Optional[di
 
     area = _int(rea.get("land_area"))
     meter = _int(rea.get("meter_price"))
-    total = _resolve_total(_int(rea.get("total_price")), meter, area)
+    total = _resolve_total(_int(rea.get("total_price")), meter)
+    # A genuine rate and a null total_price: the source publishes NO total. Send AUTHORITATIVE_NULL,
+    # not None. The upsert drops a None, so the rate × area totals this scraper stored before
+    # PR #3450 would otherwise stay frozen in the table.
+    if total is None and rea.get("total_price") is None and meter and meter < 50_000:
+        total = db.AUTHORITATIVE_NULL
 
     # No magnitude gate (removed 2026-08-09). This DISCARDED THE WHOLE LISTING when the computed
     # magnitude probe fell under 1,000 SAR. The comment above it already recorded the discomfort —
@@ -403,6 +468,7 @@ def map_listing(item: dict, s: Optional[cc.Session] = None) -> tuple[Optional[di
 
 
 def main() -> int:
+    global _CONTROL_URL
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
     ap.add_argument("--limit", type=int, default=None,
@@ -423,8 +489,24 @@ def main() -> int:
     is_validation = bool(args.limit)
     run_id = db.begin_run("fursaghyr") if not is_validation else None
 
+    expired = 0
+    unread = 0
     try:
         for it in items:
+            # The feed carries no status. A post the source itself calls expired is not kept or
+            # refreshed here — it is left to prune_unseen, whose oracle reads the same status.
+            # FAIL CLOSED (audit 2026-10-02): only a record that READS `publish` is written. Until
+            # now an 'unknown' answer (REST failure, 401/403/5xx, a status nobody measured) was
+            # upserted active on the feed sighting alone — "could not read" written as "available".
+            # Measured 2026-10-02: 10 of 10 feed posts read publish; FG24965 (licence ended that
+            # day) had left the feed and read expired. An unread post is counted, never guessed.
+            verdict = _verify_gone(f"FG{it.get('id')}", s)[0]
+            if verdict == "gone":
+                expired += 1
+                continue
+            if verdict != "live":
+                unread += 1
+                continue
             row, cat = map_listing(it, s)
             if not row:
                 continue
@@ -432,6 +514,7 @@ def main() -> int:
                 continue
             (com if cat == "commercial" else res).append(row)
             seen += 1
+            _CONTROL_URL = _CONTROL_URL or row.get("listing_url")
 
         if res:
             db.upsert_fursaghyr_residential_batch(res)
@@ -441,9 +524,22 @@ def main() -> int:
         pruned = 0
         if not is_validation:
             # FULL-REFRESH prune: we fetched the COMPLETE catalog → anything not seen is gone.
+            # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+            # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+            # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+            # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+            # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+            superseded = db.retire_superseded_siblings(
+                res_table="fursaghyr_residential_listings", com_table="fursaghyr_commercial_listings",
+                res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+                source="Fursaghyr")
+            if superseded:
+                print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
             for tbl, rows_seen in (("fursaghyr_residential_listings", res),
                                    ("fursaghyr_commercial_listings", com)):
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Fursaghyr")
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Fursaghyr",
+                                    verify_gone=lambda ad: _verify_gone(ad, s))
                 if n < 0:
                     print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
                 else:
@@ -453,7 +549,7 @@ def main() -> int:
               + (f", {pruned} stale pruned" if not is_validation else " (validation, no prune)"))
         healthy = True
         if run_id is not None:
-            healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["fursaghyr_residential_listings", "fursaghyr_commercial_listings"])
+            healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned} expired_in_feed={expired} status_unread_skipped={unread}", check_tables=["fursaghyr_residential_listings", "fursaghyr_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

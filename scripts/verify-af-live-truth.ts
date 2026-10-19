@@ -9,6 +9,7 @@
 // duplicate, not just counts.
 import { chromium } from 'playwright';
 import { openAfOffer } from './lib/afOfferLive.ts';
+import { pairCountForSelection, isResultsRequest } from './lib/afCountPairing.ts';
 
 // ONE BUDGET FOR "WAIT FOR THE AGENT'S NEXT TURN", not three magic numbers (2026-09-03).
 // Every wait below is behind the same dependency: a PAID LLM turn whose latency is variable. This
@@ -25,6 +26,7 @@ import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { resultsFoundCount } from '../e2e/lib/resultsSentence.mjs';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: REST_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -191,12 +193,15 @@ function diffIds(rpcList, oracleSet) {
 
 // ── ONE journey runner ─────────────────────────────────────────────────────────────────────────
 async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal = [], category = null,
-  group, type, city, district = null, answerAmenityIndex = null, answerBathrooms = null,
+  group = null, type = null, city, district = null, answerAmenityIndex = null, answerBathrooms = null,
   answerFurnished = null, expectZero = false, skipFirst = false, backAndChange = false }) {
   console.log(`\n════════ JOURNEY: ${name} ════════`);
   const ctx = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'ar-SA', viewport });
   const page = await ctx.newPage();
   let lastCountBody = null, lastCountResp = null, lastSearchBody = null, lastSearchResp = null;
+  const countPairs: Array<{ body: any; resp: any[] }> = [];
+  let countsBeforeTap = 0;
+  let tappedKey = '';
   // Only accept a WELL-FORMED array response as "the" capture — a transient bad parse (or, per
   // remote.ts's own comments, a secondary diversity-seed call racing the main one) must never
   // silently overwrite a good capture with garbage and poison the total_count read downstream.
@@ -205,13 +210,30 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     if (u.includes('/rpc/apartment_guided_counts_ar') && resp.request().method() === 'POST') {
       try {
         const j = await resp.json();
-        if (Array.isArray(j)) { lastCountBody = JSON.parse(resp.request().postData() || '{}'); lastCountResp = j; }
+        if (Array.isArray(j)) {
+          lastCountBody = JSON.parse(resp.request().postData() || '{}'); lastCountResp = j;
+          // EVERY count call, kept with ITS OWN body. "The last one" stopped being "the card's one"
+          // when primeFooterCounts shipped (2026-09-21): the app now walks the question's options
+          // and prices each with its own apartment_guided_counts_ar, serially, ~680 ms apart — so
+          // after a tap the LAST response is the last PRIMED OPTION, not the selection. Measured
+          // 2026-09-24: card=2,968 (كمطبخ) vs last response 5,488 (عداد ماء مستقل, the final call of
+          // that walk), and card=10,904 vs 385 on the Villa/street-width journey. A count surface is
+          // paired to a card by its REQUEST, never by arrival order (AGENTS.md harness note 3).
+          countPairs.push({ body: lastCountBody, resp: j });
+        }
       } catch {}
     }
     if (u.includes('/rpc/location_search_candidates_ar') && resp.request().method() === 'POST') {
       try {
         const j = await resp.json();
-        if (Array.isArray(j)) { lastSearchBody = JSON.parse(resp.request().postData() || '{}'); lastSearchResp = j; }
+        // ONLY A RESULTS-SHAPED REQUEST IS "the search". Several count probes share this RPC name,
+        // and keeping whichever answered last captured a `p_limit: 1` probe on the no-نوع journey —
+        // the journey then compared the UI's 42,309 against that probe's 1,769 and reported a count
+        // defect that production does not have. scripts/lib/afCountPairing.ts holds the shape.
+        if (Array.isArray(j)) {
+          const b = JSON.parse(resp.request().postData() || '{}');
+          if (isResultsRequest(b)) { lastSearchBody = b; lastSearchResp = j; }
+        }
       } catch {}
     }
   });
@@ -263,8 +285,16 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       await page.type('input >> nth=1', district, { delay: 60 });
       await tap(district);
     }
-    await tap(group);
-    await tap(type);
+    // group/type are OPTIONAL (2026-09-14, routine #10 — ops_incident #176). Every journey in this
+    // corpus used to narrow by a SPECIFIC نوع, so the single most common real search shape — a
+    // Residential or Commercial search with no type picked, which sends `p_types: null` — had ZERO
+    // daily coverage. A corpus that always narrows on every axis cannot see a bug that only fires
+    // on the UNNARROWED case for that axis; that is what hid ops_incident #165 for an unmeasured
+    // period. Passing group:null,type:null drives the untyped search the oracle already knows how
+    // to judge (scripts/lib/afOracleFilter.ts handles a null p_types explicitly, on both the
+    // single-scope and two-scope paths).
+    if (group) await tap(group);
+    if (type) await tap(type);
     await tap('بحث');
     await page.waitForTimeout(14000);
     // scroll to reveal the AF launcher below the result cards
@@ -273,9 +303,11 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
 
     if (expectZero) {
       const uiTxt = await body();
-      const nonZeroMatch = uiTxt.match(/لقينا\s*([\d,٬]+)\s*إعلان/);
-      const nonZeroCount = nonZeroMatch ? parseInt(nonZeroMatch[1].replace(/[^\d]/g, ''), 10) : null;
-      check(`${name}: UI shows no nonzero result count`, !nonZeroCount, `matched=${nonZeroMatch?.[0] ?? '(none)'}`);
+      // Derived from the shipped pool (2026-09-19, routine #5): this read «لقينا N إعلان», retired
+      // by PR #3186 that morning. On an honest-zero cohort a blind parser reports "no nonzero count"
+      // for the wrong reason — it would pass just as happily on a screen quoting 41,330.
+      const nonZeroCount = resultsFoundCount(uiTxt);
+      check(`${name}: UI shows no nonzero result count`, !nonZeroCount, `read=${nonZeroCount ?? '(no sentence)'}`);
       check(`${name}: result-RPC was captured for this search`, !!lastSearchBody, JSON.stringify(lastSearchBody));
       if (lastSearchBody) {
         const rpcTotal = Number(lastSearchResp?.[0]?.total_count ?? (Array.isArray(lastSearchResp) ? lastSearchResp.length : NaN));
@@ -304,6 +336,11 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     if (!offer.opened) {
       check(`${name}: AF launcher present`, false, offer.reason === 'no-turn'
         ? `NOT VERIFIED — no results turn from the agent within ${offer.waitedMs}ms; the launcher could not be looked for`
+        : offer.reason === 'intercepted'
+        // HARNESS, NOT PRODUCT: the launcher was on screen for every one of those attempts and the
+        // reflowing conversation took the click instead. Saying "no launcher rendered" here would be
+        // the false accusation ops_incident #340 was made of (scripts/lib/afOfferLive.ts).
+        ? `NOT VERIFIED — the launcher was present but ${offer.attempts} click(s) landed on «${offer.hit}» instead within ${offer.waitedMs}ms; a harness miss, not an AF verdict`
         : `the turn landed but no launcher rendered within ${offer.waitedMs}ms — not eligible on this scope, or a regression`);
       await ctx.close(); return;
     }
@@ -386,6 +423,8 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
           `the card rendered no [data-testid^="af-option-"] to click (opts=${opts.length}) — refusing to click a selector built from undefined`);
         await ctx.close(); return;
       }
+      tappedKey = testid.replace(/^af-option-/, '');
+      countsBeforeTap = countPairs.length;
       await page.click(`[data-testid="${testid}"]`);
     } else {
       const opts = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')));
@@ -394,6 +433,8 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
           `the card rendered no [data-testid^="af-option-"] to click (opts=${opts.length}) — refusing to click a selector built from undefined`);
         await ctx.close(); return;
       }
+      tappedKey = String(opts[0]).replace(/^af-option-/, '');
+      countsBeforeTap = countPairs.length;
       await page.click(`[data-testid="${opts[0]}"]`); // first option — deterministic, whatever the question is
     }
     // `s.chip !== baselineChip` alone is satisfied BY the pending window's null (fix 2026-08-26), so
@@ -408,9 +449,30 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     // passed. Selecting an answer fires exactly one count call (fetchGuidedLiveCount → cnt_selected);
     // the last captured response must be that call, and its cnt_selected must be the chip.
     await page.waitForTimeout(600);
-    check(`${name}: the card's count IS the count RPC's cnt_selected`,
-      lastCountResp?.[0]?.cnt_selected != null && Number(lastCountResp[0].cnt_selected) === afterSelect.chip,
-      `card=${afterSelect.chip} rpc cnt_selected=${lastCountResp?.[0]?.cnt_selected}`);
+    // PAIRED BY REQUEST, NOT BY ARRIVAL ORDER — AND OVER THE WHOLE CONVERSATION.
+    //
+    // Two facts about the shipped app that this check used to contradict, both measured on
+    // production 2026-09-24 and both created by primeFooterCounts (2026-09-21):
+    //   1. A tap is followed by a count call PER OPTION, ~680 ms apart, so "the last response" is
+    //      the last PRIMED option — card 2,968 (المطبخ) vs last response 5,488 (عداد ماء مستقل),
+    //      and card 10,904 vs 385 on the Villa/street-width journey. Both were reported FAIL.
+    //   2. A tap fires ZERO count calls of its own: the option was already priced during the search
+    //      wait and settledGuidedCounts remembers it — which is precisely what that walk is for.
+    //      So "the call after the tap" does not exist to be compared with.
+    // The honest assertion is therefore: SOME count call priced this number FOR THE OPTION THE USER
+    // TAPPED. Both halves are needed — the walk prices every option, so the number alone would let a
+    // card showing a different option's count pass. scripts/lib/afCountPairing.ts holds the rule and
+    // scripts/verify-af-count-pairing-is-by-request.ts executes it against the measured walk.
+    await page.waitForTimeout(600);
+    const baseBody = [...countPairs].reverse()
+      .find((p) => Number(p.resp?.[0]?.cnt_selected) === baselineChip)?.body ?? null;
+    const { paired, via } = pairCountForSelection(countPairs, afterSelect.chip, tappedKey, baseBody);
+    check(`${name}: the card's count IS a count RPC's cnt_selected, for the option the user tapped`,
+      paired != null,
+      paired
+        ? `card=${afterSelect.chip} priced by a call carrying «${tappedKey}» (matched ${via})`
+        : `card=${afterSelect.chip} matched NO count call that also carried «${tappedKey}» ` +
+          `(${countPairs.length} count call(s) seen: [${countPairs.map((p) => p.resp?.[0]?.cnt_selected).join(', ')}])`);
     // ARM THE CAPTURE **BEFORE** THE COMMITTING CLICK, never after it (fix 2026-08-28). Confirming
     // the last useful question can end the round on its own and fire the final search inside the
     // 1200 ms below; the reset used to sit after this block, so that search was captured and then
@@ -495,7 +557,7 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     // footer is متابعة/تخطي/رجوع only, and a round ends when its questions are exhausted. So when
     // the card is still open after the committing confirm above, walk it out by SKIPPING the
     // remaining questions (skip = commitGuidedStep([]) — the same ONE commit path, recorded as
-    // no-preference, changing no filters). Bounded: AF_ROUND_MAX_QUESTIONS is 5, so 8 attempts can
+    // no-preference, changing no filters). Bounded: AF_ROUND_MAX_QUESTIONS is 4, so 8 attempts can
     // never loop forever even if a click is swallowed once or twice. The capture was armed before
     // that confirm, so a search it already fired is still held here rather than discarded.
     for (let hop = 0; hop < 8; hop++) {
@@ -514,14 +576,16 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     check(`${name}: final search request was captured`, !!lastSearchBody, JSON.stringify(lastSearchBody));
     if (!lastSearchBody) { await ctx.close(); return; }
     const rpcTotal = Number(lastSearchResp?.[0]?.total_count ?? (Array.isArray(lastSearchResp) ? lastSearchResp.length : NaN));
-    const rpcTotalFmt = rpcTotal.toLocaleString('en-US');
     let uiCount = null;
     const until2 = Date.now() + AGENT_TURN_MS;
     while (Date.now() < until2) {
       const t = await body();
-      if (t.includes(`لقينا ${rpcTotalFmt}`) || t.includes(`لقينا ${rpcTotal}`)) { uiCount = rpcTotal; break; }
-      const m = [...t.matchAll(/لقينا\s*([\d,٬]+)/g)];
-      if (m.length) uiCount = parseInt(m[m.length - 1][1].replace(/[^\d]/g, ''), 10);
+      // Derived from the shipped pool (2026-09-19, routine #5). The retired «لقينا N إعلان» shapes
+      // this replaced could not read a single rotated template, and resultsFoundCount() already
+      // takes the LAST sentence by document position — which is what the matchAll(...).pop() here
+      // was reaching for by hand.
+      const read = resultsFoundCount(t);
+      if (read != null) { uiCount = read; if (read === rpcTotal) break; }
       await page.waitForTimeout(500);
     }
     check(`${name}: UI displayed count == result-RPC total_count`, uiCount != null && uiCount === rpcTotal, `ui=${uiCount} rpc=${rpcTotal}`);
@@ -595,6 +659,15 @@ await runJourney('Residential/Buy/Apartment/Riyadh — SKIP case', {
 });
 await runJourney('Residential/Buy/Apartment/Riyadh — BACK/change-answer case', {
   deal: [], city: 'الرياض', group: 'الشقق والسكن المشترك', type: 'شقة', backAndChange: true,
+});
+
+// THE UNNARROWED AXIS (ops_incident #176). No نوع picked at all — the p_types:null shape that every
+// other journey in this corpus narrows away, and the most common real search a user actually makes.
+await runJourney('Residential/Buy/Riyadh — NO نوع picked (p_types:null)', {
+  deal: [], category: null, city: 'الرياض', group: null, type: null,
+});
+await runJourney('Commercial/Rent-Annual/Riyadh — NO نوع picked (p_types:null, commercial scope)', {
+  deal: ['إيجار', 'شراء', 'سنوي'], category: 'تجاري', city: 'الرياض', group: null, type: null,
 });
 
 await browser.close();

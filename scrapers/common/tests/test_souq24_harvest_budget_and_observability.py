@@ -57,7 +57,7 @@ class _FakeSession:
         if url == sq.SITEMAP:
             locs = "".join(
                 f"<loc>https://24.com.sa/view/slug-{i}</loc>" for i in range(self.sitemap_pages))
-            return mock.Mock(text=f"<urlset>{locs}</urlset>")
+            return mock.Mock(status_code=200, text=f"<urlset>{locs}</urlset>")
         with self._lock:
             self.calls.append(url)
             self.concurrent += 1
@@ -69,7 +69,7 @@ class _FakeSession:
                 time.sleep(self.latency)
             body = "".join(
                 f'href="https://24.com.sa/{n * 100 + k}/slug"' for k in range(self.ids_per_page))
-            return mock.Mock(text=body)
+            return mock.Mock(status_code=200, text=body)
         finally:
             with self._lock:
                 self.concurrent -= 1

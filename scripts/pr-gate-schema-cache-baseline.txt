@@ -1,0 +1,30 @@
+# PR-GATING LIVE CHECKS THAT DO NOT YET SURVIVE A SCHEMA-CACHE RELOAD.
+#
+# Routine #10, 2026-09-23. A workflow with a `pull_request` trigger blocks a contributor's merge.
+# When such a check reads PostgREST without scripts/lib/postgrestRetry.ts, any session applying a
+# function-creating migration opens a PGRST002 window that fails somebody else's unrelated diff —
+# measured that evening on two PRs at once, 96 seconds after migration 20260923233010, with four
+# such migrations landing from three concurrent sessions inside twelve minutes.
+#
+# THIS LIST MAY ONLY SHRINK. Its size is pinned by PR_GATE_UNPROTECTED_CEILING in
+# scripts/verify-pr-gates-survive-schema-cache-reload.ts, so adding a name is a reviewed source
+# change and never a quiet append. A NEW unprotected PR gate is RED. A row the tree has outgrown is
+# RED as STALE, so the ledger can never read better than reality.
+#
+# SHRINK IT BY ADOPTING THE DRIVER, NEVER BY REMOVING THE TRIGGER. Dropping `pull_request` from a
+# workflow would empty this file and lose the per-PR coverage that is the whole point; that is the
+# prohibited act wearing this ratchet's syntax.
+#
+# Format:  check filename | the pull_request-triggered workflow that runs it | what its reads are
+#
+# verify-p0-fast-lane-detection.ts is NOT here: it is the one that actually bit, and it was repaired
+# in the same change rather than baselined. Its reproduction is in that file's header.
+
+# EMPTY SINCE 2026-09-26, AND THAT IS THE POINT — do not read an empty file as an unused mechanism.
+# routine #5 adopted the driver in verify-af-independent-oracle.ts (the last row, deleted above:
+# ops_incident #563), so PR_GATE_UNPROTECTED_CEILING is 0 and ANY new unprotected PR gate is red
+# immediately, with no ledger to hide in. Reproduced before and after against a stub holding
+# PGRST002 open indefinitely, the exact shape that bit on somebody else's diff:
+#     pre-fix  → ✗ 27 check(s) FAILED — an AF answer means something different than the product intends
+#     post-fix → ✗ NOT MEASURED — … this cell was NOT measured, and says nothing about the product
+# Same exit code (1) both times: adopting the driver changed the CLAIM, never the fail-closed verdict.

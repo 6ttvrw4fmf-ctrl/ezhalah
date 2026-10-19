@@ -2,6 +2,72 @@
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing any code.
 
+# NOTHING IS LIVE UNTIL YOU HAVE USED IT LIKE A REAL USER (owner, 2026-09-21 — supreme, permanent)
+
+**In the owner's words: "What determines it's live is that you actually test it like a real user.
+Tell this to all the chats, all the agents, all the engineers. This is extremely important."** It
+binds every chat, subagent, workflow and all eleven engineer routines, and overrides any prompt that
+says less.
+
+A merged PR, a green CI, a successful deploy run, a served bundle, a DB row, an RPC result or a
+`curl` is **not** "live". It is evidence that a step ran. A change is live only when you have opened
+**https://ezhalah-app.vercel.app** in a real browser and walked the path a user walks:
+
+1. Search through the real UI (Filter or AI Agent), with the inputs a user would type and tap.
+2. Find the exact thing you changed on the screen: the card, count, label, logo or button.
+3. Click it the way a user would (open the card, press «عرض المزيد», follow the link).
+4. Compare what the user sees with the SOURCE website: price, area, rooms, location, name, link.
+
+Until all four are done and observed, report **PROPAGATION PENDING** or **NOT YET VERIFIED**, never
+"live", "fixed", "done" or "shipped". If the change reaches users only after a sync or cron, wait for
+it and then do the four steps, or say plainly that you have not. Back-end-only work (a scraper, a
+column, a sync) is not exempt: it is live when its effect shows on a real card. How to drive the
+browser from an agent session: `docs/ops/VERIFYING_PRODUCTION.md`.
+
+# OUR OWN ROBOTS MUST NOT TAKE PRODUCTION DOWN (2026-10-09 — permanent)
+
+Production has no separate test database: every live check, sweep, smoke and agent browser runs on the
+same database real users search. On 2026-10-09 20:00-21:00 UTC our robots were nearly all of the load —
+the Friday 🦅 audit's browser sweeps (Claude cloud, 17 machines, ~2,700 searches per half hour), CI live
+checks and an agent's local Playwright runs — and two migrations applied in that hour made PostgREST
+reload its schema cache under load: the reload needed more than authenticator's 8 s, failed, and EVERY
+API call answered 503 for about a minute (20:24 and 20:56). The CI web-runtime smoke failed on main
+and on PRs with `count=null`.
+
+1. **Before any live robot run** (a sweep, a smoke, a Playwright script, a burst of RPCs): check
+   `pg_stat_activity` on aannarbkwcymrotzwdbo — active `authenticator` queries > 8, or any running > 5 s
+   → wait. Re-check between batches, not only at the start.
+2. **At most 2 browsers against production at a time per session**, subagents included. Run the next
+   journey when one finishes; never fan out a sweep across many machines.
+3. **Apply migrations when the database is quiet** (rule 1). Every migration makes PostgREST reload its
+   schema cache; a busy reload is what takes the whole API down. Never send `notify pgrst, 'reload …'`
+   by hand while it is busy.
+4. **When search is slow, find the caller first:** group `edge_logs` by `request.cf.asOrganization`
+   and user agent (Anthropic = Claude cloud sessions, Microsoft = GitHub runners, `HeadlessChrome` =
+   any Playwright) before touching SQL.
+
+# CHAT LANGUAGE AND UI LANGUAGE ARE SEPARATE (owner, 2026-10-14 — permanent)
+
+English user message → English reply. Arabic → Arabic. Mixed Arabic/English → the language with more words, never more characters; numerals and emoji do not count as words. A tie retains established conversation language; a letterless follow-up inherits the most recent language-bearing turn, falling back to the UI language only without one. Typed messages stay verbatim.
+
+The language button changes only the UI, settings and displayed account name. Existing chat replies, summaries and closing notes retain their own language; switching never translates history, reruns a search or adds paid translation calls. Save a signed-in user's UI language choice on the device and restore it on refresh/return. Guest fresh loads stay Arabic-first. Canonical detail: `docs/ARCHITECTURE.md` i18n section. Guard: `scripts/verify-chat-language-is-not-interface-language.ts`.
+
+# GATHERN + AQAR MONTHLY SHOW NO PRICE — ONLY THE STAY-LENGTH NOTE (owner, 2026-10-02 — permanent)
+
+**Every Gathern and Aqar Monthly listing, today's and every new one we ingest, shows
+«اضغط للاطلاع على الأسعار حسب مدة الإقامة» where the price would be. Never a price.** Their stays are
+priced by length (the guest picks the dates on the platform), so one monthly figure misstates them.
+They stay under «شهري».
+
+- Render every price through `listingPrice()` in `src/lib/listingDisplay.ts` (card, Read Aloud, the
+  agent's card summary). Never print `listing.price` raw for these sources. Their details panel shows
+  no discount / pre-discount / nightly rows.
+- Display only. Scrapers keep storing the source's price (PRICE = SOURCE). Never NULL it: a NULL
+  price turns the row into «السعر عند الطلب», which is found under every rent period, not just «شهري».
+- A new stay-length (nightly / calendar-booked) platform joins `isStayLengthPriced()` only with the
+  owner's approval.
+- Guarded by `scripts/verify-stay-length-platforms-show-a-note-not-a-price.ts`.
+
 # Read this first — canonical rules + token efficiency (owner rule, 2026-08-10, confirmed permanent)
 
 **Reading order before any research task: `AGENTS.md` (this file) → `docs/ARCHITECTURE.md` →
@@ -25,6 +91,39 @@ never a verdict, and "seen by the crawler" (`last_seen_at`) is a different fact 
 production-searchable platform must declare a strategy in `scrapers/common/liveness_policies.py` or
 CI fails. `select * from ops_platform_liveness_coverage;` is the standing answer to "do we have dead
 listings?" — do not re-derive it by hand.
+
+**A PLATFORM IS "COVERED" ONLY WHEN THE CHAIN IS PROVEN TO RUN IN PRODUCTION, AND A CHECKER'S
+SILENCE MUST BE AN ALARM — `docs/ops/LISTING_LIVENESS.md` §9 is canonical (owner, 2026-09-21).**
+The owner's two sentences: *source removes a listing → Ezhalah detects it → safely verifies it →
+deactivates it*; and *if the liveness checker or its scheduled job stops working, Ezhalah must detect
+THAT failure too, instead of silently accumulating stale listings.* Never call a platform covered
+because code, a workflow, a cron row or a green barrier exists — every one of those was true of
+platforms serving dead inventory the day this rule was written. Measured then: wasalt's enumeration
+was dead for SEVEN DAYS while the workflow reported `success` on every run, enumerating 96 rows
+instead of ~105,000, because a job that stops producing runs contributes no row for
+`mon_detect_silent_partial_success()` to compare — **absence cannot be compared, so silence read as
+health** — and because the enum shared a `platform` label with the ordinary crawl, hiding its
+collapse inside that crawl's small-slice median. A liveness job needs its OWN run label and must be
+watched for EXPECTED-BUT-ABSENT runs on its own cadence. A job that did not run proves nothing about
+its listings: they are UNKNOWN, and the response is to fix the checker, never to widen a kill or
+lower a floor (§7). And an "EGRESS BLOCKED" note is a fact about the container that wrote it, not
+about the platform — re-measure from the egress the job really uses (CI), where a cloud routine
+measured an 83% false-death rate on gathern the same day CI got clean 200s.
+
+**A TIER IS A MECHANISM; COVERAGE IS EVIDENCE; NEVER READ ONE AS THE OTHER —
+`docs/ops/LISTING_LIVENESS.md` §9.6 is canonical (2026-09-21).** The registry grades what a platform
+RUNS; `ops_platform_liveness_coverage` measures what that has PRODUCED. Fusing them is how the fleet
+read as uncovered while 29 platforms ran real per-listing oracles. Measured that day: **63 of 67
+platforms holding active inventory (34,763 listings) had never written a single
+`last_verified_alive_at`**, because `prune_unseen()`'s self-heal discarded the ALIVE verdict it had
+just obtained — so coverage read 0% everywhere, `CRAWL_PRESENCE_ONLY` looked honest, and
+`mon_detect_liveness_coverage_ramp` (filter: `strategy in ('DIRECT_REVISIT','CANDIDATE_PLUS_DIRECT')`)
+never looked at one of them. Every layer confirmed every other layer and all of them were wrong.
+A platform handing `verify_gone=` to `prune_unseen` **is** CANDIDATE_PLUS_DIRECT — declaring it lower
+is not modesty, it switches monitors off. Whether its chain has ever actually RUN is the separate
+question: `scrapers/oracle-never-observed.txt` (shrink-only ledger) plus
+`mon_detect_oracle_chain_never_observed()`, which recomputes it from production every sweep. 20 of
+the 29 have still never produced a verdict. **A tier is never a coverage claim and never permission.**
 
 **The daily integrity routine's spec is `docs/ops/DATA_INTEGRITY_ENGINEER.md` — that FILE is the
 source of truth, not the cloud routine's prompt text.** If the two ever differ, update the routine to
@@ -76,6 +175,11 @@ outside the roster is decoration. Adjudicate every finding against source before
    cases, and prove both directions. (Run #15 assumed absence meant silence on 13 aqaratikom rows;
    the source published «سنوي» on all 13.)
 
+**⛔ The eleven routines below were DELETED by the owner on 2026-09-27 — do NOT recreate them.** A
+new, smaller team is being built one engineer at a time; see the notice at the top of
+`docs/ops/ENGINEER_ROUTINES.md`. ⚡ Scraping Engineer: `docs/ops/SCRAPING_ENGINEER.md`. 🆕 New Listings
+Engineer: `docs/ops/NEW_LISTINGS_ENGINEER.md`. ♻️ Lifecycle Engineer: `docs/ops/LIFECYCLE_ENGINEER.md`. Routine numbers and routine-to-routine handoffs below are history.
+
 **GLOBAL ENGINEERING POLICY (owner, 2026-08-29, extended 2026-09-04) — binds ALL ELEVEN routines.
 Canonical text: `docs/ops/ENGINEER_ROUTINES.md` §G; the file wins over any routine prompt.** It said
 "ALL SEVEN" until 2026-09-05, four routines after the roster grew to eleven — and this is the file
@@ -108,8 +212,37 @@ failure into a plausible empty value that no type checker and no count-honesty b
 The mechanism already exists — **do not invent a second one.** `src/lib/afProbe.ts` defines
 `PROBE_FAILED` / `isProbeFailure()` / `probeVerdict()`, distinguishing `'unknown'` from
 `'known-empty'`. Use it. A fetch that can fail must return a value the caller can tell apart from
-success and from a genuine zero, and every RPC goes through the `bounded()` timeout wrapper — a call
-with no timeout wedges the loader forever, which reads to a user as a hang, not an error.
+success and from a genuine zero, and every RPC must bound its await — a call with no timeout wedges
+the loader forever, which reads to a user as a hang, not an error.
+
+**That last clause used to read "every RPC goes through the `bounded()` timeout wrapper", and it was
+a claim nobody executed (corrected 2026-09-14, routine #10).** Measured then: 16 RPC call sites in
+`src/`, **13 bounded and 3 not** — `loaderActivePlatforms.ts`, `loaderScaleStats.ts` and
+`remote.ts`'s `loc_rel_rank` had no timeout, no AbortSignal and no `withTimeout`. Nothing in the
+repo would have noticed a fourth. A reader consulting this rule for "are our RPCs bounded?" got a
+confident yes from a sentence no check enforced — the PART 1.11 shape in
+`docs/ops/BARRIER_ENGINEER.md`: a pointer reads as coverage. `scripts/verify-every-rpc-call-is-bounded.ts`
+(in `npm test`) measures it on every PR: the known sites are a **shrink-only** baseline with a
+ceiling, a NEW unbounded call site is RED, and a baseline entry that has been fixed is RED as stale
+so the ratchet cannot read better than reality. **It judges each call against its OWN STATEMENT.**
+It used to judge an 18-line neighbourhood, and a neighbourhood is proximity standing in for a
+per-call fact: measured 2026-09-21 by planting the mutant, deleting `.abortSignal(_ac.signal)` from
+one of the two `top_cities_by_deal_ar` awaits in `src/data/locations.ts` left the whole suite GREEN,
+because the retry seven lines below still carried its own.
+
+**Closed 2026-09-18 (routine #6, `ops_incident` #269): the baseline is empty and the ceiling is 0.**
+The sentence at the top of this section is, for the first time, a measured fact rather than an
+aspiration. **Read the count the check PRINTS — never a number from this paragraph**; it said "16
+call sites, 16 bounded" and the tree had grown to 18 by 2026-09-21. The two search-loading reads
+went through the new
+`src/data/boundedRpc.ts` rather than `remote.ts`'s `bounded()`, because those modules are
+deliberately import-light (`loaderPlatforms.ts` records why) and importing `remote.ts` would drag the
+whole search layer in behind them; `loc_rel_rank` uses the in-file `bounded()` it sits next to. Keep
+the baseline empty: a name appearing in it again means someone shipped an RPC that can hang.
+
+Three mechanisms count as bounded because the repo really uses three and all three bound the wait:
+`bounded()` (src/data/remote.ts), `.abortSignal()` (src/data/locations.ts and `boundedRpc.ts`) and
+`withTimeout()` (the AF probe path).
 
 **Barriers for this class must EXECUTE the function against an injected failure.** Every one of these
 five defects had a barrier over the exact line, and every one of those barriers was a source-TEXT
@@ -302,16 +435,27 @@ and mutation-proven in `scripts/lib/mergeGate.ts` / `scripts/verify-merge-gate.t
 before merge" prose rule by enforcing the "again" half automatically — pass the file list from your
 post-creation check as `--expect-files` and the tool does the second verification for you.
 
-# Autonomous engineering authority (owner-granted, 2026-08-04)
+# Autonomous engineering authority (owner-granted, 2026-08-04; extended to every session 2026-09-13)
 
-**The engineering routines are AUTONOMOUS for safe operational work. Finding a safe production bug
-and then asking the owner whether to fix it is a FAILURE, not caution.**
+**Every agent session in this repo is AUTONOMOUS for safe operational work — a named routine, an
+ad-hoc interactive session, all of it. Finding a safe production bug and then asking the owner
+whether to fix it is a FAILURE, not caution.** This used to bind only the two named routines; the
+owner extended it to every session (2026-09-13) because the same split is what they actually want
+regardless of who's running. If a memory, prior instruction, or a routine's own prompt is more
+cautious than this, it is stale — this file and `docs/ops/AGENT_AUTHORITY.md` win.
 
 The full contract — the GREEN list (do it, don't ask), the RED list (stop and ask), and the
 execution rules that GREEN work still obeys — is **`docs/ops/AGENT_AUTHORITY.md`**. Read it before
-deciding to escalate anything. It governs both the Senior Production Engineer and the
-Junior/Beginner Daily Engineer routines, and it OVERRIDES any routine prompt that is more timid
-than it (routine prompts live outside this repo and drift; this file does not).
+deciding to escalate anything. It governs every session, and it OVERRIDES any routine prompt or
+other instruction that is more timid than it (routine prompts live outside this repo and drift;
+this file does not).
+
+**Multiple autonomous sessions run at once — claim wide work before starting it.** Before touching
+something bigger than an obviously-yours small diff (a whole platform's data, a shared table, a bug
+class spanning many files), check `select * from ops_active_claims;` and take one with
+`claim_work_area()` if clear (see `docs/ops/AGENT_AUTHORITY.md` §9 for the exact calls). This
+exists because two sessions built overlapping fixes for the same bug on 2026-09-13 without knowing
+about each other — not a hypothetical.
 
 The expected loop, end to end, without check-ins:
 
@@ -496,6 +640,19 @@ named `<that timestamp>_<a name>.sql` (or recover it later from
 for the next deploy, the drift sweep, or another session to clean up: the person/session that ran
 `apply_migration` is responsible, immediately.
 
+**Check the SQL's citations BEFORE you apply it, not in CI afterwards.** Write the SQL to a file
+first and run `node --experimental-strip-types scripts/check-migration-before-apply.ts <file.sql>`.
+Because `apply_migration` MINTS the version, any 14-digit timestamp written for *this* migration is a
+guess, and after applying, neither way out is free: correcting the text re-opens content-parity drift
+(condition #4/#5) on a file that is otherwise byte-exact, and keeping it costs a line in
+`scripts/migration-reference-baseline.txt` plus a bump to a ratchet that may only shrink — which is
+why two of its 31 entries exist. **Mint the version you cite, or cite nothing.** This runs the same
+predicate `verify-migration-references-resolve.ts` runs in `npm test`
+(`scripts/lib/migrationCitations.ts`), just before the irreversible step instead of after it: a guard
+after the point of no return is not a guard. Knowing about this class is demonstrably not enough to
+avoid it — on 2026-09-27 one session did it twice four hours apart, the second time after being
+caught by the first and writing the rule down.
+
 **The guard checks all FOUR drift conditions (owner extended it 2026-08-21), in both directions:**
 1. **applied-but-not-committed** — a migration live in prod with no git file (the classic drift).
 2. **committed-but-not-applied** — a git migration file whose version was never applied to prod.
@@ -550,6 +707,68 @@ not closed.
 `supabase_migrations.schema_migrations.statements` (matched by `version`) into
 `supabase/migrations/`, commit, and open a PR — this itself touches `supabase/migrations/`, so per
 the daily/senior routine rules it stays OPEN for review, never self-merged by an autonomous run.
+
+## HIDING A LISTING IS A TWO-PART ACT — `active=false` ALONE IS UNDONE WITHIN 24h (2026-09-18)
+
+**If you deliberately deactivate a listing that is still live at source, you must ALSO register it in
+`ops_adjudicated_retraction`, or `auto_recover_false_inactive()` will switch it back on within a
+day.** That job exists to undo accidental inactivations, and its predicate is
+
+```sql
+active = false
+and coalesce(missing_count,0) = 0        -- true for anything still published at source
+and deactivated_at >= now() - 24h        -- true for anything you just did
+and not exists (select 1 from ops_adjudicated_listing j
+                 where j.tbl = <t> and j.listing_id = t.id)   -- the ONLY clause that protects you
+```
+
+A deliberate withdrawal and an accidental flip are **identical** under the first three clauses. The
+adjudication register is what tells them apart, and the function's own comment says so: *"An
+adjudicated row was never struck BECAUSE a decision was recorded about it… must never be
+auto-reactivated (owner, 2026-08-30)."*
+
+`ops_adjudicated_listing` is a VIEW; write to **`ops_adjudicated_retraction`** (`source_table`,
+`listing_id`, `reason`, `evidence` jsonb).
+
+**How this was earned.** The owner said «delete the 99 please» about راكز's «البيع على الخارطة»
+(off-plan) units on 2026-09-14. They were deactivated, a detector was added to watch them, and they
+were **active again the next day**. Three days were then spent suspecting the scraper, which was
+innocent throughout — `map_unit()` was executed against the real live unit 16938 and the real live
+project 16055 and correctly returned `None`. The withdrawal migration had simply never written to the
+register, so the recovery job read an owner decision as an accident. The failure is silent, arrives a
+day late, and looks exactly like a scraper bug.
+
+**Two second-order lessons from the same incident, both already written down and both walked into:**
+
+1. **A detector returning 0 does NOT mean clean.** `mon_raise()` returns 0 when its dedup key is
+   already open, so an all-zero sweep can sit on top of a standing alert — this file already says so
+   under "Read this first", and `mon_detect_rakez_off_plan_resurrection()` had been alerting
+   correctly since 09-15 while its return value read 0. **Read `open_alerts`, not the count.**
+2. **`scraped_at` cannot date a re-upsert.** Nothing writes it after insert — it is a column default.
+   `last_seen_at` is the one that moves. Using `scraped_at` to rule out a re-upsert will mislead you.
+
+The rakez off-plan rows are now adjudicated (`20260918172239`) and stay hidden. They are **kept, not
+deleted** — the owner wants them as the seed of a future off-plan feature, so do not prune them.
+
+**The rule is now CHECKED, and one clause above is stated too strongly (routine-8, 2026-09-20).**
+`scripts/verify-deliberate-deactivation-is-adjudicated.ts` (in `npm test`) discovers every migration
+whose executed SQL sets `active = false` on a listing table — by shape, never from a list anyone has
+to remember to extend — and fails unless the recovery job can tell it from an accident. It would have
+failed the rakez migration at PR time. Two corrections it encodes, both measured:
+
+1. **`missing_count` is a second protecting clause, not a decoration.** The comment above calls the
+   register "the ONLY clause that protects you"; the live function's `coalesce(missing_count,0) = 0`
+   protects a row too. This matters in the dangerous direction: `20260919010944` deactivated six
+   wasalt listings proven 404 on both language routes, and the only thing keeping them dead is a
+   `missing_count = 3` its own comment justifies as *monitoring consistency* — tidiness, not
+   survival. Anyone "cleaning up" that line returns six 404s to search. **Still always register:** an
+   adjudication is a decision that persists, a strike count is a number the next re-scrape may reset.
+2. **A companion migration rescues only if no 05:20 UTC recovery run falls in between.** Protection
+   five minutes later (`20260919230553` → `20260919231035`) is a real rescue; four days later is the
+   rakez incident. The barrier measures the gap in recovery runs, not in hours or in file adjacency.
+
+Measured the day the barrier landed: of the three deactivating migrations that followed this rule,
+the register was used **zero** times — two survived on a side effect, one on an owner reversal.
 
 ## PLATFORM ACTIVATION IS APPLY-AND-MIRROR IN ONE CHANGE (owner rule, 2026-09-06, permanent)
 

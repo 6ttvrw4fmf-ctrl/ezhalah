@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { rpcProbeOutcome, outcomeIsUsable } from './lib/liveHalf.ts';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
 import {
   evaluateImageCoverage,
   type ImageBaseline,
@@ -43,7 +44,7 @@ const baseline: { platforms: Record<string, ImageBaseline> } =
   JSON.parse(readFileSync(join(import.meta.dirname, 'image-coverage-baseline.json'), 'utf8'));
 
 const { url, key } = resolvePublicSupabase();
-const r = await fetch(`${url}/rest/v1/rpc/ops_image_coverage_latest`, {
+const r = await postgrestFetch(`${url}/rest/v1/rpc/ops_image_coverage_latest`, {
   method: 'POST',
   headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
   body: '{}',

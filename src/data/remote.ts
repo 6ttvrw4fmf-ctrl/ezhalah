@@ -1,3 +1,4 @@
+import { selectSourceTables } from '@/lib/agentSourceSelection';
 import { supabase } from '@/lib/supabase';
 import { PROBE_FAILED, isProbeFailure, type ProbeFailed } from '@/lib/afProbe';
 import { listingPriceString, isDerivedTotal, type Listing } from './listings';
@@ -5,16 +6,18 @@ import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
-import { normalizeType, queryForSelection, queryForTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
+import { scopeCrossesMacro } from '@/lib/searchDefaults';
+import { normalizeType, queryForSelection, queryForTypes, storedRawTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
 import { effectiveTypes, effectiveGroups, bedroomTokens } from './search';
 import { scoreListingProximity } from './proximity';
 import { cityDisplay } from './locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { decodeEntities } from '@/lib/htmlEntities';
-import { photoDisplayUrl } from '@/lib/photoUrl';
+import { dedupePhotoUrls, photoDisplayUrl } from '@/lib/photoUrl';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
 import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import { rotationSeed } from '@/lib/rotationSeed';
+import { truncateGlyphs } from '@/lib/typedReveal';
 import saLocations from './sa-locations.json';
 
 // Maps proximity.ts Relationship values to the relationship_group stored in listing_location_relations.
@@ -317,7 +320,7 @@ function effectiveCleanQuery(q: SearchQuery): CleanQuery | null {
 // spelling a clean type came from (e.g. Shop ⊇ {Shop, Kiosk}; Studio ⊇ {Studio, ستوديو, …}).
 function dbTypesFor(q: SearchQuery): string[] | null {
   const cq = effectiveCleanQuery(q);
-  return cq && cq.rawTypes.length ? cq.rawTypes : null;
+  return cq && cq.rawTypes.length ? storedRawTypes(cq.rawTypes) : null;   // «أرض خام» → the land types its rows carry
 }
 
 // FILTER-FIRST (owner 2026-07-08): the search RPC applies these BEFORE the per-platform/limit cap, so the
@@ -430,6 +433,10 @@ export function rpcAdvancedFilterParams(q: SearchQuery) {
     ...(q.ageMin != null ? { p_age_min: q.ageMin } : {}),
     ...(q.ageMax != null ? { p_age_max: q.ageMax } : {}),
     ...(q.isNewConstruction != null ? { p_is_new_construction: q.isNewConstruction } : {}),
+    // Several answers to one question = their exact union (owner 2026-10-03); sent only when picked.
+    ...(q.ageBuckets?.length ? { p_age_buckets: q.ageBuckets } : {}),
+    ...(q.ratingBuckets?.length ? { p_rating_buckets: q.ratingBuckets } : {}),
+    ...(q.furnishedIn?.length ? { p_furnished_in: q.furnishedIn } : {}),
   };
 }
 const RPC_SORT_KEYS = new Set(['oldest', 'price_asc', 'price_desc', 'area_asc', 'area_desc', 'beds_desc']);
@@ -544,9 +551,7 @@ export function searchTableScope(q: SearchQuery): SearchTableScope | null {
   // table in this particular scope (e.g. Gathern + Buy) — that fallback bug let a platform filter
   // silently widen back to every platform.
   const platformScope = (tbls: string[]): string[] => {
-    if (!(q.sources && q.sources.length)) return tbls;
-    const wanted = new Set(q.sources);
-    return tbls.filter((t) => wanted.has(t.replace(/_(residential|commercial)_listings$/, '')));
+    return selectSourceTables(tbls, q.sources, q.excludedSources);
   };
   const mainTables = isBroadCommercial ? platformScope(resTables(q)) : tables;
 
@@ -607,9 +612,12 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   const tableScope = searchTableScope(q);
   if (!tableScope) return null;
 
+  if (q.geographicScope === 'REGION' && (!q.regionPin || !REGION_TO_ID[q.regionPin])) return PROBE_FAILED;
   const lm = q.locationMatch;
   let cities: string[] | null = null;
-  if (q.regionPin && (q.location || '').trim()) {
+  if (q.geographicScope === 'REGION' || q.geographicScope === 'NATIONWIDE') {
+    cities = null;
+  } else if (q.regionPin && (q.location || '').trim()) {
     cities = [arCity(q.location) || q.location];
   } else if (lm?.exact && lm.kind === 'city' && lm.city) {
     cities = [arCity(lm.city) || lm.city];
@@ -670,7 +678,7 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
     // RPC call will correctly return an honest zero on its own.
   }
 
-  if ((!cities || !cities.length) && !countryWide && !(q.districts && q.districts.length) && (q.location || '').trim()) {
+  if ((!cities || !cities.length) && !countryWide && q.geographicScope !== 'REGION' && !(q.districts && q.districts.length) && (q.location || '').trim()) {
     return null;
   }
   if (lm?.kind === 'district' && !(q.districts && q.districts.length)) return null;
@@ -684,7 +692,7 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
     p_cities: cities && cities.length ? cities : null,
     p_districts: q.districts && q.districts.length ? q.districts : null,
     p_platforms: q.sources && q.sources.length ? q.sources : null,
-    p_region_ids: q.regionPin
+    p_region_ids: q.geographicScope === 'NATIONWIDE' ? null : q.regionPin
       ? (REGION_TO_ID[q.regionPin] ? [REGION_TO_ID[q.regionPin]] : null)
       : regionIdsFor(lm),
     // CATEGORY PURITY — owner PERMANENT rule 2026-07-16, merged from PR#86. Independent RPC-layer
@@ -718,10 +726,20 @@ export type AgeOptionCounts = {
 // variance while still failing fast in a genuine outage. A timeout is treated identically to an RPC
 // error: fetchPropertyAgeOptionCounts returns null either way.
 const AGE_COUNT_TIMEOUT_MS = 4000;
+//
+// IT CANCELS, NOT JUST STOPS WAITING (2026-09-21). Every caller passes a supabase-js query builder,
+// which is lazy and accepts an AbortSignal. The old body resolved {timedOut} and walked away, leaving
+// the request open and its count running on the database — and every caller then retried once on
+// top of it. Measured on production that meant an abandoned count per timed-out question plus its
+// retry, at exactly the moment the database was already too slow to answer. The timer now aborts
+// the request it gave up on. A plain promise (no abortSignal) keeps the old behaviour.
 function withTimeout<T>(p: PromiseLike<T>, ms: number): Promise<T | { timedOut: true }> {
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const b = p as PromiseLike<T> & { abortSignal?: (s: AbortSignal) => PromiseLike<T> };
+  const src = ctrl && typeof b.abortSignal === 'function' ? b.abortSignal(ctrl.signal) : p;
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve({ timedOut: true }), ms);
-    Promise.resolve(p).then((v) => { clearTimeout(timer); resolve(v); },
+    const timer = setTimeout(() => { ctrl?.abort(); resolve({ timedOut: true }); }, ms);
+    Promise.resolve(src).then((v) => { clearTimeout(timer); resolve(v); },
       () => { clearTimeout(timer); resolve({ timedOut: true }); });
   });
 }
@@ -751,14 +769,23 @@ function withTimeout<T>(p: PromiseLike<T>, ms: number): Promise<T | { timedOut: 
 // so the un-narrowed buckets are the correct thing to price: the pick replaces the old answer.
 // Same contract as apartment_guided_counts_ar, whose per-option counts also ignore their own dimension.
 function ageAgnostic<T extends Record<string, unknown>>(params: T) {
-  const { p_age_min: _min, p_age_max: _max, p_is_new_construction: _new, ...rest } = params;
+  const { p_age_min: _min, p_age_max: _max, p_is_new_construction: _new, p_age_buckets: _buckets, ...rest } = params;
   return rest;
 }
 
 const inFlightAgeCounts = new Map<string, Promise<AgeOptionCounts | null>>();
 
+// REMEMBERED like settledGuidedCounts (same COUNT_MEMORY_TTL_MS, learned answers only) — added
+// 2026-10-03 for «متابعة feels stuck»: every commit re-ranks the pool, and the age question's counts were
+// the one probe nothing remembered, so each tap paid ~1.2 s for an answer the next-step prefetch
+// (agent.tsx) had already fetched seconds earlier.
+const settledAgeCounts = new Map<string, { at: number; c: AgeOptionCounts }>();
+
 export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeOptionCounts | null | ProbeFailed> {
   if (!supabase) return null;
+  const ageKey = JSON.stringify(q);
+  const ageHit = settledAgeCounts.get(ageKey);
+  if (ageHit && Date.now() - ageHit.at < COUNT_MEMORY_TTL_MS) return ageHit.c;
   const scope = await resolveSearchScope(q);
   if (isProbeFailure(scope)) return PROBE_FAILED;   // scope resolution failed = never learned the answer
   if (!scope) {
@@ -793,7 +820,9 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
     const { data, error } = result;
     if (error) return PROBE_FAILED;               // transport/DB error = never learned the answer
     if (!data || !(data as AgeOptionCounts[]).length) return null;   // the source answered: nothing
-    return (data as AgeOptionCounts[])[0];
+    const c = (data as AgeOptionCounts[])[0];
+    settledAgeCounts.set(ageKey, { at: Date.now(), c });   // ONLY a learned answer is ever remembered
+    return c;
   });
 }
 
@@ -844,19 +873,42 @@ export type GuidedCounts = {
   // source-declared 1-10 scale — the only ones that split the distribution (<=8.0 keeps ~94%).
   cnt_rating95: number; cnt_rating90: number; cnt_rating90_rc10: number;
   cnt_sub_studio: number; cnt_sub_serviced: number; cnt_sub_regular: number;
+  // «😔 N لم يذكر» on every question (owner 2026-10-03, migration 20261003184909): the DB counts the
+  // listings whose source left the field NULL, inside the same committed scope. Amenities = every
+  // amenity column NULL (the listing stated no amenity at all).
+  cnt_rnpl_unknown: number; cnt_amen_unknown: number; cnt_bath_unknown: number;
+  cnt_stw_unknown: number; cnt_rating_unknown: number; cnt_sub_unknown: number;
 };
 
 // De-duped per the comment above fetchPropertyAgeOptionCounts — this is the function RNPL/amenities/
 // bathrooms/furnished all call with identical params in the same Promise.all batch.
-const inFlightGuidedCounts = new Map<string, Promise<GuidedCounts | null>>();
+const inFlightGuidedCounts = new Map<string, Promise<GuidedCounts | null | ProbeFailed>>();
 
-export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<GuidedCounts | null | ProbeFailed> {
+// REMEMBERED, like settledScopeCounts below (same COUNT_MEMORY_TTL_MS) — added 2026-09-21 so the
+// «متابعة» footer's number is ready the instant the card opens, and so is the button's number after
+// the FIRST tap on any option. This function is already called, with the CARD's own exact query,
+// from three places that run BEFORE the user ever sees the card: rankQuestions() resolving every
+// advanced question's options (assessNarrowing's background walk), and the new tap-priming walk in
+// agent.tsx (primeFooterCounts). Without a memory, each of those settled answers was thrown away the
+// instant its promise resolved — dedupeInFlight only joins CONCURRENT callers, never a later one —
+// so the card's own identical call, seconds afterward, paid for the same RPC again. Measured live:
+// 2.9s on every card open. ONLY a LEARNED count is ever remembered (never a failure — see below), and
+// only for COUNT_MEMORY_TTL_MS, so a stale answer can never outlive the data it was measured against.
+const settledGuidedCounts = new Map<string, { at: number; c: GuidedCounts }>();
+
+export async function fetchApartmentGuidedCounts(
+  q: SearchQuery,
+  timeoutMs: number = AGE_COUNT_TIMEOUT_MS,
+): Promise<GuidedCounts | null | ProbeFailed> {
   if (!supabase) return null;
+  const ck = JSON.stringify(q);
+  const hit = settledGuidedCounts.get(ck);
+  if (hit && Date.now() - hit.at < COUNT_MEMORY_TTL_MS) return hit.c;
   const scope = await resolveSearchScope(q);
   if (isProbeFailure(scope)) return PROBE_FAILED;   // scope resolution failed = never learned the answer
   if (!scope) return null;
   const { isBroadCommercial, ...scopeParams } = scope;
-  return dedupeInFlight(inFlightGuidedCounts, JSON.stringify(q), async () => {
+  return dedupeInFlight(inFlightGuidedCounts, ck, async () => {
     if (!supabase) return null;
     const result = await withTimeout(
       supabase.rpc('apartment_guided_counts_ar', {
@@ -875,7 +927,7 @@ export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<Guided
         // those three, so a future advanced question is carried here for free.
         ...rpcAdvancedFilterParams(q),
       }),
-      AGE_COUNT_TIMEOUT_MS,
+      timeoutMs,
     );
     // UNKNOWN IS NOT NO (owner 2026-08-26): a probe that never completed must not return the
     // same value as a source that answered 'nothing' — see src/lib/afProbe.ts.
@@ -883,7 +935,9 @@ export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<Guided
     const { data, error } = result;
     if (error) return PROBE_FAILED;               // transport/DB error = never learned the answer
     if (!data || !(data as GuidedCounts[]).length) return null;      // the source answered: nothing
-    return (data as GuidedCounts[])[0];
+    const c = (data as GuidedCounts[])[0];
+    settledGuidedCounts.set(ck, { at: Date.now(), c });   // ONLY a learned answer is ever remembered
+    return c;
   });
 }
 
@@ -925,8 +979,35 @@ export async function fetchGuidedLiveCount(q: SearchQuery, amenities: string[], 
 // answers already committed) rides along unchanged, which is what makes the count "exact result
 // count if that option were applied ON TOP OF the current committed state" rather than a bare
 // type total.
+// SETTLED SCOPE COUNTS — "prepare the advanced filter so that the second doesn't count" (owner
+// 2026-09-21). The search-time prefetch (agent.tsx: prefetchNarrowing → assessNarrowing) prices the
+// group tier with exactly the candidates the card asks for when the user taps «خلّنا نحدد الطلب
+// أكثر»; without this memory the tap paid for all five again (measured: a second 5-call wave, 1.2-1.7s
+// each, before the card had its numbers).
+//
+// THE SAME ANSWER, NOT A SECOND SOURCE. The key is the full candidate query and the value is what
+// this very function learned for it from location_search_candidates_ar — the same resolver, the same
+// predicate, only remembered. So "a count surface shares the results scope" still holds.
+// UNKNOWN IS NOT NO: only a LEARNED number is stored. A probe that failed is never remembered, so the
+// next ask retries it instead of freezing a blank. The TTL sits far below the hourly sync, so a
+// remembered count is the answer the database would give if asked again.
+// Shared by both remembered-count caches in this file (scope options above, guided counts below):
+// how long a LEARNED answer stays trustworthy before the next ask must re-earn it.
+const COUNT_MEMORY_TTL_MS = 120_000;
+const settledScopeCounts = new Map<string, { at: number; n: number }>();
+const inFlightScopeCounts = new Map<string, Promise<number | ProbeFailed>>();
+
+// BACKGROUND BUDGET (2026-09-21). The 4 s AGE_COUNT_TIMEOUT_MS exists because a user is staring at
+// the Advanced Filter card while it loads. The search-time prep (assessNarrowing) has no one waiting
+// on it — it runs behind the card reveal — yet it inherited the same 4 s, and measured on production
+// after the prep stopped competing with the search, the group-tier counts landed at 3.8-4.0 s and
+// were cut off at exactly 4,000 ms. So nothing was remembered, and the tap re-asked and showed blanks.
+// The prep now gets room to finish; the card keeps its 4 s. Still bounded: bounded() aborts at it.
+export const BACKGROUND_COUNT_TIMEOUT_MS = 12000;
+
 export async function fetchScopeOptionCounts(
   candidates: { key: string; query: SearchQuery }[],
+  timeoutMs: number = AGE_COUNT_TIMEOUT_MS,
 ): Promise<Record<string, number | null> | null> {
   if (!supabase || !candidates.length) return null;
   // UNKNOWN IS NOT NO — for SCOPE options too (owner rule 2026-09-04). This used to `return` on a
@@ -943,14 +1024,28 @@ export async function fetchScopeOptionCounts(
   // Only at the boundary is it translated to `null` for the pure builder (scopeOptionsFromCounts),
   // whose contract is: number = measured, null = UNKNOWN (no number on the card), absent = UNKNOWN.
   const raw: Record<string, number | ProbeFailed> = {};
-  const probe = async ({ key, query }: { key: string; query: SearchQuery }): Promise<number | ProbeFailed> => {
+  const probe = ({ query }: { key: string; query: SearchQuery }): Promise<number | ProbeFailed> => {
+    // Remembered answer first (see SETTLED SCOPE COUNTS above), then join an identical probe that is
+    // already in flight — a tap that lands while the search-time prefetch is still pricing the same
+    // candidate waits for THAT answer instead of paying for a second copy of it.
+    const ck = JSON.stringify(query);
+    const hit = settledScopeCounts.get(ck);
+    if (hit && Date.now() - hit.at < COUNT_MEMORY_TTL_MS) return Promise.resolve(hit.n);
+    return dedupeInFlight(inFlightScopeCounts, ck, () => probeOnce(ck, query));
+  };
+  const probeOnce = async (ck: string, query: SearchQuery): Promise<number | ProbeFailed> => {
     const scope = await resolveSearchScope(query);
     // `!scope` is an unresolvable scope; isProbeFailure() is resolveSearchScope's own RPC failing.
     // Both are "never learned" — and the sentinel is a truthy object, so `!scope` alone would let it
     // through to be spread as scope params below.
     if (isProbeFailure(scope) || !scope) return PROBE_FAILED;
     const { isBroadCommercial, ...scopeParams } = scope;
-    const result = await withTimeout(
+    // bounded(), not withTimeout(): withTimeout only stops WAITING — the request stays open and the
+    // count(*) over() keeps running on the database after the card has already given up on it. With
+    // the retry-once below that doubled the load exactly when the database was already too slow
+    // (measured 2026-09-21: 5 abandoned + 5 retries on top of the search). bounded() aborts the
+    // request at the same 4s, so an answer nobody will read stops costing anything browser-side.
+    const { data, error } = await bounded<{ total_count: number }[]>(
       supabase!.rpc('location_search_candidates_ar', {
         ...scopeParams,
         ...rpcCountFilterParams(query),
@@ -961,14 +1056,12 @@ export async function fetchScopeOptionCounts(
         p_limit: 1,
         p_offset: 0,
       }),
-      AGE_COUNT_TIMEOUT_MS,
+      timeoutMs,
     );
-    if ('timedOut' in result) return PROBE_FAILED; // never learned — the caller retries once
-    const { data, error } = result;
-    if (error) return PROBE_FAILED;                // transport/DB error = never learned the answer
-    return data && (data as { total_count: number }[]).length
-      ? Number((data as { total_count: number }[])[0].total_count) || 0
-      : 0;                                         // empty result set = an honest zero
+    if (error) return PROBE_FAILED;                // timeout, transport or DB error = never learned
+    const n = data && data.length ? Number(data[0].total_count) || 0 : 0;   // empty set = an honest zero
+    settledScopeCounts.set(ck, { at: Date.now(), n });   // ONLY a learned number is ever remembered
+    return n;
   };
   await Promise.all(candidates.map(async (c) => { raw[c.key] = await probe(c); }));
   const failed = candidates.filter((c) => isProbeFailure(raw[c.key]));
@@ -1062,9 +1155,8 @@ const ADDL_FIELDS: Array<[string, string]> = [
   //    NO other platform's panel can change). Order = display priority within the Gathern panel.
   ['unit_type_ar', 'Sub-type'],                          // شقة / استديو / غرفة
   ['furnished', 'Furnished'],                            // boolean true → "Yes"/"نعم"
-  ['discount_label', 'Discount'],                        // "خصم 20%" (Arabic, shown as-is)
-  ['monthly_price_before_discount', 'Monthly before discount (SAR)'],
-  ['nightly_price', 'Nightly rate (SAR)'],
+  // No discount / pre-discount monthly / nightly rows: Gathern shows NO price, only the stay-length
+  // note (owner rule 2026-10-02, src/lib/listingDisplay.ts::listingPrice).
   ['amenities', 'Amenities'],                            // real Arabic labels only (see gate below)
   ['suitability', 'Suitable for'],                       // Gathern detail page: عوائل و عزاب (families / singles)
   ['guest_capacity', 'Guest capacity'],                  // int → "4"
@@ -1076,7 +1168,7 @@ const ADDL_FIELDS: Array<[string, string]> = [
 // source is Gathern, so a future/other platform that happened to store one of these keys would NOT get
 // a new field — guaranteeing every non-Gathern card stays byte-identical. (Gathern Tier-1.)
 const GATHERN_ONLY_ADDL_KEYS = new Set<string>([
-  'unit_type_ar', 'furnished', 'discount_label', 'monthly_price_before_discount', 'nightly_price', 'amenities', 'suitability',
+  'unit_type_ar', 'furnished', 'amenities', 'suitability',
   'guest_capacity', 'check_in', 'check_out', 'house_rules',
 ]);
 function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; label: string; value: string }> | null {
@@ -1137,7 +1229,9 @@ function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; la
     // Source free text → decode HTML escapes before it is shown (Gathern's house_rules stores
     // `&amp;#34;`). No-op for every value without an entity. See src/lib/htmlEntities.ts.
     v = decodeEntities(v);
-    if (v.length > 120) v = v.slice(0, 117) + '…';
+    // Truncate by GLYPH, not by UTF-16 code unit (ops_incident #347). Source free text carries
+    // emoji, and `v.slice(0, 117)` can cut a surrogate pair in half, leaving a ▯ box on the card.
+    v = truncateGlyphs(v, 120);
     seen.add(label);
     out.push({ key, label, value: v });
   }
@@ -1175,7 +1269,7 @@ function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; la
 // A retired platform that starts serving rows again does NOT quietly disappear: the live barrier's
 // MISSING direction reads production's own live platform list, so it goes red and names the table.
 // GENERATED — do not edit by hand.
-const SEARCHABLE_TABLES = ['abeea_commercial_listings', 'abeea_residential_listings', 'abralosol_commercial_listings', 'abralosol_residential_listings', 'abwbna_commercial_listings', 'abwbna_residential_listings', 'aldarim_commercial_listings', 'aldarim_residential_listings', 'alhoshan_commercial_listings', 'alhoshan_residential_listings', 'alkhaas_commercial_listings', 'alkhaas_residential_listings', 'alobid_commercial_listings', 'alobid_residential_listings', 'alta_commercial_listings', 'alta_residential_listings', 'amaall_commercial_listings', 'amaall_residential_listings', 'amlakalahsa_commercial_listings', 'amlakalahsa_residential_listings', 'aouj_commercial_listings', 'aouj_residential_listings', 'aqar_commercial_listings', 'aqar_residential_listings', 'aqaratikom_commercial_listings', 'aqaratikom_residential_listings', 'aqarcity_commercial_listings', 'aqarcity_residential_listings', 'aqargate_commercial_listings', 'aqargate_residential_listings', 'aqarmonthly_residential_listings', 'arkaan_commercial_listings', 'arkaan_residential_listings', 'awal_commercial_listings', 'awal_residential_listings', 'azdad_commercial_listings', 'azdad_residential_listings', 'bahadhabab_commercial_listings', 'bahadhabab_residential_listings', 'dealapp_commercial_listings', 'dealapp_residential_listings', 'eaqartabuk_commercial_listings', 'eaqartabuk_residential_listings', 'eastabha_commercial_listings', 'eastabha_residential_listings', 'erapulse_commercial_listings', 'erapulse_residential_listings', 'fursaghyr_commercial_listings', 'fursaghyr_residential_listings', 'gathern_commercial_listings', 'gathern_residential_listings', 'hajer_commercial_listings', 'hajer_residential_listings', 'jazwtn_commercial_listings', 'jazwtn_residential_listings', 'jurash_commercial_listings', 'jurash_residential_listings', 'mizlaj_commercial_listings', 'mizlaj_residential_listings', 'muktamel_commercial_listings', 'muktamel_residential_listings', 'mustqr_commercial_listings', 'mustqr_residential_listings', 'nowaisiry_commercial_listings', 'nowaisiry_residential_listings', 'october_commercial_listings', 'october_residential_listings', 'raghdan_commercial_listings', 'raghdan_residential_listings', 'ramzalqasim_commercial_listings', 'ramzalqasim_residential_listings', 'rawasidark_commercial_listings', 'rawasidark_residential_listings', 'remal_commercial_listings', 'remal_residential_listings', 'sadin_commercial_listings', 'sadin_residential_listings', 'sanadak_commercial_listings', 'sanadak_residential_listings', 'satel_commercial_listings', 'satel_residential_listings', 'shmoualshmal_commercial_listings', 'shmoualshmal_residential_listings', 'souq24_commercial_listings', 'souq24_residential_listings', 'therc_commercial_listings', 'therc_residential_listings', 'wasalt_commercial_listings', 'wasalt_residential_listings'];
+const SEARCHABLE_TABLES = ['aalbarrak_commercial_listings', 'aalbarrak_residential_listings', 'abaad_commercial_listings', 'abaad_residential_listings', 'abeea_commercial_listings', 'abeea_residential_listings', 'abralosol_commercial_listings', 'abralosol_residential_listings', 'abwbna_commercial_listings', 'abwbna_residential_listings', 'akariyoun_commercial_listings', 'akariyoun_residential_listings', 'alajlan_commercial_listings', 'alajlan_residential_listings', 'albdah_commercial_listings', 'albdah_residential_listings', 'albukaeri_commercial_listings', 'albukaeri_residential_listings', 'aldarim_commercial_listings', 'aldarim_residential_listings', 'alhoshan_commercial_listings', 'alhoshan_residential_listings', 'alhumaidan_commercial_listings', 'alhumaidan_residential_listings', 'aljassim_commercial_listings', 'aljassim_residential_listings', 'alkhaas_commercial_listings', 'alkhaas_residential_listings', 'almotmkenah_commercial_listings', 'almotmkenah_residential_listings', 'almuteb_commercial_listings', 'almuteb_residential_listings', 'alobid_commercial_listings', 'alobid_residential_listings', 'alqasem_commercial_listings', 'alqasem_residential_listings', 'alrifai_commercial_listings', 'alrifai_residential_listings', 'alsaedan_commercial_listings', 'alsaedan_residential_listings', 'alshawaf_commercial_listings', 'alshawaf_residential_listings', 'alsidra_commercial_listings', 'alsidra_residential_listings', 'alta_commercial_listings', 'alta_residential_listings', 'amaall_commercial_listings', 'amaall_residential_listings', 'amlakalahsa_commercial_listings', 'amlakalahsa_residential_listings', 'aouj_commercial_listings', 'aouj_residential_listings', 'aqalemhajer_commercial_listings', 'aqalemhajer_residential_listings', 'aqar_commercial_listings', 'aqar_residential_listings', 'aqaralriyadh_commercial_listings', 'aqaralriyadh_residential_listings', 'aqaralsaudia_commercial_listings', 'aqaralsaudia_residential_listings', 'aqaratikom_commercial_listings', 'aqaratikom_residential_listings', 'aqarcity_commercial_listings', 'aqarcity_residential_listings', 'aqargate_commercial_listings', 'aqargate_residential_listings', 'aqarmonthly_residential_listings', 'aqarnajran_commercial_listings', 'aqarnajran_residential_listings', 'arkaan_commercial_listings', 'arkaan_residential_listings', 'arsh_commercial_listings', 'arsh_residential_listings', 'ashab_commercial_listings', 'ashab_residential_listings', 'awal_commercial_listings', 'awal_residential_listings', 'azdad_commercial_listings', 'azdad_residential_listings', 'azure_commercial_listings', 'azure_residential_listings', 'bahadhabab_commercial_listings', 'bahadhabab_residential_listings', 'bossbih_commercial_listings', 'bossbih_residential_listings', 'compoundin_commercial_listings', 'compoundin_residential_listings', 'dallali_commercial_listings', 'dallali_residential_listings', 'daraa_commercial_listings', 'daraa_residential_listings', 'daryusuf_commercial_listings', 'daryusuf_residential_listings', 'dealapp_commercial_listings', 'dealapp_residential_listings', 'dwelleo_commercial_listings', 'dwelleo_residential_listings', 'eaqartabuk_commercial_listings', 'eaqartabuk_residential_listings', 'earthapp_commercial_listings', 'earthapp_residential_listings', 'eastabha_commercial_listings', 'eastabha_residential_listings', 'ebriza_commercial_listings', 'ebriza_residential_listings', 'ego_commercial_listings', 'ego_residential_listings', 'eightfloor_commercial_listings', 'eightfloor_residential_listings', 'eilmalriyada_commercial_listings', 'eilmalriyada_residential_listings', 'erapulse_commercial_listings', 'erapulse_residential_listings', 'expattrusted_commercial_listings', 'expattrusted_residential_listings', 'eydah_commercial_listings', 'eydah_residential_listings', 'fahadalshahri_commercial_listings', 'fahadalshahri_residential_listings', 'fkralemar_commercial_listings', 'fkralemar_residential_listings', 'flow_commercial_listings', 'flow_residential_listings', 'fursaghyr_commercial_listings', 'fursaghyr_residential_listings', 'gathern_commercial_listings', 'gathern_residential_listings', 'goldendeal_commercial_listings', 'goldendeal_residential_listings', 'gomenassat_commercial_listings', 'gomenassat_residential_listings', 'gudai_commercial_listings', 'gudai_residential_listings', 'hajer_commercial_listings', 'hajer_residential_listings', 'haraj_commercial_listings', 'haraj_residential_listings', 'hasaad_commercial_listings', 'hasaad_residential_listings', 'hazim_commercial_listings', 'hazim_residential_listings', 'holoul_commercial_listings', 'holoul_residential_listings', 'ialqarawi_commercial_listings', 'ialqarawi_residential_listings', 'ibaax_commercial_listings', 'ibaax_residential_listings', 'jawher_commercial_listings', 'jawher_residential_listings', 'jazwtn_commercial_listings', 'jazwtn_residential_listings', 'jurash_commercial_listings', 'jurash_residential_listings', 'justsa_commercial_listings', 'justsa_residential_listings', 'ksaaqar_commercial_listings', 'ksaaqar_residential_listings', 'livingcompound_commercial_listings', 'livingcompound_residential_listings', 'm3tmd_commercial_listings', 'm3tmd_residential_listings', 'macsaib_commercial_listings', 'macsaib_residential_listings', 'maktab_commercial_listings', 'maktab_residential_listings', 'manafe_commercial_listings', 'manafe_residential_listings', 'manzo_commercial_listings', 'manzo_residential_listings', 'maqam_commercial_listings', 'maqam_residential_listings', 'maqrat_commercial_listings', 'maqrat_residential_listings', 'marksa_commercial_listings', 'marksa_residential_listings', 'masar_commercial_listings', 'masar_residential_listings', 'mizlaj_commercial_listings', 'mizlaj_residential_listings', 'mobasher_commercial_listings', 'mobasher_residential_listings', 'moftah_commercial_listings', 'moftah_residential_listings', 'muajarh_commercial_listings', 'muajarh_residential_listings', 'muhaysini_commercial_listings', 'muhaysini_residential_listings', 'muktamel_commercial_listings', 'muktamel_residential_listings', 'mustqr_commercial_listings', 'mustqr_residential_listings', 'nafithh_commercial_listings', 'nafithh_residential_listings', 'nawafeth_commercial_listings', 'nawafeth_residential_listings', 'nofodh_commercial_listings', 'nofodh_residential_listings', 'nowaisiry_commercial_listings', 'nowaisiry_residential_listings', 'nufouth_commercial_listings', 'nufouth_residential_listings', 'october_commercial_listings', 'october_residential_listings', 'opensooq_commercial_listings', 'opensooq_residential_listings', 'qmra_commercial_listings', 'qmra_residential_listings', 'raghdan_commercial_listings', 'raghdan_residential_listings', 'rakez_commercial_listings', 'rakez_residential_listings', 'ramzalqasim_commercial_listings', 'ramzalqasim_residential_listings', 'rawaf_commercial_listings', 'rawaf_residential_listings', 'rawasidark_commercial_listings', 'rawasidark_residential_listings', 'razre_commercial_listings', 'razre_residential_listings', 'reinvest_commercial_listings', 'reinvest_residential_listings', 'remal_commercial_listings', 'remal_residential_listings', 'remaxsa_commercial_listings', 'remaxsa_residential_listings', 'rightcompound_commercial_listings', 'rightcompound_residential_listings', 'ryadah_commercial_listings', 'ryadah_residential_listings', 'sadin_commercial_listings', 'sadin_residential_listings', 'sadiqeltajer_commercial_listings', 'sadiqeltajer_residential_listings', 'safa_commercial_listings', 'safa_residential_listings', 'safera_commercial_listings', 'safera_residential_listings', 'sakan_commercial_listings', 'sakan_residential_listings', 'sakani_commercial_listings', 'sakani_residential_listings', 'sanadak_commercial_listings', 'sanadak_residential_listings', 'satel_commercial_listings', 'satel_residential_listings', 'senan_commercial_listings', 'senan_residential_listings', 'shatri_commercial_listings', 'shatri_residential_listings', 'shmoualshmal_commercial_listings', 'shmoualshmal_residential_listings', 'shomou_commercial_listings', 'shomou_residential_listings', 'sirdab_commercial_listings', 'sirdab_residential_listings', 'snam_commercial_listings', 'snam_residential_listings', 'sodasyat_commercial_listings', 'sodasyat_residential_listings', 'sokok_commercial_listings', 'sokok_residential_listings', 'souq24_commercial_listings', 'souq24_residential_listings', 'sqcc_commercial_listings', 'sqcc_residential_listings', 'squares_commercial_listings', 'squares_residential_listings', 'sukna_commercial_listings', 'sukna_residential_listings', 'superoffice_commercial_listings', 'superoffice_residential_listings', 'suwar_commercial_listings', 'suwar_residential_listings', 'tamyaz_commercial_listings', 'tamyaz_residential_listings', 'tawia_commercial_listings', 'tawia_residential_listings', 'therc_commercial_listings', 'therc_residential_listings', 'thousand_commercial_listings', 'thousand_residential_listings', 'tuba_commercial_listings', 'tuba_residential_listings', 'villassa_commercial_listings', 'villassa_residential_listings', 'vmksa_commercial_listings', 'vmksa_residential_listings', 'wadod_commercial_listings', 'wadod_residential_listings', 'wahadat_commercial_listings', 'wahadat_residential_listings', 'wajaf_commercial_listings', 'wajaf_residential_listings', 'wasalt_commercial_listings', 'wasalt_residential_listings', 'wslnaa_commercial_listings', 'wslnaa_residential_listings', 'yameen_commercial_listings', 'yameen_residential_listings'];
 
 // Gathern + Aqar Monthly are MONTHLY-ONLY sources: every listing is a monthly rental. On a monthly
 // search we therefore include ALL their rows — even ones whose raw rent_period is null — because the
@@ -1319,7 +1413,10 @@ function kindsFor(q: SearchQuery): SourceKind[] {
 // duplicate this string at a call site.
 export const IMPLIED_CATEGORY_DEFAULT = 'Residential' as const;
 function impliedCategory(q: SearchQuery): Macro | null {
-  if (q.category) return q.category;
+  // A cross-macro scope (Residential Land under the commercial land group, owner 2026-10-03) drops the
+  // gate: the row's home macro is Residential, the user's pill says Commercial, and the type_ar list is
+  // already exact. See scopeCrossesMacro.
+  if (q.category) return scopeCrossesMacro(q) ? null : q.category;
   return effectiveCleanQuery(q) ? null : IMPLIED_CATEGORY_DEFAULT;
 }
 
@@ -1353,7 +1450,7 @@ function tablesFor(q: SearchQuery): string[] {
     const wanted = new Set(q.sources);
     tables = tables.filter((tbl) => wanted.has(tbl.replace(/_(residential|commercial)_listings$/, '')));
   }
-  return tables;
+  return selectSourceTables(tables, q.sources, q.excludedSources);
 }
 
 // Round-robin interleave so cards alternate between Aqar and Wasalt instead of front-loading one.
@@ -1410,12 +1507,16 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
   //    wholesale exactly as they do on a monthly search. (owner feature 2026-08-14.)
   // dealCombined (2026-08-20): same as bothDeals — Rent rows in combined mode have no period filter
   // at all (accepts both known periods AND unpublished-period rows), so none of these branches apply.
+  //  • PRICE ON REQUEST (owner 2026-09-28): a rental with no price (price_annual NULL) passes EVERY
+  //    period branch — it has no figure a period could misstate, and the card prints «سعر عند الطلب»
+  //    with no period suffix. Mirrors the one line af_eligibility_clause() gained, so the rows the
+  //    results RPC returns are never dropped here. A PRICED null-period row is still in neither.
   if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'monthly') {
-    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.eq('rent_period', 'monthly');
+    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.or('rent_period.eq.monthly,price_annual.is.null');
   } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'annual') {
-    req = req.eq('rent_period', 'annual');
+    req = req.or('rent_period.eq.annual,price_annual.is.null');
   } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'both') {
-    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.in('rent_period', ['monthly', 'annual']);
+    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.or('rent_period.in.(monthly,annual),price_annual.is.null');
   }
   return req;
 }
@@ -1511,19 +1612,36 @@ async function bounded<T = any>(builder: any, ms = RPC_TIMEOUT_MS, signal?: Abor
   }
 }
 
+// CHUNKS RUN CONCURRENTLY, ≤ RAW_CHUNK_CONCURRENCY IN FLIGHT PER TABLE (2026-10-10). Each chunk is its
+// own `.in('id', slice)` over ids the RPC already returned — no cursor, nothing read from the previous
+// response — so awaiting them one at a time bought nothing. Measured: an Advanced Filter round on
+// الرياض/إيجار/شقة sent 1,500 aqar ids as 8 back-to-back ~0.9 s requests (0.99 → 8.27 s), past the
+// owner's 7 s round ceiling. Same 8 requests now, in two waves. Kept from the sequential loop: the
+// request budget (one request per chunk), chunk ORDER (each page lands in its own slot), Stop between
+// chunks, and fail-closed — any chunk error rejects the table (caller → null → retry UI, never a short
+// grid) and no NEW chunk starts after it. Pinned by scripts/verify-raw-card-chunks-run-concurrently.ts.
+const RAW_CHUNK_CONCURRENCY = 4;
 async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[], signal?: AbortSignal): Promise<Listing[]> {
   const kind: SourceKind = tbl.includes('_commercial') ? 'com' : 'res';
-  const out: Listing[] = [];
-  for (let i = 0; i < ids.length; i += ID_CHUNK) {
-    if (signal?.aborted) throw new DOMException('cancelled', 'AbortError'); // Stop pressed between chunks
-    // RC-A: capture the error (was silently dropped → a chunk that 500s produced a blank/partial grid
-    // that contradicted the «لقينا N إعلان» headline). On any chunk failure, surface it so the caller
-    // returns null → retry, rather than showing a misleadingly-short result set.
-    const { data, error } = await bounded(keptFiltersReq(q, tbl).in('id', ids.slice(i, i + ID_CHUNK)).limit(ID_CHUNK), RPC_TIMEOUT_MS, signal);
-    if (error) throw new Error(`fetchRawByIds(${tbl}): ${error.message}`);
-    if (data) out.push(...finalize(data, kind));
-  }
-  return out;
+  const pages: Listing[][] = [];
+  let next = 0;
+  let failed = false;
+  const worker = async () => {
+    while (!failed && next * ID_CHUNK < ids.length) {
+      if (signal?.aborted) throw new DOMException('cancelled', 'AbortError'); // Stop pressed between chunks
+      const n = next++;
+      // RC-A: capture the error (was silently dropped → a chunk that 500s produced a blank/partial grid
+      // that contradicted the «لقينا N إعلان» headline). On any chunk failure, surface it so the caller
+      // returns null → retry, rather than showing a misleadingly-short result set.
+      // A timeout/abort THROWS out of bounded() rather than returning `error` — it must stop new chunks too.
+      const { data, error } = await bounded(keptFiltersReq(q, tbl).in('id', ids.slice(n * ID_CHUNK, (n + 1) * ID_CHUNK)).limit(ID_CHUNK), RPC_TIMEOUT_MS, signal)
+        .catch((e: unknown) => { failed = true; throw e; });
+      if (error) { failed = true; throw new Error(`fetchRawByIds(${tbl}): ${error.message}`); }
+      pages[n] = data ? finalize(data, kind) : [];
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(RAW_CHUNK_CONCURRENCY, Math.ceil(ids.length / ID_CHUNK)) }, worker));
+  return pages.flat();
 }
 
 // Per-search fetch — ROUTING LAYER (Phase 1.5). The buy/rent location index (a materialized view over
@@ -1534,7 +1652,10 @@ async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[], signal?
 // (user spec: route rent→rent_location_index, buy→buy_location_index, then fetch details from raw.)
 export async function fetchListingsForQuery(
   q: SearchQuery,
-  opts?: { offset?: number; limit?: number; signal?: AbortSignal },
+  // `rotationSeed` (2026-09-26): the ONE seed for this whole search, minted once by the caller when
+  // the search starts and passed back unchanged on every «عرض المزيد» page. Omitting it falls back
+  // to the device+week seed, which keeps every other caller working exactly as before.
+  opts?: { offset?: number; limit?: number; signal?: AbortSignal; rotationSeed?: string },
 ): Promise<FetchListingsResult> {
   let pageCandidates = 0;
   let pageTotal = 0;
@@ -1603,11 +1724,14 @@ export async function fetchListingsForQuery(
     p_per_platform: null,
     p_limit: pageLimit,
     p_offset: pageOffset,
-    // CONTROLLED ROTATION, tier 4 (owner PERMANENT rule 2026-08-29). Same seed on every page of one
-    // search/pagination walk (rotationSeed() is a pure function of device+week, recomputed identically
-    // on every call — nothing to thread through Load-More by hand), so the RPC's rot_key ORDER BY term
-    // stays stable for the whole walk while still varying across devices/weeks. See rotationSeed.ts.
-    p_rotation_seed: rotationSeed(),
+    // CONTROLLED ROTATION (owner PERMANENT rule 2026-08-29, widened 2026-09-26). ONE seed for the
+    // whole search/pagination walk, so the RPC's ordering stays stable across «عرض المزيد» — that
+    // stability is what makes paging duplicate-free and gap-free, and it is why the seed is THREADED
+    // from the caller rather than recomputed here. `opts.rotationSeed` is minted once per search by
+    // store.tsx (see newSearchSeed); the device+week rotationSeed() remains the fallback for callers
+    // that pass none, so nothing regresses. Since 2026-09-26 this seed also decides WHICH listing
+    // fronts each platform, not just the platform order — see the div_rank window in the RPC.
+    p_rotation_seed: opts?.rotationSeed ?? rotationSeed(),
   }), RPC_TIMEOUT_MS, signal);
   if (error) return { listings: null, pageCandidates, pageTotal };   // index error OR timeout (RC-A) → retry UI, not "no matches"
   pageCandidates = (cands as Cand[] | null)?.length ?? 0;   // this page's matching-candidate count → drives Load-More offset/hasMore
@@ -1684,7 +1808,7 @@ export async function fetchListingsForQuery(
     return { listings: null, pageCandidates, pageTotal };   // RC-A: a raw-card chunk failed or timed out → retry UI, not a misleadingly-partial grid (incl. Stop-cancelled)
   }
   const map = new Map<string, Listing>();
-  entries.forEach(([tbl], i) => { for (const l of fetched[i]) map.set(`${tbl}:${l.id}`, l); });
+  entries.forEach(([tbl], i) => { for (const l of fetched[i]) { l.sourceTable = tbl; map.set(`${tbl}:${l.id}`, l); } });
 
   // 4) Rebuild in newest-first order (dropping rows the raw filters / index↔raw drift removed), attach
   //    each row's city + region, then DIVERSIFY by geography according to the search scope so broad
@@ -1718,6 +1842,10 @@ export async function fetchListingsForQuery(
     // fall back to the source's own Arabic district token (l.districtArFallback, Gathern-only &
     // city-name-guarded in finalize). null for every other source → `|| ''` keeps them byte-identical.
     l.district = /[ء-ي]/.test(rawDistrict || '') ? rawDistrict : ((ar?.district) || l.districtArFallback || '');
+    // MATCH-truth companion to the display-oriented `l.district` above — never overridden by raw
+    // text, so the strict district filter (listingInDistricts) has a value it can trust regardless
+    // of how the source spelled its own free-text neighborhood. See the field's own doc comment.
+    l.districtCanonical = canonDistrict;
     l.regionAr = (ar?.region) || l.regionAr || '';
     // §12A: the AF-canonical row travels with the listing so ResultCard can prove, per card, that
     // this row really satisfies each active predicate — read from the SAME row the filter ran on,
@@ -1734,7 +1862,12 @@ export async function fetchListingsForQuery(
   // mixPeriods → the user asked for BOTH rent periods, so interleave monthly/annual (nested inside the
   // platform key) instead of letting the denser period own the top of the list. (owner 2026-08-14.)
   const mixPeriods = !q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'both';
-  const scoped = orderByScope(ranked, scopeOf(q, scope.p_cities, isCountryWideQuery(q)), multiType, mixPeriods);
+  // Owner 2026-09-14 permanent rule (see docs/ARCHITECTURE.md §20 «First-100 diversity»):
+  //   mixDeals → alternate buy/rent when the user asked for BOTH.
+  //   preferPhotos → within an otherwise-identical group, photo'd listings come before no-photo ones.
+  // Both are pure permutations of the already-matched set — never widens the eligible pool.
+  const mixDeals = !!(q.bothDeals || q.dealCombined);
+  const scoped = orderByScope(ranked, scopeOf(q, scope.p_cities, isCountryWideQuery(q)), multiType, mixPeriods, { mixDeals, preferPhotos: true });
   // Diversification (orderByScope) reorders `scoped` away from pure recency, so the true RPC recency
   // rank (r.rank, 0 = newest) must travel WITH each listing — sortListings()'s newest/oldest sort has
   // nothing else to key off once `rows` is just bare Listings. (sort=newest/oldest fix, 2026-07-25.)
@@ -1772,9 +1905,13 @@ export async function fetchListingsForQuery(
       let rpcErr: unknown = null;
       try {
         if (supabase) {
-          const { data: boosts, error } = await supabase.rpc('loc_rel_rank', {
-            p_source_tables: st, p_listing_ids: ids, p_intents: intents,
-          });
+          // Bounded (#269): unbounded, a stalled connection left this await pending forever and
+          // the results grid never rendered. On timeout `boosts` is null, every proximityBoost
+          // falls to 0 below, and the search still returns its rows — degraded ordering, never a
+          // hang, and never a wrong or empty result set.
+          const { data: boosts, error } = await bounded<Array<{ source_table: string; listing_id: number; boost: number }>>(
+            supabase.rpc('loc_rel_rank', { p_source_tables: st, p_listing_ids: ids, p_intents: intents }),
+          );
           if (error) rpcErr = error;
           for (const b of (boosts ?? [])) bmap.set(`${b.source_table}:${Number(b.listing_id)}`, Number(b.boost));
           rpcCount = (boosts ?? []).length;
@@ -1811,9 +1948,21 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
     const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).eq('active', true).limit(1);
     if (error || !data || !data.length) continue;
     const [row] = finalize(data, table.includes('_commercial') ? 'com' : 'res');
-    if (row) { LISTING_CACHE.set(row.id, row); return row; }
+    if (row) { row.sourceTable = table; LISTING_CACHE.set(row.id, row); return row; }
   }
   return null;
+}
+
+// The in-app ad page's «same ad on other sites» row (owner 2026-10-10) loads each sibling's REAL card
+// through the same finalize() path, by its own (table, id) — never fetchListingById, whose id walk
+// across DEEPLINK_TABLES could hand back another table's row that merely shares the id.
+export async function fetchListingCards(table: string, ids: number[]): Promise<Listing[]> {
+  if (!supabase || !ids.length || !SEARCHABLE_TABLES.includes(table)) return [];
+  const { data, error } = await bounded(supabase.from(table).select(LIST_SELECT).in('id', ids).eq('active', true).limit(ids.length));
+  if (error || !data) return [];
+  const rows = finalize(data, table.includes('_commercial') ? 'com' : 'res');
+  for (const r of rows) r.sourceTable = table;
+  return rows;
 }
 
 // Fetches the REAL Aqar listings + every column the new card design needs (rank/photo/title/
@@ -1874,8 +2023,8 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     // index 0. Confirmed live 2026-07-26: ~6.7% of active aqar_residential_listings had this
     // as their displayed photo; 0 occurrences on any other platform.
     const realPhotoUrls = Array.isArray(r.photo_urls)
-      ? r.photo_urls
-          .filter((u: unknown): u is string => typeof u === 'string' && !u.includes('/props/villa-default.png'))
+      ? dedupePhotoUrls(r.photo_urls
+          .filter((u: unknown): u is string => typeof u === 'string' && !u.includes('/props/villa-default.png')))
           // CANONICAL DISPLAY URL — routes CORP-blocked hosts (Sadin) through the same-origin proxy so
           // the browser can actually render them; a no-op for every other host. See src/lib/photoUrl.ts.
           .map((u: string) => photoDisplayUrl(u))

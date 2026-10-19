@@ -221,8 +221,16 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     # their own description text. to_int(0) faithfully parses that as the integer 0, which would
     # otherwise store and DISPLAY a fabricated "SAR 0" price instead of the honest "price on
     # request" the source actually means — never a real free listing.
-    _price_raw = normalize.to_int(acf.get("pw-prc"))
+    # pw-prc-typ is the price box's own LABEL for that figure (read from /wp-json/wp/v2/land 2026-10-18): «السعر» (a
+    # total), «سوم» (an offer, a total), «سعر المتر» (a RATE), «على السوم» (no price). A negative pw-prc is the same
+    # ACF «not set» sentinel pw-prc-mtr uses — AMH19549 carries -1 beside «على السوم», and to_int() dropped the sign and
+    # served it at «1 ر.س».
+    price_type = (acf.get("pw-prc-typ") or "").strip() or None
+    _prc_raw = str(acf.get("pw-prc") if acf.get("pw-prc") is not None else "").strip()
+    _price_raw = normalize.to_int(_prc_raw) if _prc_raw and not _prc_raw.startswith("-") else None
     price = _price_raw if _price_raw else None
+    # The source settled that there is no price: «على السوم» with no positive figure. The stored one clears.
+    no_price_stated = price is None and (price_type == "على السوم" or _prc_raw.startswith("-"))
     street_width = _first_street_width(acf.get("pw-str"))
     # land-num is a plain plot/parcel number (رقم القطعة); the one observed non-clean value on this
     # source is a sub-lot suffix ("388_1" = parcel 388, sub-unit 1), not a multi-measurement compound
@@ -245,6 +253,14 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     # from a sentinel, so a leading '-' is rejected before parsing — never coerced into a real value.
     _ppm_raw = str(acf.get("pw-prc-mtr") or "").strip()
     price_per_meter = normalize.to_int(_ppm_raw) if _ppm_raw and not _ppm_raw.startswith("-") else None
+    # The headline IS the rate when its own label says so — the page prints «السعر 1,500 سعر المتر» (AMH18982, pw-prc-typ
+    # «سعر المتر», pw-prc-mtr empty) — or when the two fields carry the same figure (AMH19284 1650/1650). It is not a
+    # total: the rate is the headline's figure and the stored total clears (the page settled it).
+    headline_is_rate = bool(price and (price_type == "سعر المتر" or (price_per_meter and price == price_per_meter)))
+    if headline_is_rate:
+        price_per_meter, price = price, db.AUTHORITATIVE_NULL
+    elif no_price_stated:
+        price = db.AUTHORITATIVE_NULL
 
     district_ar = (acf.get("pw-dis") or "").strip() or None
 
@@ -259,6 +275,43 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     # guess between them without a region hint, so the geocoded state ("المنطقة الشرقية") is passed
     # through to disambiguate, exactly the documented `region_hint` contract.
     city_id, region_id = to_catalog(city_ar, region_hint=region_hint) if city_ar else (None, None)
+
+    # Owner-confirmed 2026-09-13: when Google's geocode gives NO city at all (no pw-map), the
+    # district text itself is sometimes enough to know the city anyway — proven per-district by
+    # cross-referencing OTHER listings (this platform's own, or other platforms' live rows) that
+    # already carry the identical district text WITH a resolved city. Each entry below is a single,
+    # specific, evidence-backed fact about ONE district name — never a guessed pattern — so this
+    # stays a short named list, not a general "infer city from district" rule (that would risk
+    # exactly the cross-city fan-out to_catalog()'s own region_hint guard exists to prevent).
+    _DISTRICT_IMPLIES_CITY = {
+        "شرق شرق الحديقة": ("الهفوف", 12), "اليمامة": ("الهفوف", 12), "الطرف": ("الهفوف", 12),
+        "بستان المطيرفي": ("المبرز", 2748), "الجابرية": ("المبرز", 2748), "الغسانية": ("المبرز", 2748),
+        "البستنان": ("الحليلة", 2762),
+        "الرابية بالعيون": ("العيون", 2038), "الصفا": ("العيون", 2038), "الصفا 2": ("العيون", 2038),
+        "الرياض": ("الهفوف", 12),
+        "الجشة": ("الجشة", 2746),
+    }
+    if city_id is None and district_ar in _DISTRICT_IMPLIES_CITY:
+        city_ar, city_id = _DISTRICT_IMPLIES_CITY[district_ar]
+
+    # Owner-confirmed 2026-09-13: this ONE post (id 11606266) is proven الهفوف by ITS OWN raw
+    # description ("... حي المروج الجنوبي ...", a real catalog district found only under الهفوف) —
+    # the structured district field just truncated the "الجنوبي" qualifier its own free text kept.
+    # Bare "المروج" is genuinely ambiguous fleet-wide (~40 Saudi cities have one), so this is
+    # deliberately id-scoped, never a district-text rule that would wrongly touch any other listing.
+    _LISTING_ID_IMPLIES_CITY = {11606266: ("الهفوف", 12)}
+    if city_id is None and pid in _LISTING_ID_IMPLIES_CITY:
+        city_ar, city_id = _LISTING_ID_IMPLIES_CITY[pid]
+
+    # Owner instruction 2026-09-13: for these 3 specific districts, no SPECIFIC city could be
+    # proven anywhere in the fleet (unlike the map above) — owner's call: "under city districts,
+    # we guess we don't know, we just leave it" — assign the honest broad-but-true "الأحساء"
+    # governorate-level city (catalog city_id 3677) and leave district_ar exactly as scraped,
+    # never guessed at a finer grain than we can actually prove.
+    _DISTRICT_KNOWN_ONLY_BROADLY = {"النور", "العقير", "الجرن"}
+    if city_id is None and district_ar in _DISTRICT_KNOWN_ONLY_BROADLY:
+        city_ar, city_id = "الاحساء", 3677
+
     # Owner-confirmed 2026-09-12: this office serves ONLY Al-Ahsa, entirely within the Eastern
     # Province — every one of its listings, without exception. Region is therefore safe to default
     # even when Google's geocode gave no city at all (measured live: 52/262 rows, mostly "ضاحية هجر"
@@ -278,10 +331,37 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     # MATCH value collapses — `neighborhood` (the card's own display text) keeps every listing's real
     # sub-division name (e.g. "الضاحية الخامس") verbatim, per this repo's standing district_ar=match
     # / neighborhood=card-text split.
+    # THIS LINE IS NOT THE GUARANTEE — see the note below it. `city_ar` above comes from THIS
+    # crawl's geocode blob, and this source omits `pw-map.city` on a large minority of ads, so on
+    # those crawls the test below is False for a listing that IS in الجفر: UNKNOWN read as NO. That
+    # is what reverted 25 of these 32 rows on 2026-09-14, one day after the merge (routine-3).
+    # `_unknown_must_not_overwrite_known` correctly keeps the STORED city, so the row ends up
+    # claiming الجفر with a district الجفر must never carry.
+    #
+    # The invariant is therefore enforced on the stored row instead, by the trigger
+    # zz_amlakalahsa_district_match -> public.amlakalahsa_district_match() (migration
+    # 20260914072254), where the city is known even when the geocode was silent. This expression
+    # stays because it keeps the value correct at the source when the city IS known — but changing
+    # it alone does not change what gets stored, and removing the trigger re-opens the bug.
     district_ar_for_match = (
         "الضاحية" if city_ar == "الجفر" and district_ar and district_ar.startswith("الضاحية")
         else district_ar
     )
+
+    # Owner instruction 2026-09-13: a numbered variant of an otherwise-plain district name
+    # ("الصفا 2", "النسيم 3") matches to its bare form — same district_ar=match / neighborhood=
+    # card-text split as the الضاحية collapse above: the card still shows the office's exact
+    # wording (neighborhood, untouched), only the MATCH value drops the number. Each pair below is
+    # a specific, evidence-backed fact (the bare and numbered forms were independently proven to be
+    # the same real place) — not a general "strip trailing digits" rule, which would wrongly merge
+    # the many OTHER Saudi districts where the number names a genuinely different area (e.g. حي ج1
+    # vs حي ج2 elsewhere in the fleet are not the same place).
+    _NUMBERED_MATCHES_BARE = {
+        "النسيم 2": "النسيم", "النسيم 3": "النسيم",
+        "المزروع 2": "المزروع", "المباركية 3": "المباركية", "الغسانية 2": "الغسانية",
+        "الصفا 2": "الصفا",
+    }
+    district_ar_for_match = _NUMBERED_MATCHES_BARE.get(district_ar_for_match, district_ar_for_match)
 
     # The office's own free-text spec paragraph — real prose (measured live, 3/3 sampled posts),
     # e.g. "للبيع ارض في حي الورود الغربي ارض رقم 219 \ ف مساحة 360 م شارع عرض 15 شرقا ... السعر
@@ -323,6 +403,7 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
         "additional_info": {k: v for k, v in {
             "street_width": street_width,
             "parcel_number": land_number,
+            "price_type": price_type,           # the price box's own label for the figure (pw-prc-typ)
         }.items() if v not in (None, "", [], {})} or None,
     }
     return row, category.lower()
@@ -383,6 +464,18 @@ def main() -> int:
         seen_res = [r["ad_number"] for r in res_rows]
         seen_com = [r["ad_number"] for r in com_rows]
         pruned = 0
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+        # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+        # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+        # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+        superseded = db.retire_superseded_siblings(
+            res_table="amlakalahsa_residential_listings", com_table="amlakalahsa_commercial_listings",
+            res_ads=set(seen_res), com_ads=set(seen_com),
+            source="AmlakAlAhsa")
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
         for tbl, seen_ads in (("amlakalahsa_residential_listings", seen_res),
                               ("amlakalahsa_commercial_listings", seen_com)):
             n = db.prune_unseen(tbl, set(seen_ads), source="AmlakAlAhsa")

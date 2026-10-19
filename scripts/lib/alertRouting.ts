@@ -78,6 +78,11 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   { routine: 7, test: /^(alert_queue_unworked|incident_stalled)$/ },
   { routine: 7, test: /^(cron_|migration_drift|sql_mirror_drift|deploy_lock_misuse)/ },
   { routine: 7, test: /^(detector_|orphaned_detector|unresolvable_|monitoring_watchdog)/ },
+  // The auto-remediation loop (2026-09-21) — run_remediation()'s escalation when a safe fix keeps
+  // failing (remediation_exhausted), the worker-liveness watchdog (remediation_worker_stale), and
+  // the synthetic self-test kind. It is monitoring plumbing this routine already owns; the specific
+  // dead scraper/listing/etc. behind a remediation_exhausted still has its own owner via its own kind.
+  { routine: 7, test: /^remediation_/ },
   { routine: 7, test: /^(registry_orphans|repair_guarantee|loc_rel_|rls_)/ },
   { routine: 7, test: /^(stale_no_remediation_path|frontend_runtime_gate_missing)$/ },
   // ai_cost_health — the DeepSeek spend/cache/model-tier monitors (2026-08-29). Seam work: it is
@@ -86,6 +91,14 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   // Explicitly routed rather than left to the #2 fallback, so a cost alert arrives with an owner.
   { routine: 7, test: /^ai_cost_health$/ },
   { routine: 7, test: /^search_index_diverges_from_sync_source$/ },
+  // search_writer_starved (2026-09-21, routine #9 red team, migration 20260921152933). A function
+  // that writes search_listings_ar behind the single-writer advisory lock was REFUSED and returned
+  // without writing, while cron.job_run_details recorded `succeeded`. Measured: jobid 68 (the daily
+  // wasalt rich-attribute sync) and jobid 75 both started at :47, 5.5 ms apart, and 68 lost the
+  // race on 5 of its last 8 daily runs — so the SERVED index kept rich attributes the capture had
+  // already corrected. The finding is a scheduler/plumbing one (two jobs, one lock, one minute),
+  // which is this routine's surface, not a wrong row: the data is right and the writer never ran.
+  { routine: 7, test: /^search_writer_starved$/ },
   // Same detector's SELF-MIRROR limb (2026-09-12). Its oracle is a copy of an expression inside
   // sync_search_listings_ar(), and on 2026-09-03 the two silently stopped agreeing: the owner
   // retired the annual rent-period fallback in the sync and the copy kept predicting it. The
@@ -132,6 +145,7 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   { routine: 1, test: /^(liveness_cap_degraded|source_limited_contradicted|unprobed_source_waiver)/ },
   { routine: 1, test: /^gathern_liveness/ },
   { routine: 1, test: /^ingestion_check_failed$/ },
+  { routine: 1, test: /^moj_district_sales_stale$/ },   // the weekly MoJ job stopped running (its red runs arrive as ingestion_check_failed)
 
   // 6 👣 Journey & Persistence — chat/session/auth state, never matching itself.
   { routine: 6, test: /^(transcript_|filter_state_lost|chat_|session_|auth|sidebar)/ },
@@ -168,10 +182,21 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
 
   // 3 🛡️ Data Integrity — source-truth on listing fields. Broadest; must stay last.
   { routine: 3, test: /price|district|amenity|^rent_period|^manufactured_rent_period/ },
+  // city_duplicate_orphaned_districts (2026-09-23) — a loc_catalog_city row sharing its name/norm
+  // with a twin that holds all the real listings, while it alone owns the district catalog. Location
+  // data truth, this routine's own surface — explicit rather than left to the incidental `^city_`
+  // match below, per this file's own policy that an added detector names its kind here.
+  { routine: 3, test: /^city_duplicate_orphaned_districts$/ },
   { routine: 3, test: /^(field_integrity|city_|region_label|english_|type_|v2_discards)/ },
   { routine: 3, test: /^(deletion_spike|mass_inactivation|unverified_inactivation|inactivation)/ },
   { routine: 3, test: /^(stale_|quarantine_growth|prune_|cleanup_evidence_gap)/ },
   { routine: 3, test: /^(served_after_source_gone|deleted_but_source_live|unledgered_hard_delete)/ },
+  // Rows no liveness mechanism reaches, on the tables mark_stale_listings_inactive() skips by name.
+  // It sits with stale_ and served_after_source_gone rather than with routine 11's
+  // unknown_treated_as_dead: nothing has been killed here, and the question — is this active row
+  // still real? — is the same one those two ask. Without this line the kind fell through to the
+  // triage fallback, which would have handed routine 2 a class routine 3 built (2026-09-21).
+  { routine: 3, test: /^liveness_rotation_stranded$/ },
   { routine: 3, test: /^(legacy_|duplex|fabricated_|url_collision|rows_collapse)/ },
   { routine: 3, test: /^(wasalt_annualisation_fabricated|gathern_rating_source_truth)$/ },
   { routine: 3, test: /^(phasea_offregion_pick|discarded_location_resolution|aqar)/ },
@@ -196,4 +221,78 @@ export function routineForKind(kind: string): RoutineNumber {
 /** The GitHub label for an alert kind. Also total, for the same reason. */
 export function labelForKind(kind: string): string {
   return ROUTINES[routineForKind(kind)].label;
+}
+
+/** One issue as `gh issue list --json number,title,labels` returns it. */
+export type ListedIssue = {
+  number: number;
+  title: string;
+  labels?: ReadonlyArray<{ name: string }>;
+};
+
+/** One issue the CURRENT run just created, as step 5 records it. */
+export type CreatedIssue = { number: number; title: string };
+
+/** An issue the routing sweep must consider, with whether it already carries an owner. */
+export type WorklistItem = { number: number; title: string; routed: boolean };
+
+/**
+ * WHICH ISSUES THE ROUTING SWEEP MUST WALK.
+ *
+ * The sweep used to be exactly `gh issue list --label ezhalah-alert --state open`, and that listing
+ * CANNOT SEE THE ISSUES THE SAME RUN JUST FILED. `gh issue list` goes through GitHub's search
+ * index, which lags issue creation by a few seconds; the routing step starts ~1 s after the filing
+ * step ends. So every alert issue was filed unrouted and only picked up an owner label on the NEXT
+ * dispatch cycle.
+ *
+ * Measured 2026-09-14, three independent instances, all consistent:
+ *   * #2630 filed 08:18 → routed by the 08:24 run
+ *   * #2641/#2642/#2643 filed 10:24 → routed by the 10:51 run
+ *   * #2646 (P0) / #2647 (P1) filed 10:51 → still unrouted at 11:00
+ * The 10:51 run's own log is the proof: it filed #2646/#2647 at 10:51:28-30 and then, at 10:51:31,
+ * routed only #2641-#2643 — the previous cycle's issues.
+ *
+ * The cost is not that the label never arrives (the sweep is idempotent, so it does). It is that
+ * ownership arrives a full dispatch cycle late — up to ~60 min on the hourly backstop. A P0 reaches
+ * GitHub in ~30 s and reaches its OWNER an hour later, and until it does it is invisible to that
+ * routine's queue and reads as '(unrouted)' to mon_detect_alert_queue_unworked(). "Delivered is not
+ * owned" is the exact failure the routing step was written to close; this is that failure surviving
+ * inside the fix, one layer down.
+ *
+ * The repair keeps the sweep's deliberate design intact — ONE idempotent labelling mechanism, no
+ * `--label` on the create call, no create-path/backfill-path skew — and only corrects its INPUT:
+ * the run unions in the issues it just created and the listing has not indexed yet. Everything
+ * else (route on kind, only label when absent, always write back owner_routine) is unchanged.
+ *
+ * Ordering is stable and listed-first so the backfill behaviour a reader expects is unchanged, with
+ * the run's own new issues appended. Deduplicated BY NUMBER: an issue that IS in the listing keeps
+ * the listing's label state, so a just-created issue that GitHub did index is never double-walked
+ * and never has its existing owner label re-derived.
+ */
+export function routingWorklist(
+  listed: ReadonlyArray<ListedIssue>,
+  created: ReadonlyArray<CreatedIssue>,
+): WorklistItem[] {
+  const out: WorklistItem[] = [];
+  const seen = new Set<number>();
+
+  for (const issue of listed) {
+    if (seen.has(issue.number)) continue;
+    seen.add(issue.number);
+    out.push({
+      number: issue.number,
+      title: issue.title,
+      routed: (issue.labels ?? []).some((l) => l.name.startsWith('routine-')),
+    });
+  }
+
+  for (const issue of created) {
+    if (seen.has(issue.number)) continue;
+    seen.add(issue.number);
+    // Freshly created by THIS run: it cannot already carry an owner label, because the only thing
+    // that applies one is the sweep this list is being built for.
+    out.push({ number: issue.number, title: issue.title, routed: false });
+  }
+
+  return out;
 }

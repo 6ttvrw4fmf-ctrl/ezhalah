@@ -1,3 +1,6 @@
+> **RETIRED (owner, 2026-10-04).** This routine no longer runs. The Advanced Filter now has its own engineer: read
+> `docs/ops/ADVANCED_FILTER_ENGINEER.md`. This file stays only as history.
+
 # 🎯 SENIOR ADVANCED FILTER + TRENDING DATA INTEGRITY ENGINEER (canonical, owner 2026-08-23)
 
 **This file is the source of truth for this routine — the file wins over the live routine prompt
@@ -30,8 +33,11 @@ being stated. They were always binding. Now they are also visible.
 
 1. **`docs/ADVANCED_FILTER_PRODUCT_CONTRACT.md`** — the CANONICAL, owner-mandated source of
    truth for what Advanced Filter does. 74 numbered rules across category/multi-type intersection,
-   scope hierarchy, offer button, the 10%-OR-≤50 usefulness rule (INTERVIEW_STOP_AT, raised from 25
-   by the owner product rule of 2026-09-04), rounds, live counts, Skip/Back/
+   scope hierarchy, offer button, the 10%-OR-≤25 usefulness rule (`INTERVIEW_STOP_AT` — **25**; the
+   2026-09-04 raise to 50 was DELIBERATELY REVERTED by PR #3383, "the stop line returns to 25", and
+   both `ADVANCED_FILTER_PRODUCT_CONTRACT.md` §15 and `ADVANCED_FILTER_DESIGN_CONTRACT.md`
+   ("frozen, unchanged") carry 25 — corrected here 2026-09-20 after this file's stale 50 sent a run
+   looking for a contract/production conflict that does not exist), rounds, live counts, Skip/Back/
    pills, Show More, stopping conditions, must-nevers, and tuning constants — with worked
    examples (gym 100/98/8, bathrooms ladder, Apartment+Villa union, 5000→22 progressive
    narrowing).
@@ -456,7 +462,7 @@ Things that cost a previous run real time, and are NOT product defects:
    when the period scope includes Monthly (شهري or كلاهما, or combined deal). A "no non-AF key moved
    under a deal/period change" rule must assert that derivation, not equality — asserting equality
    reports a phantom regression on a correct production (`verify-af-scope-change-live.ts`
-   `tablesFollowPeriod`).
+   `tablesFollowPeriod` — that journey was retired 2026-10-03 with the Filter's carried answers; the lesson stands).
 10. **A CANCELLED GitHub job reports neither `success` nor `failure`, and `if: ${{ !cancelled() }}`
    skips every step behind it** (2026-09-03). That step guard exists so a FAILING step cannot hide
    the ones after it, and it does that well — but when the JOB is cancelled (its `timeout-minutes`
@@ -485,11 +491,12 @@ Things that cost a previous run real time, and are NOT product defects:
    token's count column is `cnt_<token>`. Where a value genuinely cannot be derived (a translated
    label), reconcile the two at LOAD time and fail loudly, not per-cohort by luck.
 14. **When a journey needs a SECOND question, do not click the narrowest option** (2026-09-03).
-   R4.3.1/R11.1 stop the interview at `INTERVIEW_STOP_AT = 50` (owner product rule 2026-09-04, raised
-   from 25 — the live value is in `src/lib/afRanking.ts`), so the narrowest option is the
+   R4.3.1/R11.1 stop the interview at `INTERVIEW_STOP_AT = 25` (the live value is in
+   `src/lib/afRanking.ts` — READ IT, never this sentence; it was briefly 50 between 2026-09-04 and
+   PR #3383, which returned it to 25), so the narrowest option is the
    surest way to end it before the next question can be tested — and the resulting "it didn't
-   advance" failure is a correct production, not a defect. Pick the narrowest option leaving **>50**,
-   and report NOT EXERCISED when the cohort offers none.
+   advance" failure is a correct production, not a defect. Pick the narrowest option leaving
+   **> `INTERVIEW_STOP_AT`**, and report NOT EXERCISED when the cohort offers none.
 15. **A CI job log can only be read from the TAIL, so a red step in the middle of a job is invisible**
    (2026-09-04). The live-check jobs are long chains (`af-truth` is 16 steps) and every step runs
    behind `if: !cancelled()`, so a failing step's own summary ends up thousands of lines from the
@@ -613,13 +620,68 @@ Things that cost a previous run real time, and are NOT product defects:
       Still OPEN and NOT settled here: whether the ACCUMULATED mount across many presses is safe —
       `ops_incident` #212 (P1, routine #4, `blocked`). Do not pin that from this surface.
 
+22. **NEVER PLAN A `DROP ... CASCADE` FROM ONE HOP OF `pg_depend`** (2026-09-14, this routine, the
+    hard way). Splicing arms into `listing_location_index` requires the `__mig` swap, whose
+    `DROP MATERIALIZED VIEW ... CASCADE` is the documented pattern. The dependents were planned by
+    asking which relations' rewrite rules reference `listing_location_index` — which returns exactly
+    two, `listing_location_canonical` and its `_mv`. Both were captured and restored, and the
+    migration's own guards all passed. **ELEVEN objects were actually dropped**, because
+    `listing_native_location_v1` LEFT JOINs `listing_location_canonical` (last line of its body) and
+    a further chain hangs off v1: v1 → v2 → {`mon_search_index_city_drift`,
+    `platforms_deprecated_status`, `platforms_unsearchable`}, plus `phasea_shadow_resolution`,
+    `buy_location_index`, `rent_location_index`, `location_index_live`, `location_review`,
+    `ops_freshness_by_layer`. A one-level query cannot see a transitive dependent, and the guards
+    could not either: they verified what the migration knew to check.
+
+    **What it cost, and what it did not.** User-facing search and Trending were never affected —
+    `verify-trending-filter-state-live.ts` passed end to end *while the eleven were missing*, because
+    `top_cities_by_deal_ar` / `district_options_ar` / `location_search_candidates_ar` resolve through
+    the name bridges, not through v1/v2. `search_listings_ar`, `active_listing_ids_v2` and both
+    attribute views were untouched. What broke was ops tooling: `search_index_freshness()` failed
+    with `42P01`. **Check the user path FIRST and measure it — do not infer the blast radius from the
+    object list.** A guessed-parameter RPC call returning `[]` looked like an outage and was not.
+
+    **The correct recipe already exists in this repo — use it, do not re-derive it:**
+    `supabase/migrations/20260913221143_aqaralsaudia_wiring_into_search.sql` captures every dependent
+    with `pg_get_viewdef` at the TOP of the migration and replays them verbatim afterwards, naming
+    "v2 and its 3 dependents" explicitly. Its header says why: a hand-copied body "goes stale the
+    moment any other platform lands, and a stale restore silently un-wires whoever was added in
+    between."
+
+    **Restoring: the source matters per object.** `ops_ddl_snapshot` is right for anything that does
+    not enumerate platform tables (v2 and its three dependents select FROM v1 by name, so their text
+    has not moved). It is WRONG for `listing_native_location_v1` — its newest snapshot copy is 14,189
+    chars against a live 26,127, and restoring it would have silently un-wired four platforms.
+    `sql/mirrors/listing_native_location_v1.sql` is the live body, byte-verified; check its md5
+    before use (it was `5fb92dbf2a54966df41d0401918a9af5`, over the file from line 204 with NO
+    trailing newline). Guard every replay with `to_regclass(...) is null` so a stale snapshot can
+    never `CREATE OR REPLACE` over something still alive.
+
+23. **A TIMED-OUT `apply_migration` TOOL CALL IS NOT A ROLLED-BACK TRANSACTION** (2026-09-14). The
+    MCP tool gives up at 60s; the transaction keeps running and commits. Checking immediately after
+    can show the change ABSENT and it still lands seconds later — that is exactly what happened here,
+    producing two committed versions of one migration (20260914111548 and 20260914111726). It was
+    harmless only because the SQL was written idempotently (skip any table already in the view
+    definition, rebuild with CREATE OR REPLACE rather than appending). **Write every splice
+    idempotently, and after a timeout POLL for the object and for `schema_migrations` instead of
+    re-issuing blind.** Both versions must then be mirrored to git — the drift guard compares applied
+    VERSIONS to committed files.
+
 ## Hard safety rails (same as every other engineer — non-negotiable)
 
 Never modify data to make a test pass. Never manufacture attributes, turn UNKNOWN into false,
 widen a search secretly, remove a platform to "improve" diversity, or delete unusual listings. Fix
 the ROOT CAUSE and the bug CLASS, not the one example. Deployment safety overrides autonomy: the
 deploy lock, the migration-drift guard, `--head`/`--base` + double file-list check, no deploys
-while Supabase is unhealthy, never hand-edit the 4 AF shared-eligibility RPCs (go through the
-shared clause + `rebuild_af_filter_rpcs()`), verify user-facing truth via the anon REST path (MCP
+while Supabase is unhealthy, never hand-edit the **SIX** AF shared-eligibility RPCs (go through the
+shared clause + `rebuild_af_filter_rpcs()`) — `af_rpc_templates`/`af_rpc_build_state` hold
+`location_search_candidates_ar`, `apartment_guided_counts_ar`, `property_age_option_counts_ar`,
+`af_eligible_count`, **`district_options_ar`** and **`top_cities_by_deal_ar`**; this line said
+"4" from 2026-09-05 (when `20260905183033` brought the two Trending count surfaces under the
+rebuild) until 2026-09-27, and the same stale count sat in `verify-af-rpcs-not-hand-edited.ts`,
+whose §4 *asserted* the protected set was four. The two the number omitted are exactly the two
+that were hand-edited on 2026-09-26 and left three P1s standing while the check read green —
+**a count repeated in prose and in an assertion is how a gap acquires a clean bill of health**,
+verify user-facing truth via the anon REST path (MCP
 SQL bypasses RLS), verify the actual served bundle after a deploy (not job status alone). If
 Supabase degrades, stop heavy testing and diagnose first.

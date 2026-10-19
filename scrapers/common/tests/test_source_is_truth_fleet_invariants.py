@@ -169,7 +169,33 @@ def test_no_writer_derives_a_total_from_area_and_per_metre_rate():
 PERIOD_DEFAULT_ALLOWLIST = {
     "alnokhba", "awal", "deal", "jazwtn", "nowaisiry", "toor",
 }
-SINGLE_PERIOD_PLATFORMS = {"gathern", "aqarmonthly"}   # short-stay marketplaces, one period by design
+# compoundin added 2026-09-20. Its entire catalogue is ANNUAL compound rent, and that is the
+# platform's own statement rather than our inference: every unit page carries "Pay your annual rent
+# in easy monthly installments with Ejari" beside an RNPL badge, and the unit price itself carries
+# no period label of its own — so there is no per-listing token to read and nothing is being
+# overridden. Consistent with the standing RNPL→ANNUAL reading. If compoundin ever lists a monthly
+# contract, this entry is what must be revisited.
+SINGLE_PERIOD_PLATFORMS = {
+    "gathern", "aqarmonthly", "compoundin",   # short-stay marketplaces, one period by design
+    # azure/rightcompound added 2026-09-24 — see the matching entry + full reasoning in
+    # test_source_fidelity_no_defaults.py: each has its own explicit, site-wide, single-period
+    # source statement (rightcompound's literal "not monthly" disclaimer; azure's price read
+    # only from the page's own "Paid Annually" tab), never a per-listing override.
+    "azure", "rightcompound",
+    # wadod added 2026-09-24: the site states only the payment split («دفعة واحدة»/«دفعتين»); the
+    # OWNER attested the 7 rentals are yearly after reading the pages (ops_rent_period_single_value_ok
+    # 20260924224146). A page that names a period still wins in scrapers/wadod/run.py.
+    "wadod",
+    # tamyaz added 2026-09-24: the UI stamps a universal «/ سنة» on every rent row (no per-listing
+    # period field exists); the OWNER checked the live site and attested it is yearly
+    # (ops_rent_period_single_value_ok 20260924231422). A period the listing states, or a
+    # daily/weekly rate, still wins in scrapers/tamyaz/run.py.
+    "tamyaz",
+    # manafe added 2026-09-28: no page states a period; the OWNER attested yearly after the company's
+    # own Aqar cross-post of the same ad (REGA 7200942068) printed «125,000 /سنوي» for the «125000 ر.س»
+    # manafe shows (ops_rent_period_single_value_ok). A period the page ties to the price still wins.
+    "manafe",
+}
 
 # Matched on ONE line only: `\s+` spanning newlines turns an assignment followed by an unrelated
 # `if` on the next statement into a false positive.

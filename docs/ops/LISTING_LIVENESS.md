@@ -97,8 +97,20 @@ added to remove: it puts a confident, recent-looking timestamp on inventory nobo
 `scripts/verify-liveness-registry-mirror.ts` fails on any hand-written stamp under `scrapers/`.
 
 `presence_patch()` exists for the one case where a platform's source presence is *explicitly
-defined* as positive evidence. No platform declares that today, and `LivenessPolicy` raises if
-`absence_is_candidate_only` is disabled.
+defined* as positive evidence. **Two owner decisions declare it, both 2026-10-02.** (1) Wasalt: a row
+Wasalt's own search results serve is stamped verified-alive by the crawl. (2) The
+`SOURCE_LIST_PRESENCE` tier («yes do that for all 60 sites … check them every single day»): for a
+small site admitted BY NAME in `liveness_policies.SOURCE_LIST_DAILY`, whose crawl re-reads the site's
+own complete list every day, a row that list serves is stamped verified-alive, 48 h window. A site
+is admitted only after its crawler was read twice (the second reader trying to break the verdict)
+and found unable to upsert an active row it did not observe at the source in that run, or one the
+source marks unavailable; 33 were admitted that day and the rest carry their reason in
+`scrapers/lifecycle-gaps.txt`. A site with an oracle is never moved there. For Wasalt: The
+measurement behind the decision is in `liveness_policies.py`, and every enum-strike run re-tests it
+with 30 directly-read in-feed controls (flips abort under 90% live). It changes what counts as
+*verified*, never what counts as *dead*: removal still needs a DIRECT gone reading, and
+`LivenessPolicy` raises if `absence_is_candidate_only` is disabled. No other platform may declare
+it without an owner decision recorded here.
 
 ## 4. Every production-searchable platform must declare a strategy
 
@@ -111,6 +123,7 @@ directory has no policy.
 |---|---|---|
 | `DIRECT_REVISIT` | we periodically re-fetch each listing's own URL | **yes**, if coverage keeps up |
 | `CANDIDATE_PLUS_DIRECT` | an absence signal picks candidates cheaply; each gets a DIRECT confirm before anything is deactivated | **yes** |
+| `SOURCE_LIST_PRESENCE` | the crawl re-reads the site's own complete list every day; a row that list serves is stamped verified (48 h). Admitted by name, owner decision 2026-10-02 | **yes for "is it still offered"**; removal still needs three complete-crawl misses |
 | `CRAWL_PRESENCE_ONLY` | we only know the ad was in the crawl | **no — recorded as a KNOWN GAP** |
 
 `CRAWL_PRESENCE_ONLY` is not an approved design. It is an honest label on 25 small platforms
@@ -160,6 +173,20 @@ consumer to it is an owner decision, not a code change.
 
 Until then the ramp monitor is what keeps this honest: dealapp coverage will not increase, the
 monitor will say so, and nobody has to remember.
+
+**Correction, 2026-09-28 (measured from a home IP): it was never egress — it is dealapp's view
+quota.** An anonymous IP gets ~10 fresh ad renders a minute; past that dealapp renders its
+registration page («صفحة التسجيل», 86,728 bytes) in place of the ad (its API: 429
+`error.tooManyAdsViewed`, then 401 `error.user.blocked`), and CloudFront keeps that page under the
+ad's own URL for days. A home IP at the same burst rate gets the same walls; a CI runner at the
+same pace gets real pages. Every failed sample of the 2026-09-28 12-shard crawl was that page, so
+~75% of the catalogue went unseen and the prune guard tripped nightly. The removed ad is a different
+page — dealapp's generic shell, byte-identical to a made-up id, which a browser bounces to the home
+page (API 403 `error.ad.unauthorized` / 410 `error.ad.notFound`). So: every fetcher now spends one
+rolling-minute budget of origin renders (`liveness.OriginBudget`), reads past a cached wall through
+another spelling of the URL, and the crawl counts the no-listing page as a removal only when the
+same runner rendered a live ad just before and just after it (`run.confirmed_absent`). A lone shell
+is still never a death.
 
 ### 5.2 The proxy was measured, not assumed — and it is not the answer
 
@@ -373,3 +400,260 @@ scheduled, quarantined by a trust gate, blocked proxy, or a probe rate too low f
 | new-table column barrier | `scripts/verify-listing-tables-carry-verification-column.ts` |
 | the column, fleet-wide | migration `20260830183939` |
 | dashboard + monitors | migration `20260830191646` |
+
+---
+
+## 9. THE CHAIN MUST BE PROVEN TO RUN, AND ITS SILENCE MUST BE AN ALARM
+
+**Owner rule, 2026-09-21. This section is canonical and binds every platform, every routine and every
+future onboarding.** It was given after the owner's own family found a dead gathern listing on the
+live site, and after this run measured why.
+
+> **1. Source removes a listing → Ezhalah detects it → safely verifies it → deactivates it.**
+> **2. If the liveness checker or its scheduled job stops working, Ezhalah must detect THAT failure
+>    too, instead of silently accumulating stale listings.**
+>
+> *"Use production evidence and controlled tests. Do not mark a platform as covered merely because
+> code exists. Prove the full chain actually runs."* — the owner, 2026-09-21
+
+### 9.1 "Covered" is a measured claim about PRODUCTION, never about the repository
+
+A platform is **NOT** covered because a scraper has an oracle, because a workflow file exists,
+because a cron row exists, or because a barrier is green. Every one of those was true of platforms
+serving dead inventory on the day this rule was written. A platform is covered only when the whole
+chain is observable in production data:
+
+| link | what proves it, in production |
+|---|---|
+| the job fired | a `cron.job_run_details` row, `status = 'succeeded'` |
+| the job actually DID its work | a `scrape_runs` row whose `rows_seen` is in family with its own history |
+| the source was asked about the listing | an `ops_stale_inactivation_probe` row, or `last_verified_alive_at` moving |
+| the verdict was earned | a DIRECT verdict at full grace, through `liveness_contract.py` |
+| the listing left the user's screen | absent from `search_listings_ar` after one completed refresh+sync cycle |
+
+If any link cannot be shown from production, the honest state is **UNKNOWN**, and it is reported as
+UNKNOWN — never as covered. This is `ENGINEER_ROUTINES.md` §G.9 applied to a platform rather than to
+a bug.
+
+### 9.2 A GREEN JOB THAT DOES NOTHING IS THE DEFAULT FAILURE MODE, NOT AN EDGE CASE
+
+Measured 2026-09-21, and the reason half this rule exists. wasalt's enumeration was **dead for seven
+days** (2026-09-12 → 09-19): the workflow was dispatched on schedule, ran for three and a half hours,
+and reported `conclusion: success` every time — while enumerating **96 rows instead of ~105,000**.
+`run.py` had moved to a real browser in PR #3129 but the enum step still called the transport
+wasalt.sa null-routed on 2026-08-17, so every page came back blocked and the walk ended early.
+
+Nothing alerted. It was found by a human reading `scrape_runs` by hand. Downstream, the strike step's
+coverage guard correctly refused to prune all week — so the guard worked, the job "succeeded", and
+**~3,900 dead listings stayed active and clickable**. Every barrier was green.
+
+**Two specific blind spots this exposed, both now closed — do not reintroduce either:**
+
+1. **Absence cannot be compared.** `mon_detect_silent_partial_success()` measures a platform's
+   last-24h `rows_seen` against its own 18-day median, which is the right question — but its
+   candidate set is *runs that exist*. A job that stops producing runs **entirely** contributes no
+   row, so there is nothing to compare and nothing fires. Silence was indistinguishable from health.
+   **A liveness job must therefore be watched for EXPECTED-BUT-ABSENT runs, on its own declared
+   cadence, not only for short ones.**
+2. **A shared `platform` label hides a collapse inside another job's baseline.** The enum wrote under
+   `platform='wasalt'`, the same bucket as the ordinary crawl, which is sharded into hundreds of
+   small slices (runs of 2, 8, 91, 96 rows are normal there). A 96-row enum was statistically
+   unremarkable against that median. **A job with its own cadence and its own expected volume needs
+   its own run label** — PR #3241 gave the shards `wasalt_enum_shard` and that is the pattern.
+
+### 9.3 What may be concluded from a job that did not run
+
+Nothing about the listings. This is §1 restated at the JOB layer, and it is the same asymmetry:
+
+- A liveness job that did not run, ran short, or could not reach the source leaves every listing it
+  would have touched **UNKNOWN**. It may never strike, deactivate, or start a deletion clock.
+- The correct response to a stalled checker is to **fix the checker**, never to widen a kill, lower a
+  coverage floor, raise a cap, or treat the backlog it created as evidence of death. §7 already
+  forbids that and this section does not soften it.
+- **A restorative write is still never gated** (§0 corollary 2): a job that proves listings alive may
+  run and heal them even while the destructive half stays frozen.
+
+### 9.4 Onboarding a platform, and re-certifying one
+
+Before a platform may be described as covered — in a report, a routine's output, a doc table or
+`ops_platform_liveness_coverage` commentary — the chain in §9.1 must be walked **from the egress the
+job really uses**, which is usually a GitHub Actions runner and is **not** a cloud routine's
+container. Measured the same day: probing gathern from a cloud-routine egress returned 404 on **10 of
+12 listings the crawl had served alive two hours earlier** (an 83% false-death rate), while the CI
+egress got clean HTTP 200 on 10/10 canaries in the same period. **An "EGRESS BLOCKED" note in
+`scrapers/absence-only-prune.txt` is a statement about the container that wrote it, and is not
+evidence about the platform.** Re-measure from CI before believing it.
+
+Each platform is validated and enabled **independently**, with interleaved known-alive controls
+(§4.2 lesson 1), before any automated deactivation is allowed to write.
+
+### 9.5 The genuinely-hard platforms are named, never quietly counted as covered
+
+Where no reliable signal exists on the listing page, the platform is reported as an explicit gap with
+**what information is missing** stated, and the next step is to look for a real source-supported
+signal — an API, a status endpoint, a sitemap, a feed. Inventing a page-text heuristic to close the
+gap is the fursaghyr mistake (§4.2: «غير متاح» was a registration-form string and «مؤجر» was
+advertising prose; gating on either would have deactivated live inventory). **Report before
+implementing anything risky.**
+
+### 9.6 A TIER IS A MECHANISM. COVERAGE IS EVIDENCE. NEVER READ ONE AS THE OTHER
+
+*(owner rule, 2026-09-21; `ops_incident` #248 / #578. Measured across the whole fleet the day it
+was written.)*
+
+The registry grades **what a platform runs**. `ops_platform_liveness_coverage` measures **what that
+has actually produced**. They answer different questions, and the day this was written the fleet had
+them fused into one wrong answer:
+
+| | platforms | active listings |
+|---|---|---|
+| had ever written a single `last_verified_alive_at` | **4** (aqar, gathern, dealapp, wasalt) | — |
+| had never written one, ever | **63** | **34,763** |
+| ran a real direct oracle but were declared `CRAWL_PRESENCE_ONLY` | **29** | — |
+| had already produced direct verdicts under that false label | **9** | 267 LIVE on rakez alone |
+
+**One discarded patch caused all of it.** `db.prune_unseen()`'s self-heal — the branch reached only
+after an oracle fetched a listing's own URL and read it ALIVE — wrote `{missing_count, last_seen_at}`
+and stopped. §3's whole point is that `last_seen_at` means "a crawl encountered this row" and says
+nothing about the source's opinion, so the strongest evidence this system can obtain was spent at
+the instant it was obtained. `last_verified_alive_at` then stayed NULL no matter how well any oracle
+ran; coverage read 0% everywhere; `CRAWL_PRESENCE_ONLY` looked like the honest tier; and
+`mon_detect_liveness_coverage_ramp` — whose entire job is *"either its liveness job is not running,
+or it is running and writing nothing"* — filters on
+`strategy in ('DIRECT_REVISIT','CANDIDATE_PLUS_DIRECT')` and therefore never looked at one of the 29.
+A self-consistent blind spot: every layer confirmed every other layer, and all of them were wrong.
+
+The two axes are now kept apart deliberately:
+
+* **Mechanism** — the tier, in `liveness_policies.py` / `sql/mirrors/liveness_registry.json` /
+  `ops_liveness_registry`, all three in one change. A platform that hands `verify_gone=` to
+  `prune_unseen` **is** `CANDIDATE_PLUS_DIRECT` by this file's own definition ("an absence signal
+  selects candidates cheaply; each candidate then gets a DIRECT re-fetch"). Declaring it below that
+  is not modesty, it is a false statement that switches monitors off.
+* **Evidence** — has the chain ever produced a verdict in production? Kept in
+  `scrapers/oracle-never-observed.txt` (a shrink-only ledger, `verify-oracle-observation-ledger.ts`)
+  and recomputed every sweep by `mon_detect_oracle_chain_never_observed()`, which raises per platform
+  and clears itself the moment the chain leaves a trace.
+
+**A tier is never a coverage claim, and it is never permission.** 20 of the 29 have still never been
+seen to run: muktamel is the sharp case — 3,864 active listings, 381 already under strike and
+queueing for the oracle, zero verdicts ever. Its alert says so in those words, and distinguishes it
+from the benign case (a small stable catalogue where no candidate has ever reached grace) by
+`under_strike`. Both are **UNPROVEN**; only one is broken; neither is *covered*.
+
+**A tier claim has to be cashed in code, and there are exactly two ways.** Either the platform owns
+`scrapers/<p>/liveness{,_run}.py` calling `direct_alive_patch()` / `verification_patch()`, or its
+`run.py` wires `verify_gone=` into `prune_unseen` **and** `prune_unseen` stamps through the contract.
+`verify-liveness-registry-mirror.ts` §4 asserts the shared branch **separately**, so deleting that
+one stamp un-cashes all 29 claims at once. It asks the stripped source for the spread
+`**direct_alive_patch(...)` that actually reaches the database: an earlier version tested the raw
+file and a planted mutant proved it worthless — deleting both the import and the call left it GREEN,
+because the comment above the self-heal *names* the function. A comment is not a code path.
+
+### 9.7 AN ORACLE THAT READS RENDERED MARKUP DIES WHEN THE SOURCE CHANGES ITS RENDERER — aqar, measured 2026-09-25
+
+§9.2 says a green job that does nothing is the default failure mode. This is that failure one level
+down, and one degree more deceptive: the job ran, on schedule, at full volume, **and it kept
+killing listings the whole time** — 8,845 kills and 17,190 strikes in the 30 days to 2026-09-25.
+What had died was one of its two death routes, and the surviving route's healthy output is exactly
+what made the dead one invisible.
+
+`looks_dead()` reaches DEAD on a 200 by two independent paths: a `DEAD_MARKERS` phrase in the body,
+or `looks_closed()`. The marker path was never affected and produced every one of those kills. The
+soft-close path could not return True for any page — **and aqar's soft-closed pages carry no
+DEAD_MARKER**, so that cohort escaped both routes and was certified ALIVE. Measuring the oracle by
+its kill count would have reported it healthy on every day it was half-blind; only a per-page test
+of `looks_closed()` itself could see it.
+
+`scrapers/aqar/liveness.py::looks_closed()` is aqar's SOFT-CLOSE detector — aqar does not 404 a
+closed ad, it serves HTTP 200, and an ad it closes carries no removal phrase, so this predicate is
+the only thing that can retire it. The 2026-08-04 design was deliberately two-factor: a «مغلق» badge
+in the markup **and** a missing offers node, because the bare word «مغلق» also appears in live ads'
+own descriptions («مطبخ مغلق» = closed kitchen). Badge-alone was measured 0/77 live and 17/17 closed.
+
+aqar then moved the listing page to **client-side rendering**. The closed banner is now painted by
+JS from the payload, so no badge markup reaches the HTML at all. What does reach it is an i18n label
+bundle shipped to **every** page, live ones included, carrying «مغلق» as a dictionary value
+(`listing_status.closed`, `closed_banner.title`). So on 2026-09-25 the word-presence pre-check was
+true on live pages and the badge regex was false on closed ones: **`looks_closed()` could not return
+True for any page in existence.**
+
+**The failure was not silence — it was an affirmative false ALIVE.** A page that fails `looks_dead()`
+falls through to the ALIVE branch, which writes `last_verified_alive_at` via `direct_alive_patch()`.
+Rows 874 and 882 were certified ALIVE that morning while aqar served them `closed:true` with
+`price`, `area`, `content` and `create_time` all null. This is the §3 distinction inverted: not a
+crawl sighting mistaken for proof of life, but our own per-listing oracle *manufacturing* the proof.
+
+Measured that day, by direct fetch of each listing's own URL, with a live control arm in the same
+session (the control matters — an all-null payload read from one container is otherwise
+indistinguishable from the egress facts §9 warns about):
+
+| arm | n | result |
+|---|---|---|
+| random active rows, never re-enriched | 75 | 71 live with a price matching ours exactly, **4 closed at source and still served (5.3%)** |
+| source-confirmed closed ads | 6 | 6/6 scored `badge_match=false` — the oracle could not fire |
+| live controls | 2 | structured price read back exactly (9,000,000 and 295,000) |
+| pages carrying `closed:true` beside a published price | 0 | the two factors never disagreed |
+
+**The repair ADDS aqar's own state flag to factor 1 — it does not delete the badge.** Factor 1 is
+satisfied by either expression of the same fact (`"closed": true`, escaped in the streamed payload,
+**or** the old badge markup), with factor 2 unchanged. Keeping the badge is not sentiment: its
+absence from the page shapes sampled today is a measurement, not a promise it can never appear
+again, it costs nothing (0/77 false fires in 2026-08, and it matches neither stored fixture), and
+two existing barriers pin it — one of them because `scrapers/common/cleanup.py` imports this same
+predicate as its aqar dead-check, so a regression here resurrects sold listings from the cleanup
+side too. Replacing it outright was the first attempt and CI rejected it, correctly. aqar states what the
+flag means in that same bundle: a closed ad «يظهر هذا الإعلان في صفحة حسابك فقط (لا يظهر على الخريطة
+أو عند البحث)» — it is gone from the source's own search. The «طلب تسويق» exemption is preserved and
+is now *stronger*: it is enforced by reading the flag rather than by the absence of a price, so an
+open ad that merely withholds its price can never be killed.
+
+**It ships DISARMED, and that is a deliberate reading of the RED list, not timidity.** Deactivating
+on the repaired factor 1 is a BULK listing operation (order 2,500 rows at the measured rate), which
+AGENTS.md puts behind owner approval. So a soft-closed page is treated as **UNKNOWN**: per §1 that
+neither deactivates the row nor certifies it alive, which is already strictly better than the state
+it replaces, where the same page had `last_verified_alive_at` written onto it. The verdict is
+recorded every sweep (`aqar_liveness_detail.verdict = 'unknown_soft_closed'`, migration
+`20260925072159`) and counted in the run summary, so the disarmed oracle cannot be mistaken for a
+silent one. `AQAR_SOFT_CLOSE_ARMED=1` lets it strike and kill under aqar's declared 3-strike / 48h
+grace once the owner has approved the volume.
+
+**ARMED 2026-09-28 (owner: «yes if they are removed»).** 9,133 rows read `unknown_soft_closed` in the
+prior 48 h; 6/6 sampled pages showed «محذوفة» (5) or «مغلق» (1) in a real browser. Both aqar-liveness.yml
+jobs set `AQAR_SOFT_CLOSE_ARMED=1`.
+
+**The general rule this platform paid for: a liveness oracle that parses RENDERED MARKUP has a
+silent expiry date set by someone else's frontend team.** Prefer the source's own state field.
+Where markup is genuinely the only signal, the barrier must EXECUTE the predicate against a stored
+real page of each kind — `scripts/verify-aqar-soft-close-oracle-can-fire.ts` does exactly that, with
+fixtures that deliberately retain the adversarial i18n bundle, and three mutants including a restore
+of the dead badge regex. A source-text tripwire over `looks_closed()` would have stayed green for
+every day the oracle was dead.
+
+## 10. ONE CHECKLIST FOR THE WHOLE FLEET — `ops_platform_protection_matrix()` (owner, 2026-09-25)
+
+The owner's rule: *every platform is eventually protected by the same core rules; platform-specific
+fixes are fine where necessary, but the main safety system is global wherever possible.* A barrier's
+name is never evidence of its scope: measured the day this was written, the only
+"district contradicts what the source published" check (`mon_detect_district_contradicts_source`)
+read a view hard-coded to ONE table (gathern) and so covered 1 of 104 active platforms.
+
+`select * from ops_platform_protection_matrix();` is the standing answer to "which platforms are
+protected?", one row per platform with active inventory. Every column is computed from production on
+each call, never from code existing:
+
+| column | measured as |
+|---|---|
+| `direct_liveness_check` | registry strategy is a per-listing oracle, not crawl presence alone |
+| `production_verified` | >= 90% of active rows carry `last_verified_alive_at` inside the SLA |
+| `location_protections` | every active row is in both relations the generic location detectors read (`search_listings_ar`, `listing_native_location_v1`) |
+| `district_source_check` | the platform has rows in `listing_source_district_ar_fleet`, the input the district-vs-source detector compares against |
+| `remaining_issue` / `final_status` | derived from the above: PROTECTED / PARTIAL / UNPROTECTED |
+
+`listing_source_district_ar_fleet` is rebuilt every 3h (`refresh-listing-source-district-ar-fleet`)
+from the live list of listing tables, so a platform added later is compared automatically. It takes the
+first ARABIC-script value among `additional_info.district_ar`, `district_ar` and `neighborhood`
+(English names are a language difference, not a contradiction) and the comparison is
+containment-aware (`الرحاب` vs `الرحاب - بريده` is formatting). The older
+`listing_source_district_ar` stays gathern-only on purpose: `refresh_district_recovery()` uses it as
+an exclusion list when it WRITES, so widening it would change a data path.

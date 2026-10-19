@@ -28,13 +28,23 @@
 // Both directions were proven against the real production row before this landed: writing 2,690
 // (the ppm) to id 7026223 left it at 11,000,000, and writing 12,000,000 was accepted normally.
 //
+// MUTATION-PROVEN SINCE 2026-09-25 (routine #10, R1). Until then this file was on
+// scripts/mutation-proof-grandfathered.txt — a guard over the highest-blast-radius thing this repo
+// has (a PRICE that can be silently rewritten) that nobody had ever watched go red. Nine conditions
+// were asserted and not one of them had been shown to fail on the defect it names, so "the aqar
+// price guard is intact" rested on nine regexes nobody had tested. The predicate is now the pure
+// function `guardProblems(body, wiring)`, fed the REAL committed SQL for the negative control and a
+// broken copy of it for each proof, so both directions are recorded.
+//
 // Deliberately OFFLINE (reads only the repo's own migration files — no DB, no network).
 //   node --experimental-strip-types scripts/verify-aqar-price-artifact-write-guard.ts
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
 
-const MIGRATIONS_DIR = join(import.meta.dirname, '..', 'supabase', 'migrations');
+const ROOT = join(import.meta.dirname, '..');
+const MIGRATIONS_DIR = join(ROOT, 'supabase', 'migrations');
 const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
 const all = files.map((f) => ({ f, sql: readFileSync(join(MIGRATIONS_DIR, f), 'utf8') }));
 
@@ -43,60 +53,154 @@ const ok = (label: string, pass: boolean, detail = '') => {
   if (!pass) failed++;
   console.log(`${pass ? 'PASS' : 'FAIL'}  ${label}${pass || !detail ? '' : `  → ${detail}`}`);
 };
+/** A mutation proof: the real regression put back into the real SQL, asserted to go RED. */
+const mustCatch = (label: string, problems: string[]) =>
+  ok(`(mutation) catches ${label}`, problems.length > 0, 'the audit passed deliberately broken input');
 
 console.log('verify-aqar-price-artifact-write-guard: a price repair must survive the next sweep.\n');
 
-// Last definition wins, same principle as the other replay verifiers.
-let body = '';
-const re =
-  /create\s+or\s+replace\s+function\s+public\.trg_aqar_reject_price_artifact\b[\s\S]*?\$function\$([\s\S]*?)\$function\$/gi;
-for (const { sql } of all) {
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(sql)) !== null) body = m[1];
-  re.lastIndex = 0;
+export const TRIGGER = 'aqar_price_artifact_guard_bu';
+export const TABLES = ['aqar_residential_listings', 'aqar_commercial_listings'];
+
+/** Prose can never satisfy a check. Stripped at the READER, so a condition left behind as a SQL
+ *  comment reads as MISSING — proved by the decoy mutation below. */
+const codeOnly = (sql: string) => sql.replace(/--.*$/gm, '');
+
+/** THE WHOLE VERDICT, as a pure function over the guard body and the migration corpus, so every
+ *  proof below is a statement about the code that decides it rather than about a copy. */
+export function guardProblems(body: string, wiring: string): string[] {
+  const bad: string[] = [];
+  if (!body || !body.trim()) {
+    // Fail CLOSED: no definition found is UNKNOWN, never "nothing to check".
+    return ['trg_aqar_reject_price_artifact is not defined in any committed migration — repo and '
+      + 'production disagree, or the guard was deleted. UNKNOWN, never green'];
+  }
+  const code = codeOnly(body);
+
+  // (1) Both proven artifact signatures are rejected.
+  if (!/NEW\.price_total\s*=\s*NEW\.area_m2/.test(code))
+    bad.push('no longer rejects a price equal to the row area (price == area_m2) — the exact shape of ids 1015536 / 1017694 / 1019212');
+  if (!/NEW\.price_total\s*=\s*NEW\.price_per_meter/.test(code))
+    bad.push('no longer rejects a price equal to the row per-meter figure (price == price_per_meter) — aqar\'s «سعر المتر 1» gimmick');
+
+  // (2) It restores the OLD value rather than inventing one — no fabricated replacement, ever.
+  if (!/NEW\.price_total\s*:=\s*OLD\.price_total/.test(code))
+    bad.push('a rejected write no longer keeps the stored value (NEW.price_total := OLD.price_total)');
+  if (/NEW\.price_total\s*:=\s*(?!OLD\.price_total)[^;]*[*/+]/.test(code))
+    bad.push('the guard now assigns a COMPUTED price on the way in — a derived price is exactly what SOURCE IS TRUTH forbids');
+
+  // (3) A NULL write must always pass — that is how an honest unknown is recorded.
+  if (!/NEW\.price_total\s+is\s+null/.test(code))
+    bad.push('a NULL price write is no longer let through — an honest unknown would be blocked, which is unknown→NO in the write path');
+
+  // (4) Only UPDATE, and only a real change — an ordinary refresh must not be disturbed.
+  if (!/TG_OP\s*<>\s*'UPDATE'/.test(code))
+    bad.push('no longer scoped to UPDATE');
+  if (!/NEW\.price_total\s+is\s+not\s+distinct\s+from\s+OLD\.price_total/.test(code))
+    bad.push('no longer ignores writes that do not change the price — an ordinary refresh would be disturbed');
+
+  // (5) The source-verified allowlist is honoured.
+  if (!/ops_price_eq_area_verified/.test(code))
+    bad.push('no longer honours ops_price_eq_area_verified — a source-real coincidence (id 132677) would be suppressed');
+
+  // (6) Trigger wiring: both aqar tables, BEFORE UPDATE, and sorting AFTER aqar_parse_bi so the
+  //     guard sees the post-parse value. Postgres fires same-timing triggers in name order.
+  for (const table of TABLES) {
+    const re = new RegExp(`create\\s+trigger\\s+${TRIGGER}\\s+before\\s+update\\s+on\\s+public\\.${table}`, 'i');
+    if (!re.test(wiring)) bad.push(`the trigger is not wired BEFORE UPDATE on ${table} — that table's writes are unguarded`);
+  }
+  if (!(TRIGGER > 'aqar_parse_bi'))
+    bad.push(`the trigger name «${TRIGGER}» no longer sorts after 'aqar_parse_bi', so it would inspect a PRE-parse value`);
+
+  return bad;
 }
+
+// ── the real, shipped inputs ────────────────────────────────────────────────────────────────────
+// Last definition wins, same principle as the other replay verifiers.
+export function guardBodyFrom(corpus: Array<{ sql: string }>): string {
+  const re = /create\s+or\s+replace\s+function\s+public\.trg_aqar_reject_price_artifact\b[\s\S]*?\$function\$([\s\S]*?)\$function\$/gi;
+  let body = '';
+  for (const { sql } of corpus) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(sql)) !== null) body = m[1];
+    re.lastIndex = 0;
+  }
+  return body;
+}
+
+const body = guardBodyFrom(all);
+const wiring = all.map((x) => x.sql).join('\n');
 
 ok('trg_aqar_reject_price_artifact is defined in a committed migration (repo == prod)', body.length > 0);
-if (!body) process.exit(1);
 
-const code = body.replace(/--.*$/gm, ''); // prose can never satisfy a check
+const live = guardProblems(body, wiring);
+ok('the write-path guard as it stands is intact', live.length === 0, `\n      ${live.join('\n      ')}`);
 
-// (1) Both proven artifact signatures are rejected.
-ok('rejects a price equal to the row area (price == area_m2)',
-  /NEW\.price_total\s*=\s*NEW\.area_m2/.test(code));
-ok('rejects a price equal to the row per-meter figure (price == price_per_meter)',
-  /NEW\.price_total\s*=\s*NEW\.price_per_meter/.test(code));
+ok('npm test discovers and runs this check',
+  npmTestRuns(ROOT, 'verify-aqar-price-artifact-write-guard'), 'not in the resolved run set');
 
-// (2) It restores the OLD value rather than inventing one — no fabricated replacement, ever.
-ok('a rejected write keeps the stored value (NEW.price_total := OLD.price_total)',
-  /NEW\.price_total\s*:=\s*OLD\.price_total/.test(code));
-ok('never assigns a computed/derived price (no arithmetic on the way in)',
-  !/NEW\.price_total\s*:=\s*(?!OLD\.price_total)[^;]*[*/+]/.test(code));
+// ── MUTATION PROOFS — each is a real regression applied to the REAL committed SQL ────────────────
+console.log('\nmutation proofs (each must turn the rule RED):');
+const drop = (needle: RegExp | string, replacement = '') => body.replace(needle as never, replacement);
+const applied = (m: string) => ok(`  …the mutation actually applied`, m !== body, 'pattern drifted — fix the mutant, not the rule');
 
-// (3) A NULL write must always pass — that is how an honest unknown is recorded.
-ok('allows a NULL price write (honest unknown is never blocked)',
-  /NEW\.price_total\s+is\s+null/.test(code));
-
-// (4) Only UPDATE, and only a real change — an ordinary refresh must not be disturbed.
-ok('scoped to UPDATE', /TG_OP\s*<>\s*'UPDATE'/.test(code));
-ok('ignores writes that do not change the price',
-  /NEW\.price_total\s+is\s+not\s+distinct\s+from\s+OLD\.price_total/.test(code));
-
-// (5) The source-verified allowlist is honoured.
-ok('honours ops_price_eq_area_verified (a source-real coincidence stays)',
-  /ops_price_eq_area_verified/.test(code));
-
-// (6) Trigger wiring: both aqar tables, BEFORE UPDATE, and sorting AFTER aqar_parse_bi so the guard
-//     sees the post-parse value. Postgres fires same-timing triggers in name order.
-const wiring = all.map((x) => x.sql).join('\n');
-const TRIGGER = 'aqar_price_artifact_guard_bu';
-for (const table of ['aqar_residential_listings', 'aqar_commercial_listings']) {
-  const re2 = new RegExp(
-    `create\\s+trigger\\s+${TRIGGER}\\s+before\\s+update\\s+on\\s+public\\.${table}`, 'i');
-  ok(`trigger wired BEFORE UPDATE on ${table}`, re2.test(wiring));
+{
+  const m = drop(/NEW\.price_total\s*=\s*NEW\.area_m2/, 'false');
+  applied(m);
+  mustCatch('the price==area signature removed — the repair reverts on the next sweep', guardProblems(m, wiring));
 }
-ok(`trigger name sorts after 'aqar_parse_bi' (guard sees the post-parse value)`,
-  TRIGGER > 'aqar_parse_bi', `${TRIGGER} vs aqar_parse_bi`);
+{
+  const m = drop(/NEW\.price_total\s*=\s*NEW\.price_per_meter/, 'false');
+  applied(m);
+  mustCatch('the price==price_per_meter signature removed («سعر المتر 1» writes back)', guardProblems(m, wiring));
+}
+{
+  const m = body.replace(/NEW\.price_total\s*:=\s*OLD\.price_total/, 'NEW.price_total := NEW.area_m2 * NEW.price_per_meter');
+  applied(m);
+  mustCatch('a rejected write INVENTING a price instead of keeping the stored one', guardProblems(m, wiring));
+}
+{
+  const m = drop(/NEW\.price_total\s+is\s+null/, 'false');
+  applied(m);
+  mustCatch('the NULL allowance removed — an honest unknown blocked at the write path', guardProblems(m, wiring));
+}
+{
+  const m = drop(/TG_OP\s*<>\s*'UPDATE'/, 'false');
+  applied(m);
+  mustCatch('the UPDATE scoping removed', guardProblems(m, wiring));
+}
+{
+  const m = drop(/NEW\.price_total\s+is\s+not\s+distinct\s+from\s+OLD\.price_total/, 'false');
+  applied(m);
+  mustCatch('the no-op-change guard removed — an ordinary price refresh is now disturbed', guardProblems(m, wiring));
+}
+{
+  const m = drop(/ops_price_eq_area_verified/, 'ops_nothing_at_all');
+  applied(m);
+  mustCatch('the source-verified allowlist removed — a real 1﷼/m² plot is suppressed', guardProblems(m, wiring));
+}
+mustCatch('the trigger unwired from the COMMERCIAL table (one table guarded, one not)',
+  guardProblems(body, wiring.replace(
+    new RegExp(`create\\s+trigger\\s+${TRIGGER}\\s+before\\s+update\\s+on\\s+public\\.aqar_commercial_listings`, 'i'),
+    'create trigger something_else before update on public.aqar_commercial_listings')));
+mustCatch('the guard deleted outright — no committed definition is UNKNOWN, never green',
+  guardProblems(guardBodyFrom([{ sql: '-- nothing here defines the guard\n' }]), wiring));
+{
+  // THE DECOY. This file's own subject matter means the forbidden and required shapes appear in
+  // prose; a reader that did not strip `--` comments would be satisfied by the explanation of the
+  // bug it forbids.
+  const m = body
+    .replace(/NEW\.price_total\s*=\s*NEW\.area_m2/, 'false')
+    + '\n  -- was: NEW.price_total = NEW.area_m2  (restore if the sweep regresses)\n';
+  mustCatch('the area signature deleted but left behind as a SQL COMMENT claiming it is still there',
+    guardProblems(m, wiring));
+}
+
+// ── NEGATIVE CONTROLS — the predicate is not red for everything ──────────────────────────────────
+console.log('\nnegative controls (the shipped SQL must NOT be flagged):');
+ok('the committed guard body and wiring are clean', guardProblems(body, wiring).length === 0);
+ok('a body carrying every condition is accepted even with unrelated SQL around it',
+  guardProblems(`${body}\n  perform pg_notify('x','y');\n`, wiring).length === 0);
 
 console.log(
   failed === 0

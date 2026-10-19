@@ -59,8 +59,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, http, http_liveness, normalize  # noqa: E402
-
+from scrapers.common import db, http, http_liveness, normalize, sold_pin  # noqa: E402
 BASE = "https://eastabha.sa"
 LIST_API = f"{BASE}/wp-json/wp/v2/estate_property"
 TAXONOMIES = (
@@ -376,6 +375,15 @@ def fetch_taxonomies(get) -> dict[str, dict[int, str]]:
                 break
             page += 1
         out[tax] = d
+    # FAIL CLOSED (audit 2026-10-02). The soft `break` above also covered the two taxonomies that
+    # decide whether an ad is on the market, so one failed request left the map empty and "could
+    # not read the status" was written as "available". Measured that day on 249 posts by emptying
+    # each map: property_status → all 42 sold/rented posts mapped active; property_action_category
+    # → 7 auctions (their own status «مزاد منتهي») mapped active. The run fails and writes nothing.
+    for tax in AVAILABILITY_TAXONOMIES:
+        if not out.get(tax):
+            raise RuntimeError(f"{tax} taxonomy could not be read — refusing to upsert: without it "
+                               "sold / rented / auction posts would be written active")
     return out
 
 
@@ -394,8 +402,26 @@ def fetch_list(get) -> list[dict]:
     return out
 
 
+# The taxonomies map_listing reads to decide an ad is OFF the market (sold / rented / auction).
+AVAILABILITY_TAXONOMIES = ("property_status", "property_action_category")
+
+
 def _names(p: dict, tax: str, taxd: dict[str, dict[int, str]]) -> list[str]:
     return [taxd[tax][i] for i in (p.get(tax) or []) if i in taxd.get(tax, {})]
+
+
+def listing_status(p: dict, taxd: dict[str, dict[int, str]]) -> tuple[Optional[str], bool]:
+    """(status label to store, gone?) from ALL of the ad's property_status terms.
+
+    A listing can carry several terms. Until 2026-10-02 only the FIRST was read, so an ad tagged
+    e.g. [«للإيجار», «تأجرت»] stayed active: EA35661 and EA34780 were live on Ezhalah while their
+    own status said rented / sold. Any term in GONE_STATUS_AR now decides, and that term is the one
+    stored. No gone term: the first term is stored, exactly as before."""
+    terms = _names(p, "property_status", taxd)
+    gone_terms = [t for t in terms if (t or "").strip() in GONE_STATUS_AR]
+    if gone_terms:
+        return gone_terms[0], True
+    return (terms or [None])[0], False
 
 
 def _lookup_type(raw: str) -> Optional[str]:
@@ -583,8 +609,23 @@ def _listing_url(p: dict) -> str:
     return f"{BASE}/properties/{p.get('id')}/"
 
 
+_NOT_SAUDI = {"أبو ظبي", "ابو ظبي", "أبوظبي", "ابوظبي", "دبي", "الشارقة", "عجمان", "رأس الخيمة", "راس الخيمة",
+              "الفجيرة", "أم القيوين", "ام القيوين", "الإمارات", "الامارات", "الإمارات العربية المتحدة",
+              "الكويت", "البحرين", "المنامة", "الدوحة", "قطر", "مسقط", "سلطنة عمان"}
+
+NOT_SAUDI = "not_saudi"   # map_listing's reason when the ad's own city/region is outside Saudi Arabia
+
+
 def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured_src: Optional[str]):
     """Return (row, category, gone) or (None, None, False) if it must be skipped (auction / unmappable)."""
+    # FAIL CLOSED: _names() silently drops a term id the map cannot name, so a half-read map (or a
+    # term created mid-crawl) would hide the very term that says sold / rented / auction. Measured
+    # 2026-10-02: 0 unnamed ids across 249 posts, so this never fires on a complete read.
+    for tax in AVAILABILITY_TAXONOMIES:
+        unnamed = [i for i in (p.get(tax) or []) if i not in taxd.get(tax, {})]
+        if unnamed:
+            raise RuntimeError(f"post {p.get('id')!r} carries {tax} id(s) {unnamed} the taxonomy map "
+                               "cannot name — its status is unreadable, refusing to upsert")
     actions = _names(p, "property_action_category", taxd)
     if any(any(a in name for a in ACTION_AUCTION) for name in actions):
         return None, None, False  # SKIP auctions entirely
@@ -631,6 +672,12 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     region_ar = next((r for r in region_names if REGION_MAP_AR.get(r)), None) or next(
         (r for r in region_names if r != "المملكة العربية السعودية"), None
     )
+    # Ezhalah is Saudi-only. eastabha's WordPress still serves 12 ads from 2014 in أبو ظبي / دبي (Yas
+    # Island, Shakhbout City, JLT…) — never a Saudi listing. Skipped, and main() RETIRES the stored
+    # copies (_retire_not_saudi): prune_unseen never would, because the URL is live and verify_gone
+    # keeps a live URL forever. Exact names only: «العين» is left out, it is also a Saudi place name.
+    if city_ar.strip() in _NOT_SAUDI or any(r.strip() in _NOT_SAUDI for r in region_names):
+        return None, NOT_SAUDI, False
     # Overrides first (Eastabha's historical labels, exact match), then the shared canonical map —
     # which also brings map_city()'s normalization + substring tolerance to inputs the old private
     # .get() missed (those all returned an honest None before, so this is coverage gain only).
@@ -650,11 +697,9 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     description = _redact(_clean((p.get("content") or {}).get("rendered", "")))[:4000] or None
 
     features_ar = _names(p, "property_features", taxd)
-    status_ar = (_names(p, "property_status", taxd) or [None])[0]
-
     # ── availability: تأجرت / تم البيع mean off-market (owner decision). Exact trimmed match
     # against GONE_STATUS_AR only; any other/unknown status (incl. "مزاد …") stays active.
-    gone = (status_ar or "").strip() in GONE_STATUS_AR
+    status_ar, gone = listing_status(p, taxd)
 
     # ── rent period: the SOURCE's own signal only — never a default (2026-08-11 audit: every
     # taxonomy-detected rent row was hardcoded 'annual' while the page's own price label said
@@ -733,10 +778,33 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
         "additional_info": add,
         **amenity_cols,
     }
+    # The WP Residence checklist has no furnished item, so the ad's own words are the statement (law §2): «مفروشة» /
+    # «مؤثثة» yes, «غير مفروشة» no, partly furnished or silence unknown and omitted (🔬 2026-10-18, backlog 626:
+    # 37 of 175 active ads state it). Only the residential table has the column (20261018093318); a commercial
+    # upsert carrying the key would fail the whole batch (PGRST204), so it is never written there.
+    if category == "residential":
+        row.update(furnished_answer(description))
     return row, category, gone
 
 
-def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+# eastabha's ads end with a «أفضل استخدام / أفضل استخدامات العقار» SUGGESTION block — «تحويلها إلى شقق مفروشة»,
+# «استثمار راقٍ كفيلا مفروشة» — on land, shells and unfurnished villas alike (595438, 595409, 595405 and ten more
+# of the 37 that mention furnishing, 2026-10-18). A suggestion is not the ad stating the unit is furnished: the
+# block is cut, and any other clause that only proposes a use is dropped, before the shared reader runs.
+_SUGGESTION_BLOCK = re.compile(r"أفضل\s+استخدام|مقترحات|استخدامات\s+العقار")
+_SUGGESTION_CLAUSE = re.compile(r"تحويل|يمكن|[إا]مكانية|مثالي|مناسب|يناسب|يتناسب|يصلح|استثمار|العائد")
+_CLAUSE_SPLIT = re.compile(r"[^\w\s\u0600-\u06FF/–-]+")
+
+
+def furnished_answer(description: Optional[str]) -> dict[str, bool]:
+    text = _SUGGESTION_BLOCK.split(description or "", maxsplit=1)[0]
+    clauses = [c.strip() for c in _CLAUSE_SPLIT.split(text) if c.strip() and not _SUGGESTION_CLAUSE.search(c)]
+    f = normalize.amenities_from_lines("\n".join(clauses)).get("furnished")
+    return {} if f is None else {"furnished": f}
+
+
+def _pin_sold_inactive(table: str, ad_numbers: list[str],
+                       seen_ad_numbers: list[str]) -> None:
     """Make source-confirmed SOLD/RENTED rows survive the nightly auto_recover_false_inactive() sweep.
 
     That pg_cron job (05:20 UTC) re-activates any active=false row with
@@ -747,13 +815,33 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     prune_unseen() never undoes this: it only selects active=true rows and only updates ids NOT
     in its seen set. When a listing is later relisted, its next upsert carries active=true and
     the upsert's own missing_count=0 reset applies — the pin is only written for ids that are
-    sold/rented THIS crawl."""
-    for i in range(0, len(ad_numbers), 200):
-        db._execute(
-            db.sb().table(table).update({"active": False, "missing_count": 3})
-            .in_("ad_number", ad_numbers[i:i + 200]),
-            what=table + ".sold_pin",
-        )
+    sold/rented THIS crawl.
+
+    The `seen_ad_numbers` half is what makes this oracle three-valued instead of one-way: the same
+    status field that publishes a removal also publishes the reversal, and until 2026-09-23 the
+    reversal was read, used, and thrown away — leaving ops_lifecycle_false_resurrection() with a
+    GONE latest verdict that no amount of correct behaviour could clear. See scrapers/common/
+    sold_pin.py. It writes evidence only: never active, never missing_count, never
+    last_verified_alive_at.
+    """
+    sold_pin.pin_source_confirmed_gone(
+        table, ad_numbers, oracle="eastabha.sold_pin.property_status", seen_ad_numbers=seen_ad_numbers,
+    )
+
+
+def _retire_not_saudi(table: str, ad_numbers: list[str]) -> list[str]:
+    """Retire the stored rows of ads whose OWN page names a city outside Saudi Arabia (2026-09-28: 12
+    ads from 2014 in أبو ظبي / دبي were served on no-location searches). The shared evidenced pin is
+    used so every retirement leaves a verdict naming the field that was read; only rows actually
+    stored and active in `table` are pinned, so the ledger never gains a row for an absent ad."""
+    if not ad_numbers:
+        return []
+    got = db._execute(db.sb().table(table).select("ad_number").in_("ad_number", ad_numbers).eq("active", True),
+                      what=table + ".not_saudi")
+    stored = sorted({r["ad_number"] for r in (got.data or [])})
+    return sold_pin.pin_source_confirmed_gone(
+        table, stored, oracle="eastabha.country_gate.property_city",
+        notes={a: "outside Saudi Arabia (the ad's own property_city / region)" for a in stored})
 
 
 def main() -> int:
@@ -766,11 +854,8 @@ def main() -> int:
     get = http.get
     small = args.limit > 0
 
-    taxd = fetch_taxonomies(get)
-    print(f"taxonomies: " + ", ".join(f"{k}={len(v)}" for k, v in taxd.items()))
-    listings = fetch_list(get)
-    print(f"East Abha: {len(listings)} listings from REST")
-
+    # begin_run() BEFORE the first source call, and the reads INSIDE the try: an unreadable status
+    # taxonomy must leave a failed scrape_runs row, not a bare traceback and no row at all.
     run_id = None if small else db.begin_run("eastabha")
     res: list[dict] = []
     com: list[dict] = []
@@ -778,8 +863,13 @@ def main() -> int:
     sold_com: list[str] = []
     gone_ct = 0
     skipped_auction = 0
+    not_saudi: list[str] = []
     seen = 0
     try:
+        taxd = fetch_taxonomies(get)
+        print(f"taxonomies: " + ", ".join(f"{k}={len(v)}" for k, v in taxd.items()))
+        listings = fetch_list(get)
+        print(f"East Abha: {len(listings)} listings from REST")
         for p in listings:
             pid = p.get("id")
             if not pid:
@@ -794,7 +884,10 @@ def main() -> int:
                     featured_src = (mr.json() or {}).get("source_url")
             row, cat, gone = map_listing(p, taxd, detail, featured_src)
             if not row:
-                skipped_auction += 1
+                if cat == NOT_SAUDI:
+                    not_saudi.append(f"EA{pid}")
+                else:
+                    skipped_auction += 1
                 continue
             if args.type != "all" and cat != args.type:
                 continue
@@ -812,16 +905,32 @@ def main() -> int:
             db.upsert_eastabha_commercial_batch(com)
         # Pin sold/rented rows immediately after the upsert (which reset their missing_count to 0),
         # so the 05:20 auto-recover job can never flip them back to active. See _pin_sold_inactive.
-        if sold_res:
-            _pin_sold_inactive("eastabha_residential_listings", sold_res)
-        if sold_com:
-            _pin_sold_inactive("eastabha_commercial_listings", sold_com)
+        _pin_sold_inactive("eastabha_residential_listings", sold_res,
+                           [r["ad_number"] for r in res])
+        _pin_sold_inactive("eastabha_commercial_listings", sold_com,
+                           [r["ad_number"] for r in com])
+        retired_abroad = sum(len(_retire_not_saudi(t, not_saudi))
+                             for t in ("eastabha_residential_listings", "eastabha_commercial_listings"))
+        if not_saudi:
+            print(f"  {len(not_saudi)} ad(s) outside Saudi Arabia skipped, {retired_abroad} stored row(s) retired")
 
         pruned = 0
         if not small:  # prune unseen only on full runs (db.prune_unseen guards against 0-scrape wipes)
             # Sold/rented rows were upserted with active=False + pinned missing_count=3 above;
             # prune_unseen never touches them (it only reads active=true rows and only updates ids
             # ABSENT from the seen set), so passing their ad_numbers in rows_seen is harmless.
+            # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+            # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+            # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+            # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+            # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+            superseded = db.retire_superseded_siblings(
+                res_table="eastabha_residential_listings", com_table="eastabha_commercial_listings",
+                res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+                source="Eastabha")
+            if superseded:
+                print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
             for tbl, rows_seen in (("eastabha_residential_listings", res), ("eastabha_commercial_listings", com)):
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Eastabha",
                                     verify_gone=_probe.verify_gone)

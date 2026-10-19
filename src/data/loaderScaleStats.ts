@@ -7,6 +7,7 @@
 // copy rather than showing a stale or fabricated number.
 
 import { supabase } from '@/lib/supabase';
+import { boundedRpc } from '@/data/boundedRpc';
 
 export type LoaderScaleStats = {
   listingCount: number;
@@ -17,7 +18,8 @@ export type LoaderScaleStats = {
 export async function fetchLoaderScaleStats(): Promise<LoaderScaleStats | null> {
   if (!supabase) return null;
   try {
-    const { data, error } = await supabase.rpc('loader_scale_stats_ar');
+    // Bounded: an unbounded await here never returns, and the loader waits forever (#269).
+    const { data, error } = await boundedRpc<Array<Record<string, unknown>>>(supabase.rpc('loader_scale_stats_ar'));
     const row = Array.isArray(data) ? data[0] : null;
     if (error || !row) return null;
     const listingCount = Number(row.listing_count);

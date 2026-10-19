@@ -32,7 +32,12 @@
 // therefore satisfied structurally — there is no search input on this path to widen.
 
 /** The Advanced Filter interview's phases, mirroring the `ageFlow` union in src/app/agent.tsx. */
-export type AfPhase = 'loading' | 'intro' | 'asking' | 'mining';
+// 'mining' was retired on 2026-09-20 with the overlay itself (owner: the magnifying-glass card
+// "needs to be gone"). A round now closes its question card and hands straight to the thread's own
+// searching turn, so there is no post-interview overlay phase for this gate to cover — and nothing
+// is weakened by its absence: `null` already means "the interview is finished, browsing belongs to
+// the user", which is exactly the state a finished round now enters.
+export type AfPhase = 'loading' | 'intro' | 'asking';
 
 /**
  * Does the Advanced Filter interview currently own browsing — i.e. must the «عرض المزيد» /
@@ -60,13 +65,6 @@ export function afInterviewOwnsBrowsing(phase: AfPhase | null): boolean {
     // conservative half: it cannot strand a user, because `loading` always resolves — to `asking`
     // when a question qualifies, or to `null` when none does, which immediately restores the row.
     case 'loading':
-      return true;
-    // The interview is over and its FINAL search is running behind the deep-search card. Browsing has
-    // not resumed yet only because the results it would page are still being fetched; the card is an
-    // overlay, and `mining` is latched to `null` on every exit path (success, empty, throw, and a
-    // 15s backstop). Rendering a pager against the OLD turn here would page a set the user has
-    // already moved past.
-    case 'mining':
       return true;
   }
 }
@@ -111,7 +109,13 @@ export function resultsActionsRowVisible(a: {
   afPhase: AfPhase | null;
   chatCompleted: boolean;
 }): boolean {
-  if (a.chatCompleted) return false;
+  // An open AF interview owns browsing — hide the whole row while it still has something to ask.
   if (afInterviewOwnsBrowsing(a.afPhase)) return false;
+  // TERMINAL / chat closed (owner 2026-09-14): «عرض المزيد» is always gone once the chat closes, but
+  // the Advanced-Filter button stays IF there is still unseen inventory to narrow into — the >500
+  // terminal. `canNarrowFurther` already carries that `shown < trueTotal` gate, so for the ≤500
+  // "everything shown" terminal it is false and the row is empty (only the ☰ new-search hint remains
+  // in the message). This decouples the AF button from the composer lock, which used to hide it too.
+  if (a.chatCompleted) return a.canNarrowFurther;
   return a.hasMore || a.canNarrowFurther;
 }

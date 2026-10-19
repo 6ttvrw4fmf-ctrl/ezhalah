@@ -13,7 +13,8 @@
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { mergeOne, withFreshTranscript } from '../src/lib/chatMerge.ts';
-import { serializeChat, restoreChat, sameTranscript, TRANSCRIPT_LISTING_CAP, TRANSCRIPT_FIRST_PAGE, LOCAL_TRANSCRIPT_ENTRIES } from '../src/lib/chatTranscript.ts';
+import { serializeChat, restoreChat, sameTranscript, pickLocalTranscripts, TRANSCRIPT_LISTING_CAP, TRANSCRIPT_FIRST_PAGE, LOCAL_TRANSCRIPT_ENTRIES } from '../src/lib/chatTranscript.ts';
+import { resetCallSitesOk, resetCallSiteProblem, RESET_EXITS } from './lib/conversationExits.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => {
@@ -96,15 +97,37 @@ check('every disk write routes through serializeHistoryForDisk (transcripts prun
   && (store.match(/serializeHistoryForDisk\(/g) ?? []).length >= 7);
 check('pruning happens ONLY at the serialization boundary — in-memory state keeps every transcript',
   /const serializeHistoryForDisk = \(items: HistoryItem\[\]\): string =>/.test(store)
-  && /slice\(0, LOCAL_TRANSCRIPT_ENTRIES\)/.test(store));
+  && /pickLocalTranscripts\(items, sizeOfTranscript\)/.test(store));
+// …under a BYTE budget (2026-10-08): a saved chat now holds up to 500 cards (~1.3 MB) and one write over the ~5 MB
+// localStorage quota fails for the WHOLE history. The newest transcript is always kept; metas are never pruned.
+{
+  const mk = (id: string, t: number) => ({ id, ts: t, tRev: t, transcript: { bytes: 1_300_000 } as object });
+  const sizeOf = (t: object) => (t as { bytes: number }).bytes;
+  const picked = pickLocalTranscripts([mk('a', 1), mk('b', 2), mk('c', 3), mk('d', 4)], sizeOf);
+  check('disk budget: of four 1.3 MB chats only the newest fit the budget — newest first, never zero',
+    picked.size === 1 && picked.has('d'), JSON.stringify([...picked]));
+  const huge = pickLocalTranscripts([{ id: 'x', ts: 1, transcript: { bytes: 9_000_000 } as object }], sizeOf);
+  check('disk budget: a single over-budget chat is still kept (the newest is always kept)', huge.has('x'));
+  const many = pickLocalTranscripts(Array.from({ length: 30 }, (_, i) => ({ id: 'c' + i, ts: i, transcript: { bytes: 10 } as object })), sizeOf);
+  check('disk budget: small chats are still bounded by the count', many.size === LOCAL_TRANSCRIPT_ENTRIES);
+}
 
 // ── 3b. Server sync (survives new browser / re-login) ───────────────────────────────────────────
 // Re-anchored 2026-08-25: the inline stamp comparison moved into chatMerge.mergeOne() so the pull
 // merge and hydrateTranscript cannot disagree about which copy is newer (they did — see
 // scripts/verify-transcript-integrity.ts for the loss that caused). Executed, not matched.
+// The call was `loadChatMetas().then((rows)` until 2026-09-15, when a bounded one-shot RETRY was
+// introduced between them (a `null` here means the LOAD FAILED, never "this account has no chats",
+// and one blip used to strand the whole session on the local-only list). Matching the two halves
+// separately keeps every load-bearing property this check has always asserted — the metas load
+// feeds the rows merge, precedence comes from mergeOne, and the stamp comparison is not re-derived
+// inline — without pinning the exact call-site spelling, which was never the invariant.
 check('pull: server metas merge after sign-in, via the single shared precedence rule',
-  /loadChatMetas\(\)\.then\(\(rows\)/.test(store) && /mergeOne\(/.test(store)
+  /loadChatMetas\(\)/.test(store) && /\.then\(\(rows\)/.test(store) && /mergeOne\(/.test(store)
   && !/serverStamp\s*>\s*localStamp/.test(store));
+check('pull: a FAILED metas load is retried, never read as an empty account',
+  /const first = await loadChatMetas\(\)/.test(store) && /return loadChatMetas\(\)/.test(store),
+  'a null metas load means the load failed; treating it as "no chats" hides the server history');
 {
   const localOld = { id: 'c', ts: 10, tRev: 10, transcript: { n: 1 } } as never;
   const localNew = { id: 'c', ts: 99, tRev: 99, transcript: { n: 9 } } as never;
@@ -177,9 +200,29 @@ check('push: the shipped effect uses that predicate, and the activity-stamp diff
   !/const stamp = Math\.max\(it\.ts, it\.tRev \?\? 0\);/.test(store)
   && /if \(!chatNeedsPush\(it, base\)\) continue;/.test(store)
   && /new Map\(rows\.map\(\(r\) =>\n\s*\[r\.id, syncKeyOf\(/.test(store));
-check('push: gated on the pull having merged (a not-yet-merged list can never mass-delete server history)',
-  /if \(syncReadyRef\.current !== historyKey\(user\.sub\)\) return; \/\/ push only after the pull merged/.test(store));
-check('push: deletions propagate only for ids the server was known to hold', /const gone = \[\.\.\.base\.keys\(\)\]\.filter\(\(id\) => !seen\.has\(id\)\);/.test(store));
+// RETARGETED to the property, for the reason the note below this check already gives (2026-09-25,
+// ops_incident #693). It used to freeze the exact line
+//     if (syncReadyRef.current !== historyKey(user.sub)) return; // push only after the pull merged
+// comment and all — and an account key is not a session, so that expression armed the push against a
+// baseline a PREVIOUS sign-in had built. The gate is now compared against the live account SCOPE
+// token, which is strictly stronger: it requires the same account AND the same signed-in session.
+// Asserted as two facts rather than one string, so the correct fix cannot be the thing that breaks it.
+check('push: gated on the pull having merged FOR THIS SESSION (a not-yet-merged list can never mass-delete server history)',
+  /if \(syncReadyRef\.current !== accountScopeRef\.current\) return;/.test(store)
+  && !/syncReadyRef\.current !== historyKey\(/.test(store));
+// THIS CHECK USED TO PIN THE DEFECT AS CORRECT (ops_incident #297). Its label claimed "deletions
+// propagate only for ids the server was known to hold" — true, and not the property that mattered.
+// Its regex froze the exact expression
+//     const gone = [...base.keys()].filter((id) => !seen.has(id));
+// which ALSO propagated a deletion for every id the 50-entry display cap had evicted, so a barrier
+// reading as a persistence guarantee was holding a silent data-loss path in place. The label and the
+// assertion have to answer the same question: deletions must follow INTENT, and be bounded by what
+// the server holds. Both halves are asserted, and neither is a frozen expression.
+check('push: deletions follow user INTENT, not "missing from the displayed list" (a 50-cap eviction is not a delete)',
+  /chatsToDelete\(base, pendingDeleteRef\.current\)/.test(store)
+  && !/\[\.\.\.base\.keys\(\)\]\.filter\(\(id\) => !seen\.has\(id\)\)/.test(store));
+check('push: deletion intent is recorded ONLY by the two user-facing removals',
+  (store.match(/pendingDeleteRef\.current\.add\(/g) || []).length === 2);
 check('a transcript the local cache pruned is never nulled on the server (meta-only upsert)',
   /void upsertChat\(it\.id, chatMetaOf\(it\), pushableTranscript\(it\)\)/.test(store));
 const sync = readFileSync(new URL('../src/lib/chatSync.ts', import.meta.url), 'utf8');
@@ -205,12 +248,20 @@ check('agent: every live recorded turn names the conversation (ensureChatId on a
   (agent.match(/runQuery\([^)]*run\.ac\.signal, ensureChatId\(\)\)/g) ?? []).length === 3);
 check('agent: a text turn keeps the same identity (recordChatTurn return adopted)',
   /const rid = recordChatTurn\(v\); if \(rid\) chatIdRef\.current = rid;/.test(agent));
-check('agent: a fresh chat clears the conversation id (New Chat + startFresh inherit nothing)',
-  (agent.match(/chatIdRef\.current = null;/g) ?? []).length >= 2);
+// CONSOLIDATED 2026-09-14 (routine #8). Counting `chatIdRef.current = null;` occurrences worked only
+// while New Chat and startFresh each kept their own copy of the conversation reset — the very
+// duplication that let them drift apart (startFresh had silently stopped clearing `completed`,
+// `pendingScopeRef`, `pendingCityRef` and `lastQueryRef`). There is ONE list now, so the honest form
+// of this check is: the shared reset clears the id, and both exits call it. Counting call sites is
+// strictly stronger than counting assignments — a third exit that forgets to call it is now RED.
+check('agent: the shared conversation reset clears the conversation id',
+  /const resetConversationState = \(\) => \{[\s\S]{0,1200}?chatIdRef\.current = null;/.test(agent));
+check(`agent: a fresh chat clears the conversation id (all ${RESET_EXITS.length} exits inherit nothing)`,
+  resetCallSitesOk(agent), resetCallSiteProblem(agent));
 // 2026-08-30: the capture also carries `completed` (AF narrowed the search to its final set — see
 // verify-completed-chat-state.ts). The invariant pinned here is unchanged: debounced, content-keyed.
 check('agent: capture serializes the settled state, debounced and content-keyed',
-  /const t = serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed \}\);/.test(agent)
+  /const t = serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow \}\);/.test(agent)
   && /if \(j === lastCapturedRef\.current\) return;/.test(agent)
   && /if \(busy\) return;/.test(agent));
 check('agent: restore reinstates ALL FIVE state slices (msgs, doneTyping, revealCount, afReceipt, guidedPills)',
@@ -226,7 +277,9 @@ check('agent: restore reinstates ALL FIVE state slices (msgs, doneTyping, reveal
 check('agent: restore adopts the chat id so continuing the conversation updates the SAME entry',
   /chatIdRef\.current = entryId \?\? null;/.test(agent));
 check('agent: restore falls back to the server copy when the local cache was pruned',
-  /if \(!t && entryId\) t = await hydrateTranscript\(entryId\)\.catch\(\(\) => null\);/.test(agent));
+  // 2026-10-10: the hydrate now sits inside a block that first paints the held copy (never blank while
+  // the server answers — verify-saved-chat-never-blank-while-hydrating.ts); the fallback is unchanged.
+  /if \(!t && entryId\) \{[\s\S]{0,1600}?t = await hydrateTranscript\(entryId\)\.catch\(\(\) => null\);/.test(agent));
 check('agent: restore never echo-writes what it just rendered', /lastCapturedRef\.current = JSON\.stringify\(t\);/.test(agent));
 // FLUSH-ON-EXIT (owner 2026-08-26: «leaving the chat must never lose later messages»). The 600ms
 // debounce alone had a real loss window: switching chats while the newest turn's cards were still

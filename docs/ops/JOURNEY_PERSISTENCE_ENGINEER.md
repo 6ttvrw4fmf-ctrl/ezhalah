@@ -81,6 +81,15 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
 
 ## PART 1 — WHAT YOU OWN
 
+> **A SURFACE THIS FILE NAMES CAN STILL HAVE ZERO COVERAGE — CHECK, DON'T ASSUME** (routine #6,
+> 2026-09-25). Read-aloud is listed below, has two offline barriers, and until 2026-09-25 had **no
+> real-browser journey at all**: nothing in the suite had ever tapped 🔊. The defect that was sitting
+> there (`ops_incident` #722) is one PART 5 shape #6 describes exactly — a control whose refusal
+> message was wrong — and it was reachable by one tap. PART 5's «check whether an existing barrier
+> already covers the shape» cuts both ways: two barriers existed and neither exercised the click. Once
+> a run, take one surface from PART 1 and ask not «is it barriered» but **«has any journey ever driven
+> it»** — the ledger answers that, and a `journey_` dimension with no row for a surface is the answer.
+
 - Authentication and session flows: sign-in, sign-out, Google One Tap (including its reappearance
   after account deletion — this exact regression escaped every existing routine once already),
   token expiry, guest vs. signed-in parity.
@@ -179,6 +188,123 @@ old build and passes on the fix, not a unit test standing in for the click. At m
     · **The absence of the prompt is a SKIP, never a pass.** Google suppresses One Tap freely
       (cooldown, no Google session, opt-out), so a green run that never saw an overlay has proven
       nothing about overlays and must not claim otherwise.
+    · **THE PLURAL RULE IS NOW ENFORCED AS A CLASS, because stating it was not enough**
+      (routine #6, 2026-09-21, `ops_incident` #377). The `elementsFromPoint` rule above was written
+      down here and pinned by exactly ONE barrier —
+      `scripts/verify-onetap-attribution-does-not-misblame.ts` — **deliberately scoped to the
+      `onetap-clear-of-controls` journey's own body by name**, with a comment excusing the rest of
+      the file. Two other probes asked the same ownership question with the forbidden singular form
+      for as long as they had existed and nothing in the repo could see them: `tap-targets-meet-44`
+      in `e2e/journeys/run.mjs`, and the CTA-coverage oracle in `e2e/guardian/journeys.mjs`. This is
+      the `AGENTS.md` PART 1.11 shape — **a pointer reads as coverage**.
+      It cost three runs of a P2. `tap-targets-meet-44:mobile375` filed «تصفية» [82,269,106,36] and
+      «الوسيط الذكي» [188,269,106,36] as blocked on 09-14, 09-15 and 09-20, and `ops_incident` #262
+      carried them as a live user-facing condition awaiting an owner decision. Reproduced
+      deterministically on production 2026-09-21, 2/2 fresh contexts, by injecting the One Tap band
+      so the consent card lifts to 286-558 and the root correctly reserves the combined 526 px:
+      `elementFromPoint(135,287)` → the card, filed as a DEFECT; `elementsFromPoint(135,287)` →
+      `[card, root, root]` with **the tab absent**. The app content box is 812 − 526 = 286 px and the
+      tabs' lower half lies past it: **clipped by a reservation doing its job, not covered**, with
+      17 px of the label still visible and `scrollIntoViewIfNeeded` returning immediately.
+      `scripts/verify-ownership-probes-use-the-painted-stack.ts` (in `npm test`) now enforces the
+      class in two halves, because §9.5 is explicit that a source-text tripwire passes for the whole
+      time a defect is live: it **discovers** every `.elementFromPoint(` in `e2e/` by shape against a
+      shrink-only ceiling, so a probe added tomorrow is RED until someone states why the singular
+      form is the right question there — and it **lifts the real probe body out of `run.mjs` and
+      EXECUTES it** against a stub DOM, proving a clipped control yields no finding while a genuinely
+      covered one, a neighbour capture, and an empty stack all still do.
+      The general form, for the next one: **a rect is LAYOUT; being painted is not.** Any probe that
+      decides who owns a point must read the painted stack, whichever journey it happens to live in —
+      scope the rule to the QUESTION the probe asks, never to the file it sits in.
+    · **AND THE CLASS BARRIER HAD ITS OWN HOLE, ONE LEVEL DOWN** (routine #6, 2026-09-25,
+      `ops_incident` #723). §1 of `verify-ownership-probes-use-the-painted-stack.ts` discovers
+      violations **by CALL SHAPE**, matching `.elementFromPoint(`. That leaves the same question
+      askable in a spelling it cannot see: take the PLURAL stack, then read only `stack[0]` — which
+      returns, by definition, exactly what the singular form returns. `onetap-clear-of-controls` did
+      precisely that, **in the very function whose comment claims «`elementsFromPoint` (PLURAL), not
+      `elementFromPoint`» as a virtue**, so it could not tell a CLIPPED control from a COVERED one and
+      filed 2/2 defects on the 2026-09-25 production sweep while §1 stayed green. This is the
+      `AGENTS.md` PART 1.11 shape again: a pointer reads as coverage.
+      The repair is **§1b, which asserts the INVARIANT rather than a forbidden spelling**, per call
+      site, over every `elementsFromPoint` site in `e2e/`: a probe deciding ownership must interrogate
+      the stack for **membership** (`findIndex`/`some`/`includes`/`indexOf`, or a `for…of` scan), never
+      read only its top. It is deliberately **not** a ban on `[0]` — three sites read the top to NAME
+      what is there, which a good failure message needs, and a barrier that cried wolf on those would
+      be deleted by the next author (PART 9's stated cost). Per call site and never per file:
+      `run.mjs` holds six, and per-file would let one bad site hide behind five good ones.
+      `classifyBlockedControl` also refuses to turn a **missing** `selfIndex` into a cover finding, so
+      the next probe to forget the field gets no free verdict — the same unknown→NO move, one layer up.
+      **The lesson to carry: when a rule is enforced by matching a CALL, ask what other spelling asks
+      the same QUESTION.** And the payoff is real, not hygiene — it is what let the same sweep prove
+      `ops_incident` #262's remaining half a GENUINE cover (the finding fires only when `selfIndex` is
+      neither `0` nor `-1`, i.e. the control is painted with something above it) rather than another
+      instance of #377's clipping artifact.
+
+14. **A NUMBER THE HARNESS MIRRORS FROM THE APP MUST BE PINNED TO IT, BY VALUE** (routine #6,
+    2026-09-25, `ops_incident` #723). This is §13's class on a third axis, and the one most likely to
+    recur, because mirroring a constant *with a comment saying so* feels like diligence.
+    Measured: `docked-prompts-stack` computed the combined docked-band cap as a retyped
+    `floor(vh * 0.5)` while the app uses `floor(vh * (1 - MIN_APP_FRACTION))` = `floor(vh * 0.7)` —
+    **406 vs 568 at 812px**, so the oracle was loose by 162px and a genuine shortfall anywhere in
+    (406, 568] would have passed. `TOP_DOCK_MIN_SPAN_FRACTION` had been mirrored from
+    `MIN_SHEET_SPAN_FRACTION` with a comment naming it and **nothing checked it at all**.
+    Both are now read out of `src/` by value in `verify-journey-mobile-sidebar-oracle.ts` §D, which
+    **fails closed** when the constant cannot be read — a failed match must never pass as agreement.
+    Same family as the smoke journey retyping `INTERVIEW_STOP_AT`, and `r.y < 80` in `ops_incident`
+    #593. If the harness needs one of the app's numbers, derive it or pin it; never retype it.
+
+15. **A DEFECT MESSAGE THAT REFUTES ITS OWN ARITHMETIC IS THE TELL** (routine #6, 2026-09-25).
+    `docked-prompts-stack` filed «a SECOND docked prompt SHRANK the reservation the first one had
+    earned» 2/2 against healthy production, and printed, in the same sentence, **«0px of app content
+    is now under an opaque card»**. Both numbers were right; the verdict was not. It compared
+    reservation to *reservation* — an absolute test standing in for the relative question the incident
+    it cites actually asks: *does the reservation still COVER the band the card occupies?* A shorter
+    reservation for a shorter docked stack is the inset working.
+    Two habits from it. **Write the failure message so its numbers can contradict its conclusion** —
+    this one caught itself, and a message that merely said «the reservation shrank» would not have.
+    And **when a finding names an old incident, re-read what that incident's assertion actually was**
+    before assuming the new observation is the same thing.
+
+16. **A SURFACE PART 1 NAMES CAN BE UNCOVERED IN THE AUTH ROW, NOT ONLY IN READ-ALOUD** (routine #6,
+    2026-09-27, `ops_incident` #854). PART 1's header tells you to ask, once a run, «has any journey
+    ever DRIVEN this» rather than «is it barriered». Taken literally against the list, **"token
+    expiry" had zero hits anywhere in `e2e/`** — and behind it sat a defect reachable by simply
+    coming back to the site with a stale token.
+    `authChecked` gates five things in `src/store.tsx` (local history restore, server pull, sign-in
+    card, cookie-consent banner, intro), and the launch restore awaited `supabase.auth.getSession()`
+    with no timeout and no `.catch()`. **`getSession()` is not the local-only read its name
+    suggests:** on an expired session `@supabase/auth-js`'s `__loadSession()` calls
+    `_callRefreshToken` over the NETWORK. Measured on production, 2/2 fresh contexts per arm, oracle
+    `[data-testid="cookie-consent"]` + `[data-testid="signin-card"]` (both gated on
+    `authChecked && !user`) against a true-guest control rendering both: `refresh_token: ''` left both
+    ABSENT at 20 s, 40 s **and 75 s** (permanent — `_isValidSession()` tests key PRESENCE only, so the
+    slot passes as valid and `_callRefreshToken('')` then throws past every catch in auth-js, so
+    `getSession()` REJECTS, 3 uncaught page errors per load); a BLOCKED refresh request left both
+    absent at 20 s and 40 s, recovering by 75 s. So the app sat in a **fourth state no gate expects**,
+    `user === null && authChecked === false` — rendering as a guest while withholding every affordance
+    a guest gets, with no error shown.
+    Three lessons, each of which cost something this run:
+    · **The hazard was already written down two files away, about the same client.**
+      `GoogleOneTap.tsx` bounds `getUser()` with a timeout, a catch and a settled flag, and its
+      comment says *"the refresh with backoff, so it can take many seconds or never settle"* — measured
+      live 2026-08-18. The sibling call was never given the same treatment. **When you find a
+      defended call site, ask what else calls the same API undefended**; §2 of
+      `scripts/verify-session-restore-always-settles.ts` now makes that a shrink-only ledger so a
+      fourth site is RED until someone states how it is bounded.
+    · **A FIXTURE THAT SEEDS NOTHING IS THE CONTROL ARM.** The new journey passed GREEN 4/4 against
+      the UNFIXED bundle first: `seedInitScript` returns at `if (!wantAuth) return` before writing the
+      auth slot, so a `session` override without `signedIn: true` seeded nothing and both arms ran as
+      plain guests. A differential-against-a-control design **cannot** catch this, because the broken
+      injection collapses onto the control. When a journey compares an injected state against a
+      baseline, **assert the INJECTION took**, not only the comparison.
+    · **Ground a harness timeout in the library's own schedule, not in a round number.** This nearly
+      filed the blocked-refresh arm as PERMANENT off a 25 s observation. auth-js's `retryable` keeps
+      retrying while `now + nextBackoff - startedAt` fits in `AUTO_REFRESH_TICK_DURATION_MS`
+      (30 000, backoff `200*2^(n-1)`) — so 25 s lands INSIDE the retry window and reads as permanent.
+      Re-measured at 20/40/75 s, one arm is permanent and the other self-heals. Both the fix constant
+      (6 000 = a fifth of 30 000) and the barrier's assertion (`bound < 30 000`) are derived from that
+      measured number. PART 11.2's «a real condition, not a bigger number», applied to a number the
+      LIBRARY owns.
 
 Mutation-prove the important ones — deliberately break the fix, prove the barrier goes red, restore
 it. Before writing a new barrier, check whether an existing one already covers the shape (e.g.
@@ -657,6 +783,36 @@ infrastructure asks rather than rediscovered each time:
 - **Real Google sign-in is unavailable**, so signed-in journeys seed the session client-side (see
   the harness header). That is the real client code path for sidebar/persistence — which is
   purely client-side — but it is NOT evidence about server sync, RLS, or a real token.
+
+  **And the bound is WIDER than "no evidence about the server" (measured 2026-09-19, routine #6).**
+  The seeded session carries a deliberately fake JWT, so **every PostgREST read 401s** — which means
+  a signed-in journey cannot perform any *data-backed* journey at all. Measured on production in one
+  run, capturing all `/rest/v1` and `/auth/v1` traffic, signed-out and signed-in side by side:
+
+  | request | signed out | signed in (seeded) |
+  |---|---|---|
+  | `location_index_live` | **200** | **401** |
+  | `rpc/top_cities_by_deal_ar` | **200** | **401** (×4) |
+  | `loc_city_cluster` | **200** | — |
+  | `user_chats` | — | **401** |
+  | `/auth/v1/user` | — | **403** |
+
+  The consequence is concrete and easy to mistake for a product bug: with no location candidates the
+  city autocomplete renders **no suggestion row at all** (exact «الرياض» leaf nodes: 1 signed out,
+  **0** signed in), so `citySelected` can never be set, so «بحث» correctly submits nothing. A probe
+  that reads that as a dead control or as a broken autocomplete is wrong in the expensive direction —
+  the app is behaving exactly as the owner's 2026-07-17 "never guess a location" rule requires, on a
+  fetch that genuinely failed.
+
+  **So: signed-in coverage is real for client-side state** (sidebar, `localStorage` history, theme,
+  favourites) — that is what those journeys legitimately assert — **and is structurally unreachable
+  for anything needing a search, a location suggestion, or a count.** The first concrete cost is
+  recorded: `ops_incident` #271 is fixed, barriered and mutation-proven but cannot meet §G.9's
+  production-verification condition, because reaching its terminal (≤ `INTERVIEW_STOP_AT` = 25 —
+  corrected 2026-09-20; PR #3383 returned the stop line to 25, and `src/lib/afRanking.ts` is the
+  live value) chat
+  state requires running a search while signed in. This is `ops_incident` #29's gap, stated as the
+  measurement rather than as a category.
 
 When you do measure one of these, land it in this table with its date and method, exactly as §40.1
 did — and delete it from this list in the same change.

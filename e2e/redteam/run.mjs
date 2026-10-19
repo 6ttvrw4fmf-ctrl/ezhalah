@@ -8,6 +8,7 @@
 // (PART 7: "a rule this run could not reach is not a rule this run proved").
 
 import { chain, tap, setDeal, setPeriod, pickCity, runSearch, visibleState, oracleCount, oracleFilterFromRequest, categoryTypeMap, sleep, BASE } from './chain.mjs';
+import { resultsFoundCount } from '../lib/resultsSentence.mjs';
 
 // The live category -> type_ar map, fetched ONCE. If it cannot be read the oracle refuses every
 // category-carrying request rather than counting a wider set (PART 2.2 rule 2).
@@ -91,9 +92,11 @@ for (const plan of (ONLY ? PLANS.filter((p) => ONLY.includes(p.id)) : PLANS)) {
       }
 
       // ── L5 DISPLAYED COUNT ─────────────────────────────────────────────────────────────────────
-      const m = vis.raw.match(/لقينا\s+([\d,،]+)/);
-      r.layers.L5 = m ? Number(m[1].replace(/[,،]/g, '')) : null;
-      if (r.layers.L5 === null) r.notReached.push('L5: no «لقينا N» count sentence on screen');
+      // Derived from the shipped pool, never restated (2026-09-19, routine #10). The retired
+      // /لقينا\s+([\d,،]+)/ read null on 7 of the 10 AR guest templates after PR #3186, so L5 —
+      // the DISPLAYED count, the one layer only a browser can see — silently stopped being a layer.
+      r.layers.L5 = resultsFoundCount(vis.raw);
+      if (r.layers.L5 === null) r.notReached.push('L5: no Results-Found count sentence on screen');
 
       // ── L6 RETURNED IDS (off the response, never card text) ─────────────────────────────────────
       const rows = (responses[responses.length - 1] || { rows: [] }).rows;
@@ -149,8 +152,7 @@ for (const plan of (ONLY ? PLANS.filter((p) => ONLY.includes(p.id)) : PLANS)) {
           + ` (batch2 p_offset=${r2?.post?.p_offset}, p_limit=${r2?.post?.p_limit})`);
       }
       const vis2 = await visibleState(page);
-      const m2 = vis2.raw.match(/لقينا\s+([\d,،]+)/);
-      const total2 = m2 ? Number(m2[1].replace(/[,،]/g, '')) : null;
+      const total2 = resultsFoundCount(vis2.raw);
       if (total2 !== null && r.layers.L5 !== null && total2 !== r.layers.L5) {
         r.findings.push(`L8 TOTAL MOVED across pagination: ${r.layers.L5} → ${total2}`);
       }

@@ -1,0 +1,94 @@
+# Dead ads a customer can see — the one number (owner, 2026-10-02) — measured every night for every
+# registered website, independently of the jobs that hide (scrapers/common/dead_visible_score.py).
+# A random sample of what customers see (search_listings_ar) is opened through each website's own
+# check with known-live controls; UNKNOWN is never dead. One row per website per night goes into
+# ops_dead_visible_score, and the ♻️ Lifecycle Engineer's rating is READ from it
+# (docs/ops/LIFECYCLE_ENGINEER.md, "Rating"), not reasoned.
+#
+# READ-ONLY on listings. The exit code is about transport only (could the fleet be measured?); a dead
+# ad is the finding, never the failure. The browser + display are for wasalt (cleanup._probe reaches
+# wasalt only through scrapers/wasalt/browser.py — verify-wasalt-probing-workflows-carry-the-browser.ts).
+name: Dead visible score
+
+on:
+  schedule:
+    # 09:05 UTC = 02:05 Arizona: after the nightly crawls and off the cron fleet's busy minutes,
+    # done well before the ♻️ engineer wakes at 11:00 UTC and reads the table.
+    - cron: "5 9 * * *"
+  workflow_dispatch:
+    inputs:
+      sites:
+        description: "Only these websites, space-separated (empty = every registered one)"
+        type: string
+        default: ""
+      big:
+        description: "Ads opened on a big website (500+ shown)"
+        type: string
+        default: "10"
+      small:
+        description: "Ads opened on a small website (or all of them)"
+        type: string
+        default: "5"
+      dry_run:
+        description: "Print the rows, write nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dead-visible-score
+  cancel-in-progress: false
+
+jobs:
+  score:
+    runs-on: ubuntu-latest
+    timeout-minutes: 170
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
+      - name: Open tonight's sample on every website
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
+          SITES: ${{ inputs.sites }}
+          BIG: ${{ inputs.big || '10' }}
+          SMALL: ${{ inputs.small || '5' }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          exec xvfb-run -a python -m scrapers.common.dead_visible_score \
+            --big "$BIG" --small "$SMALL" \
+            $([ "$DRY_RUN" = "true" ] && echo --dry-run) \
+            $([ -n "$SITES" ] && echo --sites $SITES)
+      - name: Keep the result for the engineer
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dead-visible-score
+          path: dead-visible-score.json
+          if-no-files-found: ignore
+          retention-days: 30
+      # A measurement that fails silently is no measurement (verify-scheduled-checks-alert-on-failure.ts):
+      # a red run (transport, never a dead ad) raises a P-alert owned by ♻️; a green one resolves it.
+      - name: Raise or resolve the workflow alert
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind lifecycle_check_failed
+          --workflow dead-visible-score.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

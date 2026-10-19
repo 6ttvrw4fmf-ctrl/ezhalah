@@ -8,12 +8,15 @@
 // EXIT CODE: non-zero when any journey found a DEFECT. Never read it through a pipe (§41.12
 // corollary: `… | tail` reports tail's status) — redirect to a file and read $?.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
+import { readFileSync } from 'node:fs';
 import { withPage, settle, bodyText, storedHistory, clickText, clickReason, sleep, defect, note, pass,
          findings, skips, skip, passes, classifyRunOutcome, classifyBlockedControl,
          ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
          classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport,
-         SELECTED_CITY_MARKER } from './harness.mjs';
+         SELECTED_CITY_MARKER, isBottomDocked, dockedBandCap,
+         filterHomeState, filterHomeWhy, paintedTextCarriers, stayedAtZero,
+         expiredSession } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
 const N = Number(process.env.JOURNEY_N || 2);
@@ -22,6 +25,45 @@ const N = Number(process.env.JOURNEY_N || 2);
 
 /** Type like a person: one key at a time, through React's real event path. */
 const typeInto = async (loc, text) => { await loc.click(); await loc.pressSequentially(text, { delay: 60 }); };
+
+/** The TOP dock, in the shape WebKit and Firefox really serve (ops_incident #202): a STATIC gsi
+ *  iframe whose only positioning box is a `position: fixed` #credential_picker_container.
+ *
+ *  ONE definition, two callers. `both-edges-docked-clears-controls` asks whether the HOME screen's
+ *  controls stay clear of it; `support-close-survives-a-top-dock` asks the same of an OVERLAY's own
+ *  dismiss control. Two hand-maintained copies of "what the engines really serve" is precisely the
+ *  drift this repo keeps paying for, so the shape lives here and neither journey owns it.
+ *
+ *  WHY INJECT AT ALL, rather than wait for the real prompt: Google suppresses One Tap freely
+ *  (cooldown, no Google session, opt-out), and PART 5 shape 13 is explicit that its absence is a
+ *  SKIP, never a pass. A barrier that only fires on the days Google feels like showing the prompt
+ *  is not a barrier — ops_incident #670 shipped a dead control behind exactly that gap. */
+const TOP_DOCK_SYNTH = '#credential_picker_container[data-synthetic-top-prompt]';
+const injectTopDockPrompt = (page) => page.evaluate(() => {
+  const box = document.createElement('div');
+  box.id = 'credential_picker_container';
+  box.setAttribute('data-synthetic-top-prompt', '1');
+  Object.assign(box.style, { position: 'fixed', left: '0px', top: '20px', width: '100%',
+                             height: '158px', zIndex: '9999', pointerEvents: 'auto',
+                             background: '#fff', border: '0' });
+  const f = document.createElement('iframe');
+  // The app identifies a prompt with the ATTRIBUTE selector iframe[src*="accounts.google.com/gsi/"],
+  // so the attribute is what has to match — and `srcdoc` takes precedence over `src` for the
+  // document that actually loads. So the frame matches the app's selector while loading NOTHING
+  // from Google. Pointing it at the real endpoint instead fetches real GIS code into a context it
+  // was not served for, and that code throws «ReferenceError: gis is not defined» as an uncaught
+  // page error — the journey manufacturing a defect against the app under test (PART 9.4).
+  f.setAttribute('src', 'https://accounts.google.com/gsi/iframe/select?synthetic=journey');
+  f.setAttribute('srcdoc', '<!doctype html><title>synthetic docked prompt</title>');
+  f.setAttribute('sandbox', '');
+  // STATIC on purpose: a static iframe has no positioning box, so an app measuring the IFRAME
+  // instead of its fixed ancestor under-reserves by the wrapper's extra 8px — incident #202.
+  Object.assign(f.style, { position: 'static', width: '100%', height: '150px', border: '0' });
+  box.appendChild(f);
+  document.body.appendChild(box);
+});
+const removeTopDockPrompt = (page) =>
+  page.evaluate((s) => document.querySelectorAll(s).forEach((n) => n.remove()), TOP_DOCK_SYNTH);
 
 /** Is this text VISIBLE, not merely present in innerText? A CSS-faded toast stays in innerText
  *  (agent.tsx's «شكراً على ملاحظتك» does exactly that), so presence is never the oracle. */
@@ -56,10 +98,15 @@ const JOURNEYS = {};
  *  mobile it does not overflow horizontally (PART 5 shape 11). */
 JOURNEYS['cold-open'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
   const name = `cold-open:${mobile ? 'mobile375' : 'desktop1440'}`;
-  const text = await bodyText(page);
-  if (text.length < 200) defect(name, 'blank page', `body innerText is ${text.length} chars`);
-  else pass(name, `rendered (${text.length} chars)`);
-  if (!text.includes('بحث')) defect(name, 'missing primary control', '«بحث» not rendered on Filter home');
+  // Identity by ELEMENT, never by an innerText substring — see filterHomeVerdict in harness.mjs.
+  // The old line here was `!text.includes('بحث')`, and deleting the real «بحث» control out of the
+  // live production DOM left it TRUE (2/2), so this journey's own named defect could not fire.
+  const home = await filterHomeState(page);
+  if (home.verdict === 'blank') defect(name, 'blank page', filterHomeWhy(home));
+  else pass(name, `rendered (${home.bodyLength} chars)`);
+  if (home.verdict === 'home-missing-search-control') defect(name, 'missing primary control', filterHomeWhy(home));
+  else if (home.verdict === 'not-home') defect(name, 'cold open did not land on the Filter home', filterHomeWhy(home));
+  else if (home.verdict === 'home') pass(name, filterHomeWhy(home));
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on cold open', errs.join(' | ')); }
   if (mobile) {
     const ov = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
@@ -326,10 +373,16 @@ JOURNEYS['back-after-search'] = async (mobile) => withPage({ mobile }, async (pa
     note(`${name}: Back left the app origin (${url}) — a fresh context has no prior in-app entry`);
     return;
   }
-  const text = await bodyText(page);
-  if (text.length < 200) defect(name, 'Back stranded the user', `body is ${text.length} chars at ${url}`);
-  else if (!text.includes('بحث')) defect(name, 'Back landed off-route', `no Filter home controls at ${url}`);
-  else pass(name, `Back returned to a usable screen (${url})`);
+  // PART 5 shape 9 is «Browser Back stranding the user off-route», and the old oracle here could
+  // not see it: `text.includes('بحث')` is TRUE on the agent screen too (the greeting says «أبحث»),
+  // measured 4/4 on production across both viewports. A Back that landed on the wrong screen
+  // reported `pass`. Ask the ELEMENTS instead, and name WHICH failure it is.
+  const home = await filterHomeState(page);
+  if (home.verdict === 'blank') defect(name, 'Back stranded the user', `${filterHomeWhy(home)} at ${url}`);
+  else if (home.verdict === 'home-missing-search-control')
+    defect(name, 'Back landed on the Filter home without its primary control', `${filterHomeWhy(home)} at ${url}`);
+  else if (home.verdict === 'not-home') defect(name, 'Back landed off-route', `${filterHomeWhy(home)} at ${url}`);
+  else pass(name, `Back returned to the Filter home — ${filterHomeWhy(home)} at ${url}`);
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on Back', errs.join(' | ')); }
 });
 
@@ -691,11 +744,18 @@ JOURNEYS['adv-newchat-mid-restore'] = async (mobile) => withPage({ mobile, signe
   if (!(await ensureSidebar(page, mobile))) { skip(name, 'sidebar closed after open'); return; }
   if (!(await clickText(page, 'محادثة جديدة'))) { skip(name, 'New Chat not found'); return; }
   await sleep(5000);
-  const t = await bodyText(page);
   const ta = page.locator('textarea').first();
   const composer = (await ta.count()) ? await ta.inputValue() : '';
-  const leaked = t.includes('أبحث عن') && ['جدة', 'الرياض', 'الخبر'].some((c) => t.includes(c));
-  if (leaked) defect(name, 'interrupted restore leaked into the new chat', 'a restored search bubble is on the blank chat');
+  // THE OLD ORACLE COULD NOT TELL A LEAK FROM THE PRODUCT WORKING (routine #6, 2026-09-26):
+  //   t.includes('أبحث عن') && ['جدة','الرياض','الخبر'].some((c) => t.includes(c))
+  // «أبحث عن» is carried by «وسأبحث عنه» (two greeting strings in src/i18n.tsx) and by the composer's
+  // aria-hidden rotating examples (src/data/introExamples.ts renders «أبحث عن أرض سكنية في الرياض…»),
+  // and the city conjunct was measured PERMANENTLY TRUE — all three city names are on screen from the
+  // sidebar's own saved-chat titles, 2/2 across 21 s of rotation — so it narrowed nothing. Ask for a
+  // PAINTED, non-decoration leaf carrying the phrase as its own word instead: an actual bubble.
+  const bubbles = await paintedTextCarriers(page, 'أبحث عن');
+  if (bubbles.length) defect(name, 'interrupted restore leaked into the new chat',
+    `a restored search bubble is on the blank chat: ${bubbles.map((b) => `«${b}»`).join(' | ')}`);
   else if (composer.trim()) defect(name, 'New Chat inherited composer text', `holds «${composer}»`);
   else pass(name, 'New Chat is blank even when it interrupts a restore');
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on interrupted restore', errs.join(' | ')); }
@@ -713,10 +773,13 @@ JOURNEYS['adv-background-tab'] = async (mobile) => withPage({ mobile, signedIn: 
   await sleep(45_000);
   await page.bringToFront();
   await sleep(3500);
-  const t = await bodyText(page);
-  if (t.length < 200) defect(name, 'backgrounded tab came back blank', `body is ${t.length} chars`);
-  else if (!t.includes('بحث')) defect(name, 'controls missing after backgrounding', 'no «بحث» on return');
-  else pass(name, `survived 45s backgrounded (${t.length} chars, controls present)`);
+  // «no «بحث» on return» was unreachable: the substring survives the control's removal (harness.mjs).
+  // A frozen-rAF screen that came back as the agent chat, or with the button gone, is exactly what
+  // this journey exists to catch — so the verdict has to come from the elements.
+  const home = await filterHomeState(page);
+  if (home.verdict === 'blank') defect(name, 'backgrounded tab came back blank', filterHomeWhy(home));
+  else if (home.verdict !== 'home') defect(name, 'controls missing after backgrounding', filterHomeWhy(home));
+  else pass(name, `survived 45s backgrounded — ${filterHomeWhy(home)}`);
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error after backgrounding', errs.join(' | ')); }
   await other.close().catch(() => {});
 });
@@ -825,7 +888,23 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
         for (const [k, x, y] of [['centre', cx, cy], ['left', r.x + 2, cy], ['right', r.right - 2, cy],
                                  ['top', cx, r.y + 2], ['bottom', cx, r.bottom - 2]]) {
           if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) continue;
-          const hit = document.elementFromPoint(x, y);
+          // PLURAL, per PART 5 shape 13 — the same form auth-overlay-clears-controls and
+          // both-edges-docked-clears-controls already use, and for the same reason. A bounding rect
+          // is LAYOUT; being painted is not. A control clipped out of a shortened scroll container
+          // still reports its whole rect, so the singular form tests a point the user sees nothing
+          // at and hands the verdict to whatever overlay is painted there. The painted stack omits a
+          // clipped control entirely, which is what makes «absent» distinguishable from «covered».
+          //
+          // PAINT AND OWNERSHIP ARE TWO SEPARATE QUESTIONS, ASKED SEPARATELY. A first version of
+          // this asked both with one index, \`stack.findIndex((n) => outer(n) === e)\`, and that is
+          // wrong for a control NESTED inside another control: \`outer()\` walks to the OUTERMOST
+          // control, so it never returns \`e\` for a nested \`e\`, the index is -1, and a genuine
+          // «a neighbour owns this point» finding would have been silenced as «clipped» — the quiet
+          // direction this whole repair exists to avoid. Paint is a question about \`e\` and its own
+          // subtree; ownership is the existing \`outer(top)\` question, left exactly as it was.
+          const stack = document.elementsFromPoint(x, y);
+          const paintedHere = stack.length === 0 ? null : stack.some((n) => n === e || e.contains(n));
+          const hit = stack.length ? stack[0] : null;
           const o = hit ? outer(hit) : null;
           if (o === e) continue;
           // NAME WHAT IS ACTUALLY THERE. «an element inside no control» is where the diagnosis
@@ -849,6 +928,9 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
             hitNull: !hit,
             hitTag: hit ? desc(hit) : null,
             ownerLabel: o ? (o.getAttribute('aria-label') || o.dataset.testid || 'another control') : null,
+            // false = the stack was read, is NON-EMPTY, and this control is absent from it (clipped).
+            // null  = the stack came back EMPTY — the #120 shape, which stays a finding.
+            paintedHere,
             at: [Math.round(x), Math.round(y)],
           };
         }
@@ -873,6 +955,11 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
   const assess = async (where) => {
     const { ctrls, sw, cw, vp } = await page.evaluate(READ);
     if (!ctrls.length) { defect(name, 'no tap-target-marked control on screen', `${where}: nothing carries data-tap44, so the 44px floor is not applied anywhere here`); return; }
+    // A point where the control is not painted is a MEASUREMENT THAT DID NOT HAPPEN, not a pass
+    // (PART 9.5). It is not a defect either — see classifyTapOwnership — so it is counted and said
+    // out loud in the pass line, which is what keeps a screen whose controls are all clipped from
+    // reading as a clean bill of health.
+    let clippedPts = 0;
     for (const c of ctrls) {
       const who = `${where} «${c.label}»`;
       if (c.afterPos !== 'absolute') {
@@ -892,7 +979,8 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
       // ANOTHER CONTROL is a neighbour capturing the press; a hit test that found no control there
       // is reported as what it is, with the numbers needed to tell an engine artifact from a
       // genuinely unreachable control. Neither is excused — both still fail.
-      const { stolen: taken, blind } = classifyTapOwnership(c.stolen);
+      const { stolen: taken, blind, clipped } = classifyTapOwnership(c.stolen);
+      clippedPts += Object.keys(clipped).length;
       const takenPts = Object.entries(taken);
       if (takenPts.length) {
         defect(name, 'a control no longer owns its own visual area',
@@ -907,7 +995,8 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
       }
     }
     const ok = ctrls.filter((c) => c.hw >= 44 && c.hh >= 44).length;
-    pass(name, `${where}: ${ok}/${ctrls.length} marked controls clear 44px, all boxes still under it, none capturing a neighbour`);
+    pass(name, `${where}: ${ok}/${ctrls.length} marked controls clear 44px, all boxes still under it, none capturing a neighbour`
+      + (clippedPts ? ` (${clippedPts} probed point(s) not painted — clipped out of view, ownership not asserted there)` : ''));
     if (sw > cw + 1) defect(name, 'horizontal overflow at 375px', `${where}: scrollWidth ${sw} > clientWidth ${cw}`);
   };
 
@@ -1400,7 +1489,8 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
       const r = await page.evaluate((sel) => {
         for (const f of document.querySelectorAll(sel)) {
           const q = f.getBoundingClientRect();
-          if (q.height > 0) return { top: Math.round(q.top), bottom: Math.round(q.bottom), h: Math.round(q.height) };
+          if (q.height > 0) return { top: Math.round(q.top), bottom: Math.round(q.bottom), h: Math.round(q.height),
+            height: q.height, vh: window.innerHeight, vw: window.innerWidth };
         }
         return null;
       }, SHEET_SEL);
@@ -1460,18 +1550,47 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     // answers "did the sheet win this tap" is whether the TESTED POINT falls inside the sheet's own
     // rect, exactly the two numbers this journey already prints side by side in every finding.
     const winnerIsSheet = !!q && q.height > 0 && cy >= q.top && cy <= q.bottom && cx >= q.left && cx <= q.right;
+    // THE WHOLE STACK, NOT stack[0]. `elementsFromPoint(...)[0]` is by definition what
+    // `elementFromPoint` returns, so reading only the top was the singular question PART 5 shape 13
+    // forbids here — dressed as the plural form, and therefore invisible to
+    // verify-ownership-probes-use-the-painted-stack.ts, whose §1 discovers by CALL SHAPE.
+    //   selfIndex === -1  the control is ABSENT from the painted stack ⇒ CLIPPED, not covered
+    //   selfIndex === 0   the control owns its own centre ⇒ clear
+    //   selfIndex > 0     something paints above it ⇒ genuinely covered
+    // ops_incident #377 measured the first case being filed as the third.
+    const selfIndex = stack.findIndex((n) => n === el || n.contains(el) || el.contains(n));
     return { top: Math.round(r.top), bottom: Math.round(r.bottom), sheetNow,
              winner: t ? `${t.tagName}${t.id ? '#' + t.id : ''}${t.className && typeof t.className === 'string' ? '.' + t.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}` : null,
-             isSelf: !!t && (t === el || t.contains(el) || el.contains(t)),
+             isSelf: selfIndex === 0,
+             selfIndex,
              winnerIsSheet };
   }, { s: sel, sheetSel: SHEET_SEL });
 
   /** Turn a failed hit-test into the RIGHT finding via the pure, mutation-proven classifier in
    *  harness.mjs — One Tap's own class if the sheet is really the blocker, or an honest "some other
-   *  overlay" finding otherwise. Never the wrong one asserted with confidence. */
-  const reportBlocked = (journeyName, controlLabel, r) => {
-    const { what, detail } = classifyBlockedControl(r, controlLabel);
-    defect(journeyName, what, detail);
+   *  overlay" finding otherwise. Never the wrong one asserted with confidence.
+   *
+   *  A CLIPPED control is not a blocked one, and that case is now RESOLVED BY REACHABILITY rather
+   *  than filed on geometry (ops_incident #377): the control is absent from the painted stack, so
+   *  the only question left is whether a person can still get to it. Scroll it into view and click
+   *  it the way a user would — if that lands, the reservation was doing its job and this is a PASS
+   *  with the numbers printed; if it does not, the control really is unreachable and that IS a
+   *  defect, filed with the reason. Either way the outcome is explicit, never a silent drop
+   *  (PART 9.5: a run that asserted nothing is not a pass). */
+  const reportBlocked = async (page, journeyName, controlLabel, r, loc) => {
+    const { what, detail, isClipped } = classifyBlockedControl(r, controlLabel);
+    if (!isClipped) { defect(journeyName, what, detail); return; }
+    let err = null;
+    await loc.scrollIntoViewIfNeeded().catch((e) => { err = `scrollIntoViewIfNeeded: ${String(e).split('\n')[0]}`; });
+    if (!err) await loc.click({ timeout: 10_000 }).catch((e) => { err = String(e).split('\n')[0]; });
+    if (err) {
+      defect(journeyName, `«${controlLabel}» is clipped out of view AND cannot be reached`,
+        `${detail} || scrolling to it and clicking it failed: ${err}`);
+    } else {
+      pass(journeyName, `«${controlLabel}» (${r.top}-${r.bottom}) is clipped by the app's reserved band `
+        + `(absent from the painted stack at its centre, which holds ${r.winner}) but a real scroll+click `
+        + `still reaches it — the reservation working, not an overlay covering it (ops_incident #377)`);
+    }
   };
 
   await withPage({ mobile }, async (page, bag) => {
@@ -1481,7 +1600,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     // Desktop's prompt sits in a corner rather than docked, so «بحث» needs no reserved space there —
     // but the mode-switch check below still runs, because a corner prompt on a 1440px viewport can
     // still land on a control near the top edge, and "not bottom-docked" says nothing about that.
-    const desktopCornerPrompt = sheet.bottom < 660 && !mobile;
+    const desktopCornerPrompt = !isBottomDocked(sheet, sheet.vh) && !mobile;
     if (desktopCornerPrompt) pass(name, `desktop prompt is not bottom-docked (${sheet.top}-${sheet.bottom})`);
 
 
@@ -1497,7 +1616,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     const ms = await winnerAt(page, 'modeswitch');
     if (ms.missing) skip(`${name}/modeswitch`, '«تصفية» not rendered');
     else if (!ms.isSelf) {
-      reportBlocked(`${name}/modeswitch`, 'تصفية', ms);
+      await reportBlocked(page, `${name}/modeswitch`, 'تصفية', ms, page.getByText('تصفية', { exact: true }).first());
     } else {
       let msErr = null;
       await page.getByText('تصفية', { exact: true }).first().click({ timeout: 10_000 })
@@ -1524,7 +1643,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     if (cta.skipCta) { /* handled above — fall through to the mode-switch check */ }
     else if (cta.missing) { skip(name, '«بحث» not rendered'); }
     else if (!cta.isSelf) {
-      reportBlocked(name, 'بحث', cta);
+      await reportBlocked(page, name, 'بحث', cta, page.getByText('بحث', { exact: true }).first());
     } else {
       // Not just the hit test — a REAL click must land (PART 9.2 (4)).
       let err = null;
@@ -1546,16 +1665,169 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     await sleep(3500);
     const sheet = await waitForSheet(page);
     if (!sheet) { skip(`${name}/composer`, 'Google never showed the One Tap prompt this run'); return; }
-    if (sheet.bottom < 660 && !mobile) { pass(`${name}/composer`, 'desktop prompt is not bottom-docked'); return; }
+    if (!isBottomDocked(sheet, sheet.vh) && !mobile) { pass(`${name}/composer`, 'desktop prompt is not bottom-docked'); return; }
     const comp = await winnerAt(page, 'composer');
     if (comp.missing) { skip(`${name}/composer`, 'no composer on this screen'); return; }
     if (!comp.isSelf) {
-      reportBlocked(`${name}/composer`, 'the AI Agent composer', comp);
+      await reportBlocked(page, `${name}/composer`, 'the AI Agent composer', comp, page.locator('textarea').first());
     } else {
       pass(`${name}/composer`, `composer (${comp.top}-${comp.bottom}) is clear of the prompt (now ${comp.sheetNow})`);
     }
   });
 };
+
+/** READ ALOUD MUST NOT TELL A USER THEIR DEVICE CANNOT DO SOMETHING IT HAS NOT FINISHED CHECKING.
+ *
+ *  ops_incident #722. PART 1 names the read-aloud controller as this routine's, and until this
+ *  journey existed it had NO real-browser coverage at all — only two offline barriers. PART 5 is
+ *  explicit that a unit test must not stand in for the click, so the decision being executed offline
+ *  by `verify-read-aloud-voice-logic.ts` §6 is proven HERE against the real bundle and a real tap.
+ *
+ *  THE STATE THIS EXERCISES, and why it is the ordinary path rather than a startup edge. `resolveVoice()`
+ *  starts at module import and keeps retrying for `RETRY_WINDOW_MS = 45_000`; the 🔊 control does not
+ *  exist until an agent search has returned cards, measured on production at t = 29,283 / 30,290 /
+ *  30,311 / 30,695 ms since load (4/4). So the button's first availability lands ~15s INSIDE the
+ *  window, every time, and a tap there means "still looking" — not "this device has no Arabic voice".
+ *
+ *  THE ORACLE IS THE ELAPSED TIME, MEASURED, NEVER ASSUMED, and it is deliberately asymmetric:
+ *    · inside the window  ⇒ the message must be the TEMPORARY one. Sound in the safe direction: the
+ *      45s clock starts at module import, which cannot be EARLIER than page load, so "elapsed since
+ *      load < 45s" is a conservative proof that the window is still open.
+ *    · past the window    ⇒ the reverse implication does NOT hold (import may be later than load), so
+ *      this only asserts that SOME honest refusal message appeared, and names which. Claiming the
+ *      device verdict there would be asserting more than the measurement supports.
+ *  Either way an outcome is recorded with its numbers — never a bare return (PART 9.5).
+ *
+ *  A DEVICE WITH ZERO VOICES IS A REAL DEVICE, not a harness artifact: headless Chromium reports 0
+ *  voices of any language, which is exactly a stock install with no Arabic language pack, the case
+ *  readAloud.ts's own root-cause note was written for. What this journey does NOT prove is anything
+ *  about a physical iPhone's voice list or how long it takes to populate (PART 10). */
+const RA_BUTTON = 'استماع للرد';
+// The SAME control's label while speaking — FeedbackRow: label={speaking ? t('Stop reading') : …},
+// i18n «إيقاف الاستماع». It is how the journey asks the APP whether the tap started, instead of
+// inferring it from a pre-tap voice count that `voiceschanged` is free to invalidate (#856).
+const RA_STOP_BUTTON = 'إيقاف الاستماع';
+const RA_DEVICE_VERDICT = 'الاستماع غير متاح على هذا الجهاز';
+const RA_STILL_PREPARING = 'نُجهّز الصوت — أعد المحاولة بعد لحظة';
+const RA_WINDOW_MS = 45_000;   // mirrors RETRY_WINDOW_MS in src/lib/readAloud.ts
+
+JOURNEYS['read-aloud-refusal-is-honest'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `read-aloud-refusal-is-honest:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const t0 = Date.now();
+  await gotoOrRetryTransport(page, `${BASE}/`);
+  await settle(page);
+  await sleep(2500);
+  // Through the UI, as a person does — a direct /agent deep link is sent Home by design.
+  if (!(await clickText(page, 'الوسيط الذكي', { exact: false }))) {
+    skip(name, `the agent tab was not clickable (${clickReason()})`); return;
+  }
+  await sleep(4000);
+  if (!page.url().includes('/agent')) { skip(name, `the agent tab did not land on /agent (${page.url()})`); return; }
+
+  const box = page.locator('textarea, input[type="text"]');
+  if (!(await box.count())) { skip(name, 'no composer on the agent screen'); return; }
+  const composer = box.first();
+  await composer.click();
+  await composer.pressSequentially('شقة للإيجار في الرياض', { delay: 40 });
+  await composer.press('Enter');
+
+  // The 🔊 control only exists once a results turn has rendered. Poll on THAT condition, never a
+  // fixed sleep (PART 11.2) — and record when it arrived, because the verdict depends on it.
+  let btn = null, appearedAt = null;
+  for (let i = 0; i < 140; i++) {
+    const c = page.getByLabel(RA_BUTTON);
+    if (await c.count()) { btn = c.first(); appearedAt = Date.now() - t0; break; }
+    await sleep(1000);
+  }
+  if (!btn) { skip(name, 'the 🔊 control never appeared — no results turn rendered, so there was nothing to tap'); return; }
+
+  const voices = await page.evaluate(() => ({
+    n: (window.speechSynthesis?.getVoices?.() || []).length,
+    ar: (window.speechSynthesis?.getVoices?.() || []).filter((v) => /^ar/i.test(v.lang)).length,
+  }));
+  // A device that HAS an Arabic voice will speak, so there is no refusal to judge. That is a real
+  // and welcome state, and a skip rather than a pass because nothing was measured.
+  if (voices.ar > 0) { skip(name, `this engine has ${voices.ar} Arabic voice(s), so the tap speaks — no refusal to judge`); return; }
+
+  await btn.scrollIntoViewIfNeeded().catch(() => {});
+
+  // WATCH THE TAP, DO NOT JUST LOOK AFTER IT (ops_incident #856).
+  //
+  // A silent 🔊 has TWO possible causes and a single read at +700ms cannot tell them apart:
+  //   (a) the tap NEVER STARTED — speakReadAloud() refused on a branch that shows no sentence;
+  //   (b) the tap STARTED and DIED almost immediately — e.g. an utterance handed a stale cached
+  //       voice — which also leaves no message and, by +700ms, no speaking state either.
+  // Measured 2026-09-27 on production, Chromium: silent 3 times in 32 runs, on BOTH viewports, with
+  // post-tap speaking=false every time. That rules out "it spoke and kept speaking" and nothing more.
+  // So sample tightly THROUGH the tap: if the app was ever in the speaking state, it was (b).
+  // PART 10.2's rule for a surface that is hard to observe — make the failure visible rather than
+  // guess again.
+  const sawSpeaking = { ever: false, atMs: null };
+  const t1 = Date.now();
+  await btn.click();
+  for (let i = 0; i < 24; i++) {          // 24 x 50ms = 1.2s, straddling the 700ms verdict below
+    const live = await page.evaluate((stopLabel) =>
+      !!(window.speechSynthesis?.speaking || window.speechSynthesis?.pending)
+      || document.querySelectorAll(`[aria-label="${stopLabel}"]`).length > 0,
+    RA_STOP_BUTTON).catch(() => false);
+    if (live) { sawSpeaking.ever = true; sawSpeaking.atMs = Date.now() - t1; break; }
+    await sleep(50);
+  }
+  await sleep(700);
+  const body = await bodyText(page);
+  const saidDevice = body.includes(RA_DEVICE_VERDICT);
+  const saidPreparing = body.includes(RA_STILL_PREPARING);
+
+  const after = await page.evaluate((stopLabel) => ({
+    stop: document.querySelectorAll(`[aria-label="${stopLabel}"]`).length,
+    speaking: !!(window.speechSynthesis?.speaking || window.speechSynthesis?.pending),
+    n: (window.speechSynthesis?.getVoices?.() || []).length,
+    ar: (window.speechSynthesis?.getVoices?.() || []).filter((v) => /^ar/i.test(v.lang)).length,
+  }), RA_STOP_BUTTON);
+  const started = after.stop > 0 || after.speaking || sawSpeaking.ever;
+
+  const where = `🔊 appeared at t=${appearedAt}ms since load (window ${RA_WINDOW_MS}ms); `
+    + `engine reported ${voices.n} voice(s), ${voices.ar} Arabic BEFORE the tap and `
+    + `${after.n}/${after.ar} after; speaking seen during the tap: `
+    + `${sawSpeaking.ever ? `YES at +${sawSpeaking.atMs}ms` : 'NO (24 samples over 1.2s)'}; `
+    + `at +700ms speaking=${after.speaking}, stop-control=${after.stop}`;
+
+  // A tap that SPOKE is not a refusal, so there is nothing for this journey to judge. Not a pass
+  // either — the refusal path was never exercised (PART 9.5: a run that asserted nothing is a skip).
+  if (started) {
+    skip(name, `the tap started speaking, so no refusal was produced to judge — ${where}. `
+      + `If it was seen speaking only briefly, that is cause (b) above: an utterance that began and `
+      + `died, which src/lib/readAloud.ts's refusal path never gets to explain.`);
+    return;
+  }
+
+  if (appearedAt < RA_WINDOW_MS) {
+    if (saidDevice && !saidPreparing) {
+      defect(name, 'a tap while the voice lookup was STILL RUNNING claimed the device cannot do it',
+        `${where}. The app said «${RA_DEVICE_VERDICT}» — a permanent verdict about the user's hardware — `
+        + `while resolveVoice() was still inside its retry window. ops_incident #722; this is the `
+        + `owner-locked unknown -> NO rule in the read-aloud surface.`);
+    } else if (saidPreparing) {
+      pass(name, `a refusal inside the retry window says «${RA_STILL_PREPARING}» and not the device verdict — ${where}`);
+    } else {
+      defect(name, 'a refused 🔊 tap produced NO message at all — a silent dead control',
+        `${where}. Neither refusal sentence is on screen AND the app was never seen in the speaking `
+        + `state (sampled every 50ms through the tap, not inferred), so the tap did nothing a user can `
+        + `see and it never started. ops_incident #856.`);
+    }
+  } else if (saidDevice || saidPreparing) {
+    // Past the window the implication does not run backwards (import may be later than load), so
+    // assert only that an honest refusal was shown, and name which one.
+    pass(name, `a refusal past the retry window shows an honest message `
+      + `(«${saidDevice ? RA_DEVICE_VERDICT : RA_STILL_PREPARING}») — ${where}. Which state the app was in `
+      + `is not decidable from elapsed-since-load in this direction, so only presence is asserted.`);
+  } else {
+    defect(name, 'a refused 🔊 tap produced NO message at all — a silent dead control',
+      `${where}. Neither refusal sentence is on screen AND the app was never seen in the speaking `
+      + `state (sampled, not inferred), so the tap did nothing a user can see. ops_incident #856.`);
+  }
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error while judging the read-aloud refusal', errs.join(' | ')); }
+});
 
 // ── «تواصل مع الدعم»: shared plumbing ───────────────────────────────────────────────────────────
 // The form landed 2026-09-02 inside InfoModal's dialog and had never been driven by a journey.
@@ -1711,22 +1983,39 @@ JOURNEYS['docked-prompts-stack'] = async (mobile) => withPage({ mobile }, async 
 
   if (!after.card) { skip(name, 'the consent card disappeared while the second prompt was docked'); return; }
 
+  // WHAT THIS JOURNEY IS ALLOWED TO CONCLUDE, corrected by routine #6, 2026-09-25.
+  //
+  // It used to file a DEFECT on `after.reserved < before.reserved` — any DECREASE in the reservation —
+  // before asking whether the BAND had decreased with it. That fired 2/2 against healthy production
+  // on the 2026-09-25 sweep, and the failure text refuted itself in its own arithmetic: reserved
+  // 526 → 416 with the card moving 286-558 → 396-668, i.e. a band of 812-396 = 416 covered by a
+  // reservation of exactly 416, printed as «0px of app content is now under an opaque card». A
+  // smaller reservation for a smaller band is the inset working, not ops_incident #201 recurring:
+  // the synthetic 144px prompt is shorter than the real One Tap sheet it displaced, so the whole
+  // docked stack got shorter and the correct reservation got shorter with it.
+  //
+  // Same CLASS as ops_incident #593 (`r.y < 80`) and the 660 literal beside it: an ABSOLUTE
+  // comparison standing in for an inherently RELATIVE question. The question #201 actually asks is
+  // «does the reservation still COVER the band the card occupies», and that is what is asserted —
+  // once, on coverage. A shrink is reported as CONTEXT in both outcomes so it stays visible in the
+  // log without being mistaken for a verdict.
   const band = after.vh - after.card.top;           // what the card now occupies, from its top down
-  if (after.reserved < before.reserved) {
-    defect(name, 'a SECOND docked prompt SHRANK the reservation the first one had earned',
-      `root reserved ${before.reserved}px → ${after.reserved}px; the card moved `
-      + `${before.card.top}-${before.card.bottom} → ${after.card.top}-${after.card.bottom}, so `
-      + `${band - after.reserved}px of app content is now under an opaque card. ops_incident #201.`);
-  } else if (after.reserved + 1 < Math.min(band, Math.floor(after.vh * 0.5))) {
-    // Not a shrink, but still short of the band the card occupies (allowing the documented 50% cap).
-    defect(name, 'the reservation does not cover the band the consent card occupies',
-      `root reserved ${before.reserved}px → ${after.reserved}px, but the card occupies ${band}px from `
-      + `${after.card.top} down (cap ${Math.floor(after.vh * 0.5)}px), so `
-      + `${Math.min(band, Math.floor(after.vh * 0.5)) - after.reserved}px of app content is under an `
-      + `opaque card. ops_incident #201.`);
+  const need = Math.min(band, dockedBandCap(after.vh));
+  const shrank = after.reserved < before.reserved;
+  const moved = `root reserved ${before.reserved}px → ${after.reserved}px; the card moved `
+    + `${before.card.top}-${before.card.bottom} → ${after.card.top}-${after.card.bottom} (band ${band}px, `
+    + `cap ${dockedBandCap(after.vh)}px, so ${need}px is owed)`;
+  if (after.reserved + 1 < need) {
+    // The two shapes are named apart, because they point at different code: a reservation that
+    // SHRANK while the band did not is #201's signature (a prompt resting on another prompt stopped
+    // being admitted); one that simply never covered the band is the single-prompt arithmetic.
+    defect(name, shrank
+      ? 'a SECOND docked prompt SHRANK the reservation below the band the card still occupies'
+      : 'the reservation does not cover the band the consent card occupies',
+      `${moved}, so ${need - after.reserved}px of app content is under an opaque card. ops_incident #201.`);
   } else {
-    pass(name, `a second docked prompt grew the reservation ${before.reserved}px → ${after.reserved}px `
-      + `(card ${after.card.top}-${after.card.bottom}), so nothing lays out under it`);
+    pass(name, `a second docked prompt left the reservation covering the card's band — ${moved}`
+      + `${shrank ? ' (it shrank, correctly: the docked stack itself got shorter)' : ''}`);
   }
   bag.ok = true;
 });
@@ -1764,8 +2053,38 @@ JOURNEYS['support-draft-survives-dismiss'] = async (mobile) => withPage({ mobile
   // pointer-blocked, click times out, and the whole × check skipped 2/2 while reading as coverage.
   const x = page.locator('[data-testid="info-modal-close"]').first();
   if (await x.count()) {
-    await x.click({ timeout: 10_000 }).catch(() => {});
-    if (!(await waitSupportClosed(page))) { skip(`${name}/x`, 'the X did not close the dialog'); return; }
+    // THE CLICK'S OWN ERROR USED TO BE SWALLOWED, AND THAT IS WHY THIS SKIP SAYS NOTHING
+    // (ops_incident #670, routine #6, 2026-09-24). `.catch(() => {})` threw away the one fact that
+    // distinguishes the two shapes — PART 11.2 rule 4, and the identical trap PR #1146 paid for
+    // (five retries into a swallowed catch). «the X did not close the dialog» reads like a product
+    // verdict and is equally consistent with "the click never landed at all".
+    //
+    // MEASURED, and the reason this is instrumentation rather than a guessed fix: the skip fires
+    // 2/2 on WebKit (sweep 35934755839) AND 2/2 on Firefox (sweep 35941044015), and 0/2 on
+    // Chromium. Two of three engines, so Chromium is the outlier and this points at the product —
+    // but neither failing engine is drivable from this container (PART 11.5), and the #1053
+    // precedent is explicit that the move when you are blind on a surface is to MAKE THE FAILURE
+    // VISIBLE, not to guess a third time. One CI dispatch now answers it on both engines.
+    const clickErr = await x.click({ timeout: 10_000 }).then(() => null, (e) => String(e).split('\n')[0]);
+    if (!(await waitSupportClosed(page))) {
+      // Who actually owns the X's centre? PLURAL, never `elementFromPoint` — a rect is LAYOUT and
+      // being painted is not (PART 5 shape 13; enforced as a class by
+      // scripts/verify-ownership-probes-use-the-painted-stack.ts). A control clipped out of view
+      // keeps its rect, and the singular form would report a healthy build as covered.
+      const at = await x.boundingBox().then((b) => (b ? page.evaluate(([cx, cy]) => {
+        const stack = document.elementsFromPoint(cx, cy);
+        return {
+          painted: stack.slice(0, 3).map((e) => `${e.tagName.toLowerCase()}`
+            + `${e.getAttribute('data-testid') ? `[${e.getAttribute('data-testid')}]` : ''}`),
+          selfIndex: stack.findIndex((e) => e.getAttribute?.('data-testid') === 'info-modal-close'),
+        };
+      }, [b.x + b.width / 2, b.y + b.height / 2]) : null)).catch(() => null);
+      skip(`${name}/x`, 'the X did not close the dialog — '
+        + (clickErr ? `the CLICK ITSELF FAILED: «${clickErr}»` : 'the click resolved without error, so the dialog stayed open on its own')
+        + (at ? ` | painted at the X's centre: [${at.painted.join(', ')}], the X is at index ${at.selfIndex}`
+              : ' | the X had no box to probe'));
+      return;
+    }
     const why3 = await openSupport(page, mobile);
     if (why3) { skip(`${name}/x`, `could not reopen after the X: ${why3}`); return; }
     const afterX = await readSupportDraft(page);
@@ -1776,6 +2095,116 @@ JOURNEYS['support-draft-survives-dismiss'] = async (mobile) => withPage({ mobile
   } else skip(`${name}/x`, 'no close control found on the dialog');
 
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on the support-form path', errs.join(' | ')); }
+});
+
+/** J23 — THE SUPPORT DIALOG'S × MUST SURVIVE A TOP-DOCKED FOREIGN PROMPT (ops_incident #670).
+ *
+ *  THE GAP THIS CLOSES. #670 — a signed-out guest on a phone could not close «المساعدة/تواصل معنا»,
+ *  because Google's One Tap frame docks to the TOP on WebKit and Firefox and painted over the ×  —
+ *  is fixed (centredDialogBox, e5b4a2a) and barriered OFFLINE by verify-bottom-prompt-inset.ts §K.
+ *  In a real browser, though, the only thing that ever exercised it was
+ *  `support-draft-survives-dismiss` running against whatever One Tap happened to do that day.
+ *
+ *  That is not coverage. Google suppresses One Tap freely (cooldown, no Google session, opt-out),
+ *  and PART 5 shape 13 is explicit that the prompt's absence is a SKIP, never a pass. So on any day
+ *  Google declines to show it, #670 could regress and all three engines would report green — which
+ *  is exactly how it shipped in the first place: it was found by accident, in the first WebKit
+ *  sweep after ops_incident #593's drawer fix happened to let that engine reach the step at all.
+ *
+ *  So the dock is INJECTED rather than waited for, which makes the assertion deterministic on every
+ *  engine including Chromium, where the real prompt docks to the bottom and never covered the ×.
+ *
+ *  IT ASSERTS THE USER'S TRUTH, NOT THE GEOMETRY. The offline barrier already pins the arithmetic.
+ *  What no offline check can say is whether the × actually CLOSES the dialog for a person with the
+ *  prompt on screen, so this clicks it for real and waits for the form to be gone. Geometry is
+ *  reported alongside only to tell the two failure shapes apart (PART 11.2 rule 4): a × that is
+ *  COVERED (someone else is painted at its centre) is a different bug from a × that is reachable
+ *  and still does not close the dialog.
+ *
+ *  PLURAL elementsFromPoint, never the singular form — a rect is LAYOUT, being painted is not
+ *  (PART 5 shape 13, enforced as a class by verify-ownership-probes-use-the-painted-stack.ts). */
+JOURNEYS['support-close-survives-a-top-dock'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `support-close-survives-a-top-dock:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const why = await openSupport(page, mobile);
+  if (why) { skip(name, why); return; }
+
+  const x = page.locator('[data-testid="info-modal-close"]').first();
+  if (!(await x.count())) { skip(name, 'the support dialog opened without its × — nothing to test'); return; }
+
+  // Where the × sits with nothing docked, so the move is measurable rather than assumed.
+  const readX = () => page.evaluate(() => {
+    const e = document.querySelector('[data-testid="info-modal-close"]');
+    if (!e) return null;
+    const r = e.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return null;
+    const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+    const stack = document.elementsFromPoint(cx, cy);
+    const desc = (el) => {
+      const b = el.getBoundingClientRect(), cs = getComputedStyle(el);
+      return `<${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}> `
+        + `${Math.round(b.width)}x${Math.round(b.height)} at ${Math.round(b.x)},${Math.round(b.y)} z=${cs.zIndex}`;
+    };
+    return {
+      top: Math.round(r.y), at: [Math.round(cx), Math.round(cy)],
+      // TRUE  = this control is somewhere in the PAINTED stack at its own centre.
+      // FALSE = the stack was read, is non-empty, and the control is absent from it.
+      painted: stack.some((n) => n === e || e.contains(n)),
+      stackTop: stack.length ? desc(stack[0]) : null,
+      stackLen: stack.length,
+    };
+  });
+
+  const before = await readX();
+  if (!before) { skip(name, 'the × has no box before the dock is injected — nothing to measure'); return; }
+
+  await injectTopDockPrompt(page);
+  // Wait on the CONDITION the app reports — the × being pushed clear of the band — not a fixed
+  // sleep (PART 11.2). Bounded, and the assertions below stand whether or not it ever moves.
+  let after = before;
+  for (let i = 0; i < 30; i++) {
+    after = (await readX()) ?? after;
+    if (after.top !== before.top) break;
+    await sleep(300);
+  }
+
+  if (!(await page.locator(TOP_DOCK_SYNTH).count())) {
+    defect(name, 'the injected top dock did not survive in the DOM — the measurement never happened',
+      `× was at y=${before.top}, now y=${after.top}`);
+    return;
+  }
+
+  // THE USER'S QUESTION: does the × still close the dialog with the prompt on screen? The click's
+  // own error is CAPTURED, never swallowed — that is the fact separating «the click never landed»
+  // from «it landed and the dialog stayed open» (PART 11.2 rule 4, and PR #1146's measured trap).
+  const clickErr = await x.click({ timeout: 10_000 }).then(() => null, (e) => String(e).split('\n')[0]);
+  const closed = await waitSupportClosed(page);
+  await removeTopDockPrompt(page);
+
+  // PAINT IS CHECKED BEFORE THE OUTCOME, AND THAT ORDER IS THE POINT (measured while mutation-
+  // proving this journey, 2026-09-24). Playwright's click() scrolls its target into view first, so
+  // it can reach a control a FINGER cannot — and the mutation run proved it: with the card pushed
+  // to y=-28, above the top of the viewport, `painted` was false and the dialog still closed, so an
+  // outcome-only pass branch reported «ok» on a × no user could see or tap. A control that is
+  // absent from the painted stack at its own centre is unreachable to a person whatever the
+  // automation managed to do to it, so that is a defect first and an outcome question second.
+  if (!after.painted) {
+    defect(name, 'a top-docked auth prompt left the support dialog’s × unreachable to a real finger',
+      `the × is at ${JSON.stringify(after.at)} (y ${before.top} → ${after.top}) and is ABSENT from the `
+      + `painted stack there; topmost is ${after.stackTop} of ${after.stackLen}. The dialog `
+      + `${closed ? 'closed anyway — but only because Playwright scrolls its target into view first, '
+        + 'which a finger does not' : 'did not close'}. `
+      + `${clickErr ? `the CLICK ITSELF FAILED: ${clickErr}` : 'the click resolved without error'}. `
+      + `ops_incident #670.`);
+  } else if (closed) {
+    pass(name, `with a top-docked prompt the × stayed reachable (y ${before.top} → ${after.top}, `
+      + `painted at ${JSON.stringify(after.at)}) and closed the dialog`);
+  } else {
+    defect(name, 'the × is reachable under a top-docked prompt but did not close the dialog',
+      `the × is painted at ${JSON.stringify(after.at)} (y ${before.top} → ${after.top}), topmost is `
+      + `${after.stackTop}. ${clickErr ? `the CLICK ITSELF FAILED: ${clickErr}` : 'the click resolved '
+      + 'without error, so the dialog stayed open on its own'}.`);
+  }
+  bag.ok = true;
 });
 
 /** J21 — THE ERROR STATE MUST NAME THE RIGHT FAILURE.
@@ -1977,7 +2406,47 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
         }
       }
     }
+    // WHAT THE APP ITSELF RESERVED, and what its OWN selector sees (routine #6, 2026-09-13).
+    //
+    // Without this, a blocked-control finding says only THAT the overlay won and never WHY, and the
+    // difference decides the fix. ops_incident #202 shipped a fix for the 8 px container-vs-iframe
+    // gap and the 2026-09-13 WebKit sweep is still red — but the blocked controls sit at y=149-174,
+    // ABOVE even the unfixed 170 px reservation, so the app cannot be reserving 170 OR 178; it looks
+    // to be reserving nothing at all, which is a different defect from the one that was fixed.
+    // "Looks to be" is exactly the guess PART 10.2 forbids repeating on an engine this routine
+    // cannot drive (the three-fix voice-input case), so the next sweep MEASURES it instead:
+    //   reservedTop 178 → the band is reserved and the geometry is still wrong.
+    //   reservedTop 0   → the app never saw the prompt; appSees says whether that is the SELECTOR
+    //                     (no match at all), the RESOLVER (matched, resolved to the wrong box), or
+    //                     TIMING (matched now, but the inset was computed before GIS rendered).
+    let reservedTop = 0, reservedBottom = 0;
+    for (const el of document.querySelectorAll('div')) {
+      const rr = el.getBoundingClientRect();
+      if (rr.width < innerWidth - 1 || rr.top > 1) continue;   // the full-viewport app root
+      const cs = getComputedStyle(el);
+      const pt = parseFloat(cs.paddingTop) || 0, pb = parseFloat(cs.paddingBottom) || 0;
+      if (pt > reservedTop) reservedTop = pt;
+      if (pb > reservedBottom) reservedBottom = pb;
+    }
+    // Mirrors AUTH_PROMPT_SELECTOR + promptMeasurementTarget + isHidden from
+    // src/lib/bottomPromptInset.ts, so a divergence between what the app sees and what actually
+    // covers the controls is visible in the SAME line rather than inferred across two runs.
+    const APP_SEL = '#credential_picker_iframe,iframe[src*="accounts.google.com/gsi/"],iframe[src*="appleid.apple.com"]';
+    const appSees = Array.from(document.querySelectorAll(APP_SEL)).map((m) => {
+      let node = m, hops = 0;
+      while (node && hops <= 6 && getComputedStyle(node).position !== 'fixed') { node = node.parentElement; hops++; }
+      const resolved = (node && getComputedStyle(node).position === 'fixed') ? node : m;
+      const rr = resolved.getBoundingClientRect(), cs = getComputedStyle(resolved), ms = getComputedStyle(m);
+      return { resolvedTo: resolved === m ? 'self (no fixed ancestor in reach)' : (resolved.id || resolved.tagName),
+               hops: resolved === m ? null : hops,
+               box: [Math.round(rr.x), Math.round(rr.y), Math.round(rr.width), Math.round(rr.height)],
+               pos: cs.position,
+               // isHidden() is asked of BOTH nodes, and either one true reserves nothing.
+               hiddenResolved: cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0',
+               hiddenMatched: ms.display === 'none' || ms.visibility === 'hidden' || ms.opacity === '0' };
+    });
     return { frames, blocked: blocked.slice(0, 10), blockedCount: blocked.length,
+             reservedTop, reservedBottom, appSees,
              vp: { w: innerWidth, h: innerHeight } };
   })()`;
 
@@ -2007,6 +2476,8 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
       defect(name, 'an auth overlay is sitting on top of an Ezhalah control',
         `${where}: ${state.blockedCount} control(s) blocked — `
         + state.blocked.map((b) => `«${b.label}» at ${b.at}`).join(', ')
+        + `. APP RESERVED top=${state.reservedTop} bottom=${state.reservedBottom}`
+        + ` appSees=${JSON.stringify(state.appSees)}`
         + `. overlay=${JSON.stringify(state.frames)} viewport=${JSON.stringify(state.vp)}`);
     } else {
       pass(name, `${where}: auth overlay present (${JSON.stringify(state.frames.map((f) => f.box))}) and 0 controls blocked`);
@@ -2036,14 +2507,296 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
   }
 
   if (!sawOverlay) {
-    // Not a pass and not a failure: Google decides whether to show it, and it often does not.
-    skip(name, 'no auth overlay appeared within 20s on either screen — geometry unproven this run '
-      + '(the tab presses above still ran and passed)');
+    // A BARRIER THAT ONLY FIRES ON THE DAYS GOOGLE FEELS LIKE SHOWING THE PROMPT IS NOT A BARRIER.
+    //
+    // That sentence is already in this file, above `injectTopDockPrompt`, and it names the cost:
+    // ops_incident #670 shipped a dead control behind exactly this gap. Absence of the real prompt is
+    // still a SKIP and never a pass (PART 5 shape 13) — but leaving it there is what the sibling
+    // journeys `docked-prompts-stack` and `both-edges-docked-clears-controls` deliberately do NOT do:
+    // they inject the measured shape so the geometry is proven on every run.
+    //
+    // Measured 2026-09-25 (routine #6): across a full production sweep this journey skipped its
+    // geometry half 4/4, on BOTH viewports, while `onetap-clear-of-controls` found a real sheet on
+    // mobile 2/2 in the same sweep. Those are separate browser contexts and Google suppresses
+    // per-context, so it is not a contradiction — but it does mean the owner's 2026-09-06 rule
+    // («One Tap must never cover, block, or intercept any Ezhalah controls») went unproven here on
+    // every run of that sweep, behind a tidy skip. PART 9.5 is explicit: when a journey skips, ask
+    // why before accepting it.
+    //
+    // So the real prompt's absence is recorded as the skip it is, and then the SAME geometry read is
+    // run against the injected shape, as its own clearly-labelled outcome. The synthetic pass is
+    // never dressed up as evidence about Google's real prompt: it proves the APP's reservation and
+    // hit-testing against the geometry the engines were measured serving, which is the half a
+    // suppressed prompt takes away.
+    skip(name, 'no auth overlay appeared within 20s on either screen — the REAL prompt proved nothing '
+      + 'this run (the tab presses above still ran and passed); falling back to the injected shape below');
+
+    await gotoOrRetryTransport(page, BASE + '/');
+    await settle(page);
+    await injectTopDockPrompt(page);
+    await sleep(1500);
+    const synth = await page.evaluate(READ);
+    if (!synth.frames.some((f) => !f.hidden && f.box[3] > 0)) {
+      skip(`${name}/synthetic`, 'the injected prompt did not register as an auth overlay — the app\'s own '
+        + 'selector did not match the shape the engines serve, which is itself worth knowing');
+    } else if (synth.blockedCount) {
+      defect(`${name}/synthetic`, 'an auth overlay sitting at the measured TOP dock blocks an Ezhalah control',
+        `${synth.blockedCount} control(s) blocked — ` + synth.blocked.map((b) => `«${b.label}» at ${b.at}`).join(', ')
+        + `. APP RESERVED top=${synth.reservedTop} bottom=${synth.reservedBottom} appSees=${JSON.stringify(synth.appSees)}`
+        + `. overlay=${JSON.stringify(synth.frames)} viewport=${JSON.stringify(synth.vp)}`
+        + '. INJECTED shape (ops_incident #202 geometry), so this is evidence about OUR reservation and '
+        + 'hit-testing, not about Google\'s real prompt.');
+    } else {
+      pass(`${name}/synthetic`, `an auth overlay at the measured TOP dock blocks 0 controls `
+        + `(app reserved top=${synth.reservedTop} bottom=${synth.reservedBottom}, overlay `
+        + `${JSON.stringify(synth.frames.map((f) => f.box))}) — INJECTED shape, so this proves our own `
+        + 'reservation and hit-testing, never Google\'s real prompt');
+    }
+    await page.evaluate((s) => document.querySelectorAll(s).forEach((n) => n.remove()), TOP_DOCK_SYNTH);
   }
   const errs = appPageErrors(bag, name);
   if (errs.length) defect(name, 'uncaught page error on the auth-overlay journey', errs[0]);
   void seen;
 });
+
+/** J29 — BOTH EDGES DOCKED AT ONCE (PART 5 shape #13; ops_incident #251 and #202).
+ *
+ *  WHY THIS EXISTS AS ITS OWN JOURNEY, and why `auth-overlay-clears-controls` cannot cover it.
+ *  That journey waits for a REAL One Tap. On Chromium GIS docks at the BOTTOM, on the same edge our
+ *  own consent card uses, so the two-edges state never arises there and the run correctly reports a
+ *  SKIP. WebKit is where GIS happens to dock at the top — and WebKit is not installable in this
+ *  container (PART 11.1/11.5). So the one configuration that has ever actually stranded a control
+ *  was reachable in CI only, on an engine this routine cannot drive, and it stayed a hand-run
+ *  one-off: the ledger's `both-edges-docked-reserve-the-full-band` row is a single 2026-09-13
+ *  adversarial probe that recorded `fail` and was never run again.
+ *
+ *  THE DEFECT IT PINS (ops_incident #251, fixed by MIN_APP_FRACTION in src/lib/bottomPromptInset.ts).
+ *  `promptInsets()` budgeted MAX_INSET_FRACTION — half the viewport, 406 px of 812 — for the TWO
+ *  bands together, while each band is already capped at half on its own. Demand 178 (top) + 272
+ *  (bottom) = 450 > 406, so the tie-break kept the larger band whole and handed the top the
+ *  remainder: 406 − 272 = 134. The app reserved 134 against an overlay reaching 178 and laid 44 px of
+ *  live, tappable controls underneath an opaque z-index:9999 pointer-events:auto sheet.
+ *  Measured on production, both directions: 134 → 8 controls stranded at cy=173; 178 → 0 stranded.
+ *
+ *  THE DEFECT IS ENGINE-INDEPENDENT, which is the whole reason it is drivable here at all: Chromium
+ *  reproduces it exactly once a TOP-docked prompt is present. So this journey INJECTS the WebKit
+ *  container shape — a STATIC gsi iframe inside a `position: fixed` #credential_picker_container —
+ *  rather than waiting for an engine to hand it one. Identity is by origin, exactly as
+ *  DOCKED_PROMPT_SELECTOR asks it, so the app's own selector matches the injected frame and
+ *  promptMeasurementTarget resolves it to the fixed container the compositor actually paints.
+ *
+ *  It asserts the PROPERTY, not the constant: whatever the top overlay's bottom edge is, the app must
+ *  reserve at least that much, and no control may be painted under either overlay. A future viewport,
+ *  a differently-sized sheet or a third dock is covered without editing a number.
+ */
+JOURNEYS['both-edges-docked-clears-controls'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `both-edges-docked-clears-controls:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const SYNTH = TOP_DOCK_SYNTH;
+
+  const READ = `(() => {
+    const ORIGINS = ${JSON.stringify(AUTH_OVERLAY_ORIGINS)};
+    // An element belongs to an OVERLAY — the injected auth prompt or our own consent card — and is
+    // therefore never itself a blocked control.
+    const isOverlay = (el) => {
+      for (let n = el; n; n = n.parentElement) {
+        if (n.id === 'credential_picker_iframe' || n.id === 'credential_picker_container') return true;
+        if (n.getAttribute && n.getAttribute('data-testid') === 'cookie-consent') return true;
+        if (n.tagName === 'IFRAME') { let s = ''; try { s = String(n.src || ''); } catch (e) { s = ''; }
+          if (ORIGINS.some((o) => s.includes(o))) return true; }
+      }
+      return false;
+    };
+    const isCtrl = (e) => { const st = getComputedStyle(e); const r = e.getAttribute('role');
+      return r === 'button' || r === 'link' || st.cursor === 'pointer'; };
+    const vis = (e) => { const r = e.getBoundingClientRect(); if (r.width <= 0 || r.height <= 0) return false;
+      const s = getComputedStyle(e); return s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.01; };
+    const label = (e) => (e.getAttribute('aria-label') || (e.dataset && e.dataset.testid)
+      || (e.innerText || '').trim().slice(0, 24) || e.tagName).replace(/\\s+/g, ' ');
+    // What the APP reserved on each edge: the full-viewport root's own padding.
+    let reservedTop = 0, reservedBottom = 0;
+    for (const el of document.querySelectorAll('div')) {
+      const rr = el.getBoundingClientRect();
+      if (rr.width < innerWidth - 1 || rr.top > 1) continue;
+      const cs = getComputedStyle(el);
+      const pt = parseFloat(cs.paddingTop) || 0, pb = parseFloat(cs.paddingBottom) || 0;
+      if (pt > reservedTop) reservedTop = pt;
+      if (pb > reservedBottom) reservedBottom = pb;
+    }
+    const blocked = [];
+    for (const e of document.querySelectorAll('*')) {
+      if (!vis(e) || !isCtrl(e) || isOverlay(e)) continue;
+      const r = e.getBoundingClientRect();
+      const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+      if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) continue;
+      // PLURAL, per PART 5 #13: elementFromPoint reports a control scrolled out of view as blocked
+      // because its rect still lies under the sheet. The painted stack omits a clipped control
+      // entirely, so a self index below 0 means "painted nowhere here", which is not blocked.
+      const stack = document.elementsFromPoint(cx, cy);
+      const self = stack.indexOf(e);
+      if (self < 0) continue;
+      const over = stack.findIndex((n) => isOverlay(n));
+      if (over >= 0 && over < self) {
+        blocked.push({ label: label(e), at: [Math.round(cx), Math.round(cy)],
+                       box: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)] });
+      }
+    }
+    const top = document.querySelector('#credential_picker_container');
+    const tr = top && top.getBoundingClientRect();
+    const card = document.querySelector('[data-testid="cookie-consent"]');
+    const kr = card && card.getBoundingClientRect();
+    return { reservedTop, reservedBottom, blockedCount: blocked.length, blocked: blocked.slice(0, 10),
+             topBox: tr && tr.height > 0 ? [Math.round(tr.x), Math.round(tr.y), Math.round(tr.width), Math.round(tr.height)] : null,
+             cardBox: kr && kr.height > 0 ? [Math.round(kr.x), Math.round(kr.y), Math.round(kr.width), Math.round(kr.height)] : null,
+             vp: { w: innerWidth, h: innerHeight } };
+  })()`;
+
+  await gotoOrRetryTransport(page, BASE + '/');
+  await settle(page);
+  const before = await page.evaluate(READ);
+
+  // The bottom half of "both edges" is our own consent card, and it only docks as a spanning sheet on
+  // a phone — on desktop it is the owner's 280 px corner card, which correctly reserves nothing and
+  // is a different case. Consent also persists once answered. Both are legitimate states and both are
+  // a SKIP with a reason, never a pass (PART 9.5).
+  if (!before.cardBox) {
+    skip(name, 'the cookie consent card is not on screen this run — there is no bottom dock, so "both edges docked" cannot be formed');
+    return;
+  }
+  // MIN_SHEET_SPAN_FRACTION, the same 0.8 src/lib/bottomPromptInset.ts applies.
+  if (before.cardBox[2] < before.vp.w * 0.8) {
+    skip(name, `the consent card is a corner card here (${before.cardBox[2]}px of ${before.vp.w}px), not a docked sheet — it reserves nothing by design and this is not the combined-clamp case`);
+    return;
+  }
+
+  // THE TOP DOCK, in the shape WebKit really serves (ops_incident #202). The shape itself lives in
+  // injectTopDockPrompt() at the top of this file — one definition, shared with
+  // `support-close-survives-a-top-dock`, so the two cannot drift apart.
+  await injectTopDockPrompt(page);
+  // Wait on the CONDITION the app reports — the top reservation appearing — not a fixed sleep
+  // (PART 11.2). It is a bounded poll, and the assertions below stand whether or not it moves.
+  let after = before;
+  for (let i = 0; i < 30; i++) {
+    after = await page.evaluate(READ);
+    if (after.reservedTop > before.reservedTop) break;
+    await sleep(300);
+  }
+  const state = after;
+  await page.evaluate((s) => document.querySelectorAll(s).forEach((n) => n.remove()), SYNTH);
+
+  if (!state.topBox) {
+    defect(name, 'the injected top dock did not survive in the DOM — the measurement never happened',
+      `reservedTop=${state.reservedTop} reservedBottom=${state.reservedBottom} vp=${JSON.stringify(state.vp)}`);
+    return;
+  }
+  const demandTop = state.topBox[1] + state.topBox[3];     // the overlay's own bottom edge
+  const shortfall = demandTop - state.reservedTop;
+
+  if (state.blockedCount) {
+    defect(name, 'with BOTH edges docked, an overlay is sitting on top of an Ezhalah control',
+      `${state.blockedCount} control(s) blocked — ${state.blocked.map((b) => `«${b.label}» at ${b.at}`).join(', ')}`
+      + `. APP RESERVED top=${state.reservedTop} bottom=${state.reservedBottom}; the top overlay reaches ${demandTop}`
+      + ` (box ${JSON.stringify(state.topBox)}), the card occupies ${JSON.stringify(state.cardBox)}`
+      + `, viewport ${JSON.stringify(state.vp)}. ops_incident #251/#202.`);
+  } else if (shortfall > 1) {
+    // No control happens to sit in the gap right now, but the app is under-reserving, which is the
+    // same defect one layout change away from stranding something. It is a finding on its own.
+    defect(name, 'with BOTH edges docked, the app reserved LESS than the top overlay occupies',
+      `reserved top=${state.reservedTop} but the overlay reaches ${demandTop} — a ${shortfall}px strip of live app`
+      + ` is under an opaque z-index:9999 sheet (0 controls happen to sit in it this run).`
+      + ` bottom reserved=${state.reservedBottom}, card=${JSON.stringify(state.cardBox)},`
+      + ` viewport=${JSON.stringify(state.vp)}. ops_incident #251.`);
+  } else {
+    pass(name, `both edges docked: the app reserved top=${state.reservedTop} (overlay reaches ${demandTop})`
+      + ` and bottom=${state.reservedBottom} (card ${JSON.stringify(state.cardBox)}), and 0 controls are painted under either`);
+  }
+
+  const errs = appPageErrors(bag, name);
+  if (errs.length) defect(name, 'uncaught page error on the both-edges-docked journey', errs[0]);
+});
+
+/** J28 — A STALE LOCAL TRANSCRIPT MUST BE RE-CHECKED AGAINST THE SERVER, AND AN UNVERIFIED COPY
+ *  MUST NEVER BE PROMOTED (PART 5 shapes 4 + 8; ops_incident #272 and its reachability half).
+ *
+ *  THE SURFACE, and why it had never been driven. `src/lib/chatMerge.ts` marks a carried-over local
+ *  transcript `txStale` when the server reports newer activity for that chat, and store.tsx refuses
+ *  to push a stale copy — that flag is the only thing between a short cached conversation and the
+ *  longer server one it would be written over. Every part of that was unit-tested. Nothing ever
+ *  opened a stale chat in a browser, and the ledger had no row for it.
+ *
+ *  TWO DEFECTS IT PINS, both found 2026-09-15:
+ *   1. REACHABILITY. `openSaved` read `entry?.transcript ?? null` and hydrated only when the
+ *      transcript was ABSENT — so a present-but-stale copy short-circuited the whole mechanism and
+ *      the server was never asked. The user saw the shorter conversation; the first new turn
+ *      cleared the flag and pushed that truncated view up. Asserted here as: opening a stale chat
+ *      ISSUES a user_chats transcript read.
+ *   2. NON-PROMOTION. When that read fails, the held copy may be rendered but must stay marked
+ *      stale (and therefore unpushable). Asserted here as: `txStale` survives on disk.
+ *
+ *  The seeded session carries a deliberately fake JWT, so the real PostgREST read 401s — which is
+ *  exactly the injected failure this journey needs, at the real network layer rather than a stub.
+ *  That makes assertion 2 a genuine production observation, not a simulation.
+ */
+JOURNEYS['stale-transcript-rechecks-server'] = async (mobile) => {
+  const STALE_TX = {
+    v: 1,
+    msgs: [
+      { id: 'sm1', role: 'user', text: 'عقارات الرياض' },
+      { id: 'sm2', role: 'agent', text: 'تم' },
+    ],
+    revealCount: {}, afReceipt: {}, guidedPills: null,
+  };
+  const hist = THREE_CHATS();
+  // h2 «فلل جدة»: this device holds a SHORT copy, and the server reports newer activity for it —
+  // precisely what mergeOne produces on sign-in after the chat was continued on another device.
+  hist[1] = { ...hist[1], transcript: STALE_TX, tRev: hist[1].ts, txStale: true };
+
+  return withPage({ mobile, signedIn: true, history: hist }, async (page, bag) => {
+    const name = `stale-transcript-rechecks-server:${mobile ? 'mobile375' : 'desktop1440'}`;
+    // Registered BEFORE the open so the read cannot be missed. The harness bag only records
+    // /rest/v1/rpc/ calls; this is a PostgREST table read, so it needs its own listener.
+    const reads = [];
+    page.on('request', (r) => {
+      const u = r.url();
+      if (u.includes('/rest/v1/user_chats') && u.includes('transcript')) reads.push(u.slice(0, 160));
+    });
+
+    if (!(await ensureSidebar(page, mobile))) { skip(name, 'mobile sidebar drawer would not open'); return; }
+    const before = await storedHistory(page);
+    if (!(before || []).some((e) => e.id === 'h2' && e.txStale === true)) {
+      skip(name, 'fixture did not survive to disk: no h2 marked txStale to open');
+      return;
+    }
+    if (!(await clickText(page, 'فلل جدة'))) { skip(name, `row not found (${clickReason()})`); return; }
+    await sleep(4000);   // bounded: the read either went out by now or the code never asks at all
+
+    if (reads.length === 0) {
+      defect(name, 'a STALE local transcript was opened WITHOUT consulting the server',
+        'openSaved short-circuited on the present-but-stale copy, so txStale never engaged — the user '
+        + 'is shown the shorter conversation and the next turn pushes it over the server\'s newer one');
+    } else {
+      pass(name, `opening a stale chat re-checked the server (${reads.length} transcript read(s))`);
+    }
+
+    // NON-PROMOTION. The read above fails (fake JWT → 401), so the held copy is unverified: it may
+    // be rendered, but clearing txStale would make it pushable over the server's newer copy.
+    const after = await storedHistory(page);
+    const entry = (after || []).find((e) => e.id === 'h2');
+    if (!entry) {
+      defect(name, 'the opened chat vanished from disk', `${(before || []).length} → ${(after || []).length} rows`);
+    } else if (entry.txStale !== true) {
+      defect(name, 'an UNVERIFIED transcript was PROMOTED (txStale cleared)',
+        'the read failed, so the server copy is unknown — clearing the flag makes this short copy '
+        + 'pushable and the newer server conversation is overwritten on the next meta edit');
+    } else {
+      pass(name, 'a failed re-check left the copy marked stale (still unpushable)');
+    }
+    if ((after || []).length !== (before || []).length) {
+      defect(name, 'opening a stale chat changed the row count',
+        `${(before || []).length} → ${(after || []).length}`);
+    }
+    { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error opening a stale chat', errs.join(' | ')); }
+  });
+};
 
 const engines = ['chromium', 'webkit', 'firefox'].filter(engineAvailable);
 console.log(`ENGINES AVAILABLE HERE: ${engines.join(', ') || 'none'}`);
@@ -2064,6 +2817,309 @@ for (const e of ['webkit', 'firefox']) {
     + `It is covered by the per-engine matrix in .github/workflows/journey-sweep.yml; a run that never `
     + `saw that workflow's result has no evidence about ${e}.`);
 }
+
+/** LEAVING THE AGENT AND COMING BACK GIVES A GENUINELY NEW CONVERSATION (ops_incident #341).
+ *
+ *  WHY THIS EXISTS. stop()'s filter-origin branch erases the transcript and router.replace('/')s
+ *  away. Whether the conversation-scoped refs it used to skip (chatIdRef, afCarryRef,
+ *  pendingRefineRef, saidRef, askCountRef, `completed`, the ageFlowTokenRef bump) survived that
+ *  navigation depended entirely on whether the agent screen UNMOUNTS — which a static read cannot
+ *  settle, and which #341 therefore recorded as UNDETERMINED for five days. stop() now routes
+ *  through resetConversationState() so it is correct either way (barrier: §F4 of
+ *  verify-conversation-state-never-inherited.ts), but the navigation model itself is load-bearing
+ *  for more than that one branch and nothing was watching it. This watches it.
+ *
+ *  THE ORACLE IS THE TYPING, NOT THE PRESENCE. A greeting being on screen does NOT discriminate:
+ *  if the screen persisted, `msgs` still holds the greeting from the previous visit, so the text is
+ *  there either way and an innerText check passes in both worlds. The greeting is TYPED (agent.tsx's
+ *  Typer), so a fresh conversation reveals it progressively — measured on production 2026-09-20,
+ *  Chromium, fresh context per rep, 4/4 across both viewports: the paragraph grows 0 → 141 chars
+ *  over ~1.5 s. A persisted screen would show it whole on the first sample. That growth is the only
+ *  thing separating "a new conversation" from "the one I abandoned, still sitting here".
+ *
+ *  IF THIS EVER GOES RED, read it as "the navigation model changed", not as "the greeting broke".
+ *  A tab navigator, a keep-alive, or a shared layout would all make the screen persist. That is a
+ *  legitimate product change — and it is exactly the change under which stop()'s pre-#341 code
+ *  would have stranded the user in the abandoned chat. So: re-verify the conversation exits still
+ *  reset (§F4 covers stop; startFresh and New Chat have their own), then re-oracle this journey on
+ *  whatever the new model makes observable. Do not simply widen it until it is quiet.
+ */
+JOURNEYS['agent-round-trip-is-a-fresh-conversation'] = async (mobile) => withPage({ mobile }, async (page) => {
+  const name = `agent-round-trip-is-a-fresh-conversation:${mobile ? 'mobile375' : 'desktop1440'}`;
+  // THE FULL LITERALS, NOT A HAND-TYPED PREFIX. The first draft matched on «أنا إزهله», which is a
+  // SUBSTRING of the greeting rather than a string in src/ — so a reworded greeting would have left
+  // this journey skipping at «no greeting on the first visit» forever, quietly, which is PART 9.5's
+  // exact failure. verify-e2e-targets-still-exist-in-the-product.ts caught it. Both variants the
+  // app can send are declared whole so that barrier can check them; the prefix is DERIVED, so a
+  // rename turns the suite red at the renaming PR instead of turning this journey into a no-op.
+  const GREETINGS = [
+    'أنا إزهله، مساعدك العقاري في المملكة العربية السعودية. أخبرني بما تبحث عنه وسأجد لك الإعلانات.',
+    'أنا إزهله، أساعد فقط في العقارات داخل المملكة العربية السعودية. أخبرني بما تبحث عنه، أو اضغط «تصفية» في الأعلى للبحث بالتفاصيل.',
+  ];
+  const PREFIXES = GREETINGS.map((g) => g.slice(0, 9));
+  // The greeting is TYPED, so the paragraph is a PREFIX of its literal for most of the reveal —
+  // length of the line that starts with it is the only thing that can be read mid-animation.
+  const greetLen = async () => {
+    const b = await bodyText(page).catch(() => '');
+    for (const pre of PREFIXES) {
+      const i = b.indexOf(pre);
+      if (i >= 0) return (b.slice(i).split('\n')[0] || '').length;
+    }
+    return 0;
+  };
+
+  await gotoOrRetryTransport(page, `${BASE}/`);
+  await settle(page);
+  await sleep(3000);
+  // Enter through the UI, the way a person does. A direct /agent deep link is deliberately sent
+  // Home (src/lib/webRefreshRoute.ts, owner 2026-08-16), so goto() would measure the wrong screen.
+  if (!(await clickText(page, 'الوسيط الذكي', { exact: false }))) {
+    skip(name, `the agent tab was not clickable (${clickReason()})`); return;
+  }
+  await sleep(5000);
+  if (!page.url().includes('/agent')) { skip(name, `the agent tab did not land on /agent (${page.url()})`); return; }
+  if (!(await greetLen())) { skip(name, 'no greeting on the first visit — nothing to compare a return against'); return; }
+
+  if (!(await clickText(page, 'تصفية', { exact: false }))) {
+    skip(name, `«تصفية» was not clickable, so the round trip never happened (${clickReason()})`); return;
+  }
+  await sleep(2500);
+  if (page.url().includes('/agent')) { skip(name, 'still on /agent after «تصفية» — the trip did not leave'); return; }
+
+  if (!(await clickText(page, 'الوسيط الذكي', { exact: false }))) {
+    skip(name, `the agent tab was not clickable on the way back (${clickReason()})`); return;
+  }
+  // Sample from the instant of return: a fresh conversation starts at 0 and grows.
+  const samples = [];
+  for (let i = 0; i < 24; i++) { samples.push(await greetLen()); await sleep(150); }
+  const first = samples[0], max = Math.max(...samples);
+
+  if (!page.url().includes('/agent')) { skip(name, 'the return leg did not land on /agent'); return; }
+  if (max === 0) {
+    defect(name, 'returning to the agent showed NO greeting at all',
+      `the round trip landed on /agent but no greeting ever appeared (24 samples over ~3.6s, all 0). `
+      + `A blank chat with no greeting is what ops_incident #341 predicted for a screen that persisted `
+      + `with greetedRef still true — check the conversation exits before touching this journey.`);
+  } else if (!(first < max)) {
+    defect(name, 'the greeting was NOT typed fresh on return — the conversation was inherited, not new',
+      `the greeting paragraph was already ${first} chars on the first sample and peaked at ${max}, so it `
+      + `was never re-typed: the agent screen kept its previous instance across the round trip. Every `
+      + `conversation-scoped ref survived with it. samples=[${samples.slice(0, 12).join(',')}]`);
+  } else {
+    pass(name, `the round trip produced a genuinely new conversation (greeting typed fresh, ${first} → ${max} chars)`);
+  }
+});
+
+/** J33 — BROWSER FORWARD. PART 1 names «browser Back/Forward behaves»; before this journey existed,
+ *  `goForward` appeared ZERO times anywhere in `e2e/` or `scripts/` — a surface this routine's own
+ *  spec lists, with no journey that had ever pressed it (PART 1's «has any journey ever DRIVEN it»
+ *  question, 2026-09-26).
+ *
+ *  WHAT IT ASSERTS, and what it deliberately does not. The owner-locked rule is 2026-08-16's: a
+ *  navigation that is not a user search action must produce «no duplicate AI request, duplicate
+ *  property-search RPC, duplicate conversation message, duplicate analytics event, or duplicate saved
+ *  conversation» (src/lib/appSession.ts). Back and Forward are both same-document popstate hops, so
+ *  `isAppSessionStarted()` is TRUE for both — the module flag resets only on a DOCUMENT load — which
+ *  is exactly the state in which a `?filter=` left in the URL WOULD re-execute. `consumeSearchParams()`
+ *  is what makes that safe, and this journey is the only thing that watches it hold across a history
+ *  hop.
+ *
+ *  Measured on production before it was written, 2/2 desktop: «بحث» → `/agent` with the params already
+ *  consumed (bare URL), ONE results-class RPC; Back → `/` with ZERO further results calls and ZERO
+ *  edge-function calls; Forward → `/agent`, again ZERO and ZERO, landing on the greeting screen with a
+ *  composer.
+ *
+ *  It does NOT assert that Forward restores the results. For a guest nothing is persisted, and
+ *  re-running the search to repopulate the screen is the precise thing rule 1 forbids — so «Forward
+ *  shows a blank chat» is the owner's design showing through, not a defect, and pinning either
+ *  behaviour here would be inventing a product decision (PART 9's «a barrier that pins a quirk as
+ *  product behaviour»). What is pinned is: no re-execution, and not stranded. */
+/** TOKEN EXPIRY MUST NOT WITHHOLD THE GUEST'S OWN AFFORDANCES (PART 1 "token expiry"; PART 5 shape
+ *  #12, a loading state that never resolves with no recovery path).
+ *
+ *  THE SURFACE HAD ZERO JOURNEY COVERAGE until 2026-09-27, which is the PART 1 header's own warning
+ *  — «a surface this file names can still have zero coverage» — landing on an AUTH row rather than on
+ *  read-aloud. `authChecked` gates five things in src/store.tsx (the local history restore, the
+ *  server pull, the sign-in card, the cookie-consent banner, the intro), and the launch restore
+ *  awaited supabase.auth.getSession() with no timeout and no .catch(). getSession() is not the
+ *  local-only read its name suggests: on an expired session auth-js calls _callRefreshToken over the
+ *  NETWORK. So an expired token parked the app in a state no gate expects —
+ *  `user === null && authChecked === false` — rendering as a guest while withholding every
+ *  affordance a guest is supposed to get, and emitting no error at all.
+ *
+ *  THE ORACLE IS A DIFFERENTIAL AGAINST A TRUE GUEST, not an absolute. PART 9.1 condition 3 asks for
+ *  the same served bundle checked somewhere else; arm A IS that check, in the same run and the same
+ *  engine. Both controls are gated on `authChecked && !user`, so a true guest renders BOTH and an
+ *  expired session that settled honestly must render them too. Asserting "cookie banner present"
+ *  alone would go red on the day the product legitimately stops showing it; asserting A === C stays
+ *  true through that change and still catches the wedge.
+ *
+ *  ELEMENTS, NEVER A BODY SUBSTRING (ops_incident #787): [data-testid=…], not text matching.
+ *  DESKTOP ONLY for the sign-in card: shouldShowSignInCard requires `docked`, so at 375px its
+ *  absence would mean the breakpoint, not the gate. The cookie banner is checked at both.
+ *
+ *  `signedIn: true` IS LOAD-BEARING ALONGSIDE `session`, and leaving it out is a silent false
+ *  pass: seedInitScript returns at `if (!wantAuth) return;` before it writes the auth slot, so a
+ *  session override with no signedIn seeds NOTHING and both arms below run as plain guests —
+ *  which renders the guest controls and reads as a clean green. Measured 2026-09-27: this
+ *  journey passed 4/4 against the UNFIXED production bundle that way, having asserted nothing
+ *  (PART 9.5's «ask what it actually asserted»). The true-guest control arm cannot catch it,
+ *  because a fixture that seeds nothing IS the control arm. */
+JOURNEYS['expired-token-still-opens-the-gate'] = async (mobile) => {
+  const name = `expired-token-still-opens-the-gate:${mobile ? 'mobile375' : 'desktop1440'}`;
+  // Both controls animate in, so the read waits on a CONDITION rather than a fixed sleep (PART 11.2):
+  // poll until the pair stops changing, from a budget generous enough to clear auth-js's own retry
+  // window (30 000 ms) — the fix is supposed to beat that by 5×, and the point is to measure whether
+  // it does, not to give it a deadline it cannot miss.
+  // THE WATCH MAY NOT END BEFORE THE PRODUCT'S OWN BOUND HAS HAD ITS CHANCE (🦅 Falcon 2026-10-16). The loop
+  // used to stop after three identical reads, i.e. ~4 s in, while the product deliberately holds the gate
+  // up to GETSESSION_TIMEOUT_MS AFTER MOUNT (6 s + bundle load + the cards' entrance). Reproduced on
+  // production that day, blocked-refresh arm: 0/0 at 3 s and 8 s, 1/1 at 15 s — the gate opened, the
+  // journey had already stopped looking and filed «never opened» every day for 19 days. The floor is
+  // READ from src/lib/sessionRestore.ts so it moves with the product, plus a 10 s load/animation margin.
+  const boundMs = Number((readFileSync(new URL('../../src/lib/sessionRestore.ts', import.meta.url), 'utf8')
+    .match(/GETSESSION_TIMEOUT_MS\s*=\s*([\d_]+)/) || [])[1]?.replace(/_/g, ''));
+  if (!Number.isFinite(boundMs) || boundMs <= 0) throw new Error('GETSESSION_TIMEOUT_MS not readable from src/lib/sessionRestore.ts');
+  const minWatch = Math.ceil((boundMs + 10_000) / 1000);
+  const gateState = async (page) => {
+    let last = null, stable = 0;
+    for (let i = 0; i < 40 && (stable < 3 || i < minWatch); i++) {
+      await sleep(1000);
+      const now = await page.evaluate(() => ({
+        cookie: document.querySelectorAll('[data-testid="cookie-consent"]').length,
+        signin: document.querySelectorAll('[data-testid="signin-card"]').length,
+      }));
+      const key = `${now.cookie}/${now.signin}`;
+      stable = key === last ? stable + 1 : 0;
+      last = key;
+      if (i >= 8 && now.cookie && (mobile || now.signin)) return { ...now, atMs: (i + 1) * 1000 };
+    }
+    const [cookie, signin] = last.split('/').map(Number);
+    return { cookie, signin, atMs: null };
+  };
+
+  // ARM A — a true guest. This is what "the gate opened and there is no user" LOOKS like.
+  const guest = await withPage({ mobile }, async (page) => {
+    await gotoOrRetryTransport(page, BASE + '/');
+    return gateState(page);
+  });
+  if (!guest.cookie) {
+    // Without a working control arm the comparison below proves nothing in either direction — and a
+    // run that asserted nothing is a SKIP, never a pass (PART 9.5).
+    skip(name, `the true-guest control rendered no cookie-consent card (cookie=${guest.cookie} `
+      + `signin=${guest.signin}) — the product may have changed what a guest sees, so this run has no `
+      + `baseline to compare an expired session against`);
+    return;
+  }
+
+  // ARM C — expired with an empty refresh_token: getSession() REJECTS. Terminal on the old build.
+  // ARM D — expired with the refresh REQUEST failing: getSession() never settles while auth-js
+  //         retries. Self-healing on the old build, but only after >40s of a dead-looking app.
+  for (const [arm, opts] of [
+        ['rejected refresh (refresh_token: "")', { mobile, signedIn: true,
+                                                  session: expiredSession('empty-refresh') }],
+        ['blocked refresh request',              { mobile, signedIn: true,
+                                                  session: expiredSession('server-rejects'),
+                                                  abort: '**/auth/v1/token**' }]]) {
+    const got = await withPage(opts, async (page) => {
+      await gotoOrRetryTransport(page, BASE + '/');
+      return gateState(page);
+    });
+    const want = mobile ? guest.cookie > 0 : guest.cookie > 0 && guest.signin > 0;
+    const have = mobile ? got.cookie > 0 : got.cookie > 0 && got.signin > 0;
+    if (want && !have) {
+      defect(name, `an expired session withheld the guest affordances (${arm})`,
+        `true guest: cookie-consent ×${guest.cookie}, signin-card ×${guest.signin} — `
+        + `expired session: cookie-consent ×${got.cookie}, signin-card ×${got.signin}. `
+        + `Same served bundle, same engine, same viewport, one variable changed: the stored session. `
+        + `Both controls are gated on authChecked && !user, and the user IS null here, so the gate `
+        + `never opened — the app is in user===null && authChecked===false, which renders as a guest `
+        + `while withholding what a guest gets, with no error shown. Root cause class: an auth read `
+        + `that can hang or reject, awaited unbounded (src/lib/sessionRestore.ts owns the bound).`);
+    } else {
+      pass(name, `an expired session still opened the gate (${arm}) — cookie-consent ×${got.cookie}, `
+        + `signin-card ×${got.signin}, settled${got.atMs ? ` by ${got.atMs}ms` : ' (stable)'}, `
+        + `matching the true-guest control ×${guest.cookie}/×${guest.signin}`);
+    }
+  }
+};
+
+JOURNEYS['back-forward-no-duplicate-search'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `back-forward-no-duplicate-search:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const results = (from) => bag.rpc.slice(from).filter((r) => classifySearchRpc(r) === 'results').length;
+  // The edge function is the AI request half of the owner's rule; bag.rpc only carries /rest/v1/rpc/.
+  const ai = [];
+  page.on('request', (r) => { if (r.url().includes('/functions/v1/')) ai.push(r.url().split('/functions/v1/')[1].split('?')[0]); });
+
+  if (!(await primeSearch(page))) { skip(name, 'search could not be primed'); return; }
+  const homeUrl = page.url();
+  const beforeSearch = bag.rpc.length;
+  await page.getByText('بحث', { exact: true }).last().click().catch(() => {});
+  const submitted = await settledCount(() => results(beforeSearch));
+  if (!submitted.settled || submitted.n < 1) {
+    skip(name, `the search never landed (results calls ${submitted.n}, settled=${submitted.settled}) — `
+      + 'there is no history entry to go Back from, so Forward is not reachable');
+    return;
+  }
+  const resultsUrl = page.url();
+  if (resultsUrl === homeUrl) {
+    skip(name, `«بحث» pushed no history entry (${resultsUrl}) — Forward is not applicable on this route`);
+    return;
+  }
+  // THE URL MUST CARRY NOTHING EXECUTABLE ONCE THE HOP IS OVER. This is the same fact
+  // src/lib/webRefreshRoute.ts's hasRestorableQuery() states, asserted on the real URL after a real
+  // press: it is what makes the two history hops below safe, so it is checked before them.
+  if (/[?&](filter|seed)=/.test(resultsUrl)) {
+    defect(name, 'the search intent was left in the URL', `«بحث» landed on ${resultsUrl} with an `
+      + 'unconsumed param — a Back/Forward hop would re-execute it (owner 2026-08-16)');
+  } else pass(name, `«بحث» consumed its params (${resultsUrl}), so no history hop can re-execute it`);
+
+  // ── BACK ──────────────────────────────────────────────────────────────────────────────────────
+  const beforeBack = bag.rpc.length;
+  const aiBeforeBack = ai.length;
+  await page.goBack().catch(() => {});
+  await settle(page);
+  const backUrl = page.url();
+  if (!backUrl.startsWith(BASE)) {
+    note(`${name}: Back left the app origin (${backUrl}) — a fresh context has no prior in-app entry`);
+    pass(name, 'Back left the origin, which is the browser behaving, not the app');
+    return;
+  }
+  const back = await filterHomeState(page);
+  if (back.verdict !== 'home') defect(name, 'Back did not land on the Filter home', `${filterHomeWhy(back)} at ${backUrl}`);
+  else pass(name, `Back landed on the Filter home — ${filterHomeWhy(back)}`);
+  const backQuiet = await stayedAtZero(() => results(beforeBack));
+  if (!backQuiet.zero || ai.length > aiBeforeBack) {
+    defect(name, 'Back re-executed the search', `${backQuiet.peak} results-class RPC(s) and `
+      + `${ai.length - aiBeforeBack} AI call(s) within ${backQuiet.windowMs} ms of a Back — owner `
+      + '2026-08-16 forbids a duplicate search, RPC, AI request or saved conversation from a '
+      + 'navigation that is not a user search');
+  } else pass(name, `Back fired no search: 0 results RPCs, 0 AI calls over a ${backQuiet.windowMs} ms window`);
+
+  // ── FORWARD — the half nothing in this repo had ever pressed ───────────────────────────────────
+  const beforeFwd = bag.rpc.length;
+  const aiBeforeFwd = ai.length;
+  await page.goForward().catch(() => {});
+  await settle(page);
+  const fwdUrl = page.url();
+  const fwd = await filterHomeState(page);
+  if (fwd.verdict === 'blank') {
+    defect(name, 'Forward stranded the user', `${filterHomeWhy(fwd)} at ${fwdUrl}`);
+  } else pass(name, `Forward landed on a rendered screen (${fwdUrl}, ${fwd.bodyLength} chars) — `
+    + 'results are NOT expected back: re-running the search is what the owner rule forbids');
+  const fwdQuiet = await stayedAtZero(() => results(beforeFwd));
+  if (!fwdQuiet.zero || ai.length > aiBeforeFwd) {
+    defect(name, 'Forward re-executed the search', `${fwdQuiet.peak} results-class RPC(s) and `
+      + `${ai.length - aiBeforeFwd} AI call(s) within ${fwdQuiet.windowMs} ms of a Forward — the `
+      + 'appSession gate only sees a DOCUMENT load, so a param left in the URL re-runs on a '
+      + 'same-document history hop');
+  } else pass(name, `Forward fired no search: 0 results RPCs, 0 AI calls over a ${fwdQuiet.windowMs} ms window`);
+  if (/[?&](filter|seed)=/.test(fwdUrl)) {
+    defect(name, 'Forward restored an executable search intent into the URL',
+      `${fwdUrl} — a refresh from here is a page load carrying params`);
+  }
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error across Back/Forward', errs.join(' | ')); }
+});
 
 let ran = 0;
 const perJourney = {};
@@ -2099,6 +3155,7 @@ for (const [key, fn] of Object.entries(JOURNEYS)) {
   }
 }
 
+
 console.log(`\n${'═'.repeat(90)}`);
 console.log(`JOURNEYS RUN: ${ran} on ${ENGINE} in ${Math.round((Date.now() - t0) / 1000)}s`);
 console.log(`REPRODUCTION RATIOS (failed/runs):`);
@@ -2113,9 +3170,30 @@ for (const f of findings) console.log(`  · [${f.journey}] ${f.what}: ${f.detail
 // harness.mjs's registerJourneys() header for the three orphan rows that made this necessary.
 console.log(`LEDGER KEYS OWNED BY THIS RUNNER: ${registerJourneys(Object.keys(JOURNEYS))}`);
 
-// A journey that never executed is recorded as `skip`, never as `pass`.
-for (const [k, v] of Object.entries(perJourney)) {
-  const verb = v.failed ? 'fail' : v.skipped === v.runs ? 'skip' : 'pass';
-  await ledgerRecord(k, verb, `${v.failed}/${v.runs} failed, ${v.skipped} skipped; engines=${engines.join('+')}`);
+// A SINGLE-JOURNEY DEV RUN IS NOT COVERAGE, AND MUST NOT MINT A PERMANENT ROW.
+//
+// JOURNEY_ONLY exists to develop one journey (see this file's header). Writing its result to the
+// ledger anyway has a cost that is invisible from here and lands on someone else: a journey being
+// DEVELOPED is by definition not committed to main yet, so the row it mints is an ORPHAN to
+// verify-journey-ledger-has-no-orphans-live.ts — which runs at the end of every leg of the
+// scheduled per-engine sweep. The author sees a green local run; the next scheduled sweep goes red
+// on an unrelated engine, for a key nothing in main produces.
+//
+// That is not hypothetical. On 2026-09-20 this routine developed `agent-round-trip-is-a-fresh-
+// conversation` with JOURNEY_ONLY at 10:53, and the firefox leg of run 35502346590 failed at
+// 11:00:30 naming exactly those two keys — while its own sweep reported DEFECTS: 0 and every
+// journey passed. The sweep was clean; the ledger was not, because of a dev run.
+//
+// The full sweep is unaffected: ONLY is empty there, so every row is written exactly as before.
+if (ONLY) {
+  console.log(`\nLEDGER: skipped — JOURNEY_ONLY=${ONLY} is a development run, not coverage. `
+    + `A row for a journey that is not on main yet is an orphan, and the scheduled per-engine sweep `
+    + `fails on it. Run the full sweep to record coverage.`);
+} else {
+  // A journey that never executed is recorded as `skip`, never as `pass`.
+  for (const [k, v] of Object.entries(perJourney)) {
+    const verb = v.failed ? 'fail' : v.skipped === v.runs ? 'skip' : 'pass';
+    await ledgerRecord(k, verb, `${v.failed}/${v.runs} failed, ${v.skipped} skipped; engines=${engines.join('+')}`);
+  }
 }
 process.exit(findings.length ? 1 : 0);

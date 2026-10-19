@@ -10,6 +10,18 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { windowBetween } from './lib/sourceWindow.ts';
+
+const SIG_FIELDS = ['type', 'typeGroups', 'types', 'detail', 'priceMin', 'priceMax',
+                    'priceMinRent', 'priceMaxRent', 'areaMin', 'areaMax'] as const;
+
+/** PURE, so a proof can hand it a broken `src/app/index.tsx`. Throws if a marker has moved. */
+export function sigFieldProblems(index: string): string[] {
+  const sig = windowBetween(index, 'const districtNarrowingSig', 'const hasDistrictNarrowing',
+                            'src/app/index.tsx');
+  return SIG_FIELDS.filter((f) => !new RegExp(`query\\.${f}\\b`).test(sig))
+    .map((f) => `the narrowing signature does not cover query.${f}`);
+}
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const indexSrc = readFileSync(join(root, 'src/app/index.tsx'), 'utf8');
@@ -35,7 +47,10 @@ check('clearDistrict called on ≥4 city-mutation sites', (indexSrc.match(/clear
 // of duplicating a fetch the effect would immediately re-trigger anyway. Extended 2026-07-21
 // (PR#167/#175, LIVE) to also thread rentPeriodTok (Rent's Monthly/Yearly toggle), so the same
 // effect/warm-up also live-refreshes District's Top-6 on a Monthly<->Yearly flip.
-check('city-select (via citySelected) warms THIS city’s districts by city_id, Category+Deal+period-scoped (effCategory since count-scope parity 2026-08-14)', /useEffect\(\(\) => \{\s*if \(!citySelected\) return;\s*const cid = citySelected\.cityId;\s*void ensureDistrictOptions\(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope\)/.test(indexSrc));
+// RE-POINTED 2026-09-23 (routine #8, ops_incident #648): the effect now captures the cohort the pool
+// is keyed on before it starts the load (`const cohort = districtCohortSigOf(cid);`), so that the
+// continuation can refuse to write once the user has left it. The assertion is otherwise unchanged.
+check('city-select (via citySelected) warms THIS city’s districts by city_id, Category+Deal+period-scoped (effCategory since count-scope parity 2026-08-14)', /useEffect\(\(\) => \{\s*if \(!citySelected\) return;\s*const cid = citySelected\.cityId;\s*const cohort = districtCohortSigOf\(cid\);\s*void ensureDistrictOptions\(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope\)/.test(indexSrc));
 
 // ── MULTI-SELECT (owner 2026-08-10): several districts, OR semantics, one shared selection state ──
 // The state is an ARRAY and city-mutation clears wipe the WHOLE array (no cross-city carry-over,
@@ -73,17 +88,22 @@ check('district options come from the district_options_ar RPC, Category+Deal-sco
 check('RPC result carries match_values (twin-safe recall)', /match_values/.test(locSrc));
 check('Top-6 = districts with active listings only (listingCount > 0)', /listingCount > 0\)\.slice\(0, k\)/.test(locSrc));
 check('autocomplete searches the COMPLETE cached catalog for the city', /export function matchDistrictsByCityId/.test(locSrc));
-check('empty focus shows the Category+Deal+period-scoped Top-6 via topDistrictsForCityId', /topDistrictsForCityId\(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope\)/.test(indexSrc));
+// RE-POINTED 2026-09-23 (#648): the Top-6 call moved into the one guarded writer, where the city id
+// arrives as the `cityId` parameter rather than the call site's `cid`. Same call, same scope args.
+check('empty focus shows the Category+Deal+period-scoped Top-6 via topDistrictsForCityId',
+  /topDistrictsForCityId\(cityId, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope\)/.test(indexSrc)
+  && /writeDistrictSuggestionsForCohort\(cid, cohort, true\);/.test(indexSrc));
 check('typing filters within the chosen city+scope via matchDistrictsByCityId (cohort-typed)', /matchDistrictsByCityId\(citySelected\.cityId, effDeal, effCategory, rentPeriodTok, v, cohortTypes, cityTableScope\)/.test(indexSrc));
 // Arabic-only: typing the district in English yields NO autocomplete and the same Arabic hint the City
 // field shows (owner UI request 2026-07-18) — every district name is Arabic, so there's nothing to match.
-check('English district input shows the Arabic-only hint and clears suggestions', /const latin = isLatinOnlyInput\(v\);[\s\S]{0,220}?setDistrictSuggestions\(latin \? \[\][\s\S]{0,220}?setDistrictMsg\(latin \? ARABIC_ONLY_MSG/.test(indexSrc));
+check('Arabic UI only: Latin typing is the wrong script there (the English UI matches English names, owner 2026-10-09)', /const wrongScript = \(v: string\) => locale === 'ar' && isLatinOnlyInput\(v\);/.test(indexSrc));
+check('English district input in the Arabic UI shows the Arabic-only hint and clears suggestions', /const latin = wrongScript\(v\);[\s\S]{0,220}?setDistrictSuggestions\(latin \? \[\][\s\S]{0,220}?setDistrictMsg\(latin \? ARABIC_ONLY_MSG/.test(indexSrc));
 
 // ── Dropdown shows the Top-6 WITHOUT listing numbers (owner UI request 2026-07-18). Top-6 is still
 //    SELECTED by active-listing count (asserted above, in locations.ts), but the count is no longer
 //    displayed; every row (incl. zero-listing catalog districts) renders its name unconditionally. ──
 check('district dropdown no longer displays the listing count', !/grouped\(opt\.listingCount\)/.test(indexSrc) && !/\{opt\.listingCount\}/.test(indexSrc));
-check('every district row renders its name unconditionally (zero-listing districts still selectable)', /<Text style=\{\[s\.suggCity, isEmpty && s\.suggCityEmpty\]\}>\{opt\.districtAr\}<\/Text>/.test(indexSrc));
+check('every district row renders its name unconditionally (zero-listing districts still selectable)', /<Text style=\{\[s\.suggCity, x\.suggCity, isEmpty && s\.suggCityEmpty\]\}>\{citySelected \? districtLabel\(citySelected\.cityId, opt\.districtAr\) : opt\.districtAr\}<\/Text>/.test(indexSrc));
 
 // ── Dead-end guard (2026-08-09): a district with ZERO listings for the current deal/category must be
 //    visibly marked, so a user is never silently led into a 0-result pick. The row stays selectable
@@ -101,7 +121,7 @@ check('live counts come from the RESULTS RPC (fetchDistrictEligibleCounts exists
     && /p_limit: 1/.test(remoteSrc);
 })());
 check('per-option match_values OVERRIDE the base q districts (spread order)', /\{ \.\.\.base, p_districts: opt\.matchValues \}/.test(readFileSync(join(root, 'src/data/remote.ts'), 'utf8')));
-check('marking prefers the live full-filter-state count over the scope count', /const live = districtLiveCounts\?\.\[opt\.districtAr\];\s*\n\s*const isEmpty = live != null \? live === 0 : opt\.listingCount === 0/.test(indexSrc));
+check('marking prefers the live full-filter-state count over the scope count', /const live = districtLiveCounts\?\.\[opt\.districtAr\];\s*\n\s*const isEmpty = opt\.scopeKnown === false \? false : live != null \? live === 0 : opt\.listingCount === 0/.test(indexSrc));
 // The signature must cover the NORMAL narrowing (type/group/types/beds/size/price/area) AND every
 // ADVANCED answer. The advanced half was added 2026-08-20 by the AF major certification: without it
 // an advanced-only narrowing never triggered the live-count path at all (falling back to
@@ -114,14 +134,18 @@ check('marking prefers the live full-filter-state count over the scope count', /
 // form would silently read undefined, dropping group changes out of the invalidation signature.
 // Field-by-field, not a contiguous literal: the combined-mode Rent budget (priceMinRent/MaxRent) was
 // inserted into this list on 2026-08-22 and an order-sensitive regex would have rejected the fix.
+// THE WINDOW IS FAIL-CLOSED (repaired 2026-09-20, routine #10). It was
+// `indexSrc.slice(indexSrc.indexOf(START), indexSrc.indexOf(END))`, and a missing END marker reads
+// -1, which `slice` takes as an offset from the end of the string — so the window silently became
+// the whole 200KB screen and every `query.<field>` needle below was found in unrelated source. The
+// sibling guard over this same signature, verify-district-counts-honest.ts, was watched printing
+// `PASS … includes query.priceMinRent` with that field DELETED, under a green 486-check suite. Two
+// guards, one invariant, the same blindness. `windowBetween()` throws instead.
 {
-  const sigBlock = indexSrc.slice(indexSrc.indexOf('const districtNarrowingSig'),
-                                  indexSrc.indexOf('const hasDistrictNarrowing'));
-  for (const f of ['type', 'typeGroups', 'types', 'detail', 'priceMin', 'priceMax',
-                   'priceMinRent', 'priceMaxRent', 'areaMin', 'areaMax']) {
-    check(`counts use the CURRENT filter state — signature covers query.${f}`,
-      new RegExp(`query\\.${f}\\b`).test(sigBlock));
-  }
+  const problems = sigFieldProblems(indexSrc);
+  check('counts use the CURRENT filter state — the narrowing signature covers every field',
+    problems.length === 0);
+  for (const p of problems) console.log(`      ${p}`);
 }
 // The advanced half is SPREAD from AF_PREDICATE_FIELDS (2026-09-01), not re-typed field by field:
 // naming three of the eleven here left a twelfth predicate free to stop invalidating these counts
@@ -160,6 +184,29 @@ check('onSearch carries the summed listingCount of all picked districts', /distr
   const searchSrc = readFileSync(join(root, 'src/data/search.ts'), 'utf8');
   check('SearchQuery carries districtListingCount', /districtListingCount\?: number/.test(searchSrc));
   check('0-results diagnosis uses the real district count, not the empty pool', /distCount === 0[\s\S]{0,400}?widen the area[\s\S]{0,400}?q\.type[\s\S]{0,260}?broaden the type/.test(searchSrc));
+}
+
+// ── MUTATION PROOFS over the narrowing-signature window, against the REAL shipped file ──────────
+{
+  const mustCatch = (what: string, caught: boolean) => {
+    if (!caught) failed++;
+    console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
+  };
+  const threw = (mutant: string) => {
+    try { sigFieldProblems(mutant); return false; } catch { return true; }
+  };
+  const RENT_PAIR = 'query.priceMinRent, query.priceMaxRent, ';
+  const END_MARKER = 'const hasDistrictNarrowing = useMemo(';
+  const BLINDED = 'const [hasDistrictNarrowing] = useMemo(';
+
+  mustCatch('the combined-mode Rent budget being dropped from the signature',
+    indexSrc.includes(RENT_PAIR) && sigFieldProblems(indexSrc.replace(RENT_PAIR, '')).length === 2);
+  mustCatch('the window END marker being refactored away — an UNKNOWN, never a green',
+    indexSrc.includes(END_MARKER) && threw(indexSrc.replace(END_MARKER, BLINDED)));
+  mustCatch('the defect AND the blinding refactor together (the 2026-09-20 surviving mutant)',
+    threw(indexSrc.replace(RENT_PAIR, '').replace(END_MARKER, BLINDED)));
+  mustCatch('…while the SHIPPED file is NOT flagged (the predicate is not vacuously red)',
+    sigFieldProblems(indexSrc).length === 0);
 }
 
 console.log(failed === 0 ? '\n✓ all district-field assertions passed' : `\n✗ ${failed} district-field assertion(s) FAILED`);

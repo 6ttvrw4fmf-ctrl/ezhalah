@@ -63,6 +63,10 @@ export type Listing = {
   // Real URL on the source platform — when present, the in-app browser redirects the
   // user OUT to this page. Absent for the bundled mock catalog (synthetic preview only).
   source_url?: string;
+  // The raw table this row came from (e.g. 'wasalt_residential_listings'): with `id` it names ONE
+  // row of search_listings_ar, which is how the in-app ad page reads the source's own pin and finds
+  // the same ad on other sites (src/data/adPageData.ts). Set on every fetched listing; undefined on mocks.
+  sourceTable?: string;
   // Rich extras for the new residential card design — all optional. Mock listings don't carry them;
   // real Aqar listings populate them from the rich `aqar_residential_listings` table. (user request.)
   ad_number?: string;
@@ -91,6 +95,16 @@ export type Listing = {
   // (that stays keyed on the canonical index value); display-only, city-name-guarded. undefined for
   // every non-Gathern source. (Gathern Tier-1.)
   districtArFallback?: string | null;
+  // The resolved canonical index district (remote.ts's own `canonDistrict`) — kept SEPARATELY from
+  // `district` above, which prefers raw source text for display (owner 2026-07-06, source-accurate)
+  // and can therefore diverge from the catalog match: e.g. a raw scraped label like "الضاحية الخامس"
+  // that the index correctly resolved to "حي هجر الخامس" via geocoding, not text similarity. STRICT
+  // district matching (listingInDistricts in search.ts) must compare against THIS field — comparing
+  // against the raw-preferring `district` silently drops index-matched listings whenever a source's
+  // own free-text label doesn't textually resemble its resolved district (found live 2026-09-12:
+  // amlakalahsa land listings in "حي هجر الخامس" answered "no results in this district"). '' when
+  // the index has no confident district match, same convention as `district`.
+  districtCanonical?: string;
   // Wasalt-only "Additional Information" panel — label/value pairs rendered on the card.
   // Aqar rows leave this null and skip the panel. (user: rich Wasalt facts on the card.)
   additional_info?: { key: string; label: string; value: string }[] | null;
@@ -165,6 +179,23 @@ export function derivedTotalFromPerMeter(
   const total = pricePerMeter * areaM2;
   if (!Number.isFinite(total) || total > DERIVED_TOTAL_MAX) return null;              // (d)
   return total;
+}
+
+// The working behind a derived total, so the card can SHOW it (owner 2026-09-26: "in the
+// description it should be like the price per meter × the size = the total price").
+// Routed through derivedTotalFromPerMeter itself — same inputs, same guards, same multiplication —
+// so the equation on the card and the price on the card are one computation and can never
+// disagree. Deliberately NOT a second, inline copy of the multiplication: two copies of the
+// arithmetic is exactly how the display and the searchable total would drift apart (and the
+// per-metre arithmetic ban in verify-ppm-searchable-and-filter-safe.ts forbids one anyway). Only meaningful for a row
+// the caller already knows is derived (priceIsDerived), which is why deal/published-price are
+// passed as the values that make the sale-only and source-silent guards pass.
+export function derivedTotalEquation(
+  pricePerMeter: unknown,
+  areaM2: unknown,
+): { perMeter: number; area: number; total: number } | null {
+  const total = derivedTotalFromPerMeter('Buy', null, null, pricePerMeter, areaM2);
+  return total === null ? null : { perMeter: pricePerMeter as number, area: areaM2 as number, total };
 }
 
 // True when the price shown for this row is OUR arithmetic rather than the advertiser's number.

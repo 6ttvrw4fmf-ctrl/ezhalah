@@ -30,6 +30,7 @@ Field map (Satel item → our schema):
   status "Rented out"          → active=false + post-upsert missing_count=3 pin (leased units
                                  stay in the API feed forever, so the seen-based prune can never
                                  catch them; see GONE_STATUSES + _pin_sold_inactive)
+  status "Available"           → active=true. Any OTHER status is held (AVAILABLE_STATUSES).
 
 PDPL: the Satel API returns NO advertiser/agent name or phone — but we still defensively redact
 any phone-like token from title/description and never store contact fields.
@@ -69,8 +70,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize  # noqa: E402
-
+from scrapers.common import db, normalize, sold_pin  # noqa: E402
 SOURCE = "Satel"
 AD_PREFIX = "ST"
 
@@ -101,10 +101,16 @@ COMMERCIAL_TYPES = {"Office", "Showroom", "Shop", "Warehouse"}
 # Source `status` values that mean the unit is GONE from the market. Satel keeps leased units in
 # the API feed with status "Rented out" instead of removing them, so the seen-based prune can
 # never deactivate them. Live-DB audit (2026-07-09) shows exactly two distinct statuses across
-# both Satel tables: 'Available' and 'Rented out'. Gate ONLY on the confirmed gone-value,
-# compared case-insensitively on the trimmed string; ANY unknown/new status stays ACTIVE
-# (neutrality rule: never over-hide a listing on a value we haven't confirmed means off-market).
+# both Satel tables: 'Available' and 'Rented out'. Re-measured on the live feed 2026-10-02:
+# Available 66 · Rented out 167 · nothing else (postStatus is «Published» on all 233 — furniture).
+# Compared case-insensitively on the trimmed string.
 GONE_STATUSES = {"rented out"}
+# ALLOWLIST (crawler audit 2026-10-02). The old rule was a denylist of one: any status that was not
+# "Rented out" — Sold, Reserved, a blank, a renamed value — was upserted ACTIVE. A status this
+# crawler has never measured is neither: the row is HELD (not written, so never re-asserted alive;
+# kept in the prune's seen-set, so never aged out on a value we cannot read) and counted in the
+# run notes for a human to classify.
+AVAILABLE_STATUSES = {"available"}
 
 # Phone / WhatsApp patterns to REDACT from any free text (PDPL).
 _PHONE_RE = re.compile(
@@ -294,6 +300,15 @@ def _resolve_city_region(raw_city_ar: str, raw_city_en: str) -> Optional[str]:
     return raw_city_en or "Riyadh"
 
 
+def _attach_detail(row: dict, d: Optional[dict]) -> None:
+    """The ad's own record: its gallery when it answered; when it did not (404 included), the row
+    is still written from the feed but the list sighting does not certify it (2026-10-03)."""
+    if d:
+        row["photo_urls"] = _photo_urls(d) or row["photo_urls"]
+    else:
+        db.mark_presence_unproven(row)
+
+
 def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
     """Map one Satel API item to a canonical row. Returns (row, category, gone)."""
     addr = p.get("address") or {}
@@ -408,7 +423,8 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
     return row, category, gone
 
 
-def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+def _pin_sold_inactive(table: str, ad_numbers: list[str],
+                       seen_ad_numbers: list[str]) -> None:
     """Make source-confirmed RENTED-OUT rows survive the nightly auto_recover_false_inactive() sweep.
 
     That pg_cron job (05:20 UTC) re-activates any active=false row with
@@ -419,13 +435,18 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     prune_unseen() never undoes this: it only selects active=true rows and only updates ids NOT
     in its seen set. When a unit becomes available again, its next upsert carries active=true
     and the upsert's own missing_count=0 reset applies — the pin is only written for ids that
-    are rented out THIS crawl."""
-    for i in range(0, len(ad_numbers), 200):
-        db._execute(
-            db.sb().table(table).update({"active": False, "missing_count": 3})
-            .in_("ad_number", ad_numbers[i:i + 200]),
-            what=table + ".sold_pin",
-        )
+    are rented out THIS crawl.
+
+    The `seen_ad_numbers` half is what makes this oracle three-valued instead of one-way: the same
+    status field that publishes a removal also publishes the reversal, and until 2026-09-23 the
+    reversal was read, used, and thrown away — leaving ops_lifecycle_false_resurrection() with a
+    GONE latest verdict that no amount of correct behaviour could clear. See scrapers/common/
+    sold_pin.py. It writes evidence only: never active, never missing_count, never
+    last_verified_alive_at.
+    """
+    sold_pin.pin_source_confirmed_gone(
+        table, ad_numbers, oracle="satel.sold_pin.property_status", seen_ad_numbers=seen_ad_numbers,
+    )
 
 
 def main() -> int:
@@ -459,6 +480,10 @@ def main() -> int:
     sold_com: list[str] = []
     gone_ct = 0
     seen = 0
+    held: dict[str, int] = {}          # unmeasured status → count (not upserted, not pruned)
+    # Held ids are kept PER CATEGORY: each table's prune seen-set gets only its own. A held
+    # residential id in the commercial seen-set would defeat prune_unseen's 0-seen breaker.
+    held_ads: dict[str, set[str]] = {"residential": set(), "commercial": set()}
     try:
         for p in data:
             row, cat, gone = map_listing(p)
@@ -466,15 +491,18 @@ def main() -> int:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
+            status = (p.get("status") or "").strip()
+            if not gone and status.lower() not in AVAILABLE_STATUSES:
+                held[status or "(blank)"] = held.get(status or "(blank)", 0) + 1
+                held_ads["commercial" if cat == "commercial" else "residential"].add(row["ad_number"])
+                continue
             # Full gallery lives ONLY on the detail endpoint (list imageList = featured image
             # only). Active listings get one extra throttled GET (~226/run, no auth, no proxy);
             # rented-out units keep the featured image without the extra call. On any detail
             # failure/empty gallery the featured image stays — never blank an existing photo.
             pnum = (p.get("propertyNumber") or "").strip()
             if not gone and pnum:
-                d = _fetch_detail(s, pnum)
-                if d:
-                    row["photo_urls"] = _photo_urls(d) or row["photo_urls"]
+                _attach_detail(row, _fetch_detail(s, pnum))
             (com if cat == "commercial" else res).append(row)
             if gone:
                 gone_ct += 1
@@ -484,6 +512,11 @@ def main() -> int:
                 break
 
         print(f"Mapped {len(res)} residential + {len(com)} commercial ({gone_ct} rented out)")
+        if held:
+            print(f"  held, status not a measured value (not upserted, not pruned): {held}")
+            if not (res or com):
+                # fail closed: the status field is unreadable on the whole feed → write nothing.
+                raise RuntimeError(f"no row carries a known status — status field unreadable: {held}")
 
         if args.dry:
             for r in (res + com)[:8]:
@@ -501,10 +534,10 @@ def main() -> int:
             db.upsert_satel_commercial_batch(com)
         # Pin rented-out rows immediately after the upsert (which reset their missing_count to 0),
         # so the 05:20 auto-recover job can never flip them back to active. See _pin_sold_inactive.
-        if sold_res:
-            _pin_sold_inactive("satel_residential_listings", sold_res)
-        if sold_com:
-            _pin_sold_inactive("satel_commercial_listings", sold_com)
+        _pin_sold_inactive("satel_residential_listings", sold_res,
+                           [r["ad_number"] for r in res])
+        _pin_sold_inactive("satel_commercial_listings", sold_com,
+                           [r["ad_number"] for r in com])
 
         pruned = 0
         if not is_small:
@@ -512,12 +545,25 @@ def main() -> int:
             # Rented-out rows were upserted with active=False + pinned missing_count=3 above;
             # prune_unseen never touches them (it only reads active=true rows and only updates ids
             # ABSENT from the seen set), so passing their ad_numbers in rows_seen is harmless.
-            for tbl, rows_seen in (("satel_residential_listings", res), ("satel_commercial_listings", com)):
+            # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+            # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+            # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+            # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+            # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+            superseded = db.retire_superseded_siblings(
+                res_table="satel_residential_listings", com_table="satel_commercial_listings",
+                res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+                source=SOURCE)
+            if superseded:
+                print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
+            for tbl, rows_seen, kind in (("satel_residential_listings", res, "residential"),
+                                         ("satel_commercial_listings", com, "commercial")):
                 if args.type != "all":
                     want = "commercial" if "commercial" in tbl else "residential"
                     if args.type != want:
                         continue
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen} | held_ads[kind], source=SOURCE)
                 if n < 0:
                     print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
                 else:
@@ -531,7 +577,7 @@ def main() -> int:
         healthy = True
         if run_id:
             healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
-                       notes=f"rented_out={gone_ct} pruned={pruned}", check_tables=["satel_residential_listings", "satel_commercial_listings"])
+                       notes=f"rented_out={gone_ct} pruned={pruned}" + (f" held_unknown_status={held}" if held else ""), check_tables=["satel_residential_listings", "satel_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

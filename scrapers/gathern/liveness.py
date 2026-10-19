@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -111,11 +112,120 @@ def resolve_kill_cap(active_now: int, override: int = 0) -> int:
 
 
 def is_anomaly(kill_count: int, kill_cap: int) -> bool:
-    """True iff this run's kill batch exceeds the cap → QUARANTINE (record strikes, inactivate NOTHING).
-    This is what stops a partial/blocked/site-wide-404 event from wiping live inventory: on
-    2026-07-27 a 776-row batch drained all three grace strikes within an hour; with this gate that
-    batch (>> max(150, 2%)) inactivates 0 rows and flags the run for owner review instead."""
+    """True iff this run's kill batch exceeds the cap. Over the cap a run never inactivates MORE than
+    the cap; whether it inactivates anything at all is `plan_kills`' decision (spike vs backlog).
+    On 2026-07-27 a 776-row batch drained all three grace strikes within an hour — that shape is a
+    SPIKE and still inactivates 0 rows."""
     return kill_count > kill_cap
+
+
+# ── DRAIN MODE (2026-09-28, Lifecycle Engineer's first run) ──────────────────────────────────────
+# Measured that day: 19,457 visible gathern rows with 1 strike, 1,141 with 3, 11 of 15 sampled
+# visible ads dead at source against 5/5 live controls — and nothing hidden. The cap quarantined
+# the WHOLE batch whenever a run held more 3-strike kills than it (09-24: would_inactivate=1143
+# cap=568 -> 0), so a genuine standing backlog could never drain: every run re-met the same wall.
+# Precedent copied, not invented: scrapers/common/cleanup.py drain_backlog + drain_spike_factor.
+# A TRUSTED run over the cap now inactivates the `kill_cap` oldest strikes and carries the rest;
+# a SPIKE (a sudden jump vs recent runs) still quarantines all of it. The cap itself is unchanged
+# (never raise it — LIFECYCLE_ENGINEER.md hard rule 3, LISTING_LIVENESS.md §7).
+DRAIN_SPIKE_FACTOR = 2.0
+# How far back "recent runs" reaches for the spike baseline. A row probed in one run is skipped by
+# the next (REPROBE_MIN_HOURS), so kill batches alternate big/small run to run; comparing with the
+# previous run alone would call every other run a spike and the backlog would never drain.
+DRAIN_BASELINE_HOURS = 24
+# Share of each run kept for rows with no strike yet, so re-checking flagged rows first cannot
+# starve first-time coverage.
+UNFLAGGED_SHARE = 0.2
+# A flagged row's next reading waits at least this long, so its three strikes are three separate
+# checks spread over ~16h (runs every 4h -> T, T+8h, T+16h), never three back-to-back runs.
+REPROBE_MIN_HOURS = 6
+# An UNFLAGGED row is read again at most once per this many hours. With the schedule probing every
+# active row (min_stale_days 0, owner 2026-10-02: «fix gathern daily checks» — every site on Aqar's
+# lifecycle standard), this is what makes the rotation a DAILY direct check of each listing instead
+# of re-reading the same few thousand rows every hour: it keeps every row inside the 48h window
+# Aqar meets, and spares Gathern's tight global detail-page budget.
+DAILY_REPROBE_HOURS = 20
+
+
+def is_spike(kill_count: int, baseline: Optional[int], factor: float = DRAIN_SPIKE_FACTOR) -> bool:
+    """True iff an over-cap batch is a SUDDEN jump rather than a standing backlog.
+
+    FAILS CLOSED where cleanup.py's `_is_spike` fails open: no recent baseline (or a zero one) IS a
+    spike. There, enabling drain is a per-platform human decision; here drain is always on, so the
+    first over-cap batch after a quiet spell quarantines once, records its count, and only the next
+    run — measured against that count — may drain."""
+    if baseline is None or baseline <= 0:
+        return True
+    return kill_count > baseline * factor
+
+
+DIRECT_HISTORY_DAYS = 14
+
+
+def direct_strikes_since_alive(history: list[dict]) -> dict[int, int]:
+    """{listing_id: applied DIRECT dead readings since its newest alive reading}, from
+    gathern_liveness_detail rows (listing_id, run_at, verdict, http_status, applied)."""
+    last_alive: dict[int, str] = {}
+    for h in history:
+        if h.get("verdict") == "alive" and h.get("run_at", "") > last_alive.get(h["listing_id"], ""):
+            last_alive[h["listing_id"]] = h["run_at"]
+    out: dict[int, int] = {}
+    for h in history:
+        if (h.get("applied") and h.get("verdict") in ("strike", "kill") and looks_dead(h.get("http_status"))
+                and h.get("run_at", "") > last_alive.get(h["listing_id"], "")):
+            out[h["listing_id"]] = out.get(h["listing_id"], 0) + 1
+    return out
+
+
+def demote_unearned_kills(kill_pending: list[tuple[int, int]], prior: Optional[dict[int, int]],
+                          grace: int) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """(kills, strikes): a kill stands only when THIS reading plus the row's own earlier applied
+    direct readings reach `grace` (LISTING_LIVENESS.md §2: three consecutive DIRECT dead readings).
+
+    WHY (2026-10-03). `missing_count` is shared with the crawl's prune_unseen, which bumps it for an
+    ad missing from the feed — an ABSENCE signal (§2: a candidate, never a vote). So a row read 404
+    at 04:40 (0→1), missed by the crawl (1→2) and read 404 at 12:07 was hidden on two page readings:
+    7 rows that hour, and two ads (6711536, 1816396) hidden on one or two readings answered 200 a
+    day later. A demoted row keeps missing_count at grace-1 and is hidden by its next 404 reading
+    once it has earned it. `prior` None (history unreadable) demotes every kill: fail closed."""
+    kills, strikes = [], []
+    for rid, nm in kill_pending:
+        if prior is not None and prior.get(rid, 0) + 1 >= grace:
+            kills.append((rid, nm))
+        else:
+            strikes.append((rid, min(nm, grace - 1)))
+    return kills, strikes
+
+
+def plan_kills(kill_pending: list[tuple[int, int]], kill_cap: int, baseline: Optional[int],
+               trusted: bool) -> list[tuple[int, int]]:
+    """Which of this run's kill candidates, (row id, new_missing_count), to inactivate NOW.
+
+      untrusted run          -> none (the trust gate is asked FIRST, LISTING_LIVENESS.md §5.4)
+      at or under the cap    -> all of them (unchanged)
+      over the cap, a spike  -> none: quarantine, exactly as before
+      over the cap, backlog  -> the `kill_cap` OLDEST strikes (highest missing_count; ties keep
+                                worklist order, which is oldest-probe first); the rest are carried
+                                and must earn a fresh DIRECT reading next run before they can go.
+    """
+    if not trusted:
+        return []
+    if not is_anomaly(len(kill_pending), kill_cap):
+        return list(kill_pending)
+    if is_spike(len(kill_pending), baseline):
+        return []
+    return sorted(kill_pending, key=lambda p: -p[1])[:kill_cap]
+
+
+def compose_worklist(flagged: list[dict], unflagged: list[dict], limit: int,
+                     unflagged_share: float = UNFLAGGED_SHARE) -> list[dict]:
+    """Flagged rows (missing_count > 0) FIRST, with a reserved slice for unflagged ones; either side
+    fills whatever the other leaves unused. limit 0 = everything."""
+    if not limit:
+        return flagged + unflagged
+    reserve = min(len(unflagged), int(limit * unflagged_share))
+    head = flagged[:limit - reserve]
+    return head + unflagged[:limit - len(head)]
 
 
 def _throttle(_last: list[float] = [0.0]) -> None:
@@ -126,8 +236,27 @@ def _throttle(_last: list[float] = [0.0]) -> None:
     _last[0] = time.monotonic()
 
 
-def probe(s, url: str, retries: int = 3) -> int:
-    """Return the real HTTP status (200/404/410/…), retrying only transient 429/5xx; 0 = no verdict."""
+_HOME_PATHS = frozenset({"", "/ar", "/en"})
+
+
+def _landed_on_home(requested: str, final: str) -> bool:
+    """The same test as cleanup._landed_on_home, kept here so this checker does not import the
+    cleanup engine (and, through it, the wasalt browser)."""
+    from urllib.parse import urlsplit
+    if not final:
+        return False
+    want = urlsplit(requested).path.rstrip("/").lower()
+    got = urlsplit(final).path.rstrip("/").lower()
+    return got in _HOME_PATHS and got != want
+
+
+HOME_LANDED = -1     # probe(..., home_status=HOME_LANDED): the read landed on gathern's home page
+
+
+def probe(s, url: str, retries: int = 3, home_status: int = 0) -> int:
+    """Return the real HTTP status (200/404/410/…), retrying only transient 429/5xx; 0 = no verdict.
+    A 200 that landed on the home page returns `home_status` (0 = no verdict, for every caller but
+    the canary, which needs to tell it apart)."""
     for attempt in range(retries):
         _throttle()
         try:
@@ -136,8 +265,39 @@ def probe(s, url: str, retries: int = 3) -> int:
             time.sleep(2 * (attempt + 1)); continue
         if r.status_code == 429 or r.status_code >= 500:
             time.sleep(3 * (attempt + 1)); continue
+        if r.status_code == 200 and _landed_on_home(url, str(getattr(r, "url", "") or "")):
+            # gathern answers a removed unit, for some request shapes, with 307 -> /ar?error=500 and
+            # its home page serves 200 (2026-10-05, cleanup lesson). That 200 is the home page, not
+            # this unit: no verdict. It matters most to --recheck-dead, whose only write is a
+            # restore on a 200, now that it runs every day (2026-10-06).
+            # It also answers LIVE units that way on /view/ to a desktop browser while /ar/view/
+            # opens them (2026-10-17, gathern-api-probe 39029117183: 8 of 8 «home» units opened
+            # named on /ar/view/, phone and laptop): 919 served units read no verdict every hour.
+            # Their own /ar/ page may only ever say ALIVE here; anything else stays no verdict.
+            return 200 if _opens_at_ar_view(s, url) else home_status
         return r.status_code
     return 0
+
+
+_VIEW = re.compile(r"^(https://gathern\.co)/view/(\d+)/unit/(\d+)/?$")
+_NOT_FOUND = ("الصفحة غير موجودة", "page not found")
+
+
+def _opens_at_ar_view(s, url: str) -> bool:
+    """True only when the unit's /ar/view/ address answers 200 ON that address, with a body that
+    names the unit and is not gathern's not-found page. Never a death: False is no verdict."""
+    m = _VIEW.match(url or "")
+    if not m:
+        return False
+    alt = f"{m.group(1)}/ar/view/{m.group(2)}/unit/{m.group(3)}"
+    _throttle()
+    try:
+        r = s.get(alt, timeout=25, allow_redirects=True)
+    except Exception:  # noqa: BLE001 — no answer is no verdict
+        return False
+    body = getattr(r, "text", "") or ""
+    return (r.status_code == 200 and not _landed_on_home(alt, str(getattr(r, "url", "") or ""))
+            and m.group(3) in body and not any(n in body for n in _NOT_FOUND))
 
 
 def proxied_session(use_proxy: bool):
@@ -221,7 +381,24 @@ def choose_canaries(rows: list[dict], limit: int, now: Optional[datetime] = None
             continue
         fresh.append((seen, row))
     fresh.sort(key=lambda pair: pair[0], reverse=True)
-    return [row for _, row in fresh[:limit]]
+    # ONE RUN'S STAMPS MAY NOT BE EVERY CONTROL (2026-10-13). A sweep stamps every row it reads 200
+    # with the SAME timestamp, so the freshest ten were often one batch. At 06:40 UTC a run the
+    # trust gate quarantined (alive_rate 11%) still stamped 11 rows alive at 06:40:12.904624; they
+    # outranked the crawl's sightings, 7 of them answered 404 an hour later, and every sweep from
+    # 07:37 read its controls 3/10 and checked nothing — the same deadlock as above, one batch wide,
+    # until the next day's crawl. So, still freshest-first, no observation timestamp supplies more
+    # than a third of the controls; leftovers fill the pool only when there is nothing else.
+    per_stamp = max(1, limit // 3)
+    picked: list[dict] = []
+    spare: list[dict] = []
+    taken: dict[datetime, int] = {}
+    for seen, row in fresh:
+        if taken.get(seen, 0) < per_stamp:
+            taken[seen] = taken.get(seen, 0) + 1
+            picked.append(row)
+        else:
+            spare.append(row)
+    return (picked + spare)[:limit]
 
 
 def _collect_canaries(client, limit: int) -> list[dict]:
@@ -261,25 +438,50 @@ def _run_canary(s, client, n: int) -> tuple[bool, int, int, str]:
     Measured 2026-09-03: without this, a failed proxied run said "0/10" and the next question —
     is gathern blocking the proxy, or is the proxy broken? — could not be answered from our own
     logs at all."""
-    canaries = _collect_canaries(client, n)
+    # A CONTROL THAT LANDS ON THE HOME PAGE IS NOT A CONTROL (2026-10-08). gathern answers some
+    # removed units with a redirect home, so such a row is a dead ad, not a block: it is skipped (not
+    # counted in either half) and the next candidate is read, until n controls answered. If EVERY
+    # candidate lands home, nothing is probed and the gate fails CLOSED (canary_environment_ok(0, 0)).
+    # On 2026-10-08 18 home-landing units became the freshest rows and every sweep from 05:37 UTC
+    # read its controls 0/10 and checked nothing.
+    pool = _collect_canaries(client, max(n * 3, n + 10))
     alive = 0
+    home = 0
     statuses: dict[int, int] = {}
-    for row in canaries:
+    for row in pool:
+        if sum(statuses.values()) >= n:
+            break
         url = (row.get("listing_url") or "").strip()
         if not url:
             continue
-        st = probe(s, url)
+        st = probe(s, url, home_status=HOME_LANDED)
+        if st == HOME_LANDED:
+            home += 1
+            continue
         statuses[st] = statuses.get(st, 0) + 1
         if st == 200:
             alive += 1
     probed = sum(statuses.values())
-    hist = ",".join(f"{k}x{v}" for k, v in sorted(statuses.items())) or "none"
+    hist = (",".join(f"{k}x{v}" for k, v in sorted(statuses.items())) or "none") + (f",homex{home}" if home else "")
     ok = canary_environment_ok(alive, probed)
     verdict = "PASS" if ok else "FAIL"
     print(f"CANARY {verdict}: {alive}/{probed} known-alive controls returned 200 "
           f"(need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES}) statuses[{hist}]"
           + ("" if ok else f" — {canary_diagnosis(statuses)}"), flush=True)
     return ok, alive, probed, hist
+
+
+def controls_all_alive(c_alive: int, c_probed: int, p_alive: int, p_probed: int) -> bool:
+    """Gathern only: did EVERY known-live control answer 200 at both ends of the run?
+
+    WHY (2026-10-07). Gathern answers a block with its own 404, and it does so intermittently: the
+    11:49 UTC run of 2026-10-06 passed the 60% gate with controls 9/10 and 6/10, so up to 4 in 10
+    known-live units read 404 inside the same window as the worklist, and that run applied 11 page
+    strikes. Unit 276709 read 200, 404, 200 within an hour; 8 of 25 units hidden in that window read
+    200 the same day, and the sweep was quarantined. A 404 on gathern is only evidence when not one
+    live control read 404 in the same run (rulebook: «A 404 only counts as "gone" if known-live
+    control listings answered 200 in the same run»). Restorative 200s are not gated by this."""
+    return c_probed > 0 and p_probed > 0 and c_alive == c_probed and p_alive == p_probed
 
 
 def trust_quarantine_reason(canary_ok: bool, canary_alive: int, canary_probed: int) -> str:
@@ -346,23 +548,92 @@ def canary_diagnosis(statuses: dict[int, int]) -> str:
 
 
 def _collect_stale(client, cutoff_iso: str, limit: int) -> list[dict]:
-    """Read-only worklist: active rows whose last_seen_at is already stale, oldest first. Collected in
-    full BEFORE any write so flipping active=false mid-sweep can't shift an offset window and skip rows."""
+    """Read-only worklist: active stale rows, LEAST-RECENTLY-LOOKED-AT first. Collected in full
+    BEFORE any write so flipping active=false mid-sweep can't shift an offset window and skip rows.
+
+    THE ORDER IS THE FIX (2026-09-24, owner directive).
+    This ranked by `last_seen_at asc` — oldest crawl sighting first — and that starved the platform.
+    A row this sweep probes and finds DEAD moves neither `last_seen_at` (a crawl fact; a sweep is
+    not a crawl) nor `last_verified_alive_at` (only ALIVE moves it). So a dead row the anomaly cap
+    refuses to kill keeps its ancient last_seen_at and sits at the head of this queue permanently.
+
+    Measured before the fix: 28,639 active gathern rows, the same ~1,500 re-probed every run —
+    an identical `strike=1461` in the run notes on 09-16, 17, 18, 19, 20, 21 and 22 — while 27,102
+    rows had never been looked at once and the oldest last_seen_at was still 2026-07-27. Coverage:
+    0.4% verified-in-SLA. Throughput was never the binding constraint; a faster loop over a queue
+    whose head cannot clear just re-reads the same rows more often.
+
+    `last_liveness_probe_at` (migration 20260924…) records the missing third fact — "we LOOKED at
+    this row, whatever we concluded" — and every verdict branch below now writes it, INCLUDING the
+    quarantined kills the cap declines to action. Ordering `nulls first` therefore puts rows nobody
+    has ever looked at at the front, and a probed row drops to the back for a full cycle.
+
+    NOTE it is ordered on, never read as evidence: a row probed a minute ago and found 404 or
+    blocked has a fresh timestamp here and is still DEAD or UNKNOWN. Only last_verified_alive_at
+    means alive.
+
+    FLAGGED ROWS FIRST (2026-09-28). The rotation above is fair to UNFLAGGED rows and fatal to
+    flagged ones: a struck row also got a fresh probe timestamp and went to the back of a ~28k-row
+    queue, so its 2nd and 3rd readings were days apart and a dead ad stayed visible 10+ days
+    (19,457 rows sat at 1 strike that day). Rows already carrying a strike now come first, highest
+    missing_count then oldest reading first, each no sooner than REPROBE_MIN_HOURS after its last
+    reading; UNFLAGGED_SHARE of the run is kept for the rotation (compose_worklist).
+    """
+    base = lambda: (client.table(TABLE).select("id, ad_number, listing_url, missing_count, last_liveness_probe_at")  # noqa: E731
+                    .eq("source", SOURCE).eq("active", True).lt("last_seen_at", cutoff_iso))
+    reprobe_before = (datetime.now(timezone.utc)
+                      - timedelta(hours=REPROBE_MIN_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    flagged = _paged(lambda: base().gt("missing_count", 0)
+                     .or_(f"last_liveness_probe_at.is.null,last_liveness_probe_at.lt.{reprobe_before}")
+                     .order("missing_count", desc=True)
+                     .order("last_liveness_probe_at", desc=False, nullsfirst=True)
+                     .order("id", desc=False), limit)
+    unflagged = _paged(lambda: base().or_("missing_count.is.null,missing_count.lte.0")
+                       .order("last_liveness_probe_at", desc=False, nullsfirst=True)
+                       .order("last_seen_at", desc=False).order("id", desc=False), limit)
+    # A row read within DAILY_REPROBE_HOURS sorts to the END of the rotation (oldest reading first),
+    # so dropping it here never skips an older row — it only stops a re-read before its day is up.
+    daily_before = datetime.now(timezone.utc) - timedelta(hours=DAILY_REPROBE_HOURS)
+    unflagged = [r for r in unflagged if not _read_since(r.get("last_liveness_probe_at"), daily_before)]
+    return compose_worklist(flagged, unflagged, limit)
+
+
+def _read_since(ts: Optional[str], since: datetime) -> bool:
+    """True iff the row's last reading (ISO timestamp) is at or after `since`. NULL = never read."""
+    if not ts:
+        return False
+    try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")) >= since
+    except ValueError:
+        return False  # an unreadable stamp is treated as never read — it gets probed, never skipped
+
+
+def _paged(make_query, limit: int, page: int = 1000) -> list[dict]:
+    """Read a whole ordered result in pages (a fresh builder per page), stopping at `limit`."""
     work: list[dict] = []
     offset = 0
-    page = 1000
     while True:
-        q = (client.table(TABLE).select("id, ad_number, listing_url, missing_count")
-             .eq("source", SOURCE).eq("active", True).lt("last_seen_at", cutoff_iso)
-             .order("last_seen_at", desc=False).order("id", desc=False)
-             .range(offset, offset + page - 1))
-        batch = q.execute().data or []
+        batch = make_query().range(offset, offset + page - 1).execute().data or []
         work.extend(batch)
         if limit and len(work) >= limit:
             return work[:limit]
         if len(batch) < page:
             return work
         offset += page
+
+
+def _recent_kill_baseline(client) -> Optional[int]:
+    """The largest kill-candidate batch any TRUSTED APPLY run logged in the last
+    DRAIN_BASELINE_HOURS, or None. A quarantined spike counts, as cleanup.py's aborted runs do: it
+    records the standing total, which is exactly what the next run should be measured against."""
+    since = (datetime.now(timezone.utc) - timedelta(hours=DRAIN_BASELINE_HOURS)).isoformat()
+    rows = (client.table("scrape_runs").select("notes")
+            .in_("platform", [RUN_NAME, RUN_NAME_PROXY]).gte("started_at", since)
+            .like("notes", "%kill_candidates=%").execute().data or [])
+    counts = [int(m.group(1)) for r in rows
+              if "APPLY scanned=" in (n := r.get("notes") or "") and "trusted=True" in n
+              and (m := re.search(r"kill_candidates=(\d+)", n))]
+    return max(counts) if counts else None
 
 
 def _collect_killed(client, limit: int) -> list[dict]:
@@ -381,22 +652,10 @@ def _collect_killed(client, limit: int) -> list[dict]:
 
     This worklist is READ-ONLY and the mode it feeds can only ever restore a row, never inactivate
     one, so it cannot deepen an inactivation mistake — only undo one, and only on a live 200."""
-    work: list[dict] = []
-    offset = 0
-    page = 1000
-    while True:
-        q = (client.table(TABLE).select("id, ad_number, listing_url, missing_count")
-             .eq("source", SOURCE).eq("active", False).gte("missing_count", 3)
-             .not_.is_("listing_url", "null")
-             .order("deactivated_at", desc=True).order("id", desc=False)
-             .range(offset, offset + page - 1))
-        batch = q.execute().data or []
-        work.extend(batch)
-        if limit and len(work) >= limit:
-            return work[:limit]
-        if len(batch) < page:
-            return work
-        offset += page
+    return _paged(lambda: (client.table(TABLE).select("id, ad_number, listing_url, missing_count")
+                           .eq("source", SOURCE).eq("active", False).gte("missing_count", 3)
+                           .not_.is_("listing_url", "null")
+                           .order("deactivated_at", desc=True).order("id", desc=False)), limit)
 
 
 # ── Cross-session write lock (2026-07-27) ────────────────────────────────────────────────────────
@@ -563,9 +822,10 @@ def main() -> int:
                          "that changes nothing and only reports what would happen.")
     ap.add_argument("--kill-cap", type=int, default=0,
                     help="ANOMALY GUARD (2026-07-27): max rows one run may inactivate. 0 = auto "
-                         "(max(150, 2%% of currently-active rows)). A batch above the cap is "
-                         "QUARANTINED: missing_count still records the strikes, but NO row is "
-                         "flipped inactive and the run is marked ok=false for owner review. "
+                         "(max(150, 2%% of currently-active rows)). A batch above the cap never "
+                         "inactivates more than the cap: a SPIKE vs the last 24h is QUARANTINED "
+                         "(strikes recorded, NO row flipped, run ok=false); a standing backlog "
+                         "inactivates the cap's worth of oldest strikes and carries the rest. "
                          "Added after a first-ever 776-row kill batch landed with all 3 grace "
                          "strikes consumed within ~1 hour (3 back-to-back apply runs) — a "
                          "transient site-wide 404 event could mass-kill live listings the same "
@@ -721,6 +981,7 @@ def main() -> int:
         if args.apply and alive_ids:
             for i in range(0, len(alive_ids), 200):
                 client.table(TABLE).update({"last_seen_at": now_iso, "missing_count": 0,
+                                            "last_liveness_probe_at": now_iso,
                                             **direct_alive_patch(now_iso=now_iso)}) \
                     .in_("id", alive_ids[i:i + 200]).execute()
         alive_ids.clear()
@@ -784,6 +1045,37 @@ def main() -> int:
         _flush_alive()
         _flush_detail(detail_buf)
 
+    # ── A HIDE IS EARNED BY THREE OF THE ROW'S OWN PAGE READINGS (2026-10-03) ─────────────────────
+    # missing_count also carries the crawl's absence strikes; see demote_unearned_kills.
+    if kill_pending:
+        prior: Optional[dict[int, int]]
+        try:
+            since = (datetime.now(timezone.utc) - timedelta(days=DIRECT_HISTORY_DAYS)).isoformat()
+            ids = [rid for rid, _ in kill_pending]
+            hist: list[dict] = []
+            for i in range(0, len(ids), 200):
+                hist += (client.table("gathern_liveness_detail")
+                         .select("listing_id, run_at, verdict, http_status, applied")
+                         .in_("listing_id", ids[i:i + 200]).gte("run_at", since)
+                         .limit(10000).execute().data or [])
+            prior = direct_strikes_since_alive(hist)
+        except Exception as exc:  # noqa: BLE001 — unreadable history earns no hide
+            print(f"⚠ direct-reading history unreadable ({str(exc)[:120]}): every kill held as a strike",
+                  flush=True)
+            prior = None
+        kill_pending, demoted = demote_unearned_kills(kill_pending, prior, args.grace)
+        if demoted:
+            demoted_ids = {rid: nm for rid, nm in demoted}
+            print(f"  {len(demoted)} kill(s) held as strikes: fewer than {args.grace} direct page "
+                  f"readings (an absence strike is not one)", flush=True)
+            strike_pending += demoted
+            for e in [e for e in kill_detail if e["listing_id"] in demoted_ids]:
+                kill_detail.remove(e)
+                e["verdict"], e["missing_count_after"] = "strike", demoted_ids[e["listing_id"]]
+                strike_detail.append(e)
+            killed -= len(demoted)
+            struck += len(demoted)
+
     # ── CLOSING CANARY (2026-09-11, ops_incident #183) ────────────────────────────────────────────
     # The opening canary proves the environment at run START. That alone must never be allowed to
     # excuse the rate gate, because the failure the rate gate was built for — 2026-09-01 — looked
@@ -797,6 +1089,8 @@ def main() -> int:
     if args.canaries:
         p_ok, p_alive, p_probed, p_hist = _run_canary(s, client, args.canaries)
         canary_ok = bool(c_ok and p_ok)
+        if not controls_all_alive(c_alive, c_probed, p_alive, p_probed):
+            canary_ok = False   # gathern: one control 404 voids this run's 404s (2026-10-07)
         if not p_ok:
             print(f"✗ CLOSING CANARY FAILED {p_alive}/{p_probed} statuses[{p_hist}] — "
                   f"{canary_diagnosis_from_hist(p_hist)}. The environment degraded DURING this run, "
@@ -821,44 +1115,51 @@ def main() -> int:
     trusted = environment_is_trustworthy(alive, seen, canary_ok=canary_ok)
     trust_quarantine = (not trusted) and bool(strike_pending or kill_pending)
 
-    anomaly = False
+    # ── Anomaly cap gate (2026-07-27), with DRAIN (2026-09-28). Asked AFTER trust, never instead
+    # of it: plan_kills returns nothing for an untrusted run. At/under the cap every kill lands;
+    # over it, a SPIKE lands none (quarantine, as always) and a standing backlog lands the
+    # `kill_cap` oldest strikes. The cap never inactivates more than itself.
+    over_cap = is_anomaly(len(kill_pending), kill_cap)
+    baseline = _recent_kill_baseline(client) if (trusted and over_cap) else None
+    kill_now = plan_kills(kill_pending, kill_cap, baseline, trusted)
+    kill_ids = {rid for rid, _ in kill_now}
+    anomaly = trusted and over_cap and not kill_now    # a spike: quarantined, 0 inactivated
+    drained = trusted and over_cap and bool(kill_now)  # a backlog: capped batch, rest carried
+
     applied_kills = 0
     applied_strikes = 0
     if args.apply and trusted:
         # Strikes: the cap does not govern them, only trust does.
         for rid, nm in strike_pending:
-            client.table(TABLE).update({"missing_count": nm}).eq("id", rid).execute()
+            client.table(TABLE).update({"missing_count": nm,
+                                        "last_liveness_probe_at": now_iso}).eq("id", rid).execute()
         applied_strikes = len(strike_pending)
 
-        # ── Anomaly cap gate (2026-07-27) — UNCHANGED and still fully enabled. The trust gate is an
-        # ADDITIONAL guard in front of it, never a replacement for it.
-        anomaly = is_anomaly(len(kill_pending), kill_cap)
-        if kill_pending:
-            if anomaly:
-                # QUARANTINE: record the earned strike (missing_count) so history is truthful, but
-                # flip NOTHING inactive. The rows re-classify as kills next run and hit this gate
-                # again until the owner reviews and re-runs with an explicit --kill-cap.
-                for i in range(0, len(kill_pending), 200):
-                    for rid, nm in kill_pending[i:i + 200]:
-                        client.table(TABLE).update({"missing_count": nm}).eq("id", rid).execute()
-            else:
-                for rid, nm in kill_pending:
-                    client.table(TABLE).update({"missing_count": nm, "active": False}).eq("id", rid).execute()
-                applied_kills = len(kill_pending)
+        # Every kill candidate's earned strike is recorded so history is truthful; only kill_ids
+        # flip inactive. A carried/quarantined row must earn a fresh DIRECT reading next run.
+        # last_liveness_probe_at is written even when NOTHING was inactivated: we DID look at the
+        # row. Without it the row stays at the head of _collect_stale's queue and is re-probed
+        # ahead of rows nobody has ever looked at (the same ~1,500 rows every run, 2026-09-24).
+        for rid, nm in kill_pending:
+            payload = {"missing_count": nm, "last_liveness_probe_at": now_iso}
+            if rid in kill_ids:
+                payload["active"] = False
+            client.table(TABLE).update(payload).eq("id", rid).execute()
+        applied_kills = len(kill_ids)
 
-    # `applied` must state whether a row actually changed: false for a dry run, false for a batch the
-    # anomaly cap quarantined, and false for EVERY strike and kill of an untrusted run. Written after
-    # the gates because that is the first moment the answer is known.
+    # `applied` must state whether a row actually changed: false for a dry run, false for a kill the
+    # cap quarantined or carried, and false for EVERY strike and kill of an untrusted run. Written
+    # after the gates because that is the first moment the answer is known.
     for e in strike_detail:
         e["applied"] = bool(args.apply) and trusted
     for e in kill_detail:
-        e["applied"] = bool(args.apply) and trusted and not anomaly
+        e["applied"] = bool(args.apply) and e["listing_id"] in kill_ids
     _flush_detail(strike_detail)
     _flush_detail(kill_detail)
 
     verb = "inactivated" if args.apply else "WOULD inactivate"
     # An untrusted run inactivates nothing, so a dry run must not advertise a number it would refuse.
-    kill_shown = applied_kills if args.apply else (len(kill_pending) if trusted else 0)
+    kill_shown = applied_kills if args.apply else len(kill_now)
     alive_rate = (alive / seen) if seen else 0.0
     # cap_src makes the cap's PROVENANCE auditable: an explicit --kill-cap override and a computed
     # cap are operationally different decisions and must never read the same in the run log. This is
@@ -866,7 +1167,8 @@ def main() -> int:
     # (2026-08-16): every run logged a bare "kill_cap=150" that looked computed and was not.
     cap_src = (f"override active={active_now_logged}" if args.kill_cap > 0
                else f"auto=max(150,2% of {active_now_logged})")
-    notes = (f"{mode} scanned={seen} dead={dead} {verb}={kill_shown} strike={struck} "
+    notes = (f"{mode} scanned={seen} dead={dead} {verb}={kill_shown} "
+             f"kill_candidates={len(kill_pending)} strike={struck} "
              f"applied_strikes={applied_strikes} alive={alive} transient={transient} "
              f"kill_cap={kill_cap} [{cap_src}] alive_rate={alive_rate:.3f} trusted={trusted} "
              f"proxy={bool(args.proxy)} canary={c_alive}/{c_probed} canary_statuses[{c_hist}] "
@@ -889,7 +1191,14 @@ def main() -> int:
                  f"Owner review required. " + notes)
     elif anomaly:
         notes = (f"ANOMALY-CAPPED would_inactivate={len(kill_pending)} cap={kill_cap} — 0 rows "
-                 f"inactivated; owner review required. " + notes)
+                 f"inactivated: a SPIKE vs the last {DRAIN_BASELINE_HOURS}h of trusted runs "
+                 f"(baseline={baseline}, factor={DRAIN_SPIKE_FACTOR}). A standing backlog drains "
+                 f"from the next run; review if this repeats. " + notes)
+    elif drained:
+        notes = (f"DRAIN: {verb} the {len(kill_now)} oldest of {len(kill_pending)} kill candidates "
+                 f"(cap={kill_cap}, baseline={baseline}, not a spike); "
+                 f"{len(kill_pending) - len(kill_now)} carried to a later run for a fresh reading. "
+                 + notes)
     print(f"\n✓ Gathern liveness done. {notes}", flush=True)
     # An empty stale worklist is legitimately healthy (everything fresh), not a dead source.
     end_run(run_id, ok=not (anomaly or trust_quarantine), rows_seen=seen,

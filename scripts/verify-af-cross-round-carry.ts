@@ -191,15 +191,17 @@ if (poolExpr && syncExpr) {
 // Lifted from src/data/advancedFilters.ts so this cannot go stale against a hand-copied fixture.
 const ageApply = lift(afSrc, 'src/data/advancedFilters.ts', "AGE_QUESTION's apply body",
   /id: 'property_age',[\s\S]*?apply\(q, keys\) \{([\s\S]*?)\n {2}\},/);
+// The one-tap ladder (owner 2026-10-05) reads AGE_LADDER — lifted from the same file, not copied.
+const AGE_PRELUDE = `const AGE_LADDER = ${(/const AGE_LADDER:[\s\S]*?\}> = (\[[\s\S]*?\n\]);/.exec(afSrc) ?? [])[1] ?? '[]'};`;
 if (ageApply) {
-  const apply = new Function('q', 'keys', ageApply) as (q: any, k: string[]) => any;
-  const r1 = apply({ city: 'الرياض' }, ['3_5']);          // round 1: «٣-٥ سنوات»
-  const r2 = apply(r1, ['10p']);                          // round 2 re-asks: «١٠+ سنوات»
+  const apply = new Function('q', 'keys', `${AGE_PRELUDE}${ageApply}`) as (q: any, k: string[]) => any;
+  const r1 = apply({ city: 'الرياض' }, ['upto2']);        // round 1: «حتى سنتين»
+  const r2 = apply(r1, ['upto9']);                        // round 2 re-asks: «حتى ٩ سنوات»
   check('property_age.apply REPLACES — a re-ask discards the earlier answer and WIDENS',
-    r1.ageMin === 3 && r1.ageMax === 5 && r2.ageMin === 10 && r2.ageMax === null,
+    JSON.stringify(r1.ageBuckets) === JSON.stringify(['new', '1_2']) && JSON.stringify(r2.ageBuckets) === JSON.stringify(['new', '1_2', '3_5', '6_9']),
     'if this ever becomes monotone the carry is still required — but revisit this check\'s wording');
   check('property_age can even be re-answered back to «جديد», dropping the age window entirely',
-    (() => { const back = apply(r1, ['new']); return back.ageMin === null && back.ageMax === null && back.isNewConstruction === true; })());
+    (() => { const back = apply(r1, ['new']); return back.ageBuckets === null && back.ageMin === null && back.ageMax === null && back.isNewConstruction === true; })());
 }
 const furnApply = lift(afSrc, 'src/data/advancedFilters.ts', "FURNISHED_QUESTION's apply expression",
   /id: 'furnished',[\s\S]*?apply: \(q, keys\) =>([\s\S]*?),\n\};/);
@@ -223,7 +225,7 @@ check('the results turn\'s guided record carries `asked` all the way through run
   && has(/setGuidedPills\(\{[^)]*asked: opts\.guided\.asked/),
   'src/app/agent.tsx — a record without `asked` silently forgets every skip');
 check('«تحديد أكثر» seeds the carry from THAT turn\'s record, including `asked`',
-  has(/afCarryRef\.current = q\s*\n?\s*\? \{ msgId: m\.id, originQ: carried\?\.baseQ \?\? q, facets: carried\?\.facets \?\? \[\], asked: carried\?\.asked \?\? \[\] \}/),
+  has(/afCarryRef\.current = q\s*\n?\s*\? \{ msgId: m\.id, originQ: carried\?\.baseQ \?\? q, facets: carried\?\.facets \?\? \[\], asked: \[\.\.\.new Set\(\[\.\.\.\(carried\?\.asked \?\? \[\]\), \.\.\.\(afSkippedByMsgRef\.current\[m\.id\] \?\? \[\]\)\]\)\] \}/),
   'src/app/agent.tsx — the CTA is the only place a round learns what came before it');
 
 // The seed must be written BEFORE the round opens: startAgeFlow reads afCarryRef synchronously.
@@ -235,51 +237,17 @@ check('«تحديد أكثر» seeds the carry from THAT turn\'s record, includi
     'src/app/agent.tsx — seeding after the call hands the new round the PREVIOUS tap\'s carry');
 }
 
-// UPDATED 2026-08-25 (review), deliberately STRENGTHENED, not relaxed. The original pin required the
-// record to survive a pill removal — correct, and still required below. But it pinned the asked-set as
-// `guidedPills.asked` VERBATIM, which also froze a real defect: the removed facet's own id stayed in
-// the carry, so un-answering a question permanently un-askable it. Removing «عمر ٣-٥ سنوات» to pick a
-// different bucket burned property_age for the rest of the chat, and once the pool was spent that way
-// «تحديد أكثر» stopped rendering at all. The carry's purpose is to stop re-asking what the user
-// RESOLVED; a facet the user just deleted is unresolved again. Both halves are now pinned: the record
-// still survives, AND exactly the removed id is dropped from it.
-check('removing the LAST pill still passes the guided record, so the asked-set survives',
-  has(/\{ guided: \{ baseQ: guidedPills\.baseQ, facets: remaining, asked: guidedPills\.asked/),
-  'src/app/agent.tsx removeGuidedFacet — a conditional `remaining.length ? … : undefined` here '
-  + 'resurrects every question earlier rounds asked or skipped');
-check('a REMOVED facet is un-asked: its id is dropped from the carried asked-set',
-  has(/asked: guidedPills\.asked\.filter\(\(id\) => id !== removed\.id\)/),
-  'src/app/agent.tsx removeGuidedFacet — carrying the removed question forward makes pill removal a '
-  + 'one-way door: that dimension can never be answered again, and an exhausted pool hides the CTA');
-// ── AND THE ROUND ON SCREEN IS ABANDONED, BECAUSE ITS COHORT NO LONGER EXISTS ──────────────────
-// (ops_incident #242, measured on production 2026-09-13 by verify-af-pill-removal-live.ts, 3/3.)
-//
-// The two checks above are about the CARRY — what the next round may ask. This one is about the
-// round already on screen. Since the owner's 2026-09-11 decision (#155) drew the committed pills in
-// the overlay, a removal can land with a question up; the query is rebuilt and re-searched, and the
-// live round was never told. Measured on جدة/الفلل والبيوت/فيلا/شراء at 390x844: the search widened
-// 125 → 295 (headline, anon replay and DB truth agreeing) and the card still read «125 نتيجة» a
-// minute later, still drew four committed pills including the deleted one, and asked a question
-// priced on the dead set — شمال 27 / جنوب 27 / شرق 27 / غرب 19, where the live set has 62 / 49 / 67
-// / 47. Every number the user could read was 2.3x wrong, which §2.5/§7 forbid outright, and R9.2.1
-// was false ON SCREEN while true on the wire.
-//
-// The token bump is not decoration and is checked separately: a step's resolveOptions /
-// rankQuestions probe for the dead cohort can still be in flight, and every one of them guards on
-// the token it captured — without the bump a slow probe repaints the card after the close, which is
-// the same defect with a delay. Same two lines, same order, as the ✕ handler (onAgeClose).
-//
-// SOURCE-PINNED, and honest about it: removeGuidedFacet is React wiring with no pure surface, like
-// its two siblings above. The EXECUTED proof of this rule is the live journey named at the top of
-// this block, which reads the number off the real card. Both mutations below are watched.
-check('a pill removal ABANDONS the round on screen (its cohort is gone — it may not keep quoting it)',
-  has(/const remaining = guidedPills\.facets\.filter\(\(_, i\) => i !== facetIndex\);\s*ageFlowTokenRef\.current\+\+;\s*setAgeFlow\(null\);/),
-  'src/app/agent.tsx removeGuidedFacet — without this the open round keeps its pre-removal total, '
-  + 'its pre-removal option counts and its pre-removal pills while the search has already widened');
-check('…and the token is bumped BEFORE the card is dropped, so an in-flight probe cannot repaint it',
-  agentSrc.indexOf('ageFlowTokenRef.current++;\n    setAgeFlow(null);') >= 0,
-  'src/app/agent.tsx removeGuidedFacet — setAgeFlow(null) alone leaves a resolveOptions/rankQuestions '
-  + 'probe for the destroyed cohort free to land afterwards and re-open the card on stale counts');
+// RETIRED 2026-10-03 with the pill ✕ itself (owner: «we should not show any X button on this»). Four
+// checks used to live here about removeGuidedFacet — that removing the last pill kept the guided
+// record, that a removed facet's id was dropped from the carried asked-set, that a removal abandoned
+// the round on screen (#242), and that the token was bumped first. There is no removal left, so none
+// of those can fail. What replaces them pins the half that still matters: the carried asked-set can
+// only GROW, because nothing un-answers a question from the results any more — a committed answer is
+// changed only by Back inside the round.
+check('no pill removal exists, so nothing can shrink the carried asked-set',
+  !has(/removeGuidedFacet/) && !has(/guidedPills\.asked\.filter\(/),
+  'src/app/agent.tsx — a removal path is back: it must re-prove every property the retired checks '
+  + 'held (record survives the last pill, the removed id is un-asked, the on-screen round is abandoned)');
 check('the guided record is never dropped wholesale (no setGuidedPills(null))',
   !has(/setGuidedPills\(null\)/),
   'src/app/agent.tsx — clearing the record throws away the asked-set with it. If a future flow '
@@ -302,7 +270,13 @@ check('the offer probe asks with the SAME carried asked-set the round will use',
 // and is excluded by name.
 {
   const calls = [...agentSrc.matchAll(/rankQuestions\(([^)]*)\)/g)].map((m) => m[1].trim());
-  const interviewCalls = calls.filter((a) => a !== 'scoped, seen');
+  // `rankQuestions(next, asked)` is the next-step PREFETCH (2026-10-03, verify-af-continue-never-feels-
+  // stuck): it ranks exactly what the commit will, so its asked set must be the carried set PLUS the
+  // question being answered — asserted right here, so excluding it by name cannot hide a fresh set.
+  const interviewCalls = calls.filter((a) => a !== 'scoped, seen' && a !== 'next, asked');
+  check('the next-step prefetch ranks against the carried set plus the question being answered',
+    !calls.includes('next, asked') || /const asked = new Set\(\[\.\.\.ageFlowAskedRef\.current, question\.id\]\);/.test(agentSrc),
+    'src/app/agent.tsx — prefetchNextStep must build its asked set from ageFlowAskedRef.current');
   check('the round\'s own plan is ranked against the carried set, not a fresh one',
     interviewCalls.length >= 2 && interviewCalls.every((a) => a.endsWith('ageFlowAskedRef.current')),
     `src/app/agent.tsx — every interview ranking call must pass the carried set; got ${JSON.stringify(interviewCalls)}`);
@@ -372,7 +346,7 @@ mustCatch('the asked-set being grown with .add() instead of derived',
 // (g) the applies really are replacing — a monotone fixture would make check 6 meaningless
 mustCatch('a fixture that pretended the applies were monotone',
   ((q: any, k: string[]) => ({ ...q, ageMin: Math.max(q.ageMin ?? 0, Number(k[0])) }))({ ageMin: 3 }, ['10']).ageMin === 10
-  && new Function('q', 'keys', ageApply ?? 'return q;')({ ageMin: 3, ageMax: 5 }, ['10p']).ageMax === null);
+  && new Function('q', 'keys', `${AGE_PRELUDE}${ageApply ?? 'return q;'}`)({ ageBuckets: ['new', '1_2', '3_5', '6_9'] }, ['new']).ageBuckets === null);
 // (h)-(m) the React wiring
 mustCatch('finishGuided no longer publishing the asked-set onto its results turn',
   !/asked: \[\.\.\.ageFlowAskedRef\.current\]/.test(
@@ -381,8 +355,8 @@ mustCatch('the guided record losing `asked` on the way through runRefine',
   !/setGuidedPills\(\{[^)]*asked: opts\.guided\.asked/.test(
     mut(agentSrc, 'asked: opts.guided.asked, ', '')));
 mustCatch('the CTA seeding a carry with no history',
-  !/afCarryRef\.current = q\s*\n?\s*\? \{ msgId: m\.id, originQ: carried\?\.baseQ \?\? q, facets: carried\?\.facets \?\? \[\], asked: carried\?\.asked \?\? \[\] \}/.test(
-    mut(agentSrc, 'asked: carried?.asked ?? [] }', 'asked: [] }')));
+  !/afCarryRef\.current = q\s*\n?\s*\? \{ msgId: m\.id, originQ: carried\?\.baseQ \?\? q, facets: carried\?\.facets \?\? \[\], asked: \[\.\.\.new Set\(\[\.\.\.\(carried\?\.asked \?\? \[\]\), \.\.\.\(afSkippedByMsgRef\.current\[m\.id\] \?\? \[\]\)\]\)\] \}/.test(
+    mut(agentSrc, '...(carried?.asked ?? [])', '...([])')));
 {
   const broken = mut(agentSrc,
     /const carried = guidedPills\?\.msgId === m\.id \? guidedPills : null;([\s\S]*?): null;\n(\s*)if \(q && anyGuidedEligible\(q\)\) void startAgeFlow\(q\);/,
@@ -394,22 +368,12 @@ mustCatch('the CTA seeding a carry with no history',
     !(body.indexOf('afCarryRef.current =') >= 0
       && body.indexOf('afCarryRef.current =') < body.indexOf('startAgeFlow(q)')));
 }
-mustCatch('removeGuidedFacet dropping the record when the last pill goes',
-  !/\{ guided: \{ baseQ: guidedPills\.baseQ, facets: remaining, asked: guidedPills\.asked/.test(
-    mut(agentSrc, '{ guided: { baseQ: guidedPills.baseQ, facets: remaining, asked: guidedPills.asked.filter((id) => id !== removed.id) } })',
-      'remaining.length ? { guided: { baseQ: guidedPills.baseQ, facets: remaining } } : undefined)')));
-mustCatch('removeGuidedFacet carrying the REMOVED question forward (pill removal as a one-way door)',
-  !/asked: guidedPills\.asked\.filter\(\(id\) => id !== removed\.id\)/.test(
-    mut(agentSrc, 'asked: guidedPills.asked.filter((id) => id !== removed.id)', 'asked: guidedPills.asked')));
-mustCatch('removeGuidedFacet leaving the round on screen priced on the cohort it destroyed (#242)',
-  !/const remaining = guidedPills\.facets\.filter\(\(_, i\) => i !== facetIndex\);\s*ageFlowTokenRef\.current\+\+;\s*setAgeFlow\(null\);/.test(
-    mut(agentSrc, 'ageFlowTokenRef.current++;\n    setAgeFlow(null);\n', '')));
-mustCatch('the card being dropped WITHOUT bumping the token (an in-flight probe repaints it)',
-  !/ageFlowTokenRef\.current\+\+;\n    setAgeFlow\(null\);/.test(
-    mut(agentSrc, 'ageFlowTokenRef.current++;\n    setAgeFlow(null);', 'setAgeFlow(null);')));
+mustCatch('a pill removal coming back and shrinking the carried asked-set',
+  has(/removeGuidedFacet/) || /guidedPills\.asked\.filter\(/.test(
+    mut(agentSrc, 'const afCardPills', 'const removeGuidedFacet = () => guidedPills.asked.filter((id) => id !== 1);\n  const afCardPills')));
 mustCatch('setGuidedPills(null) coming back (the asked-set goes with it)',
-  /setGuidedPills\(null\)/.test(mut(agentSrc, 'if (!guidedPills || busy) return;',
-    'if (!guidedPills || busy) { setGuidedPills(null); return; }')));
+  /setGuidedPills\(null\)/.test(mut(agentSrc, 'setGuidedPills({ msgId: statusId,',
+    'setGuidedPills(null); setGuidedPills({ msgId: statusId,')));
 mustCatch('the offer probe going back to an empty asked-set',
   !/const seen = new Set<string>\(asked\);/.test(
     mut(agentSrc, 'const seen = new Set<string>(asked);', 'const seen = new Set<string>();')));

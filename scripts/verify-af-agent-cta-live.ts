@@ -18,7 +18,7 @@ import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { judgeAfCta, type AfCtaObservation } from './lib/afOfferAgreement.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
-import { AGENT_TURN_MS } from './lib/afJourneyPacing.ts';
+import { AGENT_TURN_MS, awaitFirstResultsSettled } from './lib/afJourneyPacing.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 // Self-sufficient endpoint (verify-live-checks-self-sufficient.ts §4b): the committed public
@@ -135,13 +135,54 @@ const run = async () => {
       const u = r.url();
       if (u.startsWith(RPC_ORIGIN) && u.includes('/rest/v1/rpc/')) afRpcs.push(u.split('/rpc/')[1].split('?')[0]);
     });
+    // OBSERVE WHETHER THE COUNT PROBES ANSWERED — do not infer it from what rendered
+    // (ops_incident #340, 2026-09-20). These two RPCs are the ONLY inputs to probeVerdict(); if they
+    // all come back 2xx then the verdict cannot have been 'unknown', so «the round closed on an
+    // UNKNOWN» is not an available explanation for an empty round. Recorded from the real responses,
+    // and from requestfailed so a dropped connection counts as a failure rather than as silence.
+    const COUNT_RPCS = /(apartment_guided_counts_ar|property_age_option_counts_ar)/;
+    let probeOk = 0; let probeBad = 0;
+    const probeLog: string[] = [];
+    page.on('response', (res) => {
+      const u = res.url();
+      if (!u.startsWith(RPC_ORIGIN) || !COUNT_RPCS.test(u)) return;
+      const name = u.split('/rpc/')[1].split('?')[0];
+      if (res.status() >= 200 && res.status() < 300) probeOk++; else probeBad++;
+      probeLog.push(`${name}:${res.status()}`);
+    });
+    page.on('requestfailed', (r) => {
+      const u = r.url();
+      if (!u.startsWith(RPC_ORIGIN) || !COUNT_RPCS.test(u)) return;
+      probeBad++;
+      probeLog.push(`${u.split('/rpc/')[1].split('?')[0]}:FAILED(${r.failure()?.errorText ?? '?'})`);
+    });
     try {
       await gotoLive(page, BASE, { timeout: 90_000 });
       await page.waitForTimeout(2500);
       await page.click('text=الوسيط الذكي', { timeout: 30_000 });
       await page.waitForTimeout(1500);
       for (const m of j.say) await say(page, m);
-      await page.waitForTimeout(6000);
+      // OBSERVE THE TURN, NEVER TIME IT (harness note 20; ops_incident #340, 2026-09-20). This was
+      // `await page.waitForTimeout(6000)` — a typed number standing in for the searching beat, and
+      // 4,450 ms SHORTER than the beat it stood in for (SEARCH_MIN_MS 10,000 + LOADER_EXIT_MS 450).
+      // Measured on production: after those 6,000 ms elapsed the reveal cascade was still mounting
+      // cards and the body text went on growing ~7,300 chars, so both the CTA read and the click
+      // below landed mid-cascade. The beat barrier could not see it — it only discovers literal
+      // waits >= 8,000 ms, and 6,000 sits beneath its floor.
+      const arrival = await awaitFirstResultsSettled(
+        () => page.locator('[data-testid^="card-listing-"]').count(),
+        async () => (await page.locator('[data-testid="results-actions"]').count()) > 0,
+        (ms) => page.waitForTimeout(ms),
+      );
+      if (!arrival.settled) {
+        // Never judge a screen we did not watch arrive. NOT EXERCISED still FAILS the run — a check
+        // that could not certify must never read green — but it is labelled for what it is.
+        failures.push(`${j.name}: NOT EXERCISED — the first results turn never settled; `
+          + 'the CTA was never read against a screen that had stopped changing.');
+        report.push(`SKIP  ${j.name} — results turn never settled (cards=${arrival.cards})`);
+        continue;
+      }
+      console.log(`      [settled] ${j.name}: ${arrival.cards} cards held still before the CTA was read`);
 
       const cta = page.locator('[data-testid="results-narrow"]');
       const ctaOffered = (await cta.count()) > 0;
@@ -150,6 +191,8 @@ const run = async () => {
       let ctaReturned = false;
       let refineChipsAppeared = false;
 
+      // Only probes fired AFTER the tap belong to the round; the results turn fires its own pair.
+      const probeOkBefore = probeOk, probeBadBefore = probeBad, probeLogBefore = probeLog.length;
       if (ctaOffered) {
         await cta.last().click();
         // Sample across the whole window: a card that opens and then closes itself is NOT a pass,
@@ -193,8 +236,18 @@ const run = async () => {
         }
       }
 
+      const roundOk = probeOk - probeOkBefore;
+      const roundBad = probeBad - probeBadBefore;
+      const roundLog = probeLog.slice(probeLogBefore);
+      // null when the round issued no count RPC at all — nothing was observed, so nothing is claimed.
+      const countProbesAnswered = (roundOk + roundBad) === 0 ? null : roundBad === 0;
+      if (ctaOffered) {
+        console.log(`      [probes] ${j.name}: ${roundOk} ok / ${roundBad} failed after the tap`
+          + `${roundLog.length ? ` — ${roundLog.join(', ')}` : ' — none issued'}`);
+      }
       const o: AfCtaObservation = {
         ctaOffered, cardEverAppeared, loadingEverAppeared, ctaReturned, refineChipsAppeared,
+        countProbesAnswered,
         journey: j.name,
       };
       const verdict = judgeAfCta(o);

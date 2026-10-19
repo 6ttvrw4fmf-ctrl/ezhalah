@@ -88,6 +88,11 @@ const KNOWN_GAPS: { path: string; owner: string; why: string }[] = [
     why: 'claimed by 20260906041438_a_declared_alert_kind_without_an_emitter_is_decoration.sql; '
       + 'its own sibling 20260906041121_routine11_lifecycle_the_last_four_alert_kinds_get_an_emitter.sql '
       + 'names the owning routine in its filename — the alert-kind/emitter roster this session shipped' },
+  // 2026-09-19 gap for scripts/verify-results-found-rotation.ts (claimed by
+  // 20260919040825_ui_results_found_rotation.sql) — REMOVED HERE the moment the authoring session
+  // pushed the barrier, exactly as this entry's own instructions said. The barrier exists in this
+  // same PR, executes the real picker against the 40-row baked list, and asserts byte-for-byte
+  // multiset equality with the migration's insert rows.
   { path: 'scripts/verify-placeholder-price-detector-sees-the-whole-sentinel-set.ts', owner: 'routine-3-data-integrity',
     why: 'claimed by 20260906043755_wasalt_form_default_prices_are_retracted_and_watched.sql '
       + '(ops_incident #63/#65); wasalt placeholder-price detection is price/listing data integrity' },

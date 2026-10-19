@@ -1,6 +1,25 @@
-// AF emoji summary sentence (owner 2026-08-22). PURE — zero runtime deps.
+// AF emoji summary sentences (owner 2026-08-22). PURE — zero runtime deps.
 // Each selected Advanced Filter attribute → emoji + Arabic label.
-// Skipped questions never appear (the facets array only holds committed answers).
+//
+// TWO SENTENCES, TWO AUDIENCES — do not merge them.
+//
+//   buildAfSummary(facets)  → what the filter IS. Committed answers only. This is the sentence the
+//     results PILLS carry, so it is a claim about the live predicate: a skipped question appearing
+//     here would name a filter that is not applied (permanent rule, owner 2026-08-22).
+//
+//   buildAfRoundLog(ids, facets) → what the ROUND did, step by step, IN ASK ORDER. Added
+//     2026-09-20 on the owner's ask ("you asked about apartment and then age, and he decided to
+//     skip, then he chose الواجهة ... you say: user decided to skip"). It feeds the completed-round
+//     RECEIPT, which is a record of the interview, not a description of the predicate — which is
+//     exactly why naming a skip there breaks nothing: the receipt never claims to filter anything.
+//     The permanent rule above is untouched and still governs buildAfSummary.
+//
+// ONE LIST, NOT TWO PILES. The first version of this card split the round into «اخترت: ...» and
+// «تخطيت: ...» on separate lines. The owner replaced it with a single ask-ordered line the same
+// day: read straight through, it tells the story of the interview — picked, skipped, picked — which
+// two sorted piles cannot. A skip therefore has to be legible WHERE IT HAPPENED, mid-sentence, and
+// that is why it carries ⏭️ rather than the question's own emoji: «عمر العقار 🏗️» sitting between
+// two real answers reads as a third answer. «تخطى عمر العقار ⏭️» cannot be mistaken for one.
 
 const AMENITY_EMOJI: Record<string, string> = {
   kitchen: '🍳', parking: '🅿️', elevator: '🛗', ac: '❄️',
@@ -9,13 +28,20 @@ const AMENITY_EMOJI: Record<string, string> = {
   electricity: '⚡', water_supply: '💧',
 };
 
-export function buildAfSummary(facets: Array<{ id: string; keys: string[]; labels: string[] }>): string {
-  if (!facets.length) return '';
+// `total` = the size of the set this question was asked against (what the pick is checked against) — only the
+// Advanced Filter round's search beat reads it; the summary sentences never do.
+export type AfFacet = { id: string; keys: string[]; labels: string[]; total?: number };
+
+// ONE committed facet → its finished, reader-facing item(s). Shared by the summary and the round
+// log, so an answer is worded identically wherever it appears; a multi-select facet explodes into
+// one item per key.
+function facetItems(f: AfFacet, locale: 'ar' | 'en' = 'ar'): string[] {
   const items: string[] = [];
-  for (const f of facets) {
+  {
     switch (f.id) {
+      // Every question takes several answers (owner 2026-10-03), so each pick is its own item.
       case 'property_age':
-        items.push(`عمر ${f.labels[0]} ${f.keys[0] === 'new' ? '✨' : '🏗️'}`);
+        f.labels.forEach((l, i) => items.push(`${locale === 'en' ? 'Age' : 'عمر'} ${l} ${f.keys[i] === 'new' ? '✨' : '🏗️'}`));
         break;
       case 'rnpl':
         items.push(`${f.labels[0]} 💳`);
@@ -33,13 +59,13 @@ export function buildAfSummary(facets: Array<{ id: string; keys: string[]; label
         for (const l of f.labels) items.push(`${l} 🏡`);
         break;
       case 'bathrooms':
-        items.push(`${f.labels[0]} حمامات 🚿`);
+        for (const l of f.labels) items.push(`${l} ${locale === 'en' ? 'bathrooms' : 'حمامات'} 🚿`);
         break;
       case 'furnished':
-        items.push(`${f.labels[0]} ${f.keys[0] === 'yes' ? '🛋️' : '🏠'}`);
+        f.labels.forEach((l, i) => items.push(`${l} ${f.keys[i] === 'yes' ? '🛋️' : '🏠'}`));
         break;
       case 'street_width':
-        items.push(`شارع ${f.labels[0]} 🛣️`);
+        for (const l of f.labels) items.push(`${locale === 'en' ? 'Street' : 'شارع'} ${l} 🛣️`);
         break;
       // «أو», not «و». p_directions is a membership filter — picking شمال and غرب returns listings
       // facing north OR west. «شمال وغرب» describes a DIFFERENT, buildable query: one corner listing
@@ -47,13 +73,13 @@ export function buildAfSummary(facets: Array<{ id: string; keys: string[]; label
       // read oddly, it names a real query we did not run. Every OTHER multi-select in this sentence is
       // genuinely conjunctive — amenities AND together in the RPC — which is why they stay on «و».
       case 'direction':
-        items.push(`${f.labels.join(' أو ')} 🧭`);
+        items.push(`${f.labels.join(locale === 'en' ? ' or ' : ' أو ')} 🧭`);
         break;
       case 'rating':
-        items.push(`تقييم ${f.labels[0]} ⭐`);
+        for (const l of f.labels) items.push(`${locale === 'en' ? 'Rating' : 'تقييم'} ${l} ⭐`);
         break;
       case 'unit_subtype':
-        items.push(`${f.labels[0]} 🏢`);
+        for (const l of f.labels) items.push(`${l} 🏢`);
         break;
       default:
         for (const l of f.labels) items.push(l);
@@ -66,7 +92,133 @@ export function buildAfSummary(facets: Array<{ id: string; keys: string[]; label
   // still push the identical finished item ("Gym ✅") twice into this sentence. Dedupe at the final,
   // fully-rendered item text — the actual thing the user reads — so no upstream shape of overlap can
   // slip through (owner audit, 2026-08-27).
-  const dedupedItems = [...new Set(items)];
-  if (dedupedItems.length === 1) return dedupedItems[0];
-  return dedupedItems.slice(0, -1).join('، ') + '، و' + dedupedItems[dedupedItems.length - 1];
+  return items;
+}
+
+// The committed answers as finished items (words + emoji), one per entry, in answer order — what each
+// read-only CHIP under the results summary shows (owner 2026-10-03). Same items, same wording and the
+// same dedupe as the sentence below, so a chip and the sentence can never name different answers.
+export function buildAfSummaryItems(facets: AfFacet[], locale: 'ar' | 'en' = 'ar'): string[] {
+  return [...new Set(facets.flatMap(f => facetItems(f, locale)))];
+}
+
+// THE ADVANCED FILTER ROUND'S SEARCH BEAT (owner 2026-10-11: «نفحص أكثر من 349,793 عقار…» is how a search should read —
+// «checking», with the number): ONE step per answered question, carrying the size of the set that answer was checked
+// against («نفحص 1,425 عقار…» → «نفحص 830 عقار…»). A multi-select answer (elevator + A/C) is ONE step, not two with the
+// same number. `pool` is null when the size was never known, and the beat then names the pick instead of inventing a
+// count. Same items, same wording and the same dedupe as the chips, so the beat can never name an answer the chips don't.
+export function buildAfBeatSteps(facets: AfFacet[]): Array<{ label: string; pool: number | null }> {
+  const seen = new Set<string>();
+  const steps: Array<{ label: string; pool: number | null }> = [];
+  for (const f of facets) {
+    const fresh = facetItems(f).filter((it) => !seen.has(it));
+    fresh.forEach((it) => seen.add(it));
+    if (!fresh.length) continue;
+    steps.push({ label: joinAr(fresh), pool: typeof f.total === 'number' && f.total > 0 ? f.total : null });
+  }
+  return steps;
+}
+
+export function buildAfSummary(facets: AfFacet[]): string {
+  return joinAr(buildAfSummaryItems(facets));
+}
+
+// THE TURN SUMMARY OF AN ADVANCED FILTER ROUND (owner 2026-10-03, second pass): `base` is the summary the
+// user already read (searchSummary of the query BEFORE the first round — type group, deal and period,
+// city and region untouched), and each committed answer CONTINUES that same bullet list as its own
+// labelled line, exactly like the lines above it: «• نوع العقار المحدد: شقة», «• دورات المياه: +١»,
+// «• المميزات: المطبخ، مصعد». No «من الفلتر المتقدم» heading and no emoji here — the owner: «don't
+// include it … this is under the same one … I removed the emojis for this specific one. Below it's
+// fine» (the chips under the summary keep theirs, via buildAfSummaryItems).
+//
+// The label is an ENGLISH i18n key (AF_LINE_LABEL); the caller translates it, which keeps this file
+// pure. Two answers that share a label (a second round's amenities) merge into ONE line, values
+// deduped in answer order. Direction is a membership filter, so its values join with «أو», never «،».
+// No committed answer ⇒ `base`, unchanged.
+export const AF_LINE_LABEL: Record<string, string> = {
+  property_group: 'Selected property group',
+  property_type: 'Selected property type',
+  bathrooms: 'Bathrooms',
+  amenities: 'Features',
+  furnished: 'Furnishing',
+  property_age: 'Property age',
+  rnpl: 'Payment',
+  street_width: 'Street width',
+  direction: 'Facing',
+  rating: 'Rating',
+  unit_subtype: 'Unit type',
+};
+export const AF_LINE_FALLBACK = 'Advanced filter';
+
+export function withAdvancedLines(base: string, facets: AfFacet[], translate: (key: string) => string): string {
+  const order: string[] = [];
+  const byLabel = new Map<string, { or: boolean; values: string[] }>();
+  for (const f of facets) {
+    const label = translate(AF_LINE_LABEL[f.id] ?? AF_LINE_FALLBACK);
+    let e = byLabel.get(label);
+    if (!e) { e = { or: f.id === 'direction', values: [] }; byLabel.set(label, e); order.push(label); }
+    for (const v of f.labels) if (!e.values.includes(v)) e.values.push(v);
+  }
+  const lines = order.map((l) => { const e = byLabel.get(l)!; return `• ${l}: ${e.values.join(e.or ? ' أو ' : '، ')}`; });
+  return lines.length ? `${base}\n${lines.join('\n')}` : base;
+}
+
+// «،» between, «، و» before the last — the one Arabic list joiner both sentences share, so the
+// receipt's two lines can never drift into different punctuation. Every item ends in its emoji and
+// the separator follows it: comma AFTER the emoji, never before (owner, universal).
+const joinAr = (items: string[]): string =>
+  items.length === 0 ? ''
+    : items.length === 1 ? items[0]
+      : items.slice(0, -1).join('، ') + '، و' + items[items.length - 1];
+
+// Every question the interview can ASK, as the short noun the round log names it by — «عمر العقار»,
+// not the question sentence «كم عمر العقار تقريباً؟». NOUN ONLY, no per-question emoji: a skipped
+// question is marked as a SKIP (⏭️ below), never dressed as an answer.
+//
+// The two SCOPE tiers are here too. They show no Skip button, but «متابعة» with nothing ticked
+// leaves them uncommitted, which is a skip in everything but name.
+//
+// verify-af-receipt-shows-skips.ts executes this map against the ids scanned out of the real
+// question registries, so a question added later can never go silently unnamed here.
+const SKIPPED_QUESTION: Record<string, string> = {
+  property_group: 'مجموعة العقار',
+  property_type: 'نوع العقار',
+  property_age: 'عمر العقار',
+  rnpl: 'التقسيط',
+  amenities: 'المميزات',
+  bathrooms: 'دورات المياه',
+  furnished: 'الفرش',
+  street_width: 'عرض الشارع',
+  direction: 'الاتجاه',
+  rating: 'التقييم',
+  unit_subtype: 'نوع الوحدة',
+};
+
+export const skippedQuestionNoun = (id: string): string | undefined => SKIPPED_QUESTION[id];
+
+// ⏭️, not the question's own emoji — see ONE LIST, NOT TWO PILES in the header.
+const SKIP_MARK = '⏭️';
+const skipItem = (id: string): string | null => {
+  const noun = SKIPPED_QUESTION[id];
+  return noun ? `تخطى ${noun} ${SKIP_MARK}` : null;
+};
+
+// THE ROUND, IN THE ORDER IT HAPPENED. `askedIds` is the ask order; a question with a committed
+// facet prints its answer, one without prints as a skip, and the reader gets the interview back as
+// a story rather than as two sorted piles.
+//
+// The trailing loop is not decoration: it guarantees that a committed facet whose question is
+// somehow absent from `askedIds` is still named. Rule 1 of the permanent summary rule — a facet in
+// the predicate MUST appear — is the half that must never fail quiet, so ordering yields to it.
+export function buildAfRoundLog(askedIds: string[], facets: AfFacet[], locale: 'ar' | 'en' = 'ar'): string {
+  const byId = new Map(facets.map((f) => [f.id, f]));
+  const items: string[] = [];
+  for (const id of askedIds) {
+    const f = byId.get(id);
+    if (f) items.push(...facetItems(f, locale));
+    else { const sk = locale === 'en' ? (AF_LINE_LABEL[id] ? `Skipped ${AF_LINE_LABEL[id]} ${SKIP_MARK}` : null) : skipItem(id); if (sk) items.push(sk); }
+  }
+  for (const f of facets) if (!askedIds.includes(f.id)) items.push(...facetItems(f, locale));
+  if (locale === 'en') return [...new Set(items)].join(', ');
+  return joinAr([...new Set(items)]);
 }

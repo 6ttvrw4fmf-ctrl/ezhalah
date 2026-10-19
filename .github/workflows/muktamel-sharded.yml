@@ -26,23 +26,35 @@
 # and a blocked or 0-row shard prunes nothing. Proven by
 # scrapers/common/tests/test_muktamel_shard_partition.py.
 #
-# The MIN/MAX below are this workflow's own evidenced range, not scrapers/muktamel/run.py's
-# MIN_ID_DEFAULT (deliberately left at 1 — see that file's docstring for why). Re-measure with
-# scrapers/muktamel/diag_page_structure.py before widening either bound.
+# The MIN below is this workflow's own evidenced floor, not scrapers/muktamel/run.py's
+# MIN_ID_DEFAULT (deliberately left at 1 — see that file's docstring for why). MAX is NOT a ceiling
+# (2026-09-28): it is only the floor of the top — every shard asks the source where its ids end
+# (run.py find_ceiling) and sweeps up to that. As a constant it had silently capped the crawl at
+# 32300 while the site ran to ~34311 (~890 live listings never fetched). Measured that day the
+# swept range is ~10,400 ids → ~1,300/shard → ~73 min at the worst observed rate, inside 120m; the
+# range only grows, so re-size the shard count when a shard's own log nears the timeout.
 
 name: Muktamel sharded crawl
 
-# SCHEDULED (2026-09-11, closing alert zero_new_stall:muktamel). muktamel was launched into
-# search on 2026-09-03 (3,900+ active rows) with NO scheduler at all: the old sequential weekly
-# pg_cron job (jobid 14) was paused 2026-07-14 and is hard-locked paused by migration
-# 20260815211103 — deliberately NOT re-enabled here, because the sequential sync mathematically
-# cannot finish the 8,301-id band inside its timeout (that is what killed the one manual run on
-# 09-05: 452 min of work vs a 330-min cap). This fleet was built for exactly that math (header
-# above) and is the thing that should have been scheduled at launch. Weekly, Monday 03:00 UTC —
-# the cadence the paused job had.
+# SCHEDULING LIVES IN pg_cron, NOT HERE — the same as dealapp-sharded.yml, the file this one was
+# modelled on (`on: workflow_dispatch: {}` there too). `gh-muktamel-sharded` dispatches this
+# workflow; see supabase/migrations/20260921023559_muktamel_sharded_crawl_goes_daily.sql.
+#
+# This file carried its own `schedule: '0 3 * * 1'` from 2026-09-11 (closing alert
+# zero_new_stall:muktamel), and migration 20260914041355 then added the pg_cron job three days
+# later without either change knowing about the other. The result fired the full 8-shard fleet
+# TWICE every Monday — 03:00 from GitHub, 03:45 from pg_cron. The GitHub schedule is removed here
+# rather than the pg_cron job because pg_cron is where every other platform's cadence is declared,
+# which is the only place an operator thinks to look.
+#
+# muktamel was launched into search on 2026-09-03 (3,900+ active rows) with NO scheduler at all:
+# the old sequential weekly pg_cron job (jobid 14) was paused 2026-07-14 and is hard-locked paused
+# by migration 20260815211103 — deliberately NOT re-enabled, because the sequential sync
+# mathematically cannot finish the 8,301-id band inside its timeout (that is what killed the one
+# manual run on 09-05: 452 min of work vs a 330-min cap). This fleet was built for exactly that
+# math (header above). Cadence is DAILY as of 2026-09-21 (owner request): the per-run sizing above
+# is per-run, not per-week, and dealapp already runs 12 shards nightly against the same cap.
 on:
-  schedule:
-    - cron: '0 3 * * 1'
   workflow_dispatch:
     inputs:
       min_id:
@@ -50,7 +62,7 @@ on:
         required: false
         default: "24000"
       max_id:
-        description: "Highest listing id across ALL shards"
+        description: "Floor for the top of the sweep — the real ceiling is probed from the source each run"
         required: false
         default: "32300"
 
@@ -62,7 +74,12 @@ jobs:
   crawl:
     name: Muktamel shard ${{ matrix.shard }}/8
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # 180, not 120 (2026-10-03, Scraping Engineer): measured shards ran 77-91 min on normal nights, but
+    # on 10-03 the source was slower (network timeouts 20 vs 3) and all four shards that ran were
+    # killed at 120 mid-sweep; the rerun took 101-102 min. Almost all of it is the sweep: the
+    # pre-sweep ceiling probe takes ~1 min (begin_run lands ~1 min after job start). A shard ends when
+    # its work ends, so the extra cap only costs time on a slow night.
+    timeout-minutes: 180
     strategy:
       fail-fast: false   # one blocked/slow shard must never cancel the other seven
       # 2, NOT 8 (2026-09-11, measured): the only full 8-parallel fleet run (09-03, run
@@ -98,6 +115,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           MUKTAMEL_WORKERS: "8"
+          # unbuffered: a block-buffered stdout stamped the «sweeping ids» line ~25 min late (10-03)
+          PYTHONUNBUFFERED: "1"
         run: >-
           exec python -m scrapers.muktamel.run --type all
           --min-id ${{ github.event.inputs.min_id || '24000' }}
@@ -117,7 +136,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
       - name: Bridge this run's result to alert_event
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

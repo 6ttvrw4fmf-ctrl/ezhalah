@@ -34,8 +34,12 @@
 -- location_search_candidates_ar. Verified against production by a full dry run of that migration on
 -- 2026-09-03 (applied → all six smokes green → rolled back; 350 rows checked for 28 keys,
 -- NULL-preservation and source-row identity, parity 0, gate holding).
--- md5 of the body below: a034dbba0fff853ae4bbefde02961dff
+-- md5 of the body below: f7427472528cff2b58ccf58c9e124d18   (2026-10-03 gate amendment; before it: a034dbba0fff853ae4bbefde02961dff)
 -- Re-verify after the migration is applied under the deploy lock.
+-- Amended 2026-10-03 (migration af_every_question_multi_select_unions, owner: «never force the user to
+-- select one thing»): the gate gains p_age_buckets / p_rating_buckets / p_furnished_in, so a search
+-- narrowed by a mixture alone still packs af_canon (dry run: 28 keys on a mixture-only search). In
+-- production the gate is one line; the extra params are appended after p_is_new_construction.
 case when (
        p_bath_min is not null
     or p_amenities is not null
@@ -48,6 +52,9 @@ case when (
     or p_age_min is not null
     or p_age_max is not null
     or p_is_new_construction is not null
+    or p_age_buckets is not null
+    or p_rating_buckets is not null
+    or p_furnished_in is not null
   ) then jsonb_build_object(
     'bathrooms', s.bathrooms, 'property_age', s.property_age, 'furnished', s.furnished,
     'street_width_m', s.street_width_m, 'direction_ar', s.direction_ar, 'rating', s.rating,

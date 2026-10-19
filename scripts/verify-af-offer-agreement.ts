@@ -118,6 +118,55 @@ check('offered + NO card + loading seen ⇒ FAIL (round started, then gave up)',
     })());
 }
 
+// ── 3b. A HEALTHY PROBE IS AN OBSERVATION, AND IT OVERRIDES THE INFERENCE ───────────────────────
+// (routine #5, 2026-09-20, ops_incident #340.)
+//
+// §3 above reads a restored CTA as PROOF that the probes came back undetermined, on the strength of
+// "the product restores it on, and only on, an undetermined probe". That "only on" is FALSE, and
+// production disproved it: measured five times on الرياض/إيجار/سنوي/شقة, both count RPCs returned
+// HTTP 200 in 565-813 ms — far inside the 4 s cap — with NO retry pair on the wire, so
+// shouldRetryProbes() never saw 'unknown'. The round still rendered nothing and the CTA still came
+// back, and the verdict still read «probe-undetermined … look upstream at the count probe».
+//
+// That is this surface's own recurring failure mode pointed the other way: instead of accusing a
+// correct production, it EXONERATES a broken one and sends the next engineer to a probe that was
+// healthy all along. agent.tsx has other silent paths to the same screen — finishGuided()'s bare
+// `setAgeFlow(null)` when ageFlowChangedRef is false, and every token-supersession early return.
+//
+// So the cause is now OBSERVED, never inferred, and an observed-healthy probe makes the round's
+// silence a REAL red rather than a NOT EXERCISED.
+{
+  const started = { cardEverAppeared: false, loadingEverAppeared: true, refineChipsAppeared: false,
+                    ctaReturned: true } as const;
+  const healthy = judgeAfCta(obs({ ...started, countProbesAnswered: true }));
+  const failed = judgeAfCta(obs({ ...started, countProbesAnswered: false }));
+  const unobserved = judgeAfCta(obs({ ...started, countProbesAnswered: null }));
+  const legacy = judgeAfCta(obs({ ...started }));
+
+  check('an OBSERVED-HEALTHY probe turns the silent round into a real red',
+    !healthy.ok && healthy.reason === 'offered-then-closed-silently-on-healthy-probes');
+  check('...and it is NOT marked undetermined — this run certified a genuine disagreement',
+    !healthy.ok && healthy.undetermined === undefined);
+  check('...and it points at the silent early returns, NOT at the count probe',
+    !healthy.ok && /finishGuided/.test(healthy.diagnosis)
+      && /Do NOT look at the count probe/.test(healthy.diagnosis));
+  check('an OBSERVED-FAILED probe is still the owner-locked UNKNOWN, still NOT EXERCISED',
+    !failed.ok && failed.reason === 'probe-undetermined' && failed.undetermined === true);
+  check('an UNOBSERVED probe falls back to the pre-2026-09-20 reading (nothing is claimed)',
+    !unobserved.ok && unobserved.reason === 'probe-undetermined');
+  check('a journey that never supplies the field behaves exactly as before (backward compatible)',
+    !legacy.ok && legacy.reason === 'probe-undetermined' && legacy.undetermined === true);
+  check('the fourth ending is distinguishable from the other three',
+    new Set([healthy.reason, failed.reason,
+             judgeAfCta(obs({ ...started, refineChipsAppeared: true, ctaReturned: false, countProbesAnswered: true })).reason,
+             judgeAfCta(obs({ ...started, ctaReturned: false, countProbesAnswered: true })).reason]).size === 4);
+  // THE SOFTENER GUARD, again: healthy probes must never turn a failure into a pass.
+  check('a healthy probe never makes an empty round OK',
+    healthy.ok === false && failed.ok === false && unobserved.ok === false);
+  check('a card that DID open is still a pass whatever the probes did',
+    judgeAfCta(obs({ cardEverAppeared: true, loadingEverAppeared: true, countProbesAnswered: false })).ok === true);
+}
+
 // ── 4. the live half must exist, and must be reached by the workflow ─────────────────────────────
 // A rule nothing runs against production is decoration — the same reasoning as AGENTS.md's
 // "a detector outside the roster is decoration".

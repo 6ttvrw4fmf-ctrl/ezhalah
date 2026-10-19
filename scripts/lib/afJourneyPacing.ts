@@ -169,21 +169,26 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
  * FAILS CLOSED. If either constant cannot be read this THROWS rather than falling back to a
  * default: a harness that silently guesses the beat is how the accusation above got written.
  */
-export function readSearchBeatMs(agentSrc?: string): { floorMs: number; exitMs: number } {
+export function readSearchBeatMs(agentSrc?: string): { floorMs: number; holdMs: number; exitMs: number } {
   const src = agentSrc ?? readFileSync(join(REPO_ROOT, 'src', 'app', 'agent.tsx'), 'utf8');
   const floor = src.match(/^const SEARCH_MIN_MS = (\d+);/m);
   const exit = src.match(/^const LOADER_EXIT_MS = (\d+);/m);
+  // OWNER 2026-10-17: the beat is no longer "exactly the floor". Results show as soon as they are ready
+  // (SEARCH_MIN_MS is now a short minimum) and NOTHING is held past SEARCH_MAX_HOLD_MS. A post-search
+  // read must outlast the LONGEST hold the product can impose, so the beat is the cap when present.
+  const cap = src.match(/^const SEARCH_MAX_HOLD_MS = (\d+);/m);
   if (!floor || !exit) {
     throw new Error(
       'afJourneyPacing: could not read SEARCH_MIN_MS / LOADER_EXIT_MS from src/app/agent.tsx. ' +
       'The searching beat is the thing every post-search read must outlast, so a harness that ' +
       'cannot see it must stop, not guess.');
   }
-  return { floorMs: Number(floor[1]), exitMs: Number(exit[1]) };
+  const floorMs = Number(floor[1]);
+  return { floorMs, holdMs: Math.max(floorMs, cap ? Number(cap[1]) : floorMs), exitMs: Number(exit[1]) };
 }
 
-/** The full beat a committed answer must outlast before the new results turn is on screen. */
-export const SEARCH_BEAT_MS = (() => { const b = readSearchBeatMs(); return b.floorMs + b.exitMs; })();
+/** The full beat a committed answer must outlast before the new results turn is on screen (the longest hold + exit). */
+export const SEARCH_BEAT_MS = (() => { const b = readSearchBeatMs(); return b.holdMs + b.exitMs; })();
 
 /**
  * Budget for a post-search read: the beat, plus the real network/render time that follows it, plus
@@ -393,4 +398,61 @@ export async function awaitAfStep(
     if (Date.now() >= until) return { outcome: 'timeout', options: [] };
     await sleep(pollMs);
   }
+}
+
+/**
+ * THE FIRST RESULTS TURN HAS STOPPED ARRIVING — the observation a fixed sleep was standing in for.
+ *
+ * `awaitResultsTurn` above answers "did the turn a COMMITTED ANSWER produced land", by id. This
+ * answers the question one step earlier, where there are no previous ids to difference against: the
+ * agent has just answered the user's opening request, and the results list is REVEALING its first
+ * page card by card. A journey that reads or clicks during that cascade is sampling a race.
+ *
+ * WHY IT EXISTS (routine #5, 2026-09-20, ops_incident #340/#338). Two live AF journeys typed
+ * `await page.waitForTimeout(6000)` between the last message and the results read:
+ *
+ *   verify-af-agent-cta-live.ts:144       before reading/clicking «خلّنا نحدد الطلب أكثر»
+ *   verify-af-remove-last-pill-live.ts:519 before counting the revealed cards
+ *
+ * 6,000 ms is BELOW the live searching beat (SEARCH_MIN_MS 10,000 + LOADER_EXIT_MS 450), so the read
+ * lands mid-cascade by construction — measured on production: the card count was still climbing and
+ * the body text grew ~7,300 chars AFTER the 6,000 ms elapsed. That is the exact shape of #338's
+ * reproducible off-by-one (14 cards counted where initialReveal() computed 15).
+ *
+ * The beat barrier could not see either of them: `verify-af-live-journeys-outlast-the-search-beat.ts`
+ * only discovers literal waits >= BEAT_SIZED_MS (8,000), and 6,000 sits under that floor — a typed
+ * stand-in for the beat, too short to outlast it, and beneath the notice of the guard written to
+ * forbid exactly that.
+ *
+ * OBSERVE, NEVER TIME (harness note 20, owner 2026-09-06: the ~10s beat is intentional product
+ * behaviour and may be raised again at any time). Settles on the card count holding still while the
+ * actions row is present, and reports honestly when it never does — the caller must then say NOT
+ * EXERCISED rather than judge a screen it never saw arrive.
+ */
+export type CardCountable = { evaluate: <R>(fn: () => R) => Promise<R> };
+
+export async function awaitFirstResultsSettled(
+  readCardCount: () => Promise<number>,
+  readActionsPresent: () => Promise<boolean>,
+  sleep: (ms: number) => Promise<void>,
+  budgetMs = POST_SEARCH_BUDGET_MS,
+  stableFor = 6,            // consecutive equal samples; at the 350ms poll below that is ~2.1s
+): Promise<{ settled: boolean; cards: number }> {
+  let stable = 0;
+  let last = -1;
+  const r = await settleUntil(
+    async () => {
+      const n = await readCardCount();
+      const actions = await readActionsPresent();
+      // A count only counts as "held still" while the actions row is mounted: during the beat the
+      // PREVIOUS screen is still up, and its card count is also perfectly stable.
+      if (n === last && n > 0 && actions) stable++; else stable = 0;
+      last = n;
+      return { n, stable };
+    },
+    (v) => v.stable >= stableFor,
+    budgetMs,
+    sleep,
+  );
+  return { settled: r.settled, cards: r.value.n };
 }

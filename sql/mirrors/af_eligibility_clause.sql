@@ -1,4 +1,90 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-10-17 (migration 20261017103017_af_rail_catches_up_to_district_fold): UNCHANGED.
+--   That migration only CALLS af_eligibility_clause() inside rebuild_af_filter_rpcs(); production's
+--   md5(pg_get_functiondef) read 0e7153e98f68fa6aa26b7a00fb6e4334 after it, the md5 recorded below.
+-- Re-verified 2026-10-09 (migration 20261009235607_raw_land_type_token_in_af_clause):
+--   CHANGED — two edits, rebuilt twice by rebuild_af_filter_rpcs() in one migration.
+--   (1) The category block is the 20261003222926 semi-join (`s.type_ar in (select k.type_ar from
+--       known_type_ar k where k.macro = p_category) or (… macro = 'both' and <table kind>)`), ported from
+--       the two hand-edited RPCs so the rail renders them again (backlog 323; af_rebuild_would_revert
+--       was asserted empty before the first rebuild). Same rows as the EXISTS it replaces.
+--   (2) «أرض خام» (owner 2026-10-09): the type token 'أرض خام' in p_types / p_types2 also matches a row
+--       tagged unit_subtype_ar = 'أرض خام' (sync_raw_land_subtype, 20261009235145), and such a row passes
+--       the category gate when that token was asked for. Dry run in a rolled-back transaction: Riyadh
+--       rent شقة 43,332 → 43,332, Riyadh أرض تجارية 6,670 → 6,670, all lands under تجاري 26,818 → 26,818,
+--       raw land Riyadh 1,338 (157 ms), country 5,968; would_revert 0 afterwards.
+--   Body below rebuilt offline from the previous body by the same two edits and PROVEN against production:
+--   Recorded md5 of pg_get_functiondef: 0e7153e98f68fa6aa26b7a00fb6e4334
+--   (length 10,998; the previous text hashed 8d9c9312948bd90aaef0001e1701fbe6, 10,787.)
+-- Re-verified 2026-10-03 (migration 20261003211448_af_every_question_multi_select_unions):
+--   CHANGED — three lines appended after the p_unit_subtypes line (owner 2026-10-03: «never force the
+--   user to select one thing»): p_furnished_in / p_age_buckets / p_rating_buckets, each the union of
+--   exactly the picked options, absent or empty ⇒ no constraint, NULL in no bucket. Needle-edited on
+--   the live definition (guarded by the previous md5 in the same step), rebuild_af_filter_rpcs()
+--   re-rendered all six templated RPCs; the migration asserted six existing counts unchanged and each
+--   union equal to its parts measured with the old params.
+--   Body below = the previous body plus exactly those lines, PROVEN against production:
+--   Recorded md5 of pg_get_functiondef: 8d9c9312948bd90aaef0001e1701fbe6
+--   (length 10,787; the previous text hashed cbfa562eb5d75efc4180f2d20f64def7, 9,663.)
+-- Re-verified 2026-09-28 (migration 20260928100046_price_on_request_shows_under_every_rent_period):
+--   CHANGED — one line in the rent-period block: `or (s.price_annual is null and p_rent_period in
+--   ('شهري','سنوي','كلاهما'))`. Owner rule 2026-09-28: «For سعر عند الطلب, we put it both monthly and
+--   yearly» — a rental with no published rent has no figure a period could misstate, so it is shown
+--   under every period; a budget still excludes it. rebuild_af_filter_rpcs() re-rendered the six
+--   templated RPCs; in the same migration 36 priced cohorts (4 types × 3 cities × 3 periods,
+--   price_min 1) were asserted unchanged and one price-on-request row of each period shape
+--   (سنوي / شهري / none) was found under all three periods.
+--   Body below = the previous body plus that one line, PROVEN against production:
+--   Recorded md5 of pg_get_functiondef: cbfa562eb5d75efc4180f2d20f64def7
+--   (length 9,663; the previous text hashed 3aa7830a2349f607963774799d7ece84, 9,497 — the +166 is
+--   exactly this line, which is itself a check on the edit being the only change.)
+-- Re-verified 2026-09-27 (migration 20260927111536_af_rail_catches_up_to_shipped_perf_edits):
+--   CHANGED — one line, the read-side sanity predicate. `coalesce(s.col, 0) >= 0` hides the column
+--   from Postgres's per-column statistics, so the planner fell back to a generic ~33% selectivity
+--   guess for area_m2, price_total and price_annual. Rewritten to `col is null or col >= 0`, which
+--   is an ALGEBRAIC identity, not a property of today's rows: for every x, coalesce(x,0) >= 0 and
+--   (x is null or x >= 0) agree — null true both ways, 0 and positives true both ways, negatives
+--   false both ways. Re-measured anyway: 0 mismatches across all 269,789 rows on all three
+--   columns, and 0 negative values in any of them. Semantics of the comment above it are unchanged
+--   (Ezhalah-side impossible states only; no magnitude check; 0 stays legal).
+--   Two Trending count surfaces already carried this exact text after four output-preserving
+--   performance edits on 2026-09-26 evening; the clause had not caught up, which is what left
+--   af_parity_empirical / af_rebuild_would_revert / af_count_surfaces_carry_af standing P1 open.
+--   rebuild_af_filter_rpcs() re-rendered all six templated RPCs, and a 13-surface probe run BEFORE
+--   and AFTER the rebuild in ONE transaction was byte-identical (also re-checked against a baseline
+--   taken before the migration existed: 175,516 / 29,399 / 1,156 and every result-set hash).
+--   Body below is production's text VERBATIM — regenerated by applying the SAME one-line edit to
+--   this file and then PROVING it against production rather than transcribing 9.5KB:
+--   Recorded md5 of pg_get_functiondef: 3aa7830a2349f607963774799d7ece84
+--   (length 9,497; the previous text hashed f195840b6f1812da87ab6951b4126259, 9,458 — the +39 is
+--   exactly this edit's length delta, which is itself a check on the edit being the only change.)
+-- Re-verified 2026-09-26 (migration 20260926073334_rotation_picks_which_listing_per_platform):
+--   UNCHANGED. That migration edits af_rpc_templates' location_search_candidates_ar row and runs
+--   rebuild_af_filter_rpcs(); it only CALLS af_eligibility_clause() — inside its byte-for-byte
+--   template/live parity assertion — and never redefines it. The staleness checker counts an object
+--   named in EXECUTED SQL as "touched" (correctly — it cannot know a call from a redefinition), so
+--   this line records that the body below was re-checked against production and still matches.
+-- Re-verified 2026-09-24 (migration 20260924182710_af_tables_cap_admits_the_thirty_five_platform_batch):
+--   CHANGED — one line: the p_tables cardinality cap 200 → 500. The 2026-09-24 batch took the
+--   searchable scope to 207 tables and every scoped surface answered an honest zero (the cap
+--   fails CLOSED by design); rebuild_af_filter_rpcs() re-rendered the six templated RPCs.
+--   Body below is production's text VERBATIM (fetched base64 from pg_get_functiondef after
+--   apply — format(%L) re-quotes the literal, so the previous body plus the one edit is NOT
+--   byte-identical to it). Recorded md5 of pg_get_functiondef: f195840b6f1812da87ab6951b4126259
+--   (length 9,458; the previous text hashed 47feed9ce3a08e743c44a7fb978f4278, 9,452).
+--
+--
+-- Re-verified 2026-09-13 (AF + Trending data-integrity daily run): UNCHANGED — and, for the second
+--   time in seven days, a MENTION rather than a redefinition. Migration 20260913111514 edits
+--   af_field_registry rows only; it names `af_eligibility_clause` twice in `--` comments and once
+--   inside the not_exposed_reason TEXT it stores for tenant_ar, to record that p_tenant is a live
+--   predicate no UI control sends. verify-sql-mirrors-not-stale now strips SQL comments before the
+--   match (a comment is not a change — mutation-proven in that file), but a string literal inside
+--   executed SQL still trips it, correctly: the guard cannot tell prose in a stored value from a
+--   regexp_replace needle-edit, and asking a human to look is the point. Settled by reading
+--   production, not by re-dating on faith:
+--   md5(pg_get_functiondef) = 47feed9ce3a08e743c44a7fb978f4278, length 9,452 — byte-identical to
+--   the md5 this file already records, so the body below stands untouched.
 --
 -- Re-verified 2026-09-06 (Search & Matching QA daily heartbeat): UNCHANGED — and a MENTION, not a
 --   redefinition, which is the distinction this file keeps having to make. Migration
@@ -124,47 +210,44 @@
 --   result verified to match production's md5(pg_get_functiondef) exactly before being written here.
 -- Verified byte-exact against the 2026-09-02 rolled-back dry run; md5 of everything below this header block: 178deacbfa50de38e6b5a18e09bc737b
 --   (previous live value 681da577d8e10df55e30c345d284e139 through 2026-08-31; changes ONLY when 20260902220100 is applied).
+--
 CREATE OR REPLACE FUNCTION public.af_eligibility_clause()
  RETURNS text
  LANGUAGE sql
  IMMUTABLE
-AS $function$ select E'
+AS $function$select E'
     where (s.production_ready or ((p_cities is null or cardinality(p_cities) = 0) and (p_districts is null or cardinality(p_districts) = 0) and p_region_ids is null and not public.search_row_price_gated(s.deal_ar, s.price_total) and (s.region_id is null or s.city_id is null)))
       -- read-side defense-in-depth (2026-08): block only Ezhalah-side impossible/invalid states;
       -- never hides a source price (no magnitude check; 0 legal); production_ready must have a location.
-      and coalesce(s.area_m2, 0) >= 0 and coalesce(s.price_total, 0) >= 0 and coalesce(s.price_annual, 0) >= 0
+      and (s.area_m2 is null or s.area_m2 >= 0) and (s.price_total is null or s.price_total >= 0) and (s.price_annual is null or s.price_annual >= 0)
       and s.deal_ar is not null
       and (not s.production_ready or (s.city_id is not null and s.region_id is not null))
       and (p_deal       is null or s.deal_ar = p_deal)
       and (p_rent_period is null
            or s.deal_ar <> ''إيجار''
+           or (s.price_annual is null and p_rent_period in (''شهري'',''سنوي'',''كلاهما''))  -- price on request: no figure a period could misstate (owner 2026-09-28)
            or (p_rent_period = ''شهري'' and s.payment_monthly = true and not coalesce(s.rent_now_pay_later, false))
            or (p_rent_period = ''سنوي'' and (s.rent_period_ar = ''سنوي'' or (s.rent_period_ar = ''شهري'' and coalesce(s.rent_now_pay_later, false))))
            or (p_rent_period = ''كلاهما'' and (s.payment_monthly = true or s.rent_period_ar = ''سنوي'' or (s.rent_period_ar = ''شهري'' and coalesce(s.rent_now_pay_later, false))))
            or (p_rent_period not in (''شهري'',''سنوي'',''كلاهما'') and s.rent_period_ar = p_rent_period))
       and (
             ((p_tables is null or s.source_table = any(p_tables))
-             and (p_types is null or s.type_ar = any(p_types)))
+             and (p_types is null or s.type_ar = any(p_types)
+                  or (s.unit_subtype_ar = ''أرض خام'' and ''أرض خام'' = any(p_types))))
          or (p_tables2 is not null and p_types2 is not null
              and s.source_table = any(p_tables2)
-             and s.type_ar = any(p_types2))
+             and (s.type_ar = any(p_types2)
+                  or (s.unit_subtype_ar = ''أرض خام'' and ''أرض خام'' = any(p_types2))))
       )
       and (p_category is null
-           or exists (
-             select 1 from known_type_ar k
-             where k.type_ar = s.type_ar
-               and (
-                 k.macro = p_category
-                 or (
-                   k.macro = ''both''
-                   and (case p_category
-                          when ''Residential'' then s.source_table like ''%\\_residential\\_listings''
-                          when ''Commercial''  then s.source_table like ''%\\_commercial\\_listings''
-                          else true
-                        end)
-                 )
-               )
-           ))
+           or (s.unit_subtype_ar = ''أرض خام'' and ''أرض خام'' = any(coalesce(p_types, ''{}''::text[]) || coalesce(p_types2, ''{}''::text[])))
+           or (s.type_ar in (select k.type_ar from known_type_ar k where k.macro = p_category)
+           or (s.type_ar in (select k.type_ar from known_type_ar k where k.macro = ''both'')
+               and (case p_category
+                      when ''Residential'' then s.source_table like ''%\\_residential\\_listings''
+                      when ''Commercial''  then s.source_table like ''%\\_commercial\\_listings''
+                      else true
+                    end))))
       and (p_cities is null or cardinality(p_cities) = 0
            or normalize_ar(s.city_ar) = any (array(select tok from city_tokens))
            or s.city_id = any (array(select city_id from city_ids))
@@ -177,7 +260,7 @@ AS $function$ select E'
       and coalesce(cardinality(p_districts), 0) <= 500
       and coalesce(cardinality(p_types), 0)     <= 200
       and coalesce(cardinality(p_platforms), 0) <= 100
-      and coalesce(cardinality(p_tables), 0)    <= 200
+      and coalesce(cardinality(p_tables), 0)    <= 500
       and (p_region_ids is null or s.region_id = any(p_region_ids))
       and (nullif(p_area_min,0) is null or (s.area_m2 is not null and s.area_m2 >= p_area_min))
       and (nullif(p_area_max,0) is null or (s.area_m2 is not null and s.area_m2 <= p_area_max))
@@ -245,4 +328,17 @@ AS $function$ select E'
       and (p_rating_min is null or s.rating >= p_rating_min)
       and (p_reviews_min is null or s.reviews_count >= p_reviews_min)
       and (p_unit_subtypes is null or cardinality(p_unit_subtypes) = 0 or s.unit_subtype_ar = any(p_unit_subtypes))
-' $function$
+      -- MULTI-PICK UNIONS (owner 2026-10-03: never force the user to select one thing). Each is the
+      -- union of exactly the picked options; absent or empty means no constraint; NULL is in no bucket.
+      and (p_furnished_in is null or cardinality(p_furnished_in) = 0 or s.furnished = any(p_furnished_in))
+      and (p_age_buckets is null or cardinality(p_age_buckets) = 0 or (s.property_age is not null and (
+            (''new'' = any(p_age_buckets) and s.property_age = 0)
+         or (''1_2'' = any(p_age_buckets) and s.property_age between 1 and 2)
+         or (''3_5'' = any(p_age_buckets) and s.property_age between 3 and 5)
+         or (''6_9'' = any(p_age_buckets) and s.property_age between 6 and 9)
+         or (''10p'' = any(p_age_buckets) and s.property_age >= 10))))
+      and (p_rating_buckets is null or cardinality(p_rating_buckets) = 0 or (s.rating is not null and (
+            (''9.5'' = any(p_rating_buckets) and s.rating >= 9.5)
+         or (''9.0'' = any(p_rating_buckets) and s.rating >= 9.0)
+         or (''9.0_rc10'' = any(p_rating_buckets) and s.rating >= 9.0 and s.reviews_count >= 10))))
+'::text$function$

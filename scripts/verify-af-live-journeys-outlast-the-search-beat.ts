@@ -58,15 +58,19 @@ console.log('\nA post-search read must outlast the searching beat, and nobody ma
 // ── 1. THE DERIVATION IS LIVE ───────────────────────────────────────────────────────────────────
 const beat = readSearchBeatMs();
 check('the beat is READ from the product (src/app/agent.tsx), not typed into the harness',
-  Number.isFinite(beat.floorMs) && beat.floorMs > 0 && Number.isFinite(beat.exitMs) && beat.exitMs >= 0,
-  `SEARCH_MIN_MS=${beat.floorMs} LOADER_EXIT_MS=${beat.exitMs}`);
-check('SEARCH_BEAT_MS is exactly the product\'s floor + exit (no margin baked into the constant)',
-  SEARCH_BEAT_MS === beat.floorMs + beat.exitMs, `${SEARCH_BEAT_MS} vs ${beat.floorMs} + ${beat.exitMs}`);
+  Number.isFinite(beat.floorMs) && beat.floorMs > 0 && Number.isFinite(beat.holdMs) && beat.holdMs >= beat.floorMs
+  && Number.isFinite(beat.exitMs) && beat.exitMs >= 0,
+  `SEARCH_MIN_MS=${beat.floorMs} SEARCH_MAX_HOLD_MS=${beat.holdMs} LOADER_EXIT_MS=${beat.exitMs}`);
+check('SEARCH_BEAT_MS is exactly the product\'s LONGEST hold + exit (no margin baked into the constant)',
+  SEARCH_BEAT_MS === beat.holdMs + beat.exitMs, `${SEARCH_BEAT_MS} vs ${beat.holdMs} + ${beat.exitMs}`);
 check('a post-search budget leaves room for the agent turn that follows the beat',
   POST_SEARCH_BUDGET_MS >= SEARCH_BEAT_MS + AGENT_TURN_MS,
   `${POST_SEARCH_BUDGET_MS}ms budget vs ${SEARCH_BEAT_MS}ms beat + ${AGENT_TURN_MS}ms turn`);
-check('the beat currently honours the owner\'s ten seconds (2026-09-06)',
-  beat.floorMs >= 10_000, `SEARCH_MIN_MS=${beat.floorMs}`);
+// OWNER 2026-10-17 reversed the 2026-09-06 ten-second FLOOR into a ten-second MAXIMUM: results show as
+// soon as they are ready, and no hold may exceed SEARCH_MAX_HOLD_MS. The journeys must still outlast
+// the WORST case (the cap), and the sub-beat blind band below only means something under it.
+check('the beat the journeys outlast is the product\'s maximum hold: ≤ 10 s (owner 2026-10-17) and above the blind band',
+  beat.holdMs <= 10_000 && beat.holdMs >= 8_000, `SEARCH_MAX_HOLD_MS=${beat.holdMs}`);
 
 // ── 2. THE HELPERS ACTUALLY OBSERVE — EXECUTED, NOT READ ────────────────────────────────────────
 // A virtual clock: `sleep` advances time without spending it, so the beat is exercised in full at
@@ -218,21 +222,11 @@ type Registered = { file: string; ms: number; postSearchRead: boolean; why: stri
 const BEAT_WAITS: Registered[] = [
   { file: 'verify-af-live-truth.ts', ms: 14000, postSearchRead: true,
     why: 'settle after «بحث» before reading the results turn — must outlast the beat' },
-  { file: 'verify-af-pill-removal-live.ts', ms: 14000, postSearchRead: true,
-    why: 'settle after the baseline «بحث» before the first pill read — must outlast the beat' },
-  { file: 'verify-af-stale-predicate-live.ts', ms: 14000, postSearchRead: true,
-    why: 'two baseline searches, each read from the DOM afterwards — must outlast the beat' },
-  { file: 'verify-trending-live-four-way-truth.ts', ms: 14000, postSearchRead: true,
-    why: 'three searches whose Trending rows are read from the DOM — must outlast the beat' },
   { file: 'verify-web-runtime-smoke.mjs', ms: 12000, postSearchRead: true,
     why: 'SEARCH_BEAT_FLOOR_MS, hand-typed as 12000 in a .mjs that cannot import this .ts contract. '
        + 'Currently ≥ the live beat, so it is correct today — registered precisely so that the next '
        + 'rise in the beat turns this barrier red instead of turning that journey into a false '
        + 'accusation. It is the one remaining private copy of the beat in the tree.' },
-  { file: 'verify-af-scope-change-live.ts', ms: 8000, postSearchRead: false,
-    why: 'a UI settle after searchAndCapture(); the assertion that follows reads the CAPTURED '
-       + 'REQUEST, not the screen, so it is not gated on the beat. Kept registered because the '
-       + 'next UI interaction after it can still land on the loader if the beat ever grows past it.' },
 ];
 
 // THE SUBJECT IS JOURNEYS THAT DRIVE A BROWSER, NOT BARRIERS THAT READ SOURCE. A source-scanning
@@ -278,12 +272,77 @@ check('no registry entry describes a wait that is no longer there (the registry 
   stale.length === 0,
   stale.map((r) => `${r.file} no longer types ${r.ms}ms — remove or update its entry`).join('; '));
 
+// ── 3b. THE SUB-BEAT BLIND BAND (routine #5, 2026-09-20 — ops_incident #340/#338) ───────────────
+// BEAT_SIZED_MS is 8,000 and the live beat is SEARCH_BEAT_MS. Every literal wait BETWEEN those two
+// numbers is a typed stand-in for the beat that is TOO SHORT TO OUTLAST IT — the single most
+// dangerous shape this file exists to forbid — and until today it was the one shape the discovery
+// floor could not see. §3's own header says "nobody may type the beat"; its threshold was itself a
+// typed number sitting under the beat.
+//
+// Measured when this was written: verify-af-agent-cta-live.ts and verify-af-remove-last-pill-live.ts
+// each typed waitForTimeout(6000) immediately before reading the results turn — 4,450 ms short of
+// the beat, so both read mid-cascade by construction, and neither was visible to §3. On production
+// the card count was still climbing and the body still growing after those 6,000 ms elapsed.
+//
+// SCOPED TO THE AF RESULTS-TURN JOURNEYS ON PURPOSE. A blanket floor at 5,000 would also sweep in
+// ~25 initial-page settles across 12 files (`gotoLive` then wait), which are not post-search reads
+// at all; registering those unadjudicated would be manufacturing green. The journeys below are the
+// ones that DRIVE A SEARCH AND THEN READ ITS RESULTS TURN, which is exactly where the band bites.
+const SUB_BEAT_BAND = (src: string): number[] =>
+  [...stripComments(src).matchAll(/waitForTimeout\(\s*(\d{4,})\s*\)/g)]
+    .map((m) => Number(m[1])).filter((n) => n >= 5_000 && n < BEAT_SIZED_MS);
+
+const RESULTS_TURN_JOURNEYS = ['verify-af-agent-cta-live.ts'];
+
+// A band wait is allowed ONLY where it is provably not standing in for the beat, with the reason
+// written down — the same shape as BEAT_WAITS above, and for the same reason: the next person to
+// add one has to say why, instead of the number quietly joining the scenery.
+type BandAllowed = { file: string; ms: number; why: string };
+// (empty since 2026-10-03: its one entry belonged to verify-af-remove-last-pill-live.ts, retired with the pill ✕)
+const SUB_BEAT_ALLOWED: BandAllowed[] = [];
+
+const allowedFor = (f: string) => SUB_BEAT_ALLOWED.filter((a) => a.file === f).map((a) => a.ms);
+
+const banded = RESULTS_TURN_JOURNEYS
+  .map((f) => {
+    const ns = SUB_BEAT_BAND(readFileSync(join(SCRIPTS, f), 'utf8'));
+    const ok = allowedFor(f);
+    // One allowance per occurrence, so a second 5000 appearing later is still red.
+    const left = [...ns];
+    for (const a of ok) { const i = left.indexOf(a); if (i >= 0) left.splice(i, 1); }
+    return { f, ns: left };
+  })
+  .filter((r) => r.ns.length);
+check('no AF results-turn journey types an UNREGISTERED wait in the sub-beat blind band [5000, 8000)',
+  banded.length === 0,
+  banded.map((r) => `${r.f} types ${r.ns.join('/')}ms — shorter than the live beat (${SEARCH_BEAT_MS}ms) `
+    + 'and beneath BEAT_SIZED_MS, so it reads mid-cascade and nothing notices. Observe the turn '
+    + '(awaitFirstResultsSettled / awaitResultsTurn) instead of typing a number.').join('; '));
+
+const bandRot = SUB_BEAT_ALLOWED.filter((a) =>
+  !SUB_BEAT_BAND(readFileSync(join(SCRIPTS, a.file), 'utf8')).includes(a.ms));
+check('no sub-beat allowance describes a wait that is no longer there (it cannot rot)',
+  bandRot.length === 0,
+  bandRot.map((a) => `${a.file} no longer types ${a.ms}ms — remove its entry`).join('; '));
+
+// MUTATION-PROVEN, both directions — the predicate is EXECUTED, never trusted.
+check('MUTATION — a 6000ms wait IS caught by the band predicate',
+  SUB_BEAT_BAND('await page.waitForTimeout(6000);\n').length === 1);
+check('MUTATION — a beat-outlasting 14000ms wait is NOT in the band (it is §3\'s business)',
+  SUB_BEAT_BAND('await page.waitForTimeout(14000);\n').length === 0);
+check('MUTATION — an ordinary short settle (1200ms) is NOT in the band',
+  SUB_BEAT_BAND('await page.waitForTimeout(1200);\n').length === 0);
+check('MUTATION — a band wait quoted in a COMMENT is not code and is not caught',
+  SUB_BEAT_BAND('// it used to be waitForTimeout(6000) here\nawait page.waitForTimeout(500);\n').length === 0);
+// The band's upper edge must stay below the beat, or the rule silently stops meaning anything.
+check('the sub-beat band is genuinely below the live beat', BEAT_SIZED_MS < SEARCH_BEAT_MS,
+  `BEAT_SIZED_MS=${BEAT_SIZED_MS} SEARCH_BEAT_MS=${SEARCH_BEAT_MS}`);
+
 // ── 4. THE JOURNEYS THAT WERE FIXED STAY FIXED ──────────────────────────────────────────────────
 // Each of these judged a screen it had not observed on 2026-09-06. Pin the shared pacing import so
 // a future edit cannot quietly return them to a fixed sleep.
 const MUST_PACE = [
   'verify-af-card-evidence-live.ts',
-  'verify-af-pill-removal-live.ts',
   'verify-af-agent-cta-live.ts',
   'verify-combined-budget-live.ts',
 ];

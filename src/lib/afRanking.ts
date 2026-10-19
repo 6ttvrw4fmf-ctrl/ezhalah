@@ -56,10 +56,13 @@ export function minOptionsFor(selection: 'single' | 'multi'): number {
 // Scope-size floor: don't ask a question unless the current scope has MORE results than the
 // interview's stop line (owner 2026-08-11 contextual-interview rework — unchanged by the 2026-08-22
 // and 2026-08-25 narrowing-gate reworks below).
-// 25 → 50 (owner product rule 2026-09-04): above 50 the interview keeps offering NEW rounds of
-// certified, unasked questions until the set is ≤ 50 or no truthful question remains; at ≤ 50 it
-// stops, reveals every remaining listing, and finishes the chat (agent.tsx finishGuided).
-export const INTERVIEW_STOP_AT = 50;
+// 25 → 50 (owner product rule 2026-09-04), then 50 → 25 (owner 2026-09-20, restoring the original
+// line). Above it, a question may be asked and «تحديد أكثر» may be offered; at or below it the
+// interview stops, every remaining listing is revealed and the chat finishes (agent.tsx
+// finishGuided). NOTE what this line no longer means: rounds do not chase it on their own any more
+// — the 2026-09-04 auto-continue was removed 2026-09-20, so nothing re-opens a round to drive the
+// set down to this number. It is a CEILING on asking, never a target something works toward.
+export const INTERVIEW_STOP_AT = 25;
 export const MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT + 1;
 
 // Per-OPTION floor — one absolute value for EVERY question (contract §9). An option backed by fewer
@@ -105,11 +108,15 @@ export function askTier(id: string): number { return ASK_FIRST_TIER[id] ?? 0; }
 // examples that used to sit here were written against INTERVIEW_STOP_AT = 25 and silently became
 // arithmetically FALSE on 2026-09-04 when the owner raised it to 50 — the old line claimed "at N=50
 // a count of 45 is the last qualifying answer", while at 50 the true last qualifying answer is 50
-// itself. Nothing caught it, because a comment is not executable. Now it is.
+// itself. Nothing caught it, because a comment is not executable. Now it is — and it earned its keep
+// on 2026-09-20 when the owner moved the line back to 25: it failed the same day, naming both of the
+// then-live "51/50 qualifies" sentences below, true at 50 and false again at 25. (Deliberately NOT
+// written in the bracket form here — the parser reads every bracketed example in this file as a live
+// claim to execute, and cannot tell a historical quotation from an assertion.)
 //
 // Above the escape line the 10% clause decides alone: [N=1000, k=900 -> qualifies] is exactly 10%
 // removed, [N=1000, k=901 -> rejected] is just under. The second clause exists so the LAST step to
-// the target is never blocked by a percentage: [N=51, k=50 -> qualifies] removes only 2% but lands
+// the target is never blocked by a percentage: [N=26, k=25 -> qualifies] removes only 3.8% but lands
 // AT INTERVIEW_STOP_AT, which is the whole point of the round.
 export const MEANINGFUL_NARROWING_FRACTION = 0.1;
 export function optionNarrowsMeaningfully(count: number, total: number): boolean {
@@ -192,7 +199,7 @@ export const AF_ROUND_MAX_QUESTIONS = 4;
 // pay for itself: more than INTERVIEW_STOP_AT results AND some remaining option that
 // optionNarrowsMeaningfully(). This gate only ever runs ABOVE the stop line, so its worked examples
 // live there too: [N=100, k=90 -> qualifies] removes exactly 10%, [N=100, k=91 -> rejected] falls
-// just short, and [N=51, k=50 -> qualifies] wins by landing AT INTERVIEW_STOP_AT rather than by
+// just short, and [N=26, k=25 -> qualifies] wins by landing AT INTERVIEW_STOP_AT rather than by
 // percentage. Nothing qualifying ⇒ the button is HIDDEN. (These are executed — see the note on
 // optionNarrowsMeaningfully above. The pair that used to sit here, "at N=50 an option yielding 45
 // qualifies and one yielding 47 does not", was true at INTERVIEW_STOP_AT = 25 and false at 50, and

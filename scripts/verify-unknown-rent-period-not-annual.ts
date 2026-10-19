@@ -109,16 +109,67 @@ check('finalize() does not default Listing.rentPeriod to annual either',
   'Listing.rentPeriod is being defaulted to \'annual\' when the source published no period');
 
 // The single-period fetch branches are what kept this invisible; if they ever start admitting
-// NULL-period rows under an ANNUAL search, the card would be labelling them by the FILTER, not by
-// the source. Pin the strict equality.
-check('keptFiltersReq still filters ANNUAL searches to an explicit rent_period=\'annual\'',
-  /q\.rentPeriod === 'annual'\)\s*\{\s*\n\s*req = req\.eq\('rent_period', 'annual'\);/.test(REMOTE),
-  'the annual branch no longer requires an explicit annual rent_period — NULL-period rows would be '
+// PRICED NULL-period rows under an ANNUAL search, the card would be labelling them by the FILTER,
+// not by the source. Pin the strict equality. The one exception is a row with NO price (owner
+// 2026-09-28: price on request shows under every period) — it renders «Price on request» with no
+// suffix, so there is nothing for the filter to label.
+check('keptFiltersReq still filters ANNUAL searches to an explicit rent_period=\'annual\' (or no price at all)',
+  /q\.rentPeriod === 'annual'\)\s*\{\s*\n\s*req = req\.or\('rent_period\.eq\.annual,price_annual\.is\.null'\);/.test(REMOTE),
+  'the annual branch no longer requires an explicit annual rent_period — priced NULL-period rows would be '
   + 'swept into an annual-only result set');
+check('a price-on-request rental renders no period suffix under any period',
+  ['annual', 'monthly', null].every((p) => listingPriceString('Rent', p, null, null) === 'Price on request'),
+  'a price-on-request card now carries a period — admitting it under every period would label it by the filter');
 
 check('npm test runs this guard',
   npmTestRuns(REPO_ROOT, 'verify-unknown-rent-period-not-annual'),
   '`npm test` no longer runs verify-unknown-rent-period-not-annual.ts (see scripts/test-exclusions.txt) — the guard is inert');
+
+// ------------------------------------------------------------------ mutations (R1, 2026-09-18)
+//
+// Every behavioural check above runs the REAL listingPriceString, which is the right shape — but
+// until now nothing had ever watched this guard go RED, so it sat in
+// scripts/mutation-proof-grandfathered.txt. The rule is restated once as a predicate over a
+// FORMATTER, and applied to three: the real one, the 2026-08-23 defect, and the over-broad "fix".
+type PriceFmt = (deal: string, period: string | null | undefined, annual: number | null, total: number | null) => string;
+
+export const periodHonestyProblems = (fmt: PriceFmt): string[] => {
+  const out: string[] = [];
+  // UNKNOWN must stay unknown — neither guess is allowed (the owner-locked silent→NULL rule).
+  for (const [name, period] of [['NULL', null], ['undefined', undefined], ['an unrecognised token', 'weekly']] as const) {
+    const s = fmt('Rent', period as string | null, 70000, null);
+    if (/\/(yr|year|mo|month)/.test(s)) out.push(`${name} rent_period rendered a period the source never published: ${JSON.stringify(s)}`);
+  }
+  // …and the opposite failure: an over-broad repair that silences the 82,000 rows that DO publish one.
+  if (!fmt('Rent', 'annual', 70000, null).includes('/yr')) out.push('rent_period=annual lost its /yr suffix — a published period is being hidden');
+  if (!fmt('Rent', 'monthly', 24000, null).includes('/mo')) out.push('rent_period=monthly lost its /mo suffix — a published period is being hidden');
+  return out;
+};
+
+const mustCatch = (what: string, caught: boolean) => {
+  if (caught) { console.log(`PASS  (mutation) catches ${what}`); return; }
+  failed++;
+  console.log(`FAIL  (mutation) did NOT catch ${what}`);
+};
+
+check('NEGATIVE CONTROL — the real shipped listingPriceString is NOT flagged',
+  periodHonestyProblems(listingPriceString as PriceFmt).length === 0,
+  periodHonestyProblems(listingPriceString as PriceFmt).join('; '));
+
+// THE 2026-08-23 PRODUCTION DEFECT, re-implemented verbatim: "not monthly" treated as annual.
+const defectiveFinalize: PriceFmt = (deal, period, annual, total) => {
+  const amount = (deal === 'Rent' ? annual : total) ?? 0;
+  const isMonthlyRent = period === 'monthly';
+  return `SAR ${amount.toLocaleString('en-US')}${deal === 'Rent' ? (isMonthlyRent ? '/mo' : '/yr') : ''}`;
+};
+mustCatch('THE DEFECT: `isMonthlyRent ? \'/mo\' : \'/yr\'` stamping «/سنوياً» on raghdan 598090 and 315 siblings',
+  periodHonestyProblems(defectiveFinalize).length > 0);
+
+// THE OPPOSITE MISTAKE, which an over-broad repair would ship: drop every suffix and call it honest.
+const overBroadFix: PriceFmt = (deal, _period, annual, total) =>
+  `SAR ${((deal === 'Rent' ? annual : total) ?? 0).toLocaleString('en-US')}`;
+mustCatch('the OVER-BROAD repair: every suffix dropped, silencing the 82,000 rows whose source DID publish a period',
+  periodHonestyProblems(overBroadFix).length > 0);
 
 console.log(
   failed

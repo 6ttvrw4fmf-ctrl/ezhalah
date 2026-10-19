@@ -419,8 +419,9 @@ def sitemap_entries(s: cc.Session) -> list[tuple[str, Optional[str]]]:
         + (f" (last error: {last_err})" if last_err else " (all attempts returned decoy bodies)"))
 
 
-def fetch_one(entry: tuple[str, Optional[str]]) -> Optional[tuple[str, str, Optional[str]]]:
-    """Fetch the detail page. Returns (body, url, featured_image) or None."""
+def fetch_one(entry: tuple[str, Optional[str]]) -> Optional[tuple[str, str, Optional[str], bool]]:
+    """Fetch the detail page. Returns (body, url, featured_image, own) or None. `own` is True when
+    the request was not redirected — _signal() has no opinion about a page it was redirected to."""
     url, img = entry
     s = _session()
     for attempt in range(3):
@@ -430,7 +431,8 @@ def fetch_one(entry: tuple[str, Optional[str]]) -> Optional[tuple[str, str, Opti
             time.sleep(1.2 * (attempt + 1))
             continue
         if r.status_code == 200 and len(r.text) > 2000:
-            return r.text, url, img
+            own = http_liveness._path_of(str(getattr(r, "url", url) or url)) == http_liveness._path_of(url)
+            return r.text, url, img, own
         time.sleep(1.0 * (attempt + 1))
     return None
 
@@ -508,6 +510,28 @@ def _images(body: str, featured: Optional[str]) -> list[str]:
     ):
         add(u)
     return out[:25]
+
+
+# ── the ad's OWN «المميزات» chip list (🔬 AF engineer, 2026-10-14) ──────────────────────────────────────
+# Every /projects/<slug>/ page prints `<ul class="list-inline projServ">` with one <li><p> per feature:
+# «مجالس ضيافة · 2 غرف · 2 دورات مياة · مطبخ · خزان مستقل · موقف خاص» (3 live ads re-read 10-14; the list
+# varies per ad, e.g. «موقف خاص» on one of the three, so it is a unit statement, not a site template).
+# jazwtn scored 0 of 4 findable on 10-14, kitchen missed 4 of 5: the scraper never read this list.
+# A chip present → True. A chip absent is silence → NULL (a chip list never says «no»). The second
+# projServ block on the page is the warranty list («ضمان على …») and is not read.
+_CHIPS_RE = re.compile(r'<ul class="list-inline projServ">(.*?)</ul>', re.S)
+_CHIP_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner",
+              "private_entrance")
+
+
+def feature_answers(body: str) -> dict[str, bool]:
+    m = _CHIPS_RE.search(body or "")
+    out: dict[str, bool] = {}
+    for chip in re.findall(r"<p>([^<]+)</p>", m.group(1)) if m else []:
+        for col, val in normalize.amenities_from_text(chip.strip()).items():
+            if val is True and col in _CHIP_COLS:
+                out[col] = True
+    return out
 
 
 def map_listing(body: str, url: str, featured: Optional[str]) -> tuple[Optional[dict], str]:
@@ -638,6 +662,7 @@ def map_listing(body: str, url: str, featured: Optional[str]) -> tuple[Optional[
         "photo_urls": _images(body, featured),
         "additional_info": info,
     }
+    row.update(feature_answers(body))
     return row, category
 
 
@@ -708,12 +733,16 @@ def main() -> int:
             for result in ex.map(fetch_one, entries):
                 if not result:
                     continue
-                body, u, img = result
+                body, u, img, own = result
                 row, cat = map_listing(body, u, img)
                 if not row:
                     continue
                 if args.type != "all" and cat != args.type:
                     continue
+                if own:
+                    # 200, not redirected, parses as a listing through map_listing: what _signal()
+                    # (verify_gone's oracle) calls "live".
+                    db.mark_direct_alive(row, oracle="jazwtn.detail_page.map_listing")
                 (com_buf if cat == "commercial" else res_buf).append(row)
                 (com if cat == "commercial" else res).append(row)
                 seen += 1
@@ -738,6 +767,18 @@ def main() -> int:
         # docs/ops/LISTING_LIVENESS.md §1-§3). db.prune_unseen still carries its own guards
         # (0-scrape / collapse → skip, never wipe) — the oracle adds to them, it replaces nothing.
         pruned = 0
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+        # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+        # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+        # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+        superseded = db.retire_superseded_siblings(
+            res_table="jazwtn_residential_listings", com_table="jazwtn_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source="Jazwtn")
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
         for tbl, rows_seen in (("jazwtn_residential_listings", res),
                                ("jazwtn_commercial_listings", com)):
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Jazwtn",

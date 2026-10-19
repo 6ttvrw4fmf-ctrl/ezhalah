@@ -5,7 +5,7 @@
 //
 //   node --experimental-strip-types scripts/verify-advanced-filter-contract.ts   (wired into `npm test`)
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -44,7 +44,7 @@ check('the pool contains all five questions and rankQuestions re-ranks it contex
   // INTERVIEW_STOP_AT/MIN_TOTAL_TO_SHOW moved to afRanking.ts (2026-08-22, pure-module extraction);
   // advancedFilters.ts still re-exports them (checked separately below) so every existing importer
   // is unaffected.
-  && /INTERVIEW_STOP_AT = 50/.test(rankingSrc)   // owner product rule 2026-09-04 (was 25)
+  && /INTERVIEW_STOP_AT = 25/.test(rankingSrc)   // owner 2026-09-20 (50 → 25, restoring the original line)
   && /MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT \+ 1/.test(rankingSrc)
   && /INTERVIEW_STOP_AT, MIN_TOTAL_TO_SHOW/.test(advSrc));
 // MECHANISM CHANGE (owner 2026-08-22, «رجوع»): asked-tracking is no longer an incremental
@@ -92,7 +92,9 @@ check('the installment question stays a single binary source-confirmed chip (no 
 // deal to its source-justified question list; cohortAllows() is the ONLY eligibility gate for the
 // config-driven questions. The old per-question hardcoded gates are superseded, but their
 // INVARIANTS survive as data shape and are pinned below.
-check('furnished question is single-select, cohort-gated, true tri-state via furnishedPref',
+// 2026-10-05, owner approving the one-tap plan (R7.2.4, supersedes R7.2.3): one tap where a second pick
+// would widen — scripts/verify-af-selection-policy.ts executes what each pick sends.
+check('furnished question is one tap, cohort-gated, true tri-state via furnishedPref',
   /FURNISHED_QUESTION[\s\S]{0,400}selection:\s*'single'/.test(advSrc)
   && /FURNISHED_QUESTION[\s\S]{0,420}cohortAllows\(q, 'furnished'\)/.test(advSrc)
   && /furnishedPref:\s*true/.test(advSrc) && /furnishedPref:\s*false/.test(advSrc));
@@ -119,7 +121,7 @@ check('no Monthly list carries a fresh-dead Annual staple (age/furnished/rnpl/st
 check('no Buy list contains a rent-only question',
   !/Buy:\s*\[[^\]]*'furnished'/.test(advSrc)
   && !/Buy:\s*\[[^\]]*'rnpl'/.test(advSrc));
-check('the rating question is cohort-gated, single-select, monotone, and review-confidence rides WITH a rating floor',
+check('the rating question is cohort-gated, one tap, monotone, and review-confidence rides WITH a rating floor',
   /RATING_QUESTION[\s\S]{0,500}selection:\s*'single'/.test(advSrc)
   && /RATING_QUESTION[\s\S]{0,600}cohortAllows\(q, 'rating'\)/.test(advSrc)
   && /ratingMin:\s*Math\.max\(9\.5/.test(advSrc)
@@ -129,11 +131,11 @@ check('the rating question is cohort-gated, single-select, monotone, and review-
 check('the unit-subtype question is strict Gathern vocabulary and never rewrites the canonical taxonomy',
   /UNIT_SUBTYPE_QUESTION[\s\S]{0,600}cohortAllows\(q, 'unit_subtype'\)/.test(advSrc)
   && /'استديو'/.test(advSrc) && /'شقق مخدومة'/.test(advSrc)
-  && /unitSubtypes:\s*\[keys\[0\]\]/.test(advSrc));
+  && /unitSubtypes:\s*\[\.\.\.keys\]/.test(advSrc));
 check('the pool carries the two new data-justified questions (street_width + direction)',
   /STREET_WIDTH_QUESTION, DIRECTION_QUESTION,/.test(advSrc)
   && /cnt_stw15/.test(advSrc) && /cnt_dir_n/.test(advSrc));
-check('RNPL + amenities are multi; age + bathrooms are single',
+check('several picks only where they narrow (features) or name the type; age and bathrooms are one tap',
   /RNPL_QUESTION[\s\S]{0,400}selection:\s*'multi'/.test(advSrc)
   && /AMENITIES_QUESTION[\s\S]{0,500}selection:\s*'multi'/.test(advSrc)
   && /AGE_QUESTION[\s\S]{0,400}selection:\s*'single'/.test(advSrc)
@@ -158,7 +160,9 @@ check('one shared per-option floor (MIN_REAL_OPTION_COUNT via meaningful()); the
 // Residential-only), no commercial list carries rnpl/furnished-question on Buy, no NEW cohort
 // carries the fresh-dead 'ac' chip, and mapped types render EXACTLY their COHORT_CHIPS list.
 check('cohortAllows matches the clean type macro and COHORT_CHIPS scopes commercial chips',
-  /q\.category !== \(CLEAN_MACRO\[type\] \?\? 'Residential'\)/.test(cohortSrc)
+  // 2026-10-03: macro equality became reachability (offeredUnder = home macro OR a group on this side lists
+  // the type) so Residential Land, offered under the commercial land group, is gated on that side too.
+  /if \(!q\.category \|\| !offeredUnder\(q\.category, type\)\) return false;/.test(cohortSrc)
   && /export const COHORT_CHIPS/.test(cohortSrc)
   && !/COHORT_CHIPS[\s\S]{0,900}'ac'/.test(cohortSrc.slice(cohortSrc.indexOf('export const COHORT_CHIPS'), cohortSrc.indexOf('export const COHORT_CHIPS') + 1200))
   && /chipAllow\.includes\(d\.key\)/.test(advSrc));
@@ -176,7 +180,7 @@ check('RNPL + amenities + bathrooms are cohort-gated through cohortAllows',
   /RNPL_QUESTION[\s\S]{0,420}cohortAllows\(q, 'rnpl'\)/.test(advSrc)
   && /cohortAllows\(q, 'amenities'\)/.test(advSrc)
   && /cohortAllows\(q, 'bathrooms'\)/.test(advSrc)
-  && /export function cohortAllows[\s\S]{0,900}q\.rentPeriod === 'monthly'\) return \(cfg\.RentMonthly/.test(cohortSrc));
+  && /export function cohortAllows[\s\S]{0,1300}q\.rentPeriod === 'monthly'\) return \(cfg\.RentMonthly/.test(cohortSrc));
 
 // Mixed period ('both', owner 2026-08-19): cohortAllows must require BOTH RentAnnual and RentMonthly
 // membership — union would let a period-specific question fire against the other period's rows.
@@ -236,13 +240,11 @@ check('the in-question «عرض النتائج» escape stays removed (no onSkip
 check('the primary reads Continue · {count} results with the live count, for every arity',
   /Continue · \{count\} results/.test(cardSrc));
 // §11: one tiny plain-language availability line; the technical unknown-count phrasing is gone.
-// COPY CHANGE (owner 2026-08-29): TWO quiet lines now — (1) a listing not mentioning a detail is
-// never a «no» (unknown-data protection), (2) options/counts belong to the CURRENT result set and
-// follow the narrowing. Still natural language, still no database/unknown-count phrasing, and the
-// copy is NOT an excuse for a wrong number — the count-honesty barriers keep owning that.
+// Owner-approved 2026-10-01: one notice above the choices explains published-source limits.
+// Count-honesty checks remain independent of this presentation-only wording.
 check('availability is explained naturally (no database language, no unknown-count phrasing)',
-  /Some listings do not mention this detail, so the options reflect what the listings actually state/.test(cardSrc)
-  && /Options and counts are based on your current search results and update as you narrow down/.test(cardSrc)
+  /Your search options and counts use published listing details; unmentioned features may still be available, so check the original listing/.test(cardSrc)
+  && /af-source-note/.test(cardSrc)
   && !/Age unknown for \{count\}/.test(cardSrc));
 // §2: the opening state is its own calm card — count, invitation, soft supporting line, opt-in
 // begin + «عرض النتائج» — and it lives in the SAME shell as the questions (one visual language).
@@ -327,34 +329,101 @@ check('the result-intro count comes from matchTotal via quotableTotal(), never a
 //    owner 2026-09-06: "remove this design … keep it how it was") ─────────────────────────────────
 // The beat is DECORATION: its dismissal is driven by plain setTimeout latches in finishGuided (never
 // an animation callback — src/lib/afterAnimation.ts's rule) and a hard failsafe dismisses it even if
-// the search turn dies. It speaks the searching line, the honest from-count, and — once the search
-// lands — the «لقينا N عقار أقرب لطلبك» beat, whose number is quotableTotal()'s output handed in as
-// `to` (see verify-mining-total-honesty.ts for the honesty half). Reduced motion drops the drift.
-const miningSrc = readFileSync(join(root, 'src/components/MiningTransition.tsx'), 'utf8');
-check('deep-search dismissal is setTimeout-driven with a hard failsafe (never an animation callback)',
-  /phase: 'mining'/.test(agentSrc)
-  && /timers\.push\(setTimeout\(/.test(agentSrc)
-  && /15000/.test(agentSrc)
-  && !/\.start\(\s*\(/.test(miningSrc));
-check('the transition speaks the searching line + the honest from-count, and respects reduced motion',
-  /Going through \{count\} properties/.test(miningSrc)
-  && /Finding the closest match for you/.test(miningSrc)
-  && /useReducedMotion/.test(miningSrc));
-check('the completion beat is held long enough to be read (the 450ms direct hand-off was for a card that said nothing)',
-  /wait \+ 1100/.test(agentSrc),
-  'a copy swap the user cannot finish reading is the same as no copy at all');
+// The deep-search overlay it described is deleted (see the absence check below). What that rule was
+// really protecting — a hand-off driven by plain timers, never by an animation callback — still
+// applies to the landing scroll that replaced it, so it is asserted there instead.
+check('the round hands over on a plain setTimeout, never an animation callback',
+  /miningTimersRef\.current\.push\(setTimeout\(/.test(agentSrc)
+  && !/\.start\(\s*\(\s*\)\s*=>/.test(agentSrc));
+// THE OVERLAY IS GONE (owner 2026-09-20, final word after three passes at it: "there is this
+// pop-up that pops up with a magnifying glass … this needs to be gone"). Earlier passes removed its
+// COMPLETION state — the green checkmark and «لقينا N عقار» — which was the wrong half: what the
+// owner had been calling "the pop-up" was the card itself, in its searching state. src/components/
+// MiningTransition.tsx is deleted and the 'mining' phase with it.
+//
+// These checks are NOT deleted with it. A barrier that policed a component is the thing that stops
+// it coming back wrong, so each now asserts the ABSENCE — which is strictly stronger than anything
+// it asserted about the component's internals, and fails the moment a mining overlay reappears.
+check('the mining overlay is gone: no component, no phase, no render, no import',
+  !existsSync(join(root, 'src/components/MiningTransition.tsx'))
+  && !/phase: 'mining'/.test(agentSrc)
+  && !/MiningTransition/.test(agentSrc),
+  'a round must hand straight over to the thread\'s own searching turn, with no card on top of it');
+// THE «تحديد أكثر» PROBE RUNS RIGHT AFTER THE SEARCH — INSIDE THE WAIT, NEVER BESIDE THE QUERY.
+//
+// History, because this check has flipped once already. 2026-09-20 (PR #3420) moved the probe from
+// the passive effect (after the reveal) to BEFORE runQuery, so «تحديد أكثر» would not pop in late.
+// 2026-09-21, measured on production, that was the regression the owner felt as "it was working
+// perfect, idk what happened": the probe prices the group tier with 5 location_search_candidates_ar
+// calls, each a count(*) over() of the whole matched set — each as heavy as the search — and fired
+// beside the search they piled up (~7 at once, plus a retry wave). The same call measured 7-9 s in
+// that pile-up versus 1.2-1.7 s alone; the search slowed and the Advanced Filter opened with blanks.
+//
+// The fix keeps BOTH wins: start it the moment runQuery returns. The user is still watching the
+// loader and the reveal, so it is inside the wait (the owner's "prepare the advanced filter so that
+// the second doesn't count"), and it no longer competes with the query itself. It also prefetches
+// with result.query — the exact query the passive effect claims with — so the key always matches.
+check('the narrowing probe is prefetched at every live search site',
+  (agentSrc.match(/prefetchNarrowing\(result\.query \?\? /g) ?? []).length === 3,
+  'a search path that does not prefetch pays the probe cost after its reveal, and its button pops in late');
+// agentSrc is the RAW file, so trailing `// …` comments sit on these lines — match to end-of-line.
+const afterSearch = /const result = await runQuery\([^\n]*\n(?:\s*if \(run\.cancelled\) return;[^\n]*\n)?\s*(?:if \(!run\.cancelled\) )?prefetchNarrowing\(result\.query \?\? /g;
+check('every prefetch fires AFTER its runQuery returns, never before or beside it',
+  (agentSrc.match(afterSearch) ?? []).length === 3
+  && !/prefetchNarrowing\([^;]*\);[^\n]*\n\s*const result = await runQuery\(/.test(agentSrc),
+  'fired before the query, the 5 group-tier probes compete with the search on one database');
+// mutation proof — the exact 2026-09-20 shape must be caught
+{
+  const mut = agentSrc.replace(
+    /const result = await runQuery\(pending\.q, true, run\.ac\.signal, ensureChatId\(\)\);\n(\s*)if \(run\.cancelled\) return;\n\s*prefetchNarrowing\(result\.query \?\? pending\.q\);[^\n]*\n/,
+    (_m, ind) => `prefetchNarrowing(pending.q);\n${ind}const result = await runQuery(pending.q, true, run.ac.signal, ensureChatId());\n${ind}if (run.cancelled) return;\n`);
+  check('(mutation) catches the probe being moved back beside the search',
+    mut !== agentSrc && !((mut.match(afterSearch) ?? []).length === 3
+      && !/prefetchNarrowing\([^;]*\);[^\n]*\n\s*const result = await runQuery\(/.test(mut)));
+}
+// 2026-09-21: assessNarrowing takes a third argument (`key`) so its background tap-priming walk can
+// detect being superseded — both call sites below still pass exactly afPrefetchKey(q, asked).
+check('the effect CLAIMS the prefetched verdict instead of re-probing, and still probes on a miss',
+  /pre\.key === afPrefetchKey\(q, asked\) \? pre\.p : assessNarrowing\(q, asked, afPrefetchKey\(q, asked\)\)/.test(agentSrc),
+  'without the key match a stale verdict could be handed to a different search');
+check('a superseded prefetch cannot crash the app as an unhandled rejection',
+  /assessNarrowing\(q, asked, key\)\.catch\(\(\) => 'unknown' as const\)/.test(agentSrc));
+check('the prefetch is skipped when the button would be hidden anyway (no wasted probes)',
+  /if \(!q \|\| !anyGuidedEligible\(q\)\) return;/.test(agentSrc));
+
+// SKIP IS HIDDEN ON SCOPE QUESTIONS ONLY (owner 2026-09-20). Skipping «bathrooms» is a usable
+// answer — "I don't care" — and the round carries on. Skipping «what type of property?» is not: the
+// advanced pool cannot be ranked until CATEGORY → GROUP → TYPE resolves, so the round ends having
+// done nothing. Keyed on the question's identity, never on stepIndex: a user who chose their group
+// on the Filter screen never sees that question, so position 0 is already an advanced question.
+check('«تخطي» is hidden on scope questions, and keyed on identity rather than position',
+  /hideSkip=\{isScopeQuestionId\(ageFlow\.question\.id\)\}/.test(agentSrc)
+  && !/hideSkip=\{ageFlow\.stepIndex/.test(agentSrc),
+  'a stepIndex test removes Skip from whatever happens to be first, including a real advanced question');
+check('the card actually branches on it (a prop nothing reads hides nothing)',
+  /\{hideSkip \? null : \(/.test(readFileSync(join(root, 'src/components/AdvancedQuestionCard.tsx'), 'utf8')));
+// Leaving the scope question is still possible, so hiding Skip is never a trap.
+check('«رجوع» and the X survive on a scope question — Skip is hidden, not the way out',
+  /testID="af-back"/.test(readFileSync(join(root, 'src/components/AdvancedQuestionCard.tsx'), 'utf8'))
+  && /onClose=\{onAgeClose\}/.test(agentSrc));
+
+// THE GREEN CHECK IS GONE BY CONSTRUCTION (owner 2026-09-20: "this green check needs to always be
+// gone … it was a mistake"). The beat's trigger was removed first; the owner reported seeing it
+// again, so the CAPABILITY is deleted — no `to` prop, no `done`, no checkmark, no found-copy. There
+// is nothing left to re-trigger: bringing it back now means re-writing it.
+
 check('the results pills are fed by the deduped facet set (one label per committed answer)',
   /const dedupedFacets = dedupeFacetsByLabel\(/.test(agentSrc)
   && /facets: dedupedFacets,/.test(agentSrc));
 
-// ── Results summary + removable pills (owner 2026-08-16 §10) ────────────────────────────────────
-// Removal is PURE recomputation — rebuild from the interview's baseQ by re-applying the remaining
-// facets through each question's own apply(), never a hand-written inverse per question id.
-check('removable pills rebuild the query from baseQ via the questions’ own apply()',
-  /removeGuidedFacet/.test(agentSrc)
-  && /for \(const f of remaining\)/.test(agentSrc)
-  && /question\.apply\(q, f\.keys\)/.test(agentSrc)
-  && /buildAfSummary\(guidedPills\.facets\)/.test(agentSrc));
+// ── Results summary + READ-ONLY pills (owner 2026-10-03; supersedes the 2026-08-16 §10 removable pills) ─
+// The turn's summary is the ORIGINAL summary (built from baseQ, the query before the first round) plus
+// one labelled line per committed answer (no heading), rebuilt from baseQ + ALL facets each time. The
+// chips below the intro stay, but nothing on them removes anything: no ✕, no handler, no rebuild path.
+check('a guided round’s summary is the original summary plus every committed answer',
+  /guidedSearchSummary\(opts\.guided\.baseQ, opts\.guided\.facets\)/.test(agentSrc));
+check('the pills are read-only: removeGuidedFacet is gone and no pill takes a press',
+  !/removeGuidedFacet/.test(agentSrc) && !/<Pressable[^>]*af-pill/.test(agentSrc));
 
 // ── Count RPCs must never receive p_sort_by (bug-hunt 2026-07-30) ────────────────────────────────
 // PostgREST resolves RPCs by exact param-name match; leaking p_sort_by 404s BOTH counts calls the

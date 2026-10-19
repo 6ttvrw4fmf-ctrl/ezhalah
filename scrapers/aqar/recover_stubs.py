@@ -49,6 +49,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.aqar.enrich_residential import enrich_residential  # noqa: E402
+from scrapers.aqar.enrich_residential import LAND_DESCRIPTION_TYPES, LAND_OTHER  # noqa: E402
 
 # TABLE is module-level state, set by main() from --table before any cohort/recover function runs.
 # GENERALIZED 2026-08-10: aqar_commercial_listings has the exact same June `backfill.v1` stub-capture
@@ -66,6 +67,10 @@ REPORT_FIELDS = (
     "rent_period", "price_annual", "price_total", "area_m2", "bedrooms", "bathrooms",
     "property_age", "floor_number", "direction", "furnished", "elevator", "parking",
     "kitchen", "license_number", "street_width_m",
+    # The ad's own gallery and pin (2026-10-10): rows captured before the photo fix hold other ads'
+    # photos and no coordinates, so an `--ads` run must count a corrected gallery / a new pin as a
+    # change worth writing. A fetch that could not read them yields None, which is never a change.
+    "photo_urls", "additional_info",
 )
 
 # Fields whose value comes from aqar's own STRUCTURED keys (the RSC listing object) or from a
@@ -102,7 +107,25 @@ _PRICE_AND_PERIOD = {"price_annual", "price_total", "price_per_meter", "rent_per
 
 # canonical property_type -> the aqar URL slug enrich_residential expects
 TYPE_TO_SLUG = {v: k for k, v in N.SLUG_TO_TYPE.items()}
+# A plot's type comes from Aqar's own «نوع العقار» (Commercial Land), and rows typed before 2026-10-10 by
+# the old page-text guess still hold Industrial Land / Agriculture Plot — all live under aqar's `land`
+# slug but are NOT values of SLUG_TO_TYPE.
+# Missing here, every such row was skipped as "unfetchable" without a single fetch — 21,613 live land
+# rows kept other ads' photos through the 2026-10-10 repair. Guarded by
+# scripts/verify-aqar-photos-are-the-ads-own.ts (every type the enricher can write must resolve).
+TYPE_TO_SLUG.update({t: "land" for t in ("Commercial Land", "Industrial Land", "Agriculture Plot")})
+# Since 2026-10-10 (owner) a plot Aqar leaves silent is typed from the seller's own words («أرض صناعي») or
+# stored as «أرض» (Other Land) — every one of those lives under the `land` slug too.
+TYPE_TO_SLUG.update({t: "land" for t in (*LAND_DESCRIPTION_TYPES, LAND_OTHER)})
 
+
+def _brief(d: dict[str, Any]) -> dict[str, Any]:
+    """Log-sized view: a gallery prints as its photo count (40k-row repair runs would print GBs)."""
+    def b(v: Any) -> Any:
+        if isinstance(v, tuple):
+            return tuple(b(x) for x in v)
+        return f"[{len(v)} photos]" if isinstance(v, list) else v
+    return {k: b(v) for k, v in d.items()}
 
 def explicit_cohort(ads: list[str]) -> list[dict[str, Any]]:
     """The named rows, whatever their capture looks like.
@@ -164,6 +187,91 @@ def stub_cohort(limit: int, deal: Optional[str], ptype: Optional[str]) -> list[d
     return out
 
 
+# Every row captured by the pre-2026-10-10 gallery sweep carries this junk entry (160,448 of 160,450
+# live residential rows that day). A re-read with the fixed enricher drops it; a failed read leaves it.
+# So the marker is both the cohort and its progress meter, and a repaired row is never picked twice.
+SWEEP_JUNK_MARKER = '{"https://images.aqar.fm\\\\"}'      # PostgREST array literal, quoted
+BIG3 = ["Riyadh", "Jeddah", "Dammam"]
+
+
+def photo_repair_cohort(limit: int, shard: int = 0, shards: int = 1) -> list[dict[str, Any]]:
+    """Rows still showing other ads' photos (and no pin), in the order users see them: sale ads in
+    Riyadh/Jeddah/Dammam, then other sale ads, then rent in the big three, then the rest — newest rows
+    (highest id) first inside each tier. `shards` parallel jobs split it by the ad number's last digit,
+    so two jobs never fetch the same ad."""
+    c = db.sb()
+    cols = "id, ad_number, listing_url, property_type, transaction_type, " + ", ".join(REPORT_FIELDS)
+    digits = ",".join(f"ad_number.like.*{d}" for d in range(10) if d % shards == shard)
+    out: list[dict[str, Any]] = []
+    for deal, big in (("Buy", True), ("Buy", False), ("Rent", True), ("Rent", False)):
+        page = 0
+        while len(out) < limit:
+            q = (c.table(TABLE).select(cols).eq("active", True).eq("transaction_type", deal)
+                 .contains("photo_urls", SWEEP_JUNK_MARKER).not_.is_("listing_url", "null")
+                 .or_(digits))
+            q = q.in_("city", BIG3) if big else q.not_.in_("city", BIG3)
+            want = min(1000, limit - len(out))
+            batch = (q.order("id", desc=True)
+                     .range(page * 1000, page * 1000 + want - 1).execute().data or [])
+            out += batch
+            if len(batch) < want:
+                break
+            page += 1
+    return out
+
+
+def remaining_marked() -> int:
+    """Live Aqar rows (both tables) still carrying the old sweep — the repair chain's stop signal.
+    An unreadable count reads as 0, so a broken count stops the chain rather than looping it."""
+    c, n = db.sb(), 0
+    for t in ("aqar_residential_listings", "aqar_commercial_listings"):
+        r = (c.table(t).select("id", count="exact").eq("active", True)
+             .contains("photo_urls", SWEEP_JUNK_MARKER).limit(1).execute())
+        n += r.count or 0
+    return n
+
+# Land typed by the pre-2026-10-10 page-text guess (nav «مكتب تجاري», district list «حي الصناعية»): 0 of
+# 26,889 live plots residential while Aqar's own «نوع العقار» said سكني on 18,522. A re-read stamps
+# raw_captured_at, so `before` (the fix's merge time) makes the cohort its own progress meter.
+LAND_GUESS_TYPES = ["Commercial Land", "Industrial Land", "Agriculture Plot"]
+
+
+LAND_URL = "%/أراضي-%"     # aqar's own land category in the ad's path — how a type-less plot is found
+
+
+def _land_usage_query(c: Any, cols: str, before: str, untyped: bool = False) -> Any:
+    """`untyped`: live plots with NO type (Aqar silent before the description reading, 2026-10-10)."""
+    q = (c.table(TABLE).select(cols, count="exact").eq("active", True).lt("raw_captured_at", before)
+         .not_.is_("listing_url", "null"))
+    return q.is_("property_type", "null").like("listing_url", LAND_URL) if untyped \
+        else q.in_("property_type", LAND_GUESS_TYPES)
+
+
+def land_usage_cohort(limit: int, before: str, shard: int = 0, shards: int = 1) -> list[dict[str, Any]]:
+    """Live plots not re-read since `before`, newest first, split across shards by the ad's last digit."""
+    c = db.sb()
+    cols = "id, ad_number, listing_url, property_type, transaction_type, " + ", ".join(REPORT_FIELDS)
+    digits = ",".join(f"ad_number.like.*{d}" for d in range(10) if d % shards == shard)
+    out: list[dict[str, Any]] = []
+    for untyped in (True, False):
+        got = 0
+        while len(out) < limit:
+            want = min(1000, limit - len(out))
+            batch = (_land_usage_query(c, cols, before, untyped).or_(digits).order("id", desc=True)
+                     .range(got, got + want - 1).execute().data or [])
+            out += batch
+            got += len(batch)
+            if len(batch) < want:
+                break
+    return out
+
+
+def remaining_land_guesses(before: str) -> int:
+    """The land chain's stop signal; an unreadable count reads as 0 so it can never loop."""
+    c = db.sb()
+    return sum(_land_usage_query(c, "id", before, u).limit(1).execute().count or 0 for u in (True, False))
+
+
 AMENITY_REPAIR_TABLE = "aqar_amenity_fabrication_repair_20260809"
 
 
@@ -211,17 +319,22 @@ def amenity_repair_cohort(limit: int, deal: Optional[str], ptype: Optional[str])
 
 
 def recover(rows: list[dict[str, Any]], dry_run: bool, workers: int,
-            structured_only: bool = True) -> dict[str, int]:
-    counter = {"done": 0, "fetched": 0, "written": 0, "unfetchable": 0, "no_gain": 0}
+            structured_only: bool = True, write_all: bool = False) -> dict[str, int]:
+    counter = {"done": 0, "fetched": 0, "written": 0, "unfetchable": 0, "no_gain": 0, "no_slug": 0}
     lock = threading.Lock()
 
     def work(r: dict[str, Any]) -> None:
-        slug = TYPE_TO_SLUG.get(r.get("property_type") or "")
+        slug = TYPE_TO_SLUG.get(r.get("property_type") or "") or (
+            "land" if r.get("property_type") is None and "/أراضي-" in (r.get("listing_url") or "") else None)
         deal_slug = "rent" if (r.get("transaction_type") == "Rent") else "buy"
         if not slug or not r.get("listing_url"):
+            # Never fetched — not the source's answer. Counted apart so it cannot hide inside
+            # "unfetchable" again (it did: 21,613 land rows on 2026-10-10).
             with lock:
                 counter["done"] += 1
-                counter["unfetchable"] += 1
+                counter["no_slug"] += 1
+                print(f"  ⚠ ad={r.get('ad_number')} NOT FETCHED: no aqar slug for "
+                      f"property_type={r.get('property_type')!r}")
             return
         fresh = enrich_residential(r["listing_url"], type_slug=slug, deal_slug=deal_slug)
         if fresh and structured_only:
@@ -241,11 +354,14 @@ def recover(rows: list[dict[str, Any]], dry_run: bool, workers: int,
         # What the re-read actually recovers, purely for the operator's report.
         reportable = [f for f in REPORT_FIELDS
                       if not (structured_only and f in _PRICE_AND_PERIOD)]
+        # property_type rides along: a land row whose ONLY fix is Aqar's own «نوع العقار» (2026-10-10)
+        # must be written, not reported as "no change".
+        reportable.insert(0, "property_type")
         gained = {f: fresh.get(f) for f in reportable
                   if r.get(f) is None and fresh.get(f) is not None}
         changed = {f: (r.get(f), fresh.get(f)) for f in reportable
                    if r.get(f) is not None and fresh.get(f) is not None and r.get(f) != fresh.get(f)}
-        if not gained and not changed:
+        if not gained and not changed and not write_all:
             with lock:
                 counter["no_gain"] += 1
                 print(f"  [{counter['done']}] · ad={r['ad_number']} no change "
@@ -253,13 +369,13 @@ def recover(rows: list[dict[str, Any]], dry_run: bool, workers: int,
             return
         if dry_run:
             with lock:
-                print(f"  [{counter['done']}] DRY ad={r['ad_number']} +{gained} ~{changed}")
+                print(f"  [{counter['done']}] DRY ad={r['ad_number']} +{_brief(gained)} ~{_brief(changed)}")
             return
         try:
             UPSERT_FN(fresh)
             with lock:
                 counter["written"] += 1
-                print(f"  [{counter['done']}] ✓ ad={r['ad_number']} +{gained} ~{changed}")
+                print(f"  [{counter['done']}] ✓ ad={r['ad_number']} +{_brief(gained)} ~{_brief(changed)}")
         except Exception as e:  # noqa: BLE001
             with lock:
                 print(f"  [{counter['done']}] ✗ upsert failed ad={r['ad_number']}: {str(e)[:120]}")
@@ -285,7 +401,11 @@ def main() -> int:
                          "cohort. Lets a caller target a cohort identified elsewhere (e.g. rows "
                          "whose stored price disagrees with the figure their own capture rendered) "
                          "without teaching this script a second detection heuristic.")
-    ap.add_argument("--cohort", choices=["stub", "amenity-repair"], default="stub",
+    ap.add_argument("--shard", default="0/1",
+                    help="i/n — this job's slice of the photo-repair cohort (by the ad number's last digit)")
+    ap.add_argument("--before", default="",
+                    help="land-usage cohort: re-read live plots whose capture is older than this ISO time")
+    ap.add_argument("--cohort", choices=["stub", "amenity-repair", "photo-repair", "land-usage"], default="stub",
                     help="stub = rows with no «تفاصيل الإعلان» block (the June backfill). "
                          "amenity-repair = the closed set of rows whose amenity booleans were "
                          "prose-fabricated and cleared on 2026-08-09, re-read so aqar's own "
@@ -305,6 +425,14 @@ def main() -> int:
     ads = [s.strip() for s in args.ads.split(",") if s.strip()]
     if ads:
         rows, mode = explicit_cohort(ads), "explicit"
+    elif args.cohort == "photo-repair":
+        i, n = (int(x) for x in args.shard.split("/"))
+        rows, mode = photo_repair_cohort(args.limit, i, n), f"photo-repair {i}/{n}"
+    elif args.cohort == "land-usage":
+        if not args.before:
+            ap.error("--cohort land-usage needs --before")
+        i, n = (int(x) for x in args.shard.split("/"))
+        rows, mode = land_usage_cohort(args.limit, args.before, i, n), f"land-usage {i}/{n}"
     elif args.cohort == "amenity-repair":
         rows, mode = amenity_repair_cohort(args.limit, args.deal, args.ptype), "amenity-repair"
     else:
@@ -319,9 +447,12 @@ def main() -> int:
 
     run_platform = "aqar_stub_recovery" if args.table == "residential" else "aqar_stub_recovery_commercial"
     run_id = None if args.dry_run else db.begin_run(run_platform)
-    c = recover(rows, args.dry_run, args.workers, structured_only=not args.include_price)
+    # land-usage writes every row it read, even one whose type was already right: the write stamps
+    # raw_captured_at, which is what takes the row out of the cohort.
+    c = recover(rows, args.dry_run, args.workers, structured_only=not args.include_price,
+                write_all=args.cohort == "land-usage")
     print(f"\nfetched={c['fetched']} written={c['written']} "
-          f"unfetchable={c['unfetchable']} no_gain={c['no_gain']} of {len(rows)}")
+          f"unfetchable={c['unfetchable']} no_gain={c['no_gain']} no_slug={c['no_slug']} of {len(rows)}")
 
     # An environment aqar does not serve returns the app shell for EVERY row. Writing nothing is the
     # correct outcome there, but it must be loud — a silent 0 would look like "already clean".

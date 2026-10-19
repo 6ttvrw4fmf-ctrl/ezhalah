@@ -15,6 +15,7 @@
 // reset unrelated already-understood filters.
 import { readFileSync } from "node:fs";
 import { mergeConversationState, rescuedFields, STICKY_FIELDS } from "../src/lib/conversationState.ts";
+import { resetCallSitesOk, resetCallSiteProblem, RESET_EXITS } from "./lib/conversationExits.ts";
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = "") => {
@@ -71,8 +72,11 @@ check("NOT a real field: the phantom 'price' key was removed from STICKY_FIELDS"
 // that only narrowed the district silently dropped the order the user asked for a turn earlier.
 check("sticky: sort — a stated ordering survives the next turn (owner 2026-09-06)",
   (STICKY_FIELDS as readonly string[]).includes("sort"));
-// count/keywords keep the original rule: they really do describe one request.
-for (const f of ["count", "keywords"]) {
+// Owner 2026-10-15: requested quantity persists until changed; keywords stay per utterance.
+check("sticky: count — user-controlled result quantity survives refinements", STICKY_FIELDS.includes("count"));
+check("requested quantity is retained", mergeConversationState({count:100} as any, {} as any).count === 100);
+check("explicit quantity replaces the prior value", mergeConversationState({count:100} as any, {count:20} as any).count === 20);
+for (const f of ["keywords"]) {
   check(`NOT sticky (per-utterance): ${f}`, !(STICKY_FIELDS as readonly string[]).includes(f));
 }
 
@@ -135,7 +139,20 @@ check("a clarification's understanding goes through the SAME merge+certify pipel
   /d\.kind === 'message'[\s\S]{0,900}certifyAfOnMergedState\([\s\S]{0,200}mergeConversationState\(/.test(data),
   "a paused turn and a searching turn must not accumulate state by different rules");
 // Owner rule (PR#832): New Chat inherits NOTHING.
-check("New Chat clears the accumulated state", /lastQueryRef\.current = null;\s*\/\/ …and not the previous conversation's accumulated filters/.test(ui));
+// CONSOLIDATED 2026-09-14 (routine #8): both conversation exits now clear this through one shared
+// `resetConversationState()`, so the comment-anchored line this used to pin no longer sits in the New
+// Chat handler. The rule is unchanged and now covers MORE — startFresh (every sidebar reopen, «بحث»
+// hop, `?seed=` link) did not clear it before, so the abandoned chat's accumulated filters leaked
+// into the next conversation's first turn. Pinned where it lives; EXECUTED in
+// scripts/verify-conversation-state-never-inherited.ts §A/§B, which lifts and runs the real function.
+{
+  const reset = ui.slice(ui.indexOf("const resetConversationState = () => {"),
+    ui.indexOf("const resetConversationState = () => {") + 1200);
+  check("no conversation exit inherits the accumulated state (cleared in the ONE shared reset)",
+    /lastQueryRef\.current = null;/.test(reset));
+  check(`...and all ${RESET_EXITS.length} exits route through it`,
+    resetCallSitesOk(ui), resetCallSiteProblem(ui));
+}
 check("a Filter-originated search replaces it too",
   /makeRun\('filter'\);[\s\S]{0,700}?lastQueryRef\.current = null;/.test(ui));
 

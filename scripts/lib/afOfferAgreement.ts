@@ -63,8 +63,13 @@ export type AfCtaObservation = {
   /** Did the actions row ever disappear after the tap (⇒ ageFlow was set, at least to 'loading')? */
   loadingEverAppeared: boolean;
   /**
-   * After the round closed with no question: is «تحديد أكثر» back on screen? The product restores it
-   * on, and only on, an undetermined probe — asserting nothing about the user's search.
+   * After the round closed with no question: is «تحديد أكثر» back on screen?
+   *
+   * This comment used to read "the product restores it on, and only on, an undetermined probe".
+   * THE "ONLY ON" IS FALSE (disproved on production 2026-09-20, ops_incident #340): finishGuided()
+   * also restores it via a bare `setAgeFlow(null)` when `ageFlowChangedRef` is false, and so does
+   * every token-supersession early return in startAgeFlow/presentGuided. So this flag ALONE cannot
+   * attribute a cause — `countProbesAnswered` below is what separates them, by observation.
    */
   ctaReturned?: boolean;
   /**
@@ -73,6 +78,25 @@ export type AfCtaObservation = {
    * certified narrows, which is the genuine disagreement with an offer that promised one.
    */
   refineChipsAppeared?: boolean;
+  /**
+   * DID THE COUNT PROBES ACTUALLY ANSWER? — measured from the RPC responses the page really received
+   * after the tap, never inferred from what rendered.
+   *
+   * `true`  every apartment_guided_counts_ar / property_age_option_counts_ar call after the tap came
+   *         back 2xx, so `probeVerdict()` CANNOT have been 'unknown'
+   * `false` at least one failed, timed out, or never returned — genuinely undetermined
+   * `null`  not observed by this journey (the pre-2026-09-20 behaviour: fall back to inferring)
+   *
+   * WHY IT EXISTS (routine #5, 2026-09-20, ops_incident #340). `ctaReturned` was treated as PROOF of
+   * an undetermined probe — "the product restores it on, and only on, an undetermined probe". That is
+   * not true: agent.tsx's finishGuided() also lands there via `if (!(q && ageFlowChangedRef.current))
+   * { setAgeFlow(null); return; }`, as does every token-supersession early return. Measured on
+   * production five times on الرياض/إيجار/سنوي/شقة: both probes returned HTTP 200 in 565-813 ms, far
+   * inside the 4 s cap, with NO retry pair on the wire (so shouldRetryProbes never saw 'unknown') —
+   * and the verdict still read «probe-undetermined … look upstream at the count probe», sending the
+   * next engineer at a probe that was healthy the whole time.
+   */
+  countProbesAnswered?: boolean | null;
   /** Label for the journey, used in the failure message. */
   journey: string;
 };
@@ -82,7 +106,8 @@ export type AfCtaVerdict =
   | {
       ok: false;
       reason: 'offered-but-never-opened' | 'offered-then-asserted-nothing-narrows'
-            | 'offered-then-stranded' | 'probe-undetermined';
+            | 'offered-then-stranded' | 'probe-undetermined'
+            | 'offered-then-closed-silently-on-healthy-probes';
       /** true ⇒ production asserted nothing and this run could not certify R4.4.2 either way. */
       undetermined?: true;
       diagnosis: string;
@@ -116,6 +141,25 @@ export function judgeAfCta(o: AfCtaObservation): AfCtaVerdict {
     };
   }
   if (o.ctaReturned) {
+    // AN OBSERVED HEALTHY PROBE OVERRIDES THE INFERENCE. If every count RPC after the tap answered,
+    // the round CANNOT have closed on an UNKNOWN — so this is not the owner-locked probe handling
+    // behaving correctly, it is the round declining to ask on a scope whose counts it successfully
+    // read. The offer gate promised a question; the user got nothing back. That is a REAL red, and
+    // it must never be filed as "not exercised".
+    if (o.countProbesAnswered === true) {
+      return {
+        ok: false,
+        reason: 'offered-then-closed-silently-on-healthy-probes',
+        diagnosis: `${o.journey}: the CTA was offered, the round STARTED, every count RPC after the tap `
+          + 'ANSWERED (so probeVerdict cannot have been "unknown" and no retry was needed), and the round '
+          + 'still rendered NO question and NO refine chips before restoring «تحديد أكثر». The offer gate '
+          + 'and the round gate disagree on a scope whose counts were read successfully — R4.4.2/R13.10. '
+          + 'Do NOT look at the count probe: it was healthy. Look at the silent early returns in '
+          + 'startAgeFlow/presentGuided/finishGuided (agent.tsx) on the AGENT-path query shape — '
+          + 'finishGuided closes with a bare setAgeFlow(null) when ageFlowChangedRef is false, and every '
+          + 'token-supersession path returns silently too. ops_incident #340.',
+      };
+    }
     return {
       ok: false,
       reason: 'probe-undetermined',

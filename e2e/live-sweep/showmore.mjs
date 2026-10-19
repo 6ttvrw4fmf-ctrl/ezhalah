@@ -10,17 +10,29 @@
 // text-shaped keys collided across 150 genuinely distinct مكتب cards on a previous run). Nothing
 // here is clicked through to a source platform, so the journey generates ZERO source traffic (§40.6).
 //
-// WHAT "DONE" LOOKS LIKE (owner 2026-09-11, Task 4 rev. 2, PR #2330 — supersedes the 2026-08-29
-// "clean 100-batches all the way down" wording this header carried until 2026-09-12):
-//   · the FIRST press on a turn reveals the next clean 100-boundary only (10 → 100) and leaves both
-//     «عرض المزيد» and «خلّنا نحدد الطلب أكثر» standing;
-//   · a LATER press DRAINS every remaining page and finishes the search (composer locks, actions row
-//     goes) — it is not another hundred.
-// So a healthy الرياض run is 10 → 100 → (drain), NOT 10 → 100 → 200 → 300. This file asserted the
-// superseded shape for a day and reported a false PAGINATION/PAGER-MISSING pair against production
-// on 2026-09-10..12 — but the SAME journey's second finding was real (the drain's page backstop
-// discarded every page it fetched), which is §41.19's lesson exactly: suspect the oracle first, then
-// FINISH the diagnosis.
+// WHAT "DONE" LOOKS LIKE (owner 2026-09-14, PR #2618 — supersedes BOTH the 2026-08-29 "clean
+// 100-batches all the way down" wording and the 2026-09-11 Task-4 rev. 2 "a later press drains
+// every remaining page" model this header carried until 2026-09-14):
+//   · «عرض المزيد» gives at most TWO reveals and never shows more than SECOND_PAGE_CAP (500) cards;
+//   · the FIRST press reveals the 100-boundary (10 → 100) and leaves both «عرض المزيد» and
+//     «خلّنا نحدد الطلب أكثر» standing;
+//   · the SECOND press reveals up to the 500 cap (or the true end) and then the pager RETIRES.
+//     Where inventory remains unreached, «تحديد أكثر» stays on screen as the forward path.
+// So a healthy الرياض run is 10 → 100 → 500 → (pager gone, «تحديد أكثر» offered). Measured on
+// production 2026-09-14, الرياض/إيجار/سنوي (20,658 matching): exactly that, and the whole sequence
+// cost ONE result RPC — 500 sits inside the 1,500-row page-0 buffer, so neither press pages the
+// network.
+//
+// THIS FILE HAS TWICE ASSERTED A SUPERSEDED SHAPE, IN BOTH DIRECTIONS, AND BOTH COST A RUN:
+//   · 2026-09-10..12 it reported a false PAGINATION/PAGER-MISSING pair against production — while
+//     the SAME journey's second finding was real (the drain's page backstop discarded every page it
+//     fetched). §41.19's lesson exactly: suspect the oracle first, then FINISH the diagnosis.
+//   · 2026-09-14 the opposite failure — it went GREEN on a contract it no longer reached. Its
+//     caller passes `batches: 2`, so the loop ended on the second press and never probed the pager a
+//     third time: the entire terminal block below was UNREACHABLE for any cohort over the cap, and
+//     nothing in the daily browser layer asserted the 500-cap terminal at all. A press sequence that
+//     kept offering «عرض المزيد» past 500 (re-opening the ops_incident #212 renderer crash), or a
+//     terminal that retired the pager with no «تحديد أكثر», would both have read as a clean run.
 //
 // A drain over a huge cohort legitimately takes MINUTES (50 pages × 500 rows), so "the card count
 // did not grow inside my wait" is NOT by itself a defect. The discriminator is whether the app is
@@ -61,6 +73,7 @@ import { commitOneAfAnswer } from './journeys.mjs';
 const AF_PARAMS = [
   'p_amenities', 'p_bath_min', 'p_furnished', 'p_street_width_min', 'p_rating_min', 'p_reviews_min',
   'p_unit_subtypes', 'p_age_min', 'p_age_max', 'p_directions', 'p_is_new_construction',
+  'p_age_buckets', 'p_rating_buckets', 'p_furnished_in',
 ];
 
 // SCOPE questions (src/data/advancedFilters.ts SCOPE_QUESTIONS) share the AF card UI and round
@@ -70,7 +83,39 @@ const AF_PARAMS = [
 // legitimately carries nothing in AF_PARAMS and must not be flagged.
 const SCOPE_QUESTION_TITLES = ['أي نوع من العقارات تبحث عنه؟', 'أي نوع عقار تحديدًا؟'];
 
-const countCards = (page) => page.evaluate(() => (document.body.innerText.match(/الضغط على هذا الإعلان/g) || []).length);
+// A RESULT CARD IS ADDRESSED BY ITS OWN testID, NEVER BY ITS COPY (2026-10-05). This used to count
+// «الضغط على هذا الإعلان» in document.body.innerText. PR #5425 (2026-10-01, photo-first cards) moved
+// that sentence from visible text into the photo link's aria-label, so innerText held it 0 times and
+// from 2026-10-02 this journey read «0 cards» every night on a production that rendered 12 on
+// arrival and 100 after the first «عرض المزيد» — PAGINATION ×2 + PAGER-MISSING, a healthy pager
+// accused. ResultCard renders testID={`card-listing-${listing.id}`} (web: data-testid) on every card.
+//
+// …AND ONLY THE TURN BEING PAGED (2026-10-06). Every results turn is its own ResultCardGrid
+// (testID result-card-grid) and the transcript keeps the earlier ones. Counted document-wide, the
+// AF cohort's pre-AF villa turn (24–36 cards) was added to the AF turn's 500 and reported as
+// CAP-EXCEEDED «536 cards» — while the turn itself stopped at exactly 500. Every check here
+// (PAGINATION, PAGER-MISSING, the cap, CARDS-EXCEED-SET, the closing «أول N») is about that turn.
+const countCards = (page) => page.evaluate(() =>
+  [...document.querySelectorAll('[data-testid="result-card-grid"]')].pop()
+    ?.querySelectorAll('[data-testid^="card-listing-"]').length ?? 0);
+
+/**
+ * THE CASCADE WALK (src/lib/initialReveal.ts, owner 2026-09-20). A turn ARRIVES with CASCADE_MAX cards
+ * and reveals the rest as the user scrolls, so «no pager while N < total» is only a defect AFTER
+ * scrolling like a user until the count stops growing — read on arrival it is ops_incident #699's
+ * false dead end. Called only where the pager is absent; every press already reveals its batch whole.
+ */
+async function revealAll(page, { rounds = 60, stableFor = 3 } = {}) {
+  let last = -1, stable = 0;
+  for (let i = 0; i < rounds; i++) {
+    const n = await countCards(page);
+    if (n === last) { if (++stable >= stableFor) return n; } else { stable = 0; }
+    last = n;
+    await page.locator('[data-testid^="card-listing-"]').last().scrollIntoViewIfNeeded().catch(() => {});
+    await sleep(700);
+  }
+  return last;
+}
 
 /**
  * A CRASHED RENDERER IS A PRODUCT DEFECT, AND THE ORACLE MUST BE ABLE TO SAY SO (2026-09-12).
@@ -109,6 +154,17 @@ async function readCards(page) {
  * Stall is time-based, not poll-based: real drain pages arrived up to ~20s apart, so "the RPC count
  * held still for N polls" would call a healthy drain dead.
  */
+/**
+ * THE REVEAL CAP — mirrors `SECOND_PAGE_CAP` in src/data/resultCount.ts (owner 2026-09-14, PR #2618).
+ *
+ * This file is plain ESM and cannot import the TypeScript module production ships, so the number is
+ * MIRRORED here rather than imported — and a mirror that nothing checks is drift waiting to happen.
+ * `scripts/verify-live-sweep-coverage-contract.ts` imports the real constant and fails if these two
+ * ever disagree, so raising or lowering the shipped cap turns this file RED until it is updated.
+ * Never re-type it from memory; change it only to follow resultCount.ts.
+ */
+const SECOND_PAGE_CAP = 500;
+
 const PRESS_CAP_MS = 260_000;   // a full 50-page drain measured ~200s + the reveal
 const PRESS_STALL_MS = 45_000;  // no new page AND no new card for this long ⇒ the press is over
 async function settlePress(page, searches, before) {
@@ -163,6 +219,13 @@ async function settle(page, { minCards = 1, tries = 40 } = {}) {
  */
 const PAGER_MIN_HEIGHT = 30;
 
+// How "the pager has stopped moving" is measured before a press (see pagerSettleVerdict).
+// 3 identical readings 400ms apart, giving up after 20s — chosen so the wait can never exceed the
+// click's own 20s timeout and turn a settle into a second hang.
+const PAGER_STABLE_SAMPLES = 3;
+const PAGER_SETTLE_INTERVAL_MS = 400;
+const PAGER_SETTLE_MAX_MS = 20_000;
+
 async function pager(page) {
   const hit = await page.evaluate((minH) => {
     const cands = [];
@@ -186,6 +249,63 @@ async function pager(page) {
     if (box && box.height >= PAGER_MIN_HEIGHT) return el;
   }
   return null;
+}
+
+/**
+ * What a headline reading BEFORE and AFTER a «عرض المزيد» press means — the whole decision, as a
+ * pure function, so a barrier can run it instead of reading the source around it.
+ *
+ * The distinction this exists to keep (ops_incident #348): `before`/`after` come from
+ * resultsFoundCount(), where **null means "no shipped Results-Found template is on this screen"** —
+ * a BLIND read — and never "the count is zero" or "the count changed". Comparing a null to a number
+ * with `!==` and calling the result a moved true total is how ops_incident #331 spent a day
+ * unattributed: production really was rendering a truncated sentence (#347), and the sweep accused
+ * the count instead of the sentence.
+ *
+ * Both cases are still a DEFECT — this narrows the accusation, never the alarm.
+ */
+/**
+ * Has the pager stopped moving? — the whole decision, as a PURE function, so a barrier can RUN it
+ * instead of reading the source around it (the shape AGENTS.md keeps warning about: every defect of
+ * 2026-09-04 had a source-TEXT tripwire over the exact line and every one of them stayed green).
+ *
+ * `samples` are pager geometry readings taken at a fixed interval, OLDEST FIRST; a `null` entry
+ * means the pager could not be measured at that moment. Settled = the last `stable` readings are
+ * all present and geometrically identical.
+ *
+ * Deliberately NOT "the last two agree": a reflow driven by images loading routinely pauses for one
+ * interval while the next image decodes, so two equal readings are a common false calm. Three is
+ * what the الرياض/شقة repro needed.
+ */
+export function pagerSettleVerdict(samples, stable = PAGER_STABLE_SAMPLES) {
+  if (!Array.isArray(samples) || samples.length < stable) return { settled: false, reason: 'too-few-samples' };
+  const tail = samples.slice(-stable);
+  if (tail.some((s) => !s)) return { settled: false, reason: 'pager-unmeasurable' };
+  const [first] = tail;
+  const same = tail.every((s) => s.x === first.x && s.y === first.y && s.h === first.h);
+  return same ? { settled: true, reason: 'geometry-stable' } : { settled: false, reason: 'still-moving' };
+}
+
+/** Poll the pager's geometry until pagerSettleVerdict() says it is calm, or the window closes. */
+async function awaitPagerSettled(btn, maxMs = PAGER_SETTLE_MAX_MS) {
+  const t0 = Date.now();
+  const samples = [];
+  let verdict = { settled: false, reason: 'too-few-samples' };
+  while (Date.now() - t0 < maxMs) {
+    const box = await btn.boundingBox().catch(() => null);
+    samples.push(box ? { x: Math.round(box.x), y: Math.round(box.y), h: Math.round(box.height) } : null);
+    verdict = pagerSettleVerdict(samples);
+    if (verdict.settled) break;
+    await sleep(PAGER_SETTLE_INTERVAL_MS);
+  }
+  return { ...verdict, waitedMs: Date.now() - t0, samples: samples.length };
+}
+
+export function classifyHeadlineAcrossPress(before, after) {
+  if (after === null) return { kind: 'COUNT-UNREADABLE', before, after };
+  if (before === null) return { kind: 'COUNT-UNREADABLE', before, after };
+  if (after !== before) return { kind: 'TRUE-TOTAL', before, after };
+  return { kind: 'OK', before, after };
 }
 
 export async function showMoreJourney(plan) {
@@ -269,6 +389,7 @@ export async function showMoreJourney(plan) {
     for (let b = 1; b <= (plan.batches ?? 3); b++) {
       const btn = await pager(page);
       if (!btn) {
+        n = await revealAll(page);
         // Read the closing line and the AF-card state in ONE evaluate, so both describe the same
         // instant as the pager probe above.
         //
@@ -287,7 +408,12 @@ export async function showMoreJourney(plan) {
         const st = await page.evaluate(() => {
           const txt = document.body.innerText;
           return {
-            closing: ([...txt.matchAll(/(?:من أصل|لقينا)\s+([\d,٬]+)\s+إعلان/g)].pop() || [])[1] ?? null,
+            // «عرضت لك أول N من أصل TOTAL إعلان مطابق» (i18n.tsx) — the CLOSING line, a different
+            // sentence family from the rotating Results-Found headline and legitimately
+            // hand-written here. The `لقينا` alternative it used to carry was retired by
+            // PR #3186 and its i18n entries are now unreachable from src/, so it could only
+            // ever match text the app no longer renders. Removed 2026-09-19 (routine #10).
+            closing: ([...txt.matchAll(/من أصل\s+([\d,٬]+)\s+إعلان/g)].pop() || [])[1] ?? null,
             // The Advanced Filter interview deliberately hides the whole actions row while it is
             // open (owner 2026-08-21): the AF card is an absolute overlay and buttons underneath it
             // are unreachable. That is intended product behaviour, not a missing pager.
@@ -300,6 +426,10 @@ export async function showMoreJourney(plan) {
             afAsking: !!document.querySelector('[data-testid="af-question-title"]')
               && !!document.querySelector('[data-testid="af-confirm"]'),
             loadMoreButtons: document.querySelectorAll('[data-testid="results-load-more"]').length,
+            // «تحديد أكثر» — the forward path the 500-cap terminal MUST offer when it retires the
+            // pager with inventory still unreached (owner 2026-09-14). Without it the user is
+            // stranded on 500 of 20,658 with no way to narrow and no way on.
+            narrowButtons: document.querySelectorAll('[data-testid="results-narrow"]').length,
             // Does the visible closing sentence still ASK the user to load more?
             promisesMore: /تبي أعرض لك المزيد/.test(txt),
           };
@@ -325,10 +455,26 @@ export async function showMoreJourney(plan) {
           // settle() has already waited for the card count to stop moving before we get here.
           defect(name, 'AF-HOLDS-PAGER-WITH-NO-QUESTION',
             `an Advanced Filter card is open with no question on it while ${n} of ${total0} matches are shown and no «عرض المزيد» is offered — the interview is holding browsing without narrowing`);
+        } else if (num(total0) > n && n >= SECOND_PAGE_CAP) {
+          // THE 500-CAP TERMINAL (owner rule 2026-09-14, PR #2618). The pager legitimately retires
+          // here even though matches remain: «عرض المزيد» reveals at most SECOND_PAGE_CAP cards in
+          // at most two taps, because an unvirtualized list of 20,782 killed production's renderer
+          // on 2026-09-12 (ops_incident #212). So this is NOT the removed lifetime cap — but it is
+          // only correct while the user still has somewhere to GO. Assert that, rather than
+          // standing down: at the cap the closing line must offer «تحديد أكثر» and the button must
+          // actually be on screen (the §42 visible-output contract, in the one state that now ends
+          // every large search).
+          if (st.narrowButtons === 0) {
+            defect(name, 'CAP-STRANDS-USER',
+              `«عرض المزيد» retired at the ${SECOND_PAGE_CAP}-card cap with ${total0} matching, and NO «تحديد أكثر» is on screen — `
+            + `${num(total0) - n} eligible listings are unreachable and the user has no forward path`);
+          } else {
+            note(`${name}: ${n} of ${total0} shown — pager correctly retired at the ${SECOND_PAGE_CAP}-card cap with «تحديد أكثر» offered (owner 2026-09-14)`);
+          }
         } else if (num(total0) > n) {
-          // CONTINUATION CONTRACT (owner 2026-08-29): with no AF interview open, the pager may be
-          // absent ONLY when everything matching is already on screen. Anything else is the exact
-          // lifetime ceiling the owner removed.
+          // CONTINUATION CONTRACT (owner 2026-08-29): with no AF interview open and BELOW the cap,
+          // the pager may be absent ONLY when everything matching is already on screen. Anything
+          // else is the exact lifetime ceiling the owner removed.
           defect(name, 'PAGER-MISSING', `no «عرض المزيد» at ${n} cards while the search found ${total0} — the removed lifetime cap is back`);
         } else {
           note(`${name}: all ${n} matching cards on screen — pager legitimately absent`);
@@ -336,13 +482,43 @@ export async function showMoreJourney(plan) {
 
         // The closing line must state the search's TRUE total, never a batch size — compared
         // against the headline read the SAME way, off the SAME message.
-        if (st.closing && st.closing !== total0 && num(st.closing) > 0 && num(total0) > 0 && num(st.closing) !== n) {
+        //
+        // COMPARE NUMBERS, NEVER THE RENDERED STRINGS (2026-09-19). `st.closing` is the raw captured
+        // text («6,155») while `total0` is `visibleState.headline`, which is now a parsed number. The
+        // two were both strings until the Results-Found matcher started returning a number, and this
+        // line then reported «closing message quotes 6,155 but the search found 6155» — the same
+        // total, in two renderings, on a healthy production. §40.7 again, and the exact shape this
+        // file's own 2026-09-05 comment above was written about: read both sides the SAME way.
+        const closingN = num(st.closing);
+        if (st.closing && closingN > 0 && num(total0) > 0 && closingN !== num(total0) && closingN !== n) {
           defect(name, 'TRUE-TOTAL', `closing message quotes ${st.closing} but the search found ${total0}`);
         }
         break;
       }
       await btn.scrollIntoViewIfNeeded().catch(() => {});
-      await sleep(400);
+      // Wait for the pager to STOP MOVING before pressing it (2026-09-22). A batch reveals up to 100
+      // cards whose images load and reflow for seconds afterwards, so the button keeps sliding down
+      // the document. `sleep(400)` was not a settle — it was a guess, and on الرياض/شقة batch 2 it
+      // lost: Playwright's actionability check (visible · enabled · STABLE) burned the whole 20s
+      // retrying, reporting `element is not stable` and a card's `data-expoimage` div intercepting
+      // pointer events at the centre it had computed a moment earlier. That filed a PAGER-CLICK
+      // defect against a perfectly healthy pager — the false-red half of the cost this file's own
+      // 2026-09-10..12 note already paid once.
+      //
+      // Proven on production the same day with the page allowed to settle (الرياض/شقة, the exact
+      // cohort that failed): the pager is covered in 0/8 hit-tests at rest, occupies ONE Y position
+      // at rest, and an ordinary trusted click paginates in 71ms then 169ms, 24 → 100 → 500 cards —
+      // the documented SECOND_PAGE_CAP, reached exactly.
+      //
+      // This does NOT weaken the assertion. The click below is still an ordinary trusted click with
+      // the same timeout and the same verdict: a pager that is genuinely covered, genuinely dead, or
+      // still moving after the settle window STILL fails, and still files PAGER-CLICK. All that
+      // changes is that the question is asked of a settled page instead of a reflowing one.
+      const calm = await awaitPagerSettled(btn);
+      if (!calm.settled) {
+        note(`${name}: batch ${b} pager geometry never settled (${calm.reason}) after ${calm.waitedMs}ms `
+           + `over ${calm.samples} samples — pressing anyway; a genuinely blocked pager still fails below`);
+      }
       await btn.click({ timeout: 20000 }).catch((e) => defect(name, 'PAGER-CLICK', `batch ${b}: ${e.message}`));
       const before = n;
       const press = await settlePress(page, searches, before);
@@ -374,8 +550,39 @@ export async function showMoreJourney(plan) {
           + `${press.pages} result requests were issued and none of them reached the user`);
         }
       }
-      if (st.headline !== total0) {
-        defect(name, 'TRUE-TOTAL', `headline moved across «عرض المزيد»: ${total0} → ${st.headline}`);
+      // NULL IS "UNREADABLE", NOT A VALUE — AND THEY ARE DIFFERENT DEFECTS (2026-09-19, #348).
+      //
+      // `st.headline` comes from resultsFoundCount(), whose contract says it in so many words:
+      // "NULL MEANS NO SHIPPED SENTENCE IS ON THIS SCREEN — it must never be conflated with the
+      // screen says zero… a search that rendered results and whose count could not be read is a
+      // BLIND journey, not a journey with no total."
+      //
+      // This compared `null !== 21384` and reported a MOVED TRUE TOTAL. The underlying production
+      // defect was real — the Results-Found sentence renders truncated mid-emoji after the second
+      // press and is genuinely not any shipped template (ops_incident #347) — so the red was
+      // correct and must STAY red. What was wrong is the accusation it made: "the true total
+      // changed" sent routine #4 looking for a count bug that does not exist, and the finding sat
+      // unattributed for a day (ops_incident #331). Same evidence, right name.
+      {
+        const verdict = classifyHeadlineAcrossPress(total0, st.headline);
+        if (verdict.kind === 'COUNT-UNREADABLE') {
+          defect(name, 'COUNT-UNREADABLE',
+            `after batch ${b} the Results-Found sentence on screen matched NO shipped template, so the `
+          + `displayed count could not be read at all (it was ${total0} before the press). This is not `
+          + `a moved total — the sentence itself is wrong or incomplete. See ops_incident #347.`);
+        } else if (verdict.kind === 'TRUE-TOTAL') {
+          defect(name, 'TRUE-TOTAL', `headline moved across «عرض المزيد»: ${total0} → ${st.headline}`);
+        }
+      }
+      // THE CAP IS A MOUNT-SAFETY BOUND, NOT A PREFERENCE (owner 2026-09-14; ops_incident #212).
+      // A press that mounts more than SECOND_PAGE_CAP cards re-opens the class that crashed
+      // production's renderer on الرياض/إيجار/سنوي (20,782 unvirtualized cards) — and it does so
+      // silently, because every other assertion in this loop is happy when cards GROW. The tab we
+      // are driving may survive where a user's does not, so the bound is asserted by number and
+      // never inferred from "did it crash".
+      if (n > SECOND_PAGE_CAP) {
+        defect(name, 'CAP-EXCEEDED',
+          `batch ${b} revealed ${n} cards, past the ${SECOND_PAGE_CAP}-card reveal cap — the unvirtualized-mount crash class (ops_incident #212) is back`);
       }
       for (const [k, v0] of Object.entries({ city: state0.city, deal: state0.deal, type: state0.type,
                                              district: state0.district, budget: state0.budget })) {

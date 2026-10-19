@@ -29,6 +29,7 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { gotoLive, type Navigable } from './lib/liveNav.ts';
+import { stripComments } from './lib/stripComments.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -176,9 +177,17 @@ const consentPage = (failFirst: number, stuck = false) => {
 console.log('\n── no production browser check keeps a bare, single-attempt goto ──');
 const dir = new URL('./', import.meta.url);
 const PROD_HOST = 'ezhalah-app.vercel.app';
+//
+// A COMMENT IS NOT A CODE PATH (routine #10, 2026-09-19). This read was RAW, so a barrier that merely
+// MENTIONED the import marker in prose joined the policed population and was then failed for not
+// serving its own build. That happened: verify-results-sentence-parsers-track-the-pool.ts documents
+// which import spellings its own discovery covers, wrote one of them whole in a comment, and turned
+// this check red on an unrelated PR. The direction was fail-CLOSED, which is the right way round —
+// but a false red on prose trains people to edit the guard, so strip at the READER, the way
+// scripts/lib/stripComments.ts exists to be used.
 const browserChecks = readdirSync(dir)
   .filter((f) => /^verify-.*\.(ts|mjs)$/.test(f))
-  .map((f) => ({ f, src: readFileSync(new URL(f, dir), 'utf8') }))
+  .map((f) => ({ f, src: stripComments(readFileSync(new URL(f, dir), 'utf8')) }))
   .filter(({ src }) => /from ['"]playwright['"]/.test(src));
 const local = browserChecks.filter(({ src }) => !src.includes(PROD_HOST));
 const prod = browserChecks.filter(({ src }) => src.includes(PROD_HOST));
@@ -187,6 +196,28 @@ check(`found the browser checks (${browserChecks.length}: ${prod.length} product
 check('the local-server checks really do serve themselves (that is WHY they are exempt)',
   local.every(({ src }) => /127\.0\.0\.1|localhost/.test(src)),
   `not self-served: ${local.filter(({ src }) => !/127\.0\.0\.1|localhost/.test(src)).map((b) => b.f).join(', ')}`);
+
+// MUTATION PROOFS for the population read itself, both directions — the enlisting rule is now a
+// statement about CODE, and it is watched to still enlist real code.
+{
+  // THE MARKER IS ASSEMBLED, NEVER WRITTEN WHOLE, in these fixtures — a literal here enlists THIS
+  // file into its own population, and it then fails itself for not calling gotoLive(). Same
+  // discipline the `playwrigh[t]` spelling keeps in the sibling barrier.
+  const MARK = `playwrigh${'t'}`;
+  const enlisted = (src: string) => /from ['"]playwright['"]/.test(stripComments(src));
+  const mut = (label: string, caught: boolean) => {
+    if (caught) { console.log(`  ✓ MUTATION caught: ${label}`); return; }
+    check(`MUTATION NOT caught: ${label}`, false);
+  };
+  mut('a file that only MENTIONS the import marker in a // comment is NOT enlisted',
+    !enlisted(`// the marker was \`from '${MARK}'\` and this repo imports @${MARK}/test\nconst x = 1;`));
+  mut('…nor one that mentions it inside a /** … */ block',
+    !enlisted(`/**\n * discovered by \`from '${MARK}'\`\n */\nconst x = 1;`));
+  mut('a REAL import is still enlisted (the rule is not vacuously empty)',
+    enlisted(`import { chromium } from '${MARK}';\nawait chromium.launch();`));
+  mut('the real population is non-empty after stripping (the strip did not empty it)',
+    browserChecks.length >= 5);
+}
 
 // The ONE production check that cannot import the helper: verify-live-hydration.mjs is .mjs, and
 // deploy-frontend.yml invokes it as a bare `node scripts/verify-live-hydration.mjs` — no

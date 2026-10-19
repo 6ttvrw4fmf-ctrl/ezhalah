@@ -1,0 +1,392 @@
+"""منصة وصلنا العقارية — wslnaa.com. 59 listings, onboarding 2026-09-19.
+
+SOURCE SHAPE (probed live before any code):
+  · The site is a client-rendered app: the served HTML contains NO listing values at all. The body
+    text has no price, and the JS bundle does not carry the catalogue either. Everything a scraper
+    could read from the HTML is the og: meta pair — and og:description is TRUNCATED at ~155 chars,
+    so across the 59 listings it yields a city on only 12, a price on 13 and bedrooms on 5.
+    Parsing the meta would have shipped a platform that is ~80% empty and looked fine by row count.
+  · The app fetches each listing from its own tRPC endpoint, which returns the WHOLE record:
+        /api/trpc/properties.bySlug?batch=1&input={"0":{"json":{"slug":"<slug>"}}}
+    giving title, description, type, mode, price, rentPeriod, priceSuffix, region, district,
+    rooms, area, status, images and propertyCode. That is the source of truth this scraper uses;
+    the sitemap supplies the slugs.
+  · FIELDS WORTH NAMING:
+      - `region` holds the CITY («الرياض»), not an administrative region.
+      - `district` is already ARABIC («حي الملز») — no transliteration question on this source.
+      - `rentPeriod` is stated («yearly»), so the period is never defaulted.
+      - `area` is 0 when unknown; 0 m² is not an area and is stored as NULL.
+      - `rooms` IS NOT BEDROOMS on a commercial listing. Measured: a shop with rooms=2 is titled
+        «فتحتان تجاريتان متجاورتان» (two adjoining commercial units) and a building with rooms=24
+        is «8 شقق وقبو» — 24 rooms across eight flats, not a 24-bedroom home. Writing that into
+        bedrooms would put "24 غرف" on a building card and make it answer a bedroom filter. It is
+        only read as bedrooms for a residential dwelling; otherwise it is kept in additional_info.
+      - `status` must be «available»; anything else is not an offer we may publish.
+      - `images` is a JSON-encoded STRING, not a list.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+from typing import Any, Optional
+from urllib.parse import urlencode
+
+from curl_cffi import requests as cc
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
+
+BASE = "https://wslnaa.com"
+SOURCE = "Waslna"
+PREFIX = "WSL"
+
+
+def session() -> cc.Session:
+    s = cc.Session(impersonate="chrome124")
+    s.headers.update({"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"})
+    return s
+
+
+_TYPE_EN_AR = {
+    "apartment": "شقة", "villa": "فيلا", "duplex": "دوبلكس", "studio": "استوديو",
+    "floor": "دور", "building": "عمارة", "office": "مكتب", "showroom": "معرض",
+    "shop": "محل", "land": "أرض", "warehouse": "مستودع", "chalet": "شاليه",
+    "rest_house": "استراحة", "resthouse": "استراحة", "room": "غرفة",
+}
+
+
+# Types whose «rooms» genuinely means bedrooms. Anything else keeps rooms out of that column.
+_DWELLING_TYPES = {"apartment", "villa", "duplex", "studio", "floor", "chalet", "rest_house",
+                   "resthouse", "room"}
+
+
+def _int(v: Any) -> Optional[int]:
+    if v is None:
+        return None
+    try:
+        n = int(float(str(v).replace(",", "").strip()))
+        return n if n > 0 else None      # area/price of 0 means "not stated", never zero
+    except (TypeError, ValueError):
+        return None
+
+
+# BATHROOMS FROM THE AD'S OWN LAYOUT SENTENCE (🔬 AF engineer 2026-10-11, backlog 263). The tRPC payload has no
+# bathroom field, so the description is the only place wslnaa states one («تتكون من غرفتي نوم وصالة ومطبخ ودورتي
+# مياه»); ops_af_score 10-08 read it on the page while we stored none on 61 of 61. A digit count wins
+# (normalize.baths_from_leading_count, «و3 دورات مياه»); a lone dual «دورتي/دورتين مياه» is 2; a lone singular
+# «دورة مياه» is 1. Any mix («غرفة ماستر بدورة مياه، ودورتي مياه» = 3 in total) is NOT added up: unknown, NULL.
+_BATH_ANY = re.compile(r"[\d٠-٩]\s*(?:دورات|دورة|حمامات)\s*(?:ال)?مي[اآ][هة]")
+_BATH_DUAL = re.compile(r"دورت(?:ي|ين)\s*(?:ال)?مي[اآ][هة]")
+_BATH_ONE = re.compile(r"دورة\s*(?:ال)?مي[اآ][هة]")
+
+
+def _bathrooms_from_text(text: Optional[str]) -> Optional[int]:
+    t = str(text or "")
+    if _BATH_ANY.search(t):
+        return normalize.baths_from_leading_count(t)
+    duals, ones = len(_BATH_DUAL.findall(t)), len(_BATH_ONE.findall(t))
+    if duals == 1 and ones == 0:
+        return 2
+    if ones == 1 and duals == 0:
+        return 1
+    return None
+
+
+def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
+    if not p.get("active") or p.get("deletedAt"):
+        return None, "residential", "inactive"
+    if (p.get("status") or "").lower() != "available":
+        return None, "residential", f"status_{p.get('status')}"
+
+    type_ar = _TYPE_EN_AR.get((p.get("type") or "").strip().lower())
+    if not type_ar:
+        return None, "residential", "type_unmapped"
+    property_type = normalize.map_type_exact(type_ar)
+    if not property_type:
+        return None, "residential", "type_unmapped"
+    category = normalize.category_for_type(property_type).lower()
+
+    mode = (p.get("mode") or "").strip().lower()
+    deal = "Rent" if mode == "rent" else ("Buy" if mode in ("sale", "buy", "sell") else None)
+    if not deal:
+        return None, category, "no_deal"
+
+    # `region` is the CITY on this source, despite the field name.
+    city_ar = (p.get("region") or "").strip() or None
+    if not city_ar:
+        return None, category, "no_city"
+    city_id, region_id = to_catalog(city_ar)
+    if not city_id:
+        return None, category, "city_not_in_catalog"
+
+    district_raw = (p.get("district") or "").strip() or None
+    district_ar = find_district_in_text(district_raw, city_id) if district_raw else None
+
+    price = _int(p.get("price"))
+    imgs: list[str] = []
+    raw_imgs = p.get("images")
+    if isinstance(raw_imgs, str):
+        try:
+            imgs = [u for u in json.loads(raw_imgs) if isinstance(u, str)]
+        except (ValueError, TypeError):
+            imgs = []
+    elif isinstance(raw_imgs, list):
+        imgs = [u for u in raw_imgs if isinstance(u, str)]
+    if p.get("image") and p["image"] not in imgs:
+        imgs.insert(0, p["image"])
+
+    row: dict[str, Any] = {
+        "ad_number": f"{PREFIX}{p['id']}",
+        "listing_url": f"{BASE}/properties/{p.get('slug')}",
+        "source": SOURCE,
+        "active": True,
+        "title": (p.get("title") or "").strip() or None,
+        "description": (p.get("description") or "").strip() or None,
+        # The tRPC payload carries no amenity fields at all, so the description is the ONLY place
+        # wslnaa states them («يتوفر مدخل للمبنى ومواقف أمامية وخلفية»). 47 of its 58 listings had
+        # nothing for any Advanced-Filter question before this. Proximity prose about the
+        # NEIGHBOURHOOD («قريب من مستشفى السرطان», «مقابل كمباوند معهد الإدارة») is suppressed by
+        # amenities_from_text, so a nearby hospital never becomes this unit's feature.
+        **normalize.amenities_from_text(p.get("description")),
+        "property_type": property_type,
+        # Written as a total expression, not the bare `deal`: a transaction_type that is
+        # not provably Buy/Rent can reach the index as NULL, and a null deal is
+        # quarantined out of search entirely (the 2026-07-16 null-deal recovery).
+        "transaction_type": "Rent" if deal == "Rent" else "Buy",
+        "city": normalize.map_city(city_ar),
+        "city_ar": city_ar,
+        "city_id": city_id,
+        "region_id": region_id,
+        "district_ar": district_ar,
+        "neighborhood": district_raw,
+        "area_m2": _int(p.get("area")),
+        "bedrooms": (_int(p.get("rooms"))
+                     if (p.get("type") or "").strip().lower() in _DWELLING_TYPES else None),
+        "bathrooms": (_bathrooms_from_text(p.get("description"))
+                      if (p.get("type") or "").strip().lower() in _DWELLING_TYPES else None),
+        "photo_urls": imgs[:20] or None,
+    }
+    if deal == "Rent":
+        # The source STATES the period; it is mapped, never derived from the number.
+        rp = (p.get("rentPeriod") or "").strip().lower()
+        if rp in ("yearly", "annual", "annually"):
+            row["rent_period"] = "annual"
+            row["price_annual"] = price
+        elif rp == "monthly":
+            row["rent_period"] = "monthly"
+            row["price_annual"] = normalize.annualize_rent(price, "monthly")
+        else:
+            row["price_annual"] = price          # period unknown → never defaulted
+    else:
+        row["price_total"] = price
+    row["additional_info"] = {k: v for k, v in {
+        "type_en": p.get("type"), "property_code": p.get("propertyCode"),
+        "price_suffix": p.get("priceSuffix"), "building_id": p.get("buildingId"),
+        "map_url": p.get("mapUrl"), "slug": p.get("slug"),
+        "source_rooms": p.get("rooms"),
+    }.items() if v is not None}
+    return row, category, ""
+
+
+# Why a walk may not be the whole catalogue. Non-empty → no prune this run.
+INCOMPLETE: list[str] = []
+
+# ── REMOVAL (measured 2026-10-02). Until then this crawler had NO removal step at all: a unit the
+# office rented out or deleted stayed active here for good.
+#
+# The PAGE cannot answer: /properties/<anything> is the app shell, HTTP 200 even for a slug that
+# never existed. The listing's own RECORD can (properties.bySlug), and it has TWO removal answers:
+#   · RENTED — the path this site actually uses. Its own properties.list serves 83 records: 59
+#     «available» and 24 «rented» (every one active=true, deletedAt=null, updated 2026-06-14 to
+#     2026-08-16). 0 of the 24 are in the sitemap (59 slugs, all 59 «available»), and 10 of 10
+#     probed answer HTTP 200 with status «rented» — never a 404. 0 of 59 live records carry it, so
+#     it is not furniture. Its own page stamps such a record «تم التأجير» (PropertyDetail.tsx:351).
+#   · NOT_FOUND — a slug that never existed (and a wrong id) answers HTTP 404 with tRPC's
+#     {"message":"NOT_FOUND","path":"properties.bySlug"}.
+# «sold»: 0 records carry it today. It is read as a removal on the site's OWN page code, not on a
+# measured record: that same line stamps `status==="rented"||status==="sold"` («تم البيع»), and its
+# list filter calls the pair «تم التأجير / البيع» (unavailable). The app defines exactly four
+# statuses: available, reserved, rented, sold.
+# UNMEASURED, so UNKNOWN (held and counted by prune_unseen, never hidden — exactly like a block, a
+# 5xx or a body that is not that JSON): «reserved», any other status, active=false and a non-null
+# deletedAt, each on 0 of 83 records.
+RES_TABLE, COM_TABLE = "wslnaa_residential_listings", "wslnaa_commercial_listings"
+
+
+def _record_url(slug: str) -> str:
+    payload = json.dumps({"0": {"json": {"slug": slug}}}, ensure_ascii=False, separators=(",", ":"))
+    return f"{BASE}/api/trpc/properties.bySlug?{urlencode({'batch': 1, 'input': payload})}"
+
+
+# What the record's own `status` says. Anything not named here is UNKNOWN.
+_STATUS_SAYS = {"available": "live", "rented": "gone", "sold": "gone"}
+
+
+def _signal(status, body, moved) -> Optional[str]:
+    """'live' | 'gone' | None — only what this listing's own record affirmatively answers."""
+    if moved or status not in (200, 404):
+        return None
+    try:
+        got = json.loads(body)[0]
+        if status == 404:
+            err = got["error"]["json"]
+            said = (err["message"], err["data"]["path"])
+            return "gone" if said == ("NOT_FOUND", "properties.bySlug") else None
+        p = got["result"]["data"]["json"]
+        if not p["active"] or p.get("deletedAt"):
+            return None
+        return _STATUS_SAYS.get(str(p["status"]).lower())
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+        return None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for db.prune_unseen. A «rented»/«sold» record or a NOT_FOUND is believed
+    only while a known-live listing from this run (`control`) still reads live through the same
+    session."""
+    stored = stored_listing_url((RES_TABLE, COM_TABLE))
+    s = session()
+
+    def url_for(ad_number: str) -> Optional[str]:
+        slug = (stored(ad_number) or "").rstrip("/").rsplit("/", 1)[-1]
+        return _record_url(slug) if slug else None
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="wslnaa", signal=_signal, session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
+def fetch_slugs(s: cc.Session, limit: int = 0) -> list[str]:
+    INCOMPLETE.clear()
+    r = s.get(f"{BASE}/sitemap.xml", timeout=40)
+    if r.status_code != 200:
+        return []
+    urls = sorted({u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if "/properties/" in u})
+    slugs = [u.rstrip("/").rsplit("/", 1)[-1] for u in urls if u.rstrip("/").rsplit("/", 1)[-1]]
+    slugs = [x for x in slugs if x != "properties"]
+    return slugs[:limit] if limit else slugs
+
+
+def fetch_one(s: cc.Session, slug: str) -> Optional[dict]:
+    payload = json.dumps({"0": {"json": {"slug": slug}}}, ensure_ascii=False, separators=(",", ":"))
+    r = s.get(f"{BASE}/api/trpc/properties.bySlug", params={"batch": 1, "input": payload}, timeout=40)
+    if r.status_code != 200:
+        if r.status_code != 404:        # a 404 is the record's own answer; anything else is unread
+            INCOMPLETE.append(f"{slug}: HTTP {r.status_code}")
+        return None
+    try:
+        p = r.json()[0]["result"]["data"]["json"]
+    except (ValueError, KeyError, IndexError, TypeError):
+        INCOMPLETE.append(f"{slug}: record was not readable JSON")
+        return None
+    # The tRPC payload OMITS `slug` for the building-level combination offers (numeric slugs
+    # 540001, 570001-570005 — "الجزء السكني بالكامل", "3 فتحات تجارية متجاورة", …). `listing_url`
+    # is an f-string over p["slug"], so a missing key rendered the LITERAL text "None" and six
+    # live cards pointed at /properties/None → «العقار غير موجود». The slug we just asked for is
+    # authoritative (it came from the site's own sitemap and the page serves fine at it), so
+    # carry it through rather than trusting the response to echo it back.
+    if not p.get("slug"):
+        p["slug"] = slug
+    return p
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
+    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--dry-run", action="store_true")
+    args = ap.parse_args()
+
+    s = session()
+    dry = args.dry_run or bool(args.limit)
+    run_id = None if dry else db.begin_run("wslnaa")
+    res: list[dict] = []
+    com: list[dict] = []
+    try:
+        slugs = fetch_slugs(s, limit=args.limit)
+        if not slugs:
+            raise RuntimeError("sitemap returned no /properties/ slugs")
+        print(f"{SOURCE}: {len(slugs)} listings discovered", flush=True)
+        skipped: dict[str, int] = {}
+        for sl in slugs:
+            p = fetch_one(s, sl)
+            if not p:
+                skipped["api_miss"] = skipped.get("api_miss", 0) + 1
+                continue
+            row, cat, why = map_listing(p)
+            if not row:
+                skipped[why] = skipped.get(why, 0) + 1
+                continue
+            if args.type != "all" and cat != args.type:
+                continue
+            (com if cat == "commercial" else res).append(row)
+        if skipped:
+            print("  skipped (not guessed): "
+                  + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1])))
+        if dry:
+            print(f"✓ {SOURCE} VALIDATION: {len(res)} residential + {len(com)} commercial (nothing written)")
+            for r0 in (res + com)[:12]:
+                print(f"   {r0['ad_number']:>10} {r0['transaction_type']:4} {str(r0['property_type']):10} "
+                      f"{str(r0['city_ar']):7} d={str(r0['district_ar'])[:12]:12} "
+                      f"a={str(r0['area_m2']):>5} bd={str(r0['bedrooms']):>3} "
+                      f"pa={r0.get('price_annual')} "
+                      f"rp={r0.get('rent_period')} ph={len(r0.get('photo_urls') or [])}")
+            return 0
+        if res:
+            db.upsert_wslnaa_residential_batch(res)
+        if com:
+            db.upsert_wslnaa_commercial_batch(com)
+        superseded = db.retire_superseded_siblings(
+            res_table="wslnaa_residential_listings", com_table="wslnaa_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source=SOURCE)
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+        # REMOVAL. A listing missing from this run is only a CANDIDATE: at three misses its own
+        # record is re-read, and it is hidden only when that record says «rented»/«sold» or answers
+        # NOT_FOUND (_signal). A record still on offer heals the row. No prune on a partial walk or
+        # a single-vertical run.
+        pruned = 0
+        if INCOMPLETE:
+            print(f"  ⚠ walk incomplete — no prune: {'; '.join(INCOMPLETE)[:300]}")
+        elif args.type == "all":
+            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+            for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                k = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=verify_gone)
+                if k < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += k
+        healthy = db.end_run(run_id, ok=True, rows_seen=len(slugs), rows_upserted=len(res) + len(com),
+                             notes=f"pruned={pruned}",
+                             check_tables=["wslnaa_residential_listings",
+                                           "wslnaa_commercial_listings"])
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard", flush=True)
+            return 1
+        print(f"✓ {SOURCE}: {len(res)} residential + {len(com)} commercial upserted")
+        return 0
+    except Exception as e:
+        if run_id:
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=str(e)[:300])
+        print(f"✗ {SOURCE}: {e}", flush=True)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,11 +1,11 @@
 // Arabic-locked listing display facts — the SAME derivation ResultCard.tsx uses for its own
 // headline (type / location / price), extracted so a second consumer (Read Aloud, owner 2026-08-19)
 // can never say something that disagrees with what the card actually shows. Always resolves to
-// Arabic regardless of the app's current UI locale — Read Aloud is Arabic-only by product decision,
-// independent of whichever locale the visible screen happens to be in.
+// Arabic in the *Ar helpers; the English speech helpers share ResultCard's catalog/transliteration.
 import type { Listing } from '@/data/listings';
-import { translate, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
+import { englishCatalogText, translate, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, type Locale } from '@/i18n';
 import { arabicOrPlaceholder } from './arabicText';
+import { translitPlace } from './translitPlace';
 
 // #1 (source-accurate, mirrors ResultCard.tsx): the RAW scraped type when it's already Arabic, else
 // the clean-type mapping translated to Arabic — never leaks a raw English type string.
@@ -26,9 +26,19 @@ export function listingLocationAr(listing: Listing): string {
   return listing.district ? `${listing.district}، ${city}` : city;
 }
 
-// Pre-formatted price string, Arabic currency/period suffixes (mirrors ResultCard's `tPrice(listing.price)`).
+// STAY-LENGTH PLATFORMS SHOW NO PRICE, ONLY THIS NOTE (owner rule 2026-10-02): Gathern and Aqar
+// Monthly (Aqar's DailyRenting vertical, the Gathern twin). A stay there is priced by its length —
+// the guest picks the dates on the platform — so one monthly figure misstates it. Display only: the
+// stored price, the monthly-only search and every filter/sort are unchanged.
+export const STAY_LENGTH_PRICE_NOTE = 'Tap to see prices by length of stay';
+export const isStayLengthPriced = (source: string): boolean => /gathern|aqar\s*monthly/i.test(source || '');
+
+// The price line every surface prints (card, Read Aloud, the agent's card summary).
+export function listingPrice(listing: Listing, loc: Locale): string {
+  return isStayLengthPriced(listing.source) ? translate(loc, STAY_LENGTH_PRICE_NOTE) : tPrice(listing.price, loc);
+}
 export function listingPriceAr(listing: Listing): string {
-  return tPrice(listing.price, 'ar');
+  return listingPrice(listing, 'ar');
 }
 
 // Platform display name from the raw scraped `source` slug — MOVED here from ResultCard.tsx
@@ -53,6 +63,7 @@ export function sourceName(source: string): string {
   if (s.includes('aldarim')) return 'Aldarim Real Estate';
   if (s.includes('aqargate')) return 'Aqar Gate';
   if (s.includes('alhoshan')) return 'Al Hoshan';
+  if (s.includes('aqalemhajer') || s.includes('مكتب أقاليم هجر للخدمات العقارية')) return 'Aqalem Hajer Real Estate Services Office'; // 2026-09-24: BEFORE 'hajer', which 'aqalemhajer' contains
   if (s.includes('hajer')) return 'Hajer Houses Real Estate';
   if (s.includes('sanadak')) return 'Sanadak';
   if (s.includes('eastabha')) return 'East Abha Real Estate';
@@ -83,9 +94,15 @@ export function sourceName(source: string): string {
   if (s.includes('remal')) return 'Remal Real Estate';
   if (s.includes('amaall')) return 'Amaall Real Estate Services';
   if (s.includes('amlakalahsa')) return 'Amlak Al-Ahsa Real Estate';
+  if (s.includes('aqaralsaudia')) return 'Aqar Al Saudia Real Estate';
+  if (s.includes('suwar')) return 'Suwar Real Estate';
+  if (s.includes('rakez')) return 'Rakez Real Estate';
   if (s.includes('alta')) return 'Alta Real Estate Services';
   if (s.includes('awal')) return 'Awal United for Real Estate';
   if (s.includes('azdad')) return 'Azdad Al Aqariah';
+  // The DB source is Arabic («عقاريون», scrapers/akariyoun/run.py): the slug alone left all 280
+  // listings named عقار with «sa.aqar.fm» beside عقاريون's own logo (found live 2026-09-20).
+  if (s.includes('akariyoun') || s.includes('عقاريون')) return 'Akariyoun';
   // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
   // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/
   // logo, found live 2026-07-25). Also match the no-space form in case that ever appears.
@@ -94,6 +111,7 @@ export function sourceName(source: string): string {
   if (s.includes('jurash')) return 'Jurash Real Estate';
   if (s.includes('al nokhba') || s.includes('alnokhba')) return 'Al Nokhba';
   if (s.includes('gathern')) return 'Gathern';
+  if (s.includes('goldendeal') || s.includes('الصفقة الذهبية العقارية')) return 'Golden Deal Real Estate'; // 2026-09-24: BEFORE 'deal', which 'goldendeal' contains
   if (s.includes('deal')) return 'Deal App';
   if (s.includes('souq')) return '24 Souq';
   if (s.includes('pulse')) return 'Era Pulse';
@@ -104,6 +122,121 @@ export function sourceName(source: string): string {
   if (s.includes('abralosol')) return 'Abr Al Osol Real Estate';
   if (s.includes('arkaan')) return 'Arkaan Al Aqar';
   if (s.includes('rawasidark')) return 'Rawasi Dark Real Estate';
+  // 'ksaaqar' CONTAINS 'aqar' and the fallback below is عقار's own name, so without these two
+  // every listing of theirs would be labelled AQAR — the misattribution the owner flagged as a
+  // legal problem. Both spellings are matched: the SLUG ('ksaaqar') and the registry NAME
+  // ('KSA Aqar', with a space) — the Al Khaas lesson, where the space-less token alone missed.
+  if (s.includes('ksaaqar') || s.includes('ksa aqar') || s.includes('عقارات السعودية')) return 'KSA Aqar Real Estate';
+  if (s.includes('sadiqeltajer') || s.includes('sadiq eltajer') || s.includes('sadiq-eltajer') || s.includes('صادق التاجر')) return 'Sadiq Eltajer Real Estate';
+  // onboarded 2026-09-20 — each must resolve to its OWN name; the fallback below is عقار's.
+  if (s.includes('gudai') || s.includes('غدي')) return 'Gudai Real Estate';
+  if (s.includes('safera') || s.includes('سفيرة')) return 'Safera Real Estate';
+  if (s.includes('alhumaidan') || s.includes('الحميدان')) return 'Al Humaidan Real Estate Office';
+  if (s.includes('aqarnajran') || s.includes('عقار نجران')) return 'Aqar Najran';
+  // Matched on the STORED source («Fahad Alshahri»), displayed as the BRAND («مقام الوسام
+  // العقارية»). The two differ on purpose — see the i18n entry.
+  if (s.includes('fahadalshahri') || s.includes('فهد الشهري')) return 'Maqam Al Wisam Real Estate';
+  if (s.includes('compoundin') || s.includes('كومباوند')) return 'CompoundIn';
+  if (s.includes('wslnaa') || s.includes('waslna') || s.includes('وصلنا')) return 'Waslna Real Estate';
+  // onboarded 2026-09-21 — LAST on purpose, so no new token can capture an existing platform's
+  // source. Each tests the stored `source` (the scraper's SOURCE constant) and the slug. Bare «سكن»
+  // is deliberately NOT a token: it is a common word («سكني» = residential); only Latin 'sakan' is.
+  if (s.includes('alsidra') || s.includes('al sidra') || s.includes('السدرة')) return 'Al Sidra Real Estate';
+  if (s.includes('moftah') || s.includes('مفتاح العقار')) return 'Moftah Al Aqar';
+  if (s.includes('masar') || s.includes('مسار المستقبل')) return 'Masar Al Mustaqbal Real Estate';
+  if (s.includes('menassat') || s.includes('منصات')) return 'Menassat Real Estate';
+  if (s.includes('sakani') || s.includes('سكني')) return 'Sakani'; // 2026-09-24: BEFORE 'sakan', which 'sakani' contains
+  if (s.includes('sakan')) return 'Sakan';
+  if (s.includes('bossbih') || s.includes('بوصبيح')) return 'Bossbih Real Estate Office';
+  if (s.includes('alshawaf') || s.includes('al shawaf') || s.includes('الشواف')) return 'Al Shawaf Real Estate Office';
+  if (s.includes('alqarawi') || s.includes('القرعاوي')) return 'Ibrahim Alqarawi Real Estate Investments';
+  if (s.includes('aljassim') || s.includes('al jassim') || s.includes('الجاسم')) return 'Al Jassim Real Estate Services';
+  if (s.includes('almotmkenah') || s.includes('المتمكنة')) return 'Almotmkenah Real Estate';
+  // نفوذ للاستثمار العقاري (nofodh.sa) BEFORE نفوذ (nufouth.com): «نفوذ» is a SUBSTRING of the longer
+  // name, and first match wins, so the shorter branch would steal every nofodh card and show it under
+  // another company's brand and domain. Specific token first. Caught by
+  // verify-platform-registration-complete, which is the barrier that exists for exactly this.
+  if (s.includes('نفوذ للاستثمار العقاري') || s.includes('nofodh')) return 'نفوذ للاستثمار العقاري';
+  if (s.includes('nufouth') || s.includes('نفوذ')) return 'Nufouth Development Real Estate';
+  // onboarded 2026-09-24 (batch 36) — LAST, same contract as above. Each tests the stored `source` (the
+  // scraper's SOURCE constant) and the slug; Arabic tokens are the WHOLE stored source string.
+  if (s.includes('dwelleo') || s.includes('دويليو')) return 'Dwelleo';
+  if (s.includes('shatri') || s.includes('الشاطري للتطوير العقاري')) return 'Shatri Real Estate Development';
+  if (s.includes('alqasem') || s.includes('القاسم العقارية')) return 'Alqasem Real Estate';
+  if (s.includes('fkralemar') || s.includes('فكر الإعمار')) return 'Fkr Alemar';
+  if (s.includes('wadod') || s.includes('ودود العقارية')) return 'Wadod Real Estate';
+  if (s.includes('almuteb') || s.includes('آل متعب العقارية')) return 'Al Muteb Real Estate';
+  if (s.includes('aalbarrak') || s.includes('البراك للعقارات')) return 'Al Barrak Real Estate';
+  if (s.includes('alrifai') || s.includes('الرفاعي للعقار')) return 'Al Rifai Real Estate';
+  if (s.includes('sodasyat') || s.includes('سداسيات العقارية')) return 'Sodasyat Real Estate';
+  if (s.includes('hasaad') || s.includes('حصاد الاقتصادية للعقارات')) return 'Hasaad Economic Real Estate';
+  if (s.includes('aqaralriyadh') || s.includes('عقار الرياض')) return 'Aqar Alriyadh';
+  if (s.includes('justsa') || s.includes('فقط نقطة العقارية')) return 'Just Real Estate';
+  if (s.includes('snam') || s.includes('سنام العقارية')) return 'Snam Real Estate';
+  if (s.includes('jawher') || s.includes('جواهر للوساطة والتسويق العقاري')) return 'Jawher Real Estate Brokerage';
+  if (s.includes('m3tmd') || s.includes('مقر المعتمد')) return 'Maqar Al Motamad';
+  if (s.includes('senan') || s.includes('سنان العقارية')) return 'Senan Real Estate';
+  if (s.includes('thousand') || s.includes('1000 العقارية')) return '1000 Real Estate';
+  if (s.includes('yameen') || s.includes('يمين العقارية')) return 'Yameen Real Estate';
+  if (s.includes('ebriza') || s.includes('إبريزة العقارية')) return 'Ebriza Real Estate';
+  if (s.includes('eilmalriyada') || s.includes('علم الريادة الإدارية')) return 'Eilm Alriyada';
+  if (s.includes('daryusuf') || s.includes('دار يوسف العقارية')) return 'Dar Yusuf Real Estate';
+  if (s.includes('albdah') || s.includes('البداح للعقارات')) return 'Albdah Real Estate';
+  if (s.includes('eydah') || s.includes('الإيضاح')) return 'Eydah';
+  if (s.includes('tamyaz') || s.includes('تمايز العقارية')) return 'Tamyaz Real Estate';
+  if (s.includes('hazim') || s.includes('حازم')) return 'Hazim';
+  if (s.includes('villassa') || s.includes('فلل')) return 'Villas SA';
+  if (s.includes('marksa') || s.includes('مار العقارية')) return 'Mar Real Estate';
+  if (s.includes('rightcompound')) return 'RightCompound';
+  if (s.includes('livingcompound')) return 'LivingCompound';
+  if (s.includes('azure')) return 'Azure';
+  if (s.includes('expattrusted') || s.includes('expat trusted housing')) return 'Expat Trusted Housing';
+  if (s.includes('flow')) return 'Flow';
+  if (s.includes('أبعاد') || s.includes('abaad')) return 'أبعاد';
+  if (s.includes('آي باكس') || s.includes('ibaax')) return 'آي باكس';  // real SOURCE has a space
+  if (s.includes('وحدات') || s.includes('wahadat')) return 'وحدات';
+  if (s.includes('المربعات') || s.includes('squares')) return 'شركة المربعات العقارية';
+  if (s.includes('رواف') || s.includes('rawaf')) return 'رواف';
+  if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return 'المسوق الافتراضي';
+  if (s.includes('مكسب العقارية') || s.includes('macsaib')) return 'مكسب العقارية';
+  if (s.includes('maqrat')) return 'MAQRAT';                           // the site names itself «منصة MAQRAT», Latin only
+  if (s.includes('عرش العقارية') || s.includes('arshglobal')) return 'عرش العقارية';
+  if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return 'سوبر أوفيس';
+  if (s.includes('شموع العقار') || s.includes('shomou')) return 'شموع العقار';
+  if (s.includes('حراج') || s.includes('haraj')) return 'حراج';
+  if (s.includes('منصة مكتب') || s.includes('maktab')) return 'منصة مكتب';
+  if (s.includes('سرداب') || s.includes('sirdab')) return 'سرداب';
+  if (s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'عشاب العقارية';
+  if (s.includes('منافع العقارية') || s.includes('manafe')) return 'منافع العقارية';
+  if (s.includes('وجف العقارية') || s.includes('wajaf')) return 'وجف العقارية';
+  if (s.includes('البكيري العقارية') || s.includes('albukaeri')) return 'البكيري';
+  if (s.includes('ريادة العقارية') || s.includes('ryadah')) return 'ريادة العقارية';
+  if (s.includes('مجموعة صالح القرشي العقارية') || s.includes('sqcc')) return 'مجموعة صالح القرشي العقارية';
+  if (s.includes('دارا للتطوير العقاري') || s.includes('daraa')) return 'دارا للتطوير العقاري';
+  if (s.includes('مكتب طوية للعقار') || s.includes('tawia')) return 'مكتب طوية للعقار';
+  if (s.includes('مانزو') || s.includes('manzo')) return 'مانزو';
+  if (s.includes('الطابق الثامن') || s.includes('8floor') || s.includes('eightfloor')) return 'الطابق الثامن';
+  if (s.includes('حلول') || s.includes('holoul')) return 'حلول';
+  if (s.includes('السوق المفتوح') || s.includes('opensooq')) return 'السوق المفتوح';
+  if (s.includes('معرض نافذة') || s.includes('nafithh')) return 'معرض نافذة';
+  if (s.includes('مباشر') || s.includes('mobasher')) return 'مباشر';
+  if (s.includes('مؤاجرة') || s.includes('muajarh')) return 'مؤاجرة';
+  if (s.includes('دلّالي') || s.includes('dallali')) return 'دلّالي';
+  if (s.includes('شركة مقام للتطوير العقاري') || s.includes('maqamco') || s.includes('maqam development')) return 'شركة مقام للتطوير العقاري';
+  if (s.includes('تطبيق أرض') || s.includes('earthapp')) return 'تطبيق أرض';
+  if (s.includes('نوافذ الوطن') || s.includes('nawafeth') || s.includes('nawafethalwatan')) return 'نوافذ الوطن';
+  if (s.includes('re/max') || s.includes('remaxsa')) return 'RE/MAX';  // real SOURCE, no 'السعودية' suffix
+  if (s.includes('قمرا') || s.includes('qmra')) return 'قمرا';
+  if (s.includes('العجلان') || s.includes('alajlan')) return 'العجلان';
+  if (s.includes('آل سعيدان') || s.includes('alsaedan')) return 'آل سعيدان';
+  if (s.includes('إيجو عقار') || s.includes('ego')) return 'إيجو عقار';
+  if (s.includes('أحمد المحيسني العقارية') || s.includes('muhaysini')) return 'أحمد المحيسني العقارية';
+  if (s.includes('راز العقارية') || s.includes('razre')) return 'راز العقارية';
+  if (s.includes('ري إنفست') || s.includes('reinvest')) return 'ري إنفست';
+  if (s.includes('صفا للاستثمار') || s.includes('safa')) return 'صفا للاستثمار';
+  if (s.includes('صكوك العقارية') || s.includes('sokok')) return 'صكوك العقارية';
+  if (s.includes('سكنة') || s.includes('sukna')) return 'سكنة';
+  if (s.includes('طوبة العقارية') || s.includes('tuba')) return 'طوبة العقارية';
   return 'AQAR';
 }
 
@@ -112,4 +245,16 @@ export function sourceName(source: string): string {
 // platform name can never drift from what's shown.
 export function listingPlatformAr(listing: Listing): string {
   return translate('ar', 'Hosted on {name}', { name: translate('ar', sourceName(listing.source)) });
+}
+
+// Same English catalog and place renderer as ResultCard; Arabic helpers stay canonical.
+export function listingTypeEn(listing: Listing): string {
+  return englishCatalogText(listing.type || listing.cleanType || '');
+}
+export function listingLocationEn(listing: Listing): string {
+  const city = translitPlace(translate('en', listing.city));
+  return listing.district ? `${translitPlace(translate('en', listing.district))}, ${city}` : city;
+}
+export function listingPlatformEn(listing: Listing): string {
+  return translate('en', 'Hosted on {name}', { name: englishCatalogText(sourceName(listing.source)) });
 }

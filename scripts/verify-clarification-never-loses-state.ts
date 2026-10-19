@@ -137,8 +137,12 @@ const understood = (): any => {
   const edge = readFileSync('supabase/functions/agent/index.ts', 'utf8')
     .split('\n').map((l) => l.split('//')[0]).join('\n');
   const msgReturns = [...edge.matchAll(/kind:\s*"message"/g)].length;
+  // An ASIDE (a thanks, advice, a complaint… in the middle of a search) is not a clarification: it sends NO query and says so with
+  // `keepState: true`, so the app keeps the search exactly as it was (a query read from «وش أفضل حي في الرياض؟» planted a district
+  // «في الرياض؟», live 2026-10-13). It counts as carrying state only in that exact shape: no query beside it.
+  const keepState = [...edge.matchAll(/kind:\s*"message", reply, locationQuestion: false, keepState: true, askCount \}/g)].length;
   const withState = [...edge.matchAll(/query:\s*understoodState\(\)/g)].length
-                  + [...edge.matchAll(/kind:\s*"message",\s*\n\s*reply:[\s\S]{0,300}?query:\s*\{/g)].length;
+                  + [...edge.matchAll(/kind:\s*"message",\s*\n\s*reply:[\s\S]{0,300}?query:\s*\{/g)].length + keepState;
   check('every clarification the edge sends carries the state it understood',
     withState >= msgReturns, `${withState} of ${msgReturns} message returns carry state`);
   const client = readFileSync('src/data/agent.ts', 'utf8');

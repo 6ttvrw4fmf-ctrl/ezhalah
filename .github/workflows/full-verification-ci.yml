@@ -50,11 +50,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Install scraper Python deps
-        # Three guards in `npm test` shell out to the real scraper modules —
-        # verify-sanadak-rsc-object-match, verify-no-derived-price and
-        # verify-scraper-type-tokens-mapped — and scrapers/*/run.py imports curl_cffi at module
-        # level, so without the pinned requirements they die on import rather than on an
-        # assertion. Same reason and same install line as common-location-tests.yml.
+        # Many guards in `npm test` shell out to the real scraper modules, and scrapers/*/run.py
+        # imports curl_cffi at module level, so without the pinned requirements they die on IMPORT
+        # rather than on an assertion — a red that names nothing and invites the wrong diagnosis.
+        # Same reason and same install line as common-location-tests.yml.
+        #
+        # NO COUNT IS WRITTEN HERE, ON PURPOSE. This comment used to open "Three guards in `npm
+        # test` shell out to the real scraper modules" and name them. Measured 2026-09-25 the tree
+        # had grown far past three, and two of the three it named were not even among the ones that
+        # fail without this step. A container that skipped the install then produced 16 unexplained
+        # reds, which were written up as "the agent egress cannot reach them (403 at the proxy)" —
+        # all 16 exit 0 after this one install line, on the same commit. The census is MEASURED and
+        # PRINTED by scripts/verify-suite-python-prerequisites-are-declared.ts, which also fails if
+        # this step is ever dropped, or if a number comes back into this comment.
         run: pip install -r scrapers/requirements.txt
       - name: Run all regression guards
         run: npm test

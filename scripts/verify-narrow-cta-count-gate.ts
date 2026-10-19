@@ -44,8 +44,12 @@ check('the manual narrow-CTA count reads matchTotal FIRST, never fetched/listing
 check("canNarrowFurther is gated on (matchTotal-first total) > INTERVIEW_STOP_AT (the exact 25/26 boundary, not >=)",
   !!rawTotalName && new RegExp(`const\\s+canNarrowFurther\\s*=\\s*${rawTotalName}\\s*>\\s*INTERVIEW_STOP_AT`).test(ag));
 
-check("the «Let's narrow it down» Pressable only renders when canNarrowFurther is true",
-  /\{canNarrowFurther\s*\?\s*\(\s*<Pressable[\s\S]{0,200}?onPress=\{\(\)\s*=>\s*\{\s*const q = m\.result\.query;/.test(ag),
+// The Pressable-equivalent may sit directly inside the ternary, or (2026-09-20, gold-primary
+// restyle) inside a <GoldPulse> ambient-attention wrapper around a <GoldShineButton> (which renders
+// its OWN inner Pressable — see CardReveal.tsx) — either way `canNarrowFurther` must be the ONLY
+// gate between the ternary and the control actually being mounted.
+check("the «Let's narrow it down» control only renders when canNarrowFurther is true",
+  /\{canNarrowFurther\s*\?\s*\(\s*(?:<GoldPulse>\s*)?<(?:Pressable|GoldShineButton)[\s\S]{0,200}?onPress=\{\(\)\s*=>\s*\{\s*const q = m\.result\.query;/.test(ag),
   'the button must not render unconditionally alongside Load More');
 
 check('the OLD unconditional-button shape (no canNarrowFurther guard around the Pressable) is gone',
@@ -59,15 +63,23 @@ check('the OLD unconditional-button shape (no canNarrowFurther guard around the 
 // live on الرياض/بيع/فيلا. So this rule is now EXECUTED against that function rather than matched
 // against a source line: the same property, proven instead of spelled.
 check('the closing message drops the "help you find more precise ones?" invitation when the button is not offered',
-  !keyOffersNarrow(closingNoteKey({ endKind: 'all', quoteTotal: true, offersMore: false, offersNarrow: false }))
-  && !keyOffersNarrow(closingNoteKey({ endKind: 'more', quoteTotal: true, offersMore: true, offersNarrow: false })),
+  !keyOffersNarrow(closingNoteKey({ endKind: 'all', quoteTotal: true, offersMore: false, offersNarrow: false, lastTapOffer: false, cappedAtCap: false }))
+  && !keyOffersNarrow(closingNoteKey({ endKind: 'more', quoteTotal: true, offersMore: true, offersNarrow: false, lastTapOffer: false, cappedAtCap: false })),
   'a ≤25 set must never be invited to narrow further');
+// When «تحديد أكثر» IS on screen at a terminal, that terminal is the 500-cap case (owner 2026-09-14:
+// once everything ≤500 is shown there is nothing to narrow into, so the button only survives while
+// unseen inventory remains — i.e. cappedAtCap). The invitation must still be made there.
 check('…and still makes the invitation when the button IS offered',
-  keyOffersNarrow(closingNoteKey({ endKind: 'all', quoteTotal: true, offersMore: false, offersNarrow: true })),
+  keyOffersNarrow(closingNoteKey({ endKind: 'all', quoteTotal: true, offersMore: false, offersNarrow: true, lastTapOffer: false, cappedAtCap: true })),
   'dropping the false offers must not retire the true one');
 check('agent.tsx feeds that function the RENDERED-button booleans, not the raw gates',
   /const offersNarrow = canNarrowFurther && showActionsRow;/.test(ag)
-  && /closingNoteKey\(\{ endKind: rc\.endKind, quoteTotal, offersMore, offersNarrow \}\)/.test(ag),
+  // The RULE this check owns is that `offersMore`/`offersNarrow` — the showActionsRow-folded
+  // booleans above — are what reaches the pure function. It used to pin the call's ENTIRE argument
+  // list verbatim, so adding an unrelated argument reddened it: ops_incident #598's `chatClosed`
+  // did exactly that, in a barrier with nothing to say about that argument. Pinning the two names
+  // keeps the rule and stops a second file owning the call site's punctuation.
+  && /closingNoteKey\(\{[^}]*\boffersMore, offersNarrow,/.test(ag),
   'the pure function can only be as right as the values handed to it');
 
 check("both new ≤25 copy variants have real Arabic translations (no English key leak)",

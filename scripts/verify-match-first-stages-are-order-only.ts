@@ -160,13 +160,39 @@ const diversity = await import(DIVERSITY);
 
 // A synthetic result set with distinct ids across several platforms, regions and cities — enough
 // structure that every stage has something real to reorder.
+//
+// EVERY FIELD THE DIVERSITY KEYS READ IS POPULATED (2026-09-18, routine #10, ops_incident #273).
+// It used to carry only source/region/city/price, and the ranked stages were fed
+// `{ l, keys: [l.source] }`. `rankedKey()` reads cleanType, rentPeriod, deal and district, and
+// `listingHasPhoto()` reads `photos` — all absent, so every one of those keys folded to the single
+// group '∅' and the nested diversity levels NEVER ENGAGED even on the path the harness did call.
+// A set-preservation proof over a stage whose recursion never recurses proves the base case only.
+// Photos are deliberately present on some rows and absent on others: a leaf preference that is
+// uniform across the input cannot reorder anything, and so cannot drop anything either.
 const SAMPLE = Array.from({ length: 24 }, (_, i) => ({
   id: i + 1,
   source: ['aqar', 'wasalt', 'gathern', 'dealapp'][i % 4],
   regionAr: ['الرياض', 'مكة', 'الشرقية'][i % 3],
   city: ['الرياض', 'جدة', 'الدمام'][i % 3],
+  district: ['العليا', 'النرجس', 'الملقا', 'الياسمين'][i % 4],
+  cleanType: ['شقة', 'فيلا', 'استوديو', 'دور'][i % 4],
+  rentPeriod: ['monthly', 'annual', null][i % 3],
+  deal: i % 2 === 0 ? 'Rent' : 'Buy',
+  photos: i % 3 === 0 ? [] : [`https://example.invalid/${i}.jpg`],
   area: 100 + i, beds: (i % 5) + 1, priceValue: 1000 * (i + 1), ppm: 10 + i, rec: i,
   price: String(1000 * (i + 1)),
+}));
+
+// The ranked-row shape the two platformDiversity stages actually consume in production
+// (src/data/remote.ts:1746 hands them rows carrying platform/city/region/district/rank).
+const RANKED = SAMPLE.map((l, i) => ({
+  l,
+  platform: l.source,
+  city: l.city,
+  region: l.regionAr,
+  district: l.district,
+  rank: i,
+  source_table: l.source,
 }));
 
 const ids = (xs: readonly { id: number }[]) => xs.map((x) => x.id);
@@ -185,36 +211,201 @@ function violates(kind: Kind, input: readonly { id: number }[], output: readonly
   return null;
 }
 
-const run = (name: string): { id: number }[] => {
-  const f = (lifted as Record<string, any>)[name] ?? (diversity as Record<string, any>)[name];
-  switch (name) {
-    case 'sortListings':      return f(SAMPLE.slice(), 'price_asc');
-    case 'diversifyByRegion': return f(SAMPLE.slice());
-    case 'diversifyBySource': return f(SAMPLE.slice());
-    case 'shuffle':           return f(SAMPLE.slice());
-    case 'naturalSpread':     return f(SAMPLE.slice(), (x: any) => x.source);
-    case 'interleaveRanked':  return f(SAMPLE.map((l) => ({ l, keys: [l.source] })), ['source']).map((r: any) => r.l);
-    case 'orderByScope':      return f(SAMPLE.map((l) => ({ l, keys: [l.source] })), 'city').map((r: any) => r.l);
-    // A real budget cap, so the relevance tiers actually split — a single tier would make the
-    // concatenation trivially order-preserving and prove nothing.
-    case 'rankResults':       return f(SAMPLE.slice(), {}, 12000);
-    default: throw new Error(`no execution harness for stage ${name}`);
-  }
+// ── THE INVOCATION TABLE ──────────────────────────────────────────────────────────────────────
+// The arguments are DATA, not a switch body, for one reason: a check that hand-writes a call
+// cannot see that the call has fallen behind the function. Expressed as a table, the arguments can
+// be COUNTED, and the ARITY COVERAGE check below compares them against the real declared signature.
+//
+// How this was earned (ops_incident #273, routine #8 → routine #10, 2026-09-18). The previous
+// switch invoked `orderByScope(rows, 'city')` — two arguments against a five-parameter signature.
+// `preferPhotos: true` is passed on EVERY production search (src/data/remote.ts:1746), and the
+// branch it opens is a re-sort at the diversity leaf. So the MATCH FIRST proof — the barrier over
+// an owner-locked permanent rule — had never once executed the code path production always takes.
+// MEASURED, not reasoned: a mutant that made that leaf DROP photoless listings (`filter` before
+// `sort`) left this guard, verify-platform-diversity.ts, and the entire `npm run test:all` suite
+// GREEN. `interleaveRanked` carried the identical gap, unnamed by the incident: 3 declared
+// parameters, 2 passed, so `opts` was never supplied there either.
+type Invocation = { label: string; args: unknown[] };
+
+// Ranked stages consume and return RankedRow[]; identity lives at `row.l.id`.
+const unwrapRanked = (out: any[]): { id: number }[] => out.map((r) => r.l);
+
+const SCOPES = ['country', 'region', 'city', 'district'] as const;
+
+// The production parameter space, swept exhaustively: 4 scopes × multiType × mixPeriods × mixDeals
+// × preferPhotos = 64 combinations. This is the sweep routine #8 ran by hand when it found the gap
+// (0 violations over 600 rows); it is now part of the standing guard instead of a one-off.
+const ORDER_BY_SCOPE: Invocation[] = [];
+for (const scope of SCOPES)
+  for (const multiType of [false, true])
+    for (const mixPeriods of [false, true])
+      for (const mixDeals of [false, true])
+        for (const preferPhotos of [false, true])
+          ORDER_BY_SCOPE.push({
+            label: `scope=${scope} multiType=${multiType} mixPeriods=${mixPeriods} mixDeals=${mixDeals} preferPhotos=${preferPhotos}`,
+            args: [RANKED.slice(), scope, multiType, mixPeriods, { mixDeals, preferPhotos }],
+          });
+
+// Key lists chosen so the recursion actually recurses: [] is the LEAF (where preferPhotos re-sorts
+// and where the measured mutant lived), and the long list drives every level rankedKey() can build.
+const INTERLEAVE: Invocation[] = [];
+for (const keys of [[], ['platform'], ['platform', 'cleanType'],
+                    ['platform', 'deal', 'period', 'cleanType', 'city', 'district']])
+  for (const preferPhotos of [false, true])
+    INTERLEAVE.push({
+      label: `keys=[${keys.join(',')}] preferPhotos=${preferPhotos}`,
+      args: [RANKED.slice(), keys, { preferPhotos }],
+    });
+
+const INVOCATIONS: Record<string, Invocation[]> = {
+  sortListings:      [{ label: 'price_asc', args: [SAMPLE.slice(), 'price_asc'] },
+                      { label: 'price_desc', args: [SAMPLE.slice(), 'price_desc'] }],
+  diversifyByRegion: [{ label: 'default', args: [SAMPLE.slice()] }],
+  diversifyBySource: [{ label: 'default', args: [SAMPLE.slice()] }],
+  shuffle:           [{ label: 'default', args: [SAMPLE.slice()] }],
+  naturalSpread:     [{ label: 'by source', args: [SAMPLE.slice(), (x: any) => x.source] }],
+  // A real budget cap, so the relevance tiers actually split — a single tier would make the
+  // concatenation trivially order-preserving and prove nothing.
+  rankResults:       [{ label: 'capped budget', args: [SAMPLE.slice(), {}, 12000] }],
+  interleaveRanked:  INTERLEAVE,
+  orderByScope:      ORDER_BY_SCOPE,
 };
 
+const RANKED_STAGES = new Set(['interleaveRanked', 'orderByScope']);
+
+let executions = 0;
 for (const stage of REGISTRY) {
-  let out: { id: number }[];
-  try {
-    out = run(stage.name);
-  } catch (e) {
-    problems.push(`${stage.name}: could not be executed — ${(e as Error).message}`);
+  const invocations = INVOCATIONS[stage.name];
+  if (!invocations?.length) {
+    problems.push(`${stage.name}: no invocation in the table — a registered stage that is never ` +
+      `executed is enumerated, not guarded`);
     continue;
   }
-  const bad = violates(stage.kind, SAMPLE, out);
-  check(bad === null,
-    `${stage.name} (${stage.kind}) never introduces an ineligible listing — ${stage.why}`,
-    `${stage.name} VIOLATES MATCH FIRST: ${bad}`);
+  const f = (lifted as Record<string, any>)[stage.name] ?? (diversity as Record<string, any>)[stage.name];
+  if (typeof f !== 'function') {
+    problems.push(`${stage.name}: could not be resolved to a function to execute`);
+    continue;
+  }
+  const ranked = RANKED_STAGES.has(stage.name);
+  const input = ranked ? unwrapRanked(RANKED) : SAMPLE;
+  let failed: string | null = null;
+  for (const inv of invocations) {
+    let out: { id: number }[];
+    try {
+      const raw = f(...inv.args);
+      out = ranked ? unwrapRanked(raw) : raw;
+    } catch (e) {
+      failed = `could not be executed [${inv.label}] — ${(e as Error).message}`;
+      break;
+    }
+    executions++;
+    const bad = violates(stage.kind, input, out);
+    if (bad) { failed = `${bad} [${inv.label}]`; break; }
+  }
+  check(failed === null,
+    `${stage.name} (${stage.kind}) never introduces an ineligible listing across ` +
+    `${invocations.length} invocation(s) — ${stage.why}`,
+    `${stage.name} VIOLATES MATCH FIRST: ${failed}`);
 }
+
+// ── ARITY COVERAGE: the harness may not fall behind the function ──────────────────────────────
+// THE META-BARRIER (2026-09-18, routine #10, ops_incident #273). The DISCOVERY half above finds a
+// NEW STAGE by shape. Nothing noticed a REGISTERED stage GAINING A PARAMETER — and that is how the
+// gap above was born: `orderByScope` grew `mixDeals`/`preferPhotos` on 2026-09-14 (ebfbe5d,
+// dd66e94) and the two-argument call written before them kept passing, silently proving less every
+// time the function grew. A barrier pins the shapes that existed when it was written; this check is
+// what makes that stop being true here.
+//
+// NOT `Function.prototype.length`. That counts parameters only up to the first defaulted one, so
+// `orderByScope(rows, scope, multiType = false, mixPeriods = false, opts?)` reports 2 — EXACTLY the
+// number the blind harness was passing. A check built on `.length` would have been vacuously green
+// on the very defect it exists to catch. The declaration is read from source instead.
+
+/**
+ * The declared parameter list of a top-level function, split at top-level commas. Pure, so a
+ * mutant signature can be fed straight in. Returns null when the signature cannot be read — a
+ * parameter list this cannot parse reads as UNKNOWN and fails the check, never as "zero
+ * parameters, all covered" (AGENTS.md: a failed read is not an empty answer).
+ */
+export function declaredParams(src: string, fnName: string): string[] | null {
+  const m = new RegExp(`(?:export )?function ${fnName}\\s*(?:<[^>]*>)?\\(`).exec(src);
+  if (!m) return null;
+  const out: string[] = [];
+  let depth = 1;
+  let cur = '';
+  let i = m.index + m[0].length;
+  for (; i < src.length && depth > 0; i++) {
+    const c = src[i];
+    // `=>` inside a callback parameter is not a closing angle bracket.
+    const isArrow = c === '>' && src[i - 1] === '=';
+    if (c === '(' || c === '{' || c === '[' || c === '<') depth++;
+    else if (!isArrow && (c === ')' || c === '}' || c === ']' || c === '>')) {
+      depth--;
+      if (depth === 0) break;
+    }
+    if (depth === 1 && c === ',') { out.push(cur.trim()); cur = ''; continue; }
+    cur += c;
+  }
+  if (depth !== 0) return null;              // unbalanced → unreadable, never "no parameters"
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+/** The keys of an inline object-typed parameter (`opts?: { a?: boolean; b?: boolean }`). Pure. */
+export function declaredOptionKeys(param: string): string[] {
+  const open = param.indexOf('{');
+  const close = param.lastIndexOf('}');
+  if (open === -1 || close < open) return [];
+  return param.slice(open + 1, close).split(';')
+    .map((s) => /^([A-Za-z_]\w*)\??\s*:/.exec(s.trim())?.[1] ?? null)
+    .filter((s): s is string => s !== null);
+}
+
+/**
+ * Every declared parameter of every registered stage must be supplied by at least one invocation,
+ * and every key of an options parameter must be exercised. Pure over (source, invocations) so both
+ * directions can be proven below.
+ */
+export function arityGaps(
+  sources: Record<string, string>,
+  registry: readonly { name: string }[],
+  invocations: Record<string, Invocation[]>,
+): string[] {
+  const gaps: string[] = [];
+  for (const { name } of registry) {
+    const src = Object.values(sources).find((s) => new RegExp(`function ${name}\\s*[<(]`).test(s));
+    if (src === undefined) { gaps.push(`${name}: declaration not found in the result path`); continue; }
+    const params = declaredParams(src, name);
+    if (params === null) { gaps.push(`${name}: signature could not be read (UNKNOWN, not covered)`); continue; }
+    const calls = invocations[name] ?? [];
+    const widest = Math.max(0, ...calls.map((c) => c.args.length));
+    if (widest < params.length) {
+      gaps.push(`${name}: declares ${params.length} parameter(s) but the harness passes at most ` +
+        `${widest} — ${params.slice(widest).join(' | ')} is never exercised`);
+      continue;
+    }
+    // An options object is one argument however many knobs it hides, so count its KEYS too.
+    params.forEach((p, idx) => {
+      const keys = declaredOptionKeys(p);
+      if (!keys.length) return;
+      const missing = keys.filter((k) => !calls.some((c) => {
+        const a = c.args[idx];
+        return !!a && typeof a === 'object' && k in (a as Record<string, unknown>);
+      }));
+      if (missing.length) {
+        gaps.push(`${name}: option key(s) ${missing.join(', ')} declared on parameter ${idx + 1} ` +
+          `but never supplied by any invocation`);
+      }
+    });
+  }
+  return gaps;
+}
+
+const STAGE_SOURCES = { search: readFileSync(SEARCH, 'utf8'), diversity: readFileSync(DIVERSITY, 'utf8') };
+const gaps = arityGaps(STAGE_SOURCES, REGISTRY, INVOCATIONS);
+check(gaps.length === 0,
+  `every registered stage is executed across its FULL declared signature (${executions} invocations)`,
+  `the harness has fallen behind the code it proves:\n      - ${gaps.join('\n      - ')}`);
 
 // The one thing execution cannot show: rankResults must never REACH for rows. A stage that fetches
 // can introduce a listing the match never produced no matter how well it permutes what it was given.
@@ -280,6 +471,43 @@ mustCatch('…and the callback-parameter shape that was silently missed is now a
 // appended to the ACTUAL body — i.e. rankResults having grown — is still seen.
 mustCatch('a fetch appended to the real rankResults body, wherever the function grows to',
   REACHES.test(`${rankBody}\n  const extra = await supabase.rpc('more_listings_ar', {});`));
+
+// ── ARITY COVERAGE, proven in both directions ────────────────────────────────────────────────
+// The defect this replaces is not hypothetical: it was LIVE for four days and measured. A mutant
+// that dropped photoless listings at the diversity leaf survived a green `npm run test:all`.
+const GREW = `export function orderByScope<L extends { cleanType?: string | null }>(rows: RankedRow<L>[], scope: Scope, multiType = false, mixPeriods = false, opts?: { mixDeals?: boolean; preferPhotos?: boolean }): RankedRow<L>[] {`;
+mustCatch('the REAL defect: a 5-parameter stage invoked with 2 arguments (the shape that let a ' +
+  'photoless-listing DROP survive a green suite for four days)',
+  arityGaps({ d: GREW }, [{ name: 'orderByScope' }],
+    { orderByScope: [{ label: 'old', args: [[], 'city'] }] }).length > 0);
+mustCatch('…while the repaired invocation over the same signature is NOT flagged (the check is ' +
+  'not vacuously red — this is the negative control Prohibition 1 requires)',
+  arityGaps({ d: GREW }, [{ name: 'orderByScope' }],
+    { orderByScope: [{ label: 'new', args: [[], 'city', false, false, { mixDeals: true, preferPhotos: true }] }] }).length === 0);
+mustCatch('an options object that gains a KEY the harness never supplies (arity alone would miss ' +
+  'it — one argument can hide any number of knobs)',
+  arityGaps({ d: GREW }, [{ name: 'orderByScope' }],
+    { orderByScope: [{ label: 'partial', args: [[], 'city', false, false, { mixDeals: true }] }] }).length > 0);
+mustCatch('a stage whose signature cannot be parsed reads as UNKNOWN, never as "no parameters, ' +
+  'all covered"',
+  declaredParams('export function orderByScope(rows: T[], scope: Scope', 'orderByScope') === null);
+mustCatch('a registered stage with NO invocation at all is caught rather than silently skipped',
+  arityGaps({ d: GREW }, [{ name: 'orderByScope' }], {}).length > 0);
+mustCatch('…and a callback parameter does not truncate the parameter count (`=>` is not a closing ' +
+  'angle bracket)',
+  declaredParams('function naturalSpread<T>(items: T[], key: (x: T) => string): T[] {', 'naturalSpread')?.length === 2);
+mustCatch('the declared signature is read from SOURCE, not from Function.prototype.length — which ' +
+  'stops at the first defaulted parameter and would report exactly the 2 the blind harness passed',
+  ((_rows: unknown[], _scope: string, _multiType = false, _mixPeriods = false, _opts?: object) => 0).length === 2
+    && declaredParams(GREW, 'orderByScope')?.length === 5);
+// The enriched SAMPLE is what makes the executed half mean anything: a leaf preference over rows
+// that are uniform in the field it reads cannot reorder, and so cannot drop.
+mustCatch('the sample actually splits on the field the photo preference reads (a uniform input ' +
+  'would make the preferPhotos branch a no-op and prove nothing)',
+  SAMPLE.some((l) => l.photos.length > 0) && SAMPLE.some((l) => l.photos.length === 0));
+mustCatch('…and on the keys the nested diversity levels group by, so the recursion really recurses',
+  new Set(SAMPLE.map((l) => l.cleanType)).size > 1 && new Set(SAMPLE.map((l) => l.deal)).size > 1
+    && new Set(SAMPLE.map((l) => l.district)).size > 1 && new Set(SAMPLE.map((l) => l.rentPeriod)).size > 1);
 mustCatch('…and the bound is the function\'s own terminator, not a fixed window',
   rankEnd > rankStart && rankSrc.slice(rankEnd, rankEnd + 3) === '\n}\n');
 

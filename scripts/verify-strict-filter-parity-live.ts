@@ -139,27 +139,30 @@ async function main() {
   // then stayed silently vacuous: with zero monthly+RNPL rows in the index the old equality held
   // by coincidence, and it only went red once a single such row appeared (2026-09-03: 44,062
   // source-annual + 1 monthly-RNPL = the RPC's 44,063). Production was right the whole time.
-  const [annualRpc, annualSrc, annualRnpl, annualNullPeriod] = await Promise.all([
+  // + price on request from any OTHER period (owner 2026-09-28: no price → shown under every period).
+  const [annualRpc, annualSrc, annualRnpl, annualPor, annualNullPeriod] = await Promise.all([
     rpcCount({ p_deal: RENT, p_rent_period: 'سنوي' }),
     tableCount(`deal_ar=eq.${enc(RENT)}&rent_period_ar=eq.${enc('سنوي')}`),
     tableCount(`deal_ar=eq.${enc(RENT)}&rent_period_ar=eq.${enc('شهري')}&rent_now_pay_later=is.true`),
-    tableCount(`deal_ar=eq.${enc(RENT)}&rent_period_ar=is.null`),
+    tableCount(`deal_ar=eq.${enc(RENT)}&price_annual=is.null&or=(rent_period_ar.is.null,and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.not.is.true))`),
+    tableCount(`deal_ar=eq.${enc(RENT)}&rent_period_ar=is.null&price_annual=not.is.null`),
   ]);
-  check('annual rent = SOURCE-published annual + SOURCE-marked monthly-RNPL, exactly',
-    annualRpc === annualSrc + annualRnpl && annualSrc > 0,
-    `rpc=${annualRpc} ground=${annualSrc}+${annualRnpl}=${annualSrc + annualRnpl}`);
+  check('annual rent = SOURCE-published annual + SOURCE-marked monthly-RNPL + price on request, exactly',
+    annualRpc === annualSrc + annualRnpl + annualPor && annualSrc > 0,
+    `rpc=${annualRpc} ground=${annualSrc}+${annualRnpl}+${annualPor}=${annualSrc + annualRnpl + annualPor}`);
 
   // The invariant the block above exists for, asserted on its own so the arithmetic cannot mask it:
-  // a rent row whose source published NO period is never counted as annual. When the index holds no
-  // such rows the comparison cannot discriminate, and saying so is the honest result — a check that
-  // reports PASS on a case it never exercised is the failure mode this whole file just demonstrated.
+  // a PRICED rent row whose source published NO period is never counted as annual. When the index
+  // holds no such rows the comparison cannot discriminate, and saying so is the honest result — a
+  // check that reports PASS on a case it never exercised is the failure mode this whole file just
+  // demonstrated. (A null-period row with NO price is in every period by the owner's 2026-09-28 rule.)
   if (annualNullPeriod > 0) {
-    check('a null-period rent row is NEVER inferred into annual',
-      annualRpc < annualSrc + annualRnpl + annualNullPeriod,
-      `rpc=${annualRpc} vs ${annualSrc}+${annualRnpl}+${annualNullPeriod} null-period rows`);
+    check('a priced null-period rent row is NEVER inferred into annual',
+      annualRpc < annualSrc + annualRnpl + annualPor + annualNullPeriod,
+      `rpc=${annualRpc} vs ${annualSrc}+${annualRnpl}+${annualPor}+${annualNullPeriod} priced null-period rows`);
   } else {
-    console.log('SKIP  a null-period rent row is NEVER inferred into annual  ' +
-      '(NOT EXERCISED: the index currently holds 0 rent rows with no source-published period)');
+    console.log('SKIP  a priced null-period rent row is NEVER inferred into annual  ' +
+      '(NOT EXERCISED: the index currently holds 0 priced rent rows with no source-published period)');
   }
 
   console.log(failed === 0

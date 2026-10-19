@@ -27,8 +27,10 @@
 //
 //   node --experimental-strip-types scripts/verify-agent-scope-answer.ts   (wired into `npm test`)
 
+import { REGION_OR_CITY_ASK_AR } from '../src/data/questionExamples.ts';
 import { readFileSync } from 'node:fs';
 import { regionOrCityChoice, scopedLocation } from '../src/lib/regionOrCityAnswer.ts';
+import { resetCallSitesOk, resetCallSiteProblem, RESET_EXITS } from './lib/conversationExits.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => {
@@ -76,7 +78,7 @@ check('the region-vs-city branch STOPS asking once the user named one of the two
 // Arabic phrase and must NOT be read as "they already chose the whole region".
 check('the whole-region branch stops asking ONLY when the user named «منطقة X» for that twin',
   /scopeNamedForTwin\(userText, regionOrCityTwin\(loc\)\) === 'region'/.test(clarifyFn));
-check('the twin question itself still exists for a user who has NOT answered it', /اسم مدينة واسم منطقة في نفس الوقت/.test(clarifyFn));
+check('the twin question itself still exists for a user who has NOT answered it (now a rotating pool)', /return regionOrCityQuestion\(label, userText\);/.test(clarifyFn) && REGION_OR_CITY_ASK_AR.every((p) => /\{n\}/.test(p) && /مدينة/.test(p) && /منطقة/.test(p)));
 
 const sendFn = (() => {
   const start = src.indexOf('let turn = await respond(');
@@ -98,7 +100,21 @@ check('the pending question is read-and-CLEARED once per turn (it can never go s
 // invariant, not asserting its presence.
 check('the client no longer arms pendingScopeRef from its own retired clarify-or-search gate',
   !/pendingScopeRef\.current = regionOrCityTwin\(turn\.query\.location\);/.test(src));
-check('New Chat inherits no half-answered question', /setMsgs\(\[\]\);\s*\n\s*pendingScopeRef\.current = null;/.test(src));
+// CONSOLIDATED 2026-09-14 (routine #8). This used to pin the literal adjacency
+// `setMsgs([]);\n  pendingScopeRef.current = null;` inside the New Chat handler — which stopped being
+// true the moment BOTH conversation exits started routing through one shared
+// `resetConversationState()`, even though the invariant it names got STRONGER: startFresh (every
+// sidebar reopen, «بحث» hop and `?seed=` link) did NOT clear this ref before, so a half-asked
+// question leaked out of the abandoned chat into the next one. Pin the invariant where it now lives —
+// the one shared list — and let the executing barrier own the behaviour.
+// EXECUTED proof that the reset really nulls it: scripts/verify-conversation-state-never-inherited.ts
+// §A/§B lift the real function out of agent.tsx and run it.
+const conversationReset = src.slice(src.indexOf('const resetConversationState = () => {'),
+  src.indexOf('const resetConversationState = () => {') + 1200);
+check('no conversation exit inherits a half-answered question (cleared in the ONE shared reset)',
+  /pendingScopeRef\.current = null;/.test(conversationReset));
+check(`...and all ${RESET_EXITS.length} conversation exits route through that shared reset`,
+  resetCallSitesOk(src), resetCallSiteProblem(src));
 // RETIRED alongside the same gate: forcedBroad no longer depends on the client's own clarifyQ
 // judgment (locationClarification() has no remaining call site) — it is simply "the server searched
 // with no location", which is exactly what decideAgentTurn's budget-exhausted / hasEnoughToSearch

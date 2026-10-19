@@ -101,7 +101,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize as N  # noqa: E402
+from scrapers.common import db, http_liveness, normalize as N  # noqa: E402
 from scrapers.common import arabic_location as AL  # noqa: E402
 
 BASE_WEB = "https://gathern.co"
@@ -176,6 +176,12 @@ def _throttle() -> None:
 
 
 def session() -> cc.Session:
+    # `source: web` IS LOAD-BEARING — never drop it (PR #5177 did, 2026-09-28, and was reverted the same
+    # day). Without it the search API also serves APP-ONLY units, ~4× more (Riyadh 12,939 vs 3,238), and
+    # their gathern.co pages are 404: measured 2026-09-28 from a clean home connection, Riyadh page 1–12,
+    # web-feed units 15/15 HTTP 200, full-feed-only units 19/20 HTTP 404. Every card we show opens the
+    # listing's gathern.co page, so an app-only unit is a card that lands on «not found». The web view is
+    # not a quarter of the catalogue; it is the part of it a web user can open.
     s = cc.Session(impersonate="chrome124")
     s.headers.update({
         "Accept": "application/json",
@@ -356,6 +362,277 @@ def detail_session() -> cc.Session:
     return s
 
 
+# ── SOURCE ORACLE FOR THE PRUNE ───────────────────────────────────────────────────────────────────
+# WHY THIS EXISTS. Both `db.prune_unseen()` call sites below used to run with NO `verify_gone`, so
+# three consecutive crawl misses deactivated a listing on ABSENCE alone — the inference
+# `docs/ops/LISTING_LIVENESS.md` §1–§3 forbids. gathern was the last entry in
+# `scrapers/absence-only-prune.txt` reading "ORACLE EXISTS, NOT WIRED HERE": a DIRECT sweep with a
+# full canary apparatus has lived in `scrapers/gathern/liveness.py` since 2026-08, while run.py kept
+# a second, unevidenced path to the same `active = false`. `LISTING_LIVENESS.md` §4.2 names the fix
+# exactly — "route the prune through the oracle that already exists — inventing nothing" — and warns
+# that on THIS platform the wiring "must go through its canary gate, not through `looks_dead()`
+# alone". gathern is also one of the four delete-ENABLED platforms, so an absence-only kill here
+# feeds the 30-day retention clock toward a permanent, unrecoverable delete. (ops_incident #372.)
+#
+# THE SIGNAL IS NOT NEW AND IS NOT A GUESS. It is `liveness.py::looks_dead`/`classify` verbatim —
+# 404/410 = the unit is gone, 200 = the source still serves it, anything else = no opinion — already
+# in production use by the sweep that writes `last_verified_alive_at`. Nothing is invented here.
+#
+# THE CANARY IS THE LOAD-BEARING PART, AND IT WAS RE-MEASURED BEFORE THIS WAS WIRED. `LISTING_
+# LIVENESS.md` §5.4 records gathern expressing BLOCKING as its own application-rendered 404 rather
+# than a 429 — a 100% false-death rate from datacenter egress on rows its own oracle had just
+# verified alive. Re-measured 2026-09-21 from a cloud-routine egress, 12 dead + 12 known-alive
+# controls interleaved: the dead cohort answered 404 12/12, and so did TEN OF THE TWELVE CONTROLS
+# the crawl itself had seen alive two hours earlier — every 404 a byte-identical 50,511-byte page.
+# An 83% false-death rate. So a bare 404-means-gone oracle here would be WORSE than no oracle, and
+# the canary is what makes this wiring safe rather than what makes it tidy.
+#
+# WHY WIRING IT IS STRICTLY SAFER THAN LEAVING IT. An oracle can only ever WITHHOLD a deactivation
+# that absence alone already performs (`LISTING_LIVENESS.md` §4.1): today three misses kill with no
+# source check at all, and after this change a kill additionally requires a DIRECT 404/410 AND a
+# canary proving the source is still serving real listings this run. On the degraded egress measured
+# above the canary reads 404 and EVERY removal is withheld as UNKNOWN. It fails CLOSED: no canary
+# pool means no removal.
+_ORACLE_UNIT_RE = re.compile(r"/view/\d+/unit/(\d+)")
+
+
+_HOME_PATHS = frozenset({"", "/ar", "/en"})
+
+
+def _landed_on_home(requested: str, final: Optional[str]) -> bool:
+    """The read was redirected to gathern's home page (the same test as liveness._landed_on_home and
+    cleanup._landed_on_home; copied, because liveness imports this module)."""
+    from urllib.parse import urlsplit
+    if not final:
+        return False
+    want = urlsplit(requested).path.rstrip("/").lower()
+    got = urlsplit(final).path.rstrip("/").lower()
+    return got in _HOME_PATHS and got != want
+
+
+def _oracle_signal(status: Optional[int], body: str, landed_on_home: bool) -> Optional[str]:
+    """gathern's affirmative signals, and nothing else. None == no opinion.
+
+    Mirrors `liveness.py::looks_dead`/`classify`/`probe` so the crawl and the sweep cannot drift
+    into two different opinions about the same source. The universal law — a 403/429/5xx/timeout is
+    never a death — is applied on top of this by `http_liveness.decide()` and is not restatable here.
+
+    The third argument is `_landed_on_home` (see _GathernProbe), not "the path changed". A 200 that
+    is gathern's HOME page is not this unit: gathern answers some removed units with a redirect home
+    (2026-10-05). The sweep and the cleanup learned that on 10-05; this prune did not, so on
+    2026-10-08 04:50 UTC it "self-healed" 18 feed-missing units whose page lands home as verified
+    alive, and those became the sweep's freshest controls: every sweep from 05:37 read its controls
+    0/10 and quarantined itself (no Gathern check for a day).
+    """
+    if status in (404, 410):
+        return "gone"
+    if landed_on_home:
+        return None
+    if status == 200:
+        # Measured 2026-07-21 (77/80) and unchanged since: gathern serves a HARD 404 for a delisted
+        # unit and has no 200-with-dead-marker page, so a 200 is the source still serving it. The
+        # law refuses this on an empty body, so a truncated read cannot manufacture a verification.
+        return "live"
+    return None
+
+
+_oracle_url_memo: dict[str, Optional[str]] = {}
+
+
+def _oracle_url_for(ad_number: str) -> Optional[str]:
+    """THIS listing's own URL, read back from its row, with the identity re-checked.
+
+    gathern's detail path is `/view/<chalet>/unit/<unit>` and the chalet id is NOT derivable from
+    `ad_number` (GTH193856 → unit 193856, but chalet 111024 appears nowhere in it), so unlike
+    aqargate or raghdan the URL cannot be reconstructed and has to be read back.
+
+    A stored `listing_url` is not automatically THIS listing's URL — `LISTING_LIVENESS.md` §4.2
+    lesson 2 measured 39 of 1,724 sanadak rows carrying another listing's page, three of which
+    answered 'live' and would have produced false RESURRECTIONS on someone else's evidence. The unit
+    id in the path must therefore equal this ad_number's own digits; a mismatch returns None, which
+    the probe reports as UNKNOWN. Never a kill on a URL we cannot prove belongs to the row.
+    """
+    if ad_number in _oracle_url_memo:
+        return _oracle_url_memo[ad_number]
+    url: Optional[str] = None
+    unit = (ad_number or "")[3:] if (ad_number or "").upper().startswith("GTH") else ""
+    if unit.isdigit():
+        try:
+            r = (db.sb().table("gathern_residential_listings").select("listing_url")
+                 .eq("ad_number", ad_number).limit(1).execute())
+            stored = (r.data[0].get("listing_url") if r.data else None) or ""
+        except Exception:  # noqa: BLE001 — a failed lookup is UNKNOWN about our read, never a kill
+            stored = ""
+        m = _ORACLE_UNIT_RE.search(stored)
+        if m and m.group(1) == unit:
+            url = stored
+    _oracle_url_memo[ad_number] = url
+    return url
+
+
+# Ad_numbers THIS run's crawl confirmed the source was serving. Armed by the caller immediately
+# before the prune, and NEVER drawn from `last_verified_alive_at`: that is the self-referential pool
+# that deadlocked gathern for five days (ops_incident #168 — a control set that certifies itself
+# cannot detect its own rot). These are fresh crawl observations from this cycle.
+_canary_pool: list[str] = []
+_canary_state: dict[str, Any] = {"verdict": None, "reason": "not evaluated"}
+
+
+def arm_liveness_canaries(ad_numbers) -> None:
+    """Arm the in-run positive control from listings this run already fetched."""
+    _canary_pool.clear()
+    _canary_pool.extend(list(ad_numbers)[:24])
+    _canary_state["verdict"], _canary_state["reason"] = None, "not evaluated"
+
+
+def _canary() -> tuple[bool, str]:
+    """Is the source still serving us real listings RIGHT NOW? (LISTING_LIVENESS.md §5.4.)
+
+    Memoised in BOTH directions for the run: "is this egress being answered truthfully" is a fact
+    about the RUN, not about each row, and `verify_gone` is called once per row at grace — so a
+    validated oracle stays validated, and a FAILED control forbids every removal for the rest of the
+    run rather than being re-rolled until one happens to pass.
+    """
+    if _canary_state["verdict"] is not None:
+        return _canary_state["verdict"], _canary_state["reason"]
+    tried = 0
+    ok, why = False, "no known-live control from this run to validate the oracle against"
+    for ad in _canary_pool:
+        url = _oracle_url_for(ad)
+        if not url:
+            continue
+        tried += 1
+        status, body, _ = _probe.fetch(url)
+        if _oracle_signal(status, body, False) == "live":
+            ok, why = True, f"control {ad} still reads live (HTTP {status})"
+            break
+        if tried >= 3:
+            break
+    if not ok and tried:
+        why = (f"the oracle read {tried} known-live control(s) from this run as GONE or unreachable "
+               "— this source is not answering us truthfully, so its 404s cannot kill")
+    _canary_state["verdict"], _canary_state["reason"] = ok, why
+    return ok, why
+
+
+_oracle_session_memo: list = []
+
+
+def _oracle_session():
+    """ONE reused session, and a throttle, for every probe this oracle makes.
+
+    Both halves matter on gathern specifically, and neither is tidiness:
+
+    * `LivenessProbe.fetch()` calls `session()` once per attempt, so handing it `detail_session`
+      directly would mint a NEW curl_cffi session per probe — no connection reuse across what can
+      be hundreds of probes in one prune.
+    * gathern rate-limits hard: `liveness.py` pins `MIN_INTERVAL` at 1.0 with the note "Gathern
+      429s above ~2 [req/s]". An unthrottled burst is precisely what makes this source start
+      answering with its own application-rendered 404 (§5.4), and on this platform that is
+      indistinguishable from a removal. The canary would then withhold every kill — safe, but the
+      oracle would be useless. Throttling keeps it USEFUL; the canary keeps it HONEST.
+
+    Throttling on acquire is exact here because `fetch()` acquires once per request.
+    """
+    _throttle()
+    if not _oracle_session_memo:
+        _oracle_session_memo.append(detail_session())
+    return _oracle_session_memo[0]
+
+
+class _GathernProbe(http_liveness.LivenessProbe):
+    """The shared direct read, except its third value is `_landed_on_home` instead of "the path
+    changed" (a live unit may gain a locale prefix; only a landing on the home page is no answer)."""
+
+    def fetch(self, url: str) -> tuple[Optional[int], str, bool]:
+        try:
+            r = self.session().get(url, timeout=self.timeout, allow_redirects=True)
+        except Exception:  # noqa: BLE001 — an unreachable source is never proof of death
+            return None, "", False
+        return r.status_code, (r.text or ""), _landed_on_home(url, str(getattr(r, "url", "") or ""))
+
+
+_probe = _GathernProbe(
+    platform="gathern",
+    signal=_oracle_signal,
+    session=_oracle_session,
+    url_for=_oracle_url_for,
+    canary=_canary,
+)
+
+# ── A PRUNE KILL MUST BE EARNED BY THE AD'S OWN PAGE (2026-10-07) ─────────────────────────────────
+# prune_unseen() calls verify_gone when the SHARED missing_count reaches grace, and that counter is
+# bumped by feed absence as well as by page 404s. So one 404 read by verify_gone hid units whose only
+# other "strikes" were feed misses: 2026-10-07 04:50 UTC the cross-shard prune hid 21 units, six of
+# them (15482651, 10265545, 735574, 11062475, 11709792, 7058697) on ONE page 404 after a 200 hours
+# earlier, while gathern was flapping live units 200<->404 (the hourly sweep was quarantined for it).
+# LISTING_LIVENESS.md §2: three consecutive DIRECT readings hide; absence is a candidate, never a vote.
+# The sweep already enforces this (liveness.demote_unearned_kills); this is the same rule for the
+# prune: verify_gone's own 404 counts as one reading, and the ad needs PRUNE_GRACE - 1 more applied
+# 404/410 readings in gathern_liveness_detail since its last live one. History unreadable = withheld.
+PRUNE_GRACE = 3
+
+
+def prune_kill_is_earned(prior_readings: Optional[int], grace: int = PRUNE_GRACE) -> bool:
+    """True when this verify_gone 404 plus the ad's earlier applied direct readings reach grace."""
+    return prior_readings is not None and prior_readings + 1 >= grace
+
+
+def _prior_direct_readings(ad_number: str) -> Optional[int]:
+    """Applied direct 404/410 readings since the ad's last alive one; None if unreadable."""
+    from scrapers.gathern import liveness as _L  # lazy: liveness imports this module
+    try:
+        r = (db.sb().table("gathern_residential_listings").select("id")
+             .eq("ad_number", ad_number).limit(1).execute())
+        if not r.data:
+            return None
+        lid = r.data[0]["id"]
+        h = (db.sb().table("gathern_liveness_detail")
+             .select("listing_id, run_at, verdict, http_status, applied")
+             .eq("listing_id", lid).order("run_at", desc=True).limit(200).execute())
+        return _L.direct_strikes_since_alive(h.data or []).get(lid, 0)
+    except Exception:  # noqa: BLE001 — unreadable history withholds the kill, never grants it
+        return None
+
+
+def earned_verify_gone(ad_number: str):
+    """`_probe.verify_gone`, but a "gone" stands only when the ad's own page earned it."""
+    got = _probe.verify_gone(ad_number)
+    verdict = (got[0] if isinstance(got, (tuple, list)) else got) or "unknown"
+    if str(verdict).lower() != "gone":
+        return got
+    prior = _prior_direct_readings(ad_number)
+    if prune_kill_is_earned(prior):
+        return got
+    return ("unknown", f"removal withheld — {prior if prior is not None else 'unreadable'} earlier "
+                       f"own-page 404 reading(s) since last live; a prune kill needs "
+                       f"{PRUNE_GRACE - 1} plus this one")
+
+
+def held_strikes(rows: list[dict]) -> dict[str, tuple[int, bool]]:
+    """Feed rows whose OWN PAGE is under strike and still does not answer live: {ad: (strikes, active)}.
+
+    Gathern's search feed keeps serving some units whose gathern.co page is 404 (2026-10-02: 30 of 30
+    units the sweep read 404 were 404 from a home connection too, clustered in a few buildings). The
+    crawl's upsert used to reset every feed row to active / 0 strikes, so a unit hidden after three
+    page 404s was back in search at the next crawl, every day. Now a struck row is re-read here: its
+    page answers live → it is dropped from this map and the normal upsert revives it; anything else →
+    it keeps its strikes and its hidden state, and only the page check can clear them."""
+    held: dict[str, tuple[int, bool]] = {}
+    for i in range(0, len(rows), 200):
+        ads = [r["ad_number"] for r in rows[i:i + 200]]
+        res = (db.sb().table("gathern_residential_listings").select("ad_number, missing_count, active")
+               .in_("ad_number", ads).gt("missing_count", 0).execute())
+        for x in (res.data if res else None) or []:
+            held[x["ad_number"]] = (int(x["missing_count"]), bool(x["active"]))
+    url = {r["ad_number"]: r.get("listing_url") or "" for r in rows}
+    for ad in list(held):
+        status, body, _ = _probe.fetch(url[ad])
+        if body and _oracle_signal(status, body, False) == "live":
+            del held[ad]
+    return held
+
+
 def fetch_detail(s: cc.Session, listing_url: str) -> dict:
     """Fetch a Gathern unit's detail page → {description, suitability} (VERBATIM source text, phones
     redacted per PDPL). Returns {} on 404/block/parse-fail — never raises, never fabricates."""
@@ -418,6 +695,17 @@ def fetch_detail(s: cc.Session, listing_url: str) -> dict:
         rt = _txt(d.get("rate_text"))
         if rt:
             out["rate_text"] = rt                               # "رائع" (rating word)
+        # The unit's OWN score, as its page prints it («8.6 (7 تقييم)»). The list API sends
+        # total_present=0 / total_reviews=0 for about 1 unit in 6 that the page rates (unit 210265:
+        # list 0/0, page 8.6/7 — 2026-10-03), so the list alone left 1,536 rated units without a
+        # rating. reviews_count 0 is the page saying "no reviews yet" — kept, so the unit leaves the
+        # worklist. host_info.avg_reviews is the HOST's score across units: never this unit's.
+        rating = d.get("total_present")
+        if isinstance(rating, (int, float)) and not isinstance(rating, bool) and rating > 0:
+            out["rating"] = rating
+        reviews = d.get("total_reviews")
+        if isinstance(reviews, int) and not isinstance(reviews, bool) and reviews >= 0:
+            out["reviews_count"] = reviews
         secs: list[dict] = []
         for sec in (d.get("extraDescription") or []):
             if not isinstance(sec, dict):
@@ -438,7 +726,7 @@ def fetch_detail(s: cc.Session, listing_url: str) -> dict:
 def backfill_details(s: cc.Session, limit: int = 0, shard: Optional[int] = None,
                      shards: Optional[int] = None) -> tuple[int, int]:
     """Fill description (column) + the rich detail fields (additional_info) for ACTIVE Gathern rows that
-    still lack a description. Idempotent — re-runs skip already-filled rows. Optional stride-shard i/N
+    still lack a description OR a review count (the list API's 0/0 hides rated units). Idempotent — re-runs skip already-filled rows. Optional stride-shard i/N
     spreads the work across parallel runners: every shard pulls the SAME ordered missing-description
     worklist, then processes rows[i::N]. limit=0 → the shard's whole slice (what the workflow uses)."""
     client = db.sb()
@@ -451,9 +739,9 @@ def backfill_details(s: cc.Session, limit: int = 0, shard: Optional[int] = None,
         # fillable work so a partial/interrupted run captures the valuable rows and the dead tail sinks
         # to the end. (id is the tie-breaker for a stable total order across the paged .range() calls.)
         res = (client.table("gathern_residential_listings")
-               .select("ad_number, listing_url, additional_info")
+               .select("ad_number, listing_url, additional_info, bathrooms")
                .eq("source", SOURCE).eq("active", True)
-               .is_("description", "null")
+               .or_("description.is.null,additional_info->reviews_count.is.null")
                .order("last_seen_at", desc=True).order("id")
                .range(offset, offset + 999).execute())
         batch = (res.data if res else None) or []
@@ -474,8 +762,13 @@ def backfill_details(s: cc.Session, limit: int = 0, shard: Optional[int] = None,
         info = r.get("additional_info")
         if not isinstance(info, dict):
             info = {}
-        info.update(d)  # suitability, house_rules, check_in/out, guest_capacity, booking/views, rate_text, extra_sections
+        info.update(d)  # suitability, house_rules, check_in/out, guest_capacity, booking/views, rate_text, rating, reviews_count, extra_sections
         payload: dict[str, Any] = {"additional_info": info}
+        # The page's own count fills a bathroom count the list's icon never gave; a stored value stays.
+        if r.get("bathrooms") is None and (n := _bathrooms_from_sections(d.get("extra_sections"))):
+            payload["bathrooms"] = n
+        if _kitchen_from_sections(d.get("extra_sections")):
+            payload["kitchen"] = True
         if desc:
             payload["description"] = desc
         try:
@@ -544,11 +837,30 @@ _AMENITY_FLAG_LABELS: dict[str, str] = {
     "elevator": "مصعد",
     "parking": "موقف سيارة",
     "driver_room": "غرفة سائقين",
+    # Added 2026-09-20. «بلكونة» was captured into additional_info.amenities all along and never
+    # promoted to the column the Advanced Filter reads, so balcony_terrace sat at 0 across all
+    # 29,820 live rows while the label itself appears on 1,508 of them — re-measured that day over
+    # the FULL stored corpus, not a sample.
+    #
+    # The 2026-07-26 note above says every other column "has NO corresponding label in the real
+    # data at all". That was re-verified the same way and still holds for kitchen/air_conditioner/
+    # maid_room/private_entrance — Gathern's live label vocabulary carries no مطبخ and no مكيف. It
+    # did NOT hold for بلكونة, which is the shape of `a-guard-that-only-keeps-things-out-never-
+    # rechecks-itself`: an exclusion measured once, correct then, never re-read as the source grew.
+    "balcony_terrace": "بلكونة",
 }
 
 
-def _amenity_flags(labels: list[str]) -> dict[str, bool]:
-    return {col: label in labels for col, label in _AMENITY_FLAG_LABELS.items()}
+# LISTED = YES; ABSENT = SILENCE, NEVER «NO» (🔬 AF engineer 2026-10-09, backlog 245; ADVANCED_FILTER_SOURCE_TRUTH
+# §2 «Never infer "no" from missing data»). Gathern's feature list names only what a unit HAS and never prints a
+# no, yet this returned False for every label it lacked: 374 active units whose list is EMPTY were served «no
+# lift», and «no driver room» stood on 5,247 of 5,266 active units. A list that was read settles the column —
+# absent is AUTHORITATIVE_NULL, so the crawl clears the manufactured False; a payload with no list at all says
+# nothing (None, dropped by the upsert).
+def _amenity_flags(labels: list[str], listed: bool = True) -> dict[str, Any]:
+    if not listed:
+        return {}
+    return {col: (True if label in labels else db.AUTHORITATIVE_NULL) for col, label in _AMENITY_FLAG_LABELS.items()}
 
 
 # Bathroom count from the list response's amenities[] — a list of {icon, count, title} objects where
@@ -567,6 +879,48 @@ def _bathrooms(amenities: Optional[list]) -> Optional[int]:
             if isinstance(c, (int, float)) and c > 0:
                 return int(c)
             return None
+    return None
+
+
+# The unit page's own «دورات المياة» section states the count in words: «دورة مياه واحدة» (one) or
+# «N دورات المياة». Measured 2026-10-07 over 4,745 active units: it agrees with the list's bathtub icon
+# on 2,002 of 2,009 units that carry both, and it is the ONLY statement on 2,722 units whose list item
+# has no bathtub icon — they stored NULL and no customer asking «كم دورة مياه» could find them
+# (🔬 backlog 135). Read only that exact header (never «مرافق دورات المياة», the toiletries list);
+# anything else in it — an empty block, a new wording — is silence → None, never a guess.
+_BATH_SECTION = "دورات المياة"
+_BATH_ONE = "دورة مياه واحدة"
+_BATH_N_RE = re.compile(r"^(\d{1,2})\s+دورات المياة$")
+
+
+def _bathrooms_from_sections(secs: Optional[list]) -> Optional[int]:
+    for sec in secs or []:
+        if not isinstance(sec, dict) or (sec.get("header") or "").strip() != _BATH_SECTION:
+            continue
+        c = " ".join(str(sec.get("content") or "").split())
+        if c == _BATH_ONE:
+            return 1
+        m = _BATH_N_RE.match(c)
+        return int(m.group(1)) if m and int(m.group(1)) > 0 else None
+    return None
+
+
+# The unit page's «مرافق المطبخ» list names «مطبخ مجهز» (an equipped kitchen) as one of its items on
+# 218 of 4,754 active units (measured 2026-10-12; re-read run 38216215705, unit 196227: «فريزر · فرن ·
+# … · مطبخ مجهز · غسالة ملابس»). It was captured into additional_info.extra_sections all along and never
+# reached the `kitchen` column the Advanced Filter reads (🆕 backlog #379, rule 10 «nothing trapped»).
+# LISTED = YES; ABSENT = SILENCE, never «no»: a list of appliances without the item, an empty block or a
+# missing section all return None, and the column is left alone.
+_KITCHEN_SECTION = "مرافق المطبخ"
+_KITCHEN_ITEM = "مطبخ مجهز"
+
+
+def _kitchen_from_sections(secs: Optional[list]) -> Optional[bool]:
+    for sec in secs or []:
+        if not isinstance(sec, dict) or (sec.get("header") or "").strip() != _KITCHEN_SECTION:
+            continue
+        c = " ".join(str(sec.get("content") or "").split())
+        return True if _KITCHEN_ITEM in c else None
     return None
 
 
@@ -596,14 +950,15 @@ def _is_monthly_available(it: dict) -> bool:
     """True only if the API priced this unit for our 30-night window (the long-stay signal).
 
     In monthly mode the card carries nights=30 + long_stay + selected_check_in/out. We require the
-    long-stay signal so we never store a unit the host doesn't actually offer monthly."""
+    unit's OWN signal (its priced stay length, or its long-stay flag) so we never store a unit the
+    host doesn't actually offer monthly. selected_check_in/out is NOT such a signal: it is our own
+    request's window echoed back on every card, nightly-priced ones included (measured 2026-09-28:
+    a one-night request returns nights=1, long_stay=false, final_price=500 WITH both dates set), so
+    trusting it would file a one-night price as a monthly rent — period and price both made up by us."""
     nights = _num(it.get("nights"))
     if nights == STAY_NIGHTS:
         return True
-    if it.get("long_stay") is True:
-        return True
-    # Fallback: trust the 30-day window the API echoed back.
-    return bool(it.get("selected_check_in") and it.get("selected_check_out"))
+    return it.get("long_stay") is True
 
 
 def map_listing(it: dict) -> Optional[dict]:
@@ -667,6 +1022,23 @@ def map_listing(it: dict) -> Optional[dict]:
                  or it.get("chalet_title") or it.get("title") or "").strip()
     title = _redact(raw_title)
     # Tag the title as furnished/monthly so search snippets read correctly.
+    #
+    # THIS APPENDS OUR OWN WORDS TO THE SOURCE'S TITLE, AND THE OWNER APPROVED IT (2026-09-20).
+    # `شاليه الواحة` becomes `شاليه الواحة — شاليه مفروشة للإيجار الشهري`. It is written down here
+    # because it reads like a listing-fidelity violation and has now been raised twice: the «مفروشة»
+    # a user sees on a Gathern card comes from THIS LINE, not from the `furnished` attribute.
+    #
+    # The attribute is a separate, non-issue — see `info["furnished"]` below: that key lands in
+    # additional_info (JSONB), `gathern_residential_listings` has NO `furnished` column, and all
+    # 29,846 rows read `furnished IS NULL` in search_listings_ar. We assert nothing there, which is
+    # what SOURCE IS TRUTH wants. Do not "repair" it.
+    #
+    # Offered leave-as-is / drop just «مفروشة» / untouched title, the owner chose LEAVE AS IS:
+    # Gathern is a monthly FURNISHED-rental marketplace and the label tells the user what they are
+    # looking at. The evidence that it is structural rather than a guess: of 29,846 active rows,
+    # 22,711 carry description text, 462 say «مفروش», and ZERO say «غير مفروش» — the platform
+    # carries no unfurnished units. (Deriving `furnished` from that text would NULL 29,384 of them
+    # to recover 462, which is why text-derivation was considered and dropped.)
     type_ar = ev.get("unit_type_ar") or it.get("chalet_category_text") or ""
     if title:
         title = f"{title} — {type_ar} مفروشة للإيجار الشهري".strip(" —") if type_ar else title
@@ -729,7 +1101,7 @@ def map_listing(it: dict) -> Optional[dict]:
         "photo_urls": _photos(it),
         "rega_location_verified": False,
         "additional_info": info,
-        **_amenity_flags(amenity_labels),
+        **_amenity_flags(amenity_labels, listed=isinstance(it.get("features"), list)),
     }
 
 
@@ -900,7 +1272,12 @@ def main() -> int:
             print("✗ gathern cross-shard prune ABORTED: union is empty")
             return 1
         run_id = db.begin_run("gathern_prune")
-        pruned = db.prune_unseen("gathern_residential_listings", seen, source=SOURCE)
+        # The union IS this cycle's live observations, so it is the canary pool: every ad in it was
+        # served to one of the shards within the hour. This pass does no crawling of its own, so it
+        # has no other source of a known-live control.
+        arm_liveness_canaries(sorted(seen))
+        pruned = db.prune_unseen("gathern_residential_listings", seen, source=SOURCE,
+                                 verify_gone=earned_verify_gone)
         if pruned < 0:
             print("⚠ gathern prune guard tripped (collapse/coverage) — kept existing active")
             pruned = 0
@@ -983,8 +1360,11 @@ def main() -> int:
     run_id = None if args.limit else db.begin_run("gathern")
     try:
         if rows:
+            held = held_strikes(rows)
+            if held:
+                print(f"  {len(held)} feed unit(s) stay under their page strikes (page not live)", flush=True)
             for i in range(0, len(rows), 200):
-                db.upsert_gathern_residential_batch(rows[i:i + 200])
+                db.upsert_gathern_residential_batch(rows[i:i + 200], strikes=held)
 
         # ── validation run (--limit): upsert first N, NO prune, print samples ──
         if args.limit:
@@ -1017,8 +1397,10 @@ def main() -> int:
             print(f"✓ Gathern slice ({slice_label}): {len(rows)} monthly residential units upserted "
                   f"(scanned {scanned} cards) — NO prune (partial run)")
         else:
+            arm_liveness_canaries([r["ad_number"] for r in rows])
             pruned = db.prune_unseen("gathern_residential_listings",
-                                     {r["ad_number"] for r in rows}, source=SOURCE)
+                                     {r["ad_number"] for r in rows}, source=SOURCE,
+                                     verify_gone=earned_verify_gone)
             if pruned < 0:
                 print("⚠ gathern prune guard tripped (0 scraped or collapse) — kept existing active")
                 pruned = 0

@@ -37,10 +37,66 @@ from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.aqar import enrich_residential as ER  # noqa: E402
 
 TABLE = "aqar_residential_listings"
+
+#: What a lone `null` in this probe's output would destroy.
+#:
+#: `enrich_residential` emits `db.AUTHORITATIVE_NULL` — not None — when aqar ITSELF states a listing
+#: has no price («طلب تسويق», `published:false`). That sentinel is the whole SOURCE IS TRUTH
+#: distinction in one object: "the source says there is no value" versus "we could not read one".
+#: `json.dumps` cannot encode it, so every probe of such a listing died with
+#: `TypeError: Object of type _AuthoritativeNull is not JSON serializable` — and those are precisely
+#: the listings a price dispute is about, so the instrument was broken exactly where it was needed
+#: (found 2026-09-22 adjudicating two extreme price-per-m² rows; the run failed in 21 seconds).
+#:
+#: Encoding it as `null` would have been worse than the crash: the reader could no longer tell an
+#: authoritative absence from a failed read, which is the one question this probe exists to answer.
+#: So it gets its own visible token, and anything else unencodable still raises rather than being
+#: quietly stringified into evidence nobody can trust.
+AUTHORITATIVE_NULL_JSON = "AUTHORITATIVE_NULL"
+
+
+def _json_default(o: Any) -> str:
+    if isinstance(o, db._AuthoritativeNull):
+        return AUTHORITATIVE_NULL_JSON
+    raise TypeError(f"Object of type {o.__class__.__name__} is not JSON serializable")
+
+
+def _dump(obj: Any) -> str:
+    return json.dumps(obj, ensure_ascii=False, default=_json_default)
+
+
+def _settled(v: Any) -> Any:
+    """Collapse an authoritative absence onto NULL — but only for COMPARISON, never for output.
+
+    AUTHORITATIVE_NULL and a stored NULL are the same OUTCOME ("this listing has no price"), so the
+    disagreement summary must treat them as equal or it reports the parser and the database as
+    differing precisely when they agree — on the very cohort this probe is most often pointed at.
+    The JSON above keeps them distinct, because there the question is not the outcome but WHO SAID SO.
+    """
+    return None if isinstance(v, db._AuthoritativeNull) else v
+
+
+def _differs(r: dict[str, Any], field: str) -> bool:
+    return _settled(r["parser"].get(field)) != _settled(r["db"].get(field))
 TYPE_TO_SLUG = {v: k for k, v in N.SLUG_TO_TYPE.items()}
 
 # Keys worth reporting if aqar publishes them. Matched as substrings so a renamed field still shows.
 _PRICE_KEY_HINTS = ("price", "rent", "period", "duration", "monthly", "yearly", "annual", "meter")
+
+# The SIZE half of the same question (routine #3, 2026-09-23). `aqar_structured` above filters the
+# payload to price-ish keys, so an AREA dispute was structurally unanswerable by this tool: it would
+# print the parser's area and the DB's area — which agree, because one produced the other — and
+# nothing about what aqar itself published. That is the same shape as the TypeError this script
+# carried on 2026-09-22: the instrument was blind on exactly the cohort a dispute is about.
+#
+# Found by 6 active rows (3 residential, 3 commercial) whose area_m2 EQUALS their price to the riyal
+# — ad 6528840 «غرفة» area 1500 beside 1,500 SAR/yr, 6500587 «استراحة» 2500/2500, 6496996 «مستودع»
+# 10000/10000. The price on all three is source-confirmed (aqar publishes price_text "1,500" and
+# rent_period_text «سنوي»), so the suspect is the area — but "suspect" is not proof, and
+# DATA_INTEGRITY_ENGINEER.md forbids repairing anything Ezhalah cannot be PROVEN to have broken.
+# These keys are what settles it: `area` is the first alias enrich_listing() tries, so seeing its
+# raw value says whether aqar published that number or whether our alias hunt produced it.
+_SIZE_KEY_HINTS = ("area", "size", "space", "length", "width", "deed_area")
 
 # The rendered price slot: a number followed by the billing-period word. Captured verbatim.
 _RENDERED = re.compile(r"([\d][\d,]{2,})\s*[§ر﷼]?\s*/?\s*(سنوي\w*|شهري\w*|يومي\w*|أسبوعي\w*)")
@@ -74,6 +130,11 @@ def probe_one(row: dict[str, Any], dump_keys: bool) -> Optional[dict[str, Any]]:
     obj = ER._listing_json(html) or {}
     structured = {k: v for k, v in obj.items()
                   if any(h in k.lower() for h in _PRICE_KEY_HINTS) and not isinstance(v, (dict, list))}
+    # Raw, unjudged: what aqar itself publishes for size. Printed verbatim (including a null or a
+    # missing key) so "the source says nothing here" and "the source says 1500" stay distinguishable
+    # — a missing field is never read as an answer.
+    size_source = {k: v for k, v in obj.items()
+                   if any(h in k.lower() for h in _SIZE_KEY_HINTS) and not isinstance(v, (dict, list))}
     text = ER._html_to_text(html)
     rendered = [f"{m.group(1)} {m.group(2)}" for m in _RENDERED.finditer(
         text.split(ER._AGE_BLOCK_ANCHOR, 1)[0] if ER._AGE_BLOCK_ANCHOR in text else text)][:4]
@@ -89,6 +150,7 @@ def probe_one(row: dict[str, Any], dump_keys: bool) -> Optional[dict[str, Any]]:
         "state": state,
         "head": head,
         "aqar_structured": structured,
+        "aqar_size_source": size_source,
         "aqar_rendered": rendered,
         "parser": {k: parsed.get(k) for k in
                    ("price_annual", "price_total", "price_per_meter", "rent_period", "area_m2")},
@@ -130,15 +192,14 @@ def main() -> int:
                 print(f"  ✗ unfetchable ad={r['ad_number']}", flush=True)
                 return
             results.append(res)
-            print(json.dumps(res, ensure_ascii=False), flush=True)
+            print(_dump(res), flush=True)
 
     with ThreadPoolExecutor(max_workers=a.workers) as pool:
         list(pool.map(work, rows))
 
     # Summary: how often does the parser disagree with what aqar renders / publishes?
     disagree = [r for r in results
-                if r["parser"].get("price_annual") != r["db"].get("price_annual")
-                or r["parser"].get("rent_period") != r["db"].get("rent_period")]
+                if _differs(r, "price_annual") or _differs(r, "rent_period")]
     monthly_rendered = [r for r in results
                         if any("شهري" in s for s in r["aqar_rendered"])]
     no_period_rendered = [r for r in results if not r["aqar_rendered"]]

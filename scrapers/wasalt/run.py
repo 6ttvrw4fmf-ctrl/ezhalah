@@ -182,7 +182,34 @@ def session() -> RotatingSession:
     return RotatingSession()
 
 
-def fetch_page(s: RotatingSession, deal: str, cat: str, slug: str, page: int) -> tuple[int, int, list[dict], bool]:
+# One browser per PROCESS, created on first use and reused for every page in this slice.
+# Launching Chromium per page would dominate the wall clock; the matrix already parallelises by
+# slug/deal, so each process only walks a few dozen pages.
+_BROWSER: Any = None
+
+
+def _browser_fetch_enabled() -> bool:
+    from scrapers.wasalt import browser as _b
+    return _b.browser_enabled()
+
+
+def _browser() -> Any:
+    global _BROWSER
+    if _BROWSER is None:
+        from scrapers.wasalt import browser as _b
+        _BROWSER = _b.BoundedBrowserFetcher()   # hard per-call deadline — ops_incident #708
+    return _BROWSER
+
+
+def close_browser() -> None:
+    global _BROWSER
+    if _BROWSER is not None:
+        _BROWSER.close()
+        _BROWSER = None
+
+
+def fetch_page(s: RotatingSession, deal: str, cat: str, slug: str, page: int,
+               bust: Optional[str] = None) -> tuple[int, int, list[dict], bool]:
     """Return (count, total_pages, properties[], valid) for one search page.
 
     `valid` is True only when the response carried a parseable __NEXT_DATA__ searchResult —
@@ -192,7 +219,31 @@ def fetch_page(s: RotatingSession, deal: str, cat: str, slug: str, page: int) ->
     seg = "sale" if deal == "sale" else "rent"
     url = (f"{BASE}/en/{seg}/search?propertyFor={deal}&countryId=1&type={cat}"
            f"&propertyTypeData={slug}&page={page}")
+    if bust:
+        # A cache-busting parameter the search ignores: a re-ask must not be served the same
+        # stored empty render of this exact URL (2026-10-16, backlog 532).
+        url += f"&_ezh={bust}"
     _throttle()
+
+    # CLOUDFLARE PATH (WASALT_BROWSER=1). wasalt.sa tightened bot protection on 2026-08-17 and
+    # since then NO http-client shape gets through: issue #1019 proved the proxy is healthy and
+    # that the scraper's own (proxy x chrome124) combination is silently null-routed, while every
+    # other shape reaches the origin and gets a real 403 challenge page that requires executing
+    # JavaScript. Owner chose the browser option 2026-09-18. See scrapers/wasalt/browser.py — in
+    # particular that headless=False is load-bearing, not a style choice.
+    #
+    # The return shape is deliberately IDENTICAL to the http path below, including the `valid`
+    # flag: a challenge shell must stay distinguishable from a genuinely empty category, or the
+    # fail-visibly guard would read a block as "this slug has no listings".
+    if _browser_fetch_enabled():
+        data = _browser().next_data(url)
+        if data is None:
+            print(f"   ⚠ wasalt browser fetch ({slug}/{deal} p{page}) produced no __NEXT_DATA__")
+            return 0, 0, [], False
+        sr = (data.get("props", {}).get("pageProps", {}).get("searchResult") or {})
+        props = [p for p in (sr.get("properties") or []) if isinstance(p, dict)]
+        return int(sr.get("count") or 0), int(sr.get("totalPages") or 0), props, True
+
     for attempt in range(_FETCH_ATTEMPTS):
         try:
             r = s.get(url, timeout=_FETCH_TIMEOUT_S)
@@ -568,6 +619,7 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
         # written explicitly, tri-state, or the fact is lost instead of merely wrong.
         "separate_water_meter":       _yes_no(addl_info, "waterMeter"),
         "separate_electricity_meter": _yes_no(addl_info, "electricityMeter"),
+        **land_service_fields(property_type, addl_info),
         "detail_enriched": detail_enriched,
         # Feature-grid booleans the card already renders. Wasalt amenities map roughly.
         #
@@ -611,6 +663,38 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
     }
 
 
+def is_land_type(property_type) -> bool:
+    """wasalt land types are the English «… Land» words (Residential Land, Farming Land, Commercial Land)."""
+    return bool(property_type) and str(property_type).strip().endswith("Land")
+
+
+def land_service_fields(property_type, addl_info) -> dict:
+    """electricity / water_supply for a wasalt LAND, from its own electricityMeter / waterMeter.
+
+    Backlog 326 (owner, 2026-10-09): wasalt publishes «electricityMeter» / «waterMeter» Yes/No on
+    ~6,300 of its ~8,300 live lands, yet the index carried electricity/water_supply = NULL on all of
+    them. On a plot of land the meter IS the service connection, so Yes -> True and No -> False.
+
+    LAND ONLY, deliberately. On an apartment or a villa «electricityMeter: No» means a SHARED meter,
+    not a home without electricity, so mapping it would manufacture a negative the source never
+    stated. Non-land ads keep these columns NULL (their meters stay in separate_*_meter).
+
+    Only DETERMINED values are returned; a key the land does not publish is omitted, never None, so
+    neither the upsert path nor enrich.py's bare update() can erase a value an earlier read found.
+    Sanitation is not published by wasalt and is never written here.
+    """
+    if not is_land_type(property_type):
+        return {}
+    out: dict = {}
+    em = _yes_no(addl_info, "electricityMeter")
+    if em is not None:
+        out["electricity"] = em
+    wm = _yes_no(addl_info, "waterMeter")
+    if wm is not None:
+        out["water_supply"] = wm
+    return out
+
+
 def _yes_no(addl_info, key: str):
     """A wasalt additionalAttributes flag as a TRI-STATE: Yes -> True, No -> False, absent -> None.
 
@@ -636,8 +720,48 @@ def upsert(row: dict, main_type: str) -> None:
     db.upsert_wasalt_residential(row)
 
 
-def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[int, int, bool]:
-    """Sweep one type-slug × deal. Returns (upserted, source_count, page1_valid)."""
+# Where and how each slice stopped early on a VALID but empty page (2026-10-14, backlog 532); main()
+# writes it into the run's notes so a shard's own row says why it is short.
+_STOPS: list[str] = []
+_EMPTY_PAGE_RETRY_PAUSE_S = float(os.environ.get("WASALT_EMPTY_PAGE_RETRY_PAUSE_S", "8"))
+# Re-asks of a valid empty mid-walk page, each on a fresh proxy exit (2026-10-16, backlog 532).
+_EMPTY_PAGE_RETRIES = int(os.environ.get("WASALT_EMPTY_PAGE_RETRIES", "1"))
+# Consecutive pages the source serves empty before the walk gives up on the slice. The empty
+# pages come in CLUSTERS and the catalogue answers again after them: the 10-16 third proof sweep
+# read villa-townhouse/rent's pages 20-25 after empty 16, 18, 19 (30 -> 630 rows), while three
+# slices gave up at 3 in a row (apartment/rent 8-10, villa/sale 7-9, floor/sale 3-5).
+_MAX_EMPTY_PAGES_IN_A_ROW = int(os.environ.get("WASALT_MAX_EMPTY_PAGES_IN_A_ROW", "10"))
+# Pages a cache-busted re-ask answered after the plain URL served them empty, printed in the
+# run's notes: the evidence for (or against) the stored-empty-render explanation.
+_ROUTE_ROTATIONS_RECOVERED: list[str] = []
+
+
+def rotate_route(s) -> None:
+    """Move the NEXT fetch onto a new proxy exit: a fresh browser process (new sticky port) on
+    the browser path, a fresh curl session on the http path."""
+    if _browser_fetch_enabled():
+        if _BROWSER is not None:
+            _BROWSER.recycle()
+        return
+    if hasattr(s, "rotate"):
+        s.rotate()
+
+
+def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[int, int, bool, bool]:
+    """Sweep one type-slug × deal. Returns (upserted, source_count, page1_valid, truncated).
+
+    `truncated` is True when the crawl stopped early because a page failed to fetch/parse
+    (fetch_page's valid=False — a bot-wall/proxy shell) rather than because a page was
+    genuinely empty (valid=True, no more properties). Before 2026-09-23 the per-page loop
+    below discarded `valid` for every page after the first, so a mid-crawl proxy hiccup on
+    page 2+ was indistinguishable from "legitimately reached the end of results": both
+    produced empty `props` and both hit the same silent `break`. On a shared proxy pool
+    (six concurrent wasalt_enum_shard jobs, see the module docstring) that let a shard stop
+    after page 1 while still reporting `ok=true` with whatever handful of rows it had
+    upserted — the exact silent_partial_success incident (13 short runs/24h, worst case 1
+    row against baseline median 235). The caller must fold `truncated` into its ok/legit_empty
+    decision so a partial catalogue is reported as a FAILED attempt, never as a small one.
+    """
     count, total_pages, _, page1_valid = fetch_page(s, deal, cat, slug, 1)
     pages = min(max_pages, total_pages or max_pages)
     print(f"\n── WASALT {slug.upper():<16} {deal.upper():<4} {cat.upper():<11} count={count} pages≤{pages}")
@@ -652,13 +776,68 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[
         # category.
         print(f"   ✗ page 1 unanswerable after the full retry ladder — abandoning {slug}/{deal} "
               f"rather than re-running the same ladder on the same route")
-        return 0, count, False
+        return 0, count, False, True
     is_commercial = cat == "commercial"
     upserter = db.upsert_wasalt_commercial_batch if is_commercial else db.upsert_wasalt_residential_batch
     upserted = 0
+    truncated = False
+    skipped: list[int] = []
+    empty_run = 0
     for page in range(1, pages + 1):
-        _, _, props, _ = fetch_page(s, deal, cat, slug, page)
+        pg_count, pg_total, props, valid = fetch_page(s, deal, cat, slug, page)
+        if not props and valid and page < pages and upserted < count:
+            # A VALID page with no listings BEFORE the last page the source itself announced is not
+            # «the end of results» (2026-10-14, backlog 532): on 10-13 every enum shard stopped this
+            # way after ~5-6 pages (apartment/sale: count=33,814, pages≤1053, 176 upserted) and each
+            # one reported ok=true, so only the roll-up's 40,000 floor noticed 177,017 → 5,408. Ask
+            # once more after a pause; a second empty answer is an INCOMPLETE slice, named with what
+            # the empty page itself reported so the run's notes say where and how the source stopped.
+            #
+            # 2026-10-16 (fourth night, backlog 532/569). Measured on two proof sweeps (runs
+            # 38919794892 and the one after #7185): re-asking on 3 FRESH exits recovered 0 pages,
+            # and re-asking with a cache-busting parameter recovered 0 too. The stop is
+            # DETERMINISTIC per page: floor/rent, villa/sale and villa/rent stopped on the same page
+            # (2, 6, 2) twenty minutes apart, and floor/sale (2 → 3) and apartment/rent (7 → 8) moved
+            # down by exactly one page as new ads arrived at the top. That is one listing whose page
+            # the source cannot render (the whole searchResult comes back empty), sliding down the
+            # catalogue. So one re-ask (transient blips still recover), then SKIP that page and keep
+            # walking, instead of throwing the whole tail of the slice away. Skipped pages keep the
+            # slice TRUNCATED (ok=false), so the enum roll-up, which counts only ok shards, still
+            # refuses to strike anything off an incomplete enumeration.
+            for _ask in range(_EMPTY_PAGE_RETRIES):
+                time.sleep(_EMPTY_PAGE_RETRY_PAUSE_S)
+                rotate_route(s)
+                pg_count, pg_total, props, valid = fetch_page(
+                    s, deal, cat, slug, page, bust=f"{int(time.time())}{_ask}")
+                if props or not valid:
+                    break
+            if props:
+                _ROUTE_ROTATIONS_RECOVERED.append(f"{slug}/{deal} p{page}")
+                empty_run = 0
+            elif valid:
+                truncated = True
+                skipped.append(page)
+                empty_run += 1
+                if empty_run >= _MAX_EMPTY_PAGES_IN_A_ROW:
+                    _STOPS.append(f"{slug}/{deal}: source served {empty_run} empty pages in a row, the "
+                                  f"last {page} of {pages} (page 1 count={count}; empty page reported "
+                                  f"count={pg_count} totalPages={pg_total}) after {upserted} rows")
+                    print(f"   ✗ {_STOPS[-1]} — slice is INCOMPLETE")
+                    break
+                print(f"   ↷ {slug}/{deal}: source served an empty page {page} of {pages} — skipped, "
+                      f"walk continues (slice stays INCOMPLETE)")
+                continue
+        else:
+            empty_run = 0
         if not props:
+            if not valid:
+                # A failed fetch mid-crawl, not a genuine end of results. Stop taking new pages
+                # (re-running fetch_page's own retry ladder across the whole remaining tail would
+                # just re-pay the same cost page after page) but tell the caller this slice is
+                # INCOMPLETE — never let it read as "reached the last page cleanly".
+                print(f"   ✗ page {page} unanswerable — stopping early, slice is INCOMPLETE "
+                      f"({upserted} upserted so far is NOT the full catalogue)")
+                truncated = True
             break
         batch = []
         for prop in props:
@@ -676,8 +855,11 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[
                 print(f"   ✗ batch upsert failed (page {page}): {str(e)[:90]}")
         if page % 20 == 0:
             print(f"   [{page}/{pages}] upserted so far: {upserted}")
-    print(f"   ✓ {slug}/{deal}: {upserted} upserted")
-    return upserted, count, page1_valid
+    if skipped:
+        _STOPS.append(f"{slug}/{deal}: skipped {len(skipped)} empty page(s) the source could not "
+                      f"render: {','.join(map(str, skipped[:20]))}")
+    print(f"   ✓ {slug}/{deal}: {upserted} upserted" + (" (TRUNCATED)" if truncated else ""))
+    return upserted, count, page1_valid, truncated
 
 
 def main() -> int:
@@ -696,37 +878,75 @@ def main() -> int:
         print(f"   (startup jitter: waited {jittered:.1f}s to spread cloud-matrix load on the shared proxy)")
 
     s = session()
-    run_id = db.begin_run("wasalt")
+    # RUN LABEL (2026-09-19). The full enumeration no longer fits one CI job — measured ~11-18 s/page
+    # through the browser against ~3,300 pages, i.e. 10-16h under a 6h runner ceiling — so
+    # wasalt-enum-liveness.yml shards it one job per slice. Each shard must NOT write a
+    # `platform='wasalt'` row, because liveness.py's coverage guard picks the newest such row and a
+    # single ~3k-row shard would look like a catastrophically partial crawl. Shards write
+    # 'wasalt_enum_shard' instead and `liveness.py --mode enum-rollup` sums them into ONE
+    # 'wasalt' row. The guard itself is deliberately left untouched.
+    run_id = db.begin_run(os.environ.get("WASALT_RUN_LABEL", "").strip() or "wasalt")
     total = 0
     legit_empty = False
+    any_truncated = False
+    src_count = 0
     try:
         if args.all:
             for cat, slugs in SLUGS.items():
                 for slug in slugs:
                     for deal in ("sale", "rent"):
-                        up, _count, _valid = scrape_slice(s, deal, cat, slug, max_pages=args.pages)
+                        up, _count, _valid, trunc = scrape_slice(s, deal, cat, slug, max_pages=args.pages)
                         total += up
+                        any_truncated = any_truncated or trunc
         else:
-            total, src_count, page1_valid = scrape_slice(s, args.deal, args.type, args.slug, max_pages=args.pages)
+            total, src_count, page1_valid, any_truncated = scrape_slice(
+                s, args.deal, args.type, args.slug, max_pages=args.pages)
             # A single-category run may legitimately be empty: Wasalt itself can carry zero
             # listings for a slug (farm has zero, always has). That is only believable when the
             # app actually answered (page1_valid: parsed __NEXT_DATA__) AND its own count said 0 —
             # a bot-wall/proxy failure produces an unparseable shell (valid=False) and still fails.
             # A valid page claiming count>0 while we upserted 0 is a parse/mapping break: still fails.
-            legit_empty = total == 0 and page1_valid and src_count == 0
+            # A TRUNCATED slice (a page failed mid-crawl) can never be "legitimately empty" either,
+            # even if it stalled on page 1 after a real count>0 answer.
+            legit_empty = total == 0 and page1_valid and src_count == 0 and not any_truncated
         # Fail-visibly guard (owner 2026-07-07): a Wasalt sweep that fetched/upserted ZERO rows is a
         # failure, NOT a healthy empty result — Wasalt has ~59k live listings, so a working sweep always
         # re-sees thousands (upsert refreshes existing rows too). 0 rows means the Saudi residential
         # proxy is down / IP-blocked and the site served an empty/bot-wall shell. Never report ok=true
         # on 0 rows, or the run looks green in scrape_runs while nothing flows into search. Mirrors the
         # toor guard (PR #30). The one exception is the verified-empty single category above (2026-07-21).
-        ok = total > 0 or legit_empty
-        if legit_empty:
+        #
+        # TRUNCATION guard (2026-09-23, silent_partial_success incident): a slice that stopped early
+        # on an unanswerable page is an INCOMPLETE catalogue, never a healthy small one — even when it
+        # upserted rows on the pages it did reach. Without this, a mid-crawl proxy hiccup on page 2+
+        # reported ok=true with whatever handful of rows page 1 yielded, which prune_unseen() then
+        # read as "these are the only listings left" and started inactivating real, still-live rows.
+        ok = (total > 0 or legit_empty) and not any_truncated
+        if any_truncated and total > 0:
+            # Partial data WAS captured before the failure — distinguish this from the plain
+            # zero-row block below, which already carries its own (browser) diagnostics.
+            notes = (f"TRUNCATED mid-crawl for {args.slug}/{args.deal}: upserted={total} of "
+                     f"source-reported count={src_count} — a page failed to fetch/parse before the "
+                     f"catalogue was fully walked (not a legitimate end of results)")
+            if _STOPS:
+                notes += " | " + "; ".join(_STOPS)[:300]
+        elif legit_empty:
             notes = f"source reports 0 listings for {args.slug}/{args.deal} (valid page, empty category)"
         elif ok:
             notes = f"upserted={total}"
         else:
             notes = "FETCHED 0 ROWS — proxy/network block (fail-visibly guard)"
+            # That label predates the browser path (2026-09-18) and is a guess for it: a browser
+            # attempt can fail at launch, at a Cloudflare challenge that never clears, at a nav
+            # exception (often the proxy/TLS interaction browser.py's docstring documents), or an
+            # unclassified empty shell — see scrapers/wasalt/browser.py's failure classification.
+            # Append whatever it actually tallied so the row says WHICH, not just THAT.
+            if _browser_fetch_enabled():
+                from scrapers.wasalt import browser as _b
+                notes += _b.fail_reasons_summary()
+        if _ROUTE_ROTATIONS_RECOVERED:
+            notes += (f" | cache-busted re-ask recovered {len(_ROUTE_ROTATIONS_RECOVERED)} empty page(s): "
+                      + ", ".join(_ROUTE_ROTATIONS_RECOVERED[:8]))
     except Exception as e:
         ok = False
         notes = str(e)[:400]

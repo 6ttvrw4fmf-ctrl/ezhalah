@@ -19,6 +19,7 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { routingWorklist } from './lib/alertRouting.ts';
 
 const root = join(import.meta.dirname, '..');
 let failures = 0;
@@ -87,8 +88,22 @@ check('it only ever FILLS a null, so a hand-corrected owner is never overwritten
 check('it only writes for unresolved alerts', /resolved_at=is\.null/.test(wfCode));
 check('the label is still computed by executing the real routing module',
   /scripts\/alert-routing-label\.ts/.test(wfCode));
+// This walk moved from inline jq into routingWorklist() on 2026-09-14 (the jq version could not see
+// the issues the same run had just filed, so every alert issue was unrouted for a full dispatch
+// cycle). Both halves of the property are asserted here by EXECUTION rather than by matching the
+// old jq text: every listed issue is still walked (the backfill half), AND the issues this run
+// created are walked too (the half that was broken).
 check('every open alert issue is walked, so pre-existing ones get backfilled',
-  /routed: \(\[\.labels\[\]\.name\] \| map\(startswith\("routine-"\)\) \| any\)/.test(wfCode));
+  routingWorklist(
+    [{ number: 1, title: '[alert] a', labels: [{ name: 'routine-7-seam' }] },
+     { number: 2, title: '[alert] b', labels: [] }],
+    [],
+  ).length === 2);
+check('...and so are the issues this run just filed, which the listing cannot yet see',
+  routingWorklist([], [{ number: 3, title: '[alert] c' }])
+    .some((w) => w.number === 3 && w.routed === false));
+check('the workflow executes that rule rather than restating it',
+  /alert-routing-worklist\.ts/.test(wfCode));
 check('the label is still applied ONLY when absent (a human re-route is respected)',
   /if \[ "\$already" = "false" \]; then/.test(wfCode));
 check('a failed write-back warns instead of failing the whole dispatch run',

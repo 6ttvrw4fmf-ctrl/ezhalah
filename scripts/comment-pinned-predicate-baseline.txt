@@ -1,0 +1,48 @@
+# COMMENT-PINNED BARRIER PREDICATES — SHRINK-ONLY.
+#
+# Each row is a barrier whose predicate REQUIRES a `//` comment to be present in the product's bytes.
+# A comment has no behaviour, so such a predicate is provably not asserting one: it goes RED at a
+# reworded sentence, and it is only ever green because one exact expression is still there. That is
+# ops_incident #727's class ("the LABEL states a property while the ASSERTION freezes one exact
+# expression") in the one form a machine can find, because the author's own syntax is the evidence.
+#
+# MEASURED BY EXECUTION 2026-09-27: rewording one comment in src/app/agent.tsx — zero behavioural
+# change — took verify-read-aloud-contract.ts to 98/99 AND made two of its own mutation proofs report
+# themselves blind, because their negative control ("the real shipped tree is NOT flagged") stopped
+# holding. One sentence of prose, the assertion and its evidence together.
+#
+# THE REPAIR IS NEVER "DELETE THE COMMENT FROM THE REGEX" — that only makes the check less strict,
+# which is BARRIER_ENGINEER.md Prohibition 1 from the other side. In every site below the prose is
+# LOAD-BEARING AS A LOCATOR: it is the only thing telling one call from its siblings. Replace it with
+# a STRUCTURAL locator (the enclosing function body, a distinguishing argument) or lift and EXECUTE
+# the real symbol (scripts/lib/liftSymbols.ts) — then lower the row here IN THE SAME DIFF. A row the
+# tree has outgrown is reported STALE, so this ledger can never read better than reality.
+#
+# NOT COUNTED HERE, so there is one ledger per class and not two: a source WINDOW anchored on a
+# comment — `src.slice(src.indexOf(A), src.indexOf('// auto_select'))` — is the same hazard one layer
+# out and worse, since a lost marker WIDENS the window instead of failing (measured the same day:
+# verify-google-onetap.ts stayed a full 14/14 green with its end marker reworded away, the window
+# running to one character before end-of-file). All four such sites are already rows in
+# scripts/source-window-baseline.txt with the same repair, windowBetween(), which throws.
+#
+#   scripts/verify-google-onetap.ts                          (2, the `// auto_select` end marker)
+#   scripts/verify-saved-search-identity.ts                  (1, `// Persist chats`)
+#   scripts/verify-transcript-capture-survives-navigation.ts (1, `// A refresh/close inside …`)
+#
+# Ratchet + mutation proofs: scripts/verify-barrier-predicates-do-not-pin-comments.ts (in npm test).
+# Ceiling (PIN_CEILING) is 10 — the measured total the day this landed. It lives in that file, so raising it is a reviewed source change.
+#
+# CONVERTED SO FAR (the row is gone or lower, in the same diff as the repair):
+#   verify-read-aloud-contract.ts:184   2 -> 1   send()'s unconditional prologue, windowBetween + 4 proofs
+#   verify-selector-reliability.ts      3 -> 0   handler prologues read as STATEMENTS + 8 proofs, and the
+#                                                file left scripts/mutation-proof-grandfathered.txt
+#
+# file | comment-pinned predicates
+scripts/verify-af-min-useful-questions-gate.ts                 | 1
+scripts/verify-af-probe-failure-not-a-verdict.ts               | 1
+scripts/verify-filter-stop-cancels-and-restores.ts             | 1
+scripts/verify-google-one-tap-fedcm-race.ts                    | 1
+scripts/verify-read-aloud-contract.ts                          | 1
+scripts/verify-twin-answer-ends-the-question.ts                | 1
+scripts/verify-voice-composer-contract.ts                      | 1
+scripts/verify-voice-ios-capture-and-stop-loading.ts           | 3

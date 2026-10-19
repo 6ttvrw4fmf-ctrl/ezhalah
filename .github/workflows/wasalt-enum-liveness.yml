@@ -30,21 +30,109 @@ on:
       confirm_limit:
         description: "strike step: max rows HEAD/GET-verified this run (pilot uses a small cap)"
         type: string
-        default: "1500"
+        default: "3000"
       skip_enum:
         description: "PILOT ONLY: skip the 4.5h enum and run the strike step against the LAST completed enum (must be <36h old, else the coverage guard refuses). For repeatable pilots."
         type: boolean
         default: false
+      confirm_only:
+        description: "with skip_enum: page-confirm only the rows already at 3 strikes; strike nothing (an extra drain between enumerations never counts one enumeration twice)"
+        type: boolean
+        default: false
+      repair_clock_bug_backlog:
+        description: "ONE-TIME (ops_incident, routine #11, 2026-09-24): run --mode repair-clock-bug-backlog instead of the normal enum+strike, to resolve the confirm-eligible backlog the rollup clock bug produced. Structurally cannot deactivate a listing — see run_repair_clock_bug_backlog()'s docstring. Leave false for every ordinary run."
+        type: boolean
+        default: false
+      repair_shards:
+        description: "repair mode only: split the backlog into this many id%N shards (each dispatch runs ONE shard — see repair_shard). The first full-cohort attempt (2026-09-24) hit its 3h timeout with real per-check latency far higher than estimated; sharding + --limit let you measure the real rate on a small slice before committing to the whole backlog."
+        type: string
+        default: "1"
+      repair_shard:
+        description: "repair mode only: which 0-indexed shard (of repair_shards) this dispatch handles."
+        type: string
+        default: "0"
+      repair_limit:
+        description: "repair mode only: cap this dispatch to the first N rows of its shard (0 = no cap). Use a small number (e.g. 20) for a timed measurement pilot before sizing a full run."
+        type: string
+        default: "0"
 
 concurrency:
   group: wasalt-enum-liveness
   cancel-in-progress: false
 
 jobs:
-  enum:
-    name: Full enumeration (all slices, all pages)
-    if: ${{ !inputs.skip_enum }}      # PILOT skip: run strike against the last completed enum
+  # This dispatch's start, before any shard runs. The rollup sums only shard rows started after it:
+  # its 36h window alone also swept in the PREVIOUS dispatch's shards whenever two dispatches landed
+  # <36h apart (see run_enum_rollup()).
+  stamp:
+    if: ${{ !inputs.skip_enum && !inputs.repair_clock_bug_backlog }}
     runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      at: ${{ steps.t.outputs.at }}
+    steps:
+      - id: t
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+  enum:
+    name: Enum ${{ matrix.slug }} ${{ matrix.deal }}
+    needs: stamp
+    # PILOT skip (run strike against the last completed enum) OR the one-time repair dispatch —
+    # either way the 4.5h enum has no reason to run.
+    if: ${{ !inputs.skip_enum && !inputs.repair_clock_bug_backlog }}
+    runs-on: ubuntu-latest
+    # SHARDED 2026-09-19. This was ONE job walking ~3,300 pages. Through the browser that is
+    # 10-16h (measured ~11-18 s/page) against GitHub's 6h hosted-runner ceiling: run 35416642741
+    # died at the 330-minute wall two-thirds through, having upserted 35,826 listings. Raising the
+    # timeout cannot fix a job that needs longer than a runner may live, so the walk is split one
+    # job per slice. max-parallel 6 mirrors wasalt-residential-sweep.yml and honours the shared-proxy
+    # contention cap from PR #827 — 34 concurrent jobs against one proxy is what broke wasalt in
+    # August. Each shard writes scrape_runs under 'wasalt_enum_shard'; the rollup job below sums
+    # them into the single 'wasalt' row the coverage guard already expects.
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      # EVERY (type, slug, deal) slice must appear, and this list must match run.py's SLUGS exactly.
+      # A slice missing here is never enumerated, so every live listing in it would be counted
+      # "unseen by the enum" and struck — the category-level version of the same failure the rollup
+      # guard catches at the shard-count level. COMMERCIAL HAS ITS OWN 7 SLUGS; leaving them out was
+      # a real bug caught in review. 34 shards total; keep --shards-expected below in step.
+      matrix:
+        include:
+          - { type: residential, slug: apartment, deal: sale }
+          - { type: residential, slug: apartment, deal: rent }
+          - { type: residential, slug: villa-townhouse, deal: sale }
+          - { type: residential, slug: villa-townhouse, deal: rent }
+          - { type: residential, slug: floor, deal: sale }
+          - { type: residential, slug: floor, deal: rent }
+          - { type: residential, slug: building, deal: sale }
+          - { type: residential, slug: building, deal: rent }
+          - { type: residential, slug: land, deal: sale }
+          - { type: residential, slug: land, deal: rent }
+          - { type: residential, slug: rest-house, deal: sale }
+          - { type: residential, slug: rest-house, deal: rent }
+          - { type: residential, slug: chalet, deal: sale }
+          - { type: residential, slug: chalet, deal: rent }
+          - { type: residential, slug: farm, deal: sale }
+          - { type: residential, slug: farm, deal: rent }
+          - { type: residential, slug: room, deal: sale }
+          - { type: residential, slug: room, deal: rent }
+          - { type: residential, slug: duplex, deal: sale }
+          - { type: residential, slug: duplex, deal: rent }
+          - { type: commercial, slug: shop, deal: sale }
+          - { type: commercial, slug: shop, deal: rent }
+          - { type: commercial, slug: office, deal: sale }
+          - { type: commercial, slug: office, deal: rent }
+          - { type: commercial, slug: warehouse, deal: sale }
+          - { type: commercial, slug: warehouse, deal: rent }
+          - { type: commercial, slug: commercial-land, deal: sale }
+          - { type: commercial, slug: commercial-land, deal: rent }
+          - { type: commercial, slug: showroom, deal: sale }
+          - { type: commercial, slug: showroom, deal: rent }
+          - { type: commercial, slug: building, deal: sale }
+          - { type: commercial, slug: building, deal: rent }
+          - { type: commercial, slug: land, deal: sale }
+          - { type: commercial, slug: land, deal: rent }
     # Wasalt rate-limits sustained sequential fetching (measured 2026-07-12: ~5s/page from a
     # throttled IP vs ~1s unthrottled). ~2k pages must fit even the throttled case: 2k × 5s ≈ 2.8h.
     timeout-minutes: 330
@@ -57,24 +145,46 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
+      # Cloudflare path (issue #1019). THE ENUM WAS THE LAST BLOCKED CONSUMER. run.py moved to a
+      # real browser in PR #3129, but only the SWEEP workflow passed WASALT_BROWSER — this step
+      # kept calling the same run.py on the blocked curl_cffi path. Measured in scrape_runs: full
+      # enums of ~105k rows landed on 09-07, 09-09 and 09-11, then 96 rows on 09-13, 09-15, 09-17
+      # and 09-19. So enumeration has been dead since 2026-09-12, which is why the strike step's
+      # coverage guard has (correctly) refused ever since and no wasalt listing has been retired.
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
       - name: Enumerate every slice to exhaustion
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
+          # Shards must NOT write a 'wasalt' run row: the coverage guard reads the newest one, and a
+          # single ~3k-row slice would read as a catastrophically partial crawl. See run_enum_rollup().
+          WASALT_RUN_LABEL: "wasalt_enum_shard"
           SCRAPE_MIN_INTERVAL: "0.3"
         run: |
-          exec python -m scrapers.wasalt.run --all --pages 2000
+          # headless=False clears the challenge; the runner has no display, so xvfb-run supplies one.
+          #
+          # BANDWIDTH, MEASURED 2026-09-19 rather than estimated: a search page through
+          # browser.py's route blocking (image/media/font/stylesheet aborted) is ~894 KB, so a
+          # 2000-page enum is ~1.83 GB/run and ~27.5 GB/month at the 2-day cadence — about 3x the
+          # ~9 GB/month this file's header budgeted for the http enum, and still two orders of
+          # magnitude under the ~700 GB/month that got per-listing liveness disabled. That figure
+          # is a FLOOR: it counts rendered HTML, and scripts are deliberately not blocked because
+          # the challenge needs them. Re-measure before raising --pages or the cadence.
+          exec xvfb-run -a python -m scrapers.wasalt.run \
+            --type ${{ matrix.type }} --slug ${{ matrix.slug }} --deal ${{ matrix.deal }} --pages 2000
 
-  strike:
-    name: Strike unseen + confirm-flip (3-strike, guarded)
-    needs: enum            # a failed/partial enumeration means NO strikes — fail-safe by design
-    # Runs after a successful enum, OR standalone when skip_enum=true (pilot). The strike step's own
-    # coverage guard still refuses if the last enum is >36h old or below the row floor, so skipping
-    # here never bypasses the safety — it only avoids re-running the 4.5h enum for a repeat pilot.
-    if: ${{ always() && (needs.enum.result == 'success' || inputs.skip_enum) }}
+  rollup:
+    name: Roll the shards up into one enumeration
+    needs: [stamp, enum]
+    # Only runs when EVERY shard succeeded. `fail-fast: false` lets the other slices finish so the
+    # rollup can report exactly which are missing, but a single failed shard still stops publication:
+    # a slice nobody enumerated is a slice whose every live listing would be counted "unseen".
+    if: ${{ !inputs.skip_enum && needs.enum.result == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -84,15 +194,104 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
+      - name: Sum the shard runs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          # No proxy and no browser: this step only reads scrape_runs and writes one row.
+          # --shards-expected must equal the matrix size (residential 10 + commercial 7, x2 deals = 34).
+          # It is re-checked
+          # against the DB rather than against CI, because a job can succeed having written nothing.
+          exec python -m scrapers.wasalt.liveness \
+            --mode enum-rollup \
+            --shards-expected 34 \
+            --since "${{ needs.stamp.outputs.at }}" \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
+
+  strike:
+    name: Strike unseen + confirm-flip (3-strike, guarded)
+    needs: [enum, rollup]  # a failed/partial enumeration means NO strikes — fail-safe by design
+    # Runs after a successful enum, OR standalone when skip_enum=true (pilot). The strike step's own
+    # coverage guard still refuses if the last enum is >36h old or below the row floor, so skipping
+    # here never bypasses the safety — it only avoids re-running the 4.5h enum for a repeat pilot.
+    if: ${{ always() && ((needs.enum.result == 'success' && needs.rollup.result == 'success') || inputs.skip_enum) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      # Cloudflare path (issue #1019): the DIRECT confirm below reads listing pages on wasalt.sa,
+      # which no http client has reached since 2026-08-17. --with-deps pulls Chromium's libs.
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
       - name: Enum-strike (guarded)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          # Browser + residential proxy, the pair proven on 2026-09-18: the browser supplies the JS
+          # execution the challenge demands, the proxy the residential IP it also demands. Without
+          # this every confirm returns 403 -> 'failed' -> no strike, which is why no dead wasalt
+          # listing had EVER been retired (six were repaired by hand in migration 20260919010944).
+          WASALT_BROWSER: "1"
           SCRAPE_MIN_INTERVAL: "0.3"
         run: |
-          exec python -m scrapers.wasalt.liveness \
+          # headless=False is what clears the challenge; the runner has no display, so xvfb-run
+          # supplies a virtual one. --workers 1 because Playwright's sync API is thread-bound
+          # (liveness.py forces it anyway; passing it keeps the command honest).
+          # --max-seconds 19800 (330 min) sits under timeout-minutes: 350 with room for setup and
+          # one stuck browser check (~9 min hard deadline). Results are flushed as the run goes, so
+          # a stop loses nothing. 70 min confirmed ~570 rows per run while ~4,000 rows the
+          # enumeration no longer serves waited (2026-10-02: struck=4090, killed=573) — dead ads
+          # stayed visible for a week. 330 min confirms ~2,700 at the measured ~7.3 s per check.
+          exec xvfb-run -a python -m scrapers.wasalt.liveness \
             --mode enum-strike \
             --grace 3 \
-            --confirm-limit ${{ inputs.confirm_limit || '1500' }} \
+            --workers 1 \
+            --confirm-limit ${{ inputs.confirm_limit || '3000' }} \
+            --max-seconds 19800 \
+            ${{ inputs.confirm_only && '--confirm-only' || '' }} \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
+
+  repair:
+    name: ONE-TIME — repair the clock-bug backlog (does not touch active)
+    if: ${{ inputs.repair_clock_bug_backlog == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
+      - name: Repair (direct-check every row at grace — can only write missing_count 0 or 1)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
+          SCRAPE_MIN_INTERVAL: "0.3"
+          # The browser's own diagnostics print without flush; buffered, a cancelled run shows none
+          # of them and reads as a hang (ops_incident #708).
+          PYTHONUNBUFFERED: "1"
+        run: |
+          exec xvfb-run -a python -m scrapers.wasalt.liveness \
+            --mode repair-clock-bug-backlog \
+            --grace 3 \
+            --workers 1 \
+            --shards ${{ inputs.repair_shards || '1' }} \
+            --shard ${{ inputs.repair_shard || '0' }} \
+            --limit ${{ inputs.repair_limit || '0' }} \
             ${{ inputs.dry_run && '--dry-run' || '' }}

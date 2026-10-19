@@ -99,8 +99,15 @@ def _wire(monkeypatch, *, meta, items=()):
         calls["end"] = {"run_id": run_id, "ok": ok, "notes": notes}
         return ok
 
-    def _prune(tbl, seen, source=None):
+    def _prune(tbl, seen, source=None, **kw):
+        # **kw, and the oracle recorded rather than swallowed. This double used to pin
+        # db.prune_unseen's signature as (tbl, seen, source) — narrower than the real one — so
+        # wiring the DIRECT liveness oracle (2026-09-26) made every test here die with a
+        # TypeError. A double narrower than the function it stands in for cannot catch a wiring
+        # change; it can only break on one. So it now accepts what the real call passes AND
+        # remembers whether the oracle came with it, which §C then asserts.
         calls.setdefault("pruned", []).append(tbl)
+        calls.setdefault("prune_oracle", []).append(kw.get("verify_gone"))
         return 0
 
     monkeypatch.setattr(eaq.db, "end_run", _end_run)
@@ -148,6 +155,14 @@ def test_source_published_emptiness_is_not_treated_as_dark(monkeypatch):
     assert calls.get("pruned"), (
         "a real crawl that legitimately saw nothing must still reach prune (its own guards then "
         "decide) — otherwise the fix has simply disabled pruning"
+    )
+    assert calls.get("prune_oracle") and all(o is eaq._verify_gone for o in calls["prune_oracle"]), (
+        "prune_unseen was reached WITHOUT the DIRECT liveness oracle. Absence from the crawl is "
+        "EvidenceKind.ABSENCE and may only SELECT a candidate; until 2026-09-26 this scraper "
+        "passed no verify_gone= at all and three missed crawls deactivated a listing with no "
+        "source verdict of any kind (alert_event 5923). Whatever is handed here must be the "
+        "shipped oracle itself — see scripts/verify-eaqartabuk-liveness-oracle.ts for what that "
+        "oracle is required to decide."
     )
 
 

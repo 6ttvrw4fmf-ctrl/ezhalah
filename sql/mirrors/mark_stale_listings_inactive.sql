@@ -14,6 +14,21 @@
 --   It now measures distinct ACTIVE rows re-confirmed at the source inside a cadence-derived
 --   window (expected_hours * 3), the same measure mon_detect_refresh_coverage() already used.
 --   Re-derived verbatim from pg_get_functiondef (base64 round-trip), never hand-transcribed.
+-- Re-verified 2026-09-21 by the Senior Data Integrity Engineer routine (routine-3), while
+--   building mon_detect_liveness_rotation_stranded(). Production is UNCHANGED: md5 of
+--   pg_get_functiondef is still 8a7e43fbf25479b558a69473a0fae7b6, 6,873 octets / 6,869
+--   characters, identical to the 2026-08-29 capture below. No body edit — this line records a
+--   re-verification, not a change.
+--   WHY IT WAS RE-VERIFIED. This function's by-name exclusions are now load-bearing for a
+--   second object: ops_stale_sweep_excluded_tables() (migration 20260921073600) PARSES this
+--   definition at run time to learn which listing tables the stale sweep skips, so that
+--   mon_detect_liveness_rotation_stranded() can watch exactly those and no others. The two
+--   clauses it reads are `tablename not like 'wasalt_%'` and
+--   `tablename <> 'aqar_residential_listings'`. Rewriting either of them changes which tables
+--   are watched, silently and in the dangerous direction — a table dropped from BOTH
+--   mechanisms at once. Measured that day: 169 aqar_residential rows sat active, unstruck and
+--   unseen since 2026-07-25 precisely because nothing watched this exclusion (ops_incident
+--   #374).
 -- Verified byte-exact; md5 of everything below this header block: 8a7e43fbf25479b558a69473a0fae7b6
 --   equals md5(pg_get_functiondef) in production, 6,873 octets / 6,869 characters both sides
 --   (the body carries 4 multi-byte em-dashes), checked 2026-08-29.

@@ -256,8 +256,13 @@ mustCatch('a chip the registry cannot DESCRIBE at all (the optical_fibers shape)
 // could see. Four of the nine live questions narrow on something that is not an amenity, and the
 // live registry is wrong about all four TODAY while this check is green. These proofs feed the same
 // shared predicate the real shapes, through the third argument that carries the rest of the surface.
-const DIRECTION_ROW = { canonical_key: 'direction_ar', ui_exposed: true, not_exposed_reason: null, filter_tier: 'more_options' };
-const STREETW_ROW = { canonical_key: 'street_width_m', ui_exposed: true, not_exposed_reason: null, filter_tier: 'more_options' };
+// 'advanced', not 'more_options' — corrected 2026-09-13 with 20260913111514, which moved the live
+// rows for the same reason: both questions are in COHORT_QUESTIONS, so the interview auto-asks them,
+// and 'more_options' means the exact opposite (a manual sheet, never auto-asked). While these fixture
+// rows said 'more_options' they were a HEALTHY baseline asserting length===0, so the tier rule below
+// could not have been written against them.
+const DIRECTION_ROW = { canonical_key: 'direction_ar', ui_exposed: true, not_exposed_reason: null, filter_tier: 'advanced' };
+const STREETW_ROW = { canonical_key: 'street_width_m', ui_exposed: true, not_exposed_reason: null, filter_tier: 'advanced' };
 const healthyWide = (): Array<Record<string, unknown>> => [...healthy(), DIRECTION_ROW, STREETW_ROW];
 const WIDE = ['direction_ar', 'street_width_m'];
 
@@ -315,6 +320,52 @@ mustCatch("an interview field demoted out of 'advanced' tier — Normal-Filter t
 mustCatch("bedrooms being promoted to 'advanced' so the interview could ask it",
   registryProblems(withRow('bedrooms', { filter_tier: 'advanced' }), CHIPS)
     .some((p) => p.includes("'bedrooms' is filter_tier")));
+
+// ── 6d. THE TIER RULE OVER THE WHOLE SURFACE (added 2026-09-13, routine #5, ops_incident #217) ───
+// The two proofs above walk INTERVIEW_FIELDS — five question ids written out by hand — so the tier
+// rule could not see the four questions that are not on that list. THE LIVE REGISTRY WAS WRONG ABOUT
+// TWO OF THEM while every rule here was green: direction_ar and street_width_m were
+// filter_tier='more_options', which 20260811181508 defines as «manual «خيارات إضافية» sheet only,
+// NEVER auto-asked», while COHORT_QUESTIONS puts both in front of real users automatically and no
+// such sheet exists anywhere in src/. Same blind spot as the exposure rules had one day earlier,
+// one rule further along. Each proof feeds the REAL shared predicate the real shape.
+mustCatch("THE LIVE DEFECT: an auto-asked question parked at 'more_options' — the tier that means "
+  + 'the opposite (direction_ar, as production stored it until 20260913111514)',
+  registryProblems(
+    healthyWide().map((r) => (r.canonical_key === 'direction_ar' ? { ...r, filter_tier: 'more_options' } : r)),
+    CHIPS, WIDE,
+  ).some((p) => p.includes('direction_ar') && p.includes('user-facing Advanced Filter control')));
+
+mustCatch('the same for street_width_m',
+  registryProblems(
+    healthyWide().map((r) => (r.canonical_key === 'street_width_m' ? { ...r, filter_tier: 'more_options' } : r)),
+    CHIPS, WIDE,
+  ).some((p) => p.includes('street_width_m') && p.includes('user-facing Advanced Filter control')));
+
+mustCatch("…and 'backend' tier on a question the app asks is caught the same way (a field demoted "
+  + 'to stored-truth-only while its chip keeps rendering)',
+  registryProblems(
+    healthyWide().map((r) => (r.canonical_key === 'street_width_m' ? { ...r, filter_tier: 'backend' } : r)),
+    CHIPS, WIDE,
+  ).some((p) => p.includes('street_width_m') && p.includes('user-facing Advanced Filter control')));
+
+mustCatch('an AMENITY chip demoted out of advanced tier is caught too — the rule covers every '
+  + 'control, not only the ranked questions',
+  registryProblems(withRow('kitchen', { filter_tier: 'more_options' }), CHIPS)
+    .some((p) => p.includes("'kitchen'") && p.includes('user-facing Advanced Filter control')));
+
+mustCatch('…and the OLD narrow tier rule missed every one of them — the false green, reproduced. '
+  + 'INTERVIEW_FIELDS names five question ids; direction/street_width/rating/unit_subtype are not '
+  + 'among them, so a wrong tier on those four was unreachable',
+  Object.values(INTERVIEW_FIELDS).flat().every((k) => k !== 'direction_ar' && k !== 'street_width_m'
+    && k !== 'rating' && k !== 'reviews_count' && k !== 'unit_subtype_ar'));
+
+check('a control with NO row is not double-reported by the tier rule (undescribed owns that case)',
+  registryProblems(healthyWide(), CHIPS, [...WIDE, 'rating'])
+    .filter((p) => p.includes('rating')).length === 1);
+
+check('…and a registry whose every control IS advanced stays clean (the rule is not vacuously red)',
+  registryProblems(healthyWide(), CHIPS, WIDE).length === 0);
 
 mustCatch('an interview field that VANISHED from the registry (absence must not read as compliance)',
   registryProblems(healthy().filter((r) => r.canonical_key !== 'furnished'), CHIPS)

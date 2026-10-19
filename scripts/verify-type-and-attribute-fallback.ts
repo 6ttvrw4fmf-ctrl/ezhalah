@@ -139,9 +139,23 @@ check(
 
 const RESULTCARD_TS = readFileSync(new URL('../src/components/ResultCard.tsx', import.meta.url), 'utf8');
 const RESULTCARD_NOWS = stripWs(RESULTCARD_TS);
+// 2026-09-18: the label now routes through attrDisplayLabel() instead of arabicOrPlaceholder()
+// directly. That is a STRICTLY STRONGER contract, not a relaxation — it keeps the same English-leak
+// guard and the same ATTRIBUTE_UNRESOLVED_AR final fallback, and adds one step in front: a `key`
+// that is itself a clean Arabic display string (therc publishes «السعر كما نشر» there while `label`
+// holds the English "Price as published") is preferred over the placeholder, while a machine key
+// like wasalt's `propertyMainType` is still refused. Both directions are EXECUTED — not pattern-
+// matched — in scripts/verify-additional-info-labels-are-arabic.ts, which also pins this wiring.
 check(
-  "ResultCard.tsx's AdditionalInformationPanel wraps the row label in arabicOrPlaceholder(..., ATTRIBUTE_UNRESOLVED_AR)",
-  RESULTCARD_NOWS.includes('arabicOrPlaceholder(t(r.label),locale,ATTRIBUTE_UNRESOLVED_AR)'),
+  "ResultCard.tsx's AdditionalInformationPanel resolves the row label via attrDisplayLabel(..., ATTRIBUTE_UNRESOLVED_AR)",
+  RESULTCARD_NOWS.includes("attrDisplayLabel(locale==='en'?englishCatalogText(r.label):t(r.label),r.key,locale,ATTRIBUTE_UNRESOLVED_AR)"),
+);
+check(
+  'the placeholder is still the FINAL fallback for an unresolvable label (no English leak)',
+  /return placeholder;\s*\n\}/.test(
+    readFileSync(new URL('../src/lib/arabicText.ts', import.meta.url), 'utf8')
+      .split('export function attrDisplayLabel')[1] ?? '',
+  ),
 );
 check(
   "ResultCard.tsx's row value passes locale into arAttrValue() (needed for the fix #3 leak check)",
@@ -222,7 +236,7 @@ const AGENT_TSX = readFileSync(new URL('../src/app/agent.tsx', import.meta.url),
 const AGENT_NOWS = stripWs(AGENT_TSX);
 check(
   'agent.tsx\'s district refine-chip question wraps q.location in arLabel() on the Arabic branch (was raw — could render "أي حي تفضّل في Riyadh؟")',
-  AGENT_NOWS.includes('ask=ar?`أيحيتفضّلفي${arLabel(q.location)}؟`:`Whichdistrictin${q.location}?`;'),
+  AGENT_NOWS.includes('ask=ar?nextVariant(REFINE_DISTRICT_AR,{c:arLabel(q.location)}):nextVariant(REFINE_DISTRICT_EN,{c:q.location});'),
 );
 
 console.log('');

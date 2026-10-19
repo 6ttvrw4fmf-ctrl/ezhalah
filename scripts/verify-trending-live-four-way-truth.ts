@@ -30,6 +30,10 @@ import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { AGENT_TURN_MS, PACE_BUDGET_MS, PACE_POLL_MS, describeLoad, paceUntilHealthy, readSearchLoad, settleUntil, verdictForNonArrival } from './lib/afJourneyPacing.ts';
+import { resultsFoundCount, resultsSentenceSource } from '../e2e/lib/resultsSentence.mjs';
+
+/** The Results-Found sentence as an in-browser regex source — derived from the shipped pool. */
+const SENTENCE_SRC = resultsSentenceSource();
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: REST_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -318,11 +322,42 @@ async function runJourney(j: Journey) {
     await tap(group);
     await tap(type);
     await page.waitForTimeout(1500);
-    await page.click('[data-testid="district-input"]').catch(() => {});
-    await page.waitForTimeout(4000);
-    const visibleDistricts = await page.evaluate(READ_TRENDING_ROWS);
+
+    // POLL FOR THE PANEL — NEVER SLEEP-THEN-READ (harness notes 17 and 20, and the rule
+    // scripts/verify-af-live-journey-polling.ts exists to keep). This block used to click the
+    // district input, sleep a flat 4,000 ms, and assert on whatever was on screen at that instant.
+    // On 2026-09-18 that reported «Trending Districts rendered» RED for الرياض and for the الدمام
+    // mobile case, and BOTH accusations were false: re-driven at the identical precondition with a
+    // poll, the rows arrived at 2,428 ms and 1,620 ms, and district_options_ar had returned 200 with
+    // 230 and 104 rows carrying the narrowing. Production was correct; the harness was sampling a
+    // race. Selecting the property type re-renders the field, so a click that lands mid-render is
+    // simply lost — and once it is lost NO amount of extra waiting helps, which is exactly why a
+    // bigger sleep is not the fix. Re-open on each pass instead, and judge on what was OBSERVED.
+    const districtsWhenRendered = async (budgetMs = 25_000) => {
+      const until = Date.now() + budgetMs;
+      const t0 = Date.now();
+      let lastOpen = 0;
+      for (;;) {
+        // Re-focus at most every 2s: focusing an already-open field is a no-op, but it recovers the
+        // one click the re-render swallowed.
+        if (Date.now() - lastOpen > 2_000) {
+          lastOpen = Date.now();
+          await page.click('[data-testid="district-input"]').catch(() => {});
+        }
+        const rows = await page.evaluate(READ_TRENDING_ROWS);
+        if (rows.length > 0) return { rows, arrivedMs: Date.now() - t0 };
+        if (Date.now() >= until) return { rows: [] as { label: string; count: number }[], arrivedMs: null };
+        await page.waitForTimeout(250);
+      }
+    };
+    const district = await districtsWhenRendered();
+    const visibleDistricts = district.rows;
+    // Still a hard failure when the panel genuinely never opens — this is not a route to green, only
+    // a way to stop calling a correct production broken. The detail names what was observed.
     check(`${name}: Trending Districts rendered for ${city}`, visibleDistricts.length > 0,
-      visibleDistricts.map((d) => `${d.label} ${d.count}`).join(' · ') || '(none)');
+      district.arrivedMs === null
+        ? 'the district panel never rendered a single row within 25,000 ms of polling (re-opened every 2s)'
+        : `arrived after ${district.arrivedMs} ms — ` + visibleDistricts.map((d) => `${d.label} ${d.count}`).join(' · '));
 
     // PART 3's PERMANENT RULE: a district's advertised count must be the EXACT count after clicking
     // it — never a wider/unfiltered fallback dressed up as filtered truth. Checking that the number
@@ -349,14 +384,18 @@ async function runJourney(j: Journey) {
     // The assertion is that the number EQUALS the RPC's total_count, and a wrong number is just as
     // stable as a right one — so a real product mismatch still settles here and still fails below.
     let prevHeadline: number | null = null;
-    const READ_HEADLINE = () => {
-      const m = document.body.innerText.match(/لقينا\s*([\d,٬]+)\s*إعلان/);
-      return m ? m[1] : null;
+    // DERIVED FROM THE SHIPPED POOL, NEVER RESTATED (2026-09-19, routine #5). This settle loop read
+    // «لقينا N إعلان», retired by PR #3186 that morning for a four-pool rotation. With the retired
+    // regex the read returned null on EVERY cohort, so `stable` was never true and the loop burned
+    // its whole budget before judging a screen it had never observed settle.
+    const READ_HEADLINE = (src: string) => {
+      const m = document.body.innerText.match(new RegExp(src));
+      return m ? m[0] : null;
     };
     await settleUntil(
       async () => {
-        const raw = await page.evaluate(READ_HEADLINE);
-        const cur = raw ? parseInt(raw.replace(/[^\d]/g, ''), 10) : null;
+        const raw = await page.evaluate(READ_HEADLINE, SENTENCE_SRC);
+        const cur = raw ? resultsFoundCount(raw) : null;
         const stable = !!lastSearch && cur != null && cur === prevHeadline;
         prevHeadline = cur;
         return stable;
@@ -375,12 +414,22 @@ async function runJourney(j: Journey) {
         `p_cities=${JSON.stringify(body.p_cities)}`);
 
       const uiTxt = await page.evaluate(() => document.body.innerText);
-      const m = uiTxt.match(/لقينا\s*([\d,٬]+)\s*إعلان/);
-      const uiCount = m ? parseInt(m[1].replace(/[^\d]/g, ''), 10) : null;
-      if (uiCount != null) {
-        check(`${name}: the displayed result count == the search RPC's total_count`,
-          uiCount === rpcTotal, `ui=${uiCount} rpc=${rpcTotal}`);
-      }
+      const uiCount = resultsFoundCount(uiTxt);
+      // AN UNREADABLE TOTAL IS A DEFECT, NOT A SKIP (2026-09-19, routine #5). This was
+      // `if (uiCount != null) { check(...) }` over a parser pinned to the retired «لقينا N إعلان».
+      // When PR #3186 rotated the sentence the parse returned null on every cohort, the `if` fell
+      // through, and THE UI→RPC COMPARISON — the one layer only a browser can see — stopped running
+      // while this job reported SUCCESS. That is the exact silent-blindness routine #4 had just
+      // fixed in the live sweep; it recurred here because the barrier guarding the class was a
+      // three-file list. The comparison is now unconditional: a screen showing results whose total
+      // cannot be read fails, and says which of the two it is.
+      check(`${name}: the displayed result count == the search RPC's total_count`,
+        uiCount != null && uiCount === rpcTotal,
+        uiCount == null
+          ? `the rendered total could not be READ (rpc=${rpcTotal}). The pool-derived matcher matched `
+            + 'nothing on a settled screen — check scripts/verify-results-sentence-parsers-track-the-pool.ts '
+            + 'before accusing production.'
+          : `ui=${uiCount} rpc=${rpcTotal}`);
 
       // THE LINK THAT WAS UNCHECKABLE BEFORE 2026-09-01.
       //
@@ -422,195 +471,13 @@ async function runJourney(j: Journey) {
   }
 }
 
-/**
- * PART 2/3 ON A RE-ENTRY — the journey the owner broke, in a real browser (P0 2026-09-01).
- *
- * Every journey above starts on a fresh context and searches ONCE, so none of them could ever see
- * this: the user commits an Advanced Filter answer, goes BACK to the Filter screen, and searches
- * again. Measured live before the fix, الرياض / إيجار / سنوي / تجاري / محل:
- *
- *   base search                        566   (no AF param in the body)
- *   «كم عمر العقار؟» → «جديد»          243   (p_is_new_construction: true)
- *   back → Trending «الرياض» → «بحث»   566   ← the committed answer simply gone from the request
- *
- * and every Trending row on that second visit advertised the 566-scoped number, so the card
- * promised exactly the wrong count it then delivered. Reproduced through a Trending city card, a
- * district card, a different city, and with Trending never touched at all.
- *
- * ASSERTED ON THE CAPTURED REQUEST BODY, never on rendered text: a UI assertion passes on a page
- * that merely re-renders a stale number. Note the «تصفية» pill is collapsed once a search has run
- * (agent.tsx modeSearched), so browser Back is the only non-destructive way back — which is exactly
- * the route the owner took.
- */
-async function runAfReentryJourney(j: {
-  name: string; city: string; group: string; type: string; deal: string[]; category: string;
-  /** testID of the Advanced Filter option to commit, e.g. 'af-option-new'. */
-  afOption: string;
-}) {
-  const { name, city, group, type, deal, category, afOption } = j;
-  console.log(`\n════════ AF RE-ENTRY JOURNEY: ${name} ════════`);
-  const ctx = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'ar-SA', viewport: { width: 1440, height: 900 } });
-  const page = await ctx.newPage();
-  const searches: { body: any; total: number }[] = [];
-  const cityCalls: { body: any }[] = [];
-  page.on('response', async (resp) => {
-    if (resp.request().method() !== 'POST') return;
-    try {
-      const rows = await resp.json();
-      if (!Array.isArray(rows)) return;
-      const body = JSON.parse(resp.request().postData() || '{}');
-      if (resp.url().includes('/rpc/location_search_candidates_ar') && body.p_limit > 1)
-        searches.push({ body, total: Number(rows?.[0]?.total_count ?? rows.length) });
-      else if (resp.url().includes('/rpc/top_cities_by_deal_ar')) cityCalls.push({ body });
-    } catch {}
-  });
-  const tap = async (txt: string, timeoutMs = 9000) => {
-    const until = Date.now() + timeoutMs;
-    let box: any = null;
-    while (Date.now() < until) {
-      box = await page.evaluate(CLICK_LEAF, txt);
-      if (box) break;
-      await page.waitForTimeout(300);
-    }
-    if (!box) throw new Error(`control never rendered: ${txt}`);
-    await page.mouse.click(box.x, box.y);
-    await page.waitForTimeout(900);
-  };
-  /** Only the Advanced Filter half of a request — the half that went missing. */
-  const afOf = (body: any) => Object.fromEntries(Object.entries(body)
-    .filter(([k]) => /^p_(amenities|bath_min|furnished|street_width_min|directions|rating_min|reviews_min|unit_subtypes|age_min|age_max|is_new_construction)$/.test(k)));
-
-  try {
-    await gotoLive(page, `${BASE}/`, { timeout: 60000 });
-    await page.waitForTimeout(5000);
-    for (const d of deal) await tap(d);
-    await tap(category);
-    await page.click('[data-testid="city-input"]');
-    await page.waitForTimeout(3000);
-    await tap(city).catch(async () => { await page.fill('[data-testid="city-input"]', city); await tap(city); });
-    await page.waitForSelector('[data-testid="selected-city-visual"]', { timeout: 6000 }).catch(() => null);
-    await tap(group);
-    await tap(type);
-    await tap('بحث');
-    await page.waitForTimeout(14000);
-    const base = searches[searches.length - 1] ?? null;
-    check(`${name}: the base search ran`, !!base, `captured ${searches.length} search(es)`);
-
-    // ── commit an Advanced Filter answer, then FINISH the round ─────────────────────────────────
-    // By testID, never by label: the copy on this button is being reworked in a parallel PR, and a
-    // barrier that silently stops finding its own entry point reports green on an untested journey —
-    // which is precisely what the first run of this journey did.
-    //
-    // WATCH THE TRENDING CALLS FROM HERE, not from after goBack(). Measured on production
-    // 2026-09-02, every RPC of one session logged in order: the AF-carrying top_cities_by_deal_ar
-    // fires DURING the round, in the same breath as the committed search — the Filter home is still
-    // mounted, so the moment the answer lands its reconciled query re-derives the Trending pool.
-    // Coming back then focuses the city field on a pool key that is ALREADY in locations.ts's
-    // CITY_FIELD_POOLS, so no second, byte-identical request is made, and correctly so. Marking the
-    // window after goBack() asserted "a cache miss happened", which is not a product property; the
-    // product property is that the pool the user is shown was computed WITH the committed answer.
-    const beforeTrending = cityCalls.length;
-    await page.waitForSelector('[data-testid="results-narrow"]', { timeout: 30000 });
-    await page.click('[data-testid="results-narrow"]');
-    await page.waitForSelector('[data-testid="af-card"]', { timeout: 20000 });
-    await page.click(`[data-testid="${afOption}"]`);
-    await page.waitForTimeout(900);
-    await page.click('[data-testid="af-confirm"]');
-    // The store write happens when the ROUND ends (finishGuided → runRefine), not per answer, so the
-    // remaining questions must be skipped out or nothing is ever committed. Skip is a real answer of
-    // "I'm open": it applies no predicate and cannot move the count.
-    for (let i = 0; i < 12; i++) {
-      await page.waitForTimeout(1500);
-      if (!(await page.$('[data-testid="af-card"]'))) break;
-      await page.click('[data-testid="af-skip"]').catch(() => {});
-    }
-    await page.waitForTimeout(14000);
-    const committed = searches[searches.length - 1] ?? null;
-    const committedAf = committed ? afOf(committed.body) : {};
-    // FATAL, not a check: every assertion below compares against this answer, so if it never landed
-    // they would all compare {} to {} and pass while proving nothing at all.
-    if (!Object.keys(committedAf).length) {
-      throw new Error(`the Advanced Filter answer never reached the request (af params = ${JSON.stringify(committedAf)}; ` +
-        `base=${base?.total} committed=${committed?.total}) — the journey below would be vacuous`);
-    }
-    check(`${name}: the Advanced Filter answer reached the request`, true, `af params = ${JSON.stringify(committedAf)}`);
-    check(`${name}: and it NARROWED the set (an AF answer may only ever narrow)`,
-      !!base && !!committed && committed.total < base.total, `base=${base?.total} committed=${committed?.total}`);
-
-    // ── back to the Filter screen, re-open Trending, search again ───────────────────────────────
-    await page.goBack({ waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(4000);
-    await page.fill('[data-testid="city-input"]', '');           // clearing re-opens the Trending Top-6
-    await page.click('[data-testid="city-input"]');
-    await page.waitForTimeout(4000);
-    const rows = await page.evaluate(READ_TRENDING_ROWS);
-    check(`${name}: Trending re-rendered on the way back`, rows.length > 0,
-      rows.map((r) => `${r.label} ${r.count}`).join(' · ') || '(none)');
-    // R14.1.2: Trending is the location breakdown of the EXACT current eligible set — which now
-    // includes the committed Advanced Filter answer. So the MOST RECENT city-pool request made
-    // since the answer was committed must carry it: that request is the one whose numbers the rows
-    // above are rendering, whether it was served fresh or from the in-session pool cache. Zero
-    // requests since the commit IS a failure — it would mean the pool the user is looking at was
-    // computed before the answer existed, which is exactly the defect (pre-fix, every call in the
-    // window carried af={} while the committed search carried p_is_new_construction, and this check
-    // was RED).
-    const trendingCall = cityCalls.slice(beforeTrending).pop() ?? null;
-    check(`${name}: the Trending request carries the committed Advanced Filter answer`,
-      !!trendingCall && JSON.stringify(afOf(trendingCall.body)) === JSON.stringify(committedAf),
-      trendingCall
-        ? `trending af=${JSON.stringify(afOf(trendingCall.body))} committed af=${JSON.stringify(committedAf)}`
-        : `no Trending request at all since the answer was committed — the pool predates the answer`);
-
-    const advertised = rows.find((r) => r.label === city)?.count ?? null;
-    await tap(city).catch(async () => { await page.fill('[data-testid="city-input"]', city); await tap(city); });
-    await page.waitForTimeout(1200);
-    await tap('بحث');
-    await page.waitForTimeout(14000);
-    const reentry = searches[searches.length - 1] ?? null;
-
-    check(`${name}: the re-entry search carries the SAME Advanced Filter params (no dropped filters)`,
-      !!reentry && JSON.stringify(afOf(reentry.body)) === JSON.stringify(committedAf),
-      `re-entry af=${JSON.stringify(reentry ? afOf(reentry.body) : null)} committed af=${JSON.stringify(committedAf)}`);
-    check(`${name}: the property type did not widen back out to its group`,
-      !!reentry && !!committed && JSON.stringify(reentry.body.p_types) === JSON.stringify(committed.body.p_types),
-      `re-entry p_types=${JSON.stringify(reentry?.body.p_types)} committed=${JSON.stringify(committed?.body.p_types)}`);
-    check(`${name}: the Normal Filter state round-tripped (deal, period, category)`,
-      !!reentry && !!committed && reentry.body.p_deal === committed.body.p_deal
-        && reentry.body.p_rent_period === committed.body.p_rent_period
-        && reentry.body.p_category === committed.body.p_category,
-      `re-entry=${JSON.stringify([reentry?.body.p_deal, reentry?.body.p_rent_period, reentry?.body.p_category])}`);
-    check(`${name}: the eligible set is the one the user committed, not the pre-AF one`,
-      !!reentry && !!committed && reentry.total === committed.total,
-      `committed=${committed?.total} re-entry=${reentry?.total}`);
-    // COUNT == CLICK-THROUGH (R14.2.1). The whole scope was already committed before Trending
-    // rendered, so the advertised city number is not merely an upper bound here — it is the answer.
-    //
-    // ON ITS OWN THIS CHECK CANNOT SEE THE DEFECT, and that is the point of the one above it: the
-    // advertised count and the landed count are built from the SAME store, so when the store has
-    // silently dropped the AF answer they agree with each other perfectly and are both wrong
-    // (measured on production 2026-09-01: advertised 566, landed 566, against a committed 243).
-    // Only «the eligible set is the one the user committed» distinguishes the two states.
-    if (advertised != null && reentry) {
-      check(`${name}: the Trending row advertised ${advertised} and clicking it delivered exactly that`,
-        advertised === reentry.total, `advertised=${advertised} landed=${reentry.total}`);
-    }
-    // …AND THAT NUMBER IS DB TRUTH (added 2026-09-02). advertised == landed is RPC-vs-RPC: both are
-    // built from the same clause, so a predicate wrong in the same way on both sides still agrees.
-    // The landed request is the one body here that carries a city AND the committed AF answer, so
-    // it is what the independent oracle can price: with the check above, the Trending row itself
-    // is then pinned to canonical truth, not merely to its own click-through.
-    if (reentry) {
-      const o = await oracleCount(reentry.body);
-      if (o.count == null) { unverified++; console.log(`SKIP  ${name}: oracle declined the re-entry body — ${o.unhandled[0]}`); }
-      else check(`${name}: the landed (and advertised) count equals INDEPENDENT DB truth`, o.count === reentry.total,
-        `oracle=${o.count} landed=${reentry.total}`);
-    }
-  } catch (e: any) {
-    check(`${name}: journey completed without a harness error`, false, e.message);
-  } finally {
-    await ctx.close();
-  }
-}
+// RETIRED 2026-10-03: the re-entry journey that used to live here. It committed an Advanced Filter
+// answer, went BACK to the Filter, and asserted that the answer was still on the next request and in
+// Trending's numbers (the owner's P0 of 2026-09-01). The owner then ruled that going back to the Filter
+// always opens a CLEAN form — no carried answers, no chips, no «مسح الكل» — so the premise is gone and
+// the journey would now fail on correct behaviour. The four-way truth of every other journey above is
+// untouched, and the clean return itself is pinned offline by verify-clear-all-reset.ts and
+// verify-af-state-never-leaks-into-filter.ts.
 
 // Measure the product, not the queue — see scripts/lib/afJourneyPacing.ts.
 {
@@ -630,12 +497,6 @@ await runJourney({ name: 'Riyadh · Buy · Apartment — price 900k + area>=120 
   deal: [], group: 'الشقق والسكن المشترك', type: 'شقة', priceMax: 900000, areaMin: 120 });
 await runJourney({ name: 'MOBILE 390x844 · Dammam · Buy · Apartment', city: 'الدمام',
   deal: [], group: 'الشقق والسكن المشترك', type: 'شقة', viewport: { width: 390, height: 844 } });
-// The owner's own repro, at the exact scope they measured it on.
-await runAfReentryJourney({ name: 'RE-ENTRY · Riyadh · Rent-Annual · Shop + property_age', city: 'الرياض',
-  // إيجار then شراء: the deal buttons are two independent toggles, so tapping إيجار alone leaves
-  // BOTH on (dealCombined), and combined mode has no period selector at all — «سنوي» never renders.
-  deal: ['إيجار', 'شراء', 'سنوي'], category: 'تجاري', group: 'التجزئة والمكاتب', type: 'محل', afOption: 'af-option-new' });
-
 await browser.close();
 console.log(failures + undecided
   ? `\n✗ ${failures} check(s) FAILED, ${undecided} NOT EXERCISED (${unverified} request(s) the oracle honestly declined):\n` +

@@ -44,3 +44,28 @@ jobs:
         run: pip install pytest -r scrapers/requirements.txt
       - name: Run shared location-resolver + placeholder-guard + price-fidelity tests
         run: python -m pytest scrapers/common/tests/ -v
+      - name: Run the per-scraper source-fidelity barriers
+        # The 20 scrapers/<platform>/test_*.py files are assert-at-IMPORT scripts, not pytest
+        # test_ functions, and they are written to own their interpreter: every one of them
+        # stubs scrapers.common.db into sys.modules, and several rebind a shared helper
+        # (`_al.to_catalog = lambda city_ar: ...`) with MUTUALLY INCOMPATIBLE signatures.
+        # That is harmless one-file-per-process and poisonous in a shared process, so widening
+        # the pytest target above to `scrapers/` is not an option: measured 2026-09-14, it turns
+        # 1599 passing tests into 27 collection errors — AUTHORITATIVE_NULL disappearing into an
+        # empty stub module, and `to_catalog() got an unexpected keyword argument region_hint`
+        # once abwbna's 1-arg lambda has overwritten the real function for alhoshan/aqargate.
+        # (pytest would also report `no tests ran` for these files, since they define no test_ fn.)
+        # So: one file, one interpreter — exactly how they are run by hand. Globbed, never
+        # enumerated, for the same reason the path filters above are not enumerated: a list rots,
+        # and a barrier nobody runs is how awal/test_parked_source.py sat broken from the day it
+        # was written (ModuleNotFoundError: no sys.path bootstrap) until 2026-09-14.
+        run: |
+          rc=0; n=0
+          for f in scrapers/*/test_*.py; do
+            n=$((n + 1))
+            echo "── $f"
+            python "$f" || { echo "::error file=$f::barrier FAILED"; rc=1; }
+          done
+          [ "$n" -gt 0 ] || { echo "::error::glob matched no barriers — the suite silently ran nothing"; rc=1; }
+          echo "ran $n per-scraper barriers"
+          exit $rc

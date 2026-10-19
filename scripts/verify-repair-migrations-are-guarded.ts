@@ -48,6 +48,402 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-10-18. aqar `direction` repaired to the closed facade vocabulary (14 rows).
+  '20261018234721_trg_aqar_parse_respects_a_rate_headline.sql':
+    'its UPDATEs are an apply-time PROOF inside a rolled-back block (no row is repaired). The outcome it protects, a ' +
+    'per-metre rate served as the total, is watched by mon_detect_rate_served_as_total (20261018124842) and ' +
+    'mon_detect_served_total_below_city_floor (20261018135715), both on the hourly roster; the edit is already applied, ' +
+    'so the file stays byte-identical to the recorded migration and cannot name its watcher itself',
+  '20261018235847_aqar_facade_closed_vocabulary.sql':
+    'the same migration makes trg_aqar_parse write only public.aqar_facade(), and the Python enricher writes only ' +
+    'aqar_facade() (test_aqar_facade_closed_vocabulary_2026_10_18.py), so no write path can store a value outside the ' +
+    'vocabulary again; the migration asserts 0 such rows at apply',
+  // 2026-10-18. Undoes 15 rows of a cancelled re-parse run, back to the exact district each served before it.
+  '20261018131709_dealapp_restore_numbered_districts_a_broad_plot_rule_moved.sql':
+    'restores 15 dealapp districts that the cancelled run 39129698696 rewrote under a too-broad plot-code rule, each to ' +
+    'the value search_listings_ar served before the run and only where the row still held the run\'s value; the rule ' +
+    'that caused it is pinned by test_dealapp_plot_code_district_2026_10_18.py (numbered districts stay, short codes go), ' +
+    'and the next re-parse writes the same page value, so there is no state left for a detector to watch',
+  // 2026-10-18. dealapp twin towns placed by the ad's own pin: the only UPDATE is inside the always-rolled-back proof.
+  '20261019034701_dealapp_town_aliases_and_island_by_own_pin.sql':
+    'changes no listing row: the one UPDATE (DA418566) runs inside the proof sub-blocks that always roll back; the bridge '
+    + 'edit is pinned by verify-dealapp-town-placed-by-own-pin.ts and the scraper half by '
+    + 'test_dealapp_island_town_by_own_pin_2026_10_19.py',
+  '20261019001829_dealapp_town_placed_by_own_pin.sql':
+    'changes no listing row: the one UPDATE (DA417737) runs inside the proof sub-blocks that always roll back, and the ' +
+    'migration fails if a bridge row survives; the bridge edit itself is pinned by verify-dealapp-town-placed-by-own-pin.ts ' +
+    'and the scraper half by test_dealapp_own_pin_town_2026_10_18.py',
+  // 2026-10-18. ksaaqar `neighborhood` repair (data half of #7511), applied before its detector existed.
+  '20261018125140_ksaaqar_neighborhood_holds_only_a_stated_district.sql':
+    'watched by its companion 20261018131230_mon_detect_ksaaqar_neighborhood_unstated.sql, which creates ' +
+    'mon_detect_ksaaqar_neighborhood_unstated() over the same predicate and splices it into the ' +
+    'mon_run_all_detectors() roster (0 live after the repair; a planted plus code is caught, 0 -> 1). The scraper ' +
+    'half is pinned by test_ksaaqar_location_field_district_2026_10_18.py',
+  // 🔬 AF engineer, 2026-10-12. Two NULL-only back-fills of Advanced Filter answers from each ad's OWN stored
+  // text, computed by the same shared reader the scrapers now call on every crawl (yes-or-nothing prose for
+  // sites with no structured field), so a re-crawl writes the same value and a new row cannot re-open the gap.
+  '20261012093213_dealapp_residential_furnished_from_own_words.sql':
+    'NULL-only back-fill of dealapp residential furnished from its stored description (a strict subset of ' +
+    'normalize.amenities_from_lines, zero disagreements over 22,594 rows); scrapers/dealapp/run.py af_answers() ' +
+    'now writes it on every crawl, pinned with mutations by scrapers/common/tests/test_dealapp_af_answers.py, and ' +
+    'the migration ends in a check block that executes the view against the raw table',
+  '20261012100330_sirdab_remal_amenities_from_own_words.sql':
+    'NULL-only, true-only back-fill of sirdab / remal amenities from their stored description via ' +
+    'normalize.prose_amenities_yes; both parsers now write the same on every crawl, pinned with mutations by ' +
+    'scrapers/common/tests/test_prose_only_sites_read_amenities.py',
+  '20261013095626_sadiqeltajer_frontage_one_street_or_nothing.sql':
+    'Fifteen sadiqeltajer rows repaired from each ad\'s own frontage row (CI source-reread 38379060128), every ' +
+    'update guarded on the exact value it replaces; scrapers/sadiqeltajer/run.py now reads one street or nothing on ' +
+    'every crawl, so a re-crawl writes the same facade and never re-creates a cross-street pair, pinned with ' +
+    'mutations by scrapers/common/tests/test_sadiqeltajer_one_street_or_nothing.py',
+  '20261014093140_jurash_amenities_from_own_words_and_garage_silence.sql':
+    'Twelve jurash rows, each update guarded on its id and on the exact value it replaces: NULL-only, true-only ' +
+    'kitchen / maid / driver room from the stored description via normalize.prose_amenities_yes, and five ' +
+    'parking = false rows with no garage field back to NULL; scrapers/jurash/run.py prose_answers() and ' +
+    'parking_answer() now write the same on every crawl, pinned with mutations by ' +
+    'scrapers/common/tests/test_jurash_amenity_answers.py',
+  '20261013094218_squares_shmoualshmal_kitchen_ac_from_feature_chips.sql':
+    'NULL-only, true-only back-fill of squares / shmoualshmal kitchen and AC from each row\'s own STRUCTURED chip ' +
+    'list (additional_info.features_ar); both parsers\' chip maps now write the same on every crawl, pinned with a ' +
+    'mutation by scrapers/common/tests/test_feature_chip_kitchen_ac_squares_shmoualshmal.py',
+  '20261012094158_eaqartabuk_feature_checklist_to_amenities.sql':
+    'NULL-only, true-only back-fill of eaqartabuk amenities from each row\'s own STRUCTURED features list ' +
+    '(additional_info.features); scrapers/eaqartabuk/run.py feature_answers() now writes the same on every crawl, ' +
+    'pinned with a mutation by scrapers/common/tests/test_eaqartabuk_feature_checklist.py',
+  '20261012093639_alkhaas_rawasidark_amenities_from_own_words.sql':
+    'NULL-only, true-only back-fill of alkhaas / rawasidark amenities from their stored description via ' +
+    'normalize.prose_amenities_yes; both parsers now write the same on every crawl, pinned with mutations by ' +
+    'scrapers/common/tests/test_prose_only_sites_read_amenities.py',
+  // ⚡ Scraping engineer, 2026-10-10. Three NULL-only back-fills (each writes only where the column is NULL,
+  // never a rewrite of a known value) from the row's OWN stored source field, which the scraper now
+  // writes on every crawl — so a new row cannot re-open the gap, and each migration ends in a check block.
+  '20261010051214_wasalt_land_meters_are_services.sql':
+    'NULL-only back-fill of electricity/water_supply on wasalt LANDS from their own additional_info ' +
+    'electricityMeter/waterMeter; scrapers/wasalt/run.py + enrich.py land_service_fields() now write the same ' +
+    'on every read, pinned (with a mutation) by scrapers/common/tests/test_wasalt_land_meters_are_services.py',
+  '20261010052741_aqarcity_land_services_checklist.sql':
+    'NULL-only back-fill of electricity/water_supply/sanitation on aqarcity LANDS from their own stored ' +
+    '«خدمات العقار» checklist; scrapers/aqarcity/run.py land_utilities() now writes the same on every crawl, ' +
+    'pinned by scrapers/common/tests/test_aqarcity_land_services_checklist.py',
+  '20261010052859_wasalt_meter_parse_gap_leftovers.sql':
+    'NULL-only back-fill of separate_*_meter from each row\'s own additional_info for 7,403 rows enriched ' +
+    'before 2026-09-04; enrich.py meter_fields_from_deep() has written them on every enrichment since, pinned ' +
+    'by test_wasalt_enrich_meter_parse_gap.py, and mon_detect_wasalt_meter_parse_gap watches the class',
+  // 🔧 Quality & Repair, 2026-10-12. Fifteen located_row_unreachable rows (price/size gate hid them; the
+  // source's own page prints the same extreme price) registered in ops_price_source_verified and flipped
+  // production_ready. The class is watched by the very detector that raised them: a row that loses its
+  // registration, or that the gate re-hides on the next sync upsert, re-enters the cohort and
+  // mon_detect_located_row_unreachable (in the roster, whole cohort evaluated at ≤ 200 rows) raises it again.
+  '20261012132626_qa_located_row_unreachable_source_verified_dealapp_raghdan.sql':
+    'registration-gated un-hide of 15 rows whose source page prints the stored price (evidence string per ' +
+    'row); enforce_price_size_sanity() re-reads ops_price_source_verified on every upsert, and ' +
+    'mon_detect_located_row_unreachable watches exactly this cohort (it raised these 24; 9 stay hidden and open)',
+  // ⚡ Scraping Engineer, 2026-10-13. One more located_row_unreachable row of the same cohort (wasalt
+  // 12915861, its source page read from CI prints the stored price), the same shape as 20261012132626.
+  '20261013051932_scraping_engineer_wasalt_12915861_source_verified.sql':
+    'registration-gated un-hide of 1 row whose source page prints the stored price (evidence string); ' +
+    'enforce_price_size_sanity() re-reads ops_price_source_verified on every upsert, and ' +
+    'mon_detect_located_row_unreachable watches exactly this cohort (it raised this row)',
+  // 🔧 Quality & Repair, 2026-10-12. The eleven aqar rows aqar_classify_shadow_drift() classified PROVEN_WRONG
+  // (own city + neighbourhood resolve under another city) rewritten to the function's fresh_* values, in the
+  // shadow row and the served row, logged to aqar_resolver_log, with a trailing assertion that the cohort is
+  // empty. The class is watched by the detector that raised it: mon_detect_aqar_proven_wrong_resolution (in the
+  // roster) re-runs the same function every sweep, so any row that drifts wrong again is raised again.
+  '20261012142822_qa_aqar_proven_wrong_city_resolutions_repaired_from_own_fields.sql':
+    'self-guarding repair of exactly the aqar_classify_shadow_drift() PROVEN_WRONG cohort (11 rows), each value ' +
+    'the function\'s own reading of the listing\'s raw_city + neighborhood; mon_detect_aqar_proven_wrong_resolution ' +
+    'watches the class every sweep and raised these rows (17 open alerts on 2026-10-12)',
+  // Owner session 2026-10-09 (owner: «make the call yourself»), for the 🦅 Falcon's repair below. The class it
+  // fixes — a searchable listing served at exactly 0 for its own deal — is already watched fleet-wide.
+  '20261009204020_bossbih_per_metre_ads_stale_zero_total_to_null.sql':
+    'watched by the fleet-wide mon_detect_zero_price_served() (in the mon_run_all_detectors() roster, every ' +
+    'platform but ramzalqasim), the very detector that raised zero_price_served #4565 on these six rows; a ' +
+    're-seen that wrote 0 back would re-raise it. The cause is fixed too: the per-metre branch now emits ' +
+    'AUTHORITATIVE_NULL (scrapers/bossbih/run.py), pinned by test_bossbih_price_basis_and_traps.py',
+  // 🔬 AF engineer, 2026-10-08. Each of tonight's three repairs is watched by its own companion or pinned the
+  // same way as the 2026-10-07 entries below.
+  // 2026-10-18 (owner P1 «we can get sued»): the repair was applied before its watcher existed, so the applied file cannot
+  // name it; the companion creates it and splices it into the roster.
+  '20261018123454_wasalt_rate_is_not_the_total.sql':
+    'watched by its companion 20261018124842_mon_detect_rate_served_as_total.sql, which creates ' +
+    'mon_detect_rate_served_as_total() (P1, routed to 🔧 repair) over every SERVED sale row whose own description proves the ' +
+    'served price is a per-m² rate, and splices it into the mon_run_all_detectors() roster (a planted served 8,000 on the ' +
+    '9.8M ad 5848132 is caught at apply)',
+  // Same class, same watcher: the reader now reads both texts and the seller's line; the applied detector reads through it.
+  '20261018135052_wasalt_rate_proof_reads_both_texts_and_the_sellers_line.sql':
+    'watched by mon_detect_rate_served_as_total() (20261018124842, rostered, P1 to 🔧), which reads through the very ' +
+    'wasalt_description_total() this file widens, and by its companion 20261018135715_mon_detect_served_total_below_city_floor.sql ' +
+    '(P1 over every served sale plot under 2% of its city median SAR/m² that no page read backs; a planted 6.5 SAR/m² Riyadh ' +
+    'plot is caught at apply)',
+  '20261008095541_sanadak_unticked_feature_box_is_silence_not_no.sql':
+    'watched by its companion 20261008095825_mon_detect_sanadak_unticked_box_as_no.sql, which creates ' +
+    'mon_detect_sanadak_unticked_box_as_no() over the served rows AND both views and splices it into the ' +
+    'mon_run_all_detectors() roster (0 live after the repair; a planted false is caught, 0 -> 1)',
+  '20261008102944_suwar_prepared_shaft_is_not_an_elevator.sql':
+    'watched by its companion 20261008103334_mon_detect_suwar_prepared_shaft_as_lift.sql, which creates ' +
+    'mon_detect_suwar_prepared_shaft_as_lift() over the same predicate and splices it into the ' +
+    'mon_run_all_detectors() roster (0 live after the repair; a planted shaft-only yes is caught, 0 -> 1)',
+  '20261008100625_af_prose_backfill_therc_shomou_arkaan.sql':
+    'NULL-only back-fill (writes only where the column is NULL, never a rewrite) of values the therc, shomou ' +
+    'and arkaan parsers now read from the same stored text on every crawl; pinned by ' +
+    'test_therc_source_truth.py, test_shomou_in_date_ads_only.py and test_arkaan_price_period_and_type.py',
+  // 🔬 AF engineer, 2026-10-07. A NULL-only fill (0 rewrites) of gathern bathrooms from the unit page's own
+  // «دورات المياة» section the scraper already stored verbatim (additional_info.extra_sections). It cannot
+  // decay: the crawl's upsert drops an absent icon count instead of NULLing the column, and every detail
+  // back-fill now writes the same count from the same section (scrapers/gathern/run.py
+  // _bathrooms_from_sections), pinned by test_gathern_bathrooms_from_page_section.py.
+  // Same shape: a NULL-only fill of kitchen from the «المطابخ: N» count each ad's own stored text carries;
+  // the sakan and tuba parsers now read that count on every crawl (normalize.kitchen_from_count), and the
+  // crawl upsert drops an absent key, so it cannot decay. Pinned by test_floor_details_kitchen_count.py.
+  '20261007094958_af_sakan_tuba_kitchen_count_is_a_kitchen.sql':
+    'NULL-only back-fill from the floor-details kitchen count both parsers now read on every crawl; ' +
+    'pinned by test_floor_details_kitchen_count.py::test_sakan_stores_the_stated_kitchen_and_keeps_the_lift_unknown',
+  '20261007093148_af_gathern_bathrooms_from_page_section.sql':
+    'NULL-only back-fill from the page section the scraper now writes on every detail back-fill; ' +
+    'pinned by test_gathern_bathrooms_from_page_section.py::test_backfill_fills_a_null_count_from_the_page',
+  // 🔬 AF engineer, 2026-10-06. Same shape as the ksaaqar back-fill below: a one-shot copy of a value
+  // the scraper ALREADY captured verbatim (source_capture.rem_fields «واجهة العقار») into the column
+  // the same scraper now writes from the same field on every crawl (scrapers/hajer/run.py map_listing),
+  // pinned by test_hajer_direction_reaches_the_column.py (3 tests fail on the old map_listing).
+  '20261006100226_hajer_direction_reaches_the_column.sql':
+    'back-fill of the direction column from the REM field the scraper now writes to it on every crawl; ' +
+    'pinned by test_hajer_direction_reaches_the_column.py::test_the_published_facade_is_stored_in_the_column',
+  '20261005094209_aldarim_saas_unfilled_room_block_is_silence.sql':
+    'watched by its companion 20261006095236_aldarim_saas_unfilled_block_false_detector.sql, which creates ' +
+    'mon_detect_aldarim_saas_unfilled_block_false() over the same eight tables and predicate and needle-edits ' +
+    'it into the mon_run_all_detectors() roster (0 live on 563 active rows; a planted false is caught)',
+  // 🔬 AF engineer, 2026-10-06. Both became visible the day repairClassifier.ts learned format()
+  // placeholders (they always were repairs; the classifier could not read `update public.%I`).
+  // The first is watched by an existing detector that is not named mon_detect_*: the field-level
+  // safety barrier's detect_manufactured_negatives() (live in production; run by
+  // verify-safety-barrier.ts) fires on any (platform × column) holding false with true nowhere,
+  // exactly the fabricated negatives this migration retracted.
+  '20260911115757_retract_fabricated_count_derived_amenity_negatives.sql':
+    'watched by public.detect_manufactured_negatives() (field-level safety barrier, ' +
+    '20260810151116), which flags any platform x amenity column holding false with true nowhere',
+  // An owner REVERSAL that restores exactly the rows 20260919230553 hid (which itself ships a
+  // detector). Re-activating listings is not a value a scraper can decay back; liveness owns them.
+  '20260919231035_restore_the_four_down_sites_listings_owner_reversal.sql':
+    'owner reversal of 20260919230553 (guarded): restores exactly the rows it hid; no corrected value ' +
+    'exists for a re-scrape to undo, and liveness (LISTING_LIVENESS.md) owns those rows from here',
+  // 🔬 AF engineer, 2026-10-05 (PR #6112). A one-shot BACK-FILL, not a correction of a value that could
+  // drift: ksaaqar's map_listing() parsed «التكييف» but filed it only in additional_info.air_conditioning.
+  // From this PR on, the column and that key are written by the SAME parse_tristate(page_text, "التكييف")
+  // call in the same map_listing() on every crawl, so the two cannot diverge again — pinned by
+  // test_the_published_ac_answer_is_stored_in_the_column (fails on the old map_listing). The migration only
+  // copies the already-captured JSON boolean into rows crawled before the fix, where the column was NULL.
+  // A re-scrape cannot re-corrupt it: the upsert drops None, and a non-None value is the same parse.
+  '20261005103137_ksaaqar_ac_reaches_the_column.sql':
+    'back-fill of a column now written by the same parse as its source key on every crawl; pinned by ' +
+    'test_ksaaqar_captures_what_the_source_publishes.py::test_the_published_ac_answer_is_stored_in_the_column',
+  // routine #11, 2026-09-24 (ops_incident). Resets wasalt missing_count in {1,2} to 0 — every one of
+  // those strikes was produced by the enum-rollup clock bug (rollup_started_at() in
+  // scrapers/wasalt/liveness.py), not by real absence, and nothing has self-healed a wasalt row since
+  // 2026-09-12 (the control-group guard aborted every flip on every run since). Same two-migrations
+  // shape as the ksaaqar precedent below: the repair had to run before its watcher could exist.
+  //
+  // What watches the class: mon_detect_wasalt_liveness_flips_stalled(), created in
+  // 20260924211725 (dedup-key fix in 211811, a missing-column fix in 211837), rostered into
+  // mon_run_all_detectors() in 20260924211857 via the idempotent anchor splice (raises rather than
+  // no-ops if its anchor moved; reachability asserted in the same migration). It fires when the last
+  // 3 wasalt enum-strike runs all aborted every flip — the exact standing shape the clock bug
+  // produced — which is a stronger guarantee than re-asserting THIS specific value reset: it catches
+  // any future cause of the same "checker running, striking, never confirming" failure, not only a
+  // recurrence of this one clock bug. Not re-asserted because re-running this reset after the pipeline
+  // is healthy again would blank real, freshly-earned strikes.
+  '20260924210249_repair_wasalt_clock_bug_false_strikes_mc1_mc2.sql':
+    'watched by its companion 20260924211725_create_wasalt_liveness_flips_stalled_detector_fn.sql '
+    + '(rostered in 20260924211857_register_wasalt_liveness_flips_stalled_detector.sql), which fires '
+    + 'mon_detect_wasalt_liveness_flips_stalled() whenever 3 consecutive wasalt enum-strike runs all '
+    + 'abort every flip — the standing shape of the bug this repair undoes, not just its one instance. '
+    + 'Not re-asserted because re-running the reset after the pipeline recovers would blank real, '
+    + 'freshly-earned strikes',
+  // The two-migrations-minutes-apart shape (see the identical entries below). The repair blanks
+  // EVERY ksaaqar price: its parser read a value from a static sidebar of five unrelated ads that
+  // is byte-identical on every page of the site, so 685 of 720 priced rows shared seven values and
+  // ads that published no price were given one anyway. The repair (20260919091545) had to run
+  // before its watcher could exist, so the repair file itself never reaches a mon_detect_* in
+  // executed SQL.
+  //
+  // What watches the class: mon_detect_price_borrowed_from_chrome(), created in 20260919092122,
+  // rostered into mon_run_all_detectors() in that same migration (the splice RAISES rather than
+  // no-ops if its anchor moved, and reachability is asserted afterwards), and reclassified P0->P1
+  // in 20260919170553 (a full-fleet aggregate belongs on the daily roster, not the 300s fast lane).
+  // It is a SHAPE detector — it fires when ANY platform's price distribution clusters past 15% on
+  // its top value or 50% on its top three, which is exactly what a chrome-borrowed price looks like
+  // and what a real market never does. Thresholds were measured against the live fleet (healthy max
+  // 11.1% / 23.7%), and it was mutation-proven by replaying ksaaqar's pre-repair distribution
+  // (fires, 33.7% / 83.5%) against sadiqeltajer's real 668 rows (silent, 4.3% / 11.4%).
+  //
+  // Deliberately NOT re-asserted the way the fabricated-amenity and price-evidence companions are:
+  // re-running this repair's UPDATE would now BLANK the real prices the fixed sweep has since
+  // written, destroying good data. The standing class detector is the guarantee here, not a
+  // re-assertion. Open 20260919092122 to check this reason rather than taking it on trust.
+  // The same two-migrations-minutes-apart shape. The repair realigns the aqarmonthly CARD district
+  // (`neighborhood`, which ResultCard renders verbatim whenever it is Arabic) onto the row's own
+  // already-indexed `district_ar`, after a second, weaker slug parse in map_listing() had glued the
+  // city and «منطقة» onto 1,352 of 1,801 active rows. The repair had to run before its watcher could
+  // exist, so the repair file itself never reaches a mon_detect_* in executed SQL.
+  //
+  // What watches the class: mon_detect_aqarmonthly_card_district_drift(), created in 20260927203335
+  // and rostered into mon_run_all_detectors() in that same migration (the splice RAISES rather than
+  // no-ops if its anchor moved). It is an INVARIANT detector, not a one-instance one: it raises P2
+  // on any active aqarmonthly row whose card district differs from its indexed district, which is
+  // exactly what a re-introduced second parse produces on the very next scrape. It is BLIND-guarded
+  // on aqarmonthly's own run history, because the drift it watches is written by a scrape and a 0
+  // during a stalled crawl would otherwise read as health.
+  //
+  // This is the guarantee migration 20260721104637 lacked — the 1,015-row aqarmonthly district
+  // repair whose silent re-corruption is the incident at the top of this file. Same table, same
+  // class, one column over.
+  '20260927201934_aqarmonthly_card_district_realigned_to_the_parsed_district.sql':
+    'watched by its companion 20260927203335_aqarmonthly_card_district_drift_detector.sql, which '
+    + 'creates mon_detect_aqarmonthly_card_district_drift() and rosters it into '
+    + 'mon_run_all_detectors(); an INVARIANT detector that raises P2 on any active aqarmonthly row '
+    + 'whose card district (neighborhood) differs from its indexed district (district_ar) — the '
+    + 'shape a re-introduced second parse produces on the next scrape — and is BLIND-guarded on '
+    + 'aqarmonthly run history. Re-asserting the repair is unnecessary: the writer now derives both '
+    + 'columns from one value, and the detector fires if that ever stops being true',
+
+  // 2026-09-27, the SAME table and the same shape one defect over. 20260927205755 repaired 36 rows
+  // whose district was a STREET — «حي شارع ابن هلال», and on two rows the bare word «حي شارع» —
+  // because Aqar prefixes an EMPTY «حي» label onto the street segment when an ad names no district,
+  // and resolve_slug() took the FIRST «حي» in the slug. The repair had to run before its watcher
+  // could exist, so the repair file itself never reaches a mon_detect_* in executed SQL.
+  //
+  // What watches the class: mon_detect_aqarmonthly_street_as_district(), created in 20260927210420
+  // and rostered into mon_run_all_detectors() in that same migration (the splice RAISES rather than
+  // no-ops if its anchor moved). Corrected in 20260927211052 — as first written it could not raise
+  // AT ALL, because `live text[] || 'bare literal'` throws 22P02 here and every limb reaches that
+  // line only when it has something to report; widened in 20260927213758 to make «حي » optional and
+  // to add a third limb on listings_arabic_locations.
+  //
+  // It is an INVARIANT detector, not a one-instance one, and it watches all THREE surfaces that can
+  // serve a street: the raw table (district_ar AND the card's neighborhood), search_listings_ar, and
+  // the listings_arabic_locations fallback that listing_native_location_v1 COALESCEs to when the
+  // native district is NULL — the surface that kept serving «حي شارع ابي الفتوح» after the platform
+  // table was already clean. BLIND-guarded on aqarmonthly run history, because the corruption is
+  // written by a scrape and a 0 during a stalled crawl would read as health.
+  //
+  // Unlike the entries above, this one's raise path is not merely reasoned about: it was EXECUTED in
+  // production. While the served index was still stale it raised P2 on dedup key
+  // aqarmonthly_street_as_district:index with rows=34, raw_rows=0, and mon_resolve_stale_keys()
+  // closed that key at 21:44:57 UTC once the index agreed. Raise and resolve, both observed.
+  '20260927205755_aqarmonthly_street_is_not_a_district.sql':
+    'watched by its companion 20260927210420_aqarmonthly_street_as_district_detector.sql, which '
+    + 'creates mon_detect_aqarmonthly_street_as_district() and rosters it into '
+    + 'mon_run_all_detectors() (corrected in 20260927211052, which fixed a 22P02 that made every '
+    + 'limb unable to raise; widened in 20260927213758). An INVARIANT detector that raises P2 on any '
+    + 'aqarmonthly row whose district is a street, across all three surfaces that can serve one — '
+    + 'the raw table (district_ar and the card\'s neighborhood), search_listings_ar, and the '
+    + 'listings_arabic_locations fallback v1 COALESCEs to — and BLIND-guarded on aqarmonthly run '
+    + 'history. Proven live, not just reasoned: it raised aqarmonthly_street_as_district:index '
+    + '(rows=34, raw_rows=0) while the index was stale and auto-resolved at 21:44:57 UTC once it was '
+    + 'clean. Re-asserting the repair is unnecessary: resolve_slug() now skips a capture opening with '
+    + 'a street marker (8 executed regression cases, all failing on the pre-fix parser), and the '
+    + 'detector fires if that ever stops being true',
+  '20260919091545_ksaaqar_every_price_was_the_sidebars_not_the_ads.sql':
+    'watched by its companion 20260919092122_detect_price_borrowed_from_page_chrome_fleet_wide.sql, '
+    + 'which creates mon_detect_price_borrowed_from_chrome(), rosters it into mon_run_all_detectors() '
+    + 'and asserts reachability; a fleet-wide SHAPE detector that fires when a platform price '
+    + 'distribution clusters the way chrome-borrowed values do, mutation-proven on the ksaaqar '
+    + 'pre-repair distribution. Not re-asserted because re-running the blank would now wipe the real '
+    + 'prices the fixed sweep wrote',
+  // Same two-migrations-minutes-apart shape. The repair set two ksaaqar rows from a bogus
+  // property_age=100 (a spec-block overrun: the label «حدود وأطوال العقار» was missing from the
+  // parser, so the age value swallowed the 100 from the adjacent boundaries field) to their true 2,
+  // and NULLed any remaining 100 so the next sweep rewrites the real age. The parser fix is locked
+  // by hermetic tests, but this barrier's thesis is that a parser guard can decay to a weaker rule
+  // and re-corrupt silently, so a runtime watch is required in addition.
+  //
+  // What watches the class: mon_detect_property_age_beyond_ceiling(), created and rostered into
+  // mon_run_all_detectors() in 20260919170952 (the splice RAISES if its anchor moved; reachability
+  // asserted after). It is a fleet-wide SHAPE detector: property_age here is years-since-built, and
+  // across all 96,885 aged active listings the real maximum is 47, so an age past the 80 ceiling is
+  // a parse artifact on any platform, not just ksaaqar. Mutation-checked before shipping — a 100
+  // fires, a real 47 stays silent — and it returns 0 on the repaired fleet. Open 20260919170952 to
+  // check this reason rather than taking it on trust.
+  '20260919073453_ksaaqar_two_word_numeral_ages_were_overrun_by_the_next_field.sql':
+    'watched by its companion 20260919170952_detect_property_age_beyond_plausible_ceiling_fleet_wide.sql, '
+    + 'which creates mon_detect_property_age_beyond_ceiling(), rosters it into mon_run_all_detectors() '
+    + 'and asserts reachability; a fleet-wide SHAPE detector firing on any property_age past 80 (real '
+    + 'fleet max is 47), mutation-checked that 100 fires and 47 does not',
+  // Second instance of the 20260918220610 shape, and waived for the identical structural reason
+  // rather than by analogy — check it the same way. The UPDATE writes NO source-derived value: it
+  // sets production_ready=true on two rows whose ONLY reason for being false was
+  // enforce_price_size_sanity(), which hides a price_size_impossible() row iff it is absent from
+  // ops_price_source_verified. The same migration adds those evidence rows, so the flag it releases
+  // is derived from state it also wrote, and the repair cannot outlive its own justification:
+  // delete the evidence and the next sync upsert re-fires the trigger and re-hides the row by itself.
+  // The opposite regression — a located row falling back to not-production_ready — is what
+  // mon_detect_located_row_unreachable() already raises P1 on, per row, on the evaluated path; it is
+  // the detector that RAISED these two, it is on the mon_run_all_detectors() roster, and it re-ran
+  // green (0 raised) after this applied.
+  '20260919031619_register_aqar_and_akariyoun_source_published_extreme_prices.sql':
+    'no source-derived value is written: the flag this releases is derived from the '
+    + 'ops_price_source_verified rows the same migration adds, so deleting the evidence makes the '
+    + 'next sync upsert re-fire enforce_price_size_sanity() and re-hide the row by itself. The '
+    + 'opposite regression is already raised P1 per row by mon_detect_located_row_unreachable() — '
+    + 'the detector that raised these two — which is on the mon_run_all_detectors() roster and '
+    + 're-ran green after this applied',
+  // The detector for this repair EXISTS and is on the roster — it simply cannot be named inside the
+  // migration, because the migration was already applied to production before the barrier flagged
+  // it, and editing an applied file to add the reference would put git and the migration history
+  // out of sync. That is drift, and it is the thing several other barriers here exist to catch.
+  //
+  // What watches it: mon_detect_wasalt_dead_but_active(), created in 20260919023049 and wired to
+  // mon_run_all_detectors() in 20260919023145 (both applied the same night, minutes after the
+  // repair). It has TWO independent arms, because the obvious guard was the one that failed:
+  //   * ARM A reads the AR ENRICHER's evidence — a listing whose own URL returned no listing on
+  //     BOTH the /ar and /en routes, at least twice, days apart. Independent of the liveness ledger.
+  //   * ARM B reads the liveness ledger — 3+ DIRECT dead verdicts (the policy grace) on a row that
+  //     is still active.
+  // It also raises BLIND rather than 0 when the enricher has not run in 7 days, so a dead evidence
+  // source cannot read as a clean bill of health.
+  //
+  // WHY ARM A EXISTS AT ALL, and why citing the pre-existing detectors would have been the mute
+  // button this file warns about: mon_detect_served_after_source_confirmed_gone and
+  // mon_detect_served_despite_direct_404 both key off the liveness ledger, and wasalt liveness had
+  // written nothing for a month — it ran on the transport wasalt.sa null-routed on 2026-08-17
+  // (issue #1019), so every read was UNKNOWN. Both detectors returned 0 for exactly the reason
+  // there was a problem. Arm A is sourced from the browser transport instead.
+  //
+  // Verified on production the night it landed: the detector is on the roster, returns 0 now, and
+  // its arm-A predicate run without the `active` filter matches all six repaired rows — so it would
+  // have fired on the defect and is silent only because the defect is fixed.
+  '20260919010944_wasalt_deactivate_6_listings_direct_404_on_both_routes.sql':
+    'the guard is mon_detect_wasalt_dead_but_active() (created 20260919023049, wired to the roster '
+    + 'in 20260919023145), which cannot be named inside this migration because this migration was '
+    + 'already applied to production — editing it would desync git from the migration history. The '
+    + 'detector has an enricher-evidence arm deliberately independent of the liveness ledger, '
+    + 'because the pre-existing ledger-based detectors were dark for a month on the blocked '
+    + 'transport and returned 0 for the same reason the defect existed.',
+  // NOT the usual two-migrations-minutes-apart shape: this repair ships no companion because it
+  // needs none, and the reason is structural rather than "some detector probably covers it".
+  //
+  // The UPDATE changes NO source-derived value. It sets production_ready=true on two rows whose
+  // ONLY reason for being false was enforce_price_size_sanity() — a BEFORE trigger that hides a
+  // price_size_impossible() row iff it is absent from ops_price_source_verified. The same migration
+  // adds the evidence rows, so the flag it releases is DERIVED from state the migration also wrote.
+  //
+  // That makes the invariant self-restoring in both directions, which is what a detector would
+  // otherwise have to watch for: delete the evidence row and the next sync upsert re-fires the
+  // trigger and re-hides the listing automatically; the repair cannot survive its own justification.
+  // And a regression the other way — the flag falling back to false while the row is still located —
+  // is exactly what mon_detect_located_row_unreachable() already raises P1 on, per row, on the
+  // evaluated path. That detector is what opened this investigation in the first place; it is on the
+  // mon_run_all_detectors() roster and re-ran green (0 raised) after this migration applied.
+  // ops_price_source_verified's own decay is separately watched by
+  // mon_detect_price_source_evidence_stale(), which counts these three as not_recheckable while
+  // ar_data is NULL (live-probe evidence) and will machine-check them once enrich_ar is unblocked.
+  '20260918220610_register_wasalt_land_prices_read_live_from_the_source.sql':
+    'no source-derived value is written: the flag this releases is derived from the '
+    + 'ops_price_source_verified rows the same migration adds, so deleting the evidence makes the '
+    + 'next sync upsert re-fire enforce_price_size_sanity() and re-hide the row by itself. The '
+    + 'opposite regression (located row falls back to not-production_ready) is already raised P1 '
+    + 'per row by mon_detect_located_row_unreachable(), which is on the mon_run_all_detectors() '
+    + 'roster and re-ran green after this applied; evidence decay is watched by '
+    + 'mon_detect_price_source_evidence_stale()',
   // Same companion shape as the entries below: the repair (healing six dealapp rows the
   // enforce_price_size_sanity trigger had sentineled to «غير معروف», owner decision 2026-09-11 /
   // ops_incident #172) and its watcher landed as two migrations nine minutes apart, so the repair
@@ -116,6 +512,65 @@ const WAIVED: Record<string, string> = {
   // no future crawl will ever re-correct these rows, and the ledger's price_before/price_after are
   // the only record of what the source actually published. Open the two companions to check this
   // reason rather than taking it on trust.
+  // Fifth instance of the two-migrations-minutes-apart shape. The repair NULLs property_age on 46
+  // عقاريون listings whose «عمر العقار» reads «اكثر من عشر سنوات» — MORE THAN ten years — which
+  // Ezhalah had stored as exactly 10, so a customer filtering «10 years or newer» was shown homes
+  // the source itself calls older. The 17 rows whose source genuinely says «عشر سنوات» were left
+  // alone; all 63 were re-fetched and read individually first, so this is per-row evidence.
+  //
+  // Like the res_com waiver above, the companion's detector watches THIS REPAIR SPECIFICALLY rather
+  // than a class: mon_detect_akariyoun_open_bound_age_reappears() holds the 46 proven URLs in
+  // akariyoun_open_bound_age_slugs() and fires the moment any of them carries an age again. It also
+  // re-asserts the UPDATE, because the scraper cannot self-heal here — parse_age() correctly returns
+  // None for an open bound, but _unknown_must_not_overwrite_known() DROPS a None key from an upsert
+  // (owner rule 2026-08-09), so a wrong number once stored can only be removed explicitly.
+  //
+  // The companion mutation-proves the detector inside its own migration: it plants an age on a known
+  // open-bound row, asserts the detector fires, then puts the row back and asserts it runs green.
+  // Open that companion to check this reason rather than taking it on trust.
+  '20260919014358_akariyoun_open_bound_ages_are_unknown_not_ten.sql':
+    'watched by its companion 20260919022152_mon_detect_akariyoun_open_bound_age_reappears.sql, '
+    + 'which ships + rosters + mutation-proves mon_detect_akariyoun_open_bound_age_reappears() — a '
+    + 'detector that watches THIS repair (the 46 proven-open-bound URLs it NULLed, held in '
+    + 'akariyoun_open_bound_age_slugs()) — and re-asserts the same UPDATE idempotently',
+  // The two-migrations-minutes-apart shape again (routine-3 daily audit, ops_incident #589). The
+  // repair NULLs one aqar price: ad 6708117 was SERVED at 25,000,000 SAR over a 5 m2 plot while
+  // aqar itself publishes «طلب تسويق» — price: null, meter_price: null. Proven through the real
+  // production RPC as an anonymous user, where the row was the ONLY result in its Filter cell, and
+  // against the source by read-only probe run 35699759373 from CI egress. Its detector lands 14
+  // minutes later in 20260922074707, so the repair file itself never reaches a mon_detect_* in
+  // executed SQL.
+  //
+  // WHY THE COMPANION DOES NOT RE-ASSERT THE UPDATE, and this is the interesting part. The other
+  // re-asserting waivers above exist because their scrapers cannot self-heal the field. Here the
+  // opposite is true: enrich_residential ALREADY returns db.AUTHORITATIVE_NULL for this exact shape
+  // (owner decision 2026-08-22, ad 6686450 — the grandfathered file two rows down in this same
+  // barrier's NOTE list), and AUTHORITATIVE_NULL is the one value permitted to overwrite a known
+  // price with NULL. So a re-read writes precisely what this repair wrote. Re-asserting would
+  // instead FREEZE the NULL against a source that may republish a price tomorrow — destroying good
+  // data, the same trap the ksaaqar waiver names.
+  //
+  // What watches the class is therefore not the repaired value but the PRECONDITION that let it rot
+  // unseen: this row's last_seen_at was 2026-07-30, three weeks BEFORE that rule shipped, and
+  // nothing had re-read it since — a rule can only act on a row something re-reads.
+  // mon_detect_served_price_never_rechecked() fires on any SERVED, priced row whose source has not
+  // been read in 30 days (4x the longest declared liveness SLA). It discovers platforms from
+  // platform_registry rather than a list, so a platform added tomorrow is covered. Measured on
+  // production the moment it shipped: 6 cohorts, 3,488 served rows, naming aqar_residential at the
+  // exact 166 remaining rows of this cohort — and mutation-proven in the other direction inside a
+  // rolled-back transaction (re-reading them took aqar 166 -> 0; nothing persisted).
+  //
+  // It deliberately does NOT claim those prices are wrong — proving that needs a source fetch, which
+  // SQL cannot do. It claims the checkable, weaker thing. Open 20260922074707 to check this reason
+  // rather than taking it on trust.
+  '20260922073326_repair_aqar_59619_price_source_publishes_no_price.sql':
+    'watched by its companion 20260922074707_mon_detect_served_price_never_rechecked.sql, which '
+    + 'ships + rosters (needle-edit that RAISES if its anchor moved) + asserts reachability for '
+    + 'mon_detect_served_price_never_rechecked() — a detector on the PRECONDITION that hid this bug '
+    + '(a SERVED priced row whose source has not been read in 30 days, so no price rule can have '
+    + 'reached it). Deliberately NOT re-asserted: enrich_residential already returns '
+    + 'AUTHORITATIVE_NULL for this shape, so a re-read rewrites the repair by itself, and freezing '
+    + 'the NULL would destroy a price the source may republish',
   '20260905070828_repair_muktamel_raw_monthly_rent_stored_in_price_annual.sql':
     'watched by its companions 20260905071148_barrier_a_whole_platform_monthly_rent_cohort_that_was_'
     + 'never_annualised.sql, which ships + rosters mon_detect_unannualised_rent_cohort(), and '
@@ -229,6 +684,90 @@ const WAIVED: Record<string, string> = {
     'same merge as 20260913080703 (search_listings_ar backfill, needed because it is a synced copy '
     + 'not a live passthrough) — watched by the same companion, '
     + '20260913082310_amlakalahsa_jafr_dahiya_merge_gets_a_detector.sql',
+  // Amlakalahsa district/city consolidation (owner-directed 2026-09-13, real-user "test it and
+  // confirm" pass): 10 "no city" listings resolved to a specific city (each independently proven —
+  // same district text already correct elsewhere, on this platform or others — never a guessed
+  // pattern), plus 5 numbered district variants folded to their bare match form ("الصفا 2" ->
+  // "الصفا", card text untouched). Two migrations for the base-table fix (a follow-up caught one
+  // row the first WHERE clause missed). Companion lands ~3 migrations later and creates + rosters +
+  // self-verifies mon_detect_amlakalahsa_district_consolidation_regressed(), which watches for
+  // either shape reappearing. scrapers/amlakalahsa/run.py was also updated (the same session) to
+  // apply both corrections on every future scrape, so a regression here means that scraper fix
+  // itself was reverted, not just a one-off sync gap. Open the companion to verify this reason
+  // rather than taking it on trust.
+  '20260913174942_amlakalahsa_confirmed_city_fixes_and_number_strip.sql':
+    'watched by its companion 20260913180152_amlakalahsa_district_consolidation_gets_a_detector.sql, '
+    + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_district_consolidation_regressed()',
+  '20260913175242_amlakalahsa_ayoun_safa2_number_strip_missed_row.sql':
+    'same consolidation as 20260913174942 (one row its WHERE clause missed) — watched by the same '
+    + 'companion, 20260913180152_amlakalahsa_district_consolidation_gets_a_detector.sql',
+  // Amlakalahsa's last 3 unresolved districts (النور، العقير، الجرن — no specific city provable
+  // anywhere in the fleet, unlike the 10 in the migration above): owner-directed 2026-09-13,
+  // assigned the broad-but-true "الأحساء" governorate city rather than staying cityless.
+  // district_ar deliberately untouched (owner: "we guess we don't know, we just leave it").
+  // Companion lands ~6 minutes later and EXTENDS the existing
+  // mon_detect_amlakalahsa_district_consolidation_regressed() (no new function — same regression
+  // shape, three more names added to its existing no_city check), self-verified green in the same
+  // migration. scrapers/amlakalahsa/run.py updated the same session so this applies to every
+  // future scrape too. Open the companion to verify this reason rather than taking it on trust.
+  '20260913182357_amlakalahsa_final_three_districts_get_broad_city.sql':
+    'watched by its companion 20260913182939_amlakalahsa_final_three_districts_detector_extended.sql, '
+    + 'which extends mon_detect_amlakalahsa_district_consolidation_regressed() to also cover these '
+    + '3 district names and self-verifies green',
+  // "الرياض" -> الهفوف (regionally-unique catalog match + abralosol cross-platform confirmation +
+  // listings_arabic_locations overlay agreement). district_ar deliberately untouched. Companion
+  // lands ~3 minutes later and EXTENDS the existing mon_detect_amlakalahsa_district_consolidation_
+  // regressed() (no new function — same regression shape, one more name added to its existing
+  // no_city check), self-verified green in the same migration. run.py updated the same session.
+  '20260913184721_amlakalahsa_riyadh_district_resolves_to_hofuf.sql':
+    'watched by its companion 20260913185054_amlakalahsa_riyadh_district_detector_extended.sql, '
+    + 'which extends mon_detect_amlakalahsa_district_consolidation_regressed() to also cover this '
+    + 'district name and self-verifies green',
+  // "الجشة" (bare, its own city) + listing 11606266 ("المروج" -> حي المروج الجنوبي, proven only by
+  // that listing's own text, id-scoped). district_ar untouched in both. Companion lands ~3 minutes
+  // later and EXTENDS the existing mon_detect_amlakalahsa_district_consolidation_regressed() (no new
+  // function — "الجشة" joins the existing no_city list, plus one new id-scoped check), self-verified
+  // green in the same migration. run.py updated the same session for both.
+  '20260913190703_amlakalahsa_jasha_and_marouj_janoubi_resolved.sql':
+    'watched by its companion 20260913191008_amlakalahsa_jasha_and_marouj_janoubi_detector_extended.sql, '
+    + 'which extends mon_detect_amlakalahsa_district_consolidation_regressed() to also cover "الجشة" '
+    + 'and listing 11606266, and self-verifies green',
+  // Re-repair of the 2026-09-13 الجفر/الضاحية merge, which a geocode-silent crawl reverted on 25 of
+  // its 32 rows within a day (routine-3 2026-09-14; a buyer picking الجفر → الضاحية got 7 results,
+  // proven through location_search_candidates_ar). This migration is mostly PREVENTION — the
+  // owner's rule moves out of the scraper, where it silently no-opped whenever the source omitted
+  // pw-map.city, and onto the stored row as a BEFORE INSERT OR UPDATE trigger, where the city is
+  // known even on a crawl that could not geocode it. The UPDATEs are the one-time cleanup of rows
+  // the reverting crawls already wrote. TWO detectors watch it, not one: the pre-existing
+  // mon_detect_amlakalahsa_jafr_dahiya_merge_regressed() (20260913082310) still checks the base
+  // table, the search index and the population floor, and the companion below adds a guard on the
+  // MECHANISM rather than the data, so a disarmed trigger is caught before it costs a row. Open
+  // the companion to verify this reason rather than taking it on trust.
+  '20260914072254_amlakalahsa_jafr_dahiya_collapse_moves_to_the_stored_row.sql':
+    'watched by its companion 20260914072446_jafr_dahiya_collapse_gets_an_executing_barrier.sql, '
+    + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_district_match_disarmed() '
+    + '(EXECUTING the collapse rule against its four defining cases and asserting the trigger is '
+    + 'attached to both amlakalahsa tables, mutation-proven in-migration against two broken rules) '
+    + '— and by the pre-existing mon_detect_amlakalahsa_jafr_dahiya_merge_regressed() which still '
+    + 'watches the data this repair corrected',
+  // Same two-migrations-apart shape as the entries above. The repair withdraws 99 راكز units whose
+  // project is tagged «البيع على الخارطة» — off-plan, sold before it is built (owner decision
+  // 2026-09-14, "delete the 99 please"). The repair file itself never reaches a mon_detect_* in
+  // executed SQL because its companion lands ~25 minutes later.
+  //
+  // The companion's detector watches THIS REPAIR SPECIFICALLY, not a class: it counts active rows
+  // in either راكز listing table whose additional_info->project_id is one of the 13 ids known to
+  // carry the tag, which is exactly the set the repair deactivated. Re-assertion is unnecessary
+  // (unlike the muktamel case) because a future crawl CANNOT undo this: an upsert is the only thing
+  // that sets active back to true, scrapers/rakez/run.py now vetoes an off-plan tag on either
+  // language's project record, and the detector runs twice an hour rather than at deploy time.
+  // The companion rosters it via needle-edit, runs it green, and asserts its predicate matches a
+  // non-empty set so it cannot be vacuously green. Open the companion to check this rather than
+  // taking it on trust.
+  '20260914181618_rakez_off_plan_units_are_not_listings.sql':
+    'watched by its companion 20260914190653_rakez_off_plan_resurrection_detector.sql, which '
+    + 'creates mon_detect_rakez_off_plan_resurrection(), needle-edits it into the '
+    + 'mon_run_all_detectors() roster, runs it green, and proves the predicate is not vacuous',
 };
 
 // Enforcement starts here — the day this rule landed.
@@ -314,6 +853,20 @@ const mustCatch = (label: string, caught: boolean) => {
 mustCatch('a bare backfill is flagged as an unguarded repair',
   repairsData('update aqarmonthly_residential_listings set district_ar = x;') === true
   && isGuarded('update aqarmonthly_residential_listings set district_ar = x;') === false);
+mustCatch('a dynamic-SQL repair over a listing-table family counts (execute format … %I_listings)',
+  repairsData(`do $$ declare t text; begin foreach t in array array['aldarim_residential'] loop
+     execute format($q$ update public.%I_listings x set kitchen = null where x.kitchen is false $q$, t);
+     end loop; end $$;`) === true);
+mustCatch('a fully dynamic UPDATE over named listing tables counts',
+  repairsData(`do $$ declare v_tbl text; begin foreach v_tbl in array array['eastabha_residential_listings'] loop
+     execute format('update public.%I set active = true', v_tbl); end loop; end $$;`) === true);
+mustCatch('a fully dynamic UPDATE over a config table is still not a repair',
+  repairsData(`do $$ begin execute format('update public.%I set v = 1', 'mon_config'); end $$;`) === false);
+mustCatch('the aldarim-SaaS repair (20261005094209) is classified a repair, and it is guarded',
+  (() => { const f = files.find((x) => x.startsWith('20261005094209'));
+    return !!f && repairsData(readFileSync(join(MIGRATIONS, f), 'utf8'))
+      && files.some((x) => x.endsWith('_aldarim_saas_unfilled_block_false_detector.sql')
+        && /mon_detect_aldarim_saas_unfilled_block_false/.test(readFileSync(join(MIGRATIONS, x), 'utf8'))); })());
 mustCatch('a repair inside a do-block still counts as executed',
   repairsData('do $mig$ begin update search_listings_ar set district_ar = y; end $mig$;') === true);
 mustCatch('an UPDATE merely DEFINED in a function body is not a repair',

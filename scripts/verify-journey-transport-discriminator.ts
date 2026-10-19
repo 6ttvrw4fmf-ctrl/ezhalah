@@ -24,12 +24,16 @@
 // Run: node --experimental-strip-types scripts/verify-journey-transport-discriminator.ts
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { isTransportError, gotoOrRetryTransport } from '../e2e/journeys/harness.mjs';
+import { isTransportError, gotoOrRetryTransport, TRANSPORT_RETRY_PAUSE_MS } from '../e2e/journeys/harness.mjs';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
 const ok = (m: string) => console.log(`  ok  ${m}`);
-const check = (m: string, cond: boolean) => { if (cond) ok(m); else { console.error(`  FAIL  ${m}`); failed++; } };
+const check = (m: string, cond: boolean, detail = '') => {
+  if (cond) { ok(m); return; }
+  console.error(`  FAIL  ${m}${detail ? `\n        ${detail}` : ''}`);
+  failed++;
+};
 
 // ── 1. classification, both directions ──────────────────────────────────────────────────────────
 // The exact string Playwright produced in the measured run, not a paraphrase of it.
@@ -93,6 +97,58 @@ check('a non-transport error is NOT retried — one navigation only', appBug.cal
 const healthy = fakePage([null]);
 await gotoOrRetryTransport(healthy as never, 'https://x/');
 check('a healthy navigation costs exactly one goto (no speculative second hit on production)', healthy.calls.length === 1);
+
+// ── 2b. THE RETRY IS SPACED — an immediate one samples the same burst ────────────────────────────
+// Measured 2026-09-18, two independent runs against production from the agent container: a
+// 112-journey sweep had 3 opening-navigation failures and 0 recovered on the IMMEDIATE retry (all
+// three were filed as «journey threw», i.e. as Ezhalah defects); a 60-navigation probe had 1
+// failure (1.7%) that also failed immediately and then SUCCEEDED after a 3 s pause. 0/4 immediate,
+// 1/1 spaced. The distribution is the evidence: independent failures at that rate would produce far
+// more SINGLE failures than doubles, and the sweep saw zero singles against three doubles — so the
+// failures are bursty and only a spaced retry carries information.
+//
+// The retry stays exactly ONE and the timeout is unchanged, so the fail-closed property below is
+// untouched. Only the spacing is pinned here.
+check('the retry pause is a real, non-zero interval', TRANSPORT_RETRY_PAUSE_MS >= 1_000,
+  `TRANSPORT_RETRY_PAUSE_MS is ${TRANSPORT_RETRY_PAUSE_MS}`);
+
+// Executed, not read: a recording `pause` is injected and the ORDER of effects is asserted, so an
+// implementation that pauses after the retry (or not at all) cannot pass.
+{
+  const order: string[] = [];
+  const recording = fakePage([`page.goto: net::ERR_TIMED_OUT at https://x/`, null]);
+  const spy = { goto: async (u: string) => { order.push('goto'); return recording.goto(u); } };
+  let paused = -1;
+  await gotoOrRetryTransport(spy as never, 'https://x/', {
+    pause: async (ms: number) => { order.push('pause'); paused = ms; },
+  });
+  check('the retry waits BEFORE re-navigating, not after', order.join(',') === 'goto,pause,goto',
+    `effect order was ${order.join(',')}`);
+  check('the wait is the measured interval', paused === TRANSPORT_RETRY_PAUSE_MS, `paused ${paused}ms`);
+}
+
+// A healthy navigation must not pay the pause at all — the cost is only on the failure path.
+{
+  let paused = false;
+  const ok = fakePage([null]);
+  await gotoOrRetryTransport(ok as never, 'https://x/', { pause: async () => { paused = true; } });
+  check('a healthy navigation never waits', !paused);
+}
+
+// PART 11.2 rule 4: the two failure shapes must be distinguishable IN THE MESSAGE. A double failure
+// is "egress was down longer than one burst", which is a different fact from a one-off blip, and the
+// reader must not have to infer it. It must also still classify as TRANSPORT, or wrapping the error
+// would turn a network failure back into something that reads like an app bug.
+{
+  const twice = fakePage([`page.goto: net::ERR_TIMED_OUT at https://x/`, `page.goto: net::ERR_TIMED_OUT at https://x/`]);
+  let err: unknown = null;
+  await gotoOrRetryTransport(twice as never, 'https://x/', { pause: async () => {} }).catch((e) => { err = e; });
+  const msg = String(err);
+  check('a double failure still throws (fail-closed is untouched by the spacing)', err !== null);
+  check('the double-failure message says it failed TWICE and how far apart', /failed TWICE/.test(msg) && /apart/.test(msg));
+  check('the double-failure message still classifies as TRANSPORT, not as an app error',
+    isTransportError(err), msg.slice(0, 120));
+}
 
 // ── 3. the sweep actually routes through it ─────────────────────────────────────────────────────
 // A discriminator nothing calls is decoration (AGENTS.md: "a detector outside the roster"). withPage

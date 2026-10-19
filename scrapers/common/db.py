@@ -22,6 +22,7 @@ from typing import Any, Callable, Optional
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
+from scrapers.common.liveness_contract import direct_alive_patch, presence_patch
 from scrapers.common.pii import is_free_text, redact_capture, redact_pii
 from scrapers.common.placeholder_tokens import PLACEHOLDER_TOKENS, is_placeholder
 
@@ -340,6 +341,12 @@ def upsert_aqar_residential(row: dict[str, Any]) -> None:
     _sanitize_ints(row)
     _ensure_capture(row)
     _reject_placeholder_location(row, table="aqar_residential_listings")
+    # These three single-row helpers bypass `_wasalt_batch`, so they consume the
+    # direct-alive marker themselves. Stripping it is the point: the key is not a
+    # column, and a leak would make PostgREST reject the write — monitoring must never
+    # be able to break ingestion. They set no `active` default, so an unstated `active`
+    # is treated as "no claim" and gets no stamp: fail closed.
+    _apply_direct_alive(row, now_iso=row["last_seen_at"], table="aqar_residential_listings")
     _execute(sb().table("aqar_residential_listings").upsert(row, on_conflict="ad_number"), what="aqar_residential_listings")
 
 
@@ -354,6 +361,12 @@ def upsert_aqar_commercial(row: dict[str, Any]) -> None:
     _sanitize_ints(row)
     _ensure_capture(row)
     _reject_placeholder_location(row, table="aqar_commercial_listings")
+    # These three single-row helpers bypass `_wasalt_batch`, so they consume the
+    # direct-alive marker themselves. Stripping it is the point: the key is not a
+    # column, and a leak would make PostgREST reject the write — monitoring must never
+    # be able to break ingestion. They set no `active` default, so an unstated `active`
+    # is treated as "no claim" and gets no stamp: fail closed.
+    _apply_direct_alive(row, now_iso=row["last_seen_at"], table="aqar_commercial_listings")
     _execute(sb().table("aqar_commercial_listings").upsert(row, on_conflict="ad_number"), what="aqar_commercial_listings")
 
 
@@ -368,6 +381,12 @@ def upsert_wasalt_residential(row: dict[str, Any]) -> None:
     _sanitize_ints(row)
     _ensure_capture(row)
     _reject_placeholder_location(row, table="wasalt_residential_listings")
+    # These three single-row helpers bypass `_wasalt_batch`, so they consume the
+    # direct-alive marker themselves. Stripping it is the point: the key is not a
+    # column, and a leak would make PostgREST reject the write — monitoring must never
+    # be able to break ingestion. They set no `active` default, so an unstated `active`
+    # is treated as "no claim" and gets no stamp: fail closed.
+    _apply_direct_alive(row, now_iso=row["last_seen_at"], table="wasalt_residential_listings")
     _execute(sb().table("wasalt_residential_listings").upsert(row, on_conflict="ad_number"), what="wasalt_residential_listings")
 
 
@@ -713,6 +732,25 @@ def guard_location_update(fields: dict[str, Any], *, table: str, ref: str = "") 
     return fields
 
 
+_UNUSABLE_URL_RE = re.compile(r"/(None|null|undefined|NaN)/?$|=(None|null|undefined)$")
+
+
+def _reject_unusable_listing_url(r: dict[str, Any], *, table: str) -> None:
+    """A `listing_url` that ends in a language literal is never source truth — it is an f-string
+    over an id/slug the source did not supply, rendered as the text "None"/"undefined". wslnaa
+    shipped six of them (2026-09-20): the API omits `slug` on its building-level combination
+    offers, so every card linked to /properties/None → «العقار غير موجود», which reads to the
+    user as OUR bug, not the source's. Unlike a placeholder location there is nothing safe to
+    salvage — nulling the column leaves a card with nowhere to go and keeps the defect silent —
+    so this RAISES and fails the run. Always a programming error, never data."""
+    url = r.get("listing_url")
+    if isinstance(url, str) and _UNUSABLE_URL_RE.search(url.strip()):
+        raise ValueError(
+            f"{table}: refusing to write a fabricated listing_url {url!r} "
+            f"(ad_number={r.get('ad_number')}) — the source did not supply this id/slug"
+        )
+
+
 def _reject_placeholder_location(r: dict[str, Any], *, table: str) -> None:
     """Backstop for the upsert helpers below (`_wasalt_batch` + the 3 dedicated `upsert_*`
     functions) — every row THOSE specific functions handle passes through here before the actual
@@ -722,27 +760,167 @@ def _reject_placeholder_location(r: dict[str, Any], *, table: str) -> None:
     guard_location_update(r, table=table, ref=f"ad_number={r.get('ad_number')}")
 
 
-def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
+# ── THE CRAWL IS THE ORACLE ──────────────────────────────────────────────────────────────────────
+# A transient key, never a column. `mark_direct_alive()` sets it; `_wasalt_batch` consumes it and
+# ALWAYS strips it before the row reaches PostgREST.
+_DIRECT_ALIVE_KEY = "_direct_alive_oracle"
+
+
+def mark_direct_alive(row: dict[str, Any], *, oracle: str) -> dict[str, Any]:
+    """Record that THIS row was built from a DIRECT fetch of THIS listing's own page/record.
+
+    WHY THIS EXISTS (owner directive, 2026-09-24)
+    ---------------------------------------------
+    Measured that day across the whole fleet: 67 platforms, 234,748 active listings, and only
+    92,650 verified inside their own SLA — of which **92,439 were aqar**. Every other platform
+    combined had 211. Sixty-two platforms sat at exactly zero. wasalt (56,643 active) and gathern
+    (28,639) are both declared DIRECT_REVISIT and both measured 0.0% / 0.4%.
+
+    The owner's instruction was to fix the CAPACITY, not the paperwork, and to do it in a way that
+    future platforms inherit automatically. The cheapest honest capacity in the system was already
+    being thrown away: ~28 scrapers ALREADY fetch each listing's own detail page every crawl, parse
+    it, and build a row from it. That is `EvidenceKind.DIRECT` by construction — a fetch of this
+    listing's own URL that returned an affirmative, parseable representation of it. It was recorded
+    as `last_seen_at` ("a crawl encountered this row") and nothing else, so the strongest routine
+    evidence Ezhalah gathers was discarded at the moment it was obtained.
+
+    So this adds **zero** HTTP requests, zero proxy bandwidth and zero rate-limit exposure. It
+    records a read we already performed. That is what makes it the safest available method: there
+    is no new way to get blocked, because there is no new request.
+
+    WHEN A CALLER MAY USE IT
+    ------------------------
+    Only from a branch that has ALL of:
+      1. fetched this listing's OWN url/record (not a list, feed or search page), and
+      2. got an affirmative, parseable representation of it back, and
+      3. confirmed the payload is THIS ad_number (the sanadak lesson: 39 of 1,724 rows stored
+         another listing's URL, and 3 answered 'live' on someone else's evidence).
+    A failed, blocked, empty or shell response is UNKNOWN and gets nothing. Crawler presence gets
+    nothing. `oracle` names WHAT was read, so the stamp is falsifiable later by re-reading it.
+
+    THE LAW A CALLER CANNOT RELAX
+    -----------------------------
+    `_wasalt_batch` drops this stamp for any row that ends the pipeline `active = false` — a sold
+    pin, a price-typo quarantine, anything. A row the scraper itself concluded is gone can never
+    also be certified alive, no matter what the call site passed. Same shape as
+    `scrapers/common/http_liveness.py`: the law lives once, under the caller.
+    """
+    if not oracle or not str(oracle).strip():
+        raise ValueError(
+            "mark_direct_alive requires a non-empty oracle naming what was read, e.g. "
+            "'gathern.detail_fetch.unit_payload' — an unfalsifiable stamp is worse than none"
+        )
+    row[_DIRECT_ALIVE_KEY] = str(oracle).strip()
+    return row
+
+
+def decide_direct_alive(row: dict[str, Any], now_iso: str) -> tuple[dict[str, Any], str]:
+    """Pure: given a row that may carry the marker, return `(patch, reason)`. NO I/O, NO mutation.
+
+    Split out from `_apply_direct_alive` so the law can be EXECUTED by a barrier rather than read as
+    source text (`scripts/verify-every-platform-is-liveness-checked.ts` runs it through
+    `scripts/lib/pythonMutant.ts`, which calls positionally — hence the positional signature).
+    `reason` is one of: 'no-marker', 'stamped', 'dropped-inactive'.
+    """
+    oracle = row.get(_DIRECT_ALIVE_KEY)
+    if not oracle:
+        return {}, "no-marker"
+    if row.get("active") is not True:
+        # The caller claimed a direct live read AND the pipeline concluded the row is not active.
+        # Trust the deactivation and drop the stamp. A caller cannot relax this by passing a
+        # different argument — same shape as scrapers/common/http_liveness.py: the law lives once,
+        # under the caller. Also covers `last_liveness_probe_at`: looking is not living.
+        return {}, "dropped-inactive"
+    return direct_alive_patch(now_iso=now_iso), "stamped"
+
+
+def _apply_direct_alive(r: dict[str, Any], *, now_iso: str, table: str) -> None:
+    """Consume the marker: stamp when the row really is alive, and ALWAYS strip the key.
+
+    Stripping unconditionally is the load-bearing half — `_DIRECT_ALIVE_KEY` is not a column, and a
+    leaked key would make PostgREST reject the whole batch, i.e. a monitoring feature able to break
+    ingestion. Monitoring must never be able to do that.
+    """
+    patch, reason = decide_direct_alive(r, now_iso)
+    oracle = r.pop(_DIRECT_ALIVE_KEY, None)
+    if reason == "no-marker":
+        return
+    if patch:
+        # A direct read also counts as having LOOKED at the row, which is what lets every
+        # staleness-ordered worklist rotate fairly (migration 20260924).
+        r.update(patch)
+        r["last_liveness_probe_at"] = now_iso
+        return
+    if r.get("active") is not True:
+        # The caller claimed a direct live read AND the pipeline concluded the row is not active.
+        # Trust the deactivation, drop the stamp, and say so: this is either a sold pin racing a
+        # detail fetch (benign, the pin wins) or a real call-site bug (needs finding).
+        print(
+            f"{table}: dropped a direct-alive stamp on an INACTIVE row "
+            f"(ad_number={r.get('ad_number')}, oracle={oracle}) — a row this crawl concluded is "
+            f"gone is never also certified alive",
+            flush=True,
+        )
+
+
+# A transient key, never a column (2026-10-03). A crawler sets it on a row its list served while
+# the ad's OWN page or record could not be read this run, or says something nobody measured. The row
+# is written exactly as before; the list sighting just does not certify it (SOURCE_LIST_PRESENCE).
+_PRESENCE_UNPROVEN_KEY = "_presence_unproven"
+
+
+def mark_presence_unproven(row: dict[str, Any]) -> dict[str, Any]:
+    row[_PRESENCE_UNPROVEN_KEY] = True
+    return row
+
+
+def _wasalt_batch(table: str, rows: list[dict[str, Any]],
+                  strikes: Optional[dict[str, tuple[int, bool]]] = None) -> None:
     if not rows:
         return
     now = datetime.now(timezone.utc).isoformat()
+    # The REGISTRY decides whether a sighting is proof of life, not 300 call sites: the platform's
+    # registered policy (wasalt, and the SOURCE_LIST_PRESENCE sites admitted one by one) either
+    # declares presence_is_positive_evidence or presence_patch() returns nothing. Imported lazily:
+    # db must import without the registry. No platform key contains "_".
+    from scrapers.common.liveness_policies import POLICIES
+    _registered = POLICIES.get(table.split("_", 1)[0])
+    presence = _registered["policy"] if _registered else None
     seen: dict[str, dict[str, Any]] = {}
     for r in rows:
         r = dict(r)
+        unproven = r.pop(_PRESENCE_UNPROVEN_KEY, False)     # stripped always: it is not a column
         r["last_seen_at"] = now
         # Seen on the source THIS crawl → reset the consecutive-miss counter (prune_unseen only
         # deactivates after `grace` consecutive misses), and reactivate it: a listing that
         # reappears in the source is live again, so undo any earlier prune. `setdefault` so a
         # scraper that deliberately flags a row inactive (e.g. dealapp's مباع/مؤجر "sold" badge)
         # still wins, and _sanitize_price below can still force a price-typo row inactive.
-        r["missing_count"] = 0
-        r.setdefault("active", True)
+        held = (strikes or {}).get(r["ad_number"])
+        if held:
+            # The listing's OWN PAGE has it under strike (a direct read) and the caller could not
+            # read that page live. A feed sighting is weaker evidence than the page, so it may
+            # refresh the row's data but not clear the strikes or un-hide it (gathern, 2026-10-02).
+            r["missing_count"], r["active"] = held
+        else:
+            r["missing_count"] = 0
+            r.setdefault("active", True)
         _sanitize_price(r)
         _unknown_must_not_overwrite_known(r)
         _redact_user_visible_text(r)
         _sanitize_ints(r)
         _ensure_capture(r)
         _reject_placeholder_location(r, table=table)
+        _reject_unusable_listing_url(r, table=table)
+        # LAST, deliberately: `_sanitize_price` and a caller's own `active=False` can both land
+        # after the marker was set, and the stamp must be judged against the row's FINAL state.
+        # Also strips the transient key, which must never reach PostgREST.
+        _apply_direct_alive(r, now_iso=now, table=table)
+        if presence is not None and r.get("active") is True and not held and not unproven:
+            # Being served by the source's own feed is proof of life ONLY for a platform whose
+            # registered policy declares it (presence_patch returns {} for every other policy),
+            # and never for a row whose own page is under strike: the page outranks the feed.
+            r.update(presence_patch(presence, now_iso=now))
         seen[r["ad_number"]] = r
     # SOURCE IS TRUTH across a BATCH, not just a row (owner rule 2026-08-09, see
     # `_unknown_must_not_overwrite_known`). That guard drops a None/unread key from each row so a
@@ -795,6 +973,16 @@ def _ad_shard(ad_number: Optional[str], shards: int) -> Optional[int]:
     if not m:
         return None
     return int(m.group()) % max(1, shards)
+
+
+# Every collapse/coverage trip of prune_unseen() this process, until end_run() writes them into the run's
+# notes. A tripped guard withholds the whole prune, and most callers flatten its -1 into «pruned=0», so the
+# trip used to vanish: gathern's prune tripped EVERY day from at least 2026-09-21 to 2026-09-28 (re-saw
+# ~4.4k of ~28k active) while writing «pruned=0» and ok=true, and ~23k listings whose gathern.co page was
+# 404 stayed in search. end_run() appends «prune guard tripped: …», the phrase
+# mon_detect_enumeration_incomplete() already watches — so a withheld prune alerts on every platform
+# without trusting 144 call sites to report it.
+_PRUNE_TRIPS: list[str] = []
 
 
 def prune_unseen(
@@ -898,9 +1086,12 @@ def prune_unseen(
         return -1  # nothing scraped → site almost certainly down → keep everything active
     gone = [r for r in existing if r["ad_number"] not in seen]
     if len(existing) >= min_active_guard:
+        resaw = f"re-saw {len(existing) - len(gone)} of {len(existing)} active"
         if len(gone) > max_prune_frac * len(existing):
+            _PRUNE_TRIPS.append(f"{table} collapse ({resaw})")
             return -1  # collapse guard: a big fraction vanished at once → treat as a broken crawl
         if (len(existing) - len(gone)) / len(existing) < min_coverage:
+            _PRUNE_TRIPS.append(f"{table} coverage ({resaw}, floor {min_coverage:.0%})")
             return -1  # partial-scrape guard: saw too little of the catalog to trust a prune
     if not gone:
         return 0
@@ -917,6 +1108,14 @@ def prune_unseen(
         doomed = new_missing >= grace
         if doomed:
             payload["active"] = False
+        if doomed and verify_gone is None:
+            # ABSENCE NEVER HIDES (LISTING_LIVENESS.md §1-§3; owner decision 2026-10-05). A caller
+            # with no oracle used to deactivate on three crawl misses alone: on 2026-10-09 abwbna
+            # and shomou hid 4 rows that way with no source reading, and 46 sites in
+            # scrapers/absence-only-prune.txt still could. Such a row is now hidden only when ITS OWN
+            # stored URL answers 404/410 while a page this crawl just saw still answers live; any
+            # other answer is UNKNOWN and the row keeps its strike, shown.
+            verify_gone = own_page_status_oracle(c, table, seen)
         if doomed and verify_gone is not None:
             # Only rows about to be deactivated are probed — a strike that is merely ticking up
             # costs nothing and needs no network call.
@@ -945,15 +1144,53 @@ def prune_unseen(
             held = len(ads) - len(confirmed_gone) - len(still_live)
             if still_live:
                 # Self-heal: the source serves it, so it was never missing — only un-indexed.
+                #
+                # AND THE VERDICT IS RECORDED, NOT SPENT (ops_incident #248, fixed 2026-09-21).
+                # This branch is reached ONLY after `verify_gone` made a DIRECT fetch of this
+                # listing's own URL and read an affirmative live answer — which is precisely the
+                # fact `last_verified_alive_at` exists to hold (LISTING_LIVENESS.md §3), and
+                # precisely the branch direct_alive_patch()'s docstring says to call it from. It
+                # used to write `missing_count`/`last_seen_at` and nothing else, so the strongest
+                # evidence this system ever gathers was thrown away at the moment it was obtained:
+                # `last_seen_at` says only "a crawl encountered this row", and the row that was
+                # PROVEN alive became indistinguishable from one merely sighted.
+                #
+                # Measured the day this was fixed, across the whole fleet: 63 of 67 platforms
+                # holding active inventory had never written a single last_verified_alive_at, while
+                # nine of them (abeea, akariyoun, aqarcity, aqargate, hajer, mustqr, raghdan, rakez,
+                # sanadak) had already produced real direct verdicts through THIS call site — 267
+                # LIVE on rakez alone. ops_platform_liveness_coverage therefore read 0% verified for
+                # every one of them, mon_detect_liveness_coverage_ramp skipped them because its
+                # filter is `strategy in ('DIRECT_REVISIT','CANDIDATE_PLUS_DIRECT')`, and the
+                # registry went on calling them CRAWL_PRESENCE_ONLY — "no per-listing revisit
+                # exists" — because nothing in the data contradicted it. A self-consistent blind
+                # spot, all of it downstream of this one discarded patch.
+                #
+                # The stamp stays the contract's to mint: this asks liveness_contract for it rather
+                # than writing the column, so the rule "nothing stamps this except a direct
+                # affirmative read" keeps living in exactly one place (and
+                # verify-liveness-registry-mirror.ts enforces that no scraper writes it directly).
+                _now_iso = datetime.now(timezone.utc).isoformat()
+                # `last_liveness_probe_at` records that the oracle LOOKED at this row,
+                # whatever it concluded. Without it a row probed and found dead moves no
+                # column at all and keeps its place at the head of every staleness-ordered
+                # worklist forever — the fairness bug that starved 27,102 gathern rows
+                # (migration 20260924). It is NOT evidence of life; only
+                # last_verified_alive_at is, and only via liveness_contract.
+                _selfheal = {"missing_count": 0, "last_seen_at": _now_iso,
+                             "last_liveness_probe_at": _now_iso,
+                             **direct_alive_patch(now_iso=_now_iso)}
                 for i in range(0, len(still_live), 200):
-                    _execute(c.table(table).update({"missing_count": 0, "last_seen_at": datetime.now(timezone.utc).isoformat()})
+                    _execute(c.table(table).update(_selfheal)
                              .in_("ad_number", still_live[i:i + 200]),
                              what=table + ".prune_selfheal")
             if held:
                 # Record the strike but do NOT deactivate on an unreachable source.
                 pending = [a for a in ads if a not in set(confirmed_gone) | set(still_live)]
+                _probe_iso = datetime.now(timezone.utc).isoformat()
                 for i in range(0, len(pending), 200):
-                    _execute(c.table(table).update({"missing_count": new_missing})
+                    _execute(c.table(table).update({"missing_count": new_missing,
+                                                    "last_liveness_probe_at": _probe_iso})
                              .in_("ad_number", pending[i:i + 200]),
                              what=table + ".prune_update")
             print(f"{table}: verify_gone on {len(ads)} at-grace row(s) → "
@@ -983,7 +1220,17 @@ def prune_unseen(
                              what="ops_stale_inactivation_probe.insert")
             except Exception as e:
                 print(f"{table}: could not record prune probe evidence ({type(e).__name__}: {e})")
-            ads, payload = confirmed_gone, {"missing_count": new_missing, "active": False}
+            # Probed and confirmed GONE — a look, and the one that most needs recording: without it
+            # a killed row keeps a stale last_seen_at and can outrank never-looked-at rows in the
+            # next staleness-ordered worklist (migration 20260924).
+            # deactivated_at is written HERE, not left to trg_set_deactivated_at: 27 platforms'
+            # tables never had that trigger (2026-10-03), so their hides carried no date and were
+            # invisible to the hidden counts, the unverified-hide monitor, auto-recovery and the
+            # 30-day clock. The trigger keeps a value it is given, so both paths agree.
+            _now = datetime.now(timezone.utc).isoformat()
+            ads, payload = confirmed_gone, {
+                "missing_count": new_missing, "active": False,
+                "deactivated_at": _now, "last_liveness_probe_at": _now}
             if not ads:
                 continue
         for i in range(0, len(ads), 200):
@@ -992,6 +1239,349 @@ def prune_unseen(
         if doomed:
             killed += len(ads)
     return killed
+
+
+OWN_PAGE_ORACLE = "own_page_status.default"
+
+# Ads whose OWN page or record THIS process read as sold or rented, ad_number → the words it printed.
+# A crawler that drops such an ad from its rows (rather than storing it) calls note_read_gone(), so
+# the default oracle above can tell "the crawl read it sold" from "the crawl did not see it": the
+# first is a direct reading, the second is absence (2026-10-09, backlog 300).
+_READ_GONE: dict[str, str] = {}
+_SOLD_OR_RENTED = ("مباع", "تم البيع", "بيعت", "مؤجر", "تم التأجير", "تم تأجير")
+
+
+def note_read_gone(ad_number: Optional[str], status_text: Optional[str]) -> bool:
+    """Record that this ad's own page/record says sold or rented. Any other status (reserved, coming
+    soon, missing, unreadable) records nothing: it is not a removal. Returns whether it was recorded."""
+    s = (status_text or "").strip()
+    if not ad_number or not s or not any(w in s for w in _SOLD_OR_RENTED):
+        return False
+    _READ_GONE[str(ad_number)] = s[:80]
+    return True
+_OWN_PAGE_CONTROLS = 3
+_OWN_PAGE_MAX_READS = 300
+
+
+def _own_page_status_signal(status, body, path_changed):
+    """A bare 404/410 on the listing's OWN path is the only removal this default can see. A redirect
+    elsewhere, a 200 of any shape, or anything unreadable is no opinion (UNKNOWN), never a death."""
+    if status in (404, 410) and not path_changed:
+        return "gone"
+    return None
+
+
+_END_DATE_KEYS = ("license_expiry",)
+_END_DATE_INFO_KEYS = ("ad_end_date", "license_end_date", "expired_at", "end_date")
+
+
+def _published_end_passed(row: Optional[dict]) -> Optional[str]:
+    """The stored source-published end date when it has passed (normalize.ad_expiry_state), else None.
+    No date, an unreadable date or a future one is None: never evidence."""
+    if not row:
+        return None
+    from scrapers.common import normalize
+    info = row.get("additional_info") if isinstance(row.get("additional_info"), dict) else {}
+    for raw in [row.get(k) for k in _END_DATE_KEYS] + [info.get(k) for k in _END_DATE_INFO_KEYS]:
+        if isinstance(raw, str) and normalize.ad_expiry_state(raw) == "expired":
+            return raw
+    return None
+
+
+def _own_page_session():
+    try:
+        from curl_cffi import requests as cc
+        return cc.Session(impersonate="chrome124")
+    except Exception:  # noqa: BLE001 — plain requests is still a direct read
+        import requests
+        return requests.Session()
+
+
+READ_GONE_MAX_READS = 60   # own-page reads per table per run when a prune is guarded or skipped
+
+
+def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=None, *,
+                     max_prune_frac: float = 0.30, min_active_guard: int = 8,
+                     max_reads: int = READ_GONE_MAX_READS) -> int:
+    """Strike ONLY the unseen active rows whose OWN page reads gone (2026-10-12).
+
+    For a crawl whose absence prune was refused (a guard tripped, or the walk fell short) — the
+    direct readings must not be thrown away with the absence (the dealapp lesson of 10-06, muktamel
+    10-07). opensooq: 27 of 97 ads read «هذا الإعلان غير متوفر» on their own pages four runs running
+    while the guard (re-saw 49 of 72) discarded every prune. manzo: a 2-ad catalogue whose walk never
+    matched the API's count, so its dead ad's strike counter froze at 2 for days, on screen.
+
+    Each unseen row's own page is read through `verify_gone` (default: own_page_status_oracle, which
+    needs a seen page to answer live first). UNKNOWN and live rows are counted as seen (kept, shown);
+    only read-gone rows take a strike, at most the collapse cap's worth (oldest-seen first; the cap
+    is respected, never raised). prune_unseen then runs with its grace and its at-grace re-read."""
+    seen = {str(a) for a in seen_ads if a}
+    if not seen:
+        return 0       # nothing seen this run: the source may be down — no control, no reading
+    c = sb()
+    q = c.table(table).select("ad_number,last_seen_at").eq("active", True)
+    if source:
+        q = q.eq("source", source)
+    rows = [r for r in (_execute(q.range(0, 999), what=table + ".read_gone_slice").data or [])
+            if r.get("ad_number")]
+    if verify_gone is None:
+        verify_gone = own_page_status_oracle(c, table, seen)
+    unseen = sorted((r for r in rows if r["ad_number"] not in seen),
+                    key=lambda r: str(r.get("last_seen_at") or ""))[:max_reads]
+    gone: list[str] = []
+    for r in unseen:
+        try:
+            got = verify_gone(r["ad_number"])
+        except Exception as e:  # noqa: BLE001 — an oracle that throws is UNKNOWN, never gone
+            print(f"{table}: verify_gone({r['ad_number']}) raised {type(e).__name__}: {e} → unknown")
+            continue
+        verdict = (got[0] if isinstance(got, (tuple, list)) else got) or "unknown"
+        if str(verdict).lower() == "gone":
+            gone.append(r["ad_number"])
+    if len(rows) >= min_active_guard:
+        gone = gone[:int(max_prune_frac * len(rows))]
+    if not gone:
+        print(f"{table}: no unseen ad read gone on its own page — nothing struck", flush=True)
+        return 0
+    print(f"{table}: striking only the {len(gone)} ad(s) whose own page read gone", flush=True)
+    return prune_unseen(table, {r["ad_number"] for r in rows} - set(gone), source=source,
+                        verify_gone=verify_gone, min_coverage=0.0, max_prune_frac=max_prune_frac,
+                        min_active_guard=min_active_guard)
+
+
+def own_page_status_oracle(c, table: str, seen, *, session=None):
+    """verify_gone for a prune_unseen caller that supplied none (see the call site).
+
+    Each at-grace row is read at its own stored `listing_url`. Before any removal a known-live control
+    must answer: up to three ads THIS crawl just saw, read the same way, at least one of which answers
+    200 with a body and no 404/410 (a source that answers blocks with 404, like gathern, fails here and
+    removes nothing). Memoised per call, both ways. No URL, no control, any failure: UNKNOWN."""
+    from scrapers.common.http_liveness import LivenessProbe
+
+    s = session or _own_page_session()
+    rows: dict[str, Optional[dict]] = {}
+
+    def row_of(ad_number: str) -> Optional[dict]:
+        if ad_number not in rows:
+            try:   # "*": tables differ in which end-date columns they carry
+                r = _execute(c.table(table).select("*").eq("ad_number", ad_number).limit(1),
+                             what=table + ".own_page_url")
+                data = getattr(r, "data", None) or []
+                rows[ad_number] = data[0] if data else None
+            except Exception:  # noqa: BLE001 — a failed lookup is UNKNOWN, never a kill
+                rows[ad_number] = None
+        return rows[ad_number]
+
+    def url_for(ad_number: str):
+        row = row_of(ad_number)
+        return (row.get("listing_url") or None) if row else None
+
+    state: dict[str, Any] = {}
+
+    def canary() -> tuple[bool, str]:
+        if "v" in state:
+            return state["v"]
+        state["v"] = (False, "no known-live control from this crawl answered live")
+        for ad in sorted(str(a) for a in seen)[:_OWN_PAGE_CONTROLS]:
+            url = url_for(ad)
+            if not url:
+                continue
+            try:
+                r = s.get(url, timeout=45, allow_redirects=True)
+            except Exception:  # noqa: BLE001
+                continue
+            if r.status_code == 200 and (r.text or "") and _own_page_status_signal(
+                    r.status_code, r.text, False) is None:
+                state["v"] = (True, f"control {ad} answers 200")
+                break
+        return state["v"]
+
+    probe = LivenessProbe(platform=table, signal=_own_page_status_signal, session=lambda: s,
+                          url_for=url_for, canary=canary, attempts=1, backoff=0.0)
+    reads = [0]
+
+    def verify_gone(ad_number: str):
+        # A held row stays at grace and is read again next crawl, so the budget bounds a crawl's
+        # cost; a row past it is UNKNOWN (kept, shown), never a kill.
+        if reads[0] >= _OWN_PAGE_MAX_READS:
+            return "unknown", f"{OWN_PAGE_ORACLE}: read budget of {_OWN_PAGE_MAX_READS} spent this run"
+        said = _READ_GONE.get(str(ad_number))     # the crawl read its own page as sold/rented
+        if said:
+            return "gone", f"{OWN_PAGE_ORACLE}: its own page read «{said}» this run"
+        # The ad's OWN published end date (licence / ad end, as the source printed it and the crawl
+        # stored it) has passed: the source itself says the ad is over, which is why its complete
+        # list stopped serving it (shomou, earthapp, maktab, opensooq …: 2026-10-09, 15 of 31 such
+        # hides; their pages still answer 200). That is the source's statement, not our clock.
+        ended = _published_end_passed(row_of(ad_number))
+        if ended:
+            return "gone", f"{OWN_PAGE_ORACLE}: the ad's own published end date {ended} has passed"
+        reads[0] += 1
+        verdict, why = probe.verify_gone(ad_number)
+        return verdict, f"{OWN_PAGE_ORACLE}: {why}"[:300]
+    return verify_gone
+
+
+# The verdict a res/com supersession records, and the oracle that names WHY it was recorded.
+#
+# It is deliberately NOT 'GONE'. A supersession is not a statement about the source at all: the
+# listing's own URL is still served, by the ACTIVE sibling row that superseded this copy. Filing it
+# as GONE would put a false source verdict in the one ledger every other detector reads as source
+# truth (`mon_detect_prune_kill_without_source_verdict`, `mon_detect_deletion_clock_without_evidence`
+# and `ops_lifecycle_false_resurrection` all key on verdict = 'GONE'). It is also not 'AMBIGUOUS' —
+# `retire_superseded_siblings` reserves that word for the both-ways case it refuses to touch at all.
+SUPERSESSION_VERDICT = "SUPERSEDED"
+SUPERSESSION_ORACLE = "res_com.sibling_classified_this_run"
+
+
+def plan_supersession_evidence(
+    retired_ads,
+    table: str = "",
+    superseding_table: str = "",
+    rows=None,
+):
+    """Pure: the ledger rows a supersession retirement owes, one per ad actually retired.
+
+    WHY THIS EXISTS (ops_incident #275, measured 2026-09-18)
+    -------------------------------------------------------
+    `retire_superseded_siblings()` wrote `{active: false, deactivated_at}` and nothing else. So an
+    automatic retirement was, in SQL, indistinguishable from a crawl that timed out — and
+    `mon_detect_unknown_treated_as_dead` (P1) asks exactly *was this row set active=false with no
+    verdict recorded against its ad_number at the time?* It therefore counted every automatic
+    supersession as `without_direct_evidence`. Measured across the seven wired platforms: 16
+    retirements in 30 days, every one evidence-free, every one confirmed a genuine supersession by
+    an ACTIVE sibling row holding the same ad_number (sadin 5, amaall 6, dealapp 4, arkaan 1).
+
+    The exclusion the detector already had (migration 20260913144532) reads
+    `ops_res_com_collision_adjudication`, and the only writer of THOSE rows is a human/agent
+    session — so the suppression for an automatic path was, in practice, written by hand or not at
+    all. `docs/ops/LISTING_LIFECYCLE_ENGINEER.md` §8.3 calls that detector the highest-value one in
+    §4 and "the one that can least afford to cry wolf"; a detector readers learn to dismiss is a
+    detector that is dark on the day it is right.
+
+    This is `scrapers/common/sold_pin.py`'s lesson applied to the other automatic kill path: the
+    actor that performs an authoritative deactivation writes the evidence for it, in the same
+    function, so the duty cannot be lost by anyone forgetting.
+
+    Pure and total, so the law can be EXECUTED by a barrier rather than read as text
+    (`scripts/verify-supersession-kill-leaves-evidence.ts` runs it through
+    `scripts/lib/pythonMutant.ts`, which calls positionally — hence the positional signature).
+    """
+    if not superseding_table or not str(superseding_table).strip():
+        # An evidence row that cannot say WHICH table superseded this copy is unfalsifiable later —
+        # the 2026-08-26 aqarcity lesson (254 kills nobody could adjudicate from the record).
+        raise ValueError(
+            "plan_supersession_evidence requires a non-empty superseding_table naming the sibling "
+            "that positively classified the ad this run, e.g. 'arkaan_commercial_listings'"
+        )
+    by_ad = {}
+    for r in (rows or ()):
+        ad = (r or {}).get("ad_number")
+        if ad and ad not in by_ad:
+            by_ad[ad] = r
+    seen, evidence = set(), []
+    for a in retired_ads or ():
+        if not a or a in seen:
+            continue
+        seen.add(a)
+        row = by_ad.get(a) or {}
+        evidence.append({
+            "source_table": table,
+            "listing_id": row.get("id"),
+            "listing_url": row.get("listing_url"),
+            "ad_number": a,
+            "verdict": SUPERSESSION_VERDICT,
+            "oracle": SUPERSESSION_ORACLE,
+            "note": (
+                f"retired because {superseding_table} positively classified this ad_number from "
+                f"the source page during this run; the listing_url is still served by that sibling"
+            ),
+        })
+    return evidence
+
+
+def register_source_retraction(
+    *,
+    table: str,
+    ad_numbers,
+    reason: str,
+    source_signal: str,
+    source: Optional[str] = None,
+) -> int:
+    """Record, in `ops_adjudicated_retraction`, that the SOURCE itself says these ads are gone.
+
+    HIDING A LISTING IS A TWO-PART ACT (AGENTS.md, 2026-09-18). Setting `active = false` is only
+    the first half; without the second the deactivation is undone within 24 hours and the failure
+    is silent, arrives a day late, and looks exactly like a scraper bug.
+
+    The reason is structural, not incidental. `auto_recover_false_inactive()` recovers a row on
+
+        active = false AND coalesce(missing_count, 0) = 0
+                       AND deactivated_at >= now() - 24h
+                       AND not exists (<an adjudication row>)
+
+    A row killed from POSITIVE source evidence — the ad's own page says «غير متاح» / sold /
+    withdrawn — was never ABSENT from the crawl, so nothing ever increments `missing_count`. It
+    therefore matches the first three clauses verbatim, exactly as an accidental flip does, and the
+    adjudication ledger is the ONLY clause that can tell the two apart. This is the third recorded
+    instance of that class: sadin supersession (2026-09-02, guarded by a dedicated clause) and
+    rakez off-plan (2026-09-14, registered by hand three days after the fact) were the first two.
+
+    Measured on suwar, 2026-09-19: 54 ads the source marks «غير متاح» were deactivated by every
+    daily run from 2026-09-15 and reactivated by every 05:20 recovery pass — `marked_inactive = 54`
+    AND `reactivated = 54` on four consecutive days, leaving 54 sold/withdrawn ads `active = true`
+    in the canonical table and one full sync pass away from being served to users.
+
+    Call this for ads whose page was READ and said gone — never for ads merely missing from a
+    crawl. Absence is `prune_unseen`'s business and is never evidence on its own
+    (docs/ops/LISTING_LIVENESS.md: UNKNOWN never deactivates anything).
+
+    Idempotent: re-registering an already-registered ad is a no-op, so a daily run may call it
+    unconditionally. Best-effort — a ledger failure is reported and never blocks the crawl.
+
+    Returns the number of ads registered (0 when there is nothing to do).
+    """
+    ads = sorted({a for a in (ad_numbers or ()) if a})
+    # Nothing to register → return before building a client, so a no-op call needs no credentials
+    # and costs no round trip (same contract as retire_superseded_siblings).
+    if not ads:
+        return 0
+
+    c = sb()
+    now = datetime.now(timezone.utc).isoformat()
+    registered = 0
+    for i in range(0, len(ads), 200):
+        chunk = ads[i:i + 200]
+        q = c.table(table).select("id, ad_number, listing_url").in_("ad_number", chunk)
+        if source:
+            q = q.eq("source", source)
+        found = _execute(q, what=table + ".retraction_select")
+        rows = list(getattr(found, "data", None) or [])
+        if not rows:
+            continue
+        payload = [{
+            "source_table": table,
+            "listing_id": r["id"],
+            "reason": reason,
+            "evidence": {
+                "ad_number": r.get("ad_number"),
+                "listing_url": r.get("listing_url"),
+                "source_signal": source_signal,
+                "registered_by": f"{table} scraper run",
+                "registered_at": now,
+            },
+        } for r in rows]
+        try:
+            _execute(c.table("ops_adjudicated_retraction")
+                     .upsert(payload, on_conflict="source_table,listing_id"),
+                     what="ops_adjudicated_retraction.insert")
+            registered += len(payload)
+        except Exception as e:  # noqa: BLE001 — the ledger may never block the crawl
+            print(f"{table}: could not register source retraction "
+                  f"({type(e).__name__}: {e})", flush=True)
+    if registered:
+        print(f"↪ {table}: registered {registered} source-confirmed retraction(s) so the "
+              f"24h auto-recovery cannot resurrect them", flush=True)
+    return registered
 
 
 def retire_superseded_siblings(
@@ -1034,6 +1624,9 @@ def retire_superseded_siblings(
       • An ad present in BOTH seen-sets in one run is genuinely ambiguous (the crawl classified
         the same ad two ways) and is left completely untouched, on both sides, for a human.
       • A row already inactive is not rewritten, so `deactivated_at` keeps its original date.
+      • EVERY retired row leaves a per-row `ops_stale_inactivation_probe` verdict of
+        `SUPERSEDED` naming the sibling table that superseded it — see
+        `plan_supersession_evidence`. Not `GONE`: the source still serves the URL.
 
     Returns the number of rows retired (0 when there is nothing to do).
     """
@@ -1062,20 +1655,39 @@ def retire_superseded_siblings(
         ads = sorted(superseding)
         for i in range(0, len(ads), 200):
             chunk = ads[i:i + 200]
-            q = c.table(table).select("ad_number").in_("ad_number", chunk).eq("active", True)
+            q = (c.table(table).select("id, ad_number, listing_url")
+                 .in_("ad_number", chunk).eq("active", True))
             if source:
                 q = q.eq("source", source)
             live = _execute(q, what=table + ".supersede_select")
-            stale = [r["ad_number"] for r in (getattr(live, "data", None) or [])]
+            rows = list(getattr(live, "data", None) or [])
+            stale = [r["ad_number"] for r in rows]
             if not stale:
                 continue
             _execute(c.table(table).update({"active": False, "deactivated_at": now})
                      .in_("ad_number", stale),
                      what=table + ".supersede_update")
             retired += len(stale)
+            # Record WHY each row was retired. Written AFTER the update and best-effort, for the
+            # same reason sold_pin.py gives: monitoring must never be able to keep a superseded
+            # duplicate card on screen. Without this the kill is unfalsifiable from the record and
+            # mon_detect_unknown_treated_as_dead counts it as evidence-free (ops_incident #275).
+            try:
+                evidence = plan_supersession_evidence(stale, table, other, rows)
+                for j in range(0, len(evidence), 200):
+                    _execute(c.table("ops_stale_inactivation_probe").insert(evidence[j:j + 200]),
+                             what="ops_stale_inactivation_probe.supersede_insert")
+            except Exception as e:  # noqa: BLE001 — the ledger may never block the retirement
+                print(f"{table}: could not record supersession evidence "
+                      f"({type(e).__name__}: {e})", flush=True)
             print(f"↪ {table}: retired {len(stale)} row(s) superseded by {other} this run "
                   f"({', '.join(stale[:5])}{'…' if len(stale) > 5 else ''})", flush=True)
     return retired
+
+
+#: Written to a run's notes by a caller that checked its own prices (see end_run); read by
+#: mon_check_run_field_ranges to skip only its windowed null-price check for that one run.
+OWN_PRICE_CHECK_MARK = "own_price_check"
 
 
 def end_run(
@@ -1089,6 +1701,7 @@ def end_run(
     floor: int = 0,
     degraded: bool = False,
     check_tables: Optional[list[str]] = None,
+    price_null_checked_by_caller: bool = False,
 ) -> bool:
     """Finalize a scrape_runs row. Returns the EFFECTIVE ok actually written.
 
@@ -1125,19 +1738,29 @@ def end_run(
             # Monitoring must never fail an already-committed run — the rows are written either
             # way, this only affects whether the run is HONESTLY reported as degraded.
             try:
+                if price_null_checked_by_caller:
+                    # The caller ran the null-price regression check on its OWN rows, telling a
+                    # source-published «no price» from a failed read (scrapers/aqar/price_tally.py).
+                    # This marker on THIS run's own record is what lets mon_check_run_field_ranges
+                    # skip only its windowed version of that one check — which, on a table 95 jobs
+                    # write at once, judges a run on its neighbours' rows. Every other check still
+                    # runs, and a run without the marker (every other scraper) is judged as before.
+                    _execute(sb().table("scrape_runs").update({"notes": OWN_PRICE_CHECK_MARK}).eq("id", run_id),
+                             what="scrape_runs.mark_own_price_check")
                 run_row = _execute(
                     sb().table("scrape_runs").select("platform, started_at").eq("id", run_id),
                     what="scrape_runs.select_for_check",
                 ).data[0]
                 for tbl in check_tables:
+                    params = {
+                        "p_run_id": run_id,
+                        "p_platform": run_row["platform"],
+                        "p_table": tbl,
+                        "p_since": run_row["started_at"],
+                        "p_placeholder_tokens": list(PLACEHOLDER_TOKENS),
+                    }
                     field_bad = _execute(
-                        sb().rpc("mon_check_run_field_ranges", {
-                            "p_run_id": run_id,
-                            "p_platform": run_row["platform"],
-                            "p_table": tbl,
-                            "p_since": run_row["started_at"],
-                            "p_placeholder_tokens": list(PLACEHOLDER_TOKENS),
-                        }),
+                        sb().rpc("mon_check_run_field_ranges", params),
                         what="mon_check_run_field_ranges",
                     ).data
                     if field_bad:
@@ -1151,6 +1774,10 @@ def end_run(
     if demotions:
         tag = "RC-B demoted ok=False: " + "; ".join(demotions)
         final_notes = f"{notes} | {tag}" if notes else tag
+    if _PRUNE_TRIPS:
+        tag = "prune guard tripped: " + "; ".join(_PRUNE_TRIPS)
+        final_notes = f"{final_notes} | {tag}" if final_notes else tag
+        _PRUNE_TRIPS.clear()
     _execute(
         sb().table("scrape_runs").update(
             {
@@ -1168,6 +1795,411 @@ def end_run(
     if _OPEN_RUN.get("run_id") == run_id:
         _OPEN_RUN["run_id"] = None
     return effective_ok
+
+
+# --- 2026-09-19 batch: seven small platforms onboarded in one pass -------------------------------
+# غدي / سفيرة / الحميدان are three tenant offices of one inblaj.net WordPress product and share a
+# parser (scrapers/common/inblaj_platform.py), but each keeps its OWN tables, registry row and run
+# ledger — a shared parser is not a shared platform.
+def upsert_squares_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("squares_residential_listings", rows)
+
+
+def upsert_squares_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("squares_commercial_listings", rows)
+
+
+def upsert_rawaf_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("rawaf_residential_listings", rows)
+
+
+def upsert_rawaf_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("rawaf_commercial_listings", rows)
+
+
+def upsert_maqrat_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("maqrat_residential_listings", rows)
+
+
+def upsert_maqrat_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("maqrat_commercial_listings", rows)
+
+
+def upsert_dallali_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("dallali_residential_listings", rows)
+
+
+def upsert_dallali_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("dallali_commercial_listings", rows)
+
+
+def upsert_muajarh_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("muajarh_residential_listings", rows)
+
+
+def upsert_muajarh_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("muajarh_commercial_listings", rows)
+
+
+def upsert_mobasher_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("mobasher_residential_listings", rows)
+
+
+def upsert_mobasher_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("mobasher_commercial_listings", rows)
+
+
+def upsert_nafithh_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nafithh_residential_listings", rows)
+
+
+def upsert_nafithh_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nafithh_commercial_listings", rows)
+
+
+def upsert_opensooq_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("opensooq_residential_listings", rows)
+
+
+def upsert_opensooq_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("opensooq_commercial_listings", rows)
+
+
+def upsert_holoul_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("holoul_residential_listings", rows)
+
+
+def upsert_holoul_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("holoul_commercial_listings", rows)
+
+
+def upsert_eightfloor_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("eightfloor_residential_listings", rows)
+
+
+def upsert_eightfloor_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("eightfloor_commercial_listings", rows)
+
+
+def upsert_manzo_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("manzo_residential_listings", rows)
+
+
+def upsert_manzo_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("manzo_commercial_listings", rows)
+
+
+def upsert_arsh_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("arsh_residential_listings", rows)
+
+
+def upsert_arsh_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("arsh_commercial_listings", rows)
+
+
+def upsert_superoffice_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("superoffice_residential_listings", rows)
+
+
+def upsert_superoffice_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("superoffice_commercial_listings", rows)
+
+
+def upsert_haraj_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("haraj_residential_listings", rows)
+
+
+def upsert_haraj_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("haraj_commercial_listings", rows)
+
+
+def upsert_shomou_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("shomou_residential_listings", rows)
+
+
+def upsert_shomou_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("shomou_commercial_listings", rows)
+
+
+def upsert_maktab_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("maktab_residential_listings", rows)
+
+
+def upsert_maktab_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("maktab_commercial_listings", rows)
+
+
+def upsert_sirdab_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sirdab_residential_listings", rows)
+
+
+def upsert_sirdab_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sirdab_commercial_listings", rows)
+
+
+def upsert_ashab_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ashab_residential_listings", rows)
+
+
+def upsert_ashab_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ashab_commercial_listings", rows)
+
+
+def upsert_manafe_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("manafe_residential_listings", rows)
+
+
+def upsert_manafe_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("manafe_commercial_listings", rows)
+
+
+def upsert_wajaf_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wajaf_residential_listings", rows)
+
+
+def upsert_wajaf_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wajaf_commercial_listings", rows)
+
+
+def upsert_albukaeri_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("albukaeri_residential_listings", rows)
+
+
+def upsert_albukaeri_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("albukaeri_commercial_listings", rows)
+
+
+def upsert_ryadah_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ryadah_residential_listings", rows)
+
+
+def upsert_ryadah_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ryadah_commercial_listings", rows)
+
+
+def upsert_sqcc_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sqcc_residential_listings", rows)
+
+
+def upsert_sqcc_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sqcc_commercial_listings", rows)
+
+
+def upsert_daraa_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("daraa_residential_listings", rows)
+
+
+def upsert_daraa_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("daraa_commercial_listings", rows)
+
+
+def upsert_tawia_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("tawia_residential_listings", rows)
+
+
+def upsert_tawia_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("tawia_commercial_listings", rows)
+
+
+def upsert_vmksa_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("vmksa_residential_listings", rows)
+
+
+def upsert_vmksa_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("vmksa_commercial_listings", rows)
+
+
+def upsert_macsaib_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("macsaib_residential_listings", rows)
+
+
+def upsert_macsaib_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("macsaib_commercial_listings", rows)
+
+
+def upsert_maqam_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("maqam_residential_listings", rows)
+
+
+def upsert_maqam_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("maqam_commercial_listings", rows)
+
+
+
+
+def upsert_earthapp_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("earthapp_residential_listings", rows)
+
+
+def upsert_earthapp_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("earthapp_commercial_listings", rows)
+
+
+def upsert_nawafeth_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nawafeth_residential_listings", rows)
+
+
+def upsert_nawafeth_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nawafeth_commercial_listings", rows)
+
+
+def upsert_wahadat_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wahadat_residential_listings", rows)
+
+
+def upsert_wahadat_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wahadat_commercial_listings", rows)
+
+
+def upsert_gudai_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("gudai_residential_listings", rows)
+
+
+def upsert_gudai_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("gudai_commercial_listings", rows)
+
+
+def upsert_safera_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("safera_residential_listings", rows)
+
+
+def upsert_safera_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("safera_commercial_listings", rows)
+
+
+def upsert_alhumaidan_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alhumaidan_residential_listings", rows)
+
+
+def upsert_alhumaidan_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alhumaidan_commercial_listings", rows)
+
+
+def upsert_aqarnajran_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aqarnajran_residential_listings", rows)
+
+
+def upsert_aqarnajran_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aqarnajran_commercial_listings", rows)
+
+
+def upsert_fahadalshahri_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("fahadalshahri_residential_listings", rows)
+
+
+def upsert_fahadalshahri_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("fahadalshahri_commercial_listings", rows)
+
+
+def upsert_wslnaa_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wslnaa_residential_listings", rows)
+
+
+def upsert_wslnaa_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wslnaa_commercial_listings", rows)
+
+
+# CompoundIn lists residential compounds only; its commercial table exists for schema symmetry with
+# every other platform (and so the shared retire/prune helpers can address it) but is never written.
+def upsert_compoundin_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("compoundin_residential_listings", rows)
+
+
+def upsert_compoundin_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("compoundin_commercial_listings", rows)
+
+
+# --- 2026-09-21 batch: eleven platforms onboarded in one pass ------------------------------------
+# One public pair per platform, exactly like the seven above. Each scraper shipped calling the
+# private _wasalt_batch (or a local stand-in for this pair) because it could not edit this file;
+# they now call these, so every guard in _wasalt_batch still runs and nothing addresses a table by
+# a string built outside this module.
+def upsert_alsidra_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alsidra_residential_listings", rows)
+
+
+def upsert_alsidra_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alsidra_commercial_listings", rows)
+
+
+def upsert_moftah_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("moftah_residential_listings", rows)
+
+
+def upsert_moftah_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("moftah_commercial_listings", rows)
+
+
+def upsert_masar_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("masar_residential_listings", rows)
+
+
+def upsert_masar_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("masar_commercial_listings", rows)
+
+
+def upsert_gomenassat_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("gomenassat_residential_listings", rows)
+
+
+def upsert_gomenassat_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("gomenassat_commercial_listings", rows)
+
+
+def upsert_sakan_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sakan_residential_listings", rows)
+
+
+def upsert_sakan_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sakan_commercial_listings", rows)
+
+
+def upsert_bossbih_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("bossbih_residential_listings", rows)
+
+
+def upsert_bossbih_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("bossbih_commercial_listings", rows)
+
+
+def upsert_alshawaf_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alshawaf_residential_listings", rows)
+
+
+def upsert_alshawaf_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alshawaf_commercial_listings", rows)
+
+
+def upsert_ialqarawi_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ialqarawi_residential_listings", rows)
+
+
+def upsert_ialqarawi_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ialqarawi_commercial_listings", rows)
+
+
+def upsert_aljassim_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aljassim_residential_listings", rows)
+
+
+def upsert_aljassim_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aljassim_commercial_listings", rows)
+
+
+def upsert_almotmkenah_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("almotmkenah_residential_listings", rows)
+
+
+def upsert_almotmkenah_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("almotmkenah_commercial_listings", rows)
+
+
+def upsert_nufouth_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nufouth_residential_listings", rows)
+
+
+def upsert_nufouth_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nufouth_commercial_listings", rows)
 
 
 def upsert_aldarim_residential_batch(rows: list[dict[str, Any]]) -> None:
@@ -1261,6 +2293,30 @@ def upsert_azdad_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("azdad_commercial_listings", rows)
 
 
+def upsert_akariyoun_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("akariyoun_residential_listings", rows)
+
+
+def upsert_akariyoun_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("akariyoun_commercial_listings", rows)
+
+
+def upsert_sadiqeltajer_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sadiqeltajer_residential_listings", rows)
+
+
+def upsert_sadiqeltajer_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sadiqeltajer_commercial_listings", rows)
+
+
+def upsert_ksaaqar_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ksaaqar_residential_listings", rows)
+
+
+def upsert_ksaaqar_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ksaaqar_commercial_listings", rows)
+
+
 def upsert_remal_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("remal_residential_listings", rows)
 
@@ -1275,6 +2331,30 @@ def upsert_amaall_residential_batch(rows: list[dict[str, Any]]) -> None:
 
 def upsert_amaall_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("amaall_commercial_listings", rows)
+
+
+def upsert_rakez_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("rakez_residential_listings", rows)
+
+
+def upsert_rakez_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("rakez_commercial_listings", rows)
+
+
+def upsert_suwar_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("suwar_residential_listings", rows)
+
+
+def upsert_suwar_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("suwar_commercial_listings", rows)
+
+
+def upsert_aqaralsaudia_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aqaralsaudia_residential_listings", rows)
+
+
+def upsert_aqaralsaudia_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aqaralsaudia_commercial_listings", rows)
 
 
 def upsert_amlakalahsa_residential_batch(rows: list[dict[str, Any]]) -> None:
@@ -1335,11 +2415,14 @@ def upsert_october_commercial_batch(rows: list[dict[str, Any]]) -> None:
 
 # additional_info keys OWNED by the Tier-2 `--backfill-details` pass (detail-page fields the LIST
 # crawl never produces). The crawl rebuilds additional_info from scratch, so a plain full-row upsert
-# would drop these on every sighting — the same wipe as the description column (PR #210). Crawl keys
-# and these are disjoint, so we carry them forward from the stored row before upserting.
+# would drop these on every sighting — the same wipe as the description column (PR #210). We carry
+# them forward from the stored row before upserting. rating / reviews_count are the one overlap: the
+# crawl writes them when the list API rates the unit (the crawl wins), and leaves them out when the
+# list sends 0/0 — then the unit page's own score, read by the backfill, carries forward.
 _GATHERN_DETAIL_AI_KEYS = (
     "suitability", "house_rules", "check_in", "check_out",
     "guest_capacity", "booking_count", "views_count", "rate_text", "extra_sections",
+    "rating", "reviews_count",
 )
 
 
@@ -1362,7 +2445,7 @@ def _preserve_gathern_detail_ai(table: str, rows: list[dict[str, Any]]) -> None:
     """Read-modify-write: fetch the stored additional_info for these ad_numbers and carry the
     backfill-owned detail keys forward, so the crawl's fresh blob doesn't wipe them.
     ponytail: small race vs a concurrent backfill write; fine — crawl and backfill are separate
-    scheduled jobs and backfill only touches desc-NULL rows. Upgrade to a Postgres `||` upsert RPC
+    scheduled jobs and backfill only touches rows missing a description or a review count. Upgrade to a Postgres `||` upsert RPC
     if they ever run together."""
     ads = [r["ad_number"] for r in rows if r.get("ad_number")]
     if not ads:
@@ -1378,13 +2461,14 @@ def _preserve_gathern_detail_ai(table: str, rows: list[dict[str, Any]]) -> None:
     _carry_forward_ai(rows, stored, _GATHERN_DETAIL_AI_KEYS)
 
 
-def upsert_gathern_residential_batch(rows: list[dict[str, Any]]) -> None:
+def upsert_gathern_residential_batch(rows: list[dict[str, Any]],
+                                      strikes: Optional[dict[str, tuple[int, bool]]] = None) -> None:
     """Gathern (gathern.co) MONTHLY furnished residential units only (source='Gathern').
 
     Carries the Tier-2 detail fields forward first (see _preserve_gathern_detail_ai) so the crawl's
     full-row upsert doesn't wipe additional_info — same class of bug as the description wipe (PR #210)."""
     _preserve_gathern_detail_ai("gathern_residential_listings", rows)
-    _wasalt_batch("gathern_residential_listings", rows)
+    _wasalt_batch("gathern_residential_listings", rows, strikes=strikes)
 
 
 def upsert_gathern_commercial_batch(rows: list[dict[str, Any]]) -> None:
@@ -1629,3 +2713,407 @@ def upsert_alnokhba_residential_batch(rows: list[dict[str, Any]]) -> None:
 
 def upsert_alnokhba_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("alnokhba_commercial_listings", rows)
+
+
+# --- 2026-09-24 batch: thirty-five platforms onboarded in one pass -------------------------------
+# One public pair per platform, exactly like the eleven above. Each scraper shipped calling the
+# private _wasalt_batch because it could not edit this file; these are the public names the fleet's
+# registration check expects (verify-platform-registration-complete.ts). dwelleo is RE-ONBOARDED
+# (owner decision 2026-09-24): its 2026-06 pair was removed at retirement, so it gets a fresh pair here.
+# rightcompound and azure write their residential table only; the commercial twin exists anyway
+# because every platform carries the same two tables.
+def upsert_dwelleo_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("dwelleo_residential_listings", rows)
+
+
+def upsert_dwelleo_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("dwelleo_commercial_listings", rows)
+
+
+def upsert_aqalemhajer_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aqalemhajer_residential_listings", rows)
+
+
+def upsert_aqalemhajer_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aqalemhajer_commercial_listings", rows)
+
+
+def upsert_sakani_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sakani_residential_listings", rows)
+
+
+def upsert_sakani_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sakani_commercial_listings", rows)
+
+
+def upsert_shatri_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("shatri_residential_listings", rows)
+
+
+def upsert_shatri_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("shatri_commercial_listings", rows)
+
+
+def upsert_alqasem_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alqasem_residential_listings", rows)
+
+
+def upsert_alqasem_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alqasem_commercial_listings", rows)
+
+
+def upsert_fkralemar_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("fkralemar_residential_listings", rows)
+
+
+def upsert_fkralemar_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("fkralemar_commercial_listings", rows)
+
+
+def upsert_wadod_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wadod_residential_listings", rows)
+
+
+def upsert_wadod_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wadod_commercial_listings", rows)
+
+
+def upsert_almuteb_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("almuteb_residential_listings", rows)
+
+
+def upsert_almuteb_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("almuteb_commercial_listings", rows)
+
+
+def upsert_aalbarrak_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aalbarrak_residential_listings", rows)
+
+
+def upsert_aalbarrak_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aalbarrak_commercial_listings", rows)
+
+
+def upsert_alrifai_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alrifai_residential_listings", rows)
+
+
+def upsert_alrifai_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alrifai_commercial_listings", rows)
+
+
+def upsert_sodasyat_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sodasyat_residential_listings", rows)
+
+
+def upsert_sodasyat_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sodasyat_commercial_listings", rows)
+
+
+def upsert_hasaad_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("hasaad_residential_listings", rows)
+
+
+def upsert_hasaad_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("hasaad_commercial_listings", rows)
+
+
+def upsert_aqaralriyadh_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aqaralriyadh_residential_listings", rows)
+
+
+def upsert_aqaralriyadh_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aqaralriyadh_commercial_listings", rows)
+
+
+def upsert_justsa_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("justsa_residential_listings", rows)
+
+
+def upsert_justsa_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("justsa_commercial_listings", rows)
+
+
+def upsert_snam_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("snam_residential_listings", rows)
+
+
+def upsert_snam_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("snam_commercial_listings", rows)
+
+
+def upsert_jawher_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("jawher_residential_listings", rows)
+
+
+def upsert_jawher_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("jawher_commercial_listings", rows)
+
+
+def upsert_m3tmd_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("m3tmd_residential_listings", rows)
+
+
+def upsert_m3tmd_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("m3tmd_commercial_listings", rows)
+
+
+def upsert_senan_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("senan_residential_listings", rows)
+
+
+def upsert_senan_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("senan_commercial_listings", rows)
+
+
+def upsert_goldendeal_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("goldendeal_residential_listings", rows)
+
+
+def upsert_goldendeal_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("goldendeal_commercial_listings", rows)
+
+
+def upsert_thousand_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("thousand_residential_listings", rows)
+
+
+def upsert_thousand_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("thousand_commercial_listings", rows)
+
+
+def upsert_yameen_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("yameen_residential_listings", rows)
+
+
+def upsert_yameen_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("yameen_commercial_listings", rows)
+
+
+def upsert_ebriza_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ebriza_residential_listings", rows)
+
+
+def upsert_ebriza_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ebriza_commercial_listings", rows)
+
+
+def upsert_eilmalriyada_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("eilmalriyada_residential_listings", rows)
+
+
+def upsert_eilmalriyada_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("eilmalriyada_commercial_listings", rows)
+
+
+def upsert_daryusuf_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("daryusuf_residential_listings", rows)
+
+
+def upsert_daryusuf_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("daryusuf_commercial_listings", rows)
+
+
+def upsert_albdah_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("albdah_residential_listings", rows)
+
+
+def upsert_albdah_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("albdah_commercial_listings", rows)
+
+
+def upsert_eydah_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("eydah_residential_listings", rows)
+
+
+def upsert_eydah_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("eydah_commercial_listings", rows)
+
+
+def upsert_tamyaz_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("tamyaz_residential_listings", rows)
+
+
+def upsert_tamyaz_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("tamyaz_commercial_listings", rows)
+
+
+def upsert_hazim_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("hazim_residential_listings", rows)
+
+
+def upsert_hazim_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("hazim_commercial_listings", rows)
+
+
+def upsert_villassa_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("villassa_residential_listings", rows)
+
+
+def upsert_villassa_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("villassa_commercial_listings", rows)
+
+
+def upsert_marksa_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("marksa_residential_listings", rows)
+
+
+def upsert_marksa_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("marksa_commercial_listings", rows)
+
+
+def upsert_rightcompound_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("rightcompound_residential_listings", rows)
+
+
+def upsert_rightcompound_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("rightcompound_commercial_listings", rows)
+
+
+def upsert_livingcompound_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("livingcompound_residential_listings", rows)
+
+
+def upsert_livingcompound_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("livingcompound_commercial_listings", rows)
+
+
+def upsert_azure_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("azure_residential_listings", rows)
+
+
+def upsert_azure_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("azure_commercial_listings", rows)
+
+
+def upsert_expattrusted_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("expattrusted_residential_listings", rows)
+
+
+def upsert_expattrusted_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("expattrusted_commercial_listings", rows)
+
+
+def upsert_flow_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("flow_residential_listings", rows)
+
+
+def upsert_flow_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("flow_commercial_listings", rows)
+
+def upsert_abaad_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("abaad_residential_listings", rows)
+
+
+def upsert_abaad_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("abaad_commercial_listings", rows)
+
+def upsert_alsaedan_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alsaedan_residential_listings", rows)
+
+
+def upsert_alsaedan_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alsaedan_commercial_listings", rows)
+
+
+def upsert_ego_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ego_residential_listings", rows)
+
+
+def upsert_ego_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ego_commercial_listings", rows)
+
+
+def upsert_muhaysini_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("muhaysini_residential_listings", rows)
+
+
+def upsert_muhaysini_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("muhaysini_commercial_listings", rows)
+
+
+def upsert_nofodh_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nofodh_residential_listings", rows)
+
+
+def upsert_nofodh_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nofodh_commercial_listings", rows)
+
+
+def upsert_razre_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("razre_residential_listings", rows)
+
+
+def upsert_razre_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("razre_commercial_listings", rows)
+
+
+def upsert_reinvest_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("reinvest_residential_listings", rows)
+
+
+def upsert_reinvest_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("reinvest_commercial_listings", rows)
+
+
+def upsert_safa_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("safa_residential_listings", rows)
+
+
+def upsert_safa_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("safa_commercial_listings", rows)
+
+
+def upsert_sokok_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sokok_residential_listings", rows)
+
+
+def upsert_sokok_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sokok_commercial_listings", rows)
+
+
+def upsert_sukna_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sukna_residential_listings", rows)
+
+
+def upsert_sukna_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sukna_commercial_listings", rows)
+
+
+def upsert_tuba_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("tuba_residential_listings", rows)
+
+
+def upsert_tuba_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("tuba_commercial_listings", rows)
+
+def upsert_ibaax_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ibaax_residential_listings", rows)
+
+
+def upsert_ibaax_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ibaax_commercial_listings", rows)
+
+
+def upsert_remaxsa_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("remaxsa_residential_listings", rows)
+
+
+def upsert_remaxsa_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("remaxsa_commercial_listings", rows)
+
+
+def upsert_qmra_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("qmra_residential_listings", rows)
+
+
+def upsert_qmra_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("qmra_commercial_listings", rows)
+
+
+def upsert_alajlan_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alajlan_residential_listings", rows)
+
+
+def upsert_alajlan_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alajlan_commercial_listings", rows)

@@ -99,12 +99,22 @@ print("ok: alta mapping is exact-only, wanted-ads excluded, sold→inactive, pri
 #     run pins it. Pin the SHAPE here: run.py must call _pin_sold_inactive AFTER the upsert, for
 #     both tables, and it must write BOTH active=false and a missing_count above the recover
 #     job's `coalesce(missing_count,0)=0` condition.
+#
+#     2026-09-14: that payload moved into the ONE shared law, scrapers/common/sold_pin.py, together
+#     with the per-row evidence write ten platforms had been missing (see
+#     docs/ops/LISTING_LIFECYCLE_ENGINEER.md §4.1b). So this asserts the same invariant one link
+#     further along — alta delegates, and the law it delegates to still carries the payload — and
+#     it now reads the real runtime CONSTANT rather than a source-text literal.
 import inspect  # noqa: E402
 import re as _re  # noqa: E402
 from scrapers.alta import run as _run  # noqa: E402
+from scrapers.common import sold_pin as _sold_pin  # noqa: E402
 
 _pin = inspect.getsource(_run._pin_sold_inactive)
-assert '"active": False' in _pin and '"missing_count": 3' in _pin, (
+assert "sold_pin.pin_source_confirmed_gone(" in _pin, (
+    "alta's pin no longer routes through the shared law — a local copy of the pin is a local copy "
+    "of the law, and the clause copies lose is the per-row evidence row")
+assert _sold_pin.PIN_PAYLOAD == {"active": False, "missing_count": 3}, (
     "the pin must set BOTH active=false and missing_count>0, or the sweep re-activates it")
 
 _main = inspect.getsource(_run.main)
