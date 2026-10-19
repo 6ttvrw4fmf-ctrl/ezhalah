@@ -15,6 +15,7 @@ const OBS = join(ROOT, 'src/lib/observability.ts');
 const LAYOUT = join(ROOT, 'src/app/_layout.tsx');
 let failed = 0;
 const check = (name: string, ok: boolean, detail = '') => { console.log(`  ${ok ? '✓' : '❌'} ${name}${!ok && detail ? ` — ${detail}` : ''}`); if (!ok) failed++; };
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
 console.log('\nA third-party transport failure is classified, not swallowed and not filed as an Ezhalah error\n');
 
 const lifted = await liftSymbols(OBS, [
@@ -42,9 +43,9 @@ check('a DOMException whose code arrives as the string "19" still matches (engin
 const alwaysTransport = (r: any) => ({ thirdPartyTransport: !!r, level: 'warning' });   // ignores the GSI evidence
 const ignoresName = (r: any, g: boolean) => ({ thirdPartyTransport: !!r && g, level: g ? 'warning' : 'error' }); // any rejection with GSI
 const swallows = () => ({ thirdPartyTransport: true, level: 'warning', fingerprint: [] });
-check('(mutation) a classifier that ignores the GSI evidence is caught', alwaysTransport(netErr).thirdPartyTransport !== classify(netErr, false).thirdPartyTransport);
-check('(mutation) a classifier that ignores the reason name is caught', ignoresName(typeErr, true).thirdPartyTransport !== classify(typeErr, true).thirdPartyTransport);
-check('(mutation) a classifier with an empty fingerprint is caught', (swallows().fingerprint as string[]).length === 0 && (classify(netErr, true).fingerprint ?? []).length > 0);
+mustCatch('a classifier that ignores the GSI evidence', alwaysTransport(netErr).thirdPartyTransport !== classify(netErr, false).thirdPartyTransport);
+mustCatch('a classifier that ignores the reason name', ignoresName(typeErr, true).thirdPartyTransport !== classify(typeErr, true).thirdPartyTransport);
+mustCatch('a classifier with an empty fingerprint', (swallows().fingerprint as string[]).length === 0 && (classify(netErr, true).fingerprint ?? []).length > 0);
 
 // The verdict must reach Sentry: the handler asks the classifier and hands level/fingerprint/tags on.
 const layout = readFileSync(LAYOUT, 'utf8');
