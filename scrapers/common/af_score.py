@@ -111,6 +111,20 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # null outranks any prose hit (law §2), so our NULL is the source's answer and the score must not ask from it.
     "amaall": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "private_entrance"),
 }
+# A rakez listing's page is its PROJECT's page: one shared feature list and every unit's price · rooms · area. A UNIT
+# trait the project list names («غرفة خادمة», «غرفة سائق», «مواقف خاصة», «مطبخ») describes some of the project's units,
+# not this one, so it is never stored per unit (scrapers/rakez/run.py project_answers, backlog 467). The page therefore
+# cannot state it for this unit either: silent, never a miss. 10-19: the rakez maid_room asks (3 of 5 misses) were
+# exactly this list. Building traits (lift, AC) stay scored: the scraper reads them from the same list.
+PROJECT_PAGE_UNIT_TRAITS: dict[str, tuple[str, ...]] = {
+    "rakez": ("maid_room", "driver_room", "parking", "kitchen", "private_entrance", "furnished"),
+}
+# A website whose listing_url is its SHARED list page, not the unit: safa has no standalone unit page (the unit is a
+# popup sheet, scrapers/safa/run.py fetch_unit), and «/units/rental?page=1&property_id=N» serves the same first page
+# of cards for every N (CI re-read 39228340160: 14146 and 13181 print the identical cards). Its «مفروشة بالكامل» chip
+# belongs to another unit's card; all 4 safa misses on 10-19 asked furnished from it. Such a page is not this ad:
+# unreadable, never counted as wrong.
+SHARED_LIST_PAGE_SITES = {"safa"}
 # WordPress «WP Residence» sites: the ticked checklist is the structured statement (wpresidence_props).
 WP_RESIDENCE_SITES = {"eastabha"}
 COL = {n: c for n, _, c, _ in FIELDS}
@@ -176,6 +190,9 @@ def structured_only(platform: str, results: dict[str, str], stored: dict, page: 
     for f in STRUCTURED_ONLY.get(platform, ()):
         if f in out and out[f] != UNREADABLE:
             out[f] = structured_result(stored.get(COL[f]), structured_says(page, f))
+    for f in PROJECT_PAGE_UNIT_TRAITS.get(platform, ()):
+        if f in out and out[f] != UNREADABLE:
+            out[f] = PAGE_SILENT
     return out
 
 
@@ -443,6 +460,24 @@ def wpresidence_props(body: str) -> list[dict]:
             for absent, label in _WPR_ITEM.findall(body or "") if not absent]
 
 
+# rakez prints the developer's WARRANTY block on a project page: «10 سنوات · الهيكل الإنشائي», «20 سنوات · المصاعد»,
+# «5 سنوات · التكييف» (CI re-read 39228336072, projects 15002 and 65739). A guarantee period is not the ad stating
+# that the unit has a lift or fitted air conditioning, and it is ambiguous on its face (law §6: ambiguous → NULL).
+# All 5 rakez misses on 10-19 asked air_conditioner from this heading. The headings are dropped from the evidence.
+WARRANTY_SITES = {"rakez"}
+_WARRANTY_HEADING = re.compile(r'<span[^>]*>\s*\d+\s*</span>\s*<span[^>]*>\s*(?:سنوات|سنة|سنه)\s*</span>\s*</div>\s*'
+                               r'<h3[^>]*>\s*([^<]{1,40}?)\s*</h3>')
+
+
+def strip_warranty(page: dict, body: str) -> dict:
+    heads = {norm(html.unescape(t)) for t in _WARRANTY_HEADING.findall(body or "") if t.strip()}
+    if not heads:
+        return page
+    keep = [x for x in (page.get("evidence_lines") or []) if norm(x) not in heads]
+    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if norm(x) not in heads)
+    return {**page, "evidence_lines": keep, "text_head": head}
+
+
 def is_gathern(url: str) -> bool:
     return "gathern.co" in url
 
@@ -543,6 +578,10 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
+        if platform in SHARED_LIST_PAGE_SITES:
+            row["sampled"] += 1
+            row["unreadable_pages"] += 1
+            continue
         time.sleep(max(0.0, last + pace - time.monotonic()))
         last = time.monotonic()
         if is_wasalt(url) and wasalt is not None:
@@ -557,6 +596,8 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
             page = page_evidence(body) if status == 200 and body else None
             if page is not None and platform in NAV_LINK_SITES:
                 page = strip_nav(page, body)
+            if page is not None and platform in WARRANTY_SITES:
+                page = strip_warranty(page, body)
             if page is not None and platform in WP_RESIDENCE_SITES:
                 page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": wpresidence_props(body)}]}
             if page is not None and is_gathern(url):
