@@ -135,6 +135,16 @@ def deal_of(raw: Optional[str]) -> Optional[str]:
     return DEAL.get((raw or "").strip().lower())
 
 
+def licence_deals(desc: str) -> list[Optional[str]]:
+    """The deal of EVERY licence block in the post, in order. A post can paste two REGA blocks (HRJ11190666849,
+    backlog 656: 1st «غرض الإعلان: Sell» with no price, 2nd «غرض الإعلان: إيجار · سعر الوحدة: 28000»); `sections()`
+    keeps the first value of each label, so the two blocks would be read as ONE «Buy 28,000»."""
+    i = (desc or "").find(LICENCE_HEAD)
+    if i < 0:
+        return []
+    return [deal_of(_clean(m.group(1))) for m in re.finditer(r"غرض الإعلان[ \t]*:[ \t]*([^\s|]+)", desc[i:])]
+
+
 def age_of(raw: Optional[str]) -> Optional[int]:
     """«جديد»/«New» → 0, «ثلاث سنوات», «Seven Year» → 7, «5» → 5; an open bound («أكثر من 10») → None."""
     from scrapers.common.normalize import exact_age
@@ -330,6 +340,7 @@ def parse_post(ld: dict[str, Any], page_html: str = "") -> dict[str, Any]:
         "licence_location": get("وصف موقع العقار"),
         "deal": deal_of(deal_raw),
         "deal_raw": deal_raw,
+        "licence_deals": licence_deals(desc),
         "price": _num(get("سعر الوحدة")),
         "price_raw": get("سعر الوحدة"),
         "property_type_ar": get("نوع العقار"),
