@@ -110,6 +110,13 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # 10-18 «misses» (0 of 4, CI re-read 39115342028, 10729207 and 10729184) were exactly that prose. A structured
     # null outranks any prose hit (law §2), so our NULL is the source's answer and the score must not ask from it.
     "amaall": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "private_entrance"),
+    # muktamel publishes features through its own taxonomy (scrapers/muktamel/run.py FEATURE_COLS: «مطبخ مجهز»,
+    # «مواقف خاصة», «مدخل مستقل», «مصعد», «تكييف», …), rendered as the page's `<ul class="features-list">` (CI re-read
+    # 39231636290). Its 10-19 «misses» (4 of 6) were description prose («مطبخ راكب», «موقف سيارة», «مدخل خاص بالشقة»)
+    # on ads whose own list ticks none of them (re-read 39228500483): a structured null outranks prose (law §2).
+    # Read by muktamel_props().
+    "muktamel": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room",
+                 "private_entrance", "furnished"),
 }
 # A rakez listing's page is its PROJECT's page: one shared feature list and every unit's price · rooms · area. A UNIT
 # trait the project list names («غرفة خادمة», «غرفة سائق», «مواقف خاصة», «مطبخ») describes some of the project's units,
@@ -478,6 +485,27 @@ def strip_warranty(page: dict, body: str) -> dict:
     return {**page, "evidence_lines": keep, "text_head": head}
 
 
+# muktamel's taxonomy label → our field, exactly as its scraper maps the feature ids. A label is read only on an
+# exact match (a rooms entry «غرفة سائق مع حمام» or «مدخل سيارة» is a different item, never a guess).
+MUKTAMEL_LABELS = {"مصعد": "elevator", "مواقف خاصة": "parking", "مطبخ مجهز": "kitchen", "تكييف": "air_conditioner",
+                   "غرفة خادمة": "maid_room", "غرفة سائق": "driver_room", "مدخل مستقل": "private_entrance",
+                   "مفروشة": "furnished"}
+# The name structured_says() reads for each field (BOOL_KW), so a ticked item scores as the page's YES.
+_PROP_NAME = {**SANADAK_NAMES, "private_entrance": "مدخل خاص"}
+_MUK_FEATURES = re.compile(r'<ul class="features-list[^"]*"[^>]*>(.*?)</ul>', re.S)
+_MUK_ITEM = re.compile(r"<li[^>]*>([^<]{1,60})</li>")
+
+
+def muktamel_props(body: str) -> list[dict]:
+    """The ticked items of muktamel's own feature list: a listed item is a yes, an unlisted one is silence."""
+    ticked = {html.unescape(x).strip() for block in _MUK_FEATURES.findall(body or "") for x in _MUK_ITEM.findall(block)}
+    return [{"name": _PROP_NAME[f], "value": "نعم"} for lab, f in MUKTAMEL_LABELS.items() if lab in ticked]
+
+
+def is_muktamel(url: str) -> bool:
+    return "muktamel.com" in url
+
+
 def is_gathern(url: str) -> bool:
     return "gathern.co" in url
 
@@ -600,6 +628,8 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
                 page = strip_warranty(page, body)
             if page is not None and platform in WP_RESIDENCE_SITES:
                 page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": wpresidence_props(body)}]}
+            if page is not None and is_muktamel(url):
+                page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": muktamel_props(body)}]}
             if page is not None and is_gathern(url):
                 page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": gathern_props(body)}]}
         if page is None:
