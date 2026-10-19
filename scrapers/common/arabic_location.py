@@ -568,6 +568,19 @@ def catalog_district(city_id: Optional[int], district_ar: Optional[str]) -> Opti
     return _DISTRICT_AR_BY_CITY.get((city_id, n)) if n in _DISTRICT_BY_CITY.get(city_id, ()) else None
 
 
+def only_city_with_district(district_ar: Optional[str], region_id: Optional[int]) -> Optional[int]:
+    """The ONE catalogue city of `region_id` that has `district_ar` as a district, else None (owner 2026-10-18, the
+    المبرز pattern): a source that names a district and its region but no city — rakez «الخور , الشرقية» — is placed
+    only when the catalogue leaves exactly one candidate. Two cities with that district, or none, place nothing."""
+    _load()
+    n = norm_district_tok(district_ar) if district_ar else ""
+    if not n or region_id is None:
+        return None
+    region_of = {cid: rid for pairs in _CITY.values() for cid, rid in pairs}
+    hits = {cid for cid, keys in _DISTRICT_BY_CITY.items() if n in keys and region_of.get(cid) == region_id}
+    return next(iter(hits)) if len(hits) == 1 else None
+
+
 def catalog_district_keys(city_id: Optional[int]) -> frozenset[str]:
     """Every district_norm key the catalogue attests for `city_id`; empty when the city is unknown. For a
     caller that must test MANY candidate spans against one town (abralosol's title fallback)."""
