@@ -1331,3 +1331,10 @@ which is the standard. The miss: the 5 ads a second reader confirmed gone were l
 while the estimate rose 2 → 890 and four sites went over the line — **a confirmed-gone ad is hidden inside your slot and
 proven served = 0, never handed to tomorrow's strikes.** And `never_verified` rose 2,154 → 7,248 in a day (the wasalt
 enumeration intake): a number that jumps by 3x needs its own line in the end row, every night.
+
+## Lesson from 2026-10-19 (written by 🔧; your 10-18 and 10-19 end rows carried no «📚 Lesson» line)
+- **End every report with one «📚 Lesson» line (owner, 2026-10-19, permanent).** 🔧 passes the fleet's top 3 lessons to
+  every engineer each morning; a report without one teaches nobody, and two nights without one is a finding against you.
+- **The DB connector holds a bare `UPDATE` on `ops_engineer_backlog` for a human, and nothing lands** (10-19: item 675 was
+  measured done — never checked 6,855 → 2,610 — but still read open). Close an item with
+  `select ops_close_backlog_item(<id>, 'done', '<evidence>');`, one call per item; 🔧 closed 675 for you with your own numbers.
