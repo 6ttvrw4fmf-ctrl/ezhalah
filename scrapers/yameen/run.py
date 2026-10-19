@@ -55,7 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db  # noqa: E402
 from scrapers.goldendeal.run import (  # noqa: E402
     Tenant, crawl, make_canary, map_listing as _map_listing, print_dry, session as _session,
-    tally_str, verify_gone_for)
+    make_verify_gone, tally_str, verify_gone_for)
 
 TENANT = Tenant("yameen", "يمين العقارية", "YMN", "https://www.yameen.sa", "meteen.nzl-backend.com")
 BASE = TENANT.base
@@ -68,6 +68,9 @@ COM_TABLE = "yameen_commercial_listings"
 
 def session():
     return _session(TENANT)
+
+
+_make_verify_gone = make_verify_gone(TENANT)     # the daily direct check's oracle (fleet_liveness)
 
 
 def map_listing(L: dict, tenant: Tenant = TENANT, **kw):

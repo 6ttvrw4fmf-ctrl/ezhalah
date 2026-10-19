@@ -19,10 +19,6 @@ scripts/lib/afJourneyPacing.ts | routine-5-af-trending | shared AF pacing helper
 scripts/verify-af-card-evidence-live.ts | routine-5-af-trending | private tap() copy; its offer tap already goes through the fixed opener, the filter-control taps do not
 scripts/verify-af-live-truth.ts | routine-5-af-trending | private tap() copy
 scripts/verify-af-option-card-truth-live.ts | routine-5-af-trending | private tap() copy
-scripts/verify-af-pill-removal-live.ts | routine-5-af-trending | private tap() copy
-scripts/verify-af-remove-last-pill-live.ts | routine-5-af-trending | private tap() copy
-scripts/verify-af-scope-change-live.ts | routine-5-af-trending | private tap() copy
-scripts/verify-af-stale-predicate-live.ts | routine-5-af-trending | private tap() copy
 scripts/verify-trending-live-four-way-truth.ts | routine-5-af-trending | private tap() copy
 scripts/verify-combined-budget-live.ts | routine-4-search-qa | Normal Filter journey — not this routine's to rewrite
 scripts/verify-chat-persistence-live.mjs | routine-6-journey | persistence journey — not this routine's to rewrite

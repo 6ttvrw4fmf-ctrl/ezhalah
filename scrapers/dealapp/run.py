@@ -48,6 +48,7 @@ import argparse
 import collections
 import json
 import os
+import random
 import re
 import sys
 import threading
@@ -63,6 +64,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, http_liveness, normalize, sold_pin  # noqa: E402
+from scrapers.common.arabic_location import city_by_own_pin, norm_ar  # noqa: E402
 from scrapers.dealapp import liveness as dealapp_liveness  # noqa: E402
 
 SOURCE = "Deal App"
@@ -172,9 +174,16 @@ def session() -> cc.Session:
 _ORACLE_ADID = threading.local()
 
 
-def _oracle_session() -> cc.Session:
+class _PacedSession:
+    """The oracle's re-probes spend the same origin budget as the crawl (see _ORIGIN)."""
+
+    def get(self, url: str, **kw: Any) -> Any:
+        return _get(_session(), url, **kw)[0]
+
+
+def _oracle_session() -> Any:
     """Transport seam for the probe. Tests replace this; the shared law is never replaced."""
-    return _session()
+    return _PacedSession()
 
 
 def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
@@ -420,7 +429,27 @@ def enumerate_ids(s: cc.Session, cap_pages: int, shards: int = 1, shard: int = 0
         # budget left for new ids. Re-confirmation is what actually produces the liveness signal
         # (a re-fetched page either re-confirms the row or drops it from the seen set), so it has
         # to come first or the coverage floor stays unreachable and nothing is ever aged out.
-        ids = known_ids + tail + new_ids
+        #
+        # SHUFFLED, not «known then tail» (measured 2026-10-02). Removed ads drop out of the sitemap,
+        # so `tail` is where the dead ones are, and fetching it last put them all in one block at the
+        # end of the run: confirmed_absent() needs a live-ad render AFTER each no-listing render, and
+        # when the shard's own slice filled the cap nothing came after the tail — those shards
+        # confirmed 0–60 removals a night against ~400 dead, and the time budget cut the same tail
+        # every night. Interleaving gives every dead ad live neighbours and spreads the cut evenly.
+        #
+        # NEWEST NEW IDS GET A RESERVED SLICE AT THE FRONT (2026-10-08). With re-confirm strictly
+        # first, a shard's own active slice (~1,315) outgrew its cap (1,200) and its time budget, so
+        # «keeping the full active slice and dropping new ids only» fetched ZERO new ads: 3,374 new
+        # sitemap ids on shard 3 alone, and dealapp arrivals fell from ~1,780/day (10-02) to ~200.
+        # Dealapp ids rise with time, so the highest ids are the ads published since the last run;
+        # DEALAPP_NEW_RESERVE of them (default 150 a shard, ~1,800 a night against ~650 new a day)
+        # go first, and the shuffled re-confirm slice follows unchanged.
+        reserve_n = max(0, int(os.environ.get("DEALAPP_NEW_RESERVE", "150")))
+        newest = sorted(new_ids, key=int, reverse=True)
+        reserve = newest[:reserve_n]
+        head = known_ids + tail
+        random.shuffle(head)
+        ids = reserve + head + newest[len(reserve):]
     else:
         ids = new_ids + known_ids + tail
 
@@ -446,7 +475,7 @@ def enumerate_ids(s: cc.Session, cap_pages: int, shards: int = 1, shard: int = 0
         # prune_unseen will measure coverage against, so truncating it would re-create the
         # under-coverage that stopped pruning in the first place. The cap only ever trims NEW ids.
         if shards > 1:
-            must_keep = len(known_ids) + len(tail)
+            must_keep = len(reserve) + len(known_ids) + len(tail)
             if max_listings < must_keep:
                 print(f"  ⚠ cap {max_listings} < {must_keep} active ids owned by shard "
                       f"{shard}/{shards}; keeping the full active slice and dropping new ids only",
@@ -457,7 +486,7 @@ def enumerate_ids(s: cc.Session, cap_pages: int, shards: int = 1, shard: int = 0
     print(f"Deal App: {len(ids)} ids to scrape "
           f"({'shard %d/%d, ' % (shard, shards) if shards > 1 else ''}"
           f"{len(new_ids)} new-from-sitemap, {len(known_ids)} re-confirm, {len(tail)} off-sitemap"
-          f"{', RE-CONFIRM FIRST' if shards > 1 else ' (new first)'}"
+          f"{f', {len(reserve)} NEWEST NEW FIRST, THEN RE-CONFIRM' if shards > 1 else ' (new first)'}"
           f"{'' if not max_listings else f', capped at {max_listings}'})", flush=True)
     return ids
 
@@ -520,6 +549,130 @@ def _breadcrumb_district_ar(schema: dict, city_ar: Optional[str]) -> Optional[st
                 if re.search(r"[ء-ي]", cand) and cand != city:
                     return cand
     return None
+
+
+def _location_line_pairs(html: str) -> list[tuple[str, str]]:
+    """The page's mirrored location lines as (A, B) pairs: both «A, B» and «B, A» printed, B starting
+    with «حي» (a district, or the source's own «حي غير محدد»), A not. See _location_line_district_ar."""
+    body_start = html.find("</head>")
+    body = html[body_start:] if body_start != -1 else html
+    body = re.sub(r"<(script|style|noscript|svg)[^>]*>.*?</\1>", " ", body, flags=re.S | re.I)
+    lines = [re.sub(r"\s+", " ", x).strip() for x in re.sub(r"<[^>]+>", "\n", body).split("\n")]
+    pairs = set()
+    for ln in lines:
+        parts = [x.strip() for x in re.split(r"\s*[,،]\s*", ln)]
+        if len(parts) == 2 and all(parts):
+            pairs.add((parts[0], parts[1]))
+    return [(a, b) for (a, b) in pairs
+            if (b, a) in pairs and not a.startswith("حي") and re.match(r"حي\s+\S", b)
+            and re.search(r"[ء-ي]", b) and len(b) <= 60]
+
+
+def _location_line_district_ar(html: str, city_ar: Optional[str] = None) -> Optional[str]:
+    """The district the PAGE ITSELF shows under the title, from its visible location line.
+
+    The page prints the location twice, mirrored: «<A>, <district>» and «<district>, <A>», where A is the
+    city, a city with a sub-area after a dash, or the village/area the ad sits in, and <district> starts
+    with «حي ». Real lines (re-read of 32 ads, 2026-10-03):
+        «مكة المكرمة, حي الشامية الجديد»  /  «حي الشامية الجديد, مكة المكرمة»   (title said «الشامية»)
+        «الغزالة - الروضه, حي الروضة»      /  «حي الروضة, الغزالة - الروضه»
+        «العسيله, حي العسيله»              /  «حي العسيله, العسيله»              (A is a village)
+        «النعيرية, حي حي الشهداء»          (the source doubles «حي»; collapsed)
+        «الكامل, حي غير محدد»              <- the source says it has NO district; never stored
+    Owner 2026-10-03: «all the ones in dealapp have a district… you're not capturing it». The title's
+    district is often a broader area or a plan name («الشامية» for «الشامية الجديد», «ضاحية الملك
+    عبدالله» for «حي الناصرية 5»), so this line is read FIRST and the title is the fallback.
+
+    Both mirrored lines must be present and agree, and exactly one distinct district may come out of
+    the page (two means the page carries other listings' lines: say nothing). `city_ar` only breaks a
+    tie. Arabic only, never «غير محدد». Verbatim source Arabic or None."""
+    city = (city_ar or "").strip()
+    mirrored = [(a, b) for (a, b) in _location_line_pairs(html) if "غير محدد" not in b]
+    districts = {re.sub(r"^(حي\s+)+", "حي ", b) for (_a, b) in mirrored}
+    if len(districts) > 1 and city:
+        districts = {re.sub(r"^(حي\s+)+", "حي ", b) for (a, b) in mirrored
+                     if a == city or re.match(rf"{re.escape(city)}\s*[-–]", a)}
+    return districts.pop() if len(districts) == 1 else None
+
+
+# Villages the page names on its location line when the title carries no city (21 new ads on 2026-10-03:
+# «طحي, حي غير محدد», «فرسان - فرسان, حي الجنوبي», «بئر بن هرماس, حي الربوة» …). Only villages that our
+# catalog holds AS A CITY and whose name is unique within ONE region are listed, each paired with a
+# loc_city_map row (migration 20261003*_dealapp_village_cities). A name that exists in several regions
+# (القويعية is in four) or that the page does not place (الصقيع, الكهفة, الحناه, السقيد: not in the
+# catalog) is NOT here: no region is ever guessed. العيينة is deliberately absent: the 2026-08 fallback
+# sends it to Diriyah while one ad on 2026-10-03 sits in Tabuk.
+LINE_PLACE_CITY_AR = {
+    "حلبان": "Halban", "سنام": "Sanam", "طحي": "Tuhayy",
+    "بئر بن هرماس": "Bir Bin Hirmas", "فرسان": "Farasan",
+}
+
+
+# A place the page names that is a catalogue town under another written form, for the OWN-PIN rule only (owner
+# 2026-10-19): «جزيرة فرسان» is the island of «فرسان», a town both Jazan and Asir hold. The pin still decides; the
+# page's own word stays in city_ar and the catalogue form travels as additional_info.catalog_town_ar.
+TOWN_OF_PLACE_AR = {"جزيرة فرسان": "فرسان"}
+
+
+def _location_line_place_ar(html: str) -> Optional[str]:
+    """The place the page's location line names (A of «A, حي X», any trailing « - area» dropped), when
+    exactly one place is named. Used ONLY when the title carries no city."""
+    places = {re.split(r"\s*[-–]\s*", a)[0].strip() for (a, _b) in _location_line_pairs(html)}
+    places.discard("")
+    return places.pop() if len(places) == 1 else None
+
+
+def _city_from_line(html: str) -> tuple[Optional[str], Optional[str]]:
+    """(city_ar, canonical English city) from the location line, for an ad whose title names no city:
+    the place goes through the shared catalog map first, then the explicit village table above."""
+    place = _location_line_place_ar(html)
+    if not place:
+        return None, None
+    city = normalize.map_city(place) or LINE_PLACE_CITY_AR.get(place)
+    return (place, city) if city else (None, None)
+
+
+# A plot or plan code is never a district (owner 2026-10-18): «حي 1051 مخطط رقم», «حي 33ج», «حي ج19», «مخططات».
+# A NUMBERED district is not one: «حي الناصرية 4», «حي الياسمين1» name a real sub-district (a name of 3+ letters
+# followed by a 1-2 digit number). The first cut called every digit a plot code and its repair run (39129698696,
+# cancelled) moved 29 such rows to the title's district — «الناصرية 4» → «الشواجرة».
+_PLOT_CODE = re.compile(r"مخطط|رقم|[0-9٠-٩]{3,}")
+_NUMBERED_NAME = re.compile(r"(?:حي\s+)?[ء-ي]{3,}(?:\s+[ء-ي]+)*\s?[0-9٠-٩]{1,2}")
+
+
+def _is_plot_code(d: str) -> bool:
+    d = d.strip()
+    if _PLOT_CODE.search(d):
+        return True
+    return bool(re.search(r"[0-9٠-٩]", d)) and not _NUMBERED_NAME.fullmatch(d)
+# The deed's own location, which the ad prints in its description: «وصف موقع العقار حسب الصك / المدينة: X / الحي: Y».
+_DEED_RE = re.compile(r"حسب\s+الصك\s*المدينة\s*:\s*([^\n:]{2,30}?)\s*الحي\s*:\s*([^\n:]{2,40}?)"
+                      r"(?=\s*(?:\n|$|الموظف|عمولة|رقم|شاهد|الضمانات))")
+
+
+def _usable_district(d: Optional[str]) -> bool:
+    return bool(d) and bool(re.search(r"[ء-ي]{2}", d)) and not _is_plot_code(d) and "غير محدد" not in d
+
+
+def _deed_district_ar(schema: dict, city_ar: Optional[str]) -> Optional[str]:
+    """«الحي:» of the deed block, ONLY when its «المدينة:» is this listing's city. 422 of 1,949 live deed blocks
+    (2026-10-18) name another city — 581956, a Buraidah plot, prints «المدينة: جده الحي: الصفا» — so a block
+    about another place is never this ad's district."""
+    m = _DEED_RE.search(schema.get("description") or "")
+    if not m or not city_ar or norm_ar(m.group(1)) != norm_ar(city_ar):
+        return None
+    hay = m.group(2).strip()
+    return hay if _usable_district(hay) else None
+
+
+def _district_ar(schema: dict, html: str, city_ar: Optional[str]) -> Optional[str]:
+    """Dealapp's district: the page's own location line, then the title's middle segment — each only when it is a
+    district name, never a plot/plan code. When the listing itself names none (93 live rows on 2026-10-18 stored
+    a plot code and served no district), the deed block's «الحي:» for the same city."""
+    for own in (_location_line_district_ar(html, city_ar), _breadcrumb_district_ar(schema, city_ar)):
+        if _usable_district(own):
+            return own
+    return _deed_district_ar(schema, city_ar)
 
 
 def _spec_value(html: str, label: str) -> Optional[str]:
@@ -734,6 +887,8 @@ def _record_status_200_no_schema(adid: str, requested_url: str, resp: Any) -> No
     has_ng_state_tag = 'id="ng-state"' in body
     if redirected_away:
         bucket = "redirected_away"
+    elif dealapp_liveness.is_registration_wall(body):
+        bucket = "registration_wall"        # dealapp's view quota, not the ad (see liveness.py)
     elif not has_ng_state_tag:
         bucket = "same_url_no_ng_state"
     else:
@@ -751,29 +906,124 @@ def _record_status_200_no_schema(adid: str, requested_url: str, resp: Any) -> No
             })
 
 
+# Every dealapp request in this process spends one budget of ORIGIN renders (see
+# dealapp_liveness.RENDERS_PER_MIN) — the crawl's workers and the prune oracle alike.
+_ORIGIN = dealapp_liveness.OriginBudget()
+# A shard must end in time for prune + end_run; ids it never reached simply stay unseen tonight.
+_DEADLINE = time.monotonic() + 60 * float(os.environ.get("DEALAPP_TIME_BUDGET_MIN", "100"))
+
+# Every ORIGIN render this run got, in completion order: (adid, "ad" | "none" | "wall" | "other").
+# "none" = dealapp's own app hydrated this URL with no listing in it (the not-found page). That is
+# only believable while the origin is rendering ads honestly, so `confirmed_absent()` accepts it
+# only between two renders of real ads — the crawl's own live pages are the canaries.
+_render_lock = threading.Lock()
+_origin_renders: list[tuple[str, str]] = []
+# adids whose accepted page was a CURRENT read (see fetch_one) — the only ones main() may stamp.
+_MAX_EDGE_AGE_S = dealapp_liveness.FRESH_MAX_AGE_S   # the sweep's own rule (liveness.py), never looser
+_fresh_reads: set[str] = set()
+
+
+def _ad_urls(adid: str) -> list[str]:
+    """The ad's own URL, then two spellings dealapp routes to the same ad but CloudFront keys
+    separately — how we get a fresh render when the edge copy is a cached wall or a days-old
+    page without the ad. Tried in order, only when needed."""
+    return [f"{BASE}/ar/ad-details/{adid}", f"{BASE}/ar/ad-details/{adid}/",
+            f"{BASE}/ar//ad-details/{adid}"]
+
+
+def _get(s: Any, url: str, **kw: Any) -> tuple[Any, bool]:
+    """One paced request → (response, came_from_edge)."""
+    kw.setdefault("timeout", 45)
+    kw.setdefault("allow_redirects", True)
+    slot = _ORIGIN.acquire()
+    r = s.get(url, **kw)
+    edge = dealapp_liveness.from_edge(r)
+    if edge:
+        _ORIGIN.refund(slot)
+    return r, edge
+
+
+def confirmed_absent() -> dict[str, str]:
+    """adid → evidence, for ids whose fresh origin render was the no-listing page with a live ad
+    rendered by this runner immediately before AND after it (walls break the bracket)."""
+    with _render_lock:
+        log = list(_origin_renders)
+    prev = [None] * len(log)
+    last = None
+    for i, (_, kind) in enumerate(log):
+        prev[i] = last
+        if kind != "none":
+            last = kind
+    out: dict[str, str] = {}
+    nxt = None
+    for i in range(len(log) - 1, -1, -1):
+        adid, kind = log[i]
+        if kind == "none" and prev[i] == "ad" and nxt == "ad":
+            out[adid] = ("fresh origin render: dealapp's own page with no listing in it, "
+                         "between two renders of live ads on the same runner")
+        if kind != "none":
+            nxt = kind
+    return out
+
+
 def fetch_one(adid: str) -> Optional[tuple[str, str]]:
+    if time.monotonic() > _DEADLINE:
+        _record_fetch_failure("not_reached_time_budget")
+        return None
     s = _session()
-    url = f"{BASE}/ar/ad-details/{adid}"
+    urls = _ad_urls(adid)
+    url = urls.pop(0)
     last_skeleton_html: Optional[str] = None
     last_status: Any = None
     last_resp: Any = None
-    for attempt in range(3):
+    for attempt in range(4):
         try:
-            r = s.get(url, timeout=45, allow_redirects=True)
+            r, edge = _get(s, url)
         except Exception as e:
             last_status = f"exception:{type(e).__name__}"
             time.sleep(1.0 * (attempt + 1))
             continue
         last_status = r.status_code
         last_resp = r
-        if r.status_code == 200 and "real-estate-listing" in r.text:
-            if has_priced_schema(r.text):
-                return r.text, adid
-            # Skeleton hit: keep the response as a fallback and retry for a fully-hydrated one.
-            last_skeleton_html = r.text
+        body = r.text or ""
+        wall = r.status_code == 200 and dealapp_liveness.is_registration_wall(body)
+        has_ad = r.status_code == 200 and "real-estate-listing" in body
+        if not edge and r.status_code == 200:
+            kind = ("wall" if wall else "ad" if has_ad
+                    else "none" if 'id="ng-state"' in body else "other")
+            with _render_lock:
+                _origin_renders.append((adid, kind))
+        if wall:
+            # A cached wall hides this ad for days: ask the origin through another spelling. A
+            # fresh wall means we out-ran the quota after all: sit out a window, same URL again.
+            if edge and urls:
+                url = urls.pop(0)
+            elif not edge:
+                _ORIGIN.back_off()
+            continue
+        if has_ad:
+            if has_priced_schema(body):
+                # An origin render, or an edge copy no older than the liveness sweep accepts, is a
+                # current read of this ad. CloudFront keeps a page for days, and an older copy must
+                # not certify «alive now» (2026-10-11: a 24 h allowance here outvoted the sweep).
+                if not edge or int(getattr(r, "headers", {}).get("age") or 0) <= _MAX_EDGE_AGE_S:
+                    with _render_lock:
+                        _fresh_reads.add(adid)
+                return body, adid
+            # Skeleton hit: keep the response as a fallback and retry for a fully-hydrated one
+            # (from the origin — the edge would only hand the same skeleton back).
+            last_skeleton_html = body
+            if edge and urls:
+                url = urls.pop(0)
+                continue
         if r.status_code in (404, 410):
             _record_fetch_failure("not_found_404_410")
             return None
+        if r.status_code == 200 and not has_ad:
+            if edge and urls:
+                url = urls.pop(0)        # an edge copy without the ad may be days old: ask the origin
+                continue
+            break                        # the origin itself rendered no ad here: that IS the answer
         time.sleep(0.8 * (attempt + 1))
     # Exhausted retries without ever seeing a priced schema. Fall back to the last skeleton
     # response we did get — map_listing's existing `_int(offers.get("price"))` already yields
@@ -799,6 +1049,50 @@ def _resolve_city(city_ar: Optional[str]) -> Optional[str]:
     if not city_ar:
         return None
     return normalize.map_city(city_ar) or CITY_FALLBACK_AR.get(city_ar) or None
+
+
+def _route_land(property_type: Optional[str], usage: Optional[str]) -> Optional[str]:
+    """Land residential-vs-commercial routing. The usage chip («استخدامات العقار») decides when the
+    page RENDERS one: «تجاري» → Commercial Land, anything else → Residential Land. When the page
+    renders NO usage chip, the listing's own propertyType («ارض تجارية» / «ارض سكنية») stands.
+    It used to fall through to Residential Land on a missing chip, so an ad dealapp itself titles
+    «ارض تجارية» was filed as residential land out of silence (2 of 3,323 new rows, 2026-10-03,
+    🆕 New Listings Engineer)."""
+    if property_type in ("Residential Land", "Commercial Land") and usage:
+        return "Commercial Land" if usage == "تجاري" else "Residential Land"
+    return property_type
+
+
+# ── Advanced Filter answers (🔬 AF engineer, 2026-10-05) ─────────────────────────────────────────
+# 15,311 active dealapp listings stored NULL for every amenity and utility. Read from the raw payload
+# (source-reread run 37290037560, ads 557924 + the Abu Arish apartment): the JSON-LD additionalProperty
+# carries ONLY propertyType / facing / streetWidth / propertyAge / utilities / licenseNumber — dealapp
+# has NO structured amenity field, so the ad's own prose is the source (ADVANCED_FILTER_SOURCE_TRUTH:
+# prose only where nothing structured exists; four outcomes via the shared normalize matcher).
+#   utilities  «Electricity, Waters, Sanitation, FixedPhone, FibreOpt» → a LISTED utility is a yes; an
+#              unlisted one stays UNKNOWN (an unticked box on the advertiser's form is not a stated «no»).
+UTILITY_COLUMNS = {"electricity": "electricity", "waters": "water_supply", "water": "water_supply",
+                   "sanitation": "sanitation", "fibreopt": "optical_fibers", "fiberopt": "optical_fibers"}
+PROSE_AMENITY_COLUMNS = frozenset({"elevator", "kitchen", "air_conditioner", "parking", "maid_room",
+                                   "driver_room", "laundry_room", "balcony_terrace", "private_entrance",
+                                   "car_entrance", "optical_fibers", "furnished"})
+# «furnished» (🔬 2026-10-12, backlog 386): the same four-outcome prose reading — «مفروشة» / «مؤثثة» yes,
+# «غير مفروشة» a stated no, silence NULL. Only dealapp_residential_listings has the column
+# (20261012 migration), so map_listing() drops it from a commercial row (a key the table lacks is PGRST204).
+
+
+def af_answers(aprops: dict, description: Optional[str]) -> dict[str, bool]:
+    out: dict[str, bool] = {}
+    for col, val in normalize.amenities_from_lines(description).items():
+        if col in PROSE_AMENITY_COLUMNS:
+            out[col] = val
+    util = aprops.get("utilities")
+    if isinstance(util, str) and util.strip():
+        for tok in re.split(r"[,،]", util):
+            col = UTILITY_COLUMNS.get(re.sub(r"[^a-z]", "", tok.lower()))
+            if col:
+                out[col] = True          # the structured list wins over prose for the same column
+    return out
 
 
 def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
@@ -836,8 +1130,7 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     # ── usage chip drives residential/commercial routing (authoritative for land) ──
     usage = _spec_value(html, "استخدامات العقار")
     is_commercial_usage = usage == "تجاري"
-    if property_type in ("Residential Land", "Commercial Land"):
-        property_type = "Commercial Land" if is_commercial_usage else "Residential Land"
+    property_type = _route_land(property_type, usage)
     category = "commercial" if (property_type in COMMERCIAL_TYPES or is_commercial_usage) else "residential"
 
     # ── price ──
@@ -884,12 +1177,15 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     # ── location: breadcrumb Arabic city is the best map_city input; addressRegion is the DISTRICT ──
     city_ar = _breadcrumb_city_ar(schema)
     city = _resolve_city(city_ar)
+    if not city_ar:
+        # the title names no city (a village ad): the page's own location line may, see _city_from_line
+        city_ar, city = _city_from_line(html)
     region = normalize.region_for_city(city)
     # District: the SOURCE's own Arabic from the page's .location line ("حي …"). We deliberately do NOT
     # use schema.org address.addressRegion — it is English and frequently a wrong default ("Riyadh"),
     # which was silently storing English/incorrect districts. No Arabic on the page → honest null.
     # (feedback_english-district-to-arabic-mapping-standard: never show English; unsure → «الحي غير محدد».)
-    district = _breadcrumb_district_ar(schema, city_ar)
+    district = _district_ar(schema, html, city_ar)
     postal = (addr.get("postalCode") or "").strip() or None
 
     # ── active / sold ──
@@ -926,6 +1222,15 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
         "longitude": str(lng) if lng is not None else None,
         "date_posted": schema.get("datePosted"),
     }
+    # A town that is a city in several regions (الكهفة, الدرب, قصيباء …) is placed by the ad's own pin, or not at all
+    # (owner 2026-10-18). resolve_dealapp_city() reads pin_city_id only with this provenance.
+    town = TOWN_OF_PLACE_AR.get(city_ar or "", city_ar)
+    pin_city_id = city_by_own_pin(town, lat, lng) if (city_ar and not city) else None
+    if pin_city_id:
+        info["pin_city_id"] = pin_city_id
+        info["city_source"] = "own_pin_disambiguation"
+        if town != city_ar:
+            info["catalog_town_ar"] = town
     info = {k: v for k, v in info.items() if v not in (None, "", "—")}
 
     listing_url = f"{BASE}/ar/ad-details/{adid}"
@@ -966,7 +1271,10 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
         "description": _redact(schema.get("description")),
         "photo_urls": _images(schema),
         "additional_info": info,
+        **af_answers(aprops, _redact(schema.get("description"))),
     }
+    if category == "commercial":
+        row.pop("furnished", None)
     return row, category, sold
 
 
@@ -1082,6 +1390,13 @@ def main() -> int:
                     continue
                 if args.type != "all" and cat != args.type:
                     continue
+                # The row was built from a CURRENT read of THIS ad's own page (fetch_one), which
+                # rendered its own id-scoped listing schema still on offer: a direct read we
+                # already paid for. Until 2026-10-02 it was recorded as last_seen_at only, so half
+                # the catalogue read «never visited directly» while being opened every night.
+                if (not sold and adid in _fresh_reads
+                        and dealapp_liveness.listing_schema_present(html, adid)):
+                    db.mark_direct_alive(row, oracle="dealapp.ad_details_page.own_listing_schema")
                 (com_buf if cat == "commercial" else res_buf).append(row)
                 (com if cat == "commercial" else res).append(row)
                 if sold:
@@ -1148,19 +1463,28 @@ def main() -> int:
         # serving us real listings (see the oracle above). The canaries are ads this run already
         # parsed, so a shelled environment yields zero removals rather than many.
         set_liveness_canaries([(r["ad_number"] or "")[2:] for r in (res + com)[:3]])
+        # This run already rendered every id it owns, fresh, between live ads: that render is the
+        # removal evidence (confirmed_absent). Anything it could not settle goes to the oracle.
+        absent = confirmed_absent()
+        # Printed in full so a removal the coverage guard is still holding back stays auditable
+        # (and actionable) after the run: the ids plus the evidence rule that selected them.
+        print(f"Deal App confirmed absent ({len(absent)}, fresh no-listing render between two "
+              f"live-ad renders): {' '.join(sorted(absent, key=int))}", flush=True)
+
+        def _verify_gone(ad_number: str):
+            m = re.search(r"\d+", ad_number or "")
+            why = absent.get(str(int(m.group()))) if m else None
+            if why:
+                return "gone", why
+            if time.monotonic() > _DEADLINE + 600:   # re-probes are paced too; end_run must still land
+                return "unknown", "time budget spent before this row could be re-probed"
+            return _probe.verify_gone(ad_number)
+
         pruned = 0
         for tbl, rows_seen in (("dealapp_residential_listings", res),
                                ("dealapp_commercial_listings", com)):
-            seen_set = {r["ad_number"] for r in rows_seen}
-            n = (db.prune_unseen(tbl, seen_set, source=SOURCE, verify_gone=_probe.verify_gone,
-                                 shards=args.shards, shard=args.shard)
-                 if args.shards > 1
-                 else db.prune_unseen(tbl, seen_set, source=SOURCE,
-                                      verify_gone=_probe.verify_gone))
-            if n < 0:
-                print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
-            else:
-                pruned += n
+            pruned += prune_table(tbl, {r["ad_number"] for r in rows_seen}, absent, _verify_gone,
+                                  args.shards, args.shard)
         print(f"✓ Deal App: {len(res)} residential + {len(com)} commercial upserted, "
               f"{sold_ct} sold (inactive), {pruned} stale pruned, {superseded} cross-table superseded")
         # end_run's RC-B guard returns the EFFECTIVE ok it wrote (see scrapers/common/db.py) —
@@ -1174,7 +1498,7 @@ def main() -> int:
         # rows_upserted gives the hit rate, and the buckets say whether the misses were
         # dealapp's app reporting the ids gone or our fetches never rendering a live page.
         healthy = db.end_run(run_id, ok=True, rows_seen=seen_n, rows_upserted=seen_n,
-                              notes=f"sold={sold_ct} pruned={pruned} attempted={len(ids)}"
+                              notes=f"sold={sold_ct} pruned={pruned} attempted={len(ids)} absent={len(absent)}"
                                     f"{_fetch_fail_summary()}",
                               check_tables=["dealapp_residential_listings", "dealapp_commercial_listings"])
         if not healthy:
@@ -1191,6 +1515,62 @@ def main() -> int:
         import traceback
         traceback.print_exc()
         return 1
+
+
+def prune_table(tbl: str, seen_set: set[str], absent: dict[str, str], verify_gone: Any,
+                shards: int, shard: int) -> int:
+    """The absence prune for one table, then — only if its guard tripped — the direct strikes."""
+    n = (db.prune_unseen(tbl, seen_set, source=SOURCE, verify_gone=verify_gone,
+                         shards=shards, shard=shard)
+         if shards > 1
+         else db.prune_unseen(tbl, seen_set, source=SOURCE, verify_gone=verify_gone))
+    if n < 0:
+        print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
+        n = _strike_confirmed_absent(tbl, absent, verify_gone, shards, shard)
+    return max(n, 0)
+
+
+def _strike_confirmed_absent(tbl: str, absent: dict[str, str], verify_gone: Any,
+                             shards: int, shard: int) -> int:
+    """Strike ONLY the ids this run read gone on their own page, when the absence prune is guarded.
+
+    prune_unseen's coverage/collapse guard exists so a PARTIAL walk never counts absence as a miss.
+    Every dealapp shard ends on its time budget (not_reached_time_budget 260–606 a shard on
+    2026-10-06) and re-sees ~60% of its slice, so the guard trips every night and the removal
+    evidence the same run collected — confirmed_absent(): a fresh origin render of the ad's OWN
+    page as dealapp's no-listing page, between two live-ad renders — was thrown away with it.
+    Measured 2026-10-05: 0 dealapp hides in 7 days against ~15k active.
+
+    That evidence is not absence. So the same prune runs again with every active row of this slice
+    counted as seen EXCEPT the confirmed-absent ones: unreached rows stay untouched (UNKNOWN), a
+    confirmed one takes one strike per night, and at grace verify_gone answers from the same
+    evidence. Every guard of prune_unseen (collapse, grace, evidence rows) still applies."""
+    if not absent:
+        return 0
+    rows: list[str] = []
+    start = 0
+    while True:   # PostgREST caps a select at 1000 rows — page explicitly
+        page = db._execute(
+            db.sb().table(tbl).select("ad_number").eq("active", True).eq("source", SOURCE)
+              .range(start, start + 999), what=tbl + ".absent_slice").data or []
+        rows += [r["ad_number"] for r in page if r.get("ad_number")]
+        if len(page) < 1000:
+            break
+        start += 1000
+
+    def _canon(ad: str) -> Optional[str]:
+        m = re.search(r"\d+", ad or "")
+        return str(int(m.group())) if m else None
+
+    struck = [a for a in rows if _canon(a) in absent]
+    if not struck:
+        return 0
+    kept = {a for a in rows if _canon(a) not in absent}
+    print(f"  {tbl}: guard tripped, striking only the {len(struck)} confirmed-absent row(s) "
+          f"(own-page no-listing render between live ads)", flush=True)
+    return (db.prune_unseen(tbl, kept, source=SOURCE, verify_gone=verify_gone,
+                            shards=shards, shard=shard)
+            if shards > 1 else db.prune_unseen(tbl, kept, source=SOURCE, verify_gone=verify_gone))
 
 
 if __name__ == "__main__":

@@ -92,7 +92,7 @@ TYPE_RULES = [
     ("villa", "Villa"),
     ("duplex", "Duplex"),
     ("palace", "Villa"),
-    ("townhouse", "Villa"),
+    ("townhouse", "تاون هاوس"),
     ("floor", "Floor"),
     ("roof", "Floor"),
     ("house", "House"),
@@ -184,6 +184,10 @@ CITY_AR = {
 
 # Statuses that mean the listing is no longer available.
 GONE_STATUS = ("sold", "rented", "off market", "off-market", "مباع", "مؤجر", "محجوز")
+# Every «Property Status» term the source carried on 2026-10-02 (267 posts: For Sale 152, For Rent
+# 117, Rented 60, Sold 35, New Listing 23). A term outside this set keeps the GONE_STATUS rule above
+# exactly as before, and the run's notes count it (status_unmeasured) so it is seen, not guessed.
+MEASURED_STATUS = {"for sale", "for rent", "new listing", "sold", "rented"}
 
 # Phone / contact patterns to REDACT from title + description (PDPL). Defense-in-depth — covers
 # every shape a future template change could inline into the free text.
@@ -371,6 +375,24 @@ def discover_urls(s: cc.Session) -> tuple[list[str], dict[str, set[str]]]:
     return sitemap_urls(s), {}
 
 
+def status_measured(row: dict) -> bool:
+    """Every term of the page's own «Property Status» cell is one we have measured."""
+    status_raw = (row.get("additional_info") or {}).get("status_raw") or ""
+    return not any(t.strip() not in MEASURED_STATUS for t in status_raw.lower().split(",") if t.strip())
+
+
+def certify_read_alive(row: dict, gone: Optional[bool]) -> dict:
+    """The crawl just read THIS listing's own page and its «Property Status» cell says on offer:
+    that is a direct live reading (db.mark_direct_alive), recorded instead of thrown away
+    (2026-10-08: 175 active, 0 ever verified, while every crawl read every page). Only an
+    affirmative available reading counts: a cell not read (gone None), sold/rented (gone True) or a
+    status term nobody measured certifies nothing. The ad_number comes from the page's own
+    «Property ID», so a page for another listing cannot certify this one."""
+    if gone is False and status_measured(row):
+        db.mark_direct_alive(row, oracle="abeea.detail_page.property_status")
+    return row
+
+
 def fetch_one(url: str) -> Optional[tuple[str, str]]:
     """Fetch a detail page. Returns (body, url) or None."""
     s = _session()
@@ -384,6 +406,31 @@ def fetch_one(url: str) -> Optional[tuple[str, str]]:
             return r.text, url
         time.sleep(1.0 * (attempt + 1))
     return None
+
+
+def fetch_details(urls: list[str], failed: list[str]):
+    """Yield (body, url) for every detail page that can be read; append the rest to `failed`.
+
+    A page the concurrent pass could not read gets a second chance SERIALLY, after the burst and on
+    a fresh connection. It used to be dropped silently: the 2026-09-27 run upserted 133 of the 171
+    the runs either side of it saw, and prune_unseen still counted that absence against the other
+    38. `failed` is what remains unread; main() records its count and withholds prune while it is
+    non-empty."""
+    missed: list[str] = []
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        for u, got in zip(urls, ex.map(fetch_one, urls)):
+            if got:
+                yield got
+            else:
+                missed.append(u)
+    for u in missed:
+        time.sleep(3)
+        _local.s = None          # a retry never reuses the connection that just failed
+        got = fetch_one(u)
+        if got:
+            yield got
+        else:
+            failed.append(u)
 
 
 # ── Parsing ────────────────────────────────────────────────────────────────────
@@ -521,9 +568,44 @@ def _images(body: str, ld: dict) -> list[str]:
     return out[:25]
 
 
+# The page's OWN address block (Houzez «property-address-wrap»): «<strong id="area-label">Area:</strong> <span
+# aria-labelledby="area-label">Qasr Al Khaleej</span>», and on its Arabic twin (hreflang="ar") «الحي: قصر الخليج»,
+# «المدينة: الدمام» (rendered 2026-10-18). The district used to come from the slug/title only, so 70 live ads whose title
+# names a compound or nothing («Apartment For Rent In 14 Rawas Al Bahar Compound») had none, and 30 English names
+# («Qasr Al Khaleej», «Al Shaati Al Gharbi») had no Arabic the index could serve.
+_HREFLANG_AR = re.compile(r'hreflang="ar"\s+href="(https://abeea\.com\.sa/ar/[^"]+)"')
+_ARABIC = re.compile(r"[\u0621-\u064A]")
+
+
+def address_field(body: Optional[str], label: str) -> Optional[str]:
+    m = re.search(rf'aria-labelledby="{label}-label">\s*([^<]*?)\s*</span>', body or "")
+    v = _clean(m.group(1)) if m else ""
+    return v or None
+
+
+def arabic_twin_url(body: str) -> Optional[str]:
+    m = _HREFLANG_AR.search(body or "")
+    return m.group(1) if m else None
+
+
+def _area_district(body: Optional[str], arabic: bool) -> Optional[str]:
+    """The address block's «Area»/«الحي» value — never the city or the region it may repeat."""
+    v = address_field(body, "area")
+    if not v or bool(_ARABIC.search(v)) != arabic or normalize.map_city(v) or CITY_EN.get(v.lower()):
+        return None
+    return v
+
+
 def map_listing(body: str, url: str,
-                rest_slugs: Optional[set[str]] = None) -> tuple[Optional[dict], str, bool]:
-    """Return (row, category, gone). gone=True → sold/rented (skip / mark inactive)."""
+                rest_slugs: Optional[set[str]] = None,
+                ar_body: Optional[str] = None) -> tuple[Optional[dict], str, Optional[bool]]:
+    """Return (row, category, gone). gone=True → sold/rented (skip / mark inactive).
+
+    gone=None → the page carried no «Property Status» cell, so its availability was NOT READ. Abeea
+    keeps sold and rented posts published at HTTP 200 and that cell is the only thing telling them
+    apart (measured 2026-10-02: present on 72 of 72 pages, equal to the REST term list on every
+    one), so a page without it is exactly what _liveness_verdict already calls UNKNOWN. Until that
+    day it was written active=True. main() must not upsert such a row."""
     ld = _json_ld(body)
     items = _detail_items(body)
     if not items and not ld:
@@ -534,7 +616,7 @@ def map_listing(body: str, url: str,
 
     # ── status / deal type ──
     status = (items.get("Property Status") or "").lower()
-    gone = any(g in status for g in GONE_STATUS)
+    gone = any(g in status for g in GONE_STATUS) if status.strip() else None
     price_text = items.get("Price") or ""
     is_rent = ("for rent" in status) or ("/yearly" in price_text.lower()) \
         or ("/monthly" in price_text.lower()) or bool(re.search(r"for[- ]rent", slug, re.I)) \
@@ -599,6 +681,8 @@ def map_listing(body: str, url: str,
     postal = (addr.get("postalCode") or "").strip() or None
 
     city = CITY_EN.get(locality.lower()) or normalize.map_city(locality)
+    if not city and ar_body:
+        city = normalize.map_city(address_field(ar_body, "city") or "")     # «Al Dharan» → «الظهران»
     if not city:
         for ar, en in CITY_AR.items():
             if ar in name:
@@ -612,7 +696,11 @@ def map_listing(body: str, url: str,
                 break
     region = normalize.region_for_city(city)
 
-    district = _district_from(slug, name)
+    district_ar = _area_district(ar_body, arabic=True)
+    district_en = _area_district(body, arabic=False)
+    district = district_ar or district_en or _district_from(slug, name)
+    district_source = ("area_label_ar" if district_ar else "area_label" if district_en
+                       else "title" if district else None)
 
     # ── geo ──
     geo = ld.get("geo") if isinstance(ld.get("geo"), dict) else {}
@@ -641,6 +729,8 @@ def map_listing(body: str, url: str,
     info: dict[str, Any] = {
         "property_id": pid or None,
         "slug": slug,
+        "district_source": district_source,
+        "district_en": district_en or (_district_from(slug, name) if district_ar else None),
         # Every tag the page printed, in source order, whether or not we have a column for it.
         # A feature we cannot map today (Swimming Pool, Gym, Garden, Smart Entry, Sea View …) is
         # still a fact the source published, so it is kept verbatim rather than dropped.
@@ -658,7 +748,7 @@ def map_listing(body: str, url: str,
         "ad_number": ad_number,
         "listing_url": url,
         "source": "Abeea",
-        "active": not gone,
+        "active": None if gone is None else not gone,   # None = unread; main() never upserts it
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": area,
@@ -818,6 +908,9 @@ def main() -> int:
     sold_com: list[str] = []
     gone_ct = 0
     seen = 0
+    failed: list[str] = []   # detail pages still unread after the second chance
+    status_unread: list[str] = []   # pages read, but with no «Property Status» cell: not written
+    unmeasured = 0                  # pages whose status has a term outside MEASURED_STATUS
     try:
         res_buf: list[dict] = []
         com_buf: list[dict] = []
@@ -831,29 +924,34 @@ def main() -> int:
                 db.upsert_abeea_commercial_batch(com_buf)
                 com_buf = []
 
-        with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-            for result in ex.map(fetch_one, urls):
-                if not result:
-                    continue
-                body, u = result
-                row, cat, gone = map_listing(body, u, url_feats.get(u))
-                if not row:
-                    continue
-                if gone:
-                    gone_ct += 1
-                    # remember the id so any EXISTING row is pinned inactive after the upserts
-                    (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
-                    continue  # don't list sold/rented
-                if args.type != "all" and cat != args.type:
-                    continue
-                (com_buf if cat == "commercial" else res_buf).append(row)
-                (com if cat == "commercial" else res).append(row)
-                seen += 1
-                if len(res_buf) + len(com_buf) >= 50:
-                    flush()
-                    print(f"  …{seen} upserted", flush=True)
-                if args.limit and seen >= args.limit:
-                    break
+        for body, u in fetch_details(urls, failed):
+            twin = arabic_twin_url(body)
+            got_ar = fetch_one(twin) if twin else None
+            twin_kw = {"ar_body": got_ar[0]} if got_ar else {}
+            row, cat, gone = map_listing(body, u, url_feats.get(u), **twin_kw)
+            if not row:
+                continue
+            if gone is None:
+                status_unread.append(u)
+                continue
+            if not status_measured(row):
+                unmeasured += 1
+            if gone:
+                gone_ct += 1
+                # remember the id so any EXISTING row is pinned inactive after the upserts
+                (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
+                continue  # don't list sold/rented
+            certify_read_alive(row, gone)
+            if args.type != "all" and cat != args.type:
+                continue
+            (com_buf if cat == "commercial" else res_buf).append(row)
+            (com if cat == "commercial" else res).append(row)
+            seen += 1
+            if len(res_buf) + len(com_buf) >= 50:
+                flush()
+                print(f"  …{seen} upserted", flush=True)
+            if args.limit and seen >= args.limit:
+                break
         flush()
         # Pin sold/rented rows immediately after the upserts: gone rows are never upserted here,
         # but without the pin an already-listed row stays active for 3 more crawls (prune's
@@ -933,18 +1031,27 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
-        for tbl, rows_seen in (("abeea_residential_listings", res),
-                               ("abeea_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Abeea",
-                                verify_gone=_verify_gone)
-            if n < 0:
-                print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
-            else:
-                pruned += n
+        # An unread page is not an absent listing: with any detail page still unread, absence
+        # proves nothing this cycle, so nothing is pruned from it.
+        if failed or status_unread:
+            print(f"⚠ Abeea: {len(failed)} detail page(s) unread after a second chance, "
+                  f"{len(status_unread)} with no status cell — no prune this run "
+                  f"(first: {(failed + status_unread)[0]})")
+        else:
+            for tbl, rows_seen in (("abeea_residential_listings", res),
+                                   ("abeea_commercial_listings", com)):
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Abeea",
+                                    verify_gone=_verify_gone)
+                if n < 0:
+                    print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
+                else:
+                    pruned += n
         print(f"✓ Abeea: {len(res)} residential + {len(com)} commercial upserted, "
               f"{gone_ct} sold/rented pinned inactive, {pruned} stale pruned")
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
-                   notes=f"gone={gone_ct} pruned={pruned}", check_tables=["abeea_residential_listings", "abeea_commercial_listings"])
+                   notes=f"gone={gone_ct} pruned={pruned} fetch_failed={len(failed)}/{len(urls)} "
+                         f"status_unread={len(status_unread)} status_unmeasured={unmeasured}",
+                   check_tables=["abeea_residential_listings", "abeea_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

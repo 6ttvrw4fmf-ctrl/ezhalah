@@ -116,7 +116,11 @@ console.log('\n4) repo callers use a canonical identity');
 // ~113KB function, not who may deploy — so claiming it must never block a production deploy.
 // deploy_lock_canonical() leaves it distinct because it does not start with 'prod'. Registered in
 // mon_detect_deploy_lock_misuse's known list in the same change.
+// 'scraper:<site>' (registered 2026-09-27, migration 20260927203713): the Scraping Engineer's
+// one-lock-per-site rule (docs/ops/SCRAPING_ENGINEER.md rule 6). Distinct because its skeleton
+// starts with 'scraper', never 'prod'.
 const REGISTERED_DISTINCT = new Set(['gathern_liveness_apply', 'agent-edge-surface']);
+const isRegistered = (name: string) => REGISTERED_DISTINCT.has(name) || name.startsWith('scraper:');
 const scan: string[] = [];
 for (const dir of ['scripts', 'scrapers']) {
   const walk = (u: URL, rel: string) => {
@@ -142,7 +146,7 @@ for (const rel of scan) {
     if (canonical(name) === 'production' && name !== 'production') {
       bad(`${rel}: LOCK_NAME='${name}'`,
           `it is a production alias — use the canonical 'production' literal so the intent is readable`);
-    } else if (canonical(name) !== 'production' && !REGISTERED_DISTINCT.has(name)) {
+    } else if (canonical(name) !== 'production' && !isRegistered(name)) {
       bad(`${rel}: LOCK_NAME='${name}'`,
           `unregistered lock identity. If it is genuinely a separate resource, add it to ` +
           `REGISTERED_DISTINCT here and to mon_detect_deploy_lock_misuse's known list.`);
@@ -215,7 +219,7 @@ for (const rel of allFiles) {
       bad(`${rel}: ${m[0].slice(0, 60)}…`,
           `asks for the production lock as '${name}'. Use the canonical 'production'. The DB now ` +
           `normalises it, but layer 1 is asking correctly — an alias here teaches the next agent wrong.`);
-    } else if (canonical(name) !== 'production' && !REGISTERED_DISTINCT.has(name)) {
+    } else if (canonical(name) !== 'production' && !isRegistered(name)) {
       aliasCalls++;
       bad(`${rel}: ${m[0].slice(0, 60)}…`, `unregistered lock identity '${name}'.`);
     }

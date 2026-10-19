@@ -210,7 +210,11 @@ const CEILING: Record<string, Record<string, number>> = {
   'Retail & Workspace': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0 },
   'Industrial & Logistics': { Buy: 1, 'Rent/Annual': 1, 'Rent/Monthly': 0 },
   'Commercial Buildings & Facilities': { Buy: 3, 'Rent/Annual': 2, 'Rent/Monthly': 0 },
-  'Commercial & Industrial Plots': { Buy: 2, 'Rent/Annual': 0, 'Rent/Monthly': 0 },
+  // 2026-10-03: Residential Land joined this group as a cross-macro shortcut (owner: all lands in one
+  // place). It is the only member certified for Rent/Annual (street_width + direction), so the best-case
+  // ceiling for that shape rose 0 → 2; the ACTUAL matrix above stays 0 until the two commercial lands
+  // certify an annual-rent cohort.
+  'Commercial & Industrial Plots': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0 },
 };
 const DEAL_KEYS: Array<[string, 'Buy' | 'RentAnnual' | 'RentMonthly']> = [
   ['Buy', 'Buy'], ['Rent/Annual', 'RentAnnual'], ['Rent/Monthly', 'RentMonthly'],

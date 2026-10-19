@@ -4,7 +4,14 @@
 # types (shop, office, warehouse, workshop, factory, hotel, gas_station, health_center, farm,
 # commercial_building) × rent+buy and upserts into aqar_commercial_listings.
 #
-# HOW TO RUN: Actions tab → "Aqar commercial fill" → Run workflow.
+# SCHEDULED (2026-10-02) by pg_cron `gh-aqar-commercial-fill` (supabase/migrations/20261002120706_aqar_paced_fill.sql), twice a
+# day, 6 h away from the residential deep fill. Until then the last full commercial fill had run on
+# 2026-06-20 and only the 3-page / 12-city commercial sweep kept the table alive. pg_cron dispatches with
+# NO inputs, so the defaults below ARE the schedule: every page the source has, at most `new_budget` NEW
+# rows per run shared by all city jobs (scrapers/aqar/paced_fill.py), held ads re-read once
+# `refresh_after_days` old.
+#
+# HOW TO RUN BY HAND: Actions tab → "Aqar commercial fill" → Run workflow.
 # Leave city blank for ALL cities in parallel, or name one city.
 
 name: Aqar commercial fill
@@ -17,13 +24,26 @@ on:
         required: false
         default: ""
       pages:
-        description: "Max pages per slice (default 150 — go deep; discover stops early when a slice runs out)"
+        description: "Max pages per slice (0 = every page the source has — the default)"
         required: false
-        default: "150"
+        default: "0"
       limit:
-        description: "Max listings per slice (default 5000)"
+        description: "Max listings per slice (0 = no cap — the default)"
         required: false
-        default: "5000"
+        default: "0"
+      new_budget:
+        description: "Max NEW rows this whole run may add, shared by all city jobs (default 25000)"
+        required: false
+        default: "25000"
+      refresh_after_days:
+        description: "Re-read a held ad once its last capture is this many days old (default 6)"
+        required: false
+        default: "6"
+
+# Two runs must never overlap: each run's new-row budget is only a bound if runs do not stack.
+concurrency:
+  group: aqar-commercial-fill
+  cancel-in-progress: false
 
 jobs:
   setup:
@@ -46,6 +66,7 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
+      max-parallel: 10   # leave runner slots for the sweeps and liveness jobs pg_cron dispatches meanwhile
       matrix:
         city: ${{ fromJson(needs.setup.outputs.cities) }}
 
@@ -67,9 +88,13 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_WORKERS: "16"
           SCRAPE_MIN_INTERVAL: "0.10"
+          # ONE key per workflow run: every city job draws new rows from the same budget row.
+          FILL_RUN_KEY: aqar-commercial-fill:${{ github.run_id }}
         run: |
           exec python -m scrapers.aqar.run_commercial \
             --all-commercial \
             --city ${{ matrix.city }} \
-            --pages ${{ github.event.inputs.pages || 150 }} \
-            --limit ${{ github.event.inputs.limit || 5000 }}
+            --pages ${{ github.event.inputs.pages || 0 }} \
+            --limit ${{ github.event.inputs.limit || 0 }} \
+            --new-budget ${{ github.event.inputs.new_budget || 25000 }} \
+            --refresh-after-days ${{ github.event.inputs.refresh_after_days || 6 }}

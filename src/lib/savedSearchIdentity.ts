@@ -43,6 +43,9 @@ export const SAVED_SEARCH_IGNORED_KEYS: Readonly<Record<string, string>> = Objec
     'output, never an input the user chose.',
   districtLabel:
     'Display spelling of the district already compared via `districts`; purely for the summary line.',
+  areaNote:
+    'Display-only label («big by Saudi market standards») for an areaMin that came from the word «كبير»; the ' +
+    'size itself is compared through areaMin/areaMax.',
   priceOriginal:
     'Display-only echo of a foreign-currency budget ("USD 100,000"); the SAR figure it converts to ' +
     'is compared through priceInput/priceMin/priceMax.',

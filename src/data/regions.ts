@@ -32,6 +32,7 @@ const COUNTRY_ALIASES = new Set([
   'المملكة العربية السعودية', 'المملكة', 'السعودية', 'العربية السعودية', 'سعودية', 'السعوديه',
 ]);
 export function isCountryWideQuery(q: SearchQuery): boolean {
+  if (q.geographicScope) return q.geographicScope === "NATIONWIDE";
   if ((q.locationMatch as { kind?: string } | undefined)?.kind === 'country') return true;
   const loc = (q.location || '').trim().toLowerCase()
     // strip Arabic prefix words that don't change meaning: "كل / جميع / في كل / في"

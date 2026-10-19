@@ -45,19 +45,19 @@ const i18n = readFileSync('src/i18n.tsx', 'utf8');
 
 // ── 2. THE REFUSAL REACHES THE USER (the reply half, wired) ─────────────────────
 check('rejections have a runtime reader, not just a writer',
-  /function rejectionNotice\(\)/.test(code),
+  /function rejectionNotice\(/.test(code),
   'lastRejectedFilters existed for weeks with no reader — that was the whole bug');
 check('the notice is built from lastRejectedFilters',
   /rejectionNotice[\s\S]{0,400}lastRejectedFilters/.test(code));
 check('the notice is appended to the reply the user sees',
-  /const notice = [^;]*rejectionNotice\(\)[^;]*;[\s\S]{0,900}backend\.reply = /.test(code),
+  /const notice = [^;]*rejectionNotice\(replyLocale\)[^;]*;[\s\S]{0,900}backend\.reply = /.test(code),
   'computing a notice and not attaching it would be the same silence in a new place');
 // …and it is spent on a turn that actually shows results. The sentence says «so I showed the results
 // without it», which is false on a clarification turn — and because rejectionNotice() MUTATES the
 // say-it-once set, spending it there silenced the listings turn that really did search without the
 // filter. The CALL must be gated, not just the append.
 check('the notice is only computed on a listings turn',
-  /const notice = backend\.kind === 'listings' \? rejectionNotice\(\) : '';/.test(code),
+  /const notice = backend\.kind === 'listings' \? rejectionNotice\(replyLocale\) : '';/.test(code),
   'gating only the append would still burn the once-per-conversation budget on a turn that showed nothing');
 check('the notice is a TAIL, so the reply still leads with what we ARE searching for',
   /\$\{String\(backend\.reply[\s\S]{0,40}\}\\n\$\{notice\}/.test(code));
@@ -84,8 +84,16 @@ check('the id is normalised, so rating:VALUE and rating are the same caveat',
 const appTsx = readFileSync('src/app/agent.tsx', 'utf8').split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
 check('AgentTurn carries the notice as its OWN field, not only folded into .reply',
   /notice\?:\s*string/.test(code));
-check('respond() sets backend.notice, not only backend.reply',
-  /backend\.notice = notice/.test(code));
+const mergesNotices = (source: string): boolean => {
+  const statement = /backend\.notice = [^\n]+/.exec(source)?.[0];
+  if (!statement) return false;
+  const backend = { notice: 'location notice' };
+  new Function('backend', 'notice', statement)(backend, 'filter notice');
+  return backend.notice === 'location notice\nfilter notice';
+};
+check('respond() keeps both location and filter notices in the rendered field', mergesNotices(code));
+check('(mutation) overwriting the location notice with the filter notice is caught',
+  !mergesNotices(code.replace(/backend\.notice = [^\n]+/, 'backend.notice = notice;')));
 check('the render call site actually reads turn.notice (not just turn.reply) before showing results',
   /turn\.notice/.test(appTsx));
 check('a present notice is appended to what actually renders, not silently dropped',

@@ -779,3 +779,20 @@ def test_a_broken_rega_payload_costs_the_field_not_the_row():
                                        "response_data": "{not json"}})
     assert row["price_annual"] == 12000 and row["license_number"] == "7200707974"
     assert row["street_width_m"] is None and row["ad_source"] is None
+
+
+def test_liveness_oracle_reuses_one_session_for_every_read(monkeypatch):
+    """The daily direct check reads all 4,345 tuba ads through this oracle; a new session per read
+    paid a TLS handshake per listing (2026-09-29)."""
+    made, used = [], []
+
+    class _S:
+        def get(self, url, **k):
+            used.append(self)
+            return type("R", (), {"status_code": 200, "text": R.LISTING_ANCHOR, "url": url})()
+
+    monkeypatch.setattr(R, "session", lambda: made.append(_S()) or made[-1])
+    monkeypatch.setattr(R, "stored_listing_url", lambda tables: (lambda ad: f"https://tuba.sa/{ad}"))
+    verify = R._make_verify_gone({"ad_number": "T1"})
+    assert [verify(a)[0] for a in ("T1", "T2", "T3")] == ["live"] * 3
+    assert len(made) == 1 and len(used) == 3 and set(used) == set(made)

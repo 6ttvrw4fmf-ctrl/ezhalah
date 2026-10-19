@@ -63,6 +63,10 @@ export type Listing = {
   // Real URL on the source platform — when present, the in-app browser redirects the
   // user OUT to this page. Absent for the bundled mock catalog (synthetic preview only).
   source_url?: string;
+  // The raw table this row came from (e.g. 'wasalt_residential_listings'): with `id` it names ONE
+  // row of search_listings_ar, which is how the in-app ad page reads the source's own pin and finds
+  // the same ad on other sites (src/data/adPageData.ts). Set on every fetched listing; undefined on mocks.
+  sourceTable?: string;
   // Rich extras for the new residential card design — all optional. Mock listings don't carry them;
   // real Aqar listings populate them from the rich `aqar_residential_listings` table. (user request.)
   ad_number?: string;

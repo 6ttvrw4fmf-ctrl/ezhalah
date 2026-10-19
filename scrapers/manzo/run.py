@@ -32,13 +32,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 API = "https://api.manzo.com.sa/property/v1/properties"
 SITE = "https://manzo.com.sa/ar/property/"
 SOURCE = "مانزو"
 PREFIX = "MNZ"
 SLUG = "manzo"
-IMPERSONATE = "chrome"
 
 _TYPE_AR = {"Apartment": "شقة", "Villa": "فيلا", "Floor": "دور", "Land": "ارض", "Office": "مكتب",
             "Shop": "محل", "Building": "عمارة", "Warehouse": "مستودع", "Studio": "استوديو"}
@@ -50,7 +50,7 @@ _NEVER_STORE = {"lister_info", "borders", "commission", "deep_link", "share_imag
 def get_json(s: cc.Session, url: str) -> Any:
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=40)
+            r = s.get(url, timeout=40)
             r.raise_for_status()
             return r.json()
         except Exception:  # noqa: BLE001
@@ -72,12 +72,23 @@ def walk(s: cc.Session) -> tuple[list[dict], int]:
     return rows, total
 
 
+def source_published_empty(listing: list, declared: int) -> bool:
+    """True only when the walk got an ANSWER that is empty by the source's own count. Anything else
+    (rows present, or a count the walk did not reach) is not an empty source."""
+    return not listing and declared == 0
+
+
 def _f(v: Any) -> Optional[float]:
     try:
         f = float(v)
         return f if f > 0 else None
     except (TypeError, ValueError):
         return None
+
+
+def listed_ad_number(d: dict, p: dict) -> str:
+    """The ad_number map_property would give this record, for a record it may refuse to map."""
+    return f"{PREFIX}{d.get('property_id') or d.get('slug') or p.get('slug')}"
 
 
 def map_property(d: dict) -> tuple[Optional[tuple[dict, str]], str]:
@@ -157,7 +168,10 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(API, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     listing, declared = walk(s)
     print(f"{SOURCE}: {len(listing)} propert(ies) (API declares total_count={declared})", flush=True)
 
@@ -166,6 +180,12 @@ def main() -> int:
     com: list[dict] = []
     skipped: dict[str, int] = {}
     unreadable = 0
+    # Every ad the source's own list served AND whose own record we read, mapped or not (2026-10-13).
+    # On 10-13 the walk read 29 records and mapped 0 (status «available» x28, a value nobody measured),
+    # so the seen set was empty, strike_read_gone had no control and returned «nothing seen», and
+    # MNZ1403 — its own page 404 — stayed on screen. Being listed never stamps a row alive; it only
+    # keeps a row from being read as unseen and lets the own-page oracle find a known-live control.
+    listed: set[str] = set()
     try:
         for p in listing:
             try:
@@ -174,6 +194,7 @@ def main() -> int:
             except Exception:  # noqa: BLE001
                 unreadable += 1
                 continue
+            listed.add(listed_ad_number(d, p))
             got, why = map_property(d)
             if not got:
                 skipped[why] = skipped.get(why, 0) + 1
@@ -199,16 +220,36 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
         complete = unreadable == 0 and len(listing) >= declared > 0
+        seen_all = {r["ad_number"] for r in res + com} | listed
         for tbl, rr in (("manzo_residential_listings", res), ("manzo_commercial_listings", com)):
             if rr and complete:
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
                 if n < 0:
-                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
+                    print(f"  ⚠ {tbl}: prune guard tripped — reading the unseen ads' own pages", flush=True)
+                    n = db.strike_read_gone(tbl, seen_all, SOURCE)
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
+            elif seen_all:
+                # 2026-10-12: a 2-ad catalogue whose walk never matched the API's count skipped the
+                # prune every night, so MNZ1403 (its own page 404, dead-visible 10-11 and 10-12)
+                # froze at 2 strikes, on screen. Absence still decides nothing: only an unseen ad
+                # whose OWN page reads gone (a seen ad answering live first) takes a strike.
+                n = db.strike_read_gone(tbl, seen_all, SOURCE)
+                if n > 0:
+                    print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
-            print(f"  NOT pruning: {unreadable} unreadable detail(s) or a short walk", flush=True)
+            print(f"  absence prune skipped: {unreadable} unreadable detail(s) or a short walk "
+                  f"(listed {len(listing)}, API total {declared}); own-page readings only", flush=True)
+        # The API ANSWERED (a failed fetch raises above) and itself declares total_count=0 with no
+        # results: the source published its own empty catalogue (2026-10-01/02: its one ad came
+        # down). That is an answer, not a blocked crawl, so the run is not demoted to red for it.
+        source_empty = source_published_empty(listing, declared)
+        if source_empty:
+            print("ℹ 0 rows, and the API itself declares total_count=0: the source published an empty "
+                  "catalogue. Reporting healthy rather than red — this is not a blocked crawl.", flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(listing), rows_upserted=len(res) + len(com),
+                             allow_empty=source_empty,
+                             notes="source-published empty (API total_count=0)" if source_empty else None,
                              check_tables=["manzo_residential_listings", "manzo_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()", flush=True)

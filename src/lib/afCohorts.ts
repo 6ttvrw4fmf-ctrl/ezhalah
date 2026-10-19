@@ -7,7 +7,7 @@
 //
 // The cohort DATA below is unchanged, byte for byte, from where it was profiled and certified.
 import type { SearchQuery } from '@/data/search';
-import { CLEAN_MACRO, groupsMembers } from '../data/propertyTypes.ts';
+import { groupsMembers, offeredUnder } from '../data/propertyTypes.ts';
 import { effectiveTypes, effectiveGroups } from './searchDefaults.ts';
 
 // Which amenity chips are safe for a MULTI-TYPE scope: the intersection of every selected type's
@@ -77,7 +77,7 @@ export const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: str
   // known say yes — the strongest installment market in the DB), AC textbook split, furnished,
   // plus the villa staples. Buy: NO rnpl (yes=0), NO furnished (yes below floor), and AC is
   // deliberately absent from the amenity data on Buy (aqar dropped it from بيع forms — chip
-  // gates itself out). بيت/تاون هاوس ride the same search with no interview (n=3–51).
+  // gates itself out). بيت rides the same search with no interview (n=3–51); تاون هاوس moved to Duplex (owner 2026-10-12).
   Villa: {
     RentAnnual: ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished', 'street_width', 'direction'],
     Buy: ['property_age', 'amenities', 'bathrooms', 'street_width', 'direction'],
@@ -174,6 +174,18 @@ export const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: str
   },
   'Residential Land': {
     RentAnnual: ['street_width', 'direction'],
+    Buy: ['street_width', 'direction'],
+  },
+  // أرض خام (owner 2026-10-09: «make an advanced filter for أرض خام»). Profiled on the 6,008 tagged rows:
+  // Buy 5,939 / Rent 69 → Buy only (Rent is too thin to certify). street width known 92% (p25 15 m,
+  // p75 25 m — a real split), direction known 84% over 8 values. NO utility chips: «no electricity/
+  // water/sewage» is what makes a land raw, so those chips can only ever answer «no».
+  'Raw Land': {
+    Buy: ['street_width', 'direction'],
+  },
+  // أرض أخرى (owner 2026-10-10): a plot whose source states no usage. Only what every land type already
+  // shares — street width and facade, true of ANY plot whatever its usage; no usage-specific question.
+  'Other Land': {
     Buy: ['street_width', 'direction'],
   },
   'Rest House': {
@@ -274,7 +286,9 @@ export function cohortAllows(q: SearchQuery, id: string): boolean {
     // The query's category must match the cohort's own macro (2026-08-16: was Residential-only
     // while only residential cohorts existed; commercial cohorts unlock their side, and a
     // cross-category scope still matches nothing).
-    if (q.category !== (CLEAN_MACRO[type] ?? 'Residential')) return false;
+    // …and a cross-macro shortcut (Residential Land offered under تجاري, owner 2026-10-03) counts as
+    // reachable on that side: offeredUnder() = home macro OR a group on this side lists it.
+    if (!q.category || !offeredUnder(q.category, type)) return false;
     const cfg = COHORT_QUESTIONS[type];
     if (!cfg) return false;                 // uncertified type = EMPTY cohort, never "no constraint"
     if (q.dealCombined || q.bothDeals) return cohortAllowsCombined(cfg, id);  // bothDeals: see above

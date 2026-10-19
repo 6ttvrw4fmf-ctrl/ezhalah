@@ -162,7 +162,10 @@ const registry = [...readFileSync(join(import.meta.dirname, '..', 'sql/mirrors/a
 const enabledRows = new Set(registry.filter((r) => r.enabled).map((r) => `${r.deal}|${r.period}|${r.type}`));
 
 // ── the option catalog — mirrors src/data/advancedFilters.ts one-for-one ─────────────────────────
-type Opt = { key: string; col: string | null; countRpc: 'guided' | 'age' | null; params: Record<string, unknown>; pred: Pred };
+// `col` is the chip's count column; a cumulative age rung (owner 2026-10-05) is the SUM of `col` and `plus`.
+type Opt = { key: string; col: string | null; plus?: string[]; countRpc: 'guided' | 'age' | null; params: Record<string, unknown>; pred: Pred };
+const chipOf = (row: Record<string, unknown>, opt: Opt): number =>
+  [opt.col, ...(opt.plus ?? [])].reduce((sum, c) => sum + Number(row[c as string]), 0);
 const AMENITY_COL: Record<string, string> = {
   kitchen: 'kitchen', parking: 'parking', elevator: 'elevator', ac: 'air_conditioner', private_entrance: 'private_entrance',
   maid_room: 'maid_room', driver_room: 'driver_room', car_entrance: 'car_entrance', sanitation: 'sanitation',
@@ -212,6 +215,10 @@ function optionsFor(qid: string, types: string[], q: any): Opt[] | null {
       { key: 'property_age:3_5', col: 'cnt_3_5', countRpc: 'age', params: { p_age_min: 3, p_age_max: 5 }, pred: { kind: 'between', col: 'property_age', lo: 3, hi: 5 } },
       { key: 'property_age:6_9', col: 'cnt_6_9', countRpc: 'age', params: { p_age_min: 6, p_age_max: 9 }, pred: { kind: 'between', col: 'property_age', lo: 6, hi: 9 } },
       { key: 'property_age:10p', col: 'cnt_10p', countRpc: 'age', params: { p_age_min: 10 }, pred: { kind: 'gte', col: 'property_age', n: 10 } },
+      // The card's one-tap «up to» ladder (owner 2026-10-05): each rung = every newer bucket.
+      { key: 'property_age:upto2', col: 'cnt_new', plus: ['cnt_1_2'], countRpc: 'age', params: { p_age_buckets: ['new', '1_2'] }, pred: { kind: 'between', col: 'property_age', lo: 0, hi: 2 } },
+      { key: 'property_age:upto5', col: 'cnt_new', plus: ['cnt_1_2', 'cnt_3_5'], countRpc: 'age', params: { p_age_buckets: ['new', '1_2', '3_5'] }, pred: { kind: 'between', col: 'property_age', lo: 0, hi: 5 } },
+      { key: 'property_age:upto9', col: 'cnt_new', plus: ['cnt_1_2', 'cnt_3_5', 'cnt_6_9'], countRpc: 'age', params: { p_age_buckets: ['new', '1_2', '3_5', '6_9'] }, pred: { kind: 'between', col: 'property_age', lo: 0, hi: 9 } },
     ];
     default: return null;
   }
@@ -367,7 +374,7 @@ const onOneIndex = <T>(take: () => Promise<T>) => settleOnOneIndex(indexStamp, t
 async function chipNow(base: Record<string, unknown>, opt: Opt): Promise<number | null> {
   if (!opt.col || !opt.countRpc) return null;
   const row = (await rpc(opt.countRpc === 'age' ? 'property_age_option_counts_ar' : 'apartment_guided_counts_ar', countBody(base, {})))?.[0];
-  return row ? Number(row[opt.col]) : null;
+  return row ? chipOf(row, opt) : null;
 }
 
 /** One option, five witnesses, one verdict. Returns the RPC id set so combos can do set algebra. */
@@ -531,7 +538,7 @@ for (const scope of SCOPES) {
       if (!opts) { fail(`${tag} · ${qid}`, 'certified question with NO catalog entry in this sweep — add it to optionsFor(); an unmapped question is a certified predicate this sweep never tests'); continue; }
       for (const opt of opts) {
         const counts = opt.countRpc === 'age' ? age : guided;
-        const chip = counts && opt.col ? Number(counts[opt.col]) : null;
+        const chip = counts && opt.col ? chipOf(counts, opt) : null;
         if (chip == null) { fail(`${tag} · ${opt.key}`, `the count RPC returned no ${opt.col} — a chip with no count path`); continue; }
         jobs.push(verifyOption(`${tag} · ${opt.key}`, base, opt, chip, true, total).then((r) => {
           if (r && !result.firstIds[qid] && chip >= 5) result.firstIds[qid] = { opt, ids: r.ids, total: r.total, chip };

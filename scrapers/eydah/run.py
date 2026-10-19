@@ -32,6 +32,13 @@ SOURCE SHAPE (measured live 2026-09-24; fully static HTML, no JS, no pagination)
   So: 200 + RealEstateListing naming THIS url → live; 200 + the home graph (or any 200 without a
   RealEstateListing) → gone; 404 → gone; anything else → no opinion. Removal is additionally gated
   by an in-run positive control that fails CLOSED.
+
+  AVAILABILITY (measured live 2026-10-02). Both offers print JSON-LD offers.availability =
+  https://schema.org/InStock (2/2) and no sold / reserved wording anywhere on the page or its index
+  card. No other value has ever been seen here, so none is filtered on: the value is archived in
+  additional_info.availability, and an offer whose value is NOT InStock (or is absent) is still
+  written as before but counted in the run notes as `unmeasured_availability_kept_active[<value>]`,
+  so the first offer the office marks in place is visible instead of silent.
 """
 from __future__ import annotations
 
@@ -135,6 +142,7 @@ def map_listing(href: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]
     district_ar = find_district_in_text(district_raw, city_id) or find_district_in_text(title, city_id)
     description = redact_pii(_text(ld.get("description")) or None)
     offer = ld.get("offers") or {}
+    availability = str(offer.get("availability") or "").rsplit("/", 1)[-1] or None
     price = normalize.to_int_numeric(offer.get("price")) if isinstance(offer.get("price"), (int, float)) \
         else normalize.to_int(offer.get("price"))
     area = normalize.to_int_numeric((ld.get("floorSize") or {}).get("value")) or normalize.to_int(specs.get("المساحة"))
@@ -182,9 +190,12 @@ def map_listing(href: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]
         "plot_no": specs.get("رقم المخطط"),
         "property_age_raw": specs.get("عمر العقار"),
         "date_posted": ld.get("datePosted"),
+        "availability": availability,
         "advertiser_fal_licence": d.get("advertiser_fal_licence"),
     }.items() if v is not None}
-    return row, category, ""
+    # A row AND a note: the only measured value is InStock; anything else is kept, never guessed.
+    return row, category, ("" if availability == "InStock"
+                           else f"unmeasured_availability_kept_active[{availability or 'absent'}]")
 
 
 def fetch_index(s: cc.Session) -> tuple[list[str], Optional[int]]:
@@ -271,8 +282,9 @@ def main() -> int:
                 skipped["detail_unreachable_or_not_a_listing"] = skipped.get("detail_unreachable_or_not_a_listing", 0) + 1
                 continue
             row, cat, why = map_listing(href, d)
-            if not row:
+            if why:
                 skipped[why] = skipped.get(why, 0) + 1
+            if not row:
                 continue
             if args.type != "all" and cat != args.type:
                 continue

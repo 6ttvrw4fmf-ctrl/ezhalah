@@ -489,9 +489,10 @@ def test_enumeration_walks_pages_and_demands_the_rich_row(monkeypatch):
 
 # ==================================== 6. main() =================================================
 def _stub_db(monkeypatch):
-    calls = {"batch": [], "end_run": [], "prune": [], "retire": []}
+    calls = {"batch": [], "end_run": [], "prune": [], "retire": [], "alive": []}
     db = types.SimpleNamespace(
         begin_run=lambda platform: 77,
+        mark_direct_alive=lambda row, *, oracle: calls["alive"].append((row["ad_number"], oracle)) or row,
         _wasalt_batch=lambda table, rows: calls["batch"].append((table, [r["ad_number"] for r in rows])),
         retire_superseded_siblings=lambda **kw: calls["retire"].append(kw) or 0,
         prune_unseen=lambda table, seen, source=None, **kw: calls["prune"].append((table, sorted(seen), kw)) or 0,
@@ -592,3 +593,29 @@ def test_session_asks_for_arabic_json_and_never_sets_a_user_agent(monkeypatch):
     assert s.headers["Accept-Language"] == "ar" and s.headers["Accept"] == "application/json"
     assert "User-Agent" not in s.headers and "user-agent" not in s.headers
     assert seen["url"].startswith(R.SEARCH) and seen["order"][0] == "safari17_0" and seen["proxies"] == R._PROXIES
+
+
+def test_the_crawl_stamps_its_own_id_matched_live_detail_read_and_nothing_else(monkeypatch):
+    """2026-09-29: the crawl reads every unit's own DETAIL record, the oracle's exact read, and threw
+    it away — 0 of 280 rows ever verified, and the daily direct check could only redo it through the
+    proxy. A published rent record stamps; an index-only row, a sale record or another unit's record
+    does not."""
+    calls = _stub_db(monkeypatch)
+    monkeypatch.setattr(R, "enumerate_rent", lambda s: list(_UNITS))
+    monkeypatch.setattr(R, "fetch_detail", lambda s, uid: _DETAILS[uid])
+    monkeypatch.setattr(R, "district_names", lambda s, cid, cache: {"500001063": "الشعلة"})
+    monkeypatch.setattr(R, "_controls_live", lambda ads: False)
+    monkeypatch.setattr(sys, "argv", ["run.py"])
+    assert R.main() == 0
+    assert calls["alive"] == [("SKI24858", "sakani.detail_api.published_rent")]
+
+
+def test_a_detail_record_counts_only_when_it_is_this_units_own():
+    class _S:
+        def __init__(self, body): self.body = body
+        def get(self, url, params=None, timeout=None):
+            return _Resp(200, json.dumps(self.body), "application/json")
+    other = {"data": {"id": "11111", "type": "market_units", "attributes": DETAIL_24858}}
+    assert R.fetch_detail(_S(other), "24858") == ("miss", None), "another unit's record is no detail"
+    own = {"data": {"id": "24858", "type": "market_units", "attributes": DETAIL_24858}}
+    assert R.fetch_detail(_S(own), "24858") == ("ok", DETAIL_24858)

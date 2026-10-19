@@ -7,6 +7,16 @@
 -- Re-verified 2026-09-25: migration 20260925175109 only NAMES this function in prose (a comment on
 --   the new, independent aqar_classify_shadow_drift() function, which reimplements the same join
 --   rather than calling this one) — the body below is still byte-identical to production, unchanged.
+-- Re-verified 2026-09-27: migration 20260927222150 (enrolling the street-as-district repairs in
+--   ops_repair_guarantee_registry) NAMES this function only inside a jsonb string literal — the
+--   `writer_check` field listing the seven functions that write listings_arabic_locations, recorded
+--   to show that none of them touches aqarmonthly and so the cleared bridge rows cannot be rewritten.
+--   It neither calls nor redefines this function. Because that mention sits in EXECUTED text rather
+--   than a comment, verify-sql-mirrors-not-stale counts it as "touching" and required this line.
+--   Verified against production the same day, line by line: pg_get_functiondef returns 71 lines and
+--   all 71 match the body below, the sole difference being the trailing `;` this mirror adds so the
+--   file is runnable (which is why the recorded md5 is of the FILE BODY, 313aa32e…, and not equal to
+--   md5(pg_get_functiondef) = ef38f2304a92172f39a716a8c3a6324f). The function is unchanged.
 CREATE OR REPLACE FUNCTION public.resolve_aqar_locations()
  RETURNS TABLE(shadow_added integer, lal_added integer)
  LANGUAGE plpgsql

@@ -36,6 +36,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, stated_city, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 
 BASE = "https://www.arshglobal.com.sa/"
@@ -43,7 +44,6 @@ INDEX = "عقارات-عرش"
 SOURCE = "عرش العقارية"
 PREFIX = "ARS"
 SLUG = "arsh"
-IMPERSONATE = "chrome"
 
 # 19 of 23 pages never say sale or rent (4 say بيع). OWNER DECISION 2026-09-27: «yes treat arsh as for
 # sale» — land a broker offers in a subdivision is for sale. A page that says إيجار/تأجير is never forced.
@@ -57,7 +57,7 @@ _HEADER_RE = re.compile(r"(أراضي سكنية|أرض سكنية|سكنية ا
 def get(s: cc.Session, slug: str) -> str:
     for attempt in range(3):
         try:
-            r = s.get(BASE + urllib.parse.quote(slug), impersonate=IMPERSONATE, timeout=40)
+            r = s.get(BASE + urllib.parse.quote(slug), timeout=40)
             r.raise_for_status()
             return r.text
         except Exception:  # noqa: BLE001
@@ -178,7 +178,10 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(BASE + urllib.parse.quote(INDEX), timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     slugs = list_slugs(s)
     print(f"{SOURCE}: {len(slugs)} page(s) on its own index", flush=True)
 

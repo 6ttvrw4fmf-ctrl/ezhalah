@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { I18nManager, Platform } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
+import { EN_TO_AR } from '@/data/propertyTypes';
 
 // Arabic-first localization (PRD §13 decision). The app defaults to Arabic + RTL; an EN/AR toggle
 // in Settings lets the user switch. We use an English-key dictionary: t('Search') looks up the
@@ -54,7 +55,7 @@ function readSavedLocale(): Locale {
 }
 
 // Whether the active language is REMEMBERED across a refresh. Only signed-in users persist their
-// language; a GUEST is always Arabic-first on a fresh load — typing English flips the UI live for the
+// language; a GUEST is always Arabic-first on a fresh load — an explicit language switch lasts for the
 // session, but a refresh/return resets to Arabic. The store toggles this on auth state. (user request.)
 let _persistEnabled = false;
 
@@ -81,6 +82,8 @@ export function persistLocale(l: Locale): void {
 }
 
 let _locale: Locale = readSavedLocale();
+let _localeRevision = 0;
+export const getLocaleRevision = (): number => _localeRevision;
 export const getLocale = (): Locale => _locale;
 export const isRTLNow = (): boolean => _locale === 'ar';
 
@@ -177,7 +180,9 @@ const AR: Record<string, string> = {
   'Industrial & Logistics': 'الصناعة واللوجستيات',
   // Owner's canonical group name (audit item 7a, 2026-07-27) — was «المباني والمرافق التجارية».
   'Commercial Buildings & Facilities': 'المباني والمرافق',
-  'Commercial & Industrial Plots': 'الأراضي التجارية والصناعية',
+  // Owner 2026-10-03: the group now holds every land (أرض سكنية joined as a cross-macro shortcut), so
+  // its name is just «الأراضي» — «it works out good».
+  'Commercial & Industrial Plots': 'الأراضي',
   'Price': 'السعر',
   // Buy+Rent combined multi-select (owner feature 2026-08-20): the two independent price ranges
   // shown together when شراء+إيجار are both selected — never one shared/naive range.
@@ -188,6 +193,36 @@ const AR: Record<string, string> = {
   ' /yr': ' / سنوياً',
   'Max price': 'السعر الأقصى',
   'Search': 'بحث',
+  'Real-estate websites in one search': 'مواقع عقارية في بحث واحد',
+  'Search across {count} real-estate websites': 'نبحث عبر {count} موقع عقاري',
+  'Choose websites': 'اختر المواقع',
+  'Deep search across websites': 'بحث عميق في المواقع',
+  // Owner 2026-10-10: the sheet must say its purpose — one site, several, or all, chosen by coverage.
+  'Focus your search on one or more specific websites. We show only their listings.': 'اختر موقعاً معيّناً أو أكثر، أو كل المواقع، ونعرض لك إعلاناتها فقط.',
+  'You can choose up to 5 websites': 'تقدر تختار 5 مواقع كحد أقصى',
+  // ChatGPT-style quiet stop line (owner 2026-10-10) — one muted line, no question, no sparkle.
+  'Search stopped': 'وقفت البحث',
+  'By coverage': 'حسب التغطية',
+  // The sheet reads as two steps (owner 2026-10-10: «search on the region you want, then choose the websites below»).
+  'Step 1 · Choose the region': '١ · اختر المنطقة',
+  'Step 2 · Choose the websites': '٢ · اختر المواقع',
+  'Whole kingdom': 'كل المملكة',
+  'Websites covering {region}': 'المواقع التي تغطي {region}',
+  '{count} listings': '{count} إعلان',
+  'Search across Saudi Arabia': 'ابحث في جميع المواقع داخل المملكة',
+  // The regions map inside the picker (owner 2026-10-10: «highlight the entire region … so users are
+  // aware of where they cover»): tap a region to see only the websites with listings there.
+  'Tap a region to see the websites that cover it': 'اضغط على منطقة لعرض المواقع التي تغطيها',
+  'All regions': 'كل المناطق',
+  '{count} websites': '{count} موقع',
+  'Map data © OpenStreetMap contributors': 'بيانات الخريطة © مساهمو OpenStreetMap',
+  'Choose a website': 'اختر موقعاً',
+  'Search one website': 'ابحث في موقع واحد',
+  'Select a website to narrow your search.': 'حدّد موقعاً لتضييق البحث.',
+  'Search websites…': 'ابحث عن موقع…',
+  'All websites': 'كل المواقع',
+  'Clear website': 'مسح اختيار الموقع',
+  'No matching websites': 'لا توجد مواقع مطابقة',
   'Clear all': 'مسح الكل',
 
   // Deals + verbs
@@ -231,6 +266,8 @@ const AR: Record<string, string> = {
   'Workshop': 'ورشة',
   'Commercial Land': 'أرض تجارية',
   'Industrial Land': 'أرض صناعية',
+  'Raw Land': 'أرض خام',
+  'Other Land': 'أرض أخرى',
   'Farm': 'مزرعة',
   'Agriculture Plot': 'أرض زراعية',
   'Camp': 'مخيم',
@@ -371,6 +408,10 @@ const AR: Record<string, string> = {
   '3–5 years': '٣-٥ سنوات',
   '6–9 years': '٦-٩ سنوات',
   '10+ years': '١٠ سنوات فأكثر',
+  // Age is a one-tap «up to» ladder (owner 2026-10-05): each option includes every newer bucket.
+  'Up to 2 years': 'حتى سنتين',
+  'Up to 5 years': 'حتى ٥ سنوات',
+  'Up to 9 years': 'حتى ٩ سنوات',
   // «مطابق لطلبك» card evidence (§12A / R13.12, owner 2026-09-03). The age voices print the
   // LISTING's own age, not the bucket the user picked (R12A.2), so they need the singular/dual forms
   // Arabic actually uses; «١٠ سنوات فأكثر» above is reused verbatim for 10, which is exact on aqar
@@ -457,10 +498,9 @@ const AR: Record<string, string> = {
   'Let’s begin': 'يلا نبدأ',
   // 'Continue' reuses the existing auth-flow key ('متابعة') — not redeclared here.
   'Continue · {count} results': 'متابعة · {count} نتيجة',
-  // AF data-availability notes (owner 2026-08-29): unknown is never «no», and the numbers belong to
-  // the CURRENT result set. Professional, calm, never legal/technical language.
-  'Some listings do not mention this detail, so the options reflect what the listings actually state': 'بعض الإعلانات لا تذكر هذه المعلومة، لذلك تعتمد الخيارات على البيانات المتوفرة في الإعلانات.',
-  'Options and counts are based on your current search results and update as you narrow down': 'الخيارات والأعداد مبنية على نتائج بحثك الحالية وتُحدَّث مع تضييق البحث.',
+  'No results with these choices': 'لا توجد نتائج بهذه الاختيارات',
+  // Owner 2026-10-01: one source-data notice above the options; unknown still never means «no».
+  'Your search options and counts use published listing details; unmentioned features may still be available, so check the original listing.': 'خيارات بحثك وأعدادها مبنية على بيانات الإعلانات المنشورة؛ غياب المعلومة لا ينفي توفرها، فتأكد من الإعلان الأصلي.',
   'Based on: {labels}': 'بناءً على: {labels}',
   'Without: {label}': 'بدون: {label}',
 
@@ -561,6 +601,7 @@ const AR: Record<string, string> = {
   'Reload': 'إعادة تحميل',
   'Loading listings — please try again in a few seconds.':
     'يجري تحميل الإعلانات — حاول مرة ثانية بعد لحظات.',
+  'Loading the rest of your listings…': 'جاري تحميل بقية إعلاناتك…',
 
   // Agent chat chrome
   'Ezhalah is searching…': 'إزهله يبحث…',
@@ -576,6 +617,25 @@ const AR: Record<string, string> = {
   // Live-number variants (owner 2026-09-12) — {count}/{cities}/{districts} are real, derived
   // figures (loaderScaleStats.ts), never hardcoded; see SEARCH_TITLES's comment in SearchLoader.tsx.
   'Checking more than {count} properties…': 'نفحص أكثر من {count} عقار…',
+  // THE SEARCH FUNNEL (owner 2026-10-17) — every line an action, the numbers of THIS search inside it,
+  // narrowing all websites → Kingdom → the user's city → their district → their request. {count} is
+  // live and worded by lib/searchLoaderTitles.ts countWording(): «أكثر من» only strictly below the
+  // truth; small exact counts said exactly; unknown → the line is not shown.
+  'Searching {count} real-estate platforms…': 'نبحث في {count} منصة عقارية…',
+  'Checking more than {count} listings across the Kingdom…': 'نفحص أكثر من {count} إعلان في المملكة…',
+  // Exact count in digits (owner 2026-10-17: «the actual number … not in word form») — the line now shipped.
+  'Checking {count} listings across the Kingdom…': 'نفحص {count} إعلان في المملكة…',
+  'Reviewing more than {count} listings in {city}…': 'نراجع أكثر من {count} إعلان في {city}…',
+  'Reviewing {count} listings in {city}…': 'نراجع {count} إعلان في {city}…',
+  'Going through more than {count} listings in {district}…': 'ندقق في أكثر من {count} إعلان في {district}…',
+  'Going through {count} listings in {district}…': 'ندقق في {count} إعلان في {district}…',
+  'Matching your request: {what}…': 'نطابق طلبك: {what}…',
+  'for rent': 'للإيجار',
+  'for sale': 'للبيع',
+  // The Advanced Filter round's beat (owner 2026-10-11): CHECKING with the real size of the set each answer is checked
+  // against — «نفحص 1,425 عقار…» → «نفحص 830 عقار…» (and «نفحص مصعد…» when that size was never known).
+  'Checking {count} properties…': 'نفحص {count} عقار…',
+  'Checking': 'نفحص',
   'Reviewing {count} real-estate platforms…': 'نراجع {count} منصة عقارية…',
   // ONE combined place count (owner 2026-09-12), not a separate cities+districts pair — see
   // SearchLoader.tsx's own comment at the coverage line for why.
@@ -617,11 +677,23 @@ const AR: Record<string, string> = {
   "I've stopped the search. Is there anything else I can help you with today?": 'وقفت البحث. أقدر أساعدك بشي ثاني اليوم؟',
   'Precise': 'بحث دقيق',
   'Search Summary': 'ملخص البحث',
+  // Advanced-filter answers in the turn summary (owner 2026-10-03) — one labelled line each, AF_LINE_LABEL.
+  'Selected property group': 'مجموعة العقار المحددة',
+  'Selected property type': 'نوع العقار المحدد',
+  'Bathrooms': 'دورات المياه',
+  'Property age': 'عمر العقار',
+  'Payment': 'الدفع',
+  'Facing': 'الواجهة',
+  'Rating': 'التقييم',
+  'Unit type': 'نوع الوحدة',
+  'Advanced filter': 'الفلتر المتقدم',
   'Property Type': 'نوع العقار',
   'Transaction Type': 'نوع العملية',
   'Platform': 'المنصة',
   'For Sale': 'للبيع',
   'City': 'المدينة',
+  'Choose a city': 'اختر المدينة',
+  'Search with these filters': 'بحث بهذه الخيارات',
   'Region': 'الإقليم',
   'Neighborhood': 'الحي',
   'Districts': 'الأحياء',
@@ -649,10 +721,12 @@ const AR: Record<string, string> = {
   'Al Jawf': 'منطقة الجوف',
   'Budget': 'الميزانية',
   'Your budget': 'ميزانيتك',
+  'big by Saudi market standards': 'كبير بمقياس السوق السعودي',
   'Monthly Rent': 'الإيجار الشهري',
   'Annual Equivalent': 'المعادل السنوي',
   'Calculated from price per m² × area — not published by the source': 'محتسب من سعر المتر × المساحة — غير معلن من المصدر',
   'Price Per m²': 'سعر المتر',
+  'Tap to see prices by length of stay': 'اضغط للاطلاع على الأسعار حسب مدة الإقامة', // Gathern + Aqar Monthly, owner 2026-10-02
   // Unit suffix for the source-published «سعر المتر» rate. It is printed NEXT TO the number so the
   // card reads «سعر المتر 750 ريال/م²» — a per-square-metre RATE, never mistakable for a total.
   // (owner 2026-08-09: "display it clearly as ريال/م²".)
@@ -748,6 +822,11 @@ const AR: Record<string, string> = {
   'I can get you something more precise.': 'أقدر أجيب لك نتائج أدق.',
   // Composer placeholder (owner wording 2026-08-16) — names the domain and the country, in the
   // conversational register the rest of the agent speaks.
+  // The box's hint AFTER the first message (owner 2026-10-17: «include these messages after the user sends, not first thing; first
+  // thing will be a rotation of messages»): «type … and Ezhalah», with the word property in it, the name last, before the dots.
+  // The «بحث» chip is gone by then, so the line shows whole in both languages. At the very start the box keeps the older sentence
+  // below (and the rotating examples) until the owner's new rotation of start messages is written.
+  "Type your property and Ezhalah...": 'اكتب عقارك وإزهله...',
   "Type the property you're looking for in Saudi Arabia...": 'اكتب العقار اللي تبحث عنه في السعودية...',
   // Stable composer accessibility label (owner brief 2026-08-23 §11) — the ONE sentence a screen
   // reader hears for the AI input; the rotating examples are aria-hidden decoration.
@@ -890,6 +969,14 @@ const AR: Record<string, string> = {
   'Done': 'تم',
   'Listing not found.': 'لم يُعثر على الإعلان.',
   'Open in new tab': 'فتح في تبويب جديد',
+  // In-app ad viewer (owner 2026-10-03)
+  'Open in a new window': 'فتح في نافذة جديدة',
+  'Taking a while?': 'يأخذ وقتًا؟',
+  'Oldest tab closed': 'أُغلق أقدم تبويب',
+  'New tab': 'تبويب جديد',
+  'Hide tabs': 'إخفاء التبويبات',
+  'Forward': 'للأمام',
+  'Copy link': 'نسخ الرابط',
   'For Rent': 'للإيجار',
   'For Buy': 'للبيع',
   'Area': 'المساحة',
@@ -913,6 +1000,9 @@ const AR: Record<string, string> = {
   'Clicking this property will take you to sa.aqar.fm': 'الضغط على هذا الإعلان سيأخذك إلى sa.aqar.fm',
   // Source-aware variants — the brand name varies (AQAR/Wasalt), so the localized string carries
   // the {name} / {host} placeholder. The English value is the FALLBACK if a key is missing.
+  'Click here 👆':                     'اضغط هنا 👆',
+  'To confirm availability and details': 'للتأكد من التوفر والتفاصيل',
+  'See {n} more':                     'عرض {n} أخرى',
   'Hosted on {name}':                  'مستضاف على {name}',
   // Source BRAND names — must localize in Arabic too (rule: Arabic UI = everything Arabic except
   // numbers/domains). The card translates the source name through t() before display, so an Arabic
@@ -1035,6 +1125,22 @@ const AR: Record<string, string> = {
   'Macsaib': 'مكسب العقارية',                         // the site's own Arabic name (macsaib.sa)
   'MAQRAT': 'مقرات',                                  // transliteration — the site names itself «منصة MAQRAT», no Arabic name at the source
   'Arsh': 'عرش العقارية',                    // the site's own Arabic name (arshglobal.com.sa)
+  'SuperOffice': 'سوبر أوفيس',     // the site's own Arabic name (superoffice.sa)
+  'Shomou': 'شموع العقار',         // «مكتب شموع العقار للاستثمار والتطوير العقاري» (shomoalaqar.com.sa footer)
+  'Haraj': 'حراج',
+  // A reopened history chat's card whose listing was removed at its source since (owner 2026-10-18).
+  'Listing ended': 'انتهى الإعلان',
+  'No longer available on the source site': 'لم يعد متاحًا على الموقع',                  // the site's own name (haraj.com.sa)
+  'Maktab': 'منصة مكتب',            // the site's own title (maktab.sa)
+  'Sirdab': 'سرداب',               // the site's own Arabic name (marketplace.sirdab.co)
+  'Ashab': 'عشاب العقارية',        // the site's own Arabic name (ashab.sa)
+  'Manafe': 'منافع العقارية',      // the site's own Arabic name (manafe.com.sa)
+  'Wajaf': 'وجف العقارية',         // the site's own Arabic name (wajaf.sa)
+  'AlBukairi': 'البكيري',          // the site's own Arabic name (albukaeri.sa)
+  'Ryadah': 'ريادة العقارية',      // the site's own Arabic name (ryadah.com.sa)
+  'SQCC': 'مجموعة صالح القرشي العقارية', // the site's own Arabic name (sqcc.sa)
+  'Dara': 'دارا للتطوير العقاري',  // the site's own Arabic name (daraa.sa)
+  'Tawia': 'مكتب طوية للعقار',     // the site's own Arabic name (tawia.sa)
   'Manzo': 'مانزو',                          // the site's own Arabic name (manzo.com.sa)
   '8Floor': 'الطابق الثامن',                 // the site's own Arabic name (www.8floor.sa)
   'Holoul': 'حلول',                          // the site's own Arabic name (holoul.io)
@@ -1151,9 +1257,6 @@ const AR: Record<string, string> = {
   // Gathern Tier-1 additional-info labels (Gathern-only keys) + guest-rating review count.
   'Sub-type':                           'نوع الوحدة',
   'Furnished':                          'مفروش',
-  'Discount':                           'الخصم',
-  'Monthly before discount (SAR)':      'السعر الشهري قبل الخصم (ريال)',
-  'Nightly rate (SAR)':                 'السعر الليلي (ريال)',
   'Suitable for':                       'مناسب لـ',
   'Guest capacity':                     'عدد الضيوف',
   'Check-in':                           'تسجيل الدخول',
@@ -1165,6 +1268,99 @@ const AR: Record<string, string> = {
   'Type': 'النوع',
   'm²': 'م²',
   'Description': 'الوصف',
+  'Listing bedrooms': 'الغرف',
+  'Rent period': 'مدة الإيجار',
+  'Open the ad on {name} to contact': 'افتح الإعلان في {name} للتواصل',
+  'Details as published on {name}.': 'المعلومات كما نشرها {name}.',
+  'Photo {n} of {total}': 'الصورة {n} من {total}',
+  // The in-app ad page (components/ListingPreview.tsx, owner 2026-10-10).
+  'Next photo': 'الصورة التالية',
+  '{n} rooms': '{n} غرف',
+  '{n} bathrooms': '{n} دورات',
+  'Location as published by {name}': 'الموقع كما نشره {name}',
+  'Expand the map': 'تكبير الخريطة',
+  'Property location on Google Maps': 'موقع العقار على خرائط Google',
+  'Details': 'التفاصيل',
+  'Halls': 'الصالات',
+  'Majlis': 'المجالس',
+  'Residence type': 'نوع السكن',
+  'Project': 'المشروع',
+  'Tap here to contact': 'اضغط هنا للتواصل',
+  'Tap here to see the location': 'اضغط هنا لرؤية الموقع',
+  // The district circle for an ad whose source published no pin (owner 2026-10-17).
+  'Approximate location': 'الموقع التقريبي',
+  '{name} published no exact location': '{name} لم ينشر موقعاً دقيقاً',
+  'Tap here to see the district': 'اضغط هنا لرؤية الحي',
+  'Tap here to see the city': 'اضغط هنا لرؤية المدينة',
+  'District location on Google Maps': 'موقع الحي على خرائط Google',
+  "and to confirm it's still on {siteName}": 'وللتأكد من توفّره في {siteName}',
+  "This ad may have been removed or sold. We review ads continuously, but we can't guarantee they're still available.": 'قد يكون الإعلان حُذف أو بيع. نراجع الإعلانات باستمرار، لكن لا نضمن توفّرها.',
+  'Previous photo': 'الصورة السابقة',
+  // The «الأسعار» block (numbers only, never a judgement word — owner 2026-10-10).
+  'Prices': 'الأسعار',
+  'this ad': 'هذا الإعلان',
+  'Listed now': 'المعروض الآن',
+  'Actual sales': 'البيع الفعلي',
+  'residential property': 'عقار سكني',
+  'commercial property': 'عقار تجاري',
+  'Count': 'العدد',
+  'Average price': 'متوسط السعر',
+  'Average price per m²': 'متوسط سعر المتر',
+  '8 of every 10 between': '8 من كل 10 بين',
+  'million': 'مليون',
+  'now': 'الآن',
+  'each house counted once': 'كل بيت محسوب مرة واحدة',
+  'This same property is listed on two sites (same licence number):': 'نفس هذا العقار منشور على موقعين (نفس رقم الرخصة):',
+  'This same property is listed on {k} sites (same licence number):': 'نفس هذا العقار منشور على {k} مواقع (نفس رقم الرخصة):',
+  'Tap to view it': 'اضغط لعرضه',
+  'Ministry of Justice': 'وزارة العدل',
+  'Source: Ministry of Justice': 'المصدر: وزارة العدل',
+  'Open the Ministry of Justice page in a new tab': 'افتح صفحة وزارة العدل في نافذة جديدة',
+  'Show the similar listings ({n})': 'عرض الإعلانات المشابهة ({n})',
+  'Similar listings in the district': 'إعلانات مشابهة في الحي',
+  '{n} listings': '{n} إعلاناً',
+  '{n} bedrooms': '{n} غرف',
+  'Same district and type, area within 20% of this ad, same bedrooms when stated. Each property once, nearest first, prices as published.': 'نفس الحي والنوع، والمساحة ضمن 20% من هذا الإعلان، ونفس عدد الغرف عند ذكره. كل عقار مرة واحدة، الأقرب أولاً، والأسعار كما نُشرت.',
+  'Tap «Show the similar listings» under our half to see the ads closest to this one (same district and type, area within 20%, same bedrooms when stated), each on its own website at its published price.': 'اضغط «عرض الإعلانات المشابهة» تحت جانبنا لترى أقرب الإعلانات لهذا الإعلان (نفس الحي والنوع، والمساحة ضمن 20%، ونفس عدد الغرف عند ذكره)، كلٌّ في موقعه الأصلي وبسعره المنشور.',
+  'Updated weekly from the Ministry’s data · last update {date}': 'يُحدَّث أسبوعياً من بيانات الوزارة · آخر تحديث {date}',
+  'Updated weekly from the Ministry’s data': 'يُحدَّث أسبوعياً من بيانات الوزارة',
+  'Updated weekly': 'يُحدَّث أسبوعياً',
+  'We refresh the Ministry’s numbers and deals automatically every week{last}. The Ministry’s own records can lag, so we print the exact period of the deals.': 'نحدّث أرقام الوزارة والصفقات تلقائياً كل أسبوع{last}. وقد تتأخر سجلات الوزارة نفسها، لذلك نعرض فترة الصفقات بالضبط.',
+  ' (last update {date})': ' (آخر تحديث {date})',
+  'Show the deals ({n})': 'عرض الصفقات ({n})',
+  'Deals recorded by the Ministry of Justice': 'الصفقات المسجّلة لدى وزارة العدل',
+  '{n} deals': '{n} صفقة',
+  'As the Ministry recorded them, unaltered. The Ministry does not record the property type.': 'كما سجّلتها الوزارة، دون تعديل. والوزارة لا تسجّل نوع العقار.',
+  'Deal date': 'تاريخ الصفقة',
+  'Area m²': 'المساحة م²',
+  'Deal price': 'السعر',
+  'm² price': 'سعر المتر',
+  'Deal reference': 'الرقم المرجعي',
+  'Tap «Show the deals» under the ministry’s half to see those deals one by one, as the ministry recorded them.': 'اضغط «عرض الصفقات» تحت جانب الوزارة لترى هذه الصفقات واحدة واحدة كما سجّلتها الوزارة.',
+  'To see the same sales in the ministry’s report: open «Source: Ministry of Justice», then choose in its filters Region / City / District: {path}, property class: {cls}, and the period {from} to {to}. The report cannot open already filtered.': 'لرؤية نفس الصفقات في تقرير الوزارة: افتح «المصدر: وزارة العدل»، ثم اختر في فلاترها المنطقة / المدينة / الحي: {path}، وتصنيف العقار: {cls}، والفترة من {from} إلى {to}. التقرير لا يُفتح مفلتراً مسبقاً.',
+  'Price per m²: {n} SAR': 'سعر المتر: {n} ر.س',
+  'Of {n} {type} listed in the district: {dearer} cost more per m² than this ad, and {cheaper} less': 'من {n} {type} معروضة في الحي: {dearer} أغلى للمتر من هذا الإعلان، و{cheaper} أرخص',
+  'Price in the ad': 'السعر في الإعلان',
+  'At the listed average ≈': 'بمتوسط المعروض ≈',
+  'Just numbers — the decision is yours.': 'أرقام فقط، والقرار لك.',
+  // The «الأسعار» block's explanation (owner 2026-10-16): what the numbers are made of, in plain words.
+  'How we calculate these numbers': 'كيف نحسب هذه الأرقام؟',
+  'All residential types listed for sale: {types}': 'كل الأنواع السكنية المعروضة للبيع: {types}',
+  'All commercial types listed for sale: {types}': 'كل الأنواع التجارية المعروضة للبيع: {types}',
+  'Classified residential by the Ministry, which does not record the property type.': 'تصنيف الوزارة: سكني، والوزارة لا تسجّل نوع العقار.',
+  'Classified commercial by the Ministry, which does not record the property type.': 'تصنيف الوزارة: تجاري، والوزارة لا تسجّل نوع العقار.',
+  'villas, apartments, floors, residential land, buildings, townhouses and rooftop annexes': 'فلل وشقق وأدوار وأراضٍ سكنية وعمارات وتاون هاوس وملاحق علوية',
+  'shops, offices, showrooms, warehouses, commercial land and the other commercial types': 'محلات ومكاتب ومعارض ومستودعات وأراضٍ تجارية وباقي الأنواع التجارية',
+  'This property’s area ({area} m²) at the average listed price per m² in the district ({type}):': 'مساحة هذا العقار ({area} م²) بمتوسط سعر المتر المعروض في الحي ({type}):',
+  'Listed now: the average of the sale ads listed today in {district}, {city}, from every website Ezhalah shows, not from one website.': 'المعروض الآن: متوسط إعلانات البيع المعروضة اليوم في {district}، {city}، من جميع المواقع التي تعرضها إزهله، وليس من موقع واحد.',
+  'Property types included: {types}.': 'الأنواع المشمولة: {types}.',
+  'Each property counts once, even when several websites list it: {ads} ads from {sites} websites became {houses} properties.': 'كل عقار يُحسب مرة واحدة حتى لو نُشر في عدة مواقع: {ads} إعلاناً من {sites} موقعاً صارت {houses} عقاراً.',
+  'Prices below {min} or above {max} SAR are left out as likely typing errors.': 'نستبعد الأسعار الأقل من {min} أو الأكثر من {max} ريال لأنها غالباً خطأ إدخال.',
+  'The average per m² is the average of each property’s price divided by its own area (a mean, not a median).': 'متوسط سعر المتر هو متوسط (سعر كل عقار ÷ مساحته)، أي المتوسط الحسابي وليس الوسيط.',
+  'Other websites can show different numbers because each one calculates in its own way (property types, the area covered, mean or median). We show our method in full so you can compare.': 'قد تعرض مواقع أخرى أرقاماً مختلفة لأن كل موقع يحسب بطريقته (أنواع العقار، المنطقة المشمولة، المتوسط أو الوسيط). نعرض طريقتنا كاملة لتقارنها.',
+  'Actual sales: the deals recorded by the Ministry of Justice in the period shown, with its numbers unchanged. The Ministry classifies each deal as residential or commercial and does not record the property type, so the figures cover every deal it classified residential in this district; villa, apartment and land deals are not separated.': 'البيع الفعلي: الصفقات المسجّلة لدى وزارة العدل في الفترة المعروضة، بأرقام الوزارة دون تعديل. تصنّف الوزارة كل صفقة سكنية أو تجارية ولا تسجّل نوع العقار، فالأرقام تشمل كل صفقة صنّفتها سكنية في هذا الحي، ولا تفصل بين الفلل والشقق والأراضي.',
+  'Actual sales: the deals recorded by the Ministry of Justice in the period shown, with its numbers unchanged. The Ministry classifies each deal as residential or commercial and does not record the property type, so the figures cover every deal it classified commercial in this district.': 'البيع الفعلي: الصفقات المسجّلة لدى وزارة العدل في الفترة المعروضة، بأرقام الوزارة دون تعديل. تصنّف الوزارة كل صفقة سكنية أو تجارية ولا تسجّل نوع العقار، فالأرقام تشمل كل صفقة صنّفتها تجارية في هذا الحي.',
+  'These are neighbourhood numbers. They are not a valuation of this property and not the sale price of a similar one.': 'هذه أرقام على مستوى الحي، وليست تقييماً لهذا العقار ولا سعر بيع لعقار مماثل.',
   'Call': 'اتصال',
   'WhatsApp': 'واتساب',
   'Telegram': 'تيليجرام',
@@ -1503,6 +1699,14 @@ const AR: Record<string, string> = {
     'عذراً، ما لقينا نتائج مطابقة لطلبك حالياً. جرب استخدام الفلتر لتوسيع البحث.',
 };
 
+// A property TYPE the dictionary above does not spell out falls back to the taxonomy's own Arabic
+// label (src/data/propertyTypes.ts EN_TO_AR — the one source of type names). Without this, a clean
+// type added to the taxonomy but not here (Event Hall, Meeting Room, Storage Yard, Self Storage, ATM
+// Site, Hospital, Business Center, Resort, Compound — 12 were missing, night audit 2026-09-28) renders
+// on the card as «نوع غير محدد» for every source that stores the English type. Only fills gaps: an
+// entry above always wins. scripts/verify-card-type-label-covers-the-taxonomy.ts pins it.
+for (const [en, ar] of Object.entries(EN_TO_AR)) if (!(en in AR)) AR[en] = ar;
+
 // Interpolate {placeholders}. Used by both en (key) and ar (translation) paths.
 function fill(template: string, vars?: Record<string, string | number>): string {
   if (!vars) return template;
@@ -1511,12 +1715,41 @@ function fill(template: string, vars?: Record<string, string | number>): string 
   return out;
 }
 
+// English wording that differs from its lookup key. The key stays the stable id (the Arabic table, the code and the
+// tests use it); only what an English reader sees changes. Owner 2026-10-09: «the English is just the translation»
+// — each entry is the faithful translation of the Arabic value, in plain sentence-case English.
+const EN: Record<string, string> = {
+  'الهيئة العامة للعقار': 'Real Estate General Authority',
+  'لايوجد': 'None',
+  'لا يوجد': 'None',
+  'That is every matching listing ({n}). For a new search, open the menu and choose Search.': 'That is every matching listing ({n}). Start a new search below.',
+  'آي باكس': 'iBaax',
+  'شركة المربعات العقارية': 'Squares',
+  'Listing bedrooms': 'Bedrooms',
+  'Focus your search on one or more specific websites. We show only their listings.': 'Choose one or more specific websites, or all of them. We show only their listings.',
+  'Smart Assistant': 'Smart Broker', // «الوسيط الذكي»
+  'One site to search every Saudi real-estate platform and website.': 'One site to search all Saudi real-estate platforms and websites.',
+  'Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.':
+    'Ezhalah is an AI-powered real-estate search engine for properties across Saudi Arabia.',
+  'Any count': 'Any', // «أي عدد»
+  'SAR currency': 'SAR', // «ريال»
+  'ads': 'listings', // «إعلان», after a count
+};
+
 // Pure translate for an explicit locale — no dependence on module state. The React provider binds
 // this to its `locale` state so screens re-render from a single source of truth (React state),
 // while the module-level `t` below serves the non-React data layer.
 export function translate(loc: Locale, en: string, vars?: Record<string, string | number>): string {
-  const base = loc === 'ar' ? AR[en] ?? en : en;
+  const base = loc === 'ar' ? AR[en] ?? en : EN[en] ?? en;
   return fill(base, vars);
+}
+
+// Display-only reverse lookup for source-supplied Arabic names and closed labels.
+// Unknown source content stays verbatim; this must never rewrite reference IDs or prose.
+export function englishCatalogText(text: string): string {
+  if (EN[text]) return EN[text];
+  const entry = Object.entries(AR).find(([, arabic]) => arabic === text);
+  return entry ? (EN[entry[0]] ?? entry[0]) : text;
 }
 
 // Core translate: Arabic when active (falling back to the English key), English otherwise.
@@ -1524,15 +1757,34 @@ export function t(en: string, vars?: Record<string, string | number>): string {
   return translate(_locale, en, vars);
 }
 
-// Detect the script the user is writing in so the whole UI can follow their keyboard:
-// any Arabic letter → 'ar', otherwise any Latin letter → 'en'. Returns null for
-// digit-only/empty/symbol input so we don't flip the language on a lone number.
+// Detect input/message script; callers decide how to use it. Chat replies never change UI locale:
+// Count Arabic and Latin WORDS, never characters or numerals. Ties and letterless
+// messages inherit conversation language through resolveReplyLocale().
 const _arScript = /[؀-ۿ]/;
 const _latinScript = /[A-Za-z]/;
 export function detectLocale(text: string): Locale | null {
-  if (_arScript.test(text)) return 'ar';
-  if (_latinScript.test(text)) return 'en';
-  return null;
+  const words = text.match(/[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu) ?? [];
+  let ar = 0, en = 0;
+  for (const word of words) {
+    if (/\p{Script=Arabic}/u.test(word)) ar++;
+    else if (/\p{Script=Latin}/u.test(word)) en++;
+  }
+  if (ar === en) return null;
+  return ar > en ? 'ar' : 'en';
+}
+
+
+// Match the server's established tie/number rules without changing the UI preference.
+export function resolveReplyLocale(text: string, history: readonly { text?: string }[], fallback: Locale): Locale {
+  const detected = detectLocale(text);
+  if (detected) return detected;
+  const mixedTie = /\p{Script=Arabic}/u.test(text) && /\p{Script=Latin}/u.test(text);
+  const turns = mixedTie ? history : [...history].reverse();
+  for (const turn of turns) {
+    const previous = detectLocale(turn.text ?? '');
+    if (previous) return previous;
+  }
+  return fallback;
 }
 
 // Arabic-only INPUT guard: true when the user typed in English (Latin letters present, no Arabic).
@@ -1589,23 +1841,23 @@ export const ATTRIBUTE_UNRESOLVED_AR = 'بيان غير محدد';
 
 // A property type or category — Arabic translation, or lowercased English (matches the prior
 // "here are villas" phrasing).
-export function tWord(en: string): string {
-  return _locale === 'ar' ? AR[en] ?? en : en.toLowerCase();
+export function tWord(en: string, loc: Locale = _locale): string {
+  return loc === 'ar' ? AR[en] ?? en : en.toLowerCase();
 }
 
 // A stored location string ("Riyadh, Al Malqa District") — translate each comma-separated part.
-export function tPlace(s: string): string {
+export function tPlace(s: string, loc: Locale = _locale): string {
   if (!s) return s;
   return s
     .split(',')
-    .map((p) => t(p.trim()))
+    .map((p) => translate(loc, p.trim()))
     .join('، ');
 }
 
 // A bedrooms / size-band option ("Under 100 m²", "100–300 m²", "600+ m²"). Numbers + unit stay;
 // only the words localize. Bedroom counts (plain digits) pass through untouched.
-export function tDetailOption(opt: string): string {
-  if (_locale !== 'ar') return opt;
+export function tDetailOption(opt: string, loc: Locale = _locale): string {
+  if (loc !== 'ar') return opt;
   if (/^\d+\+?$/.test(opt)) return opt; // bedroom counts
   let s = opt.replace(/^Under\s*/, 'أقل من ');
   s = s.replace(/m²/g, 'م²');
@@ -1614,8 +1866,8 @@ export function tDetailOption(opt: string): string {
 
 // A preset price-tab band ("Under SAR 75k", "SAR 75k–150k", "SAR 3M+"). Localize the words only —
 // Western digits, "k"/"M" abbreviations, the en-dash and "+" all stay.
-export function tPriceTab(opt: string): string {
-  if (_locale !== 'ar') return opt;
+export function tPriceTab(opt: string, loc: Locale = _locale): string {
+  if (loc !== 'ar') return opt;
   let s = opt.replace(/^Under\s*/, 'أقل من ');
   s = s.replace(/SAR/g, 'ر.س');
   return s;
@@ -1720,6 +1972,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   // on Send, then call respond()) gets a reply in the NEW language — not the previous one. React
   // state stays the source of truth; this just removes the one-render lag for the static `t()`.
   const setLocale = useCallback((l: Locale) => {
+    _localeRevision++;
     // English re-enabled (owner, 2026-09-11) — see readSavedLocale()'s comment above for the full
     // rationale. This function was the single owner of the old Arabic-only guard; it is now the
     // single owner of turning both languages on, so nothing else needed a second copy of this check.
@@ -1750,4 +2003,20 @@ export function useI18n(): I18nValue {
   const v = useContext(Ctx);
   if (!v) throw new Error('useI18n must be used within LocaleProvider');
   return v;
+}
+
+/**
+ * Render `children` in `locale`, whatever language the app itself is in (owner 2026-10-17: «the property cards should follow
+ * the language» of the message). Every `useI18n()` below it (card labels, «Click here», prices, places, alignment) reads this
+ * language; the app language, its saved choice and the page direction are untouched. No extra view: layout is unchanged.
+ */
+export function LocaleScope({ locale, children }: { locale: Locale; children: ReactNode }) {
+  const parent = useI18n();
+  const value = useMemo<I18nValue>(
+    () => (parent.locale === locale
+      ? parent
+      : { locale, isRTL: locale === 'ar', t: (en: string, vars?: Record<string, string | number>) => translate(locale, en, vars), setLocale: parent.setLocale }),
+    [locale, parent],
+  );
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -143,6 +143,10 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_WORKERS: "10"
           SCRAPE_MIN_INTERVAL: "0.15"
+          # Opt-in for http.get()'s block escape (2026-09-28): used ONLY after chrome124, safari17_0,
+          # firefox133 and edge101 have all been refused direct, then pinned per host for the run.
+          # Run 36360844470 fetched 0 pages on all 95 cities with the direct route alone.
+          SCRAPE_PROXY_FALLBACK_URL: ${{ secrets.WASALT_PROXY_URL }}
         run: |
           exec python -m scrapers.aqar.run_residential \
             --all-residential \

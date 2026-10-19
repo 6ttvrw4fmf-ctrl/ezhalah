@@ -5,9 +5,10 @@
 // strip — that is dishonest to users (they can never reach those results) and unfair to the
 // platform (advertised without being able to deliver).
 //
-// TWO-LAYER GUARANTEE. The client filters PLATFORM_META at RUNTIME via
-// `loader_active_platforms_ar()` — so a scraper going cold today stops advertising within one
-// page-load. This barrier is the STATIC half: it queries production (anon REST, the same key real
+// TWO-LAYER GUARANTEE, AS AMENDED. Since 2026-09-20 the client shows ALL of PLATFORM_META (a cold
+// scraper does not hide a logo); since 2026-09-26 it hides, at RUNTIME, only websites down on their
+// side (platform_registry 'dormant'/'retired', read once per session via
+// `loader_platform_status_ar()` — section 6b). This barrier is the STATIC half: it queries production (anon REST, the same key real
 // users hit) and asserts PLATFORM_META, mapped through SOURCE_TOKENS, equals the current active
 // set exactly. That way the static list cannot silently drift; a scraper decision has to land in
 // the loader in the same PR that removes/adds it.
@@ -261,18 +262,64 @@ check(
   /PRODUCT RULE \(owner 2026-08-29/.test(LOADER_SRC) && /HONEST CLAIM/.test(LOADER_SRC),
 );
 check(
-  'pickLoaderPlatforms accepts an activeNames filter (safe-degradation fallback path exists)',
-  /pickLoaderPlatforms\([^)]*activeNames\?:/.test(LOADER_SRC) && /activeNames\.size/.test(LOADER_SRC),
+  'pickLoaderPlatforms accepts a hiddenNames exclusion (null → the full catalog, never a guess)',
+  /pickLoaderPlatforms\([^)]*hiddenNames\?:/.test(LOADER_SRC) && /!hiddenNames\.has\(p\.name\)/.test(LOADER_SRC),
 );
 const runtimeSrc = readFileSync(
   new URL('../src/data/loaderActivePlatforms.ts', import.meta.url).pathname,
   'utf8',
 );
 check(
-  'loaderActivePlatforms.ts exports fetchActivePlatformNames (runtime filter is wired)',
-  /export async function fetchActivePlatformNames\(/.test(runtimeSrc) &&
-    /supabase\.rpc\(\s*['"]loader_active_platforms_ar['"]/.test(runtimeSrc),
+  'loaderActivePlatforms.ts reads the down-site statuses from loader_platform_status_ar',
+  /export function loadHiddenPlatformNames\(/.test(runtimeSrc) &&
+    /supabase\.rpc\(\s*['"]loader_platform_status_ar['"]/.test(runtimeSrc),
+  'without it a website down on its side keeps its logo in the strip',
 );
+
+// ── 6b. A DOWN SITE LEAVES THE STRIP, AND COMES BACK BY ITSELF (owner rule 2026-09-26).
+//
+// The strip is PLATFORM_META minus hiddenLoaderNames(loader_platform_status_ar()). The registry is not
+// anon-readable; that RPC is what real users' browsers call. Against production's real statuses:
+//   (a) the RPC answers, with rows (an empty answer is a failure, not "everything is up");
+//   (b) every dormant website (down on its side) that has a logo loses it — the bug found 2026-09-27;
+//   (c) every down website is still in PLATFORM_META, so when its site answers again and the engineer
+//       flips it back to 'active', its logo returns with no code change. A down site DELETED from the
+//       catalog would stay hidden forever;
+//   (d) every hidden logo is hidden by a slug that is an EXACT token for it, never a substring
+//       accident (e.g. a down 'aqarfoo' matching the generic 'aqar' token and taking Aqar's logo).
+const statusRes = await postgrestFetch(`${SUPABASE_URL}/rest/v1/rpc/loader_platform_status_ar`, {
+  method: 'POST',
+  headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
+  body: '{}',
+});
+check('RPC loader_platform_status_ar() reachable via anon (HTTP 200)', statusRes.status === 200,
+  statusRes.status !== 200 ? `got HTTP ${statusRes.status}` : '');
+if (statusRes.status === 200) {
+  const rows = (await statusRes.json()) as Array<{ platform: string; status: string }>;
+  check('(a) the registry statuses are not empty', Array.isArray(rows) && rows.length > 0);
+  // The SHIPPED rule, imported — loaderPlatforms.ts's logo require() gets a plain-Node stand-in.
+  (globalThis as { require?: unknown }).require = (p: string) => p;
+  const mod = await import('../src/data/loaderPlatforms.ts');
+  const hidden = mod.hiddenLoaderNames(rows);
+  const shown = new Set(mod.pickLoaderPlatforms(undefined, 0, hidden).map((p) => p.name));
+  const down = rows.filter((r) => mod.HIDDEN_STATUSES.has(r.status));
+  if (down.length) console.log(`  ⓘ down on their side / retired: ${down.map((r) => `${r.platform}=${r.status}`).join(', ')}`);
+  if (hidden.size) console.log(`  ⓘ logos hidden from the strip: ${[...hidden].sort().join(', ')} — strip shows ${shown.size} of ${catalog.size}`);
+  const leaked = rows.filter((r) => r.status === 'dormant')
+    .map((r) => mod.normalizeSource(r.platform)).filter((n): n is string => !!n && shown.has(n)
+      && !rows.some((u) => !mod.HIDDEN_STATUSES.has(u.status) && mod.normalizeSource(u.platform) === n));
+  check('(b) no dormant website keeps its logo (unless a live slug shares it)', leaked.length === 0,
+    leaked.length ? `still shown: ${leaked.join(', ')}` : '');
+  const unrestorable = down.map((r) => r.platform).filter((raw) => {
+    const n = normalizeSource(raw);
+    return (!n || !catalog.has(n)) && !excusedIfHidden(raw);
+  });
+  check('(c) every down website is still in PLATFORM_META, so its logo returns by itself when the site does',
+    unrestorable.length === 0, unrestorable.length ? `down AND missing from the catalog: ${unrestorable.join(', ')}` : '');
+  const accidental = [...hidden].filter((n) => !down.some((r) => SOURCE_TOKENS.some(([tok, name]) => tok === r.platform && name === n)));
+  check('(d) every hidden logo is hidden by its own exact slug token, not a substring match', accidental.length === 0,
+    accidental.length ? `hidden by a substring match only: ${accidental.join(', ')}` : '');
+}
 
 // ── 7. Every rostered platform must have an ARABIC NAME to show. عقاريون shipped with a logo, an
 //       i18nKey and a live row in loader_active_platforms_ar — and this barrier went GREEN while the

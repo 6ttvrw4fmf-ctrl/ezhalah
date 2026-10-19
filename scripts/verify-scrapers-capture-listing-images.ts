@@ -68,7 +68,11 @@ const noPhotoField: string[] = [];
 for (const slug of dirs) {
   const files = pyFilesOf(slug);
   if (!files.length) continue;
-  const src = files.map((f) => stripPy(readFileSync(f, 'utf8'))).join('\n');
+  const own = files.map((f) => stripPy(readFileSync(f, 'utf8'))).join('\n');
+  // …plus the platform reader it imports: a Nuzul tenant (m3tmd, senan, october) builds its row,
+  // photo_urls included, in scrapers/jawher/run.py.
+  const readers = [...own.matchAll(/from scrapers\.(\w+)\.run import/g)].map((m) => m[1]).filter((s) => s !== slug);
+  const src = [own, ...readers.flatMap((s) => pyFilesOf(s).map((f) => stripPy(readFileSync(f, 'utf8'))))].join('\n');
   // Some packages are helper-only (liveness probes, cleanup) and never build a listing row.
   if (!/upsert_|["']ad_number["']\s*:/.test(src)) continue;
   if (!/["']photo_urls["']\s*:/.test(src) && !/\bphotos\b/.test(src)) { noPhotoField.push(slug); continue; }

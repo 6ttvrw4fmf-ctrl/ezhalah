@@ -242,7 +242,7 @@ listing's data.
 
 ## 15. Arabic user experience
 The product is Arabic. Test and report using real labels («تصفية» «شراء» «إيجار» «سنوي» «شهري»
-«بحث» «عرض المزيد» «مسح الكل» · فئة العقار · نوع العقار · المدينة · الحي · السعر · المساحة ·
+«بحث» «عرض المزيد» · فئة العقار · نوع العقار · المدينة · الحي · السعر · المساحة ·
 غرف النوم). Accidental English in user-facing UI where Arabic belongs = production bug → fix,
 barrier, test, deploy.
 

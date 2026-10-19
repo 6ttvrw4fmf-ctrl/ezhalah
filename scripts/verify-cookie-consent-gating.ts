@@ -22,6 +22,7 @@
 
 import {
   shouldShowCookieBanner,
+  earlyTapConsent,
   analyticsAllowed,
   getCookieConsent,
   setCookieConsent,
@@ -70,6 +71,23 @@ mustCatch('hidden before the session restore settles (authChecked=false → no f
   shouldShowCookieBanner({ ...guest, authChecked: false }) === false);
 mustCatch('hidden on native (not web)',
   shouldShowCookieBanner({ ...guest, isWeb: false }) === false);
+
+// A tap BEFORE the card rose (e.g. «English» during the session restore) is agreement too
+// (owner 2026-10-16) — the card must not rise afterwards and wait for a second tap.
+mustCatch('hidden when the visitor already tapped before it could rise',
+  shouldShowCookieBanner({ ...guest, tappedBeforeShown: true }) === false);
+check('an early tap records "all" once the restore proves the visitor signed out',
+  earlyTapConsent({ ...guest, tappedBeforeShown: true }) === 'all');
+mustCatch('an early tap records nothing for a signed-in user',
+  earlyTapConsent({ ...guest, user: { sub: 'u1' }, tappedBeforeShown: true }) === null);
+mustCatch('an early tap records nothing before the restore settles',
+  earlyTapConsent({ ...guest, authChecked: false, tappedBeforeShown: true }) === null);
+mustCatch('no tap → no consent recorded',
+  earlyTapConsent({ ...guest, tappedBeforeShown: false }) === null);
+mustCatch('an early tap never overwrites an explicit "necessary"',
+  earlyTapConsent({ ...guest, consent: 'necessary', tappedBeforeShown: true }) === null);
+mustCatch('an early tap records nothing on native',
+  earlyTapConsent({ ...guest, isWeb: false, tappedBeforeShown: true }) === null);
 
 // 3. Persistence round-trips — the LIBRARY still round-trips so analyticsAllowed() keeps the
 // visitor's preference across visits. The COMPONENT is separately pinned in section 5 to not READ
@@ -149,6 +167,19 @@ mustCatch('a corrupt stored value is treated as no-choice, not as consent',
   check('the click listener excludes the card itself (its own buttons resolve normally)',
     excludesCard,
     'Expected: if (card && card.contains(e.target)) return; using [data-testid="cookie-consent"].');
+
+  // OWNER 2026-10-17: the menu button and the language switch must NOT count as agreement.
+  const keepsMarked = /closest\(\s*['"]\[data-consent-keep\]['"]\s*\)\s*\)\s*return/.test(stripped);
+  check('the click listener ignores anything inside [data-consent-keep] (menu button, language switch)', keepsMarked,
+    'Expected: if (e.target instanceof Element && e.target.closest("[data-consent-keep]")) return;');
+  const marked = (f: string, re: RegExp) => re.test(fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8'));
+  check('the chat menu button, the home menu button and the sidebar language toggle all carry consentKeep',
+    marked('src/app/agent.tsx', /consentKeep:\s*'1'[\s\S]{0,120}setSidebarOpen\(true\)/)
+    && marked('src/app/index.tsx', /consentKeep:\s*'1'[\s\S]{0,120}setSidebarOpen\(true\)/)
+    && marked('src/components/Sidebar.tsx', /sidebar-language-toggle[\s\S]{0,420}consentKeep:\s*'1'/)
+    && marked('src/components/Sidebar.tsx', /s\.backdrop,\s*backdropStyle\][\s\S]{0,260}consentKeep:\s*'1'/));
+  mustCatch('a listener without the keep rule is caught',
+    !/closest\(\s*['"]\[data-consent-keep\]['"]\s*\)\s*\)\s*return/.test('document.addEventListener("click", () => { choose("all") })'));
 
   // Mutation: a version that forgot to exclude the card would dismiss on the user's own click on
   // "Allow all" too (harmless there, but on "Only necessary" it would OVERWRITE their choice to 'all').

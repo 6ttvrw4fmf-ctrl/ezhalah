@@ -23,6 +23,13 @@ index numbers («1», «0») whose option nothing names. Only the text labels ar
 NULL (unknown), and every raw value is kept in additional_info.source_params.
 PHOTOS: gallery `property_images`, else the listing's own cover `title_image` (5 of 11 have no gallery).
 
+AVAILABILITY (measured 2026-10-02, list AND all 11 by-slug records): status True on 18 of 18,
+request_status «approved» on 18 of 18, state null on 18 of 18 — the 7 demo rows included, so none of
+them tells a live ad from a dead one, and the site's own pages apply no status test of their own
+(they render whatever the API returns). No other value has ever been seen, so one is KEPT and
+COUNTED in the run log, never guessed to mean unavailable. The ad licence's own end date
+(`adv_license_expire_date`, ISO, 11 of 11 in 2027) goes through the fleet's ad-end-date gate.
+
 PDPL: the licence names the advertiser and his mobile, the deed number; the detail carries
 `customer` / `publisher` / `client_address` / `brokerage_contracts`. None is stored.
 """
@@ -41,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 API = "https://admin.muajarh.com/api/v1/properties"
 MEDIA = "https://admin.muajarh.com/"
@@ -48,7 +56,6 @@ SITE = "https://muajarh.com/properties"
 SOURCE = "مؤاجرة"
 PREFIX = "MJR"
 SLUG = "muajarh"
-IMPERSONATE = "chrome"
 
 _CATEGORY_AR = {"villas": "فيلا", "apartments": "شقة", "floor": "دور", "floors": "دور", "rooms": "غرفة",
                 "studios": "استوديو", "warehouses": "مستودع", "shops": "محل", "offices": "مكتب"}
@@ -57,13 +64,14 @@ _YES = {"متوفر", "متوفرة", "نعم", "خاص", "مؤثث", "true"}
 _NO = {"غير متوفر", "غير متوفرة", "لا", "لا يوجد", "غير مؤثث"}
 _BOOL_PARAMS = {"المصعد": "elevator", "مواقف خاصة": "parking", "غرفة سائق": "driver_room",
                 "المدخل": "private_entrance", "الأثاث": "furnished", "غرفة غسيل": "laundry_room"}
+_STATUS_MEASURED = {"status": True, "request_status": "approved", "state": None}
 _NEVER_STORE = {"advertiserName", "advertiserMobile", "deedNumber", "locationDescription"}
 
 
 def get_json(s: cc.Session, url: str) -> Any:
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=40)
+            r = s.get(url, timeout=40)
             r.raise_for_status()
             return r.json()
         except Exception:  # noqa: BLE001
@@ -102,6 +110,8 @@ def map_listing(x: dict, d: dict) -> tuple[Optional[tuple[dict, str]], str]:
         return None, "no_rega_licence_demo_row"
     if x.get("listing_type") != "rent":
         return None, f"deal_unstated_{x.get('listing_type')}"
+    if normalize.ad_expiry_state(x.get("adv_license_expire_date") or d.get("adv_license_expire_date")) == "expired":
+        return None, "ad_licence_expired"
     comp = ((d.get("rega_license_data") or {}).get("compliance") or {})
     cat = x.get("category") or {}
     type_ar = comp.get("propertyType") or _CATEGORY_AR.get((cat.get("nameEn") or "").strip().lower())
@@ -185,7 +195,10 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(API, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     listings, declared = walk(s)
     print(f"{SOURCE}: {len(listings)} record(s) (API declares total={declared})", flush=True)
 
@@ -193,6 +206,7 @@ def main() -> int:
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
+    kept: dict[str, int] = {}
     unreadable = 0
     try:
         for x in listings:
@@ -211,9 +225,21 @@ def main() -> int:
                 continue
             row, cat = got
             (com if cat == "commercial" else res).append(row)
+            if normalize.ad_expiry_state(x.get("adv_license_expire_date") or d.get("adv_license_expire_date")) == "unknown":
+                # no readable licence end date (measured 2026-10-02: a readable ISO date on 11 of 11
+                # licensed rows): kept, and counted out loud — never silently taken as «still licensed»
+                kept["adv_license_expire_date_unread"] = kept.get("adv_license_expire_date_unread", 0) + 1
+            for field, measured in _STATUS_MEASURED.items():
+                value = d.get(field, x.get(field))
+                if value != measured:
+                    kept[f"{field}_{value}"] = kept.get(f"{field}_{value}", 0) + 1
+                    db.mark_presence_unproven(row)         # kept as before, never stamped as checked
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
+        if kept:
+            print("  kept, status value never measured or end date unread (not guessed): "
+                  + ", ".join(f"{k}x{v}" for k, v in sorted(kept.items())), flush=True)
         if dry:
             print(f"DRY: {len(res)} residential + {len(com)} commercial ({unreadable} unreadable)")
             for row in res + com:

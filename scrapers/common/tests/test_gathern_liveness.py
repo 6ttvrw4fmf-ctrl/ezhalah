@@ -67,13 +67,23 @@ def test_scheduled_liveness_stays_source_confirmed_not_a_stale_rule():
     # BARRIER (owner 2026-08-10): nobody may later replace the automatic gathern liveness with a
     # "stale = inactive" time-based rule. The scheduled workflow MUST invoke the 404-confirmed module,
     # keep the 3-strike grace, and be a real (apply) schedule.
+    import glob
     import os
-    wf = os.path.join(os.path.dirname(__file__), "..", "..", "..",
-                      ".github", "workflows", "gathern-liveness.yml")
-    text = open(wf, encoding="utf-8").read()
+    import re
+    root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+    text = open(os.path.join(root, ".github", "workflows", "gathern-liveness.yml"),
+                encoding="utf-8").read()
     assert "scrapers.gathern.liveness" in text          # the 404-confirmed module, not a shortcut
     assert "--grace" in text                             # 3-strike confirmation preserved
-    assert "schedule:" in text and "--apply" in text     # automatic apply is actually wired
+    # Since 2026-09-28 the schedule is pg_cron job gh-gathern-liveness, which dispatches with NO
+    # inputs — so the no-input default must be a real APPLY, and GitHub's own `schedule:` trigger
+    # must be gone (both firing would double-probe gathern's global request budget).
+    apply_input = text.split("      apply:\n", 1)[1].split("      limit:\n", 1)[0]
+    assert "default: true" in apply_input and "--apply" in text
+    assert not re.search(r"^  schedule:", text, re.M)
+    assert any("'gh-gathern-liveness'" in m and "trigger_gh_workflow('gathern-liveness.yml')" in m
+               for m in (open(f, encoding="utf-8").read()
+                         for f in glob.glob(os.path.join(root, "supabase", "migrations", "*.sql"))))
     # and the core signal is still source-confirmed (404/410 only), never staleness:
     assert looks_dead(404) and not looks_dead(200) and not looks_dead(0)
 

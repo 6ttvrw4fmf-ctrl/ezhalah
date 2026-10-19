@@ -43,6 +43,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.http import retry_smarter_session
 
 # PDPL: never store these containers (advertiser / brokerage identity).
 _PII = {"advertiser", "brokerageBadge", "brokerageContract"}
@@ -61,6 +62,11 @@ TYPE_MAP = {
     "duplex": "Duplex", "palace": "Villa", "room": "Room", "rest_house": "Rest House",
     "chalet": "Chalet", "farm": "Farm", "land_residential": "Residential Land",
     "land": "Residential Land", "house": "House",
+    # The site's own dictionary: townhouse «تاون هاوس» → Duplex (owner 2026-10-12: town house is
+    # under Duplex; taxonomy Duplex rawTypes; normalize slug townhouse→Duplex). whole_floor «دور كامل» → Floor. AH1039 is filed
+    # whole_floor while its office title says «فيلا دورين»: the structured field wins (the page's
+    # own spec grid and SEO title say «دور كامل»); the title is kept verbatim on the card.
+    "townhouse": "تاون هاوس", "whole_floor": "Floor",
     # commercial
     "office": "Office", "shop": "Shop", "showroom": "Showroom", "warehouse": "Warehouse",
     "land_commercial": "Commercial Land", "commercial_building": "Commercial Building",
@@ -124,8 +130,12 @@ def _throttle() -> None:
 
 
 def session() -> cc.Session:
-    s = cc.Session(impersonate="chrome124")
-    s.headers.update({"Accept": "application/json", "Content-Type": "application/json"})
+    # 2026-10-03: two runs in a row timed out CONNECTING from the GitHub runner (76 s, 0 rows), so
+    # probe 3 profiles DIRECT, then the residential proxy (`proxy: true` → WASALT_PROXY_URL), and keep
+    # the session the host answers. Never raises: an unserved probe falls back to the old DIRECT session.
+    s, tried = retry_smarter_session(BASE + "/", headers={"Accept": "application/json",
+                                                          "Content-Type": "application/json"})
+    print(f"Al Hoshan: probe {' '.join(tried)}", flush=True)
     return s
 
 
@@ -146,17 +156,24 @@ def _items(payload: dict) -> list[dict]:
 
 
 def fetch_page(s: cc.Session, page: int) -> tuple[list[dict], dict]:
+    """(items, meta) of one search page. Raises when the page never answers 200: a failed fetch is
+    not an empty catalogue (2026-10-08: the API answered Cloudflare 502 three nights' runs in a row
+    and the run read «None listings across 1 pages», a 0-row source, instead of the outage)."""
     _throttle()
+    last = "no answer"
     for attempt in range(3):
         try:
             r = s.post(SEARCH, timeout=30, json={"page": page, "limit": PAGE_SIZE})
-        except Exception:
+        except Exception as e:  # noqa: BLE001 — retried below, reported if every try fails
+            last = f"{type(e).__name__}"
             time.sleep(2 * (attempt + 1)); continue
         if r.status_code != 200:
+            last = f"HTTP {r.status_code}"
             time.sleep(2 * (attempt + 1)); continue
         j = r.json()
         return _items(j), (j.get("meta") or {})
-    return [], {}
+    raise RuntimeError(f"search page {page} answered {last} on 3 tries — the source API is failing, "
+                       "not empty")
 
 
 def fetch_media(s: cc.Session, guid: Any) -> Optional[list[str]]:
@@ -208,6 +225,33 @@ def _additional_info(p: dict, specs: dict) -> list[dict[str, Any]]:
     if lic and not str(lic).startswith("•"):  # skip Al Hoshan's masked (••••) values
         rows.append({"key": "adlic", "label": "Ad license number", "value": str(lic)})
     return rows
+
+
+def source_status(p: dict) -> str:
+    """What the record ITSELF says about being on the market: 'live' | 'unpublished' | 'unmeasured'.
+
+    MEASURED 2026-10-02 over the whole feed (34 of 34 items): isPublished=True, moderationStatus=
+    'approved', listingExpiresAt=None on every one. No sold / rented field exists, and the Arabic
+    words «مؤجر» «غير متاح» «محجوز» on a live page come from the site's own dictionary (contract
+    form, app-store labels, payment states) — furniture, never read. The 13 ids missing from the
+    1001-1047 range answer 404.
+
+      isPublished is False → 'unpublished': the record's own flag; main() does not upsert it.
+      isPublished unreadable (absent / not a boolean) → RAISE. "Could not read" is not "available";
+          the run fails and writes nothing.
+      moderationStatus other than 'approved', or an expiry date set → 'unmeasured'. Neither was
+          ever observed, so today's behaviour is kept (the row is upserted) and main() counts it in
+          the run notes. Nobody guesses what an unseen value means.
+    """
+    pub = p.get("isPublished")
+    if not isinstance(pub, bool):
+        raise RuntimeError(f"alhoshan item {p.get('publicId')!r}: isPublished unreadable ({pub!r}) — "
+                           "refusing to upsert on a status that could not be read")
+    if not pub:
+        return "unpublished"
+    if p.get("moderationStatus") != "approved" or p.get("listingExpiresAt") is not None:
+        return "unmeasured"
+    return "live"
 
 
 def map_listing(p: dict, photos: Optional[list[str]] = None) -> tuple[Optional[dict], str]:
@@ -309,7 +353,31 @@ def map_listing(p: dict, photos: Optional[list[str]] = None) -> tuple[Optional[d
         "region_id": rid,
         "source_capture": {k: v for k, v in p.items() if k not in _PII},
     }
+    row.update(af_answers(p, specs))
     return row, category
+
+
+# ── Advanced Filter answers from the record's OWN fields (🔬 AF engineer, 2026-10-14) ─────────────────────
+# specs.direction («north») and specs.parkingSpaces (a count) are structured, and both were filed only in the
+# additional_info panel: on 10-14, 23 of 30 active ads stated a facade and 8 a parking count, and the
+# direction / parking columns were NULL on all of them (alhoshan 0 of 3 findable, direction missed 5 of 5).
+# specs.features is empty on every active record, so kitchen and the rooms have no structured field and the
+# record's own description is the statement (law §2), yes-or-nothing; parking is never read from prose.
+_PROSE_COLS = ("kitchen", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance")
+
+
+def af_answers(p: dict, specs: dict) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    facade = normalize.facade_from_slug(specs.get("direction"))
+    if facade:
+        out["direction"] = facade
+    spaces = _int(specs.get("parkingSpaces"))
+    if spaces and spaces > 0:
+        out["parking"] = True
+    for col, val in normalize.prose_amenities_yes(p.get("description"), skip=("parking",)).items():
+        if col in _PROSE_COLS:
+            out[col] = val
+    return out
 
 
 def main() -> int:
@@ -319,19 +387,26 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
-    items, meta = fetch_page(s, 1)
-    total = meta.get("total")
-    pages = meta.get("totalPages") or 1
-    print(f"Al Hoshan: {total} listings across {pages} pages")
-
+    # begin_run BEFORE the first fetch: a crawl that dies on page 1 must still leave its failure row.
     run_id = None if args.limit_test else db.begin_run("alhoshan")
     res: list[dict] = []
     com: list[dict] = []
     seen = 0
+    status: dict[str, int] = {}   # source_status() tally of every item carrying a publicId
     try:
+        items, meta = fetch_page(s, 1)
+        total = meta.get("total")
+        pages = meta.get("totalPages") or 1
+        print(f"Al Hoshan: {total} listings across {pages} pages")
         page = 1
         while True:
             for p in items:
+                if not p.get("publicId"):
+                    continue
+                st = source_status(p)          # raises when the record's own flag is unreadable
+                status[st] = status.get(st, 0) + 1
+                if st == "unpublished":
+                    continue
                 row, cat = map_listing(p, fetch_media(s, p.get("id")))
                 if not row:
                     continue
@@ -342,9 +417,10 @@ def main() -> int:
             if not meta.get("hasNext") or page >= pages:
                 break
             page += 1
-            items, meta = fetch_page(s, page)
+            items, meta = fetch_page(s, page)     # raises on a page that never answers
             if not items:
-                break
+                # The page before said hasNext. A half-read catalogue is not a complete one.
+                raise RuntimeError(f"search page {page} unreadable after hasNext — refusing a partial catalogue")
 
         if args.limit_test:
             print(f"DRY RUN — would upsert {len(res)} residential + {len(com)} commercial")
@@ -378,7 +454,7 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ Al Hoshan: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["alhoshan_residential_listings", "alhoshan_commercial_listings"])
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned} unpublished_skipped={status.get('unpublished', 0)} status_unmeasured={status.get('unmeasured', 0)}", check_tables=["alhoshan_residential_listings", "alhoshan_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

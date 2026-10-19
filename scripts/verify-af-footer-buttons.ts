@@ -55,11 +55,13 @@ console.log('\nAF footer — رجوع/تخطي are real buttons; the «عرض ا
 
 // ── 1. BEHAVIOR UNCHANGED: same handlers, same testIDs, same commit paths ───────────────────────
 check('af-back rides onBack (unchanged semantics)', /onPress=\{onBack\}/.test(backBlock));
-check('af-skip rides onSkip (unchanged semantics)', /onPress=\{onSkip\}/.test(skipBlock));
+// 2026-10-03: both now pass through the card's advance() (instant «working» state, same handler) —
+// verify-af-continue-never-feels-stuck.ts owns that wrapper; the handler under it is what is pinned here.
+check('af-skip rides onSkip (unchanged semantics)', /onPress=\{(?:onSkip|\(\) => advance\(onSkip\))\}/.test(skipBlock));
 check('the primary still rides onConfirm(sel)',
-  /testID="af-confirm"/.test(cardSrc) && /onPress=\{\(\) => onConfirm\(sel\)\}/.test(cardSrc));
+  /testID="af-confirm"/.test(cardSrc) && /onPress=\{\(\) => (?:advance\(\(\) => )?onConfirm\(sel\)\)?\}/.test(cardSrc));
 check('onAgeSkip still commits an empty answer through the ONE commit path',
-  /const onAgeSkip = \(\) => \{ void commitGuidedStep\(\[\]\); \}/.test(agentSrc));
+  /const onAgeSkip = \(\) => (?:\{ void commitGuidedStep\(\[\]\); \}|commitGuidedStep\(\[\]\);)/.test(agentSrc));
 check('onAgeBack still walks back via presentGuided(stepIndex - 1)',
   /presentGuided\(stepIndex - 1, back\)/.test(agentSrc));
 

@@ -77,15 +77,23 @@ const mustCatch = (label: string, caught: boolean, detail = "") =>
 // could only express "null or false or []" and would have silently mis-judged the two fields added
 // on 2026-09-18 whose cleared value is neither (`askCountRef` → 0, `ageFlowTokenRef` → *incremented*).
 const CONVERSATION_SCOPED = [
+  { name: "pickerSourceExplicit", kind: "probe", cleared: (v: any) => v === false, why: "a new conversation accepts source requests from free text until the picker is explicitly used" },
+  { name: "selectedSources", kind: "probe", cleared: (v: any) => Array.isArray(v) && v.length === 0, why: "website choices belong to this conversation" },
   { name: "completed", kind: "probe", cleared: (v: any) => v === false, why: "locks the composer AND withholds the «عرض المزيد» row" },
+  { name: "restoringId", kind: "probe", cleared: (v: any) => v === null, why: "a saved chat's restore loading line would stand over the NEXT conversation's buttons (2026-10-08)" },
   { name: "msgs", kind: "probe", cleared: (v: any) => Array.isArray(v) && v.length === 0, why: "the previous conversation's bubbles" },
   { name: "busy", kind: "probe", cleared: (v: any) => v === false, why: "a spinner owned by a search that is being abandoned" },
   { name: "stopped", kind: "probe", cleared: (v: any) => v === false, why: "a Stop pressed in the previous conversation" },
   { name: "ageFlow", kind: "probe", cleared: (v: any) => v === null, why: "the guided AF card the abandoned conversation had open" },
   { name: "chatIdRef", kind: "ref", cleared: (v: any) => v === null, why: "the previous conversation's sidebar identity" },
+  { name: "liveTurnsRef", kind: "ref", cleared: (v: any) => v instanceof Set && v.size === 0,
+    why: "the results turns a search produced live (2026-10-10) — inherited, a reopened chat's turns replay every card's mount-in at once and the screen goes blank" },
   { name: "afCarryRef", kind: "ref", cleared: (v: any) => v === null, why: "the Advanced-Filter answered set (New Chat used to inherit it)" },
+  { name: "afSkippedByMsgRef", kind: "ref", cleared: (v: any) => v && typeof v === "object" && Object.keys(v).length === 0,
+    why: "the Advanced-Filter skip-only rounds per results turn (2026-10-06) — inherited, a new chat would skip questions it never asked" },
   { name: "pendingScopeRef", kind: "ref", cleared: (v: any) => v === null, why: "a half-answered clarifying question the next send() would consume" },
   { name: "pendingCityRef", kind: "ref", cleared: (v: any) => v === null, why: "the plain-city question's subject" },
+  { name: "lastPaginationResultRef", kind: "ref", cleared: (v: any) => v === null, why: "quantity navigation belongs to its results conversation" },
   { name: "lastQueryRef", kind: "ref", cleared: (v: any) => v === null, why: "the accumulated filters the previous conversation narrowed" },
   // ── added 2026-09-18, ops_incident #319: the rest of what send() consumes, and the second token ──
   { name: "pendingRefineRef", kind: "ref", cleared: (v: any) => v === null,
@@ -114,11 +122,17 @@ const calls: string[] = [];
 const rec = (k: string) => (v: unknown) => { probe[k] = typeof v === "function" ? "(updater)" : v; };
 const setBusy = rec("busy");
 const setStopped = rec("stopped");
+const setPlatformPickerOpen = rec("platformPickerOpen");
+const setPlatformPickerSearch = rec("platformPickerSearch");
+const setSelectedSources = rec("selectedSources");
+const setPickerSourceExplicit = rec("pickerSourceExplicit");
 const setMsgs = rec("msgs");
 const setCompleted = rec("completed");
+const setRestoringId = rec("restoringId");
 const setFilterOrigin = rec("filterOrigin");
 const setAgeFlow = rec("ageFlow");
 const chatIdRef = { current: "PREVIOUS-CHAT" as unknown };
+const liveTurnsRef = { current: new Set(["PREVIOUS-RESULTS-TURN"]) };
 const pendingRefineRef = { current: { q: { location: "جدة" }, dim: "budget" } as unknown };
 const refineMsgIdRef = { current: "PREVIOUS-RESULTS-TURN" as unknown };
 const saidRef = { current: ["شقة", "بالقرب من البحر"] as unknown };
@@ -126,8 +140,10 @@ const askCountRef = { current: 3 as unknown };
 const ageFlowTokenRef = { current: 7 };
 const conversationEpochRef = { current: 4 };
 const afCarryRef = { current: { msgId: "m", facets: [1], asked: ["a"] } as unknown };
+const afSkippedByMsgRef = { current: { m: ["a"] } as unknown };
 const pendingScopeRef = { current: "PREVIOUS-TWIN-QUESTION" as unknown };
 const pendingCityRef = { current: "الرياض" as unknown };
+const lastPaginationResultRef = { current: "PREVIOUS-RESULTS-TURN" as unknown };
 const lastQueryRef = { current: { location: "جدة", priceMax: 1_000_000 } as unknown };
 const runRef = { current: { cancelled: false } as { cancelled: boolean } | null };
 const flushPendingCapture = () => { calls.push("flushPendingCapture"); };
@@ -143,7 +159,7 @@ const liftFrom = async (file: string) =>
       { header: "    const startFresh = () => {", endsWith: /^    \};$/ },
     ],
     ["resetConversationState", "startFresh", "probe", "calls",
-     "chatIdRef", "afCarryRef", "pendingScopeRef", "pendingCityRef", "lastQueryRef", "runRef",
+     "chatIdRef", "liveTurnsRef", "afCarryRef", "afSkippedByMsgRef", "pendingScopeRef", "pendingCityRef", "lastQueryRef", "lastPaginationResultRef", "runRef",
      "pendingRefineRef", "refineMsgIdRef", "saidRef", "askCountRef", "ageFlowTokenRef",
      "conversationEpochRef"],
     PRELUDE,
@@ -363,6 +379,7 @@ const TURN_SCOPED_EXEMPT: Record<string, string> = {
 };
 const TOKEN_EXEMPT: Record<string, string> = {
   voiceStopGenRef: "mic-recording scoped, not conversation scoped: it is bumped by its own start/stop transitions and gates only the 'processing' beat of a recording the user is holding",
+  savedOpenTokenRef: "counts sidebar chat-open TAPS, not conversations: it orders two quick taps; leaving the conversation (New Chat) is detected in the same check through conversationEpochRef, which resetConversationState already bumps",
   askCountRef: "not a cancellation token despite its useRef(0) shape — it is a counter, and it is in the CONVERSATION_SCOPED contract above (cleared to 0)",
 };
 
@@ -839,6 +856,8 @@ const setMsgs = (u: any) => {
 };
 const setCompleted = (_v: boolean) => { probe.completed++; };
 const conversationEpochRef = { get current() { return world.epoch; } };
+// No saved-chat pre-load in this fixture (2026-10-07): the press must reach loadMoreListings itself.
+const prefetchRef = { current: new Map<string, any>() };
 // THE EXIT, inside the await: the user tapped another chat while the page was in flight.
 const loadMoreListings = async (_q: any, offset: number) => {
   if (world.exitDuringFetch) world.epoch++;
@@ -848,7 +867,7 @@ const loadMoreListings = async (_q: any, offset: number) => {
 `;
   const liftLoadMore = async (file: string) => await liftSymbols(
     file,
-    [{ header: "  const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>) => {", endsWith: /^  \};$/ }],
+    [{ header: "  const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>, requestedTarget?: number) => {", endsWith: /^  \};$/ }],
     ["loadMore", "probe", "world"], LOADMORE_PRELUDE,
   ) as { loadMore: (m: unknown) => Promise<void>; probe: any; world: any };
 

@@ -27,7 +27,22 @@ const MIGRATION = 'supabase/migrations/20260830022719_migration_content_parity_c
 // DELETING its line, so this number may only go DOWN. Raising it takes a deliberate edit here, in a
 // reviewed diff — which is precisely what stops a new divergence from being silenced by appending
 // to a text file. Same shape as scripts/test-baseline.txt.
-const MAX_BASELINE_ENTRIES = 75;
+//
+// 75 -> 76 on 2026-09-27 (owner-approved, the first raise since this barrier was created). The two
+// ratchets that guard a mirrored migration are mutually exclusive once it has been APPLIED, and
+// 20260927211052 landed in exactly that gap: its production text cites `20260927210556`, a version
+// apply_migration never minted (the real sibling is 20260927210420 — a typo in a header comment,
+// caught by verify-migration-references-resolve). Leaving it meant a NEW dangling citation, which
+// that check's own failure text forbids baselining; correcting it meant this divergence. There is no
+// third option for text production has already executed — the only true fix is not to author the
+// typo. Correction was chosen because the failing barrier MANDATES it ("A new dangling citation must
+// be CORRECTED, not baselined"), and because this divergence is the benign class: `code_md5` is
+// unchanged (stripSqlCommentsAndBlanks leaves the executable SQL byte-identical), so
+// classifyDivergence() reports 'comment', the same class as the three standing divergences this
+// barrier's own header calls "an ordinary workflow that will recur". The file now tells a reader the
+// truth; only its comment differs from what ran. NOT a precedent for a NEW migration: mint the
+// version you cite, or cite nothing.
+const MAX_BASELINE_ENTRIES = 76;
 
 const problems: string[] = [];
 const ok: string[] = [];

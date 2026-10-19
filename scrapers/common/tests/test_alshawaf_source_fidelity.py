@@ -40,7 +40,7 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from scrapers.alshawaf import run as R  # noqa: E402
-from scrapers.common import normalize as N  # noqa: E402
+from scrapers.common import db, normalize as N  # noqa: E402
 
 
 # ── VERBATIM SOURCE FIXTURES (alshawaf.com.sa, 2026-09-20) ─────────────────────────────────────
@@ -644,7 +644,8 @@ def test_per_metre_label_never_fills_price_total() -> None:
     row, _cat, why = _row(TR_22190)
     assert row is not None, why
     assert row["price_per_meter"] == 1200
-    assert row["price_total"] is None
+    # a rate with no total: AUTHORITATIVE_NULL, so a total an older read stored is cleared (SHW22164, 2026-10-18)
+    assert row["price_total"] is db.AUTHORITATIVE_NULL
     assert row["area_m2"] == 472              # 472.5م — and 1200 * 472 is NEVER written anywhere
     assert row["additional_info"]["price_basis"] == "per_sqm"
 
@@ -666,7 +667,7 @@ def test_cheap_agricultural_land_keeps_its_real_low_rate() -> None:
     magnitude. An absolute «too small to be a price» floor would have mangled this row."""
     row, _cat, why = _row(TR_19813)
     assert row is not None, why
-    assert (row["price_per_meter"], row["price_total"]) == (8, None)
+    assert (row["price_per_meter"], row["price_total"]) == (8, db.AUTHORITATIVE_NULL)
     assert row["area_m2"] == 200_000
     assert row["additional_info"]["price_basis"] == "per_sqm"
     assert "area_contradicts" not in (row["additional_info"].get("price_basis_from") or "")
@@ -910,7 +911,8 @@ def test_every_price_column_is_absent_or_an_int() -> None:
         assert row is not None, why
         for col in ("price_total", "price_annual", "price_per_meter", "area_m2", "bedrooms",
                     "property_age", "street_width_m", "floor_number"):
-            assert row[col] is None or isinstance(row[col], int), (row["ad_number"], col, row[col])
+            ok = row[col] is None or isinstance(row[col], int) or (col == "price_total" and row[col] is db.AUTHORITATIVE_NULL)
+            assert ok, (row["ad_number"], col, row[col])
 
 
 def test_a_town_in_another_region_is_not_the_town_the_source_meant(monkeypatch) -> None:
@@ -922,7 +924,9 @@ def test_a_town_in_another_region_is_not_the_town_the_source_meant(monkeypatch) 
     monkeypatch.setattr(AL, "_CITY", {AL.norm_ar("اليمامة"): [(1062, 1)],
                                       AL.norm_ar("الاحساء"): [(3677, 5)]})
     monkeypatch.setattr(R, "to_catalog", AL.to_catalog)
-    assert AL.to_catalog("اليمامة", region_hint=5) == (1062, 1), "the trap this guards is real"
+    # Since 2026-10-07 to_catalog itself refuses a lone namesake outside the hinted region (the trap
+    # this test was written around is closed centrally); alshawaf's own guard below must still hold.
+    assert AL.to_catalog("اليمامة", region_hint=5)[0] is None, "a lone namesake in another region is unknown"
     _city_ar, city_id, region_id, _d, basis = R._district_and_city("الخرس والشهاب ، اليمامة")
     assert basis != "source_states_town" and city_id != 1062 and region_id == 5
 

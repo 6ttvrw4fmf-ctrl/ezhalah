@@ -69,6 +69,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, stated_city, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 BASE = "https://squares.com.sa"
@@ -76,7 +77,6 @@ LIST = f"{BASE}/wp-json/wp/v2/property"
 SOURCE = "شركة المربعات العقارية"
 PREFIX = "SQR"
 SLUG = "squares"
-IMPERSONATE = "chrome"
 TIMEOUT = 40
 
 _TAG = re.compile(r"<[^>]+>")
@@ -84,6 +84,11 @@ _WS = re.compile(r"\s+")
 # The authoritative per-post status terms, measured 2026-09-26 against every title (18/18 agree):
 # 90 appears on all 17 «للبيع» posts, 89 on the single «للإيجار» post.
 _STATUS_DEAL = {"90": "Buy", "89": "Rent"}
+# Re-measured 2026-10-02: still 90 ×17 / 89 ×1, the site's own search form offers exactly those two
+# («للبيع», «للإيجار»), and every page prints its post's status ONCE, in this span (18 of 18 agree with
+# the term). No third term exists, so nobody knows what one would mean: a post carrying one is KEPT
+# and COUNTED with the word its own page prints — never guessed to be sold.
+_OWN_STATUS = re.compile(r'<span class="status[^"]*"[^>]*>(.*?)</span>', re.S)
 
 _TYPE_LINK = re.compile(r'href="[^"]*/property_type/[^/"]+/?"[^>]*>([^<]{1,40})<')
 _STATUS_LINK = re.compile(r'href="[^"]*/property_status/[^/"]+/?"[^>]*>([^<]{1,40})<')
@@ -103,8 +108,17 @@ def _term_id(rec: dict, tax: str) -> Optional[str]:
     return None
 
 
+def walk_session() -> cc.Session:
+    """3 browser profiles DIRECT, then the residential proxy (when the job has it), each a fresh
+    session; the first that the catalogue answers is used for the whole walk. 2026-10-07: one
+    connect timeout on the single chrome session failed the night (job 112629728613)."""
+    s, tried = retry_smarter_session(f"{LIST}?per_page=1", timeout=TIMEOUT)
+    print(f"  route: {' · '.join(tried)}", flush=True)
+    return s
+
+
 def fetch_catalogue(s: cc.Session) -> tuple[list[dict], Optional[int]]:
-    r = s.get(f"{LIST}?per_page=100&_embed=1", impersonate=IMPERSONATE, timeout=TIMEOUT)
+    r = s.get(f"{LIST}?per_page=100&_embed=1", timeout=TIMEOUT)   # the session owns the profile
     r.raise_for_status()
     declared = r.headers.get("X-WP-Total") or r.headers.get("x-wp-total")
     return r.json(), (int(declared) if declared and declared.isdigit() else None)
@@ -158,7 +172,7 @@ def fetch_pages(s: cc.Session, rows: list[dict]) -> dict[str, str]:
         if not link:
             continue
         try:
-            r = s.get(link, impersonate=IMPERSONATE, timeout=TIMEOUT)
+            r = s.get(link, timeout=TIMEOUT)
             if r.status_code == 200:
                 pages[str(rec.get("id"))] = r.text
         except Exception:  # noqa: BLE001
@@ -176,7 +190,9 @@ _FEATURE = re.compile(r'<span>(.*?)</span>', re.S)
 # NULL (unknown) — a list that omits «مصعد» does not say there is no lift.
 _FEATURE_COLS = {"غرفة سائق": "driver_room", "غرفة خادمة": "maid_room", "غرفة عاملة": "maid_room",
                  "مصعد": "elevator", "كراج سيارة": "parking", "موقف سيارة": "parking",
-                 "مواقف": "parking", "مطبخ": "kitchen"}
+                 "مواقف": "parking", "مطبخ": "kitchen",
+                 # The site's own longer chips for the same facts (10-13, 2 + 2 of 14 active ads).
+                 "مطبخ كامل": "kitchen", "مكيف إسبليت": "air_conditioner"}
 
 
 def parse_detail(page: str) -> dict[str, Any]:
@@ -271,6 +287,14 @@ def map_listing(rec: dict, ptype_ar: str, deal: str, detail: dict[str, Any]) -> 
     for word, col in _FEATURE_COLS.items():
         if word in features:
             row[col] = True
+    # Street width and facade have NO structured field on this site (its fact block is type, build year
+    # and area only), so the ad's own words are the statement (law §2): «عرض الشارع : 15 متر» on
+    # 13602726 (CI re-read 38384423613). The shared reader keeps the fleet rule — one street or nothing.
+    width, facade = normalize.street_from_prose(body)
+    if width is not None:
+        row["street_width_m"] = width
+    if facade is not None:
+        row["direction"] = facade
     if deal == "Buy":
         row["price_total"] = price
     else:
@@ -311,20 +335,24 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
-    rows, declared = fetch_catalogue(s)
-    if a.limit:
-        rows = rows[: a.limit]
-    print(f"{SOURCE}: {len(rows)} posts (X-WP-Total={declared})", flush=True)
-    pages = fetch_pages(s, rows)
-    tmap, smap = learn_type_map(pages, rows)
-    print(f"  learned {len(tmap)} type term(s), {len(smap)} status term(s)", flush=True)
-
+    # The run is registered BEFORE the first request: a fetch that dies (DNS, connect timeout) is a
+    # failed run on record, never a night with no row (2026-10-07: squares and nafithh vanished
+    # from scrape_runs that way and the early-warning robot could not see them).
     run_id = None if dry else db.begin_run(SLUG)
+    rows: list[dict] = []
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
+    kept: dict[str, int] = {}
     try:
+        s = walk_session()
+        rows, declared = fetch_catalogue(s)
+        if a.limit:
+            rows = rows[: a.limit]
+        print(f"{SOURCE}: {len(rows)} posts (X-WP-Total={declared})", flush=True)
+        pages = fetch_pages(s, rows)
+        tmap, smap = learn_type_map(pages, rows)
+        print(f"  learned {len(tmap)} type term(s), {len(smap)} status term(s)", flush=True)
         for rec in rows:
             tid = _term_id(rec, "property_type")
             ptype_ar = tmap.get(tid or "")
@@ -354,10 +382,18 @@ def main() -> int:
                 continue
             row, cat = map_listing(rec, ptype_ar, deal, parse_detail(page))
             (com if cat == "commercial" else res).append(row)
+            if not by_term:
+                db.mark_presence_unproven(row)      # a status term nobody measured: no stamp
+                m = _OWN_STATUS.search(page)
+                k = f"status_term_{sid}_{_clean(m.group(1)) if m else None}"
+                kept[k] = kept.get(k, 0) + 1
 
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
+        if kept:
+            print("  kept, status value never measured (not guessed): "
+                  + ", ".join(f"{k}x{v}" for k, v in sorted(kept.items())), flush=True)
         if dry:
             print(f"DRY: {len(res)} residential + {len(com)} commercial")
             for row in (res[:3] + com[:2]):

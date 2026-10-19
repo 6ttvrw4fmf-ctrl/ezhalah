@@ -126,7 +126,7 @@ not_ready_تم_التأجير 1, not_ready_تم_البيع 1. Zero type-unmapped
 OPEN QUESTIONS FOR ONBOARDING (none of these are guessed in code)
 -------------------------------------------------------------------
   · «تاون هاوس» (Townhouse) and «مكاتب» (Offices) currently have ZERO ready units, so this build has
-    never had to map them. `_TYPE_OVERRIDES` folds them anyway (Townhouse→Villa, matching the
+    never had to map them. `_TYPE_OVERRIDES` folds them anyway (Townhouse→«تاون هاوس», matching the
     fleet's OWN existing TYPE_MAP_EN fold for the English word; مكاتب→Office, the plural of the
     shared map's own «مكتب» key) so a future ready townhouse/office is not skipped by surprise — if
     the owner would rather see these as their own distinct types, that is a normalize-level decision.
@@ -192,11 +192,11 @@ _READY_STATUS_TO_DEAL: dict[str, str] = {
 
 # Per-platform exact-match overrides (map_type_exact's documented escape hatch) — NOT a guess: both
 # fold an already-owner-approved fleet equivalence onto a spelling this source happens to use.
-# «تاون هاوس» → Villa mirrors normalize.TYPE_MAP_EN's existing 'Townhouse': 'Villa' fold for the
+# «تاون هاوس» keeps its own name, like normalize.TYPE_MAP_EN's 'Townhouse' (owner 2026-10-12), for the
 # English word; «مكاتب» → Office is the plain plural of TYPE_MAP_AR's own singular «مكتب» key.
 # Neither has a ready unit today (see OPEN QUESTIONS) — this only prevents a foreseeable future skip.
 _TYPE_OVERRIDES = {
-    "تاون هاوس": "Villa",
+    "تاون هاوس": "تاون هاوس",
     "مكاتب": "Office",
 }
 

@@ -35,6 +35,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 API = "https://app.holoul.io/customer/api/v1/units/"
@@ -42,7 +43,6 @@ SITE = "https://app.holoul.io/units/"   # /ar/units/<id> answers 404 (found in t
 SOURCE = "حلول"
 PREFIX = "HLL"
 SLUG = "holoul"
-IMPERSONATE = "chrome"
 _UTILITIES = {"electricity": "electricity", "water": "water_supply", "sanitation": "sanitation",
               "كهرباء": "electricity", "مياه": "water_supply", "صرف صحي": "sanitation"}
 _NEVER_STORE = {"nhc_advertiser_name", "nhc_advertiser_phone", "nhc_advertiser_id", "deed_number",
@@ -55,7 +55,7 @@ def walk(s: cc.Session) -> tuple[list[dict], int]:
     for page in range(0, 50):
         for attempt in range(3):
             try:
-                r = s.get(f"{API}?page={page}&per_page=100", impersonate=IMPERSONATE, timeout=40,
+                r = s.get(f"{API}?page={page}&per_page=100", timeout=40,
                           headers={"Accept-Language": "ar"})
                 r.raise_for_status()
                 d = r.json()
@@ -167,7 +167,10 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(f"{API}?page=0&per_page=1", timeout=40, headers={"Accept-Language": "ar"})
+    print(f"  route: {' · '.join(tried)}", flush=True)
     units, declared = walk(s)
     print(f"{SOURCE}: {len(units)} unit record(s) (API declares total={declared})", flush=True)
 

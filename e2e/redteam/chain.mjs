@@ -191,7 +191,7 @@ export function oracleFilterFromRequest(p, typesForCategory = null) {
   const inList = (vals) => `(${vals.map((v) => `"${String(v).replace(/"/g, '')}"`).join(',')})`;
   const parts = [];
   if (p.p_deal) parts.push(`deal_ar=eq.${encodeURIComponent(p.p_deal)}`);
-  if (p.p_rent_period) parts.push(`rent_period_ar=eq.${encodeURIComponent(p.p_rent_period)}`);
+  if (p.p_rent_period) parts.push(`or=(rent_period_ar.eq.${encodeURIComponent(p.p_rent_period)},price_annual.is.null)`); // price on request: every period (owner 2026-09-28)
   if (p.p_cities?.length) parts.push(`city_ar=in.${encodeURIComponent(inList(p.p_cities))}`);
   if (p.p_districts?.length) parts.push(`district_ar=in.${encodeURIComponent(inList(p.p_districts))}`);
   if (p.p_platforms?.length) parts.push(`platform=in.${encodeURIComponent(inList(p.p_platforms))}`);

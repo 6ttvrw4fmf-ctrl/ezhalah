@@ -39,6 +39,13 @@ THE TRAPS, EACH MEASURED:
    the API keeps serving such items (goldendeal: 1 sold + 1 unavailable; yameen: 12 rented + 2
    unavailable of 27). SKIPPED, tallied as status_<value>, and the liveness oracle reads them as GONE
    so a row the crawl refuses cannot be self-healed back to life.
+   WITHDRAWN IN PLACE (measured 2026-09-28): the office can also take an item off its site while
+   leaving it «available» — published_on_website 0. The list API drops it (every one of 276
+   goldendeal / 130 maqam / 29 yameen listed items is published_on_website 1) but the detail API
+   still serves it: GDL52019 / GDL52111 / GDL53568 (unpublished 2026-09-26) miss every crawl, and at
+   the third miss the oracle read «available» and self-healed them (missing_count → 0) — forever.
+   _withdrawn() is the ONE predicate the crawl and the oracle share: not available, or not
+   published → gone.
 2. FOUR RENT FIELDS FOR ONE UNIT. A rent item may publish monthly AND quarterly AND semi-annual AND
    annual figures at once (yameen 43065: 2,500 / 7,500 / 15,000 / 30,000). PERIOD = SOURCE: when the
    source publishes an ANNUAL figure that figure is stored verbatim as annual; monthly-only is
@@ -178,7 +185,7 @@ TYPE_AR = {
 }
 # Exact overrides for the tokens normalize.TYPE_MAP_EN lacks (map_type_en is exact-match, no
 # substring pass). Every value is an existing canonical type. The shared map already folds the
-# site's other tokens (mansion → Villa, resort → Hotel, townhouse → Villa); a token neither map
+# site's other tokens (mansion → Villa, resort → Hotel, townhouse → «تاون هاوس»); a token neither map
 # knows («palace») is skipped as type_unmapped, never forced.
 TYPE_OVERRIDES_EN = {"building_studio": "Studio", "kiosk": "Kiosk", "workshop": "Workshop",
                      "istraha": "Rest House", "villa_floor": "Floor"}
@@ -252,6 +259,15 @@ def fetch_all(s: cc.Session, tenant: Tenant, limit: int = 0) -> tuple[list[dict]
             return items[:limit], total
         time.sleep(PAGE_PAUSE)
     return items, total
+
+
+def _withdrawn(L: dict) -> str:
+    """The office's own reason an item is not on offer (trap 1), '' when it is: a status other than
+    available, or taken off the website while still «available» (published_on_website 0)."""
+    status = (L.get("availability_status") or "").strip().lower()
+    if status != "available":
+        return f"status_{status or 'blank'}"
+    return "unpublished" if str(L.get("published_on_website")).strip() == "0" else ""
 
 
 # ── FIELD HELPERS ───────────────────────────────────────────────────────────────────────────────
@@ -385,8 +401,9 @@ def map_listing(L: dict, tenant: Tenant = TENANT, *,
     if not isinstance(pid, int) or pid <= 0:
         return None, "residential", "missing_id"
     status = (L.get("availability_status") or "").strip().lower()
-    if status != "available":
-        return None, "residential", f"status_{status or 'blank'}"      # trap 1
+    withdrawn = _withdrawn(L)
+    if withdrawn:
+        return None, "residential", withdrawn                           # trap 1
 
     tok = (L.get("type") or "").strip().lower()
     src_category = (L.get("category") or "").strip().lower()
@@ -553,8 +570,7 @@ def _signal_for(pid: int):
                 return None
             if data.get("id") != pid:
                 return None
-            live = (data.get("availability_status") or "").strip().lower() == "available"
-            return "live" if live else "gone"
+            return "gone" if _withdrawn(data) else "live"
         return None
     return _signal
 
@@ -593,6 +609,24 @@ def verify_gone_for(tenant: Tenant, canary: Callable[[], tuple[bool, str]],
                              url_for=lambda _ad: api_url(tenant, int(pid)),
                              canary=canary).verify_gone(ad_number)
     return _verify
+
+
+def make_verify_gone(tenant: Tenant, session_factory: Optional[Callable[[], Any]] = None):
+    """The one-argument oracle the daily direct check calls (fleet_liveness.SITES `_make_verify_gone()`):
+    the crawl's own verify_gone_for + make_canary, with the caller's control row as the canary. The
+    crawl builds the same pair inside its run, so this tenant's ads went unread by the daily check
+    (0 of 293 goldendeal, 42 maqam, 10 yameen checked in time on 2026-10-08)."""
+    sf = session_factory or (lambda: session(tenant))     # the tenant's own Origin/Referer
+
+    def factory(control: Optional[dict] = None):
+        ad = str((control or {}).get("ad_number") or "")
+        pid = ad[len(tenant.prefix):]
+        pid_ok = ad.startswith(tenant.prefix) and pid.isdigit()
+        return verify_gone_for(tenant, make_canary(tenant, int(pid) if pid_ok else None, sf), sf)
+    return factory
+
+
+_make_verify_gone = make_verify_gone(TENANT)
 
 
 def print_dry(source: str, res: list[dict], com: list[dict]) -> None:

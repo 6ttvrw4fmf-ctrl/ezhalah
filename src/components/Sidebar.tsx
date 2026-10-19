@@ -117,7 +117,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const pathname = usePathname();
   const onAgentScreen = pathname?.startsWith('/agent') ?? false;
   const { t, isRTL, locale, setLocale } = useI18n();
-  const { user, history, setQuery, toggleStar, deleteHistory, renameHistory, openModal, openAuth, activeChatId, setActiveChat, newChat } = useApp();
+  const { user, authChecked, history, setQuery, toggleStar, deleteHistory, renameHistory, openModal, openAuth, activeChatId, setActiveChat, newChat } = useApp();
   // APPEARANCE (owner 2026-08-28): the sidebar is a THEMED surface — it re-skins in dark mode via
   // the dark override sheet (dks) below. TC carries the resolved palette for inline icon colors.
   const { resolved, colors: TC } = useTheme();
@@ -624,7 +624,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
           openAccountMenu()/openSignIn() above, but a guest never gets that far. Single tap toggles
           ar<->en directly via the now-bilingual setLocale(); the label names the language a tap
           switches TO, same convention as AccountMenu's two Language rows. */}
-      <Pressable testID="sidebar-language-toggle" style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => setLocale(locale === 'ar' ? 'en' : 'ar')}>
+      {/* data-consent-keep: switching language is not agreement to cookies (owner 2026-10-17), the guest card stays up. */}
+      <Pressable testID="sidebar-language-toggle" style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => setLocale(locale === 'ar' ? 'en' : 'ar')}
+        // @ts-expect-error web-only DOM props on the RNW host node
+        dataSet={{ consentKeep: '1' }}>
         {(st) => (<>
           <Ionicons name="globe-outline" size={19} color={isOn(st) ? colors.onFill : TC.ink} />
           <Text style={[s.navText, dark && dks.navText, isOn(st) && s.navTextOn]}>{locale === 'ar' ? 'English' : 'العربية'}</Text>
@@ -662,7 +665,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                 there is exactly ONE search affordance on screen at a time. */}
             <View style={s.brandRow}>
               <RNImage source={require('../../assets/images/eagle-mark.png')} style={s.logo} resizeMode="contain" />
-              <Text ref={noTranslateRef} style={[s.word, dark && dks.word]}>{t('EZHALAH')}</Text>
+              <Text ref={noTranslateRef} style={[s.word, !isRTL && s.wordLatin, dark && dks.word]}>{t('EZHALAH')}</Text>
               {!searching && (
                 <Pressable
                   style={(st) => [s.searchTopBtn, WEB_SMOOTH, isOn(st) && s.searchTopBtnHover]}
@@ -882,14 +885,14 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
               </>); }}
             </Pressable>
           </>
-        ) : (
-          // Guest sidebar — wrapped in a ScrollView so it SCROLLS when the content is taller than a
+        ) : !authChecked ? null : (
+          // (NEVER FOR A SIGNED-IN USER, NOT EVEN FOR A MOMENT (owner 2026-10-18: «when I open Ezhalah logged in, the sign up / log i…) Guest sidebar — wrapped in a ScrollView so it SCROLLS when the content is taller than a
           // short phone screen (it had a fixed flex layout that clipped on mobile). flexGrow:1 keeps
           // the sign-up CTA pinned to the bottom on tall screens. (user request 2026-06-22.)
           <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
             <View style={s.brandRow}>
               <RNImage source={require('../../assets/images/eagle-mark.png')} style={s.logo} resizeMode="contain" />
-              <Text ref={noTranslateRef} style={[s.word, dark && dks.word]}>{t('EZHALAH')}</Text>
+              <Text ref={noTranslateRef} style={[s.word, !isRTL && s.wordLatin, dark && dks.word]}>{t('EZHALAH')}</Text>
             </View>
 
             {/* The upper guest CTA card that used to sit here was the OLD auth prompt (removed
@@ -1018,7 +1021,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // Mobile / native: tap-to-open overlay drawer that slides in over the dimmed page.
   return (
     <View style={s.overlay}>
-      <AnimatedPressable style={[s.backdrop, backdropStyle]} onPress={close} />
+      {/* Closing the menu is not agreement to cookies either (owner 2026-10-17): the guest card stays up after a language switch. */}
+      <AnimatedPressable style={[s.backdrop, backdropStyle]} onPress={close}
+        // @ts-expect-error web-only DOM props on the RNW host node
+        dataSet={{ consentKeep: '1' }} />
       <Animated.View ref={panelRef as any} style={[s.panel, dark && dks.panel, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, panelStyle, LTR_PIN]}>
         {!dark && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
         {body}
@@ -1053,7 +1059,10 @@ const s = StyleSheet.create({
   searchTopBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', marginLeft: 'auto' },
   searchTopBtnHover: { backgroundColor: colors.hoverRow },
   logo: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  word: { fontSize: 15, fontWeight: '800', letterSpacing: 2, color: colors.ink },
+  // Bigger brand name (owner 2026-10-04: «make Ezhalah big»). Letter-spacing only on the Latin wordmark —
+  // it pulls Arabic letters apart and breaks their joining.
+  word: { fontSize: 22, fontWeight: '800', color: colors.dark },
+  wordLatin: { letterSpacing: 2 },
 
   // Owner 2026-08-24: LIGHT green default (dark-green text) → DARK green with white text only on
   // hover/focus/press. The dark green is the interaction color, never the resting color.

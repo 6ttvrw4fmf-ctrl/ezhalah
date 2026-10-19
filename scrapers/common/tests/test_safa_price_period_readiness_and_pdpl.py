@@ -557,7 +557,7 @@ def test_the_type_words_this_site_publishes_map_through():
     got = {w: normalize.map_type_exact(w, run._TYPE_OVERRIDES)
            for w in ("شقة", "فيلا", "دوبلكس", "تاون هاوس", "الدور")}
     assert got == {"شقة": "Apartment", "فيلا": "Villa", "دوبلكس": "Duplex",
-                   "تاون هاوس": "Villa", "الدور": "Floor"}
+                   "تاون هاوس": "تاون هاوس", "الدور": "Floor"}
 
 
 def test_a_unit_with_no_type_chip_is_skipped_not_read_off_its_unit_code():

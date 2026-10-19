@@ -94,8 +94,8 @@ const C=[
  {label:'Hotel/Buy',group:'المباني والمرافق',typeChip:'فندق',deal:'buy',category:'Commercial',city:'مكة المكرمة'},
  {label:'GasStation/Buy',group:'المباني والمرافق',typeChip:'محطة وقود',deal:'buy',category:'Commercial',city:'الرياض'},
  {label:'GasStation/Rent',group:'المباني والمرافق',typeChip:'محطة وقود',deal:'rent',period:'annual',category:'Commercial',city:'الرياض'},
- {label:'CommLand/Buy',group:'الأراضي التجارية والصناعية',typeChip:'أرض تجارية',deal:'buy',category:'Commercial',city:'الرياض'},
- {label:'IndLand/Buy',group:'الأراضي التجارية والصناعية',typeChip:'أرض صناعية',deal:'buy',category:'Commercial',city:'الدمام'},
+ {label:'CommLand/Buy',group:'الأراضي',typeChip:'أرض تجارية',deal:'buy',category:'Commercial',city:'الرياض'},
+ {label:'IndLand/Buy',group:'الأراضي',typeChip:'أرض صناعية',deal:'buy',category:'Commercial',city:'الدمام'},
 ];
 try{fs.unlinkSync(OUT);}catch{}
 const b=await chromium.launch({headless:true});

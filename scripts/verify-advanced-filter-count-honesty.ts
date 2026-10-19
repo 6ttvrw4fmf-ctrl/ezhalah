@@ -64,7 +64,8 @@ eq('re-answering «4+» on top of «3+» narrows to 4', applyBath({ bathMin: 3 }
 eq('empty answer (no preference) leaves the floor untouched', applyBath({ bathMin: 3 }, []).bathMin, 3);
 eq('a junk key never nulls an existing floor', applyBath({ bathMin: 3 }, ['abc']).bathMin, 3);
 check('shipped apply() uses Math.max against the existing floor',
-  /apply:\s*\(q,\s*keys\)\s*=>\s*\{[\s\S]{0,400}?Math\.max\(n,\s*q\.bathMin\s*\?\?\s*0\)/.test(adv));
+  // 2026-10-03: several rungs may be picked; their union is the LOWEST pick, still floored by Math.max.
+  /apply:\s*\(q,\s*keys\)\s*=>\s*\{[\s\S]{0,400}?Math\.max\((?:n|Math\.min\(\.\.\.ns\)),\s*q\.bathMin\s*\?\?\s*0\)/.test(adv));
 check('shipped apply() no longer REPLACES bathMin (the pre-fix one-liner is gone)',
   !adv.includes('bathMin: parseInt(keys[0], 10) || null'));
 
@@ -197,17 +198,17 @@ const mustCatch = (label: string, caught: boolean) => {
 };
 
 // ── DEFECT 1: bathrooms re-ask WIDENED instead of intersecting ────────────────────────────────────
-const shippedApplyPattern = /apply:\s*\(q,\s*keys\)\s*=>\s*\{[\s\S]{0,400}?Math\.max\(n,\s*q\.bathMin\s*\?\?\s*0\)/;
+const shippedApplyPattern = /apply:\s*\(q,\s*keys\)\s*=>\s*\{[\s\S]{0,400}?Math\.max\((?:n|Math\.min\(\.\.\.ns\)),\s*q\.bathMin\s*\?\?\s*0\)/;
 const usesMathMax = (s: string) => shippedApplyPattern.test(s);
 const advWidened = adv.replace(
-  'Math.max(n, q.bathMin ?? 0)', 'n',    // the exact historical bug: REPLACES instead of intersecting
+  'Math.max(Math.min(...ns), q.bathMin ?? 0)', 'Math.min(...ns)',    // the exact historical bug: REPLACES instead of intersecting
 );
 mustCatch('apply() reverted to REPLACING bathMin instead of Math.max-intersecting — THE ORIGINAL BUG',
   !usesMathMax(advWidened));
 mustCatch('…while the genuine, fixed apply() IS recognised (negative control)',
   usesMathMax(adv));
 const oldOneLinerReintroduced = adv.replace(
-  '{ ...q, bathMin: Math.max(n, q.bathMin ?? 0) }', "{ ...q, bathMin: parseInt(keys[0], 10) || null }",
+  '{ ...q, bathMin: Math.max(Math.min(...ns), q.bathMin ?? 0) }', "{ ...q, bathMin: parseInt(keys[0], 10) || null }",
 );
 mustCatch('the pre-fix one-liner pasted back in (a stale-body revert, the class #2034 warns about)',
   oldOneLinerReintroduced.includes('bathMin: parseInt(keys[0], 10) || null'));

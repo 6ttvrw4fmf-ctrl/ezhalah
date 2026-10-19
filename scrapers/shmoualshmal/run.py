@@ -39,6 +39,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://shmoua-alshmal.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -59,6 +60,7 @@ FEATURE_COLUMN = {
     "غرفة سائق": "driver_room",
     "غرفة غسيل": "laundry_room",
     "مدخل سيارة": "car_entrance",
+    "مطبخ": "kitchen",               # the site's own feature tag (6 of 6 active ads on 10-13)
 }
 
 # One vetted addition to the house taxonomy: «محل تجاري» is «محل» (Shop) with the redundant
@@ -84,13 +86,39 @@ def session() -> cc.Session:
     The source was never down; the caller was unreachable. Same class of block the wasalt path
     documents. PROXY_URL holds only the env NAME — the value lives in the secret, never here.
     """
-    s = cc.Session(impersonate="chrome124")
+    return _session_as("chrome124")
+
+
+# A refused page (403 / 429 / 5xx) is retried on a FRESH session with the next browser profile
+# (2026-10-09, Scraping Engineer): on 10-09 page 1 answered HTTP 403 once and the run failed with
+# «REST returned no listings»; the automatic re-crawl 14 minutes later read all 6 posts. The old loop
+# retried only transport exceptions — a refused status ended the walk on its first answer.
+REFUSED = {403, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
+ROTATION = ("chrome124", "safari17_0", "firefox133")
+
+
+def _session_as(profile: str, proxy_url: str = "") -> cc.Session:
+    s = cc.Session(impersonate=profile)   # impersonate OWNS the User-Agent; never set one
     s.headers.update({"Accept": "application/json,text/html;q=0.9",
                       "Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
-    purl = os.environ.get("WASALT_PROXY_URL", "").strip()
-    if purl:
-        s.proxies = {"http": purl, "https": purl}
+    if proxy_url:
+        s.proxies = {"http": proxy_url, "https": proxy_url}
     return s
+
+
+# DIRECT FIRST, PROXY LAST (2026-10-11, Scraping Engineer, backlog 375). On 10-11 page 1 answered
+# HTTP 403 to all three DIRECT profiles twice (04:51 and 05:02 UTC); 10-09 the same, ok 50 minutes
+# later. Three profiles from the same runner IP are the same caller to a WAF. The residential proxy
+# is a different IP, so it is the last try, used only when the workflow opts in (`proxy: true` sets
+# SCRAPE_PROXY_FALLBACK_URL). This scraper no longer routes EVERY request through WASALT_PROXY_URL:
+# on 09-10..09-14 that hop timed out while the direct route answered in under a second.
+def _proxy_session() -> Optional[cc.Session]:
+    purl = os.environ.get("SCRAPE_PROXY_FALLBACK_URL", "").strip()
+    return _session_as("chrome124", purl) if purl else None
+
+
+def _fresh_session(attempt: int) -> cc.Session:
+    return _session_as(ROTATION[attempt % len(ROTATION)])
 
 
 def _clean(s: str) -> str:
@@ -212,7 +240,54 @@ def fetch_images(s: cc.Session, posts: list[dict]) -> dict[int, list[str]]:
     return out
 
 
-def fetch_listings(s: cc.Session) -> list[dict]:
+# Why a REST walk may not be the whole catalogue. Non-empty → no prune this run.
+INCOMPLETE: list[str] = []
+
+# ── REMOVAL (measured 2026-10-02). Until then this crawler had NO removal step at all: a post the
+# office deleted or unpublished stayed active here for good.
+#
+# No ad has left this site since onboarding (6 active rows = today's 6 posts, none inactive), so
+# there is no removed cohort to measure. What the site does answer: a slug that never existed is a
+# hard 404 (body class «error404»), under /property/ and at the root, and so is a wrong post id;
+# 6 of 6 live ads answer 200 on their own path with
+# `<body class="… single-property postid-<their own id>">`. So only a 404/410 on the ad's OWN url
+# is a removal, only that body class is life, and a redirect, a block or any other 200 is UNKNOWN.
+# (The site's status terms today are «للبيع» x6 and «للإيجار» x0, its labels «متاحة» x6 and «تجاري»
+# x0: it publishes no sold/rented value, so there is nothing of that kind to filter on. Any other
+# value is counted every run — see MEASURED_TERMS.)
+_OWN_PAGE = re.compile(r"<body[^>]*\bsingle-property postid-\d+")
+RES_TABLE, COM_TABLE = "shmoualshmal_residential_listings", "shmoualshmal_commercial_listings"
+
+
+def _signal(status, body, moved) -> Optional[str]:
+    """'live' | 'gone' | None — only what this ad's own URL affirmatively answers."""
+    if moved:
+        return None
+    if status in (404, 410):
+        return "gone"
+    return "live" if status == 200 and _OWN_PAGE.search(body) else None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for db.prune_unseen. A 404 is believed only while a known-live ad from
+    this run (`control`) still reads live through the same session."""
+    url_for = stored_listing_url((RES_TABLE, COM_TABLE))
+    s = session()
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="shmoualshmal", signal=_signal, session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
+def fetch_listings(s: cc.Session, fresh=_fresh_session, proxied=_proxy_session) -> list[dict]:
     """Every property post. An unparseable body ends enumeration rather than raising — the guard
     awal's 2026-07-27 parking incident put in every WP scraper."""
     out: list[dict] = []
@@ -221,6 +296,7 @@ def fetch_listings(s: cc.Session) -> list[dict]:
     # dead source that was actually fine (2026-09-05).
     global LAST_FETCH_NOTE
     LAST_FETCH_NOTE = "no pages attempted"
+    INCOMPLETE.clear()
     for page in range(1, 30):
         # RETRY, because a single attempt made this source a coin flip (measured 2026-09-14):
         # ok on 09-11, failed 09-10/12/13/14, every failure a 40s curl(28) timeout through the
@@ -233,11 +309,24 @@ def fetch_listings(s: cc.Session) -> list[dict]:
         for attempt in range(3):
             try:
                 r = s.get(f"{REST}/properties?per_page=100&page={page}", timeout=40)
-                break
             except Exception as e:
                 last_exc = e
                 if attempt < 2:
                     time.sleep(3 * (attempt + 1))
+                continue
+            if r.status_code in REFUSED and attempt < 2:
+                time.sleep(5 * (attempt + 1))
+                s = fresh(attempt + 1)          # a refusal is the handshake, not a ban
+                continue
+            break
+        if r is not None and r.status_code in REFUSED:
+            ps = proxied()
+            if ps is not None:
+                try:
+                    r = ps.get(f"{REST}/properties?per_page=100&page={page}", timeout=40)
+                    s = ps                       # the rest of the walk keeps the route that answered
+                except Exception as e:  # noqa: BLE001 — keep the direct refusal as the note
+                    print(f"  proxy fallback for page {page} raised {type(e).__name__}", flush=True)
         if r is None:
             LAST_FETCH_NOTE = (f"page {page} raised {type(last_exc).__name__} on all 3 attempts: "
                                f"{str(last_exc)[:110]}")
@@ -255,7 +344,35 @@ def fetch_listings(s: cc.Session) -> list[dict]:
             break
         out.extend(x for x in batch if isinstance(x, dict))
         if len(batch) < 100:
-            break
+            return out                  # a short page is the walk's only clean end
+    # ponytail: a catalogue of exactly 100/200 posts also lands here (page N+1 answers HTTP 400) and
+    # skips that run's prune; compare X-WP-Total instead if the site ever grows to that.
+    INCOMPLETE.append(LAST_FETCH_NOTE)
+    return out
+
+
+# The only status / label values a post carried when this was measured (2026-10-02): status «للبيع»
+# on 6 of 6 posts («للإيجار» is the site's one other term, on 0), label «متاحة» on 6 of 6. The site
+# has no sold/rented term yet, so there is nothing to filter on — but map_listing reads the status by
+# SUBSTRING, so a future «تم البيع» / «تم الإيجار» post would still be written as an active Buy / Rent
+# listing. What is written is NOT changed here (an unmeasured value is not guessed at); every value
+# outside this list is COUNTED on every run, in the log and in the run's notes, so it cannot arrive
+# silently.
+MEASURED_TERMS = {"property_status": ("للبيع", "للإيجار"), "property_label": ("متاحة",)}
+
+
+def unmeasured_terms(p: dict, tax: dict[str, dict[int, str]]) -> list[str]:
+    """This post's own status / label values that were never measured on this site."""
+    out: list[str] = []
+    for key, known in MEASURED_TERMS.items():
+        word = key.removeprefix("property_")
+        ids = p.get(key) or []
+        if not ids:
+            out.append(f"{word} missing")
+        for i in ids:
+            name = (tax.get(key) or {}).get(i)
+            if name not in known:
+                out.append(f"{word} «{name}»" if name else f"{word} id {i} (name not read)")
     return out
 
 
@@ -372,7 +489,10 @@ def main() -> int:
               f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
 
         unmapped: dict[str, int] = {}
+        unmeasured: dict[str, int] = {}
         for p in posts:
+            for k in unmeasured_terms(p, tax):
+                unmeasured[k] = unmeasured.get(k, 0) + 1
             row, cat = map_listing(p, tax, images)
             if not row:
                 names = tax.get('property_type') or {}
@@ -383,7 +503,10 @@ def main() -> int:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
+            if unmeasured_terms(p, tax):
+                db.mark_presence_unproven(row)             # kept as before, never stamped as checked
             (com if cat == "commercial" else res).append(row)
+        tally = ", ".join(f"{k}×{v}" for k, v in sorted(unmeasured.items(), key=lambda x: -x[1]))
 
         if res:
             db.upsert_shmoualshmal_residential_batch(res)
@@ -397,11 +520,35 @@ def main() -> int:
                       f"{str(r['city']):12s} {str(r['neighborhood']):14s} "
                       f"{str(r['area_m2']):>6}m² bd={r['bedrooms']} price={r['price_total']}")
         else:
+            # An ad whose category flipped this run is superseded in the table it left; prune
+            # cannot clean that up (its own page is still live). See db.retire_superseded_siblings.
+            superseded = db.retire_superseded_siblings(
+                res_table=RES_TABLE, com_table=COM_TABLE,
+                res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+                source=SOURCE)
+            if superseded:
+                print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+            # REMOVAL. A post missing from this run's list is only a CANDIDATE: at three misses its
+            # own page is re-read, and it is hidden only on a 404 (_signal). A page that still
+            # renders heals the row. No prune on a partial walk or a single-vertical run.
+            pruned = 0
+            if INCOMPLETE:
+                print(f"  ⚠ REST walk incomplete — no prune: {'; '.join(INCOMPLETE)}")
+            elif args.type == "all":
+                verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+                for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                    k = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                        verify_gone=verify_gone)
+                    if k < 0:
+                        print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                    else:
+                        pruned += k
             n = len(res) + len(com)
             # end_run returns the EFFECTIVE ok it actually wrote: its RC-B guard can demote a run
             # that looks successful but wrote nothing real. Fail CI on a demotion rather than
             # reporting a silent success (the same check awal makes).
             healthy = db.end_run(run_id, ok=True, rows_seen=n, rows_upserted=n,
+                                 notes=f"pruned={pruned} unmeasured_status_or_label=[{tally}]"[:300],
                                  check_tables=["shmoualshmal_residential_listings",
                                                "shmoualshmal_commercial_listings"])
             if not healthy:
@@ -414,6 +561,8 @@ def main() -> int:
             # platform quietly shrinks and nobody knows why.
             print(f"  skipped (no canonical type, not guessed): "
                   + ", ".join(f"{k}×{v}" for k, v in sorted(unmapped.items(), key=lambda x: -x[1])))
+        # Printed EVERY run, empty or not: see MEASURED_TERMS.
+        print(f"  status/label values never measured (counted, written as before): {tally or 'none'}")
         return 0
     except Exception as e:
         if run_id:

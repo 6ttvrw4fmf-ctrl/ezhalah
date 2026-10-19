@@ -121,7 +121,7 @@ check('a turn holding a receipt shows no actions row (this is what makes the swa
 const fin = windowBetween(agent, 'const finishGuided = ', 'const startAgeFlow = ', 'src/app/agent.tsx');
 check('the receipt stores the ask-ordered round log',
   /\[carry\.msgId\]: roundLog/.test(fin)
-  && /const roundLog = buildAfRoundLog\(askedThisRound, ageFlowFacetsRef\.current\)/.test(fin));
+  && /const roundLog = buildAfRoundLog\(askedThisRound, ageFlowFacetsRef\.current, locale\)/.test(fin));
 check("ask order is THIS round's, with the carry subtracted",
   /const askedThisRound = \[\.\.\.ageFlowAskedRef\.current\]\.filter\(\(id\) => !\(carry\?\.asked \?\? \[\]\)\.includes\(id\)\)/.test(fin),
   'carrying earlier rounds in would re-report questions the previous receipt already named');
@@ -161,6 +161,11 @@ mustCatch('the log sorted into piles instead of kept in ask order',
 mustCatch("a skip given the question's own emoji instead of ⏭️",
   !log(['property_age'], []).includes('🏗️'));
 mustCatch('skips leaking into the PILLS sentence', !buildAfSummary([TYPE, DIR]).includes('⏭️'));
+const enAge = { id: 'property_age', keys: ['new'], labels: ['New construction'] };
+const englishOnly = (text: string) => !/[ء-ي]/.test(text) && text.includes('Skipped Features') && text.includes('Age New construction');
+check('English receipt has translated age, skip and punctuation', englishOnly(log(['property_age', 'amenities'], [enAge], 'en')));
+mustCatch('English receipt call omitting its locale', !englishOnly(log(['property_age', 'amenities'], [enAge])));
+
 
 console.log(failed
   ? `\n✗ ${failed} check(s) FAILED — the receipt is late, silent about skips, or out of order\n`

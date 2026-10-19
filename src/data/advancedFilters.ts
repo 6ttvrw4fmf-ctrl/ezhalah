@@ -107,13 +107,21 @@ export const primeLiveResultCount = (q: SearchQuery): Promise<number | null> =>
 // ── Questions ────────────────────────────────────────────────────────────────────────────────────
 
 // Property age — eligible for every type/deal/period COHORT_QUESTIONS certifies for 'property_age'
-// (see cohortAllows() below). 5 strict buckets; each is exactly what Search returns if picked.
-const AGE_BUCKETS: Array<{ key: string; labelKey: string; count: (c: AgeOptionCounts) => number }> = [
-  { key: 'new', labelKey: 'New construction', count: (c) => c.cnt_new },
-  { key: '1_2', labelKey: '1–2 years', count: (c) => c.cnt_1_2 },
-  { key: '3_5', labelKey: '3–5 years', count: (c) => c.cnt_3_5 },
-  { key: '6_9', labelKey: '6–9 years', count: (c) => c.cnt_6_9 },
-  { key: '10p', labelKey: '10+ years', count: (c) => c.cnt_10p },
+// (see cohortAllows() below).
+//
+// ONE TAP, CUMULATIVE «UP TO» LADDER (owner 2026-10-05 — supersedes the 2026-10-03 «every question is
+// multi-select» rule for this question). Ticking جديد and then ١–٢ made the footer count JUMP UP
+// (10,846 → 12,990, measured live): a second pick widened the set, which reads as the filter getting
+// worse. The owner still wanted «new or 1–2 years» reachable without being forced into one narrow
+// bucket, so the options are nested instead: جديد · حتى سنتين · حتى ٥ سنوات · حتى ٩ سنوات. One tap
+// covers the common mixes, and no tap can make the number grow. Each «up to» option is the union of
+// the disjoint integer buckets below it (af_eligibility_clause: property_age = 0 | 1–2 | 3–5 | 6–9), so
+// its count is the exact sum and its query is p_age_buckets — the same predicate the counts read.
+const AGE_LADDER: Array<{ key: string; labelKey: string; buckets: string[] | null; count: (c: AgeOptionCounts) => number }> = [
+  { key: 'new',   labelKey: 'New construction', buckets: null,                        count: (c) => c.cnt_new },
+  { key: 'upto2', labelKey: 'Up to 2 years',    buckets: ['new', '1_2'],               count: (c) => c.cnt_new + c.cnt_1_2 },
+  { key: 'upto5', labelKey: 'Up to 5 years',    buckets: ['new', '1_2', '3_5'],        count: (c) => c.cnt_new + c.cnt_1_2 + c.cnt_3_5 },
+  { key: 'upto9', labelKey: 'Up to 9 years',    buckets: ['new', '1_2', '3_5', '6_9'], count: (c) => c.cnt_new + c.cnt_1_2 + c.cnt_3_5 + c.cnt_6_9 },
 ];
 
 const AGE_QUESTION: AdvancedQuestion = {
@@ -134,18 +142,14 @@ const AGE_QUESTION: AdvancedQuestion = {
     const counts = await fetchPropertyAgeOptionCounts(q);
     if (isProbeFailure(counts)) return { options: [], unknownCount: null, total: 0, probeFailed: true };
     if (!counts || counts.cnt_total < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: null, total: counts?.cnt_total ?? 0 };
-    const options = meaningful(AGE_BUCKETS.map((b) => ({ key: b.key, label: t(b.labelKey), count: b.count(counts) })));
+    const options = meaningful(AGE_LADDER.map((b) => ({ key: b.key, label: t(b.labelKey), count: b.count(counts) })));
     return { options, unknownCount: counts.cnt_unknown, total: counts.cnt_total };
   },
   apply(q, keys) {
-    switch (keys[0]) {
-      case 'new': return { ...q, isNewConstruction: true, ageMin: null, ageMax: null };
-      case '1_2': return { ...q, isNewConstruction: null, ageMin: 1, ageMax: 2 };
-      case '3_5': return { ...q, isNewConstruction: null, ageMin: 3, ageMax: 5 };
-      case '6_9': return { ...q, isNewConstruction: null, ageMin: 6, ageMax: 9 };
-      case '10p': return { ...q, isNewConstruction: null, ageMin: 10, ageMax: null };
-      default: return q;
-    }
+    const rung = AGE_LADDER.find((b) => keys.includes(b.key));
+    if (!rung) return q;
+    if (!rung.buckets) return { ...q, ageBuckets: null, isNewConstruction: true, ageMin: null, ageMax: null };
+    return { ...q, ageBuckets: [...rung.buckets], isNewConstruction: null, ageMin: null, ageMax: null };
   },
 };
 
@@ -179,14 +183,15 @@ function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
 //     inflate "did not mention", so it must turn the barrier red.
 //   • PROPERTY AGE has a real `cnt_unknown` column and needs no derivation.
 //
-// Everything else stays null, and each for a stated reason:
-//   • AMENITIES — there is NO single unknown. Each chip is its own boolean column, so "didn't say"
-//     differs per amenity; one number could only be a lie about the rest.
-//   • BATHROOMS / STREET_WIDTH / RATING — threshold ladders. total − (≥1) conflates NULL with the
-//     rows that genuinely have zero/below-threshold, so no honest subtraction exists.
-//   • UNIT_SUBTYPE — total − Σ(3) is only right while the value domain has exactly 3 members. That
-//     is true today but is a data fact, not an invariant, so it is not safe to publish as truth.
-//   • RNPL — a lone boolean chip: false and null are inseparable from cnt_rnpl alone.
+//   • THE OTHER SIX (owner 2026-10-03: «😔 on every advanced filter question») read a real DB column,
+//     because none of them can be derived here without lying: bathrooms / street width / rating are
+//     threshold ladders (total − ≥1 folds the genuine zero-bathroom rows into "did not mention"),
+//     RNPL's false and NULL are inseparable from cnt_rnpl, unit subtype's total − Σ3 holds only while
+//     the domain has three values, and amenities has one column per chip. So
+//     apartment_guided_counts_ar counts `IS NULL` directly in the committed scope (migration
+//     20261003184909): cnt_rnpl_unknown, cnt_bath_unknown, cnt_stw_unknown, cnt_rating_unknown,
+//     cnt_sub_unknown, and cnt_amen_unknown = EVERY amenity column NULL (the listing stated no amenity
+//     at all — the one number true for the whole amenities card). Never a subtraction for these.
 function guidedOptions(
   counts: GuidedCounts | null | { __probeFailed: true },
   defs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }>,
@@ -220,7 +225,7 @@ const RNPL_QUESTION: AdvancedQuestion = {
   eligibility: (q) => cohortAllows(q, 'rnpl'),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q),
-      [{ key: 'rnpl', labelKey: 'Offers installments', count: (c) => c.cnt_rnpl }]);
+      [{ key: 'rnpl', labelKey: 'Offers installments', count: (c) => c.cnt_rnpl }], (c) => c.cnt_rnpl_unknown);
   },
   apply: addAmenities,
 };
@@ -295,11 +300,11 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
       defs.push({ key: 'electricity',  labelKey: 'Electricity',       count: (c) => c.cnt_electricity });
       defs.push({ key: 'water_supply', labelKey: 'Water supply',      count: (c) => c.cnt_water_supply });
       const chosen = defs.filter((d) => chipAllow.includes(d.key));
-      return guidedOptions(await fetchApartmentGuidedCounts(q), chosen);
+      return guidedOptions(await fetchApartmentGuidedCounts(q), chosen, (c) => c.cnt_amen_unknown);
     }
     // Furnished chip: Annual Rent only (Buy furnished ≈2%; owner: no Furnished filter on Buy).
     if (cohortAllows(q, 'furnished')) defs.push({ key: 'furnished', labelKey: 'Furnished', count: (c) => c.cnt_furnished });
-    return guidedOptions(await fetchApartmentGuidedCounts(q), defs);
+    return guidedOptions(await fetchApartmentGuidedCounts(q), defs, (c) => c.cnt_amen_unknown);
   },
   apply: addAmenities,
 };
@@ -324,7 +329,7 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
       { key: '3', labelKey: '3+', count: (c) => c.cnt_bath3 },
       { key: '4', labelKey: '4+', count: (c) => c.cnt_bath4 },
     ];
-    return guidedOptions(await fetchApartmentGuidedCounts(q), rungs.filter((d) => parseInt(d.key, 10) > floor));
+    return guidedOptions(await fetchApartmentGuidedCounts(q), rungs.filter((d) => parseInt(d.key, 10) > floor), (c) => c.cnt_bath_unknown);
   },
   // INTERSECT, never replace (bug fix 2026-08-04). Every option's `count` is defined by the contract as
   // "exactly what Search returns if picked", and it is computed WITH the previous answer applied — so an
@@ -333,9 +338,10 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
   // reads 1,117 → tapping it installed bathMin=1 and returned 2,984, of which 1,867 had FEWER bathrooms
   // than the user had asked for (breaking strict-options too, not just count honesty). Math.max keeps
   // the card monotone: the answer can only ever narrow, so the pill's number always holds.
+  // «+١» and «+٣» together = at least one: the union of «at least» rungs IS the lowest pick.
   apply: (q, keys) => {
-    const n = parseInt(keys[0] ?? '', 10);
-    return Number.isFinite(n) && n > 0 ? { ...q, bathMin: Math.max(n, q.bathMin ?? 0) } : q;
+    const ns = keys.map((k) => parseInt(k, 10)).filter((n) => Number.isFinite(n) && n > 0);
+    return ns.length ? { ...q, bathMin: Math.max(Math.min(...ns), q.bathMin ?? 0) } : q;
   },
 };
 
@@ -353,9 +359,11 @@ const FURNISHED_QUESTION: AdvancedQuestion = {
       { key: 'no',  labelKey: 'Unfurnished', count: (c) => c.cnt_unfurnished },
     ], (c) => c.cnt_total_base - c.cnt_furnished - c.cnt_unfurnished);
   },
+  // One tap (owner 2026-10-05): «مفروش» or «غير مفروش»; Skip = doesn't matter. The first key wins if a
+  // caller ever hands two — a single-select answer never widens to «both».
   apply: (q, keys) =>
-    keys[0] === 'yes' ? { ...q, furnishedPref: true }
-    : keys[0] === 'no' ? { ...q, furnishedPref: false }
+    keys[0] === 'yes' ? { ...q, furnishedPref: true, furnishedIn: null }
+    : keys[0] === 'no' ? { ...q, furnishedPref: false, furnishedIn: null }
     : q,
 };
 
@@ -380,11 +388,12 @@ const STREET_WIDTH_QUESTION: AdvancedQuestion = {
       { key: '25', labelKey: '25 m or wider', count: (c) => c.cnt_stw25 },
       { key: '30', labelKey: '30 m or wider', count: (c) => c.cnt_stw30 },
     ];
-    return guidedOptions(await fetchApartmentGuidedCounts(q), rungs.filter((r) => parseInt(r.key, 10) > floor));
+    return guidedOptions(await fetchApartmentGuidedCounts(q), rungs.filter((r) => parseInt(r.key, 10) > floor), (c) => c.cnt_stw_unknown);
   },
+  // Several «or wider» rungs = the narrowest picked one (their union).
   apply: (q, keys) => {
-    const n = parseInt(keys[0] ?? '', 10);
-    return Number.isFinite(n) && n > 0 ? { ...q, streetWidthMin: Math.max(n, q.streetWidthMin ?? 0) } : q;
+    const ns = keys.map((k) => parseInt(k, 10)).filter((n) => Number.isFinite(n) && n > 0);
+    return ns.length ? { ...q, streetWidthMin: Math.max(Math.min(...ns), q.streetWidthMin ?? 0) } : q;
   },
 };
 
@@ -404,7 +413,7 @@ const DIRECTION_QUESTION: AdvancedQuestion = {
   id: 'direction',
   titleKey: 'Which direction do you prefer?',
   descriptionKey: 'Results update as you choose',
-  selection: 'multi',
+  selection: 'single',
   // Not asked once directions are already committed — the same guard unit_subtype carries, for the
   // same reason. cnt_dir_* is computed INSIDE a scope that already applies p_directions, while
   // apply() UNIONS the new key: so every direction outside the committed set counts 0 while tapping
@@ -422,7 +431,7 @@ const DIRECTION_QUESTION: AdvancedQuestion = {
       // derivation cannot drift from the offered chips.
       (c) => c.cnt_total_base - DIRECTION_DEFS.reduce((a, d) => a + d.count(c), 0));
   },
-  apply: (q, keys) => (keys.length ? { ...q, directions: [...new Set([...(q.directions ?? []), ...keys])] } : q),
+  apply: (q, keys) => (keys.length ? { ...q, directions: [...new Set([...(q.directions ?? []), keys[0]])] } : q),   // one tap (owner 2026-10-05)
 };
 
 // ── Monthly-only questions (owner order 2026-08-18) ─────────────────────────────────────────────
@@ -447,10 +456,12 @@ const RATING_QUESTION: AdvancedQuestion = {
     ];
     // Monotone like BATHROOMS: only rungs that can still NARROW the current answer are offered.
     return guidedOptions(await fetchApartmentGuidedCounts(q),
-      rungs.filter((d) => parseFloat(d.key) > floor || (d.key === '9.0_rc10' && (q.reviewsMin ?? 0) < 10 && floor <= 9.0)));
+      rungs.filter((d) => parseFloat(d.key) > floor || (d.key === '9.0_rc10' && (q.reviewsMin ?? 0) < 10 && floor <= 9.0)),
+      (c) => c.cnt_rating_unknown);
   },
   apply: (q, keys) => {
-    const k = keys[0];
+    // One tap (owner 2026-10-05); the first rung offered wins if a caller ever hands two.
+    const k = ['9.5', '9.0', '9.0_rc10'].find((r) => keys.includes(r));
     if (k === '9.5')      return { ...q, ratingMin: Math.max(9.5, q.ratingMin ?? 0) };
     if (k === '9.0')      return { ...q, ratingMin: Math.max(9.0, q.ratingMin ?? 0) };
     if (k === '9.0_rc10') return { ...q, ratingMin: Math.max(9.0, q.ratingMin ?? 0), reviewsMin: Math.max(10, q.reviewsMin ?? 0) };
@@ -465,16 +476,16 @@ const RATING_QUESTION: AdvancedQuestion = {
 const UNIT_SUBTYPE_QUESTION: AdvancedQuestion = {
   id: 'unit_subtype',
   titleKey: 'What kind of unit?',
-  selection: 'single',
+  selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'unit_subtype') && !(q.unitSubtypes?.length),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
       { key: 'استديو',      labelKey: 'Studio unit',        count: (c) => c.cnt_sub_studio },
       { key: 'شقق مخدومة',  labelKey: 'Serviced apartment', count: (c) => c.cnt_sub_serviced },
       { key: 'شقة',         labelKey: 'Regular apartment',  count: (c) => c.cnt_sub_regular },
-    ]);
+    ], (c) => c.cnt_sub_unknown);
   },
-  apply: (q, keys) => (keys[0] ? { ...q, unitSubtypes: [keys[0]] } : q),
+  apply: (q, keys) => (keys.length ? { ...q, unitSubtypes: [...keys] } : q),
 };
 
 export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [

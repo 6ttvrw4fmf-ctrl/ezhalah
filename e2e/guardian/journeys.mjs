@@ -21,6 +21,7 @@ import {
   loadersPresent, ok, open, parseColor, pickCity, relativeLuminance, resultsState, runSearch,
   searchAsGuest, sleep, tap, until, violated,
 } from './harness.mjs';
+import { zeroRendered } from '../lib/resultsSentence.mjs';
 
 // ── G1 · theme ───────────────────────────────────────────────────────────────────────────────────
 // WHAT THIS ASSERTS, AND WHY IT IS NOT "the guest app must be dark".
@@ -512,13 +513,19 @@ const G5 = {
   steps: [
     'Open https://ezhalah-app.vercel.app/, dismiss the sign-in card, pick الرياض and press «بحث».',
     'Read the rendered text of every card-listing-* element.',
-    'For each card assert: a price figure or «السعر عند الطلب»; a «سيأخذك إلى <domain>» source attribution; a non-empty location before «المملكة العربية السعودية».',
+    'For each card assert: a price figure or «السعر عند الطلب»; a visible source domain whose link names the same «سيأخذك إلى <domain>»; a non-empty location before «المملكة العربية السعودية».',
     'For each card assert no HTML entity, no «[object Object]», no bare «undefined»/«NaN», and no zero-valued money token.',
   ],
   async run(page, ctx) {
     await searchAsGuest(page);
     const cards = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="card-listing-"]')]
-      .map((c) => ({ id: c.getAttribute('data-testid'), text: c.innerText || '' })));
+      .map((c) => ({
+        id: c.getAttribute('data-testid'),
+        text: c.innerText || '',
+        // The «الضغط على هذا الإعلان سيأخذك إلى <host>» sentence is the card link's accessible name
+        // (ResultCard.tsx); the card SHOWS the host on its own line beside «مستضاف على X».
+        aria: [...c.querySelectorAll('[aria-label]')].map((e) => e.getAttribute('aria-label') || ''),
+      })));
     if (!cards.length) throw new HarnessError('the search rendered no cards to inspect');
 
     const bad = [];
@@ -529,8 +536,13 @@ const G5 = {
       if (!hasPrice) bad.push(`${card.id}: no price treatment at all — neither a figure nor «${PRICE_ON_REQUEST}»`);
       const zero = t.match(ZERO_MONEY);
       if (zero) bad.push(`${card.id}: renders a zero-valued money token «${zero[0].trim()}» — a NULL price surfacing as 0`);
-      const source = t.match(/سيأخذك إلى\s+(\S+\.\S+)/u);
-      if (!source) bad.push(`${card.id}: no source attribution — the «الضغط على هذا الإعلان سيأخذك إلى <منصة>» line names no domain`);
+      // Source attribution = the host a customer SEES on the card, and the link's «سيأخذك إلى <host>» names
+      // the same host (a screen reader hears where the tap goes). Either missing, or the two disagreeing, fails.
+      const shownHost = t.match(/^\s*((?:[a-z0-9-]+\.)+[a-z]{2,})\s*$/imu)?.[1]?.toLowerCase() ?? null;
+      const saidHost = [t, ...card.aria].map((x) => x.match(/سيأخذك إلى\s+(\S+\.\S+)/u)?.[1]).find(Boolean)?.toLowerCase() ?? null;
+      if (!shownHost) bad.push(`${card.id}: no source attribution — the card shows no source domain`);
+      if (!saidHost) bad.push(`${card.id}: no source attribution — the «الضغط على هذا الإعلان سيأخذك إلى <منصة>» link names no domain`);
+      if (shownHost && saidHost && shownHost !== saidHost) bad.push(`${card.id}: the card shows ${shownHost} but its link says it goes to ${saidHost}`);
       const location = t.match(/(.*)،?\s*المملكة العربية السعودية/u) || t.match(/([^\n]+),\s*المملكة العربية السعودية/u);
       if (!location || !location[1].trim()) bad.push(`${card.id}: no location — the country line names no city`);
       for (const [re, label] of junk) {
@@ -658,7 +670,22 @@ const G7 = {
 // sits in. The product must say so in Arabic rather than quietly widening or padding the page.
 // «عرض المزيد» is asserted by TESTID, never by text: the same words are also a per-card attribute
 // expander, so a text search would fail on a perfectly honest zero screen.
-const ZERO_PHRASES = ['ما فيه نتائج', 'ما لقيت', 'ما لقينا'];
+// THE ZERO VOCABULARY IS DERIVED FROM THE SHIPPED POOL, NEVER RESTATED HERE.
+//
+// This was a hand-written `['ما فيه نتائج', 'ما لقيت', 'ما لقينا']`, and on 2026-09-26 the app's
+// catch-all no-results sentence became an 80-template ROTATION (src/data/noResultsRotation.ts, owner
+// rule). Production then answered an impossible budget with «ما طلع لنا تطابق في بحث العقار، جرّب
+// توسّع نطاق البحث وإزهله 😢» — a perfectly honest zero, opening with a phrase no entry in that list
+// contains — so this journey called the PRODUCT dishonest and opened ops_incident #852 and #853
+// against it. Measured: guardian-journeys.yml run 36313435466, FAIL 2/2 (desktop and mobile), while
+// the other 14 journeys passed.
+//
+// PR #4890 fixed this exact class in e2e/live-sweep/ the same day, and its lesson is the one that
+// matters here: «derive the predicate from the shipped pool, never restate it». It repaired two
+// copies; this was the THIRD, one directory over, and nothing in the repo connected them. So the
+// import is the fix — zeroRendered() reads the same baked pool with the same parser, so a pool that
+// grows tomorrow is covered without editing this file.
+const zeroStatementIn = (text) => zeroRendered(text);
 
 const G8 = {
   id: 'empty-results-are-honest',
@@ -675,13 +702,18 @@ const G8 = {
     const state = await resultsState(page);
     const text = await bodyText(page);
     const bad = [];
-    const said = ZERO_PHRASES.find((p) => text.includes(p));
-    if (!said) bad.push(`an impossible budget produced no Arabic no-results statement (expected one of ${JSON.stringify(ZERO_PHRASES)})`);
+    const said = zeroStatementIn(text);
+    if (!said) {
+      bad.push('an impossible budget produced no Arabic no-results statement — no template from the '
+        + 'shipped zero pool (src/data/noResultsRotation.ts) and no MSA zero phrase is on screen. '
+        + 'The pool is READ, not restated, so this is the product being silent rather than the '
+        + 'journey not knowing this month\'s wording (see the note above).');
+    }
     if (state.cards > 0) bad.push(`an impossible budget still rendered ${state.cards} result card(s)`);
     if (state.loadMore > 0) bad.push('an impossible budget still offered the «عرض المزيد» pager');
     if (state.countChip) bad.push(`an impossible budget still quoted a Results-Found count of ${state.countChip}`);
     if (ctx.pageErrors.length) bad.push(`uncaught page error on the empty-results screen: ${ctx.pageErrors[0]}`);
-    const evidence = { state, said: said ?? null };
+    const evidence = { state, zeroStatementPresent: said };
     return bad.length ? violated(bad, evidence) : ok(evidence);
   },
 };

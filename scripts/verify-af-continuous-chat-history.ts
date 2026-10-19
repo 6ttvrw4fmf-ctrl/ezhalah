@@ -76,7 +76,7 @@ check('«تحديد أكثر» is offered by the newest turn only',
 // Read Aloud must describe the buttons that are actually there — it reads the SAME two flags, so a
 // history turn is never spoken as if it still had actions.
 check('the spoken closing note names the same two latest-turn-aware flags',
-  /const spokenActionLabels = \[hasMore && t\('Load more'\), canNarrowFurther && t\('Let’s narrow it down'\)\]/.test(agent),
+  /const spokenActionLabels = \[hasMore && replyT\('Load more'\), canNarrowFurther && replyT\('Let’s narrow it down'\)\]/.test(agent),
   'agent.tsx: reading rc.hasMore instead of hasMore would announce buttons an old turn does not render');
 
 // ── 2. THE HONESTY BOUNDARY: latest-only touches the BUTTONS and nothing else ────────────────────
@@ -152,7 +152,7 @@ check('the receipt is the ELSE branch of the actions row (the two can never rend
 }
 check('the receipt is written for the ORIGIN turn, from THIS round\'s ask order and facets',
   /\[carry\.msgId\]: roundLog/.test(agent)
-  && /const roundLog = buildAfRoundLog\(askedThisRound, ageFlowFacetsRef\.current\)/.test(agent),
+  && /const roundLog = buildAfRoundLog\(askedThisRound, ageFlowFacetsRef\.current, locale\)/.test(agent),
   'agent.tsx (finishGuided): keyed on carry.msgId = the turn the round was opened FROM; answers still come from the facets, which skips never enter');
 check('only a round that committed something leaves a receipt at all',
   /if \(carry && roundCommitted\) setAfReceipt/.test(agent),
@@ -273,7 +273,7 @@ check('the round cap ends the round through the shared terminator, not through t
   /const askedThisRound = steps\.filter\(\(st\) => st\.keys != null && !isScopeQuestionId\(st\.question\.id\)\)\.length;\s*\n\s*if \(askedThisRound >= AF_ROUND_MAX_QUESTIONS\) \{ finishGuided\(token\); return; \}/.test(agent),
   'agent.tsx (presentGuided): the cap must be a presentGuided exit calling finishGuided — never a flag handed to the question card');
 check('a confirm still advances one question (the primary is never terminal)',
-  /const onAgeConfirm = \(keys: string\[\]\) => \{ void commitGuidedStep\(keys\); \}/.test(agent),
+  /const onAgeConfirm = \(keys: string\[\]\) => (?:\{ void commitGuidedStep\(keys\); \}|commitGuidedStep\(keys\);)/.test(agent),
   'agent.tsx: see verify-af-primary-advances-not-shows.ts — «متابعة · N نتيجة» must commit WITHOUT the finish flag');
 check('the question card is never told where it sits in the round',
   !/AF_ROUND_MAX_QUESTIONS/.test(codeOnly(read('src/components/AdvancedQuestionCard.tsx'))),

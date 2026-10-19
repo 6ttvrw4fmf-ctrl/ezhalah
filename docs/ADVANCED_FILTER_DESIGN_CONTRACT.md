@@ -43,6 +43,8 @@ visual and behavioural below is owned by the shared component.
 
 ## 2. Card layout — identical for every question
 
+**Owner visual revision, 2026-10-01:** use one short source-data sentence in a subtle information strip immediately below the question/description and above the options: «خيارات بحثك وأعدادها مبنية على بيانات الإعلانات المنشورة؛ غياب المعلومة لا ينفي توفرها، فتأكد من الإعلان الأصلي.» It replaces the two footer notes, keeping both current-search scope and missing-is-not-no semantics while directing users to the original listing. Use a thin neutral card border and compact option rows with at least 48 px height. The refined conversational revision uses a quiet header with a green brand mark, a prominent question, and tinted selected rows with a green check and border. Continue stays solid green with a direction-aware arrow. Press feedback starts immediately (120 ms), question content fades/slides 6 px over 180 ms, and the pinned footer does not fade or translate between questions. Reduced motion removes movement. The existing callbacks execute immediately without waiting for animation; counts and search timing are unchanged. Preserve the existing count, unknown-count caption, selection, progress, committed pills and pinned action behavior.
+
 ```
 ┌───────────────────────────────────────────┐
 │  ✦  Ezhalah AI Agent                    ✕  │  Shell top-bar (fixed)
@@ -159,6 +161,8 @@ Both تخطي and رجوع are equal-width real buttons (§4); رجوع carries 
   prior pick; checkbox for multi — toggles); it does **not** auto-advance. The footer `Show {N}`
   commits and advances. This kills the "tap-to-advance vs toggle-then-confirm" whiplash — single and
   multi feel identical; only the selection count differs.
+- **No question forces one answer** *(owner 2026-10-03, product contract R7.2.3)*: every advanced
+  question renders checkboxes; several ticks are the exact union of what was ticked.
 - **Every question is optional/skippable** (§7).
 - **One unified eligibility gate.** `eligibility(scope)` is the *only* visibility rule a question
   declares, and all questions share the same gate contract (same thresholds: a question shows only when
@@ -281,10 +285,17 @@ narrowing the market for them, not forcing them to fill another form.» Everythi
   beat plays over the final search: fragments drift inward, copy uses REAL numbers («نراجع N عقار
   ونطلع لك الأنسب» → «لقينا N عقار أقرب لطلبك»), minimum ~1.4 s, dismissed by setTimeout latches
   with a 15 s failsafe + a catch on the search itself. Skip-everything closes with no beat.
-- **Results summary + removable pills.** The guided results turn shows «بناءً على: …» and each
-  committed answer as a removable pill. Removal is PURE recomputation: rebuild from the interview's
-  baseQ by re-applying the remaining facets through each question's own `apply()` — never a
-  hand-written inverse — then re-search immediately (no mining beat on removal).
+- **Results summary + read-only chips** *(amended 2026-10-03, owner: «we should not show any X
+  button on this»)*. The guided results turn's «ملخص البحث» is the ORIGINAL summary (built from the
+  query before the first round) continued by one labelled bullet per committed answer — «• نوع العقار
+  المحدد: شقة», «• دورات المياه: +١», «• المميزات: المطبخ، مصعد» — no heading and no emoji (the chips
+  carry the emoji), cumulative across rounds (same label ⇒ same line). Each answer is also a plain chip — no ✕, no press, in the transcript or
+  in the round card. Nothing removes an answer from the results; it is changed only by Back inside the
+  round. The earlier «بناءً على: …» sentence and removable pills are retired.
+- **The reader stays in place** *(2026-10-03)*. Earlier turns are dimmed while a search loads, never
+  hidden, so the thread keeps its height; the view eases to the user's own answers bubble and lands on
+  the new turn — never to the top. Going back to the Filter always opens a clean form.
+- **The «didn't mention this» line** *(2026-10-03)* leads with 😔: «😔 N إعلان لم يذكر هذه المعلومة».
 
 
 ## Amendment 2026-08-22 (a) — the narrowing gate (owner-approved, supersedes the 8%-90% option band)

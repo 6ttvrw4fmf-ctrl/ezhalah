@@ -4,6 +4,7 @@
 //
 //   node --experimental-strip-types scripts/verify-agent-location-ambiguity.ts   (auto-discovered by npm test)
 
+import { GEO_ASK_AR, REGION_ASK_AR } from '../supabase/functions/agent/questionExamples.ts';
 import { plainRegionQuestion, emptyLocationQuestion } from '../supabase/functions/agent/locationAmbiguity.ts';
 
 let failures = 0;
@@ -16,7 +17,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 console.log('\nCASE 1 — a plain (non-twin) region: whole-region-vs-a-named-city\n');
 {
   const r = plainRegionQuestion('عسير', 'أبغى شقة في عسير');
-  check('a plain region with no "whole" wording -> asks whole-region-vs-city', r === 'تقصد عسير كاملة، أو مدينة معيّنة؟', String(r));
+  check('a plain region with no "whole" wording -> asks whole-region-vs-city (one of the rotating phrasings, with the 📍)', !!r && r.endsWith('📍') && REGION_ASK_AR.some((p) => r === p.replace('{n}', 'عسير') + ' 📍'), String(r));
 
   const whole = plainRegionQuestion('عسير', 'أبغى شقة في عسير كاملة');
   check('the user already said "كاملة" this turn -> no ambiguity (null)', whole === null, String(whole));
@@ -28,7 +29,7 @@ console.log('\nCASE 1 — a plain (non-twin) region: whole-region-vs-a-named-cit
 console.log('\nCASE 2 — an empty-location proximity phrase: smart question echoing the user\'s own words\n');
 {
   const r = emptyLocationQuestion('أبغى شقة قريبة من مستشفى الحبيب');
-  check('a named proximity phrase -> echoes it back', r === 'في أي مدينة تبحث عن عقار قريبة من مستشفى الحبيب؟', String(r));
+  check('a named proximity phrase -> echoes it back (one of the rotating phrasings, with an example and the 📍)', !!r && r.includes('عقار قريبة من مستشفى الحبيب') && r.includes('مثلاً ') && r.endsWith('📍') && r.includes('؟'), String(r));
 
   const en = emptyLocationQuestion('a villa near the mall please');
   check('an English "near" phrase is recognised too', en !== null && en.includes('near the mall please'), String(en));
@@ -43,11 +44,11 @@ console.log('\nCASE 3 — a bare geography cue with no city\n');
   check('"قرب البحر" is caught (via the proximity match, which is a superset of this cue)', r !== null, String(r));
 
   const bare = emptyLocationQuestion('أبي شقة على الكورنيش');
-  check('a bare geography cue with NO "near/قرب" wording -> the generic geography question',
-    bare === 'تقصد في أي مدينة أو منطقة؟', String(bare));
+  const isGeo = (t: string | null) => !!t && GEO_ASK_AR.some((p) => t.includes(p)) && t.includes('مثلاً ') && t.endsWith('📍');
+  check('a bare geography cue with NO "near/قرب" wording -> the generic geography question (one of the rotating phrasings)', isGeo(bare), String(bare));
 
   const mountain = emptyLocationQuestion('أدور شي بالجبال أجواء باردة');
-  check('a mountain/highlands cue -> the generic geography question', mountain === 'تقصد في أي مدينة أو منطقة؟', String(mountain));
+  check('a mountain/highlands cue -> the generic geography question', isGeo(mountain), String(mountain));
 }
 
 console.log('\nNEGATIVE — an ordinary message with neither cue must not be turned into an ambiguity\n');

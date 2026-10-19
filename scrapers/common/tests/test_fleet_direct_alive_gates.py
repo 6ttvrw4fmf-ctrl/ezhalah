@@ -97,3 +97,25 @@ def test_jazwtn_unredirected_own_page_is_own(monkeypatch):
 def test_jazwtn_redirected_page_is_never_this_listing(monkeypatch):
     assert _jz(monkeypatch, "https://jazwtn.com/")[3] is False
     assert _jz(monkeypatch, "https://jazwtn.com/property/other-9/")[3] is False
+
+
+# ── abeea (2026-10-08) ──────────────────────────────────────────────────────────────────────────
+# Every crawl reads every listing's own page and its «Property Status» cell, yet 175 active rows had
+# never been verified: the live reading was thrown away. Only a measured «on offer» reading certifies.
+from scrapers.abeea import run as AB  # noqa: E402
+from scrapers.common import db as DB  # noqa: E402
+
+
+def _ab(status_raw):
+    return {"ad_number": "AB1", "additional_info": {"status_raw": status_raw}}
+
+
+def test_abeea_measured_available_status_is_a_direct_live_reading():
+    row = AB.certify_read_alive(_ab("For Sale"), False)
+    assert row.get(DB._DIRECT_ALIVE_KEY) == "abeea.detail_page.property_status"
+
+
+def test_abeea_sold_unread_or_unmeasured_status_certifies_nothing():
+    assert DB._DIRECT_ALIVE_KEY not in AB.certify_read_alive(_ab("Sold"), True)
+    assert DB._DIRECT_ALIVE_KEY not in AB.certify_read_alive(_ab(""), None)
+    assert DB._DIRECT_ALIVE_KEY not in AB.certify_read_alive(_ab("For Sale, Under Offer"), False)

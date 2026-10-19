@@ -7,10 +7,8 @@
 // scripts/verify-read-aloud-contract.ts is the permanent, machine-enforced barrier that this file
 // (and its callers) never grows a paid-provider import.
 //
-// ARABIC ONLY (owner 2026-08-19): every utterance speaks as ar-SA — no English branch. Ezhalah's AI
-// replies are Arabic-canonical by design (locations, results, everything are shown in Arabic; a
-// stray English reply is not a case worth a second code path for), so this is a real simplification,
-// not a lost capability.
+// Read the displayed language (owner 2026-10-14): English uses an explicit English voice;
+// Arabic keeps its Saudi-preferred voice. Never fall back across languages.
 //
 // ROOT CAUSE OF "sounds English / robotic" (owner report, 2026-08-22 — reproduced live against
 // production): SpeechSynthesisUtterance.lang is only a HINT on the Web Speech API — Chrome (and most
@@ -28,7 +26,7 @@
 import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
 import { type Voice } from 'expo-speech';
-import { pickBestArabicVoice, shouldForcePauseFallback, readAloudRefusalVerdict,
+import { pickBestArabicVoice, pickBestEnglishVoice, shouldForcePauseFallback, readAloudRefusalVerdict,
          type ReadAloudRefusal } from '@/lib/readAloudVoice';
 
 const AR_LANG = 'ar-SA';
@@ -61,6 +59,9 @@ export const RATE_STEPS = [0.8, 1, 1.2, 1.3, 1.5, 1.75, 2] as const;
 // controller work below — the controller only adds pause/resume/seek/speed around this same
 // already-shipped, already-tested voice contract; it never re-decides which voice to use.
 let bestArabicVoice: Voice | null = null;
+let bestEnglishVoice: Voice | null = null;
+let sessionVoice: Voice | null = null;
+let sessionLanguage = AR_LANG;
 let voiceCheckExhausted = false;
 
 // Priority, exactly per owner spec: (1) exact ar-SA wins UNCONDITIONALLY, even over a local generic
@@ -115,13 +116,17 @@ const RETRY_WINDOW_MS = 45000; // generous vs. any real page-load-to-first-tap g
 async function resolveVoice() {
   const deadline = Date.now() + RETRY_WINDOW_MS;
   for (const timeout of POLL_TIMEOUTS_MS) {
-    const found = pickBestArabic(await getVoicesOnce(timeout));
-    if (found) { bestArabicVoice = found; return; }
+    const voices = await getVoicesOnce(timeout);
+    bestArabicVoice = pickBestArabic(voices) ?? bestArabicVoice;
+    bestEnglishVoice = pickBestEnglishVoice(voices) ?? bestEnglishVoice;
+    if (bestArabicVoice && bestEnglishVoice) return;
   }
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, BACKGROUND_RETRY_MS));
-    const found = pickBestArabic(await getVoicesOnce(500));
-    if (found) { bestArabicVoice = found; return; }
+    const voices = await getVoicesOnce(500);
+    bestArabicVoice = pickBestArabic(voices) ?? bestArabicVoice;
+    bestEnglishVoice = pickBestEnglishVoice(voices) ?? bestEnglishVoice;
+    if (bestArabicVoice && bestEnglishVoice) return;
   }
   voiceCheckExhausted = true;
 }
@@ -133,9 +138,9 @@ void resolveVoice();
 // string id. Voice SELECTION itself is untouched: this only re-looks-up the exact voice
 // pickBestArabic already chose.
 function resolveWebVoiceObject(): SpeechSynthesisVoice | null {
-  if (!bestArabicVoice || typeof window === 'undefined' || !window.speechSynthesis) return null;
+  if (!sessionVoice || typeof window === 'undefined' || !window.speechSynthesis) return null;
   const voices = window.speechSynthesis.getVoices();
-  return voices.find((v) => v.voiceURI === bestArabicVoice!.identifier) ?? null;
+  return voices.find((v) => v.voiceURI === sessionVoice!.identifier) ?? null;
 }
 
 // One spoken block, with an optional silent gap AFTER it — e.g. {text:'إزهله', pauseAfterMs:450}
@@ -160,10 +165,40 @@ function splitIntoChunks(text: string): string[] {
 // Segments -> a flat ordered list of speak/pause units. Each segment's OWN text is still split on
 // sentence boundaries and chained with NO gap (the Chrome-15s-bug workaround above) — the pause only
 // ever sits BETWEEN segments, which is what makes it read as a structural beat, not just a breath.
+/**
+ * IS THERE ANYTHING HERE A VOICE COULD ACTUALLY SAY?
+ *
+ * ONE PREDICATE FOR BOTH THE CONTROL AND THE ACTION, because two of them disagreed and the gap was a
+ * silent dead control. FeedbackRow rendered 🔊 on `readAloudSegments?.length` — the SEGMENT count —
+ * while speakReadAloud() refuses on `!buildUnits(segments).length` — the SPEAKABLE UNIT count. Those
+ * are different questions: buildUnits skips any segment whose text.trim() is empty, so a non-empty
+ * segment list can yield zero units.
+ *
+ * When they disagreed the tap was a guaranteed no-op that said NOTHING, because the refusal that
+ * follows is `readAloudRefusalVerdict({ voiceConfirmed: true, … })` → 'none' →
+ * readAloudRefusalMessageKey('none') → null. That null is deliberate and correct on its own terms
+ * (its comment: inventing a device verdict when the voice is fine would be the same class of lie in a
+ * new place) — which is exactly why the control must not be OFFERED in that state rather than
+ * explained away in it. PART 5 shape #6: a control doing nothing on a genuine tap.
+ *
+ * Measured on production 2026-09-27 (Chromium, ops_incident #856): a 🔊 tap produced no message at
+ * all, with the journey confirming post-tap `speaking=false` and no stop-control — so the tap neither
+ * spoke nor refused out loud. Every other refusal path in speakReadAloud DOES surface a sentence, so
+ * `!units.length` is the only branch that can be silent.
+ */
+export function hasSpeakableContent(segments: ReadAloudSegment[] | undefined | null): boolean {
+  return !!segments && buildUnits(segments).length > 0;
+}
+
+export function stripEmoji(text: string): string {
+  return text.replace(/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{FE0F}\u{200D}\u{20E3}]/gu, '').replace(/[ \t]{2,}/g, ' ');
+}
+
 function buildUnits(segments: ReadAloudSegment[]): Unit[] {
   const units: Unit[] = [];
   for (const seg of segments) {
-    const trimmed = seg.text.trim();
+    // Never speak an emoji (owner 2026-10-10: the voice read «✅» aloud after «طلع لنا 9,515 نتيجة»).
+    const trimmed = stripEmoji(seg.text).trim();
     if (!trimmed) continue;
     for (const chunk of splitIntoChunks(trimmed)) units.push({ kind: 'speak', text: chunk });
     if (seg.pauseAfterMs) units.push({ kind: 'pause', ms: seg.pauseAfterMs });
@@ -296,9 +331,10 @@ function resumeSpeakingNow() {
 function speakUnitText(text: string, token: number, onDone: () => void, onError: () => void) {
   if (isWeb()) {
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = AR_LANG;
+    utterance.lang = sessionLanguage;
     utterance.rate = rate;
     const voice = resolveWebVoiceObject();
+    if (!voice) { onError(); return; }
     if (voice) utterance.voice = voice;
     utterance.onend = () => { if (token === playToken) onDone(); };
     utterance.onerror = () => { if (token === playToken) onError(); };
@@ -306,9 +342,9 @@ function speakUnitText(text: string, token: number, onDone: () => void, onError:
     return;
   }
   Speech.speak(text, {
-    language: AR_LANG,
+    language: sessionLanguage,
     rate,
-    voice: bestArabicVoice!.identifier,
+    voice: sessionVoice!.identifier,
     onDone: () => { if (token === playToken) onDone(); },
     onStopped: () => { if (token === playToken) onError(); },
     // No paid fallback on error (owner requirement) — an error here means the OS/browser itself
@@ -380,13 +416,13 @@ export function stopReadAloud() {
   if (wasActive) { notifyId(); notifyPlayback(); }
 }
 
-// Speak `segments` in order (always Arabic) as `id` (pass the message id a caller already has —
+// Speak `segments` in order in the selected display language as `id` (pass the message id a caller already has —
 // e.g. the results/agent message id FeedbackRow is keyed by). Must be called from a user-gesture
 // handler (onPress) — iOS Safari silently drops speak() calls made any other way, so this module
 // cannot self-trigger even if it wanted to; the voice lookup above is pre-resolved rather than
 // awaited here for the same reason.
 //
-// Returns true if it actually started speaking, false if it refused (no confirmed Arabic voice —
+// Returns true if it actually started speaking, false if it refused (no confirmed matching voice —
 // root-cause fix, 2026-08-22: NEVER hand Arabic text to a non-Arabic voice; the caller shows a
 // graceful Arabic "not available" message instead, per owner requirement). This can only return
 // false on a device/browser with genuinely no Arabic voice, or in the (rare in practice — polling
@@ -394,9 +430,11 @@ export function stopReadAloud() {
 //
 // `rate` deliberately is NOT reset here — the user's last chosen speed (see cycleReadAloudRate)
 // carries over into the next response, same as a real player remembering your speed preference.
-export function speakReadAloud(id: string, segments: ReadAloudSegment[]): boolean {
+export function speakReadAloud(id: string, segments: ReadAloudSegment[], locale: 'ar' | 'en' = 'ar'): boolean {
   stopReadAloud();
-  if (!bestArabicVoice) return false; // never fall back to the browser/OS default (English) voice
+  sessionVoice = locale === 'en' ? bestEnglishVoice : bestArabicVoice;
+  sessionLanguage = locale === 'en' ? 'en-US' : AR_LANG;
+  if (!sessionVoice) return false; // never fall back to a different language's default voice
   const units = buildUnits(segments);
   if (!units.length) return false;
   sessionId = id;
@@ -586,9 +624,9 @@ export function isReadAloudDefinitelyUnavailable(): boolean {
 // boolean cannot distinguish "this device has no Arabic voice" from "I am still looking", and for
 // the ~45s RETRY_WINDOW_MS after load those are different facts. Keeping the boolean return means
 // every existing caller still works unchanged; this only tells an already-refused caller why.
-export function readAloudRefusal(): ReadAloudRefusal {
+export function readAloudRefusal(locale: 'ar' | 'en' = 'ar'): ReadAloudRefusal {
   return readAloudRefusalVerdict({
-    voiceConfirmed: !!bestArabicVoice,
+    voiceConfirmed: !!(locale === 'en' ? bestEnglishVoice : bestArabicVoice),
     checkExhausted: voiceCheckExhausted,
   });
 }

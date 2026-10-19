@@ -442,7 +442,7 @@ def test_the_capture_is_an_allowlist_not_a_blocklist():
     ("فلل", "Villa"),            # plural, 64
     ("فيلا", "Villa"),           # singular, 16
     ("villa", "Villa"),          # English slug, 44
-    ("تاون هاوس", "Villa"),      # fleet fold (dwelleo, eilmalriyada, aqalemhajer), 59
+    ("تاون هاوس", "تاون هاوس"),  # keeps its own name (owner 2026-10-12), 59
     ("بنتهاوس ", "Apartment"),   # fleet fold + trailing space, 31
     ("penthouse", "Apartment"),  # English twin of the above, 14 — in neither shared map
 ])

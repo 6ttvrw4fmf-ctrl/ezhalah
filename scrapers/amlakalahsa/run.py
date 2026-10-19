@@ -221,8 +221,16 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     # their own description text. to_int(0) faithfully parses that as the integer 0, which would
     # otherwise store and DISPLAY a fabricated "SAR 0" price instead of the honest "price on
     # request" the source actually means — never a real free listing.
-    _price_raw = normalize.to_int(acf.get("pw-prc"))
+    # pw-prc-typ is the price box's own LABEL for that figure (read from /wp-json/wp/v2/land 2026-10-18): «السعر» (a
+    # total), «سوم» (an offer, a total), «سعر المتر» (a RATE), «على السوم» (no price). A negative pw-prc is the same
+    # ACF «not set» sentinel pw-prc-mtr uses — AMH19549 carries -1 beside «على السوم», and to_int() dropped the sign and
+    # served it at «1 ر.س».
+    price_type = (acf.get("pw-prc-typ") or "").strip() or None
+    _prc_raw = str(acf.get("pw-prc") if acf.get("pw-prc") is not None else "").strip()
+    _price_raw = normalize.to_int(_prc_raw) if _prc_raw and not _prc_raw.startswith("-") else None
     price = _price_raw if _price_raw else None
+    # The source settled that there is no price: «على السوم» with no positive figure. The stored one clears.
+    no_price_stated = price is None and (price_type == "على السوم" or _prc_raw.startswith("-"))
     street_width = _first_street_width(acf.get("pw-str"))
     # land-num is a plain plot/parcel number (رقم القطعة); the one observed non-clean value on this
     # source is a sub-lot suffix ("388_1" = parcel 388, sub-unit 1), not a multi-measurement compound
@@ -245,6 +253,14 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     # from a sentinel, so a leading '-' is rejected before parsing — never coerced into a real value.
     _ppm_raw = str(acf.get("pw-prc-mtr") or "").strip()
     price_per_meter = normalize.to_int(_ppm_raw) if _ppm_raw and not _ppm_raw.startswith("-") else None
+    # The headline IS the rate when its own label says so — the page prints «السعر 1,500 سعر المتر» (AMH18982, pw-prc-typ
+    # «سعر المتر», pw-prc-mtr empty) — or when the two fields carry the same figure (AMH19284 1650/1650). It is not a
+    # total: the rate is the headline's figure and the stored total clears (the page settled it).
+    headline_is_rate = bool(price and (price_type == "سعر المتر" or (price_per_meter and price == price_per_meter)))
+    if headline_is_rate:
+        price_per_meter, price = price, db.AUTHORITATIVE_NULL
+    elif no_price_stated:
+        price = db.AUTHORITATIVE_NULL
 
     district_ar = (acf.get("pw-dis") or "").strip() or None
 
@@ -387,6 +403,7 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
         "additional_info": {k: v for k, v in {
             "street_width": street_width,
             "parcel_number": land_number,
+            "price_type": price_type,           # the price box's own label for the figure (pw-prc-typ)
         }.items() if v not in (None, "", [], {})} or None,
     }
     return row, category.lower()

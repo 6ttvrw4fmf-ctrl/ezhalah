@@ -73,6 +73,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 
@@ -99,8 +100,10 @@ def _tally(skipped: dict[str, int]) -> str:
 
 def session() -> cc.Session:
     # impersonate owns the User-Agent; setting one contradicts the TLS fingerprint.
-    s = cc.Session(impersonate="chrome")
-    s.headers.update({"Accept-Language": "ar,en;q=0.7"})
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(BASE, headers={"Accept-Language": "ar,en;q=0.7"}, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     return s
 
 
@@ -114,6 +117,7 @@ def _area_m2(raw: Optional[str]) -> Optional[int]:
     field uses the comma as a DECIMAL point too («240,16» = 240.16 m², «706,25» = 706.25 m²). Under
     to_int those become 24,016 and 70,625 — a 100× area, shown on the card and searched by the area
     filter. The comma is read by the digits that follow it: three → grouping, one or two → decimal.
+    A lone dot is read the same way («1.652» = 1,652 m²; «107.68» = 107.68 m²).
     """
     if raw is None:
         return None
@@ -130,6 +134,11 @@ def _area_m2(raw: Optional[str]) -> Optional[int]:
     if len(nums) != 1:           # 0 → «_» / prose; 2+ → «مساحة المعرض 68م … المعارض : 204م2»
         return None
     n = nums[0]
+    # 2026-10-13 (offer 818 prints «1.652» for a 13-flat project; stored 1 m²): the DOT is overloaded
+    # the same way. Every decimal this field prints has 1-2 digits («107.68», «1393.3»); a lone dot
+    # followed by exactly three digits, with no comma, is grouping, read by the comma's own rule.
+    if "," not in n and re.fullmatch(r"\d{1,3}\.\d{3}", n):
+        n = n.replace(".", "")
     if "," in n:
         tail = n.rsplit(",", 1)[1]
         n = n.replace(",", "." if ("." not in n and 1 <= len(tail) <= 2) else "")

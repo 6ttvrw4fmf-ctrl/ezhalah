@@ -180,3 +180,17 @@ def test_a_word_numeral_age_is_not_overrun_by_the_next_field():
 
 def test_the_boundaries_label_terminates_the_field_before_it():
     assert spec("عمر العقار : جديد حدود وأطوال العقار : 100", "عمر العقار") == "جديد"
+
+
+# ── 🔬 2026-10-05: the AC field reaches the COLUMN the Advanced Filter reads ─────────────────────────
+def test_the_published_ac_answer_is_stored_in_the_column():
+    """«التكييف : نعم» was filed only in additional_info.air_conditioning, so the AC chip (which reads
+    air_conditioner) never saw 393 published «yes» / 89 «no». Both directions, and silence stays NULL."""
+    post = {"id": 1, "slug": "x", "link": "https://ksaaqar.com/ad/x/",
+            "title": {"rendered": "شقة للإيجار في الملقا"}, "class_list": []}
+    yes, _c, _w = K.map_listing(post, SPEC, "")
+    assert yes is not None and yes["air_conditioner"] is True
+    no, _c, _w = K.map_listing(post, SPEC.replace("التكييف : نعم", "التكييف : لا يوجد"), "")
+    assert no["air_conditioner"] is False
+    silent, _c, _w = K.map_listing(post, SPEC.replace("التكييف : نعم ", ""), "")
+    assert silent["air_conditioner"] is None

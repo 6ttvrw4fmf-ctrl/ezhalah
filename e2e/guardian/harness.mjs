@@ -35,7 +35,7 @@ export const VIEWPORTS = [
 
 /** The property-search RPC. Journeys count these to prove "no search fired" / "no duplicate". */
 import { isHydrationNoticePageError, hydrationNoticeNote } from '../lib/pageErrors.mjs';
-import { resultsFoundCount, settledSource } from '../lib/resultsSentence.mjs';
+import { resultsFoundCount, settledSource, zeroRendered } from '../lib/resultsSentence.mjs';
 import { pickCityOptionIndex } from '../live-sweep/cityOption.mjs';
 
 export const SEARCH_RPC = '/rpc/location_search_candidates_ar';
@@ -420,12 +420,17 @@ export async function runSearch(page, budgetMs = 90000) {
  * silently sees 11% of the evidence is barely an oracle at all. So wait for the count to STOP
  * changing, and take an honest zero as its own settled state rather than burning the budget on it.
  */
-const ZERO_STATE_RE = /ما فيه نتائج|ما لقيت|ما لقينا/;
+// The zero check is DERIVED, for the same reason SETTLED_RE above is. This was a hand-written
+// /ما فيه نتائج|ما لقيت|ما لقينا/, and when the app's no-results sentence became an 80-template
+// rotation on 2026-09-26 it silently stopped matching — so the early return below never fired and
+// every honest-zero journey burned the whole 30s budget waiting for cards that were never coming,
+// which is precisely what this function's comment says it exists to avoid. Milder than its sibling
+// in journeys.mjs (that one ACCUSED the product), but the same defect and the same repair.
 export async function waitForCards(page, budgetMs = 30000) {
   let last = -1;
   let stable = 0;
   await until(async () => {
-    if (ZERO_STATE_RE.test(await bodyText(page))) return true;
+    if (zeroRendered(await bodyText(page))) return true;
     const n = await countVisible(page, '[data-testid^="card-listing-"]');
     if (n > 0 && n === last) stable += 1; else { stable = 0; last = n; }
     return stable >= 2;

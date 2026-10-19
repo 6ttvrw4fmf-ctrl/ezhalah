@@ -150,15 +150,14 @@ def test_new_labels_are_in_the_stop_set(label: str) -> None:
 
 
 def test_compoundin_pairs_chips_per_unit_not_page_wide() -> None:
-    """Defect 3. The fix must pair chips with units BY POSITION and, when the counts disagree,
-    write no amenities at all rather than attach them to the wrong unit."""
-    import inspect
+    """Defect 3. Chips are read INSIDE each unit's own card (2026-09-28: every card field is), so a
+    card without chips gets none and never borrows the next card's."""
     from scrapers.compoundin import run as cin
-    src = inspect.getsource(cin.map_units)
-    assert "unit_chips" in src and "len(chips) == len(units)" in src, \
-        "per-unit chip pairing (with a count guard) must be present"
-    assert not re.search(r"amenities_en[\"']?\s*:\s*\(lambda m", src), \
-        "the page-wide first-match lambda must be gone"
+    card = ('<article class="cin-compound-card cin-unit-card"><h3 class="cin-unit-card__title">Apartment'
+            '</h3>{chips}<button data-cin-contact-unit="{uid}"></button></article>')
+    page = (card.format(chips="", uid="1")
+            + card.format(chips='<p class="cin-unit-card__amenities">Furnished · Kitchen</p>', uid="2"))
+    assert [c["chips"] for c in cin.unit_cards(page)] == [None, "Furnished · Kitchen"]
 
 
 def test_every_new_parser_writes_af_columns() -> None:
@@ -268,7 +267,10 @@ def test_inblaj_sitemap_fetch_is_retried() -> None:
             return _R(self.calls > 2)      # both spellings miss on the first pass
 
     sess = _S()
-    got = ip.fetch_catalogue(sess, "https://x.inblaj.net")
+    # Every retry now opens a fresh session with another browser profile; the stub hands back the
+    # same flaky transport so the test still models "fails, then recovers" without real network.
+    got, used, _trace = ip.fetch_catalogue(sess, "https://x.inblaj.net", make_session=lambda _p: sess)
+    assert used is sess
     assert len(got) == 2, f"a retried fetch must recover the catalogue, got {got}"
     assert sess.calls > 2, "it must actually retry, not succeed by luck on the first call"
 
@@ -284,7 +286,9 @@ def test_a_truly_empty_sitemap_still_returns_empty() -> None:
     class _S:
         def get(self, *_a, **_k): return _R()
 
-    assert ip.fetch_catalogue(_S(), "https://x.inblaj.net") == []
+    urls, _used, trace = ip.fetch_catalogue(_S(), "https://x.inblaj.net", make_session=lambda _p: _S())
+    assert urls == []
+    assert trace and all("HTTP 404" in t for t in trace), "an empty result must say what the source answered"
 
 
 # ─────────────────────────── gathern: a published label that reached no column ──────────────────
@@ -307,9 +311,10 @@ def test_gathern_balcony_label_is_mapped() -> None:
     assert got["balcony_terrace"] is True
     assert got["elevator"] is True and got["parking"] is True
 
-    # A listing WITHOUT the label must read False, not True — the flags are a closed set over the
-    # labels gathern published for that unit, so absence here is the source's own silence.
-    assert _amenity_flags(["تلفزيون", "انترنت"])["balcony_terrace"] is False
+    # A listing WITHOUT the label is the source's own silence: NULL (AUTHORITATIVE_NULL, which clears a
+    # stale value), never False and never True (🔬 2026-10-09, backlog 245 — this line used to pin False).
+    from scrapers.common.db import AUTHORITATIVE_NULL
+    assert _amenity_flags(["تلفزيون", "انترنت"])["balcony_terrace"] is AUTHORITATIVE_NULL
 
 
 def test_gathern_does_not_invent_kitchen_or_ac() -> None:

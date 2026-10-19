@@ -1,0 +1,59 @@
+# Wakes the ♻️ Lifecycle Engineer the moment a liveness or cleanup job fails
+# (docs/ops/LIFECYCLE_ENGINEER.md, "When you run"), the same way scraping-engineer-wake-up.yml wakes
+# the ⚡ Scraping Engineer on a crawl failure. It uses the documented routine fire endpoint with a
+# per-routine token the owner generates in claude.ai, stored as two repo secrets:
+#   LIFECYCLE_ENGINEER_FIRE_URL    https://api.anthropic.com/v1/claude_code/routines/<trig_…>/fire
+#   LIFECYCLE_ENGINEER_FIRE_TOKEN  sk-ant-oat01-…  (can ONLY fire this one routine; no read access)
+# Until both exist this job does nothing and stays green. Loops are bounded twice: the engineer
+# tries a website at most 3 times a day (hard rule 13), and the endpoint accepts at most 30 fires per
+# routine per hour.
+name: Lifecycle Engineer wake-up
+
+on:
+  workflow_run:
+    workflows:
+      - Aqar liveness
+      - Aqar cleanup
+      - Aqarcity cleanup
+      - Aqar stub recovery
+      - Dealapp liveness
+      - Dealapp recover
+      - Gathern liveness
+      - Gathern cleanup
+      - Wasalt liveness
+      - Wasalt enum liveness
+      - Wasalt cleanup
+      - Platform cleanup (retention)
+      - Verify deletions (post-delete spot-check)
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  wake:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/engineer-wake.sh
+          sparse-checkout-cone-mode: false
+      # Wakes only for NEW failures (jobs that did not fail in the previous run of the same
+      # workflow). A repeat of a known failure is left to the nightly run. See the script.
+      - name: Fire the Lifecycle Engineer (new failures only)
+        env:
+          FIRE_URL: ${{ secrets.LIFECYCLE_ENGINEER_FIRE_URL }}
+          FIRE_TOKEN: ${{ secrets.LIFECYCLE_ENGINEER_FIRE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          ENGINEER: Lifecycle Engineer
+          KIND: lifecycle
+          SCOPE: "Handle only the website(s) those jobs cover."
+        run: bash scripts/engineer-wake.sh

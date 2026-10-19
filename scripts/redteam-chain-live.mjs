@@ -521,7 +521,7 @@ async function runChain(cell) {
 
     // ── L8 : «عرض المزيد» for real ───────────────────────────────────────────────────────────────
     const seen = new Set(returned);
-    let clicks = 0, prevOffset = 0;
+    let clicks = 0, prevOffset = 0, wireHalfUnreached = false;
     const basePredicates = JSON.stringify(predicatesOf(first.body));
     for (let i = 0; i < PAGES; i++) {
       const y = await page.evaluate(PAGER, 30);
@@ -549,6 +549,48 @@ async function runChain(cell) {
       await sleep(2500);
 
       const more = searches.slice(before);
+      // ── WHICH PAGING MODE DID THAT CLICK PRODUCE, AND SAY IT (2026-09-27, routine #9) ───────────
+      //
+      // «عرض المزيد» has two legitimate implementations and this driver only ever asserted one of
+      // them. When the first response already carries the rows (p_limit is large), the click reveals
+      // them from the client's own buffer and NO new RPC goes out — so `searches.slice(before)` is
+      // empty, the whole `for (const s of more)` loop below never executes, and the five WIRE-LEVEL
+      // assertions inside it record nothing at all: not a pass, not a failure, not a NOT REACHED.
+      //
+      // MEASURED THIS RUN, before this fix: 16 chains, 244 equalities, the pager clicked for real in
+      // 14 of them — and `L8 page@…` appeared ZERO times. The run printed «every equality held»
+      // while the only assertions that can catch a predicate silently dropped mid-browse, an offset
+      // that does not advance, a total_count that moves under the user, or a later page adding a row
+      // outside the truth set had not run once. PART 7 names exactly this: *a rule this run could not
+      // reach is not a rule this run proved — print it, count it separately, never fold it into the
+      // passes.* The instrument was folding it in by silence.
+      //
+      // Production is NOT at fault: revealing from an already-fetched page is correct, and the
+      // card-level assertions below do hold it to «every card came from a captured response», «no
+      // duplicate card» and «the headline did not move». The defect is the instrument's honesty about
+      // which half of L8 it reached.
+      if (!more.length) {
+        if (!wireHalfUnreached) {
+          wireHalfUnreached = true;
+          unreached(name, 'L8 wire-level page assertions (predicates / offset / total_count / dup ids / outside-truth-set)',
+            'the click revealed rows from the FIRST response\'s own buffer and issued no new RPC, so there is '
+            + 'no second request to compare — this chain proves L8 at CARD level only');
+        }
+        // …and close the half that IS closable without a second request: every row the reader can now
+        // see must still be inside the independent L4 truth set. That is what the skipped
+        // `adds no row outside the L4 truth set` existed for, and it needs no new RPC to ask.
+        if (o.ids) {
+          const shownNow = await page.evaluate(CARD_IDS);
+          const firstById = new Map(first.json.map((r) => [String(r.listing_id), `${r.source_table}:${r.listing_id}`]));
+          const outsideTruth = shownNow.filter((id) => {
+            const k = firstById.get(id);
+            return k === undefined || !o.ids.has(k);
+          });
+          eq(name, `L8 client-paged reveal ${clicks}: every revealed card is inside the L4 truth set`,
+            outsideTruth.length === 0,
+            `rendered=${shownNow.length} outside-oracle=${outsideTruth.length} ${outsideTruth.slice(0, 4).join(',')}`);
+        }
+      }
       for (const s of more) {
         const off = Number(s.body.p_offset ?? 0);
         eq(name, `L8 page@${off} carries the SAME predicates`, JSON.stringify(predicatesOf(s.body)) === basePredicates,
