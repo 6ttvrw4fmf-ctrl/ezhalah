@@ -113,6 +113,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_capture  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 
 BASE = "https://sa.sakan.co"
 SITEMAP = f"{BASE}/ar/pdpmap.xml"
@@ -255,6 +256,9 @@ def parse_page(url: str, page: str) -> dict[str, Any]:
     """Every fact this source publishes, read off one detail page. Pure — no network, so the
     offline barrier feeds it saved HTML and exercises this exact function."""
     out: dict[str, Any] = {"url": url, "ad_id": ad_id_from_url(url)}
+    # The ad's own marker («new google.maps.LatLng(…)»), read only when the page says
+    # show_exact_location = true; otherwise the marker is the site's approximation (owner 2026-10-19).
+    out["pin"] = pin_from_html(page)
 
     res: dict[str, Any] = {}
     crumbs: list[dict[str, Any]] = []
@@ -533,6 +537,7 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     # PDPL: the spec table names the responsible EMPLOYEE and their mobile («اسم الموظف المسؤول»,
     # «هاتف الموظف المسؤول»), and additional_info is anon-readable — redact_capture drops those keys.
     row["additional_info"] = redact_capture({k: v for k, v in {
+        **(p.get("pin") or {}),
         "type_ar": p.get("type_ar"),
         "city_ar_raw": city_raw if city_raw != city_ar else None,
         "features": p.get("features") or None,

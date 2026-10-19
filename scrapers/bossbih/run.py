@@ -137,6 +137,7 @@ from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, norm_ar, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 
 BASE = "https://bossbihoffice.com.sa"
 SOURCE = "مكتب بوصبيح"
@@ -523,6 +524,8 @@ def parse_detail(page_html: str) -> dict:
         "site_total": N.to_int(m_site_total.group(1)) if m_site_total else None,
         "photos": photos,
         "fal_license": m_fal.group(1) if m_fal else None,
+        # The «الموقع» google.com/maps/place/LAT,LNG link; the page's embed is only a map centre.
+        "pin": pin_from_html(art) or pin_from_html(page_html),
     }
 
 
@@ -737,6 +740,7 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
         # unknown-must-not-overwrite-known guard keeps a previously stored list.
         "photo_urls": photos[:20] if (detail or photos) else None,
         "additional_info": redact_capture({k: v for k, v in {
+            **(detail.get("pin") or {}),
             "price_label": label,
             "price_basis": basis,
             "price_basis_from": basis_from,
