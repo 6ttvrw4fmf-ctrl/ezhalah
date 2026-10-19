@@ -186,9 +186,11 @@ export const SHARE_CARD = {
   ar: { desc: 'كل مواقع العقار في مكان واحد', site: 'إزهله' },
   en: { desc: 'Every real-estate site in one place', site: 'Ezhalah' },
 } as const;
-// The square 512 px logo (owner 2026-10-18): WhatsApp shows it as the small square beside the text. Under
-// 300 px WhatsApp drops the picture entirely — the 192 px icon was tried and vanished.
-export const SHARE_CARD_IMAGE_PATH = '/og-image-v5.png';
+// SMALL, under 300 px (owner 2026-10-18, twice: «look how big … keep it small», «the image is very big
+// still»). Measured on the owner's own WhatsApp: the 512 px logo renders as a BIG banner over the card
+// (11:42 PM screenshot, /s/lLzdSNTR); the 192 px one rendered as the small square beside the text (2:57 PM,
+// /s/bkTsnLiQ). Same 192 px file as the main link's card (middleware.ts, og-image-v6.png).
+export const SHARE_CARD_IMAGE_PATH = '/og-image-v6.png';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
@@ -215,7 +217,7 @@ export function shareCardHtml(origin: string, rawPayload: string | null | undefi
     + `<meta property="og:type" content="website"><meta property="og:site_name" content="${esc(c.site)}">`
     + `<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(c.desc)}">`
     + `<meta property="og:url" content="${esc(url)}"><meta property="og:image" content="${esc(image)}">`
-    + `<meta property="og:image:width" content="512"><meta property="og:image:height" content="512">`
+    + `<meta property="og:image:width" content="192"><meta property="og:image:height" content="192">`
     + `<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${esc(title)}">`
     + `<meta name="twitter:description" content="${esc(c.desc)}"><meta name="twitter:image" content="${esc(image)}">`
     + `<meta http-equiv="refresh" content="0;url=${esc(to)}">`

@@ -117,7 +117,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const pathname = usePathname();
   const onAgentScreen = pathname?.startsWith('/agent') ?? false;
   const { t, isRTL, locale, setLocale } = useI18n();
-  const { user, history, setQuery, toggleStar, deleteHistory, renameHistory, openModal, openAuth, activeChatId, setActiveChat, newChat } = useApp();
+  const { user, authChecked, history, setQuery, toggleStar, deleteHistory, renameHistory, openModal, openAuth, activeChatId, setActiveChat, newChat } = useApp();
   // APPEARANCE (owner 2026-08-28): the sidebar is a THEMED surface — it re-skins in dark mode via
   // the dark override sheet (dks) below. TC carries the resolved palette for inline icon colors.
   const { resolved, colors: TC } = useTheme();
@@ -885,8 +885,8 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
               </>); }}
             </Pressable>
           </>
-        ) : (
-          // Guest sidebar — wrapped in a ScrollView so it SCROLLS when the content is taller than a
+        ) : !authChecked ? null : (
+          // (NEVER FOR A SIGNED-IN USER, NOT EVEN FOR A MOMENT (owner 2026-10-18: «when I open Ezhalah logged in, the sign up / log i…) Guest sidebar — wrapped in a ScrollView so it SCROLLS when the content is taller than a
           // short phone screen (it had a fixed flex layout that clipped on mobile). flexGrow:1 keeps
           // the sign-up CTA pinned to the bottom on tall screens. (user request 2026-06-22.)
           <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>

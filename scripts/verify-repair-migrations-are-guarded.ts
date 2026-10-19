@@ -65,6 +65,10 @@ const WAIVED: Record<string, string> = {
     'that caused it is pinned by test_dealapp_plot_code_district_2026_10_18.py (numbered districts stay, short codes go), ' +
     'and the next re-parse writes the same page value, so there is no state left for a detector to watch',
   // 2026-10-18. dealapp twin towns placed by the ad's own pin: the only UPDATE is inside the always-rolled-back proof.
+  '20261019034701_dealapp_town_aliases_and_island_by_own_pin.sql':
+    'changes no listing row: the one UPDATE (DA418566) runs inside the proof sub-blocks that always roll back; the bridge '
+    + 'edit is pinned by verify-dealapp-town-placed-by-own-pin.ts and the scraper half by '
+    + 'test_dealapp_island_town_by_own_pin_2026_10_19.py',
   '20261019001829_dealapp_town_placed_by_own_pin.sql':
     'changes no listing row: the one UPDATE (DA417737) runs inside the proof sub-blocks that always roll back, and the ' +
     'migration fails if a bridge row survives; the bridge edit itself is pinned by verify-dealapp-town-placed-by-own-pin.ts ' +
