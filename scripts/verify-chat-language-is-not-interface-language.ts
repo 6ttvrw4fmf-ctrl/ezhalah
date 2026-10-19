@@ -228,6 +228,9 @@ function persistenceRuntime() {
 }
 assert.match(screen,/const replyT = \(key: string, vars\?: Record<string, string \| number>\) => translate\(rfLang, key, vars\)/,'existing result closing notes stay in the reply language');
 assert(!screen.includes('translate_display'),'language switch never adds paid translation');
+// The buttons under a results turn speak the REPLY's language (owner 2026-10-18: an English reply had
+// «عرض المزيد» / «خلّنا نحدد الطلب أكثر» under it — «doesn't make sense»).
+assert(screen.includes("{replyT('Load more')}") && screen.includes("{replyT('Let’s narrow it down')}") && !screen.includes("{t('Load more')}") && !screen.includes("{t('Let’s narrow it down')}"),'results-turn buttons follow the reply language');
 console.log('PASS: message/request/fallback languages are independent of UI; latest titles persist and manual names win.');
 
 // Repeat the regression proof on every CI run, using source copies instead of changing the checkout.
@@ -250,5 +253,6 @@ if (!process.env.EZ_LANGUAGE_MUTATION_CHILD) {
   mustCatch('UI toggle rewrites existing result note', 'src/app/agent.tsx', 'const moreNoteText = replyT(', 'const moreNoteText = t(');
   mustCatch('stale restore overwrites current language', 'src/store.tsx', 'getLocaleRevision() === revisionBeforeRead', 'true');
   mustCatch('title summarizes in UI language', 'src/store.tsx', 'autoTitleForPrompt(v, detectLocale(v) ?? getLocale())', 'autoTitleForPrompt(v, getLocale())');
+  mustCatch('results-turn buttons in the UI language', 'src/app/agent.tsx', "{replyT('Let’s narrow it down')}", "{t('Let’s narrow it down')}");
   mustCatch('results overwrite latest title', 'src/store.tsx', ': chatId && prior?.title ? prior.title', ': false ? prior!.title');
 }
