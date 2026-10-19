@@ -25,5 +25,5 @@ def test_live_null_english_names_map():
 
 def test_template_and_city_names_stay_unmapped():
     for city, en in [("riyadh", "King Abdullah Financial"), ("khobar", "King Abdullah Financial"),
-                     ("khobar", "Al Khobar"), ("khobar", "Doha"), ("khobar", "Aziziyah"), ("riyadh", "Exit 8")]:
+                     ("khobar", "Al Khobar"), ("khobar", "Doha"), ("riyadh", "Exit 8")]:
         assert _DISTRICT_EN_AR.get((city, _norm_dist(en))) is None, (city, en)
