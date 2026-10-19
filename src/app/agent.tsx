@@ -686,7 +686,7 @@ export default function Agent() {
     fresh?: string;
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
-  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript } = useApp();
+  const { user, authChecked, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript } = useApp();
   // SHARE THIS SEARCH (owner 2026-10-17): a signed-in user's «مشاركة» sends the search itself with the
   // approved line «عقارات من {name} لك على إزهله 🦅 …» (src/lib/shareSearch.ts). The link lands on
   // Home, never on /agent — a pasted link must not run a search by itself (appSession gate). A guest,
@@ -4264,7 +4264,8 @@ export default function Agent() {
         {!docked ? <Text ref={noTranslateRef} style={s.title}>{t('Ezhalah')}</Text> : null}
         <View style={{ flex: 1 }} />
         {/* Logged-out sign-in (mobile only — desktop has the docked sidebar CTA). Owner 2026-08-19. */}
-        {!user && !docked && (
+        {/* NEVER FOR A SIGNED-IN USER, NOT EVEN FOR A MOMENT (owner 2026-10-18: «when I open Ezhalah logged in, the sign up / log in button shows then goes away»). During the session restore `user` is null, so `!user` alone drew it for every signed-in visitor; it waits for authChecked (store.tsx), exactly like SignInCard. */}
+        {authChecked && !user && !docked && (
           <Pressable
             style={[s.topSignIn, !topBarRoomy && s.topSignInNarrow]}
             onPress={openAuth}
