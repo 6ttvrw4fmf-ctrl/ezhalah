@@ -861,6 +861,12 @@ export const isTransportError = (err) => {
 // of disappearing.
 const TRANSPORT_PAGE_ERROR_SHAPES = [
   /Fetch API cannot load [\s\S]*due to access control checks/i, // WebKit's wording for a dead fetch
+  // WebKit's wording for a dead XHR — measured 2026-10-19 (sweep 39236332307, webkit mobile): Google's own
+  // One Tap status call «XMLHttpRequest cannot load https://accounts.google.com/gsi/status?… due to access
+  // control checks» (ITP, has_opted_out_fedcm=true) was filed as an Ezhalah defect on two journeys. It is the
+  // same class as the fetch line above (a third-party request the engine blocked), and the same class as
+  // Sentry REACT-NATIVE-D/E (a bare NetworkError DOMException, code 19, from our own Firefox sweep).
+  /XMLHttpRequest cannot load [\s\S]*due to access control checks/i,
   /\bLoad failed\b/,                                            // WebKit's generic fetch failure
   /The network connection was lost/i,                           // WebKit/CFNetwork
   /Failed to fetch/i,                                           // Blink
