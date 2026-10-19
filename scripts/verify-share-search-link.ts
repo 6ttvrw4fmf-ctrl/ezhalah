@@ -71,7 +71,7 @@ const meta = (prop: string) => new RegExp(`<meta (?:property|name)="${prop}" con
 check('the card title names the type, the place, the sender and إزهله; the line is Ezhalah\'s promise',
   meta('og:title') === 'شقق للإيجار في حي النرجس من يوسف على إزهله' && meta('og:description') === 'كل مواقع العقار في مكان واحد');
 check('every card URL follows the REQUEST\'S domain (a domain change needs no code change)',
-  meta('og:image') === 'https://new-domain.example/og-image-v5.png' && meta('og:url') === `https://new-domain.example/s/${fullPayload}`
+  meta('og:image') === 'https://new-domain.example/og-image-v6.png' && meta('og:url') === `https://new-domain.example/s/${fullPayload}`
   && !/vercel\.app/.test(html));
 check('the page sends a person to Home + ?share= (never /agent)',
   html.includes(`content="0;url=/?share=${fullPayload}"`) && html.includes(`location.replace("/?share=${fullPayload}")`) && !/\/agent/.test(html));
@@ -127,13 +127,15 @@ check('a place in the other script is left out, never mixed into the sentence',
 const EMOJI = /\p{Extended_Pictographic}/u;
 check('the title carries no emoji (no 👇, no 🦅)', shareMessage('يوسف', Q, 'ar') === 'شقق للإيجار في حي النرجس من يوسف على إزهله' && !EMOJI.test(shareMessage('يوسف', Q, 'ar') ?? ''));
 mustCatch('a message that brings 👇 back', EMOJI.test('شقق للإيجار 👇'));
-// The logo must be ≥ 300 px or WhatsApp DROPS it (owner screenshot 2026-10-18: the 192 px logo vanished).
-// A square 512 px logo is what WhatsApp shows as the small square on the side — the look the owner chose.
+// The logo must be SMALL: under 300 px WhatsApp shows it as the small square beside the text; at 512 px it
+// renders as a BIG banner over the card (owner's WhatsApp, 2026-10-18 11:42 PM: «the image is very big still»;
+// the 192 px logo showed as the small side square at 2:57 PM). Owner asked for small twice.
 const imgW = Number(/og:image:width" content="(\d+)"/.exec(html)?.[1] ?? 0);
 const imgH = Number(/og:image:height" content="(\d+)"/.exec(html)?.[1] ?? 0);
-check('the card logo is square and ≥ 300 px (WhatsApp shows it as the small side square; under 300 it vanishes)',
-  imgW >= 300 && imgW === imgH && meta('og:image') === 'https://new-domain.example/og-image-v5.png');
-mustCatch('a logo too small for WhatsApp to show', !(192 >= 300));
+const smallSquare = (w: number, h: number) => w > 0 && w === h && w < 300;
+check('the card logo is a small square under 300 px (WhatsApp side thumbnail, not a big banner)',
+  smallSquare(imgW, imgH) && meta('og:image') === 'https://new-domain.example/og-image-v6.png');
+mustCatch('the 512 px logo that WhatsApp draws as a big banner', !smallSquare(512, 512));
 {
   const agentSrc = (await import('node:fs')).readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
   const ret = /return \{ shareUrl: shareLink\(origin, payload\)[^}]*\}/.exec(agentSrc)?.[0] ?? '';

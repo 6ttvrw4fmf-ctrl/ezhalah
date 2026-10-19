@@ -1373,7 +1373,8 @@ export default function Home() {
               {/* Logged-out users always see a sign-in action in the top bar (owner 2026-08-19).
                   On desktop the docked sidebar already shows it; on mobile the sidebar is a drawer,
                   so without this the sign-in CTA is invisible until the hamburger is tapped. */}
-              {!user && !docked && (
+              {/* NEVER FOR A SIGNED-IN USER, NOT EVEN FOR A MOMENT (owner 2026-10-18: «when I open Ezhalah logged in, the sign up / log in button shows then goes away»). During the session restore `user` is null, so `!user` alone drew it for every signed-in visitor; it waits for authChecked (store.tsx), exactly like SignInCard. */}
+              {authChecked && !user && !docked && (
                 <Pressable
                   style={s.topSignIn}
                   onPress={openAuth}
