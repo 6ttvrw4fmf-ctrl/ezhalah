@@ -110,7 +110,28 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # 10-18 «misses» (0 of 4, CI re-read 39115342028, 10729207 and 10729184) were exactly that prose. A structured
     # null outranks any prose hit (law §2), so our NULL is the source's answer and the score must not ask from it.
     "amaall": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "private_entrance"),
+    # muktamel publishes features through its own taxonomy (scrapers/muktamel/run.py FEATURE_COLS: «مطبخ مجهز»,
+    # «مواقف خاصة», «مدخل مستقل», «مصعد», «تكييف», …), rendered as the page's `<ul class="features-list">` (CI re-read
+    # 39231636290). Its 10-19 «misses» (4 of 6) were description prose («مطبخ راكب», «موقف سيارة», «مدخل خاص بالشقة»)
+    # on ads whose own list ticks none of them (re-read 39228500483): a structured null outranks prose (law §2).
+    # Read by muktamel_props().
+    "muktamel": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room",
+                 "private_entrance", "furnished"),
 }
+# A rakez listing's page is its PROJECT's page: one shared feature list and every unit's price · rooms · area. A UNIT
+# trait the project list names («غرفة خادمة», «غرفة سائق», «مواقف خاصة», «مطبخ») describes some of the project's units,
+# not this one, so it is never stored per unit (scrapers/rakez/run.py project_answers, backlog 467). The page therefore
+# cannot state it for this unit either: silent, never a miss. 10-19: the rakez maid_room asks (3 of 5 misses) were
+# exactly this list. Building traits (lift, AC) stay scored: the scraper reads them from the same list.
+PROJECT_PAGE_UNIT_TRAITS: dict[str, tuple[str, ...]] = {
+    "rakez": ("maid_room", "driver_room", "parking", "kitchen", "private_entrance", "furnished"),
+}
+# A website whose listing_url is its SHARED list page, not the unit: safa has no standalone unit page (the unit is a
+# popup sheet, scrapers/safa/run.py fetch_unit), and «/units/rental?page=1&property_id=N» serves the same first page
+# of cards for every N (CI re-read 39228340160: 14146 and 13181 print the identical cards). Its «مفروشة بالكامل» chip
+# belongs to another unit's card; all 4 safa misses on 10-19 asked furnished from it. Such a page is not this ad:
+# unreadable, never counted as wrong.
+SHARED_LIST_PAGE_SITES = {"safa"}
 # WordPress «WP Residence» sites: the ticked checklist is the structured statement (wpresidence_props).
 WP_RESIDENCE_SITES = {"eastabha"}
 COL = {n: c for n, _, c, _ in FIELDS}
@@ -176,6 +197,9 @@ def structured_only(platform: str, results: dict[str, str], stored: dict, page: 
     for f in STRUCTURED_ONLY.get(platform, ()):
         if f in out and out[f] != UNREADABLE:
             out[f] = structured_result(stored.get(COL[f]), structured_says(page, f))
+    for f in PROJECT_PAGE_UNIT_TRAITS.get(platform, ()):
+        if f in out and out[f] != UNREADABLE:
+            out[f] = PAGE_SILENT
     return out
 
 
@@ -443,6 +467,63 @@ def wpresidence_props(body: str) -> list[dict]:
             for absent, label in _WPR_ITEM.findall(body or "") if not absent]
 
 
+# rakez prints the developer's WARRANTY block on a project page: «10 سنوات · الهيكل الإنشائي», «20 سنوات · المصاعد»,
+# «5 سنوات · التكييف» (CI re-read 39228336072, projects 15002 and 65739). A guarantee period is not the ad stating
+# that the unit has a lift or fitted air conditioning, and it is ambiguous on its face (law §6: ambiguous → NULL).
+# All 5 rakez misses on 10-19 asked air_conditioner from this heading. The headings are dropped from the evidence.
+WARRANTY_SITES = {"rakez"}
+_WARRANTY_HEADING = re.compile(r'<span[^>]*>\s*\d+\s*</span>\s*<span[^>]*>\s*(?:سنوات|سنة|سنه)\s*</span>\s*</div>\s*'
+                               r'<h3[^>]*>\s*([^<]{1,40}?)\s*</h3>')
+
+
+# A spec term about the building's COMMON areas is not the unit: «ممرات مكيفة» (air-conditioned corridors) is not
+# fitted AC in the flat. The scraper never stores it (scrapers/rakez/run.py _COMMON_AREA, 54 rows reverted on
+# 10-18); the 10-19 branch dry run's last rakez miss (11750314) asked air_conditioner from exactly that term. The
+# same rule is imported, so the score and the scraper cannot disagree about what a common area is.
+def _rakez_common_area():
+    from scrapers.rakez.run import _COMMON_AREA
+    return _COMMON_AREA
+
+
+def strip_warranty(page: dict, body: str) -> dict:
+    heads = {norm(html.unescape(t)) for t in _WARRANTY_HEADING.findall(body or "") if t.strip()}
+    common = _rakez_common_area()
+
+    def is_heading(x: str) -> bool:
+        # the evidence builder glues a short value onto the line before it («مكينة مصعد 10»), so a heading followed
+        # by nothing but a number is still the heading (11748121 / 11748137, branch dry run 39233528007)
+        nx = norm(x)
+        return any(nx == h or (nx.startswith(h + " ") and re.fullmatch(r"[\d\s]+", nx[len(h):])) for h in heads)
+
+    def keep_line(x: str) -> bool:
+        return not is_heading(x) and not common.search(x)
+
+    keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
+    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))
+    return {**page, "evidence_lines": keep, "text_head": head}
+
+
+# muktamel's taxonomy label → our field, exactly as its scraper maps the feature ids. A label is read only on an
+# exact match (a rooms entry «غرفة سائق مع حمام» or «مدخل سيارة» is a different item, never a guess).
+MUKTAMEL_LABELS = {"مصعد": "elevator", "مواقف خاصة": "parking", "مطبخ مجهز": "kitchen", "تكييف": "air_conditioner",
+                   "غرفة خادمة": "maid_room", "غرفة سائق": "driver_room", "مدخل مستقل": "private_entrance",
+                   "مفروشة": "furnished"}
+# The name structured_says() reads for each field (BOOL_KW), so a ticked item scores as the page's YES.
+_PROP_NAME = {**SANADAK_NAMES, "private_entrance": "مدخل خاص"}
+_MUK_FEATURES = re.compile(r'<ul class="features-list[^"]*"[^>]*>(.*?)</ul>', re.S)
+_MUK_ITEM = re.compile(r"<li[^>]*>([^<]{1,60})</li>")
+
+
+def muktamel_props(body: str) -> list[dict]:
+    """The ticked items of muktamel's own feature list: a listed item is a yes, an unlisted one is silence."""
+    ticked = {html.unescape(x).strip() for block in _MUK_FEATURES.findall(body or "") for x in _MUK_ITEM.findall(block)}
+    return [{"name": _PROP_NAME[f], "value": "نعم"} for lab, f in MUKTAMEL_LABELS.items() if lab in ticked]
+
+
+def is_muktamel(url: str) -> bool:
+    return "muktamel.com" in url
+
+
 def is_gathern(url: str) -> bool:
     return "gathern.co" in url
 
@@ -543,6 +624,10 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
+        if platform in SHARED_LIST_PAGE_SITES:
+            row["sampled"] += 1
+            row["unreadable_pages"] += 1
+            continue
         time.sleep(max(0.0, last + pace - time.monotonic()))
         last = time.monotonic()
         if is_wasalt(url) and wasalt is not None:
@@ -557,8 +642,12 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
             page = page_evidence(body) if status == 200 and body else None
             if page is not None and platform in NAV_LINK_SITES:
                 page = strip_nav(page, body)
+            if page is not None and platform in WARRANTY_SITES:
+                page = strip_warranty(page, body)
             if page is not None and platform in WP_RESIDENCE_SITES:
                 page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": wpresidence_props(body)}]}
+            if page is not None and is_muktamel(url):
+                page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": muktamel_props(body)}]}
             if page is not None and is_gathern(url):
                 page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": gathern_props(body)}]}
         if page is None:

@@ -79,6 +79,18 @@ def ld_listing(html: str) -> Optional[dict]:
     return None
 
 
+# Every label REGA's licence and deed blocks print. Some posts glue the next label onto the same line («… الملك فهد صاحب
+# الترخيص : <office> تاريخ انتهاء رخصة الإعلان : 2026-12-31»): without a break the district swallowed the licence holder's
+# line and the expiry (HRJ11188292238, HRJ11187750970) and the deed's «الحي:» swallowed «عمولة نقل الملكية» (HRJ11189101593).
+_BLOCK_LABELS = ("غرض الإعلان", "سعر الوحدة", "نوع العقار", "عمر العقار", "مساحة العقار", "واجهة العقار", "عدد الغرف",
+                 "رقم المخطط", "رقم القطعة", "عرض الشارع", "استخدامات العقار", "خدمات العقار", "الضمانات ومدتها",
+                 "الالتزامات الآخرى على العقار", "وصف موقع العقار", "صاحب الترخيص", "تاريخ انتهاء رخصة الإعلان",
+                 "المدينة", "الحي", "الموظف المسؤول عن الإعلان", "رقم جوال مسؤول الإعلان", "عمولة نقل الملكية",
+                 "موقع العقار على الخريطة")
+_GLUED_LABEL = re.compile(r"[ \t]+(?=(?:" + "|".join(map(re.escape, sorted(_BLOCK_LABELS, key=len, reverse=True)))
+                          + r")[ \t]*:)")
+
+
 def sections(desc: str) -> tuple[dict[str, str], dict[str, str]]:
     """(licence block, deed block) as {label: raw value}, person lines dropped. Empty dicts when absent."""
     lic: dict[str, str] = {}
@@ -90,7 +102,7 @@ def sections(desc: str) -> tuple[dict[str, str], dict[str, str]]:
     lic_txt = desc[i + len(LICENCE_HEAD): j if j > 0 else len(desc)]
     deed_txt = desc[j + len(DEED_HEAD):] if j > 0 else ""
     for txt, out in ((lic_txt, lic), (deed_txt, deed)):
-        txt = _PERSON_LINE_RE.sub("", txt)
+        txt = _PERSON_LINE_RE.sub("", _GLUED_LABEL.sub("\n", txt))
         for line in txt.split("\n"):
             m = re.match(r"\s*([^:\n]{2,60}?)\s*:\s*(.*)$", line)
             if m and m.group(1).strip() not in out:
@@ -121,6 +133,16 @@ SERVICE_COLUMNS = {
 
 def deal_of(raw: Optional[str]) -> Optional[str]:
     return DEAL.get((raw or "").strip().lower())
+
+
+def licence_deals(desc: str) -> list[Optional[str]]:
+    """The deal of EVERY licence block in the post, in order. A post can paste two REGA blocks (HRJ11190666849,
+    backlog 656: 1st «غرض الإعلان: Sell» with no price, 2nd «غرض الإعلان: إيجار · سعر الوحدة: 28000»); `sections()`
+    keeps the first value of each label, so the two blocks would be read as ONE «Buy 28,000»."""
+    i = (desc or "").find(LICENCE_HEAD)
+    if i < 0:
+        return []
+    return [deal_of(_clean(m.group(1))) for m in re.finditer(r"غرض الإعلان[ \t]*:[ \t]*([^\s|]+)", desc[i:])]
 
 
 def age_of(raw: Optional[str]) -> Optional[int]:
@@ -318,6 +340,7 @@ def parse_post(ld: dict[str, Any], page_html: str = "") -> dict[str, Any]:
         "licence_location": get("وصف موقع العقار"),
         "deal": deal_of(deal_raw),
         "deal_raw": deal_raw,
+        "licence_deals": licence_deals(desc),
         "price": _num(get("سعر الوحدة")),
         "price_raw": get("سعر الوحدة"),
         "property_type_ar": get("نوع العقار"),

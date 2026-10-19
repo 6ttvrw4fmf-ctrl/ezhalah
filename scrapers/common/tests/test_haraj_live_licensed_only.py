@@ -295,6 +295,17 @@ def test_liveness_controls_walk_back_past_a_quiet_hour(monkeypatch):
     assert R.liveness_controls(5, max_reads=4) == [] and seen == ["h3", "h2"]
 
 
+def test_liveness_controls_budget_outlasts_a_run_of_honest_non_offers(monkeypatch):
+    """2026-10-18 20:48 UTC: 20 reads found 3 live posts (the rest honest non-offers read «gone»), the gate
+    needs 5, and 6,317 ads were quarantined. The default budget reaches the 5th live post at read 40."""
+    monkeypatch.setattr(R, "hour_files", lambda: ["h1", "h2", "h3", "h4", "filling"])
+    monkeypatch.setattr(R, "ids_in", lambda u, pre, tight=False: [f"{u[1]}{i:02d}" for i in range(20)])
+    live = {"400", "405", "410", "300", "319"}            # 3 in the newest hour, 2 more only 20 reads later
+    monkeypatch.setattr(R, "_verify_gone", lambda ad: ("live" if ad[3:] in live else "gone", ""))
+    assert len(R.liveness_controls(5)) == 5
+    assert len(R.liveness_controls(5, max_reads=20)) == 3    # the old budget: what quarantined the recheck
+
+
 # ── several units in one licensed post = a catalogue (owner real-user check 2026-10-17) ─────────────
 @pytest.mark.parametrize("title,cat", [
     ("شقق تمليك فاخرة للسكن والا ستثمار ابحر الشمالية 3و4و 5غرف", True),   # HRJ11190739649, 1,161 m²
@@ -383,3 +394,47 @@ def test_a_rate_stated_anywhere_about_the_figure_is_per_meter(price, area, text)
 def test_mutation_a_mention_with_no_marker_anywhere_stays_a_total():
     # 11189120675: «عليها سوم 750» on 1,008 m² — no per-metre word for this figure (owner default: a total)
     assert R.land_price_basis(750, 1008, "أرض بمساحة مناسبة وموقع واعد، عليها سوم 750 والبيع قريب") == "total"
+
+
+# ── the post's own words disagree on Buy vs Rent: a doubt, never stored (backlog 656/672, 2026-10-19) ─────
+TWO_BLOCKS = (  # HRJ11190666849: a Sell block with no price, then an إيجار block priced 28,000
+    "معلومات العقار حسب الرخصة\nغرض الإعلان: Sell\nنوع العقار: Apartment\nمساحة العقار: 119.45\nعدد الغرف: 5\n"
+    "معلومات العقار حسب الرخصة\nغرض الإعلان: إيجار\nسعر الوحدة: 28000\nنوع العقار: شقة\nمساحة العقار: 119.45\n"
+    "وصف موقع العقار: حي مريخ بمدينة جدة .\n تاريخ انتهاء رخصة الإعلان : 2027-10-15\n-----\n"
+    "وصف موقع العقار حسب الصك\nالمدينة: جده\nالحي: مريخ\n")
+SELL_BLOCK = NO_DEED   # «غرض الإعلان: بيع · سعر الوحدة: 2000000»
+
+
+def _page(name, desc):
+    return '<script type="application/ld+json">' + json.dumps(ld(name, desc), ensure_ascii=False) + "</script>"
+
+
+def test_two_licence_blocks_with_different_deals_are_never_one_offer():
+    assert P.licence_deals(TWO_BLOCKS) == ["Buy", "Rent"]
+    row, _, skip, _ = mapped("شقة سكنية الايجار 5 غرف في حي التيسير (وادي مريخ) او للبيع", TWO_BLOCKS)
+    assert row is None and skip == "deal_conflict:blocks"
+    assert R._signal(200, _page("شقة سكنية الايجار 5 غرف", TWO_BLOCKS), False) == "gone"
+
+
+@pytest.mark.parametrize("title,why", [
+    ("ايجار شقه ارضي3غرف وصاله حي النور الدمام 20 الف السنه", "title"),   # stored Buy 1,000,000,000
+    ("شقه للايجار فى لبن قريب المخرج 3 غرف وصاله بسعر 35 الف", "title"),   # stored Buy 2,800,000
+    ("للإيجار عمارة في الخالدية", "title"),
+    ("عمارة للبيع في الخالدية", None),                                        # agrees with the Sell block
+    ("عمارة للبيع او للايجار في الخالدية", None),                             # names both: decides nothing
+    ("عمارة دخلها الايجاري 200 الف للبيع", None),                              # «الايجاري» is not a rent offer
+    ("عمارة في الخالدية", None),                                               # names neither
+])
+def test_a_title_that_names_the_other_deal_is_a_doubt(title, why):
+    row, _, skip, _ = mapped(title, SELL_BLOCK, city="المدينة المنورة")
+    if why:
+        assert row is None and skip == f"deal_conflict:{why}"
+        assert R._signal(200, _page(title, SELL_BLOCK), False) == "gone"
+    else:
+        assert not skip.startswith("deal_conflict")
+        assert R._signal(200, _page(title, SELL_BLOCK), False) == "live"
+
+
+def test_mutation_one_block_agreeing_with_its_title_is_still_stored():
+    row, _, skip, _ = mapped("شقة مميزة للإيجار في حي الجنادرية", FLAT_AR, city="الرياض")
+    assert skip == "" and row["transaction_type"] == "Rent" and P.licence_deals(FLAT_AR) == ["Rent"]

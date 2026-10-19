@@ -38,33 +38,33 @@ These win over THE PLAN's timeline below; THE PLAN's rules still hold. Replace t
 
 **Kept hard rules:** ONE PR early (`pytest scrapers/common/tests` + `npm run test:all` locally, then push once); read
 every failed site's exception TEXT in the first 15 min; a parser fix is fixed only when the RAW row changed;
-`issues_fixed` = PASS `:proof` rows for tonight's backlog items, counted by query.
+`issues_fixed` = PASS `:proof` rows for tonight's backlog items, counted by query; pick the proof before the fix.
 
-**NEW (10-17): pick the proof before the fix.** Before writing a fix, name the listing and the journey that will prove
-it, and check the tool can drive it: `customer-journey.mjs` cannot search type «أرض» (no box) and no rent search shows a
-rental without a period. A fix whose only carriers are unprovable stays UNKNOWN (10-17: two Haraj area fixes). Merge by
-~06:00 UTC so a ~15-min crawl lands before the 06:22 sync (rakez 10-17: merged 05:57, crawled 06:09–06:17, proven 06:27).
+**NEW (10-19): `haraj-sync.yml` is ONE concurrency slot (`group: haraj-sync`, one pending run).** A `--ref` dispatch
+waits behind the running :05 crawl (~1.5 h) and is CANCELLED by the next dispatch from anyone (10-19: my 05:18 proof
+run was replaced at 05:54 by another session's main dispatch). Before relying on a Haraj `--ids` proof, read
+`list_workflow_runs haraj-sync.yml`: dispatch only when nothing is pending, right after a crawl ends (~:35 of odd UTC
+hours), and never over someone else's pending run. **A line-anchored pin** (`scripts/verify-no-derived-price.ts`
+haraj `asking_price` line) moves whenever `scrapers/haraj/run.py` grows above it: re-pin in the same PR, and it makes
+the PR need the owner merge (scripts/).
 
-**Owed → first thing next run (10-19):**
-- **Haraj catalogues leave by strikes (owner fix #7341 + my 615 body rule).** 200 stored plural-title posts and
-  HRJ11190705938 read «gone» from the 10-18 ~21:00 UTC `fleet_liveness:haraj` APPLY on; grace 3 → hidden after the
-  10-20 pass. Each night read their `missing_count`; on 10-21 replay the owner's Jeddah «شقة للبيع» search and show
-  HRJ11190739649 / HRJ11190629474 gone (proof row). 608 (HRJ11190645357 «طلب») is at 2 strikes → gone after 10-18 21:00.
-- **645/584 dangling threshold (applied 20261018052758).** Proof = no `dangling_scrape_run` alert for
-  `fleet_liveness:muhaysini` or `wasalt_enum_shard` while a healthy run passes 3 h (muhaysini liveness ~07–12 UTC,
-  wasalt enum 10-19 21:00). Read `alert_event` for those keys, then close 645 and 584.
-- **613 wasalt 13746442:** NOT ours — wasalt's own archived payload (ar_data) carries salePrice 3,346,875,000 and the
-  row is hidden by the price gate. Re-read once a week; close when the list API serves 8,925,000.
-- **610/616 Haraj areas:** the carriers are rentals with no period (no customer search shows them). Values are right
-  in raw and index; keep UNKNOWN, do not count them as fixed.
-- Kept: 575/612 photo floors · 564 gathern 577 units redirecting home · 565 almuteb 503 · 646 aqalemhajer rows_collapse.
+**Owed → first thing next run (10-20):**
+- **#7661 Haraj deal conflict (656/672/679):** 112 searchable ads whose own words disagree on Buy vs Rent (e.g.
+  «ايجار شقه … 20 الف السنه» served as Buy 1,000,000,000). Merge state first; then ONE `--ids` re-read of the 112 ids
+  (list in backlog 679 / proof row 10-19) when the slot is free → notes must show `skip_deal_conflict` ≈ 112. Removal
+  from search then comes from ♻️'s strikes (`_signal` → gone).
+- **615 Haraj catalogues:** routed to ♻️ (backlog lifecycle, 10-19): `fleet_liveness:haraj` was QUARANTINED on 2 of 3
+  passes («opening controls 3/3 live»), so no strikes landed. Read their missing_count; nothing else to do on our side.
+- **#7662 rows_collapse:** proven (20 → 1 open, dwelleo kept). Only the merge is owed (migration 20261019051932 live).
+- Kept: 575/612 photo floors · 564 gathern redirects · 565 almuteb 503 · 613 wasalt 13746442 (source's own price).
 
-**10-18 facts:** the wasalt enum is healthy again (34/34 shards, 181,789 rows; liveness in-time 3.6% → 92.6%). «حي X» in a
-Haraj district is NOT a bug: it is the catalogue's own spelling in many cities (Riyadh «حي المنار» = 288 other listings).
+**10-19 facts:** `rows_seen` on `fleet_liveness:*` / `cleanup:*` / `verify_deletions:*` / `aqar_liveness*` labels is
+rows PROBED (fresh rows are skipped), never inventory; judge a site's size by its crawl label. The detector sweep
+(cron 38) runs hourly at :59 and takes ~5–7 min, so a detector fix is provable ~:06 after the hour.
 
-**Proof timing facts:** search sync :22 (commits ~:24–:26); detector sweep :29/:59; Wasalt enum 21:00 UTC every 2 days
-(~7 h when healthy); muhaysini nightly ends ~07:10 UTC; small-sources-sync is ONE queue — a dispatch during the nightly
-waits for it (rakez 10-17 waited 12 min); a Haraj crawl upserts everything at its END (04:19 run → rows at 04:59).
+**Proof timing facts:** search sync :22 (commits ~:24–:26); detector sweep :59 (ends ~:05); Wasalt enum 21:00 UTC
+every 2 days; muhaysini nightly ends ~07:10 UTC; small-sources-sync is ONE queue; Haraj crawl every 2 h at :05,
+~1.5 h, upserts at its END.
 
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «wire them so the next run turns out perfect … at the point where I don't need to check and agree on
@@ -636,3 +636,13 @@ night ended at 2/8 proven. **When choosing the 3 jobs, name for each the proof t
 `--ref <branch>` workflow re-read of the exact ids, never a strike count hours later); a job without one is paired with one
 that has one. 🔧 adds: the Haraj hand-check found 3 of 50 fresh ads whose title says للإيجار while the stored REGA block
 says Sell (656's class, backlog 672) — a rule that decides a contradiction is worth more than a rule that stores one side.
+
+## Lesson from 2026-10-19 (copied by 🔧 from your own reports — 10-17 and 10-18 said the same thing, so it is now a rule)
+- **Choose only jobs whose proof lands inside your 2-hour slot, and name the proof listing + journey BEFORE writing the
+  fix.** 10-17: two Haraj fixes ended UNKNOWN because the journey tool could not prove them. 10-18: two of three jobs could
+  only be proven by a liveness pass at ~21:00 UTC and the merge needed a human. A job without an in-slot proof is paired
+  with one that has one, or goes to ♻️ / the automatic liveness — never to your own queue.
+- **haraj-sync is ONE concurrency slot.** A `--ids` proof dispatched behind a running crawl is replaced by the next dispatch
+  (10-19: proof run 39203822704 cancelled at 05:54). Read `gh run list --workflow haraj-sync.yml` first and dispatch only
+  into an empty queue. The same holds for `small-sources-sync.yml`: on 10-19 one run (39218294587) stayed `in_progress`
+  from 07:47 for more than 5 hours and every dispatch behind it queued — read the run list before blaming a site.

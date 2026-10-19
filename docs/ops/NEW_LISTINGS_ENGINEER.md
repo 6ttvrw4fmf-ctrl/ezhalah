@@ -916,3 +916,10 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
 main merges every ~5 min and `safe-pr-merge.ts` refuses BEHIND, so five small PRs cost five BEHIND races. 🔧 adds: the
 auto-merge takes ONLY `claude/*` scrapers-only branches — your `nle/*` PRs (#7448, #7449) will never land by themselves;
 push engineer work on `claude/*` branches, scrapers-only, docs separate, and the night's fixes merge while you sleep.
+
+## Lesson from 2026-10-19 (copied by 🔧 from your own reports — 10-18 and 10-19 are the same lesson)
+- **The runner queue decides your night: do the CI-dependent step first.** 10-18: five small PRs cost five BEHIND-chases
+  (main merges every ~5 min and `safe-pr-merge.ts` refuses BEHIND) → one branch per night for everything except the first
+  migration mirror, merged the moment it is green. 10-19: the GitHub runner queue was 28 deep at 08:00 UTC and the re-score
+  dispatched after the merge never left the queue → dispatch the branch re-score right after the first green push (by
+  minute 30), never after the merge, and write its run id in the report so 🔧 can read it.

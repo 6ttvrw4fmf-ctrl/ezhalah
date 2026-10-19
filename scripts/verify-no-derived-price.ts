@@ -151,7 +151,8 @@ for (const f of pyFiles) {
 // sadin's: re-verify it is still the file's ONLY asking_price(title, description) call before re-pinning.
 // (2026-10-18: 332 → 338 — the district-precedence change above it added six lines; still the only call.)
 // (2026-10-19: 349 → 379 — licence_district() and its hook above it added thirty lines; still the only call.)
-const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:663', 'scrapers/haraj/run.py:379']);
+// (2026-10-19: 379 → 400 — deal_conflict() above map_post (backlog 656/672) added 21 lines; still the only call.)
+const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:663', 'scrapers/haraj/run.py:400']);
 const proseUnapproved = proseOffenders.filter(o => !PROSE_ALLOWLIST.has(o.split(': ')[0]));
 check('no scraper assigns a listing price from prose (outside the declared, dated exception)',
   proseUnapproved.length === 0);
