@@ -83,14 +83,17 @@ export function decodeSharePayload(raw: string | null | undefined): { q: SearchQ
 // (the base64url payload above) and keep working.
 export const SHARE_CODE_RE = /^[A-Za-z0-9]{8}$/;
 export const isShareCode = (raw: string | null | undefined): boolean => !!raw && SHARE_CODE_RE.test(raw);
-export type SharedChatCard = { q: SearchQuery; name: string; locale: 'ar' | 'en' };
+// q = null: a chat with no search in it (owner 2026-10-18, option A: «محادثة من يوسف على إزهله»).
+export type SharedChatCard = { q: SearchQuery | null; name: string; locale: 'ar' | 'en' };
 /** Validates a row the database returns (shared_chat_card / get_shared_chat); anything off is null. */
 export function sharedChatCardFrom(row: unknown): SharedChatCard | null {
   const r = row as { sender_name?: unknown; locale?: unknown; query?: unknown } | null;
   const name = firstName(String(r?.sender_name ?? ''));
-  const q = r?.query as SearchQuery | undefined;
-  if (!name || !q || typeof q !== 'object' || typeof q.location !== 'string') return null;
-  if (q.deal !== 'Rent' && q.deal !== 'Buy') return null;
+  const raw = r?.query as SearchQuery | undefined;
+  if (!name || !raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  // An empty query object is a chat with no search; anything else must be a real search.
+  const q = Object.keys(raw).length === 0 ? null : raw;
+  if (q && (typeof q.location !== 'string' || (q.deal !== 'Rent' && q.deal !== 'Buy'))) return null;
   return { q, name, locale: r?.locale === 'en' ? 'en' : 'ar' };
 }
 
@@ -130,6 +133,7 @@ const stripDistrict = (s: string) => s.trim().replace(/^حي\s+/, '').replace(/\
 export function shareTitle(name: string, q: SearchQuery | null | undefined, locale: 'ar' | 'en'): string | null {
   const n = firstName(name);
   if (!n) return null;
+  if (q === null) return locale === 'ar' ? `محادثة من ${n} على إزهله` : `A chat from ${n} on Ezhalah`;
   const phrase = sharePhrase(q, locale);
   return locale === 'ar' ? `${phrase} من ${n} على إزهله` : `${phrase} from ${n} on Ezhalah`;
 }
@@ -140,6 +144,7 @@ export function shareTitle(name: string, q: SearchQuery | null | undefined, loca
 export function shareInviteNote(name: string, q: SearchQuery | null | undefined, locale: 'ar' | 'en'): string | null {
   const n = firstName(name);
   if (!n) return null;
+  if (q === null) return locale === 'ar' ? `${n} شاركك محادثة` : `${n} shared a chat with you`;
   const phrase = sharePhrase(q, locale);
   return locale === 'ar' ? `${n} شاركك: ${phrase}` : `${n} shared with you: ${phrase}`;
 }
@@ -181,8 +186,9 @@ export const SHARE_CARD = {
   ar: { desc: 'كل مواقع العقار في مكان واحد', site: 'إزهله' },
   en: { desc: 'Every real-estate site in one place', site: 'Ezhalah' },
 } as const;
-// Small on purpose (owner 2026-10-18: the logo was «very very big»): under 300 px WhatsApp shows a thumbnail.
-export const SHARE_CARD_IMAGE_PATH = '/icon-192.png';
+// The square 512 px logo (owner 2026-10-18): WhatsApp shows it as the small square beside the text. Under
+// 300 px WhatsApp drops the picture entirely — the 192 px icon was tried and vanished.
+export const SHARE_CARD_IMAGE_PATH = '/og-image-v5.png';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
@@ -209,7 +215,7 @@ export function shareCardHtml(origin: string, rawPayload: string | null | undefi
     + `<meta property="og:type" content="website"><meta property="og:site_name" content="${esc(c.site)}">`
     + `<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(c.desc)}">`
     + `<meta property="og:url" content="${esc(url)}"><meta property="og:image" content="${esc(image)}">`
-    + `<meta property="og:image:width" content="192"><meta property="og:image:height" content="192">`
+    + `<meta property="og:image:width" content="512"><meta property="og:image:height" content="512">`
     + `<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${esc(title)}">`
     + `<meta name="twitter:description" content="${esc(c.desc)}"><meta name="twitter:image" content="${esc(image)}">`
     + `<meta http-equiv="refresh" content="0;url=${esc(to)}">`

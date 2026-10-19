@@ -89,7 +89,8 @@ type AppState = {
   saveTranscript: (id: string, transcript: PersistedChat) => void;
   // A chat someone SHARED with this user (owner 2026-10-17): becomes a NEW entry in their own history,
   // holding the copied conversation — theirs from now on, never synced back. Returns the new entry id.
-  importSharedChat: (q: SearchQuery, transcript: PersistedChat) => string;
+  // q = null: a shared chat with no search in it — saved like any chat-only row (emptyQuery, titled from its first message).
+  importSharedChat: (q: SearchQuery | null, transcript: PersistedChat) => string;
   // Fetch a transcript this device no longer holds locally (pruned cache / fresh sign-in) from the
   // server, validate it, and attach it to the entry. Resolves to the transcript or null.
   hydrateTranscript: (id: string) => Promise<PersistedChat | null>;
@@ -1079,10 +1080,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       importSharedChat: (q, transcript) => {
         const id = 'h' + Date.now();
         const tRev = Date.now();
-        const next: HistoryItem = {
-          id, label: queryLabel(q), query: q, ts: Date.now(), starred: false,
-          title: autoTitleForQuery(q, getLocale()), titleSource: 'auto', transcript, tRev,
-        };
+        const firstAsk = String((transcript.msgs.find((m) => m.role === 'user') as { text?: unknown } | undefined)?.text ?? '').trim();
+        const next: HistoryItem = q
+          ? { id, label: queryLabel(q), query: q, ts: Date.now(), starred: false,
+              title: autoTitleForQuery(q, getLocale()), titleSource: 'auto', transcript, tRev }
+          : { id, label: firstAsk, query: emptyQuery(), ts: Date.now(), starred: false,
+              title: firstAsk ? autoTitleForPrompt(firstAsk, getLocale()) : (getLocale() === 'ar' ? 'محادثة' : 'Chat'),
+              titleSource: 'auto', transcript, tRev };
         // Same direct-then-state write as saveTranscript, so the entry is on disk before the chat opens.
         const merged = [next, ...historyRef.current].slice(0, 50);
         historyRef.current = merged;
