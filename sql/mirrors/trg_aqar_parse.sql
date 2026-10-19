@@ -17,7 +17,13 @@
 -- Re-verified 2026-09-27: UNCHANGED. Migration 20260927070718 (price_fidelity snapshot) names
 --   trg_aqar_parse only inside mon_detect_price_fidelity's alert text, so the staleness guard wants a
 --   fresh stamp. md5 of pg_get_functiondef from production = e94517e6…, identical to the one below.
--- Verified byte-exact; md5 of everything below this header block: e94517e6c07ddb44ac946fe64b1b7ee0
+-- Refreshed 2026-10-18: TWO needle edits, both applied to production.
+--   20261018234721: the Buy total is no longer reimposed when the scraper's own price_evidence says the headline
+--     is a per-metre rate (`and coalesce(NEW.source_capture->'price_evidence'->>'unit', '') <> 'per_meter'`).
+--   20261018235847: `direction` is written only through public.aqar_facade(), the closed facade vocabulary.
+--   md5 of pg_get_functiondef from production = 947fd49b…, equal to this body rebuilt from the 2026-09-27 mirror
+--   plus exactly those two edits.
+-- Verified byte-exact; md5 of everything below this header block: 947fd49be1e4914667714cd5da89a6fb
 CREATE OR REPLACE FUNCTION public.trg_aqar_parse()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -34,7 +40,7 @@ begin
     return NEW;
   end;
 
-  NEW.direction       := p->>'direction';
+  NEW.direction       := public.aqar_facade(p->>'direction');
   NEW.last_update     := coalesce(p->>'last_update', NEW.last_update);
   NEW.date_added      := coalesce(p->>'date_added', NEW.date_added);
   NEW.license_number  := p->>'license_number';
@@ -52,7 +58,8 @@ begin
 
   if NEW.transaction_type='Buy' then
     parsed_price := public.safe_bigint(p->>'price');
-    if parsed_price is not null then
+    if parsed_price is not null
+       and coalesce(NEW.source_capture->'price_evidence'->>'unit', '') <> 'per_meter' then
       NEW.price_total := parsed_price;         -- trigger fully owns Buy total (source-parsed)
     end if;
     -- FIDELITY GUARD (2026-07-28, P0): the Python enrich fallback pattern `(\d{6,9})` before a bare
