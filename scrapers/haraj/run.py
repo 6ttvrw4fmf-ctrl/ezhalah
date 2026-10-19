@@ -165,6 +165,24 @@ def is_catalogue_title(title: Optional[str]) -> bool:
     return False
 
 
+def deal_conflict(title: Optional[str], p: dict) -> Optional[str]:
+    """Why the post's own words disagree on Buy vs Rent, or None. A doubt is never stored (backlog 656/672):
+    - "blocks": two REGA licence blocks with different deals (HRJ11190666849: Sell + إيجار 28,000, stored as
+      Buy 28,000);
+    - "title": the title names ONE deal and the licence block the other. Measured 2026-10-19 on the 8,035 stored
+      ads: 111 (1.4%), e.g. «ايجار شقه ارضي3غرف … 20 الف السنه» with a Sell block of 1,000,000,000 and «شقه
+      للايجار فى لبن … بسعر 35 الف» with Sell 2,800,000 — the owner's SALE licence pasted under a rental, so
+      storing the block's side served a rental as a sale at the wrong price. The ad itself does not settle it,
+      so it is not a listing. A title naming both («… الايجار … او للبيع») or neither decides nothing."""
+    deals = {d for d in p.get("licence_deals") or [] if d}
+    if len(deals) > 1:
+        return "blocks"
+    said = X.deal_of(title or "", "")
+    if said and p.get("deal") and said != p["deal"]:
+        return "title"
+    return None
+
+
 def licence_district(p: dict, city_id: Optional[int]) -> tuple[Optional[str], Optional[str]]:
     """(district, district_source) from REGA's licence location when the deed names a city but no «الحي:» (owner
     2026-10-19): only when the licence's city IS the deed's city (same_city: by name or the catalogue alias table).
@@ -205,6 +223,9 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
         return None, "", "deal_unstated", facts
     if is_catalogue_title(ld.get("name")) or X.body_offers_several_units(ld.get("description")):
         return None, "", "catalogue", facts
+    conflict = deal_conflict(ld.get("name"), p)
+    if conflict:
+        return None, "", f"deal_conflict:{conflict}", facts
     usage = usage_of(p["usage_raw"])
     ptype = type_of(p["property_type_ar"], usage, ld.get("name"))
     if not ptype:
@@ -597,6 +618,9 @@ def _signal(status, body, moved):
         return "gone"
     if X.body_offers_several_units(desc):     # the same, offered in the body (backlog 615, 2026-10-18)
         return "gone"
+    p = P.parse_post(ld, body)
+    if p["rega_block"] and p["deal"] and deal_conflict(ld.get("name"), p):
+        return "gone"                       # its own words disagree on the deal: never a listing (656/672, 10-19)
     return "live"
 
 
