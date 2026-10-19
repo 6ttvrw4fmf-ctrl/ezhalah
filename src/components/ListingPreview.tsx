@@ -672,7 +672,16 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                     <View style={s.split}>
                       {halves.map((h) => (
                         <View key={h.key} style={[s.half, h.gov && s.halfGov]}>
-                          <Text numberOfLines={1} style={[s.halfTitle, tx]}>{h.title}</Text>
+                          <View style={[s.halfHeading, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                            {!h.gov && <Image
+                              source={require('../../assets/icons/falconer-property.png')}
+                              contentFit="contain"
+                              accessible={false}
+                              testID="listed-now-falconer-logo"
+                              style={s.halfLogo}
+                            />}
+                            <Text numberOfLines={1} style={[s.halfTitle, { flexShrink: 1 }, tx]}>{h.title}</Text>
+                          </View>
                           <Text numberOfLines={1} style={[s.halfSub, tx]}>{h.sub}</Text>
                           <View style={[s.tag, h.gov && s.tagGov, s.halfTag]}><Text style={[s.tagTx, h.gov && s.tagGovTx]}>{h.tag}</Text></View>
                           {labels.map((label, i) => cell(label, h.rows[i], `${h.key}-${i}`))}
@@ -1121,6 +1130,8 @@ const s = StyleSheet.create({
   half: { flex: 1, minWidth: 0, gap: 6 },
   halfGov: { borderStartWidth: 1, borderStartColor: colors.line, paddingStart: 10 },
   halfTitle: { fontSize: 15, fontWeight: '700', color: colors.ink },
+  halfHeading: { alignItems: 'center', gap: 6, minHeight: 30 },
+  halfLogo: { width: 30, height: 30, flexShrink: 0 },
   halfSub: { fontSize: 12, color: colors.muted, marginTop: -4 },
   halfTag: { alignSelf: 'flex-start', marginBottom: 2 },
   cell2: { gap: 1 },
