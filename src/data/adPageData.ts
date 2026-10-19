@@ -97,7 +97,14 @@ export const typeWordAr = (n: number, typeAr: string): string => (n >= 3 && n <=
 export type DistrictPlace = { query: string; district: string; city: string };
 // + Wasalt (owner 2026-10-19: «map Wasalt like Aqar»). Its pin comes from the Arabic detail page; an ad
 // whose page is not fetched yet (or truly has no pin) shows the district/city border meanwhile.
-export const DISTRICT_MAP_PLATFORMS: readonly string[] = ['aqar', 'aqarmonthly', 'wasalt'];
+export const DISTRICT_MAP_PLATFORMS: readonly string[] = [
+  'aqar', 'aqarmonthly', 'wasalt',
+  // Owner 2026-10-19 («check; if they don't have a pin, do the district/city border»): the ten largest
+  // native-preview sites. Ksaaqar and Mustqr publish no pin (3 ads each checked live; mustqr's API
+  // restricts lat/lng); the other eight publish one that the scraper reads partly (arkaan, alshawaf)
+  // or not yet (sakan, abralosol, nofodh, bossbih, aqalemhajer, reinvest) — the border bridges until it does.
+  'sakan', 'abralosol', 'nofodh', 'arkaan', 'bossbih', 'ksaaqar', 'mustqr', 'aqalemhajer', 'alshawaf', 'reinvest',
+];
 /** The place an Aqar ad's own link names, e.g. sa.aqar.fm/شارع-الصليحى-212-الفرعاء-منطقة-عسير-6836489 →
  *  «شارع الصليحى 212 الفرعاء منطقة عسير، السعودية». Only sa.aqar.fm; the trailing ad number is dropped; a
  *  link that names nothing but the country («المملكة-العربية-السعودية-…») names no place → null. */
