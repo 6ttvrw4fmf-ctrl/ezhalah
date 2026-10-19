@@ -129,3 +129,26 @@ def test_the_six_sites_are_on_the_border_map_meanwhile():
     data = (ROOT / "src" / "data" / "adPageData.ts").read_text(encoding="utf-8")
     for p in ("sakan", "abralosol", "nofodh", "bossbih", "aqalemhajer", "reinvest"):
         assert f"'{p}'" in data.split("DISTRICT_MAP_PLATFORMS")[1].split("];")[0]
+
+
+def test_abralosol_and_bossbih_follow_a_short_link_too():
+    # measured 2026-10-19: abralosol 7890 links its pin only as maps.app.goo.gl; the office sites share one template
+    ab = _src("abralosol")
+    assert 'pin_from_html(page) or pin_from_short_link(short_maps_link(page), lambda u: resolve_redirect(s, u))' in ab
+    bo = _src("bossbih")
+    assert 'd["pin"] = pin_from_short_link(short_maps_link(r.text), lambda u: resolve_redirect(s, u))' in bo
+
+
+def test_a_consent_interstitial_still_yields_the_pin():
+    # Google answers a datacenter address with consent.google.com and hides the Maps URL, encoded,
+    # in `continue=`; the pair must still be read from it.
+    consent = ("https://consent.google.com/m?continue=https%3A%2F%2Fwww.google.com%2Fmaps%3Fq%3D25.3152163"
+               "%2C49.6193885%26entry%3Dgps&gl=US&m=0&pc=m&uxe=eomtm&hl=en")
+    s = _Sess({"https://maps.app.goo.gl/c": _Resp(302, consent)})
+    assert resolve_redirect(s, "https://maps.app.goo.gl/c") is not None
+    assert pin_from_short_link("https://maps.app.goo.gl/c", lambda u: resolve_redirect(s, u)) == {
+        "latitude": 25.3152163, "longitude": 49.6193885}
+    # and a consent page reached only through the client's own follow
+    s2 = _Sess({}, final=consent)
+    assert pin_from_short_link("https://maps.app.goo.gl/d", lambda u: resolve_redirect(s2, u)) == {
+        "latitude": 25.3152163, "longitude": 49.6193885}
