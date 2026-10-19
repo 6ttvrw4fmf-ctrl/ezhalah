@@ -121,9 +121,15 @@ def resolve_redirect(session, url: str, hops: int = 4) -> Optional[str]:
                 if hit:
                     break
                 continue
-            hit = _maps_url_in_body(getattr(r, "text", None))     # a 200 interstitial names the destination
+            body = getattr(r, "text", None) or ""
+            hit = _maps_url_in_body(body)     # a 200 interstitial names the destination
             if hit:
                 seen.append("pair in body")
+            else:
+                # Diagnostic for the crawl log: what did Google answer? (title + the first Maps/redirect hint)
+                t = re.search(r"<title>(.{0,80})", body, re.S)
+                g = re.search(r".{0,40}(?:google\.[a-z.]+/maps|http-equiv|window\.location|sorry|unusual traffic|consent)[^<]{0,120}", body, re.I)
+                seen.append(f"body {len(body)}B title={t.group(1).strip() if t else chr(63)} hint={g.group(0).strip() if g else chr(45)}")
             break
     except Exception as e:  # noqa: BLE001 — fall through to the client's own follow
         seen.append(f"manual hop raised {type(e).__name__}")
