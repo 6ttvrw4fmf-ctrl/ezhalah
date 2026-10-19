@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 from typing import Callable, Optional
+from urllib.parse import unquote
 
 from scrapers.common.source_pin import pin_dict
 
@@ -65,32 +66,56 @@ def pin_from_short_link(url: Optional[str], resolve: Callable[[str], Optional[st
         final = resolve(url)
     except Exception:  # noqa: BLE001 — a failed hop is "no pin this fetch", never a crash
         return {}
+    final = _maps_url_in(final)
     if not final:
         return {}
     m = _MAPS_LINK.search(final)
     return pin_dict(m.group(1), m.group(2)) if m else {}
 
 
+_DEBUG_LEFT = [3]   # the first few resolutions of a run are printed, so a crawl log shows what Google answered
+
+
+def _maps_url_in(candidate: Optional[str]) -> Optional[str]:
+    """The candidate itself when it carries a pair — also after URL-decoding, because Google's
+    consent interstitial for datacenter addresses hides the Maps URL inside `continue=…%3Fq%3D…`."""
+    if not candidate:
+        return None
+    for form in (candidate, unquote(candidate), unquote(unquote(candidate))):
+        if _MAPS_LINK.search(form):
+            return form
+    return None
+
+
 def resolve_redirect(session, url: str, hops: int = 4) -> Optional[str]:
     """The URL a short link lands on. First by hand, hop by hop, so Maps itself is never loaded
     (measured 2026-10-19: goo.gl → maps.google.com?q=LAT,LNG on the first hop). If that reads
     nothing — a client that cannot do a manual hop, or a shape we do not know — let the client
-    follow the redirects itself and read the final URL it reports."""
-    cur = url
+    follow the redirects itself and read the final URL it reports (decoded, see _maps_url_in)."""
+    cur, seen, hit = url, [], None
     try:
         for _ in range(hops):
             r = session.get(cur, allow_redirects=False, timeout=20)
             loc = r.headers.get("location") or r.headers.get("Location")
+            seen.append(f"{r.status_code}→{(loc or '')[:90]}")
             if r.status_code in (301, 302, 303, 307, 308) and loc:
                 cur = loc
-                if _MAPS_LINK.search(cur):
-                    return cur
+                hit = _maps_url_in(cur)
+                if hit:
+                    break
                 continue
             break
-    except Exception:  # noqa: BLE001 — fall through to the client's own follow
-        pass
-    if _MAPS_LINK.search(cur):
-        return cur
-    r = session.get(url, allow_redirects=True, timeout=30)
-    final = str(getattr(r, "url", "") or "")
-    return final if _MAPS_LINK.search(final) else None
+    except Exception as e:  # noqa: BLE001 — fall through to the client's own follow
+        seen.append(f"manual hop raised {type(e).__name__}")
+    if not hit:
+        try:
+            r = session.get(url, allow_redirects=True, timeout=30)
+            final = str(getattr(r, "url", "") or "")
+            seen.append(f"follow→{final[:90]}")
+            hit = _maps_url_in(final)
+        except Exception as e:  # noqa: BLE001
+            seen.append(f"follow raised {type(e).__name__}")
+    if _DEBUG_LEFT[0] > 0:
+        _DEBUG_LEFT[0] -= 1
+        print(f"   ⓘ short-link pin {url[:60]}: {' | '.join(seen)} → {'pin' if hit else 'none'}", flush=True)
+    return hit
