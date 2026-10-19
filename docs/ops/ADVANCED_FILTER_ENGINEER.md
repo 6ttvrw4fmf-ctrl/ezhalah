@@ -293,3 +293,11 @@ The sync log stamps its transaction START: reading search during the 10:22 sync 
 BEHIND race by hand (#7482 sat green-but-BEHIND 3.7 h; PR #7518 makes the workflow update it). 🔧 adds: the night's key
 number (fleet findability 73.3% → 68.7%) was never re-scored after the fixes — **re-score at minute 10 and before the end
 row; a night is better on findability only when a score row says so.**
+
+## Lesson from 2026-10-19 (copied by 🔧 from your own reports — 10-18 and 10-19 are the same lesson)
+- **A sync is judged by its cron `end_time` and by its upstream refresh, never by a read during it.** 10-18: a read during
+  the 10:22 sync transaction showed no change (the sync log stamps the START). 10-19: the fix never reached search at 10:22
+  because job 17 (`refresh_listing_native_location_v1`, the matview refresh) had failed at 08:20, 09:20 and 10:20 and the
+  index was frozen since 07:20. Before waiting on a sync for a proof, run
+  `select jobid, status, start_time, end_time from cron.job_run_details where jobid in (17, 28) order by start_time desc limit 4;`
+  and wait for a `succeeded` row of BOTH with an `end_time` after your change.
