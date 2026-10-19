@@ -608,6 +608,12 @@ LINE_PLACE_CITY_AR = {
 }
 
 
+# A place the page names that is a catalogue town under another written form, for the OWN-PIN rule only (owner
+# 2026-10-19): «جزيرة فرسان» is the island of «فرسان», a town both Jazan and Asir hold. The pin still decides; the
+# page's own word stays in city_ar and the catalogue form travels as additional_info.catalog_town_ar.
+TOWN_OF_PLACE_AR = {"جزيرة فرسان": "فرسان"}
+
+
 def _location_line_place_ar(html: str) -> Optional[str]:
     """The place the page's location line names (A of «A, حي X», any trailing « - area» dropped), when
     exactly one place is named. Used ONLY when the title carries no city."""
@@ -1218,10 +1224,13 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     }
     # A town that is a city in several regions (الكهفة, الدرب, قصيباء …) is placed by the ad's own pin, or not at all
     # (owner 2026-10-18). resolve_dealapp_city() reads pin_city_id only with this provenance.
-    pin_city_id = city_by_own_pin(city_ar, lat, lng) if (city_ar and not city) else None
+    town = TOWN_OF_PLACE_AR.get(city_ar or "", city_ar)
+    pin_city_id = city_by_own_pin(town, lat, lng) if (city_ar and not city) else None
     if pin_city_id:
         info["pin_city_id"] = pin_city_id
         info["city_source"] = "own_pin_disambiguation"
+        if town != city_ar:
+            info["catalog_town_ar"] = town
     info = {k: v for k, v in info.items() if v not in (None, "", "—")}
 
     listing_url = f"{BASE}/ar/ad-details/{adid}"
