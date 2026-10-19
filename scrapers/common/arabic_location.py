@@ -21,6 +21,8 @@ and Jazan). For those, this NEVER guesses — it resolves only when a region hin
 """
 from __future__ import annotations
 
+import json
+import math
 import os
 import re
 import threading
@@ -752,3 +754,65 @@ def is_ambiguous_standalone_word(word: Optional[str]) -> bool:
     if not word:
         return False
     return norm_ar(word) in _AMBIGUOUS_NORMALIZED
+
+
+# ── A town name that is a city in several regions, placed by the ad's OWN pin (owner 2026-10-18) ──
+# Region outlines: src/data/saRegionPaths.json (geoBoundaries ADM1, built by scripts/generate-sa-region-paths.ts with the
+# projection below and simplified by up to ~5 km). PIN_MARGIN_KM keeps a pin near another candidate's border unplaced.
+PIN_MARGIN_KM = 15.0
+_REGION_PATHS = os.path.join(os.path.dirname(__file__), "..", "..", "src", "data", "saRegionPaths.json")
+_PK = math.cos(math.radians((16.2 + 32.3) / 2))
+_PSCALE = 400 / ((55.8 - 34.4) * _PK)
+_KM_PER_UNIT = 111.2 / _PSCALE
+_REGION_RINGS: dict[int, list[list[tuple[float, float]]]] = {}
+
+
+def _rings() -> dict[int, list[list[tuple[float, float]]]]:
+    if not _REGION_RINGS:
+        with open(_REGION_PATHS, encoding="utf-8") as f:
+            for r in json.load(f)["regions"]:
+                _REGION_RINGS[r["id"]] = [[tuple(map(float, p.split())) for p in sub.split("L")]
+                                          for sub in re.findall(r"M([^MZ]+)Z", r["d"])]
+    return _REGION_RINGS
+
+
+def _inside(x: float, y: float, rings: list) -> bool:
+    c = False
+    for ring in rings:
+        for (x0, y0), (x1, y1) in zip(ring, ring[1:] + ring[:1]):
+            if (y0 > y) != (y1 > y) and x < x0 + (y - y0) * (x1 - x0) / (y1 - y0):
+                c = not c
+    return c
+
+
+def _km_to(x: float, y: float, rings: list) -> float:
+    best = math.inf
+    for ring in rings:
+        for (x0, y0), (x1, y1) in zip(ring, ring[1:] + ring[:1]):
+            dx, dy = x1 - x0, y1 - y0
+            t = max(0.0, min(1.0, ((x - x0) * dx + (y - y0) * dy) / ((dx * dx + dy * dy) or 1.0)))
+            best = min(best, math.hypot(x - x0 - t * dx, y - y0 - t * dy))
+    return best * _KM_PER_UNIT
+
+
+def city_by_own_pin(city_ar: Optional[str], lat, lng) -> Optional[int]:
+    """The catalogue city a town name means when that name is a city in SEVERAL regions (dealapp «الكهفة»: Eastern and
+    Hail), decided by the ad's own pin. The pin must fall inside exactly one candidate's region (so inside KSA), at least
+    PIN_MARGIN_KM from every other candidate's region, and that region must hold exactly one city of that name
+    («الرويضة» is twice in Riyadh: never placed). A one-city name returns None: it needs no pin."""
+    _load()
+    try:
+        lat, lng = float(lat), float(lng)
+    except (TypeError, ValueError):
+        return None
+    cands = {(cid, rid) for cid, rid in _CITY.get(norm_ar(city_ar), []) if rid is not None}
+    if len({cid for cid, _ in cands}) < 2:
+        return None
+    x, y = (lng - 34.4) * _PK * _PSCALE, (32.3 - lat) * _PSCALE
+    rings = _rings()
+    regions = {rid for _, rid in cands if rid in rings}
+    home = [rid for rid in regions if _inside(x, y, rings[rid])]
+    if len(home) != 1 or any(_km_to(x, y, rings[rid]) < PIN_MARGIN_KM for rid in regions - set(home)):
+        return None
+    hits = [cid for cid, rid in cands if rid == home[0]]
+    return hits[0] if len(hits) == 1 else None
