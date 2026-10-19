@@ -76,7 +76,7 @@ class _Sess:
     def __init__(self, hops, final=None):
         self.hops, self.calls, self.final = hops, [], final
 
-    def get(self, url, allow_redirects=False, timeout=20):
+    def get(self, url, allow_redirects=False, timeout=20, proxies=None):
         self.calls.append(url)
         if allow_redirects:
             r = _Resp(200)
@@ -93,7 +93,7 @@ def test_resolve_redirect_falls_back_to_the_clients_own_follow():
         "latitude": 25.3152163, "longitude": 49.6193885}
     # a manual hop that raises also falls back rather than failing the ad
     class _Boom(_Sess):
-        def get(self, url, allow_redirects=False, timeout=20):
+        def get(self, url, allow_redirects=False, timeout=20, proxies=None):
             if not allow_redirects:
                 raise RuntimeError("no manual hops here")
             return super().get(url, allow_redirects, timeout)
@@ -170,3 +170,23 @@ def test_a_200_interstitial_names_the_destination_in_its_body():
     r2.text = "<html>nothing here</html>"
     s2 = _Sess({"https://maps.app.goo.gl/f": r2})
     assert pin_from_short_link("https://maps.app.goo.gl/f", lambda u: resolve_redirect(s2, u)) == {}
+
+
+def test_the_short_link_hop_uses_the_proxy_only_when_the_job_has_one(monkeypatch):
+    # owner 2026-10-19 («ok use the proxy»): only the goo.gl hop, only when WASALT_PROXY_URL is set
+    class _Cap(_Sess):
+        def __init__(self, hops):
+            super().__init__(hops)
+            self.kw = []
+
+        def get(self, url, allow_redirects=False, timeout=20, proxies=None):
+            self.kw.append(proxies)
+            return super().get(url, allow_redirects, timeout)
+    monkeypatch.setenv("WASALT_PROXY_URL", "http://user:pw@gw.example:823")
+    s = _Cap({"https://maps.app.goo.gl/p": _Resp(302, "https://maps.google.com?q=25.3152163,49.6193885&entry=gps")})
+    assert resolve_redirect(s, "https://maps.app.goo.gl/p") is not None
+    assert s.kw == [{"http": "http://user:pw@gw.example:823", "https": "http://user:pw@gw.example:823"}]
+    monkeypatch.delenv("WASALT_PROXY_URL")
+    s2 = _Cap({"https://maps.app.goo.gl/p": _Resp(302, "https://maps.google.com?q=25.3152163,49.6193885&entry=gps")})
+    assert resolve_redirect(s2, "https://maps.app.goo.gl/p") is not None
+    assert s2.kw == [None]
