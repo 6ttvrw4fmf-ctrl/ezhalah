@@ -20,7 +20,7 @@ export const SHARE_BLURB_AR = 'تدور على عقار وتبي تشوف الم
 // The preview CARD's own line (owner 2026-10-18: the card repeated the sent message and was cut off).
 // middleware.ts serves link-preview bots the same line WITH live numbers (src/lib/homeCard.ts); this
 // number-free form is the static fallback. Pinned equal to HOME_CARD_FALLBACK_AR.
-export const SHARE_CARD_DESC_AR = 'محرك بحث عقاري بالذكاء الاصطناعي، كل مواقع العقار في السعودية في مكان واحد.';
+export const SHARE_CARD_DESC_AR = 'كل مواقع العقار في السعودية في مكان واحد.';
 export const SHARE_BLURB_EN = 'Looking for a property and want to see everything on offer in one place? Ezhalah, the smarter way to find properties in the Kingdom.';
 export const SHARE_LEAD_AR = SHARE_BLURB_AR;
 export const SHARE_LEAD_EN = SHARE_BLURB_EN;

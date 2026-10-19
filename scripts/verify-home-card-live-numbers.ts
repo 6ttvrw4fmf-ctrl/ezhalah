@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import {
   homeCardDescription, homeCardFactsFrom, homeCardHtml, isPreviewBot,
-  HOME_CARD_FALLBACK_AR, HOME_CARD_IMAGE_PATH, HOME_CARD_TITLE_AR,
+  HOME_CARD_FALLBACK_AR, HOME_CARD_IMAGE_PATH, HOME_CARD_TITLE_AR, HOME_CARD_HEADLINE_AR,
 } from '../middleware.ts';
 
 let failed = 0;
@@ -19,7 +19,17 @@ const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches 
 const SITES = Array.from({ length: 149 }, (_, i) => `site${i}`);
 const SCALE = [{ city_count: 346, listing_count: 385330, district_count: 5547 }];
 const good = homeCardDescription(homeCardFactsFrom(SITES, SCALE));
-check('the owner-approved line, exact digits', good === 'محرك بحث عقاري بالذكاء الاصطناعي: 149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.', good);
+check('the owner-approved numbers line, exact digits', good === '149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.', good);
+check('the owner-approved title', HOME_CARD_HEADLINE_AR === 'إزهله، محرك بحث عقاري بالذكاء الاصطناعي');
+// IT ALL SHOWS (owner 2026-10-18: «the message doesn't show fully»). WhatsApp's small card shows ~2 lines
+// of title and ~2 lines of description before cutting. Measured against the BIGGEST numbers we could reach.
+const TITLE_MAX = 45, DESC_MAX = 70;
+const fits = (t: string, d: string) => t.length <= TITLE_MAX && d.length <= DESC_MAX;
+const biggest = homeCardDescription({ sites: 999, listings: 9_999_999, cities: 9_999 });
+check(`title fits (${HOME_CARD_HEADLINE_AR.length} ≤ ${TITLE_MAX} chars)`, HOME_CARD_HEADLINE_AR.length <= TITLE_MAX);
+check(`numbers line fits even at 999 sites / 9,999,999 listings (${biggest.length} ≤ ${DESC_MAX})`, fits(HOME_CARD_HEADLINE_AR, biggest), biggest);
+check('fallback line fits', fits(HOME_CARD_HEADLINE_AR, HOME_CARD_FALLBACK_AR));
+mustCatch('the old one-line card (cut off in WhatsApp)', !fits(HOME_CARD_TITLE_AR, 'محرك بحث عقاري بالذكاء الاصطناعي: 149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.'));
 check('string counts from PostgREST are read too', homeCardDescription(homeCardFactsFrom(SITES, [{ city_count: '346', listing_count: '385330' }])) === good);
 
 // Every failure shape → the fallback, never a number that is not a real count.
@@ -39,6 +49,7 @@ mustCatch('a builder that prints a zero count', /\b0 موقع/.test(`محرك: $
 // The card page carries the line in og:description and the small 192px image.
 const html = homeCardHtml('https://ezhalah-app.vercel.app', good);
 check('card page: og:description is the live line', html.includes(`<meta property="og:description" content="${good}">`));
+check('card page: og:title is the bold headline', html.includes(`<meta property="og:title" content="${HOME_CARD_HEADLINE_AR}">`));
 check('card page: small 192px image', html.includes(`og:image" content="https://ezhalah-app.vercel.app${HOME_CARD_IMAGE_PATH}"`) && html.includes('og:image:width" content="192"'));
 check('card page escapes markup', !homeCardHtml('https://x', '"><script>').includes('"><script>'));
 
@@ -47,6 +58,13 @@ const share = readFileSync(new URL('../src/lib/share.ts', import.meta.url), 'utf
 check('image path matches OG_IMAGE in share.ts', share.includes(`export const OG_IMAGE = \`\${SHARE_LINK}${HOME_CARD_IMAGE_PATH}\`;`));
 check('title matches SHARE_TITLE_AR', share.includes(`export const SHARE_TITLE_AR = '${HOME_CARD_TITLE_AR}';`));
 check('static fallback in share.ts equals the card fallback', share.includes(`export const SHARE_CARD_DESC_AR = '${HOME_CARD_FALLBACK_AR}';`));
+
+// THE MIDDLEWARE IMPORTS NOTHING LOCAL (2026-10-19: Vercel's edge bundler refused «./src/lib/homeCard.ts»
+// and EVERY frontend deploy failed until it was inlined). A relative import or an @/ alias is RED here.
+const mwSrc = readFileSync(new URL('../middleware.ts', import.meta.url), 'utf8');
+const localImports = (src: string) => [...src.matchAll(/^\s*(?:import|export)\b[^;\n]*\bfrom\s+['"]((?:\.|@\/)[^'"]*)['"]/gm)].map((m) => m[1]);
+check('middleware.ts has no local imports (Vercel edge bundler refuses them)', localImports(mwSrc).length === 0, localImports(mwSrc).join(', '));
+mustCatch('the import that blocked every deploy', localImports("import { x } from './src/lib/homeCard.ts';").length === 1);
 
 // Bots vs people.
 for (const ua of ['WhatsApp/2.24.1 A', 'facebookexternalhit/1.1 Facebot Twitterbot/1.0', 'TelegramBot (like TwitterBot)']) check(`preview bot recognised: ${ua.slice(0, 24)}`, isPreviewBot(ua));
