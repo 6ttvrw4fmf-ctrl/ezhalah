@@ -15,6 +15,7 @@ import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { decodeEntities } from '@/lib/htmlEntities';
 import { dedupePhotoUrls, photoDisplayUrl } from '@/lib/photoUrl';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
+import { listingDiscountFrom } from '@/lib/listingDisplay';
 import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import { rotationSeed } from '@/lib/rotationSeed';
 import { truncateGlyphs } from '@/lib/typedReveal';
@@ -1976,6 +1977,9 @@ const LIST_SELECT = [
   // Source-published «سعر المتر». Present on all 63 platform tables. Shown on the card only when
   // the listing has no total/annual price (2026-07-26 aqar fidelity fix).
   'price_per_meter',
+  // Source-published discount (owner 2026-10-19): the struck-through original and the badge %.
+  // Present on all platform tables; only aqar writes them today. Card-only — never filtered on.
+  'price_original', 'discount_pct',
   'area_m2', 'bedrooms', 'bathrooms',
   'master_bedrooms', 'halls', 'reception_rooms_majlis',
   'property_age', 'direction', 'street_name', 'residence_type', 'project_name',
@@ -2059,6 +2063,8 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // whether to SHOW it (and the «سعر المتر 1» placeholder rule) lives in ResultCard, so this
       // field always means "what the source published", nothing else.
       pricePerMeter: typeof r.price_per_meter === 'number' ? r.price_per_meter : null,
+      // Shown as «~~old~~ خصم X٪» under the (already discounted) price. Null = no line at all.
+      discount: priceIsDerived ? null : listingDiscountFrom(deal, r.source ?? 'Aqar', r.price_total, r.price_original, r.discount_pct),
       priceIsDerived,
       area: r.area_m2 ?? 0,
       beds: r.bedrooms ?? 0,

@@ -1004,6 +1004,7 @@ const AR: Record<string, string> = {
   'To confirm availability and details': 'للتأكد من التوفر والتفاصيل',
   'See {n} more':                     'عرض {n} أخرى',
   'Hosted on {name}':                  'مستضاف على {name}',
+  'Discount {pct}%':                   'خصم {pct}٪',
   // Source BRAND names — must localize in Arabic too (rule: Arabic UI = everything Arabic except
   // numbers/domains). The card translates the source name through t() before display, so an Arabic
   // card reads "مستضاف على وصلت" not "Hosted on Wasalt". Applies to every source. ('AQAR' is already

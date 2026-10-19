@@ -3,6 +3,8 @@ import type { AfCanon } from '@/lib/afEvidence';
 
 // A normalized listing. (PRD §8.2) In production the ingestion pipeline maps every partner feed
 // onto this shape; here we ship curated placeholders ported from the prototype.
+export type ListingDiscount = { original: number; pct: number };
+
 export type Listing = {
   id: number;
   type: string;
@@ -22,6 +24,12 @@ export type Listing = {
   // whenever there was no total.) MUST NOT be folded into `price` — that string is parsed back to a
   // number by listingPriceValue() and drives the hard price filter and the cheapest/priciest sort.
   pricePerMeter?: number | null;
+  // A SOURCE-PUBLISHED DISCOUNT (owner 2026-10-19): the struck-through pre-discount price and the
+  // badge percentage, exactly as the platform printed them. `price` is ALREADY the discounted figure
+  // (PRICE = SOURCE; aqar_parse takes the second, real asking price), so search, filters and sort
+  // already work on the final price — this only lets the card show «~~old~~ خصم X٪» next to it.
+  // Null whenever the source shows no discount; built by listingDiscountFrom() (src/lib/listingDisplay.ts).
+  discount?: ListingDiscount | null;
   // True when `price` is OUR per-metre x area arithmetic, not a figure the advertiser published.
   // The card MUST label it; nothing may present it as source-published. (owner rule 2026-09-03)
   priceIsDerived?: boolean;

@@ -5,7 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, font, lightColors, radius } from '@/theme/tokens';
 import { BUZZER_GOLD, TAP44 } from '@/theme/palette';
 import { useI18n, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
-import { listingPrice, sourceName } from '@/lib/listingDisplay';
+import { listingPrice, listingDiscountOldPrice, sourceName } from '@/lib/listingDisplay';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, attrDisplayLabel, hideArabicProseInEnglish, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { translitPlace } from '@/lib/translitPlace';
 import { DIRECTION_LABEL } from '@/lib/afEvidence';
@@ -544,6 +544,14 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             <Text testID="listing-preview-price" numberOfLines={1} style={[s.price, tx]}>
               {priceRuns(listingPrice(l, locale)).map((r, i) => <Text key={i} style={r.num ? s.priceNum : s.priceUnit}>{r.text}</Text>)}
             </Text>
+            {/* Source-published discount (owner 2026-10-19): the old price struck + «خصم X٪» under the
+                final price — the same line the result card shows, only when the source showed one. */}
+            {l.discount ? (
+              <View style={s.discountRow} testID="listing-preview-discount">
+                <Text numberOfLines={1} style={s.discountOld}>{listingDiscountOldPrice(l.discount, locale)}</Text>
+                <View style={s.discountBadge}><Text style={s.discountBadgeTx}>{t('Discount {pct}%', { pct: l.discount.pct })}</Text></View>
+              </View>
+            ) : null}
             <View style={s.keyLine}>
               <Text numberOfLines={1} style={[s.keyTx, s.keyType, keyFont]}>{typeLabel}</Text>
               <View style={s.deal}><Text numberOfLines={1} style={s.dealTx}>{t(l.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text></View>
@@ -1044,6 +1052,10 @@ const s = StyleSheet.create({
   price: { fontSize: 28, lineHeight: 36, color: colors.dark },
   priceNum: { fontFamily: NUM_FONT, fontWeight: '600', fontVariant: ['tabular-nums'] },
   priceUnit: { fontSize: 15, color: colors.muted, fontWeight: '500' },
+  discountRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
+  discountOld: { fontSize: 14, color: colors.muted, fontWeight: '500', textDecorationLine: 'line-through' },
+  discountBadge: { backgroundColor: colors.amberBg, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 2 },
+  discountBadgeTx: { fontSize: 12, fontWeight: '700', color: colors.amberInk },
   // ONE line, never wrapped: the type label is the part that gives way.
   keyLine: { flexDirection: 'row', alignItems: 'center', flexWrap: 'nowrap', gap: 7, minWidth: 0 },
   keyTx: { fontSize: 15, fontWeight: '600', color: colors.ink },
