@@ -41,6 +41,8 @@ const TRANSPORT = [
   // The exact WebKit string measured on production, including its odd `https: /` spacing.
   'Fetch API cannot load https: /aannarbkwcymrotzwdbo.supabase.co/rest/v1/rpc/top_cities_by_deal_ar due to access control checks.',
   'Fetch API cannot load https://example.com/x due to access control checks.',
+  // WebKit's XHR wording for the same class — Google One Tap's status call under ITP (sweep 39236332307)
+  'XMLHttpRequest cannot load https://accounts.google.com/gsi/status?client_id=x&has_opted_out_fedcm=true&is_itp=true due to access control checks.',
   'Load failed',
   'TypeError: Load failed',
   'The network connection was lost.',
