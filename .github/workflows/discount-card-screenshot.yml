@@ -1,0 +1,42 @@
+# Owner-requested one-off (2026-10-19): screenshot a real Aqar discount card on PRODUCTION from a
+# runner that can reach it (the agent sandbox cannot — docs/ops/VERIFYING_PRODUCTION.md). ONE browser,
+# one search, on demand only. Never runs on a schedule.
+name: Discount card screenshot (production)
+
+on:
+  workflow_dispatch:
+    inputs:
+      district_typed:
+        description: 'text typed into the district field'
+        required: false
+        default: 'المهدية'
+      district_row:
+        description: 'suggestion row to tap'
+        required: false
+        default: 'حي المهدية'
+
+jobs:
+  screenshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies + Chromium
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Drive the live site and screenshot the first discounted card
+        env:
+          BASE_URL: https://ezhalah-app.vercel.app
+          DISTRICT_TYPED: ${{ github.event.inputs.district_typed }}
+          DISTRICT_ROW: ${{ github.event.inputs.district_row }}
+        run: node e2e/screenshots/discount-card.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: discount-card-screenshots
+          path: out/
+          retention-days: 7
