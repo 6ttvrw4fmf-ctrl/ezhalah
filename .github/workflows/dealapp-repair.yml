@@ -20,6 +20,9 @@ on:
       plot_code_districts:
         description: "true = re-parse the rows whose stored district is a plot/plan code, instead of the legacy set"
         default: "false"
+      ambiguous_towns:
+        description: "true = re-parse the rows with no city whose town is a city in several regions (placed by own pin)"
+        default: "false"
 
 concurrency:
   group: dealapp-repair
@@ -51,4 +54,5 @@ jobs:
             --limit ${{ github.event.inputs.limit || '0' }} \
             --workers 6 \
             $([ "${{ github.event.inputs.dry_run }}" = "true" ] && echo --dry-run) \
-            $([ "${{ github.event.inputs.plot_code_districts }}" = "true" ] && echo --plot-code-districts)
+            $([ "${{ github.event.inputs.plot_code_districts }}" = "true" ] && echo --plot-code-districts) \
+            $([ "${{ github.event.inputs.ambiguous_towns }}" = "true" ] && echo --ambiguous-towns)
