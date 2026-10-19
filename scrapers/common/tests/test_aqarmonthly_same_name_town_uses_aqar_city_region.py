@@ -133,3 +133,23 @@ def test_aqars_own_district_places_a_country_only_ad_only_when_unique_in_region(
 def test_an_unknown_town_stays_unresolved(address_catalog):
     # real ad 762316: «الوغل ، منطقة عسير» — الوغل is in neither the city nor the district catalog
     assert _resolve_location("الوغل-منطقة-عسير-5785059", 1, "الوغل ، منطقة عسير")["city_id"] is None
+
+
+def test_a_dropped_street_city_that_finds_nothing_better_is_marked_for_clearing(address_catalog):
+    # real ad 762480: «شارع مصاولي 3168 ، الوغل ، منطقة عسير» was filed under مصاولي; الوغل is uncatalogued.
+    al._CITY["مصاولي"] = [(81, 6)]
+    al._CID_AR[81] = "مصاولي"
+    am._city_region.cache_clear()
+    r = _resolve_location("شارع-مصاولي-3168-الوغل-منطقة-عسير-5818181", 1, "شارع مصاولي 3168 ، الوغل ، منطقة عسير")
+    assert r["city_id"] is None and r.get("street_city_dropped") is True
+    # an ordinary unresolved ad is NOT marked (its stored city must survive a weak fetch)
+    assert not _resolve_location("الوغل-منطقة-عسير-5785059", 1, "الوغل ، منطقة عسير").get("street_city_dropped")
+
+
+def test_the_street_pattern_really_matches_a_street_segment():
+    # The first version shipped as r"^s*(?:شارع|طريق)(?:s|$)" (backslashes lost in a patch), which
+    # matched no street at all, and every street-guard test above still passed for another reason.
+    assert am._STREET_SEG.match("شارع مصاولي 3168") and am._STREET_SEG.match("طريق الملك فهد")
+    assert not am._STREET_SEG.match("الوغل") and not am._STREET_SEG.match("شارعين")
+    assert am._city_only_in_street("الاحساء", "شارع الاحساء, العيينة")
+    assert not am._city_only_in_street("تمنية", "شارع 44 تمنية ، تمنية ، منطقة عسير")
