@@ -560,7 +560,7 @@ AQAR_CITY_REGION: dict[int, int] = {
 }
 
 
-_STREET_SEG = re.compile(r"^s*(?:شارع|طريق)(?:s|$)")
+_STREET_SEG = re.compile(r"^\s*(?:شارع|طريق)(?:\s|$)")
 
 
 def _address_segments(address) -> list[str]:
