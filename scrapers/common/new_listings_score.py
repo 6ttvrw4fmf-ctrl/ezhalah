@@ -366,6 +366,12 @@ def _cmp_district(stored, whole: str) -> str:
         return MATCH
     if d and re.search(r"(?<!\S)" + re.escape(d) + r"(?!\S)", _hajer_aliases(whole)):
         return MATCH
+    # The article is not the name: the catalogue's «حي السدرة» is the page's «روشن سدرة» / «حي سدرة»
+    # (eilmalriyada 18624025, 2026-10-19 re-read run 39215210951: its own district field says «حي سدرة»).
+    # Whole words only, so «السدره» never matches inside another name.
+    core = d[2:] if d.startswith("ال") else ""
+    if len(core) >= 3 and re.search(r"(?<!\S)(?:حي\s+)?" + re.escape(core) + r"(?!\S)", whole):
+        return MATCH
     return MISMATCH if page_names_one else PAGE_SILENT
 
 

@@ -24,6 +24,8 @@ def page(*lines, title=""):
     ("المحمدية 2", "حي المحمدية", MATCH),        # numbered district folds onto the plain name
     ("النرجس", "حي العليا", MISMATCH),           # the page names a DIFFERENT district
     (None, "حي العليا", WE_MISS),                # page states it, we serve NULL
+    ("حي السدرة", "فيلا للإيجار في روشن سدرة حي سدرة", MATCH),   # the article is not the name (eilmalriyada 18624025)
+    ("حي السدرة", "حي العليا حي سدرات", MISMATCH),  # whole words only: «سدرات» is not «سدرة»
 ])
 def test_district_rules(stored, on_page, want):
     assert _cmp_district(stored, norm(on_page)) == want
