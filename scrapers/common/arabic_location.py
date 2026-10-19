@@ -149,6 +149,14 @@ def _load() -> None:
             raise last
 
 
+def same_city(a: Optional[str], b: Optional[str]) -> bool:
+    """Two written city names are one city when they share a catalogue id — by name or through
+    loc_catalog_city_alias (جيزان = جازان). Never by edit distance."""
+    _load()
+    ids = lambda n: {cid for cid, _ in _CITY.get(norm_ar(n), [])}  # noqa: E731
+    return bool(a and b and ids(a) & ids(b))
+
+
 def city_ar_for(city_id: Optional[int]) -> Optional[str]:
     _load()
     return _CID_AR.get(city_id) if city_id is not None else None
