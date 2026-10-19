@@ -489,8 +489,14 @@ def strip_warranty(page: dict, body: str) -> dict:
     heads = {norm(html.unescape(t)) for t in _WARRANTY_HEADING.findall(body or "") if t.strip()}
     common = _rakez_common_area()
 
+    def is_heading(x: str) -> bool:
+        # the evidence builder glues a short value onto the line before it («مكينة مصعد 10»), so a heading followed
+        # by nothing but a number is still the heading (11748121 / 11748137, branch dry run 39233528007)
+        nx = norm(x)
+        return any(nx == h or (nx.startswith(h + " ") and re.fullmatch(r"[\d\s]+", nx[len(h):])) for h in heads)
+
     def keep_line(x: str) -> bool:
-        return norm(x) not in heads and not common.search(x)
+        return not is_heading(x) and not common.search(x)
 
     keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
     head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))

@@ -52,3 +52,11 @@ def test_rakez_unit_traits_are_silent_and_building_traits_still_scored():
 def test_another_site_keeps_its_unit_traits():
     out = A.structured_only("sakan", {"maid_room": A.WE_MISS}, {"maid_room": None}, {"jsonld": []})
     assert out["maid_room"] == A.WE_MISS
+
+
+def test_a_heading_glued_to_the_next_value_is_still_the_heading():
+    # 11748121 / 11748137: «2 سنوات · مكينة مصعد» reached the evidence as «مكينة مصعد 10»
+    body = ('<span class="a">2</span><span class="b">سنوات</span></div><h3 class="c">مكينة مصعد</h3>')
+    page = {"evidence_lines": ["مكينة مصعد 10", "مصاعد"], "text_head": "مكينة مصعد 10"}
+    out = A.strip_warranty(page, body)
+    assert out["evidence_lines"] == ["مصاعد"] and out["text_head"] == ""
