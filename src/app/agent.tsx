@@ -4763,7 +4763,7 @@ export default function Agent() {
                           return (
                             <View testID="results-restoring" style={{ flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 8, marginTop: 14 }}>
                               <ActivityIndicator size="small" color={colors.muted} />
-                              <Text style={[s.replyText, { color: colors.muted }]}>{t('Loading the rest of your listings…')}</Text>
+                              <Text style={[s.replyText, { color: colors.muted }]}>{replyT('Loading the rest of your listings…')}</Text>
                             </View>
                           );
                         }
@@ -4911,11 +4911,11 @@ export default function Agent() {
                         // Read Aloud closing note (owner request, 2026-08-23: "read the note... and say the
                         // button also") — names the SAME button label(s) actually rendered below, in the same
                         // order, so it can never mention an action that isn't on screen to tap.
-                        const spokenActionLabels = [hasMore && t('Load more'), canNarrowFurther && t('Let’s narrow it down')].filter(Boolean) as string[];
+                        const spokenActionLabels = [hasMore && replyT('Load more'), canNarrowFurther && replyT('Let’s narrow it down')].filter(Boolean) as string[];
                         const spokenActionsNote = !showActionsRow ? ''
                           : spokenActionLabels.length === 2
-                            ? t('You can tap {a} or {b}.', { a: spokenActionLabels[0], b: spokenActionLabels[1] })
-                            : t('You can tap {a}.', { a: spokenActionLabels[0] });
+                            ? replyT('You can tap {a} or {b}.', { a: spokenActionLabels[0], b: spokenActionLabels[1] })
+                            : replyT('You can tap {a}.', { a: spokenActionLabels[0] });
                         const readAloudClosingNote = [moreNoteText, spokenActionsNote].filter(Boolean).join(' ');
                         const readAloudSegments = buildResultsReadAloudSegments(introText, m.result.listings.slice(0, shown), readAloudClosingNote, locale);
                         return (
@@ -4951,7 +4951,7 @@ export default function Agent() {
                                     >
                                       {fetching || cascading
                                         ? <LoadingDots color={colors.primary} />
-                                        : <Text style={s.mBtnAltTx}>{t('Load more')}</Text>}
+                                        : <Text style={s.mBtnAltTx}>{replyT('Load more')}</Text>}
                                     </Pressable>
                                   ) : null}
                                   {/* SEED THE CARRY (owner 2026-08-24) before the round opens: this
@@ -4978,7 +4978,7 @@ export default function Agent() {
                                         style={s.mBtnPrimary}
                                         disabled={busy}
                                       >
-                                        <Text style={s.mBtnPrimaryTx}>{t('Let’s narrow it down')}</Text>
+                                        <Text style={s.mBtnPrimaryTx}>{replyT('Let’s narrow it down')}</Text>
                                       </GoldShineButton>
                                     </GoldPulse>
                                   ) : null}

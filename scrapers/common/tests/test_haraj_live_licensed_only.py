@@ -295,6 +295,17 @@ def test_liveness_controls_walk_back_past_a_quiet_hour(monkeypatch):
     assert R.liveness_controls(5, max_reads=4) == [] and seen == ["h3", "h2"]
 
 
+def test_liveness_controls_budget_outlasts_a_run_of_honest_non_offers(monkeypatch):
+    """2026-10-18 20:48 UTC: 20 reads found 3 live posts (the rest honest non-offers read «gone»), the gate
+    needs 5, and 6,317 ads were quarantined. The default budget reaches the 5th live post at read 40."""
+    monkeypatch.setattr(R, "hour_files", lambda: ["h1", "h2", "h3", "h4", "filling"])
+    monkeypatch.setattr(R, "ids_in", lambda u, pre, tight=False: [f"{u[1]}{i:02d}" for i in range(20)])
+    live = {"400", "405", "410", "300", "319"}            # 3 in the newest hour, 2 more only 20 reads later
+    monkeypatch.setattr(R, "_verify_gone", lambda ad: ("live" if ad[3:] in live else "gone", ""))
+    assert len(R.liveness_controls(5)) == 5
+    assert len(R.liveness_controls(5, max_reads=20)) == 3    # the old budget: what quarantined the recheck
+
+
 # ── several units in one licensed post = a catalogue (owner real-user check 2026-10-17) ─────────────
 @pytest.mark.parametrize("title,cat", [
     ("شقق تمليك فاخرة للسكن والا ستثمار ابحر الشمالية 3و4و 5غرف", True),   # HRJ11190739649, 1,161 m²
