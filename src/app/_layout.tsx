@@ -5,7 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AppProvider } from '@/store';
-import { initObservability, reportError } from '@/lib/observability';
+import { classifyRejection, initObservability, reportError } from '@/lib/observability';
 import { LocaleProvider, useI18n } from '@/i18n';
 import { colors } from '@/theme/tokens';
 import { ThemeProvider, useTheme } from '@/theme/theme';
@@ -40,13 +40,20 @@ if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && !(globalThis a
     // 🔧 2026-10-16: Sentry REACT-NATIVE-D/E were bare «NetworkError» rejections with no stack and
     // url=/, so the class could not be diagnosed. Carry what the browser knows at that instant.
     const r: any = ev?.reason;
+    // 🔧 2026-10-19: a bare NetworkError (code 19) on a page carrying Google's GSI script is One Tap's
+    // own status call refused by the engine (REACT-NATIVE-D/E) — reported as a warning with its own
+    // fingerprint, never dropped (see classifyRejection).
+    let gsiScriptPresent = false;
+    try { gsiScriptPresent = !!(globalThis as any).document?.querySelector?.('script[src*="accounts.google.com/gsi"]'); } catch {}
+    const cls = classifyRejection(r, gsiScriptPresent);
     reportError(ev?.reason ?? new Error('unhandledrejection'), {
       source: 'unhandledrejection',
       reasonName: r?.name, reasonCode: r?.code,
       online: (globalThis as any).navigator?.onLine,
       visibility: (globalThis as any).document?.visibilityState,
       path: (globalThis as any).location?.pathname,
-    });
+      gsiScriptPresent, thirdPartyTransport: cls.thirdPartyTransport,
+    }, cls.thirdPartyTransport ? { level: cls.level, fingerprint: cls.fingerprint, tags: cls.tags } : undefined);
   });
   globalThis.addEventListener?.('error', (ev: any) => {
     // eslint-disable-next-line no-console
