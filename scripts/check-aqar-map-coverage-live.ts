@@ -25,7 +25,7 @@ const FILE = new URL('../src/data/adPageData.ts', import.meta.url).pathname.repl
 const lifted = await liftSymbols(FILE, [
   { header: 'const num = (', endsWith: /: NaN;$/ },
   { header: 'export function mapPoint(' },
-  { header: 'export const DISTRICT_MAP_PLATFORMS: ', endsWith: /\];$/ },
+  { header: 'export const DISTRICT_MAP_PLATFORMS: ', endsWith: /^\];$/ },
   { header: 'export function aqarTownFromUrl(' },
   { header: 'export function districtPlace(' },
 ], ['mapPoint', 'districtPlace', 'DISTRICT_MAP_PLATFORMS']);
