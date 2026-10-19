@@ -204,6 +204,17 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 total = float(ppm) * float(area)
                 if total == int(total) and _cmp_number(int(total), lines, whole, kw) == MATCH:
                     out[name] = MATCH
+            # A price written in words of thousands is the same figure: akariyoun 18605450 (2026-10-19, re-read
+            # run 39215534393) prints «السعر : 150 الف ريال» and we store 150000; the score read «150» as a
+            # different price. Thousands («الف/ألف») and millions («مليون») only, the figure exact.
+            if out[name] != MATCH and stored_v:
+                v = float(stored_v)
+                for unit, words in ((1_000_000, r"مليون"), (1_000, r"الف|ألف|آلاف|الاف")):
+                    k = v / unit
+                    if v >= unit and k == int(k) and re.search(
+                            r"(?<![\d.,])" + str(int(k)) + r"\s*(?:" + words + r")(?!\S*\s*مليون)", whole):
+                        out[name] = MATCH
+                        break
         elif kind == "number":
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)
         elif kind == "bool":
@@ -398,6 +409,28 @@ def page_lacks_its_ad(url: str | None, body: str) -> bool:
     code = m.group(1)
     digits = re.sub(r"\D", "", code)
     return code not in (body or "") and not re.search(r"(?<!\d)" + digits + r"(?!\d)", body or "")
+
+
+# The same table page DOES carry the ad when its code is on it, but as one card among the others: nufouth
+# 18610653 (2026-10-19, re-read run 39215530774) — the card «الدمام · حي الخالدية الجنوبية - N4175» sits
+# beside units in المحمدية / الياسمين / التعاون, and the whole page scored our 236 m² against their numbers.
+# Read only the card that carries the code; a page without card markers is left as it is.
+_CARD_START = re.compile(r'<div[^>]*class="[^"]*\bcard-item\b')
+
+
+def scope_to_its_ad(url: str | None, body: str) -> str:
+    m = _AD_CODE_IN_URL.search(url or "")
+    if not m or not body:
+        return body
+    at = body.find("'" + m.group(1) + "'")
+    if at < 0:
+        at = body.find(m.group(1))
+    starts = [s.start() for s in _CARD_START.finditer(body)]
+    before = [s for s in starts if s <= at]
+    if at < 0 or not before:
+        return body
+    after = [s for s in starts if s > at]
+    return body[before[-1]:after[0] if after else len(body)]
 
 
 def is_other_ads_page(stored: dict, page: dict) -> bool:
@@ -698,6 +731,7 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
+        body = scope_to_its_ad(url, body)
         page = page_evidence(body)
         if (platform in SHELL_PAGE_PLATFORMS or is_other_ads_page(stored, page)
                 or page_lacks_its_ad(url, body)):

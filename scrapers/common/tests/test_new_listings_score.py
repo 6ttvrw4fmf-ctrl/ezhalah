@@ -611,3 +611,50 @@ def test_tuba_street_width_comes_from_its_rega_record():
     lines = nls.tuba_rega_lines("https://tuba.com.sa/property/villa-for-sale-in-riyadh-61", fetch=lambda: [rec])
     assert nls._cmp_number(25, lines + ["شارع 20 متر"], " ".join(lines), r"عرض الشارع") == nls.MATCH
     nls._TUBA_RECORDS = None
+
+
+def test_a_share_link_page_is_read_only_inside_the_card_that_carries_its_code():
+    # nufouth 18610653 (2026-10-19, re-read run 39215530774): the vacancy table carries our card («الدمام ·
+    # حي الخالدية الجنوبية - N4175») beside other units with their own areas; the whole page scored our
+    # 236 m² against «المساحة 400 م²» of a unit in المحمدية. Only the card with the code is this ad.
+    from scrapers.common.new_listings_score import scope_to_its_ad
+    from scrapers.common.source_reread import page_evidence
+    card = ('<div class="col-6 col-md-4 d-flex card-item " data-index="{i}"><div>{d}</div><div>{a}</div>'
+            '<a onclick="openDetailsModal(\'{c}\')"></a></div>')
+    table = ("<html><body><h1>جدول الشواغر</h1>"
+             + card.format(i=1, d="الدمام حي المحمدية - N5105", a="المساحة 400 م²", c="N5105")
+             + card.format(i=2, d="الدمام حي الخالدية الجنوبية - N4175", a="", c="N4175")
+             + card.format(i=3, d="الدمام حي الياسمين - N3001", a="المساحة 300 م²", c="N3001")
+             + "</body></html>")
+    url = "https://nufouth.com/latest-offers?ads-N4175=1"
+    ours = scope_to_its_ad(url, table)
+    assert "الخالدية" in ours and "المحمدية" not in ours and "الياسمين" not in ours
+    got = compare_listing({"area_m2": 236, "district_ar": "حي الخالدية الجنوبية"}, page_evidence(ours))
+    assert got["area"] != MISMATCH and got["district"] == MATCH
+    assert compare_listing({"area_m2": 236}, page_evidence(table))["area"] == MISMATCH   # the whole page misreads
+    assert scope_to_its_ad("https://aqar.fm/ad/4175", table) == table                   # no code: unchanged
+    assert scope_to_its_ad(url, "<html>جدول N4175 بلا بطاقات</html>") == "<html>جدول N4175 بلا بطاقات</html>"
+
+
+def test_a_number_first_chip_is_read_with_its_own_label():
+    # abaad 18623200 (2026-10-19, re-read run 39215583152): «<strong>6</strong> حمام», «<strong>8</strong> غرف نوم»,
+    # «<strong>3</strong> صالات», past the 1,500-character text head. The visible-text split glued each label to
+    # the NEXT chip's figure («حمام 8», «غرف نوم 3») and our 8 bedrooms / 6 bathrooms (= the API) scored wrong.
+    from scrapers.common.source_reread import page_evidence
+    chip = '<div class="chip"><i class="fa-solid fa-{i}"></i>\n <strong>{n}</strong> {l}\n</div>'
+    body = ("<html><body><p>" + "نص " * 600 + "</p><div>عدد الغرف</div><div>11</div>"
+            + chip.format(i="shower", n=6, l="حمام") + chip.format(i="bed", n=8, l="غرف نوم")
+            + chip.format(i="couch", n=3, l="صالات") + "</body></html>")
+    got = compare_listing({"bedrooms": 8, "bathrooms": 6}, page_evidence(body))
+    assert got["bedrooms"] == MATCH and got["bathrooms"] == MATCH
+    wrong = compare_listing({"bedrooms": 3, "bathrooms": 9}, page_evidence(body))
+    assert wrong["bathrooms"] == MISMATCH                      # a figure no chip states is still wrong
+
+
+def test_a_price_written_in_thousands_is_the_same_figure():
+    # akariyoun 18605450 (2026-10-19, re-read run 39215534393): «السعر : 150 الف ريال», stored 150000.
+    page = {"title": "مستودع للايجار في الغنامية", "evidence_lines": ["المساحة : 605 متر السعر : 150 الف ريال"],
+            "text_head": "السعر | المساحة: | 396 m²"}
+    assert compare_listing({"price_annual": 150000}, page)["price"] == MATCH
+    assert compare_listing({"price_annual": 160000}, page)["price"] != MATCH         # another figure is not ours
+    assert compare_listing({"price_total": 1500000}, page)["price"] != MATCH         # 150 الف is not 1.5 million
