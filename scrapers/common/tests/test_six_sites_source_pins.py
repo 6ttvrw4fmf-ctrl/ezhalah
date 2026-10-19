@@ -152,3 +152,21 @@ def test_a_consent_interstitial_still_yields_the_pin():
     s2 = _Sess({}, final=consent)
     assert pin_from_short_link("https://maps.app.goo.gl/d", lambda u: resolve_redirect(s2, u)) == {
         "latitude": 25.3152163, "longitude": 49.6193885}
+
+
+def test_a_200_interstitial_names_the_destination_in_its_body():
+    # Measured on the GitHub runner 2026-10-19: goo.gl → HTTP 200, no Location, the page body
+    # carries the Maps URL (here as a consent form's encoded continue= and as an escaped link).
+    body = ('<html><form action="https://consent.google.com/save"><input name="continue" '
+            'value="https://www.google.com/maps?q=25.3152163%2C49.6193885&amp;entry=gps"></form>'
+            '<a href="https://www.google.com/maps?q=25.3152163,49.6193885&amp;entry=gps">open</a></html>')
+    r = _Resp(200)
+    r.text = body
+    s = _Sess({"https://maps.app.goo.gl/e": r})
+    assert pin_from_short_link("https://maps.app.goo.gl/e", lambda u: resolve_redirect(s, u)) == {
+        "latitude": 25.3152163, "longitude": 49.6193885}
+    # a 200 body with no Maps URL at all still yields nothing (never a geocode, never a guess)
+    r2 = _Resp(200)
+    r2.text = "<html>nothing here</html>"
+    s2 = _Sess({"https://maps.app.goo.gl/f": r2})
+    assert pin_from_short_link("https://maps.app.goo.gl/f", lambda u: resolve_redirect(s2, u)) == {}

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 from typing import Callable, Optional
+from html import unescape
 from urllib.parse import unquote
 
 from scrapers.common.source_pin import pin_dict
@@ -87,6 +88,22 @@ def _maps_url_in(candidate: Optional[str]) -> Optional[str]:
     return None
 
 
+def _maps_url_in_body(text: Optional[str]) -> Optional[str]:
+    """A Maps URL carrying a pair inside a page BODY. Measured on the GitHub runner 2026-10-19:
+    goo.gl answers a datacenter address with HTTP 200 and no Location at all — an interstitial
+    page whose markup names the destination (a link, a form's continue=, a script). The body is
+    HTML-unescaped and URL-decoded before the search; only a pair inside Saudi Arabia survives
+    sa_pin() afterwards, so a stray number cannot become a pin."""
+    if not text:
+        return None
+    body = text[:400_000]
+    for form in (body, unescape(body), unquote(unescape(body))):
+        m = _MAPS_LINK.search(form)
+        if m:
+            return form[max(0, m.start() - 60):m.end()]
+    return None
+
+
 def resolve_redirect(session, url: str, hops: int = 4) -> Optional[str]:
     """The URL a short link lands on. First by hand, hop by hop, so Maps itself is never loaded
     (measured 2026-10-19: goo.gl → maps.google.com?q=LAT,LNG on the first hop). If that reads
@@ -104,6 +121,9 @@ def resolve_redirect(session, url: str, hops: int = 4) -> Optional[str]:
                 if hit:
                     break
                 continue
+            hit = _maps_url_in_body(getattr(r, "text", None))     # a 200 interstitial names the destination
+            if hit:
+                seen.append("pair in body")
             break
     except Exception as e:  # noqa: BLE001 — fall through to the client's own follow
         seen.append(f"manual hop raised {type(e).__name__}")
@@ -112,7 +132,7 @@ def resolve_redirect(session, url: str, hops: int = 4) -> Optional[str]:
             r = session.get(url, allow_redirects=True, timeout=30)
             final = str(getattr(r, "url", "") or "")
             seen.append(f"follow→{final[:90]}")
-            hit = _maps_url_in(final)
+            hit = _maps_url_in(final) or _maps_url_in_body(getattr(r, "text", None))
         except Exception as e:  # noqa: BLE001
             seen.append(f"follow raised {type(e).__name__}")
     if _DEBUG_LEFT[0] > 0:
