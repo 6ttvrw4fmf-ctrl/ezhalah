@@ -95,7 +95,9 @@ export const typeWordAr = (n: number, typeAr: string): string => (n >= 3 && n <=
 // on that district. Nothing here touches the pin path: mapPoint() is unchanged and a pin still needs
 // BOTH published coordinates.
 export type DistrictPlace = { query: string; district: string; city: string };
-export const DISTRICT_MAP_PLATFORMS: readonly string[] = ['aqar', 'aqarmonthly'];
+// + Wasalt (owner 2026-10-19: «map Wasalt like Aqar»). Its pin comes from the Arabic detail page; an ad
+// whose page is not fetched yet (or truly has no pin) shows the district/city border meanwhile.
+export const DISTRICT_MAP_PLATFORMS: readonly string[] = ['aqar', 'aqarmonthly', 'wasalt'];
 /** The place an Aqar ad's own link names, e.g. sa.aqar.fm/شارع-الصليحى-212-الفرعاء-منطقة-عسير-6836489 →
  *  «شارع الصليحى 212 الفرعاء منطقة عسير، السعودية». Only sa.aqar.fm; the trailing ad number is dropped; a
  *  link that names nothing but the country («المملكة-العربية-السعودية-…») names no place → null. */

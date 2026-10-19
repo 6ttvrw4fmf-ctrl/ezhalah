@@ -426,7 +426,7 @@ use `t(sourceName(listing.source))`, matching the result card. Arabic prose is h
 like ResultCard. No photos means no gallery box. The preview and iframe host lists are disjoint.
 
 **The map:** the source's own pin when it published both coordinates («الموقع كما نشره {site}»).
-When an **Aqar (buy or rent) or Aqar Monthly** ad published none (owner 2026-10-17: «show the entire
+When an **Aqar (buy or rent), Aqar Monthly or Wasalt** ad published none (Wasalt added 2026-10-19, owner: «map Wasalt like Aqar»; its pin is read from the Arabic detail page, so an un-fetched ad shows the border meanwhile) (owner 2026-10-17: «show the entire
 district … all around the boundaries», «just do aqar now», then «Aqar Monthly and rent, same style,
 just don't include the Ministry of Justice» — other sites still show no map without a pin; the
 ministry block stays Aqar-sale-only),

@@ -1,4 +1,5 @@
-// DAILY ROBOT: every NEW Aqar / Aqar Monthly ad must get a map on its ad page (owner, 2026-10-18).
+// DAILY ROBOT: every NEW ad on a district-map platform (DISTRICT_MAP_PLATFORMS: Aqar, Aqar Monthly,
+// Wasalt since 2026-10-19) must get a map on its ad page (owner, 2026-10-18).
 //
 // The owner: «make sure automatically it knows if we have the pin — perfect; if not, we do the
 // boundaries». The ad page decides it in this order, and this check runs THE SAME CODE, lifted from
@@ -27,7 +28,8 @@ const lifted = await liftSymbols(FILE, [
   { header: 'export const DISTRICT_MAP_PLATFORMS: ', endsWith: /\];$/ },
   { header: 'export function aqarTownFromUrl(' },
   { header: 'export function districtPlace(' },
-], ['mapPoint', 'districtPlace']);
+], ['mapPoint', 'districtPlace', 'DISTRICT_MAP_PLATFORMS']);
+const PLATFORMS = lifted.DISTRICT_MAP_PLATFORMS as readonly string[];   // the SAME list the page uses
 const mapPoint = lifted.mapPoint as (r: Row) => unknown;
 const districtPlace = lifted.districtPlace as (r: Row, url?: string | null) => Place;
 
@@ -53,7 +55,7 @@ async function get<T>(path: string): Promise<T> {
 const rows: Row[] = [];
 for (let from = 0; ; from += 1000) {
   const page = await get<Row[]>(`search_listings_ar?select=platform,city_ar,district_ar,latitude,longitude,source_table,listing_id`
-    + `&platform=in.(aqar,aqarmonthly)&first_seen_at=gte.${encodeURIComponent(since)}&order=listing_id.asc&offset=${from}&limit=1000`);
+    + `&platform=in.(${PLATFORMS.join(',')})&first_seen_at=gte.${encodeURIComponent(since)}&order=listing_id.asc&offset=${from}&limit=1000`);
   rows.push(...page);
   if (page.length < 1000) break;
 }
@@ -86,7 +88,7 @@ for (const [table, list] of byTable) {
   }
 }
 
-console.log(`Aqar + Aqar Monthly ads first seen in the last ${HOURS}h: ${rows.length}`);
+console.log(`${PLATFORMS.join(' + ')} ads first seen in the last ${HOURS}h: ${rows.length}`);
 console.log(`  pin ${tally.pin} | district border ${tally.district} | city border ${tally.city} | town from link ${tally.town} | NO MAP ${tally.none}`);
 if (missing.length) {
   console.log('\nThese new ads will show NO map (no pin, no city, and their link names no town):');
