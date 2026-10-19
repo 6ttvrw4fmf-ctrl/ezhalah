@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 
 from scrapers.common import arabic_location as al
 from scrapers.common.db import sb, upsert_dealapp_commercial_batch, upsert_dealapp_residential_batch
-from scrapers.dealapp.run import _is_plot_code, _pin_sold_inactive, fetch_one, map_listing
+from scrapers.dealapp.run import TOWN_OF_PLACE_AR, _is_plot_code, _pin_sold_inactive, fetch_one, map_listing
 
 TABLES = {
     "dealapp_residential_listings": "residential",
@@ -79,7 +79,9 @@ def _candidates(table: str, plot_code_districts: bool = False, ambiguous_towns: 
         # 2026-10-18: rows with no city whose town is a catalogue city in several regions (الكهفة, الدرب …); the current
         # parser places them by their own pin (arabic_location.city_by_own_pin) or leaves them unplaced.
         al._load()
-        return [r for r in rows if len({cid for cid, _ in al._CITY.get(al.norm_ar(r.get("town")), [])}) > 1]
+        def twin(town):
+            return len({cid for cid, _ in al._CITY.get(al.norm_ar(TOWN_OF_PLACE_AR.get(town or "", town)), [])}) > 1
+        return [r for r in rows if twin(r.get("town"))]
     if plot_code_districts:
         # 2026-10-18: rows whose stored district is a plot/plan code («حي 1051 مخطط رقم», «حي 33ج») and serve none;
         # the current parser reads the title's district or the same-city deed block instead.
