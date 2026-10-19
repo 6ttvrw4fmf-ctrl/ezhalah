@@ -302,3 +302,11 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   workflow update a BEHIND branch itself). Third: the phone keyboard is part of E1 — typing «المرموثة» at 600 ms/char kept
   «ال» because the Google One Tap sheet took focus ~1 s after load (PR #7520); the 10-17 proof used `fill()`, which no
   customer does. Type like a person when you test typing.
+- **2026-10-19:** a browser proof script written OUTSIDE the repo tree cannot resolve `playwright`, and the installed
+  Playwright asks for a headless-shell build that `/opt/pw-browsers` does not carry: import from
+  `/home/user/ezhalah/node_modules/playwright/index.mjs` and launch with `executablePath: '/opt/pw-browsers/chromium'`
+  (two failed runs before the 676 proof). A `Deploy frontend` run marked `failure` had SHIPPED (run 831: only the baseline
+  advance failed, repository secret `BASELINE_PR_TOKEN` missing) — read the Report step before believing a red deploy. And
+  `git log -- <path>` on a stale local clone is not the merge timeline: read the PR's `merged_at` and the deploy run list.
+  Tonight's shape worked: 3 jobs, 2 of them proofs of yesterday's merged fixes, both PASS inside 35 minutes — a proof is
+  the cheapest fix-rate there is; keep job 0 = yesterday's ⏳.

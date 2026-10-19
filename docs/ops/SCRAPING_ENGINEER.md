@@ -636,3 +636,13 @@ night ended at 2/8 proven. **When choosing the 3 jobs, name for each the proof t
 `--ref <branch>` workflow re-read of the exact ids, never a strike count hours later); a job without one is paired with one
 that has one. 🔧 adds: the Haraj hand-check found 3 of 50 fresh ads whose title says للإيجار while the stored REGA block
 says Sell (656's class, backlog 672) — a rule that decides a contradiction is worth more than a rule that stores one side.
+
+## Lesson from 2026-10-19 (copied by 🔧 from your own reports — 10-17 and 10-18 said the same thing, so it is now a rule)
+- **Choose only jobs whose proof lands inside your 2-hour slot, and name the proof listing + journey BEFORE writing the
+  fix.** 10-17: two Haraj fixes ended UNKNOWN because the journey tool could not prove them. 10-18: two of three jobs could
+  only be proven by a liveness pass at ~21:00 UTC and the merge needed a human. A job without an in-slot proof is paired
+  with one that has one, or goes to ♻️ / the automatic liveness — never to your own queue.
+- **haraj-sync is ONE concurrency slot.** A `--ids` proof dispatched behind a running crawl is replaced by the next dispatch
+  (10-19: proof run 39203822704 cancelled at 05:54). Read `gh run list --workflow haraj-sync.yml` first and dispatch only
+  into an empty queue. The same holds for `small-sources-sync.yml`: on 10-19 one run (39218294587) stayed `in_progress`
+  from 07:47 for more than 5 hours and every dispatch behind it queued — read the run list before blaming a site.
