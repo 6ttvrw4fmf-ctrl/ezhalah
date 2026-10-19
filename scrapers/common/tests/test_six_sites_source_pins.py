@@ -116,7 +116,7 @@ def _src(p: str) -> str:
 
 def test_each_scraper_writes_the_pin_into_additional_info():
     assert 'out["pin"] = pin_from_html(page)' in _src("sakan") and '**(p.get("pin") or {}),' in _src("sakan")
-    assert '"pin": pin_from_html(page),' in _src("abralosol") and '**(detail.get("pin") or {}),' in _src("abralosol")
+    assert '"pin": pin_from_html(page) or pin_from_short_link(' in _src("abralosol") and '**(detail.get("pin") or {}),' in _src("abralosol")
     assert '"pin": pin_from_html(body),' in _src("nofodh") and '**(rec.get("pin") or {}),' in _src("nofodh")
     assert '"pin": pin_from_html(art) or pin_from_html(page_html),' in _src("bossbih") and '**(detail.get("pin") or {}),' in _src("bossbih")
     aq = _src("aqalemhajer")
