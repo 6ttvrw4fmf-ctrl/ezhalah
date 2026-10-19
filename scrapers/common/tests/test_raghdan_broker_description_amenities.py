@@ -90,3 +90,32 @@ def test_a_furnished_flat_does_not_break_the_crawl():
     row, _ = R.map_listing(_page('<div class="rt-content"><p><span>شقة مفروشة مع مطبخ</span></p></div>'),
                            "https://raghdan.sa/ar/property/375444614027/")
     assert "furnished" not in row and row["kitchen"] is True
+
+
+# The redesigned page (CI re-read 39229707556, 2026-10-19): the broker's text is ONE pre-wrap <p> whose lines are
+# literal newlines. Verbatim from live ads 10440439 and 12751033 (contact lines cut).
+_PW = ('<div class="flex-1"><p class="text-gray-600 dark:text-gray-400 font-medium leading-relaxed text-sm font-cairo" '
+       'style="white-space:pre-wrap;text-align:justify">{}</p></div>')
+AD_10440439 = _PW.format("الموقع: مدينة الخبر - حي الحمراء (موقع استراتيجي مميز وقريب جداً من جسر البحرين).\n"
+                         "الدور: الدور الرابع (يوجد مصعد في المبنى).\nالمساحة الإجمالية: 131 متر مربع.\n"
+                         "التفاصيل الداخلية:\n3 غرف نوم واسعة.\n3 دورات مياه.\nمطبخ راكب بالكامل.\n"
+                         "مكيفات راكبة وجاهزة للتشغيل.\n[المزايا والخدمات]\nموقف سيارة مستقل وخاص بالشقة.")
+AD_12751033 = _PW.format("🟧 شقة للبيع\n 📍جنوب الرياض - حي المروة \n\n-  المساحة: 118.78م\n- دور ثاني \n- مصعد \n\n"
+                         "🔻الشقة تتكون من⬇️\n- مجلس رجال \n- صالة\n- مطبخ \n- عدد 3 غرف نوم \n- عدد 3 دورات مياه")
+
+
+def test_the_redesigned_page_states_lift_kitchen_ac_parking():
+    am, baths = _read(AD_10440439)
+    assert am.get("elevator") is True and am.get("kitchen") is True
+    assert am.get("air_conditioner") is True and am.get("parking") is True
+    assert baths == 3
+
+
+def test_the_redesigned_dash_list_reads_the_same():
+    am, baths = _read(AD_12751033)
+    assert am.get("elevator") is True and am.get("kitchen") is True and baths == 3
+
+
+def test_mutation_the_old_pattern_alone_reads_nothing_from_the_new_page():
+    # what every crawl did since the redesign: rt-content is absent, so nothing was read
+    assert R._RT_CONTENT_RE.search(AD_10440439) is None

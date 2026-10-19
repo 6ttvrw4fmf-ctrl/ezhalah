@@ -656,9 +656,20 @@ _RT_CONTENT_RE = re.compile(r'class="rt-content[^"]*"\s*>(.*?)</div>', re.S)
 _PROSE_SKIP = ("optical_fibers", "furnished")
 
 
+# raghdan's redesigned ad page (live by 2026-10-19) no longer has the «rt-content» block: the broker's text is one
+# `<p class="… font-cairo" style="white-space:pre-wrap;…">` whose lines are literal newlines (CI re-read 39229707556,
+# 10440439 «الدور: الدور الرابع (يوجد مصعد في المبنى).» «مطبخ راكب بالكامل.» «مكيفات راكبة …», 12751033 «- مصعد»
+# «- مطبخ»). The old pattern matched nothing, so every crawl since read no prose and the answers stopped moving
+# (the None-dropping upsert kept the old ones). Both layouts are read; the old one first.
+_PRE_WRAP_RE = re.compile(r'<p\b[^>]*style="[^"]*white-space:\s*pre-wrap[^"]*"[^>]*>(.*?)</p>', re.S)
+
+
 def _broker_text(body: str) -> str:
     m = _RT_CONTENT_RE.search(body or "")
-    return normalize.html_block_lines(m.group(1)) if m else ""
+    if m:
+        return normalize.html_block_lines(m.group(1))
+    blocks = _PRE_WRAP_RE.findall(body or "")
+    return "\n".join(normalize.html_block_lines(b) for b in blocks if b.strip())
 
 
 def _spec_int(v: Optional[str]) -> Optional[int]:
