@@ -76,7 +76,7 @@ check('«تحديد أكثر» is offered by the newest turn only',
 // Read Aloud must describe the buttons that are actually there — it reads the SAME two flags, so a
 // history turn is never spoken as if it still had actions.
 check('the spoken closing note names the same two latest-turn-aware flags',
-  /const spokenActionLabels = \[hasMore && t\('Load more'\), canNarrowFurther && t\('Let’s narrow it down'\)\]/.test(agent),
+  /const spokenActionLabels = \[hasMore && replyT\('Load more'\), canNarrowFurther && replyT\('Let’s narrow it down'\)\]/.test(agent),
   'agent.tsx: reading rc.hasMore instead of hasMore would announce buttons an old turn does not render');
 
 // ── 2. THE HONESTY BOUNDARY: latest-only touches the BUTTONS and nothing else ────────────────────
