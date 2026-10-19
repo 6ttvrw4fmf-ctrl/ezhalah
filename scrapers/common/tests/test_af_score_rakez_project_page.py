@@ -27,6 +27,14 @@ def test_without_warranty_markup_nothing_is_dropped():
     assert A.strip_warranty(PAGE, "<h3>التكييف</h3>") == PAGE
 
 
+def test_a_common_area_term_is_not_the_units_ac():
+    # 11750314 (branch dry run 39231712736): the spec's «ممرات مكيفة» asked air_conditioner
+    page = {"evidence_lines": ["ممرات مكيفة", "تكييف مخفي"], "text_head": "ممرات مكيفة"}
+    out = A.strip_warranty(page, "")
+    assert out["evidence_lines"] == ["تكييف مخفي"] and out["text_head"] == ""
+    assert A.page_says_yes(["ممرات مكيفة"], "air_conditioner")   # what the score read before
+
+
 def test_the_warranty_heading_alone_never_builds_an_ac_request():
     lines = A.strip_warranty(PAGE, BODY)["evidence_lines"]
     assert not A.page_says_yes([x for x in lines if x != "تكييف مخفي"], "air_conditioner")

@@ -476,12 +476,24 @@ _WARRANTY_HEADING = re.compile(r'<span[^>]*>\s*\d+\s*</span>\s*<span[^>]*>\s*(?:
                                r'<h3[^>]*>\s*([^<]{1,40}?)\s*</h3>')
 
 
+# A spec term about the building's COMMON areas is not the unit: «ممرات مكيفة» (air-conditioned corridors) is not
+# fitted AC in the flat. The scraper never stores it (scrapers/rakez/run.py _COMMON_AREA, 54 rows reverted on
+# 10-18); the 10-19 branch dry run's last rakez miss (11750314) asked air_conditioner from exactly that term. The
+# same rule is imported, so the score and the scraper cannot disagree about what a common area is.
+def _rakez_common_area():
+    from scrapers.rakez.run import _COMMON_AREA
+    return _COMMON_AREA
+
+
 def strip_warranty(page: dict, body: str) -> dict:
     heads = {norm(html.unescape(t)) for t in _WARRANTY_HEADING.findall(body or "") if t.strip()}
-    if not heads:
-        return page
-    keep = [x for x in (page.get("evidence_lines") or []) if norm(x) not in heads]
-    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if norm(x) not in heads)
+    common = _rakez_common_area()
+
+    def keep_line(x: str) -> bool:
+        return norm(x) not in heads and not common.search(x)
+
+    keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
+    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))
     return {**page, "evidence_lines": keep, "text_head": head}
 
 
