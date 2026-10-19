@@ -13,6 +13,7 @@ const ROOT = join(import.meta.dirname, '..');
 const FILE = join(ROOT, 'src/components/GoogleOneTap.tsx');
 let failed = 0;
 const check = (name: string, ok: boolean, detail = '') => { console.log(`  ${ok ? '✓' : '❌'} ${name}${!ok && detail ? ` — ${detail}` : ''}`); if (!ok) failed++; };
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
 console.log('\nGoogle One Tap gives the keyboard back to a typing visitor\n');
 
 const lifted = await liftSymbols(FILE, [
@@ -83,11 +84,11 @@ check('teardown removes the listener (no guard after the component unmounts)', (
 // Mutations, executed: the two ways the guard could decay.
 const neverRefocus = (doc: any) => { doc.addEventListener('focusout', () => {}); return () => {}; };
 const alwaysRefocus = (doc: any, schedule: any) => { doc.addEventListener('focusout', (e: any) => schedule(() => e.target.focus())); return () => {}; };
-check('(mutation) a guard that never refocuses is caught', (() => {
+mustCatch('a guard that never refocuses', (() => {
   const doc = fakeDoc(); const q: Array<() => void> = []; neverRefocus(doc); const f = el('INPUT'); doc.nodes.add(f); doc.dispatch('focusout', { target: f }); doc.activeElement = gsiFrame(); q.forEach((fn) => fn());
   return f.focusCalls === 0 && steal.field.focusCalls === 1;
 })());
-check('(mutation) a guard that drags the visitor back from the body is caught', (() => {
+mustCatch('a guard that drags the visitor back from the body', (() => {
   const doc = fakeDoc(); const q: Array<() => void> = []; alwaysRefocus(doc, (fn: any) => q.push(fn)); const f = el('INPUT'); doc.nodes.add(f); doc.dispatch('focusout', { target: f }); doc.activeElement = el('BODY'); q.forEach((fn) => fn());
   return f.focusCalls === 1 && scenario({ next: el('BODY') }).field.focusCalls === 0;
 })());
