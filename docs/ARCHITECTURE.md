@@ -425,6 +425,15 @@ to an explicit external contact link to the original ad. Both the contact label 
 use `t(sourceName(listing.source))`, matching the result card. Arabic prose is hidden in English
 like ResultCard. No photos means no gallery box. The preview and iframe host lists are disjoint.
 
+**Listed-now identity (owner, 2026-10-19):** the Aqar sale price comparison's
+«المعروض الآن» / “Listed now” heading carries the approved transparent Saudi falconer holding
+a falcon, with a house integrated into the silhouette (`assets/icons/falconer-property.png`).
+Use a compact 30 px image beside the heading, mirrored placement for Arabic; the Ministry's
+actual-sales heading uses the Ministry's official green-and-gold logo in the same 30 px frame
+(`assets/icons/ministry-of-justice.webp`, copied unchanged from the official homepage's
+`https://www.moj.gov.sa/_catalogs/masterpage/MOJPortalDesign2023/images/logo.webp`, checked
+2026-10-19). Preserve its original colours and source attribution. This is branding only, not a new valuation model.
+
 **The map:** the source's own pin when it published both coordinates («الموقع كما نشره {site}»).
 When an **Aqar (buy or rent), Aqar Monthly or Wasalt** ad published none (Wasalt added 2026-10-19, owner: «map Wasalt like Aqar»; its pin is read from the Arabic detail page, so an un-fetched ad shows the border meanwhile) (owner 2026-10-17: «show the entire
 district … all around the boundaries», «just do aqar now», then «Aqar Monthly and rent, same style,
