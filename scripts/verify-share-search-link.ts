@@ -167,6 +167,25 @@ check('the popup note reads «يوسف شاركك: شقق للإيجار في ح
   check('the sign-in popup shows the note above its heading', /\{note \? <Text style=\{s\.shareNote\}[^\n]*>\{note\}<\/Text> : null\}\s*<Text style=\{\[s\.formHead/.test(modal));
 }
 
+// ── 7. A CHAT WITH NO SEARCH (owner 2026-10-18, option A) ──────────────────────────────────────────
+check('no search → «محادثة من يوسف على إزهله» / "A chat from Yusuf on Ezhalah"; popup «يوسف شاركك محادثة»',
+  shareTitle('يوسف', null, 'ar') === 'محادثة من يوسف على إزهله' && shareTitle('Yusuf', null, 'en') === 'A chat from Yusuf on Ezhalah'
+  && shareInviteNote('يوسف', null, 'ar') === 'يوسف شاركك محادثة' && shareInviteNote('Yusuf', null, 'en') === 'Yusuf shared a chat with you');
+check('a search still keeps its own title (the chat title is only for no search)', shareTitle('يوسف', Q, 'ar') === 'شقق للإيجار في حي النرجس من يوسف على إزهله');
+const noSearch = sharedChatCardFrom({ sender_name: 'يوسف', locale: 'ar', query: {} });
+check('the database\'s empty query reads as «no search», and its card says so',
+  !!noSearch && noSearch.q === null
+  && /og:title" content="محادثة من يوسف على إزهله"/.test(shareCardHtml('https://x.example', 'a7Kx2bQ9', noSearch)));
+mustCatch('a card reader that rejects a chat with no search (the link would show a plain «إزهله»)',
+  ((r: any) => (r && typeof r.query?.location === 'string' ? r : null))({ sender_name: 'يوسف', query: {} }) === null);
+{
+  const agentSrc = (await import('node:fs')).readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
+  const top = /onPress=\{async \(\) => \{ if \(await shareThisChat\(\)\) return; if \(!\(await shareNative\(\)\)\) setShareOpen\(true\); \}\}/;
+  check('the top «مشاركة» in a chat shares THAT chat first (homepage share only for guests / an empty screen)', top.test(agentSrc)
+    && /const shareThisChat = async \(\): Promise<boolean> => \{\s*if \(!user \|\| !msgs\.length\) return false;/.test(agentSrc));
+  mustCatch('a top button that only ever shares the homepage', !top.test(agentSrc.replace('if (await shareThisChat()) return; ', '')));
+}
+
 console.log(`\nexample link: ${link.slice(0, 90)}…`);
 if (failed) { console.error(`\n❌ verify-share-search-link: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-share-search-link: the link carries the search, says the approved words, and never runs by itself.');

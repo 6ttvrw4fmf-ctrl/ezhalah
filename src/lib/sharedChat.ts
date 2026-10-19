@@ -13,10 +13,10 @@ import type { SearchQuery } from '@/data/search';
 
 const SHARE_RPC_MS = 8000;
 
-export async function createSharedChat(name: string, locale: 'ar' | 'en', q: SearchQuery, transcript: PersistedChat): Promise<string | null> {
+export async function createSharedChat(name: string, locale: 'ar' | 'en', q: SearchQuery | null, transcript: PersistedChat): Promise<string | null> {
   if (!supabase) return null;
   const { data, error } = await boundedRpc<string>(
-    supabase.rpc('create_shared_chat', { p_sender_name: name, p_locale: locale, p_query: q, p_transcript: transcript }) as never,
+    supabase.rpc('create_shared_chat', { p_sender_name: name, p_locale: locale, p_query: q ?? {}, p_transcript: transcript }) as never,
     SHARE_RPC_MS,
   );
   return !error && typeof data === 'string' && isShareCode(data) ? data : null;

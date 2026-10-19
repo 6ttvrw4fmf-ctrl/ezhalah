@@ -10,9 +10,11 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  Share,
   TextInput,
   View,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -688,6 +690,49 @@ export default function Agent() {
   // Home, never on /agent — a pasted link must not run a search by itself (appSession gate). A guest,
   // or a result whose query is unknown, keeps the plain homepage share.
   const sharedCopyRef = useRef<{ j: string; url: string } | null>(null);
+  // Saves a COPY of this conversation (public.shared_chat) and returns its short /s/<code> link — one copy
+  // per unchanged conversation. q = the search the card names, or null for a chat with no search (the card
+  // then reads «محادثة من يوسف على إزهله», owner 2026-10-18 option A). null result = not saved.
+  const chatShareUrl = async (q: SearchQuery | null): Promise<string | null> => {
+    if (!user) return null;
+    const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
+    const name = pickName(user, loc);
+    if (!name.trim()) return null;
+    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow: afCanNarrow }); // same fields as the capture below
+    if (!t || !t.msgs.length) return null;
+    const j = JSON.stringify(t);
+    if (sharedCopyRef.current?.j === j) return sharedCopyRef.current.url;
+    const code = await createSharedChat(name, loc, q, t);
+    if (!code) return null;
+    const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;
+    const url = shareLink(origin, code);
+    sharedCopyRef.current = { j, url };
+    return url;
+  };
+  // THE TOP «مشاركة» INSIDE A CHAT (owner 2026-10-18): a signed-in user with a conversation on screen shares
+  // THAT chat — named after its latest search, or «محادثة من يوسف» when it has none. Guests and an empty
+  // screen keep the homepage share. Phone: the phone's own share menu with the link alone (the card holds
+  // the title). Desktop: the link is copied and the pill says so.
+  const [chatLinkCopied, setChatLinkCopied] = useState(false);
+  const shareThisChat = async (): Promise<boolean> => {
+    if (!user || !msgs.length) return false;
+    const lastQ = ([...msgs].reverse().find((m: any) => m?.result?.query) as any)?.result?.query ?? null;
+    const url = await chatShareUrl(lastQ);
+    if (!url) return false;
+    try {
+      if (Platform.OS === 'web') {
+        const nav: any = typeof navigator !== 'undefined' ? navigator : null;
+        const touch = typeof nav?.maxTouchPoints === 'number' ? nav.maxTouchPoints > 0 : false;
+        if (touch && nav?.share) { await nav.share({ url }); return true; }
+        await Clipboard.setStringAsync(url);
+        setChatLinkCopied(true);
+        setTimeout(() => setChatLinkCopied(false), 1800);
+        return true;
+      }
+      await Share.share({ message: url, url });
+      return true;
+    } catch { return true; /* cancelled — never fall through to a second share sheet */ }
+  };
   const shareFor = (q: SearchQuery | undefined): { shareUrl?: string; shareText?: string; prepareShare?: () => Promise<string | null> } => {
     if (!user || !q) return {};
     const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
@@ -699,17 +744,7 @@ export default function Agent() {
     // THE WHOLE CHAT (owner 2026-10-17: «sharing it means I share the chat history»): pressing Share saves
     // a COPY of this conversation (public.shared_chat) and shares its short /s/<code> link; the search
     // link above is only the fallback when that save fails. One copy per unchanged conversation.
-    const prepareShare = async (): Promise<string | null> => {
-      const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow: afCanNarrow }); // same fields as the capture below
-      if (!t) return null;
-      const j = JSON.stringify(t);
-      if (sharedCopyRef.current?.j === j) return sharedCopyRef.current.url;
-      const code = await createSharedChat(name, loc, q, t);
-      if (!code) return null;
-      const url = shareLink(origin, code);
-      sharedCopyRef.current = { j, url };
-      return url;
-    };
+    const prepareShare = () => chatShareUrl(q);
     return { shareUrl: shareLink(origin, payload), prepareShare /* no text: the card shows the title — sending it too repeated it (owner 2026-10-18) */ };
   };
   // THE ONE STORE WRITER FOR THIS SCREEN. Every write into the shared query the Filter home binds to
@@ -4233,7 +4268,7 @@ export default function Agent() {
             WhatsApp/X/Telegram sheet looked «fake»). Our sheet stays only as the fallback where the
             device has no usable share menu (desktop — see shareNative()). */}
         <Pressable
-          onPress={async () => { if (!(await shareNative())) setShareOpen(true); }}
+          onPress={async () => { if (await shareThisChat()) return; if (!(await shareNative())) setShareOpen(true); }}
           style={({ pressed, hovered }: any) => [
             s.shareIcon,
             s.shareIconWide,
@@ -4249,7 +4284,7 @@ export default function Agent() {
         >
           <Animated.View style={[s.shareInner, { transform: [{ scale: shareScale }] }]}>
             <Ionicons name="share-social-outline" size={17} color={colors.primary} />
-            <Text style={s.shareText}>{t('Share')}</Text>
+            <Text style={s.shareText}>{chatLinkCopied ? t('Copied!') : t('Share')}</Text>
           </Animated.View>
         </Pressable>
       </View>

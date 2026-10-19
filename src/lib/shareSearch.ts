@@ -83,14 +83,17 @@ export function decodeSharePayload(raw: string | null | undefined): { q: SearchQ
 // (the base64url payload above) and keep working.
 export const SHARE_CODE_RE = /^[A-Za-z0-9]{8}$/;
 export const isShareCode = (raw: string | null | undefined): boolean => !!raw && SHARE_CODE_RE.test(raw);
-export type SharedChatCard = { q: SearchQuery; name: string; locale: 'ar' | 'en' };
+// q = null: a chat with no search in it (owner 2026-10-18, option A: «محادثة من يوسف على إزهله»).
+export type SharedChatCard = { q: SearchQuery | null; name: string; locale: 'ar' | 'en' };
 /** Validates a row the database returns (shared_chat_card / get_shared_chat); anything off is null. */
 export function sharedChatCardFrom(row: unknown): SharedChatCard | null {
   const r = row as { sender_name?: unknown; locale?: unknown; query?: unknown } | null;
   const name = firstName(String(r?.sender_name ?? ''));
-  const q = r?.query as SearchQuery | undefined;
-  if (!name || !q || typeof q !== 'object' || typeof q.location !== 'string') return null;
-  if (q.deal !== 'Rent' && q.deal !== 'Buy') return null;
+  const raw = r?.query as SearchQuery | undefined;
+  if (!name || !raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  // An empty query object is a chat with no search; anything else must be a real search.
+  const q = Object.keys(raw).length === 0 ? null : raw;
+  if (q && (typeof q.location !== 'string' || (q.deal !== 'Rent' && q.deal !== 'Buy'))) return null;
   return { q, name, locale: r?.locale === 'en' ? 'en' : 'ar' };
 }
 
@@ -130,6 +133,7 @@ const stripDistrict = (s: string) => s.trim().replace(/^حي\s+/, '').replace(/\
 export function shareTitle(name: string, q: SearchQuery | null | undefined, locale: 'ar' | 'en'): string | null {
   const n = firstName(name);
   if (!n) return null;
+  if (q === null) return locale === 'ar' ? `محادثة من ${n} على إزهله` : `A chat from ${n} on Ezhalah`;
   const phrase = sharePhrase(q, locale);
   return locale === 'ar' ? `${phrase} من ${n} على إزهله` : `${phrase} from ${n} on Ezhalah`;
 }
@@ -140,6 +144,7 @@ export function shareTitle(name: string, q: SearchQuery | null | undefined, loca
 export function shareInviteNote(name: string, q: SearchQuery | null | undefined, locale: 'ar' | 'en'): string | null {
   const n = firstName(name);
   if (!n) return null;
+  if (q === null) return locale === 'ar' ? `${n} شاركك محادثة` : `${n} shared a chat with you`;
   const phrase = sharePhrase(q, locale);
   return locale === 'ar' ? `${n} شاركك: ${phrase}` : `${n} shared with you: ${phrase}`;
 }
