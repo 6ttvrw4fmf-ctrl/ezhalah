@@ -323,6 +323,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://reinvest.sa"
 API = "https://api.reinvest.sa/api/v1/real-estate"
@@ -674,6 +675,8 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
                               "count": len(photos or [])}
 
     extra = {
+        # The API's own `latitude`/`longitude` (present on every ad), through the one gate (owner 2026-10-19).
+        **pin_dict(rec.get("latitude"), rec.get("longitude")),
         "source_id": rec.get("id"), "source_slug": _clean(rec.get("slug")), "type_ar": type_ar,
         "region_ar": _clean(rec.get("region")),
         # exact m², before area_m2's INTEGER round
