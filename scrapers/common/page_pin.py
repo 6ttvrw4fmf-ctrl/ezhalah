@@ -20,6 +20,7 @@ A pin outside Saudi Arabia, at 0,0 or not numeric is rejected by sa_pin(). Nothi
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Callable, Optional
 from html import unescape
@@ -104,15 +105,26 @@ def _maps_url_in_body(text: Optional[str]) -> Optional[str]:
     return None
 
 
+def _hop_proxies() -> Optional[dict]:
+    """Owner 2026-10-19 («ok use the proxy»): Google answers GitHub runners with a script page
+    instead of the goo.gl redirect, so ONLY this hop goes through the Saudi residential proxy when
+    the job has it (WASALT_PROXY_URL — a few KB per new ad). Site pages never use it from here."""
+    purl = os.environ.get("WASALT_PROXY_URL", "").strip()
+    return {"http": purl, "https": purl} if purl else None
+
+
 def resolve_redirect(session, url: str, hops: int = 4) -> Optional[str]:
     """The URL a short link lands on. First by hand, hop by hop, so Maps itself is never loaded
     (measured 2026-10-19: goo.gl → maps.google.com?q=LAT,LNG on the first hop). If that reads
     nothing — a client that cannot do a manual hop, or a shape we do not know — let the client
     follow the redirects itself and read the final URL it reports (decoded, see _maps_url_in)."""
     cur, seen, hit = url, [], None
+    proxies = _hop_proxies()
+    if proxies:
+        seen.append("via proxy")
     try:
         for _ in range(hops):
-            r = session.get(cur, allow_redirects=False, timeout=20)
+            r = session.get(cur, allow_redirects=False, timeout=20, proxies=proxies)
             loc = r.headers.get("location") or r.headers.get("Location")
             seen.append(f"{r.status_code}→{(loc or '')[:90]}")
             if r.status_code in (301, 302, 303, 307, 308) and loc:
@@ -135,7 +147,7 @@ def resolve_redirect(session, url: str, hops: int = 4) -> Optional[str]:
         seen.append(f"manual hop raised {type(e).__name__}")
     if not hit:
         try:
-            r = session.get(url, allow_redirects=True, timeout=30)
+            r = session.get(url, allow_redirects=True, timeout=30, proxies=proxies)
             final = str(getattr(r, "url", "") or "")
             seen.append(f"follow→{final[:90]}")
             hit = _maps_url_in(final) or _maps_url_in_body(getattr(r, "text", None))
