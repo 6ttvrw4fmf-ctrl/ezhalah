@@ -33,7 +33,7 @@ def test_the_glued_article_folds_and_nothing_else_changes():
 
 
 def test_two_answers_or_no_catalogue_entry_stays_unmapped():
-    for city, en in [("khobar", "Rakaa"), ("khobar", "Aziziyah"), ("khobar", "Azzizyah"),
+    for city, en in [("khobar", "Rakaa"),
                      ("khobar", "Al Qashlah"), ("khobar", "Al Douha"), ("khobar", "Dana Bay"), ("jubail", "Khaldiya"),
                      ("riyadh", "King Abdullah Financial"), ("riyadh", "Arizona Golf Resort")]:
         assert _DISTRICT_EN_AR.get((city, _norm_dist(en))) is None, (city, en)
@@ -72,3 +72,11 @@ def test_the_template_sentence_does_not_hide_the_next_district_sentence():
             '<script type="application/ld+json">{"@type":"Place","geo":{"latitude":1,"longitude":2},'
             '"address":{"streetAddress":"King Fahad Road","addressLocality":"Riyadh"}}</script>')
     assert compound_facts("https://rightcompound.com/compounds/riyadh/tuwaiq-gate", page)["district_en_candidates"] == ["Ar Rahmaniya"]
+
+
+def test_khobars_aziziyah_maps_once_admitted_to_its_catalogue():
+    # «Aziziyah, Khobar» (gulf-pearl-compound-2), «Aziziyah district» (sea-shore-compound), «Azzizyah» (black-pearl),
+    # «Al Aziziyah» (al-nawras) — 14 live units; الخبر's «العزيزية» admitted 2026-10-18 (migration 20261018235112).
+    for en in ("Aziziyah", "Azzizyah", "Al Aziziyah"):
+        assert _DISTRICT_EN_AR.get(("khobar", _norm_dist(en))) == "حي العزيزية", en
+    assert _DISTRICT_EN_AR.get(("riyadh", _norm_dist("Aziziyah"))) is None    # never another city's العزيزية
