@@ -1,5 +1,5 @@
 // The main link's WhatsApp/iMessage card carries LIVE, TRUE numbers — or none (owner 2026-10-18).
-//   «محرك بحث عقاري بالذكاء الاصطناعي: 149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.»
+//   «149 موقع · 385,330 إعلان · 346 مدينة» (2026-10-19; the sentence form was cut at the city count)
 //
 // EXECUTED, not grepped: the real builder (inlined in middleware.ts since 2026-10-19) runs against PostgREST-shaped bodies,
 // including the failure shapes supabase-js/PostgREST really produce (error objects, null, empty arrays,
@@ -19,7 +19,8 @@ const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches 
 const SITES = Array.from({ length: 149 }, (_, i) => `site${i}`);
 const SCALE = [{ city_count: 346, listing_count: 385330, district_count: 5547 }];
 const good = homeCardDescription(homeCardFactsFrom(SITES, SCALE));
-check('the owner-approved numbers line, exact digits', good === '149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.', good);
+check('the owner-approved numbers line, exact digits (2026-10-19: counts only, middle dots, no tail)', good === '149 موقع · 385,330 إعلان · 346 مدينة', good);
+mustCatch('the «و…في…، كلها في مكان واحد.» line WhatsApp cut at the city count', good !== '149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.');
 check('the owner-approved title', HOME_CARD_HEADLINE_AR === 'إزهله، محرك بحث عقاري بالذكاء الاصطناعي');
 // IT ALL SHOWS (owner 2026-10-18: «the message doesn't show fully»). WhatsApp's small card shows ~2 lines
 // of title and ~2 lines of description before cutting. Measured against the BIGGEST numbers we could reach.

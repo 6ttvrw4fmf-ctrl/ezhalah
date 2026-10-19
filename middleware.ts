@@ -2,7 +2,7 @@
 //
 // One job (owner 2026-10-18): when a LINK-PREVIEW BOT (WhatsApp, iMessage, Telegram, X…) fetches the
 // main link, answer with the preview card carrying the LIVE numbers
-//   title «إزهله، محرك بحث عقاري بالذكاء الاصطناعي» + «149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.»
+//   title «إزهله، محرك بحث عقاري بالذكاء الاصطناعي» + «149 موقع · 385,330 إعلان · 346 مدينة»
 // Everyone else — every person, every search engine — falls straight through to the normal static
 // page: this function returns nothing for them and touches nothing.
 //
@@ -18,7 +18,7 @@
 // When someone shares https://ezhalah-app.vercel.app on WhatsApp / iMessage / Telegram / X, the app
 // reads the card below — not the sentence they send (owner: the card repeated the message word for
 // word and was cut off). Owner-approved wording, exact digits, refreshed at share time:
-//   title «إزهله، محرك بحث عقاري بالذكاء الاصطناعي» + «149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.»
+//   title «إزهله، محرك بحث عقاري بالذكاء الاصطناعي» + «149 موقع · 385,330 إعلان · 346 مدينة»
 //
 // THE NUMBERS MUST BE TRUE. They come from the same reads the app uses (loader_active_platforms_ar =
 // websites with searchable listings, loader_scale_stats_ar = listings and cities). A missing, failed
@@ -47,7 +47,9 @@ const fmt = (n: number) => n.toLocaleString('en-US');
 /** The owner-approved line with live numbers, or the fallback when any number is not a real count. */
 export function homeCardDescription(f: HomeCardFacts | null | undefined): string {
   if (!f || !ok(f.sites) || !ok(f.listings) || !ok(f.cities)) return HOME_CARD_FALLBACK_AR;
-  return `${fmt(f.sites)} موقع و${fmt(f.listings)} إعلان في ${fmt(f.cities)} مدينة، كلها في مكان واحد.`;
+  // Owner 2026-10-19: no «و», no «في», no tail sentence — WhatsApp cut the line at «353 مدي…», so the
+  // city count never showed. Three counts, middle dots, nothing after the last one.
+  return `${fmt(f.sites)} موقع · ${fmt(f.listings)} إعلان · ${fmt(f.cities)} مدينة`;
 }
 
 /** Read the counts out of the two RPC bodies as PostgREST returns them; null when a body is unusable. */
