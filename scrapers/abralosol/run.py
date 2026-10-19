@@ -52,6 +52,7 @@ from scrapers.common.http import retry_smarter_session
 from scrapers.common.http_liveness import LivenessProbe
 from scrapers.common import normalize as N
 from scrapers.common.pii import redact_capture, redact_pii
+from scrapers.common.page_pin import pin_from_html
 
 BASE = "https://abralosol.com"
 SOURCE = "Abr Alosol"
@@ -409,6 +410,7 @@ def _detail(s: cc.Session, nid: str) -> dict:
         "photo_urls": photos,
         "label": label,
         "age_raw": age_raw,
+        "pin": pin_from_html(page),   # the «الموقع» google.com/maps/place/LAT,LNG link (owner 2026-10-19)
     }
 
 
@@ -695,6 +697,7 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
         "title": _clean(detail.get("title") or title_text) or None,
         "description": detail.get("description"),
         "additional_info": redact_capture({k: v for k, v in {
+            **(detail.get("pin") or {}),
             "price_label": p["label"],
             "price_basis": basis,
             "price_basis_from": basis_from,
