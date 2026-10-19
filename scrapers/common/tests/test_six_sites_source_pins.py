@@ -82,9 +82,9 @@ class _Sess:
 
 
 def test_resolve_redirect_stops_at_the_maps_url_without_loading_it():
-    s = _Sess({"https://maps.app.goo.gl/x": _Resp(302, "https://maps.google.com/?q=25.3,49.6&x=1"),
-               "https://maps.google.com/?q=25.3,49.6&x=1": _Resp(302, "https://consent.google.com/…")})
-    assert resolve_redirect(s, "https://maps.app.goo.gl/x") == "https://maps.google.com/?q=25.3,49.6&x=1"
+    s = _Sess({"https://maps.app.goo.gl/x": _Resp(302, "https://maps.google.com/?q=25.3152163,49.6193885&x=1"),
+               "https://maps.google.com/?q=25.3152163,49.6193885&x=1": _Resp(302, "https://consent.google.com/…")})
+    assert resolve_redirect(s, "https://maps.app.goo.gl/x") == "https://maps.google.com/?q=25.3152163,49.6193885&x=1"
     assert s.calls == ["https://maps.app.goo.gl/x"]          # never fetched Maps itself
     assert resolve_redirect(_Sess({}), "https://maps.app.goo.gl/dead") is None
 
