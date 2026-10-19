@@ -14,7 +14,8 @@
 //      a source pin, because the card is JSX; the logic it renders is executed above.
 //
 //   node --experimental-strip-types scripts/verify-source-discount-shows-final-price-and-strikes-the-old.ts
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { liftSymbols } from './lib/liftSymbols.ts';
@@ -25,6 +26,8 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !detail ? '' : `\n      ${detail}`}`);
   if (!ok) failed++;
 };
+// A mutation proof: `caught` is true only when the barrier's own assertion FAILS against the mutant.
+const mustCatch = (label: string, caught: boolean) => check(`MUTATION caught: ${label}`, caught);
 
 const i18n = await liftSymbols(join(root, 'src/i18n.tsx'), [
   { header: 'const AR: Record<string, string> = {' },
@@ -67,6 +70,36 @@ const nulls: [string, unknown[]][] = [
 for (const [label, args] of nulls) {
   const r = from(...(args as [unknown, unknown, unknown, unknown, unknown]));
   check(`null → no discount line: ${label}`, r === null, JSON.stringify(r));
+}
+
+// 1b. MUTATION PROOFS — the REAL listingDisplay.ts is mutated on disk (a temp copy), lifted the same
+// way, and executed: the barrier's assertions above must FAIL against each mutant, or they prove nothing.
+const DISPLAY = join(root, 'src/lib/listingDisplay.ts');
+const displaySrc = readFileSync(DISPLAY, 'utf8');
+const liftMutant = async (from: string, to: string) => {
+  if (!displaySrc.includes(from)) throw new Error(`mutation anchor missing: ${from}`);
+  const file = join(mkdtempSync(join(tmpdir(), 'discount-mutant-')), 'listingDisplay.ts');
+  writeFileSync(file, displaySrc.replace(from, to));
+  const m = await liftSymbols(file, [
+    { header: 'export const isStayLengthPriced', endsWith: /;$/ },
+    { header: 'export function listingDiscountFrom(' },
+  ], ['listingDiscountFrom'], 'type ListingDiscount = { original: number; pct: number };');
+  return m.listingDiscountFrom as typeof from_;
+};
+const from_ = from;
+{
+  // Mutant A: drop the «original must exceed the final price» guard → a swapped pair would strike the REAL price.
+  const mA = await liftMutant("!(priceOriginal > priceTotal)) return null;", "false) return null;");
+  mustCatch('a builder that strikes an original BELOW the final price', mA('Buy', 'Aqar', 1_250_000, 1_200_000, 4) !== null);
+  // Mutant B: drop the Buy-only guard → a Rent row (no usable original) grows a discount line.
+  const mB = await liftMutant("if (deal !== 'Buy') return null;", "");
+  mustCatch('a builder that shows a discount on a Rent row', mB('Rent', 'Aqar', 60_000, 65_000, 8) !== null);
+  // Mutant C: drop the stay-length guard → Aqar Monthly / Gathern, which show no price, would show a discount.
+  const mC = await liftMutant("if (isStayLengthPriced(typeof source === 'string' ? source : '')) return null;", "");
+  mustCatch('a builder that shows a discount on a stay-length platform', mC('Buy', 'Aqar Monthly', 1_200_000, 1_250_000, 4) !== null);
+  // Mutant D: a builder that never returns a discount — the happy path must be a real assertion too.
+  const mD = await liftMutant("return { original: priceOriginal, pct: discountPct };", "return null;");
+  mustCatch('a builder that never shows a discount', mD('Buy', 'Aqar', 45_000_000, 60_000_000, 25) === null);
 }
 
 // 2. The struck line reads like the Buy price line.
