@@ -109,8 +109,42 @@ check('badge reads «خصم 4٪»', i18n.translate('ar', 'Discount {pct}%', { pc
 
 // 3. The wiring: fetch selects both columns, finalize builds the discount, both card layouts render it.
 const remote = readFileSync(join(root, 'src/data/remote.ts'), 'utf8');
-const listSelect = remote.slice(remote.indexOf('const LIST_SELECT = ['), remote.indexOf('].join(', ')'));
-check("LIST_SELECT fetches 'price_original' and 'discount_pct'", /'price_original'/.test(listSelect) && /'discount_pct'/.test(listSelect));
+// THE SELECT IS BUILT PER TABLE, AND EXECUTED HERE. 65 platform tables have no discount columns and
+// PostgREST fails the whole select over an unknown column: with the two names in LIST_SELECT, CI's
+// built-app smoke measured count=null on EVERY search (PR #7689, run 2795). So: the shared list never
+// names them, and listSelectFor() adds them for the aqar tables only.
+const sel = await liftSymbols(join(root, 'src/data/remote.ts'), [
+  { header: 'const LIST_SELECT = [', endsWith: /^\]\.join\(', '\);$/ },
+  { header: 'const DISCOUNT_COLUMN_TABLES', endsWith: /;$/ },
+  { header: 'const DISCOUNT_COLUMNS', endsWith: /;$/ },
+  { header: 'function listSelectFor(' },
+], ['LIST_SELECT', 'listSelectFor']);
+const LIST_SELECT = sel.LIST_SELECT as string;
+const listSelectFor = sel.listSelectFor as (t: string) => string;
+check('the shared LIST_SELECT names neither discount column (65 tables do not have them)', !/price_original|discount_pct/.test(LIST_SELECT));
+for (const t of ['aqar_residential_listings', 'aqar_commercial_listings']) {
+  check(`listSelectFor('${t}') asks for price_original + discount_pct`, /\bprice_original\b/.test(listSelectFor(t)) && /\bdiscount_pct\b/.test(listSelectFor(t)) && listSelectFor(t).startsWith(LIST_SELECT));
+}
+for (const t of ['wasalt_residential_listings', 'dealapp_commercial_listings', 'gathern_residential_listings', 'aqarmonthly_residential_listings', 'abeea_residential_listings']) {
+  check(`listSelectFor('${t}') (no such columns) is exactly LIST_SELECT`, listSelectFor(t) === LIST_SELECT);
+}
+check('every list fetch goes through listSelectFor(table) — no bare .select(LIST_SELECT) remains', (remote.match(/\.select\(listSelectFor\(/g)?.length ?? 0) >= 3 && !/\.select\(LIST_SELECT\)/.test(remote));
+{
+  // MUTATION: the discount columns slipped back into the shared list → a wasalt select would carry them.
+  const remoteSrc = readFileSync(join(root, 'src/data/remote.ts'), 'utf8');
+  const from = "  'price_per_meter',\n  'area_m2', 'bedrooms', 'bathrooms',";
+  if (!remoteSrc.includes(from)) throw new Error('mutation anchor missing in remote.ts');
+  const file = join(mkdtempSync(join(tmpdir(), 'remote-mutant-')), 'remote.ts');
+  writeFileSync(file, remoteSrc.replace(from, "  'price_per_meter', 'price_original', 'discount_pct',\n  'area_m2', 'bedrooms', 'bathrooms',"));
+  const m = await liftSymbols(file, [
+    { header: 'const LIST_SELECT = [', endsWith: /^\]\.join\(', '\);$/ },
+    { header: 'const DISCOUNT_COLUMN_TABLES', endsWith: /;$/ },
+    { header: 'const DISCOUNT_COLUMNS', endsWith: /;$/ },
+    { header: 'function listSelectFor(' },
+  ], ['listSelectFor']);
+  const mutant = m.listSelectFor as (t: string) => string;
+  mustCatch('a shared select that asks every table for the discount columns', /price_original/.test(mutant('wasalt_residential_listings')));
+}
 check('finalize() builds `discount` with listingDiscountFrom(deal, source, price_total, price_original, discount_pct)',
   /discount:\s*priceIsDerived \? null : listingDiscountFrom\(deal, r\.source \?\? 'Aqar', r\.price_total, r\.price_original, r\.discount_pct\)/.test(remote));
 const card = readFileSync(join(root, 'src/components/ResultCard.tsx'), 'utf8');
