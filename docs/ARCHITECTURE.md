@@ -435,7 +435,7 @@ actual-sales heading uses the Ministry's official green-and-gold logo in the sam
 2026-10-19). Preserve its original colours and source attribution. This is branding only, not a new valuation model.
 
 **The map:** the source's own pin when it published both coordinates («الموقع كما نشره {site}»).
-When an **Aqar (buy or rent), Aqar Monthly or Wasalt** ad published none (Wasalt added 2026-10-19, owner: «map Wasalt like Aqar»; its pin is read from the Arabic detail page, so an un-fetched ad shows the border meanwhile) (owner 2026-10-17: «show the entire
+When an **Aqar (buy or rent), Aqar Monthly, Wasalt, or one of the ten largest native-preview sites (sakan, abralosol, nofodh, arkaan, bossbih, ksaaqar, mustqr, aqalemhajer, alshawaf, reinvest — owner 2026-10-19)** ad published none (Wasalt added 2026-10-19, owner: «map Wasalt like Aqar»; its pin is read from the Arabic detail page, so an un-fetched ad shows the border meanwhile) (owner 2026-10-17: «show the entire
 district … all around the boundaries», «just do aqar now», then «Aqar Monthly and rent, same style,
 just don't include the Ministry of Justice» — other sites still show no map without a pin; the
 ministry block stays Aqar-sale-only),
