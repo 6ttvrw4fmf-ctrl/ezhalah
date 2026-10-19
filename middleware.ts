@@ -2,7 +2,7 @@
 //
 // One job (owner 2026-10-18): when a LINK-PREVIEW BOT (WhatsApp, iMessage, Telegram, X…) fetches the
 // main link, answer with the preview card carrying the LIVE numbers
-//   «محرك بحث عقاري بالذكاء الاصطناعي: 149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.»
+//   title «إزهله، محرك بحث عقاري بالذكاء الاصطناعي» + «149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.»
 // Everyone else — every person, every search engine — falls straight through to the normal static
 // page: this function returns nothing for them and touches nothing.
 //
@@ -18,7 +18,7 @@
 // When someone shares https://ezhalah-app.vercel.app on WhatsApp / iMessage / Telegram / X, the app
 // reads the card below — not the sentence they send (owner: the card repeated the message word for
 // word and was cut off). Owner-approved wording, exact digits, refreshed at share time:
-//   «محرك بحث عقاري بالذكاء الاصطناعي: 149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.»
+//   title «إزهله، محرك بحث عقاري بالذكاء الاصطناعي» + «149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.»
 //
 // THE NUMBERS MUST BE TRUE. They come from the same reads the app uses (loader_active_platforms_ar =
 // websites with searchable listings, loader_scale_stats_ar = listings and cities). A missing, failed
@@ -31,11 +31,15 @@
 // below are pinned to src/lib/share.ts (OG_IMAGE's file, SHARE_TITLE_AR) by the verify script.
 export const HOME_CARD_IMAGE_PATH = '/og-image-v6.png';
 export const HOME_CARD_TITLE_AR = 'إزهله';
+// The card's BOLD title (owner 2026-10-18: «the message doesn't show fully»). WhatsApp's small card shows
+// ~2 lines under the title, so the approved sentence is split: what Ezhalah is goes in the title, the
+// live numbers go underneath — same words, both short enough to show in full (length pinned by the verify script).
+export const HOME_CARD_HEADLINE_AR = 'إزهله، محرك بحث عقاري بالذكاء الاصطناعي';
 
 export type HomeCardFacts = { sites?: number | null; listings?: number | null; cities?: number | null };
 
 /** The card line without numbers — used whenever any live number is missing. */
-export const HOME_CARD_FALLBACK_AR = 'محرك بحث عقاري بالذكاء الاصطناعي، كل مواقع العقار في السعودية في مكان واحد.';
+export const HOME_CARD_FALLBACK_AR = 'كل مواقع العقار في السعودية في مكان واحد.';
 
 const ok = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0;
 const fmt = (n: number) => n.toLocaleString('en-US');
@@ -43,7 +47,7 @@ const fmt = (n: number) => n.toLocaleString('en-US');
 /** The owner-approved line with live numbers, or the fallback when any number is not a real count. */
 export function homeCardDescription(f: HomeCardFacts | null | undefined): string {
   if (!f || !ok(f.sites) || !ok(f.listings) || !ok(f.cities)) return HOME_CARD_FALLBACK_AR;
-  return `محرك بحث عقاري بالذكاء الاصطناعي: ${fmt(f.sites)} موقع و${fmt(f.listings)} إعلان في ${fmt(f.cities)} مدينة، كلها في مكان واحد.`;
+  return `${fmt(f.sites)} موقع و${fmt(f.listings)} إعلان في ${fmt(f.cities)} مدينة، كلها في مكان واحد.`;
 }
 
 /** Read the counts out of the two RPC bodies as PostgREST returns them; null when a body is unusable. */
@@ -63,12 +67,12 @@ export function homeCardHtml(origin: string, description: string): string {
   const url = `${o}/`;
   const image = `${o}${HOME_CARD_IMAGE_PATH}`;
   return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">`
-    + `<title>${esc(HOME_CARD_TITLE_AR)}</title>`
+    + `<title>${esc(HOME_CARD_HEADLINE_AR)}</title>`
     + `<meta property="og:type" content="website"><meta property="og:site_name" content="${esc(HOME_CARD_TITLE_AR)}">`
-    + `<meta property="og:title" content="${esc(HOME_CARD_TITLE_AR)}"><meta property="og:description" content="${esc(description)}">`
+    + `<meta property="og:title" content="${esc(HOME_CARD_HEADLINE_AR)}"><meta property="og:description" content="${esc(description)}">`
     + `<meta property="og:url" content="${esc(url)}"><meta property="og:image" content="${esc(image)}">`
     + `<meta property="og:image:width" content="192"><meta property="og:image:height" content="192">`
-    + `<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${esc(HOME_CARD_TITLE_AR)}">`
+    + `<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${esc(HOME_CARD_HEADLINE_AR)}">`
     + `<meta name="twitter:description" content="${esc(description)}"><meta name="twitter:image" content="${esc(image)}">`
     + `</head><body><a href="${esc(url)}">${esc(HOME_CARD_TITLE_AR)}</a></body></html>`;
 }
