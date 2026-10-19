@@ -469,9 +469,29 @@ def location_box_label(page_html: str) -> Optional[str]:
 _NOT_A_CITY_MENTION = re.compile(r"(?:حي|طريق|شارع)\s+\S+")
 
 
+def label_cities(text: Optional[str]) -> dict[str, str]:
+    """{English city: the Arabic as written} for every Saudi city a label or title names (not «حي X»/«طريق X»)."""
+    rest = _NOT_A_CITY_MENTION.sub(" ", text or "")
+    return {normalize.map_city(c) or c: c for c in _CITY_FALLBACK_RE.findall(rest)}
+
+
 def names_other_city(label: Optional[str], city: Optional[str]) -> bool:
-    rest = _NOT_A_CITY_MENTION.sub(" ", label or "")
-    return any(normalize.map_city(c) != city for c in _CITY_FALLBACK_RE.findall(rest))
+    return any(en != city for en in label_cities(label))
+
+
+def label_city(label: Optional[str], title: Optional[str], city: Optional[str]) -> Optional[str]:
+    """The city the ad's OWN pin label names when it is not the category's (owner 2026-10-18): «عقارات أبها» is the
+    site's regional bucket, «خميس مشيط حي الاسكان» is the ad's own claim, so the ad is filed under خميس مشيط. Only when
+    the label names exactly ONE city, and the title does not name a different one (12226684: a Riyadh pin on an ad
+    whose title says صبيا is a conflict, not a claim) — otherwise None."""
+    named = label_cities(label)
+    if len(named) != 1:
+        return None
+    en, ar = next(iter(named.items()))
+    in_title = label_cities(title)
+    if en == city or (in_title and en not in in_title):
+        return None
+    return ar
 
 
 def district_candidate(text: str, box: Optional[str] = None) -> Optional[str]:
@@ -791,9 +811,16 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
     title = _clean((post.get("title") or {}).get("rendered", ""))
     body = _clean((post.get("content") or {}).get("rendered", ""))
     district_ar = cand_hit = None
+    # The ad's own label names its city and it is not the category's bucket city: file it there (owner 2026-10-18).
+    category_city = None
+    relabel = label_city(box or cand, title, city) if (cand and not field) else None
+    if relabel:
+        new_id, new_region = to_catalog(relabel)
+        if new_id:
+            category_city, city_ar, city, city_id, region_id = city_ar, relabel, normalize.map_city(relabel), new_id, new_region
     # The page itself places the pin in another city: no district of THIS city comes from it, its title or its body,
     # and the stored one clears (the source settled it — AUTHORITATIVE_NULL, not a dropped None).
-    elsewhere = bool(cand) and not field and names_other_city(box or cand, city)
+    elsewhere = bool(cand) and not field and not category_city and names_other_city(box or cand, city)
     if elsewhere:
         district_ar, district_source = db.AUTHORITATIVE_NULL, "label_names_another_city"
     elif city_id:
@@ -860,6 +887,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
 
     extra: dict[str, Any] = {
         "district_source": district_source,      # the page's «الموقع:» address field, or the map line
+        "category_city_ar": category_city,       # the site's bucket city when the ad's own label named another one
         "map_line": cand if cand and not field else None,   # the pin label as read; a district only via neighborhood_word
         "wp_id": post.get("id"),
         "slug": post.get("slug") or None,
