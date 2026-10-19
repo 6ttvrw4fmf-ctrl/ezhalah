@@ -639,7 +639,7 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
                          url_for=lambda _ad: f"{BASE}/{pid}/").verify_gone(ad_number)
 
 
-def liveness_controls(n: int, max_reads: int = 20, max_hours: int = 6) -> list[dict]:
+def liveness_controls(n: int, max_reads: int = 60, max_hours: int = 12) -> list[dict]:
     """fleet_liveness controls (CONTROL_POOLS): property offers posted in Haraj's newest COMPLETE hours
     whose own page reads live now. Fresh posts are alive almost always; a block or a redesign reads
     none live, so fewer than n come back and the run quarantines (fails closed).
@@ -647,7 +647,12 @@ def liveness_controls(n: int, max_reads: int = 20, max_hours: int = 6) -> list[d
     Walks back hour by hour (newest complete first, at most `max_hours` files, `max_reads` page reads
     in all) until n read live. One quiet hour is not a block: the 07:48 UTC daily run on 2026-10-18
     found 3 licensed-titled posts in the 06:00 hour, all 3 read live, and the gate (5 needed)
-    quarantined 3,600 ads with every control it had alive, while 273 struck at 1 strike sat on screen."""
+    quarantined 3,600 ads with every control it had alive, while 273 struck at 1 strike sat on screen.
+
+    The read budget is 60 (was 20, 2026-10-19): since 10-17/10-18 the own-page reader calls a request,
+    a catalogue, a deal conflict or an ended licence «gone», so most fresh tight-titled posts are honest
+    non-offers. The 20:48 UTC recheck on 10-18 spent its 20 reads, found 3 live and 0 blocked, and
+    quarantined 6,317 ads with 4 dead ones on screen at 2 strikes. A block still reads none live."""
     locs = hour_files()
     out: list[dict] = []
     reads = 0
