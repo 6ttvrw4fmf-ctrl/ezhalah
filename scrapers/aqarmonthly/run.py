@@ -628,7 +628,7 @@ def _resolve_location(uri: str, aqar_city_id, address=None, aqar_district=None) 
     if loc.get("city_id") and not _city_only_in_street(loc.get("city_ar"), address):
         return loc
     if loc.get("city_id"):
-        loc = {**loc, "city_ar": None, "city_id": None, "confidence": "unresolved"}
+        loc = {**loc, "city_ar": None, "city_id": None, "confidence": "unresolved", "street_city_dropped": True}
     try:
         hint = AQAR_CITY_REGION.get(int(aqar_city_id or 0))
     except (TypeError, ValueError):
@@ -760,9 +760,12 @@ def map_listing(g: dict, price: dict) -> dict | None:
         "description":      _redact(g.get("content")),
         "photo_urls":       imgs,
         # ── Arabic-native (additive, shadow) + complete-source capture ──────────
-        "city_ar":          loc["city_ar"],
+        # A city we PROVED wrong (a street named after a town) must be cleared, not kept: a plain None
+        # means "unknown this fetch" and would leave the stored wrong city in place (db's
+        # unknown-must-not-overwrite-known rule). Only the street guard sets this.
+        "city_ar":          loc["city_ar"] if loc["city_ar"] or not loc.get("street_city_dropped") else db.AUTHORITATIVE_NULL,
         "district_ar":      district_ar_val,
-        "city_id":          loc["city_id"],
+        "city_id":          loc["city_id"] if loc["city_id"] or not loc.get("street_city_dropped") else db.AUTHORITATIVE_NULL,
         "region_id":        loc["region_id"],
         "source_capture":   capture,
         **map_amenities(g),
