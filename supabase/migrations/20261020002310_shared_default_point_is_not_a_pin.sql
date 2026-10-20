@@ -13,7 +13,7 @@
 -- point — a subdivision's place link on bossbih — stays inside one district and is untouched.
 --
 -- Three parts, all automatic (owner: «the robot has to fix it automatically»):
---   1. shared_default_pins()        — finds such points in the served index (≥10 ads, ≥3 districts).
+--   1. shared_default_pins()        — finds such points in the served index (≥10 ads, ≥3 districts; 20261020002525 lowers the floor to 5).
 --   2. strip_shared_default_pins()  — registers each point (ops_default_pin_register), removes the pair
 --      from the source rows' additional_info, and attaches reject_registered_default_pin to that
 --      table so the next crawl cannot write the same point back. Hourly at :15, before the :22 sync.
