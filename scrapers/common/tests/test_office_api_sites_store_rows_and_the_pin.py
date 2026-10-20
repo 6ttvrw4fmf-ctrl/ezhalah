@@ -3,21 +3,26 @@
 which listing_rich_attrs cannot read a pin from; it is now {"rows": [...], "latitude", "longitude"} and
 src/data/remote.ts buildAdditionalInfo() unwraps "rows" so the card panel is unchanged.
 """
-import re
 from pathlib import Path
 
 from scrapers.common.source_pin import pin_dict
 
 ROOT = Path(__file__).resolve().parents[3]
-SITES = {"aldarim": "L", "abwbna": "L", "alobid": "L", "bahadhabab": "L", "alhoshan": "p"}
+SITES = {
+    "aldarim": "{\"rows\": _additional_info(L), **pin_dict(L.get(\"latitude\"), L.get(\"longitude\"))},",
+    "abwbna": "{\"rows\": _additional_info(L), **pin_dict(L.get(\"latitude\"), L.get(\"longitude\"))},",
+    "alobid": "{\"rows\": _additional_info(L), **pin_dict(L.get(\"latitude\"), L.get(\"longitude\"))},",
+    "bahadhabab": "{\"rows\": _additional_info(L), **pin_dict(L.get(\"latitude\"), L.get(\"longitude\"))},",
+    # alhoshan: the pair lives under item.specs (measured 2026-10-20)
+    "alhoshan": "{\"rows\": _additional_info(p, specs), **pin_dict(specs.get(\"latitude\"), specs.get(\"longitude\"))},",
+}
 
 
 def test_each_site_stores_rows_plus_the_pin():
-    for site, var in SITES.items():
+    for site, call in SITES.items():
         src = (ROOT / "scrapers" / site / "run.py").read_text(encoding="utf-8")
         assert "from scrapers.common.source_pin import pin_dict" in src, site
-        assert re.search(r'"additional_info": \{"rows": _additional_info\(' + var + r'[^)]*\), \*\*pin_dict\(' + var
-                         + r'\.get\("latitude"\), ' + var + r'\.get\("longitude"\)\)\},', src), site
+        assert '"additional_info": ' + call in src, site
 
 
 def test_string_and_numeric_coordinates_both_pass_the_gate():
