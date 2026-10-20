@@ -33,7 +33,7 @@ def test_goldendeal_short_link_in_the_description_is_followed(monkeypatch):
     hops = []
     monkeypatch.setattr(GD, "resolve_redirect", lambda s, u: (hops.append(u), "https://maps.google.com/?q=25.3152163,49.6193885&entry=gps")[1])
     L = {"id": 54192, "latitude": None, "longitude": None,
-         "description": '<a href="https:\\/\\/maps.app.goo.gl\\/koSyLPSEfYusvUgKA?g_st=ic">map</a>'}
+         "description": '<a href="https://maps.app.goo.gl/koSyLPSEfYusvUgKA?g_st=ic">map</a>'}   # as json.loads hands it over
     assert GD._short_link_pin(L) == {"latitude": 25.3152163, "longitude": 49.6193885}
     assert hops == ["https://maps.app.goo.gl/koSyLPSEfYusvUgKA"]
     assert GD._short_link_pin({"id": 1, "description": "no link"}) == {}

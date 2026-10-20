@@ -402,7 +402,7 @@ def _short_link_pin(L: dict) -> dict:
     the pin as «maps.app.goo.gl/…» (5/5 sampled pin-less ads). Followed through page_pin's hop (the
     headless-Chromium leg runs where the workflow installed it — PIN_BROWSER_HOP); {} when absent."""
     global _HOP_SESSION
-    short = short_maps_link(json.dumps(L, ensure_ascii=False).replace("\\/", "/"))
+    short = short_maps_link(json.dumps(L, ensure_ascii=False))   # json.dumps never escapes "/"
     if not short:
         return {}
     if _HOP_SESSION is None:
