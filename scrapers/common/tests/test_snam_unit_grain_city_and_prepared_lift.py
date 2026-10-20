@@ -38,6 +38,7 @@ def _to_catalog(city_ar, region_hint=None):
 
 R.to_catalog = _to_catalog
 R.find_district_in_text = lambda text, city_id: ("حي " + text.strip()) if text and not text.isascii() else None
+R.bridge_rows = lambda city_en: ()           # the EN→AR bridge is a Supabase read; its own test is below
 
 TODAY = dt.date(2026, 9, 24)
 
@@ -246,3 +247,20 @@ def test_a_refused_catalogue_names_every_route_it_tried(monkeypatch):
     assert R.main() == 1
     assert calls["end"]["ok"] is False and "HTTP 502" in calls["end"]["notes"]
     assert all(r in calls["end"]["notes"] for r in route)
+
+
+def test_an_english_neighbourhood_reads_the_en_ar_bridge(monkeypatch):
+    # 2026-10-20: 14 snam ads «Ad Dirah» (projects 23, 45) had no district; district_name_bridge (dealapp's bilingual
+    # pairs, verbatim rows) maps «Ad Dirah» / «Ad-Dirah» → «حي الديرة», which الرياض's catalogue holds.
+    monkeypatch.setattr(R, "bridge_rows", lambda city_en: (("Ad Dirah", "حي الديرة"), ("Ad-Dirah", "حي الديرة"))
+                        if city_en == "Riyadh" else ())
+    monkeypatch.setattr(R, "find_district_in_text",
+                        lambda text, city_id: text if city_id == 3 and text == "حي الديرة" else None)
+    R._bridge_en_ar.cache_clear()
+    row, _ = _row(P45, U70)
+    assert row["district_ar"] == "حي الديرة" and row["neighborhood"] == "Ad Dirah"
+    # the answer must be in THIS city's catalogue
+    monkeypatch.setattr(R, "find_district_in_text", lambda text, city_id: None)
+    row, _ = _row(P45, U70)
+    assert row["district_ar"] is None
+    R._bridge_en_ar.cache_clear()
