@@ -43,6 +43,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.source_pin import pin_dict
 from scrapers.common.http import retry_smarter_session
 
 # PDPL: never store these containers (advertiser / brokerage identity).
@@ -345,7 +346,9 @@ def map_listing(p: dict, photos: Optional[list[str]] = None) -> tuple[Optional[d
         # source gallery stays [] — fewer images on failure, never a wrong or invented one.
         "photo_urls": photos if photos else ([photo] if photo else []),
         "rega_location_verified": bool(p.get("advertisingLicenseNumber")),
-        "additional_info": _additional_info(p, specs),
+        # Owner 2026-10-20: the search API item's own latitude/longitude (numbers, e.g. 24.5149529,46.7431743).
+        # Rows keep their legacy shape under "rows" (buildAdditionalInfo unwraps it); the index reads the pin.
+        "additional_info": {"rows": _additional_info(p, specs), **pin_dict(p.get("latitude"), p.get("longitude"))},
         # ── Arabic-native (additive, shadow) + complete-source capture ──────────
         "city_ar": raw_city or None,
         "district_ar": (specs.get("district") or "").strip() or None,
