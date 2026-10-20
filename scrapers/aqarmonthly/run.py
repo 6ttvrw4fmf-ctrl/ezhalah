@@ -45,6 +45,7 @@ from scrapers.common import db
 from scrapers.common import normalize as N
 from scrapers.common import arabic_location as AL
 from scrapers.common.arabic_location import resolve_slug
+from scrapers.common.source_pin import pin_dict
 
 GQL = "https://sa.aqar.fm/graphql"
 WORKERS = int(os.environ.get("SCRAPE_WORKERS", "6"))
@@ -234,7 +235,13 @@ _ext_by_id: dict[int, dict] = {}
 # pages render «مطبخ · مصعد · مكيف · موقف خاص» (source-reread run 37288862098, ad 6570974) — invisible
 # to every customer who ticks an amenity on a Monthly search (ops_af_score 2026-10-05: find 0/10).
 AMENITY_GQL_FIELDS: tuple[str, ...] = ("lift", "ketchen", "ac", "maid", "driver", "car_entrance",
-                                       "special_entrance", "two_entrances", "extended_details", "wc")
+                                       "special_entrance", "two_entrances", "extended_details", "wc",
+                                       "location { lat lng }")
+# `location { lat lng }` (owner 2026-10-20 night, «most of them have a real pin, we're just missing it»):
+# the unit page draws a Leaflet map with Aqar's own pin, and the page data carries it as
+# Listing.location {lat, lng} (ad 5993983 → 24.887617, 46.60416). 0 of 3,693 Monthly units were served
+# with a pin because this query never asked for it. Settled like the flags: a schema that rejects it
+# drops it alone and the crawl runs exactly as before.
 # `wc` (2026-10-10, 🔬): the same Listing's bathroom count — the «دورات المياه» row of the unit page.
 # The Monthly apartment interview asks «كم دورة مياه», and 0 of 3,073 searchable Monthly apartments
 # carried one (ops_af_score 2026-10-10 aqarmonthly bathrooms we_miss 4/4). Settled against the live
@@ -273,7 +280,8 @@ def settle_amenity_fields(answer, fields: tuple[str, ...] = AMENITY_GQL_FIELDS) 
         if ((d.get("data") or {}).get("Listing") or {}).get("get") is not None:
             return fields
         msgs = " ".join(str((e or {}).get("message", "")) for e in (d.get("errors") or []))
-        bad = {f for f in fields if re.search(r'"' + re.escape(f) + r'"', msgs)}
+        # A field is named in the error by its NAME — «location», never «location { lat lng }».
+        bad = {f for f in fields if re.search(r'"' + re.escape(f.split()[0]) + r'"', msgs)}
         if not bad:
             return ()
         fields = tuple(f for f in fields if f not in bad)
@@ -294,6 +302,14 @@ def settle_across_units(answer_for, ids, tries: int = SETTLE_TRIES) -> tuple[str
         if got:
             return got
     return ()
+
+
+def aqar_pin(g: dict) -> dict:
+    """{"latitude","longitude"} from Listing.location, or {} when Aqar gave none / an unusable pair."""
+    loc = g.get("location") if isinstance(g, dict) else None
+    if not isinstance(loc, dict):
+        return {}
+    return pin_dict(loc.get("lat"), loc.get("lng"))
 
 
 def wc_bathrooms(raw) -> int | None:
@@ -768,6 +784,9 @@ def map_listing(g: dict, price: dict) -> dict | None:
         "city_id":          loc["city_id"] if loc["city_id"] or not loc.get("street_city_dropped") else db.AUTHORITATIVE_NULL,
         "region_id":        loc["region_id"],
         "source_capture":   capture,
+        # Aqar's own pin for this unit (Listing.location), through the one KSA gate; {} → the district
+        # border, never a guess. listing_rich_attrs reads additional_info.latitude/longitude.
+        "additional_info":  aqar_pin(g),
         **map_amenities(g),
     }
 
