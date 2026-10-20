@@ -149,7 +149,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
-from scrapers.common.page_pin import pin_from_short_link, resolve_redirect, short_maps_link  # noqa: E402
+from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
 
 
@@ -402,7 +402,11 @@ def _short_link_pin(L: dict) -> dict:
     the pin as «maps.app.goo.gl/…» (5/5 sampled pin-less ads). Followed through page_pin's hop (the
     headless-Chromium leg runs where the workflow installed it — PIN_BROWSER_HOP); {} when absent."""
     global _HOP_SESSION
-    short = short_maps_link(json.dumps(L, ensure_ascii=False))   # json.dumps never escapes "/"
+    text = json.dumps(L, ensure_ascii=False)                       # json.dumps never escapes "/"
+    pin = pin_from_html(text)          # owner 2026-10-20 night: a plain «maps.google.com/?q=LAT,LNG» link too
+    if pin:
+        return pin
+    short = short_maps_link(text)
     if not short:
         return {}
     if _HOP_SESSION is None:
