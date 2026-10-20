@@ -56,7 +56,10 @@ Dispatch early, and name every site you need in ONE comma list. **A route log is
 verdict on a small site, check the proxy on a known-good one in the same run.
 
 **Owed → first thing next run (10-21):**
-- **#7808** (scrapers-only, auto-merge lane): confirm it merged. If not, `git merge origin/main` + push once.
+- **#744 P1 FIRST: the residential proxy answers ProxyError on every host since 10-19 21:00 UTC** (wasalt enum ×34 +
+  02:50 crawl 0 rows, souq24 1,323, eilmalriyada, sadin, aqaralsaudia, senan/snam proxy leg). Owner pinged 10-20 (account/
+  credential = money/secret). Read whether wasalt's 21:00 enum read rows; when it does, re-dispatch souq24,eilmalriyada.
+- **#7808** (scrapers-only, auto-merge lane): merged 05:52 UTC 10-20 (done). If not, `git merge origin/main` + push once.
 - **senan / snam (dormant 10-20 05:34 UTC):** read their nightly route notes. senan's own ad pages became the host's
   generic «This Page Does Not Exist» — re-read its HOMEPAGE (`source-reread.yml --around`) for a new domain or API
   before calling it gone; snam answered 502 everywhere. The auto-return flips them back on a crawl that reads ≥ 3 rows.
