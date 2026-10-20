@@ -1444,6 +1444,17 @@ for _p in FLEET_DAILY_DIRECT:
                       "Daily direct revisit of every active listing (fleet_liveness.py, 2026-09-28). "
                       + POLICIES[_p]["note"])
 
+# GRACE 1 — remove on the FIRST affirmative reading (owner 2026-10-20: «once we see it, remove it»).
+# sakan prints «هذا العقار لم يعد متاحاً» on the expired ad's own page (aldarim stays at 3: it is a
+# FLEET_DAILY_DIRECT site whose daily revisit hides on three direct readings). That notice is the source's direct statement about THIS listing, so
+# the 3-crawl wait only kept dead ads on screen (sakan: 600 of 742 border ads were expired). Absence
+# still never kills: the at-grace verify_gone must answer «gone», and every UNKNOWN still holds.
+for _p in ("sakan",):
+    _old = POLICIES[_p]
+    POLICIES[_p] = _P(_pol(_p, 1, _old["policy"].max_verification_age_hours), _old["strategy"],
+                      _old["death_signals"], "GRACE 1 on the source's own removal (owner 2026-10-20). "
+                      + _old["note"])
+
 
 # remal and shmoualshmal gained a prune-time oracle on the ad's OWN url on 2026-10-02 (until then
 # neither crawler removed anything), so "absence only" no longer describes them. Tier unchanged.

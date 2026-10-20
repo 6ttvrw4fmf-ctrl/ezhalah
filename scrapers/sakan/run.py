@@ -111,6 +111,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.liveness_policies import policy_for  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_capture  # noqa: E402
 from scrapers.common.page_pin import pin_from_html  # noqa: E402
@@ -730,7 +731,9 @@ def main() -> int:
             for tbl, rows in (("sakan_residential_listings", res),
                               ("sakan_commercial_listings", com)):
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
-                                    verify_gone=verify_gone)
+                                    verify_gone=verify_gone,
+                                    # owner 2026-10-20 «once we see it, remove it»: the registry's grace (1)
+                                    grace=policy_for("sakan").grace)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
                 else:
