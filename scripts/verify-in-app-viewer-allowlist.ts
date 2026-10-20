@@ -298,6 +298,21 @@ const mustCatch = (label: string, caught: boolean) => {
 // A decision that lets EVERY host in (the "forgot the allowlist" mutant).
 const letsEveryoneIn = (url: string | null | undefined) => { try { return new URL(url ?? '').hostname; } catch { return null; } };
 mustCatch('a decision that opens every site in-app', letsEveryoneIn('https://sa.aqar.fm/x') !== null);
+
+// THE LIVE GUARD TELLS A BLOCKED ROBOT FROM A BLANK FRAME (🔧 2026-10-20, backlog 741). razre.sa answered HTTP 403 (no
+// cf-* header) / NO CONTENT to every datacenter egress and 200 to a phone, and e2e/viewer/speed-live.mjs read it ✗ on
+// every run for two days — a guard red on its own egress hides a real slow site. The guard must record each ad's
+// top-level status and exclude a blank frame whose top-level load answered 4xx/5xx (or nothing) as inconclusive,
+// exactly as it already excludes 429 and the challenge page; a 200 page that stays blank must still be measured.
+const guardSrc = readFileSync(new URL('../e2e/viewer/speed-live.mjs', import.meta.url), 'utf8');
+const guardTellsBlockedFromBlank = (src: string) =>
+  /topStatus\.set\(u, res \? res\.status : 0\)/.test(src)
+  && /seen === null && \(top === 0 \|\| top >= 400\)/.test(src)
+  && /excluded as inconclusive/.test(src)
+  && /times\.push\(seen \?\? 99_999\)/.test(src);
+check('speed-live.mjs excludes a blank frame over a 4xx/5xx top-level load as inconclusive (never ✗)', guardTellsBlockedFromBlank(guardSrc));
+mustCatch('a guard that drops the top-level status check', !guardTellsBlockedFromBlank(guardSrc.replace('seen === null && (top === 0 || top >= 400)', 'false')));
+mustCatch('a guard that stops measuring a blank 200 page', !guardTellsBlockedFromBlank(guardSrc.replace('times.push(seen ?? 99_999)', 'if (seen !== null) times.push(seen)')));
 // A suffix match without the dot boundary (the lookalike mutant).
 const sloppySuffix = (url: string) => IN_APP_VIEWER_HOSTS.find((h) => new URL(url).hostname.endsWith(h)) ?? null;
 mustCatch('a host match without the dot boundary', sloppySuffix('https://notdealapp.sa/x') !== null);
