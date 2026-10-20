@@ -43,3 +43,10 @@ def test_two_different_counts_cannot_be_attributed():
 def test_mutation_without_the_entry_the_prose_would_have_asked():
     assert A.page_says_yes(["مطبخ داخلي ألماني جديد بالكامل"], "kitchen")
     assert A.is_nuzul("https://www.aldarim.sa/en/properties/49170")
+
+
+def test_furnished_prose_on_an_aldarim_ad_is_silent():
+    """576300 (10-20 branch dry run) was asked furnished from prose; aldarim states is_furnished structurally."""
+    out = A.structured_only("aldarim", {"furnished": A.WE_MISS}, {"furnished": None}, _page(AD_49170))
+    assert out["furnished"] == A.PAGE_SILENT
+    assert A.structured_says(_page(r'\"is_furnished\":1'), "furnished") is True

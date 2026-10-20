@@ -1048,6 +1048,17 @@ _NEGATOR_RES = tuple(re.compile(rf"(?<!\w){'(?:و|ال|وال)?' if re.match(r'[
                      for n in _NEGATORS)
 
 
+# A token can sit inside a PLACE NAME: «شرفة» is the tail of Jeddah's district «مشرفة», and every ad there read
+# balcony = yes (🔬 2026-10-20: muhaysini 110 and dwelleo 34 active rows, ~127 with no balcony word at all). Only the
+# measured collision is refused: a general word-start rule would also drop real glued typos the sites print
+# («منبلكونه», «ماستروبلكونة», dwelleo/muhaysini 10-20). token (normalised) → letters that may not stand before it.
+_EMBEDDED_IN_NAME = {"شرفه": ("م",)}
+
+
+def _inside_a_name(t: str, start: int, tok: str) -> bool:
+    return start > 0 and t[start - 1] in _EMBEDDED_IN_NAME.get(tok, ())
+
+
 def _amenities_in_clause(raw: str) -> dict[str, bool]:
     t = _norm_ar(raw).lower()
     out: dict[str, bool] = {}
@@ -1055,6 +1066,8 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
         for tok in tokens:
             k = _norm_ar(tok).lower()
             for m in re.finditer(re.escape(k), t):
+                if _inside_a_name(t, m.start(), k):
+                    continue
                 before = t[max(0, m.start() - 12):m.start()]
                 after = t[m.end():m.end() + 14]
                 if any(_norm_ar(q) in after for q in _PREPARED_ONLY):

@@ -123,7 +123,9 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # (scrapers/aldarim/run.py). Its 10-14 and 10-20 «misses» asked kitchen from prose («مطبخ داخلي ألماني», 49170)
     # on ads whose own count is 0 (CI re-read; backlog 555): a structured null outranks prose (law §2). Read by
     # nuzul_props(). abwbna / alobid / bahadhabab run the same SaaS but were not reachable to verify (10-20): not added.
-    "aldarim": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room"),
+    # furnished: the API's is_furnished (filed in additional_info, 0 on all 132 active ads on 10-20): 576300's ask
+    # on the 10-20 branch dry run was prose. Structured silence, never a miss.
+    "aldarim": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "furnished"),
     # superoffice prints each office's own services as `<ul class="service_ul">` («أثاث», «إنترنت عالي السرعه» …),
     # the list its scraper reads (scrapers/superoffice/run.py). Its 10-20 «misses» (parking 5 of 5, 0 of 4 findable)
     # were the description's marketing line «نحن نقدم: … مواقف السيارات», on offices whose list names no parking.
@@ -541,7 +543,7 @@ def muktamel_props(body: str) -> list[dict]:
 # A count ≥ 1 is a yes, 0 is silence (the scraper's own rule); two different counts for one key cannot be
 # attributed to this ad and say nothing.
 NUZUL_COUNTS = {"kitchens": "kitchen", "elevators": "elevator", "parking_spots": "parking", "maid_rooms": "maid_room",
-                "driver_rooms": "driver_room", "is_ac_installed": "air_conditioner"}
+                "driver_rooms": "driver_room", "is_ac_installed": "air_conditioner", "is_furnished": "furnished"}
 
 
 def nuzul_props(body: str) -> list[dict]:
