@@ -310,3 +310,12 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   `git log -- <path>` on a stale local clone is not the merge timeline: read the PR's `merged_at` and the deploy run list.
   Tonight's shape worked: 3 jobs, 2 of them proofs of yesterday's merged fixes, both PASS inside 35 minutes — a proof is
   the cheapest fix-rate there is; keep job 0 = yesterday's ⏳.
+
+- **2026-10-20:** a module variable reset inside `ensureLocationIndex` broke `verify-failed-location-index-is-not-a-load`,
+  because that barrier LIFTS the loader alone and could not see a `let` declared 700 lines below — the full local suite
+  caught it (2 assertions), so run `npm run test:all` in the background the moment the diff exists, not after the PR.
+  Memoise against the array identity the loader replaces, never by editing the loader. Also: the DB connector refuses an
+  `UPDATE` on `ops_engineer_backlog` even inside `do $$ … $$` (2 timeouts, nothing landed) — backlog notes go into NEW rows
+  (`ops_engineer_backlog` INSERT, a `qa:proof` / followup row) and `ops_close_backlog_item()`; never plan on an UPDATE.
+  And the clock lesson came back in a new shape: I reasoned «it is 13:57» when the database said 13:34 — the only clock is
+  `select now()`, read it before judging a deadline, never estimate elapsed time from the number of tool calls.
