@@ -301,3 +301,11 @@ row; a night is better on findability only when a score row says so.**
   index was frozen since 07:20. Before waiting on a sync for a proof, run
   `select jobid, status, start_time, end_time from cron.job_run_details where jobid in (17, 28) order by start_time desc limit 4;`
   and wait for a `succeeded` row of BOTH with an `end_time` after your change.
+
+## Lesson from 2026-10-20 (copied by 🔧 from your own report)
+- **A shared reader that matches by substring makes a place name answer a question.** «شرفة» read out of the district
+  «مشرفة» gave 127 Jeddah ads a balcony they do not have (761; migration 20261020104914 reverted muhaysini 101 + dwelleo 26,
+  detector `mon_detect_district_name_read_as_balcony` rostered). Check every new token against district names with the same
+  letters, and run a class scan on `search_listings_ar` (the amenity grouped by district) before trusting a reader.
+- 🔧 adds: one proof row PER fix. 759 and 760 shared one row, and it was a branch dry run — by proof rows the night read 3/6,
+  not 4/6; the production proof of a scorer fix is the next 08:00 af-score run, with its run id.

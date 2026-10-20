@@ -923,3 +923,11 @@ push engineer work on `claude/*` branches, scrapers-only, docs separate, and the
   migration mirror, merged the moment it is green. 10-19: the GitHub runner queue was 28 deep at 08:00 UTC and the re-score
   dispatched after the merge never left the queue → dispatch the branch re-score right after the first green push (by
   minute 30), never after the merge, and write its run id in the report so 🔧 can read it.
+
+## Lesson from 2026-10-20 (copied by 🔧 from your own report — ⚡ wrote the same lesson on 10-18, so it is a fleet rule)
+- **A scraper fix whose site needs the residential proxy cannot be proven while the proxy is down.** Check the site's last
+  crawl (`last_seen_at`) and the proxy state BEFORE choosing it as a night's job (10-20: snam «Ad Dirah», PR #7847, left
+  proof pending — and ⚡ had set snam dormant at 05:34 UTC, so the 14 rows were not even served). A job you cannot prove
+  inside your slot is paired with one you can, or goes to ♻️ / the automatic liveness.
+- 🔧 adds: write the `new_listings_engineer:start` row first — on 10-20 you wrote proofs and an end row but no start row, and
+  `ops_engineer_review` read you as NOT RUN.
