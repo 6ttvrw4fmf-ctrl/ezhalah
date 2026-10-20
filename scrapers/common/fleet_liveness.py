@@ -52,7 +52,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
-from scrapers.common.db import begin_run, end_run, sb
+from scrapers.common.db import _execute, begin_run, end_run, sb
 from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN, EvidenceKind, decide, verification_patch
 from scrapers.common.liveness_policies import FLEET_DAILY_DIRECT, policy_for
 from scrapers.common.liveness_trust import MIN_CANARIES, canary_environment_ok
@@ -109,6 +109,13 @@ PACE_S = 1.0            # at most one read a second per site
 # Per site per run, inside the job's 350-minute ceiling. It was 95 minutes: dwelleo (11,137 ads at
 # ~1.6 s a read) covered 30% a day and nofodh 57%, so neither could ever meet its 48 h window.
 BUDGET_S = 320 * 60
+# The recheck reads every site ONE AFTER ANOTHER inside one 120-minute job, so one site's struck
+# backlog must not be allowed to eat it (2026-10-19 20:47: dwelleo's 6,634 struck rows read for the
+# whole two hours, the job was cancelled at its ceiling, and every site after it alphabetically —
+# haraj with 4 dead ads at 2 strikes on screen — got no recheck at all). Each site gets this much;
+# what it does not reach waits for the next daily run, which has a runner per site. Sites are also
+# read smallest struck backlog first (recheck_order), so a small site is never queued behind a big one.
+RECHECK_BUDGET_S = 12 * 60
 FLUSH = 200             # reads between writes of what is already known (live stamps, "we looked")
 CONTROL_HOURS = 48
 # A row its own crawl already read DIRECTLY within FRESH_HOURS (last_verified_alive_at — only the
@@ -154,7 +161,8 @@ def tables_for(client, site: str) -> dict[str, int]:
     out = {}
     for t in (f"{site}_residential_listings", f"{site}_commercial_listings"):
         try:
-            out[t] = client.table(t).select("id", count="exact").eq("active", True).limit(1).execute().count or 0
+            out[t] = _execute(client.table(t).select("id", count="exact").eq("active", True).limit(1),
+                              what=f"{t}.count", tries=3).count or 0
         except Exception:  # noqa: BLE001 — a site with one vertical has one table
             continue
     return out
@@ -162,8 +170,8 @@ def tables_for(client, site: str) -> dict[str, int]:
 
 def struck(client, site: str) -> int:
     """How many of the site's active rows carry a strike — what a recheck has to read."""
-    return sum(client.table(t).select("id", count="exact").eq("active", True).gt("missing_count", 0)
-               .limit(1).execute().count or 0 for t in tables_for(client, site))
+    return sum(_execute(client.table(t).select("id", count="exact").eq("active", True).gt("missing_count", 0)
+                        .limit(1), what=f"{t}.struck").count or 0 for t in tables_for(client, site))
 
 
 def _rows(client, table: str, cols: str, *, order: list[tuple[str, bool]], limit: int, since=None) -> list[dict]:
@@ -175,7 +183,7 @@ def _rows(client, table: str, cols: str, *, order: list[tuple[str, bool]], limit
         for col, desc in order:
             q = q.order(col, desc=desc, nullsfirst=not desc)
         n = min(PAGE, limit - len(out))
-        page = q.range(len(out), len(out) + n - 1).execute().data or []
+        page = _execute(q.range(len(out), len(out) + n - 1), what=f"{table}.read").data or []
         out += [dict(r, _table=table) for r in page if r.get("ad_number")]
         if len(page) < n:
             break
@@ -242,8 +250,10 @@ def _fresh(r: dict, since: datetime) -> bool:
 
 
 def _update(client, table: str, ids: list, patch: dict) -> None:
+    # Every write retries a transient error (2026-10-20: one Cloudflare 502 at 10:40 UTC, after haraj
+    # had read for three hours, raised out of run_site and threw away every strike and hide it held).
     for i in range(0, len(ids), 200):
-        client.table(table).update(patch).in_("id", ids[i:i + 200]).execute()
+        _execute(client.table(table).update(patch).in_("id", ids[i:i + 200]), what=f"{table}.update")
 
 
 def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
@@ -301,8 +311,9 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
                 alive.clear()
                 looked.clear()
 
+            budget = RECHECK_BUDGET_S if struck_only else BUDGET_S
             for r in work:
-                if time.monotonic() - started > BUDGET_S:
+                if time.monotonic() - started > budget:
                     break
                 # PACE_S is a RATE (at most one read per PACE_S), not a pause added to each read:
                 # sleeping a full second after a 1.5 s read halved how much of a site fits the budget.
@@ -355,10 +366,13 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
                     for r, d, why in dead_side:
                         patch = {"missing_count": d.strikes, "last_liveness_probe_at": done}
                         if d.action == "deactivate":
-                            client.table("ops_stale_inactivation_probe").insert({
+                            # Retried: a transient error committed server-side can leave a SECOND
+                            # identical GONE row, which is harmless evidence; a lost hide is not.
+                            _execute(client.table("ops_stale_inactivation_probe").insert({
                                 "source_table": r["_table"], "listing_id": r["id"], "ad_number": r["ad_number"],
                                 "listing_url": r.get("listing_url") or "", "verdict": "GONE",
-                                "oracle": f"fleet_liveness.{site}", "note": f"{d.reason} · {why}"}).execute()
+                                "oracle": f"fleet_liveness.{site}", "note": f"{d.reason} · {why}"}),
+                                what="ops_stale_inactivation_probe.insert")
                             # Dated here, not by trg_set_deactivated_at, which 27 platforms'
                             # tables lack (2026-10-03; db.prune_unseen says why).
                             patch["active"] = False
@@ -366,7 +380,8 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
                             st["hidden"] += 1
                         else:
                             st["struck"] += 1
-                        client.table(r["_table"]).update(patch).eq("id", r["id"]).execute()
+                        _execute(client.table(r["_table"]).update(patch).eq("id", r["id"]),
+                                 what=f"{r['_table']}.update")
         note = (f"{'SHADOW' if shadow else 'APPLY'}{' RECHECK' if struck_only else ''} active={st['active']} probed={st['probed']} "
                 f"covered={st['covered']}% fresh={st['fresh']} alive={st[ALIVE]} dead={st[DEAD]} unknown={st[UNKNOWN]} "
                 f"verified={st['verified']} struck={st['struck']} hidden={st['hidden']} "
@@ -382,6 +397,17 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
     except Exception as e:
         end_run(run_id, ok=False, rows_seen=st["probed"], rows_upserted=0, notes=f"error: {e}")
         raise
+
+
+def recheck_order(client, sites: list[str]) -> list[str]:
+    """Smallest struck backlog first, so no small site waits behind a big one (see RECHECK_BUDGET_S).
+    A site whose count cannot be read goes last, never dropped."""
+    def n(site: str) -> float:
+        try:
+            return struck(client, site)
+        except Exception:  # noqa: BLE001 — unreadable count: read it last, still read it
+            return math.inf
+    return sorted(sites, key=n)
 
 
 def plan_sites(spec: str) -> list[str]:
@@ -415,7 +441,10 @@ def main() -> int:
             f.write(f"sites={json.dumps(sites)}\n")
         return 0
     failed = 0
-    for site in a.site or sorted(SITES):
+    sites = a.site or sorted(SITES)
+    if a.struck_only:
+        sites = recheck_order(sb(), sites)
+    for site in sites:
         try:
             run_site(site, shadow=a.shadow, struck_only=a.struck_only)
         except Exception as e:  # noqa: BLE001 — one site failing never stops the rest
