@@ -452,10 +452,10 @@ lifts the same functions and sorts every Aqar / Aqar Monthly ad first seen in th
 those four paths; any new ad left with no map turns it red and raises an alert. Measured 2026-10-18:
 175,619 ads all-time, 5 with no map (their links name only «المملكة العربية السعودية»).
 A pin is only a pin when it is the ad's own: a point shared by ≥5 ads tagged with ≥3 districts is the
-site's default (nofodh's office, sakan's city centre printed with ,
-eaqartabuk's mall — 2026-10-19).  (hourly :15, before the :22 sync, and
-in the detector roster as ) registers such points in
-, strips them from the stored rows and attaches a reject trigger to that
+site's default (nofodh's office, sakan's city centre printed with `show_exact_location = true`,
+eaqartabuk's mall — 2026-10-19). `strip_shared_default_pins()` (hourly :15, before the :22 sync, and
+in the detector roster as `mon_detect_shared_default_pin`) registers such points in
+`ops_default_pin_register`, strips them from the stored rows and attaches a reject trigger to that
 table so a re-crawl cannot write them back; those ads fall through to the border like any pin-less ad.
 
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
