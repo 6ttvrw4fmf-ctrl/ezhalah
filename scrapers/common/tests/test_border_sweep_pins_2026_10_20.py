@@ -47,3 +47,10 @@ def test_wiring():
     wf = (ROOT / ".github" / "workflows" / "small-sources-sync.yml").read_text(encoding="utf-8")
     for site in ("therc", "shomou"):
         assert "browser: true" in next(l for l in wf.splitlines() if f"source: {site}," in l), site
+
+
+def test_nawafeth_reads_the_pin_its_own_script_draws():
+    import scrapers.nawafeth.run as NW
+    page = "<script>var propertyLat = parseFloat('27.0196');\r\n var propertyLng = parseFloat('49.5732');</script>"
+    assert NW._own_pin(page) == {"latitude": 27.0196, "longitude": 49.5732}
+    assert NW._own_pin("<script>no map</script>") == {}
