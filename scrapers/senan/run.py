@@ -51,6 +51,7 @@ from typing import Any, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.jawher.run import (  # noqa: E402
     API_PATH, ORACLE, fetch_detail, fetch_ids, make_verify_gone, nuzul_fields, session,
 )
@@ -76,6 +77,15 @@ def map_listing(d: dict[str, Any]) -> tuple[Optional[dict[str, Any]], str, str]:
     return row, category, ""
 
 
+def walk_session() -> tuple[Any, list[str]]:
+    """3 browser profiles DIRECT, then the residential proxy (when the job has it), each a fresh
+    session; the first the catalogue answers 200 is kept. 2026-10-20 (Scraping Engineer): the one
+    pinned chrome session read «no properties» on 4 runs from 10-19 while jawher/m3tmd (same engine,
+    same runner) were served — and the note never said what the host answered."""
+    return retry_smarter_session(f"{BASE}{API_PATH}?page=1&per_page=1",
+                                 headers=dict(session().headers))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -84,7 +94,8 @@ def main() -> int:
     ap.add_argument("--delay", type=float, default=0.4)
     args = ap.parse_args()
 
-    s = session()
+    s, route = walk_session()
+    print(f"{SOURCE}: route {' · '.join(route)}", flush=True)
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run(SLUG)
     res: list[dict] = []
@@ -93,7 +104,7 @@ def main() -> int:
     try:
         ids, complete = fetch_ids(s, BASE, limit=args.limit)
         if not ids:
-            raise RuntimeError(f"{BASE}{API_PATH} returned no properties")
+            raise RuntimeError(f"{BASE}{API_PATH} returned no properties (route {' '.join(route)})")
         print(f"{SOURCE}: {len(ids)} units discovered (complete={complete})", flush=True)
         for i, pid in enumerate(ids, 1):
             d, verdict = fetch_detail(s, BASE, pid)
