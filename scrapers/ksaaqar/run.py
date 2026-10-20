@@ -52,6 +52,7 @@ from scrapers.common.arabic_location import (  # noqa: E402
     find_district_in_text, known_district_keys, title_hayy_district, to_catalog,
 )
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://ksaaqar.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -181,8 +182,26 @@ def own_price(page_html: str, link: str) -> Optional[int]:
 _PHOTO_RE = re.compile(r'class="img-box"[^>]*>\s*<a[^>]+href="([^"]+)"', re.S)
 
 
+_AD_LAT = re.compile(r'id="ad_lat"\s+value="(-?\d+\.\d+)"')
+_AD_LNG = re.compile(r'id="ad_lon"\s+value="(-?\d+\.\d+)"')
+# The map's «not set» centre: every ad whose owner placed no pin prints it (9 of 10 sampled, across Jeddah,
+# Taif and Makkah ads — owner 2026-10-20 night). It is never an ad's location.
+_DEFAULT_PIN = ("24.633333", "46.716667")
+
+
+def own_pin(page_html: str) -> dict:
+    """The pin the ad page draws (`<input id="ad_lat" value="21.2817249">` + ad_lon). {} for the map's
+    default centre or when absent."""
+    la, lo = _AD_LAT.search(page_html or ""), _AD_LNG.search(page_html or "")
+    if not (la and lo):
+        return {}
+    if (la.group(1)[:9], lo.group(1)[:9]) == _DEFAULT_PIN:
+        return {}
+    return pin_dict(la.group(1), lo.group(1))
+
+
 def own_photos(page_html: str) -> Optional[list[str]]:
-    urls = [ihtml.unescape(u) for u in _PHOTO_RE.findall(page_html or "")]
+    urls =[ihtml.unescape(u) for u in _PHOTO_RE.findall(page_html or "")]
     urls = [u for u in dict.fromkeys(urls)
             if u.startswith("http") and re.search(r"\.(?:jpe?g|png|webp)$", u, re.I)]
     return urls or None
@@ -903,7 +922,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         "price_published": figure is not None,
         "price_published_text": f"{figure} ريال" if fractional else None,   # the card's figure, verbatim
     }
-    row["additional_info"] = {k: v for k, v in extra.items() if v is not None}
+    row["additional_info"] = {**own_pin(page_html), **{k: v for k, v in extra.items() if v is not None}}
     return row, category, ""
 
 
