@@ -1461,13 +1461,37 @@ def own_page_status_oracle(c, table: str, seen, *, session=None):
 _BLOCK_WHY = re.compile(r"HTTP 40[13]\b")
 
 
+_HOME_PATHS_2 = frozenset({"", "/ar", "/en"})   # cleanup._HOME_PATHS
+
+
 def _second_read(url: str):
-    """(status, body) through the shared reader, or (None, '') — never raises."""
+    """(status, body) through the shared session, escaping a 401/403 through the other browser
+    profiles exactly as cleanup._probe does; (None, '') on no answer or a landing on the home page.
+    Built on common.http, not cleanup: importing cleanup here drags scrapers.wasalt.browser into the
+    import graph of every crawler (verify-wasalt-probing-workflows-carry-the-browser.ts). Never raises."""
+    from urllib.parse import urlsplit as _split
+    from scrapers.common import http as _http
+
+    def one(sess):
+        r = sess.get(url, timeout=25, allow_redirects=True)
+        final = str(getattr(r, "url", "") or "")
+        want, got = _split(url).path.rstrip("/").lower(), _split(final).path.rstrip("/").lower()
+        if final and got in _HOME_PATHS_2 and got != want:
+            return None, ""
+        return r.status_code, (r.text or "")
     try:
-        from scrapers.common.cleanup import _probe
-        return _probe(url)
-    except Exception:  # noqa: BLE001 — no answer is UNKNOWN, never a kill
-        return None, ""
+        status, body = one(_http.session())
+    except Exception:  # noqa: BLE001
+        status, body = None, ""
+    if status is None or status in _http.BLOCK_STATUSES:
+        for profile in _http.FALLBACK_PROFILES:
+            try:
+                st, bd = one(_http._route_session(profile, False, fresh=True))
+            except Exception:  # noqa: BLE001
+                continue
+            if st is not None and st not in _http.BLOCK_STATUSES:
+                return st, bd
+    return status, body
 
 
 # The verdict a res/com supersession records, and the oracle that names WHY it was recorded.
