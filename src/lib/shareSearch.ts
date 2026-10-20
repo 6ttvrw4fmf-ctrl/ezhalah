@@ -198,14 +198,30 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
  * The preview page for /s/<payload>. A valid payload → the personal card + a redirect to Home with
  * ?share=; anything else → the plain Ezhalah card + a redirect to Home. Never throws.
  */
-export function shareCardHtml(origin: string, rawPayload: string | null | undefined, chatCard?: SharedChatCard | null): string {
+/** The live counts the home link's card shows (middleware.ts homeCardFactsFrom); null = unknown. */
+export type ShareCardFacts = { sites?: number | null; listings?: number | null; cities?: number | null };
+const factOk = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0;
+/**
+ * The card's bottom line (owner 2026-10-20): the SAME marketing line as the home link — three live
+ * counts, nothing about the search itself — in the card's language. Any missing count → the plain
+ * tagline, never a zero.
+ */
+export function shareCardFactsLine(f: ShareCardFacts | null | undefined, loc: 'ar' | 'en'): string {
+  if (!f || !factOk(f.sites) || !factOk(f.listings) || !factOk(f.cities)) return SHARE_CARD[loc].desc;
+  const n = (v: number) => v.toLocaleString('en-US');
+  return loc === 'ar'
+    ? `${n(f.sites)} موقع · ${n(f.listings)} إعلان · ${n(f.cities)} مدينة`
+    : `${n(f.sites)} sites · ${n(f.listings)} listings · ${n(f.cities)} cities`;
+}
+
+export function shareCardHtml(origin: string, rawPayload: string | null | undefined, chatCard?: SharedChatCard | null, facts?: ShareCardFacts | null): string {
   const o = origin.replace(/\/+$/, '');
   // A short code is a SAVED CHAT (shared_chat); its card facts come from the database (chatCard). A code
   // whose card could not be read still goes to Home + ?share=<code> — the app fetches it there.
   const code = isShareCode(rawPayload);
   const d = code ? (chatCard ?? null) : decodeSharePayload(rawPayload);
   const loc = d?.locale ?? 'ar';
-  const c = SHARE_CARD[loc];
+  const c = { site: SHARE_CARD[loc].site, desc: shareCardFactsLine(facts, loc) };
   const title = (d && shareTitle(d.name, d.q, loc)) || (loc === 'ar' ? 'إزهله' : 'Ezhalah');
   const ok = !!rawPayload && (code || !!d);
   const to = ok ? shareLandingPath(rawPayload!) : '/';
