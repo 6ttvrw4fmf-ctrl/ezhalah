@@ -87,13 +87,25 @@ const shareConst = (name: string): string => {
   if (!m) check(`lib/share.ts exports ${name}`, false, 'not found');
   return m?.[1] ?? '';
 };
-const AR_LEAD = shareConst('SHARE_LEAD_AR'), EN_LEAD = shareConst('SHARE_LEAD_EN');
+// The sentence is now BUILT (owner 2026-10-20: «ليش تدوّر في 148 موقع؟ إزهله يدوّر عنك», the count
+// live): the real shareLead/shareMessage functions and their template constants are lifted out of
+// share.ts verbatim; only liveSiteCount() is stubbed (it reads the platform registry at runtime).
+const fn = (name: string): string => {
+  const m = new RegExp(`export function ${name}\\([\\s\\S]*?\\n\\}`).exec(shareSrc);
+  if (!m) check(`lib/share.ts exports function ${name}`, false, 'not found');
+  // new Function() runs plain JavaScript: drop the TypeScript annotations from the signature line only.
+  const src = (m?.[0] ?? `function ${name}() { return ''; }`).replace(/^export /, '');
+  const nl = src.indexOf('\n');
+  const sig = src.slice(0, nl).replace(/\): [^{]+\{$/, ') {').replace(/: [^,)]+(?=[,)])/g, '');
+  return sig + src.slice(nl);
+};
 const preamble = [
   `const SHARE_LINK = ${JSON.stringify(shared)};`,
-  `const SHARE_LEAD_AR = ${JSON.stringify(AR_LEAD.replace(/\\n/g, '\n'))};`,
-  `const SHARE_LEAD_EN = ${JSON.stringify(EN_LEAD.replace(/\\n/g, '\n'))};`,
-  'const SHARE_MESSAGE_AR = `${SHARE_LEAD_AR}\n${SHARE_LINK}`;',
-  'const SHARE_MESSAGE_EN = `${SHARE_LEAD_EN}\n${SHARE_LINK}`;',
+  ...['SHARE_LEAD_AR_TEMPLATE', 'SHARE_LEAD_AR_NO_COUNT', 'SHARE_LEAD_EN_TEMPLATE', 'SHARE_LEAD_EN_NO_COUNT']
+    .map((n) => `const ${n} = ${JSON.stringify(shareConst(n))};`),
+  fn('shareLead'), fn('shareMessage'),
+  'const liveSiteCount = () => 148;',
+  stmt('count'),
 ].join('\n');
 
 const body = [

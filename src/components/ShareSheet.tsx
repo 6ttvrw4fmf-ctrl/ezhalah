@@ -13,7 +13,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
-import { SHARE_BLURB_AR, SHARE_BLURB_EN, SHARE_LEAD_AR, SHARE_LEAD_EN, SHARE_LINK, SHARE_MESSAGE_AR, SHARE_MESSAGE_EN } from '@/lib/share';
+import { SHARE_BLURB_AR, SHARE_BLURB_EN, SHARE_LINK, liveSiteCount, shareLead, shareMessage } from '@/lib/share';
 
 // Real, resolvable share link (the deployed app), not a placeholder.
 // The link, the sentence and the message all come from lib/share.ts. This file used to hold its own
@@ -61,8 +61,9 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
   // `msg` too pre-filled the composer with the link TWICE.
   // ONE source of truth for the wording — lib/share.ts. This file used to hold its own copy of
   // the sentence, and the two drifted apart until they said different things in different places.
-  const lead = locale === 'ar' ? SHARE_LEAD_AR : SHARE_LEAD_EN;
-  const msg = locale === 'ar' ? SHARE_MESSAGE_AR : SHARE_MESSAGE_EN;
+  const count = liveSiteCount();
+  const lead = shareLead(locale, count);
+  const msg = shareMessage(locale, count);
   const copy = async () => {
     // expo-clipboard works on web (navigator.clipboard) and native alike.
     try { await Clipboard.setStringAsync(msg); } catch { /* ignore */ }

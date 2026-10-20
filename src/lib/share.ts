@@ -1,5 +1,7 @@
 import { Platform, Share } from 'react-native';
 import { getLocale } from '@/i18n';
+import { PLATFORM_META } from '@/data/loaderPlatforms';
+import { hiddenPlatformNames } from '@/data/loaderActivePlatforms';
 
 // The real, resolvable share target (the deployed app).
 export const SHARE_LINK = 'https://ezhalah-app.vercel.app';
@@ -22,22 +24,36 @@ export const SHARE_BLURB_AR = 'تدور على عقار وتبي تشوف الم
 // number-free form is the static fallback. Pinned equal to HOME_CARD_FALLBACK_AR.
 export const SHARE_CARD_DESC_AR = 'كل مواقع العقار في السعودية في مكان واحد.';
 export const SHARE_BLURB_EN = 'Looking for a property and want to see everything on offer in one place? Ezhalah, the smarter way to find properties in the Kingdom.';
-export const SHARE_LEAD_AR = SHARE_BLURB_AR;
-export const SHARE_LEAD_EN = SHARE_BLURB_EN;
-export const SHARE_MESSAGE_AR = `${SHARE_LEAD_AR}\n${SHARE_LINK}`;
-export const SHARE_MESSAGE_EN = `${SHARE_LEAD_EN}\n${SHARE_LINK}`;
+// THE SENT MESSAGE (owner 2026-10-20, replacing the long sentence above in the share message only):
+// «ليش تدوّر في 148 موقع؟ إزهله يدوّر عنك». The number is LIVE — the same count the app shows
+// («148»: the platform catalog minus the sites the registry marks dormant, src/data/loaderPlatforms.ts
+// + loaderActivePlatforms.ts), never typed; while that count is unknown the sentence says «كل المواقع».
+// SHARE_BLURB_* above stay the page's SEO description and the in-app preview text.
+export const SHARE_LEAD_AR_TEMPLATE = 'ليش تدوّر في {count} موقع؟ إزهله يدوّر عنك';
+export const SHARE_LEAD_AR_NO_COUNT = 'ليش تدوّر في كل المواقع؟ إزهله يدوّر عنك';
+export const SHARE_LEAD_EN_TEMPLATE = 'Why search {count} sites? Ezhalah searches for you.';
+export const SHARE_LEAD_EN_NO_COUNT = 'Why search every site? Ezhalah searches for you.';
+/** The live site count the app itself shows, or null while the registry has not answered yet. */
+export function liveSiteCount(): number | null {
+  const hidden = hiddenPlatformNames();
+  if (!hidden) return null;
+  const n = PLATFORM_META.filter((p) => !hidden.has(p.name)).length;
+  return n > 0 ? n : null;
+}
+/** The sentence on its own (X / Telegram put the link in their own url= parameter). */
+export function shareLead(loc: 'ar' | 'en', count: number | null): string {
+  const live = typeof count === 'number' && Number.isInteger(count) && count > 0 ? count : null;
+  if (loc === 'ar') return live ? SHARE_LEAD_AR_TEMPLATE.replace('{count}', String(live)) : SHARE_LEAD_AR_NO_COUNT;
+  return live ? SHARE_LEAD_EN_TEMPLATE.replace('{count}', String(live)) : SHARE_LEAD_EN_NO_COUNT;
+}
+/** The sentence WITH the link — what WhatsApp / Mail / Copy receive. One link, always last. */
+export function shareMessage(loc: 'ar' | 'en', count: number | null): string {
+  return `${shareLead(loc, count)}\n${SHARE_LINK}`;
+}
 export const SHARE_TITLE_AR = 'إزهله';
 const SHARE = {
-  en: {
-    title: 'Ezhalah',
-    blurb: SHARE_BLURB_EN,
-    message: SHARE_MESSAGE_EN,
-  },
-  ar: {
-    title: SHARE_TITLE_AR,
-    blurb: SHARE_BLURB_AR,
-    message: SHARE_MESSAGE_AR,
-  },
+  en: { title: 'Ezhalah' },
+  ar: { title: SHARE_TITLE_AR },
 };
 
 // Invoke the device's REAL share sheet so the user can actually send the link to any app or
@@ -49,7 +65,11 @@ const SHARE = {
 // in-app fallback; returns false only when no native sharing exists (e.g. desktop Chrome), so the
 // caller can open the custom ShareSheet instead.
 export async function shareNative(): Promise<boolean> {
-  const L = SHARE[getLocale() === 'ar' ? 'ar' : 'en'];
+  const loc: 'ar' | 'en' = getLocale() === 'ar' ? 'ar' : 'en';
+  const L = SHARE[loc];
+  const count = liveSiteCount();
+  const lead = shareLead(loc, count);
+  const message = shareMessage(loc, count);
   if (Platform.OS === 'web') {
     const nav: any = typeof navigator !== 'undefined' ? navigator : undefined;
     // TOUCH DEVICES ONLY (owner report, 2026-09-05: "on macbook just the link pops up, but on my
@@ -68,7 +88,7 @@ export async function shareNative(): Promise<boolean> {
     if (!coarse) return false;
     if (typeof nav?.share === 'function') {
       try {
-        await nav.share({ title: L.title, text: L.blurb, url: SHARE_LINK });
+        await nav.share({ title: L.title, text: lead, url: SHARE_LINK });
         return true;
       } catch (e: any) {
         // Only a deliberate user dismiss (AbortError) counts as "handled" — don't pop the fallback
@@ -83,7 +103,7 @@ export async function shareNative(): Promise<boolean> {
   }
 
   try {
-    await Share.share({ message: L.message, url: SHARE_LINK, title: L.title });
+    await Share.share({ message, url: SHARE_LINK, title: L.title });
     return true;
   } catch {
     return false;
