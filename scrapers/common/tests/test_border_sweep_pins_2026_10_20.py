@@ -63,6 +63,8 @@ def test_raghdan_reads_the_ads_own_location_block_only_when_unique():
     assert len(RG._OWN_LOCATION.findall(one + one.replace("21.6138", "21.7"))) == 2     # two blocks → caller reads none
     t = (ROOT / "scrapers" / "raghdan" / "run.py").read_text(encoding="utf-8")
     assert "if len(_locs) == 1:" in t
+
+
 def test_dms_inside_an_embed_q_is_read():
     # aljassim 4626: «maps.google.com/maps?hl=ar&q=25°24'43.2"N+49°36'48.8"E&t=h&z=14&output=embed»
     frame = '<iframe src="https://maps.google.com/maps?hl=ar&amp;q=25%C2%B024%2743.2%22N+49%C2%B036%2748.8%22E&amp;t=h&amp;z=14&amp;output=embed"></iframe>'
