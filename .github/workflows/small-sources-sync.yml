@@ -204,7 +204,7 @@ jobs:
           - { source: goldendeal,     cmd: "python -m scrapers.goldendeal.run --type all", tmo: 30, browser: true }
           - { source: yameen,         cmd: "python -m scrapers.yameen.run --type all", tmo: 20 }
           - { source: tamyaz,         cmd: "python -m scrapers.tamyaz.run --type all", tmo: 20 }
-          - { source: hazim,          cmd: "python -m scrapers.hazim.run --type all", tmo: 20 }
+          - { source: hazim,          cmd: "python -m scrapers.hazim.run --type all", tmo: 20, browser: true }
           #   jawher / m3tmd / senan: one API engine (scrapers/jawher/run.py), 145 / 46 / 82 detail
           #   records each, 0.4 s apart.
           - { source: jawher,         cmd: "python -m scrapers.jawher.run --type all", tmo: 20 }
@@ -317,7 +317,7 @@ jobs:
           - { source: earthapp,     cmd: "python -m scrapers.earthapp.run --type all", tmo: 15, proxy: true }
           - { source: nawafeth,     cmd: "python -m scrapers.nawafeth.run --type all", tmo: 15 }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
-          - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
+          - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all", browser: true }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }
           # souq24 probes ~1,300 candidate ids/run through the metered Saudi proxy for only ~52 active
           # listings, and the sweep deliberately re-checks the whole id range (skipping ids would miss

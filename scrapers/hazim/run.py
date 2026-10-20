@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import json
 import re
 import sys
 from datetime import datetime, timezone
@@ -60,6 +61,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.page_pin import pin_from_page  # noqa: E402
 
 BASE = "https://hazim.sa"
 SOURCE = "حازم"
@@ -190,6 +192,7 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     else:
         row["price_total"] = price
     row["additional_info"] = {k: v for k, v in {
+        **pin_from_page(json.dumps(p, ensure_ascii=False)),   # owner 2026-10-20 night: the item's own Maps link
         "source_id": pid,
         "ref": p.get("ref"),
         "type_ar": type_ar,

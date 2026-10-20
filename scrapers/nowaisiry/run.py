@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import html as ihtml
 import os
 import re
@@ -55,6 +56,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, http_liveness, normalize as N  # noqa: E402
+from scrapers.common.page_pin import pin_from_page  # noqa: E402
 
 BASE = "https://alnowaisiry.com"
 LIST_API = f"{BASE}/wp-json/wp/v2/lands"
@@ -406,6 +408,9 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
     ad_number = f"NW{pid}" if pid else "NW" + hashlib.md5((link or "").encode()).hexdigest()[:12]
 
     info: dict[str, Any] = {
+        # Owner 2026-10-20 night: the post's own «الموقع» link (goo.gl or a Maps pair) in its content — 5/5
+        # sampled border ads carried one. Followed through page_pin (headless-Chromium leg where installed).
+        **pin_from_page(json.dumps(p, ensure_ascii=False)),
         "wp_id": pid,
         "slug": p.get("slug") or None,
         "plot_number": plot_no,
