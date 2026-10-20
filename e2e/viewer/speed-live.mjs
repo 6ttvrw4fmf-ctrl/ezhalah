@@ -127,8 +127,14 @@ try {
     try { urls = await sampleUrls(site.table); } catch (e) { fail(`${site.host}: cannot pick live ads (${e.message})`); continue; }
     if (!urls.length) { fail(`${site.host}: no active ads to test`); continue; }
     // 1. framing headers
+    // The top-level answer each ad gave THIS robot, so step 2 can tell «the site blocks this datacenter»
+    // from «the frame stayed blank». razre.sa, measured 2026-10-19/20 (runs 39259106269, 39417227566):
+    // HTTP 403 text/plain with no cf-* header from a cloud session, NO CONTENT ×3 from the runner, 200 to a
+    // phone — a WAF on datacenter egress, not a framing refusal, yet it read ✗ on every run for two days.
+    const topStatus = new Map();
     for (const u of urls) {
       const res = await fetch(u, { headers: { 'User-Agent': devices['iPhone 13'].userAgent }, redirect: 'follow' }).catch(() => null);
+      topStatus.set(u, res ? res.status : 0);
       // A Cloudflare challenge page (403 + cf-mitigated: challenge) is served to THIS robot's datacenter
       // IP, not to a phone in Saudi, and it carries its own X-Frame-Options: SAMEORIGIN that says nothing
       // about the real ad page. Measured 2026-10-17 on sodasyat.sa (run 39032767927): 3/3 samples
@@ -159,10 +165,15 @@ try {
       await ctx.close();
       if (seen === null && rateLimited) { console.log(`· ${site.host}: ${u} — rate-limited by the site (429), excluded`); continue; }
       if (seen === null && challenged) { console.log(`· ${site.host}: ${u} — Cloudflare challenged the robot (cf-mitigated: challenge), excluded`); continue; }
+      // A blank frame over an ad whose TOP-LEVEL load already answered 4xx/5xx (or nothing) to this egress says
+      // nothing about framing or speed for a phone in Saudi: the site blocks the robot. Same class as 429 and the
+      // challenge page — excluded and reported, never ✗. A 200 page that stays blank is still measured (99,999).
+      const top = topStatus.get(u) ?? 0;
+      if (seen === null && (top === 0 || top >= 400)) { console.log(`· ${site.host}: ${u} — top-level load answered HTTP ${top || 'nothing'} to this egress (WAF / block / outage), excluded as inconclusive`); continue; }
       times.push(seen ?? 99_999);
       console.log(`· ${site.host}: ${u} → ${seen === null ? 'NO CONTENT in 12s' : seen + ' ms'}`);
     }
-    if (!times.length) { console.log(`! ${site.host}: every sample was rate-limited by the site — inconclusive this run`); continue; }
+    if (!times.length) { console.log(`! ${site.host}: every sample was rate-limited, challenged or unreachable from this egress — inconclusive this run`); continue; }
     const med = [...times].sort((a, b) => a - b)[Math.floor(times.length / 2)];
     if (med > BUDGET_MS) fail(`${site.host}: median ${med} ms to show the ad inside Ezhalah (budget ${BUDGET_MS} ms)`);
     else ok(`${site.host}: median ${med} ms to show the ad inside Ezhalah (budget ${BUDGET_MS} ms)`);
