@@ -228,3 +228,21 @@ def test_an_incomplete_enumeration_never_prunes(monkeypatch):
     monkeypatch.setattr(R.db, "prune_unseen", lambda t, seen, **k: pruned.append(t) or 0)
     monkeypatch.setattr(R.db, "end_run", lambda run_id, **k: True)
     assert R.main() == 0 and pruned == []
+
+
+def test_a_refused_catalogue_names_every_route_it_tried(monkeypatch):
+    """2026-10-20: 4 nights read only «projects page 1 → HTTP 502»; the route log says whether
+    another profile or the proxy was served (SCRAPING_ENGINEER.md step 6 evidence)."""
+    calls = {}
+    route = ["direct/chrome124:502", "direct/firefox133:502", "proxy/chrome124:ProxyError"]
+
+    def refuse(s):
+        raise RuntimeError("projects page 1 → HTTP 502")
+    monkeypatch.setattr(sys, "argv", ["run.py"])
+    monkeypatch.setattr(R, "walk_session", lambda: (None, route))
+    monkeypatch.setattr(R, "fetch_projects", refuse)
+    monkeypatch.setattr(R.db, "begin_run", lambda slug: 5)
+    monkeypatch.setattr(R.db, "end_run", lambda run_id, **k: calls.update(end=k) or True)
+    assert R.main() == 1
+    assert calls["end"]["ok"] is False and "HTTP 502" in calls["end"]["notes"]
+    assert all(r in calls["end"]["notes"] for r in route)

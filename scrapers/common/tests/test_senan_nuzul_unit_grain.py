@@ -157,3 +157,18 @@ def test_main_tallies_every_skip_into_end_run(monkeypatch):
     assert end["check_tables"] == ["senan_residential_listings", "senan_commercial_listings"]
     assert end["rows_seen"] == 4 and end["rows_upserted"] == 2
     assert "no_cityx1" in end["notes"] and "status_soldx1" in end["notes"]
+
+
+def test_a_failed_catalogue_names_every_route_it_tried(monkeypatch):
+    """2026-10-20: 4 nights read only «returned no properties». The route log is the down-at-source
+    evidence (SCRAPING_ENGINEER.md step 6): 3 profiles answered 404 and the proxy leg errored."""
+    calls = {}
+    route = ["direct/chrome124:404", "direct/safari17_0:404", "proxy/chrome124:ProxyError"]
+    monkeypatch.setattr(sys, "argv", ["run.py"])
+    monkeypatch.setattr(R, "walk_session", lambda: (None, route))
+    monkeypatch.setattr(R, "fetch_ids", lambda s, base, limit=0: ([], False))
+    monkeypatch.setattr(R.db, "begin_run", lambda slug: 5)
+    monkeypatch.setattr(R.db, "end_run", lambda run_id, **k: calls.update(end=k) or True)
+    assert R.main() == 1
+    assert calls["end"]["ok"] is False
+    assert all(r in calls["end"]["notes"] for r in route)
