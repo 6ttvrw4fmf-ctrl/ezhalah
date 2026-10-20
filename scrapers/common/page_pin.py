@@ -5,7 +5,8 @@ Six native-preview sites publish a pin on the ad page that no scraper read (saka
 nofodh, bossbih, aqalemhajer, reinvest). Each site prints it differently; this module knows the
 shapes, each measured on a live ad that day:
 
-  · JSON-LD  «"geo":{"@type":"GeoCoordinates","latitude":24.72,"longitude":46.74}»   (nofodh)
+  · a Maps frame «maps.google.com/maps?q=24.56,46.75&output=embed»  (nofodh — only the ads that have one;
+    its JSON-LD "geo" is the company office on every page and is deliberately NOT read)
   · a Maps link with coordinates  «google.com/maps/place/25.45,49.60»  (abralosol, bossbih),
     «google.com/maps?q=24.81,46.63»  (reinvest's embed)
   · a Maps JS marker  «new google.maps.LatLng(21.62,39.16)»  (sakan — only when the page also
@@ -41,9 +42,9 @@ def pin_from_html(text: Optional[str]) -> dict:
     """{"latitude","longitude"} from the page's own pin, else {}."""
     if not text:
         return {}
-    m = _JSONLD_GEO.search(text)
-    if m:
-        return pin_dict(m.group(1), m.group(2))
+    # A Maps link/frame carrying the pair is the ad's own pin. JSON-LD "geo" is NOT read any more:
+    # on nofodh it is the Organization block (the company's office) printed on every page — 2,556
+    # ads landed on one point before this was measured (owner caught it, 2026-10-19 night).
     m = _MAPS_LINK.search(text)
     if m:
         return pin_dict(m.group(1), m.group(2))
