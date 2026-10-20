@@ -299,7 +299,7 @@ jobs:
           # 2026-09-28 (owner-approved): Shomou = 26 index pages + ~1,028 ad pages (only in-date ads kept);
           #   Maktab = one public JSON page of offices.
           #   shomou: `proxy: true` (2026-10-14, Scraping Engineer) — 10-14 read index page 0 as no ad on one pinned profile.
-          - { source: shomou,      cmd: "python -m scrapers.shomou.run --type all", tmo: 30, proxy: true }
+          - { source: shomou,      cmd: "python -m scrapers.shomou.run --type all", tmo: 30, proxy: true, browser: true }
           - { source: maktab,      cmd: "python -m scrapers.maktab.run --type all", tmo: 10 }
           # wave 3, batch 5: holoul is an open JSON API (238 rows → 30); eightfloor is a Nuzul tenant (public API, 2 rows); manzo is an open JSON API (1 row).
           - { source: manzo,        cmd: "python -m scrapers.manzo.run --type all", tmo: 10, proxy: true }
@@ -355,7 +355,7 @@ jobs:
           # If this leg fails again DIRECT with a reset, set JAZWTN_PROXY_URL to a WORKING proxy
           # (verify the tunnel first) or re-retire — do not re-point it at the wasalt secret.
           - { source: jazwtn,      cmd: "python -m scrapers.jazwtn.run --type all" }
-          - { source: therc,       cmd: "python -m scrapers.therc.run --type all" }
+          - { source: therc,       cmd: "python -m scrapers.therc.run --type all", browser: true }
           - { source: aouj,        cmd: "python -m scrapers.aouj.run --type all" }
           # Two GREEN-audited additions (owner-instructed 2026-09-05, from the 40-candidate audit).
           # Both are WordPress REST sources whose taxonomies resolve live, so their type/city maps

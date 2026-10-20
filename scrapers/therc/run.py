@@ -56,6 +56,7 @@ from curl_cffi import requests as cc
 
 from scrapers.common import db
 from scrapers.common import normalize as N
+from scrapers.common.page_pin import pin_from_page
 
 BASE = "https://therc.aqar.digital"
 SITEMAP = f"{BASE}/sitemap.xml"
@@ -359,7 +360,9 @@ def map_listing(url: str, page: str, lastmod: Optional[str]) -> Optional[tuple[d
         "title": _redact(title),
         "description": description,
         **said,
-        "additional_info": extra,
+        # Owner 2026-10-20 night: the ad's own «الموقع» link (Maps ?q=LAT,LNG or a goo.gl link) — 5 of 10
+        # border ads carried one. Rows keep their legacy shape under "rows" (buildAdditionalInfo unwraps it).
+        "additional_info": {"rows": extra, **pin_from_page(page)},
         "source_capture": capture,
         "price_evidence": N.price_evidence(
             field="offers.price",

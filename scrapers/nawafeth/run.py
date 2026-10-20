@@ -55,6 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 
 SITE = "https://nawafethalwatan.com"
 SOURCE = "نوافذ الوطن"
@@ -208,6 +209,7 @@ def map_listing(ad_id: int, page: str, today: date) -> tuple[Optional[tuple[dict
         kind="per_meter" if is_land else ("total" if deal == "Buy" else (row.get("rent_period") or "annual")),
         unit="per_meter" if is_land else "total", origin="structured", authoritative_absent=False)
     info = {
+        **pin_from_html(page),          # owner 2026-10-20 night: the ad page's own Maps link (9/10 sampled)
         "source_id": ad_id,
         "type_ar": kv.get("نوع العقار"),
         "usage_ar": usage,
