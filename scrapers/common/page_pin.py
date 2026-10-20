@@ -44,6 +44,7 @@ def pin_from_html(text: Optional[str]) -> dict:
     """{"latitude","longitude"} from the page's own pin, else {}."""
     if not text:
         return {}
+    text = unescape(text)   # «maps/search/?api=1&amp;query=LAT,LNG» (opensooq) — the entity hides the «&query=» shape
     # A Maps link/frame carrying the pair is the ad's own pin. JSON-LD "geo" is NOT read any more:
     # on nofodh it is the Organization block (the company's office) printed on every page — 2,556
     # ads landed on one point before this was measured (owner caught it, 2026-10-19 night).
