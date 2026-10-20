@@ -77,8 +77,9 @@ export function auditShareMeta(layout: string, share: string, exists: (p: string
   const english = s.match(/export const SHARE_BLURB_EN = '([^']+)'/)?.[1];
   if (english !== REQUIRED_EN) bad.push('the English description is not the owner-approved translation');
   if (!NAMES_COUNTRY.test(blurb ?? '')) bad.push('the description no longer names the country — it must say «في السعودية» (or «في المملكة»)');
-  // The OS share text and the in-app sheet must read from the same constant, not their own copy.
-  if (!/blurb: SHARE_BLURB_AR/.test(s)) bad.push('the Arabic share text no longer reuses SHARE_BLURB_AR');
+  // The OS share text is BUILT by shareLead()/shareMessage() (owner 2026-10-20 wording, live count) —
+  // scripts/verify-main-link-share-says-why-search-sites.ts executes them; here: still wired.
+  if (!/text: lead, url: SHARE_LINK/.test(s) || !/message, url: SHARE_LINK/.test(s)) bad.push('shareNative no longer sends shareLead()/shareMessage()');
 
   if (!exists(OG_FILE)) bad.push(`${OG_FILE} does not exist — og:image would 404 and the preview would be blank`);
   return bad;
