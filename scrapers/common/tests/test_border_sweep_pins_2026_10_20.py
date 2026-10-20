@@ -54,3 +54,12 @@ def test_nawafeth_reads_the_pin_its_own_script_draws():
     page = "<script>var propertyLat = parseFloat('27.0196');\r\n var propertyLng = parseFloat('49.5732');</script>"
     assert NW._own_pin(page) == {"latitude": 27.0196, "longitude": 49.5732}
     assert NW._own_pin("<script>no map</script>") == {}
+
+
+def test_raghdan_reads_the_ads_own_location_block_only_when_unique():
+    import scrapers.raghdan.run as RG
+    one = '"location":{"buildingNumber":"2516","street":"x","city":"جدة","region":"منطقة مكة المكرمة","district":"النعيم","postalCode":"23526","latitude":21.613825871738374,"longitude":39.14225532020586}'
+    assert RG._OWN_LOCATION.findall(one) == [("21.613825871738374", "39.14225532020586")]
+    assert len(RG._OWN_LOCATION.findall(one + one.replace("21.6138", "21.7"))) == 2     # two blocks → caller reads none
+    t = (ROOT / "scrapers" / "raghdan" / "run.py").read_text(encoding="utf-8")
+    assert "if len(_locs) == 1:" in t
