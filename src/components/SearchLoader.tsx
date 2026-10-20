@@ -46,6 +46,7 @@ import {
   type LoaderPlatform,
 } from '@/data/loaderPlatforms';
 import { hiddenPlatformNames, loadHiddenPlatformNames } from '@/data/loaderActivePlatforms';
+import { loadSiteCount, siteCountNow } from '@/data/siteCount';
 import { fetchLoaderScaleStats, type LoaderScaleStats } from '@/data/loaderScaleStats';
 import { PILL_STAGGER, highlightStepMs, waveDelayMs, PILL_GROUP, WAVE_RISE, WAVE_HOLD, WAVE_FALL } from '@/lib/searchLoaderTiming';
 import { buildSearchLoaderTitles, countWording, readingDurationMs } from '@/lib/searchLoaderTitles';
@@ -57,6 +58,11 @@ const IS_WEB = Platform.OS === 'web';
 // normally resolved before the first search mounts the strip. Not during the web static render
 // (app.json output "static"), which runs this module in Node at build time.
 if (!IS_WEB || typeof window !== 'undefined') void loadHiddenPlatformNames();
+// The ONE site count every user-facing number uses (owner 2026-10-20: «make it 148»): the WhatsApp
+// card, the share sentence, the welcome line and this loader's «نبحث في N منصة» all read
+// src/data/siteCount.ts. The strip still hides dormant logos; the sentence no longer counts them —
+// until the count has been read it falls back to the logos on screen.
+if (!IS_WEB || typeof window !== 'undefined') void loadSiteCount();
 const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1);
 
 // Rotating searching headlines (owner-approved copy, v4 set — short, alive, smooth cross-fades).
@@ -392,7 +398,7 @@ export default function SearchLoader({
       {/* Headline: sparkle + rotating phase text (+ soft dots while thinking) */}
       <View style={[s.titleRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
         <Ionicons name="sparkles" size={15} color={colors.primary} />
-        <PhaseTitle phase={phase} rtl={rtl} reduced={reduced} exiting={exiting} platformCount={platforms.length} scaleStats={scaleStats} query={query} />
+        <PhaseTitle phase={phase} rtl={rtl} reduced={reduced} exiting={exiting} platformCount={siteCountNow() ?? platforms.length} scaleStats={scaleStats} query={query} />
         {phase === 'thinking' ? <Dots reduced={reduced} /> : null}
       </View>
 
