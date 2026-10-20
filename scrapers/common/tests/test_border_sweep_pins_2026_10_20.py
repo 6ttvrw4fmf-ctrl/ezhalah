@@ -42,8 +42,15 @@ def test_wiring():
     assert '"additional_info": {"rows": extra, **pin_from_page(page)},' in t("therc")
     assert 'pins[url] = pin_from_html(page)' in t("alsaedan")
     assert '"pin": pin_from_page(art),' in t("shomou") and '**(d.get("pin") or {}),' in t("shomou")
-    assert '**pin_from_html(page),' in t("nawafeth")
+    assert '**(_own_pin(page) or pin_from_html(page)),' in t("nawafeth")
     assert '"pin": pin_from_html(page_html) or pin_from_embed(page_html)}' in t("wadod")
     wf = (ROOT / ".github" / "workflows" / "small-sources-sync.yml").read_text(encoding="utf-8")
     for site in ("therc", "shomou"):
         assert "browser: true" in next(l for l in wf.splitlines() if f"source: {site}," in l), site
+
+
+def test_nawafeth_reads_the_pin_its_own_script_draws():
+    import scrapers.nawafeth.run as NW
+    page = "<script>var propertyLat = parseFloat('27.0196');\r\n var propertyLng = parseFloat('49.5732');</script>"
+    assert NW._own_pin(page) == {"latitude": 27.0196, "longitude": 49.5732}
+    assert NW._own_pin("<script>no map</script>") == {}
