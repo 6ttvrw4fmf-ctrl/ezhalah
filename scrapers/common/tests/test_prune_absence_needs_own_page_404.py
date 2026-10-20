@@ -207,3 +207,4 @@ def test_only_a_block_asks_the_shared_reader(monkeypatch):
     killed, kills, _ = _run(monkeypatch, _Session(dead_status=503),
                             second=lambda url: asked.append(url) or (404, "x"))
     assert killed == 0 and not asked, "a 5xx is the source's health, not a block to route around"
+
