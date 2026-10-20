@@ -32,8 +32,13 @@ AQALEMHAJER = '<a href="https://maps.app.goo.gl/Qg3j1DUtCWPULM1ZA?g_st=ic">ال�
 AQALEMHAJER_FINAL = "https://www.google.com/maps?q=25.3152163,49.6193885&entry=gps&shh=CAE"
 
 
-def test_nofodh_reads_the_jsonld_pin_never_the_default_centre():
-    assert pin_from_html(NOFODH) == {"latitude": 24.728956, "longitude": 46.7436311}
+NOFODH_FRAME = ('<iframe class="position-relative h600" loading="lazy" src="https://maps.google.com/maps?q=24.562438,46.756979&amp;t=m&amp;z=14&amp;output=embed&amp;iwloc=near"></iframe>')
+
+
+def test_nofodh_reads_the_maps_frame_never_the_office_geo_nor_the_default_centre():
+    # the JSON-LD geo is the company office on EVERY page (2,556 ads landed on one point) → never read
+    assert pin_from_html(NOFODH) == {}
+    assert pin_from_html(NOFODH + NOFODH_FRAME) == {"latitude": 24.562438, "longitude": 46.756979}
     # the default centre alone must yield nothing — it is the same number on every ad
     assert pin_from_html("center: { lat: 24.793809, lng: 46.7039 }, // Default location") == {}
 
