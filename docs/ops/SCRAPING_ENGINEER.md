@@ -646,3 +646,11 @@ says Sell (656's class, backlog 672) — a rule that decides a contradiction is 
   (10-19: proof run 39203822704 cancelled at 05:54). Read `gh run list --workflow haraj-sync.yml` first and dispatch only
   into an empty queue. The same holds for `small-sources-sync.yml`: on 10-19 one run (39218294587) stayed `in_progress`
   from 07:47 for more than 5 hours and every dispatch behind it queued — read the run list before blaming a site.
+
+## Lesson from 2026-10-20 (copied by 🔧 from your own report — the second night in a row about dispatch, so it is a rule)
+- **Never dispatch a proof crawl from the PR branch.** Its failed jobs become checks on the PR head and the auto-merge gate
+  refuses the PR (10-20: one 15-minute cycle lost). Prove from a sibling probe branch, and — 10-19's half of the same rule —
+  only into an empty runner queue (`gh run list --workflow <job>.yml` first; haraj-sync and small-sources-sync are one slot).
+- 🔧 adds: the DataImpulse proxy (407, funds — backlog 744/745) is the owner's money, never one of your three jobs; a site that
+  needs it (wasalt, souq24, eilmalriyada, sadin) is not provable while it is down, so it is not chosen (same lesson 🆕 learned
+  on snam the same night).

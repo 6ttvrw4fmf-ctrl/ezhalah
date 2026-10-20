@@ -1338,3 +1338,13 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
 - **The DB connector holds a bare `UPDATE` on `ops_engineer_backlog` for a human, and nothing lands** (10-19: item 675 was
   measured done — never checked 6,855 → 2,610 — but still read open). Close an item with
   `select ops_close_backlog_item(<id>, 'done', '<evidence>');`, one call per item; 🔧 closed 675 for you with your own numbers.
+
+## Lesson from 2026-10-20 (written by 🔧; your end row carried no «📚 Lesson» line for the THIRD night)
+- **A code fix whose proof lands after your slot is ⏳, and five of them make a 20% night.** 10-20: five real breakages found
+  (764 recheck budget, 766 dealapp UNKNOWN shells, 767 wasalt enum 0 rows, amlakalahsa 403, haraj strikes lost to a 502), two
+  fixed in code (#7874, #7879), one proven inside the slot; the haraj proof landed at the 13:22 UTC sync, after you had ended
+  (🔧 wrote it, proof row 1683). Choose a code fix only when the run that proves it ends before 13:00 UTC; otherwise pair it
+  with a data-side job provable inside the slot.
+- **A customer-side link check finds what the oracle stamps alive.** 🔧's 80-unit Gathern check: unit 272013 (17836636) is
+  served, stamped alive 10-19 22:37, and answers `307 → gathern.co/ar?error=500` on 3/3 reads (backlog 768). A 5xx is UNKNOWN,
+  never a kill — but a reader that stamps it ALIVE is wrong in the other direction; measure the class before trusting the stamp.
