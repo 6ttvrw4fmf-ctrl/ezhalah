@@ -200,7 +200,7 @@ jobs:
           - { source: almuteb,        cmd: "python -m scrapers.almuteb.run --type all", tmo: 20 }
           - { source: aalbarrak,      cmd: "python -m scrapers.aalbarrak.run --type all", tmo: 20 }
           - { source: aqaralriyadh,   cmd: "python -m scrapers.aqaralriyadh.run --type all", tmo: 20 }
-          - { source: snam,           cmd: "python -m scrapers.snam.run --type all", tmo: 20 }
+          - { source: snam,           cmd: "python -m scrapers.snam.run --type all", tmo: 20, proxy: true }
           - { source: goldendeal,     cmd: "python -m scrapers.goldendeal.run --type all", tmo: 20 }
           - { source: yameen,         cmd: "python -m scrapers.yameen.run --type all", tmo: 20 }
           - { source: tamyaz,         cmd: "python -m scrapers.tamyaz.run --type all", tmo: 20 }
@@ -209,7 +209,7 @@ jobs:
           #   records each, 0.4 s apart.
           - { source: jawher,         cmd: "python -m scrapers.jawher.run --type all", tmo: 20 }
           - { source: m3tmd,          cmd: "python -m scrapers.m3tmd.run --type all", tmo: 20 }
-          - { source: senan,          cmd: "python -m scrapers.senan.run --type all", tmo: 20 }
+          - { source: senan,          cmd: "python -m scrapers.senan.run --type all", tmo: 20, proxy: true }
           #   Small HTML catalogues — tens of detail pages at <=1 s each:
           - { source: alqasem,        cmd: "python -m scrapers.alqasem.run --type all", tmo: 20, proxy: true }
           - { source: fkralemar,      cmd: "python -m scrapers.fkralemar.run --type all", tmo: 20, proxy: true }
