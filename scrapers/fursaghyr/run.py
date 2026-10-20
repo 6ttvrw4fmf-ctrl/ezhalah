@@ -43,6 +43,7 @@ BASE = "https://fursaghyr.com"
 LIST = f"{BASE}/wp-json/fgh/v1/properties"
 MEDIA = f"{BASE}/wp-json/wp/v2/media"  # standard WP core media, open, no auth
 POSTS = f"{BASE}/wp-json/wp/v2/properties"  # the post's own record: its WordPress `status`
+TERMS = f"{BASE}/wp-json/wp/v2/property_feature"  # the Houzez «المميزات» taxonomy: id → label
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 
 # Fursaghyr rea.property_type (Arabic) → our canonical English taxonomy.
@@ -152,6 +153,53 @@ def fetch_all(s: cc.Session) -> list[dict]:
         items = j.get("items") if isinstance(j, dict) else j
         return items or []
     return []
+
+
+# The ad's own statement of its amenities lives in its WordPress post, which the fgh feed does not carry
+# (🔬 2026-10-20, ops_af_score fursaghyr 0 of 4 findable). Two parts, by the law's §2:
+# - the «المميزات» checklist (Houzez `property_feature`) is STRUCTURED for every column one of its terms expresses
+#   (today only «تكييف»/«تكييف هواء» → air_conditioner): a ticked label is a yes, an unticked one silence, never «no».
+#   FG26842, FG25354 and FG27232 tick «تكييف» while air_conditioner was NULL.
+# - a column NO term can express (kitchen, parking, elevator …) has no structured field at all, so the ad's own
+#   description is its only statement, read by the shared prose reader: FG26842 «مطبخ مجهز بالكامل», «مرافق البرج:
+#   … مواقف». Prose is never read for a checklist column.
+# Only columns both fursaghyr tables carry are written (PGRST204, 10-09). A failed read writes nothing.
+FEATURE_COLS = ("elevator", "kitchen", "air_conditioner", "parking", "laundry_room", "balcony_terrace",
+                "maid_room", "driver_room", "private_entrance")
+_TAG = re.compile(r"<[^>]+>")
+
+
+def fetch_post_facts(s: cc.Session) -> dict[int, dict[str, Any]]:
+    """post id → {labels: ticked checklist labels, text: the description, checklist_cols: columns the taxonomy can
+    express}. A failed read is {} (silence), never an empty checklist."""
+    try:
+        _throttle()
+        t = s.get(TERMS, params={"per_page": 100, "_fields": "id,name"}, timeout=30)
+        _throttle()
+        p = s.get(POSTS, params={"per_page": 100, "_fields": "id,property_feature,content"}, timeout=30)
+        if t.status_code != 200 or p.status_code != 200:
+            return {}
+        names = {x["id"]: x["name"] for x in t.json()}
+        expressible = frozenset(c for n in names.values() for c in normalize.amenities_from_text(n)) & set(FEATURE_COLS)
+        out: dict[int, dict[str, Any]] = {}
+        for x in p.json():
+            html_text = ((x.get("content") or {}).get("rendered") or "") if isinstance(x.get("content"), dict) else ""
+            out[x["id"]] = {"labels": [names[i] for i in x.get("property_feature") or [] if i in names],
+                            "text": _TAG.sub("\n", html_text), "checklist_cols": expressible}
+        return out
+    except Exception:
+        return {}
+
+
+def feature_answers(facts: Any) -> dict[str, bool]:
+    if not isinstance(facts, dict) or not facts.get("checklist_cols"):
+        return {}
+    checklist = facts["checklist_cols"]
+    ticked = normalize.amenities_from_text("، ".join(str(x) for x in facts.get("labels") or []))
+    prose = normalize.amenities_from_text(facts.get("text") or "")
+    out = {c: True for c, v in ticked.items() if v is True and c in checklist}
+    out.update({c: v for c, v in prose.items() if c in FEATURE_COLS and c not in checklist})
+    return out
 
 
 def _verify_gone(ad_number: str, s: Optional[cc.Session] = None) -> tuple[str, str]:
@@ -464,6 +512,7 @@ def map_listing(item: dict, s: Optional[cc.Session] = None) -> tuple[Optional[di
             if catalog_city_id is not None else {}),
     }
     row.update(_utility_flags(rea.get("utilities")))
+    row.update(feature_answers(item.get("post_facts")))
     return row, category
 
 
@@ -478,6 +527,9 @@ def main() -> int:
     s = session()
     items = fetch_all(s)
     print(f"Fursaghyr: fetched {len(items)} items")
+    facts = fetch_post_facts(s)
+    for it in items:
+        it["post_facts"] = facts.get(it.get("id"))
     if args.limit:
         items = items[: args.limit]
         print(f"Validation cap: processing {len(items)} items, prune disabled")
