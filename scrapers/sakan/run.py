@@ -607,6 +607,13 @@ def fetch_page(s: cc.Session, url: str, *, tries: int = 3) -> Optional[str]:
 # on its title/description; anything else has no opinion. Because the death is a page that is not
 # the listing, every removal is also gated by an in-run POSITIVE CONTROL (a row this same run mapped
 # must still be served as itself), and it fails CLOSED: no control, no removal.
+# Owner 2026-10-20 («remove the dead ones, leave it for our lifecycle»). An expired Sakan ad keeps ITS OWN
+# canonical (/ar/property/details/<this id>-…) but loses the listing payload and prints the source's own
+# notice «هذا العقار لم يعد متاحاً» in a property-unavailable-notice block (measured on 94392, «هذا الإعلان قد
+# انتهت صلاحيته» on the photo). Without a payload the signal had no opinion, so those ads were never
+# retired and the app served them with a district border. The notice on the ad's own page, for this id,
+# is the source's direct statement that the listing is gone — still behind the in-run positive control.
+_UNAVAILABLE_NOTICE = re.compile(r'property-unavailable-notice|هذا العقار لم يعد متاح')
 _CANONICAL = re.compile(r'<link rel="canonical" href="https://sa\.sakan\.co/ar/'
                         r'(?:property/details/(\d+)-|properties/)')
 
@@ -618,7 +625,11 @@ def _signal_for(ad_id: str):
             return None
         if m.group(1) is None:
             return "gone" if (moved and not _is_listing(body)) else None
-        if m.group(1) != ad_id or not _is_listing(body):
+        if m.group(1) != ad_id:
+            return None
+        if _UNAVAILABLE_NOTICE.search(body):
+            return "gone"                          # the source's own «لم يعد متاحاً» on this ad's own page
+        if not _is_listing(body):
             return None
         p = parse_page(f"{BASE}{DETAIL_PATH}{ad_id}-", body)
         state = (p.get("status") or "").strip()
