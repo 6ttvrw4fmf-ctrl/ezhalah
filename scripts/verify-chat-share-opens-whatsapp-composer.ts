@@ -4,8 +4,8 @@
 // own user agent — title «عقارات في الرياض من يوسف على إزهله», logo, description — and the owner's
 // phone still showed «a normal link». A link handed to WhatsApp by the phone's share menu is sent
 // without a preview; a link pre-filled in WhatsApp's OWN composer (wa.me/?text=) gets one. So on a
-// touch device both chat-share buttons (the reply row's share icon, the top «مشاركة» pill) open the
-// composer, and a desktop copies the link.
+// touch device the reply row's share icon opens the composer, and a desktop copies the link. (The
+// top «مشاركة» pill is the normal homepage share since 2026-10-20.)
 //
 // EXECUTED, not grepped: src/lib/shareToWhatsApp.ts is import-light and is run here against fake
 // navigator/window objects. The two call sites are pinned by source, and every claim is re-broken
@@ -79,8 +79,10 @@ const sharesChatViaMenu = (src: string, fn: string) => {
 };
 check('FeedbackRow (the reply row\'s share icon) routes the chat link through openWhatsAppCompose', usesIt(rowSrc));
 check('FeedbackRow no longer hands the chat link to the phone\'s share menu', !sharesChatViaMenu(rowSrc, 'const onShare = async'));
-check('agent.tsx (the top «مشاركة» pill, shareThisChat) routes the chat link through openWhatsAppCompose', usesIt(agentSrc));
-check('shareThisChat no longer hands the chat link to the phone\'s share menu', !sharesChatViaMenu(agentSrc, 'const shareThisChat = async'));
+// Owner 2026-10-20: the top «مشاركة» pill is the NORMAL share again (scripts/verify-share-search-link.ts
+// pins it); the chat is shared only from the reply row, so agent.tsx must not grow a second chat share.
+check('agent.tsx has no chat-share path of its own any more (the reply row is the one place)',
+  !/shareThisChat/.test(agentSrc) && !/openWhatsAppCompose/.test(agentSrc));
 
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
 console.log('\n  mutation proof — the real code, deliberately re-broken\n');
@@ -110,7 +112,7 @@ const mutant = (from: string, to: string) => {
 }
 mustCatch('FeedbackRow going back to the share menu for the chat link',
   sharesChatViaMenu(rowSrc.replace('if (openWhatsAppCompose(url)) return;', "const nav: any = navigator; if (nav?.share) { await nav.share({ url }); return; }"), 'const onShare = async'));
-mustCatch('the import of the helper removed from agent.tsx', !usesIt(agentSrc.replace("import { openWhatsAppCompose } from '@/lib/shareToWhatsApp';", '')));
+mustCatch('the import of the helper removed from FeedbackRow', !usesIt(rowSrc.replace("import { openWhatsAppCompose } from '@/lib/shareToWhatsApp';", '')));
 
 if (fail || mutFail) { console.error(`\n❌ chat-share-opens-whatsapp-composer: ${fail} check(s), ${mutFail} mutation(s) failed`); process.exit(1); }
 console.log('\n✅ chat-share-opens-whatsapp-composer: all checks passed, every mutation caught.');
