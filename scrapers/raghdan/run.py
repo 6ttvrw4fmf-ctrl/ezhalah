@@ -71,6 +71,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://raghdan.sa"
 SITEMAP = f"{BASE}/sitemap.xml"
@@ -733,6 +734,9 @@ def _desc_specs(desc: str) -> dict[str, str]:
     return out
 
 
+_OWN_LOCATION = re.compile(r'"district":"[^"]*","postalCode":"[^"]*","latitude":(-?[0-9.]+),"longitude":(-?[0-9.]+)')
+
+
 def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     if "هذا الإعلان" in body and "منتهي" in body:
         return None, "residential"
@@ -839,6 +843,13 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
 
     geo = ld.get("geo") or {}
     # NOTE: address.streetAddress is DROPPED for PDPL — too often a person name, not a street.
+    if not geo.get("latitude"):
+        # Owner 2026-10-20 night («if there is a pin the mistake can be ours»): the JSON-LD carries no geo,
+        # but the page's own data holds the ad's `location {…, district, postalCode, latitude, longitude}`
+        # (6 of 6 sampled border ads; one block per page). Read only when there is exactly ONE.
+        _locs = _OWN_LOCATION.findall((body or "").replace('\\"', '"'))
+        if len(_locs) == 1:
+            geo = pin_dict(_locs[0][0], _locs[0][1])
 
     info: dict[str, Any] = {
         "firebase_id": fid,

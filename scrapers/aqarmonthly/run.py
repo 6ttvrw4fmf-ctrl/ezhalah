@@ -288,7 +288,9 @@ def settle_amenity_fields(answer, fields: tuple[str, ...] = AMENITY_GQL_FIELDS) 
     return ()
 
 
-SETTLE_TRIES = 3
+# 3 → 8 (owner 2026-10-20 night): 2 of 16 shards per run settled to () on three unreadable first units and so
+# never asked for Listing.location — 197 Monthly units re-crawled without their pin. Still bounded; still falls back.
+SETTLE_TRIES = 8
 
 
 def settle_across_units(answer_for, ids, tries: int = SETTLE_TRIES) -> tuple[str, ...]:
