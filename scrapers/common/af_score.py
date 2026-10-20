@@ -42,6 +42,7 @@ from scrapers.common.new_listings_score import (
     empty_row, fold, norm,
 )
 from scrapers.common.source_reread import page_evidence
+from scrapers.common.normalize import amenities_from_text
 
 TABLE = "ops_af_score"
 PAGE = 1000
@@ -117,6 +118,23 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # Read by muktamel_props().
     "muktamel": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room",
                  "private_entrance", "furnished"),
+    # aldarim (the Nuzul SaaS) publishes these as COUNTS in its listing payload (kitchens, elevators, parking_spots,
+    # maid_rooms, driver_rooms; is_ac_installed from the API), and its scraper stores N ≥ 1 as yes and 0 as silence
+    # (scrapers/aldarim/run.py). Its 10-14 and 10-20 «misses» asked kitchen from prose («مطبخ داخلي ألماني», 49170)
+    # on ads whose own count is 0 (CI re-read; backlog 555): a structured null outranks prose (law §2). Read by
+    # nuzul_props(). abwbna / alobid / bahadhabab run the same SaaS but were not reachable to verify (10-20): not added.
+    # furnished: the API's is_furnished (filed in additional_info, 0 on all 132 active ads on 10-20): 576300's ask
+    # on the 10-20 branch dry run was prose. Structured silence, never a miss.
+    "aldarim": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "furnished"),
+    # superoffice prints each office's own services as `<ul class="service_ul">` («أثاث», «إنترنت عالي السرعه» …),
+    # the list its scraper reads (scrapers/superoffice/run.py). Its 10-20 «misses» (parking 5 of 5, 0 of 4 findable)
+    # were the description's marketing line «نحن نقدم: … مواقف السيارات», on offices whose list names no parking.
+    # Read by superoffice_props().
+    "superoffice": ("elevator", "parking", "kitchen", "air_conditioner", "furnished"),
+    # erapulse's page embeds the listing's own `features` list and `elevator` flag (the API object its scraper
+    # maps); the re-read ads carry «features":[]» and print «لا توجد مميزات متاحة». Its 10-20 «misses» (0 of 4)
+    # asked kitchen / elevator from the free «تفاصيل العقار» prose (backlog 551). Read by erapulse_props().
+    "erapulse": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "furnished"),
 }
 # A rakez listing's page is its PROJECT's page: one shared feature list and every unit's price · rooms · area. A UNIT
 # trait the project list names («غرفة خادمة», «غرفة سائق», «مواقف خاصة», «مطبخ») describes some of the project's units,
@@ -520,6 +538,62 @@ def muktamel_props(body: str) -> list[dict]:
     return [{"name": _PROP_NAME[f], "value": "نعم"} for lab, f in MUKTAMEL_LABELS.items() if lab in ticked]
 
 
+# The Nuzul SaaS prints the ad's counts as escaped JSON in its RSC payload: «\\"kitchens\\":1». The same key also
+# appears once in the label dictionary with a STRING value («\\"kitchens\\":\\"Kitchen\\"»), which is never read.
+# A count ≥ 1 is a yes, 0 is silence (the scraper's own rule); two different counts for one key cannot be
+# attributed to this ad and say nothing.
+NUZUL_COUNTS = {"kitchens": "kitchen", "elevators": "elevator", "parking_spots": "parking", "maid_rooms": "maid_room",
+                "driver_rooms": "driver_room", "is_ac_installed": "air_conditioner", "is_furnished": "furnished"}
+
+
+def nuzul_props(body: str) -> list[dict]:
+    out = []
+    for key, f in NUZUL_COUNTS.items():
+        vals = set(re.findall(r'\\"' + key + r'\\":(\d+)', body or ""))
+        if len(vals) == 1 and int(vals.pop()) >= 1:
+            out.append({"name": _PROP_NAME[f], "value": "نعم"})
+    return out
+
+
+def is_nuzul(url: str) -> bool:
+    return "aldarim.sa" in url
+
+
+_SO_SERVICES = re.compile(r'<ul class="service_ul">(.*?)</ul>', re.S)
+_SO_ITEM = re.compile(r"<li>(.*?)</li>", re.S)
+
+
+def superoffice_props(body: str) -> list[dict]:
+    """The office's own service list, read item by item exactly as its scraper does («أثاث» is furnished)."""
+    items = [re.sub(r"<[^>]+>|\s+", " ", html.unescape(x)).strip()
+             for block in _SO_SERVICES.findall(body or "") for x in _SO_ITEM.findall(block)]
+    said = {c for x in items for c, v in amenities_from_text(x).items() if v is True}
+    if "أثاث" in items:
+        said.add("furnished")
+    return [{"name": _PROP_NAME[f], "value": "نعم"} for f in _PROP_NAME if f in said]
+
+
+def erapulse_props(body: str) -> list[dict]:
+    """erapulse's embedded listing object: its `features` names and its `elevator` flag. A value that is not
+    exactly one per page cannot be attributed to this ad and says nothing."""
+    said: set[str] = set()
+    feats = set(re.findall(r'"features":(\[[^\]]*\])', body or ""))
+    if len(feats) == 1:
+        try:
+            names = [x if isinstance(x, str) else (x.get("nameAr") or x.get("name") or "")
+                     for x in json.loads(feats.pop()) if isinstance(x, (str, dict))]
+        except ValueError:
+            names = []
+        said |= {c for x in names for c, v in amenities_from_text(x).items() if v is True}
+    lift = set(re.findall(r'"elevator":(true|false)', body or ""))
+    if lift == {"true"}:
+        said.add("elevator")
+    return [{"name": _PROP_NAME[f], "value": "نعم"} for f in _PROP_NAME if f in said]
+
+
+SITE_PROPS = {"superoffice": superoffice_props, "erapulse": erapulse_props}
+
+
 def is_muktamel(url: str) -> bool:
     return "muktamel.com" in url
 
@@ -648,6 +722,10 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
                 page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": wpresidence_props(body)}]}
             if page is not None and is_muktamel(url):
                 page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": muktamel_props(body)}]}
+            if page is not None and platform in SITE_PROPS:
+                page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": SITE_PROPS[platform](body)}]}
+            if page is not None and is_nuzul(url):
+                page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": nuzul_props(body)}]}
             if page is not None and is_gathern(url):
                 page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": gathern_props(body)}]}
         if page is None:
