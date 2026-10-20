@@ -44,6 +44,10 @@ every failed site's exception TEXT in the first 15 min; a parser fix is fixed on
 `scripts/verify-no-derived-price.ts` haraj `asking_price` pin is line-anchored, so growing `scrapers/haraj/run.py` above it
 means a re-pin in scripts/ and an owner merge.
 
+**NEW (10-20): NEVER dispatch a proof crawl from the PR's own branch when a site in it may fail.** Its jobs become
+checks on the PR head; `safe-pr-merge.ts` refuses ANY non-green check, so the auto-merge lane skipped #7808 for a cycle
+until a new commit landed. Dispatch proofs from a sibling branch (`<branch>-probe`, same commit) and delete it after.
+
 **NEW (10-20): a branch dispatch of `small-sources-sync.yml` starts ALL ~143 matrix jobs** (the `source` filter is on
 the STEP, not the job), so on a busy night your two sites wait behind the whole matrix for runners (10-20: queued ~10 min).
 Dispatch early, and name every site you need in ONE comma list. **A route log is now in the run notes** for senan/snam
