@@ -137,6 +137,8 @@ export default function Home() {
   const cityLabel = (o: { cityId: number; cityAr: string }) => (locale === 'en' ? cityNameEn(o.cityId, o.cityAr) : o.cityAr);
   const regionLabel = (o: { regionId: number | null; regionAr: string | null }) => (locale === 'en' ? regionNameEn(o.regionId, o.regionAr) : o.regionAr);
   const districtLabel = (cityId: number, ar: string) => (locale === 'en' ? districtNameEn(cityId, ar) : ar);
+  // A «حي X · City» row in the city box (owner decision 2026-10-19, backlog 522/566) names the district AND its city.
+  const cityRowLabel = (o: CityOption) => (o.districtAr ? `${districtLabel(o.cityId, o.districtAr)} · ${cityLabel(o)}` : cityLabel(o));
   const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history, importSharedChat, authChecked } = useApp();
   // A SHARED SEARCH LANDS HERE (owner 2026-10-17). `/?share=<payload>` (src/lib/shareSearch.ts) shows a
   // card «عقارات من {name} لك على إزهله» with «اضغط وشوف العقارات». The TAP is what runs the search
@@ -1672,6 +1674,12 @@ export default function Home() {
                   // New city → drop any prior district; the [query.deal, effCategory, citySelected]
                   // effect above warms THIS city's district catalog so District shows its Top-6 instantly.
                   clearDistrict();
+                  // A «حي X · City» row (owner decision 2026-10-19, backlog 522/566): the customer typed a district
+                  // into the city box, so the tap selects the city AND that district, with every spelling the index
+                  // serves for it. Its count is unmeasured (scopeKnown:false) until the city's own pool answers.
+                  if (opt.districtAr) {
+                    setDistrictsSelected([{ districtAr: opt.districtAr, listingCount: 0, matchValues: opt.districtMatchValues ?? [opt.districtAr], totalInCity: 0, scopeKnown: false }]);
+                  }
                   scrollDown(districtAnchorRef); // carry them down to the next step (district)
                 };
                 return (
@@ -1717,14 +1725,14 @@ export default function Home() {
                         const cityEmpty = opt.scopeKnown !== false && !(opt.listingCount > 0);
                         return (
                         <Tappable
-                          key={opt.cityId}
+                          key={opt.districtAr ? `${opt.cityId}:${opt.districtAr}` : String(opt.cityId)}
                           dip={0.03}
                           style={[s.suggRow, i < citySuggestions.length - 1 && s.suggDivider, cityEmpty && s.suggRowEmpty]}
                           onPress={() => cityOnPress(opt)}
                         >
-                          <Image source={LOC_IMG.city} style={[s.suggLocIcon, cityEmpty && s.suggIconEmpty]} />
+                          <Image source={opt.districtAr ? LOC_IMG.district : LOC_IMG.city} style={[s.suggLocIcon, cityEmpty && s.suggIconEmpty]} />
                           <View style={{ flex: 1 }}>
-                            <Text style={[s.suggCity, x.suggCity, cityEmpty && s.suggCityEmpty]}>{cityLabel(opt)}</Text>
+                            <Text style={[s.suggCity, x.suggCity, cityEmpty && s.suggCityEmpty]}>{cityRowLabel(opt)}</Text>
                             {/* Region stays hidden per spec ("use the confirmed hidden region internally")
                                 UNLESS two results in this exact list share a display name — a real,
                                 verified case (e.g. الهفوف exists as two distinct real cities) — in which
