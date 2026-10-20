@@ -22,7 +22,7 @@ def test_each_site_stores_rows_plus_the_pin():
     for site, call in SITES.items():
         src = (ROOT / "scrapers" / site / "run.py").read_text(encoding="utf-8")
         assert "from scrapers.common.source_pin import pin_dict" in src, site
-        assert ""additional_info": " + call in src, site
+        assert '"additional_info": ' + call in src, site
 
 
 def test_string_and_numeric_coordinates_both_pass_the_gate():
