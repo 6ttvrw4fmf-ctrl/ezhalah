@@ -197,7 +197,7 @@ def test_the_skip_tally_reaches_end_run(monkeypatch):
     projects = [{**P34, "properties": [U70, U20]}, {**P15, "properties": [U24, U51]}, {**P45, "properties": []}]
     monkeypatch.setattr(sys, "argv", ["run.py"])
     monkeypatch.setattr(R, "PAUSE", 0)
-    monkeypatch.setattr(R, "session", lambda: None)
+    monkeypatch.setattr(R, "walk_session", lambda: (None, ["direct/chrome124:200"]))
     monkeypatch.setattr(R, "fetch_projects", lambda s: (projects, len(projects)))
     monkeypatch.setattr(R, "fetch_project", lambda s, pid: {"thumbnail": PHOTOS[0], "images": None})
     monkeypatch.setattr(R.db, "begin_run", lambda src: 1)
@@ -219,7 +219,7 @@ def test_an_incomplete_enumeration_never_prunes(monkeypatch):
     pruned: list = []
     monkeypatch.setattr(sys, "argv", ["run.py"])
     monkeypatch.setattr(R, "PAUSE", 0)
-    monkeypatch.setattr(R, "session", lambda: None)
+    monkeypatch.setattr(R, "walk_session", lambda: (None, ["direct/chrome124:200"]))
     monkeypatch.setattr(R, "fetch_projects", lambda s: ([{**P34, "properties": [U70]}], 29))   # site says 29
     monkeypatch.setattr(R, "fetch_project", lambda s, pid: None)
     monkeypatch.setattr(R.db, "begin_run", lambda src: 1)
@@ -228,3 +228,21 @@ def test_an_incomplete_enumeration_never_prunes(monkeypatch):
     monkeypatch.setattr(R.db, "prune_unseen", lambda t, seen, **k: pruned.append(t) or 0)
     monkeypatch.setattr(R.db, "end_run", lambda run_id, **k: True)
     assert R.main() == 0 and pruned == []
+
+
+def test_a_refused_catalogue_names_every_route_it_tried(monkeypatch):
+    """2026-10-20: 4 nights read only «projects page 1 → HTTP 502»; the route log says whether
+    another profile or the proxy was served (SCRAPING_ENGINEER.md step 6 evidence)."""
+    calls = {}
+    route = ["direct/chrome124:502", "direct/firefox133:502", "proxy/chrome124:ProxyError"]
+
+    def refuse(s):
+        raise RuntimeError("projects page 1 → HTTP 502")
+    monkeypatch.setattr(sys, "argv", ["run.py"])
+    monkeypatch.setattr(R, "walk_session", lambda: (None, route))
+    monkeypatch.setattr(R, "fetch_projects", refuse)
+    monkeypatch.setattr(R.db, "begin_run", lambda slug: 5)
+    monkeypatch.setattr(R.db, "end_run", lambda run_id, **k: calls.update(end=k) or True)
+    assert R.main() == 1
+    assert calls["end"]["ok"] is False and "HTTP 502" in calls["end"]["notes"]
+    assert all(r in calls["end"]["notes"] for r in route)

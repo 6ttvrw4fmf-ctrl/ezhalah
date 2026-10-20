@@ -124,7 +124,12 @@ _PHONE_LOOSE = re.compile(r"[\(\[\{«]{1,3}\s*0?5[\d\s\.\-]{7,}\s*[\)\]\}»]{1,3
 # 2026-09-13: only not-yet-built inventory is out). It was named in this comment but missing from the
 # set, so 3 off-plan units sat active. in_prograss is NOT here: neither page says what is in
 # progress (a sale? the build? the ad?) — both carry price 0 — so it is left for the owner.
-GONE_AVAL = {"sold", "under_construction"}
+# 2026-10-20 (Scraping Engineer, owner order 10-19 for backlog 654: «show them as available ONLY if
+# the page itself offers them for sale/rent, otherwise keep them hidden»): the source's only
+# availability statement says NOT «available», the own /x/<id> page prints no availability and no
+# price (price 0), so nothing offers the unit → gone, through the same sold pin. HELD had left the two
+# old rows (RQ226, RQ262) ACTIVE and served at price 0 since 10-02 — held never removes a row.
+GONE_AVAL = {"sold", "under_construction", "in_prograss"}
 # ALLOWLIST (crawler audit 2026-10-02; re-measured the same day: available 151 · sold 42 ·
 # under_construction 3 · in_prograss 2, and the marker's `active`/`enabled` are 1 on all 198 —
 # furniture). GONE_AVAL alone was a denylist: in_prograss, a blank, or any new state (rented,
@@ -132,7 +137,7 @@ GONE_AVAL = {"sold", "under_construction"}
 # all (10 pages read: sold, available and in_prograss render the same), so `avalible` is the only
 # statement the source makes. A value that is neither available nor a confirmed gone state is HELD:
 # not written (never re-asserted alive), kept in the prune's seen-set (never aged out on a value
-# nobody can read), and counted in the run notes. in_prograss is still the owner's to classify.
+# nobody can read), and counted in the run notes. in_prograss was classified 2026-10-20 (GONE_AVAL).
 AVAILABLE_AVAL = {"available"}
 
 _last = 0.0
