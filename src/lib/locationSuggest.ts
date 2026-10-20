@@ -110,8 +110,10 @@ export function catalogDistrictExtras(query: string, catalog: readonly CatalogDi
 // city AND that district. The rows sit after the cities that have listings in the scope (or an unmeasured count) and
 // BEFORE the 0-served cities and the catalog extras. No count is shown for them (scopeKnown:false — the index counts
 // every deal, the scope does not), so nothing is claimed that was not measured.
-export type LiveDistrictRow = { districtAr: string; cityId: number; n: number; matchValues?: string[] };
-const stripHayy = (n: string) => n.replace(/^حي/, '');
+// `key` = stripHayy(norm(districtAr)), precomputed once by the caller so a keystroke never re-folds thousands of names.
+export type LiveDistrictRow = { districtAr: string; cityId: number; n: number; matchValues?: string[]; key?: string };
+export const stripHayy = (n: string) => n.replace(/^حي/, '');
+export const liveDistrictKey = (districtAr: string) => stripHayy(norm(districtAr));
 /** Served districts whose name (with «حي» dropped) starts with the query, most listings first; every raw spelling of
  *  one district (حي الراكة الجنوبية / الراكة الجنوبية) folds into ONE row that carries all of them in `matchValues`.
  *  A query under 3 letters, or a Latin one, adds nothing. */
@@ -123,7 +125,7 @@ export function populatedDistrictRows(query: string, rows: readonly LiveDistrict
   for (const r of rows) {
     const n = Number(r.n) || 0;
     if (n <= 0) continue;
-    const key = stripHayy(norm(r.districtAr));
+    const key = r.key ?? liveDistrictKey(r.districtAr);
     if (!key.startsWith(q)) continue;
     const g = groups.get(`${r.cityId}:${key}`);
     if (!g) groups.set(`${r.cityId}:${key}`, { districtAr: r.districtAr, cityId: r.cityId, n, matchValues: [r.districtAr], top: n });

@@ -6,7 +6,7 @@
 // first with English fallbacks. (PRD §5.1, prototype matchLocations — extended to nationwide data.)
 
 import raw from './sa-locations.json';
-import { norm, catalogCityExtras, catalogDistrictExtras, isLatinQuery, latinRank, populatedDistrictRows, orderCityBoxRows, type CatalogCity, type CatalogDistrict, type LiveDistrictRow } from '../lib/locationSuggest';
+import { norm, catalogCityExtras, catalogDistrictExtras, isLatinQuery, latinRank, populatedDistrictRows, orderCityBoxRows, liveDistrictKey, type CatalogCity, type CatalogDistrict, type LiveDistrictRow } from '../lib/locationSuggest';
 import { supabase } from '@/lib/supabase';
 import { CITY_AR_DISPLAY, CITY_TOKENS, cityTokensReverseLookup } from '@/lib/cityDisplay';
 import { arabicOrPlaceholder, cutPlaceName } from '@/lib/arabicText';
@@ -1292,7 +1292,7 @@ function liveDistrictRows(): LiveDistrictRow[] {
     }
     if (id === null) continue;
     const n = Number(d.n) || 0;
-    if (n > 0 && d.district) out.push({ districtAr: d.district, cityId: id, n });
+    if (n > 0 && d.district) out.push({ districtAr: d.district, cityId: id, n, key: liveDistrictKey(d.district) });
   }
   _liveDistrictRows = { src: LIVE_DISTRICTS, rows: out };
   return out;
