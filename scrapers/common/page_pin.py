@@ -38,6 +38,13 @@ _MAPS_LINK = re.compile(
 _LATLNG_CTOR = re.compile(r"google\.maps\.LatLng\(\s*" + _NUM + r"\s*,\s*" + _NUM + r"\s*\)")
 _EXACT_ON = re.compile(r"show_exact_location\s*=\s*true")
 _SHORT_LINK = re.compile(r"https://(?:maps\.app\.goo\.gl|goo\.gl/maps)/[A-Za-z0-9_-]+")
+# A Maps place link written in degrees-minutes-seconds — «maps/place/25°26'36.7"N+49°34'20.7"E» (shomou,
+# owner 2026-10-20 night). Read after HTML-unescape + URL-decode; only N/E halves are Saudi.
+_DMS_LINK = re.compile(r"maps/place/(\d{1,2})°(\d{1,2})'(\d{1,2}(?:\.\d+)?)\"([NS])[+\s]*"
+                       r"(\d{1,3})°(\d{1,2})'(\d{1,2}(?:\.\d+)?)\"([EW])")
+# A Google Maps embed's own centre — «maps/embed?pb=…!2dLNG!3dLAT…» (wadod). Not read by pin_from_html:
+# on bossbih the embed is the OFFICE on every page; a scraper uses it only where it is measured per ad.
+_EMBED_PB = re.compile(r"maps/embed\?pb=[^\"'<>\s]*?!2d(-?\d{1,3}\.\d{3,})!3d(-?\d{1,2}\.\d{3,})")
 
 
 def pin_from_html(text: Optional[str]) -> dict:
@@ -51,11 +58,45 @@ def pin_from_html(text: Optional[str]) -> dict:
     m = _MAPS_LINK.search(text)
     if m:
         return pin_dict(m.group(1), m.group(2))
+    d = _DMS_LINK.search(unquote(text))
+    if d:
+        la = int(d.group(1)) + int(d.group(2)) / 60 + float(d.group(3)) / 3600
+        lo = int(d.group(5)) + int(d.group(6)) / 60 + float(d.group(7)) / 3600
+        if d.group(4) == "N" and d.group(8) == "E":
+            return pin_dict(round(la, 7), round(lo, 7))
     if _EXACT_ON.search(text):          # a marker without that flag may be the site's approximation
         m = _LATLNG_CTOR.search(text)
         if m:
             return pin_dict(m.group(1), m.group(2))
     return {}
+
+
+def pin_from_embed(text: Optional[str]) -> dict:
+    """The centre of the page's own Google Maps embed (`!2dLNG!3dLAT`), else {} — per-ad sites only."""
+    m = _EMBED_PB.search(unescape(text or ""))
+    return pin_dict(m.group(2), m.group(1)) if m else {}
+
+
+_PAGE_SESSION: list = []
+
+
+def pin_from_page(text: Optional[str]) -> dict:
+    """A page's own pin by every safe shape: a Maps link/frame (pin_from_html), else a maps.app.goo.gl
+    link followed through resolve_redirect (its headless-Chromium leg where the job installed it)."""
+    pin = pin_from_html(text)
+    if pin:
+        return pin
+    short = short_maps_link(text)
+    if not short:
+        return {}
+    if not _PAGE_SESSION:
+        try:
+            from curl_cffi import requests as _cc
+            _PAGE_SESSION.append(_cc.Session(impersonate="chrome124"))
+        except Exception:  # noqa: BLE001
+            import requests as _rq
+            _PAGE_SESSION.append(_rq.Session())
+    return pin_from_short_link(short, lambda u: resolve_redirect(_PAGE_SESSION[0], u))
 
 
 def short_maps_link(text: Optional[str]) -> Optional[str]:
