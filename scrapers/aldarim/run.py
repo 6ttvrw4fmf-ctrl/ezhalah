@@ -36,6 +36,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, http_liveness, normalize
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.source_pin import pin_dict
 
 # PDPL: never store advertiser contact/identity. The rest of the API item is kept.
 _PII = {"whatsapp_number", "rega_advertiser_number"}
@@ -417,7 +418,10 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "property_age": None if property_type in AGELESS_TYPES
                         else _age_from_year_built(L.get("year_built")),
         "rega_location_verified": bool(L.get("rega_ad_number")),
-        "additional_info": _additional_info(L),
+        # Owner 2026-10-20: the API item's own latitude/longitude (strings). The panel rows keep their
+        # legacy shape under "rows" (src/data/remote.ts buildAdditionalInfo unwraps it); the index reads
+        # the pin from the object (listing_rich_attrs → search_listings_ar.latitude).
+        "additional_info": {"rows": _additional_info(L), **pin_dict(L.get("latitude"), L.get("longitude"))},
         # Feature-grid booleans the card renders with icons — mapped from Aldarim's flags/counts so the
         # card shows real features (Electricity/Water/Sewage/AC/parking…) instead of "No features".
         # Tri-state (2026-08-11): silence is NOT a denial. All four keys are 0/1 flags aldarim really

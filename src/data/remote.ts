@@ -1174,6 +1174,10 @@ const GATHERN_ONLY_ADDL_KEYS = new Set<string>([
 ]);
 function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; label: string; value: string }> | null {
   if (!raw) return null;
+  // LEGACY rows carried under "rows" (owner 2026-10-20): the office sites whose additional_info was the bare
+  // rows array (aldarim, abwbna, alobid, bahadhabab, alhoshan) now store {rows, latitude, longitude} so the
+  // index can read the ad's pin from the object. The panel is exactly the rows it always was.
+  if (typeof raw === 'object' && !Array.isArray(raw) && Array.isArray(raw.rows)) raw = raw.rows;
   if (Array.isArray(raw)) {
     // TYPE COERCION (P0 fix 2026-08-18, Search & Matching QA run): the LEGACY array shape is stored
     // by the source scraper verbatim, and Wasalt publishes NUMERIC values for noOfParkings /
