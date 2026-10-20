@@ -170,6 +170,21 @@ export const IN_APP_PREVIEW_HOSTS = [
   'hasaadestate.com',
   'yameen.sa',
   'maktab.sa',
+  // Owner 2026-10-20 («every listing goes to the map … check all not inside the app»): the last eleven preview
+  // sites still opened the SOURCE in a new tab, so Ezhalah's ad page — and its pin / district border — never
+  // showed for them (muktamel 4,077 ads, ialqarawi 2,609, aqarcity 2,082 + eight small ones). Same page as
+  // the sites above; muktamel is here precisely because framing it is over budget (~37 s).
+  'muktamel.com',
+  'ialqarawi.com',
+  'aqarcity.net',
+  'alnowaisiry.com',
+  'almuteb.sa',
+  'nawafethalwatan.com',
+  'wadod.sa',
+  '1october.com.sa',
+  'hazim.sa',
+  'eydah.com',
+  '8floor.sa',
 ] as const;
 export function inAppPreviewHost(url: string | null | undefined): string | null {
   if (!url) return null;
