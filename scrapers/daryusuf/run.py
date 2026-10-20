@@ -78,6 +78,7 @@ import json
 import re
 import sys
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote, unquote
@@ -88,6 +89,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.district_bridge import bridge_rows, bridge_unique, norm_en  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
@@ -395,6 +397,38 @@ _CITY_WORDS = {
 _CITY_RE = re.compile("|".join(re.escape(w) for w in sorted(_CITY_WORDS, key=len, reverse=True)))
 _DISTRICT_AR_RE = re.compile(r"حي\s+([ء-ي]+(?:\s+[ء-ي]+){0,2})")
 _DISTRICT_EN_RE = re.compile(r"((?:Al[\s\-]?)?[A-Z][A-Za-z\-']+(?:\s+[A-Z][A-Za-z\-']+){0,2})\s+[Dd]istrict")
+_EN_DIRECTION = re.compile(r"\b(?:north|south|east|west|new|old)\b", re.I)
+
+
+@lru_cache(maxsize=None)
+def _bridge_en_ar(city_en: str) -> dict[str, str]:
+    """The source-attested EN→AR district bridge for one city, unique keys only (scrapers/common/district_bridge)."""
+    return bridge_unique(bridge_rows(city_en), norm_en)
+
+
+def english_district(hood: Optional[str], city_ar: str, city_id: Optional[int]) -> Optional[str]:
+    """An English post's «Al Difaa District» → «حي الدفاع» through the shared bridge (dealapp's bilingual pairs),
+    confirmed against THIS city's catalogue. 2026-10-20: ~190 Madinah/Jeddah ads named their district only in
+    English and were stored with none. Tried: the whole name, then its last two and last one words unless a
+    direction word is dropped («Furnished Apartment Al Salam» → «Al Salam»). No unique key → None, never a guess."""
+    if not hood or not city_id:
+        return None
+    city_en = normalize.map_city(city_ar)
+    if not city_en:
+        return None
+    bridge = _bridge_en_ar(city_en)
+    if not bridge:
+        return None
+    words = re.sub(r"\s+[Dd]istrict\b.*$", "", hood.strip()).split()
+    names = [" ".join(words)]
+    for k in (2, 1):
+        if len(words) > k and not _EN_DIRECTION.search(" ".join(words[:-k])):
+            names.append(" ".join(words[-k:]))
+    for name in names:
+        ar = bridge.get(norm_en(name) or "")
+        if ar:
+            return find_district_in_text(ar, city_id)
+    return None
 
 
 def city_in_title(title: str) -> Optional[str]:
@@ -451,6 +485,8 @@ def map_listing(post: dict, terms: dict[int, str]) -> tuple[Optional[dict], str,
     dm = _DISTRICT_AR_RE.search(title) or _DISTRICT_EN_RE.search(title)
     hood = dm.group(0).strip() if dm else None
     district_ar = find_district_in_text(dm.group(0), city_id) if dm and not is_en else None
+    if dm and not district_ar and _DISTRICT_EN_RE.fullmatch(dm.group(0).strip()):
+        district_ar = english_district(dm.group(0), city_ar, city_id)
 
     amount, period_tok, price_text = parse_price_heading(content)
     description, source_ad = parse_description(content)

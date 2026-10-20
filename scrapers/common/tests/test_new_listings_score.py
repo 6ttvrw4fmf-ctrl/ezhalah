@@ -437,6 +437,22 @@ def test_shell_page_platform_is_unreadable_not_wrong():
     assert other["normal_mismatch"] > 0
 
 
+def test_a_closed_ad_page_is_unreadable_not_wrong():
+    # aqarmonthly 18842133 (2026-10-20, re-read run 39384695539 verdict=dead): the closed ad's URL serves another
+    # listing's leftovers; scored as a 300 m² area MISMATCH that capped the night. aqar's own dead marker decides.
+    from scrapers.common.cleanup import AQAR_DEAD_MARKERS
+    alive = "<html><body><h1>شقة للإيجار في حي العارض</h1><p>المساحة 450 م²</p></body></html>"
+    dead = alive.replace("</body>", f"<p>{AQAR_DEAD_MARKERS[0]}</p></body>")
+    client = FakeClient({
+        "search_listings_ar": [{"source_table": "t", "listing_id": 1, "district_ar": "حي العارض", "area_m2": 300}],
+        "t": [{"id": 1, "listing_url": "https://sa.aqar.fm/x-6461856"}],
+    })
+    row = score_site(client, "aqarmonthly", [("t", 1)], night="2026-10-20", pace=0, probe=lambda url: (200, dead))
+    assert row["unreadable_pages"] == 1 and row["normal_mismatch"] == 0
+    live = score_site(client, "aqarmonthly", [("t", 1)], night="2026-10-20", pace=0, probe=lambda url: (200, alive))
+    assert live["normal_mismatch"] > 0                     # a live page is still judged
+
+
 def test_area_the_page_labels_in_its_own_payload_is_the_page_value():
     # sanadak 17502436 (2026-10-13, re-read run 38361883389): the flight payload maps its area label to
     # lotSize and carries "lotSize":760 (= what we store); the visible text has only «المساحة : 150م تقريباً».
@@ -458,8 +474,15 @@ def test_area_the_page_labels_in_its_own_payload_is_the_page_value():
     ("الضاحية الحادي عشر", "أرض سكنية للبيع في حي الحادي عشر بضاحية هجر", MATCH),
     ("الضاحية الخامس", "ضاحية هجر(الحي الخامس)", MATCH),
     ("الضاحية الخامس", "أرض سكنية للبيع في حي الرابع بضاحية هجر", MISMATCH),
+    # bossbih 18985501 (2026-10-20, re-read run 39384692527): served «ضاحية هجر(الحي الخامس)», page «الضاحية الحي الخامس»
+    ("ضاحية هجر(الحي الخامس)", "نص أرض للبيع في الضاحية الحي الخامس (640/4) د", MATCH),
+    ("الضاحية الخامس", "مخطط الضاحية الحي الخامس", MATCH),
 ])
 def test_hajer_suburb_spellings_are_one_place(stored, text, want):
+    # Only the SAME ordinal is the same place, in the fourth form too (a bare «الضاحية الحي X» page is not read
+    # as naming a district at all, backlog #61, so the other ordinal is silence — never a match).
+    other = "نص أرض للبيع في الضاحية الحي الرابع (640/4) د"
+    assert compare_listing({"district_ar": "ضاحية هجر(الحي الخامس)"}, page(other, title=other))["district"] != MATCH
     # arkaan 17543658 … 17544564 (2026-10-13): served the catalog's «الضاحية X» for «حي X بضاحية هجر».
     assert compare_listing({"district_ar": stored}, page(text, title=text))["district"] == want
 
@@ -592,6 +615,14 @@ def test_three_to_ten_written_as_words_on_the_keyword_line():
     assert compare_listing({"bedrooms": 5}, page("أربع غرف"))["bedrooms"] == MISMATCH
     # A word that only CONTAINS a number word is not one («مستودع» holds «ست»).
     assert compare_listing({"bedrooms": 6}, page("غرف مستودع"))["bedrooms"] != MATCH
+
+
+def test_every_worded_figure_on_a_keyword_line_counts():
+    # bossbih 18945171 (2026-10-20, re-read run 39384692527): the ad's own «غرفتين نوم», then the related-ads
+    # table's «المساحة194مأربع غرف» for another unit. Stored 2 = the ad's own figure; 3 is on no line.
+    p = page("شقة للايجار في حي الصحافه ب الدور الاول", "▫️غرفتين نوم\n▫️مطبخ\nحي الصحافه\nالمساحة194مأربع غرف")
+    assert compare_listing({"bedrooms": 2}, p)["bedrooms"] == MATCH
+    assert compare_listing({"bedrooms": 3}, p)["bedrooms"] == MISMATCH
 
 
 def test_tuba_street_width_comes_from_its_rega_record():

@@ -293,13 +293,16 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # because the previous row's bare «220 م²» read as a stated age).
         # «دورة مياه واحدة» is gathern's way of printing ONE bathroom: the word, not the digit (af_score
         # 2026-10-07: gathern 12857258 / 13191014 / 13971729 stored 1, scored «mismatch» 3/3).
+        # Every worded figure on a keyword line counts, like a digit there does: bossbih 18945171 / 18945121
+        # (2026-10-20, re-read run 39384692527) print the ad's own «غرفتين نوم» AND, in the related-ads table under
+        # it, another unit's «المساحة194مأربع غرف»; reading the number word first scored our 2 bedrooms a MISMATCH.
         worded = {WORD_NUMBERS[m.group(1)] for i in kw_hits for m in WORD_NUMBER.finditer(lines[i])}
+        if any(ONE_WORD.search(lines[i]) for i in kw_hits):
+            worded.add(1)
+        if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
+            worded.add(2)
         if worded:
             return MATCH if float(stored) in worded else MISMATCH
-        if any(ONE_WORD.search(lines[i]) for i in kw_hits):
-            return MATCH if float(stored) == 1 else MISMATCH
-        if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
-            return MATCH if float(stored) == 2 else MISMATCH
         if kw == AGE_KW and (NEW_BUILDING.search(" | ".join(lines[i] for i in kw_hits)) or any(
                 i + 1 < len(lines) and re.match(r"^\s*جديد\s*$", lines[i + 1]) for i in kw_hits)):
             return MATCH if float(stored) == 0 else MISMATCH
@@ -360,8 +363,12 @@ def _cmp_bool(stored, lines: list[str], kw: str) -> str:
 # / الخامس / الحادي عشر» for exactly those pages and scored 4 district mismatches. Only the SAME ordinal is
 # the same place: «الرابع بضاحية هجر» never matches «الضاحية الخامس».
 _HAJER_ORDINAL = r"(الاول|الثاني عشر|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|الحادي عشر)"
+# bossbih / aqalemhajer write it a fourth way, «الضاحية الحي الخامس» (bossbih 18985501, 2026-10-20 re-read run
+# 39384692527: page «الضاحية الحي الخامس (640/4)», served «ضاحية هجر(الحي الخامس)», scored MISMATCH). The stored
+# value is aliased too, so either side may carry any of the four forms.
 _HAJER_FORMS = (re.compile(r"(?:الحي\s+)?" + _HAJER_ORDINAL + r"\s+بضاحيه\s+هجر"),
-                re.compile(r"ضاحيه\s+هجر\s*\(?\s*الحي\s+" + _HAJER_ORDINAL))
+                re.compile(r"ضاحيه\s+هجر\s*\(?\s*الحي\s+" + _HAJER_ORDINAL),
+                re.compile(r"الضاحيه\s+الحي\s+" + _HAJER_ORDINAL))
 
 
 def _hajer_aliases(whole: str) -> str:
@@ -377,6 +384,10 @@ def _cmp_district(stored, whole: str) -> str:
         return MATCH
     if d and re.search(r"(?<!\S)" + re.escape(d) + r"(?!\S)", _hajer_aliases(whole)):
         return MATCH
+    page_hajer = _hajer_aliases(whole) + " " + whole
+    for m in re.finditer(r"الضاحيه " + _HAJER_ORDINAL, _hajer_aliases(d or "")):
+        if re.search(r"(?<!\S)" + re.escape(m.group(0)) + r"(?!\S)", page_hajer):
+            return MATCH
     # The article is not the name: the catalogue's «حي السدرة» is the page's «روشن سدرة» / «حي سدرة»
     # (eilmalriyada 18624025, 2026-10-19 re-read run 39215210951: its own district field says «حي سدرة»).
     # Whole words only, so «السدره» never matches inside another name.
@@ -392,6 +403,17 @@ def _cmp_district(stored, whole: str) -> str:
 # login banner and a featured ad «جدة - حي الزهراء» / «الغرف 1», and scored our الخرج / العيون villa (6 rooms)
 # as 3 mismatches. Such a page has said nothing about the ad: unreadable, never wrong.
 SHELL_PAGE_PLATFORMS = frozenset({"ebriza"})
+
+
+# A closed ad's page is not the ad: aqarmonthly 18842133 (2026-10-20, re-read run 39384695539, verdict=dead) now
+# serves «فيلا مفروشة للحجز في حي العارض» with the default villa image, and its leftovers scored our flat's 300 m²
+# a MISMATCH that capped the night. The platform's own dead marker (scrapers/common/cleanup.PLATFORMS, the one
+# liveness uses) decides; a closed ad is ♻️'s finding, and for the score the page has said nothing: unreadable.
+def closed_ad_page(platform: str, status, body: str) -> bool:
+    from scrapers.common.cleanup import PLATFORMS
+    from scrapers.common.liveness_contract import DEAD, classify_response
+    marker = PLATFORMS.get(platform, {}).get("dead_marker")
+    return marker is not None and classify_response(status, body or "", dead_marker=marker) == DEAD
 
 
 # A share link that names its ad by CODE in the query («/latest-offers?ads-N5470=1», nufouth) opens the ad in a JS
@@ -727,7 +749,7 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             status, body = probe(url)
         except Exception:  # noqa: BLE001 — a transport failure has said nothing about the ad
             status, body = None, ""
-        if status != 200 or not body:
+        if status != 200 or not body or closed_ad_page(platform, status, body):
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
