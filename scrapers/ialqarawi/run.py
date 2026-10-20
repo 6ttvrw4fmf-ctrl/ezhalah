@@ -101,6 +101,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, http, normalize  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
     find_district_in_text, is_ambiguous_standalone_word, known_district_keys, title_hayy_district, to_catalog,
 )
@@ -518,7 +519,9 @@ def parse_detail(page_html: str) -> dict[str, Any]:
         return {}
     title = _clean((re.findall(r"<h3[^>]*>(.*?)</h3>", page_html, re.S) or [""])[0])
     photos = list(dict.fromkeys(html.unescape(u) for u in _BIG_IMG_RE.findall(page_html)))
-    return {"fields": fields, "title": title, "photos": photos}
+    # Owner 2026-10-20: the ad's own Maps embed «maps/embed/v1/place?q=LAT,LNG» (5/5 sampled ads; 2,609
+    # ads were on the district border for nothing). Through the one gate (sa_pin); {} when absent.
+    return {"fields": fields, "title": title, "photos": photos, "pin": pin_from_html(page_html)}
 
 
 def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
@@ -688,6 +691,7 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         "district_field_raw": district_field if field_is_a_city else None,
         "district_source": "title" if title_hayy else None,
         "added_ago_raw": None if _is_blank(f.get("مضاف منذ")) else f.get("مضاف منذ"),
+        **(detail.get("pin") or {}),
     }.items() if v is not None}
     return row, category, ""
 
