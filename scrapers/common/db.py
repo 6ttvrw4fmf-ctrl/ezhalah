@@ -1302,7 +1302,7 @@ READ_GONE_MAX_READS = 60   # own-page reads per table per run when a prune is gu
 
 def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=None, *,
                      max_prune_frac: float = 0.30, min_active_guard: int = 8,
-                     max_reads: int = READ_GONE_MAX_READS) -> int:
+                     max_reads: int = READ_GONE_MAX_READS, grace: int = 3) -> int:
     """Strike ONLY the unseen active rows whose OWN page reads gone (2026-10-12).
 
     For a crawl whose absence prune was refused (a guard tripped, or the walk fell short) — the
@@ -1344,9 +1344,11 @@ def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=No
         print(f"{table}: no unseen ad read gone on its own page — nothing struck", flush=True)
         return 0
     print(f"{table}: striking only the {len(gone)} ad(s) whose own page read gone", flush=True)
+    # grace: 3 by default (unchanged). A caller whose verify_gone reads the source's OWN affirmative removal
+    # may pass 1 — owner 2026-10-20 «once we see it, remove it» (aldarim's API «unavailable»).
     return prune_unseen(table, {r["ad_number"] for r in rows} - set(gone), source=source,
                         verify_gone=verify_gone, min_coverage=0.0, max_prune_frac=max_prune_frac,
-                        min_active_guard=min_active_guard)
+                        min_active_guard=min_active_guard, grace=grace)
 
 
 def own_page_status_oracle(c, table: str, seen, *, session=None):
