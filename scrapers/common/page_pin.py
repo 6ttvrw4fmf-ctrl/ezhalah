@@ -40,8 +40,10 @@ _EXACT_ON = re.compile(r"show_exact_location\s*=\s*true")
 _SHORT_LINK = re.compile(r"https://(?:maps\.app\.goo\.gl|goo\.gl/maps)/[A-Za-z0-9_-]+")
 # A Maps place link written in degrees-minutes-seconds — «maps/place/25°26'36.7"N+49°34'20.7"E» (shomou,
 # owner 2026-10-20 night). Read after HTML-unescape + URL-decode; only N/E halves are Saudi.
-_DMS_LINK = re.compile(r"maps/place/(\d{1,2})°(\d{1,2})'(\d{1,2}(?:\.\d+)?)\"([NS])[+\s]*"
+_DMS_LINK = re.compile(r"(?:maps/place/|[?&]q=)(\d{1,2})°(\d{1,2})'(\d{1,2}(?:\.\d+)?)\"([NS])[+\s]*"
                        r"(\d{1,3})°(\d{1,2})'(\d{1,2}(?:\.\d+)?)\"([EW])")
+# …also inside an embed's «?q=» — «maps.google.com/maps?hl=ar&q=25°24'43.2"N+49°36'48.8"E&output=embed»
+# (aljassim, owner 2026-10-20 night).
 # A Google Maps embed's own centre — «maps/embed?pb=…!2dLNG!3dLAT…» (wadod). Not read by pin_from_html:
 # on bossbih the embed is the OFFICE on every page; a scraper uses it only where it is measured per ad.
 _EMBED_PB = re.compile(r"maps/embed\?pb=[^\"'<>\s]*?!2d(-?\d{1,3}\.\d{3,})!3d(-?\d{1,2}\.\d{3,})")

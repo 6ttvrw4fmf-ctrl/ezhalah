@@ -54,3 +54,12 @@ def test_nawafeth_reads_the_pin_its_own_script_draws():
     page = "<script>var propertyLat = parseFloat('27.0196');\r\n var propertyLng = parseFloat('49.5732');</script>"
     assert NW._own_pin(page) == {"latitude": 27.0196, "longitude": 49.5732}
     assert NW._own_pin("<script>no map</script>") == {}
+
+
+def test_dms_inside_an_embed_q_is_read():
+    # aljassim 4626: «maps.google.com/maps?hl=ar&q=25°24'43.2"N+49°36'48.8"E&t=h&z=14&output=embed»
+    frame = '<iframe src="https://maps.google.com/maps?hl=ar&amp;q=25%C2%B024%2743.2%22N+49%C2%B036%2748.8%22E&amp;t=h&amp;z=14&amp;output=embed"></iframe>'
+    pin = pin_from_html(frame)
+    assert abs(pin["latitude"] - 25.412) < 1e-6 and abs(pin["longitude"] - 49.6135556) < 1e-6
+    t = (ROOT / "scrapers" / "aljassim" / "run.py").read_text(encoding="utf-8")
+    assert '"pin": pin_from_html(body),' in t and '**(detail.get("pin") or {}),' in t

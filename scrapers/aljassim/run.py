@@ -133,6 +133,7 @@ from scrapers.common import normalize as N  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 
 BASE = "https://aljassimaqar.com"
 SOURCE = "Al Jassim"
@@ -524,6 +525,7 @@ def parse_detail(page: Optional[str], nid: str) -> dict:
             break
     adv = _ADVERTISER.search(page)
     return {
+        "pin": pin_from_html(body),   # owner 2026-10-20 night: the article's own Maps embed
         "title": title,
         "blocks": [t for _, t in blocks],
         "description": _clean("\n".join(prose)),
@@ -719,6 +721,8 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         # unknown-must-not-overwrite-known guard drop the key so a stored list survives.
         "photo_urls": (photos[:20] or None) if (detail or photos) else None,
         "additional_info": redact_capture({k: v for k, v in {
+            # owner 2026-10-20 night: the article's own Maps embed (degrees-minutes-seconds in ?q=)
+            **(detail.get("pin") or {}),
             "price_label": p["label"],
             "price_basis": basis,
             "price_basis_from": basis_from,
