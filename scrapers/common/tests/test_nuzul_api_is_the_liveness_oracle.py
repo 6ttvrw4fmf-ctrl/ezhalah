@@ -1,4 +1,4 @@
-"""aldarim / abwbna / alobid / bahadhabab: the Nuzul API is the per-listing liveness oracle (owner 2026-10-20).
+"""aldarim: the Nuzul API is the per-listing liveness oracle (owner 2026-10-20).
 
 Measured: ten aldarim ads the API marked availability_status «unavailable» stayed active 6–15 days and were
 served with a district border — the crawl skipped them and the page probe still answered 200. The API's own
@@ -7,7 +7,6 @@ answer (404, or availability_status) is the source's direct verdict; a failed fe
 from pathlib import Path
 
 import scrapers.aldarim.run as A
-import scrapers.abwbna.run as B
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -56,13 +55,13 @@ def test_api_404_is_gone_unavailable_is_gone_available_is_live_failure_is_unknow
 
 
 def test_an_item_the_crawl_saw_as_unavailable_is_gone_without_a_request(monkeypatch):
-    s = _wire(B, monkeypatch, {})
-    B._SOURCE_UNAVAILABLE.add("ABW42")
+    s = _wire(A, monkeypatch, {})
+    A._SOURCE_UNAVAILABLE.add("ALD42")
     try:
-        assert B._api_verify_gone("ABW42")[0] == "gone"
+        assert A._api_verify_gone("ALD42")[0] == "gone"
         assert s.calls == []
     finally:
-        B._SOURCE_UNAVAILABLE.discard("ABW42")
+        A._SOURCE_UNAVAILABLE.discard("ALD42")
 
 
 def test_aldarim_asks_the_api_before_the_page_probe(monkeypatch):
@@ -73,11 +72,7 @@ def test_aldarim_asks_the_api_before_the_page_probe(monkeypatch):
     assert A._verify_gone("ALD9") == ("live", "page 200")
 
 
-def test_every_tenant_records_unavailable_items_and_hands_the_oracle_to_prune():
-    for site, src in (("aldarim", None), ("abwbna", "Abwbna"), ("alobid", "Alobid"), ("bahadhabab", "Bahadhabab")):
-        text = (ROOT / "scrapers" / site / "run.py").read_text(encoding="utf-8")
-        assert "_SOURCE_UNAVAILABLE.add(f\"{_AD_PREFIX}{L.get('id')}\")" in text, site
-        if src:
-            assert f'source="{src}", verify_gone=_api_verify_gone)' in text, site
-        else:
-            assert "verify_gone=_verify_gone)" in text
+def test_aldarim_records_unavailable_items_and_hands_the_oracle_to_prune():
+    text = (ROOT / "scrapers" / "aldarim" / "run.py").read_text(encoding="utf-8")
+    assert "_SOURCE_UNAVAILABLE.add(f\"{_AD_PREFIX}{L.get('id')}\")" in text
+    assert "verify_gone=_verify_gone)" in text

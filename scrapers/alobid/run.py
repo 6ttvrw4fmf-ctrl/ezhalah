@@ -73,43 +73,6 @@ def _throttle() -> None:
     _last = time.monotonic()
 
 
-# ── The source's own per-listing verdict (owner 2026-10-20) ──────────────────────────────────
-# Measured on aldarim: ten ads the API marked availability_status «unavailable» stayed ACTIVE for 6–15 days
-# — the crawl skips them, and the page probe still answers 200 for them — so they were served with a
-# district border. The Nuzul API is a DIRECT per-listing oracle: /api/public/properties/{id} answers 404
-# for a deleted ad (measured) and availability_status for the rest. Asked only at grace, from
-# prune_unseen; absence alone still never kills (docs/ops/LISTING_LIVENESS.md).
-_AD_PREFIX = "ALB"
-_SOURCE_UNAVAILABLE: set[str] = set()      # ad_numbers the API marked not-available THIS run
-_ORACLE_S = None
-
-
-def _api_verify_gone(ad_number: str) -> tuple[str, str]:
-    global _ORACLE_S
-    if ad_number in _SOURCE_UNAVAILABLE:
-        return "gone", "source API availability_status is not available (this run)"
-    pid = ad_number[len(_AD_PREFIX):] if ad_number.startswith(_AD_PREFIX) else ""
-    if not pid.isdigit():
-        return "unknown", f"{ad_number!r} is not a {_AD_PREFIX}<id> ad number"
-    try:
-        if _ORACLE_S is None:
-            _ORACLE_S = session()
-        r = _ORACLE_S.get(f"{API}/{pid}", timeout=30)
-    except Exception as e:  # noqa: BLE001 — a failed fetch is UNKNOWN, never a death
-        return "unknown", f"api {type(e).__name__}"
-    if r.status_code == 404:
-        return "gone", "source API 404 for this id"
-    if r.status_code != 200:
-        return "unknown", f"api HTTP {r.status_code}"
-    try:
-        d = r.json()
-        d = d.get("data") if isinstance(d, dict) and isinstance(d.get("data"), dict) else d
-        st = (d.get("availability_status") or "").strip().lower()
-    except Exception:  # noqa: BLE001
-        return "unknown", "api body not json"
-    return ("live", "api available") if st in ("available", "") else ("gone", f"source API availability_status={st}")
-
-
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
     s.headers.update(HEADERS)
@@ -419,7 +382,6 @@ def main() -> int:
                 # SKIP sold/rented — Aldarim's API returns them, but they're not available to buy/rent.
                 # (Found in recon: 74 of 231 were sold/rented. We only show what's actually on offer.)
                 if (L.get("availability_status") or "").lower() not in ("available", "", None):
-                    _SOURCE_UNAVAILABLE.add(f"{_AD_PREFIX}{L.get('id')}")   # the source's own verdict, used at grace
                     continue
                 row, cat = map_listing(L)
                 if not row or not row.get("property_type"):
@@ -458,7 +420,7 @@ def main() -> int:
                 print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
             for tbl, seen_ads in (("alobid_residential_listings", seen_res), ("alobid_commercial_listings", seen_com)):
-                n = db.prune_unseen(tbl, set(seen_ads), source="Alobid", verify_gone=_api_verify_gone)
+                n = db.prune_unseen(tbl, set(seen_ads), source="Alobid")
                 if n < 0:
                     print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
                 else:
