@@ -128,7 +128,7 @@ def test_ramzalqasim_only_available_is_written_active(fake, monkeypatch):
     monkeypatch.setattr(ramz, "fetch_markers", lambda s: [
         _marker(1, avalible="available"),
         _marker(2, avalible="sold"),
-        _marker(3, avalible="in_prograss"),        # measured, but nobody knows what it means
+        _marker(3, avalible="in_prograss"),        # classified gone 2026-10-20 (backlog 654)
         _marker(4),                                # blank
         _marker(5, avalible="reserved"),           # never measured on this source
     ])
@@ -136,9 +136,10 @@ def test_ramzalqasim_only_available_is_written_active(fake, monkeypatch):
     up = fake.upserted()
     assert rc == 0
     assert up["RQ1"]["active"] is True and up["RQ2"]["active"] is False
-    assert not {"RQ3", "RQ4", "RQ5"} & set(up), "an unclassified availability must not be written"
-    assert {"RQ3", "RQ4", "RQ5"} <= fake.pruned_seen()
-    assert "in_prograss" in fake.end()["notes"] and "reserved" in fake.end()["notes"]
+    assert up["RQ3"]["active"] is False, "in_prograss offers nothing: written inactive, never held active"
+    assert not {"RQ4", "RQ5"} & set(up), "an unclassified availability must not be written"
+    assert {"RQ4", "RQ5"} <= fake.pruned_seen()
+    assert "in_prograss" not in fake.end()["notes"] and "reserved" in fake.end()["notes"]
 
 
 def test_ramzalqasim_fails_closed_when_the_field_is_gone_from_the_feed(fake, monkeypatch):
@@ -149,7 +150,7 @@ def test_ramzalqasim_fails_closed_when_the_field_is_gone_from_the_feed(fake, mon
 
 def test_ramzalqasim_held_residential_id_never_enters_the_commercial_seen_set(fake, monkeypatch):
     monkeypatch.setattr(ramz, "fetch_markers", lambda s: [_marker(1, avalible="available"),
-                                                          _marker(3, avalible="in_prograss")])
+                                                          _marker(3, avalible="reserved")])
     assert ramz.main() == 0
     seen = fake.prune_seen_by_table()
     assert seen["ramzalqasim_commercial_listings"] == set()

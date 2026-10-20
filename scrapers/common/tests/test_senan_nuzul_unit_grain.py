@@ -140,7 +140,7 @@ def test_main_tallies_every_skip_into_end_run(monkeypatch):
     records = {44630: UNIT_IN_PROJECT, 41522: STANDALONE, 41291: NO_LOCATION, 41223: SOLD}
     writes, calls = {}, {}
     monkeypatch.setattr(sys, "argv", ["run.py"])
-    monkeypatch.setattr(R, "session", lambda: None)
+    monkeypatch.setattr(R, "walk_session", lambda: (None, ["direct/chrome124:200"]))
     monkeypatch.setattr(R, "fetch_ids", lambda s, base, limit=0: (list(records), True))
     monkeypatch.setattr(R, "fetch_detail", lambda s, base, pid, tries=3: (records[pid], "live"))
     monkeypatch.setattr(R.time, "sleep", lambda *_: None)

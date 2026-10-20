@@ -83,6 +83,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 
@@ -148,6 +149,14 @@ def city_from_location(loc: dict) -> Optional[str]:
             if cid and (region is None or rid == region):
                 return name
     return None
+
+
+def walk_session() -> tuple[cc.Session, list[str]]:
+    """3 browser profiles DIRECT, then the residential proxy (when the job has it), each a fresh
+    session; the first the catalogue answers 200 is kept. 2026-10-20 (Scraping Engineer): the one
+    pinned chrome session got «projects page 1 → HTTP 502» on 4 runs from 10-19 (181 seen on 10-18),
+    and nothing recorded whether another profile or route would have been served."""
+    return retry_smarter_session(f"{API}?page=1&limit=1", headers=dict(session().headers))
 
 
 def fetch_projects(s: cc.Session) -> tuple[list[dict], int]:
@@ -318,7 +327,8 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    s = session()
+    s, route = walk_session()
+    print(f"{SOURCE}: route {' · '.join(route)}", flush=True)
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run("snam")
     res: list[dict] = []
@@ -396,7 +406,8 @@ def main() -> int:
         return 0
     except Exception as e:
         if run_id:
-            db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])
+            db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0,
+                       notes=f"{e} (route {' '.join(route)})"[:300])
         print(f"✗ {SOURCE}: {e}", flush=True)
         return 1
 

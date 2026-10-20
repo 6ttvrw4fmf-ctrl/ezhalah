@@ -197,7 +197,7 @@ def test_the_skip_tally_reaches_end_run(monkeypatch):
     projects = [{**P34, "properties": [U70, U20]}, {**P15, "properties": [U24, U51]}, {**P45, "properties": []}]
     monkeypatch.setattr(sys, "argv", ["run.py"])
     monkeypatch.setattr(R, "PAUSE", 0)
-    monkeypatch.setattr(R, "session", lambda: None)
+    monkeypatch.setattr(R, "walk_session", lambda: (None, ["direct/chrome124:200"]))
     monkeypatch.setattr(R, "fetch_projects", lambda s: (projects, len(projects)))
     monkeypatch.setattr(R, "fetch_project", lambda s, pid: {"thumbnail": PHOTOS[0], "images": None})
     monkeypatch.setattr(R.db, "begin_run", lambda src: 1)
@@ -219,7 +219,7 @@ def test_an_incomplete_enumeration_never_prunes(monkeypatch):
     pruned: list = []
     monkeypatch.setattr(sys, "argv", ["run.py"])
     monkeypatch.setattr(R, "PAUSE", 0)
-    monkeypatch.setattr(R, "session", lambda: None)
+    monkeypatch.setattr(R, "walk_session", lambda: (None, ["direct/chrome124:200"]))
     monkeypatch.setattr(R, "fetch_projects", lambda s: ([{**P34, "properties": [U70]}], 29))   # site says 29
     monkeypatch.setattr(R, "fetch_project", lambda s, pid: None)
     monkeypatch.setattr(R.db, "begin_run", lambda src: 1)
