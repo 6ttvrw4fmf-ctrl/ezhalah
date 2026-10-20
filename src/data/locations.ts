@@ -605,7 +605,6 @@ export async function ensureLocationIndex(): Promise<void> {
           agg.set(r.city, e);
         }
         LIVE_CITIES = [...agg.values()];
-        _liveDistrictRows = null; // the city box's «حي X · City» candidates follow the fresh index
         _cityKeys = null; // rebuild the fuzzy-city index now that live cities are loaded
         _invMemo = new WeakMap(); // recompute inventory against the fresh index
       }
@@ -1270,9 +1269,11 @@ export function matchDistrictsByCityId(cityId: number, deal: Deal | null, catego
 // index names the city by its English DB label («Khobar», «Riyadh»), which is mapped to the catalog id the same way
 // placeHasInventory does (the label itself, else CITY_AR_DISPLAY → the Arabic name). A label that lands on two catalog
 // cities (the الهفوف twins) or on none contributes no row: a district row must never select the wrong city.
-let _liveDistrictRows: LiveDistrictRow[] | null = null;
+// Memoised against the index array itself: ensureLocationIndex replaces LIVE_DISTRICTS on every (re)load, so the rows
+// follow it without that function having to know about this one (its failure-path barrier lifts it on its own).
+let _liveDistrictRows: { src: LiveDistrict[]; rows: LiveDistrictRow[] } | null = null;
 function liveDistrictRows(): LiveDistrictRow[] {
-  if (_liveDistrictRows) return _liveDistrictRows;
+  if (_liveDistrictRows && _liveDistrictRows.src === LIVE_DISTRICTS) return _liveDistrictRows.rows;
   const byEn = new Map<string, number[]>();
   const byAr = new Map<string, number[]>();
   for (const [id, c] of CITY_BY_ID) {
@@ -1293,7 +1294,7 @@ function liveDistrictRows(): LiveDistrictRow[] {
     const n = Number(d.n) || 0;
     if (n > 0 && d.district) out.push({ districtAr: d.district, cityId: id, n });
   }
-  _liveDistrictRows = out;
+  _liveDistrictRows = { src: LIVE_DISTRICTS, rows: out };
   return out;
 }
 
