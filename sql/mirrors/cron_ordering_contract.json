@@ -19,10 +19,10 @@
     "PART 6) — never weaken a barrier to make it green."
   ],
   "_semantics": "gap = downstream_minute - upstream_minute, PLAIN subtraction, not modulo 60 — copied from the live detector on purpose. A consumer must trail its producer WITHIN the hour; one that runs first reads an input up to a full cycle stale. See scripts/lib/cronOrdering.ts.",
-  "_mirrored_through_migration": "20261018120750",
+  "_mirrored_through_migration": "20261020002310",
   "_mirrored_through_migration_why": "The NEWEST migration version in supabase/migrations/ whose SQL mentions ops_cron_ordering_contract. scripts/verify-cron-ordering-contract.ts recomputes this from the tree and fails if it does not match, so a migration that changes the contract without updating this file goes RED on its own PR. That is AGENTS.md's apply-and-mirror rule enforced from the diff alone — no secret, no network, and no SQL parsing. If you add such a migration, re-read production, update the rows/schedules above, and set this to the new version.",
-  "_measured_at": "2026-10-18",
-  "_measured_by": "🔧 Quality & Repair, via Supabase MCP against project aannarbkwcymrotzwdbo: select * from ops_cron_ordering_contract; select jobid, jobname, schedule, command from cron.job (jobid 28 has been at :22 since 20260918171507; the 2026-09-12 reading of :36 was stale). [2026-10-18] re-read after 20261018120750 via Supabase MCP: select * from ops_cron_ordering_contract; jobid 180 refresh-district-list-after-sync at 33 * * * *.",
+  "_measured_at": "2026-10-20",
+  "_measured_by": "🔧 Quality & Repair, via Supabase MCP against project aannarbkwcymrotzwdbo: select * from ops_cron_ordering_contract; select jobid, jobname, schedule, command from cron.job (jobid 28 has been at :22 since 20260918171507; the 2026-09-12 reading of :36 was stale). [2026-10-18] re-read after 20261018120750 via Supabase MCP: select * from ops_cron_ordering_contract; jobid 180 refresh-district-list-after-sync at 33 * * * *. [2026-10-20] re-read after 20261020002310 via Supabase MCP: select * from ops_cron_ordering_contract; jobid 183 strip-shared-default-pins at 15 * * * *.",
   "contract": [
     {
       "upstream_job": "sync-search-listings-ar",
@@ -48,6 +48,12 @@
       "downstream_job": "refresh-district-list-after-sync",
       "min_gap_minutes": 9,
       "why": "refresh_loc_canonical_district() adds every district word the sync served (source live) to the Filter district list. Run before the sync finishes, it misses the words that sync carried in and the customer cannot pick a district the cards show until the next rebuild (2026-10-18: «العنبرية», المدينة المنورة, 41 ads). Floor 9 min = the sync's measured max runtime 8.1 min, as in contract 1."
+    },
+    {
+      "upstream_job": "strip-shared-default-pins",
+      "downstream_job": "sync-search-listings-ar",
+      "min_gap_minutes": 5,
+      "why": "The strip removes a platform's default point from the stored rows; the :22 sync then serves those ads without a pin so the district border shows (owner 2026-10-19). Run after the sync, the default point is served for an extra hour."
     }
   ],
   "schedules": {
@@ -55,20 +61,23 @@
     "refresh_listing_native_location_v1": "20 * * * *",
     "sync-search-listings-ar": "22 * * * *",
     "resolve-english-city-overlay": "50 * * * *",
-    "refresh-district-list-after-sync": "33 * * * *"
+    "refresh-district-list-after-sync": "33 * * * *",
+    "strip-shared-default-pins": "15 * * * *"
   },
   "_jobids": {
     "refresh-district-display-canon": 109,
     "refresh_listing_native_location_v1": 17,
     "sync-search-listings-ar": 28,
     "resolve-english-city-overlay": 35,
-    "refresh-district-list-after-sync": 180
+    "refresh-district-list-after-sync": 180,
+    "strip-shared-default-pins": 183
   },
   "_gaps_as_measured": [
     "refresh-district-display-canon :08 -> sync-search-listings-ar :22 = 14 min (floor 2)",
     "refresh_listing_native_location_v1 :20 -> sync-search-listings-ar :22 = 2 min (floor 7) — satisfied by the advisory lock location_pipeline:v1_refresh, not by the clock",
     "sync-search-listings-ar :22 -> resolve-english-city-overlay :50 = 28 min (floor 9)",
-    "sync-search-listings-ar :22 -> refresh-district-list-after-sync :33 = 11 min (floor 9)"
+    "sync-search-listings-ar :22 -> refresh-district-list-after-sync :33 = 11 min (floor 9)",
+    "strip-shared-default-pins :15 -> sync-search-listings-ar :22 = 7 min (floor 5)"
   ],
   "lock_dependencies": [
     {
