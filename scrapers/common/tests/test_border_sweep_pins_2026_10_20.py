@@ -42,7 +42,7 @@ def test_wiring():
     assert '"additional_info": {"rows": extra, **pin_from_page(page)},' in t("therc")
     assert 'pins[url] = pin_from_html(page)' in t("alsaedan")
     assert '"pin": pin_from_page(art),' in t("shomou") and '**(d.get("pin") or {}),' in t("shomou")
-    assert '**pin_from_html(page),' in t("nawafeth")
+    assert '**(_own_pin(page) or pin_from_html(page)),' in t("nawafeth")
     assert '"pin": pin_from_html(page_html) or pin_from_embed(page_html)}' in t("wadod")
     wf = (ROOT / ".github" / "workflows" / "small-sources-sync.yml").read_text(encoding="utf-8")
     for site in ("therc", "shomou"):
