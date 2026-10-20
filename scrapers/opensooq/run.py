@@ -48,6 +48,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
@@ -147,6 +148,15 @@ def commercial_twin(x: dict, row: dict) -> Optional[dict]:
     if x.get("cat2_code") == "LandsForSale" and _MULTI_USE in chips(x):
         return dict(row, property_type="Commercial Land")
     return None
+
+
+def _page_pin(s: cc.Session, ad_id: Any) -> dict:
+    try:
+        r = s.get(f"{BASE}/ar/search/{ad_id}", timeout=20)
+        time.sleep(0.3)
+        return pin_from_html(r.text) if r.status_code == 200 else {}
+    except Exception:  # noqa: BLE001 — a failed page read is "no pin this fetch"
+        return {}
 
 
 def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
@@ -329,6 +339,12 @@ def main() -> int:
                     skipped.get("duplicate_post_same_licence_district_price_area", 0) + 1
                 continue
             seen_keys.add(key)
+            # Owner 2026-10-20: the SERP JSON carries no coordinates, the ad's own page does
+            # («google.com/maps/search/?api=1&query=LAT,LNG», 5/5 sampled). One GET per kept ad; a page
+            # that does not answer leaves the row as it was (no pin → the district border).
+            pin = _page_pin(s, x["id"])
+            if pin:
+                row["additional_info"] = {**(row.get("additional_info") or {}), **pin}
             (com if cat == "commercial" else res).append(row)
             if normalize.ad_expiry_state(x.get("expired_at")) == "unknown":
                 # no readable end date (measured 2026-10-02: 5 of 77 live ads carry «قبل 17 ساعة» there):
