@@ -1,5 +1,5 @@
 // The Filter home's personal headline for a signed-in user (owner 2026-10-17). One line is HELD for
-// 4 hours (HOLD_MS) on this device — «not every refresh … every now and then, hours» — then the next
+// 2 hours (HOLD_MS, owner 2026-10-20) on this device — «not every refresh … every now and then, hours» — then the next
 // one comes; a signed-in user always sees a personal line. Switching language re-renders the SAME line.
 //
 // INSTANT AND NEVER A VISIBLE SWAP (owner 2026-10-17: «make sure it never happens, never ever» and
