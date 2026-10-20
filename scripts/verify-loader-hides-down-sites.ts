@@ -69,8 +69,11 @@ const hiddenInCatalog = catalog.filter((n) => hidden.has(n));
 check(`the count drops with the logos: ${strip.length} shown = ${catalog.length} catalog − ${hiddenInCatalog.length} down`,
   strip.length === catalog.length - hiddenInCatalog.length);
 const loader = stripComments(readFileSync(join(import.meta.dirname, '..', 'src/components/SearchLoader.tsx'), 'utf8'));
-check('the «Reviewing N platforms» number is the number of logos actually shown',
-  /platformCount=\{platforms\.length\}/.test(loader));
+// Owner 2026-10-20 («make it 148»): the «Reviewing N platforms» number is the ONE shared site count
+// (src/data/siteCount.ts — the WhatsApp card's number); the logos on screen are only its fallback
+// before that count has been read. The strip itself still hides dormant logos (asserted above).
+check('the «Reviewing N platforms» number is the shared site count, the on-screen roster only as fallback',
+  /platformCount=\{siteCountNow\(\) \?\? platforms\.length\}/.test(loader));
 
 check('a logo shared with a live slug stays: deal is down but dealapp is active → Deal App shown',
   strip.includes('Deal App'));
