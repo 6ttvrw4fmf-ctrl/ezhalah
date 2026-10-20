@@ -15,6 +15,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { getListingFeedback, setListingFeedback, type FeedbackRating } from '@/lib/listingFeedback';
+import { openWhatsAppCompose } from '@/lib/shareToWhatsApp';
 import { speakReadAloud, stopReadAloud, subscribeReadAloud, readAloudRefusal, hasSpeakableContent,
          type ReadAloudSegment } from '@/lib/readAloud';
 import { readAloudRefusalMessageKey, type ReadAloudRefusal } from '@/lib/readAloudVoice';
@@ -95,16 +96,17 @@ export default function FeedbackRow({
     if (next) onFeedback?.();
   };
 
-  // Normal share/copy flow: OS share sheet where available, else copy the link (the share icon
-  // briefly becomes a check). Never throws to the user (cancel = no-op).
+  // Share flow: on a phone, WhatsApp's own composer with the link (the ONLY route that shows the
+  // card — src/lib/shareToWhatsApp.ts; the phone's share menu handed WhatsApp a bare link, owner
+  // 2026-10-20); on a desktop, copy the link (the share icon briefly becomes a check). Never throws
+  // to the user (cancel = no-op).
   const onShare = async () => {
     let url = shareUrl || 'https://ezhalah-app.vercel.app';
     if (prepareShare) { try { url = (await prepareShare()) || url; } catch { /* the search link still works */ } }
     const withText = shareText ? `${shareText}\n${url}` : url;
     try {
       if (Platform.OS === 'web') {
-        const nav: any = typeof navigator !== 'undefined' ? navigator : null;
-        if (nav?.share) { await nav.share(shareText ? { text: shareText, url } : { url }); return; }
+        if (openWhatsAppCompose(url)) return;
         await Clipboard.setStringAsync(withText);
         setCopied(true);
         setTimeout(() => setCopied(false), 1600);
