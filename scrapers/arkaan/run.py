@@ -109,6 +109,13 @@ _STYLE = re.compile(r"<(style|script)\b.*?</\1>", re.S | re.I)
 _TYPE_TEXT = re.compile(r'نوع العقار:\s*</span>\s*<span[^>]*>(.*?)</span>', re.S)
 # ONLY the map box's own node — some pages carry a second maps?q= pair on an unrelated action button.
 _COORDS = re.compile(r'id="box-map"[^>]*data-map-url="[^"]*maps\?q=(-?[\d.]+),(-?[\d.]+)')
+# A plot ad with NO map box still publishes its subdivision's location as the «لوكيشن المخطط» button
+# (owner 2026-10-20: sampled 25/25 of arkaan's 359 pin-less ads carried it, e.g. property/1758 →
+# 25.371765,49.594828). It is the source's own published location for that plot, read only when the
+# exact box is absent — on property/1267 the box (25.342466,49.744928) and the scheme button
+# (25.352035,49.742286) differ, and the box always wins. «الاتجاهات» repeats the box pair; never read.
+_SCHEME = re.compile(
+    r'href="https://www\.google\.com/maps\?q=(-?[\d.]+),(-?[\d.]+)[^"]*"[^>]*>(?:(?!</a>).)*?لوكيشن المخطط', re.S)
 _ADTEXT = re.compile(r'detail-order-adtext[^>]*>(.*?)</div>', re.S)
 # The price CARD — a dedicated labelled DOM element, not prose. It is strictly richer than the
 # JSON-LD: reconciled over 92 live listings (2026-09-02), `offers.price` was null on 11 of them
@@ -255,6 +262,10 @@ def fetch_detail(s: cc.Session, pid: str) -> dict[str, Any]:
     clean = _STYLE.sub(" ", body)          # or the CSS block naming .detail-order-adtext matches first
     tt = _TYPE_TEXT.findall(clean)
     co = _COORDS.findall(clean)
+    if not co:
+        sm = _SCHEME.search(clean)
+        if sm:
+            co = [(sm.group(1), sm.group(2))]
     ad = [_text(b) for b in _ADTEXT.findall(clean)]
     ad = [a for a in ad if a]
     pc = _PRICE_CARD.search(clean)
