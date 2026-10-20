@@ -99,6 +99,7 @@ import { pickNoResultsSentence } from '@/data/noResultsRotation';
 import { pickName } from '@/lib/nameSync';
 import { encodeSharePayload, shareLink, shareMessage } from '@/lib/shareSearch';
 import { SHARE_LINK, shareNative } from '@/lib/share';
+import { openWhatsAppCompose } from '@/lib/shareToWhatsApp';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
@@ -723,9 +724,9 @@ export default function Agent() {
     if (!url) return false;
     try {
       if (Platform.OS === 'web') {
-        const nav: any = typeof navigator !== 'undefined' ? navigator : null;
-        const touch = typeof nav?.maxTouchPoints === 'number' ? nav.maxTouchPoints > 0 : false;
-        if (touch && nav?.share) { await nav.share({ url }); return true; }
+        // A phone opens WhatsApp's composer with the link — the share menu sent a bare link with no
+        // card (owner 2026-10-20, src/lib/shareToWhatsApp.ts); a desktop copies the link.
+        if (openWhatsAppCompose(url)) return true;
         await Clipboard.setStringAsync(url);
         setChatLinkCopied(true);
         setTimeout(() => setChatLinkCopied(false), 1800);
