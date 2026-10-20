@@ -187,8 +187,24 @@ def _reader_for(platform: str):
     does, or the two cannot be compared. Each reader returns ALIVE / DEAD / UNKNOWN."""
     if platform == "dealapp":
         from scrapers.dealapp import liveness_run
+        import re as _re
         session = liveness_run._session()
-        return lambda url: liveness_run.probe_listing(session, url)[0]
+
+        def read_dealapp(url: str):
+            # The same reading as probe_listing, plus WHY (2026-10-20: 54 shown ads at 3+ strikes read
+            # «no evidence» here while every sweep read a fresh 200 its signal had no opinion about).
+            adid = liveness_run._adid(url)
+            for u in liveness_run._variants(url):
+                status, body, final = liveness_run.probe(session, u)
+                if status is None:
+                    continue
+                v = liveness_run.classify_dealapp(status, body=body, adid=adid, final_url=final,
+                                                  requested_url=u.rstrip("/"))
+                t = _re.search(r"<title[^>]*>([^<]{0,90})", body or "")
+                return v, (f"HTTP {status} {len(body or '')}B final={str(final)[-50:]} "
+                           f"adid_in_body={adid in (body or '')} title={t.group(1).strip() if t else None!r}")
+            return UNKNOWN, "every cache key served a stale copy or no answer"
+        return read_dealapp
     if platform == "gathern":
         from scrapers.gathern import liveness as gl
         session = gl.proxied_session(False)
