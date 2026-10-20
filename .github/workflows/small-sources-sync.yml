@@ -150,7 +150,7 @@ jobs:
           #   ialqarawi: `proxy: true` (2026-09-28, Scraping Engineer) — every profile DIRECT drew an
           #   empty HTTP 202 challenge on 4 of 7 crawls; session() now tries DIRECT first and rides
           #   the residential proxy only when DIRECT is walled.
-          - { source: ialqarawi,   cmd: "python -m scrapers.ialqarawi.run --type all", tmo: 45, proxy: true }
+          - { source: ialqarawi,   cmd: "python -m scrapers.ialqarawi.run --type all", tmo: 45, proxy: true, browser: true }
           #   bossbih: 10 index pages + ~1,485 detail pages, sequential, 0.25s pause + ~0.2s
           #   response → ~11 min.
           # bossbih + aqalemhajer: `proxy: true` (owner 2026-10-19) ONLY for the maps.app.goo.gl pin hop in
