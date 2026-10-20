@@ -594,7 +594,9 @@ const districtProblems = (f: DistrictFns): string[] => {
   // Aqar + Aqar Monthly (owner 2026-10-17) + Wasalt (owner 2026-10-19: «map Wasalt like Aqar»); nobody else yet.
   if (f.districtPlace({ platform: 'dealapp', district_ar: 'حي الساحل', city_ar: 'جدة' }) !== null) out.push('only Aqar, Aqar Monthly and Wasalt get the district map for now (dealapp must not)');
   if (f.districtPlace({ platform: 'wasalt', district_ar: 'حي الساحل', city_ar: 'جدة' })?.query !== 'حي الساحل، جدة') out.push('Wasalt gets the district map (owner 2026-10-19)');
-  for (const p of ['sakan', 'abralosol', 'nofodh', 'arkaan', 'bossbih', 'ksaaqar', 'mustqr', 'aqalemhajer', 'alshawaf', 'reinvest']) {
+  for (const p of ['sakan', 'abralosol', 'nofodh', 'arkaan', 'bossbih', 'ksaaqar', 'mustqr', 'aqalemhajer', 'alshawaf', 'reinvest',
+    // owner 2026-10-20: every remaining preview site
+    'haraj', 'muktamel', 'ialqarawi', 'aqarcity', 'rightcompound', 'sirdab', 'therc', 'sokok', 'raghdan', 'alsaedan', 'goldendeal', 'nufouth', 'akariyoun', 'sukna', 'aldarim', 'aqargate', 'shomou', 'abwbna', 'aqaratikom', 'thousand', 'alobid', 'jazwtn', 'aljassim', 'manafe', 'opensooq', 'justsa', 'senan', 'bahadhabab', 'erapulse', 'maqam', 'jawher', 'm3tmd', 'azure', 'holoul', 'superoffice', 'alhoshan', 'arsh', 'flow', 'nowaisiry', 'hasaad', 'almuteb', 'nawafeth', 'wadod', 'october', 'hazim', 'eydah', 'eightfloor']) {
     if (f.districtPlace({ platform: p, district_ar: 'حي الساحل', city_ar: 'جدة' })?.query !== 'حي الساحل، جدة') out.push(`${p} gets the district map (owner 2026-10-19, the ten largest native-preview sites)`);
   }
   if (f.districtPlace({ platform: 'aqarmonthly', district_ar: 'حي الملز', city_ar: 'الرياض' })?.query !== 'حي الملز، الرياض') out.push('Aqar Monthly gets the district map too (owner 2026-10-17)');
@@ -629,6 +631,7 @@ await mustCatchDistrict('the district map spreading past Aqar', "if (!DISTRICT_M
 await mustCatchDistrict('Aqar Monthly dropped from the district map', "  'aqar', 'aqarmonthly', 'wasalt',", "  'aqar', 'wasalt',");
 await mustCatchDistrict('Wasalt dropped from the district map', "  'aqar', 'aqarmonthly', 'wasalt',", "  'aqar', 'aqarmonthly',");
 await mustCatchDistrict('one of the ten sites dropped from the district map', "'sakan', 'abralosol', 'nofodh',", "'abralosol', 'nofodh',");
+await mustCatchDistrict('one of the 47 preview sites dropped from the district map (owner 2026-10-20)', "'haraj', 'muktamel', 'ialqarawi',", "'haraj', 'ialqarawi',");
 await mustCatchDistrict('the district embed losing the name', '`https://maps.google.com/maps?q=${q}&t=h&hl=${hl}&output=embed`', '`https://maps.google.com/maps?t=h&hl=${hl}&output=embed`');
 const districtWired = (dataSrc: string, previewSrc: string) =>
   /if \(!pin\) setArea\(districtPlace\(row, listingOpenUrl\(l\)\)\);/.test(previewSrc)   // only when the source published no pin; the ad's own link feeds the town fallback
