@@ -40,23 +40,27 @@ These win over THE PLAN's timeline below; THE PLAN's rules still hold. Replace t
 every failed site's exception TEXT in the first 15 min; a parser fix is fixed only when the RAW row changed;
 `issues_fixed` = PASS `:proof` rows for tonight's backlog items, counted by query; pick the proof before the fix.
 
-**NEW (10-19): `haraj-sync.yml` is ONE concurrency slot (`group: haraj-sync`, one pending run).** A `--ref` dispatch
-waits behind the running :05 crawl (~1.5 h) and is CANCELLED by the next dispatch from anyone (10-19: my 05:18 proof
-run was replaced at 05:54 by another session's main dispatch). Before relying on a Haraj `--ids` proof, read
-`list_workflow_runs haraj-sync.yml`: dispatch only when nothing is pending, right after a crawl ends (~:35 of odd UTC
-hours), and never over someone else's pending run. **A line-anchored pin** (`scripts/verify-no-derived-price.ts`
-haraj `asking_price` line) moves whenever `scrapers/haraj/run.py` grows above it: re-pin in the same PR, and it makes
-the PR need the owner merge (scripts/).
+**Kept (10-19):** `haraj-sync.yml` is ONE concurrency slot (read its run list, dispatch only into an empty queue); the
+`scripts/verify-no-derived-price.ts` haraj `asking_price` pin is line-anchored, so growing `scrapers/haraj/run.py` above it
+means a re-pin in scripts/ and an owner merge.
 
-**Owed → first thing next run (10-20):**
-- **#7661 Haraj deal conflict (656/672/679):** 112 searchable ads whose own words disagree on Buy vs Rent (e.g.
-  «ايجار شقه … 20 الف السنه» served as Buy 1,000,000,000). Merge state first; then ONE `--ids` re-read of the 112 ids
-  (list in backlog 679 / proof row 10-19) when the slot is free → notes must show `skip_deal_conflict` ≈ 112. Removal
-  from search then comes from ♻️'s strikes (`_signal` → gone).
-- **615 Haraj catalogues:** routed to ♻️ (backlog lifecycle, 10-19): `fleet_liveness:haraj` was QUARANTINED on 2 of 3
-  passes («opening controls 3/3 live»), so no strikes landed. Read their missing_count; nothing else to do on our side.
-- **#7662 rows_collapse:** proven (20 → 1 open, dwelleo kept). Only the merge is owed (migration 20261019051932 live).
-- Kept: 575/612 photo floors · 564 gathern redirects · 565 almuteb 503 · 613 wasalt 13746442 (source's own price).
+**NEW (10-20): a branch dispatch of `small-sources-sync.yml` starts ALL ~143 matrix jobs** (the `source` filter is on
+the STEP, not the job), so on a busy night your two sites wait behind the whole matrix for runners (10-20: queued ~10 min).
+Dispatch early, and name every site you need in ONE comma list. **A route log is now in the run notes** for senan/snam
+(`retry_smarter_session`): read `notes` first — «direct/…:502 ×3» is the site, «direct/…:403, proxy/…:200» is us.
+**The proxy leg answered `ProxyError` for both senan and snam on 10-20 (run 39375170056)**: before you trust a proxy
+verdict on a small site, check the proxy on a known-good one in the same run.
+
+**Owed → first thing next run (10-21):**
+- **#7808** (scrapers-only, auto-merge lane): confirm it merged. If not, `git merge origin/main` + push once.
+- **senan / snam (dormant 10-20 05:34 UTC):** read their nightly route notes. senan's own ad pages became the host's
+  generic «This Page Does Not Exist» — re-read its HOMEPAGE (`source-reread.yml --around`) for a new domain or API
+  before calling it gone; snam answered 502 everywhere. The auto-return flips them back on a crawl that reads ≥ 3 rows.
+- **#742 (♻️, Haraj 656/672/679):** after the 07:48 UTC APPLY, read missing_count on 18483551 / 18694891 / 18706581 /
+  18706592 / 18706604. ≥ 1 strike = the reader works (close 656/672/679 when they leave search); «live» = _signal is
+  the bug — fix it from the post body.
+- Kept: 575/612 photo floors · 564 gathern redirects · 565 almuteb 503 · 613 wasalt 13746442 · jazwtn failed 10-20
+  04:58 (new) · tamyaz/manzo 0 rows (720/702).
 
 **10-19 facts:** `rows_seen` on `fleet_liveness:*` / `cleanup:*` / `verify_deletions:*` / `aqar_liveness*` labels is
 rows PROBED (fresh rows are skipped), never inventory; judge a site's size by its crawl label. The detector sweep
