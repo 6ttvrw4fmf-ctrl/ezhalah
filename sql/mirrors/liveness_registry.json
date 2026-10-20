@@ -57,7 +57,7 @@
     "platform": "aldarim",
     "strategy": "DIRECT_REVISIT",
     "sla_hours": 48,
-    "grace": 1
+    "grace": 3
   },
   {
     "platform": "alhoshan",

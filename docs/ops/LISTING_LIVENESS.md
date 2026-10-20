@@ -77,8 +77,8 @@ A `DEAD` verdict on DIRECT evidence adds **one strike**. Deactivation happens on
 reach the platform's `grace` (3 almost everywhere) — i.e. **three consecutive direct dead readings**,
 never one. **Exception — remove on first sight (owner 2026-10-20: «once we see it, remove it»):** a
 platform whose own page/record states the removal affirmatively for THIS listing runs `grace = 1` —
-today `sakan` («هذا العقار لم يعد متاحاً» on the ad's own page) and `aldarim` (its API record: 404 or
-`availability_status` «unavailable»). Absence still never kills and UNKNOWN still holds; only the
+today `sakan` («هذا العقار لم يعد متاحاً» on the ad's own page). `aldarim` stays at 3: it is a
+FLEET_DAILY_DIRECT site, whose daily revisit hides on three direct readings by design. Absence still never kills and UNKNOWN still holds; only the
 wait for a second and third identical reading is dropped. Migration `20261020183753`. `decide()` is the single origin of every deactivation, and it writes an auditable reason
 string (`source_confirmed_dead:direct:strikes=3/3`).
 

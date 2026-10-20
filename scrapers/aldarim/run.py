@@ -36,7 +36,6 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, http_liveness, normalize
 from scrapers.common.arabic_location import to_catalog
-from scrapers.common.liveness_policies import policy_for
 from scrapers.common.source_pin import pin_dict
 
 # PDPL: never store advertiser contact/identity. The rest of the API item is kept.
@@ -582,9 +581,7 @@ def main() -> int:
 
             for tbl, seen_ads in (("aldarim_residential_listings", seen_res), ("aldarim_commercial_listings", seen_com)):
                 n = db.prune_unseen(tbl, set(seen_ads), source="Aldarim",
-                                    verify_gone=_verify_gone,
-                                    # owner 2026-10-20 «once we see it, remove it»: the registry's grace (1)
-                                    grace=policy_for("aldarim").grace)
+                                    verify_gone=_verify_gone)
                 if n < 0:
                     print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
                 else:
