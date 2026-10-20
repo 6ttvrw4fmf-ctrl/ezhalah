@@ -76,3 +76,13 @@ def test_aldarim_records_unavailable_items_and_hands_the_oracle_to_prune():
     text = (ROOT / "scrapers" / "aldarim" / "run.py").read_text(encoding="utf-8")
     assert "_SOURCE_UNAVAILABLE.add(f\"{_AD_PREFIX}{L.get('id')}\")" in text
     assert "verify_gone=_verify_gone)" in text
+
+
+def test_aldarim_strikes_the_apis_unavailable_items_at_grace_one():
+    # owner 2026-10-20 «once we see it, remove it»
+    text = (ROOT / "scrapers" / "aldarim" / "run.py").read_text(encoding="utf-8")
+    assert 'db.strike_read_gone(tbl, set(seen_ads), "Aldarim", verify_gone=_verify_gone, grace=1)' in text
+    import inspect
+    import scrapers.common.db as DB
+    sig = inspect.signature(DB.strike_read_gone)
+    assert sig.parameters["grace"].default == 3          # every other caller unchanged

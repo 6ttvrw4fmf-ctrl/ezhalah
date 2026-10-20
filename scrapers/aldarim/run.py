@@ -580,6 +580,12 @@ def main() -> int:
                 print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
             for tbl, seen_ads in (("aldarim_residential_listings", seen_res), ("aldarim_commercial_listings", seen_com)):
+                # Owner 2026-10-20 «once we see it, remove it»: an ad this run's own API marked unavailable,
+                # or whose record answers 404, is removed NOW — only rows _verify_gone reads «gone» are
+                # struck, at grace 1. The registry tier (FLEET_DAILY_DIRECT, grace 3) is unchanged for the
+                # daily revisit; this is the crawl's own direct reading.
+                if _SOURCE_UNAVAILABLE:
+                    db.strike_read_gone(tbl, set(seen_ads), "Aldarim", verify_gone=_verify_gone, grace=1)
                 n = db.prune_unseen(tbl, set(seen_ads), source="Aldarim",
                                     verify_gone=_verify_gone)
                 if n < 0:
