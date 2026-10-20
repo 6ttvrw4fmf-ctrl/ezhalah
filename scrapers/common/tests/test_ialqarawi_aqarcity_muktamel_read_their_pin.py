@@ -50,3 +50,12 @@ def test_muktamel_reads_offer_location_not_the_agency_office():
 def test_ialqarawi_row_spreads_the_pin_into_additional_info():
     src = (ROOT / "scrapers" / "ialqarawi" / "run.py").read_text(encoding="utf-8")
     assert '**(detail.get("pin") or {}),' in src
+
+
+def test_ialqarawi_follows_a_short_link_when_the_page_has_no_pair(monkeypatch):
+    # owner 2026-10-20 night: 3 of 25 ialqarawi border ads carry only a maps.app.goo.gl link
+    import scrapers.common.page_pin as PP
+    monkeypatch.setattr(PP, "resolve_redirect", lambda s, u: "https://www.google.com/maps/place/26.3301,43.9712/data=x")
+    page = ('<dd class="col-sm-3"><strong>رقم العقار</strong></dd><dd class="col-sm-9">3360</dd>'
+            '<p>الموقع https://maps.app.goo.gl/AbCdEf123</p>')
+    assert IQ.parse_detail(page)["pin"] == {"latitude": 26.3301, "longitude": 43.9712}
