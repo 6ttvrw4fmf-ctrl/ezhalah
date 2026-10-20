@@ -1417,8 +1417,57 @@ def own_page_status_oracle(c, table: str, seen, *, session=None):
             return "gone", f"{OWN_PAGE_ORACLE}: the ad's own published end date {ended} has passed"
         reads[0] += 1
         verdict, why = probe.verify_gone(ad_number)
+        if verdict == "unknown" and _BLOCK_WHY.search(why or ""):
+            second = second_reader(ad_number)
+            if second:
+                return second
         return verdict, f"{OWN_PAGE_ORACLE}: {why}"[:300]
+
+    # A 401/403 to THIS session is about our access (LISTING_LIVENESS.md §1), so it is no answer;
+    # the shared reader (cleanup._probe: the deletion tier's, the spot check's) escapes a block
+    # through other browser profiles and may get the page's real answer (2026-10-20, amlakalahsa:
+    # 5 shown ads at 4-11 strikes read 403 here every crawl for days; the spot check read 4 of
+    # them 404 and the 5th live from CI, controls trusted). Its 404/410 counts only when a page
+    # this crawl saw answers 200 THROUGH THE SAME READER: a source that 404s blocks fails there.
+    second_state: dict[str, Any] = {}
+
+    def second_control() -> bool:
+        if "ok" not in second_state:
+            second_state["ok"] = False
+            for ad in sorted(str(a) for a in seen)[:_OWN_PAGE_CONTROLS]:
+                url = url_for(ad)
+                if not url:
+                    continue
+                reads[0] += 1
+                status, body = _second_read(url)
+                if status == 200 and body and _own_page_status_signal(200, body, False) is None:
+                    second_state["ok"] = True
+                    break
+        return second_state["ok"]
+
+    def second_reader(ad_number: str):
+        url = url_for(ad_number)
+        if not url or reads[0] >= _OWN_PAGE_MAX_READS:
+            return None
+        reads[0] += 1
+        status, _body = _second_read(url)
+        if status in (404, 410) and second_control():
+            return "gone", (f"{OWN_PAGE_ORACLE}: own page 401/403 to the crawl's session, {status} through "
+                            f"the shared reader (a page this crawl saw answered 200 through it)")
+        return None
     return verify_gone
+
+
+_BLOCK_WHY = re.compile(r"HTTP 40[13]\b")
+
+
+def _second_read(url: str):
+    """(status, body) through the shared reader, or (None, '') — never raises."""
+    try:
+        from scrapers.common.cleanup import _probe
+        return _probe(url)
+    except Exception:  # noqa: BLE001 — no answer is UNKNOWN, never a kill
+        return None, ""
 
 
 # The verdict a res/com supersession records, and the oracle that names WHY it was recorded.
