@@ -21,8 +21,10 @@ A pin outside Saudi Arabia, at 0,0 or not numeric is rejected by sa_pin(). Nothi
 """
 from __future__ import annotations
 
+import atexit
 import os
 import re
+import time
 from typing import Callable, Optional
 from html import unescape
 from urllib.parse import unquote
@@ -114,6 +116,73 @@ def _hop_proxies() -> Optional[dict]:
     return {"http": purl, "https": purl} if purl else None
 
 
+_BROWSER: dict = {"pw": None, "browser": None, "ctx": None, "dead": False}
+
+
+def _browser_hop_enabled() -> bool:
+    """PIN_BROWSER_HOP=1 — set by small-sources-sync.yml only for the sources whose job installed
+    Chromium (matrix.browser). Everywhere else the hop is the plain HTTP one above."""
+    return os.environ.get("PIN_BROWSER_HOP", "").strip() == "1"
+
+
+def _browser_close() -> None:
+    for k in ("ctx", "browser"):
+        try:
+            if _BROWSER[k] is not None:
+                _BROWSER[k].close()
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        if _BROWSER["pw"] is not None:
+            _BROWSER["pw"].stop()
+    except Exception:  # noqa: BLE001
+        pass
+    _BROWSER.update(pw=None, browser=None, ctx=None)
+
+
+def _browser_hop(url: str, wait_s: float = 15.0) -> Optional[str]:
+    """Owner 2026-10-20 («get the 3 small sites» — Playwright, not the proxy): a real headless
+    Chromium opens the short link and we read the URL it lands on. Google answers a plain HTTP
+    client on a datacenter address with a 200 script page (measured 2026-10-19), but a browser runs
+    that script and ends on Maps — or on the consent page, whose `continue=` names the Maps URL
+    (_maps_url_in decodes it). One browser per crawl, closed at exit; a browser that cannot launch
+    turns the hop off for the rest of the run instead of failing every ad."""
+    if _BROWSER["dead"]:
+        return None
+    try:
+        if _BROWSER["ctx"] is None:
+            from playwright.sync_api import sync_playwright  # installed only where the job needs it
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(headless=True)
+            ctx = browser.new_context(locale="ar-SA", viewport={"width": 1280, "height": 800})
+            _BROWSER.update(pw=pw, browser=browser, ctx=ctx)
+            atexit.register(_browser_close)
+    except Exception as e:  # noqa: BLE001
+        _BROWSER["dead"] = True
+        print(f"   ⓘ short-link browser hop unavailable: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        return None
+    page = None
+    try:
+        page = _BROWSER["ctx"].new_page()
+        page.goto(url, wait_until="commit", timeout=20_000)
+        deadline = time.time() + wait_s
+        while time.time() < deadline:
+            hit = _maps_url_in(page.url)
+            if hit:
+                return hit
+            page.wait_for_timeout(400)
+        return _maps_url_in_body(page.content())   # a page that never redirected may name the destination
+    except Exception as e:  # noqa: BLE001 — one ad's hop failing is "no pin this fetch"
+        print(f"   ⓘ short-link browser hop {url[:60]}: {type(e).__name__}", flush=True)
+        return None
+    finally:
+        try:
+            if page is not None:
+                page.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def resolve_redirect(session, url: str, hops: int = 4) -> Optional[str]:
     """The URL a short link lands on. First by hand, hop by hop, so Maps itself is never loaded
     (measured 2026-10-19: goo.gl → maps.google.com?q=LAT,LNG on the first hop). If that reads
@@ -154,6 +223,9 @@ def resolve_redirect(session, url: str, hops: int = 4) -> Optional[str]:
             hit = _maps_url_in(final) or _maps_url_in_body(getattr(r, "text", None))
         except Exception as e:  # noqa: BLE001
             seen.append(f"follow raised {type(e).__name__}")
+    if not hit and _browser_hop_enabled():
+        hit = _browser_hop(url)
+        seen.append(f"browser→{(hit or 'none')[:90]}")
     if _DEBUG_LEFT[0] > 0:
         _DEBUG_LEFT[0] -= 1
         print(f"   ⓘ short-link pin {url[:60]}: {' | '.join(seen)} → {'pin' if hit else 'none'}", flush=True)
