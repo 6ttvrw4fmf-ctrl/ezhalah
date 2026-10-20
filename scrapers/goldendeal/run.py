@@ -149,6 +149,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
+from scrapers.common.page_pin import pin_from_short_link, resolve_redirect, short_maps_link  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
 
 
@@ -393,6 +394,22 @@ def _title(L: dict, tok: str, transaction_type: str) -> Optional[str]:
 
 
 # ── MAPPING ─────────────────────────────────────────────────────────────────────────────────────
+_HOP_SESSION: Optional[cc.Session] = None
+
+
+def _short_link_pin(L: dict) -> dict:
+    """Owner 2026-10-20: the API's latitude/longitude are null on most ads while the description links
+    the pin as «maps.app.goo.gl/…» (5/5 sampled pin-less ads). Followed through page_pin's hop (the
+    headless-Chromium leg runs where the workflow installed it — PIN_BROWSER_HOP); {} when absent."""
+    global _HOP_SESSION
+    short = short_maps_link(json.dumps(L, ensure_ascii=False).replace("\\/", "/"))
+    if not short:
+        return {}
+    if _HOP_SESSION is None:
+        _HOP_SESSION = cc.Session()
+    return pin_from_short_link(short, lambda u: resolve_redirect(_HOP_SESSION, u))
+
+
 def map_listing(L: dict, tenant: Tenant = TENANT, *,
                 this_year: Optional[int] = None) -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason). row is None exactly when skip_reason is set."""
@@ -487,6 +504,7 @@ def map_listing(L: dict, tenant: Tenant = TENANT, *,
         "additional_info": redact_capture({k: v for k, v in {
             "latitude": _float(L.get("latitude")),
             "longitude": _float(L.get("longitude")),
+            **({} if _float(L.get("latitude")) is not None else _short_link_pin(L)),
             "ref": (L.get("unit_number") or None),
             "type_token": tok,
             "type_ar": TYPE_AR.get(tok),
