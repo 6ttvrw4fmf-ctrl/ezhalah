@@ -137,60 +137,17 @@ check('the card logo is a small square under 300 px (WhatsApp side thumbnail, no
   smallSquare(imgW, imgH) && meta('og:image') === 'https://new-domain.example/og-image-v6.png');
 mustCatch('the 512 px logo that WhatsApp draws as a big banner', !smallSquare(512, 512));
 {
+  // Owner 2026-10-20: the top «مشاركة» pill is the NORMAL share (the Ezhalah link + home sentence,
+  // same as the Filter screen) — never this chat. Sharing the chat is the reply row's share icon
+  // (FeedbackRow, fed by shareFor()). Until 2026-10-20 the pill shared the chat first (owner 2026-10-17).
   const agentSrc = (await import('node:fs')).readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
-  const ret = /return \{ shareUrl: shareLink\(origin, payload\)[^}]*\}/.exec(agentSrc)?.[0] ?? '';
-  check('the signed-in share sends only the link — the card already shows the title (never said twice)', !!ret && !/shareText/.test(ret));
-  mustCatch('a share that sends the title text next to its card again', /shareText/.test(ret.replace('prepareShare', 'shareText: text, prepareShare')));
-}
-check('the landing title is the same title; the button is «اضغط وشوف العقارات»',
-  shareLandingTitle('يوسف', Q, 'ar') === T(Q) && SHARE_COPY.ar.button === 'اضغط وشوف العقارات');
-mustCatch('a title that forgets the place', (() => {
-  const noPlace = (q: any) => shareTitle('يوسف', { ...q, districtLabel: undefined, districts: [], location: '' }, 'ar');
-  return noPlace(Q) !== T(Q);
-})());
-const allCopy = JSON.stringify(SHARE_COPY) + JSON.stringify(SHARE_CARD) + T(Q) + T(Q, 'en');
-check('the wording never says "sign in / log in" (owner: «don\'t say log in»)', !/sign ?in|log ?in|سجل|تسجيل|دخولك/i.test(allCopy));
-check('the wording never uses the forbidden word «حيك»', !allCopy.includes('حيك'));
-check('no eagle emoji anywhere — the Ezhalah logo is enough (owner 2026-10-17)', !allCopy.includes('🦅'));
-check('the Arabic title names إزهله and the English keeps "Ezhalah"', T(Q).includes('إزهله') && /Ezhalah/.test(T(Q, 'en') ?? ''));
-
-// ── 5. no name → nothing ────────────────────────────────────────────────────────────────────────
-check('no sender name → no message, no title, no payload (never a blank-name line)',
-  shareMessage('  ', Q, 'ar') === null && shareLandingTitle('', Q, 'en') === null && encodeSharePayload(Q, ' ') === null);
-
-// ── 6. OPENING THE LINK = THE SIGN-IN POPUP WITH A NOTE (owner 2026-10-18) ─────────────────────────
-check('the popup note reads «يوسف شاركك: شقق للإيجار في حي النرجس» / "Yusuf shared with you: …"',
-  shareInviteNote('يوسف الأحمد', Q, 'ar') === 'يوسف شاركك: شقق للإيجار في حي النرجس'
-  && shareInviteNote('Yusuf', { deal: 'Rent', location: 'Riyadh', type: 'Apartment' } as any, 'en') === 'Yusuf shared with you: Apartments for rent in Riyadh'
-  && shareInviteNote(' ', Q, 'ar') === null && !EMOJI.test(shareInviteNote('يوسف', Q, 'ar') ?? ''));
-{
-  const fs = await import('node:fs');
-  const home = fs.readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
-  const flow = /if \(!sharedSearch \|\| !authChecked \|\| sharedHandledRef\.current\) return;[\s\S]{0,700}?if \(!user\) \{[\s\S]{0,400}?SHARED_PENDING_KEY[\s\S]{0,300}?openAuth\(shareInviteNote\([\s\S]{0,200}?if \(sharedSearch\.code\) void openSharedSearch\(sharedSearch\);/;
-  check('a signed-out visitor gets the sign-in popup with the note (and the chat opens once in); signed-in opens the chat directly', flow.test(home));
-  mustCatch('a link that opens the popup with no note', !flow.test(home.replace('openAuth(shareInviteNote(', 'openAuth((')));
-  check('signed-out visitors and shared chats never see the old tap card', /\{sharedSearch && user && !sharedSearch\.code && \(/.test(home));
-  const modal = fs.readFileSync(new URL('../src/components/AuthModal.tsx', import.meta.url), 'utf8');
-  check('the sign-in popup shows the note above its heading', /\{note \? <Text style=\{s\.shareNote\}[^\n]*>\{note\}<\/Text> : null\}\s*<Text style=\{\[s\.formHead/.test(modal));
-}
-
-// ── 7. A CHAT WITH NO SEARCH (owner 2026-10-18, option A) ──────────────────────────────────────────
-check('no search → «محادثة من يوسف على إزهله» / "A chat from Yusuf on Ezhalah"; popup «يوسف شاركك محادثة»',
-  shareTitle('يوسف', null, 'ar') === 'محادثة من يوسف على إزهله' && shareTitle('Yusuf', null, 'en') === 'A chat from Yusuf on Ezhalah'
-  && shareInviteNote('يوسف', null, 'ar') === 'يوسف شاركك محادثة' && shareInviteNote('Yusuf', null, 'en') === 'Yusuf shared a chat with you');
-check('a search still keeps its own title (the chat title is only for no search)', shareTitle('يوسف', Q, 'ar') === 'شقق للإيجار في حي النرجس من يوسف على إزهله');
-const noSearch = sharedChatCardFrom({ sender_name: 'يوسف', locale: 'ar', query: {} });
-check('the database\'s empty query reads as «no search», and its card says so',
-  !!noSearch && noSearch.q === null
-  && /og:title" content="محادثة من يوسف على إزهله"/.test(shareCardHtml('https://x.example', 'a7Kx2bQ9', noSearch)));
-mustCatch('a card reader that rejects a chat with no search (the link would show a plain «إزهله»)',
-  ((r: any) => (r && typeof r.query?.location === 'string' ? r : null))({ sender_name: 'يوسف', query: {} }) === null);
-{
-  const agentSrc = (await import('node:fs')).readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
-  const top = /onPress=\{async \(\) => \{ if \(await shareThisChat\(\)\) return; if \(!\(await shareNative\(\)\)\) setShareOpen\(true\); \}\}/;
-  check('the top «مشاركة» in a chat shares THAT chat first (homepage share only for guests / an empty screen)', top.test(agentSrc)
-    && /const shareThisChat = async \(\): Promise<boolean> => \{\s*if \(!user \|\| !msgs\.length\) return false;/.test(agentSrc));
-  mustCatch('a top button that only ever shares the homepage', !top.test(agentSrc.replace('if (await shareThisChat()) return; ', '')));
+  const top = /onPress=\{async \(\) => \{ if \(!\(await shareNative\(\)\)\) setShareOpen\(true\); \}\}/;
+  check('the top «مشاركة» pill is the normal share (shareNative, our sheet as fallback) and never the chat',
+    top.test(agentSrc) && !/shareThisChat/.test(agentSrc));
+  check('sharing THIS chat still lives under each reply (shareFor → prepareShare → chatShareUrl)',
+    /const prepareShare = \(\) => chatShareUrl\(q\);/.test(agentSrc) && /<FeedbackRow[\s\S]*shareFor\(/.test(agentSrc));
+  mustCatch('the top pill going back to sharing the chat first',
+    !top.test(agentSrc.replace('if (!(await shareNative())) setShareOpen(true);', 'if (await shareThisChat()) return; if (!(await shareNative())) setShareOpen(true);')));
 }
 
 console.log(`\nexample link: ${link.slice(0, 90)}…`);

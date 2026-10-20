@@ -14,7 +14,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -99,7 +98,6 @@ import { pickNoResultsSentence } from '@/data/noResultsRotation';
 import { pickName } from '@/lib/nameSync';
 import { encodeSharePayload, shareLink, shareMessage } from '@/lib/shareSearch';
 import { SHARE_LINK, shareNative } from '@/lib/share';
-import { openWhatsAppCompose } from '@/lib/shareToWhatsApp';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
@@ -716,26 +714,6 @@ export default function Agent() {
   // THAT chat — named after its latest search, or «محادثة من يوسف» when it has none. Guests and an empty
   // screen keep the homepage share. Phone: the phone's own share menu with the link alone (the card holds
   // the title). Desktop: the link is copied and the pill says so.
-  const [chatLinkCopied, setChatLinkCopied] = useState(false);
-  const shareThisChat = async (): Promise<boolean> => {
-    if (!user || !msgs.length) return false;
-    const lastQ = ([...msgs].reverse().find((m: any) => m?.result?.query) as any)?.result?.query ?? null;
-    const url = await chatShareUrl(lastQ);
-    if (!url) return false;
-    try {
-      if (Platform.OS === 'web') {
-        // A phone opens WhatsApp's composer with the link — the share menu sent a bare link with no
-        // card (owner 2026-10-20, src/lib/shareToWhatsApp.ts); a desktop copies the link.
-        if (openWhatsAppCompose(url)) return true;
-        await Clipboard.setStringAsync(url);
-        setChatLinkCopied(true);
-        setTimeout(() => setChatLinkCopied(false), 1800);
-        return true;
-      }
-      await Share.share({ message: url, url });
-      return true;
-    } catch { return true; /* cancelled — never fall through to a second share sheet */ }
-  };
   const shareFor = (q: SearchQuery | undefined): { shareUrl?: string; shareText?: string; prepareShare?: () => Promise<string | null> } => {
     if (!user || !q) return {};
     const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
@@ -4288,8 +4266,12 @@ export default function Agent() {
         {/* The phone's OWN share menu first, exactly like the Filter screen (owner 2026-10-18: our drawn
             WhatsApp/X/Telegram sheet looked «fake»). Our sheet stays only as the fallback where the
             device has no usable share menu (desktop — see shareNative()). */}
+        {/* THE NORMAL SHARE, never the chat (owner 2026-10-20: «the share button on top shouldn't be
+            sharing properties, it should be the normal share»): this pill shares the Ezhalah link with
+            the home sentence, exactly like index.tsx. Sharing THIS chat is the share icon under each
+            reply (FeedbackRow → shareFor below). */}
         <Pressable
-          onPress={async () => { if (await shareThisChat()) return; if (!(await shareNative())) setShareOpen(true); }}
+          onPress={async () => { if (!(await shareNative())) setShareOpen(true); }}
           style={({ pressed, hovered }: any) => [
             s.shareIcon,
             s.shareIconWide,
@@ -4305,7 +4287,7 @@ export default function Agent() {
         >
           <Animated.View style={[s.shareInner, { transform: [{ scale: shareScale }] }]}>
             <Ionicons name="share-social-outline" size={17} color={colors.primary} />
-            <Text style={s.shareText}>{chatLinkCopied ? t('Copied!') : t('Share')}</Text>
+            <Text style={s.shareText}>{t('Share')}</Text>
           </Animated.View>
         </Pressable>
       </View>
