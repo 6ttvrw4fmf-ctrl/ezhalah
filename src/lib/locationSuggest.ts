@@ -100,3 +100,45 @@ export function catalogDistrictExtras(query: string, catalog: readonly CatalogDi
     .filter((d) => !haveNorms.has(norm(d.districtAr)))
     .slice(0, limit);
 }
+
+// THE CITY BOX OFFERS THE POPULATED DISTRICT, AND RANKS 0-SERVED HOMONYM CITIES BELOW IT (owner decision 2026-10-19,
+// backlog 522/566). Two real users typed a DISTRICT name into the city box — «البديعة» (حي البديعة · الرياض, 100+ served
+// ads) and «الراكة» (حي الراكة الجنوبية · الخبر, ~200) — and the picker offered only the catalog CITIES of the same
+// name, each «لا توجد إعلانات هنا حالياً», so both searches answered 0 over listings that exist. The live location
+// index (location_index_live: every served district with its city and count, all deals) knows which districts are
+// populated, so a typed name that is the prefix of a served district adds a «حي X · City» row; tapping it selects the
+// city AND that district. The rows sit after the cities that have listings in the scope (or an unmeasured count) and
+// BEFORE the 0-served cities and the catalog extras. No count is shown for them (scopeKnown:false — the index counts
+// every deal, the scope does not), so nothing is claimed that was not measured.
+export type LiveDistrictRow = { districtAr: string; cityId: number; n: number; matchValues?: string[] };
+const stripHayy = (n: string) => n.replace(/^حي/, '');
+/** Served districts whose name (with «حي» dropped) starts with the query, most listings first; every raw spelling of
+ *  one district (حي الراكة الجنوبية / الراكة الجنوبية) folds into ONE row that carries all of them in `matchValues`.
+ *  A query under 3 letters, or a Latin one, adds nothing. */
+export function populatedDistrictRows(query: string, rows: readonly LiveDistrictRow[], limit = 4): LiveDistrictRow[] {
+  if (isLatinQuery(query)) return [];
+  const q = stripHayy(norm(query));
+  if (q.length < 3) return [];
+  const groups = new Map<string, LiveDistrictRow & { top: number }>();
+  for (const r of rows) {
+    const n = Number(r.n) || 0;
+    if (n <= 0) continue;
+    const key = stripHayy(norm(r.districtAr));
+    if (!key.startsWith(q)) continue;
+    const g = groups.get(`${r.cityId}:${key}`);
+    if (!g) groups.set(`${r.cityId}:${key}`, { districtAr: r.districtAr, cityId: r.cityId, n, matchValues: [r.districtAr], top: n });
+    else {
+      g.n += n;
+      if (!g.matchValues!.includes(r.districtAr)) g.matchValues!.push(r.districtAr);
+      if (n > g.top) { g.top = n; g.districtAr = r.districtAr; } // the most common spelling is the one shown
+    }
+  }
+  return [...groups.values()].sort((a, b) => b.n - a.n).slice(0, limit).map(({ top: _t, ...r }) => r);
+}
+/** Order of the city box: pool cities with listings (or an unmeasured count) → the populated district rows → the pool's
+ *  0-served cities → the catalog extras. With no district rows the list is exactly `[...pool, ...extras]` (today's order). */
+export function orderCityBoxRows<T extends { listingCount: number; scopeKnown?: boolean }>(pool: readonly T[], districtRows: readonly T[], extras: readonly T[]): T[] {
+  if (!districtRows.length) return [...pool, ...extras];
+  const live = (c: T) => c.scopeKnown === false || c.listingCount > 0;
+  return [...pool.filter(live), ...districtRows, ...pool.filter((c) => !live(c)), ...extras];
+}
