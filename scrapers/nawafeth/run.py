@@ -127,8 +127,8 @@ def _num(raw: Optional[str]):
     return None if f <= 0 else int(f) if f.is_integer() else f
 
 
-_PLAT = re.compile(r"propertyLats*=s*parseFloat('(-?d+.d+)')")
-_PLNG = re.compile(r"propertyLngs*=s*parseFloat('(-?d+.d+)')")
+_PLAT = re.compile(r"propertyLat\s*=\s*parseFloat\('(-?\d+\.\d+)'\)")
+_PLNG = re.compile(r"propertyLng\s*=\s*parseFloat\('(-?\d+\.\d+)'\)")
 
 
 def _own_pin(page: str) -> dict:
