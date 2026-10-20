@@ -59,6 +59,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 
 BASE = "https://www.aqarcity.net"
 # /sitemaps/sitemap-index.xml answers 404 since the 2026-09 redesign; robots.txt now names
@@ -898,6 +899,10 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         fal_no = _int(m.group(1))
 
     geo = ld.get("geo") or {}
+    # Owner 2026-10-20 («first let's investigate those ones»): the JSON-LD geo block vanished with the
+    # 2026-09 redesign (0 of 2,245 ads served a pin), while every sampled ad page (5/5) still prints its own
+    # Maps link «google.com/maps?q=LAT%2CLNG». Read it when the JSON-LD has no geo; the LD still wins.
+    page_pin = pin_from_html(body) if not geo.get("latitude") else {}
 
     # ── amenity columns from خدمات العقار ──
     amenities: dict[str, bool] = {}
@@ -945,8 +950,8 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "deed_location_text": pi.get("وصف موقع العقار حسب الصك"),
         "building_code_compliant": pi.get("مطابقة كود البناء السعودي"),
         "warranties": pi.get("الضمانات و مددها"),
-        "latitude": geo.get("latitude"),
-        "longitude": geo.get("longitude"),
+        "latitude": geo.get("latitude") or page_pin.get("latitude"),
+        "longitude": geo.get("longitude") or page_pin.get("longitude"),
         "street_address": _redact(addr.get("streetAddress")),
         "postal_code": addr.get("postalCode"),
         "date_published": ld.get("datePublished"),
