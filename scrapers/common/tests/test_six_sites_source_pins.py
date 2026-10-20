@@ -177,6 +177,39 @@ def test_a_200_interstitial_names_the_destination_in_its_body():
     assert pin_from_short_link("https://maps.app.goo.gl/f", lambda u: resolve_redirect(s2, u)) == {}
 
 
+def test_the_browser_hop_runs_last_and_only_where_the_job_installed_chromium(monkeypatch):
+    # owner 2026-10-20 («get the 3 small sites»): when both HTTP hops read nothing, a headless
+    # Chromium opens the short link — but only under PIN_BROWSER_HOP=1 (matrix.browser), and never
+    # when an HTTP hop already found the pair.
+    import scrapers.common.page_pin as pp
+    calls = []
+    final = "https://www.google.com/maps/place/x/@25.3152163,49.6193885,17z/data=y"
+
+    def fake_hop(url, wait_s=15.0):
+        calls.append(url)
+        return final
+    monkeypatch.setattr(pp, "_browser_hop", fake_hop)
+    monkeypatch.delenv("PIN_BROWSER_HOP", raising=False)
+    assert resolve_redirect(_Sess({}), "https://maps.app.goo.gl/dead") is None
+    assert calls == []                                   # not installed here → not tried
+    monkeypatch.setenv("PIN_BROWSER_HOP", "1")
+    assert resolve_redirect(_Sess({}), "https://maps.app.goo.gl/dead") == final
+    assert calls == ["https://maps.app.goo.gl/dead"]     # the ORIGINAL short link, not a hop's result
+    assert pin_from_short_link("https://maps.app.goo.gl/dead", lambda u: resolve_redirect(_Sess({}), u)) == {
+        "latitude": 25.3152163, "longitude": 49.6193885}
+    s = _Sess({"https://maps.app.goo.gl/p": _Resp(302, "https://maps.google.com?q=25.3152163,49.6193885&entry=gps")})
+    n = len(calls)
+    assert resolve_redirect(s, "https://maps.app.goo.gl/p") is not None
+    assert len(calls) == n                               # HTTP hop found it → browser never opened
+    # the workflow installs Chromium and sets the flag for exactly the three office sites
+    wf = (ROOT / ".github" / "workflows" / "small-sources-sync.yml").read_text(encoding="utf-8")
+    assert "python -m playwright install --with-deps chromium" in wf
+    assert "PIN_BROWSER_HOP: ${{ matrix.browser && '1' || '' }}" in wf
+    for site in ("abralosol", "bossbih", "aqalemhajer"):
+        line = next(l for l in wf.splitlines() if f"source: {site}," in l)
+        assert "browser: true" in line, site
+
+
 def test_the_short_link_hop_uses_the_proxy_only_when_the_job_has_one(monkeypatch):
     # owner 2026-10-19 («ok use the proxy»): only the goo.gl hop, only when WASALT_PROXY_URL is set
     class _Cap(_Sess):
