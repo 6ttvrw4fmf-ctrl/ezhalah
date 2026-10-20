@@ -104,6 +104,16 @@ export const DISTRICT_MAP_PLATFORMS: readonly string[] = [
   // restricts lat/lng); the other eight publish one that the scraper reads partly (arkaan, alshawaf)
   // or not yet (sakan, abralosol, nofodh, bossbih, aqalemhajer, reinvest) — the border bridges until it does.
   'sakan', 'abralosol', 'nofodh', 'arkaan', 'bossbih', 'ksaaqar', 'mustqr', 'aqalemhajer', 'alshawaf', 'reinvest',
+  // Owner 2026-10-20 («we want more, not 4 — check all not inside the app»): EVERY remaining preview site
+  // whose ads can lack a pin (47 sites, 12,653 pin-less ads measured that day). Sites that open inside the
+  // app (IN_APP_VIEWER_HOSTS) show the source page itself and are not here. The border bridges until a
+  // site's pin is read; a site whose page carries a pin is handled one by one, biggest first.
+  'haraj', 'muktamel', 'ialqarawi', 'aqarcity', 'rightcompound', 'sirdab', 'therc', 'sokok',
+  'raghdan', 'alsaedan', 'goldendeal', 'nufouth', 'akariyoun', 'sukna', 'aldarim', 'aqargate',
+  'shomou', 'abwbna', 'aqaratikom', 'thousand', 'alobid', 'jazwtn', 'aljassim', 'manafe',
+  'opensooq', 'justsa', 'senan', 'bahadhabab', 'erapulse', 'maqam', 'jawher', 'm3tmd',
+  'azure', 'holoul', 'superoffice', 'alhoshan', 'arsh', 'flow', 'nowaisiry', 'hasaad',
+  'almuteb', 'nawafeth', 'wadod', 'october', 'hazim', 'eydah', 'eightfloor',
 ];
 /** The place an Aqar ad's own link names, e.g. sa.aqar.fm/شارع-الصليحى-212-الفرعاء-منطقة-عسير-6836489 →
  *  «شارع الصليحى 212 الفرعاء منطقة عسير، السعودية». Only sa.aqar.fm; the trailing ad number is dropped; a
