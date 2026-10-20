@@ -43,6 +43,7 @@ BASE = "https://fursaghyr.com"
 LIST = f"{BASE}/wp-json/fgh/v1/properties"
 MEDIA = f"{BASE}/wp-json/wp/v2/media"  # standard WP core media, open, no auth
 POSTS = f"{BASE}/wp-json/wp/v2/properties"  # the post's own record: its WordPress `status`
+TERMS = f"{BASE}/wp-json/wp/v2/property_feature"  # the Houzez «المميزات» taxonomy: id → label
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 
 # Fursaghyr rea.property_type (Arabic) → our canonical English taxonomy.
@@ -152,6 +153,36 @@ def fetch_all(s: cc.Session) -> list[dict]:
         items = j.get("items") if isinstance(j, dict) else j
         return items or []
     return []
+
+
+# The ad's own «المميزات» checklist (Houzez `property_feature` taxonomy) is the site's structured statement of its
+# amenities, and the fgh feed does not carry it: FG26842 ticks «تكييف» on its page while we stored
+# air_conditioner NULL (🔬 2026-10-20, ops_af_score fursaghyr 0 of 4 findable). A ticked label is a yes; an
+# unticked one is silence, never «no». Only columns both fursaghyr tables carry are written (PGRST204, 10-09).
+FEATURE_COLS = ("elevator", "kitchen", "air_conditioner", "parking", "laundry_room", "balcony_terrace",
+                "maid_room", "driver_room", "private_entrance")
+
+
+def fetch_feature_names(s: cc.Session) -> dict[int, list[str]]:
+    """post id → the labels its checklist ticks. A failed read is {} (silence), never an empty checklist."""
+    try:
+        _throttle()
+        t = s.get(TERMS, params={"per_page": 100, "_fields": "id,name"}, timeout=30)
+        _throttle()
+        p = s.get(POSTS, params={"per_page": 100, "_fields": "id,property_feature"}, timeout=30)
+        if t.status_code != 200 or p.status_code != 200:
+            return {}
+        names = {x["id"]: x["name"] for x in t.json()}
+        return {x["id"]: [names[i] for i in x.get("property_feature") or [] if i in names] for x in p.json()}
+    except Exception:
+        return {}
+
+
+def feature_answers(labels: Any) -> dict[str, bool]:
+    if not isinstance(labels, list) or not labels:
+        return {}
+    said = normalize.amenities_from_text("، ".join(str(x) for x in labels))
+    return {c: True for c, v in said.items() if v is True and c in FEATURE_COLS}
 
 
 def _verify_gone(ad_number: str, s: Optional[cc.Session] = None) -> tuple[str, str]:
@@ -464,6 +495,7 @@ def map_listing(item: dict, s: Optional[cc.Session] = None) -> tuple[Optional[di
             if catalog_city_id is not None else {}),
     }
     row.update(_utility_flags(rea.get("utilities")))
+    row.update(feature_answers(item.get("feature_labels")))
     return row, category
 
 
@@ -478,6 +510,9 @@ def main() -> int:
     s = session()
     items = fetch_all(s)
     print(f"Fursaghyr: fetched {len(items)} items")
+    features = fetch_feature_names(s)
+    for it in items:
+        it["feature_labels"] = features.get(it.get("id"))
     if args.limit:
         items = items[: args.limit]
         print(f"Validation cap: processing {len(items)} items, prune disabled")
