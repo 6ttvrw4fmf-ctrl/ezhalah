@@ -22,6 +22,8 @@ const check = (name: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'OK  ' : 'FAIL'} ${name}${detail ? ' — ' + detail : ''}`);
   if (!ok) failed++;
 };
+// A mutation proof: the SAME assertion, run against a deliberately broken implementation, must go RED.
+const mutation = (name: string, brokenAssertionHolds: boolean) => check(`(mutation) catches ${name}`, !brokenAssertionHolds);
 
 const LIVE: LiveDistrictRow[] = [
   { districtAr: 'حي الراكة الجنوبية', cityId: 31, n: 186 },
@@ -74,9 +76,11 @@ const extras: Row[] = [{ id: 'catalog-extra', listingCount: 0, scopeKnown: true 
 {
   const noFold = (q: string, rows: readonly LiveDistrictRow[]) => rows.filter((r) => r.n > 0 && r.districtAr.includes(q)).sort((a, b) => b.n - a.n).slice(0, 4);
   const m1 = noFold('الراكة', LIVE);
-  check('mutant (no spelling fold, substring match) is caught', !(m1[0]?.n === 202 && m1.filter((r) => r.cityId === 31).length === 1) || noFold('البديعة', LIVE).some((r) => r.districtAr.includes('ظهرة')));
+  mutation('a reader that neither folds spellings nor matches by prefix', m1[0]?.n === 202 && m1.filter((r) => r.cityId === 31).length === 1 && !noFold('البديعة', LIVE).some((r) => r.districtAr.includes('ظهرة')));
   const appendOnly = <T,>(p: readonly T[], d: readonly T[], e: readonly T[]) => [...p, ...e, ...d];
-  check('mutant (district rows appended last) is caught', appendOnly(pool, dist, extras).map((r) => r.id).join(' > ') !== 'city-with-listings > city-unmeasured > district-row > city-empty-in-scope > catalog-extra');
+  mutation('an order that appends the district rows last', appendOnly(pool, dist, extras).map((r) => r.id).join(' > ') === 'city-with-listings > city-unmeasured > district-row > city-empty-in-scope > catalog-extra');
+  const neverEmpty = (q: string, rows: readonly LiveDistrictRow[]) => populatedDistrictRows(q, rows.map((r) => ({ ...r, n: Math.max(r.n, 1) })));
+  mutation('a reader that offers 0-served districts', !neverEmpty('الراكة', LIVE).some((r) => r.districtAr === 'حي الراكة القديمة'));
 }
 
 // 6. Wiring: the data module builds the rows from the live index and orders through the helper; the screen selects the
