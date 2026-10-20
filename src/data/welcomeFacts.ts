@@ -2,7 +2,7 @@
 //
 // Every number is read from the same production sources the app already trusts — no number is ever
 // typed into a line — and only the facts the CHOSEN line needs are fetched, once per app session:
-//   sites      → loader_active_platforms_ar()  (websites with searchable listings — the logo strip's truth)
+//   sites      → loader_active_platforms_ar() folded to one per platform (src/data/siteCount.ts — the card's number)
 //   listings / cities / districts → loader_scale_stats_ar()   (the search loader's "big database" numbers)
 //   regions, region counts, the user's city → top_cities_by_deal_ar(null)  (Trending's own city pool)
 //   top district → district_options_ar(city)   (Trending districts, highest listing count first)
@@ -12,6 +12,7 @@
 import { supabase } from '@/lib/supabase';
 import { boundedRpc } from '@/data/boundedRpc';
 import { fetchLoaderScaleStats } from '@/data/loaderScaleStats';
+import { loadSiteCount } from '@/data/siteCount';
 import { translate } from '@/i18n';
 import { cityNameEn, districtNameEn } from '@/data/locations';
 import type { WelcomeFacts, WelcomeLine } from '@/lib/filterWelcome';
@@ -28,11 +29,9 @@ const once = <T,>(fn: () => Promise<T | null>) => {
   };
 };
 
-const siteCount = once(async () => {
-  if (!supabase) return null;
-  const { data, error } = await boundedRpc<string[]>(supabase.rpc('loader_active_platforms_ar'), WELCOME_RPC_MS);
-  return !error && Array.isArray(data) && data.length > 0 ? data.length : null;
-});
+// The sites count is the shared one (src/data/siteCount.ts): one per PLATFORM, the number the WhatsApp
+// card and the share sentence show — this used to count raw slugs (149 while the card said 148).
+const siteCount = loadSiteCount;
 
 const newToday = once(async () => {
   if (!supabase) return null;

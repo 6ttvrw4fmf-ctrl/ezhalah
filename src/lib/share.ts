@@ -1,7 +1,6 @@
 import { Platform, Share } from 'react-native';
 import { getLocale } from '@/i18n';
-import { PLATFORM_META } from '@/data/loaderPlatforms';
-import { hiddenPlatformNames } from '@/data/loaderActivePlatforms';
+import { loadSiteCount, siteCountNow } from '@/data/siteCount';
 
 // The real, resolvable share target (the deployed app).
 export const SHARE_LINK = 'https://ezhalah-app.vercel.app';
@@ -33,13 +32,17 @@ export const SHARE_LEAD_AR_TEMPLATE = 'ليش تدوّر في {count} موقع؟
 export const SHARE_LEAD_AR_NO_COUNT = 'ليش تدوّر في كل المواقع؟ إزهله يدوّر عنك';
 export const SHARE_LEAD_EN_TEMPLATE = 'Why search {count} sites? Ezhalah searches for you.';
 export const SHARE_LEAD_EN_NO_COUNT = 'Why search every site? Ezhalah searches for you.';
-/** The live site count the app itself shows, or null while the registry has not answered yet. */
+/**
+ * The live site count — THE SAME number the WhatsApp card shows (src/data/siteCount.ts: sites with
+ * searchable listings, one per platform), or null while it has not been read yet. Owner 2026-10-20:
+ * the sentence said 146 (logo catalog minus dormant) next to a card saying 148 — one number now.
+ */
 export function liveSiteCount(): number | null {
-  const hidden = hiddenPlatformNames();
-  if (!hidden) return null;
-  const n = PLATFORM_META.filter((p) => !hidden.has(p.name)).length;
-  return n > 0 ? n : null;
+  return siteCountNow();
 }
+// Start the read at app load so the count is known by the time anyone taps Share (the tap handler
+// must not await: navigator.share only works inside the gesture). Same guard SearchLoader.tsx uses.
+if (Platform.OS !== 'web' || typeof window !== 'undefined') void loadSiteCount();
 /** The sentence on its own (X / Telegram put the link in their own url= parameter). */
 export function shareLead(loc: 'ar' | 'en', count: number | null): string {
   const live = typeof count === 'number' && Number.isInteger(count) && count > 0 ? count : null;

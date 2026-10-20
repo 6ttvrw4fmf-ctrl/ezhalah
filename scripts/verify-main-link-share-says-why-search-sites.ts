@@ -5,15 +5,17 @@
 // — and replaced that sentence with the one above. The card itself (title, eagle, «148 موقع · … إعلان
 // · … مدينة») is untouched, and the page's SEO description (SHARE_BLURB_AR) keeps the old wording.
 //
-// The 148 is LIVE, never typed: the platform catalog minus the registry's dormant sites — the same
-// count the app shows. While that count is unknown the sentence says «كل المواقع»; it never shows a
-// zero or a stale number.
+// The 148 is LIVE, never typed, and it is THE CARD'S number (owner 2026-10-20: «the message says 146
+// but when I send it says 148 — confusing»): src/data/siteCount.ts reads loader_active_platforms_ar()
+// and folds it to one per platform exactly like middleware.ts homeCardFactsFrom(). While that count is
+// unknown the sentence says «كل المواقع»; it never shows a zero or a stale number.
 //
 // EXECUTED: liveSiteCount / shareLead / shareMessage are lifted out of src/lib/share.ts and run
 // against a stubbed catalog + registry (share.ts imports react-native, so it cannot be imported).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { liftSymbols } from './lib/liftSymbols.ts';
+import { homeCardFactsFrom } from '../middleware.ts';
 
 const root = join(import.meta.dirname, '..');
 const SHARE = join(root, 'src/lib/share.ts');
@@ -33,9 +35,7 @@ type Lib = {
   shareMessage: (loc: 'ar' | 'en', count: number | null) => string;
 };
 const g = globalThis as any;
-// 152 catalog entries, 4 dormant → 148, the number the app shows (and the owner's).
-g.__meta = Array.from({ length: 152 }, (_, i) => ({ name: `site${i}` }));
-g.__hidden = new Set(['site1', 'site2', 'site3', 'site4']);
+g.__siteCount = 148;
 const load = (src: string) => liftSymbols(
   src === shareSrc ? SHARE : writeTemp(src),
   [
@@ -49,7 +49,7 @@ const load = (src: string) => liftSymbols(
     { header: 'export function shareMessage(', endsWith: /^\}$/ },
   ],
   ['liveSiteCount', 'shareLead', 'shareMessage'],
-  'const PLATFORM_META: any[] = (globalThis as any).__meta; const hiddenPlatformNames = () => (globalThis as any).__hidden;',
+  'const siteCountNow = () => (globalThis as any).__siteCount; const loadSiteCount = () => Promise.resolve(null); const Platform = { OS: "web" };',
 ) as Promise<Lib>;
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -58,17 +58,42 @@ const writeTemp = (src: string) => { const f = join(mkdtempSync(join(tmpdir(), '
 console.log('\nThe main link\'s share message says «ليش تدوّر في 148 موقع؟ إزهله يدوّر عنك», with a live 148\n');
 const real = await load(shareSrc);
 
-check('liveSiteCount() = catalog minus dormant = 148 (the number the app shows)', real.liveSiteCount() === 148, String(real.liveSiteCount()));
+check('liveSiteCount() is the shared site count (148, the card\'s number)', real.liveSiteCount() === 148, String(real.liveSiteCount()));
 check('the Arabic sentence is the owner\'s exact words with that live number', real.shareLead('ar', real.liveSiteCount()) === OWNER_AR, real.shareLead('ar', real.liveSiteCount()));
 check('the message = that sentence, a newline, the link — nothing else', real.shareMessage('ar', 148) === `${OWNER_AR}\n${LINK}`);
 check('the English sentence carries the same live number', real.shareLead('en', 148) === 'Why search 148 sites? Ezhalah searches for you.');
-g.__hidden = null;
-check('registry not answered yet → count unknown (null), never 152 and never 0', real.liveSiteCount() === null, String(real.liveSiteCount()));
+g.__siteCount = null;
+check('count not read yet → unknown (null), never 0', real.liveSiteCount() === null, String(real.liveSiteCount()));
 check('unknown count → «كل المواقع», never a zero or a typed number', real.shareLead('ar', null) === 'ليش تدوّر في كل المواقع؟ إزهله يدوّر عنك' && !/\d/.test(real.shareLead('ar', null)) && !/\d/.test(real.shareLead('en', null)));
 check('a zero or a bad count is treated as unknown', real.shareLead('ar', 0) === real.shareLead('ar', null) && real.shareLead('ar', 2.5) === real.shareLead('ar', null));
-g.__hidden = new Set(['site1', 'site2', 'site3', 'site4']);
+g.__siteCount = 148;
 check('the old long sentence is gone from the sent message (it stays only as the page\'s SEO description)',
   !real.shareMessage('ar', 148).includes('الطريقة الأذكى') && /SHARE_BLURB_AR = 'تدور على عقار/.test(shareSrc));
+
+// ── ONE NUMBER: the sentence's count and the card's count are the same fold over the same RPC ───
+// siteCount.ts imports the supabase client (an alias Node cannot resolve), so its pure fold is lifted.
+const lp = await liftSymbols(join(root, 'src/data/loaderPlatforms.ts'), [
+  { header: 'const SOURCE_TOKENS: Array<[string, string]> = [', endsWith: /^\];$/ },
+  { header: 'export function normalizeSource(' },
+], ['normalizeSource']);
+(globalThis as any).__normalizeSource = lp.normalizeSource;
+const { sitesFromSlugs } = await liftSymbols(
+  join(root, 'src/data/siteCount.ts'),
+  [{ header: 'export function sitesFromSlugs(', endsWith: /^\}$/ }],
+  ['sitesFromSlugs'],
+  'const normalizeSource: (s: string) => string | null = (globalThis as any).__normalizeSource;',
+) as { sitesFromSlugs: (slugs: unknown) => number | null };
+{
+  // The real shape of loader_active_platforms_ar() on 2026-10-20: 149 slugs, aqarmonthly among them.
+  const slugs = [...Array.from({ length: 147 }, (_, i) => `site${i}`), 'aqar', 'aqarmonthly'];
+  const card = homeCardFactsFrom(slugs, [{ listing_count: 1, city_count: 1 }]).sites;
+  check('sitesFromSlugs (the sentence) === homeCardFactsFrom (the card) over the same slugs — 148, aqarmonthly folded into Aqar',
+    sitesFromSlugs(slugs) === 148 && card === 148, `sentence=${sitesFromSlugs(slugs)} card=${card}`);
+  check('an empty or failed slug list is unknown, never 0', sitesFromSlugs([]) === null && sitesFromSlugs(null) === null && sitesFromSlugs([1, 2]) === null);
+}
+const welcome = readFileSync(join(root, 'src/data/welcomeFacts.ts'), 'utf8');
+check('the Filter home\'s welcome line takes the same count (it used to count raw slugs: 149)', /const siteCount = loadSiteCount;/.test(welcome) && !/data\.length : null/.test(welcome));
+check('share.ts starts the read at app load so a tap never has to await', /void loadSiteCount\(\);/.test(shareSrc));
 
 // ── wiring: both share surfaces send the built sentence ─────────────────────────────────────────
 const sheet = readFileSync(join(root, 'src/components/ShareSheet.tsx'), 'utf8');
@@ -98,11 +123,16 @@ const mutant = (from: string, to: string) => {
   mustCatch('the number typed into the sentence instead of the live count', m.shareLead('ar', 150) === OWNER_AR);
 }
 {
-  const m = await mutant('  if (!hidden) return null;\n', '');
-  g.__hidden = null;
-  let v: number | null = -1; try { v = m.liveSiteCount(); } catch { v = -2; }
-  g.__hidden = new Set(['site1', 'site2', 'site3', 'site4']);
-  mustCatch('an unanswered registry counted as «every site is up» (152) or crashing', v !== null);
+  const m = await mutant('  return siteCountNow();', '  return siteCountNow() ?? 152;');
+  g.__siteCount = null;
+  mustCatch('an unread count rendered as the catalog size instead of «كل المواقع»', m.liveSiteCount() !== null);
+  g.__siteCount = 148;
+}
+{
+  const m = await mutant('  return siteCountNow();', '  return 148;');
+  g.__siteCount = 131;
+  mustCatch('the number typed into liveSiteCount() instead of read', m.liveSiteCount() !== 131);
+  g.__siteCount = 148;
 }
 {
   const m = await mutant("const live = typeof count === 'number' && Number.isInteger(count) && count > 0 ? count : null;", 'const live = count;');
