@@ -58,6 +58,7 @@ from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
+from scrapers.common.page_pin import pin_from_page  # noqa: E402
 
 BASE = "https://shomoalaqar.com.sa"
 SOURCE = "Shomou"          # English slug; never «…Alaqar»: the app's fallback source token is 'aqar'
@@ -139,6 +140,9 @@ def parse_detail(nid: str, page: str) -> Optional[dict[str, Any]]:
     title = re.search(r'<span property="schema:name" content="([^"]*)"', art)
     photos = [u if u.startswith("http") else BASE + u for u in dict.fromkeys(_IMG_RE.findall(art))]
     return {
+        # Owner 2026-10-20 night: the article's own «الموقع» Maps link (decimal, DMS or goo.gl) — 3 of 10
+        # sampled border ads; read from the ARTICLE only, never from other ads on the page.
+        "pin": pin_from_page(art),
         "nid": nid, "title": _text(title.group(1)) if title else None, "divs": divs, "price": price, "price_label": price_label,
         "description": description, "end_date": end.group(1) if end else None, "photos": photos,
         "office_licence": (re.search(r"رقم الترخيص:?\s*(\d+)", alert) or [None, None])[1],
@@ -238,6 +242,7 @@ def map_detail(d: dict[str, Any], today: Any = None) -> tuple[Optional[dict], st
         "rent_period": rent_period,
         "photo_urls": d.get("photos") or [],
         "additional_info": redact_capture({k: v for k, v in {
+            **(d.get("pin") or {}),
             "price_label": label, "price_basis": basis, "price_kind": kind,
             "price_amount_raw": d.get("price"), "type_ar": phrase, "ad_end_date": d.get("end_date"),
             "posted_or_bumped": d.get("posted"), "governorate_ar": gov,
