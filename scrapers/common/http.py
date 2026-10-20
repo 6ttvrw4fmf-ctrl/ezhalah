@@ -11,6 +11,7 @@ needing a real browser. We only reach for Playwright when even that fails.
 from __future__ import annotations
 
 import os
+import re
 import random
 import threading
 import time
@@ -165,7 +166,10 @@ def retry_smarter_session(probe_url: str, *, headers: Optional[dict] = None, tim
             try:
                 r = s.get(probe_url, timeout=timeout)
             except Exception as e:             # noqa: BLE001 — recorded, then the next one
-                tried.append(f"{route}/{prof}:{type(e).__name__}")
+                # 2026-10-20: «ProxyError» on every host since 10-19 21:00 UTC; the proxy's own CONNECT
+                # answer (407 credential / 402 balance / 403 refused) is what tells the owner which.
+                code = re.search(r"CONNECT tunnel failed, response (\d{3})", str(e))
+                tried.append(f"{route}/{prof}:{type(e).__name__}" + (f"({code.group(1)})" if code else ""))
                 continue
             tried.append(f"{route}/{prof}:{r.status_code}")
             if r.status_code == 200:
