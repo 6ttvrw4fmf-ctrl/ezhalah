@@ -44,3 +44,34 @@ If a blocked address turns out to be ours, unblock it and add it to the repo var
   batches, then a lower bar, then a human check on heavy use) narrow this. Nothing makes copying impossible.
 - **A shared address** (mobile carrier, campus) could in theory add up past 100,000 from many real people. At
   today's traffic the busiest address is ~12× below the bar. Re-measure before lowering it.
+
+## The front door (Phase 4.3, 2026-10-21)
+
+Real visitors made ~1,400 direct database requests in the 24 h to 2026-10-21. Our own robots made ~290,000 with the
+same public key (GitHub CI ~286,000, the owner's machine ~15,000). Closing the direct "back door" is therefore mostly
+about moving our robots, not visitors.
+
+- `api/sb.ts` at `/sb/rest/v1/*` (vercel.json rewrite, functions in Tokyo `hnd1` next to the database) forwards the
+  web app's REST calls to Supabase. Auth, storage and edge functions stay direct.
+- **Vercel BotID** (free Basic) checks each call. SOFT until `EZ_BOTID_ENFORCE=1` is set in Vercel: answers carry
+  `x-ezhalah-bot: human|bot|unknown`, nobody is refused.
+- **Secret handshake.** Behind the front door, Cloudflare sees our server, not the visitor. So `api/sb.ts` forwards
+  the visitor's address (as Vercel measured it) in `x-ezhalah-client-ip` with `x-ezhalah-gate = EZ_GATE_SECRET`.
+  `robot_gate` believes it only when the secret matches `guard.front_door_secret` (20261021120255). Otherwise it is
+  ignored. The secret lives in the GitHub secret `EZ_GATE_SECRET`, the Vercel env `EZ_GATE_SECRET`, and the database
+  (written by the **Front door secret** workflow). It is never written in a file in this repo or in a chat.
+- The app uses the front door only when `EXPO_PUBLIC_FRONT_DOOR=1` (src/lib/supabase.ts). While the back door is
+  open, a front door that fails (502/503/504 or unreachable) is retried directly.
+- The scrape alarm skips front-door traffic (Amazon network + `ezhalah-front-door` marker): it is every visitor
+  summed under a few server addresses. **Stated gap**: a scraper going through the front door is BotID's job, not
+  the alarm's, until a per-visitor count exists there.
+
+### Turning it on (order matters)
+
+1. Owner: Vercel → project `ezhalah-app` → Settings → Environment Variables → add `EZ_GATE_SECRET` (Production) =
+   the value in the Desktop file `EZHALAH-GATE-SECRET-paste-into-Vercel-then-delete.txt`, then delete that file.
+2. Dispatch **Front door secret** (stores the same value in the database).
+3. Deploy, then confirm `/sb/rest/v1/…` answers and the database sees the visitor's address.
+4. After a day of `x-ezhalah-bot` showing real visitors as `human`: set `EZ_BOTID_ENFORCE=1`.
+5. Move our robots off the bare public key (they send the handshake too, from the GitHub secret), then close the back
+   door: `robot_gate` refuses the public roles without a valid handshake. Owner present for this step.
