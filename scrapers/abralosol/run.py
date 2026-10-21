@@ -702,6 +702,10 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
         "description": detail.get("description"),
         "additional_info": redact_capture({k: v for k, v in {
             **(detail.get("pin") or {}),
+            # The ad's own article WAS read and carries no pin (audit 2026-10-21). keep_stored_pin keeps an old
+            # pin only for a write that does not say this, so a failed short-link hop still keeps its pin while a
+            # neighbour's pin stored before the article-only fix can finally leave.
+            **({"pin_absent": True} if detail and not detail.get("pin") else {}),
             "price_label": p["label"],
             "price_basis": basis,
             "price_basis_from": basis_from,
