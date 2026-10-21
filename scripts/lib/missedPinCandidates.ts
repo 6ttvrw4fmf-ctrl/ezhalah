@@ -46,7 +46,11 @@ const DMS = /(?:maps\/place\/|[?&]q=)(\d{1,2})°(\d{1,2})'(\d{1,2}(?:\.\d+)?)"N[
 export function pairsIn(sample: AdSample): Pair[] {
   const text = decode([sample.html, ...(sample.frames || []), ...(sample.network || [])].join('\n'));
   const out = new Map<string, Pair>();
+  // sakan prints a google.maps.LatLng marker on every ad, but only `show_exact_location = true` makes it the
+  // ad's pin; without it the marker is the site's approximation (97227, audit 2026-10-21).
+  const approxMarker = /show_exact_location/.test(text) && !/show_exact_location\s*=\s*true/.test(text);
   for (const [shape, re, swapped] of SHAPES) {
+    if (shape === 'latlng-call' && approxMarker) continue;
     for (const m of text.matchAll(re)) {
       let a = Number(m[1]), b = Number(m[2]);
       if (swapped) [a, b] = [b, a];
