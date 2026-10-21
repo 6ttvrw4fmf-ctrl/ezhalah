@@ -17,7 +17,13 @@ if (typeof window !== 'undefined') {
 // it all», after the door, BotID, Turnstile and the handshake were tested live). Kill switch: EXPO_PUBLIC_FRONT_DOOR=0
 // in the Vercel env, then a deploy.
 export const FRONT_DOOR = process.env.EXPO_PUBLIC_FRONT_DOOR !== '0';
-const webFront = typeof window !== 'undefined' && typeof window.fetch === 'function' && FRONT_DOOR && !!url;
+// ONLY on the real site. The door (/sb) and both guards exist only there, and Cloudflare Turnstile answers any other
+// host with error 110200 (measured 2026-10-21: CI's local build threw «Uncaught TurnstileError 110200» and its search
+// journey failed). Local, CI and preview builds keep talking to the database directly, exactly as before.
+export const FRONT_DOOR_HOSTS = ['ezhalah-app.vercel.app'];
+export function frontDoorHost(hostname: string): boolean { return FRONT_DOOR_HOSTS.includes(hostname); }
+const webFront = typeof window !== 'undefined' && typeof window.fetch === 'function' && FRONT_DOOR && !!url
+  && frontDoorHost(window.location?.hostname ?? '');
 
 /** supabase.co/rest/v1/<rest> → /sb/rest/v1/<rest>; null for anything that is not a REST call. */
 export function frontDoorUrl(target: string, base: string | undefined): string | null {
@@ -73,6 +79,8 @@ function startTurnstile(): void {
           void window.fetch('/api/human', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token }) }).catch(() => {});
         },
         'refresh-expired': 'auto',
+        // A Turnstile failure must never surface as an uncaught page error: no pass, the call is labelled "none".
+        'error-callback': () => true,
       });
       // The pass lasts an hour; renew at 50 minutes so a long visit never runs without one.
       setInterval(() => { try { ts.reset(id); } catch { /* renew failed: the next call still flows */ } }, 50 * 60 * 1000);
