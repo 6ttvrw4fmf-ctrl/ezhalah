@@ -34,7 +34,7 @@ concurrency:
 jobs:
   liveness:
     name: Liveness ${{ matrix.table }} #${{ matrix.shard }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -72,7 +72,7 @@ jobs:
   alert:
     needs: [liveness]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

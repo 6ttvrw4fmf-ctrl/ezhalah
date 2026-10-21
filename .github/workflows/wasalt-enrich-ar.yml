@@ -42,7 +42,7 @@ concurrency:
 jobs:
   enrich-ar:
     name: Enrich AR ${{ matrix.table }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # BACKSTOP ONLY. The job now carries its own 2700s (45 min) budget via --max-seconds and stops
     # cleanly inside this wall; reaching 60 minutes again means the budget itself failed, and should
     # be investigated rather than raised. Until 2026-09-18 this timeout was the ONLY limit, so the

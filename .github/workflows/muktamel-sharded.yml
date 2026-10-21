@@ -73,7 +73,7 @@ concurrency:
 jobs:
   crawl:
     name: Muktamel shard ${{ matrix.shard }}/8
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # 180, not 120 (2026-10-03, Scraping Engineer): measured shards ran 77-91 min on normal nights, but
     # on 10-03 the source was slower (network timeouts 20 vs 3) and all four shards that ran were
     # killed at 120 mid-sweep; the rerun took 101-102 min. Almost all of it is the sweep: the
@@ -129,7 +129,7 @@ jobs:
   # non-continued shard failed, and 'success' resolves the standing key.
   bridge:
     name: Bridge fleet result to alert_event
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     needs: crawl
     if: always()
     steps:

@@ -13,7 +13,7 @@ on:
 jobs:
   diagnose:
     name: Diagnose wasalt proxy failure layer
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4

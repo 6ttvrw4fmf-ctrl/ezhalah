@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 330   # 1.4MB/page × ~8k live-band ids is slow; stay under GitHub's 6h cap
     steps:
       - uses: actions/checkout@v4
