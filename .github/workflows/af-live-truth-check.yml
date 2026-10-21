@@ -55,7 +55,7 @@ jobs:
   # owner ruling budgeted for. A refused deploy now runs nothing instead of the previous nothing.
   gate:
     name: Did the triggering deploy actually ship a bundle?
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       actions: read
@@ -83,7 +83,7 @@ jobs:
     needs: [gate]
     if: needs.gate.outputs.shipped == 'yes'
     name: AF UI count = count RPC = result RPC = independent DB truth
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # RE-MEASURED 2026-09-04, because the old note was already wrong. It read "16m44s of work plus
     # ~1m of setup, roughly 2x headroom" from a quiet 2026-09-03. Run #137 took 27m50s of this
     # 35-minute budget against a production whose search mean had risen 773ms → 5,109ms — 7 minutes
@@ -342,7 +342,7 @@ jobs:
     needs: [gate, af-truth, af-card-state]
     if: always() && needs.gate.outputs.shipped == 'yes'
     name: The REST-only AF oracles (predicate, strict parity, guided carry, chips)
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # Measured: the four steps total ~15s of work. 10 covers that plus checkout and npm ci with
     # room to spare, and declares a budget somebody chose rather than GitHub's 360-minute default.
     timeout-minutes: 10
@@ -457,7 +457,7 @@ jobs:
     needs: [gate, af-truth, af-card-state]
     if: always() && needs.gate.outputs.shipped == 'yes'
     name: Every certified AF option shows DB truth and clicks to exactly that set (region)
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # THE TWO SWEEPS GET A JOB EACH (2026-09-03). They are independent scopes and each is an
     # open-ended walk over the live pool, so chaining them behind one budget recreates exactly the
     # starvation this file was just restructured to remove — the second would be the new tail. A
@@ -495,7 +495,7 @@ jobs:
     needs: [gate, af-truth, af-card-state]
     if: always() && needs.gate.outputs.shipped == 'yes'
     name: …and the same option surface inside a CITY scope (جدة), single-type stages
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -538,7 +538,7 @@ jobs:
     needs: [gate, af-truth]
     if: always() && needs.gate.outputs.shipped == 'yes'
     name: The rendered card, the removed pill and the scope change all tell one truth
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # 45 → 60 on 2026-09-03: two more browser journeys (the §12A card-evidence pair) live here now.
     timeout-minutes: 60
     steps:
@@ -603,7 +603,7 @@ jobs:
     needs: [gate, af-truth, af-card-state]
     if: always() && needs.gate.outputs.shipped == 'yes'
     name: Every certified AF option shows, sends, applies, returns and carries one truth
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
@@ -632,7 +632,7 @@ jobs:
   # this file and not added here.
   attendance:
     name: Every AF/Trending live job actually ran and passed
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
     # Only attends a run that had something to verify. When the gate says nothing shipped, the
     # jobs above do not run and there is no attendance to take — reporting those skips as a

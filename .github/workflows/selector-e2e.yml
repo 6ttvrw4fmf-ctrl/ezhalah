@@ -34,7 +34,7 @@ concurrency:
 jobs:
   selector-e2e:
     name: Drive the live selector end-to-end
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 20
     # A workflow_run trigger also fires for FAILED deploys — nothing new is live then, so skip.
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'

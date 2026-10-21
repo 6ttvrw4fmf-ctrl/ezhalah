@@ -54,7 +54,7 @@ concurrency:
 jobs:
   enrollment:
     name: Every landed repair is enrolled in the orphaned-guarantee registry
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

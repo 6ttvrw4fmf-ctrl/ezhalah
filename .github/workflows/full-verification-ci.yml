@@ -34,7 +34,7 @@ jobs:
     # NOTE: this job name is referenced by the branch-protection required-status-check list.
     # Renaming it silently drops the gate — change both together.
     name: Full verification suite (npm test)
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +70,7 @@ jobs:
   taxonomy-verify:
     # NOTE: this job name is referenced by the branch-protection required-status-check list.
     name: Taxonomy + location index (npm run verify)
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
