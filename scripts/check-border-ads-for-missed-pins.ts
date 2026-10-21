@@ -71,7 +71,18 @@ const ctx = await browser.newContext({ locale: 'ar-SA', userAgent: 'Mozilla/5.0 
 type Report = { platform: string; border: number; sampled: number; loaded: number; missed: Array<{ url: string; pair: string; shape: string }> };
 const reports: Report[] = [];
 
+// A site whose ad page also lists OTHER ads, each with its own map link: read only the ad's own section — the same
+// element its scraper reads (2026-10-21 re-run: abralosol's related-ads table re-flagged the neighbour pin
+// 25.4542,49.5820 that PR #7920 stopped storing).
+const OWN_SECTION: Record<string, string> = { abralosol: 'article[data-history-node-id]' };
+// A site whose page map is DELIBERATELY not read, with the evidence (2026-10-21 audit): flagging it every week
+// would be noise, and reading it would show a wrong pin.
+const DELIBERATELY_UNREAD: Record<string, string> = {
+  superoffice: 'its embed is the BRANCH building, and the Suwaidi branch embed (24.5948,46.4065) sits ~25 km from that branch\'s own written address',
+};
+
 for (const platform of PLATFORMS) {
+  if (DELIBERATELY_UNREAD[platform]) { console.log(`⚪ ${platform}: skipped — ${DELIBERATELY_UNREAD[platform]}`); continue; }
   const served = await get<Array<{ listing_id: number; source_table: string }>>('search_listings_ar?select=listing_id,source_table'
     + `&platform=eq.${encodeURIComponent(platform)}&latitude=is.null&production_ready=eq.true&limit=500`);
   const pick = served.sort(() => Math.random() - 0.5).slice(0, PER_SITE);
@@ -93,10 +104,19 @@ for (const platform of PLATFORMS) {
     try {
       await page.goto(r.listing_url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {});
-      const html = await page.content();
-      const frames = page.frames().map((f) => f.url());
-      const links = await page.$$eval('a[href]', (as) => as.map((a) => (a as HTMLAnchorElement).href).filter((h) => /goo\.gl|maps/i.test(h))).catch(() => [] as string[]);
-      samples.push({ url: r.listing_url, listingId: r.id, html, frames: [...frames, ...links], network });
+      const own = OWN_SECTION[platform];
+      if (own) {
+        // Only the ad's own section: its HTML and the map links inside it — never the page's frames or requests,
+        // which belong to the whole page (the related-ads list included).
+        const html = await page.$eval(own, (el) => el.outerHTML).catch(() => '');
+        const links = await page.$$eval(`${own} a[href]`, (as) => as.map((a) => (a as HTMLAnchorElement).href).filter((h) => /goo\.gl|maps/i.test(h))).catch(() => [] as string[]);
+        samples.push({ url: r.listing_url, listingId: r.id, html, frames: links, network: [] });
+      } else {
+        const html = await page.content();
+        const frames = page.frames().map((f) => f.url());
+        const links = await page.$$eval('a[href]', (as) => as.map((a) => (a as HTMLAnchorElement).href).filter((h) => /goo\.gl|maps/i.test(h))).catch(() => [] as string[]);
+        samples.push({ url: r.listing_url, listingId: r.id, html, frames: [...frames, ...links], network });
+      }
     } catch { /* unreachable — counted below, never read as «no pin» */ }
     await page.close();
   }
