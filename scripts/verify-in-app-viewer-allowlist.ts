@@ -36,7 +36,7 @@ const PROVEN_HOSTS = [
   'snam.sa', 'alqasem.com.sa', 'moftah-aleaqar.com', 'safera.inblaj.net', 'tawia.sa', 'daryusuf.com',
   'hajerhouses.com', 'wslnaa.com', 'alrifai.com.sa', 'shmoua-alshmal.com', 'alkhaas.net',
   'ramzalqasim.com', 'alajlan-re.com', 'alta.com.sa', 'ebriza.com.sa', 'expattrustedhousingriyadh.com',
-  'daraa.sa', 'razre.sa', 'shatrirealestate.com', 'azdadalaqaria.com',
+  'daraa.sa', 'shatrirealestate.com', 'azdadalaqaria.com',
   'aqaralriyadh.com', 'fkralemar.com', 'fahadalshahri.com', 'eastabha.sa', 'suwar.sa', 'sqcc.sa',
   'aalbarrak.com', 'abeea.com.sa', 'wajaf.sa', 'alsidra.com.sa', 'squares.com.sa',
   'muajarh.com', 'compoundin.com', 'gomenassat.com', 'almotmkenah.com', 'gudai.inblaj.net',
