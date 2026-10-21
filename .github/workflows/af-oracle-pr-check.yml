@@ -47,7 +47,7 @@ jobs:
     # NOTE: this job name is the branch-protection required-status-check context. Renaming it
     # silently drops the gate — change both together (same rule as full-verification-ci.yml).
     name: AF predicates vs an independent oracle (live)
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4

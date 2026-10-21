@@ -43,7 +43,7 @@ concurrency:
 jobs:
   verify:
     name: Verify ${{ matrix.platform }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # 180 min (was 60), matching wasalt-cleanup.yml: the wasalt leg now drives a real browser per
     # sampled row (~15-20s each through the Cloudflare path), so a 200-row sample needs ~1h. The
     # other three legs still finish in seconds.

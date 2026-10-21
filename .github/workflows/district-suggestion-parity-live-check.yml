@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   district-parity:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # 10 was the cap until 2026-09-27, when 9 of 12 consecutive runs were KILLED at 618-620s and
     # reported as `cancelled` — which the failure->alert bridge classifies as NO_VERDICT, so this
     # barrier went dark for ~2.5 days with no red anyone read and no alert row. The work grew

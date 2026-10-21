@@ -66,7 +66,7 @@ jobs:
   # <36h apart (see run_enum_rollup()).
   stamp:
     if: ${{ !inputs.skip_enum && !inputs.repair_clock_bug_backlog }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 2
     outputs:
       at: ${{ steps.t.outputs.at }}
@@ -80,7 +80,7 @@ jobs:
     # PILOT skip (run strike against the last completed enum) OR the one-time repair dispatch —
     # either way the 4.5h enum has no reason to run.
     if: ${{ !inputs.skip_enum && !inputs.repair_clock_bug_backlog }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # SHARDED 2026-09-19. This was ONE job walking ~3,300 pages. Through the browser that is
     # 10-16h (measured ~11-18 s/page) against GitHub's 6h hosted-runner ceiling: run 35416642741
     # died at the 330-minute wall two-thirds through, having upserted 35,826 listings. Raising the
@@ -183,7 +183,7 @@ jobs:
     # rollup can report exactly which are missing, but a single failed shard still stops publication:
     # a slice nobody enumerated is a slice whose every live listing would be counted "unseen".
     if: ${{ !inputs.skip_enum && needs.enum.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -216,7 +216,7 @@ jobs:
     # coverage guard still refuses if the last enum is >36h old or below the row floor, so skipping
     # here never bypasses the safety — it only avoids re-running the 4.5h enum for a repeat pilot.
     if: ${{ always() && ((needs.enum.result == 'success' && needs.rollup.result == 'success') || inputs.skip_enum) }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
@@ -263,7 +263,7 @@ jobs:
   repair:
     name: ONE-TIME — repair the clock-bug backlog (does not touch active)
     if: ${{ inputs.repair_clock_bug_backlog == true }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4

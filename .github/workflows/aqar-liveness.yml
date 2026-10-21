@@ -27,7 +27,7 @@ jobs:
   liveness:
     name: Liveness ${{ matrix.table }} #${{ matrix.shard }}
     if: inputs.only != 'aqarmonthly'
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 120
     strategy:
       fail-fast: false   # each shard/table runs independently, in parallel
@@ -71,7 +71,7 @@ jobs:
   aqarmonthly:
     name: Liveness aqarmonthly_residential_listings
     if: inputs.only != 'aqar'
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4

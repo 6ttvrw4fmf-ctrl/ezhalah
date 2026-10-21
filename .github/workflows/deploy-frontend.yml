@@ -58,7 +58,7 @@ concurrency:
 jobs:
   deploy:
     name: safe-deploy.sh → ezhalah-app.vercel.app
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 30
 
     # THE MINIMUM THE BASELINE RECORD NEEDS, and nothing else (naming any permission sets every
