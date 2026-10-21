@@ -35,6 +35,24 @@ function problems(s: string, app: string): string[] {
 const appSrc = ['src/data/locations.ts', 'src/data/remote.ts', 'src/data/adPageData.ts']
   .map((f) => { try { return readFileSync(join(root, f), 'utf8'); } catch { return ''; } }).join('\n');
 
+// EVERY public-key reader, not just three app files (2026-10-21). scripts/verify-all-platforms-have-extra-attrs-branch-live.ts
+// read listing_extra_attrs_mv with the publishable key, and this barrier, which only looked at src/data, stayed green
+// while that live check started answering 401. Now: all of src/, plus every script that talks to production with the
+// public key (public-supabase / resolvePublicSupabase / postgrestFetch). A quoted hidden-view name in one of them is RED.
+const walk = (d: string): string[] => readdirSync(join(root, d), { withFileTypes: true }).flatMap((e) =>
+  e.isDirectory() ? walk(join(d, e.name)) : /\.(ts|tsx|mjs)$/.test(e.name) ? [join(d, e.name).replace(/\\/g, '/')] : []);
+const publicReaders: [string, string][] = [...walk('src'), ...walk('scripts').filter((f) => !f.endsWith('verify-internal-views-are-not-public.ts'))]
+  .map((f): [string, string] => [f, readFileSync(join(root, f), 'utf8')])
+  .filter(([f, s]) => f.startsWith('src') || /public-supabase|resolvePublicSupabase|postgrestFetch/.test(s));
+function readerProblems(s: string, readers: [string, string][]): string[] {
+  const listed = [...s.matchAll(/'([a-z0-9_]+)'/g)].map((m) => m[1]);
+  const fail: string[] = [];
+  for (const [f, src] of readers) for (const v of listed) {
+    if (new RegExp(`['"\`/]${v}['"\`?]`).test(src)) fail.push(`${f} reads ${v} with the public key, but it is hidden`);
+  }
+  return fail;
+}
+
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? '' : ' — ' + detail}`); if (!ok) failed++; };
 const mustCatch = (label: string, caught: boolean) => { console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${label}`); if (!caught) failed++; };
@@ -43,6 +61,10 @@ const p = problems(sql, appSrc);
 check('internal ops/cost/crawl views are hidden from the public key; the app\'s location views stay readable', p.length === 0, p.join('; '));
 mustCatch('the AI-cost view made public again', problems(sql.replace("'ai_usage_costed',", ''), appSrc).length > 0);
 mustCatch('hiding a view the app reads (location_index_live)', problems(sql.replace("'scraper_heartbeat'", "'scraper_heartbeat', 'location_index_live'"), appSrc).length > 0);
+const rp = readerProblems(sql, publicReaders);
+check(`no public-key reader (${publicReaders.length} files in src/ and scripts/) reads a hidden view`, rp.length === 0, rp.join('; '));
+mustCatch('a live check reading a hidden view with the public key',
+  readerProblems(sql, [['scripts/x-live.ts', 'await fetch(`${REST}/listing_extra_attrs_mv?select=listing_id`)']]).length > 0);
 mustCatch('a revoke that forgets signed-in users', problems(sql.replace('from anon, authenticated', 'from anon'), appSrc).length > 0);
 
 if (failed) { console.error(`\n❌ verify-internal-views-are-not-public: ${failed} check(s) failed.`); process.exit(1); }
