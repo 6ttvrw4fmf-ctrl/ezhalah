@@ -38,7 +38,22 @@ function frontDoorFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
   const front = frontDoorUrl(target, url);
   if (!front) return window.fetch(input, init);
   const direct = () => window.fetch(input, init);
-  return window.fetch(front, init).then((r) => (frontDoorAnswered(r.status, r.headers.has('x-ezhalah-bot')) ? r : direct()), direct);
+  return window.fetch(front, init).then((r) => {
+    if (!frontDoorAnswered(r.status, r.headers.has('x-ezhalah-bot'))) return direct();
+    // VPN / Tor / server network refused by the network guard (20261021224031): tell the visitor why, once,
+    // instead of letting it read as an empty or broken search (components/NetworkBlockedNotice.tsx).
+    if (r.status === 403) {
+      r.clone().json().then((b) => { if (isNetworkBlocked(r.status, b)) window.dispatchEvent(new Event(NETWORK_BLOCKED_EVENT)); }, () => {});
+    }
+    return r;
+  }, direct);
+}
+
+export const NETWORK_BLOCKED_EVENT = 'ezhalah:network-blocked';
+/** The network guard's refusal (robot_gate: sqlstate PT403 «This network is not supported»). */
+export function isNetworkBlocked(status: number, body: unknown): boolean {
+  const b = body as { code?: unknown; message?: unknown } | null;
+  return status === 403 && !!b && b.code === 'PT403' && b.message === 'This network is not supported';
 }
 
 /** A reply counts only if OUR front door sent it (it always sets x-ezhalah-bot) and it is not a gateway failure.
