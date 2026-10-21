@@ -40,3 +40,10 @@ def test_mutation_reading_the_whole_page_again_is_caught(monkeypatch):
     # The defect itself: the same reader pointed at the WHOLE page picks up the related-list pin.
     page = _page("4790", '<div class="text-right h1">🟡 المساحة 500</div>')
     assert run.pin_from_html(page), "the fixture no longer reproduces the defect — the test above would pass vacuously"
+
+
+def test_a_read_article_without_a_pin_says_so(monkeypatch):
+    # keep_stored_pin keeps an old pin unless the write says the article was read and had none (audit 2026-10-21).
+    import inspect
+    src = inspect.getsource(run)
+    assert '**({"pin_absent": True} if detail and not detail.get("pin") else {}),' in src
