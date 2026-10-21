@@ -35,6 +35,14 @@ export function safeRestPath(p: string | null): string | null {
   return /^(rpc\/)?[A-Za-z0-9_]+$/.test(p) ? p : null;
 }
 
+/** True only when the caller presented the gate secret itself (our own browser robots). Never true without a secret. */
+export function robotPass(presented: string | null, gate: string): boolean {
+  if (!gate || !presented || presented.length !== gate.length) return false;
+  let diff = 0;
+  for (let i = 0; i < gate.length; i++) diff |= gate.charCodeAt(i) ^ presented.charCodeAt(i);
+  return diff === 0;
+}
+
 /** The visitor's address as Vercel measured it (Vercel overwrites these headers; a caller cannot set them). */
 export function visitorIp(h: Headers): string {
   const ip = (h.get('x-real-ip') || h.get('x-forwarded-for')?.split(',')[0] || '').trim();
@@ -63,6 +71,10 @@ async function handle(request: Request): Promise<Response> {
   headers.set('x-client-info', `${headers.get('x-client-info') ?? ''} ezhalah-front-door`.trim());
   const ip = visitorIp(request.headers);
   if (GATE && ip) { headers.set('x-ezhalah-gate', GATE); headers.set('x-ezhalah-client-ip', ip); }
+  // ROBOT PASS (20261021224031): our own browser robots run from server networks (GitHub, Google Cloud) that the network
+  // guard refuses. They send x-ezhalah-robot = the gate secret; only then does the database hear «robot: 1» (vouched
+  // by the same handshake). A caller's own x-ezhalah-robot is never forwarded as-is.
+  if (robotPass(request.headers.get('x-ezhalah-robot'), GATE)) headers.set('x-ezhalah-robot', '1');
 
   const method = request.method.toUpperCase();
   const qs = url.searchParams.toString();
