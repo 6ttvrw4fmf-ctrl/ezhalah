@@ -68,7 +68,8 @@ about moving our robots, not visitors.
 
 ### Turning it on (order matters)
 
-1. Owner: Vercel → project `ezhalah-app` → Settings → Environment Variables → add `EZ_GATE_SECRET` (Production) =
+1. Dispatch **Vercel gate secret** (copies the GitHub secret `EZ_GATE_SECRET` into the Vercel Production env; owner
+   2026-10-21 chose this over pasting from a laptop file). Manual alternative: Vercel → Settings → Environment Variables → add `EZ_GATE_SECRET` (Production) =
    the value in the Desktop file `EZHALAH-GATE-SECRET-paste-into-Vercel-then-delete.txt`, then delete that file.
 2. Dispatch **Front door secret** (stores the same value in the database).
 3. Deploy, then confirm `/sb/rest/v1/…` answers and the database sees the visitor's address.
