@@ -92,7 +92,7 @@ class World:
         if names == ["n"]:
             rows = [[len(ds)]]
         elif "ref" in names:   # the ministry's per-deal row: its date is 'YYYY/MM/DD' text, its m² price a decimal string
-            full = [{"region": d[0], "area": d[2], "cls": d[3], "ref": d[4], "price": d[5], "date": d[7].replace("-", "/"),
+            full = [{"region": d[0], "city": d[1], "area": d[2], "cls": d[3], "ref": d[4], "price": d[5], "date": d[7].replace("-", "/"),
                      "area_m2": d[6], "ppm": str(d[5] / d[6])} for d in ds if d[4] != self.missing_deal]
             rows = [[f[n] for n in names] for f in full]
         else:
@@ -220,11 +220,12 @@ def check_partial(m) -> list[str]:
     if not raises(lambda: bulk(m, World(drop_group="الرياض/النرجس")), m.SourceChanged):
         out.append("a read missing a district (totals don't add up) was accepted")
     writes = []
-    saved = {k: getattr(m, k) for k in ("fetch", "write", "load_ours", "stored_rows")}
+    saved = {k: getattr(m, k) for k in ("fetch", "write", "load_ours", "stored_rows", "run_archive")}
     m.MIN_GROUPS = 1
     m.fetch = lambda mj: saved["fetch"](ministry(m, World(truncate=True)))
     m.write, m.load_ours, m.stored_rows = writes.append, (lambda: OURS), (lambda cols: [])
     m.write_deals = lambda rows, window_start: writes.append(rows)   # the deals table write, stubbed like the aggregates write
+    m.run_archive = lambda dry_run: writes.append("archive") or {}    # the archive write: never reached on a partial read
     argv, sys.argv = sys.argv, ["run"]
     try:
         m.main()
@@ -251,6 +252,46 @@ def check_monitor(m) -> list[str]:
         out.append(f"equal values flagged: {m.compare(same, fresh)}")
     if not m.compare(wrong, fresh):
         out.append("a stored avg_ppm that differs from the ministry was not flagged")
+    return out
+
+
+def check_archive(m) -> list[str]:
+    """THE FULL ARCHIVE (owner 2026-10-21: «make sure we're capturing everything»): every published deal — every
+    class incl. زراعي, matched or not, every year the ministry has — lands in moj_sales_archive; a later run re-reads
+    an overlap so late registrations land; a read short of the ministry's own count writes nothing."""
+    out = []
+    every = {d[4] for d in DEALS}
+    rows: list = []
+    try:
+        rep = m.run_archive(False, post=World(missing_deal=None).post, sleep=lambda s: None, stored_max=None, write=rows.extend)
+    except Exception as e:  # noqa: BLE001
+        return [f"archive backfill raised: {e!r}"]
+    got = {r["deal_ref"] for r in rows}
+    if got != every:
+        out.append(f"backfill kept {sorted(got)}, want every published deal {sorted(every)}")
+    if "زراعي" not in {r["property_class"] for r in rows}:
+        out.append("the farm class (زراعي) was not archived")
+    if not any(r["moj_area"] == "القويعية/الورود" for r in rows):
+        out.append("a deal whose district does not match ours was not archived")
+    if any(r["moj_city"] == "" for r in rows):
+        out.append("the ministry's city was not kept")
+    later: list = []
+    try:
+        m.run_archive(False, post=World(missing_deal=None).post, sleep=lambda s: None, stored_max="2026-06-01", write=later.extend)
+    except Exception as e:  # noqa: BLE001
+        return out + [f"archive overlap run raised: {e!r}"]
+    if {r["deal_ref"] for r in later} != {"r4", "h1", "h2", "a1"}:
+        out.append(f"overlap run read {sorted(r['deal_ref'] for r in later)}, want the last {m.ARCHIVE_OVERLAP_DAYS} days before 2026-06-01 onward")
+    short: list = []
+    if not raises(lambda: m.run_archive(False, post=World(missing_deal="n2").post, sleep=lambda s: None, stored_max=None,
+                                        write=short.extend), m.SourceChanged):
+        out.append("a read missing a deal was accepted")
+    if short:
+        out.append(f"a partial archive read wrote {len(short)} rows")
+    kept, skipped = m.archive_rows([{"ref": "x1", "date": "2026/01/02", "price": None, "area_m2": "10", "ppm": None},
+                                    {"ref": None, "date": "2026/01/02"}, {"ref": "x2", "date": None}], "t")
+    if skipped != 2 or len(kept) != 1 or kept[0]["price"] is not None:
+        out.append(f"archive_rows: kept {kept}, skipped {skipped}; want one row, price NULL (never invented), two skipped")
     return out
 
 
@@ -296,7 +337,8 @@ def check_deal_rows(m) -> list[str]:
     return out
 
 
-CHECKS = [check_truth, check_window, check_ppm, check_matching, check_spread, check_partial, check_monitor, check_deal_rows]
+CHECKS = [check_truth, check_window, check_ppm, check_matching, check_spread, check_partial, check_monitor, check_deal_rows,
+          check_archive]
 
 TRANSLATE = '.translate(str.maketrans({"ة": "ه", "أ": "ا", "إ": "ا", "آ": "ا", "ى": "ي"}))'
 NORM_BODY = '    s = (s or "")' + TRANSLATE + '\n    return _HAY.sub("", re.sub(r"\\s+", " ", s).strip())'
@@ -332,6 +374,14 @@ MUTANTS = [
     ("p10/p90 kept when the deal rows disagree with the ministry's mean", check_spread,
      'if abs(money(sum(prices) / len(prices)) - avg_deal) > Decimal("0.01"):', "if False:"),
     ("monitor blind", check_monitor, "if v(stored, k) != v(fresh, k)]", "if False]"),
+    ("archive keeps only the card's two classes (farm dropped)", check_archive,
+     "            [on_or_after(DATE, start), on_or_before(DATE, end)])\n        if complete:",
+     "            [on_or_after(DATE, start), on_or_before(DATE, end), is_in(\"تصنيف العقار\", CLASSES)])\n        if complete:"),
+    ("archive accepts a read short of the ministry's count", check_archive, "    if why:\n", "    if False:\n"),
+    ("archive overlap removed (late registrations lost)", check_archive,
+     "date.fromisoformat(stored_max) - timedelta(days=ARCHIVE_OVERLAP_DAYS)", "date.fromisoformat(stored_max)"),
+    ("archive backfill reads only the card's 12 months", check_archive,
+     "        return first, anchor\n", "        return window(date.fromisoformat(anchor))[0].isoformat(), anchor\n"),
 ]
 
 

@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "sync (read + write + monitor) · dry-run (read + report, no writes) · monitor"
+        description: "sync (read + write + monitor) · dry-run (read + report, no writes) · monitor · archive (full archive only; backfills when empty) · archive-dry-run"
         required: false
         default: sync
 
@@ -27,7 +27,7 @@ concurrency:
 jobs:
   sync:
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
-    timeout-minutes: 45
+    timeout-minutes: 120   # the one-off archive backfill reads ~45 months and upserts ~715k rows
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -49,6 +49,8 @@ jobs:
             sync) exec python -m scrapers.moj.sales ;;
             dry-run) exec python -m scrapers.moj.sales --dry-run ;;
             monitor) exec python -m scrapers.moj.sales --monitor ;;
+            archive) exec python -m scrapers.moj.sales --archive ;;
+            archive-dry-run) exec python -m scrapers.moj.sales --archive --dry-run ;;
             *) echo "::error::unknown mode '$MODE'"; exit 1 ;;
           esac
 
