@@ -48,6 +48,13 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-10-21. Dwelleo fresh start (owner): 7,953 rows absent from the full catalogue walk switched off.
+  '20261021132404_dwelleo_fresh_start_retire_unseen.sql':
+    'a one-shot retirement, not a field repair a re-scrape can undo: every switched-off row is registered in ' +
+    'ops_adjudicated_retraction in the same migration, which auto_recover_false_inactive() honours, and the migration ' +
+    'asserts at apply that 0 stale rows stay active and 0 switched-off rows are unregistered. A Dwelleo id that comes ' +
+    'back to the live catalogue is re-upserted active by the crawl, which is the correct outcome; dwelleo liveness from ' +
+    'then on is the registry\'s CANDIDATE_PLUS_DIRECT oracle (its own API answers 422 for a gone id)',
   // 2026-10-18. aqar `direction` repaired to the closed facade vocabulary (14 rows).
   '20261018234721_trg_aqar_parse_respects_a_rate_headline.sql':
     'its UPDATEs are an apply-time PROOF inside a rolled-back block (no row is repaired). The outcome it protects, a ' +
