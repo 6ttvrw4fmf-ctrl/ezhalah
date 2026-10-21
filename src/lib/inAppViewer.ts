@@ -57,7 +57,6 @@ export const IN_APP_VIEWER_HOSTS = [
   'ebriza.com.sa',
   'expattrustedhousingriyadh.com',
   'daraa.sa',
-  'razre.sa',
   'shatrirealestate.com',
   'azdadalaqaria.com',
   'aqaralriyadh.com',
@@ -173,6 +172,9 @@ export const IN_APP_PREVIEW_HOSTS = [
   'hasaadestate.com',
   'yameen.sa',
   'maktab.sa',
+  // razre.sa moved here from the iframe list 2026-10-21: since 17:17 UTC its pages send X-Frame-Options SAMEORIGIN
+  // and frame-ancestors 'self' (the speed guard went red: «now REFUSES framing»), so a framed card would be blank.
+  'razre.sa',
   // Owner 2026-10-20 («every listing goes to the map … check all not inside the app»): the last eleven preview
   // sites still opened the SOURCE in a new tab, so Ezhalah's ad page — and its pin / district border — never
   // showed for them (muktamel 4,077 ads, ialqarawi 2,609, aqarcity 2,082 + eight small ones). Same page as
