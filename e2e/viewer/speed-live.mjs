@@ -77,7 +77,6 @@ const SITES = [
   { host: 'ebriza.com.sa', table: 'ebriza_residential_listings' },
   { host: 'expattrustedhousingriyadh.com', table: 'expattrusted_residential_listings' },
   { host: 'daraa.sa', table: 'daraa_residential_listings' },
-  { host: 'razre.sa', table: 'razre_residential_listings' },
   { host: 'shatrirealestate.com', table: 'shatri_residential_listings' },
   { host: 'azdadalaqaria.com', table: 'azdad_commercial_listings' },
   { host: 'aqaralriyadh.com', table: 'aqaralriyadh_residential_listings' },

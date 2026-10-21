@@ -114,6 +114,7 @@ export const DISTRICT_MAP_PLATFORMS: readonly string[] = [
   'opensooq', 'justsa', 'senan', 'bahadhabab', 'erapulse', 'maqam', 'jawher', 'm3tmd',
   'azure', 'holoul', 'superoffice', 'alhoshan', 'arsh', 'flow', 'nowaisiry', 'hasaad',
   'almuteb', 'nawafeth', 'wadod', 'october', 'hazim', 'eydah', 'eightfloor',
+  'razre',   // 2026-10-21: refuses framing now, so its ad opens on Ezhalah's page — 94 ads, all with a district, no pin
 ];
 /** The place an Aqar ad's own link names, e.g. sa.aqar.fm/شارع-الصليحى-212-الفرعاء-منطقة-عسير-6836489 →
  *  «شارع الصليحى 212 الفرعاء منطقة عسير، السعودية». Only sa.aqar.fm; the trailing ad number is dropped; a

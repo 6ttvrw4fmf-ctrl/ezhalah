@@ -87,3 +87,20 @@ renewed at 50 minutes. The front door labels every call `x-ezhalah-human: pass|n
 `EZ_TURNSTILE_ENFORCE=1`. Runs only when the front door is on. Cloudflare requires Invisible-mode sites to reference
 its Turnstile Privacy Addendum in their privacy policy. Done 2026-10-21: owner-approved line in Privacy Policy §6
 (src/data/legal.ts + legalEnglish.ts, «Last updated» 21 October 2026), linking https://www.cloudflare.com/turnstile-privacy-policy/.
+
+## Network guard: no VPN, Tor or server networks (owner 2026-10-21: «aqar and those websites also don't work with VPN»)
+
+- Lists in `ops_network_block`, refreshed daily at 03:41 UTC by **Network guard lists**
+  (`.github/workflows/network-block-lists.yml`): Tor exits (check.torproject.org), X4BNet `lists_vpn` VPN and
+  datacenter ranges. The X4BNet repository states no license. It is a public list of address ranges (facts) used
+  widely for exactly this. If that ever matters, swap the source; nothing else changes.
+- Judged in `robot_gate` (migration 20261021224031) **only for visitors the front door vouches for**. Front-door
+  traffic reaches Cloudflare from our own server (a datacenter address), so judging that address would block
+  everyone. Lookups are fail-open.
+- Our own browser robots (GitHub, Google Cloud = datacenter) send `x-ezhalah-robot: <EZ_GATE_SECRET>`. The front
+  door turns that into `x-ezhalah-robot: 1` for the database, and they are never judged.
+- **Mode** (`guard.network_block_mode`): `watch` today (count only, in `ops_network_block_hits`, POST/RPC calls),
+  then `block` (HTTP 403 «This network is not supported», with a message to turn the VPN off), or `off`.
+  Switch: `update guard.network_block_mode set mode = 'block', set_at = now();` (service role / SQL editor).
+- Before `block`: (1) a day of `watch` numbers, (2) our Playwright robots that browse the real site send the robot
+  pass, (3) the app shows a friendly «turn off your VPN» message on that 403 instead of a generic error.
