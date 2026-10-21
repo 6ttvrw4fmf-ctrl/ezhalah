@@ -19,6 +19,42 @@ const urlFor = (m: string) =>
 
 const PUBLIC_KEY = "sb_publishable_vXzwxdpfrzmbwtbR5aXcKA_cMUO8hVB";
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+// ── PER-CALLER LIMIT (security Phase 1.7, owner-approved plan 2026-10-21) ─────────────────────────
+// The publishable key is public, so the spend gate above is the only brake — and it is GLOBAL: one script could burn
+// the day's budget and every real user would be stopped with it. public.ai_caller_gate() counts calls per caller
+// (60/min, 600/hour per function). The caller is the connection address, hashed here and never stored in the clear;
+// the tag (cf/rip/xff) records which header supplied it. FAIL OPEN on purpose: an unreachable limiter must not take
+// the chat down, and the global spend gate still fails closed behind it, so money stays bounded either way.
+const CALLER_GATE_TIMEOUT_MS = 1500;
+async function callerKey(req: Request): Promise<string> {
+  const cf = req.headers.get("cf-connecting-ip")?.trim();
+  const rip = req.headers.get("x-real-ip")?.trim();
+  const xff = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim();
+  const [tag, ip] = cf ? ["cf", cf] : rip ? ["rip", rip] : xff ? ["xff", xff] : ["", ""];
+  if (!ip) return "";
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("ezhalah-caller:" + ip));
+  return tag + ":" + Array.from(new Uint8Array(d).slice(0, 12), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function callerGate(req: Request, fn: string): Promise<{ allow: boolean; reason?: string }> {
+  if (!SUPABASE_URL || !SERVICE_KEY) return { allow: true, reason: "caller gate: no service credentials" };
+  try {
+    const caller = await callerKey(req);
+    if (!caller) return { allow: true, reason: "caller gate: no address" };
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/ai_caller_gate`, {
+      method: "POST",
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({ p_caller: caller, p_fn: fn }),
+      signal: AbortSignal.timeout(CALLER_GATE_TIMEOUT_MS),
+    });
+    if (!r.ok) return { allow: true, reason: `caller gate http ${r.status}` };
+    const g = await r.json();
+    return g && g.allow === false ? { allow: false, reason: String(g.reason ?? "limit") } : { allow: true };
+  } catch (e) {
+    return { allow: true, reason: `caller gate error: ${String((e as Error)?.message ?? e)}` };
+  }
+}
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -41,6 +77,8 @@ Deno.serve(async (req: Request) => {
   const apikey = req.headers.get("apikey") ?? "";
   const ok = [ANON_KEY, PUBLIC_KEY].filter(Boolean);
   if (!ok.includes(token) && !ok.includes(apikey)) return json({ error: "unauthorized" }, 401);
+  const cg = await callerGate(req, "translit");
+  if (!cg.allow) return json({ error: "rate limited", reason: cg.reason }, 429);
 
   if (!GEMINI_API_KEY) return json({ error: "model not configured" }, 503);
 
