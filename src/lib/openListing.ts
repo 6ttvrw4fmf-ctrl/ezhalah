@@ -4,6 +4,7 @@ import type { Listing } from '@/data/listings';
 import { getLocale } from '@/i18n';
 import { gathernClickThroughUrl } from '@/lib/gathernUrl';
 import { localizeAdUrl } from '@/lib/adLocale';
+import { safeHttpUrl } from '@/lib/safeUrl';
 
 // Open a listing on its source platform in the way that "views it normally" for the user:
 //   • WEB  → a new browser tab (real Aqar page in their own Chrome; can't be an iframe — Aqar sends
@@ -41,7 +42,8 @@ export function listingOpenUrl(listing: Listing): string | undefined {
     ? gathernClickThroughUrl(raw)
     : localizeAqarUrl(raw, getLocale());
   // Deal App / Gathern follow the app's language too (Arabic app → Arabic ad). Frame and new tab agree.
-  return localizeAdUrl(url, getLocale());
+  // Only a real web page ever opens (safeUrl.ts): a stored javascript:/data: address returns undefined.
+  return safeHttpUrl(localizeAdUrl(url, getLocale()));
 }
 
 export async function openListing(listing: Listing): Promise<void> {

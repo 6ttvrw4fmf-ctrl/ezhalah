@@ -9,6 +9,7 @@ import { TAP44 } from '@/theme/palette';
 import { useI18n } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { runAfterAnimation } from '@/lib/afterAnimation';
+import { safeHttpUrl } from '@/lib/safeUrl';
 import ListingPreview from '@/components/ListingPreview';
 import type { Listing } from '@/data/listings';
 import { SourceBadge } from '@/components/ResultCard';
@@ -86,7 +87,7 @@ export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, 
   const sheetHRef = useRef(sheetH); sheetHRef.current = sheetH;
   const current = tabs[Math.min(active, tabs.length - 1)];
   const curKey = current ? adTabKey(current) : '';
-  const activeUrl = current?.url ?? '';
+  const activeUrl = safeHttpUrl(current?.url) ?? '';
 
   // 0 = off its edge, 1 = in place. dragY adds the sheet's live finger offset on top.
   const progress = useRef(new Animated.Value(0)).current;
@@ -443,7 +444,7 @@ export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, 
 // top shows progress until `load`, and a slow page gets a small «open in a new window» pill — the
 // page is never taken away.
 function TabFrame({ tab, visible, t, onNavigated }: { tab: AdTab; visible: boolean; t: (k: string) => string; onNavigated: () => void }) {
-  const url = tab.url;
+  const url = safeHttpUrl(tab.url) ?? 'about:blank';
   const { host } = splitUrlForDisplay(url);
   const [loaded, setLoaded] = useState(false);
   // The frame's first load is the page we asked for; every later one is the user moving inside it.
