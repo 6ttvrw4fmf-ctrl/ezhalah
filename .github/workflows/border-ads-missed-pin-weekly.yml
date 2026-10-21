@@ -40,6 +40,8 @@ jobs:
         env:
           PER_SITE: ${{ inputs.per_site || '6' }}
           SITES: ${{ inputs.sites }}
+          # The two exclusion registers are hidden from the anon key by row-level security (they answer []).
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: >-
           node --experimental-strip-types scripts/check-border-ads-for-missed-pins.ts
           --per-site "$PER_SITE" ${SITES:+--sites "$SITES"}

@@ -30,11 +30,11 @@ const ONLY = arg('--sites')?.split(',');
 const PLATFORMS = (lifted.DISTRICT_MAP_PLATFORMS as readonly string[]).filter((p) => !ONLY || ONLY.includes(p));
 const headers = { apikey: PUBLIC_SUPABASE_ANON_KEY, Authorization: `Bearer ${PUBLIC_SUPABASE_ANON_KEY}` };
 
-async function get<T>(path: string): Promise<T> {
+async function get<T>(path: string, h: Record<string, string> = headers): Promise<T> {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 30_000);
   try {
-    const r = await fetch(`${PUBLIC_SUPABASE_URL}/rest/v1/${path}`, { headers, signal: ac.signal });
+    const r = await fetch(`${PUBLIC_SUPABASE_URL}/rest/v1/${path}`, { headers: h, signal: ac.signal });
     if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 200)}`);
     return (await r.json()) as T;
   } catch (e) {
@@ -44,8 +44,18 @@ async function get<T>(path: string): Promise<T> {
 }
 
 // Points and rows we strip ON PURPOSE: a source page still shows them, and that is not a miss.
-const defaults = await get<Array<{ lat: number; lng: number }>>('ops_default_pin_register?select=lat,lng');
-const far = await get<Array<{ source_table: string; listing_id: number; lat: number; lng: number }>>('ops_far_pin_register?select=source_table,listing_id,lat,lng');
+// Row-level security hides both registers from the anon key: it answers 200 with [] (measured 2026-10-21), which
+// read as «nothing is excluded» and flagged registered defaults as misses. They are read with the workflow's
+// service key, and an empty answer is a FAILURE, never an empty register.
+const svc = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const regHeaders = svc ? { apikey: svc, Authorization: `Bearer ${svc}` } : headers;
+async function register<T>(path: string): Promise<T[]> {
+  const rows = await get<T[]>(path, regHeaders);
+  if (!rows.length) { console.error(`FETCH FAILED (not an empty answer): ${path} returned no rows — set SUPABASE_SERVICE_ROLE_KEY`); process.exit(2); }
+  return rows;
+}
+const defaults = await register<{ lat: number; lng: number }>('ops_default_pin_register?select=lat,lng');
+const far = await register<{ source_table: string; listing_id: number; lat: number; lng: number }>('ops_far_pin_register?select=source_table,listing_id,lat,lng');
 const skipPoints = new Set([...defaults, ...far].map((d) => key(Number(d.lat), Number(d.lng))));
 
 // A pair another ad of the SAME platform already carries is a «similar ads» card, not this ad's pin.
