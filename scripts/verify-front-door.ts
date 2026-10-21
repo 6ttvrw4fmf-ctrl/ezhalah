@@ -46,7 +46,7 @@ const base = 'https://x.supabase.co';
 check('only /rest/v1 calls go through the front door; auth and functions stay direct',
   frontDoorUrl(`${base}/rest/v1/search_listings_ar?select=a`, base) === '/sb/rest/v1/search_listings_ar?select=a'
   && frontDoorUrl(`${base}/auth/v1/token`, base) === null && frontDoorUrl(`${base}/functions/v1/agent`, base) === null);
-check('the app uses the front door only when EXPO_PUBLIC_FRONT_DOOR is "1"', /export const FRONT_DOOR = process\.env\.EXPO_PUBLIC_FRONT_DOOR === '1';/.test(client));
+check('the app uses the front door unless the kill switch EXPO_PUBLIC_FRONT_DOOR=0 is set', /export const FRONT_DOOR = process\.env\.EXPO_PUBLIC_FRONT_DOOR !== '0';/.test(client));
 const rw = (v: typeof vercel) => (v.rewrites ?? []).some((r) => r.source === '/sb/rest/v1/:ezsbpath*' && r.destination === '/api/sb?__p=:ezsbpath*');
 check('vercel.json routes /sb/rest/v1/* to the front door', rw(vercel));
 const dropsRewriteParams = (s: string) => /searchParams\.delete\('__p'\);\s*url\.searchParams\.delete\('ezsbpath'\);/.test(s);
@@ -82,6 +82,30 @@ mustCatch('a pass accepted without checking the signature', await (async () => {
   const loose = async (v: string) => /^(\d+)\.[0-9a-f]{64}$/.test(v);   // what a signature-blind check would do
   return (await loose(flipped)) !== (await hp.humanPassValid(flipped, now + 10, 'k-secret'));
 })());
+
+// 6. ON for everyone (owner 2026-10-21): a reply is used only if OUR front door sent it. A build with no /sb route
+//    (CI's local server, a preview) answers 404 without x-ezhalah-bot and must fall back to the direct call, or every
+//    search there fails. EXECUTED.
+const answered = (await liftSymbols(join(root, 'src/lib/supabase.ts'), [{ header: 'export function frontDoorAnswered(' }], ['frontDoorAnswered']))
+  .frontDoorAnswered as (s: number, f: boolean) => boolean;
+check('only our front door\'s own replies are used; a missing route or a gateway failure falls back to direct',
+  answered(200, true) && answered(206, true) && answered(401, true) && !answered(404, false) && !answered(200, false)
+  && !answered(502, true) && !answered(503, true) && !answered(504, true));
+const blindCopy = join(mkdtempSync(join(tmpdir(), 'fd-')), 'supabase.ts');
+writeFileSync(blindCopy, client.replace('return fromFrontDoor && status', 'return status'));
+const blind = (await liftSymbols(blindCopy, [{ header: 'export function frontDoorAnswered(' }], ['frontDoorAnswered'])).frontDoorAnswered as (s: number, f: boolean) => boolean;
+mustCatch('a 404 from a build with no front door treated as an answer', blind(404, false) === true);
+
+// 7. The door and both guards run ONLY on the real site: Turnstile throws error 110200 on any other host, and that
+//    uncaught error broke CI's built-app search journey on 2026-10-21. Local/CI/preview builds stay direct.
+const hostMod = await liftSymbols(join(root, 'src/lib/supabase.ts'),
+  [{ header: 'export const FRONT_DOOR_HOSTS', endsWith: /;$/ }, { header: 'export function frontDoorHost(', endsWith: /\}$/ }], ['frontDoorHost']);
+const onHost = hostMod.frontDoorHost as (h: string) => boolean;
+check('the front door runs on the real site only, never on localhost, CI or previews',
+  onHost('ezhalah-app.vercel.app') && !onHost('localhost') && !onHost('127.0.0.1') && !onHost('ezhalah-app-git-x.vercel.app')
+  && /&& frontDoorHost\(window\.location\?\.hostname \?\? ''\);/.test(client));
+check('a Turnstile failure can never become an uncaught page error', /'error-callback': \(\) => true/.test(client));
+mustCatch('the host gate removed from the switch', !/&& frontDoorHost\(window\.location\?\.hostname \?\? ''\);/.test(client.replace("\n  && frontDoorHost(window.location?.hostname ?? '');", ';')));
 
 if (failed) { console.error(`\n❌ verify-front-door: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-front-door: the front door opens only onto /rest/v1 and trusts no caller\'s own claims.');
