@@ -15,6 +15,7 @@ import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SourceBadge, FEATURE_META, arAttrValue } from '@/components/ResultCard';
 import { MOJ_SOURCE_URL, PRICE_MAX, PRICE_MIN, dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojDeals, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojDeal, type MojFacts, districtEmbedUrl, districtPlace, type DistrictPlace, fetchSimilarListings, type SimilarCard } from '@/data/adPageData';
 import { listingOpenUrl } from '@/lib/openListing';
+import { safeHttpUrl } from '@/lib/safeUrl';
 import type { Listing } from '@/data/listings';
 
 // THE IN-APP AD PAGE for the sites that cannot be framed (lib/inAppViewer.ts IN_APP_PREVIEW_HOSTS):
@@ -88,8 +89,9 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
   // window.open(url, '_blank', 'noopener') ALWAYS returns null, so a blocked tab could not be told from an
   // opened one; open plainly, then sever the opener by hand. null here = genuinely blocked.
   const open = (href: string = url): boolean => {
-    if (Platform.OS !== 'web' || !href) return false;
-    const w = window.open(href, '_blank');
+    const safe = safeHttpUrl(href);
+    if (Platform.OS !== 'web' || !safe) return false;
+    const w = window.open(safe, '_blank');
     if (w) w.opener = null;
     return !!w;
   };
