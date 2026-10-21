@@ -13,7 +13,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
-import { SHARE_BLURB_AR, SHARE_BLURB_EN, SHARE_LINK, liveSiteCount, shareLead, shareMessage } from '@/lib/share';
+import { SHARE_LINK, liveSiteCount, shareLead, shareMessage } from '@/lib/share';
 
 // Real, resolvable share link (the deployed app), not a placeholder.
 // The link, the sentence and the message all come from lib/share.ts. This file used to hold its own
@@ -119,7 +119,8 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.pvT}>{t('Ezhalah')}</Text>
-            <Text style={s.pvS} numberOfLines={2}>{locale === 'ar' ? SHARE_BLURB_AR : SHARE_BLURB_EN}</Text>
+            {/* The sentence that will actually be sent (owner 2026-10-20), never the page's SEO description. */}
+            <Text style={s.pvS} numberOfLines={2}>{lead}</Text>
             <Text style={s.pvL} numberOfLines={1}>{DOMAIN}</Text>
           </View>
         </View>
