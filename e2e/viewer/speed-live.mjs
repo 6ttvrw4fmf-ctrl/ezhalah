@@ -208,5 +208,20 @@ if (process.env.GITHUB_STEP_SUMMARY) {
   ].join('\n'));
 }
 
+// THE TIME TRACKER (owner 2026-10-21: «create an agent that tracks the time»). Every measured site's median goes to
+// public.viewer_site_speed; the app reads the slow ones and shows its «open in a new window» button the moment such
+// an ad opens. A site not measured this run (rate-limited, challenged) keeps its last row, which ages out of the
+// app's 2-day window on its own. A failed write is reported and turns the run red — never silent.
+if (SB && KEY && medians.length) {
+  const res = await fetch(`${SB}/rest/v1/viewer_site_speed?on_conflict=host`, {
+    method: 'POST',
+    headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify(medians.map((m) => ({ host: m.host, median_ms: Math.min(m.med, 2_000_000_000), samples: SAMPLES, measured_at: new Date().toISOString() }))),
+    signal: AbortSignal.timeout(30_000),
+  }).catch((e) => ({ ok: false, status: 0, text: async () => String(e) }));
+  if (res.ok) console.log(`✓ saved ${medians.length} site speeds to viewer_site_speed`);
+  else fail(`could not save site speeds to viewer_site_speed: HTTP ${res.status} ${(await res.text()).slice(0, 160)}`);
+}
+
 if (failed) { console.error(`\n✗ ad-viewer speed guard: ${failed} problem(s)`); process.exit(1); }
 console.log('\n✓ ad-viewer speed guard: every in-app site still frames, shows fast, and production has the fix');
