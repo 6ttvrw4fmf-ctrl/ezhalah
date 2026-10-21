@@ -1,6 +1,10 @@
 // Hermetic proof of the weekly missed-pin robot's judgement (scripts/lib/missedPinCandidates.ts).
 // Every fixture is a shape copied from a real page on 2026-10-20 night; every exclusion is a false alarm
 // that night's sweeps actually produced. No network.
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { judgeSite, pairsIn, key, type AdSample } from './lib/missedPinCandidates.ts';
 
 let failed = 0;
@@ -40,6 +44,38 @@ check('a row we strip on purpose (far from its city) is skipped',
   !judgeSite([{ ...own[0], listingId: 1 }, { ...own[1], listingId: 2 }], new Set(), { points: new Set(), listingIds: new Set([1, 2]) }).flagged);
 check('a registered default point is skipped',
   !judgeSite(own, new Set(), { points: new Set([key(26.317741424323515, 43.907139560208286), key(26.317632311821644, 43.90723915422684)]), listingIds: new Set() }).flagged);
+
+// Mutation proofs: break the REAL module one way at a time and prove a fixture above goes red on it.
+const LIB = new URL('./lib/missedPinCandidates.ts', import.meta.url);
+const SRC = readFileSync(LIB, 'utf8');
+const dir = mkdtempSync(join(tmpdir(), 'missed-pin-'));
+async function mutant(name: string, from: string, to: string) {
+  if (!SRC.includes(from)) throw new Error(`mutation anchor vanished: ${name}`);
+  const p = join(dir, `m${Math.random().toString(36).slice(2)}.ts`);
+  writeFileSync(p, SRC.replace(from, to));
+  return (await import(pathToFileURL(p).href)) as typeof import('./lib/missedPinCandidates.ts');
+}
+const mutantCaught = (label: string, caught: boolean) => check(`(mutation) ${label}`, caught);
+{
+  const m = await mutant('no decode', "let t = text.replace(/&quot;/g, '\"')", "let t = text; if (0) t = text.replace(/&quot;/g, '\"')");
+  mutantCaught('dropping the &quot; decode blinds the sokok fixture', !m.pairsIn(ad('s', '&quot;map&quot;:{&quot;latitude&quot;:26.437075817310653,&quot;longitude&quot;:43.88399117211289}')).length);
+}
+{
+  const m = await mutant('no repeat filter', '(freq.get(k) ?? 0) < 3 &&', 'true &&');
+  mutantCaught('dropping the repeated-point filter flags the bossbih office', m.judgeSite([1, 2, 3, 4].map(office), new Set(), none).flagged);
+}
+{
+  const m = await mutant('one ad is enough', 'missed.length >= 2', 'missed.length >= 1');
+  mutantCaught('lowering the threshold to one ad raises on a single stray pair', m.judgeSite(own.slice(0, 1), new Set(), none).flagged);
+}
+{
+  const m = await mutant('no known-pin filter', '!knownPins.has(k) &&', 'true &&');
+  mutantCaught('dropping the known-pin filter flags the alshawaf similar-ads cards', m.judgeSite(related, new Set([key(25.4218, 49.6376), key(25.4276, 49.5921)]), none).flagged);
+}
+{
+  const m = await mutant('no KSA gate', 'if (!inKsa(a, b)) continue;', '');
+  mutantCaught('dropping the Saudi gate reads a pair in Sudan', m.pairsIn(ad('x', '"lat":11.2477085,"lng":25.9967148')).length > 0);
+}
 
 if (failed) { console.log(`\n❌ verify-missed-pin-candidates: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-missed-pin-candidates: the robot reads every shape seen live and ignores every false alarm seen live.');
