@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AppProvider } from '@/store';
 import { classifyRejection, initObservability, reportError } from '@/lib/observability';
 import { LocaleProvider, useI18n } from '@/i18n';
+import { firstChildLeftRow, useDocumentRtl } from '@/lib/useDocumentRtl';
 import { colors } from '@/theme/tokens';
 import { ThemeProvider, useTheme } from '@/theme/theme';
 import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
@@ -67,9 +68,12 @@ if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && !(globalThis a
 // the document is RTL in Arabic, a plain `flexDirection: 'row'` would auto-mirror the sidebar to the
 // right; `row-reverse` under RTL cancels that mirroring so the sidebar (the first child) stays on the
 // physical left in both locales. On mobile/native it collapses away into a tap-to-open drawer.
+// The row direction follows the page's ACTUAL `dir`, not the language state (owner 2026-10-21): see
+// src/lib/useDocumentRtl.ts for the live reproduction of the sidebar landing on the right.
 function Shell() {
   const docked = useDocked();
-  const { isRTL } = useI18n();
+  const { isRTL: localeRtl } = useI18n();
+  const docRtl = useDocumentRtl(localeRtl);
   // Space occupied by a docked third-party auth prompt — Google One Tap's legacy sheet, on WHICHEVER
   // edge it lands on. Zero whenever nothing is docked; see src/lib/bottomPromptInset.ts for both
   // measured bugs this prevents. The sheet is `position:fixed; z-index:9999; pointer-events:auto`
@@ -119,7 +123,7 @@ function Shell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
-    <View style={{ flex: 1, flexDirection: isRTL ? 'row-reverse' : 'row', paddingTop: promptInset.top, paddingBottom: promptInset.bottom }}>
+    <View style={{ flex: 1, flexDirection: firstChildLeftRow(docRtl), paddingTop: promptInset.top, paddingBottom: promptInset.bottom }}>
       <StatusBar style={resolved === 'dark' ? 'light' : 'dark'} />
       {/* /auth is a focused full-screen moment — no docked sidebar there. The /agent light-pin
           special-case (owner 2026-08-29) was reversed 2026-08-30: dark mode is global and sticky,
