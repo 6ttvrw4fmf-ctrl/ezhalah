@@ -13,9 +13,17 @@ if (typeof window !== 'undefined') {
 // FRONT_DOOR is on, database reads go to /sb/rest/v1/… on our own site instead of straight to supabase.co, so Vercel
 // BotID can check for a real browser and the visitor's real address reaches the database. Auth, storage and edge
 // functions stay direct. While the back door is still open, a front door that answers 502/503/504 or cannot be
-// reached is retried directly, so a front-door problem never becomes a failed search. OFF by default.
-export const FRONT_DOOR = process.env.EXPO_PUBLIC_FRONT_DOOR === '1';
-const webFront = typeof window !== 'undefined' && typeof window.fetch === 'function' && FRONT_DOOR && !!url;
+// reached is retried directly, so a front-door problem never becomes a failed search. ON since 2026-10-21 (owner: «do
+// it all», after the door, BotID, Turnstile and the handshake were tested live). Kill switch: EXPO_PUBLIC_FRONT_DOOR=0
+// in the Vercel env, then a deploy.
+export const FRONT_DOOR = process.env.EXPO_PUBLIC_FRONT_DOOR !== '0';
+// ONLY on the real site. The door (/sb) and both guards exist only there, and Cloudflare Turnstile answers any other
+// host with error 110200 (measured 2026-10-21: CI's local build threw «Uncaught TurnstileError 110200» and its search
+// journey failed). Local, CI and preview builds keep talking to the database directly, exactly as before.
+export const FRONT_DOOR_HOSTS = ['ezhalah-app.vercel.app'];
+export function frontDoorHost(hostname: string): boolean { return FRONT_DOOR_HOSTS.includes(hostname); }
+const webFront = typeof window !== 'undefined' && typeof window.fetch === 'function' && FRONT_DOOR && !!url
+  && frontDoorHost(window.location?.hostname ?? '');
 
 /** supabase.co/rest/v1/<rest> → /sb/rest/v1/<rest>; null for anything that is not a REST call. */
 export function frontDoorUrl(target: string, base: string | undefined): string | null {
@@ -30,7 +38,13 @@ function frontDoorFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
   const front = frontDoorUrl(target, url);
   if (!front) return window.fetch(input, init);
   const direct = () => window.fetch(input, init);
-  return window.fetch(front, init).then((r) => (r.status === 502 || r.status === 503 || r.status === 504 ? direct() : r), direct);
+  return window.fetch(front, init).then((r) => (frontDoorAnswered(r.status, r.headers.has('x-ezhalah-bot')) ? r : direct()), direct);
+}
+
+/** A reply counts only if OUR front door sent it (it always sets x-ezhalah-bot) and it is not a gateway failure.
+ *  Anything else (a local/preview build with no /sb route answering 404, a 502/503/504) is retried directly. */
+export function frontDoorAnswered(status: number, fromFrontDoor: boolean): boolean {
+  return fromFrontDoor && status !== 502 && status !== 503 && status !== 504;
 }
 
 if (webFront) {
@@ -65,6 +79,8 @@ function startTurnstile(): void {
           void window.fetch('/api/human', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token }) }).catch(() => {});
         },
         'refresh-expired': 'auto',
+        // A Turnstile failure must never surface as an uncaught page error: no pass, the call is labelled "none".
+        'error-callback': () => true,
       });
       // The pass lasts an hour; renew at 50 minutes so a long visit never runs without one.
       setInterval(() => { try { ts.reset(id); } catch { /* renew failed: the next call still flows */ } }, 50 * 60 * 1000);
