@@ -39,6 +39,38 @@ if (webFront) {
     const { initBotId } = require('botid/client/core') as typeof import('botid/client/core');
     initBotId({ protect: ['GET', 'POST', 'PATCH', 'DELETE', 'HEAD'].map((method) => ({ path: '/sb/*', method })) });
   } catch { /* the guard failed to start: requests still flow, the server reads them as unknown */ }
+  startTurnstile();
+}
+
+// CLOUDFLARE TURNSTILE, INVISIBLE (owner 2026-10-21: «users shouldn't have to verify every time»). Once per visit the
+// browser solves Cloudflare's invisible check and trades the token at /api/human for a one-hour pass cookie the front
+// door reads; it renews itself before the hour runs out. Nothing is ever shown and nothing waits on it: a visitor
+// without a pass still searches (soft mode), and the front door only labels the call (x-ezhalah-human).
+export const TURNSTILE_SITE_KEY = '0x4AAAAAAFfpkJx1Y3UJ9QLd';
+function startTurnstile(): void {
+  try {
+    const host = document.createElement('div');
+    host.setAttribute('aria-hidden', 'true');
+    host.style.cssText = 'position:fixed;width:0;height:0;overflow:hidden;bottom:0;left:0';
+    document.body.appendChild(host);
+    const s = document.createElement('script');
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    s.async = true;
+    s.onload = () => {
+      const ts = (window as unknown as { turnstile?: { render: (el: HTMLElement, o: object) => string; reset: (id: string) => void } }).turnstile;
+      if (!ts) return;
+      const id = ts.render(host, {
+        sitekey: TURNSTILE_SITE_KEY,
+        callback: (token: string) => {
+          void window.fetch('/api/human', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token }) }).catch(() => {});
+        },
+        'refresh-expired': 'auto',
+      });
+      // The pass lasts an hour; renew at 50 minutes so a long visit never runs without one.
+      setInterval(() => { try { ts.reset(id); } catch { /* renew failed: the next call still flows */ } }, 50 * 60 * 1000);
+    };
+    document.head.appendChild(s);
+  } catch { /* Turnstile failed to start: requests still flow, the front door reads them as "none" */ }
 }
 
 // Null when env isn't configured — the data layer falls back to bundled mock data so the app

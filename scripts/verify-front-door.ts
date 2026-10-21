@@ -60,5 +60,28 @@ mustCatch('a path rule loose enough to climb to auth', loose('../auth/v1/user') 
 mustCatch('the proxy forwarding a caller-supplied handshake', !noSmuggle(passList + ", 'x-ezhalah-gate'"));
 mustCatch('the rewrite removed', !rw({ rewrites: (vercel.rewrites ?? []).filter((r) => r.source !== '/sb/rest/v1/:ezsbpath*') }));
 
+// 5. Cloudflare Turnstile (owner 2026-10-21): only our server can mint the one-hour human pass, and it cannot be
+//    stretched, forged or reused under another key. EXECUTED against api/_humanPass.ts.
+const hp = await import('../api/_humanPass.ts');
+const now = 1_800_000_000;
+const pass = await hp.mintHumanPass(now, 'k-secret');
+const [exp, sig] = pass.split('.');
+const flipped = `${exp}.${sig.slice(0, -1)}${sig.endsWith('0') ? '1' : '0'}`;
+const passOk = (await hp.humanPassValid(pass, now + 10, 'k-secret'))
+  && !(await hp.humanPassValid(pass, now + hp.HUMAN_PASS_SECONDS + 1, 'k-secret'))   // expired
+  && !(await hp.humanPassValid(pass, now + 10, 'other-key'))                          // another key
+  && !(await hp.humanPassValid(flipped, now + 10, 'k-secret'))                        // forged signature
+  && !(await hp.humanPassValid(`${Number(exp) + 86_400}.${sig}`, now + 10, 'k-secret')) // stretched expiry
+  && !(await hp.humanPassValid('', now, 'k-secret'));
+check('the human pass is minted only by our key, expires in an hour and cannot be forged or stretched', passOk);
+check('the pass cookie is read, never forwarded to the database', /humanPassValid\(readCookie\(request\.headers\.get\('cookie'\)/.test(proxy) && !/'cookie'/.test(passList));
+check('Turnstile starts only with the front door, invisibly, with our site key',
+  /if \(webFront\) \{[\s\S]{0,600}startTurnstile\(\);\s*\}/.test(client) && /render=explicit/.test(client) && /TURNSTILE_SITE_KEY = '0x4[A-Za-z0-9_-]+'/.test(client));
+mustCatch('the cookie forwarded upstream', /'cookie'/.test(passList + ", 'cookie'"));
+mustCatch('a pass accepted without checking the signature', await (async () => {
+  const loose = async (v: string) => /^(\d+)\.[0-9a-f]{64}$/.test(v);   // what a signature-blind check would do
+  return (await loose(flipped)) !== (await hp.humanPassValid(flipped, now + 10, 'k-secret'));
+})());
+
 if (failed) { console.error(`\n❌ verify-front-door: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-front-door: the front door opens only onto /rest/v1 and trusts no caller\'s own claims.');
