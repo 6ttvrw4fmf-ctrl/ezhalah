@@ -20,6 +20,7 @@ const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';
 const SB = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const SAMPLES = 3;
+const medians = []; // { host, med } per measured site, for the slow watch list at the end
 const BUDGET_MS = 10000; // owner 2026-10-17: «if it's below 10 seconds no problem» (was 3000)
 const SITES = [
   { host: 'gathern.co', table: 'gathern_residential_listings' },
@@ -176,6 +177,7 @@ try {
     }
     if (!times.length) { console.log(`! ${site.host}: every sample was rate-limited, challenged or unreachable from this egress — inconclusive this run`); continue; }
     const med = [...times].sort((a, b) => a - b)[Math.floor(times.length / 2)];
+    medians.push({ host: site.host, med });
     if (med > BUDGET_MS) fail(`${site.host}: median ${med} ms to show the ad inside Ezhalah (budget ${BUDGET_MS} ms)`);
     else ok(`${site.host}: median ${med} ms to show the ad inside Ezhalah (budget ${BUDGET_MS} ms)`);
   }
@@ -187,6 +189,24 @@ try {
   else if (!bundle.includes('ad-load-bar') || !bundle.includes('ad-slow-hint')) fail('production no longer ships the instant-show tab (ad-load-bar / ad-slow-hint missing)');
   else ok('production ships the instant-show tab (no blank loading cover)');
 } finally { await browser.close(); }
+
+// THE SLOW WATCH LIST (owner 2026-10-21: «some ads r slowly … make a GitHub monitors them»). The budget above is
+// the hard line (red, alert). Between SLOW_MS and the budget a site still opens but feels slow; it is listed every
+// run as a GitHub warning and ranked in the run summary, so a site drifting toward the line is seen before it
+// crosses it. Measured that day: aqaralmuhaysini.com 9.2 s, dallali.com 7.8 s, sodasyat.sa 4.9 s.
+const SLOW_MS = 5000;
+const ranked = [...medians].sort((a, b) => b.med - a.med);
+const slow = ranked.filter((m) => m.med > SLOW_MS && m.med <= BUDGET_MS);
+for (const m of slow) console.log(`::warning title=Slow in-app ad::${m.host} takes ${(m.med / 1000).toFixed(1)} s to show its ad inside Ezhalah (watch line ${SLOW_MS / 1000} s, hard limit ${BUDGET_MS / 1000} s)`);
+console.log(`\nslow watch (${SLOW_MS / 1000}–${BUDGET_MS / 1000} s): ${slow.length ? slow.map((m) => `${m.host} ${(m.med / 1000).toFixed(1)} s`).join(' · ') : 'none'}`);
+if (process.env.GITHUB_STEP_SUMMARY) {
+  const { appendFileSync } = await import('node:fs');
+  const row = (m) => `| ${m.host} | ${(m.med / 1000).toFixed(1)} s | ${m.med > BUDGET_MS ? '🔴 over the limit' : m.med > SLOW_MS ? '🟡 slow' : '🟢'} |`;
+  appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
+    `### In-app ad speed — phone on 4G (watch ${SLOW_MS / 1000} s · limit ${BUDGET_MS / 1000} s)`, '',
+    '| site | median time to show the ad | |', '|---|---|---|', ...ranked.map(row), '',
+  ].join('\n'));
+}
 
 if (failed) { console.error(`\n✗ ad-viewer speed guard: ${failed} problem(s)`); process.exit(1); }
 console.log('\n✓ ad-viewer speed guard: every in-app site still frames, shows fast, and production has the fix');
