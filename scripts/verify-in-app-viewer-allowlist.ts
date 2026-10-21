@@ -30,6 +30,7 @@ const check = (name: string, ok: boolean) => {
 // Every host here passed a live frame proof (Deal App + Gathern 2026-10-03, the rest 2026-10-16; the
 // proof table is in src/lib/inAppViewer.ts and the PR that added them). A host joins only with one.
 const PROVEN_HOSTS = [
+  'dwelleo.sa',   // re-proven 2026-10-21: no frame headers, 5 live ads framed on 4G in 2.8–4.5 s
   'dealapp.sa', 'gathern.co',
   'sadiq-eltajer.sa', 'rakez.sa', 'tuba.com.sa', 'amlakalahsa.com', 'listings.satel.sa',
   'snam.sa', 'alqasem.com.sa', 'moftah-aleaqar.com', 'safera.inblaj.net', 'tawia.sa', 'daryusuf.com',

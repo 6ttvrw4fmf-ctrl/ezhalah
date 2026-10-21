@@ -18,7 +18,7 @@
 // every client (haraj.com.sa, aqarcity.net, albdah.sa, 8floor.sa, nawafethalwatan.com, aqaralsaudia.com,
 // eydah.com, hazim.sa, alhoshan.sa, fursaghyr.com, manzo.com.sa, 1october.com.sa, wadod.sa,
 // nafithh.sa), blank
-// or error inside a frame (dwelleo.sa 404, alnowaisiry.com 403, sadin.com.sa 410), login wall
+// or error inside a frame (alnowaisiry.com 403, sadin.com.sa 410), login wall
 // (nawait.sa), site down (almuteb.sa 503), removed-at-source ads (just.sa, ialqarawi.com), and over
 // budget (muktamel.com ~37 s — the owner said to leave it). aqaralmuhaysini.com measured 9.96 s, right
 // on the line; the owner chose to keep it on anyway (2026-10-17: «put almuhaysini its fine»), so a red
@@ -30,6 +30,9 @@
 // We never proxy or strip a site's headers to force an embed; the preview allowlist uses already-
 // loaded data.
 export const IN_APP_VIEWER_HOSTS = [
+  // dwelleo.sa back 2026-10-21: its 2026-10-07 404s were the old /ar/properties/<slug> pages; the live pages
+  // (from its own sitemap) carry no X-Frame-Options / CSP and framed on a phone over 4G in 2.8–4.5 s (5 ads).
+  'dwelleo.sa',
   'dealapp.sa',
   'gathern.co',
   'sadiq-eltajer.sa',

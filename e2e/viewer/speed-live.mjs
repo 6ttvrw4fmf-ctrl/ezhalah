@@ -38,6 +38,7 @@ const SITES = [
   { host: 'livingcompound.com', table: 'livingcompound_residential_listings' },
   { host: 'wahadat.sa', table: 'wahadat_residential_listings' },
   { host: 'dallali.com', table: 'dallali_commercial_listings' },
+  { host: 'dwelleo.sa', table: 'dwelleo_residential_listings' },
   { host: 'remalre.com', table: 'remal_residential_listings' },
   { host: 'safainv.sa', table: 'safa_residential_listings' },
   { host: 'remax.sa', table: 'remaxsa_residential_listings' },
