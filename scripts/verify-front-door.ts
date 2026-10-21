@@ -47,15 +47,18 @@ check('only /rest/v1 calls go through the front door; auth and functions stay di
   frontDoorUrl(`${base}/rest/v1/search_listings_ar?select=a`, base) === '/sb/rest/v1/search_listings_ar?select=a'
   && frontDoorUrl(`${base}/auth/v1/token`, base) === null && frontDoorUrl(`${base}/functions/v1/agent`, base) === null);
 check('the app uses the front door only when EXPO_PUBLIC_FRONT_DOOR is "1"', /export const FRONT_DOOR = process\.env\.EXPO_PUBLIC_FRONT_DOOR === '1';/.test(client));
-const rw = (v: typeof vercel) => (v.rewrites ?? []).some((r) => r.source === '/sb/rest/v1/:path*' && r.destination === '/api/sb?__p=:path*');
+const rw = (v: typeof vercel) => (v.rewrites ?? []).some((r) => r.source === '/sb/rest/v1/:ezsbpath*' && r.destination === '/api/sb?__p=:ezsbpath*');
 check('vercel.json routes /sb/rest/v1/* to the front door', rw(vercel));
+const dropsRewriteParams = (s: string) => /searchParams\.delete\('__p'\);\s*url\.searchParams\.delete\('ezsbpath'\);/.test(s);
+check('the rewrite\'s own query parameters are dropped before forwarding (else PostgREST reads them as filters)', dropsRewriteParams(proxy));
+mustCatch('the rewrite capture forwarded as a filter (PGRST100, seen live 2026-10-21)', !dropsRewriteParams(proxy.replace("url.searchParams.delete('ezsbpath');", '')));
 
 const tmp = join(mkdtempSync(join(tmpdir(), 'fd-')), 'sb.ts');
 writeFileSync(tmp, proxy.replace(String.raw`/^(rpc\/)?[A-Za-z0-9_]+$/`, '/^.+$/'));
 const loose = (await liftFrom(tmp)).safeRestPath as (p: string | null) => string | null;
 mustCatch('a path rule loose enough to climb to auth', loose('../auth/v1/user') !== null);
 mustCatch('the proxy forwarding a caller-supplied handshake', !noSmuggle(passList + ", 'x-ezhalah-gate'"));
-mustCatch('the rewrite removed', !rw({ rewrites: (vercel.rewrites ?? []).filter((r) => r.source !== '/sb/rest/v1/:path*') }));
+mustCatch('the rewrite removed', !rw({ rewrites: (vercel.rewrites ?? []).filter((r) => r.source !== '/sb/rest/v1/:ezsbpath*') }));
 
 if (failed) { console.error(`\n❌ verify-front-door: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-front-door: the front door opens only onto /rest/v1 and trusts no caller\'s own claims.');
