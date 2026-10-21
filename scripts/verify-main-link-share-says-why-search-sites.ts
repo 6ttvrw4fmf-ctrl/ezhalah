@@ -61,7 +61,9 @@ const real = await load(shareSrc);
 check('liveSiteCount() is the shared site count (148, the card\'s number)', real.liveSiteCount() === 148, String(real.liveSiteCount()));
 check('the Arabic sentence is the owner\'s exact words with that live number', real.shareLead('ar', real.liveSiteCount()) === OWNER_AR, real.shareLead('ar', real.liveSiteCount()));
 check('the message = that sentence, a newline, the link — nothing else', real.shareMessage('ar', 148) === `${OWNER_AR}\n${LINK}`);
-check('the English sentence carries the same live number', real.shareLead('en', 148) === 'Why search 148 sites? Ezhalah searches for you.');
+const OWNER_EN = 'Ezhalah, the AI meta search engine. 148 sites, one search.';
+check('the English sentence is the owner\'s exact words (2026-10-20) with the same live number', real.shareLead('en', 148) === OWNER_EN, real.shareLead('en', 148));
+check('the English unknown-count form keeps the owner\'s shape with no number', real.shareLead('en', null) === 'Ezhalah, the AI meta search engine. Every site, one search.');
 g.__siteCount = null;
 check('count not read yet → unknown (null), never 0', real.liveSiteCount() === null, String(real.liveSiteCount()));
 check('unknown count → «كل المواقع», never a zero or a typed number', real.shareLead('ar', null) === 'ليش تدوّر في كل المواقع؟ إزهله يدوّر عنك' && !/\d/.test(real.shareLead('ar', null)) && !/\d/.test(real.shareLead('en', null)));
@@ -97,6 +99,8 @@ check('share.ts starts the read at app load so a tap never has to await', /void 
 
 // ── wiring: both share surfaces send the built sentence ─────────────────────────────────────────
 const sheet = readFileSync(join(root, 'src/components/ShareSheet.tsx'), 'utf8');
+check('the in-app sheet\'s preview shows the sentence that is sent ({lead}), not the old SEO description',
+  /<Text style=\{s\.pvS\} numberOfLines=\{2\}>\{lead\}<\/Text>/.test(sheet) && !/SHARE_BLURB/.test(sheet));
 check('the in-app sheet builds lead/msg from shareLead/shareMessage(locale, liveSiteCount())',
   /const count = liveSiteCount\(\);\s*const lead = shareLead\(locale, count\);\s*const msg = shareMessage\(locale, count\);/.test(sheet));
 check('shareNative sends the built sentence to the phone\'s share menu and the native sheet',
@@ -117,6 +121,10 @@ const mutant = (from: string, to: string) => {
 {
   const m = await mutant("'ليش تدوّر في {count} موقع؟ إزهله يدوّر عنك'", "'ليش تدوّر في {count} موقع؟ إزهله يدوّر لك'");
   mustCatch('the owner\'s wording drifting by one word', m.shareLead('ar', 148) !== OWNER_AR);
+}
+{
+  const m = await mutant("'Ezhalah, the AI meta search engine. {count} sites, one search.'", "'Why search {count} sites? Ezhalah searches for you.'");
+  mustCatch('the English wording drifting back to the old sentence', m.shareLead('en', 148) !== OWNER_EN);
 }
 {
   const m = await mutant('{count}', '148');
