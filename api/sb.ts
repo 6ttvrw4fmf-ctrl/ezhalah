@@ -39,7 +39,10 @@ async function handle(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const path = safeRestPath(url.searchParams.get('__p'));
   if (!path) return Response.json({ message: 'not found' }, { status: 404 });
+  // Vercel also appends the rewrite's named capture as its own query parameter; PostgREST would read it as a filter
+  // (measured live 2026-10-21: PGRST100 «failed to parse filter (search_listings_ar)»). Drop both.
   url.searchParams.delete('__p');
+  url.searchParams.delete('ezsbpath');
 
   let bot = 'unknown';
   try { bot = (await checkBotId()).isBot ? 'bot' : 'human'; } catch { /* the check itself failed: unknown, never a block */ }

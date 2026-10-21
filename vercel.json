@@ -80,8 +80,8 @@
       "destination": "/api/share-card?p=:p"
     },
     {
-      "source": "/sb/rest/v1/:path*",
-      "destination": "/api/sb?__p=:path*"
+      "source": "/sb/rest/v1/:ezsbpath*",
+      "destination": "/api/sb?__p=:ezsbpath*"
     },
     {
       "source": "/_img/sadin/media/properties/:path*",
