@@ -1,5 +1,5 @@
 # Scrape alarm + auto-block (security plan Phase 4, 2026-10-21; docs/ops/SCRAPE_GUARD.md). Hourly: blocks for 24 h any caller that pulled a bulk-download's worth
-# of listing rows in the past hour, stores the address privately (ops_scrape_suspect), raises a P2 alert carrying only
+# of listing rows in the past hour, stores the address privately (ops_scrape_suspect), leaves a quiet P3 record carrying only
 # country / city / network / device. A failed log query FAILS the job (never "nobody is scraping"), and
 # mon_detect_scrape_alarm_silent() alarms if no run succeeds for 4 hours. Read-only against production except those
 # writes. Logic: scripts/lib/scrapeAlarm.ts (executed by scripts/verify-scrape-alarm.ts in npm test).
