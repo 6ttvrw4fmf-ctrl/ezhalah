@@ -47,10 +47,18 @@ export function mapPoint(row: { latitude?: unknown; longitude?: unknown } | null
   if (!row) return null;
   const lat = num(row.latitude), lng = num(row.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  // ponytail: a 0 on either axis is the classic unset default, not a Saudi address — treated as silent.
-  if (lat === 0 || lng === 0) return null;
+  // A 0 on either axis (the classic unset default) is caught here too: 0 has no decimals.
+  // A point rounded to 2 decimals or fewer on either axis (±1 km at best) is an AREA, not a property's pin
+  // (mapping audit 2026-10-21, the same rule as shared_default_pins() in 20261021114821). The database strips
+  // such points from every table that keeps its pin in additional_info; wasalt keeps it in ar_data, where
+  // that strip cannot reach, and served 443497 at exactly 25,49. The page therefore refuses it too, and the
+  // ad falls back to its district / city border.
+  if (isCoarse(lat) || isCoarse(lng)) return null;
   return { lat, lng };
 }
+
+/** At most 2 decimals: 24, 24.5, 24.47 → coarse; 24.471 → a real coordinate. */
+export const isCoarse = (v: number): boolean => Math.abs(v * 100 - Math.round(v * 100)) < 1e-6;
 
 /** The map embed: Google's official Maps Embed API (satellite) when the owner's key is set in the build
  *  (EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY — never logged, never hardcoded), else today's keyless embed with
