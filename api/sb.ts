@@ -5,6 +5,8 @@
 //   1. Vercel BotID checks the caller is a real browser. SOFT today (EZ_BOTID_ENFORCE unset): every answer carries
 //      x-ezhalah-bot: human | bot | unknown and nobody is refused, until a day of real traffic shows real visitors
 //      read as human. Then EZ_BOTID_ENFORCE=1 refuses bots with 403.
+//   1b. Cloudflare Turnstile (invisible) gave this browser a one-hour human pass (api/human.ts): x-ezhalah-human:
+//      pass | none | off. SOFT until EZ_TURNSTILE_ENFORCE=1.
 //   2. The visitor's real address reaches the database. Cloudflare in front of Supabase sees THIS server, so we forward
 //      the address Vercel measured (x-real-ip / x-forwarded-for, set by Vercel, not by the caller) in
 //      x-ezhalah-client-ip, vouched for by x-ezhalah-gate = EZ_GATE_SECRET. robot_gate believes it only when the secret
@@ -14,10 +16,14 @@
 // Only database READS/WRITES that the app already makes pass here: the path must be a plain REST path, and only the
 // headers PostgREST understands are forwarded. Auth, storage and edge functions stay direct.
 import { checkBotId } from 'botid/server';
+import { HUMAN_COOKIE, humanPassValid, readCookie } from './_humanPass';
 
 const UPSTREAM = `${process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co'}/rest/v1/`;
 const GATE = process.env.EZ_GATE_SECRET || '';
 const ENFORCE = process.env.EZ_BOTID_ENFORCE === '1';
+// Cloudflare Turnstile (owner 2026-10-21): the one-hour human pass from api/human.ts. SOFT until EZ_TURNSTILE_ENFORCE=1.
+const TURNSTILE_KEY = process.env.TURNSTILE_SECRET_KEY || '';
+const TURNSTILE_ENFORCE = process.env.EZ_TURNSTILE_ENFORCE === '1';
 
 const PASS_REQUEST = ['apikey', 'authorization', 'content-type', 'prefer', 'range', 'range-unit', 'accept',
   'accept-profile', 'content-profile', 'x-client-info'];
@@ -46,8 +52,10 @@ async function handle(request: Request): Promise<Response> {
 
   let bot = 'unknown';
   try { bot = (await checkBotId()).isBot ? 'bot' : 'human'; } catch { /* the check itself failed: unknown, never a block */ }
-  if (ENFORCE && bot === 'bot') {
-    return Response.json({ message: 'Access denied' }, { status: 403, headers: { 'x-ezhalah-bot': bot } });
+  const human = !TURNSTILE_KEY ? 'off'
+    : (await humanPassValid(readCookie(request.headers.get('cookie'), HUMAN_COOKIE), Date.now() / 1000, TURNSTILE_KEY)) ? 'pass' : 'none';
+  if ((ENFORCE && bot === 'bot') || (TURNSTILE_ENFORCE && human === 'none')) {
+    return Response.json({ message: 'Access denied' }, { status: 403, headers: { 'x-ezhalah-bot': bot, 'x-ezhalah-human': human } });
   }
 
   const headers = new Headers();
@@ -68,9 +76,9 @@ async function handle(request: Request): Promise<Response> {
   } catch {
     // The app retries a failed front door against the database directly (src/lib/supabase.ts) while the back door
     // is still open, so a 502 here costs a visitor one round trip, never a broken search.
-    return Response.json({ message: 'upstream unreachable' }, { status: 502, headers: { 'x-ezhalah-bot': bot } });
+    return Response.json({ message: 'upstream unreachable' }, { status: 502, headers: { 'x-ezhalah-bot': bot, 'x-ezhalah-human': human } });
   }
-  const out = new Headers({ 'x-ezhalah-bot': bot, 'cache-control': 'no-store' });
+  const out = new Headers({ 'x-ezhalah-bot': bot, 'x-ezhalah-human': human, 'cache-control': 'no-store' });
   for (const k of PASS_RESPONSE) { const v = upstream.headers.get(k); if (v) out.set(k, v); }
   return new Response(method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers: out });
 }

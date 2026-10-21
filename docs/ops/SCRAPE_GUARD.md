@@ -75,3 +75,14 @@ about moving our robots, not visitors.
 4. After a day of `x-ezhalah-bot` showing real visitors as `human`: set `EZ_BOTID_ENFORCE=1`.
 5. Move our robots off the bare public key (they send the handshake too, from the GitHub secret), then close the back
    door: `robot_gate` refuses the public roles without a valid handshake. Owner present for this step.
+
+## Cloudflare Turnstile (owner 2026-10-21: invisible, "users shouldn't verify every time")
+
+Second guard next to BotID. Site key `0x4AAAAAAFfpkJx1Y3UJ9QLd` (public, in src/lib/supabase.ts), widget "Ezhalah",
+hostname ezhalah-app.vercel.app, **Invisible** mode, pre-clearance off; secret `TURNSTILE_SECRET_KEY` in the Vercel
+project (Production), never in the repo. Once per visit the browser solves the invisible check and trades the token
+at `POST /api/human` (Cloudflare siteverify) for a one-hour `ez_human` cookie (HMAC-signed, api/_humanPass.ts),
+renewed at 50 minutes. The front door labels every call `x-ezhalah-human: pass|none|off` and refuses only when
+`EZ_TURNSTILE_ENFORCE=1`. Runs only when the front door is on. Cloudflare requires Invisible-mode sites to reference
+its Turnstile Privacy Addendum in their privacy policy. That line must be in src/data/legal.ts (owner-approved
+wording) BEFORE the front door is switched on.
