@@ -493,7 +493,7 @@ const previewPrice = (src: string) => {
 };
 // window.open with 'noopener' always returns null, so the page opens plainly and severs the opener by
 // hand — that is what lets a blocked tab be told apart from an opened one (and never navigates us away).
-const previewContact = (src: string) => /const open = \(href: string = url\): boolean => \{[^}]*const w = window\.open\(href, '_blank'\);\s*if \(w\) w\.opener = null;/.test(codeOnly(src)) && !/window\.location/.test(codeOnly(src));
+const previewContact = (src: string) => /const open = \(href: string = url\): boolean => \{[^}]*const w = window\.open\((?:href|safe), '_blank'\);\s*if \(w\) w\.opener = null;/.test(codeOnly(src)) && !/window\.location/.test(codeOnly(src));
 const previewPhotos = (src: string) => {
   const code = codeOnly(src);
   return /l\.photos\?\.length \? l\.photos : \[l\.photo\]/.test(code)
@@ -553,6 +553,7 @@ const renderPreview = (src: string, source: string, locale: string, photos: stri
     '@/components/ResultCard': { SourceBadge: 'SourceBadge', FEATURE_META: [], arAttrValue: (_l: string, v: string) => v },
     '@/data/adPageData': { fetchAdPage: () => Promise.resolve({ geo: null, row: null }), fetchAskingPrices: () => Promise.resolve(null), fetchGroupPrices: () => Promise.resolve(null), fetchMojSales: () => Promise.resolve(null), fetchSameAd: () => Promise.resolve([]), dearerSplit: () => null, pricesBlockEligible: () => false, typePluralAr: (x: string) => x, typeWordAr: (_n: number, x: string) => x, mapEmbedUrl: () => '' },
     '@/lib/openListing': { listingOpenUrl: () => '' },
+    '@/lib/safeUrl': { safeHttpUrl: (u: string) => u },
   };
   const exports: Record<string, any> = {};
   new Function('require', 'exports', output)((name: string) => {
