@@ -9,7 +9,7 @@ name: Ad viewer speed — live guard
 
 on:
   schedule:
-    - cron: '23 * * * *' # every hour (owner 2026-10-21: «trakcing it every hour not 6 hours»); a run takes ~13 min
+    - cron: '23,53 * * * *' # every 30 min (owner 2026-10-21: «every hour» → «could it be less than a hour»); a run takes ~13 min, so 30 min never overlaps
   workflow_run:
     workflows: ['Deploy frontend (production)']
     types: [completed]
