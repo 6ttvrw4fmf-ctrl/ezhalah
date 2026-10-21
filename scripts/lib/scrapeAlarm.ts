@@ -27,6 +27,10 @@ export function findSuspects(rows: CallerHour[], knownIps: string[] = []): Calle
     .sort((a, b) => b.listing_rows - a.listing_rows);
 }
 
+// Front-door traffic (api/sb.ts, from Vercel on Amazon's network, x-client-info "ezhalah-front-door") is every visitor
+// summed under a few server addresses, so it is NOT judged here: blocking those addresses would block everyone. The
+// front door forwards each visitor's real address to robot_gate instead (20261021120255). STATED GAP until a per-visitor
+// count exists for front-door traffic: a scraper using the front door is caught by BotID, not by this alarm.
 // Rows per response come from content-range ("0-999/*" is 1000 rows). Listing paths only: the location catalogue
 // (location_index_live, ~14k rows) is loaded whole by every visitor and is not inventory.
 export const CALLER_SQL = `
@@ -43,6 +47,7 @@ select log_attributes['request.headers.cf_connecting_ip'] as ip,
 from logs
 where source = 'edge_logs'
   and (log_attributes['request.path'] like '/rest/v1/%listings%' or log_attributes['request.path'] like '/rest/v1/rpc/location_search%')
+  and not (log_attributes['request.headers.x_client_info'] like '%ezhalah-front-door%' and log_attributes['request.cf.asOrganization'] ilike '%amazon%')
 group by ip
 having listing_rows >= 5000 or requests >= 1000
 order by listing_rows desc
