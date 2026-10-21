@@ -32,7 +32,7 @@ concurrency:
 jobs:
   probe:
     name: Does a per-unit endpoint exist, and does it discriminate?
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

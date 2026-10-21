@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # Per-source override via matrix.tmo — souq24's ~1.3k-GET sweep through the metered Saudi proxy
     # sometimes needs >90m (killed at exactly 90:16 on 07-03 AND 07-04, marking those RUNS
     # "cancelled"). Default stays 90 for everyone else (covers aqarcity ~2.3k Cloudflare pages).

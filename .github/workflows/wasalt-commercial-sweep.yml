@@ -13,7 +13,7 @@ concurrency:
 jobs:
   sweep:
     name: Wasalt com ${{ matrix.slug }} ${{ matrix.deal }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false

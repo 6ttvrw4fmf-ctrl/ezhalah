@@ -51,7 +51,7 @@ concurrency:
 jobs:
   sweep:
     name: journeys on ${{ matrix.engine }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # 90, not 45 (🔧 2026-10-20, backlog 579): at JOURNEY_N=2 every engine now needs 40–45 minutes
     # (10-20 run 39402030730: chromium 40 min green, firefox 44 min green, webkit CANCELLED at the
     # cap after 43 min), so a 45-minute cap killed the slowest engine on every scheduled run since
@@ -151,7 +151,7 @@ jobs:
   alert:
     needs: [sweep]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

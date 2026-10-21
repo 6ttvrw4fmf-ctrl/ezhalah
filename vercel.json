@@ -80,6 +80,10 @@
       "destination": "/api/share-card?p=:p"
     },
     {
+      "source": "/sb/rest/v1/:path*",
+      "destination": "/api/sb?__p=:path*"
+    },
+    {
       "source": "/_img/sadin/media/properties/:path*",
       "destination": "https://sadin.com.sa/media/properties/:path*"
     },
@@ -91,5 +95,8 @@
       "source": "/_img/eydah/assets/listings/:path*",
       "destination": "https://eydah.com/assets/listings/:path*"
     }
+  ],
+  "regions": [
+    "hnd1"
   ]
 }

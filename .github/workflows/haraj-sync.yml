@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # ~700 property-titled candidates an hour at ~2 s a read (1 req/s + the page): 2 files ≈ 45 min.
     timeout-minutes: 300
     steps:

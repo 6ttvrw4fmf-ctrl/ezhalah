@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   repair:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -60,7 +60,7 @@ jobs:
   next:
     needs: repair
     if: ${{ needs.repair.result == 'success' && (inputs.hops || '4') != '0' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     permissions:
       actions: write
       contents: read
