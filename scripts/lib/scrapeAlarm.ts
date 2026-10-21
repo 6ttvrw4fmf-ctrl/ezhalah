@@ -6,10 +6,11 @@ export type CallerHour = {
   listing_rows: number; requests: number; top_paths: string[];
 };
 
-// Measured 24 h to 2026-10-21 on listing paths: real browsers peak in the hundreds of rows an hour; our own Claude
-// cloud sessions (Google Cloud) ~27,000. The bar sits clear of both. A full-catalogue copy is several hundred
-// thousand rows, so a scraper that wants the inventory in under a day crosses it.
-export const ROWS_PER_HOUR = 50_000;
+// OWNER DECISION 2026-10-21: block automatically for 24 h at 100,000 rows an hour, lower it later. Measured 24 h to
+// 2026-10-21 on listing paths: the busiest real visitor pulled 8,009 rows in an hour (each search loads ~1,000 rows),
+// our own Claude cloud sessions (Google Cloud) ~27,000. The owner asked about 5,000 and 10,000; both would block real
+// searchers today. Lower this only after searches load small batches (docs/ops/SCRAPE_GUARD.md).
+export const ROWS_PER_HOUR = 100_000;
 export const REQUESTS_PER_HOUR = 6_000;
 
 // GitHub-hosted runners (our CI, on Microsoft's network) are excluded. This is a STATED GAP, not a claim: a scraper on

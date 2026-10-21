@@ -39,6 +39,20 @@ const failsLoud = (s: string) => /if \(!res\.ok\) die\(/.test(s) && /!Array\.isA
   && s.lastIndexOf('ops_scrape_alarm_heartbeat') > s.indexOf('!Array.isArray(body.result)');
 check('a failed log query exits 1 before the heartbeat is stamped (silence is never "no scraping")', failsLoud(script));
 check('the alert carries no address (only the private table does)', !/p_detail: \{[^}]*\bip\b/.test(script));
+// Owner decision 2026-10-21: a caught caller is BLOCKED for 24 h, not just reported. The block must be written for every
+// suspect, inside the suspects loop, before the heartbeat says the run was fine.
+const blocks = (s: string) => {
+  const loop = s.slice(s.indexOf('for (const s of suspects)'), s.lastIndexOf('ops_scrape_alarm_heartbeat'));
+  return /rest\/v1\/ops_blocked_ip/.test(loop) && /blocked_until: new Date\(Date\.now\(\) \+ 24 \* 3600 \* 1000\)/.test(loop)
+    && /resolution=merge-duplicates/.test(loop);
+};
+check('every suspect is blocked for 24 h (ops_blocked_ip, enforced by robot_gate)', blocks(script));
+const gateSql = readFileSync(join(root, 'supabase/migrations/20261021043158_auto_block_bulk_downloaders.sql'), 'utf8');
+const gateFailsOpen = (sql: string) => /exception when others then\s+blocked := false;/.test(sql)
+  && /raise sqlstate 'PT429'/.test(sql) && /cf-connecting-ip/.test(sql);
+check('the gatekeeper refuses blocked callers with 429 and FAILS OPEN if the lookup breaks', gateFailsOpen(gateSql));
+mustCatch('the block step removed (report only)', !blocks(script.replace('rest/v1/ops_blocked_ip', 'rest/v1/ops_scrape_suspect')));
+mustCatch('a gatekeeper whose lookup error blocks everyone', !gateFailsOpen(gateSql.replace('blocked := false;\n  end;', 'blocked := true;\n  end;')));
 
 mustCatch('the bar lowered under our own robots (alert fatigue)', !barOk(lib.replace(/ROWS_PER_HOUR = [\d_]+;/, 'ROWS_PER_HOUR = 20_000;')));
 mustCatch('the bar raised past a catalogue copy (blind alarm)', !barOk(lib.replace(/ROWS_PER_HOUR = [\d_]+;/, 'ROWS_PER_HOUR = 500_000;')));

@@ -2,9 +2,10 @@
 //
 // Reads the past hour of API gateway logs (Supabase Management API, ClickHouse SQL), finds callers that pulled a
 // bulk-download's worth of listing rows (scripts/lib/scrapeAlarm.ts), stores each one in ops_scrape_suspect
-// (service_role only: the address never leaves the database) and raises a P2 alert per suspect carrying only country,
-// city, network and device. Stamps ops_scrape_alarm_heartbeat on success; mon_detect_scrape_alarm_silent() alarms if
-// that stamp goes stale.
+// (service_role only: the address never leaves the database), BLOCKS the address for 24 h (ops_blocked_ip, enforced by
+// robot_gate: owner decision 2026-10-21, "no need for an alert, just block") and leaves a quiet P3 record carrying only
+// country, city, network and device. Stamps ops_scrape_alarm_heartbeat on success; mon_detect_scrape_alarm_silent()
+// alarms if that stamp goes stale.
 //
 // A FAILED LOG QUERY IS NOT "NOBODY IS SCRAPING" (AGENTS.md): any failure exits 1 without stamping the heartbeat.
 import { CALLER_SQL, findSuspects, type CallerHour } from './lib/scrapeAlarm.ts';
@@ -42,14 +43,22 @@ for (const s of suspects) {
   await rest('ops_scrape_suspect', { method: 'POST', body: JSON.stringify({
     window_start: start.toISOString(), ip: s.ip, country: s.country, city: s.city, network: s.network,
     user_agent: s.user_agent, listing_rows: s.listing_rows, requests: s.requests, top_paths: s.top_paths }) });
-  // The dedup key is a short hash, so the alert never carries the address itself.
+  // The block: 24 h, refreshed if they are caught again. Enforced on every REST/RPC call by robot_gate (HTTP 429).
+  await fetch(`${URL_BASE}/rest/v1/ops_blocked_ip`, {
+    method: 'POST', signal: AbortSignal.timeout(30_000),
+    headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, 'content-type': 'application/json', Prefer: 'resolution=merge-duplicates' },
+    body: JSON.stringify({ ip: s.ip, blocked_until: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      reason: `scrape alarm: ${s.listing_rows} listing rows / ${s.requests} requests in the hour from ${start.toISOString()}` }),
+  }).then(async (r) => { if (!r.ok) die(`ops_blocked_ip http ${r.status}: ${(await r.text()).slice(0, 200)}`); });
+  // The dedup key is a short hash, so the record never carries the address itself.
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s.ip));
   const tag = Array.from(new Uint8Array(digest)).slice(0, 6).map((b) => b.toString(16).padStart(2, '0')).join('');
   await rest('rpc/mon_raise', { method: 'POST', body: JSON.stringify({
-    p_sev: 'P2', p_kind: 'scrape_suspect', p_platform: 'all', p_dedup: `scrape_suspect:${tag}`,
+    p_sev: 'P3', p_kind: 'scrape_suspect', p_platform: 'all', p_dedup: `scrape_suspect:${tag}`,
     p_detail: {
-      why: `One caller pulled ${s.listing_rows.toLocaleString('en')} listing rows in ${s.requests.toLocaleString('en')} requests in one hour `
-        + '(bar: 50,000 rows or 6,000 requests). This measures volume, not intent: rule out our own robots first.',
+      why: `BLOCKED for 24 h: one caller pulled ${s.listing_rows.toLocaleString('en')} listing rows in ${s.requests.toLocaleString('en')} requests in one hour `
+        + '(bar: 100,000 rows or 6,000 requests). This measures volume, not intent: if it is one of our own robots, '
+        + 'delete its row from ops_blocked_ip and add its address to the SCRAPE_ALARM_KNOWN_IPS repo variable.',
       country: s.country, city: s.city, network: s.network, device: s.user_agent, top_paths: s.top_paths,
       window_start: start.toISOString(),
       lookup: `select * from ops_scrape_suspect where window_start = '${start.toISOString()}' order by listing_rows desc;`,
