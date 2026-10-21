@@ -22,6 +22,7 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
       - name: Download and store
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -43,3 +44,17 @@ jobs:
           store vpn        https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/vpn/ipv4.txt
           store datacenter https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/datacenter/ipv4.txt
           exit $fail
+
+      # ── Failure→alert bridge (issue #1349): this runs unattended, so a red run must reach alert_event to reach a
+      # human. One open alert per workflow file; the next green run resolves it. `always()` so a failing run gets here.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind ingestion_check_failed
+          --workflow network-block-lists.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
