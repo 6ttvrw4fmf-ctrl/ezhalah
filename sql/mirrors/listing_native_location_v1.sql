@@ -42,6 +42,9 @@
 --   20261018083435_source_district_carried_fleet_wide_null_district_is_red): UNCHANGED. Both only READ this view
 --   (refresh_district_recovery_table selects from it; the proofs count rows it holds); md5(live pg_get_viewdef) ==
 --   ea8174b63953cfc25aef4a39af032f0a == body below.
+-- Re-verified 2026-10-21 (migration 20261021003001_internal_views_are_not_a_public_api): UNCHANGED. That migration
+--   only REVOKES anon/authenticated SELECT on this view (security Phase 1.3); md5(live pg_get_viewdef) ==
+--   ea8174b63953cfc25aef4a39af032f0a == body below.
  WITH native AS (
          SELECT 'alhoshan'::text AS platform,
             'alhoshan_residential_listings'::text AS source_table,
