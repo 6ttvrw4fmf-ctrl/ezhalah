@@ -85,5 +85,5 @@ project (Production), never in the repo. Once per visit the browser solves the i
 at `POST /api/human` (Cloudflare siteverify) for a one-hour `ez_human` cookie (HMAC-signed, api/_humanPass.ts),
 renewed at 50 minutes. The front door labels every call `x-ezhalah-human: pass|none|off` and refuses only when
 `EZ_TURNSTILE_ENFORCE=1`. Runs only when the front door is on. Cloudflare requires Invisible-mode sites to reference
-its Turnstile Privacy Addendum in their privacy policy. That line must be in src/data/legal.ts (owner-approved
-wording) BEFORE the front door is switched on.
+its Turnstile Privacy Addendum in their privacy policy. Done 2026-10-21: owner-approved line in Privacy Policy §6
+(src/data/legal.ts + legalEnglish.ts, «Last updated» 21 October 2026), linking https://www.cloudflare.com/turnstile-privacy-policy/.

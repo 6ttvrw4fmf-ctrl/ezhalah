@@ -18,7 +18,8 @@ assert.equal(pick('ar'),ar);
 for (const key of ['terms','privacy']) {
   assert.equal(en[key].length,ar[key].length);
   assert.equal(en[key].length,key==='terms'?17:15);
-  assert.equal(en[key][0],'Last updated: 4 September 2026');
+  // The privacy policy changed 2026-10-21 (Cloudflare Turnstile line, owner-approved); the terms did not.
+  assert.equal(en[key][0], key === 'privacy' ? 'Last updated: 21 October 2026' : 'Last updated: 4 September 2026');
   for(let i=1;i<en[key].length;i++) {
     assert(en[key][i].startsWith(`${i}) `));
     assert(en[key][i].includes('\n\n'));
@@ -62,7 +63,7 @@ function layoutContract(source: string) {
     const nodes=render(source,'en','LegalBody',tab);
     const text=nodes.filter(n=>n.type==='Text').flatMap(n=>n.children).join(' ');
     assert(!/[\u0600-\u06ff]/.test(text));
-    assert(text.includes('4 September 2026'));
+    assert(text.includes(tab === 'privacy' ? '21 October 2026' : '4 September 2026'));
     assert(!text.includes('{{CONTACT_EMAIL}}'));
   }
   const arabic=render(source,'ar','RtRow');
