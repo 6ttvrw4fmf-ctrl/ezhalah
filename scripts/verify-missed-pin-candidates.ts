@@ -27,6 +27,10 @@ check('nawafeth: propertyLat = parseFloat(…)',
   has(ad('n', "var propertyLat = parseFloat('27.0196');\n var propertyLng = parseFloat('49.5732');"), 27.0196, 49.5732));
 check('ialqarawi: var uluru = {lat: X, lng: Y}', has(ad('i', 'var uluru = {lat: 24.941824, lng: 44.539865};'), 24.9418, 44.5399));
 check('therc: description «الموقع : https://maps.google.com/?q=LAT,LNG»', has(ad('t', 'الموقع : https://maps.google.com/?q=24.639000,46.491997'), 24.639, 46.492));
+check('sakan: a LatLng marker on a page WITHOUT show_exact_location = true is the site approximation',
+  pairsIn(ad('a', "var show_exact_location = false; latLng = new google.maps.LatLng(21.5713, 39.77581);")).length === 0);
+check('sakan: the same marker WITH show_exact_location = true is the ad pin',
+  has(ad('e', 'var show_exact_location = true; var latLng = new google.maps.LatLng(21.40572, 39.4731);'), 21.4057, 39.4731));
 check('sirdab: a coarse «24.91, 46.6» is not a pin', pairsIn(ad('c', '"lat":24.91,"lng":46.6')).length === 0);
 check('a pair outside Saudi Arabia is not a pin', pairsIn(ad('x', '"lat":11.2477085,"lng":25.9967148')).length === 0);
 
@@ -75,6 +79,11 @@ const mutantCaught = (label: string, caught: boolean) => check(`(mutation) ${lab
 {
   const m = await mutant('no KSA gate', 'if (!inKsa(a, b)) continue;', '');
   mutantCaught('dropping the Saudi gate reads a pair in Sudan', m.pairsIn(ad('x', '"lat":11.2477085,"lng":25.9967148')).length > 0);
+}
+
+{
+  const m = await mutant('approx marker read', "if (shape === 'latlng-call' && approxMarker) continue;", '');
+  mutantCaught('reading every LatLng marker again flags the sakan approximation', m.pairsIn(ad('a', "var show_exact_location = false; latLng = new google.maps.LatLng(21.5713, 39.77581);")).length > 0);
 }
 
 if (failed) { console.log(`\n❌ verify-missed-pin-candidates: ${failed} check(s) failed.`); process.exit(1); }

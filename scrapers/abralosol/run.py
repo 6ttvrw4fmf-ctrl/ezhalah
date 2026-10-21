@@ -412,7 +412,9 @@ def _detail(s: cc.Session, nid: str) -> dict:
         "age_raw": age_raw,
         # The «الموقع» link: google.com/maps/place/LAT,LNG, or a maps.app.goo.gl short link that is
         # followed by redirect (measured 2026-10-19: ad 7890 carries only the short form).
-        "pin": pin_from_html(page) or pin_from_short_link(short_maps_link(page), lambda u: resolve_redirect(s, u)),
+        # The ad's OWN article only (audit 2026-10-21): the page below it lists other ads, each with its own
+        # maps/place link, and reading the whole page stored a NEIGHBOUR's pin — 95 «الراشدية» ads shared one.
+        "pin": pin_from_html(body) or pin_from_short_link(short_maps_link(body), lambda u: resolve_redirect(s, u)),
     }
 
 

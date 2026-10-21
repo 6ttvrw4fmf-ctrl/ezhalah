@@ -121,7 +121,7 @@ def _src(p: str) -> str:
 
 def test_each_scraper_writes_the_pin_into_additional_info():
     assert 'out["pin"] = pin_from_html(page)' in _src("sakan") and '**(p.get("pin") or {}),' in _src("sakan")
-    assert '"pin": pin_from_html(page) or pin_from_short_link(' in _src("abralosol") and '**(detail.get("pin") or {}),' in _src("abralosol")
+    assert '"pin": pin_from_html(body) or pin_from_short_link(' in _src("abralosol") and '**(detail.get("pin") or {}),' in _src("abralosol")
     assert '"pin": pin_from_html(body),' in _src("nofodh") and '**(rec.get("pin") or {}),' in _src("nofodh")
     assert '"pin": pin_from_html(art) or pin_from_html(page_html),' in _src("bossbih") and '**(detail.get("pin") or {}),' in _src("bossbih")
     aq = _src("aqalemhajer")
@@ -139,7 +139,7 @@ def test_the_six_sites_are_on_the_border_map_meanwhile():
 def test_abralosol_and_bossbih_follow_a_short_link_too():
     # measured 2026-10-19: abralosol 7890 links its pin only as maps.app.goo.gl; the office sites share one template
     ab = _src("abralosol")
-    assert 'pin_from_html(page) or pin_from_short_link(short_maps_link(page), lambda u: resolve_redirect(s, u))' in ab
+    assert 'pin_from_html(body) or pin_from_short_link(short_maps_link(body), lambda u: resolve_redirect(s, u))' in ab   # the ad article only (audit 2026-10-21)
     bo = _src("bossbih")
     assert 'd["pin"] = pin_from_short_link(short_maps_link(r.text), lambda u: resolve_redirect(s, u))' in bo
 

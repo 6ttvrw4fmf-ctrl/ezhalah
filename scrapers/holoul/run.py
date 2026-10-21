@@ -37,6 +37,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 API = "https://app.holoul.io/customer/api/v1/units/"
 SITE = "https://app.holoul.io/units/"   # /ar/units/<id> answers 404 (found in the 2026-09-27 real-user click-through)
@@ -151,6 +152,10 @@ def map_unit(u: dict) -> tuple[Optional[tuple[dict, str]], str]:
         "living_rooms": u.get("living_rooms") or design.get("living_rooms"),
         "usage": [_name(x) for x in (u.get("nhc_usage") or [])] or None,
         "project_features": [_name(x) for x in (proj.get("features") or [])] or None,
+        # The unit's OWN location from the API (audit 2026-10-21): «location»: {latitude, longitude} — the
+        # building's national-address point (24.500621,46.735823 for «أدوار بدر»). The page's other pair is
+        # the company office («مركز بيور»), never read.
+        **pin_dict((u.get("location") or {}).get("latitude"), (u.get("location") or {}).get("longitude")),
     }
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v not in (None, "", [])})
     cap = {k: v for k, v in u.items() if k.startswith("nhc_") and k not in _NEVER_STORE}

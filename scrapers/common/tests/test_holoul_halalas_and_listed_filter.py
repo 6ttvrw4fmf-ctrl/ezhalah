@@ -38,3 +38,15 @@ def test_no_licence_is_a_demo_row_and_no_ad_type_is_not_assumed_a_sale():
 def test_the_advertiser_is_never_stored():
     (row, _), _ = R.map_unit(_u())
     assert "0501234567" not in str(row) and "مكتب س" not in str(row)
+
+
+def test_the_units_own_api_location_is_its_pin():
+    # audit 2026-10-21: «أدوار بدر» units carry location {latitude, longitude} = the building's address point;
+    # the scraper ignored it, so 30 units showed a border over a published pin.
+    (row, _), _ = R.map_unit(_u(location={"latitude": 24.500621, "longitude": 46.735823}))
+    assert row["additional_info"]["latitude"] == 24.500621 and row["additional_info"]["longitude"] == 46.735823
+
+
+def test_no_location_means_no_pin_not_a_guess():
+    (row, _), _ = R.map_unit(_u())
+    assert "latitude" not in row["additional_info"]
