@@ -103,6 +103,7 @@ import { primeResultsFound } from '@/data/loaderResultsFound';
 import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
 import { createSharedChat } from '@/lib/sharedChat';
+import { firstChildLeftRow, useDocumentRtl } from '@/lib/useDocumentRtl';
 import { useI18n, LocaleScope, detectLocale, resolveReplyLocale, getLocale, translate, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { listingLocationAr, listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
@@ -676,6 +677,7 @@ export default function Agent() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, locale } = useI18n();
+  const docRtl = useDocumentRtl(locale === 'ar'); // the split row follows the page's real dir (owner 2026-10-21)
   const { seed, filter, chatBubble, chatSub, replay, fresh, hid } = useLocalSearchParams<{
     seed?: string;
     filter?: string;
@@ -4206,8 +4208,9 @@ export default function Agent() {
     // Owner 2026-10-03: «beside me on my right is the tabs» — the ad pane sits on the PHYSICAL right
     // in BOTH languages (his explicit word, even in Arabic RTL; his reference is the Claude desktop
     // app's layout). Under dir=rtl a plain 'row' flows right→left and would put the second child on
-    // the LEFT, so the direction is pinned per-locale instead of left to the document's dir.
-    <View style={{ flex: 1, flexDirection: locale === 'ar' ? 'row-reverse' : 'row', backgroundColor: colors.paper }}>
+    // the LEFT, so the direction cancels the document's ACTUAL dir (src/lib/useDocumentRtl.ts, owner 2026-10-21) —
+    // keyed on the language instead, a moment where the two disagree moved the pane to the left.
+    <View style={{ flex: 1, flexDirection: firstChildLeftRow(docRtl), backgroundColor: colors.paper }}>
     {/* The results column. A row so the in-app ad viewer can sit BESIDE it, full height (split). */}
     <View style={{ flex: 1 }}>
       {/* Sketch backdrop behind the chat. The bottom fade is pushed all the way down (0.8→1, same as
