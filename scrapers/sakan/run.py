@@ -254,7 +254,7 @@ def ad_id_from_url(url: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
-_SAKAN_MARKER = re.compile(r"google.maps.LatLng(s*(-?d{1,2}.d{3,})s*,s*(-?d{1,3}.d{3,})s*)")
+_SAKAN_MARKER = re.compile(r"google\.maps\.LatLng\(\s*(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})\s*\)")
 _SAKAN_FLAG = re.compile(r"show_exact_location")
 # The old shared default (registered in ops_default_pin_register 2026-10-20) is never an ad's pin.
 _SAKAN_DEFAULTS = {(24.7173, 46.6753)}
