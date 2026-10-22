@@ -12,6 +12,7 @@
 //   • a line whose fact is missing, failed, or not true today (e.g. «كل مناطق المملكة الـ13» when not
 //     every region has listings) is NOT shown — the normal subtitle stays. Never a stale or made-up number.
 // Pure: no React, no network, no storage. Executed by scripts/verify-filter-welcome.ts.
+import { isInsightLineId } from './insightWelcome.ts';
 
 export type WelcomeFacts = {
   sites?: number;        // distinct websites with searchable listings (loader_active_platforms_ar)
@@ -367,6 +368,9 @@ export function greetingFor(userId: string, signIns: number, name: string): { id
 
 const cachedFits = (c: WelcomeCache, now: Date, maxAge: number): boolean => {
   const age = now.getTime() - c.at;
+  // A daily-insight line (lib/insightWelcome.ts): its greeting is put in when shown, from Saudi time, so it
+  // fits any hour; only its age counts.
+  if (isInsightLineId(c.id)) return age >= 0 && age < maxAge && !!c.ar && !!c.en;
   const greet = GREET_LINES.find((l) => l.id === c.id);
   if (greet) return age >= 0 && age < Math.min(maxAge, GREET_HOLD_MS) && !!c.ar && !!c.en;
   const line = WELCOME_LINES.find((l) => l.id === c.id);
