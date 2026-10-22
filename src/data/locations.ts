@@ -105,15 +105,24 @@ export const regionNameEn = (regionId: number | null, regionAr: string | null): 
   (regionId != null ? REGION_BY_ID.get(regionId)?.en : undefined) ?? (regionAr ? translitPlace(regionAr) : null);
 let _districtEn: Map<string, string> | null = null;
 const districtEnKey = (cityId: number, ar: string) => `${cityId}:${stripAl(stripDistrictWord(norm(ar)))}`;
-export function districtNameEn(cityId: number, districtAr: string): string {
+function districtEnMap(): Map<string, string> {
   if (!_districtEn) {
     _districtEn = new Map();
     for (const list of CATALOG_DISTRICTS_BY_CITY.values()) {
       for (const d of list) if (d.districtEn) _districtEn.set(districtEnKey(d.cityId, d.districtAr), d.districtEn);
     }
   }
-  return _districtEn.get(districtEnKey(cityId, districtAr)) ?? translitPlace(districtAr.replace(/^حي\s+/, ''));
+  return _districtEn;
 }
+export function districtNameEn(cityId: number, districtAr: string): string {
+  return districtEnMap().get(districtEnKey(cityId, districtAr)) ?? translitPlace(districtAr.replace(/^حي\s+/, ''));
+}
+// OFFICIAL English names only — null where the catalog has none (no transliteration). For sentences a person
+// reads as English (the home headline's facts, owner 2026-10-22): «Drh Al Arws» is not English; such a fact
+// is skipped instead.
+export const cityNameEnOfficial = (cityId: number): string | null => CITY_BY_ID.get(cityId)?.en ?? null;
+export const districtNameEnOfficial = (cityId: number, districtAr: string): string | null =>
+  districtEnMap().get(districtEnKey(cityId, districtAr)) ?? null;
 
 // ---------------------------------------------------------------------------------------------
 // Normalization + search keys
