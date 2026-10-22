@@ -972,6 +972,7 @@ const AR: Record<string, string> = {
   // In-app ad viewer (owner 2026-10-03)
   'Open in a new window': 'فتح في نافذة جديدة',
   'Taking a while?': 'يأخذ وقتًا؟',
+  'This site is slow to open': 'هذا الموقع بطيء في الفتح',
   'Oldest tab closed': 'أُغلق أقدم تبويب',
   'New tab': 'تبويب جديد',
   'Hide tabs': 'إخفاء التبويبات',

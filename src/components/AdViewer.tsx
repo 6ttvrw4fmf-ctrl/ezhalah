@@ -10,6 +10,7 @@ import { useI18n } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { safeHttpUrl } from '@/lib/safeUrl';
+import { fetchSlowHosts } from '@/data/viewerSpeed';
 import ListingPreview from '@/components/ListingPreview';
 import type { Listing } from '@/data/listings';
 import { SourceBadge } from '@/components/ResultCard';
@@ -52,9 +53,11 @@ import {
 // (pane: from/to the right edge; sheet: from/to the bottom). Reduced motion → short cross-fade.
 
 const IS_WEB = Platform.OS === 'web';
-// A page still loading after this long gets a small, dismissible «open in a new window» pill. The page
-// itself stays: it keeps loading underneath and the user can keep waiting if they prefer.
-const SLOW_HINT_MS = 5_000;
+// A page still loading after this long gets a clear, dismissible «open in a new window» button. The page
+// itself stays: it keeps loading underneath and the user can keep waiting if they prefer. 3 s, not 5 (owner
+// 2026-10-21: «if it's very slowly … show this open a new window … so they go there»). A site the speed monitor
+// measured slow (src/data/viewerSpeed.ts) shows the button the moment its ad opens.
+const SLOW_HINT_MS = 3_000;
 // Marker on the history entry this viewer pushes; see the history effect below.
 const HISTORY_MARK = 'ezAdViewer';
 // Apple's "sheet" response (~0.3s), damping ratio ≈ 1 → settles with no overshoot.
@@ -452,12 +455,20 @@ function TabFrame({ tab, visible, t, onNavigated }: { tab: AdTab; visible: boole
   // navigation in the React Compiler build (seen live: ← lit up on a fresh tab and after ⟳).
   const loadedOnce = useRef(false);
   const [slow, setSlow] = useState(false);
+  const [knownSlow, setKnownSlow] = useState(false);
   const [slowDismissed, setSlowDismissed] = useState(false);
   useEffect(() => {
     if (loaded) return;
     const id = setTimeout(() => setSlow(true), SLOW_HINT_MS);
     return () => clearTimeout(id);
   }, [loaded]);
+  // The speed monitor's verdict for this site: measured slow → the button is there from the first frame.
+  useEffect(() => {
+    let live = true;
+    const h = host.toLowerCase().replace(/^www\./, '');
+    fetchSlowHosts().then((set) => { if (live && set?.has(h)) setKnownSlow(true); });
+    return () => { live = false; };
+  }, [host]);
   // The progress bar eases toward 85% while waiting (a real browser's trick: it never claims done early).
   const bar = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -497,12 +508,12 @@ function TabFrame({ tab, visible, t, onNavigated }: { tab: AdTab; visible: boole
           style={[s.loadBar, { width: bar.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]}
         />
       )}
-      {!loaded && slow && !slowDismissed && (
+      {!loaded && (slow || knownSlow) && !slowDismissed && (
         <View testID="ad-slow-hint" style={s.slowPill}>
-          <Text style={s.slowTx}>{t('Taking a while?')}</Text>
-          <Pressable onPress={openNewTab} accessibilityRole="link" style={({ hovered }: any) => [s.newTab, hovered && s.hover]}>
-            <Ionicons name="open-outline" size={15} color={colors.primary} />
-            <Text style={s.newTabTx}>{t('Open in a new window')}</Text>
+          <Text style={s.slowTx}>{t(knownSlow ? 'This site is slow to open' : 'Taking a while?')}</Text>
+          <Pressable testID="ad-slow-open-new-window" onPress={openNewTab} accessibilityRole="link" style={({ hovered }: any) => [s.slowGo, hovered && s.slowGoHover]}>
+            <Ionicons name="open-outline" size={16} color={colors.onFill} />
+            <Text style={s.slowGoTx}>{t('Open in a new window')}</Text>
           </Pressable>
           <Pressable onPress={() => setSlowDismissed(true)} accessibilityRole="button" accessibilityLabel={t('Close')} hitSlop={8} style={s.slowX}>
             <Ionicons name="close" size={14} color={colors.muted} />
@@ -591,12 +602,19 @@ const s = StyleSheet.create({
   pageHidden: { display: 'none' },
   loadBar: { position: 'absolute', top: 0, left: 0, height: 3, backgroundColor: colors.primary, borderTopRightRadius: 2, borderBottomRightRadius: 2 },
   slowPill: {
-    position: 'absolute', left: 12, right: 12, bottom: 16, alignSelf: 'center', maxWidth: 420, marginHorizontal: 'auto' as any,
-    flexDirection: 'row', alignItems: 'center', gap: 8, paddingStart: 14, paddingEnd: 6, paddingVertical: 6,
+    position: 'absolute', left: 12, right: 12, bottom: 20, alignSelf: 'center', maxWidth: 460, marginHorizontal: 'auto' as any,
+    flexDirection: 'row', alignItems: 'center', gap: 10, paddingStart: 16, paddingEnd: 8, paddingVertical: 8,
     borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
     shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 4 },
   },
-  slowTx: { flex: 1, fontSize: 13, color: colors.ink },
+  slowTx: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.ink },
+  // The way out of a slow page (owner 2026-10-21): a solid green button, not a faint link.
+  slowGo: {
+    height: 40, paddingHorizontal: 16, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', gap: 7,
+    backgroundColor: colors.selFill, flexShrink: 0,
+  },
+  slowGoHover: { opacity: 0.9 },
+  slowGoTx: { fontSize: 14, fontWeight: '700', color: colors.onFill },
   slowX: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   hintWrap: {
     position: 'absolute', top: 8, alignSelf: 'center',
