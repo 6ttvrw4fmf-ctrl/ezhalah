@@ -11,6 +11,8 @@
 //      curl -s "$SUPABASE_URL/auth/v1/token?grant_type=password" -H "apikey: $ANON_KEY" \
 //        -H 'Content-Type: application/json' -d '{"email":"<e2e user>","password":"<pw>"}'
 //   3. node scripts/verify-chat-persistence-live.mjs
+import './lib/robotPass.mjs'; // robot pass + secret handshake for our own browser robots (docs/ops/SCRAPE_GUARD.md)
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';

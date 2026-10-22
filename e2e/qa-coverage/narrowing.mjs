@@ -21,6 +21,7 @@
 //
 // Read-only. Hits ONLY Ezhalah's own index, never a source platform (§40.6), at the measured safe
 // envelope (concurrency 2, ≤1.5 searches/sec).
+import '../../scripts/lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { buildRequest, PAGE_LIMIT } from './request.mjs';
 
 const SUPA = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co';

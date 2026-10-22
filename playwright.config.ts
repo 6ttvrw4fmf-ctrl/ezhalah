@@ -1,3 +1,4 @@
+import './scripts/lib/robotPass.mjs'; // robot pass + secret handshake for our own browser robots (docs/ops/SCRAPE_GUARD.md)
 import { defineConfig, devices } from '@playwright/test';
 
 // Deterministic production-UI parity tests (2026-07-24). Drives the REAL production app with real

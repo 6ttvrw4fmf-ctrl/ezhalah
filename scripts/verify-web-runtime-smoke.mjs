@@ -86,6 +86,7 @@
 //
 // Env: PW_CHROMIUM overrides the browser binary; PW_PROXY sets an egress proxy (localhost always
 // bypassed). Both optional — CI needs neither.
+import './lib/robotPass.mjs'; // robot pass + secret handshake for our own browser robots (docs/ops/SCRAPE_GUARD.md)
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';

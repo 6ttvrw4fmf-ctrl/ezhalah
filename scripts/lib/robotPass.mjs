@@ -8,6 +8,8 @@
 // host. api/sb.ts checks it in constant time and tells the database only «robot: 1». Without the secret this file does
 // nothing at all, so local runs and fork PRs behave exactly as before.
 
+import { gateHeaders } from './gateFetch.mjs';
+
 export const ROBOT_PASS_HOSTS = ['ezhalah-app.vercel.app'];
 export const ROBOT_PASS_PATH = /\/sb\/rest\/v1\//;
 
@@ -27,6 +29,13 @@ export async function grantRobotPass(context, secret = process.env.EZ_GATE_SECRE
     const req = route.request();
     const headers = robotPassHeaders(req.url(), req.headers(), secret);
     return headers ? route.continue({ headers }) : route.continue();
+  });
+  // A test copy of the site (CI's local build, a preview) has no front door, so its browser calls our database
+  // directly: give those calls the secret handshake too (scripts/lib/gateFetch.mjs decides which calls qualify).
+  await context.route(/\.supabase\.co\/rest\/v1\//, (route) => {
+    const req = route.request();
+    const extra = gateHeaders(req.url(), secret);
+    return extra ? route.continue({ headers: { ...req.headers(), ...extra } }) : route.continue();
   });
   return true;
 }
