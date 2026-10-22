@@ -105,7 +105,8 @@ let kept: { at: number; facts: HomeCardFacts } | null = null;
 async function rpc(name: string): Promise<unknown> {
   const r = await fetch(`${supabaseUrl()}/rest/v1/rpc/${name}`, {
     method: 'POST',
-    headers: { apikey: supabaseKey(), 'Content-Type': 'application/json' },
+    // Secret handshake (docs/ops/SCRAPE_GUARD.md): our own server's database reads carry it once the back door closes.
+    headers: { apikey: supabaseKey(), 'Content-Type': 'application/json', ...(process.env.EZ_GATE_SECRET ? { 'x-ezhalah-gate': process.env.EZ_GATE_SECRET } : {}) },
     body: '{}',
     signal: AbortSignal.timeout(READ_MS),
   });

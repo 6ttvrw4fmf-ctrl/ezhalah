@@ -29,6 +29,11 @@
 # Usage: schema-drift-gate.sh <pre|post> <anon_key>
 set -uo pipefail
 
+# Secret handshake (docs/ops/SCRAPE_GUARD.md): our own calls to the database carry x-ezhalah-gate when the job
+# provides EZ_GATE_SECRET, so they keep working once the bare public key is refused. Empty-safe under set -u.
+EZ_GATE_H=()
+if [ -n "${EZ_GATE_SECRET:-}" ]; then EZ_GATE_H=(-H "x-ezhalah-gate: ${EZ_GATE_SECRET}"); fi
+
 PHASE="${1:?usage: schema-drift-gate.sh <pre|post> <anon_key>}"
 ANON="${2:?usage: schema-drift-gate.sh <pre|post> <anon_key>}"
 
@@ -51,6 +56,7 @@ HTTP="$(curl -s -o "$RESP" -w '%{http_code}' --max-time 20 \
   -X POST "$URL" \
   -H "apikey: $ANON" \
   -H "Authorization: Bearer $ANON" \
+  ${EZ_GATE_H[@]+"${EZ_GATE_H[@]}"} \
   -H "Content-Type: application/json" \
   -d "$BODY" || echo "curl_failed")"
 

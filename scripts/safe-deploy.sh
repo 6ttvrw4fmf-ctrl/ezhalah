@@ -9,6 +9,11 @@
 # completely clean. This is the ONLY way this repo should be deployed to production from now on —
 # never run `vercel --prod` directly.
 set -euo pipefail
+
+# Secret handshake (docs/ops/SCRAPE_GUARD.md): our own calls to the database carry x-ezhalah-gate when the job
+# provides EZ_GATE_SECRET, so they keep working once the bare public key is refused. Empty-safe under set -u.
+EZ_GATE_H=()
+if [ -n "${EZ_GATE_SECRET:-}" ]; then EZ_GATE_H=(-H "x-ezhalah-gate: ${EZ_GATE_SECRET}"); fi
 cd "$(git rev-parse --show-toplevel)"
 
 # Single source of truth for the production-target lock (constants + pure predicates). The exact
@@ -36,7 +41,7 @@ if [ -n "${DEPLOY_LOCK_MCP_HOLDER:-}" ]; then
   LOCK_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFhbm5hcmJrd2N5bXJvdHp3ZGJvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0MDgxMDAsImV4cCI6MjA5NTk4NDEwMH0.Z-GhSpan6otYWkc8sU43Dw5PT5T_VBUMr0IDZShCQw0"
   LOCK_RESP="$(curl -sS --max-time 15 -X POST \
     "https://aannarbkwcymrotzwdbo.supabase.co/rest/v1/rpc/ops_deploy_lock_status" \
-    -H "apikey: $LOCK_ANON_KEY" -H "Authorization: Bearer $LOCK_ANON_KEY" \
+    -H "apikey: $LOCK_ANON_KEY" -H "Authorization: Bearer $LOCK_ANON_KEY" ${EZ_GATE_H[@]+"${EZ_GATE_H[@]}"} \
     -H "Content-Type: application/json" -d '{}' || echo "curl_failed")"
   LOCK_OK="$(node -e '
     try {
@@ -352,6 +357,7 @@ SMOKE_HTTP="$(curl -s -o /tmp/safe-deploy-smoke-response.json -w '%{http_code}' 
   -X POST "$SMOKE_URL" \
   -H "apikey: $SMOKE_ANON_KEY" \
   -H "Authorization: Bearer $SMOKE_ANON_KEY" \
+  ${EZ_GATE_H[@]+"${EZ_GATE_H[@]}"} \
   -H "Content-Type: application/json" \
   -d "$SMOKE_BODY" || echo "curl_failed")"
 SMOKE_ELAPSED=$(( SECONDS - SMOKE_START ))
