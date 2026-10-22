@@ -107,5 +107,21 @@ check('the front door runs on the real site only, never on localhost, CI or prev
 check('a Turnstile failure can never become an uncaught page error', /'error-callback': \(\) => true/.test(client));
 mustCatch('the host gate removed from the switch', !/&& frontDoorHost\(window\.location\?\.hostname \?\? ''\);/.test(client.replace("\n  && frontDoorHost(window.location?.hostname ?? '');", ';')));
 
+// 8. The log labels name a coarse device class and country, never the address or the full user agent (2026-10-22:
+//    needed to tell real visitors the guards mislabel from robots, before any guard may refuse anyone).
+const lab = await liftSymbols(join(root, 'api/sb.ts'), [{ header: 'export function doorLabels(' }, { header: 'export function deviceClass(' }], ['doorLabels', 'deviceClass']);
+const deviceClass = lab.deviceClass as (ua: string) => string;
+const doorLabels = lab.doorLabels as (b: string, h: string, r: boolean, ua?: string, cc?: string) => string;
+check('device classes: headless robots, iPhone, Android, desktop',
+  deviceClass('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 HeadlessChrome/151') === 'headless'
+  && deviceClass('Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X)') === 'iphone'
+  && deviceClass('Mozilla/5.0 (Linux; Android 14; SM-S918B)') === 'android'
+  && deviceClass('Mozilla/5.0 (Windows NT 10.0; Win64; x64)') === 'desktop'
+  && deviceClass('curl/8.5.0') === 'other');
+const sample = doorLabels('human', 'pass', false, 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7) 70.162.170.16', 'SA');
+check('the labels never carry the address or the raw user agent', sample === 'bot=human ts=pass robot=0 dev=iphone cc=SA'
+  && doorLabels('bot', 'none', false, '', 'not-a-country') === 'bot=bot ts=none robot=0 dev=other cc=--', sample);
+mustCatch('a label leaking the raw user agent', !/^bot=\S+ ts=\S+ robot=[01] dev=[a-z]+ cc=(?:[A-Z]{2}|--)$/.test(`${sample} ua=Mozilla/5.0`));
+
 if (failed) { console.error(`\n❌ verify-front-door: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-front-door: the front door opens only onto /rest/v1 and trusts no caller\'s own claims.');
