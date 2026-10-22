@@ -326,16 +326,28 @@ export function headlineReduce(s: HeadlineState, ev: HeadlineEvent): HeadlineSta
 //   hasSession = a Supabase session is stored on this device (synchronous; the restore only confirms it)
 //   cache      = what this device showed last; reused only while held (HOLD_MS) and while it still
 //                fits the moment (a morning line is not reused at night)
+//   next       = the line PREPARED in the background for the next period, not yet seen. Its 2 hours start
+//                when it is first SHOWN (`promoted`: the caller then remembers it as the shown line).
+//
+// WHY `next` EXISTS (owner 2026-10-22: «I keep seeing the same one always»). The background used to
+// write the next period's line over the shown one, stamped with the moment it was PREPARED. A visitor
+// who came back more than 2 hours later found it already expired, so the screen fell back to one of
+// the five lines with no numbers — measured live: four visits 2 h apart showed «حياك {n}، وفر ساعات من
+// التدوير…» three times while lines 6, 37 and 30 were prepared and thrown away unseen.
+export const PREPARED_MAX_MS = 24 * 60 * 60 * 1000;
 export type WelcomeCache = { id: number; at: number; ar: string; en: string };
-export function instantWelcome(a: { hasSession: boolean; cache: WelcomeCache | null; now: Date; name: string; rand?: () => number }): { id: number; ar: string; en: string; fromCache: boolean } | null {
+const cachedFits = (c: WelcomeCache, now: Date, maxAge: number): boolean => {
+  const line = WELCOME_LINES.find((l) => l.id === c.id);
+  const age = now.getTime() - c.at;
+  return !!line && age >= 0 && age < maxAge && lineFitsTime(line, now) && !!c.ar && !!c.en
+    && (!line.needs.includes('newToday') || riyadhDay(c.at) === riyadhDay(now.getTime()));
+};
+export function instantWelcome(a: { hasSession: boolean; cache: WelcomeCache | null; next?: WelcomeCache | null; now: Date; name: string; rand?: () => number }): { id: number; ar: string; en: string; fromCache: boolean; promoted?: boolean } | null {
   if (!a.hasSession) return null;
   const c = a.cache;
-  if (c) {
-    const line = WELCOME_LINES.find((l) => l.id === c.id);
-    const age = a.now.getTime() - c.at;
-    if (line && age >= 0 && age < HOLD_MS && lineFitsTime(line, a.now) && c.ar && c.en
-      && (!line.needs.includes('newToday') || riyadhDay(c.at) === riyadhDay(a.now.getTime()))) return { id: c.id, ar: c.ar, en: c.en, fromCache: true };
-  }
+  if (c && cachedFits(c, a.now, HOLD_MS)) return { id: c.id, ar: c.ar, en: c.en, fromCache: true };
+  const n = a.next;
+  if (n && n.id !== c?.id && cachedFits(n, a.now, PREPARED_MAX_MS)) return { id: n.id, ar: n.ar, en: n.en, fromCache: true, promoted: true };
   const line = fallbackLine(c?.id ?? null, a.rand);
   const ar = renderWelcome(line, a.name, {}, 'ar');
   const en = renderWelcome(line, a.name, {}, 'en');

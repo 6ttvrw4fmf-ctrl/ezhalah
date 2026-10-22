@@ -11,7 +11,7 @@
 //      and the English keeps "Ezhalah" untranslated;
 //   7. rotation: one line held for 2 hours then a different one, always personal, time lines only at their time.
 import {
-  WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, FACTLESS_ANYTIME_IDS,
+  WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, PREPARED_MAX_MS, FACTLESS_ANYTIME_IDS,
   MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, fillName, NAME_SLOT, NEW_TODAY_MIN, riyadhDay, type WelcomeFacts,
 } from '../src/lib/filterWelcome.ts';
 
@@ -200,9 +200,45 @@ mustCatch('an instant path that reuses a cache past the hold',
   !!instantWelcome({ hasSession: true, cache: { ...freshCache, at: nowWed.getTime() - HOLD_MS - 1 }, now: nowWed, name: 'يوسف' })?.fromCache === false);
 const hookSrc = (await import('node:fs')).readFileSync(new URL('../src/lib/useFilterWelcome.ts', import.meta.url), 'utf8');
 check('the hook decides once per page load from device state and never re-decides (no second setShown after mount)',
-  (hookSrc.match(/setShown\(/g) ?? []).length === 1 && /instantWelcome\(\{ hasSession: session\.present, cache, now,/.test(hookSrc) && /\}, \[\]\);/.test(hookSrc));
-check('the background refresh writes the cache for the NEXT visit and never touches the screen',
-  /writeCache\(\{ id: line\.id, at, ar, en \}\)/.test(hookSrc) && !/setShown\([^)]*\)\s*;\s*\}\)\.catch/.test(hookSrc));
+  (hookSrc.match(/setShown\(/g) ?? []).length === 1 && /instantWelcome\(\{ hasSession: session\.present, cache, next, now,/.test(hookSrc) && /\}, \[\]\);/.test(hookSrc));
+check('the background writes for LATER visits (the shown line\'s numbers, the next line) and never touches the screen',
+  /writeCache\(\{ id: choice\.line\.id, at: held\.at, \.\.\.r \}\)/.test(hookSrc) && /writeKey\(NEXT_KEY, \{ id: nextLine\.id, at: now\.getTime\(\), \.\.\.r \}\)/.test(hookSrc)
+  && !/setShown\([^)]*\)\s*;\s*\}\)\.catch/.test(hookSrc));
+
+// ── 11b. the line CHANGES for a visitor who comes back after the 2 hours (owner 2026-10-22: «I keep
+// seeing the same one always»). Measured live before the fix: visits 2 h apart showed the same
+// no-numbers line three times, because the prepared line was stamped when PREPARED and had expired
+// before the visit. Executed: a simulated device across five visits 2 h 05 min apart.
+{
+  const t0 = new Date('2026-10-14T13:00:00').getTime(); // Wednesday afternoon: any-time lines only
+  const step = HOLD_MS + 5 * 60_000;
+  let cache: { id: number; at: number; ar: string; en: string } | null = null;
+  let next: typeof cache = null;
+  const seen: number[] = [];
+  const factIds: number[] = [];
+  let r = 0.11;
+  for (let v = 0; v < 5; v++) {
+    const now = new Date(t0 + v * step);
+    const s = instantWelcome({ hasSession: true, cache, next, now, name: 'يوسف', rand: () => (r = (r * 7.3 + 0.17) % 1) })!;
+    seen.push(s.id);
+    if (!s.fromCache || s.promoted) { cache = { id: s.id, at: now.getTime(), ar: s.ar, en: s.en }; if (s.promoted) next = null; }
+    // the background prepares the next line (a fact line, as the hook does) for the next visit
+    const n = chooseWelcomeLine(now, cache!.id, () => (r = (r * 7.3 + 0.17) % 1));
+    if (n) { next = { id: n.id, at: now.getTime(), ar: `AR-${n.id}`, en: `EN-${n.id}` }; factIds.push(n.id); }
+  }
+  check('a visitor coming back every 2 h 05 min sees a DIFFERENT line on every visit',
+    seen.every((id, i) => i === 0 || id !== seen[i - 1]), `seen ${seen.join(',')}`);
+  check('from the second visit on, each visit shows the line prepared for it (with its live numbers), not a no-numbers stand-in',
+    seen.slice(1).every((id, i) => id === factIds[i]), `seen ${seen.join(',')} prepared ${factIds.join(',')}`);
+  const reload = instantWelcome({ hasSession: true, cache, next, now: new Date(t0 + 4 * step + 30 * 60_000), name: 'يوسف' })!;
+  check('a reload INSIDE the 2 hours keeps the same line (never changes on every refresh)', reload.id === seen[4] && !reload.promoted);
+  const old = { id: 20, at: t0 - PREPARED_MAX_MS - 1, ar: 'x', en: 'y' };
+  check('a prepared line older than a day is not shown (its numbers may be stale)',
+    !instantWelcome({ hasSession: true, cache: null, next: old, now: new Date(t0), name: 'يوسف', rand: () => 0 })!.promoted);
+  // mutation: stamp the prepared line's hold from when it was PREPARED (the old code) → expired on arrival
+  const stamped = instantWelcome({ hasSession: true, cache: { id: 20, at: t0, ar: 'AR', en: 'EN' }, next: null, now: new Date(t0 + step), name: 'يوسف', rand: () => 0 })!;
+  mustCatch('a prepared line written over the shown one and stamped when prepared', stamped.fromCache === false);
+}
 
 // ── 7. rotation ─────────────────────────────────────────────────────────────────────────────────
 const at = (iso: string) => new Date(iso);
