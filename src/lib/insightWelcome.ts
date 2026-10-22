@@ -22,6 +22,10 @@ export const GREETING_SLOT = '⟦g⟧';
 const NAME = '⟦n⟧'; // same token as filterWelcome.ts NAME_SLOT
 
 export type Greeting = { ar: string; en: string; when: 'morning' | 'evening' | 'friday' | 'weekend' | 'any' };
+/** The line ends with its greeting's emoji (owner 2026-10-22: «good morning ☀️ should be the emoji, last sentence»). */
+export const GREETING_EMOJI: Record<Greeting['when'], string> = { morning: '☀️', evening: '🌙', friday: '🕌', weekend: '🌴', any: '👋' };
+/** «… اكتشفها مع إزهله.» → «… اكتشفها مع إزهله ☀️»: the closing full stop gives way to the emoji. */
+export const endWithEmoji = (text: string, emoji: string): string => `${text.trimEnd().replace(/[.。]$/, '')} ${emoji}`;
 // Owner-approved 2026-10-22 (occasions and afternoon wordings removed by the owner).
 export const GREETINGS: readonly Greeting[] = [
   { when: 'morning', ar: 'صباح الخير', en: 'Good morning' },
@@ -78,7 +82,7 @@ export function fillGreeting(text: string | null, greetingIndex: number | null, 
   if (!text.includes(GREETING_SLOT)) return text;
   const g = greetingIndex != null ? GREETINGS[greetingIndex] : undefined;
   if (!g) return null;
-  return text.split(GREETING_SLOT).join(locale === 'ar' ? g.ar : g.en);
+  return endWithEmoji(text.split(GREETING_SLOT).join(locale === 'ar' ? g.ar : g.en), GREETING_EMOJI[g.when]);
 }
 
 // ── the facts ──────────────────────────────────────────────────────────────────────────────────────────
@@ -158,38 +162,72 @@ export const insightKey = (f: Insight) => [f.kind, f.region ?? '', f.city ?? '',
 export const SEEN_DAYS = 7;
 export type Seen = Record<string, number>; // insightKey → when shown (ms)
 
+/** The kind and city of the line this device showed last (from the seen list), so the next one differs. */
+export function lastShown(seen: Seen): { kind: string; city: string } | null {
+  let best: string | null = null; let at = -1;
+  for (const [k, t] of Object.entries(seen)) if (t > at) { at = t; best = k; }
+  if (!best) return null;
+  const [kind, , city] = best.split('|');
+  return { kind: kind ?? '', city: city ?? '' };
+}
+const sameCity = (a: string | null | undefined, b: string | null | undefined) =>
+  !!a && !!b && a.replace(/^مدينة\s+/, '').trim() === b.replace(/^مدينة\s+/, '').trim();
+
 /**
- * The next line: a random sentence + a random fact of its kind that this device has not seen in a week.
- * About one time in three, when the user searched a district and today has a fact about it, a personal line.
+ * The next line (owner 2026-10-22):
+ *  • a user who searched a district gets a line about THAT district about one time in three;
+ *  • otherwise about two lines in three are about the city they search, one in three about other cities;
+ *  • the CITY is picked first, at random, then a fact in it — so it is never «Riyadh, Riyadh, Riyadh» just
+ *    because Riyadh has the most districts and therefore the most facts;
+ *  • never the same city, nor the same kind of line, twice in a row; never a fact seen in the past week.
  * Returns the template id (for the cache id) and the fact key (for the seen list).
  */
 export function chooseInsightLine(
   pack: InsightPack, seen: Seen, now: number, en: NameEn,
-  opts: { district?: string | null; rand?: () => number } = {},
+  opts: { district?: string | null; city?: string | null; rand?: () => number } = {},
 ): { templateId: number; key: string; ar: string; en: string } | null {
   const rand = opts.rand ?? Math.random;
+  const last = lastShown(seen);
   const fresh = (f: Insight) => { const t = seen[insightKey(f)]; return !t || now - t > SEEN_DAYS * 86_400_000; };
   const mine = (f: Insight) => !!opts.district && !!f.district && f.district.replace(/^حي\s+/, '') === opts.district.replace(/^حي\s+/, '');
-  const tryPool = (templates: InsightTemplate[], filter: (f: Insight) => boolean) => {
+  const pairsOf = (templates: InsightTemplate[], filter: (f: Insight) => boolean) => {
     const pairs: { t: InsightTemplate; f: Insight }[] = [];
     for (const t of templates) for (const f of pack.insights) if (f.kind === t.kind && filter(f) && fresh(f)) pairs.push({ t, f });
-    // shuffle-pick until one renders in both languages
-    for (let left = pairs.length; left > 0; left--) {
-      const i = Math.min(left - 1, Math.floor(rand() * left));
-      const { t, f } = pairs[i];
-      pairs[i] = pairs[left - 1];
-      const r = renderInsight(t, f, en);
-      if (r) return { templateId: t.id, key: insightKey(f), ...r };
+    // not the same kind of line, nor the same city, twice in a row — when there is anything else to say
+    const varied = pairs.filter(({ f }) => !last || (f.kind !== last.kind && (f.city ?? '') !== last.city));
+    return varied.length ? varied : pairs;
+  };
+  // a random pair that renders in both languages; `byCity` picks the city first so every city gets a fair turn
+  const pick = (pairs: { t: InsightTemplate; f: Insight }[], byCity: boolean) => {
+    const groups = new Map<string, { t: InsightTemplate; f: Insight }[]>();
+    for (const p of pairs) { const k = byCity ? (p.f.city ?? '') : ''; groups.set(k, [...(groups.get(k) ?? []), p]); }
+    const cities = [...groups.keys()];
+    while (cities.length) {
+      const ci = Math.min(cities.length - 1, Math.floor(rand() * cities.length));
+      const list = groups.get(cities[ci])!;
+      for (let left = list.length; left > 0; left--) {
+        const i = Math.min(left - 1, Math.floor(rand() * left));
+        const { t, f } = list[i];
+        list[i] = list[left - 1];
+        const r = renderInsight(t, f, en);
+        if (r) return { templateId: t.id, key: insightKey(f), ...r };
+      }
+      cities.splice(ci, 1);
     }
     return null;
   };
   const personal = pack.templates.filter((t) => t.personal);
   const general = pack.templates.filter((t) => !t.personal);
   if (opts.district && rand() < 1 / 3) {
-    const p = tryPool(personal, mine);
+    const p = pick(pairsOf(personal, mine), false);
     if (p) return p;
   }
-  return tryPool(general, () => true);
+  if (opts.city && rand() < 2 / 3) {
+    const p = pick(pairsOf(general, (f) => sameCity(f.city, opts.city)), false);
+    if (p) return p;
+  }
+  return pick(pairsOf(general, (f) => !opts.city || !sameCity(f.city, opts.city)), true)
+    ?? pick(pairsOf(general, () => true), true);
 }
 
 /** Cache ids for insight lines: 2000 + template id (WELCOME_LINES use 1–99, sign-in lines 101–105). */

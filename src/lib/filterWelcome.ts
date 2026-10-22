@@ -106,9 +106,10 @@ const REGION_AR = { riyadh: 'منطقة الرياض', makkah: 'منطقة مك�
 
 /**
  * How long one line stays before the next (owner 2026-10-17: «not every refresh … every now and then,
- * hours» → every 4 hours; owner 2026-10-20: «every 2 hours», and a signed-in user always sees a personal line).
+ * hours» → every 4 hours; owner 2026-10-20: «every 2 hours»; owner 2026-10-22: «1 hour» — a new fact every
+ * hour, still calm, never on every refresh; a signed-in user always sees a personal line).
  */
-export const HOLD_MS = 2 * 60 * 60 * 1000;
+export const HOLD_MS = 1 * 60 * 60 * 1000;
 /** A user with a searched district sees one of THEIR district's lines about this share of periods. */
 export const MY_DISTRICT_SHARE = 1 / 3;
 /** «من أنشط أحياء {city}» is said only when the district is within this rank in its city. */
@@ -327,7 +328,7 @@ export function headlineReduce(s: HeadlineState, ev: HeadlineEvent): HeadlineSta
 //   hasSession = a Supabase session is stored on this device (synchronous; the restore only confirms it)
 //   cache      = what this device showed last; reused only while held (HOLD_MS) and while it still
 //                fits the moment (a morning line is not reused at night)
-//   next       = the line PREPARED in the background for the next period, not yet seen. Its 2 hours start
+//   next       = the line PREPARED in the background for the next period, not yet seen. Its hour starts
 //                when it is first SHOWN (`promoted`: the caller then remembers it as the shown line).
 //
 // WHY `next` EXISTS (owner 2026-10-22: «I keep seeing the same one always»). The background used to
