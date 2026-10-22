@@ -35,6 +35,11 @@ export function safeRestPath(p: string | null): string | null {
   return /^(rpc\/)?[A-Za-z0-9_]+$/.test(p) ? p : null;
 }
 
+/** «bot=human ts=pass robot=0»: what the two guards and the robot pass said about this call, for the API logs. */
+export function doorLabels(bot: string, human: string, robot: boolean): string {
+  return `bot=${bot} ts=${human} robot=${robot ? 1 : 0}`;
+}
+
 /** True only when the caller presented the gate secret itself (our own browser robots). Never true without a secret. */
 export function robotPass(presented: string | null, gate: string): boolean {
   if (!gate || !presented || presented.length !== gate.length) return false;
@@ -70,7 +75,9 @@ async function handle(request: Request): Promise<Response> {
 
   const headers = new Headers();
   for (const k of PASS_REQUEST) { const v = request.headers.get(k); if (v) headers.set(k, v); }
-  headers.set('x-client-info', `${headers.get('x-client-info') ?? ''} ezhalah-front-door`.trim());
+  // The labels ride in x-client-info because it is one of the few request headers Supabase keeps in its API logs: they
+  // are how we MEASURE what share of real traffic BotID and Turnstile pass before either is allowed to refuse anyone.
+  headers.set('x-client-info', `${headers.get('x-client-info') ?? ''} ezhalah-front-door ${doorLabels(bot, human, robot)}`.trim());
   const ip = visitorIp(request.headers);
   if (GATE && ip) { headers.set('x-ezhalah-gate', GATE); headers.set('x-ezhalah-client-ip', ip); }
   // ROBOT PASS (20261021224031): our own browser robots run from server networks (GitHub, Google Cloud) that the network
