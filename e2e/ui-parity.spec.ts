@@ -1,4 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
+// Robot pass + secret handshake (docs/ops/SCRAPE_GUARD.md): our own test browser is never refused once the back door
+// closes. A no-op without EZ_GATE_SECRET (local runs, fork PRs).
+import { grantRobotPass } from '../scripts/lib/robotPassCore.mjs';
+test.beforeEach(async ({ context }) => { await grantRobotPass(context); });
 
 // Production-UI parity: drives the real app end-to-end (Filter mode + AI mode) and asserts the
 // results actually render, in Arabic, with the right classification. Real clicks + Playwright

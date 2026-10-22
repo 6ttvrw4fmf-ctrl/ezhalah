@@ -4,6 +4,7 @@
  * stubbed, its pure decisions are run, and each is mutation-proven (a mutated copy must fail this check).
  * Also pins that the table, the dispatch-only workflow and the 08:00 UTC cron row exist.
  */
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 

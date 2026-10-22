@@ -20,6 +20,7 @@
 //   language   the reply is in the language the user wrote
 //   clean      no «undefined», «null», «NaN», «{…}» leaking out
 // AND, for the search cases, that the parsed search is the obviously-correct reading (type, city, deal, price, bedrooms, amenity…).
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { readFileSync } from 'node:fs';
 
 const env = Object.fromEntries(readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')

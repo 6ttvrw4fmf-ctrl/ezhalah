@@ -6,6 +6,7 @@
 // zero counts). A failed read must print the number-free fallback, never «0 موقع» or a partial line.
 // The middleware is then executed with a stubbed fetch: people pass through untouched, bots get the card,
 // a failing database still gets a card (the fallback), never a thrown error.
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';

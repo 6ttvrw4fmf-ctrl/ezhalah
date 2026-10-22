@@ -16,6 +16,7 @@
 //
 //   node --experimental-strip-types scripts/verify-live-sweep-coverage-contract.ts
 
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { readFileSync } from 'node:fs';
 import { shippedTemplates, resultsFoundCount, shippedNoResultsTemplates, settledSource, ZERO_RE } from '../e2e/lib/resultsSentence.mjs';
 import { SECOND_PAGE_CAP as SHIPPED_SECOND_PAGE_CAP } from '../src/data/resultCount.ts';
