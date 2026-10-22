@@ -1,0 +1,189 @@
+// THE HOME HEADLINE'S DAILY INSIGHT LINE (owner 2026-10-22). A signed-in user's headline is a greeting chosen
+// by SAUDI time + «تدري إن …» + one fact Ezhalah's own data says today, about any town, district or region.
+// The facts are rebuilt every night in the database (build_welcome_insights, migration 20261022081647) and
+// read through welcome_insights_pick; the sentence shapes live there too (welcome_template).
+//
+// Pure: no React, no network, no storage. Executed by scripts/verify-insight-welcome.ts.
+//
+// TIMING IS SAUDI TIME, NEVER THE DEVICE CLOCK'S ZONE (owner: «the timings must be true»). Riyadh is UTC+3
+// all year (no daylight saving), so the hour and the weekday come from UTC + 3 h. A visitor whose phone is set
+// to another zone still gets «صباح الخير» only in a Riyadh morning and «جمعة مباركة» only on a Riyadh Friday.
+//
+// THE GREETING IS CHOSEN WHEN THE LINE IS SHOWN, not when it is prepared: the prepared line carries
+// GREETING_SLOT and the hook fills it at mount from the clock of that moment. A line prepared at 11:00 and
+// first seen at 20:00 therefore says «مساء الخير».
+//
+// THE NAME FOLLOWS THE LANGUAGE (owner: «يوسف in Arabic, Yusuf in English»): lines keep NAME_SLOT and the
+// hook's fillName puts in the name for the language on screen; both languages are rendered together so
+// the language button shows the same line translated.
+
+export const GREETING_SLOT = '⟦g⟧';
+const NAME = '⟦n⟧'; // same token as filterWelcome.ts NAME_SLOT
+
+export type Greeting = { ar: string; en: string; when: 'morning' | 'evening' | 'friday' | 'weekend' | 'any' };
+// Owner-approved 2026-10-22 (occasions and afternoon wordings removed by the owner).
+export const GREETINGS: readonly Greeting[] = [
+  { when: 'morning', ar: 'صباح الخير', en: 'Good morning' },
+  { when: 'morning', ar: 'صباح النور', en: 'Good morning' },
+  { when: 'morning', ar: 'صباح الورد', en: 'Good morning' },
+  { when: 'evening', ar: 'مساء الخير', en: 'Good evening' },
+  { when: 'evening', ar: 'مساء النور', en: 'Good evening' },
+  { when: 'evening', ar: 'مساء الورد', en: 'Good evening' },
+  { when: 'friday', ar: 'جمعة مباركة', en: 'Jumma Mubarak' },
+  { when: 'friday', ar: 'جمعتك مباركة', en: 'Jumma Mubarak' },
+  { when: 'weekend', ar: 'إجازة سعيدة', en: 'Happy weekend' },
+  { when: 'weekend', ar: 'استمتع بإجازتك', en: 'Enjoy your weekend' },
+  { when: 'any', ar: 'هلا', en: 'Hi' },
+  { when: 'any', ar: 'أهلاً', en: 'Hello' },
+  { when: 'any', ar: 'هلا والله', en: 'Hey' },
+  { when: 'any', ar: 'مرحباً', en: 'Hello' },
+  { when: 'any', ar: 'يا هلا', en: 'Hi there' },
+  { when: 'any', ar: 'حياك الله', en: 'Welcome' },
+];
+
+/** Riyadh's hour (0–23) and weekday (0 = Sunday … 5 = Friday, 6 = Saturday), whatever the device zone. */
+export function riyadhClock(now: Date): { hour: number; weekday: number } {
+  const r = new Date(now.getTime() + 3 * 3600_000);
+  return { hour: r.getUTCHours(), weekday: r.getUTCDay() };
+}
+
+/** Morning 04:00–11:59, evening 15:00–03:59 (Riyadh); midday 12:00–14:59 only the any-time hellos. */
+export function greetingFits(g: Greeting, now: Date): boolean {
+  const { hour, weekday } = riyadhClock(now);
+  switch (g.when) {
+    case 'morning': return hour >= 4 && hour < 12;
+    case 'evening': return hour >= 15 || hour < 4;
+    case 'friday': return weekday === 5;
+    case 'weekend': return weekday === 5 || weekday === 6;
+    default: return true;
+  }
+}
+
+/** The greeting for THIS moment: one of those that fit, at random (the index is kept for the page load). */
+export function pickGreeting(now: Date, rand: () => number = Math.random): number {
+  const fit = GREETINGS.map((g, i) => (greetingFits(g, now) ? i : -1)).filter((i) => i >= 0);
+  return fit[Math.min(fit.length - 1, Math.floor(rand() * fit.length))];
+}
+
+/** Put the greeting into a line for the language on screen. null leaves the line untouched (no slot). */
+export function fillGreeting(text: string | null, greetingIndex: number | null, locale: 'ar' | 'en'): string | null {
+  if (!text) return text;
+  if (!text.includes(GREETING_SLOT)) return text;
+  const g = greetingIndex != null ? GREETINGS[greetingIndex] : undefined;
+  if (!g) return null;
+  return text.split(GREETING_SLOT).join(locale === 'ar' ? g.ar : g.en);
+}
+
+// ── the facts ──────────────────────────────────────────────────────────────────────────────────────────
+export type InsightTemplate = { id: number; kind: string; personal: boolean; ar: string; en: string };
+export type Insight = {
+  id: number; kind: string; region: string | null; city: string | null; city_id: number | null;
+  district: string | null; district2: string | null; type: string | null; a: number | string | null; b: number | string | null;
+};
+export type InsightPack = { day: string | null; templates: InsightTemplate[]; insights: Insight[] };
+
+export const REGION_EN: Record<string, string> = {
+  'منطقة الرياض': 'the Riyadh Region', 'منطقة مكة المكرمة': 'the Makkah Region', 'منطقة المدينة المنورة': 'the Madinah Region',
+  'منطقة القصيم': 'Al-Qassim', 'المنطقة الشرقية': 'the Eastern Province', 'منطقة عسير': 'Asir', 'منطقة تبوك': 'the Tabuk Region',
+  'منطقة حائل': 'the Hail Region', 'منطقة الحدود الشمالية': 'the Northern Borders', 'منطقة جازان': 'Jazan', 'منطقة نجران': 'Najran',
+  'منطقة الباحة': 'Al-Baha', 'منطقة الجوف': 'Al-Jouf',
+};
+// Types a fact may name; a type outside this list is never put into a sentence (the fact is skipped).
+export const TYPE_EN: Record<string, string> = {
+  'أرض': 'land', 'أرض سكنية': 'residential land', 'أرض سكني': 'residential land', 'أرض تجارية': 'commercial land', 'أرض تجاري': 'commercial land',
+  'أرض زراعية': 'farmland', 'أرض زراعي': 'farmland', 'أرض صناعية': 'industrial land', 'أرض صناعي': 'industrial land',
+  'شقة': 'apartment', 'فيلا': 'villa', 'بيت': 'house', 'دور': 'floor', 'دوبلكس': 'duplex', 'عمارة': 'building', 'استراحة': 'rest house',
+  'شاليه': 'chalet', 'مزرعة': 'farm', 'محل': 'shop', 'مكتب': 'office', 'مستودع': 'warehouse', 'معرض': 'showroom', 'استوديو': 'studio',
+  'تاون هاوس': 'townhouse', 'مجمع سكني': 'residential compound', 'ورشة': 'workshop', 'غرفة': 'room', 'مخيم': 'camp',
+};
+
+const fmt = (v: number) => Math.trunc(v).toLocaleString('en-US');
+const num = (v: unknown): number | null => {
+  const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+const stripCity = (s: string) => s.trim();
+const withHay = (d: string) => (/^حي\s/.test(d.trim()) ? d.trim() : `حي ${d.trim()}`);
+
+export type NameEn = { city: (cityId: number, cityAr: string) => string | null; district: (cityId: number, districtAr: string) => string | null };
+
+/** One fact in one sentence, both languages, greeting and name still slotted. null when anything the
+ *  sentence names is missing, not a fact we can state, or has no English (the line is never half-filled). */
+export function renderInsight(t: InsightTemplate, f: Insight, en: NameEn): { ar: string; en: string } | null {
+  if (t.kind !== f.kind) return null;
+  const vAr: Record<string, string> = { g: GREETING_SLOT, n: NAME };
+  const vEn: Record<string, string> = { g: GREETING_SLOT, n: NAME };
+  const need = (key: string) => t.ar.includes(`{${key}}`) || t.en.includes(`{${key}}`);
+  if (need('a')) { const a = num(f.a); if (a == null) return null; vAr.a = vEn.a = fmt(a); }
+  if (need('b')) { const b = num(f.b); if (b == null) return null; vAr.b = vEn.b = fmt(b); }
+  if (need('region')) {
+    if (!f.region || !REGION_EN[f.region]) return null;
+    vAr.region = f.region; vEn.region = REGION_EN[f.region];
+  }
+  if (need('city')) {
+    if (!f.city) return null;
+    const e = f.city_id != null ? en.city(f.city_id, f.city) : null;
+    if (!e || /[؀-ۿ]/.test(e)) return null;
+    vAr.city = stripCity(f.city); vEn.city = e;
+  }
+  for (const k of ['district', 'district2'] as const) {
+    if (!need(k)) continue;
+    const d = f[k];
+    if (!d || f.city_id == null) return null;
+    const e = en.district(f.city_id, d);
+    if (!e || /[؀-ۿ]/.test(e)) return null;
+    vAr[k] = withHay(d); vEn[k] = e;
+  }
+  if (need('type')) {
+    if (!f.type || !TYPE_EN[f.type]) return null;
+    vAr.type = f.type; vEn.type = TYPE_EN[f.type];
+  }
+  const fill = (s: string, v: Record<string, string>) => s.replace(/\{(\w+)\}/g, (m, k) => (k in v ? v[k] : m));
+  const ar = fill(t.ar, vAr);
+  const enS = fill(t.en, vEn);
+  if (/\{\w+\}/.test(ar) || /\{\w+\}/.test(enS)) return null;
+  return { ar, en: enS };
+}
+
+/** The same fact on another day keeps this key, so «never twice in a week» holds across nightly rebuilds. */
+export const insightKey = (f: Insight) => [f.kind, f.region ?? '', f.city ?? '', f.district ?? '', f.district2 ?? ''].join('|');
+export const SEEN_DAYS = 7;
+export type Seen = Record<string, number>; // insightKey → when shown (ms)
+
+/**
+ * The next line: a random sentence + a random fact of its kind that this device has not seen in a week.
+ * About one time in three, when the user searched a district and today has a fact about it, a personal line.
+ * Returns the template id (for the cache id) and the fact key (for the seen list).
+ */
+export function chooseInsightLine(
+  pack: InsightPack, seen: Seen, now: number, en: NameEn,
+  opts: { district?: string | null; rand?: () => number } = {},
+): { templateId: number; key: string; ar: string; en: string } | null {
+  const rand = opts.rand ?? Math.random;
+  const fresh = (f: Insight) => { const t = seen[insightKey(f)]; return !t || now - t > SEEN_DAYS * 86_400_000; };
+  const mine = (f: Insight) => !!opts.district && !!f.district && f.district.replace(/^حي\s+/, '') === opts.district.replace(/^حي\s+/, '');
+  const tryPool = (templates: InsightTemplate[], filter: (f: Insight) => boolean) => {
+    const pairs: { t: InsightTemplate; f: Insight }[] = [];
+    for (const t of templates) for (const f of pack.insights) if (f.kind === t.kind && filter(f) && fresh(f)) pairs.push({ t, f });
+    // shuffle-pick until one renders in both languages
+    for (let left = pairs.length; left > 0; left--) {
+      const i = Math.min(left - 1, Math.floor(rand() * left));
+      const { t, f } = pairs[i];
+      pairs[i] = pairs[left - 1];
+      const r = renderInsight(t, f, en);
+      if (r) return { templateId: t.id, key: insightKey(f), ...r };
+    }
+    return null;
+  };
+  const personal = pack.templates.filter((t) => t.personal);
+  const general = pack.templates.filter((t) => !t.personal);
+  if (opts.district && rand() < 1 / 3) {
+    const p = tryPool(personal, mine);
+    if (p) return p;
+  }
+  return tryPool(general, () => true);
+}
+
+/** Cache ids for insight lines: 2000 + template id (WELCOME_LINES use 1–99, sign-in lines 101–105). */
+export const INSIGHT_ID_BASE = 2000;
+export const isInsightLineId = (id: number) => id >= INSIGHT_ID_BASE && id < INSIGHT_ID_BASE + 1000;

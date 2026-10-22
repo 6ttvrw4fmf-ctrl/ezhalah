@@ -206,7 +206,7 @@ check('the hook decides once per page load and re-decides ONLY for a sign-in wel
   && /const g = takeGreeting\(session, now\);\s*if \(!g\) return;/.test(hookSrc)
   && /instantWelcome\(\{ hasSession: session\.present, cache, next, now,/.test(hookSrc) && /\}, \[\]\);/.test(hookSrc));
 check('the background writes for LATER visits (the shown line\'s numbers, the next line) and never touches the screen',
-  /writeCache\(\{ id: choice\.line\.id, at: held\.at, \.\.\.r \}\)/.test(hookSrc) && /writeKey\(NEXT_KEY, \{ id: nextLine\.id, at: now\.getTime\(\), \.\.\.r \}\)/.test(hookSrc)
+  /writeCache\(\{ id: choice\.line\.id, at: held\.at, \.\.\.r \}\)/.test(hookSrc) && /writeKey\(NEXT_KEY, \{ id: INSIGHT_ID_BASE \+ pick\.templateId, at: now\.getTime\(\), ar: pick\.ar, en: pick\.en \}\)/.test(hookSrc)
   && !/setShown\([^)]*\)\s*;\s*\}\)\.catch/.test(hookSrc));
 
 // ── 11b. the line CHANGES for a visitor who comes back after the 2 hours (owner 2026-10-22: «I keep
@@ -310,7 +310,8 @@ mustCatch('a picker that ignores the previous line', !neverRepeats((now, _last, 
   check('no name → no line', fillName(slotted, '  ', 'ar') === null);
   check("the hook takes BOTH spellings from pickName (the menu's own rule)", /pickName\(names, 'ar'\)/.test(hookSrc) && /pickName\(names, 'en'\)/.test(hookSrc));
   check('the hook remembers lines with the name SLOT and fills the name per language when shown',
-    /name: NAME_SLOT/.test(hookSrc) && /const nm = NAME_SLOT;/.test(hookSrc) && /fillName\(shown\.ar, shown\.nameAr, 'ar'\)/.test(hookSrc));
+    /name: NAME_SLOT/.test(hookSrc) && /const nm = NAME_SLOT;/.test(hookSrc) && /fillName\(fillGreeting\(shown\.ar, shown\.greet \?\? null, 'ar'\), shown\.nameAr, 'ar'\)/.test(hookSrc)
+    && /fillName\(fillGreeting\(shown\.en, shown\.greet \?\? null, 'en'\), shown\.nameEn, 'en'\)/.test(hookSrc));
   check('old remembered lines (name baked in) are ignored', /filterWelcome:shown:v2'/.test(hookSrc));
   check('MUTATION: the pre-fix render (Latin name straight into the Arabic line) is what fillName refuses',
     /[A-Za-z]/.test(renderWelcome(line(24), 'yusuf', FACTS, 'ar') ?? '') && fillName(slotted, 'yusuf', 'ar') === null);

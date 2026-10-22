@@ -19,6 +19,11 @@ import {
 } from '@/lib/filterWelcome';
 import { loadWelcomeFacts } from '@/data/welcomeFacts';
 import { pickName } from '@/lib/nameSync';
+import {
+  pickGreeting, fillGreeting, chooseInsightLine, isInsightLineId, INSIGHT_ID_BASE, SEEN_DAYS, type Seen,
+} from '@/lib/insightWelcome';
+import { fetchWelcomeInsights } from '@/data/welcomeInsights';
+import { cityNameEn, districtNameEn } from '@/data/locations';
 import { hasJustSignedIn, takeJustSignedIn, SIGNED_IN_EVENT } from '@/lib/loginWelcome';
 
 // v2: remembered lines hold NAME_SLOT, not a name. v1 entries had the name baked in (a Latin name
@@ -36,6 +41,18 @@ const readKey = (key: string): WelcomeCache | null => {
 const writeKey = (key: string, c: WelcomeCache | null) => {
   try { if (c) globalThis.localStorage?.setItem(key, JSON.stringify(c)); else globalThis.localStorage?.removeItem(key); } catch { /* per-device nicety only */ }
 };
+// The facts this device has been shown, by key, with when — so one fact is never repeated within a week,
+// across the nightly rebuilds (lib/insightWelcome.ts insightKey).
+const SEEN_KEY = 'ezhalah:welcomeInsight:seen:v1';
+const readSeen = (now: number): Seen => {
+  try {
+    const v = JSON.parse(globalThis.localStorage?.getItem(SEEN_KEY) ?? '{}');
+    const out: Seen = {};
+    if (v && typeof v === 'object') for (const [k, t] of Object.entries(v)) if (typeof t === 'number' && now - t <= SEEN_DAYS * 86_400_000) out[k] = t;
+    return out;
+  } catch { return {}; }
+};
+const writeSeen = (s: Seen) => { try { globalThis.localStorage?.setItem(SEEN_KEY, JSON.stringify(s)); } catch { /* per-device nicety only */ } };
 const readCache = () => readKey(CACHE_KEY);
 const writeCache = (c: WelcomeCache) => writeKey(CACHE_KEY, c);
 
@@ -71,8 +88,8 @@ function takeGreeting(session: StoredSession, now: number): { id: number; ar: st
   return t ? greetingFor(session.uid, t.count, NAME_SLOT) : null;
 }
 
-type Shown = { settled: boolean; id: number | null; ar: string | null; en: string | null; nameAr: string; nameEn: string };
-const UNSETTLED: Shown = { settled: false, id: null, ar: null, en: null, nameAr: '', nameEn: '' };
+type Shown = { settled: boolean; id: number | null; ar: string | null; en: string | null; nameAr: string; nameEn: string; greet?: number | null };
+const UNSETTLED: Shown = { settled: false, id: null, ar: null, en: null, nameAr: '', nameEn: '', greet: null };
 
 export function useFilterWelcome(
   signedIn: boolean, name: string, locale: 'ar' | 'en',
@@ -95,7 +112,9 @@ export function useFilterWelcome(
     const greet = (nameAr || nameEn) ? takeGreeting(session, now.getTime()) : null;
     const inst = greet ? { ...greet, fromCache: false, promoted: false }
       : (nameAr || nameEn) ? instantWelcome({ hasSession: session.present, cache, next, now, name: NAME_SLOT }) : null;
-    setShown(inst ? { settled: true, id: inst.id, ar: inst.ar, en: inst.en, nameAr, nameEn } : { settled: true, id: null, ar: null, en: null, nameAr, nameEn });
+    // The greeting is chosen NOW, from Saudi time (lib/insightWelcome.ts), and kept for this page load.
+    const greetIdx = pickGreeting(now);
+    setShown(inst ? { settled: true, id: inst.id, ar: inst.ar, en: inst.en, nameAr, nameEn, greet: greetIdx } : { settled: true, id: null, ar: null, en: null, nameAr, nameEn, greet: greetIdx });
     if (!session.present) return;
     // What is on screen now is the SHOWN line, and its 2 hours start now when it is new to this device
     // (a prepared line seen for the first time, or the no-numbers line used when nothing was ready).
@@ -121,18 +140,20 @@ export function useFilterWelcome(
         if (r) writeCache({ id: choice.line.id, at: held.at, ...r });
       }).catch(() => {});
     }
-    // 2. Prepare the NEXT period's line with its live numbers, so the next visit after the 2 hours shows
-    //    it at once. Kept as long as it is still usable; a line whose facts are not true today is skipped.
+    // 2. Prepare the NEXT period's line: a «تدري إن …» fact from TODAY's insights (owner 2026-10-22; these
+    //    replace the old rotating lines), never one this device saw in the past week. Its greeting is put
+    //    in when it is shown. Kept as long as it is still usable (a day).
     const shownId = cache?.id ?? null;
     const pending = readKey(NEXT_KEY);
-    const pendingLine = pending ? WELCOME_LINES.find((l) => l.id === pending.id) : undefined;
-    const pendingOk = !!pending && !!pendingLine && pending.id !== shownId && now.getTime() - pending.at < PREPARED_MAX_MS
-      && lineFitsTime(pendingLine, now);
-    const nextLine = pendingOk ? null : chooseWelcomeLine(now, shownId, Math.random, !!lastDistrict);
-    if (nextLine) {
-      loadWelcomeFacts(nextLine, lastLocation, lastDistrict).then((facts) => {
-        const r = live ? render(nextLine, facts) : null;
-        if (r) writeKey(NEXT_KEY, { id: nextLine.id, at: now.getTime(), ...r });
+    const pendingOk = !!pending && isInsightLineId(pending.id) && pending.id !== shownId && now.getTime() - pending.at < PREPARED_MAX_MS;
+    if (!pendingOk) {
+      fetchWelcomeInsights(lastLocation, lastDistrict).then((pack) => {
+        if (!live || !pack) return;
+        const seen = readSeen(now.getTime());
+        const pick = chooseInsightLine(pack, seen, now.getTime(), { city: cityNameEn, district: districtNameEn }, { district: lastDistrict });
+        if (!pick) return;
+        writeKey(NEXT_KEY, { id: INSIGHT_ID_BASE + pick.templateId, at: now.getTime(), ar: pick.ar, en: pick.en });
+        writeSeen({ ...seen, [pick.key]: now.getTime() });
       }).catch(() => {});
     }
     return () => { live = false; };
@@ -163,7 +184,10 @@ export function useFilterWelcome(
     // The restore may finish after the instant decision; a signed-out restore still never swaps the
     // text (owner rule) — the line simply stays for this load. Guests (no session stored) get null.
     void signedIn;
-    const text = locale === 'ar' ? fillName(shown.ar, shown.nameAr, 'ar') : fillName(shown.en, shown.nameEn, 'en');
+    // The greeting (Saudi time, chosen once at mount) first, then the name for the language on screen.
+    const text = locale === 'ar'
+      ? fillName(fillGreeting(shown.ar, shown.greet ?? null, 'ar'), shown.nameAr, 'ar')
+      : fillName(fillGreeting(shown.en, shown.greet ?? null, 'en'), shown.nameEn, 'en');
     return { line: text, settled: shown.settled };
   }, [shown, locale, signedIn]);
 }
