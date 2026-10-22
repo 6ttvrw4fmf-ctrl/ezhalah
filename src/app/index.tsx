@@ -250,7 +250,7 @@ export default function Home() {
   // `welcomeSettled` gates the headline's ENTRANCE (owner 2026-10-17: it must never visibly change
   // after it appears): the title stays at opacity 0 until the session restore knows the visitor and,
   // signed in, until the line's numbers are in — then it rises once and is final for this load.
-  const { line: welcomeLine, settled: welcomeSettled } = useFilterWelcome(!!user, pickName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
+  const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey } = useFilterWelcome(!!user, pickName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
   // THE ONE QUERY THIS SCREEN DERIVES EVERYTHING FROM (owner P0 2026-09-01).
   //
   // The store may now carry Advanced Filter answers committed in the chat — that is the whole fix:
@@ -1282,6 +1282,13 @@ export default function Home() {
     // Instant, not a rise (owner 2026-10-17): the text is final, so it is simply there.
     titleAnim.setValue(1);
   }, [welcomeSettled, entranceKey, titleAnim]);
+  // THE SIGN-IN WELCOME HANDS OVER TO A MARKET INSIGHT, VISIBLY (owner 2026-10-22: «so they are aware on the
+  // spot the message changes»). The one headline change the owner asked to SEE: the new line rises in.
+  useEffect(() => {
+    if (!welcomeSwapKey) return;
+    titleAnim.setValue(0);
+    RNAnimated.timing(titleAnim, { toValue: 1, duration: 650, useNativeDriver: Platform.OS !== 'web' }).start();
+  }, [welcomeSwapKey, titleAnim]);
   // A RETURN TO THE FILTER IS A CLEAN FILTER (owner 2026-10-03). Coming back from a search — the
   // toggle, the browser's Back, a new visit — always opens an empty form: the previous search is NOT
   // kept here and there is no «مسح الكل» to undo it. Signed in, that search is in the sidebar history,

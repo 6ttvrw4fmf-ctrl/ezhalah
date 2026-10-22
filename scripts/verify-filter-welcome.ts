@@ -199,10 +199,13 @@ check('no name on the device → no personal line (never a line with a blank nam
 mustCatch('an instant path that reuses a cache past the hold',
   !!instantWelcome({ hasSession: true, cache: { ...freshCache, at: nowWed.getTime() - HOLD_MS - 1 }, now: nowWed, name: 'يوسف' })?.fromCache === false);
 const hookSrc = (await import('node:fs')).readFileSync(new URL('../src/lib/useFilterWelcome.ts', import.meta.url), 'utf8');
-// Two setShown calls: the mount decision, and the ONE exception — the sign-in welcome (owner 2026-10-22),
-// which only ever runs off takeGreeting (a sign-in mark), never off a timer or a facts load.
-check('the hook decides once per page load and re-decides ONLY for a sign-in welcome',
-  (hookSrc.match(/setShown\(/g) ?? []).length === 2
+// Three setShown calls: the mount decision, and the two sign-in exceptions (owner 2026-10-22) — the welcome
+// itself when the sign-in completes on this screen, and the hand-over from that welcome to a market insight
+// («show the welcome with 🥳, then change it to a market insight», visibly). Nothing else re-decides.
+check('the hook decides once per page load and re-decides ONLY for a sign-in welcome and its hand-over',
+  (hookSrc.match(/setShown\(/g) ?? []).length === 3
+  && /if \(greet\) welcomeThenInsight\(\);/.test(hookSrc) && /nameEn: session\.nameEn \}\);\s*welcomeThenInsight\(\);/.test(hookSrc)
+  && (hookSrc.match(/welcomeThenInsight\(\);/g) ?? []).length === 2
   && /const g = takeGreeting\(session, now\);\s*if \(!g\) return;/.test(hookSrc)
   && /instantWelcome\(\{ hasSession: session\.present, cache, next, now,/.test(hookSrc) && /\}, \[\]\);/.test(hookSrc));
 check('the background writes for LATER visits (the shown line\'s numbers, the next line) and never touches the screen',
@@ -313,7 +316,7 @@ mustCatch('a picker that ignores the previous line', !neverRepeats((now, _last, 
     /name: NAME_SLOT/.test(hookSrc) && /const nm = NAME_SLOT;/.test(hookSrc) && /fillName\(fillGreeting\(shown\.ar, shown\.greet \?\? null, 'ar'\), live \|\| shown\.nameAr, 'ar'\)/.test(hookSrc)
     && /fillName\(fillGreeting\(shown\.en, shown\.greet \?\? null, 'en'\), live \|\| shown\.nameEn, 'en'\)/.test(hookSrc)
     // a changed name shows at once: the account's current name (the `name` argument) is used and re-read
-    && /const live = \(name \?\? ''\)\.trim\(\);/.test(hookSrc) && /\[shown, locale, signedIn, name\]/.test(hookSrc));
+    && /const live = \(name \?\? ''\)\.trim\(\);/.test(hookSrc) && /\[shown, locale, signedIn, name, swapKey\]/.test(hookSrc));
   check('old remembered lines (name baked in) are ignored', /filterWelcome:shown:v2'/.test(hookSrc));
   check('MUTATION: the pre-fix render (Latin name straight into the Arabic line) is what fillName refuses',
     /[A-Za-z]/.test(renderWelcome(line(24), 'yusuf', FACTS, 'ar') ?? '') && fillName(slotted, 'yusuf', 'ar') === null);
@@ -343,11 +346,11 @@ mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a U
 // appears», five wordings so users see different ones, approved word for word) ──
 {
   const APPROVED_AR = [
-    'حياك الله {n}، إزهله طريقتك الجديدة لتلاقي عقارك في السعودية.',
-    'أهلاً {n}، مع إزهله صار البحث عن عقارك في السعودية أسهل.',
-    'حياك الله {n}، إزهله يدور لك على عقارك في كل السعودية.',
-    'هلا {n}، عقارك في السعودية صار أقرب مع إزهله.',
-    'مرحباً {n}، إزهله بدايتك الجديدة للبحث عن عقارك في السعودية.',
+    'حياك الله {n}، إزهله طريقتك الجديدة لتلاقي عقارك في السعودية. 🥳',
+    'أهلاً {n}، مع إزهله صار البحث عن عقارك في السعودية أسهل. 🥳',
+    'حياك الله {n}، إزهله يدور لك على عقارك في كل السعودية. 🥳',
+    'هلا {n}، عقارك في السعودية صار أقرب مع إزهله. 🥳',
+    'مرحباً {n}، إزهله بدايتك الجديدة للبحث عن عقارك في السعودية. 🥳',
   ];
   check('the five sign-in lines are the owner\'s approved Arabic, word for word, in order',
     GREET_LINES.length === 5 && GREET_LINES.every((l, i) => l.ar === APPROVED_AR[i]));
