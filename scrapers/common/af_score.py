@@ -611,7 +611,18 @@ def anon_client():
     from supabase import create_client
     url = os.environ["SUPABASE_URL"]
     key = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("EXPO_PUBLIC_SUPABASE_ANON_KEY") or ""
-    return create_client(url, key) if key else None
+    if not key:
+        return None
+    # Secret handshake (docs/ops/SCRAPE_GUARD.md): still the customer's anon path, plus x-ezhalah-gate so this check keeps
+    # working once the database refuses the bare public key. Sent only to our own database.
+    gate = os.environ.get("EZ_GATE_SECRET") or ""
+    if gate:
+        try:
+            from supabase.lib.client_options import SyncClientOptions as _Options
+        except ImportError:  # older supabase-py
+            from supabase.lib.client_options import ClientOptions as _Options
+        return create_client(url, key, options=_Options(headers={"x-ezhalah-gate": gate}))
+    return create_client(url, key)
 
 
 def ask(anon, params: dict) -> list[dict] | None:
