@@ -37,16 +37,29 @@ function frontDoorFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
   const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
   const front = frontDoorUrl(target, url);
   if (!front) return window.fetch(input, init);
-  const direct = () => window.fetch(input, init);
+  // A fallback says WHY in the API logs (x-client-info is one of the few headers Supabase keeps): «fallback=504» for a
+  // front door that timed out, «fallback=404» for one that is missing, «fallback=net» when the call never got an answer.
+  // Measured 2026-10-22: some iPhone page loads reached the database directly, and the back door cannot close until we
+  // know whether that is this fallback or an old saved copy of the app.
+  const direct = (why: string) => {
+    const headers = new Headers(init?.headers);
+    headers.set('x-client-info', `${headers.get('x-client-info') ?? ''} ${fallbackLabel(why)}`.trim());
+    return window.fetch(input, { ...init, headers });
+  };
   return window.fetch(front, init).then((r) => {
-    if (!frontDoorAnswered(r.status, r.headers.has('x-ezhalah-bot'))) return direct();
+    if (!frontDoorAnswered(r.status, r.headers.has('x-ezhalah-bot'))) return direct(String(r.status));
     // VPN / Tor / server network refused by the network guard (20261021224031): tell the visitor why, once,
     // instead of letting it read as an empty or broken search (components/NetworkBlockedNotice.tsx).
     if (r.status === 403) {
       r.clone().json().then((b) => { if (isNetworkBlocked(r.status, b)) window.dispatchEvent(new Event(NETWORK_BLOCKED_EVENT)); }, () => {});
     }
     return r;
-  }, direct);
+  }, () => direct('net'));
+}
+
+/** «ezhalah-fallback=<why>»: the log marker a direct retry carries. */
+export function fallbackLabel(why: string): string {
+  return `ezhalah-fallback=${/^[a-z0-9]{1,8}$/i.test(why) ? why : 'other'}`;
 }
 
 export const NETWORK_BLOCKED_EVENT = 'ezhalah:network-blocked';
