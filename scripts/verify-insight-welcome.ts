@@ -11,8 +11,9 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import {
   GREETINGS, localClock, greetingFits, pickGreeting, fillGreeting, renderInsight, chooseInsightLine, insightKey,
-  GREETING_SLOT, SEEN_DAYS, type Insight, type InsightTemplate, type InsightPack,
+  GREETING_SLOT, SEEN_DAYS, GREETING_EMOJI, type Insight, type InsightTemplate, type InsightPack,
 } from '../src/lib/insightWelcome.ts';
+import { HOW_IT_WORKS } from '../src/lib/insightHowItWorks.ts';
 import { fillName, NAME_SLOT } from '../src/lib/filterWelcome.ts';
 
 let failed = 0;
@@ -67,8 +68,36 @@ for (const sql of migs) {
     byId.set(Number(m[1]), { id: Number(m[1]), kind: m[2], personal: m[3] === 'true', ar: m[4].replace(/''/g, "'"), en: m[5].replace(/''/g, "'") });
   }
 }
+// a retired line (owner 2026-10-22: «pointless», «don't talk region») is switched off, never shown
+for (const sql of migs) {
+  for (const m of sql.matchAll(/update public\.welcome_template set active = false where id in \(([\d,\s]+)\)/g)) {
+    for (const id of m[1].split(',')) byId.delete(Number(id.trim()));
+  }
+}
 const templates: InsightTemplate[] = [...byId.values()].sort((x, y) => x.id - y.id);
-check('29 sentences are seeded', templates.length === 29, `found ${templates.length}`);
+check('31 sentences are live', templates.length === 31, `found ${templates.length}`);
+check('no live sentence names a region (city, then district)', templates.every((t) => !t.ar.includes('{region}') && !t.en.includes('{region}')),
+  templates.filter((t) => t.ar.includes('{region}')).map((t) => t.id).join(','));
+check('the retired lines are gone (pool, websites, maid, one-ad towns, lowest rent, local offices, regions)',
+  !templates.some((t) => ['pool', 'district_sites', 'region_sites', 'maid', 'town_single', 'town_few', 'min_rent_apt', 'local_office', 'region_week', 'region_land'].includes(t.kind)));
+check('every price line says the ASKING price («المعروض» / "asking")',
+  templates.filter((t) => /متوسط (السعر|الإيجار)/.test(t.ar)).every((t) => t.ar.includes('المعروض') && t.en.includes('asking')));
+// owner + their dad 2026-10-22: «investment usually happens أراضي، شقق، عماير» — purchase leads
+check('investors get purchase volume for land, apartments and buildings, this week against last, and month against month',
+  ['week_land', 'week_apt_sale', 'week_bld_sale', 'wow_land_up', 'wow_apt_sale_up', 'wow_bld_up', 'month_land_ppm', 'month_apt_ppm', 'month_bld_ppm']
+    .every((k) => templates.some((t) => t.kind === k)));
+check('rent is a side dish: at most 3 rent lines', templates.filter((t) => /إيجار/.test(t.ar)).length <= 3,
+  templates.filter((t) => /إيجار/.test(t.ar)).map((t) => t.id).join(','));
+check('the weak rent lines are gone (rent share, monthly payment, furnished, rent volume)',
+  !templates.some((t) => ['rent_share', 'monthly', 'furnished', 'commercial_count', 'week_apt_rent', 'wow_apt_rent_up', 'wow_apt_rent_down'].includes(t.kind)));
+// «we never recommend, we must never ever» — no line may advise, in either language
+const ADVICE_AR = /فرصة|أرخص|أفضل|استثمر|ننصح|صفقة|يستاهل|الوقت المناسب|لا تفوت/;
+const ADVICE_EN = /\b(deal|cheap|cheapest|best|invest|should|opportunity|bargain|don't miss)\b/i;
+check('no sentence gives advice (Arabic or English)', templates.every((t) => !ADVICE_AR.test(t.ar) && !ADVICE_EN.test(t.en)),
+  templates.filter((t) => ADVICE_AR.test(t.ar) || ADVICE_EN.test(t.en)).map((t) => t.id).join(','));
+check('(mutation) the advice check catches «فرصة» and "best"', ADVICE_AR.test('فرصة ذهبية') && ADVICE_EN.test('the best price'));
+check('counts say listings («إعلانات»), never properties, for the volume lines',
+  templates.filter((t) => /^(week_|city_land|city_sale|city_bld_sale)/.test(t.kind)).every((t) => t.ar.includes('إعلانات') && /listings/.test(t.en)));
 // owner 2026-10-22: «a lot of mistakes in the Arabic wording» — the corrected wording holds
 check('no sentence puts a bare count before a singular noun («14 إعلان», «3 حي») or says «أضعاف», «الحين», «بس»',
   templates.every((t) => !/\{a\} (إعلان|حي|أرض|موقع)(?![ا-ي])/.test(t.ar) && !/أضعاف|الحين| بس[؟،. ]/.test(t.ar)), templates.filter((t) => /أضعاف|الحين| بس[؟،. ]|\{a\} (إعلان|حي)/.test(t.ar)).map((t) => t.id).join(','));
@@ -123,8 +152,9 @@ check('a fact seen in the past week is never picked again (only an unsayable one
   chooseInsightLine(pack, seenAll, now, en) === null);
 const old = Object.fromEntries(pack.insights.slice(0, 2).map((f) => [insightKey(f), now - (SEEN_DAYS + 1) * 86_400_000]));
 check('after a week the fact may come back', chooseInsightLine(pack, old, now, en) !== null);
-check('a type with no English name is never put in a sentence', renderInsight(templates.find((t) => t.kind === 'town_single')!, pack.insights[2], en) === null);
-check('an unknown region is never put in a sentence', renderInsight(templates.find((t) => t.kind === 'region_land')!, { id: 9, kind: 'region_land', ...base, region: 'منطقة مجهولة' }, en) === null);
+const probe = (slot: string): InsightTemplate => ({ id: 0, kind: 'probe', personal: false, ar: `تدري إن {${slot}}؟`, en: `did you know {${slot}}?` });
+check('a type with no English name is never put in a sentence', renderInsight(probe('type'), { ...pack.insights[2], kind: 'probe' }, en) === null);
+check('an unknown region is never put in a sentence', renderInsight(probe('region'), { id: 9, kind: 'probe', ...base, region: 'منطقة مجهولة' }, en) === null);
 const picks = new Set<number>();
 for (let k = 0; k < 40; k++) { let r = (k + 1) / 41; const p = chooseInsightLine({ ...pack, insights: pack.insights.slice(0, 2) }, {}, now, en, { rand: () => (r = (r * 9.7 + 0.13) % 1) }); if (p) picks.add(p.templateId); }
 check('different sentences come up (not always the same one)', picks.size >= 2);
@@ -136,6 +166,75 @@ const mine: InsightPack = { day: '2026-10-22', templates, insights: [
 ] };
 const p5 = chooseInsightLine(mine, {}, now, en, { district: 'النخيل', rand: () => 0.1 });
 check('a user who searched a district gets a line about it (personal pick)', !!p5 && templates.find((t) => t.id === p5.templateId)!.personal && p5.ar.includes('حي النخيل'), p5?.ar);
+
+// ── 6. the line ends with its greeting's emoji (owner 2026-10-22: «good morning ☀️ … last sentence») ──
+{
+  const line = renderInsight(templates.find((t) => t.kind === 'land_ppm_city')!, { id: 1, kind: 'land_ppm_city', ...base }, en)!;
+  const want: Record<string, string> = { morning: '☀️', evening: '🌙', friday: '🕌', weekend: '🌴', any: '👋' };
+  let allEnds = true; const bad: string[] = [];
+  GREETINGS.forEach((g, i) => {
+    for (const loc of ['ar', 'en'] as const) {
+      const s = fillGreeting(loc === 'ar' ? line.ar : line.en, i, loc)!;
+      if (!s.endsWith(` ${want[g.when]}`)) { allEnds = false; bad.push(`${g.ar}/${loc}: ${s.slice(-24)}`); }
+      if (/\.\s+\S+$/.test(s)) { allEnds = false; bad.push(`full stop kept: ${s.slice(-24)}`); }
+    }
+  });
+  check('every line ends with its greeting\'s emoji (☀️ morning, 🌙 evening, 🕌 Friday, 🌴 weekend, 👋 any time), the full stop dropped', allEnds, bad.join(' | '));
+  check('the emoji table is exactly the owner\'s', JSON.stringify(GREETING_EMOJI) === JSON.stringify(want));
+  const morning = GREETINGS.findIndex((g) => g.ar === 'صباح الخير');
+  const shown = fillName(fillGreeting(line.ar, morning, 'ar'), 'يوسف', 'ar')!;
+  check('Arabic reads «صباح الخير يوسف، تدري إن … اكتشف أراضيها مع إزهله ☀️»', shown.startsWith('صباح الخير يوسف، تدري إن') && shown.endsWith('مع إزهله ☀️'), shown);
+}
+
+// ── 7. not Riyadh, Riyadh, Riyadh: city first, the user's city two lines in three, never twice in a row ──
+{
+  const cities = ['الرياض', 'جدة', 'أبها', 'تبوك', 'بريدة'];
+  const facts: Insight[] = [];
+  let id = 100;
+  for (const c of cities) {
+    const n = c === 'الرياض' ? 40 : 2; // Riyadh has far more facts, as in production
+    for (let k = 0; k < n; k++) for (const kind of ['land_ppm_city', 'land_share']) facts.push({ id: id++, kind, ...base, city: c, city_id: id, district: `حي ${c} ${k}`, a: 100 + k });
+  }
+  const pack7: InsightPack = { day: '2026-10-22', templates, insights: facts };
+  let r = 0.37; const rnd = () => (r = (r * 9.7 + 0.13) % 1);
+  const t7 = Date.UTC(2026, 9, 22, 8);
+  const count = (cityOpt: string | null) => {
+    const by: Record<string, number> = {}; let seen: Record<string, number> = {}; let prev: Insight | null = null; let repeats = 0;
+    for (let k = 0; k < 300; k++) {
+      const p = chooseInsightLine(pack7, seen, t7 + k * 3600_000, en, { city: cityOpt, rand: rnd });
+      if (!p) break;
+      const f = facts.find((x) => insightKey(x) === p.key)!;
+      by[f.city!] = (by[f.city!] ?? 0) + 1;
+      if (prev && (prev.city === f.city || prev.kind === f.kind)) repeats++;
+      prev = f; seen = { ...seen, [p.key]: t7 + k * 3600_000 };
+      // a week passes every few picks in this small simulation, so facts come back (keep the last one shown)
+      if (Object.keys(seen).length >= 6) seen = { [p.key]: t7 + k * 3600_000 };
+    }
+    return { by, repeats };
+  };
+  const guest = count(null);
+  const total = Object.values(guest.by).reduce((a, b) => a + b, 0);
+  check('a user with no searched city: Riyadh gets about its fair share, not most lines (≤ 35%)', (guest.by['الرياض'] ?? 0) / total <= 0.35, JSON.stringify(guest.by));
+  check('(mutation) a pick over FACTS instead of cities would fail the fair-share check (Riyadh holds most facts)',
+    facts.filter((f) => f.city === 'الرياض').length / facts.length > 0.35);
+  check('every city gets a turn', cities.every((c) => (guest.by[c] ?? 0) > 0), JSON.stringify(guest.by));
+  check('never the same city or the same kind of line twice in a row', guest.repeats === 0, `${guest.repeats} repeats`);
+  const jeddah = count('جدة');
+  const jt = Object.values(jeddah.by).reduce((a, b) => a + b, 0);
+  const share = (jeddah.by['جدة'] ?? 0) / jt;
+  check('a user who searches Jeddah: their city in roughly two lines of three (40%–80% here, with only 4 Jeddah facts)', share >= 0.4 && share <= 0.8, `${Math.round(share * 100)}% ${JSON.stringify(jeddah.by)}`);
+}
+
+// ── 8. «كيف تشتغل؟» says how duplicates are counted and that it is not advice (owner 2026-10-22) ──
+{
+  const ar = JSON.stringify(HOW_IT_WORKS.ar); const enS = JSON.stringify(HOW_IT_WORKS.en);
+  check('the sheet is titled «كيف تشتغل؟» / "How it works"', HOW_IT_WORKS.ar.title.startsWith('كيف تشتغل؟') && HOW_IT_WORKS.en.title.startsWith('How it works'));
+  check('it explains duplicates: same district, type, price and area count once, in counts and prices',
+    ar.includes('نحسبه مرة وحدة بس') && ar.includes('نفس الحي') && ar.includes('في الأعداد وفي الأسعار') && enS.includes('we count it only once'));
+  check('it says asking prices, not deals, and not investment advice', ar.includes('الأسعار المعروضة') && ar.includes('وليست نصيحة استثمارية') && enS.includes('not investment advice'));
+  check('it says the fact changes every hour', ar.includes('كل ساعة') && enS.includes('every hour'));
+  check('both languages carry the same sections', HOW_IT_WORKS.ar.sections.length === HOW_IT_WORKS.en.sections.length);
+}
 
 if (failed) { console.error(`\n❌ verify-insight-welcome: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-insight-welcome: greetings by local time, every sentence in both languages, no repeats.');

@@ -9,7 +9,7 @@
 //   5. English never carries Arabic script (city/district names come from the official English names);
 //   6. the owner's shape: 30 lines, Arabic without diacritics, every line ends with the brand,
 //      and the English keeps "Ezhalah" untranslated;
-//   7. rotation: one line held for 2 hours then a different one, always personal, time lines only at their time.
+//   7. rotation: one line held for 1 hour then a different one, always personal, time lines only at their time.
 import {
   WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, PREPARED_MAX_MS, FACTLESS_ANYTIME_IDS,
   MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, GREET_LINES, GREET_HOLD_MS, greetIndex, greetingFor, fillName, NAME_SLOT, NEW_TODAY_MIN, riyadhDay, type WelcomeFacts,
@@ -238,7 +238,7 @@ check('the background writes for LATER visits (the shown line\'s numbers, the ne
   check('from the second visit on, each visit shows the line prepared for it (with its live numbers), not a no-numbers stand-in',
     seen.slice(1).every((id, i) => id === factIds[i]), `seen ${seen.join(',')} prepared ${factIds.join(',')}`);
   const reload = instantWelcome({ hasSession: true, cache, next, now: new Date(t0 + 4 * step + 30 * 60_000), name: 'يوسف' })!;
-  check('a reload INSIDE the 2 hours keeps the same line (never changes on every refresh)', reload.id === seen[4] && !reload.promoted);
+  check('a reload INSIDE the hour keeps the same line (never changes on every refresh)', reload.id === seen[4] && !reload.promoted);
   const old = { id: 20, at: t0 - PREPARED_MAX_MS - 1, ar: 'x', en: 'y' };
   check('a prepared line older than a day is not shown (its numbers may be stale)',
     !instantWelcome({ hasSession: true, cache: null, next: old, now: new Date(t0), name: 'يوسف', rand: () => 0 })!.promoted);
@@ -258,26 +258,26 @@ const neverRepeats = (pick: typeof chooseWelcomeLine) => {
   return true;
 };
 // HOLD (owner: «not every refresh … every now and then, hours» → 4 h, always personal).
-const holdsTwoHours = (decide: typeof welcomeForNow) => {
+const holdsOneHour = (decide: typeof welcomeForNow) => {
   const t0 = at('2026-10-14T13:00:00').getTime(); // Wednesday 13:00 — only any-time lines fit
   const held = { id: 20, at: t0 };
-  const kept1h = decide(new Date(t0 + 1 * 3600_000), held, () => 0.3);
-  const kept3h = decide(new Date(t0 + 1.9 * 3600_000), held, () => 0.7);
-  const after = decide(new Date(t0 + 2 * 3600_000 + 1), held, () => 0.3);
+  const kept1h = decide(new Date(t0 + 0.5 * 3600_000), held, () => 0.3);
+  const kept3h = decide(new Date(t0 + 0.95 * 3600_000), held, () => 0.7);
+  const after = decide(new Date(t0 + 1 * 3600_000 + 1), held, () => 0.3);
   return kept1h?.line.id === 20 && kept1h.keep && kept3h?.line.id === 20
     && !!after && !after.keep && after.line.id !== 20;
 };
-check('one line is held for 2 hours (owner 2026-10-20), then a different line takes over', holdsTwoHours(welcomeForNow));
-check('HOLD_MS is 2 hours', HOLD_MS === 2 * 3600_000);
-mustCatch('a picker that changes on every refresh', !holdsTwoHours((now, held, rand) => {
+check('one line is held for 1 hour (owner 2026-10-22), then a different line takes over', holdsOneHour(welcomeForNow));
+check('HOLD_MS is 1 hour', HOLD_MS === 1 * 3600_000);
+mustCatch('a picker that changes on every refresh', !holdsOneHour((now, held, rand) => {
   const line = chooseWelcomeLine(now, held?.id ?? null, rand); return line ? { line, keep: false } : null;
 }));
-mustCatch('a picker that holds a line forever', !holdsTwoHours((_now, held) => {
+mustCatch('a picker that holds a line forever', !holdsOneHour((_now, held) => {
   const line = WELCOME_LINES.find((l) => l.id === held?.id)!; return { line, keep: true };
 }));
-const morningHeld = { id: 1, at: at('2026-10-14T11:00:00').getTime() };
-const afternoon = welcomeForNow(at('2026-10-14T13:00:00'), morningHeld, () => 0.5);
-check('a held MORNING line does not survive into the afternoon, even within 2 hours', !!afternoon && afternoon.line.id !== 1 && !afternoon.keep);
+const morningHeld = { id: 1, at: at('2026-10-14T11:30:00').getTime() };
+const afternoon = welcomeForNow(at('2026-10-14T12:10:00'), morningHeld, () => 0.5);
+check('a held MORNING line does not survive into the afternoon, even within the hour', !!afternoon && afternoon.line.id !== 1 && !afternoon.keep);
 let alwaysALine = true;
 for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) {
   const now = new Date(2026, 9, 11 + d, h, 30);

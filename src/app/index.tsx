@@ -33,6 +33,7 @@ import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
 import { useFilterWelcome } from '@/lib/useFilterWelcome';
+import { InsightHowItWorks } from '@/components/InsightHowItWorks';
 import { decodeSharePayload, shareLandingTitle, shareInviteNote, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
 import { fetchSharedChat, fetchSharedChatCard } from '@/lib/sharedChat';
 import { isProbeFailure } from '@/lib/afProbe';
@@ -250,7 +251,9 @@ export default function Home() {
   // `welcomeSettled` gates the headline's ENTRANCE (owner 2026-10-17: it must never visibly change
   // after it appears): the title stays at opacity 0 until the session restore knows the visitor and,
   // signed in, until the line's numbers are in — then it rises once and is final for this load.
-  const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey } = useFilterWelcome(!!user, pickName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
+  // «كيف تشتغل؟» opens when the user taps a market fact in the headline (owner 2026-10-22).
+  const [howOpen, setHowOpen] = useState(false);
+  const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey, isInsight: welcomeIsInsight } = useFilterWelcome(!!user, pickName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
   // THE ONE QUERY THIS SCREEN DERIVES EVERYTHING FROM (owner P0 2026-09-01).
   //
   // The store may now carry Advanced Filter answers committed in the chat — that is the whole fix:
@@ -1425,7 +1428,10 @@ export default function Home() {
           {/* Hero — title then subtitle rise in, staggered (user request). */}
           <HomeWebsiteStrip />
           <View style={s.hero}>
-            <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
+            <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
+              <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}{welcomeIsInsight && welcomeLine ? ' ⓘ' : ''}</RNAnimated.Text>
+            </Pressable>
+            <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
             <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>
           </View>
 
