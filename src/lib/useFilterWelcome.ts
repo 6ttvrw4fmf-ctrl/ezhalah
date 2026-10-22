@@ -14,11 +14,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   welcomeForNow, chooseWelcomeLine, renderWelcome, instantWelcome, fillName, NAME_SLOT, PREPARED_MAX_MS,
-  WELCOME_LINES, lineFitsTime,
+  WELCOME_LINES, lineFitsTime, greetingFor,
   type HeldWelcome, type WelcomeCache, type WelcomeLine, type WelcomeFacts,
 } from '@/lib/filterWelcome';
 import { loadWelcomeFacts } from '@/data/welcomeFacts';
 import { pickName } from '@/lib/nameSync';
+import { hasJustSignedIn, takeJustSignedIn, SIGNED_IN_EVENT } from '@/lib/loginWelcome';
 
 // v2: remembered lines hold NAME_SLOT, not a name. v1 entries had the name baked in (a Latin name
 // inside the Arabic line, owner 2026-10-17) and are ignored.
@@ -42,11 +43,11 @@ const writeCache = (c: WelcomeCache) => writeKey(CACHE_KEY, c);
 // Same key shape src/lib/authStorageGuard.ts and src/i18n.tsx read: `sb-<ref>-auth-token`.
 // The name in BOTH spellings, by the same pickName() the sidebar and account menu use — so the
 // Arabic line gets «يوسف», never «yusuf».
-type StoredSession = { present: boolean; nameAr: string; nameEn: string };
+type StoredSession = { present: boolean; nameAr: string; nameEn: string; uid: string };
 function readStoredSession(): StoredSession {
   try {
     const ls = globalThis.localStorage;
-    if (!ls) return { present: false, nameAr: '', nameEn: '' };
+    if (!ls) return { present: false, nameAr: '', nameEn: '', uid: '' };
     for (let i = 0; i < ls.length; i++) {
       const k = ls.key(i);
       if (!k || !/^sb-.+-auth-token$/.test(k)) continue;
@@ -56,10 +57,18 @@ function readStoredSession(): StoredSession {
       const m = u?.user_metadata ?? {};
       const base = String(m.full_name || m.name || m.nameEn || m.nameAr || (u?.email ? String(u.email).split('@')[0] : '')).trim();
       const names = { name: base, nameAr: m.nameAr, nameEn: m.nameEn };
-      return { present: true, nameAr: pickName(names, 'ar'), nameEn: pickName(names, 'en') };
+      return { present: true, nameAr: pickName(names, 'ar'), nameEn: pickName(names, 'en'), uid: String(u?.id ?? '') };
     }
   } catch { /* fall through */ }
-  return { present: false, nameAr: '', nameEn: '' };
+  return { present: false, nameAr: '', nameEn: '', uid: '' };
+}
+
+// The sign-in welcome for THIS device's session, if a sign-in was just marked (lib/loginWelcome.ts).
+// Takes the mark, so one sign-in greets once.
+function takeGreeting(session: StoredSession, now: number): { id: number; ar: string; en: string } | null {
+  if (!session.present || !(session.nameAr || session.nameEn) || !hasJustSignedIn(now)) return null;
+  const t = takeJustSignedIn(now);
+  return t ? greetingFor(session.uid, t.count, NAME_SLOT) : null;
 }
 
 type Shown = { settled: boolean; id: number | null; ar: string | null; en: string | null; nameAr: string; nameEn: string };
@@ -81,7 +90,11 @@ export function useFilterWelcome(
     // name (passed in) is preferred when it is already restored; else the stored session's.
     const nameAr = (locale === 'ar' && name) || session.nameAr;
     const nameEn = (locale === 'en' && name) || session.nameEn;
-    const inst = (nameAr || nameEn) ? instantWelcome({ hasSession: session.present, cache, next, now, name: NAME_SLOT }) : null;
+    // Right after a sign-in or sign-up the welcome line takes the place of the rotation (owner
+    // 2026-10-22); otherwise the rotation as before.
+    const greet = (nameAr || nameEn) ? takeGreeting(session, now.getTime()) : null;
+    const inst = greet ? { ...greet, fromCache: false, promoted: false }
+      : (nameAr || nameEn) ? instantWelcome({ hasSession: session.present, cache, next, now, name: NAME_SLOT }) : null;
     setShown(inst ? { settled: true, id: inst.id, ar: inst.ar, en: inst.en, nameAr, nameEn } : { settled: true, id: null, ar: null, en: null, nameAr, nameEn });
     if (!session.present) return;
     // What is on screen now is the SHOWN line, and its 2 hours start now when it is new to this device
@@ -126,6 +139,25 @@ export function useFilterWelcome(
     // Deliberately once: the headline is decided at mount and never re-decided in this page load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // THE ONE EXCEPTION to "never re-decided": a sign-in that completes while this screen is up (Google
+  // One Tap, or a Google/Apple return whose session lands after the home mounted). Signing in is the
+  // user's own act, and the owner asked for the welcome right then (2026-10-22). Nothing else changes
+  // the headline after it appears.
+  useEffect(() => {
+    const greetNow = () => {
+      const now = Date.now();
+      const session = readStoredSession();
+      const g = takeGreeting(session, now);
+      if (!g) return;
+      writeCache({ id: g.id, at: now, ar: g.ar, en: g.en });
+      setShown({ settled: true, id: g.id, ar: g.ar, en: g.en, nameAr: session.nameAr, nameEn: session.nameEn });
+    };
+    if (signedIn) greetNow();
+    const onSignedIn = () => greetNow();
+    globalThis.addEventListener?.(SIGNED_IN_EVENT, onSignedIn);
+    return () => globalThis.removeEventListener?.(SIGNED_IN_EVENT, onSignedIn);
+  }, [signedIn]);
 
   return useMemo(() => {
     // The restore may finish after the instant decision; a signed-out restore still never swaps the

@@ -336,9 +336,40 @@ export function headlineReduce(s: HeadlineState, ev: HeadlineEvent): HeadlineSta
 // التدوير…» three times while lines 6, 37 and 30 were prepared and thrown away unseen.
 export const PREPARED_MAX_MS = 24 * 60 * 60 * 1000;
 export type WelcomeCache = { id: number; at: number; ar: string; en: string };
+
+// THE SIGN-IN WELCOME (owner 2026-10-22: «whenever the user logs in or signs up, this message appears»,
+// with five wordings so users see different ones). Approved Arabic, word for word; the English is its
+// translation, with the brand never translated. Shown on the page right after a sign-in (or sign-up),
+// then held GREET_HOLD_MS so a reload keeps it; after that the normal rotation resumes. Never chosen
+// by the normal rotation (they are not in WELCOME_LINES).
+export const GREET_LINES: readonly WelcomeLine[] = [
+  { id: 101, when: 'any', needs: [], ar: 'حياك الله {n}، إزهله طريقتك الجديدة لتلاقي عقارك في السعودية.', en: 'Welcome {n}, Ezhalah is your new way to find your property in Saudi Arabia.' },
+  { id: 102, when: 'any', needs: [], ar: 'أهلاً {n}، مع إزهله صار البحث عن عقارك في السعودية أسهل.', en: 'Hello {n}, with Ezhalah, finding your property in Saudi Arabia just got easier.' },
+  { id: 103, when: 'any', needs: [], ar: 'حياك الله {n}، إزهله يدور لك على عقارك في كل السعودية.', en: 'Welcome {n}, Ezhalah searches all of Saudi Arabia for your property.' },
+  { id: 104, when: 'any', needs: [], ar: 'هلا {n}، عقارك في السعودية صار أقرب مع إزهله.', en: 'Hi {n}, your property in Saudi Arabia is closer with Ezhalah.' },
+  { id: 105, when: 'any', needs: [], ar: 'مرحباً {n}، إزهله بدايتك الجديدة للبحث عن عقارك في السعودية.', en: 'Welcome {n}, Ezhalah is your fresh start in the search for property in Saudi Arabia.' },
+];
+export const GREET_HOLD_MS = 30 * 60 * 1000;
+/** Which of the five a sign-in shows: starts from the user's own id (so users differ), then moves one
+ *  step per sign-in on this device (so the same user does not always see the same one). */
+export function greetIndex(userId: string, signIns: number): number {
+  let h = 0;
+  for (const ch of String(userId ?? '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return (h + Math.max(0, Math.trunc(signIns))) % GREET_LINES.length;
+}
+/** The sign-in welcome in both languages, name still slotted (fillName puts it in per language). */
+export function greetingFor(userId: string, signIns: number, name: string): { id: number; ar: string; en: string } | null {
+  const line = GREET_LINES[greetIndex(userId, signIns)];
+  const ar = renderWelcome(line, name, {}, 'ar');
+  const en = renderWelcome(line, name, {}, 'en');
+  return ar && en ? { id: line.id, ar, en } : null;
+}
+
 const cachedFits = (c: WelcomeCache, now: Date, maxAge: number): boolean => {
-  const line = WELCOME_LINES.find((l) => l.id === c.id);
   const age = now.getTime() - c.at;
+  const greet = GREET_LINES.find((l) => l.id === c.id);
+  if (greet) return age >= 0 && age < Math.min(maxAge, GREET_HOLD_MS) && !!c.ar && !!c.en;
+  const line = WELCOME_LINES.find((l) => l.id === c.id);
   return !!line && age >= 0 && age < maxAge && lineFitsTime(line, now) && !!c.ar && !!c.en
     && (!line.needs.includes('newToday') || riyadhDay(c.at) === riyadhDay(now.getTime()));
 };
