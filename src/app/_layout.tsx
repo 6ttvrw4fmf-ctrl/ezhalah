@@ -18,6 +18,7 @@ import { installTapDebug } from '@/lib/tapDebug';
 import Head from 'expo-router/head';
 import { OG_IMAGE, SHARE_BLURB_AR, SHARE_CARD_DESC_AR, SHARE_LINK, SHARE_TITLE_AR } from '@/lib/share';
 import Sidebar, { useDocked } from '@/components/Sidebar';
+import NetworkBlockedNotice from '@/components/NetworkBlockedNotice';
 import InfoModal from '@/components/InfoModal';
 import AuthModal from '@/components/AuthModal';
 import SignInCard from '@/components/SignInCard';
@@ -169,6 +170,8 @@ function Shell() {
       <AuthModal />
       {/* Cookie consent — bottom-corner card, once per signed-out web visitor (owner 2026-09-06). */}
       <CookieConsent />
+      {/* «Please turn off your VPN» — shown once when the network guard refuses this visitor (owner 2026-10-21). */}
+      <NetworkBlockedNotice />
       {/* First-run cinematic intro — overlays everything; shows once for new logged-out visitors. */}
       <IntroVideo />
     </View>
