@@ -13,6 +13,7 @@
 //
 // Read-only. Ezhalah's own index only, never a source platform (§40.6).
 
+import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium, devices } from 'playwright';
 import { parseVisibleState } from '../live-sweep/visibleState.mjs';
 import { settledSource } from '../lib/resultsSentence.mjs';

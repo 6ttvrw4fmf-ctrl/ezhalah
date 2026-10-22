@@ -7,6 +7,7 @@
 // calling our RPC again, NOT by re-running our SQL — translating only the specific params the
 // captured request actually carried. Diffs exact (source_table,listing_id) sets: missing / extra /
 // duplicate, not just counts.
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
 import { openAfOffer } from './lib/afOfferLive.ts';
 import { pairCountForSelection, isResultsRequest } from './lib/afCountPairing.ts';

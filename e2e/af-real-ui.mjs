@@ -1,3 +1,4 @@
+import '../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from '@playwright/test';
 import fs from 'fs';
 const BASE='https://ezhalah-app.vercel.app';

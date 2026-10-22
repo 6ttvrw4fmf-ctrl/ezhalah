@@ -7,6 +7,7 @@
 //   BASE=http://localhost:8811 node …                       # a local build
 //   ONLY=budget node …  /  N=10 node …  /  CONC=3 node …
 // Needs @playwright/test (the repo's own dev dependency) and its Chromium.
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { chromium, devices } = require('@playwright/test');

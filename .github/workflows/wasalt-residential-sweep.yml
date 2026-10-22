@@ -20,6 +20,11 @@ concurrency:
   group: wasalt-residential-sweep
   cancel-in-progress: true
 
+env:
+  # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
+  # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   sweep:
     name: Wasalt res ${{ matrix.slug }} ${{ matrix.deal }}

@@ -14,6 +14,7 @@
 //   (run from .github/workflows/af-live-truth-check.yml — deliberately NOT in `npm test`, same
 //    precedent as every other live check here: `npm test` is hermetic and runs in seconds.)
 
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { judgeAfCta, type AfCtaObservation } from './lib/afOfferAgreement.ts';

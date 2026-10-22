@@ -33,6 +33,7 @@
 //   PW_EXECUTABLE_PATH=/opt/pw-browsers/chromium node --experimental-strip-types scripts/verify-af-card-evidence-live.ts
 //   AF_EV_CITY / AF_EV_GROUP / AF_EV_TYPE   scope (defaults الرياض / الشقق والسكن المشترك / شقة)
 //   AF_EV_MOBILE=1                          390x844 touch viewport
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { chromium } from 'playwright';

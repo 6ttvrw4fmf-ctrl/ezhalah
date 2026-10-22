@@ -32,6 +32,7 @@
 //
 // A layer this run could not reach is printed as NOT REACHED and counted separately. It is never
 // folded into the passes (PART 7): a rule this run could not reach is not a rule this run proved.
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { readFileSync } from 'node:fs';
 import { chromium, devices } from 'playwright';
 import { buildOracleQS } from './lib/afOracleFilter.ts';

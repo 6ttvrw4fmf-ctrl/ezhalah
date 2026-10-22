@@ -7,6 +7,7 @@
 //   out/02-listing-preview.png         that card opened — the details panel's price block
 // Prints the card's and the panel's text so the numbers can be cross-checked against aqar.
 //   node e2e/screenshots/discount-card.mjs            (BASE_URL, CITY, DISTRICT_TYPED, DISTRICT_ROW optional)
+import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dismissCookieConsent } from '../../scripts/lib/liveConsent.ts';

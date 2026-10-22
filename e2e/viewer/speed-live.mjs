@@ -14,6 +14,7 @@
 // wall is reported and excluded — the site throttled the robot, Ezhalah did nothing wrong. A Cloudflare
 // challenge (403 + cf-mitigated: challenge, served to datacenter IPs, never to a phone in Saudi) is
 // handled the same way: its own SAMEORIGIN header is not the ad page's, and a frame it blocks is excluded.
+import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium, devices } from '@playwright/test';
 
 const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';

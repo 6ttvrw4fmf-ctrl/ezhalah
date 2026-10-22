@@ -17,6 +17,7 @@
 //
 //   node --experimental-strip-types scripts/check-border-ads-for-missed-pins.ts [--per-site 6] [--sites a,b]
 
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from '@playwright/test';
 import { liftSymbols } from './lib/liftSymbols.ts';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from './lib/public-supabase.ts';
