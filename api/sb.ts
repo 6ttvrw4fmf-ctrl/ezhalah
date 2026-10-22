@@ -35,9 +35,20 @@ export function safeRestPath(p: string | null): string | null {
   return /^(rpc\/)?[A-Za-z0-9_]+$/.test(p) ? p : null;
 }
 
-/** «bot=human ts=pass robot=0»: what the two guards and the robot pass said about this call, for the API logs. */
-export function doorLabels(bot: string, human: string, robot: boolean): string {
-  return `bot=${bot} ts=${human} robot=${robot ? 1 : 0}`;
+/** «bot=human ts=pass robot=0 dev=iphone cc=SA»: what the two guards and the robot pass said about this call, plus the
+ *  coarse device class and country, for the API logs. Never the address or the full user agent. */
+export function doorLabels(bot: string, human: string, robot: boolean, ua = '', country = ''): string {
+  const cc = /^[A-Z]{2}$/.test(country) ? country : '--';
+  return `bot=${bot} ts=${human} robot=${robot ? 1 : 0} dev=${deviceClass(ua)} cc=${cc}`;
+}
+
+/** headless (an automated browser), iphone, android, desktop, or other. */
+export function deviceClass(ua: string): string {
+  if (/HeadlessChrome|Headless|PhantomJS|puppeteer|playwright|bot\b|crawler|spider/i.test(ua)) return 'headless';
+  if (/iPhone|iPad|iPod/.test(ua)) return 'iphone';
+  if (/Android/.test(ua)) return 'android';
+  if (/Windows NT|Macintosh|X11|Linux x86_64|CrOS/.test(ua)) return 'desktop';
+  return 'other';
 }
 
 /** True only when the caller presented the gate secret itself (our own browser robots). Never true without a secret. */
@@ -77,7 +88,7 @@ async function handle(request: Request): Promise<Response> {
   for (const k of PASS_REQUEST) { const v = request.headers.get(k); if (v) headers.set(k, v); }
   // The labels ride in x-client-info because it is one of the few request headers Supabase keeps in its API logs: they
   // are how we MEASURE what share of real traffic BotID and Turnstile pass before either is allowed to refuse anyone.
-  headers.set('x-client-info', `${headers.get('x-client-info') ?? ''} ezhalah-front-door ${doorLabels(bot, human, robot)}`.trim());
+  headers.set('x-client-info', `${headers.get('x-client-info') ?? ''} ezhalah-front-door ${doorLabels(bot, human, robot, request.headers.get('user-agent') ?? '', request.headers.get('x-vercel-ip-country') ?? '')}`.trim());
   const ip = visitorIp(request.headers);
   if (GATE && ip) { headers.set('x-ezhalah-gate', GATE); headers.set('x-ezhalah-client-ip', ip); }
   // ROBOT PASS (20261021224031): our own browser robots run from server networks (GitHub, Google Cloud) that the network
