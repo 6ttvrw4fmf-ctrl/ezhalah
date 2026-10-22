@@ -12,7 +12,7 @@
 //   7. rotation: one line held for 2 hours then a different one, always personal, time lines only at their time.
 import {
   WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, PREPARED_MAX_MS, FACTLESS_ANYTIME_IDS,
-  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, fillName, NAME_SLOT, NEW_TODAY_MIN, riyadhDay, type WelcomeFacts,
+  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, GREET_LINES, GREET_HOLD_MS, greetIndex, greetingFor, fillName, NAME_SLOT, NEW_TODAY_MIN, riyadhDay, type WelcomeFacts,
 } from '../src/lib/filterWelcome.ts';
 
 let failed = 0;
@@ -199,8 +199,12 @@ check('no name on the device → no personal line (never a line with a blank nam
 mustCatch('an instant path that reuses a cache past the hold',
   !!instantWelcome({ hasSession: true, cache: { ...freshCache, at: nowWed.getTime() - HOLD_MS - 1 }, now: nowWed, name: 'يوسف' })?.fromCache === false);
 const hookSrc = (await import('node:fs')).readFileSync(new URL('../src/lib/useFilterWelcome.ts', import.meta.url), 'utf8');
-check('the hook decides once per page load from device state and never re-decides (no second setShown after mount)',
-  (hookSrc.match(/setShown\(/g) ?? []).length === 1 && /instantWelcome\(\{ hasSession: session\.present, cache, next, now,/.test(hookSrc) && /\}, \[\]\);/.test(hookSrc));
+// Two setShown calls: the mount decision, and the ONE exception — the sign-in welcome (owner 2026-10-22),
+// which only ever runs off takeGreeting (a sign-in mark), never off a timer or a facts load.
+check('the hook decides once per page load and re-decides ONLY for a sign-in welcome',
+  (hookSrc.match(/setShown\(/g) ?? []).length === 2
+  && /const g = takeGreeting\(session, now\);\s*if \(!g\) return;/.test(hookSrc)
+  && /instantWelcome\(\{ hasSession: session\.present, cache, next, now,/.test(hookSrc) && /\}, \[\]\);/.test(hookSrc));
 check('the background writes for LATER visits (the shown line\'s numbers, the next line) and never touches the screen',
   /writeCache\(\{ id: choice\.line\.id, at: held\.at, \.\.\.r \}\)/.test(hookSrc) && /writeKey\(NEXT_KEY, \{ id: nextLine\.id, at: now\.getTime\(\), \.\.\.r \}\)/.test(hookSrc)
   && !/setShown\([^)]*\)\s*;\s*\}\)\.catch/.test(hookSrc));
@@ -331,6 +335,59 @@ check('a held «today» line never crosses midnight Riyadh (yesterday\'s count i
   && !instantWelcome({ hasSession: true, cache: ntCache, now: nextDay, name: 'يوسف', rand: () => 0 })?.fromCache);
 mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a UTC day)',
   Math.floor(lateNight.getTime() / 86_400_000) === Math.floor(nextDay.getTime() / 86_400_000) ? riyadhDay(lateNight.getTime()) !== riyadhDay(nextDay.getTime()) : false);
+
+// ── 13. the sign-in welcome (owner 2026-10-22: «whenever the user logs in or signs up, this message
+// appears», five wordings so users see different ones, approved word for word) ──
+{
+  const APPROVED_AR = [
+    'حياك الله {n}، إزهله طريقتك الجديدة لتلاقي عقارك في السعودية.',
+    'أهلاً {n}، مع إزهله صار البحث عن عقارك في السعودية أسهل.',
+    'حياك الله {n}، إزهله يدور لك على عقارك في كل السعودية.',
+    'هلا {n}، عقارك في السعودية صار أقرب مع إزهله.',
+    'مرحباً {n}، إزهله بدايتك الجديدة للبحث عن عقارك في السعودية.',
+  ];
+  check('the five sign-in lines are the owner\'s approved Arabic, word for word, in order',
+    GREET_LINES.length === 5 && GREET_LINES.every((l, i) => l.ar === APPROVED_AR[i]));
+  check('every sign-in line has its English, with the name and the untranslated brand «Ezhalah»',
+    GREET_LINES.every((l) => l.en.includes('{n}') && l.en.includes('Ezhalah') && !/[؀-ۿ]/.test(l.en)));
+  check('no sign-in line uses the word «حيك» (owner rule 2026-10-17)', GREET_LINES.every((l) => !/(^|\s)حيك(\s|،|$)/.test(l.ar)));
+  check('the normal rotation never picks a sign-in line',
+    !WELCOME_LINES.some((l) => GREET_LINES.some((g) => g.id === l.id)) && !FACTLESS_ANYTIME_IDS.some((id) => id >= 101));
+  const uids = Array.from({ length: 60 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+  const firsts = new Set(uids.map((u) => greetIndex(u, 0)));
+  check('different users get different wordings (60 users cover all five)', firsts.size === 5);
+  check('the same user sees the next wording on the next sign-in', greetIndex(uids[7], 1) === (greetIndex(uids[7], 0) + 1) % 5);
+  mustCatch('a welcome that ignores who the user is (everyone the same line)', new Set(uids.map(() => 0)).size !== firsts.size);
+  const g = greetingFor(uids[3], 0, NAME_SLOT)!;
+  check('the welcome is rendered in BOTH languages at once, so switching language shows the same line translated',
+    !!g && fillName(g.ar, 'يوسف', 'ar')!.includes('يوسف') && fillName(g.en, 'Yusuf', 'en')!.includes('Yusuf')
+    && GREET_LINES.find((l) => l.id === g.id)!.en.replace('{n}', 'Yusuf') === fillName(g.en, 'Yusuf', 'en'));
+  check('an Arabic welcome never shows a Latin name (the normal headline stays instead)', fillName(g.ar, 'Yusuf', 'ar') === null);
+  const tNow = new Date('2026-10-14T21:00:00');
+  const held = { id: g.id, at: tNow.getTime() - 10 * 60_000, ar: g.ar, en: g.en };
+  check('a reload within 30 minutes keeps the welcome', !!instantWelcome({ hasSession: true, cache: held, now: tNow, name: NAME_SLOT })?.fromCache);
+  check('after 30 minutes the normal rotation resumes',
+    !instantWelcome({ hasSession: true, cache: { ...held, at: tNow.getTime() - GREET_HOLD_MS - 1 }, now: tNow, name: NAME_SLOT, rand: () => 0 })!.fromCache);
+}
+{
+  // the sign-in mark: set by a real sign-in, read once, stale after 10 minutes
+  const store = new Map<string, string>();
+  (globalThis as any).localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, String(v)), removeItem: (k: string) => void store.delete(k) };
+  const { markJustSignedIn, takeJustSignedIn, hasJustSignedIn, JUST_SIGNED_IN_MAX_MS } = await import('../src/lib/loginWelcome.ts');
+  markJustSignedIn();
+  const t = Date.now();
+  check('a sign-in mark is seen', hasJustSignedIn(t) && !!takeJustSignedIn(t));
+  check('the mark is taken once (one sign-in greets once)', !hasJustSignedIn(t) && takeJustSignedIn(t) === null);
+  markJustSignedIn();
+  check('each sign-in on the device counts up (so the wording moves on)', takeJustSignedIn(Date.now())!.count === 1);
+  markJustSignedIn();
+  check('a mark older than 10 minutes is ignored (a cancelled or abandoned sign-in)', takeJustSignedIn(Date.now() + JUST_SIGNED_IN_MAX_MS + 1) === null);
+  const authSrc = (await import('node:fs')).readFileSync(new URL('../src/app/auth.tsx', import.meta.url), 'utf8');
+  const tapSrc = (await import('node:fs')).readFileSync(new URL('../src/components/GoogleOneTap.tsx', import.meta.url), 'utf8');
+  check('both sign-in paths mark the moment: the Google/Apple return route and Google One Tap',
+    /markJustSignedIn\(\);/.test(authSrc) && /log\('signed in via One Tap'\); markJustSignedIn\(\);/.test(tapSrc));
+  delete (globalThis as any).localStorage;
+}
 
 console.log(`\nExample (ar): ${renderWelcome(WELCOME_LINES[3], 'يوسف', FACTS, 'ar')}`);
 console.log(`Example (en): ${renderWelcome(WELCOME_LINES[23], 'Yusuf', FACTS, 'en')}`);
