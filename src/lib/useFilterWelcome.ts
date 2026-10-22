@@ -112,7 +112,7 @@ export function useFilterWelcome(
     const greet = (nameAr || nameEn) ? takeGreeting(session, now.getTime()) : null;
     const inst = greet ? { ...greet, fromCache: false, promoted: false }
       : (nameAr || nameEn) ? instantWelcome({ hasSession: session.present, cache, next, now, name: NAME_SLOT }) : null;
-    // The greeting is chosen NOW, from Saudi time (lib/insightWelcome.ts), and kept for this page load.
+    // The greeting is chosen NOW, from the user's own local time (lib/insightWelcome.ts), kept for this page load.
     const greetIdx = pickGreeting(now);
     setShown(inst ? { settled: true, id: inst.id, ar: inst.ar, en: inst.en, nameAr, nameEn, greet: greetIdx } : { settled: true, id: null, ar: null, en: null, nameAr, nameEn, greet: greetIdx });
     if (!session.present) return;
@@ -184,7 +184,7 @@ export function useFilterWelcome(
     // The restore may finish after the instant decision; a signed-out restore still never swaps the
     // text (owner rule) — the line simply stays for this load. Guests (no session stored) get null.
     void signedIn;
-    // The greeting (Saudi time, chosen once at mount) first, then the name for the language on screen.
+    // The greeting (the user's local time, chosen once at mount) first, then the name for the language on screen.
     const text = locale === 'ar'
       ? fillName(fillGreeting(shown.ar, shown.greet ?? null, 'ar'), shown.nameAr, 'ar')
       : fillName(fillGreeting(shown.en, shown.greet ?? null, 'en'), shown.nameEn, 'en');

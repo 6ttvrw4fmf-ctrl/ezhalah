@@ -1,13 +1,14 @@
 // THE HOME HEADLINE'S DAILY INSIGHT LINE (owner 2026-10-22). A signed-in user's headline is a greeting chosen
-// by SAUDI time + «تدري إن …» + one fact Ezhalah's own data says today, about any town, district or region.
+// by the user's LOCAL time + «تدري إن …» + one fact Ezhalah's own data says today, about any town, district or region.
 // The facts are rebuilt every night in the database (build_welcome_insights, migration 20261022081647) and
 // read through welcome_insights_pick; the sentence shapes live there too (welcome_template).
 //
 // Pure: no React, no network, no storage. Executed by scripts/verify-insight-welcome.ts.
 //
-// TIMING IS SAUDI TIME, NEVER THE DEVICE CLOCK'S ZONE (owner: «the timings must be true»). Riyadh is UTC+3
-// all year (no daylight saving), so the hour and the weekday come from UTC + 3 h. A visitor whose phone is set
-// to another zone still gets «صباح الخير» only in a Riyadh morning and «جمعة مباركة» only on a Riyadh Friday.
+// TIMING IS THE USER'S OWN LOCAL TIME (owner 2026-10-22: «focus timing on where they are located»): the hour
+// and weekday come from the device's time zone, i.e. where the user is. A user in London at 8 am gets
+// «صباح الخير» even though it is 10 am in Riyadh. The zone offset is passed in so tests can pin any place;
+// a device that reports nothing usable falls back to Saudi time (UTC+3), the market's own zone.
 //
 // THE GREETING IS CHOSEN WHEN THE LINE IS SHOWN, not when it is prepared: the prepared line carries
 // GREETING_SLOT and the hook fills it at mount from the clock of that moment. A line prepared at 11:00 and
@@ -41,15 +42,21 @@ export const GREETINGS: readonly Greeting[] = [
   { when: 'any', ar: 'حياك الله', en: 'Welcome' },
 ];
 
-/** Riyadh's hour (0–23) and weekday (0 = Sunday … 5 = Friday, 6 = Saturday), whatever the device zone. */
-export function riyadhClock(now: Date): { hour: number; weekday: number } {
-  const r = new Date(now.getTime() + 3 * 3600_000);
+/** Minutes ahead of UTC where the user is (the device's zone); Saudi time when the device says nothing usable. */
+export function deviceOffsetMinutes(now: Date): number {
+  const o = -now.getTimezoneOffset();
+  return Number.isFinite(o) && Math.abs(o) <= 14 * 60 ? o : 180;
+}
+
+/** The user's local hour (0–23) and weekday (0 = Sunday … 5 = Friday, 6 = Saturday). */
+export function localClock(now: Date, offsetMinutes: number = deviceOffsetMinutes(now)): { hour: number; weekday: number } {
+  const r = new Date(now.getTime() + offsetMinutes * 60_000);
   return { hour: r.getUTCHours(), weekday: r.getUTCDay() };
 }
 
-/** Morning 04:00–11:59, evening 15:00–03:59 (Riyadh); midday 12:00–14:59 only the any-time hellos. */
-export function greetingFits(g: Greeting, now: Date): boolean {
-  const { hour, weekday } = riyadhClock(now);
+/** Morning 04:00–11:59, evening 15:00–03:59 (the user's local time); midday 12:00–14:59 only the any-time hellos. */
+export function greetingFits(g: Greeting, now: Date, offsetMinutes?: number): boolean {
+  const { hour, weekday } = localClock(now, offsetMinutes);
   switch (g.when) {
     case 'morning': return hour >= 4 && hour < 12;
     case 'evening': return hour >= 15 || hour < 4;
@@ -60,8 +67,8 @@ export function greetingFits(g: Greeting, now: Date): boolean {
 }
 
 /** The greeting for THIS moment: one of those that fit, at random (the index is kept for the page load). */
-export function pickGreeting(now: Date, rand: () => number = Math.random): number {
-  const fit = GREETINGS.map((g, i) => (greetingFits(g, now) ? i : -1)).filter((i) => i >= 0);
+export function pickGreeting(now: Date, rand: () => number = Math.random, offsetMinutes?: number): number {
+  const fit = GREETINGS.map((g, i) => (greetingFits(g, now, offsetMinutes) ? i : -1)).filter((i) => i >= 0);
   return fit[Math.min(fit.length - 1, Math.floor(rand() * fit.length))];
 }
 
