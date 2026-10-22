@@ -15,3 +15,5 @@ public anon key, never write.
   listings spread across platforms; `--listings '<json>'` takes explicit
   `{platform, source_table, listing_id}` rows. Pure helpers live in `journey-lib.mjs`
   (`node e2e/engineers/journey-lib.mjs` runs its hermetic self-check).
+- `first-tap.mjs` — 🔧's speed check E1: cold first tap on the city field at phone size (names / counts in ms,
+  شراء → شراء+إيجار → إيجار, then the empty city «المرموثة»), one JSON line, exit 1 when a limit is missed.
