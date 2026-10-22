@@ -306,9 +306,16 @@ def settle_across_units(answer_for, ids, tries: int = SETTLE_TRIES) -> tuple[str
     return ()
 
 
-def aqar_pin(g: dict) -> dict:
-    """{"latitude","longitude"} from Listing.location, or {} when Aqar gave none / an unusable pair."""
-    loc = g.get("location") if isinstance(g, dict) else None
+def aqar_pin(g: dict) -> dict | None:
+    """{"latitude","longitude"} from Listing.location, or {} when Aqar gave none / an unusable pair.
+
+    None when this crawl never ASKED for the location (no `location` key in the answer): that is not
+    knowing, and None makes the upsert keep the stored pin. Returning {} there used to erase it — on
+    2026-10-21 three of sixteen shards settled to the old query and blanked ~690 real pins (ad 6182428:
+    its page shows 24.839914, 46.682392; we stored {} and served the district border)."""
+    if not isinstance(g, dict) or "location" not in g:
+        return None
+    loc = g.get("location")
     if not isinstance(loc, dict):
         return {}
     return pin_dict(loc.get("lat"), loc.get("lng"))
