@@ -11,7 +11,7 @@
 //
 // Hydration: the first client render is always { line: null, settled: false }, matching the static
 // export's server HTML (React #418 — see lib/responsive.ts); the decision lands in the mount effect.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   welcomeForNow, chooseWelcomeLine, renderWelcome, instantWelcome, fillName, NAME_SLOT, PREPARED_MAX_MS,
   WELCOME_LINES, lineFitsTime, greetingFor,
@@ -53,6 +53,8 @@ const readSeen = (now: number): Seen => {
   } catch { return {}; }
 };
 const writeSeen = (s: Seen) => { try { globalThis.localStorage?.setItem(SEEN_KEY, JSON.stringify(s)); } catch { /* per-device nicety only */ } };
+/** How long the sign-in welcome stays before the market insight takes its place. */
+export const WELCOME_TO_INSIGHT_MS = 5000;
 const readCache = () => readKey(CACHE_KEY);
 const writeCache = (c: WelcomeCache) => writeKey(CACHE_KEY, c);
 
@@ -94,8 +96,40 @@ const UNSETTLED: Shown = { settled: false, id: null, ar: null, en: null, nameAr:
 export function useFilterWelcome(
   signedIn: boolean, name: string, locale: 'ar' | 'en',
   lastLocation: string | null | undefined, lastDistrict?: string | null,
-): { line: string | null; settled: boolean } {
+): { line: string | null; settled: boolean; swapKey: number } {
   const [shown, setShown] = useState<Shown>(UNSETTLED);
+  // Bumped when the sign-in welcome hands over to a market insight, so the screen can show the change.
+  const [swapKey, setSwapKey] = useState(0);
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
+
+  // AFTER THE SIGN-IN WELCOME, ON THE SPOT, A MARKET INSIGHT (owner 2026-10-22: «show the first message with
+  // 🥳, then change it to a market insight» — so the user sees the line change). The insight is the one
+  // already prepared for this device, or one picked now from the day's facts; the welcome stays if none can
+  // be had (a failed read is not an empty answer). It then becomes the shown line for its 2 hours.
+  const welcomeThenInsight = () => {
+    const start = Date.now();
+    const pick = (async () => {
+      const pend = readKey(NEXT_KEY);
+      if (pend && isInsightLineId(pend.id) && start - pend.at < PREPARED_MAX_MS) return { line: pend, fromNext: true };
+      const pack = await fetchWelcomeInsights(lastLocation, lastDistrict);
+      if (!pack) return null;
+      const seen = readSeen(start);
+      const c = chooseInsightLine(pack, seen, start, { city: (id) => cityNameEnOfficial(id), district: districtNameEnOfficial }, { district: lastDistrict });
+      if (!c) return null;
+      writeSeen({ ...seen, [c.key]: start });
+      return { line: { id: INSIGHT_ID_BASE + c.templateId, at: start, ar: c.ar, en: c.en }, fromNext: false };
+    })();
+    const wait = new Promise<void>((r) => setTimeout(r, WELCOME_TO_INSIGHT_MS));
+    Promise.all([pick, wait]).then(([r]) => {
+      if (!alive.current || !r) return;
+      const t = Date.now();
+      writeCache({ id: r.line.id, at: t, ar: r.line.ar, en: r.line.en });
+      if (r.fromNext) writeKey(NEXT_KEY, null);
+      setShown((s) => ({ ...s, settled: true, id: r.line.id, ar: r.line.ar, en: r.line.en, greet: pickGreeting(new Date(t)) }));
+      setSwapKey((k) => k + 1);
+    }).catch(() => {});
+  };
 
   // ONCE PER PAGE LOAD, synchronously from device state: settle the headline now.
   useEffect(() => {
@@ -116,6 +150,7 @@ export function useFilterWelcome(
     const greetIdx = pickGreeting(now);
     setShown(inst ? { settled: true, id: inst.id, ar: inst.ar, en: inst.en, nameAr, nameEn, greet: greetIdx } : { settled: true, id: null, ar: null, en: null, nameAr, nameEn, greet: greetIdx });
     if (!session.present) return;
+    if (greet) welcomeThenInsight();
     // What is on screen now is the SHOWN line, and its 2 hours start now when it is new to this device
     // (a prepared line seen for the first time, or the no-numbers line used when nothing was ready).
     if (inst && (!inst.fromCache || inst.promoted)) {
@@ -173,6 +208,7 @@ export function useFilterWelcome(
       if (!g) return;
       writeCache({ id: g.id, at: now, ar: g.ar, en: g.en });
       setShown({ settled: true, id: g.id, ar: g.ar, en: g.en, nameAr: session.nameAr, nameEn: session.nameEn });
+      welcomeThenInsight();
     };
     if (signedIn) greetNow();
     const onSignedIn = () => greetNow();
@@ -191,6 +227,6 @@ export function useFilterWelcome(
     const text = locale === 'ar'
       ? fillName(fillGreeting(shown.ar, shown.greet ?? null, 'ar'), live || shown.nameAr, 'ar')
       : fillName(fillGreeting(shown.en, shown.greet ?? null, 'en'), live || shown.nameEn, 'en');
-    return { line: text, settled: shown.settled };
-  }, [shown, locale, signedIn, name]);
+    return { line: text, settled: shown.settled, swapKey };
+  }, [shown, locale, signedIn, name, swapKey]);
 }
