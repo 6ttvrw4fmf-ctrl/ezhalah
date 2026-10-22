@@ -11,8 +11,9 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import {
   GREETINGS, localClock, greetingFits, pickGreeting, fillGreeting, renderInsight, chooseInsightLine, insightKey,
-  GREETING_SLOT, SEEN_DAYS, type Insight, type InsightTemplate, type InsightPack,
+  GREETING_SLOT, SEEN_DAYS, GREETING_EMOJI, type Insight, type InsightTemplate, type InsightPack,
 } from '../src/lib/insightWelcome.ts';
+import { HOW_IT_WORKS } from '../src/lib/insightHowItWorks.ts';
 import { fillName, NAME_SLOT } from '../src/lib/filterWelcome.ts';
 
 let failed = 0;
@@ -165,6 +166,75 @@ const mine: InsightPack = { day: '2026-10-22', templates, insights: [
 ] };
 const p5 = chooseInsightLine(mine, {}, now, en, { district: 'النخيل', rand: () => 0.1 });
 check('a user who searched a district gets a line about it (personal pick)', !!p5 && templates.find((t) => t.id === p5.templateId)!.personal && p5.ar.includes('حي النخيل'), p5?.ar);
+
+// ── 6. the line ends with its greeting's emoji (owner 2026-10-22: «good morning ☀️ … last sentence») ──
+{
+  const line = renderInsight(templates.find((t) => t.kind === 'land_ppm_city')!, { id: 1, kind: 'land_ppm_city', ...base }, en)!;
+  const want: Record<string, string> = { morning: '☀️', evening: '🌙', friday: '🕌', weekend: '🌴', any: '👋' };
+  let allEnds = true; const bad: string[] = [];
+  GREETINGS.forEach((g, i) => {
+    for (const loc of ['ar', 'en'] as const) {
+      const s = fillGreeting(loc === 'ar' ? line.ar : line.en, i, loc)!;
+      if (!s.endsWith(` ${want[g.when]}`)) { allEnds = false; bad.push(`${g.ar}/${loc}: ${s.slice(-24)}`); }
+      if (/\.\s+\S+$/.test(s)) { allEnds = false; bad.push(`full stop kept: ${s.slice(-24)}`); }
+    }
+  });
+  check('every line ends with its greeting\'s emoji (☀️ morning, 🌙 evening, 🕌 Friday, 🌴 weekend, 👋 any time), the full stop dropped', allEnds, bad.join(' | '));
+  check('the emoji table is exactly the owner\'s', JSON.stringify(GREETING_EMOJI) === JSON.stringify(want));
+  const morning = GREETINGS.findIndex((g) => g.ar === 'صباح الخير');
+  const shown = fillName(fillGreeting(line.ar, morning, 'ar'), 'يوسف', 'ar')!;
+  check('Arabic reads «صباح الخير يوسف، تدري إن … اكتشف أراضيها مع إزهله ☀️»', shown.startsWith('صباح الخير يوسف، تدري إن') && shown.endsWith('مع إزهله ☀️'), shown);
+}
+
+// ── 7. not Riyadh, Riyadh, Riyadh: city first, the user's city two lines in three, never twice in a row ──
+{
+  const cities = ['الرياض', 'جدة', 'أبها', 'تبوك', 'بريدة'];
+  const facts: Insight[] = [];
+  let id = 100;
+  for (const c of cities) {
+    const n = c === 'الرياض' ? 40 : 2; // Riyadh has far more facts, as in production
+    for (let k = 0; k < n; k++) for (const kind of ['land_ppm_city', 'land_share']) facts.push({ id: id++, kind, ...base, city: c, city_id: id, district: `حي ${c} ${k}`, a: 100 + k });
+  }
+  const pack7: InsightPack = { day: '2026-10-22', templates, insights: facts };
+  let r = 0.37; const rnd = () => (r = (r * 9.7 + 0.13) % 1);
+  const t7 = Date.UTC(2026, 9, 22, 8);
+  const count = (cityOpt: string | null) => {
+    const by: Record<string, number> = {}; let seen: Record<string, number> = {}; let prev: Insight | null = null; let repeats = 0;
+    for (let k = 0; k < 300; k++) {
+      const p = chooseInsightLine(pack7, seen, t7 + k * 3600_000, en, { city: cityOpt, rand: rnd });
+      if (!p) break;
+      const f = facts.find((x) => insightKey(x) === p.key)!;
+      by[f.city!] = (by[f.city!] ?? 0) + 1;
+      if (prev && (prev.city === f.city || prev.kind === f.kind)) repeats++;
+      prev = f; seen = { ...seen, [p.key]: t7 + k * 3600_000 };
+      // a week passes every few picks in this small simulation, so facts come back (keep the last one shown)
+      if (Object.keys(seen).length >= 6) seen = { [p.key]: t7 + k * 3600_000 };
+    }
+    return { by, repeats };
+  };
+  const guest = count(null);
+  const total = Object.values(guest.by).reduce((a, b) => a + b, 0);
+  check('a user with no searched city: Riyadh gets about its fair share, not most lines (≤ 35%)', (guest.by['الرياض'] ?? 0) / total <= 0.35, JSON.stringify(guest.by));
+  check('(mutation) a pick over FACTS instead of cities would fail the fair-share check (Riyadh holds most facts)',
+    facts.filter((f) => f.city === 'الرياض').length / facts.length > 0.35);
+  check('every city gets a turn', cities.every((c) => (guest.by[c] ?? 0) > 0), JSON.stringify(guest.by));
+  check('never the same city or the same kind of line twice in a row', guest.repeats === 0, `${guest.repeats} repeats`);
+  const jeddah = count('جدة');
+  const jt = Object.values(jeddah.by).reduce((a, b) => a + b, 0);
+  const share = (jeddah.by['جدة'] ?? 0) / jt;
+  check('a user who searches Jeddah: their city in roughly two lines of three (40%–80% here, with only 4 Jeddah facts)', share >= 0.4 && share <= 0.8, `${Math.round(share * 100)}% ${JSON.stringify(jeddah.by)}`);
+}
+
+// ── 8. «كيف تشتغل؟» says how duplicates are counted and that it is not advice (owner 2026-10-22) ──
+{
+  const ar = JSON.stringify(HOW_IT_WORKS.ar); const enS = JSON.stringify(HOW_IT_WORKS.en);
+  check('the sheet is titled «كيف تشتغل؟» / "How it works"', HOW_IT_WORKS.ar.title.startsWith('كيف تشتغل؟') && HOW_IT_WORKS.en.title.startsWith('How it works'));
+  check('it explains duplicates: same district, type, price and area count once, in counts and prices',
+    ar.includes('نحسبه مرة وحدة بس') && ar.includes('نفس الحي') && ar.includes('في الأعداد وفي الأسعار') && enS.includes('we count it only once'));
+  check('it says asking prices, not deals, and not investment advice', ar.includes('الأسعار المعروضة') && ar.includes('وليست نصيحة استثمارية') && enS.includes('not investment advice'));
+  check('it says the fact changes every hour', ar.includes('كل ساعة') && enS.includes('every hour'));
+  check('both languages carry the same sections', HOW_IT_WORKS.ar.sections.length === HOW_IT_WORKS.en.sections.length);
+}
 
 if (failed) { console.error(`\n❌ verify-insight-welcome: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-insight-welcome: greetings by local time, every sentence in both languages, no repeats.');

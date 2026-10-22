@@ -268,9 +268,24 @@ export function strippedSql(src: string): string {
  * definition to assert on it — a guard that noisy is a guard everyone learns to ignore.
  */
 export function executesAPatchedDefinition(src: string): string[] {
+  return patchedDefinitionSources(src).executed;
+}
+
+/**
+ * Which definitions a needle edit actually READ, by statement. A migration that patches one function
+ * (say the detector roster, mon_run_all_detectors) and merely CALLS a protected RPC elsewhere edited
+ * nothing protected: 20261022165352 did exactly that and was read as a hand edit of
+ * location_search_candidates_ar. `sources` holds the statement each executed definition was read in;
+ * `opaque` is true when one of those reads names no function literally (pg_get_functiondef(v_oid)),
+ * and then the caller falls back to the whole file rather than guess.
+ */
+export function patchedDefinitionSources(src: string): { executed: string[]; sources: string[]; opaque: boolean } {
   const fromDef = new Set<string>();
-  for (const m of src.matchAll(/(\w+)\s*(?::=|\btext\s*:=)\s*[^;]*pg_get_functiondef/gi)) {
-    fromDef.add(m[1].toLowerCase());
+  const origin = new Map<string, string[]>();
+  for (const m of src.matchAll(/(\w+)\s*(?::=|\btext\s*:=)\s*([^;]*pg_get_functiondef[^;]*)/gi)) {
+    const v = m[1].toLowerCase();
+    fromDef.add(v);
+    origin.set(v, [...(origin.get(v) ?? []), m[2]]);
   }
   // Follow replace() chains to a fixed point: v2 := replace(v1, …) taints v2 when v1 is tainted.
   for (let changed = true; changed; ) {
@@ -278,6 +293,7 @@ export function executesAPatchedDefinition(src: string): string[] {
     for (const m of src.matchAll(/(\w+)\s*:=\s*replace\s*\(\s*(\w+)/gi)) {
       if (fromDef.has(m[2].toLowerCase()) && !fromDef.has(m[1].toLowerCase())) {
         fromDef.add(m[1].toLowerCase());
+        origin.set(m[1].toLowerCase(), origin.get(m[2].toLowerCase()) ?? []);
         changed = true;
       }
     }
@@ -291,7 +307,9 @@ export function executesAPatchedDefinition(src: string): string[] {
   for (const m of src.matchAll(/\bexecute\s+replace\s*\(\s*(\w+)/gi)) {
     if (fromDef.has(m[1].toLowerCase())) executed.push(m[1].toLowerCase());
   }
-  return [...new Set(executed)];
+  const sources = [...new Set(executed)].flatMap((v) => origin.get(v) ?? []);
+  const opaque = sources.length === 0 || sources.some((st) => !/pg_get_functiondef\s*\(\s*'/i.test(st));
+  return { executed: [...new Set(executed)], sources, opaque };
 }
 
 type Offence = { file: string; fns: string[]; hasTemplate: boolean; hasRebuild: boolean };
@@ -301,12 +319,14 @@ for (const file of files) {
   const version = file.slice(0, 14);
   if (version < TEMPLATE_ERA_BASELINE) continue;
   const src = strippedSql(readFileSync(`${MIGRATIONS_DIR}/${file}`, 'utf8'));
-  const patched = executesAPatchedDefinition(src);
+  const patched = patchedDefinitionSources(src);
   const fns = PROTECTED.filter((fn) =>
     REPLACE_RE(fn).test(src)
-    // A needle edit names no CREATE, so the function is identified by being named anywhere in the
-    // executed SQL of a migration that ships a patched definition.
-    || (patched.length > 0 && new RegExp(String.raw`\b${fn}\b`, 'i').test(src)));
+    // A needle edit names no CREATE, so the function is identified by the statement that READ the
+    // definition it executes. Only when that read names no function literally (an oid variable) does
+    // the whole file decide, as before: never less strict, only exact when the read is explicit.
+    || (patched.executed.length > 0 && new RegExp(String.raw`\b${fn}\b`, 'i').test(
+      patched.opaque ? src : patched.sources.join('\n'))));
   if (!fns.length) continue;
   const hasTemplate = /\baf_rpc_templates\b/i.test(src);
   const hasRebuild = /\brebuild_af_filter_rpcs\b/i.test(src);
@@ -362,6 +382,30 @@ for (const file of files) {
   check('§3 every allowlisted migration still exists and still offends (no stale cover)',
     stale.length === 0,
     `${stale.join(', ')} no longer hand-edits an AF RPC (or is gone) — delete the allowlist entr(ies)`);
+}
+
+// ── §3b — a needle edit is attributed to the definition it READ, in both directions ─────────────
+{
+  const named = (src: string) => {
+    const p = patchedDefinitionSources(src);
+    return PROTECTED.filter((fn) => p.executed.length > 0 && new RegExp(String.raw`\b${fn}\b`, 'i').test(p.opaque ? src : p.sources.join('\n')));
+  };
+  const rosterOnly = `do $$ declare src text; out_def text; begin
+    src := pg_get_functiondef('public.mon_run_all_detectors()'::regprocedure);
+    out_def := replace(src, 'a', 'b'); execute out_def; end $$;
+    select count(*) from public.location_search_candidates_ar(p_cities => array['x']);`;
+  const realEdit = `do $$ declare src text; out_def text; begin
+    src := pg_get_functiondef('public.location_search_candidates_ar(text)'::regprocedure);
+    out_def := replace(src, 'a', 'b'); execute out_def; end $$;`;
+  const byOid = `do $$ declare r record; src text; begin
+    for r in select oid from pg_proc where proname = 'location_search_candidates_ar' loop
+      src := pg_get_functiondef(r.oid); execute replace(src, 'a', 'b'); end loop; end $$;`;
+  check('§3b patching the detector roster while CALLING a protected RPC is not a hand edit of it',
+    named(rosterOnly).length === 0, `named ${named(rosterOnly).join(', ')}`);
+  check('§3b (mutation) a patched definition READ from a protected RPC is still caught',
+    named(realEdit).includes('location_search_candidates_ar'));
+  check('§3b (mutation) a read by oid names no function, so the whole file decides and it is still caught',
+    named(byOid).includes('location_search_candidates_ar'));
 }
 
 // ── §4 — the protected set still matches the rail ───────────────────────────────────────────────

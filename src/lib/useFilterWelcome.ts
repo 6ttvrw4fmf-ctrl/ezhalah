@@ -96,7 +96,7 @@ const UNSETTLED: Shown = { settled: false, id: null, ar: null, en: null, nameAr:
 export function useFilterWelcome(
   signedIn: boolean, name: string, locale: 'ar' | 'en',
   lastLocation: string | null | undefined, lastDistrict?: string | null,
-): { line: string | null; settled: boolean; swapKey: number } {
+): { line: string | null; settled: boolean; swapKey: number; isInsight: boolean } {
   const [shown, setShown] = useState<Shown>(UNSETTLED);
   // Bumped when the sign-in welcome hands over to a market insight, so the screen can show the change.
   const [swapKey, setSwapKey] = useState(0);
@@ -115,7 +115,7 @@ export function useFilterWelcome(
       const pack = await fetchWelcomeInsights(lastLocation, lastDistrict);
       if (!pack) return null;
       const seen = readSeen(start);
-      const c = chooseInsightLine(pack, seen, start, { city: (id) => cityNameEnOfficial(id), district: districtNameEnOfficial }, { district: lastDistrict });
+      const c = chooseInsightLine(pack, seen, start, { city: (id) => cityNameEnOfficial(id), district: districtNameEnOfficial }, { district: lastDistrict, city: lastLocation });
       if (!c) return null;
       writeSeen({ ...seen, [c.key]: start });
       return { line: { id: INSIGHT_ID_BASE + c.templateId, at: start, ar: c.ar, en: c.en }, fromNext: false };
@@ -185,7 +185,7 @@ export function useFilterWelcome(
       fetchWelcomeInsights(lastLocation, lastDistrict).then((pack) => {
         if (!live || !pack) return;
         const seen = readSeen(now.getTime());
-        const pick = chooseInsightLine(pack, seen, now.getTime(), { city: (id) => cityNameEnOfficial(id), district: districtNameEnOfficial }, { district: lastDistrict });
+        const pick = chooseInsightLine(pack, seen, now.getTime(), { city: (id) => cityNameEnOfficial(id), district: districtNameEnOfficial }, { district: lastDistrict, city: lastLocation });
         if (!pick) return;
         writeKey(NEXT_KEY, { id: INSIGHT_ID_BASE + pick.templateId, at: now.getTime(), ar: pick.ar, en: pick.en });
         writeSeen({ ...seen, [pick.key]: now.getTime() });
@@ -227,6 +227,7 @@ export function useFilterWelcome(
     const text = locale === 'ar'
       ? fillName(fillGreeting(shown.ar, shown.greet ?? null, 'ar'), live || shown.nameAr, 'ar')
       : fillName(fillGreeting(shown.en, shown.greet ?? null, 'en'), live || shown.nameEn, 'en');
-    return { line: text, settled: shown.settled, swapKey };
+    // A market fact (not the sign-in welcome or an older line) can be tapped for «كيف تشتغل؟».
+    return { line: text, settled: shown.settled, swapKey, isInsight: shown.id != null && isInsightLineId(shown.id) };
   }, [shown, locale, signedIn, name, swapKey]);
 }

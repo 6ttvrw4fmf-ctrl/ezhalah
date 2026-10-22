@@ -1297,6 +1297,21 @@ migration-drift-guard rule in `AGENTS.md`).
   bug with one obvious right answer, and needs the owner's decision the same way the loadMore
   behavior above did.
 
+
+- **Home headline market facts «تدري إن …» (owner + their dad, 2026-10-22).** Facts only, never advice
+  («we never recommend, we must never ever»); prices are the displayed ASKING price («السعر المعروض»).
+  Purchase first — أراضي، شقق، عمائر (villas 2 lines, rent 3); a CITY then its busiest DISTRICT, never a
+  region; volume = new for-sale ads, this week vs last (steady-crawl sites only), asking price this month
+  vs last (shown only when it moved ≥3%). Counts say «إعلانات», with exact cross-site copies removed (same
+  district, deal, type, price, area on a different site; pins within ~200 m when both carry one). An ad is
+  "new" only once we have read its site for 7 days. Built nightly by `build_welcome_insights()`, recounted
+  independently by `audit_welcome_insights()` on the same snapshot (mismatch ⇒ fact removed + alarm
+  `mon_detect_welcome_insights_audit`), places checked in the Filter by `verify_welcome_insights()`.
+  Big and medium cities (≥300 ads) only until 3 clean checker nights. The line ends with its greeting's
+  emoji (☀️ 🌙 🕌 🌴 👋), changes every hour, two lines in three about the user's searched city, city
+  picked before fact, never the same city or kind twice in a row; tapping it opens «كيف تشتغل؟».
+  Guards: `scripts/verify-insight-welcome.ts`, `scripts/verify-filter-welcome.ts`.
+
 ---
 
 ## 21. Open questions / decisions still pending
