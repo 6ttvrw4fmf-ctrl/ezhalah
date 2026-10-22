@@ -116,4 +116,4 @@ const p5 = chooseInsightLine(mine, {}, now, en, { district: 'النخيل', rand
 check('a user who searched a district gets a line about it (personal pick)', !!p5 && templates.find((t) => t.id === p5.templateId)!.personal && p5.ar.includes('حي النخيل'), p5?.ar);
 
 if (failed) { console.error(`\n❌ verify-insight-welcome: ${failed} check(s) failed.`); process.exit(1); }
-console.log('\n✅ verify-insight-welcome: greetings by the user's own local time, every sentence in both languages, no repeats.');
+console.log('\n✅ verify-insight-welcome: greetings by local time, every sentence in both languages, no repeats.');
