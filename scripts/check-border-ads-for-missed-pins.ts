@@ -85,11 +85,14 @@ const OWN_SECTION: Record<string, string> = {
 // would be noise, and reading it would show a wrong pin.
 const DELIBERATELY_UNREAD: Record<string, string> = {
   superoffice: 'its embed is the BRANCH building, and the Suwaidi branch embed (24.5948,46.4065) sits ~25 km from that branch\'s own written address',
+  // run 39853742689 (2026-10-22): the only Maps link on a Flow ad is the site FOOTER «Flow Narjis» (company
+  // location, same on every page, class Footer_footerColumnLink) — the ad page draws no map of its own.
+  flow: 'its only Maps link is the site footer «Flow Narjis» (the company), printed on every page — not the ad\'s own map',
 };
 
 for (const platform of PLATFORMS) {
   if (DELIBERATELY_UNREAD[platform]) { console.log(`⚪ ${platform}: skipped — ${DELIBERATELY_UNREAD[platform]}`); continue; }
-  const served = await get<Array<{ listing_id: number; source_table: string }>>('search_listings_ar?select=listing_id,source_table'
+  const served = await get<Array<{ listing_id: number; source_table: string; city_ar: string | null }>>('search_listings_ar?select=listing_id,source_table,city_ar'
     + `&platform=eq.${encodeURIComponent(platform)}&latitude=is.null&production_ready=eq.true&limit=500`);
   const pick = served.sort(() => Math.random() - 0.5).slice(0, PER_SITE);
   const rows: Array<{ id: number; listing_url: string; table: string; saved?: unknown }> = [];
@@ -101,6 +104,7 @@ for (const platform of PLATFORMS) {
   }
   const farIds = new Set(far.filter((f) => rows.some((r) => r.table === f.source_table)).map((f) => f.listing_id));
   for (const r of rows) if (r.saved != null && r.saved !== '') farIds.add(r.id);
+  const cityOf = (r: { id: number; table: string }) => served.find((p) => p.listing_id === r.id && p.source_table === r.table)?.city_ar ?? null;
   const samples: AdSample[] = [];
   for (const r of rows) {
     if (!r.listing_url) continue;
@@ -116,12 +120,12 @@ for (const platform of PLATFORMS) {
         // which belong to the whole page (the related-ads list included).
         const html = await page.$eval(own, (el) => el.outerHTML).catch(() => '');
         const links = await page.$$eval(`${own} a[href]`, (as) => as.map((a) => (a as HTMLAnchorElement).href).filter((h) => /goo\.gl|maps/i.test(h))).catch(() => [] as string[]);
-        samples.push({ url: r.listing_url, listingId: r.id, html, frames: links, network: [] });
+        samples.push({ url: r.listing_url, listingId: r.id, city: cityOf(r), html, frames: links, network: [] });
       } else {
         const html = await page.content();
         const frames = page.frames().map((f) => f.url());
         const links = await page.$$eval('a[href]', (as) => as.map((a) => (a as HTMLAnchorElement).href).filter((h) => /goo\.gl|maps/i.test(h))).catch(() => [] as string[]);
-        samples.push({ url: r.listing_url, listingId: r.id, html, frames: [...frames, ...links], network });
+        samples.push({ url: r.listing_url, listingId: r.id, city: cityOf(r), html, frames: [...frames, ...links], network });
       }
     } catch { /* unreachable — counted below, never read as «no pin» */ }
     await page.close();
