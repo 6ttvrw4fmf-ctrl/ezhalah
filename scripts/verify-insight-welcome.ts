@@ -8,7 +8,7 @@
 //      is skipped, never half-filled;
 //   5. a user who searched a district sometimes gets a line about it.
 //   node --experimental-strip-types scripts/verify-insight-welcome.ts   (in `npm test`)
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import {
   GREETINGS, localClock, greetingFits, pickGreeting, fillGreeting, renderInsight, chooseInsightLine, insightKey,
   GREETING_SLOT, SEEN_DAYS, type Insight, type InsightTemplate, type InsightPack,
@@ -55,14 +55,25 @@ check('the greetings are exactly the owner-approved list (no occasions, no after
   GREETINGS.length === owner.length && GREETINGS.every((g, i) => g.ar === owner[i] && !!g.en));
 
 // ── 2. every sentence in the database, both languages ──
-const MIG = new URL('../supabase/migrations/20261022081647_welcome_insights.sql', import.meta.url);
-check('the migration that seeds the sentences is in the tree', existsSync(MIG));
-const sql = existsSync(MIG) ? readFileSync(MIG, 'utf8') : '';
-const templates: InsightTemplate[] = [];
-for (const m of sql.matchAll(/^\s*\((\d+),\s*'([^']+)',\s*(true|false),\s*'((?:[^']|'')*)',\s*'((?:[^']|'')*)'\)/gm)) {
-  templates.push({ id: Number(m[1]), kind: m[2], personal: m[3] === 'true', ar: m[4].replace(/''/g, "'"), en: m[5].replace(/''/g, "'") });
+// The sentences as production holds them: every migration that writes welcome_template, in version order,
+// later rows replacing earlier ones (the seed 20261022081647, then the wording fix 20261022162032, …).
+const MIG_DIR = new URL('../supabase/migrations/', import.meta.url);
+const migs = readdirSync(MIG_DIR).filter((f) => f.endsWith('.sql')).sort()
+  .map((f) => readFileSync(new URL(f, MIG_DIR), 'utf8')).filter((s) => s.includes('insert into public.welcome_template'));
+check('the migrations that seed the sentences are in the tree', migs.length >= 2);
+const byId = new Map<number, InsightTemplate>();
+for (const sql of migs) {
+  for (const m of sql.matchAll(/^\s*\((\d+),\s*'([^']+)',\s*(true|false),\s*'((?:[^']|'')*)',\s*'((?:[^']|'')*)'\)/gm)) {
+    byId.set(Number(m[1]), { id: Number(m[1]), kind: m[2], personal: m[3] === 'true', ar: m[4].replace(/''/g, "'"), en: m[5].replace(/''/g, "'") });
+  }
 }
+const templates: InsightTemplate[] = [...byId.values()].sort((x, y) => x.id - y.id);
 check('29 sentences are seeded', templates.length === 29, `found ${templates.length}`);
+// owner 2026-10-22: «a lot of mistakes in the Arabic wording» — the corrected wording holds
+check('no sentence puts a bare count before a singular noun («14 إعلان», «3 حي») or says «أضعاف», «الحين», «بس»',
+  templates.every((t) => !/\{a\} (إعلان|حي|أرض|موقع)(?![ا-ي])/.test(t.ar) && !/أضعاف|الحين| بس[؟،. ]/.test(t.ar)), templates.filter((t) => /أضعاف|الحين| بس[؟،. ]|\{a\} (إعلان|حي)/.test(t.ar)).map((t) => t.id).join(','));
+check('a district line says «اكتشفه», a city/region line «اكتشفها» (gender)',
+  templates.filter((t) => t.kind === 'hot_district' && !t.personal).every((t) => t.ar.includes('اكتشفه مع')));
 const base = { region: 'منطقة حائل', city: 'بقعاء', city_id: 1, district: 'حي النخيل', district2: 'حي الروضة', type: 'أرض', a: 1234, b: 56 };
 const en = { city: () => 'Buqaa', district: (_c: number, d: string) => (d.includes('النخيل') ? 'Al Nakhil' : 'Al Rawdah') };
 let rendered = 0;
