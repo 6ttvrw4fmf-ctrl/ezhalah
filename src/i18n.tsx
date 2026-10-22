@@ -1474,6 +1474,8 @@ const AR: Record<string, string> = {
   'Privacy Policy': 'سياسة الخصوصية',
   // «الشروط والخصوصية» reader (owner 2026-09-03): the account-menu row + its two tabs.
   'Terms & Privacy': 'الشروط والخصوصية',
+  'Please turn off your VPN': 'فضلاً أوقف الـ VPN',
+  'Ezhalah is not available over VPN, Tor or server networks. Turn off your VPN and try again.': 'إزهله غير متاح عبر شبكات VPN أو Tor أو الخوادم. أوقف الـ VPN وحاول مرة ثانية.',
   'Terms of Use': 'شروط الاستخدام',
   'Ezhalah v{version}': 'إزهله الإصدار {version}',
 

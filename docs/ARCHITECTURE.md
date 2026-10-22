@@ -457,6 +457,17 @@ eaqartabuk's mall — 2026-10-19). `strip_shared_default_pins()` (hourly :15, be
 in the detector roster as `mon_detect_shared_default_pin`) registers such points in
 `ops_default_pin_register`, strips them from the stored rows and attaches a reject trigger to that
 table so a re-crawl cannot write them back; those ads fall through to the border like any pin-less ad.
+**A district border is a suspected bug on OUR side until proven otherwise (owner 2026-10-21, permanent:
+«whenever we have a district border, suspect a bug on our end, especially the big sites»).** Before calling
+any ad pin-less, check (1) does our own stored row already hold a coordinate pair, and (2) does the source
+page or API print one. The same day found three of ours: Wasalt commercial (2,070 ads — pin in `ar_data`,
+view arm read `additional_info`), Aqar Monthly (~690 pins ERASED by shards that never asked for
+`location`, PR #8132: a field not asked is `None`, never `{}`), and sanadak commercial / aqargate /
+amlakalahsa / tuba (pins in `source_capture`, no arm read them). Two daily rostered detectors now guard it
+(`20261022001318`): `mon_detect_captured_pin_not_served` (a served pin-less ad whose own row holds a
+Saudi pair, minus the guards' deliberate strips; a coordinate proven NOT the ad's pin goes in
+`ops_captured_pin_waiver` with evidence) and `mon_detect_pin_share_drop` (a table losing ≥50 pins and ≥3
+points of pin share between daily snapshots in `ops_platform_pin_daily`).
 
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.

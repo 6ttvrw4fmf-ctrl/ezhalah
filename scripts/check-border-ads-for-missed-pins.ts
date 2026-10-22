@@ -74,7 +74,12 @@ const reports: Report[] = [];
 // A site whose ad page also lists OTHER ads, each with its own map link: read only the ad's own section — the same
 // element its scraper reads (2026-10-21 re-run: abralosol's related-ads table re-flagged the neighbour pin
 // 25.4542,49.5820 that PR #7920 stopped storing).
-const OWN_SECTION: Record<string, string> = { abralosol: 'article[data-history-node-id]' };
+// shomou is the same office template (2026-10-22 run 39694521580): 8321 and 8369 both «missed»
+// 25.4253,49.5856, which sits in the related-ads `.views-field` table, outside the ad's article.
+const OWN_SECTION: Record<string, string> = {
+  abralosol: 'article[data-history-node-id]',
+  shomou: 'article[data-history-node-id]',
+};
 // A site whose page map is DELIBERATELY not read, with the evidence (2026-10-21 audit): flagging it every week
 // would be noise, and reading it would show a wrong pin.
 const DELIBERATELY_UNREAD: Record<string, string> = {
