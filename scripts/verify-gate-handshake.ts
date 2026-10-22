@@ -28,7 +28,7 @@ check('the handshake goes only to our own database REST API',
 
 // 2. Every script that talks to the database carries it (via the shared helper, or its own import).
 const files = execSync('git ls-files scripts e2e', { cwd: root, encoding: 'utf8' }).split('\n').filter((f) => /\.(m?js|ts)$/.test(f));
-const SELF = /scripts\/lib\/(gateFetch|robotPass)\.mjs$|scripts\/lib\/public-supabase\.ts$|scripts\/verify-gate-handshake\.ts$/;
+const SELF = /scripts\/lib\/(gateFetch|robotPass|robotPassCore)\.mjs$|scripts\/lib\/public-supabase\.ts$|scripts\/verify-gate-handshake\.ts$/;
 const talksToDb = (s: string) => /aannarbkwcymrotzwdbo\.supabase\.co|EXPO_PUBLIC_SUPABASE_(KEY|ANON_KEY|URL)|sb_publishable_/.test(s);
 const carries = (s: string) => /gateFetch\.mjs|public-supabase|robotPass\.mjs/.test(s);
 const dbScripts = files.filter((f) => !SELF.test(f)).map((f) => [f, read(f)] as const).filter(([, s]) => talksToDb(s));
@@ -41,8 +41,13 @@ const browsers = files.filter((f) => !SELF.test(f)).map((f) => [f, read(f)] as c
   .filter(([, s]) => /(chromium|firefox|webkit)\.launch|launchPersistentContext\(/.test(s));
 const bareBrowsers = browsers.filter(([, s]) => !/robotPass\.mjs/.test(s)).map(([f]) => f);
 check(`every browser robot carries the pass + handshake (${browsers.length})`, bareBrowsers.length === 0, bareBrowsers.join(', '));
-check('the Playwright test runner loads it too', /robotPass\.mjs/.test(read('playwright.config.ts')));
-check('a test copy\'s direct database calls get the handshake', /context\.route\(\/\\\.supabase\\\.co\\\/rest\\\/v1\\\/\//.test(read('scripts/lib/robotPass.mjs')));
+// Playwright TEST SPECS cannot load a module that awaits at load time (2026-10-22: importing robotPass.mjs from
+// playwright.config.ts made every spec fail to load), so each spec grants the pass per test from robotPassCore.mjs.
+const specs = files.filter((f) => /\.spec\.(ts|mjs|js)$/.test(f));
+const bareSpecs = specs.filter((f) => !/import \{ grantRobotPass \} from '[./]+(?:scripts\/)?lib\/robotPassCore\.mjs';[\s\S]*test\.beforeEach\(async \(\{ context \}\) => \{ await grantRobotPass\(context\); \}\);/.test(read(f)));
+check(`every Playwright spec grants the pass per test (${specs.length})`, specs.length > 0 && bareSpecs.length === 0, bareSpecs.join(', '));
+check('the test runner config does not import the awaiting module (it would stop every spec loading)', !/robotPass\.mjs/.test(read('playwright.config.ts')));
+check('a test copy\'s direct database calls get the handshake', /context\.route\(\/\\\.supabase\\\.co\\\/rest\\\/v1\\\/\//.test(read('scripts/lib/robotPassCore.mjs')));
 
 // 4. Every workflow hands its jobs the secret.
 const wfDir = join(root, '.github/workflows');
