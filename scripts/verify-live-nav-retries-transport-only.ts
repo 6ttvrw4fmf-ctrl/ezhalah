@@ -27,6 +27,7 @@
 //
 //   node --experimental-strip-types scripts/verify-live-nav-retries-transport-only.ts
 
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { readFileSync, readdirSync } from 'node:fs';
 import { gotoLive, type Navigable } from './lib/liveNav.ts';
 import { stripComments } from './lib/stripComments.ts';

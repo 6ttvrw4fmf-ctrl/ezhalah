@@ -21,6 +21,7 @@
 //
 //   node scripts/verify-live-hydration.mjs [url]      (default: https://ezhalah-app.vercel.app)
 
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
 
 const URL = process.argv[2] || process.env.HYDRATION_CHECK_URL || 'https://ezhalah-app.vercel.app';

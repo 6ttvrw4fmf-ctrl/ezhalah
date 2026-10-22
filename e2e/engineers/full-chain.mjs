@@ -22,6 +22,7 @@
 //
 // Exit 0 = card found AND it opened the exact URL (and showed `price` when given). Exit 1 = not.
 // Launch flags are the ones docs/ops/VERIFYING_PRODUCTION.md documents for this cloud proxy.
+import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 

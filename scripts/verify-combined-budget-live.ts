@@ -25,6 +25,7 @@
 //
 // LIVE CHECK — excluded from `npm test`, runs in .github/workflows/af-live-truth-check.yml.
 
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';

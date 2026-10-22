@@ -35,7 +35,8 @@ const robotPass = (await liftSymbols(join(root, 'api/sb.ts'), [{ header: 'export
 const g = 'x'.repeat(64);
 check('only the exact gate secret earns the robot pass',
   robotPass(g, g) && !robotPass('1', g) && !robotPass(null, g) && !robotPass(g, '') && !robotPass(g.slice(1) + 'y', g));
-check('the database only ever hears robot = 1, set by the front door', /if \(robotPass\(request\.headers\.get\('x-ezhalah-robot'\), GATE\)\) headers\.set\('x-ezhalah-robot', '1'\);/.test(proxy)
+check('the database only ever hears robot = 1, set by the front door',
+  /const robot = robotPass\(request\.headers\.get\('x-ezhalah-robot'\), GATE\);/.test(proxy) && /if \(robot\) headers\.set\('x-ezhalah-robot', '1'\);/.test(proxy)
   && !/'x-ezhalah-robot'/.test((/const PASS_REQUEST = \[([^\]]*)\]/.exec(proxy)?.[1] ?? '')));
 
 mustCatch('judging Cloudflare\'s address instead of the vouched visitor (would block everyone)',

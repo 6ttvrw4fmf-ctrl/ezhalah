@@ -60,6 +60,11 @@ concurrency:
   group: wasalt-enum-liveness
   cancel-in-progress: false
 
+env:
+  # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
+  # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   # This dispatch's start, before any shard runs. The rollup sums only shard rows started after it:
   # its 36h window alone also swept in the PREVIOUS dispatch's shards whenever two dispatches landed

@@ -62,7 +62,9 @@ async function handle(request: Request): Promise<Response> {
   try { bot = (await checkBotId()).isBot ? 'bot' : 'human'; } catch { /* the check itself failed: unknown, never a block */ }
   const human = !TURNSTILE_KEY ? 'off'
     : (await humanPassValid(readCookie(request.headers.get('cookie'), HUMAN_COOKIE), Date.now() / 1000, TURNSTILE_KEY)) ? 'pass' : 'none';
-  if ((ENFORCE && bot === 'bot') || (TURNSTILE_ENFORCE && human === 'none')) {
+  // Our own robots (scripts/lib/robotPass.mjs) carry the gate secret: never refused by BotID or Turnstile.
+  const robot = robotPass(request.headers.get('x-ezhalah-robot'), GATE);
+  if (!robot && ((ENFORCE && bot === 'bot') || (TURNSTILE_ENFORCE && human === 'none'))) {
     return Response.json({ message: 'Access denied' }, { status: 403, headers: { 'x-ezhalah-bot': bot, 'x-ezhalah-human': human } });
   }
 
@@ -74,7 +76,7 @@ async function handle(request: Request): Promise<Response> {
   // ROBOT PASS (20261021224031): our own browser robots run from server networks (GitHub, Google Cloud) that the network
   // guard refuses. They send x-ezhalah-robot = the gate secret; only then does the database hear «robot: 1» (vouched
   // by the same handshake). A caller's own x-ezhalah-robot is never forwarded as-is.
-  if (robotPass(request.headers.get('x-ezhalah-robot'), GATE)) headers.set('x-ezhalah-robot', '1');
+  if (robot) headers.set('x-ezhalah-robot', '1');
 
   const method = request.method.toUpperCase();
   const qs = url.searchParams.toString();

@@ -25,6 +25,7 @@
 // hourly and an oracle that depends on it accuses the product of its own staleness.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
+import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 export const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';
 
 /** The two viewports every journey runs on. The barrier pins both. */

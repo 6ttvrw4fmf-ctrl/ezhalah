@@ -28,6 +28,7 @@
 //
 //   node --experimental-strip-types scripts/verify-bottom-prompt-inset.ts   (discovered by `npm test`)
 
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';

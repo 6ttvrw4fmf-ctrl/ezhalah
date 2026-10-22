@@ -27,6 +27,7 @@
 // The seeded token is not a valid credential, so server sync legitimately no-ops; every assertion
 // here is about client state, never about server truth.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
+import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium, webkit, firefox, devices } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { isHydrationNoticePageError, hydrationNoticeNote } from '../lib/pageErrors.mjs';

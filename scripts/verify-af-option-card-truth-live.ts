@@ -56,6 +56,7 @@
 //
 // LIVE CHECK — excluded from `npm test` (it drives a real browser against production).
 
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
 import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
 import { dismissStrayOverlay, STRAY_OVERLAY_SRC } from './lib/liveClick.ts';
