@@ -46,5 +46,20 @@ writeFileSync(tmp, proxy.replace("if (!gate || !presented || presented.length !=
 const loosePass = (await liftSymbols(tmp, [{ header: 'export function robotPass(' }], ['robotPass'])).robotPass as (p: string | null, g: string) => boolean;
 mustCatch('a robot pass for any caller', loosePass('1', g) === true);
 
+// 5. A refused visitor is TOLD why («please turn off your VPN»), never left looking at an empty or broken search.
+const client = readFileSync(join(root, 'src/lib/supabase.ts'), 'utf8');
+const layout = readFileSync(join(root, 'src/app/_layout.tsx'), 'utf8');
+const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
+const isBlocked = (await liftSymbols(join(root, 'src/lib/supabase.ts'), [{ header: 'export function isNetworkBlocked(' }], ['isNetworkBlocked']))
+  .isNetworkBlocked as (s: number, b: unknown) => boolean;
+const refusal = { code: 'PT403', message: 'This network is not supported' };
+check('the guard\'s refusal is recognised, and nothing else is',
+  isBlocked(403, refusal) && !isBlocked(403, { code: '42501', message: 'permission denied' }) && !isBlocked(200, refusal) && !isBlocked(403, null));
+check('the message is raised on that refusal and mounted at the root, in Arabic and English',
+  /isNetworkBlocked\(r\.status, b\)\) window\.dispatchEvent\(new Event\(NETWORK_BLOCKED_EVENT\)\)/.test(client)
+  && /<NetworkBlockedNotice \/>/.test(layout)
+  && /'Please turn off your VPN': 'فضلاً أوقف الـ VPN'/.test(i18n));
+mustCatch('the refusal no longer raising the message', !/isNetworkBlocked\(r\.status, b\)\) window\.dispatchEvent/.test(client.replace('window.dispatchEvent(new Event(NETWORK_BLOCKED_EVENT))', 'void 0')));
+
 if (failed) { console.error(`\n❌ verify-network-block: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-network-block: VPN / Tor / server networks are judged safely, robots keep working.');
