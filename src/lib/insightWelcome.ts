@@ -146,7 +146,8 @@ export function renderInsight(t: InsightTemplate, f: Insight, en: NameEn): { ar:
     vAr.type = f.type; vEn.type = TYPE_EN[f.type];
   }
   const fill = (s: string, v: Record<string, string>) => s.replace(/\{(\w+)\}/g, (m, k) => (k in v ? v[k] : m));
-  const ar = fill(t.ar, vAr);
+  // «بـ» + a place reads «بجدة» / «بالطائف», never «بـجدة» / «بـالطائف» (owner 2026-10-22, seen live).
+  const ar = fill(t.ar, vAr).replace(/بـ(?=\S)/g, 'ب');
   const enS = fill(t.en, vEn);
   if (/\{\w+\}/.test(ar) || /\{\w+\}/.test(enS)) return null;
   return { ar, en: enS };

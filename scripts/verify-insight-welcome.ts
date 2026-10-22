@@ -88,6 +88,17 @@ check('Arabic shows «صباح الخير يوسف، تدري إن …»', shown
 check('English shows the SAME line translated, with «Good morning Yusuf»', shownEn.startsWith('Good morning Yusuf, did you know'), shownEn);
 check('an Arabic line never shows the Latin name', fillName(fillGreeting(r1.ar, morning, 'ar'), 'Yusuf', 'ar') === null);
 check('a line without a greeting slot (older lines) is left as it is', fillGreeting('هلا ⟦n⟧', null, 'ar') === 'هلا ⟦n⟧');
+// seen live 2026-10-22: «حي الرحاب بـالطائف», «بـجدة» — the «بـ» joins the place
+const jed = { ...base, city: 'جدة' };
+const rGap = renderInsight(templates.find((t) => t.kind === 'rent_gap')!, { id: 5, kind: 'rent_gap', ...jed, a: 6 }, en)!;
+check('«بـ» joins the place: «بجدة», never «بـجدة»', rGap.ar.includes('بجدة') && !rGap.ar.includes('بـ'), rGap.ar);
+let anyTatweel = false;
+for (const t of templates) { const r = renderInsight(t, { id: t.id, kind: t.kind, ...base, city: 'الطائف' }, en); if (r && r.ar.includes('بـ')) anyTatweel = true; }
+check('no sentence ever shows «بـ» before a place (e.g. «بالطائف»)', !anyTatweel);
+// English reads as English: a place with no official English name skips the fact (never «Drh Al Arws»)
+const noOfficial = { city: () => 'Jeddah', district: () => null };
+check('a district with no official English name skips the fact (no transliterated English)',
+  renderInsight(templates.find((t) => t.kind === 'rent_gap')!, { id: 6, kind: 'rent_gap', ...jed, a: 6 }, noOfficial as never) === null);
 
 // ── 4. no repeats, no half-filled lines ──
 const pack: InsightPack = { day: '2026-10-22', templates, insights: [

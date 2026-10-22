@@ -23,7 +23,7 @@ import {
   pickGreeting, fillGreeting, chooseInsightLine, isInsightLineId, INSIGHT_ID_BASE, SEEN_DAYS, type Seen,
 } from '@/lib/insightWelcome';
 import { fetchWelcomeInsights } from '@/data/welcomeInsights';
-import { cityNameEn, districtNameEn } from '@/data/locations';
+import { cityNameEnOfficial, districtNameEnOfficial } from '@/data/locations';
 import { hasJustSignedIn, takeJustSignedIn, SIGNED_IN_EVENT } from '@/lib/loginWelcome';
 
 // v2: remembered lines hold NAME_SLOT, not a name. v1 entries had the name baked in (a Latin name
@@ -150,7 +150,7 @@ export function useFilterWelcome(
       fetchWelcomeInsights(lastLocation, lastDistrict).then((pack) => {
         if (!live || !pack) return;
         const seen = readSeen(now.getTime());
-        const pick = chooseInsightLine(pack, seen, now.getTime(), { city: cityNameEn, district: districtNameEn }, { district: lastDistrict });
+        const pick = chooseInsightLine(pack, seen, now.getTime(), { city: (id) => cityNameEnOfficial(id), district: districtNameEnOfficial }, { district: lastDistrict });
         if (!pick) return;
         writeKey(NEXT_KEY, { id: INSIGHT_ID_BASE + pick.templateId, at: now.getTime(), ar: pick.ar, en: pick.en });
         writeSeen({ ...seen, [pick.key]: now.getTime() });
