@@ -1429,7 +1429,7 @@ export default function Home() {
           <HomeWebsiteStrip />
           <View style={s.hero}>
             <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
-              <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}{welcomeIsInsight && welcomeLine ? ' ⓘ' : ''}</RNAnimated.Text>
+              <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
             </Pressable>
             <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
             <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>
