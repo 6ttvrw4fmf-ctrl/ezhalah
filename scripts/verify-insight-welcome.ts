@@ -67,8 +67,36 @@ for (const sql of migs) {
     byId.set(Number(m[1]), { id: Number(m[1]), kind: m[2], personal: m[3] === 'true', ar: m[4].replace(/''/g, "'"), en: m[5].replace(/''/g, "'") });
   }
 }
+// a retired line (owner 2026-10-22: «pointless», «don't talk region») is switched off, never shown
+for (const sql of migs) {
+  for (const m of sql.matchAll(/update public\.welcome_template set active = false where id in \(([\d,\s]+)\)/g)) {
+    for (const id of m[1].split(',')) byId.delete(Number(id.trim()));
+  }
+}
 const templates: InsightTemplate[] = [...byId.values()].sort((x, y) => x.id - y.id);
-check('29 sentences are seeded', templates.length === 29, `found ${templates.length}`);
+check('31 sentences are live', templates.length === 31, `found ${templates.length}`);
+check('no live sentence names a region (city, then district)', templates.every((t) => !t.ar.includes('{region}') && !t.en.includes('{region}')),
+  templates.filter((t) => t.ar.includes('{region}')).map((t) => t.id).join(','));
+check('the retired lines are gone (pool, websites, maid, one-ad towns, lowest rent, local offices, regions)',
+  !templates.some((t) => ['pool', 'district_sites', 'region_sites', 'maid', 'town_single', 'town_few', 'min_rent_apt', 'local_office', 'region_week', 'region_land'].includes(t.kind)));
+check('every price line says the ASKING price («المعروض» / "asking")',
+  templates.filter((t) => /متوسط (السعر|الإيجار)/.test(t.ar)).every((t) => t.ar.includes('المعروض') && t.en.includes('asking')));
+// owner + their dad 2026-10-22: «investment usually happens أراضي، شقق، عماير» — purchase leads
+check('investors get purchase volume for land, apartments and buildings, this week against last, and month against month',
+  ['week_land', 'week_apt_sale', 'week_bld_sale', 'wow_land_up', 'wow_apt_sale_up', 'wow_bld_up', 'month_land_ppm', 'month_apt_ppm', 'month_bld_ppm']
+    .every((k) => templates.some((t) => t.kind === k)));
+check('rent is a side dish: at most 3 rent lines', templates.filter((t) => /إيجار/.test(t.ar)).length <= 3,
+  templates.filter((t) => /إيجار/.test(t.ar)).map((t) => t.id).join(','));
+check('the weak rent lines are gone (rent share, monthly payment, furnished, rent volume)',
+  !templates.some((t) => ['rent_share', 'monthly', 'furnished', 'commercial_count', 'week_apt_rent', 'wow_apt_rent_up', 'wow_apt_rent_down'].includes(t.kind)));
+// «we never recommend, we must never ever» — no line may advise, in either language
+const ADVICE_AR = /فرصة|أرخص|أفضل|استثمر|ننصح|صفقة|يستاهل|الوقت المناسب|لا تفوت/;
+const ADVICE_EN = /\b(deal|cheap|cheapest|best|invest|should|opportunity|bargain|don't miss)\b/i;
+check('no sentence gives advice (Arabic or English)', templates.every((t) => !ADVICE_AR.test(t.ar) && !ADVICE_EN.test(t.en)),
+  templates.filter((t) => ADVICE_AR.test(t.ar) || ADVICE_EN.test(t.en)).map((t) => t.id).join(','));
+check('(mutation) the advice check catches «فرصة» and "best"', ADVICE_AR.test('فرصة ذهبية') && ADVICE_EN.test('the best price'));
+check('counts say listings («إعلانات»), never properties, for the volume lines',
+  templates.filter((t) => /^(week_|city_land|city_sale|city_bld_sale)/.test(t.kind)).every((t) => t.ar.includes('إعلانات') && /listings/.test(t.en)));
 // owner 2026-10-22: «a lot of mistakes in the Arabic wording» — the corrected wording holds
 check('no sentence puts a bare count before a singular noun («14 إعلان», «3 حي») or says «أضعاف», «الحين», «بس»',
   templates.every((t) => !/\{a\} (إعلان|حي|أرض|موقع)(?![ا-ي])/.test(t.ar) && !/أضعاف|الحين| بس[؟،. ]/.test(t.ar)), templates.filter((t) => /أضعاف|الحين| بس[؟،. ]|\{a\} (إعلان|حي)/.test(t.ar)).map((t) => t.id).join(','));
@@ -123,8 +151,9 @@ check('a fact seen in the past week is never picked again (only an unsayable one
   chooseInsightLine(pack, seenAll, now, en) === null);
 const old = Object.fromEntries(pack.insights.slice(0, 2).map((f) => [insightKey(f), now - (SEEN_DAYS + 1) * 86_400_000]));
 check('after a week the fact may come back', chooseInsightLine(pack, old, now, en) !== null);
-check('a type with no English name is never put in a sentence', renderInsight(templates.find((t) => t.kind === 'town_single')!, pack.insights[2], en) === null);
-check('an unknown region is never put in a sentence', renderInsight(templates.find((t) => t.kind === 'region_land')!, { id: 9, kind: 'region_land', ...base, region: 'منطقة مجهولة' }, en) === null);
+const probe = (slot: string): InsightTemplate => ({ id: 0, kind: 'probe', personal: false, ar: `تدري إن {${slot}}؟`, en: `did you know {${slot}}?` });
+check('a type with no English name is never put in a sentence', renderInsight(probe('type'), { ...pack.insights[2], kind: 'probe' }, en) === null);
+check('an unknown region is never put in a sentence', renderInsight(probe('region'), { id: 9, kind: 'probe', ...base, region: 'منطقة مجهولة' }, en) === null);
 const picks = new Set<number>();
 for (let k = 0; k < 40; k++) { let r = (k + 1) / 41; const p = chooseInsightLine({ ...pack, insights: pack.insights.slice(0, 2) }, {}, now, en, { rand: () => (r = (r * 9.7 + 0.13) % 1) }); if (p) picks.add(p.templateId); }
 check('different sentences come up (not always the same one)', picks.size >= 2);
