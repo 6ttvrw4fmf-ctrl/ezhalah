@@ -272,6 +272,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://www.razre.sa"
 QUERY_API = f"{BASE}/_api/cloud-data/v1/wix-data/collections/query"
@@ -400,6 +401,19 @@ def city_from_address(addr) -> tuple[Optional[str], Optional[str], Optional[str]
         if (city_ar := _CITY_AR.get(tok.lower())):
             return city_ar, _clean(region_ar), tok
     return None, _clean(region_ar), None
+
+
+def address_pin(addr) -> dict:
+    """{"latitude","longitude"} from the parent's Wix address OBJECT (`location`), else {}.
+
+    The project page prints the same pair as its JSON-LD geo next to its own «hasMap» link
+    (onepro-1/29 → 21.521324, 39.237759; onepro-1/55 → 21.582453, 39.153981, 2026-10-22), and the
+    weekly missed-pin robot found it while all 94 razre units showed the district border. A bare
+    STRING address (Import872/6) carries no pin, and a pair outside Saudi Arabia is refused by pin_dict."""
+    loc = addr.get("location") if isinstance(addr, dict) else None
+    if not isinstance(loc, dict):
+        return {}
+    return pin_dict(loc.get("latitude"), loc.get("longitude"))
 
 
 def _photo_url(v) -> Optional[str]:
@@ -544,6 +558,8 @@ def map_listing(unit: dict[str, Any], parent: Optional[dict[str, Any]],
         "project_plan_ar": redact_pii(_clean(parent.get("propertieType"))),
         "project_scheme_images": len(parent.get("scheme") or []) or None,
         "photo_source_field": photo_field,
+        # The project's own map pin (Wix address.location) — the building every unit of it sits in.
+        **address_pin(parent.get("address")),
     }
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v is not None})
     row["source_capture"] = strip_pii_fields({
@@ -699,12 +715,55 @@ def _make_verify_gone(control: Optional[dict]):
     return lambda ad_number: probe(ad_number, canary=canary)
 
 
+# The project's own JSON-LD node: its geo sits right before its «hasMap» link. The district node
+# printed further down the same page has a geo too and NO hasMap — that one is never read.
+_PROJECT_GEO_RE = re.compile(
+    r'"geo"\s*:\s*\{\s*"@type"\s*:\s*"GeoCoordinates"\s*,\s*"latitude"\s*:\s*(-?\d{1,2}\.\d{3,})\s*,'
+    r'\s*"longitude"\s*:\s*(-?\d{1,3}\.\d{3,})\s*\}\s*,\s*"hasMap"')
+
+
+def project_pin_from_page(html: Optional[str]) -> dict:
+    """{"latitude","longitude"} of the project from its own page, else {}. Pure (the barrier feeds it
+    saved HTML). onepro-1/29 → 21.521324, 39.237759 (2026-10-22, the missed-pin robot's find)."""
+    m = _PROJECT_GEO_RE.search(html or "")
+    return pin_dict(m.group(1), m.group(2)) if m else {}
+
+
+def add_project_page_pin(s, row: dict, cache: dict[str, Optional[dict]]) -> None:
+    """Fill the unit's pin from its project page when the API record carried none.
+
+    A page we could NOT read is unknown, not «no pin»: additional_info is written whole, so writing it
+    without the pin would erase a stored one (the Aqar Monthly shape, 2026-10-21). The row then carries
+    additional_info = None, which the upsert drops, and the stored value stays exactly as it was."""
+    info = row.get("additional_info") or {}
+    if info.get("latitude") is not None:
+        return
+    url = row.get("listing_url")
+    if not url:
+        return
+    if url not in cache:
+        pin: Optional[dict] = None
+        try:
+            r = s.get(url, timeout=45)
+            if r.status_code == 200:
+                pin = project_pin_from_page(r.text)
+        except Exception:  # noqa: BLE001 — a page we could not read is "unknown", never "no pin"
+            pin = None
+        cache[url] = pin
+    got = cache[url]
+    if got is None:
+        row["additional_info"] = None
+    elif got:
+        row["additional_info"] = {**info, **got, "pin_source": "project_page_jsonld_geo"}
+
+
 def crawl(s: cc.Session, token: str, limit: int = 0) -> tuple[list[dict], list[dict], dict, bool]:
     """(residential, commercial, skip tally, catalogue complete)."""
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
     complete = True
+    page_pins: dict[str, Optional[dict]] = {}   # one project page per run, shared by its units
     for fam, cfg in _FAMILIES.items():
         parents, p_ok = fetch_collection(s, token, cfg["parent_coll"])
         units, u_ok = fetch_collection(s, token, cfg["unit_coll"])
@@ -716,6 +775,7 @@ def crawl(s: cc.Session, token: str, limit: int = 0) -> tuple[list[dict], list[d
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue
+            add_project_page_pin(s, row, page_pins)
             (com if cat == "commercial" else res).append(row)
             if limit and len(res) + len(com) >= limit:
                 return res, com, skipped, False

@@ -492,3 +492,69 @@ def test_the_row_carries_the_fields_a_card_needs():
     assert row["additional_info"]["source_area_raw"] == 144.0
     assert row["additional_info"]["family"] == "onepro"
     assert len(row) >= 20, f"only {len(row)} keys — the mapper stopped producing a real row"
+
+
+# ── THE PROJECT'S OWN PIN (2026-10-22, the weekly missed-pin robot) ──────────────────────────────
+# All 94 razre units showed the district border while each project page prints its building's pin.
+_PAGE_29 = ('"address":{"@type":"PostalAddress","addressLocality":"جدة","addressRegion":"منطقة مكة المكرمة",'
+            '"addressCountry":"SA"},"geo":{"@type":"GeoCoordinates","latitude":21.521324,"longitude":39.237759},'
+            '"hasMap":"https://maps.app.goo.gl/JghxzWDGudn6qu3A6","containedInPlace":{"@id":"https://www.razre.sa/'
+            'districts/al-naseem/","@type":"Place","name":"Al Naseem","url":"https://www.razre.sa/districts/al-naseem/",'
+            '"geo":{"@type":"GeoCoordinates","latitude":21.52028,"longitude":39.23061}}')
+
+
+def test_the_project_page_pin_is_the_one_beside_its_map_link_never_the_district_centre():
+    assert R.project_pin_from_page(_PAGE_29) == {"latitude": 21.521324, "longitude": 39.237759}
+    district_only = '"geo":{"@type":"GeoCoordinates","latitude":21.52028,"longitude":39.23061},"containedInPlace":{}'
+    assert R.project_pin_from_page(district_only) == {}
+    assert R.project_pin_from_page(None) == {}
+
+
+class _Resp:
+    def __init__(self, status, text=""):
+        self.status_code, self.text = status, text
+
+
+class _Sess:
+    def __init__(self, resp):
+        self.resp, self.calls = resp, 0
+
+    def get(self, url, timeout=0):
+        self.calls += 1
+        if isinstance(self.resp, Exception):
+            raise self.resp
+        return self.resp
+
+
+def test_units_of_one_project_get_its_pin_from_one_fetch():
+    s, cache = _Sess(_Resp(200, _PAGE_29)), {}
+    rows = [{"listing_url": "https://www.razre.sa/onepro-1/29", "additional_info": {"unit_model": m}} for m in "AB"]
+    for r in rows:
+        R.add_project_page_pin(s, r, cache)
+    assert s.calls == 1
+    assert all(r["additional_info"]["latitude"] == 21.521324 and r["additional_info"]["unit_model"] for r in rows)
+
+
+def test_a_page_we_could_not_read_never_erases_a_stored_pin():
+    for bad in (_Resp(503), RuntimeError("timeout")):
+        row = {"listing_url": "https://www.razre.sa/onepro-1/29", "additional_info": {"unit_model": "A"}}
+        R.add_project_page_pin(_Sess(bad), row, {})
+        assert row["additional_info"] is None          # dropped by the upsert → stored value kept
+        db._unknown_must_not_overwrite_known(row)
+        assert "additional_info" not in row
+
+
+def test_a_readable_page_with_no_project_pin_writes_the_row_as_it_is():
+    row = {"listing_url": "u", "additional_info": {"unit_model": "A"}}
+    R.add_project_page_pin(_Sess(_Resp(200, "<html>no map</html>")), row, {})
+    assert row["additional_info"] == {"unit_model": "A"}
+
+
+def test_an_api_address_location_is_read_and_skips_the_page():
+    assert R.address_pin({"city": "Jeddah", "location": {"latitude": 21.5824, "longitude": 39.1539}}) == \
+        {"latitude": 21.5824, "longitude": 39.1539}
+    assert R.address_pin("G68H+2X An Naseem, Jeddah") == {}
+    s = _Sess(_Resp(200, _PAGE_29))
+    row = {"listing_url": "u", "additional_info": {"latitude": 21.5824, "longitude": 39.1539}}
+    R.add_project_page_pin(s, row, {})
+    assert s.calls == 0
