@@ -385,7 +385,7 @@ mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a U
   const authSrc = (await import('node:fs')).readFileSync(new URL('../src/app/auth.tsx', import.meta.url), 'utf8');
   const tapSrc = (await import('node:fs')).readFileSync(new URL('../src/components/GoogleOneTap.tsx', import.meta.url), 'utf8');
   check('both sign-in paths mark the moment: the Google/Apple return route and Google One Tap',
-    /markJustSignedIn\(\);/.test(authSrc) && /log\('signed in via One Tap'\); markJustSignedIn\(\);/.test(tapSrc));
+    /markJustSignedIn\(\);/.test(authSrc) && /log\('signed in via One Tap'\), markJustSignedIn\(\);/.test(tapSrc));
   delete (globalThis as any).localStorage;
 }
 

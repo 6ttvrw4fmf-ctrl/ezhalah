@@ -233,7 +233,7 @@ export default function GoogleOneTap() {
                 // of this effect either (see the DEPS note at the bottom of this file).
                 openAuth();
               }
-              else { log('signed in via One Tap'); markJustSignedIn(); }
+              else log('signed in via One Tap'), markJustSignedIn();
             } catch (e) {
               diag.exchangeError = String(e); log('token exchange threw', String(e));
               openAuth();
