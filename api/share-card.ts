@@ -13,13 +13,15 @@ import { homeCardFactsFrom } from '../middleware';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co';
 const SUPABASE_KEY = process.env.EXPO_PUBLIC_SUPABASE_KEY || '';
+// Secret handshake (docs/ops/SCRAPE_GUARD.md): our own server's database reads carry it once the back door closes.
+const GATE_HEADER: Record<string, string> = process.env.EZ_GATE_SECRET ? { 'x-ezhalah-gate': process.env.EZ_GATE_SECRET } : {};
 
 async function chatCard(code: string): Promise<SharedChatCard | null> {
   if (!SUPABASE_KEY) return null;
   try {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/shared_chat_card`, {
       method: 'POST',
-      headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
+      headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json', ...GATE_HEADER },
       body: JSON.stringify({ p_code: code }),
       signal: AbortSignal.timeout(6000),
     });
@@ -38,7 +40,7 @@ let keptFacts: { at: number; facts: ShareCardFacts } | null = null;
 const complete = (f: ShareCardFacts) => [f.sites, f.listings, f.cities].every((n) => typeof n === 'number' && n > 0);
 async function rpc(name: string): Promise<unknown> {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
-    method: 'POST', headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' }, body: '{}',
+    method: 'POST', headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json', ...GATE_HEADER }, body: '{}',
     signal: AbortSignal.timeout(FACTS_MS),
   });
   if (!r.ok) throw new Error(`${name} ${r.status}`);
