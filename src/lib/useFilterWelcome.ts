@@ -13,7 +13,8 @@
 // export's server HTML (React #418 — see lib/responsive.ts); the decision lands in the mount effect.
 import { useEffect, useMemo, useState } from 'react';
 import {
-  welcomeForNow, fallbackLine, renderWelcome, instantWelcome, fillName, NAME_SLOT,
+  welcomeForNow, chooseWelcomeLine, renderWelcome, instantWelcome, fillName, NAME_SLOT, PREPARED_MAX_MS,
+  WELCOME_LINES, lineFitsTime,
   type HeldWelcome, type WelcomeCache, type WelcomeLine, type WelcomeFacts,
 } from '@/lib/filterWelcome';
 import { loadWelcomeFacts } from '@/data/welcomeFacts';
@@ -22,14 +23,20 @@ import { pickName } from '@/lib/nameSync';
 // v2: remembered lines hold NAME_SLOT, not a name. v1 entries had the name baked in (a Latin name
 // inside the Arabic line, owner 2026-10-17) and are ignored.
 const CACHE_KEY = 'ezhalah:filterWelcome:shown:v2';
-const readCache = (): WelcomeCache | null => {
+// The NEXT period's line, prepared in the background and not yet seen (lib/filterWelcome.ts `next`).
+const NEXT_KEY = 'ezhalah:filterWelcome:next:v1';
+const readKey = (key: string): WelcomeCache | null => {
   try {
-    const v = JSON.parse(globalThis.localStorage?.getItem(CACHE_KEY) ?? 'null');
+    const v = JSON.parse(globalThis.localStorage?.getItem(key) ?? 'null');
     return v && Number.isFinite(v.id) && Number.isFinite(v.at) && typeof v.ar === 'string' && typeof v.en === 'string'
       ? { id: Number(v.id), at: Number(v.at), ar: v.ar, en: v.en } : null;
   } catch { return null; }
 };
-const writeCache = (c: WelcomeCache) => { try { globalThis.localStorage?.setItem(CACHE_KEY, JSON.stringify(c)); } catch { /* per-device nicety only */ } };
+const writeKey = (key: string, c: WelcomeCache | null) => {
+  try { if (c) globalThis.localStorage?.setItem(key, JSON.stringify(c)); else globalThis.localStorage?.removeItem(key); } catch { /* per-device nicety only */ }
+};
+const readCache = () => readKey(CACHE_KEY);
+const writeCache = (c: WelcomeCache) => writeKey(CACHE_KEY, c);
 
 // A stored Supabase session = this device is signed in (the restore only confirms it a moment later).
 // Same key shape src/lib/authStorageGuard.ts and src/i18n.tsx read: `sb-<ref>-auth-token`.
@@ -68,31 +75,53 @@ export function useFilterWelcome(
   useEffect(() => {
     const now = new Date();
     const session = readStoredSession();
-    const cache = readCache();
+    let cache = readCache();
+    const next = readKey(NEXT_KEY);
     // Names are fixed here, once, so the line on screen never changes in this page load. The store's
     // name (passed in) is preferred when it is already restored; else the stored session's.
     const nameAr = (locale === 'ar' && name) || session.nameAr;
     const nameEn = (locale === 'en' && name) || session.nameEn;
-    const inst = (nameAr || nameEn) ? instantWelcome({ hasSession: session.present, cache, now, name: NAME_SLOT }) : null;
+    const inst = (nameAr || nameEn) ? instantWelcome({ hasSession: session.present, cache, next, now, name: NAME_SLOT }) : null;
     setShown(inst ? { settled: true, id: inst.id, ar: inst.ar, en: inst.en, nameAr, nameEn } : { settled: true, id: null, ar: null, en: null, nameAr, nameEn });
     if (!session.present) return;
-    // BACKGROUND, for the NEXT visit: keep (or pick) the held line, load its live numbers, render both
-    // languages and remember them. Nothing here touches the screen.
+    // What is on screen now is the SHOWN line, and its 2 hours start now when it is new to this device
+    // (a prepared line seen for the first time, or the no-numbers line used when nothing was ready).
+    if (inst && (!inst.fromCache || inst.promoted)) {
+      cache = { id: inst.id, at: now.getTime(), ar: inst.ar, en: inst.en };
+      writeCache(cache);
+      if (inst.promoted) writeKey(NEXT_KEY, null);
+    }
+    // BACKGROUND, for later visits. Nothing here touches the screen.
     let live = true;
-    const held: HeldWelcome | null = cache ? { id: cache.id, at: cache.at } : null;
-    const choice = welcomeForNow(now, held, Math.random, !!lastDistrict);
-    if (!choice) return;
-    loadWelcomeFacts(choice.line, lastLocation, lastDistrict).then((facts: WelcomeFacts) => {
-      if (!live) return;
-      const nm = NAME_SLOT;
-      let line: WelcomeLine = choice.line;
-      if (renderWelcome(line, nm, facts, 'ar') === null || renderWelcome(line, nm, facts, 'en') === null) line = fallbackLine(held?.id ?? null);
+    const nm = NAME_SLOT;
+    const render = (line: WelcomeLine, facts: WelcomeFacts) => {
       const ar = renderWelcome(line, nm, facts, 'ar');
       const en = renderWelcome(line, nm, facts, 'en');
-      if (!ar || !en) return;
-      const at = choice.keep && held && line.id === held.id ? held.at : now.getTime();
-      writeCache({ id: line.id, at, ar, en });
-    }).catch(() => {});
+      return ar && en ? { ar, en } : null;
+    };
+    // 1. Refresh the shown line's live numbers for a reload inside its 2 hours (same line, same start).
+    const held: HeldWelcome | null = cache ? { id: cache.id, at: cache.at } : null;
+    const choice = welcomeForNow(now, held, Math.random, !!lastDistrict);
+    if (choice?.keep && held) {
+      loadWelcomeFacts(choice.line, lastLocation, lastDistrict).then((facts) => {
+        const r = live ? render(choice.line, facts) : null;
+        if (r) writeCache({ id: choice.line.id, at: held.at, ...r });
+      }).catch(() => {});
+    }
+    // 2. Prepare the NEXT period's line with its live numbers, so the next visit after the 2 hours shows
+    //    it at once. Kept as long as it is still usable; a line whose facts are not true today is skipped.
+    const shownId = cache?.id ?? null;
+    const pending = readKey(NEXT_KEY);
+    const pendingLine = pending ? WELCOME_LINES.find((l) => l.id === pending.id) : undefined;
+    const pendingOk = !!pending && !!pendingLine && pending.id !== shownId && now.getTime() - pending.at < PREPARED_MAX_MS
+      && lineFitsTime(pendingLine, now);
+    const nextLine = pendingOk ? null : chooseWelcomeLine(now, shownId, Math.random, !!lastDistrict);
+    if (nextLine) {
+      loadWelcomeFacts(nextLine, lastLocation, lastDistrict).then((facts) => {
+        const r = live ? render(nextLine, facts) : null;
+        if (r) writeKey(NEXT_KEY, { id: nextLine.id, at: now.getTime(), ...r });
+      }).catch(() => {});
+    }
     return () => { live = false; };
     // Deliberately once: the headline is decided at mount and never re-decided in this page load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
