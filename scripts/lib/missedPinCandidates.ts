@@ -13,12 +13,14 @@
 //
 // judgeSite() then decides, over the sampled ads of ONE site, which pairs are the ad's OWN unsaved pin:
 //   · a pair repeated on ≥ 3 sampled ads is the site's office / default centre        (bossbih, ksaaqar)
+//   · a point (~1 km) drawn on ads of DIFFERENT cities is the site's default            (nawafeth 156 دخنة
+//     and 160 الدمام both at 27.022,49.573 in Jubail — robot run 39853742689, 2026-10-22)
 //   · a pair equal to a pin we already store for ANOTHER ad is a «similar ads» card   (alshawaf, abwbna)
 //   · a pair on a point / row we strip on purpose (default register, far-from-city)  is skipped
 // A site is flagged when ≥ 2 sampled ads carry such a pair — one stray number never raises the alarm.
 
 export type Pair = { lat: number; lng: number; shape: string; ctx: string };
-export type AdSample = { url: string; listingId?: number; html: string; frames?: string[]; network?: string[] };
+export type AdSample = { url: string; listingId?: number; city?: string | null; html: string; frames?: string[]; network?: string[] };
 export type SiteVerdict = { flagged: boolean; missed: Array<{ url: string; pair: Pair }>; repeated: string[] };
 
 const NUM = String.raw`(-?\d{1,2}\.\d{4,})`;
@@ -71,11 +73,16 @@ export function judgeSite(samples: AdSample[], knownPins: Set<string>, skip: { p
   const freq = new Map<string, number>();
   for (const { pairs } of per) for (const p of pairs) freq.set(key(p.lat, p.lng), (freq.get(key(p.lat, p.lng)) ?? 0) + 1);
   const repeated = [...freq].filter(([, n]) => n >= 3).map(([k]) => k);
+  // ~1 km cells holding ads of more than one city: one point standing for different towns is a default
+  const cell = (p: Pair) => `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
+  const citiesAt = new Map<string, Set<string>>();
+  for (const { s, pairs } of per) for (const p of pairs) if (s.city) citiesAt.set(cell(p), (citiesAt.get(cell(p)) ?? new Set()).add(s.city));
+  const shared = (p: Pair) => (citiesAt.get(cell(p))?.size ?? 0) >= 2;
   const missed: SiteVerdict['missed'] = [];
   for (const { s, pairs } of per) {
     const own = pairs.find((p) => {
       const k = key(p.lat, p.lng);
-      return (freq.get(k) ?? 0) < 3 && !knownPins.has(k) && !skip.points.has(k);
+      return (freq.get(k) ?? 0) < 3 && !shared(p) && !knownPins.has(k) && !skip.points.has(k);
     });
     if (own) missed.push({ url: s.url, pair: own });
   }

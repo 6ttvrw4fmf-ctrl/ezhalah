@@ -86,5 +86,16 @@ const mutantCaught = (label: string, caught: boolean) => check(`(mutation) ${lab
   mutantCaught('reading every LatLng marker again flags the sakan approximation', m.pairsIn(ad('a', "var show_exact_location = false; latLng = new google.maps.LatLng(21.5713, 39.77581);")).length > 0);
 }
 
+// nawafeth (run 39853742689): two ads in DIFFERENT towns drawn at the same Jubail point = the site's default
+{
+  const naw = (id: number, city: string, lat: string, lng: string) => ({ url: `n${id}`, listingId: id, city, html: `const propertyLat = parseFloat('${lat}'); const propertyLng = parseFloat('${lng}');` });
+  const twoTowns = [naw(156, 'دخنة', '27.0220', '49.5732'), naw(160, 'الدمام', '27.0219', '49.5728')];
+  check('a point drawn on ads of two different towns is the site default, never a missed pin', !judgeSite(twoTowns, new Set(), none).flagged);
+  const twoOwn = [naw(176, 'المدينة المنورة', '24.476430', '39.611220'), naw(178, 'الدمام', '26.426045', '50.088101')];
+  check('two ads with their OWN different points still raise the alarm', judgeSite(twoOwn, new Set(), none).flagged);
+  const m = await mutant('no town filter', '!shared(p) &&', 'true &&');
+  mutantCaught('dropping the different-towns filter flags the nawafeth default', m.judgeSite(twoTowns, new Set(), none).flagged);
+}
+
 if (failed) { console.log(`\n❌ verify-missed-pin-candidates: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-missed-pin-candidates: the robot reads every shape seen live and ignores every false alarm seen live.');
