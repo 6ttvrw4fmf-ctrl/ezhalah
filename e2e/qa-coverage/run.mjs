@@ -9,6 +9,7 @@
 //
 // The run prints the SIX SEPARATE NUMBERS the owner requires (2026-08-28) — it never collapses them
 // into one "searches" figure, because a request count is not a coverage claim.
+import '../../scripts/lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { createHash } from 'node:crypto';
 import { buildRequest, cohortKey, PAGE_LIMIT } from './request.mjs';
 import { dbCount, dbFilterFromRequest, cityCatalog } from '../live-sweep/sweep.mjs';

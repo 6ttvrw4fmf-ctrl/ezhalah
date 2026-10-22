@@ -17,6 +17,7 @@
 //   7) disjointness: full-walk of residential scenarios has 0 duplicate (source_table,listing_id).
 //
 // Run: node_modules/.bin/tsx --env-file=.env scripts/verify-residential-misfile-recovery.ts
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { createClient } from '@supabase/supabase-js';
 import { CLEAN_MACRO, CLEAN_TO_TYPE_AR, typeArForTypes, typeArForSelection, queryForTypes, queryForSelection, normalizeType, type SourceKind, type CleanQuery } from '../src/data/propertyTypes';
 

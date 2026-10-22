@@ -29,6 +29,7 @@
 //   BASE_URL=http://localhost:8081 node …        # against a local build
 //   SWEEP_ONLY=trending-city node …              # one journey kind while developing
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
+import '../../scripts/lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium, devices } from '@playwright/test';
 import { appendFileSync, writeFileSync, mkdirSync } from 'node:fs';

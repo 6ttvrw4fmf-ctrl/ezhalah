@@ -9,6 +9,7 @@
 // EXECUTED: the real api/share-card.ts handler runs here against a stubbed global fetch that answers
 // the two RPCs the way PostgREST does, plus the shared_chat_card lookup; the HTML it writes is read
 // back. Mutations re-break the line builder in a temp copy and prove the check fails.
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

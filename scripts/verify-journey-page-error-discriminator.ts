@@ -24,6 +24,7 @@
 // `TypeError: undefined is not an object (evaluating 'x.y')` is a defect and stays one.
 //
 // Run: node --experimental-strip-types scripts/verify-journey-page-error-discriminator.ts
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { appPageErrors, isTransportPageError } from '../e2e/journeys/harness.mjs';
