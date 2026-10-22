@@ -107,11 +107,22 @@ def sections(desc: str) -> tuple[dict[str, str], dict[str, str]]:
             m = re.match(r"\s*([^:\n]{2,60}?)\s*:\s*(.*)$", line)
             if m and m.group(1).strip() not in out:
                 out[m.group(1).strip()] = m.group(2).strip()
-    # the pin's URL sits on the line AFTER its label
-    pin = re.search(r"maps\.google\.com/\?q=(-?[0-9.]+),(-?[0-9.]+)", deed_txt or lic_txt)
+    # the pin's URL sits on the line AFTER its label. Haraj masks long digit runs as a phone number
+    # («46.( رقم الجوال يظهر عند الضغط على زر تواصل )»), so a cut link is skipped for a whole one (2026-10-22).
+    pin = full_pin(deed_txt or lic_txt)
     if pin:
-        deed["_pin"] = f"{pin.group(1)},{pin.group(2)}"
+        deed["_pin"] = f"{pin[0]},{pin[1]}"
     return lic, deed
+
+
+_MAPS_Q = re.compile(r"maps\.google\.com/\?q=(-?\d{1,2}\.\d{4,}),(-?\d{1,3}\.\d{4,})(?![\d.])")
+
+
+def full_pin(text: str) -> Optional[list[str]]:
+    """The first COMPLETE «maps.google.com/?q=LAT,LNG» in text: both halves with ≥ 4 decimals, not cut
+    mid-number (Haraj's phone mask turns «46.597182495004» into «46.( رقم الجوال … )»)."""
+    m = _MAPS_Q.search(text or "")
+    return [m.group(1), m.group(2)] if m else None
 
 
 # ── REGA's English enums (the licence platform prints either language) ──────────────────────────
@@ -304,8 +315,8 @@ def parse_post(ld: dict[str, Any], page_html: str = "") -> dict[str, Any]:
     deal_raw = get("غرض الإعلان")
     pin = (deed.get("_pin") or "").split(",") if deed.get("_pin") else None
     if not pin:
-        m = re.search(r"maps\.google\.com/\?q=(-?[0-9.]+),(-?[0-9.]+)", desc)
-        pin = [m.group(1), m.group(2)] if m else None
+        # the ad text carries the link twice; the deed copy can be cut by Haraj's phone mask (18482433, حي الملقا)
+        pin = full_pin(desc)
     lat, lng = sa_pin(*pin) if pin else (None, None)
     loc3 = licence_location_ar(get("وصف موقع العقار"))
     # DISTRICT precedence (owner 2026-10-18): (1) the deed's «الحي:» — else the licence location's own
