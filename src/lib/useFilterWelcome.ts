@@ -185,9 +185,12 @@ export function useFilterWelcome(
     // text (owner rule) — the line simply stays for this load. Guests (no session stored) get null.
     void signedIn;
     // The greeting (the user's local time, chosen once at mount) first, then the name for the language on screen.
+    // The name is the account's CURRENT name for that language when the store has it (owner 2026-10-22: a user
+    // who changes their name sees it at once, يوسف in Arabic and Yusuf in English); the device's copy otherwise.
+    const live = (name ?? '').trim();
     const text = locale === 'ar'
-      ? fillName(fillGreeting(shown.ar, shown.greet ?? null, 'ar'), shown.nameAr, 'ar')
-      : fillName(fillGreeting(shown.en, shown.greet ?? null, 'en'), shown.nameEn, 'en');
+      ? fillName(fillGreeting(shown.ar, shown.greet ?? null, 'ar'), live || shown.nameAr, 'ar')
+      : fillName(fillGreeting(shown.en, shown.greet ?? null, 'en'), live || shown.nameEn, 'en');
     return { line: text, settled: shown.settled };
-  }, [shown, locale, signedIn]);
+  }, [shown, locale, signedIn, name]);
 }

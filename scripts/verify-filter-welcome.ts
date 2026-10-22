@@ -310,8 +310,10 @@ mustCatch('a picker that ignores the previous line', !neverRepeats((now, _last, 
   check('no name → no line', fillName(slotted, '  ', 'ar') === null);
   check("the hook takes BOTH spellings from pickName (the menu's own rule)", /pickName\(names, 'ar'\)/.test(hookSrc) && /pickName\(names, 'en'\)/.test(hookSrc));
   check('the hook remembers lines with the name SLOT and fills the name per language when shown',
-    /name: NAME_SLOT/.test(hookSrc) && /const nm = NAME_SLOT;/.test(hookSrc) && /fillName\(fillGreeting\(shown\.ar, shown\.greet \?\? null, 'ar'\), shown\.nameAr, 'ar'\)/.test(hookSrc)
-    && /fillName\(fillGreeting\(shown\.en, shown\.greet \?\? null, 'en'\), shown\.nameEn, 'en'\)/.test(hookSrc));
+    /name: NAME_SLOT/.test(hookSrc) && /const nm = NAME_SLOT;/.test(hookSrc) && /fillName\(fillGreeting\(shown\.ar, shown\.greet \?\? null, 'ar'\), live \|\| shown\.nameAr, 'ar'\)/.test(hookSrc)
+    && /fillName\(fillGreeting\(shown\.en, shown\.greet \?\? null, 'en'\), live \|\| shown\.nameEn, 'en'\)/.test(hookSrc)
+    // a changed name shows at once: the account's current name (the `name` argument) is used and re-read
+    && /const live = \(name \?\? ''\)\.trim\(\);/.test(hookSrc) && /\[shown, locale, signedIn, name\]/.test(hookSrc));
   check('old remembered lines (name baked in) are ignored', /filterWelcome:shown:v2'/.test(hookSrc));
   check('MUTATION: the pre-fix render (Latin name straight into the Arabic line) is what fillName refuses',
     /[A-Za-z]/.test(renderWelcome(line(24), 'yusuf', FACTS, 'ar') ?? '') && fillName(slotted, 'yusuf', 'ar') === null);
