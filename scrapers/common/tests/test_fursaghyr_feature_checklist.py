@@ -91,3 +91,12 @@ def test_a_district_name_is_not_a_balcony():
     # a glued typo is still the ad naming a balcony (muhaysini 15874198 «منبلكونه», dwelleo 13135529)
     assert amenities_from_text("مجلس يتكون منبلكونه كبيره") == {"balcony_terrace": True}
     assert amenities_from_text("ماستروبلكونة") == {"balcony_terrace": True}
+
+
+def test_fg27238_furnished_comes_from_its_own_description():
+    """🔬 2026-10-23 (backlog 763): FG27238 (3237533), a Makkah flat, says «الشقه مؤثثه بالكامل»; we had no column, so a
+    customer asking «مفروش» never found it. A mixed building («6 وحدات مفروشة + 3 غير مفروشة») is not one answer."""
+    assert run.feature_answers(_facts([], "الشقه مؤثثه بالكامل و يوجد غرفه سايق")).get("furnished") is True
+    assert "furnished" not in run.feature_answers(_facts([], "* 6 وحدات مفروشة + 3 غير مفروشة"))
+    row, _ = run.map_listing(_item(_facts([], "الشقه مؤثثه بالكامل")))
+    assert row is not None and row.get("furnished") is True

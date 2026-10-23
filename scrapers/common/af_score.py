@@ -135,6 +135,11 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # maps); the re-read ads carry «features":[]» and print «لا توجد مميزات متاحة». Its 10-20 «misses» (0 of 4)
     # asked kitchen / elevator from the free «تفاصيل العقار» prose (backlog 551). Read by erapulse_props().
     "erapulse": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "furnished"),
+    # maqrat's «خدمات العقار» chip row (`ap-ro-field-label`, scrapers/maqrat/run.py _SERVICES) expresses utilities and
+    # «مصعد»: elevator is the one Advanced Filter field it publishes. Its 10-23 asks (13605174, 19039930) took
+    # elevator from description prose («ومصعدين» in the building) on ads whose chips name none. The other fields
+    # have no structured home there, so their prose stays a statement (backlog 790). Read by maqrat_props().
+    "maqrat": ("elevator",),
 }
 # A rakez listing's page is its PROJECT's page: one shared feature list and every unit's price · rooms · area. A UNIT
 # trait the project list names («غرفة خادمة», «غرفة سائق», «مواقف خاصة», «مطبخ») describes some of the project's units,
@@ -247,9 +252,16 @@ def template_lines(pages: list[list[str]]) -> set[str]:
     return set.intersection(*readable)
 
 
+# A deed's boundary text («… وتمام الحد المصعد وتمام الحد المنور …», «يحده شمالاً …») names what the unit's border
+# touches, not what the ad offers: fursaghyr 3237533 was asked elevator from its licence boundary block on 10-20,
+# 10-22 and 10-23 while its description names no lift (page read 2026-10-23).
+DEED_BOUNDARY = re.compile(r"تمام\s*الحد|يحده|الحد\s*(?:الشمالي|الجنوبي|الشرقي|الغربي)")
+
+
 def page_says_yes(lines: list[str], field: str) -> bool:
     """The ad itself names the amenity and does not negate it («مصعد» yes, «لا يوجد مصعد» no)."""
     kw = BOOL_KW[field]
+    lines = [y for y in lines if not DEED_BOUNDARY.search(y)]
     hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x)]
     return bool(hit) and not all(re.search(NEG + "(?:" + kw + ")", x) for x in hit)
 
@@ -591,7 +603,17 @@ def erapulse_props(body: str) -> list[dict]:
     return [{"name": _PROP_NAME[f], "value": "نعم"} for f in _PROP_NAME if f in said]
 
 
-SITE_PROPS = {"superoffice": superoffice_props, "erapulse": erapulse_props}
+_MQ_CHIPS = re.compile(r'class="ap-ro-field-label">خدمات العقار</span>\s*<div class="pd-chip-row">(.*?)</div>', re.S)
+
+
+def maqrat_props(body: str) -> list[dict]:
+    """maqrat's own «خدمات العقار» chips, read as its scraper reads them: «مصعد» listed is a yes, else silence."""
+    chips = {re.sub(r"\s+", " ", html.unescape(x)).strip()
+             for block in _MQ_CHIPS.findall(body or "") for x in re.findall(r'class="pd-chip">(.*?)</span>', block)}
+    return [{"name": _PROP_NAME["elevator"], "value": "نعم"}] if "مصعد" in chips else []
+
+
+SITE_PROPS = {"superoffice": superoffice_props, "erapulse": erapulse_props, "maqrat": maqrat_props}
 
 
 def is_muktamel(url: str) -> bool:
