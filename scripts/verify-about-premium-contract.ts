@@ -64,8 +64,11 @@ check(
 
 // ── 3. The redesign themes fully — dark mode is a real dark composition ─────────────────────────
 check('3a. About styles are palette-driven (makeAbout factory), never the static light tokens',
-  /function makeAbout\(pal: Record<string, string>, dark: boolean\)/.test(modal)
-  && /useMemo\(\(\) => makeAbout\(pal, dark\), \[pal, dark\]\)/.test(modal));
+  /function makeAbout\(pal: Record<string, string>, dark: boolean, rtl = true\)/.test(modal)
+  && /useMemo\(\(\) => makeAbout\(pal, dark, aboutRtl\), \[pal, dark, aboutRtl\]\)/.test(modal));
+// Owner 2026-10-23: English About reads left-to-right — the text alignment follows the screen language.
+check('3a+. About text aligns to the screen language (right in Arabic, left in English)',
+  /const start = rtl \? 'right' : 'left';/.test(modal) && !/heroLine: \{[^}]*textAlign: 'right'/.test(modal));
 check('3b. the reading page keeps its typography and dividers palette-driven',
   /heroLine:[^\n]*color: pal\.ink/.test(modal)
   && /paragraph:[^\n]*color: pal\.body/.test(modal)

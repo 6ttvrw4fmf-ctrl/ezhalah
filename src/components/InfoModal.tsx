@@ -256,12 +256,12 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
   // draft is restored from the session-scoped cache rather than starting empty. See the long note
   // in lib/supportDraft.ts for the measured loss and why the cache is memory, never disk.
   // Lazy initialisers: `recallSupportDraft()` must run on MOUNT, not on every render.
-  const [email, setEmail] = useState(
-    // Signed-in users authenticate with Google/Apple, so `sub` IS their email — prefill it rather
-    // than making them type an address we already know. Signed-out users type their own. A recalled
-    // address wins: the user may have deliberately typed a different one before being interrupted.
-    () => recallSupportDraft()?.email || (user?.sub && user.sub.includes('@') ? user.sub : ''),
-  );
+  // LOCKED FOR A SIGNED-IN USER (owner 2026-10-23: «lock the email … that's his logged-in email»): Google/Apple
+  // sign-in means `sub` IS their address, so the reply goes to the account itself and the field cannot be
+  // edited. A signed-out user types their own (a recalled draft address is kept for them).
+  const accountEmail = user?.sub && user.sub.includes('@') ? user.sub : '';
+  const [typedEmail, setEmail] = useState(() => (accountEmail ? '' : recallSupportDraft()?.email || ''));
+  const email = accountEmail || typedEmail;
   const [subject, setSubject] = useState(() => recallSupportDraft()?.subject ?? '');
   const [message, setMessage] = useState(() => recallSupportDraft()?.message ?? '');
   const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
@@ -365,14 +365,16 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
           onChangeText={setEmail}
           onFocus={() => setFocus('email')}
           onBlur={() => setFocus(null)}
-          editable={!sending}
+          editable={!sending && !accountEmail}
+          accessibilityHint={accountEmail ? t('Your signed-in email') : undefined}
           keyboardType="email-address"
           autoCapitalize="none"
           autoComplete="email"
           placeholder="name@example.com"
           placeholderTextColor={colors.muted}
-          style={[s.input, s.inputLtr]}
+          style={[s.input, s.inputLtr, !!accountEmail && s.inputLocked]}
         />
+        {accountEmail ? <Ionicons name="lock-closed" size={14} color={colors.muted} style={s.lockIcon} accessible={false} /> : null}
       </Field>
 
       {state === 'error' ? (
@@ -471,7 +473,8 @@ function AboutBody({ t, reduced, gripRef, drag }: {
   const animate = IS_WEB && !reduced;
   const shown = useShown(!animate);
   const rev = { shown, animate };
-  const a = useMemo(() => makeAbout(pal, dark), [pal, dark]);
+  const { isRTL: aboutRtl } = useI18n();
+  const a = useMemo(() => makeAbout(pal, dark, aboutRtl), [pal, dark, aboutRtl]);
 
   return (
     <View style={a.body}>
@@ -647,6 +650,8 @@ const s = StyleSheet.create({
   },
   textLtr: { textAlign: 'left', writingDirection: 'ltr' as any },
   inputLtr: { textAlign: 'left', writingDirection: 'ltr' as any },
+  inputLocked: { color: colors.muted, paddingRight: 30 },
+  lockIcon: { position: 'absolute', right: 12, top: '50%', marginTop: -7 } as any,
   area: { minHeight: 132, paddingTop: 12, lineHeight: 22 },
   errRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 12 },
   errTx: { flex: 1, fontSize: 12.5, color: colors.danger, textAlign: 'right', lineHeight: 18 },
@@ -691,7 +696,9 @@ const s = StyleSheet.create({
 // Arabic script), weights carry the hierarchy, body leading stays generous (~1.7).
 // Keep this page intentionally close to the legal reader: one calm reading column, clear hierarchy,
 // and no decorative panels competing with the explanation.
-function makeAbout(pal: Record<string, string>, dark: boolean) {
+// English reads left-to-right (owner 2026-10-23, English screenshot: the About text sat on the right).
+function makeAbout(pal: Record<string, string>, dark: boolean, rtl = true) {
+  const start = rtl ? 'right' : 'left';
   void dark;
   return StyleSheet.create({
     body: { paddingHorizontal: BODY_PAD + 4, paddingTop: BODY_PAD, paddingBottom: BODY_PAD },
@@ -702,10 +709,10 @@ function makeAbout(pal: Record<string, string>, dark: boolean) {
     wordmark: { fontSize: 34, lineHeight: 42, fontWeight: '800', color: pal.ink },
     wordDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: pal.accentLeaf ?? pal.primary, alignSelf: 'flex-end', marginBottom: 8 },
     readingColumn: { maxWidth: 640, width: '100%', alignSelf: 'center' },
-    heroLine: { fontSize: 19, lineHeight: 31, fontWeight: '700', color: pal.ink, textAlign: 'right', marginTop: 8, marginBottom: 18 },
-    paragraph: { fontSize: 15, lineHeight: 28, fontWeight: '400', color: pal.body, textAlign: 'right', marginBottom: 16 },
+    heroLine: { fontSize: 19, lineHeight: 31, fontWeight: '700', color: pal.ink, textAlign: start as any, marginTop: 8, marginBottom: 18 },
+    paragraph: { fontSize: 15, lineHeight: 28, fontWeight: '400', color: pal.body, textAlign: start as any, marginBottom: 16 },
     rule: { height: 1, backgroundColor: pal.line, marginTop: 4, marginBottom: 18 },
-    note: { fontSize: 13.5, lineHeight: 24, fontWeight: '400', color: pal.muted, textAlign: 'right', marginBottom: 12 },
+    note: { fontSize: 13.5, lineHeight: 24, fontWeight: '400', color: pal.muted, textAlign: start as any, marginBottom: 12 },
   });
 }
 

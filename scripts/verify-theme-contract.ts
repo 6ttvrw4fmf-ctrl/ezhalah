@@ -96,8 +96,12 @@ const menu = read('src/components/AccountMenu.tsx');
 check('NO banner artwork in the account menu (owner removed it)', !menu.includes('eagle-night') && !menu.includes('LinearGradient'));
 check('profile row opens the display-name editor', /account-menu-profile[\s\S]{0,200}setEditing\(true\); go\('account', 1\)/.test(menu));
 check("Manage-account row opens in READ mode (no stale edit ride-along)", menu.includes("setEditing(false); go('account', 1)"));
-check('anchored panel pins direction rtl (escapes the sidebar LTR pin)', /panel: \{[\s\S]{0,220}direction: 'rtl'/.test(menu));
-check('both centered popups pin direction rtl', /centerCard: \{ direction: 'rtl'/.test(menu) && /centerCardWide: \{ direction: 'rtl'/.test(menu));
+// Owner 2026-10-23: the sheet follows the SCREEN language (Arabic right-first, English left-first) — still an
+// EXPLICIT direction on every surface, so the sidebar's LTR pin can never half-flip it.
+check('anchored panel pins an explicit direction from the screen language (escapes the sidebar LTR pin)',
+  /panel: \{[\s\S]{0,220}direction: dir as any/.test(menu) && /const dir = rtl \? 'rtl' : 'ltr';/.test(menu));
+check('both centered popups pin that direction',
+  /centerCard: \{ direction: dir as any/.test(menu) && /centerCardWide: \{ direction: dir as any/.test(menu) && /makeStyles\(C, resolved === 'dark', locale === 'ar'\)/.test(menu));
 // The change-phone dialog (phCard) was REMOVED with phone sign-in (owner 2026-09-01: Google and
 // Apple only). Retired deliberately rather than routed around; scripts/verify-no-phone-auth.ts
 // now asserts the dialog stays gone, which is the opposite of what this line used to pin.
