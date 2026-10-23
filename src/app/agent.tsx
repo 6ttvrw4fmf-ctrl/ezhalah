@@ -4526,7 +4526,11 @@ export default function Agent() {
                 // handled inside SearchLoader (the message column is LTR-pinned).
                 // An Advanced Filter round: one sentence of the user's picks, each landing in turn (owner 2026-10-11).
                 if (m.afRound) return <AfRoundLoader key={m.id} items={m.afRound.items} pools={m.afRound.pools} exiting={m.exiting} fontFamily={CHAT_FONT} />;
-                return <View key={m.id} ref={m.id === loaderId ? loaderNodeRef : undefined} collapsable={false}><SearchLoader bottomInset={loaderBottomInset} settleTop={loaderSettleTop} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} /></View>;
+                // The loader speaks the language of the message that started it (owner 2026-10-23: typed «hi» → the
+                // «thinking» line said «إزهله يفكر…» on the right). Same per-turn rule the result card uses below.
+                const asked = msgs.slice(0, msgs.indexOf(m)).reverse().find((x): x is Extract<typeof x, { role: 'user' }> => x.role === 'user');
+                const loaderLocale: Locale = asked?.text ? (msgRTL(asked.text) ? 'ar' : 'en') : locale;
+                return <View key={m.id} ref={m.id === loaderId ? loaderNodeRef : undefined} collapsable={false}><LocaleScope locale={loaderLocale}><SearchLoader bottomInset={loaderBottomInset} settleTop={loaderSettleTop} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} /></LocaleScope></View>;
               }
               if (m.role === 'agent') {
                 if (m.greeting) {
