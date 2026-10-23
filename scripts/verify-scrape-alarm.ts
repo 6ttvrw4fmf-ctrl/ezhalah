@@ -6,7 +6,7 @@
 //   node --experimental-strip-types scripts/verify-scrape-alarm.ts   (discovered by `npm test`)
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { findSuspects, ROWS_PER_HOUR, type CallerHour } from './lib/scrapeAlarm.ts';
+import { catchUpStart, findSuspects, hourIso, ROWS_PER_HOUR, type CallerHour } from './lib/scrapeAlarm.ts';
 
 const root = join(import.meta.dirname, '..');
 const wf = readFileSync(join(root, '.github/workflows/scrape-alarm.yml'), 'utf8');
@@ -58,6 +58,21 @@ mustCatch('the bar lowered under our own robots (alert fatigue)', !barOk(lib.rep
 mustCatch('the bar raised past a catalogue copy (blind alarm)', !barOk(lib.replace(/ROWS_PER_HOUR = [\d_]+;/, 'ROWS_PER_HOUR = 500_000;')));
 mustCatch('a failed query treated as an empty hour', !failsLoud(script.replace('if (!res.ok) die(', 'if (!res.ok) console.log(')));
 mustCatch('a scraper hiding behind a known IP list that names everyone', ips(findSuspects(hour, ['9.9.9.9', '8.8.8.8'])) !== '9.9.9.9,8.8.8.8');
+
+// CATCH-UP (2026-10-23): GitHub runs the "hourly" schedule every 3-5 hours, so each run must cover every hour since the
+// last good run (per-hour bars, one row per caller per hour), never just the last hour.
+const end = new Date('2026-10-23T05:07:00Z');
+const H = 3600_000;
+check('a run covers every hour since the last good run, 1 to 24 hours back',
+  catchUpStart(new Date('2026-10-23T00:23:00Z'), end).toISOString() === '2026-10-23T00:00:00.000Z'      // 5 h gap → 5 h covered
+  && catchUpStart(new Date('2026-10-23T04:59:00Z'), end).toISOString() === '2026-10-23T04:00:00.000Z'   // recent → from that hour (>= 1 h)
+  && catchUpStart(new Date('2026-10-23T05:05:00Z'), end).getTime() === end.getTime() - H                 // just ran → still at least 1 h
+  && catchUpStart(new Date('2026-10-20T00:00:00Z'), end).getTime() === end.getTime() - 24 * H + 60_000   // capped at the API limit
+  && catchUpStart(null, end).getTime() === end.getTime() - 24 * H + 60_000);                             // unreadable → widest, never narrower
+check('the log query is per caller per hour and the run uses the catch-up window',
+  /toStartOfHour\(timestamp\) as hour/.test(lib) && /group by ip, hour/.test(lib) && /const start = catchUpStart\(lastOk, end\);/.test(script));
+check('the hour reads back as an exact time', hourIso('2026-10-22T21:00:00', end) === '2026-10-22T21:00:00.000Z' && hourIso('2026-10-22 21:00:00', end) === '2026-10-22T21:00:00.000Z');
+mustCatch('the window shrunk back to one hour', !/const start = catchUpStart\(lastOk, end\);/.test(script.replace('const start = catchUpStart(lastOk, end);', 'const start = new Date(end.getTime() - 3600000);')));
 
 if (failed) { console.error(`\n❌ verify-scrape-alarm: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-scrape-alarm: the hourly scrape alarm flags bulk downloads and fails loud when blind.');
