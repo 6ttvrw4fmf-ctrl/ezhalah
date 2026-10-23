@@ -16,7 +16,11 @@ import {
   isBackendLive,
   signInWithProvider,
   authenticateWithFaceId,
+  APPLE_JS_SIGNIN,
+  prepareAppleJs,
+  signInWithAppleJs,
 } from '@/lib/auth';
+import { useSaveName } from '@/lib/useSaveName';
 
 const LOGO = require('../../assets/images/ezhalah-logo.png');
 type Step = 'main' | 'google' | 'apple' | 'appleface';
@@ -198,6 +202,13 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
     onRequestClose();
   };
 
+  // Apple JS (flagged, see src/lib/auth.ts): load Apple's script while the chooser is on screen, so
+  // the tap opens Apple's popup directly — a popup opened after a slow await is blocked.
+  const saveName = useSaveName();
+  useEffect(() => {
+    if (APPLE_JS_SIGNIN && isBackendLive && Platform.OS === 'web') void prepareAppleJs();
+  }, []);
+
   // Apple Face ID: mirror the prototype's scan→verified beat, but on a native build we actually
   // invoke the device biometric (expo-local-authentication) and bail if it fails. Unchanged from the
   // old route.
@@ -245,6 +256,17 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
     // sign-in — if Apple isn't enabled in Supabase yet (or fails), surface a clear message instead.
     if (isBackendLive) {
       if (Platform.OS === 'web') {
+        if (APPLE_JS_SIGNIN) {
+          const a = await signInWithAppleJs();
+          if (a.cancelled) return; // the user closed Apple's window: stay on the chooser
+          if (a.signedIn) {
+            // Apple sends the name on the FIRST authorization only — keep it through the rename path.
+            // No name → nothing written; «وش نناديك؟» asks instead. Never invented.
+            if (a.name) saveName(a.name);
+            return onRequestClose(); // the store adopts the session via onAuthStateChange
+          }
+          // a.fallback → today's redirect, below. Never leave the user stuck.
+        }
         const r = await signInWithProvider('apple');
         if (r.redirected) return;
         if (r.user) return done(r.user);

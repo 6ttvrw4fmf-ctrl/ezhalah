@@ -1435,6 +1435,9 @@ const AR: Record<string, string> = {
   // Settings
   'Account': 'الحساب',
   'Sign out': 'تسجيل الخروج',
+  'Add your name': 'أضف اسمك',
+  'What should we call you?': 'وش نناديك؟',
+  'Later': 'لاحقاً',
   'Save searches and continue beyond your free search': 'احفظ عمليات بحثك وتابع بعد بحثك المجاني',
   'Language': 'اللغة',
   'How Ezhalah works': 'كيف تعمل إزهله',

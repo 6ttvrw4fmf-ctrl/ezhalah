@@ -18,20 +18,19 @@
 # immune to data movement; the landed count stays only as a finite-liveness check. Full story in
 # the ORACLE CHANGE comment at the [E] resubmit check in the script.
 #
-# Kept OUT of the required `npm test` on purpose (that suite is hermetic and runs in seconds; a
-# 2-minute build + browser would slow every unrelated PR and add flake to a required check) — same
-# precedent as the live migration-drift check in AGENTS.md.
+# Kept OUT of `npm test` (that suite is hermetic and runs in seconds); since 2026-10-23 it is its OWN
+# required status check instead, running on every PR — see the `on:` note below.
 name: Web runtime smoke
 
 on:
+  # EVERY PR, no path filter (owner 2026-10-23, step 1 of the self-healing proposal): this is the one
+  # check that renders the app, and it is becoming a REQUIRED status check on main. A path filter on
+  # a required check stalls every PR that does not match it (the check never reports), and the two
+  # 2026-10-23 app-screen bugs showed that "which paths can break a screen" is not a list anyone keeps
+  # right. 8 minutes on a PR is the price of never shipping a blank page again.
   pull_request:
-    paths:
-      - 'src/**'
-      - 'app.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'scripts/verify-web-runtime-smoke.mjs'
-      - '.github/workflows/web-runtime-smoke.yml'
+  # The queued merge commit must carry the check too, or the merge queue waits forever (owner 2026-10-22).
+  merge_group:
   push:
     branches: [main]
     paths:
