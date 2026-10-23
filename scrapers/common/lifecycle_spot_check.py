@@ -198,7 +198,20 @@ def _reader_for(platform: str):
             if status == 200:
                 return ALIVE, "HTTP 200 on the unit's own page"
             if status == gl.HOME_LANDED:
-                return UNKNOWN, "landed on gathern's home page (no verdict)"
+                # DIAG (scratch, not for merge): what does the unit's /ar/view/ page answer?
+                import re as _re
+                m = gl._VIEW.match(url or "")
+                alt = f"{m.group(1)}/ar/view/{m.group(2)}/unit/{m.group(3)}" if m else url
+                try:
+                    r = session.get(alt, timeout=25, allow_redirects=True)
+                    b = r.text or ""
+                    t = _re.search(r"<title[^>]*>([^<]{0,70})", b)
+                    why = (f"/ar/view/ HTTP {r.status_code} final={str(r.url)[-45:]} bytes={len(b)} "
+                           f"unit_in_body={m.group(3) in b if m else None} notfound={any(n in b for n in gl._NOT_FOUND)} "
+                           f"title={t.group(1).strip() if t else None!r}")
+                except Exception as e:  # noqa: BLE001
+                    why = f"/ar/view/ raised {type(e).__name__}"
+                return UNKNOWN, "landed on gathern's home page | " + why
             return (DEAD if gl.looks_dead(status) else UNKNOWN), f"HTTP {status or 'none after retries'}"
         return read
     if platform == "muktamel":
