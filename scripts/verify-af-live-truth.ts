@@ -499,6 +499,27 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       while (Date.now() < until && lastSearchBody === null) await page.waitForTimeout(250);
       await page.waitForTimeout(600);   // let the count/render settle once the body has landed
     }
+    // A SCOPE TIER IS NOT THE END OF THE ROUND (contract R3.1.1, 2026-10-23). With no نوع picked the first question
+    // is the GROUP; confirming it must open the EXACT TYPE question, not a results search. Reproduced on production
+    // with AF_LT_ONLY: after «الشقق والسكن المشترك» the app sent five `p_limit: 1` probes for the sub-types and the
+    // card asked for the type, so «final search request was captured = null» was this journey stopping early, not a
+    // search that never fired. Answer at most two more questions (first option, deterministic): measured 10-23, both
+    // NO-type journeys needed the EXACT TYPE tier and then one ordinary round question before the round's search fired.
+    // The capture is judged exactly as before: a search that never fires still leaves it null and still fails.
+    for (let tier = 0; tier < 2 && lastSearchBody === null; tier++) {
+      const next = await readCardUntil((s) => s.hasCard, 5000);
+      const opts3 = next.hasCard
+        ? await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')))
+        : [];
+      if (!opts3[0]) break;
+      console.log(`      [round] ${name}: confirm opened another question «${next.q}» (a scope tier, R3.1.1, or the round's next question) — answering its first option`);
+      await page.click(`[data-testid="${opts3[0]}"]`);
+      await page.waitForTimeout(400);
+      await page.click('[data-testid="af-confirm"]');
+      const until3 = Date.now() + AGENT_TURN_MS;
+      while (Date.now() < until3 && lastSearchBody === null) await page.waitForTimeout(250);
+      await page.waitForTimeout(600);
+    }
 
     if (backAndChange) {
       // WHICH RULE A BACK CLICK MEANS IS DECIDED BY THE STEP THE CARD IS ON, so this journey must
