@@ -45,7 +45,7 @@ const PROVEN_HOSTS = [
   'amaall.com', 'jurash.sa', 'awaalun.com', 'ego-aqar.com', 'rawaf.ai', 'rawasi-dark.com',
   'mobasher.sa', 'villas-sa.com', 'vm-ksa.com', 'eaqartabuk.com', '24.com.sa', 'livingcompound.com',
   'wahadat.sa', 'dallali.com', 'remalre.com', 'safainv.sa', 'remax.sa',
-  'ibaax.sa', 'qmra.sa',
+  'qmra.sa', // ibaax.sa left 2026-10-22: it now refuses framing (SAMEORIGIN); it opens on Ezhalah's ad page
   'aqaralmuhaysini.com', // 9.96 s on the runner; owner keeps it on (2026-10-17)
   'albukaeri.sa', 'tamyaz-sa.com', 'ashab.sa', 'macsaib.sa', 'sanadak.sa', 'masaraqarat.com', // 0.7–2.7 s, run 39026362475
   'ryadah.com.sa', 'sodasyat.sa', 'app.abaadapp.sa', // 1.6–4.8 s, run 39033523902 (challenge-aware guard)
