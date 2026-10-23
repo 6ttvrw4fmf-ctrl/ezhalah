@@ -56,7 +56,7 @@ export default function NamePrompt() {
             style={s.input}
             value={name}
             autoFocus
-            placeholder={t('Display Name')}
+            placeholder={t('Type your name')}
             placeholderTextColor={C.muted}
             onChangeText={setName}
             onSubmitEditing={save}

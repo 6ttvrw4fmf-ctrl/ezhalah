@@ -129,6 +129,15 @@ const modalProblems = (f: Record<string, string>) => {
   check('§3 «لاحقاً» and Save both mark it seen', closeOk(files[PROMPT]) && /saveName\(v\);\n\s*close\(\);/.test(files[PROMPT]));
   mustCatch('«لاحقاً» not recording that it was shown', !closeOk(files[PROMPT].replace(' markNamePromptSeen();', '')));
   check('§3 the prompt is mounted at the root', /<NamePrompt \/>/.test(files[LAYOUT]));
+  // Owner 2026-10-23: the box speaks the UI's language — «وش نناديك؟» / «اكتب اسمك» / «حفظ» / «لاحقاً».
+  const i18n = read('src/i18n.tsx');
+  const wordsOk = (p: string, i: string) => /t\('What should we call you\?'\)/.test(p) && /placeholder=\{t\('Type your name'\)\}/.test(p)
+    && /t\('Save'\)/.test(p) && /t\('Later'\)/.test(p)
+    && /'What should we call you\?': 'وش نناديك؟'/.test(i) && /'Type your name': 'اكتب اسمك'/.test(i)
+    && /'Save': 'حفظ'/.test(i) && /'Later': 'لاحقاً'/.test(i);
+  check('§3 the owner\'s words, in both languages', wordsOk(files[PROMPT], i18n));
+  mustCatch('a placeholder other than «اكتب اسمك»', !wordsOk(files[PROMPT].replace("t('Type your name')", "t('Display Name')"), i18n));
+  mustCatch('the Arabic title drifting', !wordsOk(files[PROMPT], i18n.replace("'وش نناديك؟'", "'ما اسمك؟'")));
   check('§3 the field starts EMPTY (never prefilled)', /useState\(''\);/.test(files[PROMPT]) && !/email|user\.sub/.test(files[PROMPT].split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n')));
 }
 
