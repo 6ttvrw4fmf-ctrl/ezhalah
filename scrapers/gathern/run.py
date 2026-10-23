@@ -1119,8 +1119,43 @@ def _saudi_cities(all_cities: list[dict]) -> list[dict]:
     return out
 
 
+HARD_PAGE_CAP = 2000          # safety net only; a city that reaches it is reported INCOMPLETE
+RETRY_COOLDOWN_S = 120        # a throttled city is asked again once, after this pause
+
+
 def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
-          *, limit: int = 0, max_pages: int = 0, verbose: bool = True) -> tuple[dict[str, dict], int, dict[str, int]]:
+          *, limit: int = 0, max_pages: int = 0, verbose: bool = True,
+          cooldown_s: float = RETRY_COOLDOWN_S):
+    """crawl_once(), then ONE more try for every city gathern refused outright (2026-10-22: the same
+    cities — Najran, Sakaka, Al-Ahsa, Thuwal, Layla, Sabya … — came back «FETCH FAILED (exhausted)» night
+    after night because they sit late in a shard, after the big cities spent gathern's budget). A city
+    that answers the second time is crawled in full; one that still refuses stays a counted failure."""
+    rows_by_ad, scanned, per_city, outcomes = crawl_once(s, cities, ci, co, limit=limit, max_pages=max_pages, verbose=verbose)
+    refused = set(outcomes.get("_failed_ids", []))
+    retry = [c for c in cities if c.get("id") in refused]
+    if not retry or (limit and len(rows_by_ad) >= limit):
+        return rows_by_ad, scanned, per_city, outcomes
+    if verbose:
+        print(f"  ↻ {len(retry)} refused cit{'y' if len(retry) == 1 else 'ies'}: one more try after {int(cooldown_s)}s", flush=True)
+    time.sleep(cooldown_s)
+    r2, sc2, pc2, oc2 = crawl_once(s, retry, ci, co, limit=limit, max_pages=max_pages, verbose=verbose)
+    for k, v in r2.items():
+        rows_by_ad.setdefault(k, v)
+    for k, v in pc2.items():
+        per_city[k] = per_city.get(k, 0) + v
+    recovered = len(retry) - oc2.get("failed", 0)
+    outcomes["failed"] = max(0, outcomes.get("failed", 0) - recovered)
+    outcomes["recovered_on_retry"] = recovered
+    outcomes["_failed_ids"] = oc2.get("_failed_ids", [])
+    outcomes["failed_city_ids"] = oc2.get("failed_city_ids", [])   # what is STILL missing after the retry
+    for k, v in oc2.items():
+        if k.startswith("reason:cap") or k == "incomplete":
+            outcomes[k] = outcomes.get(k, 0) + v
+    return rows_by_ad, scanned + sc2, per_city, outcomes
+
+
+def crawl_once(s: cc.Session, cities: list[dict], ci: str, co: str,
+               *, limit: int = 0, max_pages: int = 0, verbose: bool = True) -> tuple[dict[str, dict], int, dict[str, int]]:
     """Page each city in MONTHLY mode. Returns (rows_by_ad, cards_scanned, per_city_counts).
 
     Pagination stops on the FIRST empty page (the API runs out of distinct monthly units well before
@@ -1142,6 +1177,7 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
             outcomes[outcome] = outcomes.get(outcome, 0) + 1
             if outcome == "failed":
                 failed_cities.append(f"{name}:{status}")
+                outcomes.setdefault("_failed_ids", []).append(cid)   # every one, for crawl()'s second try
                 outcomes.setdefault("failed_city_ids", [])
                 if len(outcomes["failed_city_ids"]) < 12:
                     outcomes["failed_city_ids"].append(cid)
@@ -1157,8 +1193,10 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
         total_meta = meta.get("totalCount") or 0
         # _meta.pageCount under-reports the real tail (Jeddah: pageCount=121 but units run to ~p129),
         # so we page until empty pages — not to pageCount. Guard with a generous hard cap so a
-        # mis-behaving city can't loop forever.
-        hard_cap = max_pages or 400
+        # mis-behaving city can't loop forever. The cap was 400 until 2026-10-22, and Riyadh reached it
+        # EVERY night (pagesRead=400 on 10-18…10-22) while items were still coming, so its tail was cut
+        # silently. Hitting the cap with items still arriving now marks the city INCOMPLETE.
+        hard_cap = max_pages or HARD_PAGE_CAP
         city_kept = 0
         page = 1
         empties = 0
@@ -1177,6 +1215,11 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
             if limit and len(rows_by_ad) >= limit:
                 break
             if page >= hard_cap:
+                if items and not max_pages:
+                    # still serving units at the safety cap: a cut, never a finished city
+                    incomplete_cities.append(f"{name}:p{page}:cap")
+                    outcomes["reason:cap"] = outcomes.get("reason:cap", 0) + 1
+                    truncated = True
                 break
             page += 1
             items, _, status = fetch_page(s, cid, page, ci, co)
