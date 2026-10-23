@@ -34,7 +34,7 @@ import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
 import { useFilterWelcome } from '@/lib/useFilterWelcome';
 import { InsightHowItWorks } from '@/components/InsightHowItWorks';
-import { decodeSharePayload, shareLandingTitle, shareInviteNote, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
+import { decodeSharePayload, decodeInvitePayload, shareJoinNote, shareLandingTitle, shareInviteNote, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
 import { fetchSharedChat, fetchSharedChatCard } from '@/lib/sharedChat';
 import { isProbeFailure } from '@/lib/afProbe';
 import { pickName } from '@/lib/nameSync';
@@ -166,8 +166,18 @@ export default function Home() {
       return () => { alive = false; };
     }
     const s = decodeSharePayload(raw);
-    if (s) setSharedSearch(s);
+    if (s) { setSharedSearch(s); return; }
+    // An invitation to join (owner 2026-10-23): no search, no chat — the welcome popup for a guest, nothing
+    // for someone already signed in.
+    const inv = decodeInvitePayload(raw);
+    if (inv) setSharedJoin(inv);
   }, []);
+  const [sharedJoin, setSharedJoin] = useState<{ name: string; locale: 'ar' | 'en' } | null>(null);
+  useEffect(() => {
+    if (!sharedJoin || !authChecked) return;
+    if (!user) openAuth(shareJoinNote(sharedJoin.name, locale === 'en' ? 'en' : 'ar') ?? undefined);
+    setSharedJoin(null);
+  }, [sharedJoin, authChecked, user, openAuth, locale]);
   const openSharedSearch = useCallback(async (s: { q: SearchQuery | null; code?: string }) => {
     try { localStorage.removeItem(SHARED_PENDING_KEY); } catch { /* per-device only */ }
     setSharedSearch(null);

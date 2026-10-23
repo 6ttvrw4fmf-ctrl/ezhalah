@@ -301,7 +301,7 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
                   {note ? (
                     <View style={s.shareNote} accessibilityRole="text">
                       <Text style={s.shareNoteTitle}>{note}</Text>
-                      <Text style={s.shareNoteSub}>{t('Sign in and it opens right away')}</Text>
+                      <Text style={s.shareNoteSub}>{t(/يرحّب بك للانضمام|welcomes you to join/.test(note) ? 'Sign up free and start searching' : 'Sign in and it opens right away')}</Text>
                     </View>
                   ) : null}
                   <Text style={[s.formHead, cp && c.formHead]}>{t('Sign in or create your free account')}</Text>

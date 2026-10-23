@@ -76,6 +76,31 @@ export function decodeSharePayload(raw: string | null | undefined): { q: SearchQ
   } catch { return null; }
 }
 
+// AN INVITATION TO JOIN (owner 2026-10-23): the Share under a reply with no search (a «هلا», a question)
+// sends a personal welcome, not a chat — «يوسف يرحّب بك للانضمام إلى إزهله» / "Yusuf welcomes you to join
+// Ezhalah" — with the top Share's marketing line as the message text. `k: 'join'` marks it; no search inside.
+export function encodeInvitePayload(senderName: string, locale: 'ar' | 'en' = 'ar'): string | null {
+  const n = firstName(senderName);
+  return n ? toB64Url(JSON.stringify({ v: SHARE_PAYLOAD_VERSION, n, l: locale, k: 'join' })) : null;
+}
+export function decodeInvitePayload(raw: string | null | undefined): { name: string; locale: 'ar' | 'en' } | null {
+  if (!raw || raw.length > 2000) return null;
+  const json = fromB64Url(raw);
+  if (!json) return null;
+  try {
+    const p = JSON.parse(json);
+    if (!p || p.v !== SHARE_PAYLOAD_VERSION || p.k !== 'join') return null;
+    const name = firstName(String(p.n ?? ''));
+    return name ? { name, locale: p.l === 'en' ? 'en' : 'ar' } : null;
+  } catch { return null; }
+}
+/** The welcome on the invitation's card and on the sign-in popup (owner-approved wording 2026-10-23). */
+export function shareJoinNote(name: string, locale: 'ar' | 'en'): string | null {
+  const n = firstName(name);
+  if (!n) return null;
+  return locale === 'ar' ? `${n} يرحّب بك للانضمام إلى إزهله` : `${n} welcomes you to join Ezhalah`;
+}
+
 // A SHARED CHAT (owner 2026-10-17: «sharing it means I share the chat history»). A signed-in user's
 // Share saves a COPY of the whole conversation in the database (public.shared_chat, migration
 // 20261018031834) under an 8-character code, and the link is /s/<code>. The recipient signs in and the
@@ -227,13 +252,14 @@ export function shareCardHtml(origin: string, rawPayload: string | null | undefi
   // whose card could not be read still goes to Home + ?share=<code> — the app fetches it there.
   const code = isShareCode(rawPayload);
   const d = code ? (chatCard ?? null) : decodeSharePayload(rawPayload);
-  const loc = d?.locale ?? 'ar';
-  const invite = d ? shareInviteNote(d.name, d.q, loc) : null;
+  const join = !code && !d ? decodeInvitePayload(rawPayload) : null; // an invitation to join (owner 2026-10-23)
+  const loc = d?.locale ?? join?.locale ?? 'ar';
+  const invite = d ? shareInviteNote(d.name, d.q, loc) : join ? shareJoinNote(join.name, loc) : null;
   // The invite LINE now travels as the message text (owner 2026-10-22: WhatsApp cut it in the card), so the
   // card's line is the short tagline that fits — never the same sentence twice.
   const c = { site: SHARE_CARD[loc].site, desc: invite ? SHARE_CARD[loc].desc : shareCardFactsLine(facts, loc) };
   const title = invite || (loc === 'ar' ? 'إزهله' : 'Ezhalah');
-  const ok = !!rawPayload && (code || !!d);
+  const ok = !!rawPayload && (code || !!d || !!join);
   const to = ok ? shareLandingPath(rawPayload!) : '/';
   const url = `${o}${ok ? `/s/${rawPayload}` : '/'}`;
   const image = `${o}${SHARE_CARD_IMAGE_PATH}`;
