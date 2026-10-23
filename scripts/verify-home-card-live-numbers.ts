@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { liftSymbols } from './lib/liftSymbols.ts';
 import {
-  homeCardDescription, homeCardFactsFrom, homeCardHtml, isPreviewBot,
+  homeCardDescription, homeCardFactsFrom, homeCardHtml, isPreviewBot, PREVIEW_BOT_UA,
   HOME_CARD_FALLBACK_AR, HOME_CARD_IMAGE_PATH, HOME_CARD_TITLE_AR, HOME_CARD_HEADLINE_AR,
 } from '../middleware.ts';
 
@@ -94,6 +94,20 @@ mustCatch('the import that blocked every deploy', localImports("import { x } fro
 // Bots vs people.
 for (const ua of ['WhatsApp/2.24.1 A', 'facebookexternalhit/1.1 Facebot Twitterbot/1.0', 'TelegramBot (like TwitterBot)']) check(`preview bot recognised: ${ua.slice(0, 24)}`, isPreviewBot(ua));
 for (const ua of ['Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Safari/604.1', 'Mozilla/5.0 (compatible; Googlebot/2.1)', '']) check(`not a preview bot: ${ua.slice(0, 24) || '(empty)'}`, !isPreviewBot(ua));
+// IN-APP BROWSERS ARE PEOPLE (owner 2026-10-23: a shared link «didn't open» inside Snapchat). Each carries its
+// app's name; none may be served the preview page instead of the site.
+const IN_APP = {
+  Snapchat: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Snapchat/13.12.0.36 (like Safari/8614.2.9.1.15, panda)',
+  Instagram: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 350.0.0.25.112 (iPhone15,3; iOS 18_0; ar_SA)',
+  Facebook: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [FBAN/FBIOS;FBAV/480.0.0.39.106;FBBV/650000000]',
+  TikTok: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 musical_ly_36.5.0 BytedanceWebview/d8a21c6',
+  X: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Twitter for iPhone/10.70',
+  Viber: 'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36 Viber/24.1.0.2',
+  LinkedIn: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [LinkedInApp]/9.31.320',
+};
+for (const [app, ua] of Object.entries(IN_APP)) check(`a person in ${app}'s in-app browser gets the site, not the preview page`, !isPreviewBot(ua));
+check('Snapchat\'s own preview fetcher still gets the card', isPreviewBot('Mozilla/5.0 (compatible; Snap URL Preview Service; bot; snapchat; https://developers.snap.com/robots)'));
+mustCatch('an app name back in the bot list (the Snapchat «didn\'t open»)', new RegExp(`${PREVIEW_BOT_UA.source}|snapchat`, 'i').test(IN_APP.Snapchat));
 
 // Execute the middleware itself with a stubbed fetch.
 process.env.EXPO_PUBLIC_SUPABASE_KEY = 'test-key';
