@@ -4578,7 +4578,7 @@ export default function Agent() {
                     ) : null}
                     {/* 👍👎 + Share under a plain reply too (owner 2026-10-23): its Share is the invitation to join. */}
                     {!m.refine && (!m.typing || doneTyping[m.id]) ? (
-                      <FeedbackRow rtl={rtl} feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={buildResultsReadAloudSegments(txt, [], undefined, locale)} {...inviteFor()} />
+                      <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={buildResultsReadAloudSegments(txt, [], undefined, locale)} {...inviteFor()} />
                     ) : null}
                   </View>
                 );
@@ -4706,7 +4706,7 @@ export default function Agent() {
                     // but the RESPONSE-level feedback row still belongs to this turn (owner 2026-08-30: thumbs
                     // must not vanish merely because listing count = 0; the user is rating the answer, and
                     // "nothing matched" IS an answer). Read-aloud reads the zero-result intro alone.
-                    <FeedbackRow rtl={rtl} feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined, locale)} {...inviteFor()} />
+                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined, locale)} {...inviteFor()} />
                   ) : (
                     <>
                       {/* The default "مرتبة حسب الأقرب لطلبك" note was removed per owner request (2026-07-07).
@@ -5033,7 +5033,7 @@ export default function Agent() {
                                 closing note + available actions above (owner 2026-08-23). Sliced to `shown`
                                 — never past what's actually rendered right now ("no hidden listing should be
                                 spoken") — but otherwise reads every visible card (owner 2026-08-22: no further cap). */}
-                            <FeedbackRow rtl={rtl} feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={readAloudSegments} {...shareFor(m.result.query)} />
+                            <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={readAloudSegments} {...shareFor(m.result.query)} />
                           </>
                         );
                       })()}
