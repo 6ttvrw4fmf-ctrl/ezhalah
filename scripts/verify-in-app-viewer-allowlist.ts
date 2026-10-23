@@ -498,7 +498,7 @@ const previewContact = (src: string) => /const open = \(href: string = url\): bo
 const previewPhotos = (src: string) => {
   const code = codeOnly(src);
   return /l\.photos\?\.length \? l\.photos : \[l\.photo\]/.test(code)
-    && /priority="high" loading="eager"/.test(code) && /priority="low" loading="lazy"/.test(code);
+    && /eager=\{i === main\}/.test(code) && /priority=\{eager \? 'high' : 'low'\} loading=\{eager \? 'eager' : 'lazy'\}/.test(code);
 };
 check('preview price only uses the shared price contract', previewPrice(preview));
 check('contact opens the original URL in a new tab with the opener severed, never by navigating this tab', previewContact(preview));
@@ -506,7 +506,7 @@ check('source-ordered gallery prioritizes the shown photo and lazy-loads the res
 mustCatch('preview formats its own price', !previewPrice(preview.replace('listingPrice(l, locale)', 'l.price')));
 mustCatch('contact drops opener protection', !previewContact(preview.replace('if (w) w.opener = null;', '')));
 mustCatch('a blocked tab navigates Ezhalah away', !previewContact(preview.replace("if (!open()) blockedOnce.current = true;\n      busy.current = false;", "if (!open()) window.location.assign(url);\n      busy.current = false;")));
-mustCatch('90 photos load eagerly', !previewPhotos(preview.replaceAll('loading="lazy"', 'loading="eager"')));
+mustCatch('90 photos load eagerly', !previewPhotos(preview.replace("loading={eager ? 'eager' : 'lazy'}", 'loading="eager"')));
 
 
 // Execute the actual facts block (the key line's stats + the details rows) against real-world raw-field
@@ -563,8 +563,11 @@ const renderPreview = (src: string, source: string, locale: string, photos: stri
   }, exports);
   return exports.default({ listing: { source, photos, photo: null, city: 'Riyadh', district: '', type: 'Apartment', area: 0, beds: 0 }, url: 'https://example.com/ad/1', ...extra }) as Node;
 };
+// A function-type node is a small component (e.g. PhotoSlide): render it like React would, so what it
+// draws (the Image) is counted, not hidden behind its wrapper.
 const nodes = (root: any): Node[] => !root || typeof root !== 'object' ? [] : Array.isArray(root)
-  ? root.flatMap(nodes) : [root, ...nodes(root.props?.children)];
+  ? root.flatMap(nodes) : typeof root.type === 'function' ? nodes(root.type(root.props))
+  : [root, ...nodes(root.props?.children)];
 const textOf = (root: any): string => root == null || root === false ? '' : typeof root !== 'object'
   ? String(root) : Array.isArray(root) ? root.map(textOf).join('') : textOf(root.props?.children);
 // The places the page names the site — the top-bar pill and the button to the real ad — all use the
