@@ -640,6 +640,21 @@ named `<that timestamp>_<a name>.sql` (or recover it later from
 for the next deploy, the drift sweep, or another session to clean up: the person/session that ran
 `apply_migration` is responsible, immediately.
 
+**The mirror ships in its OWN tiny PR, opened right after the apply — never only inside a feature PR
+(owner, 2026-10-22).** Measured 2026-10-21/22: **77 of 91 frontend deploys (85%) were refused** by the
+drift gate, every sampled one for `missing_in_git`. The files mostly existed — inside large feature PRs
+that wait ~9 minutes per CI round and lose the race to `main` for hours, while the gate correctly blocks
+EVERY session's deploy (the owner's own WhatsApp-card fix sat merged-but-unshipped ~12 h behind one).
+So, the moment `apply_migration` returns:
+1. branch `mirror/<version>` from `origin/main`, add ONLY `supabase/migrations/<version>_<name>.sql`,
+   byte-exact (`ops_migration_sql(<version>)` returns what production executed);
+2. open the PR with **«mirror» in the title** (`--head mirror/<version> --base main`).
+`engineer-automerge.yml` (every 15 min) merges a mirror-only PR through `safe-pr-merge.ts` once every
+required check — including byte-parity against production — is green (owner, 2026-10-19). Your feature
+PR may carry the same file too; identical content does not conflict. GitHub's merge queue (owner,
+2026-10-22) keeps the required checks from restarting every time `main` moves; the three required-check
+workflows run on `merge_group` for that reason.
+
 **Check the SQL's citations BEFORE you apply it, not in CI afterwards.** Write the SQL to a file
 first and run `node --experimental-strip-types scripts/check-migration-before-apply.ts <file.sql>`.
 Because `apply_migration` MINTS the version, any 14-digit timestamp written for *this* migration is a

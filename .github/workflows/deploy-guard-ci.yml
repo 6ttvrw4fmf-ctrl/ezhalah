@@ -4,6 +4,8 @@
 name: Deploy-target guard
 
 on:
+  # GitHub merge queue (owner 2026-10-22): required checks must also run on the queued merge commit, or the queue waits forever.
+  merge_group:
   pull_request:
   push:
     branches: [main]
