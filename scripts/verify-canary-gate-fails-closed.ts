@@ -23,7 +23,7 @@ function gateProblems(g: string): string[] {
   const bad: string[] = [];
   if (!/if \[ "\$CANARY_N" -lt 8 \] \|\| \[ "\$STABLE_N" -lt 8 \]; then[\s\S]*?abort "/.test(g)) bad.push('a run with too few verdicts does not abort (a run that proved nothing could promote)');
   if (!/if \[ -n "\$REGRESSIONS" \]; then[\s\S]*?abort "/.test(g)) bad.push('a regression against the stable build does not abort');
-  if (!/vcrrForceStable=true/.test(g) || !/vcrrForceCanary=true/.test(g)) bad.push('the gate does not drive BOTH the stable build and the canary (a relative verdict needs both)');
+  if (!/CANARY_QUERY='vcrrForceStable=true' BASE_URL=/.test(g) || !/CANARY_QUERY='vcrrForceCanary=true' BASE_URL=/.test(g)) bad.push('the gate does not drive BOTH the stable build and the canary (a relative verdict needs both)');
   if (!/awk '\$3=="PASS"\{print \$1" "\$2\}'/.test(g) || !/awk '\$3!="PASS"\{print \$1" "\$2\}'/.test(g)) bad.push('regression is not «passed on stable AND not passed on canary» per journey×viewport');
   const completeAt = g.lastIndexOf('rolling-release complete --dpl'); const runAt = g.lastIndexOf('node e2e/guardian/run.mjs');
   if (completeAt < 0 || runAt < 0 || completeAt < runAt) bad.push('`complete` is not after the guardian runs');
