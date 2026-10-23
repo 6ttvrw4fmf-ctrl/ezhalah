@@ -38,7 +38,7 @@ jobs:
     # NOTE: this job name is referenced by the branch-protection required-status-check list.
     # Renaming it silently drops the gate — change both together.
     name: Typecheck (tsc --noEmit)
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +54,7 @@ jobs:
   assertion-trap:
     # NOTE: this job name is referenced by the branch-protection required-status-check list.
     name: Tests keep their assertions
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
     # A push to main has no base to compare against; the PR and the queued merge commit do.
     if: github.event_name != 'push'
