@@ -34,11 +34,18 @@ function problems(s: string, rest: ReadonlyArray<readonly [string, string]>, rea
   if (!/if leaked is not null then raise exception/.test(s) || !/if writable is not null then raise exception/.test(s) || !/mon_zz_born_revoked_probe/.test(s)) fail.push('the apply-time proof (0 readable mon_* views, 0 writable views, new views born revoked) is missing');
   if (/resolvePublicSupabase\(\);?\s*$/m.test(reader) && /key:\s*KEY\s*\}\s*=\s*resolvePublicSupabase/.test(reader)) fail.push('verify-district-source-truth-live.ts reads mon_* views with the public key again');
   if (!/const KEY = process\.env\.SUPABASE_SERVICE_ROLE_KEY/.test(reader)) fail.push('verify-district-source-truth-live.ts no longer uses the service key for the mon_* views');
-  for (const [f, body] of rest) {
+  rest.forEach(([f, body], idx) => {
     for (const m of body.matchAll(OPENERS)) fail.push(`${f} re-opens a mon_* view to the public key: «${m[0].slice(0, 120)}»`);
-    if (/grant\s+[^;]*\b(insert|update|delete|all)\b[^;]*\bon\s+(table\s+)?[^;]*\bto\b[^;]*\b(anon|authenticated)\b/i.test(body) && /create (or replace )?view/i.test(body)) fail.push(`${f} grants writes to the public key in a migration that defines a view — check it is not a view`);
+    if (/grant\s+[^;]*\b(insert|update|delete|all)\b[^;]*\bon\s+(table\s+)?[^;]*\bto\b[^;]*\b(anon|authenticated)\b/i.test(body) && /create (or replace )?view/i.test(body)) {
+      // An applied migration cannot be rewritten (content parity), so such a slip is closed only by a LATER migration
+      // that revokes the writes on that same view from anon AND authenticated (20261022230940 → *_rich_attrs_read_only).
+      const views = [...body.matchAll(/grant\s+[^;']*?\b(?:insert|update|delete|all)\b[^;']*?\bon\s+(?:table\s+)?(?:public\.)?(\w+)[^;']*?\bto\b[^;']*\b(?:anon|authenticated)\b/gi)].map((m) => m[1]);
+      const closed = (v: string) => rest.slice(idx + 1).some(([, b]) =>
+        new RegExp(String.raw`revoke\s+insert,\s*update,\s*delete[^;]*\bon\s+(?:table\s+)?(?:public\.)?${v}\b[^;]*\bfrom\b[^;]*\banon\b[^;]*\bauthenticated\b`, 'i').test(b));
+      if (!views.length || !views.every(closed)) fail.push(`${f} grants writes to the public key in a migration that defines a view — check it is not a view`);
+    }
     if (/drop\s+event\s+trigger[^;]*mon_views_born_revoked/i.test(body) && !/create event trigger mon_views_born_revoked/.test(body)) fail.push(`${f} drops the born-revoked view trigger`);
-  }
+  });
   return fail;
 }
 
@@ -60,6 +67,15 @@ const mutants: Array<[string, (s: string) => string]> = [
 for (const [label, mutate] of mutants) {
   const m = mutate(sql);
   mustCatch(label, m !== sql && problems(m, later, liveReader).length > 0, m === sql ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+}
+{
+  const grantsView = ['29991231000001_view.sql', "create or replace view public.v_x as select 1; grant all on public.v_x to anon, authenticated;"] as const;
+  mustCatch('a view migration that grants writes to the public key and is never revoked',
+    problems(sql, [...later, grantsView], liveReader).length > 0);
+  mustCatch('a later revoke that leaves out authenticated does not close the grant',
+    problems(sql, [...later, grantsView, ['29991231000002_half.sql', 'revoke insert, update, delete, truncate on table public.v_x from public, anon;']], liveReader).length > 0);
+  check('a view grant closed by a later revoke from anon AND authenticated is accepted',
+    problems(sql, [...later, grantsView, ['29991231000002_fix.sql', 'revoke insert, update, delete, truncate on table public.v_x from public, anon, authenticated;']], liveReader).length === 0);
 }
 mustCatch('a later migration grants a mon_* view back to anon',
   problems(sql, [...later, ['29991231000000_oops.sql', 'grant select on public.mon_searchability_alerts to anon;']], liveReader).length > 0);
