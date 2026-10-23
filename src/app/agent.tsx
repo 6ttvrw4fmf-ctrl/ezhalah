@@ -5310,11 +5310,10 @@ export default function Agent() {
                   the microphone and send all in the same line — the model only below»). A zero-width anchor
                   centred on the mic (the row is LTR-pinned, so the same offset holds in both locales); the box's
                   bottom padding makes the room, so the one-line row above it never moves. */}
-              {!modeSearched ? (
+              {/* ALWAYS (owner 2026-10-23, reversing #7229's «only at the start»: «this model disappears … must show»). */}
               <View pointerEvents="box-none" style={s.composerModelAnchor}>
                 <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />
               </View>
-              ) : null}
             </View>
             ) : null}
             {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY (owner, 2026-09-12, second tightening:
@@ -5663,7 +5662,8 @@ const s = StyleSheet.create({
   // Carries the FULL shadow set: RNW compiles box-shadow per-style, so a partial override here
   // would win wholesale and drop the green tint + offset (observed live).
   // «شاهين 2.2» is gone after the first message (owner 2026-10-17): the 24 px that made room for it go with it.
-  composerNoModel: { paddingBottom: 6 },
+  // Kept as a no-op: «شاهين 2.2» now shows in every state, so the box keeps its room for it (owner 2026-10-23).
+  composerNoModel: {},
   composerFocused: { borderColor: colors.primary, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.2, shadowRadius: 18, shadowOffset: { width: 0, height: 6 } },
   // The wrapper owns the glide (INPUT_EASE) and the row position; marginVertical 6 =
   // (34 send-button − 22 line) / 2, the single-line centering trick above.
