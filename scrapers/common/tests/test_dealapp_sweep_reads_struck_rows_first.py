@@ -72,3 +72,12 @@ def test_an_unused_share_goes_to_the_other_side():
     assert len(plan) == 600 and sum(r["missing_count"] == 0 for r in plan) == 100
     small = _rows(5, True) + _rows(5, False, 100)
     assert L._plan_worklist(small, 600) == small
+
+
+def test_struck_rows_are_read_between_rotation_rows():
+    """2026-10-23: read as one block, struck rows only had each other as neighbours, so the
+    bracketed no-listing reading (shadow since #8372) could almost never close around one."""
+    plan = L._plan_worklist(_rows(959, True) + _rows(2000, False, 10_000), 600)
+    head = [r["missing_count"] > 0 for r in plan[:300]]
+    assert all(head[i] != head[i + 1] for i in range(len(head) - 1)), "struck and rotation alternate"
+    assert sum(r["missing_count"] > 0 for r in plan) == 150 and plan[0]["missing_count"] > 0
