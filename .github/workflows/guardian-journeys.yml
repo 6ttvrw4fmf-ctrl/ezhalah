@@ -12,8 +12,13 @@ name: Guardian journeys (production)
 
 on:
   schedule:
-    # 05:40 UTC — off-peak, and after UI parity (05:10) so the two browser jobs do not contend.
-    - cron: '40 5 * * *'
+    # EVERY 30 MINUTES (owner 2026-10-23, step 2 of the self-healing proposal, free tier): this suite
+    # is the live pulse of the customer-facing surfaces until a paid synthetic monitor exists. It is
+    # read-only, 8 journeys x 2 viewports, about 7 minutes. :07/:37 sit off the :00/:14 data-refresh
+    # ticks (pg_cron jobids 17 and 28) and off the 15-minute drift-guard slots. GitHub's scheduler
+    # drops roughly half of declared runs (measured in gathern-liveness.yml), so this is a floor of
+    # about 20 runs a day, not a promise of 48 — which is still 20x the one daily run it replaces.
+    - cron: '7,37 * * * *'
   workflow_run:
     workflows: ['Deploy frontend (production)']
     types: [completed]
@@ -34,9 +39,18 @@ env:
   # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
   EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
 
+# Never two pulses at once (a slow run must not stack on the next tick), but never cancel a running
+# one either: a cancelled leg reads as neither pass nor fail, the dark-barrier shape.
+concurrency:
+  group: guardian-journeys
+  cancel-in-progress: false
+
 jobs:
   guardian:
-    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # GitHub-hosted on purpose, every trigger: 20-48 runs a day would otherwise queue behind the
+    # scrapers on the single self-hosted runner, and the pulse would stop measuring the site and
+    # start measuring the runner. Chromium is all this needs; the repo is public, so minutes are free.
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     # A deploy that FAILED shipped nothing; re-driving production would only measure the old bundle.
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
