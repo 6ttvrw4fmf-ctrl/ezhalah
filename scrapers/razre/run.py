@@ -611,6 +611,21 @@ def authorize(s: cc.Session) -> str:
                 print(f"  PROBE razre GET {path} {g.status_code} {g.headers.get('content-type')} len={len(g.text or '')}: {(g.text or '')[:1200]!r}", flush=True)
             except Exception as ex:  # noqa: BLE001
                 print(f"  PROBE razre GET {path} EXC {ex}", flush=True)
+        sm = s.get(BASE + "/sitemap.xml", timeout=45).text or ""
+        locs = re.findall(r"<loc>([^<]+)</loc>", sm)
+        print("  PROBE2 locs(" + str(len(locs)) + "): " + repr([u for u in locs if "/en/" not in u]), flush=True)
+        for path in ("/projects/raz-55/", "/projects/haven-1/"):
+            g = s.get(BASE + path, timeout=45); h = g.text or ""
+            print("  PROBE2 " + path + " " + str(g.status_code) + " len=" + str(len(h)), flush=True)
+            for ld in re.findall(r'<script[^>]*application/ld\+json[^>]*>(.*?)</script>', h, re.S)[:4]:
+                print("  PROBE2 LD: " + repr(ld[:3500]), flush=True)
+            for sc in re.findall(r'<script(?![^>]*src)[^>]*>(.*?)</script>', h, re.S)[:6]:
+                print("  PROBE2 INLINE: " + repr(sc[:2500]), flush=True)
+            b = h.find("<main"); b = b if b >= 0 else h.find("<body")
+            body = re.sub(r"\s+", " ", h[b:])
+            for k in ("ريال", "متاح", "مباع", "محجوز", "data-unit", "unit"):
+                i = body.find(k)
+                print("  PROBE2 " + k + "@" + str(i) + ": " + (repr(body[max(0, i-1500):i+2500]) if i >= 0 else "absent"), flush=True)
         t0 = s.get(TOKEN_API, timeout=45)
         print(f"  PROBE razre access-tokens {t0.status_code}: {(t0.text or '')[:1500]!r}", flush=True)
         raise RuntimeError("signedAppRenderInfo is gone from the page — the Wix auth shape changed")
