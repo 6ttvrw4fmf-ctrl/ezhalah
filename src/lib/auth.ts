@@ -71,6 +71,19 @@ export function persistDisplayName(v: string): void {
     .catch(() => {});
 }
 
+// «وش نناديك؟» was answered or put off — written ONCE to user_metadata so the prompt follows the
+// account to every device (owner 2026-10-23). On the same queue as the name write, so a Save's two
+// writes reach the server in the order they were called and neither response can overwrite the other.
+export function markNamePromptSeen(): void {
+  if (!supabase) return;
+  nameWriteQueue = nameWriteQueue
+    .then(() => Promise.race([
+      supabase!.auth.updateUser({ data: { name_prompt_seen: true } }),
+      new Promise((r) => setTimeout(r, NAME_WRITE_TIMEOUT_MS)),
+    ]))
+    .catch(() => {});
+}
+
 export function mapSupabaseUser(u: any, method: AuthUser['method']): AuthUser {
   const meta = u?.user_metadata ?? {};
   // The name is only ever what the provider SENT (owner 2026-10-23). Apple sends it on the FIRST
@@ -80,7 +93,7 @@ export function mapSupabaseUser(u: any, method: AuthUser['method']): AuthUser {
   // «أضف اسمك» and the user types it. scripts/verify-display-name-never-from-email.ts pins this.
   const name: string = String(meta.full_name || meta.name || '').trim();
   const sub: string = u?.email || name;
-  return { method, name, initials: initialsFrom(name, sub), sub };
+  return { method, name, initials: initialsFrom(name, sub), sub, namePromptSeen: meta.name_prompt_seen === true };
 }
 
 // ── OAuth (Google / Apple) ───────────────────────────────────────────────────
@@ -106,6 +119,86 @@ export async function signInWithProvider(
   } catch (e: any) {
     return { error: e?.message ?? 'Sign-in failed' };
   }
+}
+
+// ── Sign in with Apple JS (web, popup) ───────────────────────────────────────
+// Apple sends the user's name ONLY on the first authorization, and only to the page that asked —
+// the Supabase redirect (signInWithProvider above) never passes it on, so every Apple sign-up landed
+// nameless (2026-10-23: raw_user_meta_data had iss/sub/email only). Apple's own JS in popup mode
+// hands the name to THIS page, and the id_token goes to Supabase via signInWithIdToken.
+//
+// Behind a build-time flag (EXPO_PUBLIC_APPLE_JS_SIGNIN=1), default OFF: Apple refuses the popup
+// until the Services ID com.ezhalah.web lists this domain + Return URL. Flag off → AuthModal never
+// reaches this code and Apple sign-in is today's redirect, byte for byte.
+// Any failure (script blocked, popup blocked, Apple config error, token refused) → { fallback } →
+// the caller runs the redirect. Closing Apple's window is the user's choice → { cancelled }.
+export const APPLE_JS_SIGNIN = process.env.EXPO_PUBLIC_APPLE_JS_SIGNIN === '1';
+const APPLE_JS_SRC = 'https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js';
+const APPLE_SERVICES_ID = 'com.ezhalah.web';
+// The ONE Return URL registered with Apple for the popup. Any other origin (previews, localhost)
+// takes the redirect — Apple would refuse it there anyway.
+const APPLE_JS_ORIGIN = 'https://ezhalah-app.vercel.app';
+
+/** «First Last» from Apple's `user.name`, or '' — never invented, never the email. */
+export function appleFullName(n: { firstName?: string; lastName?: string } | null | undefined): string {
+  return [n?.firstName, n?.lastName].map((x) => String(x ?? '').trim()).filter(Boolean).join(' ');
+}
+
+const hex = (b: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(b as ArrayBuffer), (x) => x.toString(16).padStart(2, '0')).join('');
+
+let appleJsReady: Promise<{ rawNonce: string; state: string } | null> | null = null;
+
+/** Load Apple's script and init it with a fresh nonce + state, ahead of the click: the popup must
+ *  open inside the user's tap, so nothing slow may run between the tap and `AppleID.auth.signIn()`. */
+export function prepareAppleJs(): Promise<{ rawNonce: string; state: string } | null> {
+  if (appleJsReady) return appleJsReady;
+  appleJsReady = (async () => {
+    if (Platform.OS !== 'web' || window.location.origin !== APPLE_JS_ORIGIN) return null;
+    const w = window as any;
+    if (!w.AppleID?.auth) {
+      await new Promise<void>((resolve) => {
+        const el = document.createElement('script');
+        el.src = APPLE_JS_SRC;
+        el.async = true;
+        el.onload = () => resolve();
+        el.onerror = () => resolve();
+        setTimeout(resolve, 8000);
+        document.head.appendChild(el);
+      });
+    }
+    if (!w.AppleID?.auth) return null;
+    const rawNonce = hex(crypto.getRandomValues(new Uint8Array(32)));
+    const state = hex(crypto.getRandomValues(new Uint8Array(16)));
+    const nonce = hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(rawNonce)));
+    w.AppleID.auth.init({ clientId: APPLE_SERVICES_ID, scope: 'name email', redirectURI: APPLE_JS_ORIGIN + '/auth', state, nonce, usePopup: true });
+    return { rawNonce, state };
+  })().catch(() => null);
+  return appleJsReady;
+}
+
+export async function signInWithAppleJs(): Promise<{ signedIn?: true; name?: string; cancelled?: true; fallback?: true }> {
+  if (!supabase) return { fallback: true };
+  const prep = await prepareAppleJs();
+  appleJsReady = null; // one nonce per attempt
+  if (!prep) return { fallback: true };
+  let res: any;
+  try {
+    res = await (window as any).AppleID.auth.signIn();
+  } catch (e: any) {
+    void prepareAppleJs();
+    const err = String(e?.error ?? '');
+    return err === 'popup_closed_by_user' || err === 'user_cancelled_authorize' ? { cancelled: true } : { fallback: true };
+  }
+  void prepareAppleJs();
+  const token = res?.authorization?.id_token;
+  if (!token || res?.authorization?.state !== prep.state) return { fallback: true };
+  try {
+    const { error } = await supabase.auth.signInWithIdToken({ provider: 'apple', token, nonce: prep.rawNonce });
+    if (error) return { fallback: true };
+  } catch {
+    return { fallback: true };
+  }
+  return { signedIn: true, name: appleFullName(res?.user?.name) };
 }
 
 // ── Face ID / biometric (native only) ────────────────────────────────────────
