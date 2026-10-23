@@ -71,7 +71,9 @@ const meta = (prop: string) => new RegExp(`<meta (?:property|name)="${prop}" con
 // Owner 2026-10-22 (approved mockup): the card says the SAME invite the visitor then sees on the sign-in popup.
 check('the card title is the popup\'s own invite; the line says what Ezhalah is, in Saudi Arabia',
   meta('og:title') === 'يوسف شاركك: شقق للإيجار في حي النرجس' && meta('og:title') === shareInviteNote('يوسف', Q, 'ar')
-  && meta('og:description') === 'افتحها على إزهله، محرك البحث العقاري بالذكاء الاصطناعي في السعودية');
+  && meta('og:description') === SHARE_CARD.ar.desc && meta('og:description') !== SHARE_INVITE_LINE.ar);
+check('the invite line names Ezhalah, AI and Saudi Arabia (it travels as the message text — owner 2026-10-22)',
+  /السعودية/.test(SHARE_INVITE_LINE.ar) && /Saudi Arabia/.test(SHARE_INVITE_LINE.en));
 mustCatch('a card title that drifts from the popup\'s invite', shareTitle('يوسف', Q, 'ar') !== shareInviteNote('يوسف', Q, 'ar'));
 check('every card URL follows the REQUEST\'S domain (a domain change needs no code change)',
   meta('og:image') === 'https://new-domain.example/og-image-v6.png' && meta('og:url') === `https://new-domain.example/s/${fullPayload}`
@@ -80,7 +82,7 @@ check('the page sends a person to Home + ?share= (never /agent)',
   html.includes(`content="0;url=/?share=${fullPayload}"`) && html.includes(`location.replace("/?share=${fullPayload}")`) && !/\/agent/.test(html));
 const enHtml = shareCardHtml('https://x.example', encodeSharePayload(Q, 'Yusuf', 'en')!);
 check('an English sender gets the English card, brand kept as "Ezhalah"',
-  enHtml.includes(`<meta property="og:title" content="${shareInviteNote('Yusuf', Q, 'en')}"`) && enHtml.includes(SHARE_INVITE_LINE.en) && /Saudi Arabia/.test(SHARE_INVITE_LINE.en) && /lang="en"/.test(enHtml));
+  enHtml.includes(`<meta property="og:title" content="${shareInviteNote('Yusuf', Q, 'en')}"`) && enHtml.includes(SHARE_CARD.en.desc) && /lang="en"/.test(enHtml));
 const evil = shareCardHtml('https://x.example', enc({ v: 1, n: '<script>alert(1)</script>', l: 'ar', q: Q }));
 check('a hostile name is escaped, never injected into the page', !evil.includes('<script>alert') && evil.includes('&lt;script&gt;'));
 mustCatch('a card builder that does not escape the name', (() => {

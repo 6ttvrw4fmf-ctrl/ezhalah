@@ -229,7 +229,9 @@ export function shareCardHtml(origin: string, rawPayload: string | null | undefi
   const d = code ? (chatCard ?? null) : decodeSharePayload(rawPayload);
   const loc = d?.locale ?? 'ar';
   const invite = d ? shareInviteNote(d.name, d.q, loc) : null;
-  const c = { site: SHARE_CARD[loc].site, desc: invite ? SHARE_INVITE_LINE[loc] : shareCardFactsLine(facts, loc) };
+  // The invite LINE now travels as the message text (owner 2026-10-22: WhatsApp cut it in the card), so the
+  // card's line is the short tagline that fits — never the same sentence twice.
+  const c = { site: SHARE_CARD[loc].site, desc: invite ? SHARE_CARD[loc].desc : shareCardFactsLine(facts, loc) };
   const title = invite || (loc === 'ar' ? 'إزهله' : 'Ezhalah');
   const ok = !!rawPayload && (code || !!d);
   const to = ok ? shareLandingPath(rawPayload!) : '/';

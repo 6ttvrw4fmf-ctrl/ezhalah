@@ -113,7 +113,8 @@ export default function FeedbackRow({
         // a desktop copies. A cancelled menu (AbortError) is a choice, not a failure.
         const nav: any = typeof navigator !== 'undefined' ? navigator : null;
         if (isTouchDevice(nav, typeof window !== 'undefined' ? (window as any) : null) && typeof nav?.share === 'function') {
-          try { await nav.share({ url }); return; } catch (e: any) { if (e?.name === 'AbortError') return; }
+          // The invite line rides as the message text (owner 2026-10-22); the card's title stays the invite.
+          try { await nav.share(shareText ? { text: shareText, url } : { url }); return; } catch (e: any) { if (e?.name === 'AbortError') return; }
         }
         if (openWhatsAppCompose(url)) return;
         await Clipboard.setStringAsync(withText);
