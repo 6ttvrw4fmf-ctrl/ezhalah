@@ -736,6 +736,57 @@ def nufouth_page(url: str, ad_number: str | None, fetch=None) -> dict | None:
     return None
 
 
+_DALLALI_RECORDS: "dict | None" = None
+
+
+def dallali_page(url: str, fetch=None) -> dict | None:
+    """A dallali ad read from the storefront's own JSON feed (2026-10-23). dallali.com/advertisements/property/<uuid>
+    is a client-rendered shell («دلّالي | نظام إدارة العقارات والوساطة العقارية في السعودية», re-read run
+    39944419156): no ad text at all, so a template «إيجار» scored 20007459 — «شقة للبيع», REGA advertisementType
+    «بيع», listing_type sale — a deal MISMATCH and capped the 10-23 night at 5 on one ad. This restates the
+    listing object's own fields, labelled; None when the feed cannot be read or lacks the id (unknown, never
+    wrong). The feed is walked once per run."""
+    global _DALLALI_RECORDS
+    m = re.search(r"/advertisements/property/([0-9a-fA-F-]{8,})", url or "")
+    if not m:
+        return None
+    try:
+        if _DALLALI_RECORDS is None:
+            if fetch is not None:
+                items = fetch()
+            else:
+                from scrapers.dallali import run as dallali
+                s, _ = dallali.retry_smarter_session(f"{dallali.API}?purpose=all&page=1", timeout=40)
+                items = dallali.walk(s)[0]
+            _DALLALI_RECORDS = {str(x.get("id")): x for x in items if isinstance(x, dict)}
+        x = _DALLALI_RECORDS.get(m.group(1))
+    except Exception:  # noqa: BLE001
+        return None
+    if not x:
+        return None
+    rega = x.get("rega_display_data") or {}
+    loc = rega.get("location") or {}
+    lines = []
+
+    def put(label, v, tail=""):
+        if isinstance(v, bool) or v in (None, "", 0):
+            return
+        lines.append(f"{label} {str(v).strip()}{tail}")
+    put("نوع الإعلان", {"sale": "للبيع", "rent": "للايجار"}.get(x.get("listing_type") or ""))
+    put("المنطقة", loc.get("region"))
+    put("المدينة", loc.get("city") or (x.get("property") or {}).get("city"))
+    put("الحي", loc.get("district") or (x.get("property") or {}).get("district"))
+    put("نوع العقار", rega.get("propertyType"))
+    put("المساحة", rega.get("propertyArea"), " م²")
+    put("عدد الغرف", rega.get("numberOfRooms"))
+    put("السعر", x.get("price"), " ريال")
+    put("عرض الشارع", rega.get("streetWidth"))
+    title = str(x.get("title") or "")
+    lines += [y.strip() for y in f"{title}\n{x.get('description') or ''}".splitlines() if y.strip()]
+    return {"title": title, "meta": {}, "jsonld": [], "evidence_lines": lines[:200],
+            "text_head": " | ".join(lines)[:1500]}
+
+
 _TUBA_RECORDS: "dict | None" = None
 
 
@@ -772,7 +823,7 @@ def tuba_rega_lines(url: str, fetch=None) -> list[str]:
 
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
                pace: float = PACE_S, probe=None, wasalt=None, sanadak=None, muktamel=None, tuba=None,
-               nufouth=None) -> dict:
+               nufouth=None, dallali=None) -> dict:
     if probe is None:
         # Imported here, not at module level: af_score and its hermetic check load this module with
         # source_reread stubbed, and they always pass their own probe.
@@ -801,6 +852,8 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         time.sleep(max(0.0, last + pace - time.monotonic()))
         last = time.monotonic()
         own = wasalt if ("wasalt.sa" in url or "wasalt.com" in url) else sanadak if "sanadak.sa" in url else None
+        if "dallali.com/advertisements/" in url:
+            own = dallali or dallali_page
         if "nufouth.com" in url:
             ad_number = (client.table(table).select("ad_number").eq("id", rid).limit(1).execute().data
                          or [{}])[0].get("ad_number")
