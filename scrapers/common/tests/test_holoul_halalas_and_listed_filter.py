@@ -50,3 +50,20 @@ def test_the_units_own_api_location_is_its_pin():
 def test_no_location_means_no_pin_not_a_guess():
     (row, _), _ = R.map_unit(_u())
     assert "latitude" not in row["additional_info"]
+
+
+def test_a_source_that_fails_every_route_still_writes_a_failed_run_naming_the_error(monkeypatch):
+    """10-22/10-23: every route answered 504 and the crawl died before begin_run, leaving no row."""
+    calls = []
+    monkeypatch.setattr(R.db, "begin_run", lambda slug: calls.append(("begin", slug)) or 42)
+    monkeypatch.setattr(R.db, "end_run", lambda rid, **kw: calls.append(("end", rid, kw)) or True)
+
+    def boom(*a, **k):
+        raise RuntimeError("HTTP Error 504: ")
+    monkeypatch.setattr(R, "retry_smarter_session", boom)
+    monkeypatch.setattr("sys.argv", ["holoul", "--type", "all"])
+    with pytest.raises(RuntimeError):
+        R.main()
+    assert calls[0] == ("begin", "holoul")
+    end = calls[-1]
+    assert end[0] == "end" and end[1] == 42 and end[2]["ok"] is False and "504" in end[2]["notes"]
