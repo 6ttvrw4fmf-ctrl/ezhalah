@@ -29,7 +29,13 @@ export async function grantRobotPass(context, secret = process.env.EZ_GATE_SECRE
   await context.route(/\.supabase\.co\/rest\/v1\//, (route) => {
     const req = route.request();
     const extra = gateHeaders(req.url(), secret);
-    return extra ? route.continue({ headers: { ...req.headers(), ...extra } }) : route.continue();
+    if (!extra) return route.continue();
+    const headers = { ...req.headers(), ...extra };
+    // The same log marker gateFetch.mjs adds, so the API logs count these as «has the handshake» (2026-10-22: 4,353
+    // calls a morning from CI test copies looked like strangers only because they carried no marker). A CORS
+    // preflight never reaches here with a body, and x-client-info is already on supabase's allowed-headers list.
+    headers['x-client-info'] = `${headers['x-client-info'] ?? ''} ezhalah-gate`.trim();
+    return route.continue({ headers });
   });
   return true;
 }
