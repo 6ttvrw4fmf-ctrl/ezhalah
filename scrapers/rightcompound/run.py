@@ -157,9 +157,10 @@ _DISTRICT_EN_AR = {
     ("khobar", "aziziyah"): "حي العزيزية", ("khobar", "azzizyah"): "حي العزيزية",
     # 2026-10-23 (New Listings, contract G): the two names unknown_named_districts(3) still listed for this site that
     # the city's catalogue holds: le-ruya «Ishbilia» (الخبر: حي اشبيليا) ×6, jeddah-view «Al Nakhil» (جدة: حي النخيل)
-    # ×5. Still NOT mapped: «Rakaa» (الراكة الشمالية/الجنوبية), «Fanateer» (not in الجبيل's catalogue), «Dariyah»
+    # ×5, «Al Andalus» (الخبر: حي الاندلس) ×4. Still NOT mapped: «Rakaa» (الراكة الشمالية/الجنوبية), «Fanateer» (not in الجبيل's catalogue), «Dariyah»
     # (الدرعية is its own town, not a Riyadh district), «Dana Bay» (a compound name).
     ("khobar", "ishbilia"): "حي اشبيليا", ("jeddah", "nakhil"): "حي النخيل",
+    ("khobar", "andalus"): "حي الاندلس",
 }
 
 

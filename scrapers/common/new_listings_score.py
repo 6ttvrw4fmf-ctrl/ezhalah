@@ -672,6 +672,70 @@ def muktamel_room_lines(url: str, fetch=None) -> list[str]:
     return out
 
 
+def nufouth_page(url: str, ad_number: str | None, fetch=None) -> dict | None:
+    """A nufouth ad read from its own record (backlog #683, 2026-10-23). The share link
+    («/latest-offers?ads-N4175=1») opens the ad in a JS modal filled from get_property_data; the static HTML is
+    the vacancy table of OTHER units, so the score called every nufouth page unreadable: 0 decided ads on
+    10-20, 10-21, 10-22 and 10-23. This restates the record's own fields for THIS ad and unit (ad_number
+    NFZ<code>A<ad>U<unit name hash | P>), labelled the way the modal prints them. None = unreadable."""
+    m = re.search(r"[?&]ads-([HNR]\d+)=", url or "")
+    a = re.match(r"^NFZ([HNR]\d+)A(\d+)U(P|[0-9a-f]{8})$", ad_number or "")
+    if not m or not a or a.group(1) != m.group(1):
+        return None
+    code, ad_num, unit_key = a.groups()
+    try:
+        if fetch is None:
+            from scrapers.nufouth import run as nufouth
+            msg = nufouth.fetch_property(nufouth.session(), code)
+        else:
+            msg = fetch(code)
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(msg, dict):
+        return None
+    import hashlib
+    prop = msg.get("property") or {}
+    for item in msg.get("ads") or []:
+        ad = (item or {}).get("ad") or {}
+        if (re.sub(r"\D", "", str(ad.get("name") or "")) or "0") != ad_num:
+            continue
+        units = item.get("units") or []
+        if unit_key == "P":
+            unit = None if not units else False
+        else:
+            unit = next((u for u in units if hashlib.sha1(str((u or {}).get("name") or "").encode("utf-8"))
+                         .hexdigest()[:8] == unit_key), False)
+        if unit is False:
+            return None
+        src = unit if unit is not None else ad
+        ad_type = str(ad.get("ad_type") or "").strip()
+        lines = []
+
+        def put(label, v, tail=""):
+            if isinstance(v, bool) or v in (None, "", 0, "0"):
+                return
+            lines.append(f"{label} {str(v).strip()}{tail}")
+        put("المدينة", prop.get("city"))
+        put("الحي", prop.get("district"))
+        put("نوع الإعلان", {"ايجار": "للايجار", "بيع": "للبيع"}.get(ad_type))
+        put("نوع الوحدة", (unit or {}).get("unit_type") if unit else prop.get("property_type"))
+        put("المساحة", ((unit or {}).get("space") or (unit or {}).get("area")) if unit
+            else (ad.get("total_area") or prop.get("property_area")), " م²")
+        if unit:
+            put("عدد الغرف", unit.get("no_of_rooms"))
+            put("دورات المياه", unit.get("no_of_bathrooms"))
+        put("الإيجار السنوي" if ad_type == "ايجار" else "السعر",
+            src.get("annual_rent") if ad_type == "ايجار" else src.get("selling_price"), " ريال")
+        put("عرض الشارع", prop.get("street_width"))
+        put("عمر العقار", prop.get("age_property"))
+        text = str((unit or {}).get("details") if unit else ad.get("custom_property_details") or "")
+        lines += [y.strip() for y in text.splitlines() if y.strip()]
+        title = str((unit or {}).get("name") if unit else prop.get("name") or "")
+        return {"title": title, "meta": {}, "jsonld": [], "evidence_lines": lines[:200],
+                "text_head": " | ".join(lines)[:1500]}
+    return None
+
+
 _TUBA_RECORDS: "dict | None" = None
 
 
@@ -707,7 +771,8 @@ def tuba_rega_lines(url: str, fetch=None) -> list[str]:
 
 
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
-               pace: float = PACE_S, probe=None, wasalt=None, sanadak=None, muktamel=None, tuba=None) -> dict:
+               pace: float = PACE_S, probe=None, wasalt=None, sanadak=None, muktamel=None, tuba=None,
+               nufouth=None) -> dict:
     if probe is None:
         # Imported here, not at module level: af_score and its hermetic check load this module with
         # source_reread stubbed, and they always pass their own probe.
@@ -736,6 +801,10 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         time.sleep(max(0.0, last + pace - time.monotonic()))
         last = time.monotonic()
         own = wasalt if ("wasalt.sa" in url or "wasalt.com" in url) else sanadak if "sanadak.sa" in url else None
+        if "nufouth.com" in url:
+            ad_number = (client.table(table).select("ad_number").eq("id", rid).limit(1).execute().data
+                         or [{}])[0].get("ad_number")
+            own = (lambda u, _n=ad_number: (nufouth or nufouth_page)(u, _n))
         if own is not None:
             page = own(url)                 # the ad's own record; None = unreadable, never wrong
             if page is None:
