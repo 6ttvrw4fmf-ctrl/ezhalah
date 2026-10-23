@@ -3,6 +3,8 @@ import { Modal, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { useI18n } from '@/i18n';
+import { useAtLeast } from '@/lib/useAtLeast';
+import { MODELS_POPUP_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { cardShadow, colors, radius } from '@/theme/tokens';
 import { TAP44, TAP44_DOWN } from '@/theme/palette';
 
@@ -42,7 +44,7 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
   const [anchor, setAnchor] = useState<{ x: number; y: number; width: number } | null>(null);
   const trigger = useRef<View>(null);
   const { width, height } = useWindowDimensions();
-  const wide = width >= 768;
+  const wide = useAtLeast(MODELS_POPUP_WIDE_BREAKPOINT);
   const model = MODELS.find((item) => item.id === selected)!;
   const close = () => { setAnchor(null); };
 
