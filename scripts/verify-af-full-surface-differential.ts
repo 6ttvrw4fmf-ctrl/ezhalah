@@ -389,7 +389,7 @@ async function verifyOption(label: string, base: Record<string, unknown>, opt: O
         applied ? rpc('af_eligible_count', countBody(base, opt.params)) : Promise.resolve(null),
       ]);
       if (o.unhandled.length) { skip(label, `oracle declined: ${o.unhandled[0].slice(0, 100)}`); return null; }
-      let v = judgeOption({ label, chip, applied: a == null ? null : Number(a), rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred: opt.pred });
+      let v = judgeOption({ label, chip, applied: a == null ? null : Number(a), rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred: opt.pred });
 
       // A disagreement is only this product's if it survives a re-read taken on ONE index state —
       // chip included, since the chip handed in above may be many minutes old (see `indexStamp`).
@@ -402,7 +402,7 @@ async function verifyOption(label: string, base: Record<string, unknown>, opt: O
             applied ? rpc('af_eligible_count', countBody(base, opt.params)) : Promise.resolve(null),
           ]);
           if (o2.unhandled.length) return null;
-          return judgeOption({ label, chip: c2, applied: a2 == null ? null : Number(a2), rpcTotal: r2.total, rpcIds: r2.ids, oracleIds: o2.ids, oracleRows: o2.rows, pred: opt.pred });
+          return judgeOption({ label, chip: c2, applied: a2 == null ? null : Number(a2), rpcTotal: r2.total, page: PAGE, rpcIds: r2.ids, oracleIds: o2.ids, oracleRows: o2.rows, pred: opt.pred });
         });
         if (again.state === 'moved') {
           undecide(label, `the searchable index was rebuilt under the read (${again.stamp}) — no verdict, in either direction`);
@@ -497,7 +497,7 @@ for (const scope of SCOPES) {
       const body = searchBody(base, {});
       const [r, o] = await Promise.all([rpcIds(body), oracle(body)]);
       if (o.unhandled.length) { skip(`${tag} · baseline`, o.unhandled[0]); return null; }
-      const v = judgeOption({ label: 'baseline', chip: total, applied: null, rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids });
+      const v = judgeOption({ label: 'baseline', chip: total, applied: null, rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids });
       M.basePurity++;
       if (!v.ok) { fail(`${tag} · baseline (no AF)`, v.reasons.join(' | ')); M.missing += v.missing.length; M.extra += v.extra.length; }
       else pass(`${tag} · baseline (no AF)`, `${r.total} rows, chip total ${total}`);
@@ -568,7 +568,7 @@ for (const scope of SCOPES) {
         M.orCombos++;
         const u = judgeUnion(a[1].ids, b[1].ids, r.ids);
         const chip = Number(footer?.[0]?.cnt_selected);
-        const v = judgeOption({ label: 'or', chip, applied: null, rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred: { kind: 'in', col: 'direction_ar', vs: [...(DIRECTION_VARIANTS.map?.[ka] ?? [ka]), ...(DIRECTION_VARIANTS.map?.[kb] ?? [kb])] } });
+        const v = judgeOption({ label: 'or', chip, applied: null, rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred: { kind: 'in', col: 'direction_ar', vs: [...(DIRECTION_VARIANTS.map?.[ka] ?? [ka]), ...(DIRECTION_VARIANTS.map?.[kb] ?? [kb])] } });
         if (o.unhandled.length) skip(`${tag} · OR ${ka}+${kb}`, o.unhandled[0]);
         else if (!u.ok || !v.ok) fail(`${tag} · OR ${ka}+${kb}`, `union expected ${u.expected} got ${u.got} (missing ${u.missing.length}, extra ${u.extra.length}); ${v.reasons.join(' | ')}`);
         else pass(`${tag} · OR ${ka}+${kb}`, `${a[1].chip} ∪ ${b[1].chip} = ${r.total} (footer ${chip} = oracle ${o.ids.length})`);
@@ -591,7 +591,7 @@ for (const scope of SCOPES) {
         M.andCombos++; M.secondRoundChips++;
         if (o.unhandled.length) { skip(`${tag} · AND ${A.opt.key} ∧ ${B.opt.key}`, o.unhandled[0]); return; }
         const it = judgeIntersection(A.ids, B.ids, r.ids);
-        const v = judgeOption({ label: 'and', chip: chipB, applied: null, rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred });
+        const v = judgeOption({ label: 'and', chip: chipB, applied: null, rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred });
         M.missing += v.missing.length; M.extra += v.extra.length; M.nullLeaks += v.nullLeaks; M.rowViolations += v.rowViolations;
         if (!it.ok || !v.ok) fail(`${tag} · AND ${A.opt.key} ∧ ${B.opt.key}`, `intersection expected ${it.expected} got ${it.got} (missing ${it.missing.length}, extra ${it.extra.length}); second-round chip ${chipB}; ${v.reasons.join(' | ')}`);
         else pass(`${tag} · AND ${A.opt.key} ∧ ${B.opt.key}`, `${A.chip} ∩ ${B.chip} = ${r.total} (chip-in-round-2 ${chipB} = oracle ${o.ids.length})`);
@@ -605,7 +605,7 @@ for (const scope of SCOPES) {
         const [r, o, a] = await Promise.all([rpcIds(searchBody(base, params)), oracle(searchBody(base, params), strictColsOf(pred)), rpc('af_eligible_count', countBody(base, params))]);
         M.stacked++;
         if (o.unhandled.length) { skip(`${tag} · STACK ×${firsts.length}`, o.unhandled[0]); return; }
-        const v = judgeOption({ label: 'stack', chip: null, applied: Number(a), rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred });
+        const v = judgeOption({ label: 'stack', chip: null, applied: Number(a), rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred });
         M.missing += v.missing.length; M.extra += v.extra.length;
         if (!v.ok) fail(`${tag} · STACK ${firsts.map(([, f]) => f.opt.key).join(' ∧ ')}`, v.reasons.join(' | '));
         else pass(`${tag} · STACK ${firsts.map(([, f]) => f.opt.key).join(' ∧ ')}`, `${r.total} = oracle ${o.ids.length}`);
@@ -649,7 +649,7 @@ if (!SKIP_MULTI) {
         const take = async (chipNow: number | null) => {
           const [r, o] = await Promise.all([rpcIds(searchBody(base, {})), oracle(searchBody(base, {}))]);
           if (o.unhandled.length) return null;
-          return judgeOption({ label: 'mt-base', chip: chipNow, applied: null, rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids });
+          return judgeOption({ label: 'mt-base', chip: chipNow, applied: null, rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids });
         };
         let v = await take(total);
         if (v === null) { skip(label, 'oracle declined'); return; }

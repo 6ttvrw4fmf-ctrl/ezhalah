@@ -9,6 +9,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { SEARCH_RPC_MAX_OFFSET, reachableRows, missingVerdict } from './lib/searchDeepPageCap.ts';
+import { judgeOption } from './lib/afSurfaceJudge.ts';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
@@ -53,6 +54,20 @@ for (const f of ['scripts/verify-af-live-truth.ts', 'scripts/verify-af-property-
   check(`${f} judges MISSING through missingVerdict()`, routes(src), 'import or call missing');
   mustCatch(`${f} reverting to a bare missing == 0`, !routes(src.replace(/missingVerdict\(/g, 'Math.max(')));
 }
+
+// The full-surface judge (verify-af-full-surface-differential.ts, run 39940963632: Apartment/Buy @جدة MISSING with
+// EXTRA 0 and COUNT MISMATCHES 0) must apply the same rule when it is told the page size.
+const ids = (n: number, from = 0) => Array.from({ length: n }, (_, i) => `t:${from + i}`);
+const big = 26100;   // > 25,500 reachable at PAGE 1500
+const oracleAll = ids(big);
+const judged = (rpc: string[], page?: number) => judgeOption({ label: 'cap', chip: big, applied: null, rpcTotal: big, rpcIds: rpc, oracleIds: oracleAll, ...(page ? { page } : {}) });
+check('judgeOption: a walk that reached every reachable row passes, the tail explained', judged(ids(25500), 1500).ok, judged(ids(25500), 1500).reasons.join('; '));
+mustCatch('judgeOption: one dropped listing inside the window', !judged([...ids(25499), 't:99999'].slice(0, 25499), 1500).ok);
+mustCatch('judgeOption: the same walk judged without the page size (the old blind spot is still visible when no page is given)', !judged(ids(25500)).ok);
+const fsd = readFileSync(join(root, 'scripts/verify-af-full-surface-differential.ts'), 'utf8');
+const everyJudgeHasPage = (src: string) => [...src.matchAll(/judgeOption\(\{[^}]*\}/g)].every((m) => /page: PAGE/.test(m[0]));
+check('verify-af-full-surface-differential.ts hands every judgeOption() its page size', everyJudgeHasPage(fsd), 'a judgeOption call without page: PAGE');
+mustCatch('a judgeOption call losing its page size', !everyJudgeHasPage(fsd.replace('page: PAGE, ', '')));
 
 if (failed) { console.error(`\n❌ verify-af-walkers-respect-search-deep-page-cap: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-af-walkers-respect-search-deep-page-cap: the AF walks read the offset cap as a cap, not as lost listings.');
