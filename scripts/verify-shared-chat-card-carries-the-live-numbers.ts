@@ -46,7 +46,7 @@ check('no facts at all → the plain tagline', shareCardFactsLine(null, 'ar') ==
 {
   const html = shareCardHtml('https://ezhalah-app.vercel.app', 'HvJnnVKT', CARD, FACTS);
   check('the card HTML: title is the popup\'s invite «يوسف شاركك: …» …', ogTitle(html) === INVITE && INVITE.startsWith('يوسف شاركك'), String(ogTitle(html)));
-  check('… and og:description is the approved Saudi line', ogDesc(html) === SHARE_INVITE_LINE.ar, String(ogDesc(html)));
+  check('… and og:description is the short tagline (the invite line travels as the message text)', ogDesc(html) === SHARE_CARD.ar.desc && ogDesc(html) !== SHARE_INVITE_LINE.ar, String(ogDesc(html)));
   const unreadHtml = shareCardHtml('https://ezhalah-app.vercel.app', 'HvJnnVKT', null, FACTS);
   check('a link whose card could not be read keeps the live numbers line under «إزهله»', ogTitle(unreadHtml) === 'إزهله' && ogDesc(unreadHtml) === LINE_AR, String(ogDesc(unreadHtml)));
   check('the line names nothing about the search (no deal, no district, no price)', !/شراء|للبيع|إيجار|الرياض|ر\.س/.test(ogDesc(html) ?? ''));
@@ -86,7 +86,7 @@ answers = {
 {
   const r = res(); await handler(req('HvJnnVKT'), r);
   check('HANDLER: a saved chat renders the popup\'s invite …', ogTitle(r.body) === INVITE, String(ogTitle(r.body)));
-  check('… and the approved Saudi line', ogDesc(r.body) === SHARE_INVITE_LINE.ar, String(ogDesc(r.body)));
+  check('… and the short tagline', ogDesc(r.body) === SHARE_CARD.ar.desc, String(ogDesc(r.body)));
 }
 answers = { ...answers, shared_chat_card: json([]) };
 {
@@ -132,9 +132,12 @@ const mutant = async (from: string, to: string) => {
   mustCatch('the line drifting from the home card\'s approved shape (the «و» / «في» WhatsApp truncated)', m.shareCardFactsLine(FACTS, 'ar') !== LINE_AR);
 }
 {
-  const m = await mutant("const c = { site: SHARE_CARD[loc].site, desc: invite ? SHARE_INVITE_LINE[loc] : shareCardFactsLine(facts, loc) };", 'const c = SHARE_CARD[loc];');
+  const m = await mutant("const c = { site: SHARE_CARD[loc].site, desc: invite ? SHARE_CARD[loc].desc : shareCardFactsLine(facts, loc) };", 'const c = SHARE_CARD[loc];');
   mustCatch('an unreadable link\'s card ignoring the facts it was handed', ogDesc(m.shareCardHtml('https://e.app', 'HvJnnVKT', null, FACTS)) !== LINE_AR);
-  mustCatch('a known sender\'s card losing the approved Saudi line', ogDesc(m.shareCardHtml('https://e.app', 'HvJnnVKT', CARD, FACTS)) !== SHARE_INVITE_LINE.ar);
+}
+{
+  const m = await mutant("desc: invite ? SHARE_CARD[loc].desc : shareCardFactsLine(facts, loc)", 'desc: invite ? SHARE_INVITE_LINE[loc] : shareCardFactsLine(facts, loc)');
+  mustCatch('the long invite line back in the card (WhatsApp cut it — it belongs in the message text)', ogDesc(m.shareCardHtml('https://e.app', 'HvJnnVKT', CARD, FACTS)) !== SHARE_CARD.ar.desc);
 }
 {
   const handlerSrc = readFileSync(join(root, 'api/share-card.ts'), 'utf8');

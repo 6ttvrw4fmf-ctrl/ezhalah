@@ -76,14 +76,18 @@ const agentSrc = readFileSync(AGENT, 'utf8');
 // the PHONE'S SHARE MENU with the LINK ONLY (no text beside it, so the target builds the card); WhatsApp's
 // composer is the fallback for a touch browser with no menu, and a desktop copies. The checks below pin that.
 const usesIt = (src: string) => /import \{ openWhatsAppCompose, isTouchDevice \} from '@\/lib\/shareToWhatsApp'/.test(src) && /openWhatsAppCompose\(url\)/.test(src);
-const menuLinkOnly = (src: string) => { const i = src.indexOf('const onShare = async'); const body = i < 0 ? '' : src.slice(i, i + 2000);
-  return /await nav\.share\(\{ url \}\)/.test(body) && !/nav\.share\(\{[^}]*text/.test(body) && body.indexOf('nav.share(') < body.indexOf('openWhatsAppCompose(url)'); };
+// Owner 2026-10-22 (WhatsApp screenshot): the card cut its line, so the invite LINE rides as the message text
+// beside the link — the menu gets { text: shareText, url } when a text exists, else the bare link.
+const menuLinkOnly = (src: string) => { const i = src.indexOf('const onShare = async'); const body = i < 0 ? '' : src.slice(i, i + 2400);
+  return /await nav\.share\(shareText \? \{ text: shareText, url \} : \{ url \}\)/.test(body) && body.indexOf('nav.share(') < body.indexOf('openWhatsAppCompose(url)'); };
+const agentSendsInviteLine = (src: string) => /shareText: SHARE_INVITE_LINE\[loc\]/.test(src) && !/shareText: shareMessage\(/.test(src);
+check('the text beside the link is the invite LINE (never the card title twice)', agentSendsInviteLine(readFileSync(AGENT, 'utf8')));
 const sharesChatViaMenu = (src: string, fn: string) => {
   const i = src.indexOf(fn); if (i < 0) return true;
   return /\bnav(?:igator)?\??\.share\(/.test(src.slice(i, i + 1600));
 };
 check('FeedbackRow keeps WhatsApp\'s composer as the fallback (touch browser without a share menu)', usesIt(rowSrc));
-check('FeedbackRow opens the phone\'s share menu FIRST, with the link only (no text beside it)', menuLinkOnly(rowSrc));
+check('FeedbackRow opens the phone\'s share menu FIRST, with the invite line as text beside the link', menuLinkOnly(rowSrc));
 void sharesChatViaMenu;
 // Owner 2026-10-20: the top «مشاركة» pill is the NORMAL share again (scripts/verify-share-search-link.ts
 // pins it); the chat is shared only from the reply row, so agent.tsx must not grow a second chat share.
@@ -117,9 +121,11 @@ const mutant = (from: string, to: string) => {
   mustCatch('"handled" reported without ever opening WhatsApp', !(m.openWhatsAppCompose(LINK, phone, w) === true && w.gone.length === 1));
 }
 mustCatch('FeedbackRow going straight to WhatsApp again (no share menu)',
-  !menuLinkOnly(rowSrc.replace('try { await nav.share({ url }); return; }', 'try { /* menu removed */ }')));
-mustCatch('text sent beside the link through the menu (the 2026-10-20 card loss)',
-  !menuLinkOnly(rowSrc.replace('await nav.share({ url })', 'await nav.share({ text: shareText, url })')));
+  !menuLinkOnly(rowSrc.replace('try { await nav.share(shareText ? { text: shareText, url } : { url }); return; }', 'try { /* menu removed */ }')));
+mustCatch('the invite line dropped from the message (only the cut-off card line again)',
+  !menuLinkOnly(rowSrc.replace('await nav.share(shareText ? { text: shareText, url } : { url })', 'await nav.share({ url })')));
+mustCatch('the card title sent as the text (the same sentence twice)',
+  !agentSendsInviteLine('return { shareUrl, prepareShare, shareText: shareMessage(name, q, loc) };'));
 mustCatch('the import of the helper removed from FeedbackRow', !usesIt(rowSrc.replace("import { openWhatsAppCompose, isTouchDevice } from '@/lib/shareToWhatsApp';", '')));
 
 if (fail || mutFail) { console.error(`\n❌ chat-share-opens-whatsapp-composer: ${fail} check(s), ${mutFail} mutation(s) failed`); process.exit(1); }

@@ -96,7 +96,7 @@ import { useApp } from '@/store';
 import { pickResultsFoundSentence } from '@/data/resultsFoundRotation';
 import { pickNoResultsSentence } from '@/data/noResultsRotation';
 import { pickName } from '@/lib/nameSync';
-import { encodeSharePayload, shareLink, shareMessage } from '@/lib/shareSearch';
+import { encodeSharePayload, shareLink, shareMessage, SHARE_INVITE_LINE } from '@/lib/shareSearch';
 import { SHARE_LINK, shareNative } from '@/lib/share';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
@@ -728,7 +728,9 @@ export default function Agent() {
     // a COPY of this conversation (public.shared_chat) and shares its short /s/<code> link; the search
     // link above is only the fallback when that save fails. One copy per unchanged conversation.
     const prepareShare = () => chatShareUrl(q);
-    return { shareUrl: shareLink(origin, payload), prepareShare /* no text: the card shows the title — sending it too repeated it (owner 2026-10-18) */ };
+    // The text beside the link is the invite LINE, not the title (owner 2026-10-22: the card cut «Open it on
+    // Ezhalah, the AI real…» — say it in full as the message; the card keeps «يوسف شاركك: …» as its title).
+    return { shareUrl: shareLink(origin, payload), prepareShare, shareText: SHARE_INVITE_LINE[loc] };
   };
   // THE ONE STORE WRITER FOR THIS SCREEN. Every write into the shared query the Filter home binds to
   // goes through here, always sanitized — enforced by verify-af-state-never-leaks-into-filter.ts,
