@@ -710,12 +710,17 @@ export default function Home() {
       await ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).catch(() => null);
       // Then the trending DISTRICTS of the six trending cities (owner 2026-10-04: «the moment the user opens Ezhalah it
       // loads, not when he clicks»): most users pick one of them, and its district list is then already there.
+      // TOGETHER, not one after another (P1 2026-10-23): each call is ~40-60 ms of database time since the AF RPCs plan
+      // per call, but ~0.6 s of round trip through the front door, so six in a row kept city #6's list ~4 s away.
+      // Same six calls, same arguments, same cache keys — only the waiting changed.
+      // scripts/verify-trending-pools-warm-at-open.ts
+      if (cancelled) return;
+      const warm: number[] = [];
       for (const c of topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams)) {
-        if (cancelled) return;
         if (c.scopeKnown === false) break; // provisional names only: the pool did not load, nothing honest to warm
-        const cid = c.cityId;
-        await ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).catch(() => null);
+        warm.push(c.cityId);
       }
+      await Promise.all(warm.map((cid) => ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).catch(() => null)));
       for (const sel of ['Rent', 'Both', 'Buy'] as const) {
         if (cancelled) return;
         const sc = cityPoolScopeOf({ ...query, ...dealSelectionToQuery(sel, query.deal) });
