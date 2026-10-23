@@ -599,6 +599,18 @@ def authorize(s: cc.Session) -> str:
         for k in ("signedAppRenderInfo", "gridAppId", "accessTokens", "dataServiceUrl", "wix-data", "cloud-data"):
             i = _t.find(k)
             print(f"  PROBE razre {k}@{i}: {_t[max(0,i-150):i+250]!r}" if i >= 0 else f"  PROBE razre {k}: absent", flush=True)
+        hrefs = sorted(set(re.findall(r'href="([^"#]+)"', _t)))
+        print(f"  PROBE razre hrefs({len(hrefs)}): {hrefs[:120]}", flush=True)
+        _scr = re.findall(r'<script[^>]*src="([^"]+)"', _t)[:20]
+        _js = re.findall(r'(?:fetch|api|json)[^\s"]{0,80}', _t)[:30]
+        print("  PROBE razre scripts: " + repr(_scr), flush=True)
+        print("  PROBE razre jsonish: " + repr(_js), flush=True)
+        for path in ("/robots.txt", "/sitemap.xml", "/sitemap_index.xml", "/onepro-1/1", "/com/1", "/api/projects", "/projects"):
+            try:
+                g = s.get(BASE + path, timeout=45)
+                print(f"  PROBE razre GET {path} {g.status_code} {g.headers.get('content-type')} len={len(g.text or '')}: {(g.text or '')[:1200]!r}", flush=True)
+            except Exception as ex:  # noqa: BLE001
+                print(f"  PROBE razre GET {path} EXC {ex}", flush=True)
         t0 = s.get(TOKEN_API, timeout=45)
         print(f"  PROBE razre access-tokens {t0.status_code}: {(t0.text or '')[:1500]!r}", flush=True)
         raise RuntimeError("signedAppRenderInfo is gone from the page — the Wix auth shape changed")
