@@ -73,6 +73,9 @@ export const SHARE_LABEL_BREAKPOINT = 380;
 // with a drag-handle look; at/above it a compact floating card. Same SSR rule as every gate above.
 export const PICKER_SHEET_BREAKPOINT = 768;
 
+// «نماذج إزهله» popup (owner 2026-10-23): at/above this width it is the bigger centered laptop card.
+export const MODELS_POPUP_WIDE_BREAKPOINT = 768;
+
 // RETIRED 2026-09-12 (same day, a few hours later): LOADER_PILL_LABEL_BREAKPOINT drove a logo-only
 // compact tile on the search-loading strip below 640px. Owner reversed it — "put the name also,
 // because we need to include the name of each website" — so the name now always renders, every

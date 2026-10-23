@@ -96,8 +96,12 @@ const menu = read('src/components/AccountMenu.tsx');
 check('NO banner artwork in the account menu (owner removed it)', !menu.includes('eagle-night') && !menu.includes('LinearGradient'));
 check('profile row opens the display-name editor', /account-menu-profile[\s\S]{0,200}setEditing\(true\); go\('account', 1\)/.test(menu));
 check("Manage-account row opens in READ mode (no stale edit ride-along)", menu.includes("setEditing(false); go('account', 1)"));
-check('anchored panel pins direction rtl (escapes the sidebar LTR pin)', /panel: \{[\s\S]{0,220}direction: 'rtl'/.test(menu));
-check('both centered popups pin direction rtl', /centerCard: \{ direction: 'rtl'/.test(menu) && /centerCardWide: \{ direction: 'rtl'/.test(menu));
+// Owner 2026-10-23: the sheet follows the SCREEN language (Arabic right-first, English left-first) — still an
+// EXPLICIT direction on every surface, so the sidebar's LTR pin can never half-flip it.
+check('anchored panel pins an explicit direction from the screen language (escapes the sidebar LTR pin)',
+  /panel: \{[\s\S]{0,220}direction: dir as any/.test(menu) && /const dir = rtl \? 'rtl' : 'ltr';/.test(menu));
+check('both centered popups pin that direction',
+  /centerCard: \{ direction: dir as any/.test(menu) && /centerCardWide: \{ direction: dir as any/.test(menu) && /makeStyles\(C, resolved === 'dark', locale === 'ar'\)/.test(menu));
 // The change-phone dialog (phCard) was REMOVED with phone sign-in (owner 2026-09-01: Google and
 // Apple only). Retired deliberately rather than routed around; scripts/verify-no-phone-auth.ts
 // now asserts the dialog stays gone, which is the opposite of what this line used to pin.
@@ -108,8 +112,8 @@ check('persistName routes the rename through persistDisplayName', /const persist
 // Same intent, direction-aware form (reconciled 2026-08-29, mobile-UX pass): under Arabic's forced
 // RTL the physical top-right is spelled `left:` — the conditional keeps that AND stays correct for
 // a future LTR locale, which the bare literal did not.
-check('the close × lands physical top-right under RTL (direction-aware)',
-  /centerClose: \{ position: 'absolute', top: 12, \.\.\.\(I18nManager\.isRTL \? \{ left: 12 \} : \{ right: 12 \}\)/.test(menu));
+check('the close × sits at the reading end — English right, Arabic left (owner 2026-10-23)',
+  /centerClose: \{ position: 'absolute', top: 12, \.\.\.\(rtl \? \{ left: 12 \} : \{ right: 12 \}\)/.test(menu));
 
 // ── 7. ForceLightTheme the UTILITY still works, in case something needs it later ────────────────
 // EXECUTED: the real buildThemeCss() still emits the [data-ez-light] subtree block, and the
