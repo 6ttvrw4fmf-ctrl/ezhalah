@@ -197,6 +197,8 @@ function diffIds(rpcList, oracleSet) {
 async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal = [], category = null,
   group = null, type = null, city, district = null, answerAmenityIndex = null, answerBathrooms = null,
   answerFurnished = null, expectZero = false, skipFirst = false, backAndChange = false }) {
+  // AF_LT_ONLY: reproduce ONE journey by name (substring) instead of reading the whole run's summary (Falcon trap 18).
+  if (process.env.AF_LT_ONLY && !name.includes(process.env.AF_LT_ONLY)) return;
   console.log(`\n════════ JOURNEY: ${name} ════════`);
   const ctx = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'ar-SA', viewport });
   const page = await ctx.newPage();
