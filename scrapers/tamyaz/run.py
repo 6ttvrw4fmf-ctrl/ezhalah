@@ -151,6 +151,7 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         return None, category, "no_city"
     city_id, region_id = to_catalog(city_ar, re.sub(r"^منطقة\s+", "", region_ar) if region_ar else None)
     if not city_id:
+        print(f"  PROBE tamyaz unmapped location={loc!r} city={city_ar!r} region={region_ar!r}", flush=True)
         return None, category, "city_not_in_catalog"
     district_ar = find_district_in_text(district_raw, city_id) or find_district_in_text(title, city_id)
 

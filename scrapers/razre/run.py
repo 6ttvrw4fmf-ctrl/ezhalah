@@ -593,6 +593,14 @@ def authorize(s: cc.Session) -> str:
         raise RuntimeError(f"{BASE}/ returned {r.status_code} — cannot read the site's own token")
     m = _TOKEN_RE.search(r.text or "")
     if not m:
+        _t = r.text or ""
+        print(f"  PROBE razre: len={len(_t)} ctype={r.headers.get('content-type')} "
+              "sARI=" + str(_t.count("signedAppRenderInfo")), flush=True)
+        for k in ("signedAppRenderInfo", "gridAppId", "accessTokens", "dataServiceUrl", "wix-data", "cloud-data"):
+            i = _t.find(k)
+            print(f"  PROBE razre {k}@{i}: {_t[max(0,i-150):i+250]!r}" if i >= 0 else f"  PROBE razre {k}: absent", flush=True)
+        t0 = s.get(TOKEN_API, timeout=45)
+        print(f"  PROBE razre access-tokens {t0.status_code}: {(t0.text or '')[:1500]!r}", flush=True)
         raise RuntimeError("signedAppRenderInfo is gone from the page — the Wix auth shape changed")
     t = s.get(TOKEN_API, timeout=45)          # issues svSession; without it every query is a 400
     if t.status_code != 200:
