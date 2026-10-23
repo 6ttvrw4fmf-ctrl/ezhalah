@@ -154,3 +154,12 @@ def test_main_tallies_every_skip_into_end_run_notes(monkeypatch):
     assert calls["end"]["rows_seen"] == 4 and calls["end"]["rows_upserted"] == 2
     assert "investmentx1" in calls["end"]["notes"] and "type_title_conflictx1" in calls["end"]["notes"]
     assert calls["end"]["check_tables"] == ["tamyaz_residential_listings", "tamyaz_commercial_listings"]
+
+
+def test_the_district_comma_city_location_of_2026_10_19_is_read_city_last():
+    """CI crawl 2026-10-23 (run 39943742567): all 12 home rows now read «<district>، جدة» and every one
+    skipped as city_not_in_catalog — 0 rows saved for five nights."""
+    row, _, why = R.map_listing(_p(ROOF, location={"ar": "الفلاح، جدة", "en": "Al Falah, Jeddah"}))
+    assert why == "" and row["city_ar"] == "جدة" and row["district_ar"] == "حي الفلاح"
+    # a comma form that does not name a catalog city is still refused, never guessed
+    assert R.map_listing(_p(ROOF, location={"ar": "المركز، رابغ", "en": ""}))[2] == "city_not_in_catalog"
