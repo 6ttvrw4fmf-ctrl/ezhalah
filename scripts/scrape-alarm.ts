@@ -8,7 +8,7 @@
 // alarms if that stamp goes stale.
 //
 // A FAILED LOG QUERY IS NOT "NOBODY IS SCRAPING" (AGENTS.md): any failure exits 1 without stamping the heartbeat.
-import { CALLER_SQL, findSuspects, type CallerHour } from './lib/scrapeAlarm.ts';
+import { CALLER_SQL, catchUpStart, findSuspects, hourIso, type CallerHour } from './lib/scrapeAlarm.ts';
 
 const REF = 'aannarbkwcymrotzwdbo';
 const TOKEN = process.env.SUPABASE_ACCESS_TOKEN ?? '';
@@ -18,7 +18,13 @@ const die = (why: string): never => { console.error(`✗ scrape alarm could not 
 if (!TOKEN || !SERVICE) die('SUPABASE_ACCESS_TOKEN and SUPABASE_SERVICE_ROLE_KEY are required');
 
 const end = new Date(); end.setUTCSeconds(0, 0);
-const start = new Date(end.getTime() - 60 * 60 * 1000);
+// CATCH UP: every hour since the last successful run, not just the last hour. GitHub runs this "hourly" schedule
+// every 3-5 hours (measured 2026-10-23), so a one-hour window left most hours unchecked. Capped at the log API's
+// 24-hour limit; at least one hour; and if the last run cannot be read, the full 24 hours (never a smaller window).
+const lastOk = await fetch(`${URL_BASE}/rest/v1/ops_scrape_alarm_heartbeat?id=eq.1&select=last_ok_at`, {
+  headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` }, signal: AbortSignal.timeout(20_000),
+}).then((r) => (r.ok ? r.json() : null)).then((j) => (Array.isArray(j) && j[0]?.last_ok_at ? new Date(j[0].last_ok_at) : null)).catch(() => null);
+const start = catchUpStart(lastOk, end);
 const q = new URLSearchParams({ sql: CALLER_SQL, iso_timestamp_start: start.toISOString(), iso_timestamp_end: end.toISOString() });
 const res = await fetch(`https://api.supabase.com/v1/projects/${REF}/analytics/endpoints/logs?${q}`, {
   headers: { Authorization: `Bearer ${TOKEN}` }, signal: AbortSignal.timeout(60_000),
@@ -27,7 +33,7 @@ if (!res.ok) die(`log query http ${res.status}: ${(await res.text()).slice(0, 30
 const body = await res.json().catch(() => die('log query returned no JSON')) as { result?: unknown; error?: unknown };
 if (body.error || !Array.isArray(body.result)) die(`log query returned no rows array: ${JSON.stringify(body.error ?? body).slice(0, 300)}`);
 const rows: CallerHour[] = (body.result as Record<string, unknown>[]).map((r) => ({
-  ip: String(r.ip ?? ''), country: String(r.country ?? ''), city: String(r.city ?? ''), network: String(r.network ?? ''),
+  ip: String(r.ip ?? ''), hour: String(r.hour ?? ''), country: String(r.country ?? ''), city: String(r.city ?? ''), network: String(r.network ?? ''),
   user_agent: String(r.user_agent ?? ''), listing_rows: Number(r.listing_rows ?? 0), requests: Number(r.requests ?? 0),
   top_paths: Array.isArray(r.top_paths) ? (r.top_paths as string[]) : [],
 }));
@@ -41,7 +47,7 @@ const rest = (path: string, init: RequestInit) => fetch(`${URL_BASE}/rest/v1/${p
 
 for (const s of suspects) {
   await rest('ops_scrape_suspect', { method: 'POST', body: JSON.stringify({
-    window_start: start.toISOString(), ip: s.ip, country: s.country, city: s.city, network: s.network,
+    window_start: hourIso(s.hour, start), ip: s.ip, country: s.country, city: s.city, network: s.network,
     user_agent: s.user_agent, listing_rows: s.listing_rows, requests: s.requests, top_paths: s.top_paths }) });
   // The block: 24 h, refreshed if they are caught again. Enforced on every REST/RPC call by robot_gate (HTTP 429).
   await fetch(`${URL_BASE}/rest/v1/ops_blocked_ip`, {
@@ -60,8 +66,8 @@ for (const s of suspects) {
         + '(bar: 100,000 rows or 6,000 requests). This measures volume, not intent: if it is one of our own robots, '
         + 'delete its row from ops_blocked_ip and add its address to the SCRAPE_ALARM_KNOWN_IPS repo variable.',
       country: s.country, city: s.city, network: s.network, device: s.user_agent, top_paths: s.top_paths,
-      window_start: start.toISOString(),
-      lookup: `select * from ops_scrape_suspect where window_start = '${start.toISOString()}' order by listing_rows desc;`,
+      window_start: hourIso(s.hour, start),
+      lookup: `select * from ops_scrape_suspect where window_start = '${hourIso(s.hour, start)}' order by listing_rows desc;`,
     } }) });
 }
 await rest('ops_scrape_alarm_heartbeat?id=eq.1', { method: 'PATCH', body: JSON.stringify({

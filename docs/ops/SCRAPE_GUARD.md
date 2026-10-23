@@ -19,7 +19,9 @@ university, office or mobile network also shares one address across many people.
 3. `robot_gate()` (the PostgREST pre-request hook every REST/RPC call passes through) refuses a blocked address with
    **HTTP 429** for the public and signed-in roles. It **fails open**: if the lookup breaks, requests go through.
    Our robots using the service key are never checked.
-4. If the hourly job stops succeeding, `mon_detect_scrape_alarm_silent()` raises P2 after 4 hours.
+4. GitHub runs the "hourly" job every 3-5 hours, so each run checks every hour since the last good run (up to 24 h,
+   one row per caller per hour). If it stops succeeding, `mon_detect_scrape_alarm_silent()` raises P2 after 8 hours
+   (migration 20261023045428; it was 4 hours and fired on normal GitHub delays).
 
 Verified live 2026-10-21: the owner's own address, blocked for 40 s, got 429 on a table read and on an RPC. After
 unblocking it got 200. Faking `x-forwarded-for` / `x-real-ip` still got 429, and faking `cf-connecting-ip` is refused
