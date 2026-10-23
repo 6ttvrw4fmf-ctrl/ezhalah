@@ -279,7 +279,7 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
 22. A security or infrastructure change breaks robots the next day, not the product (10-23): the 10-21 search offset
    cap (nothing past offset 25,000) made three AF full-walk robots read the unreachable tail as MISSING (total == oracle,
    EXTRA 0), and the 10-21 front door (`/sb/rest/v1/` on our own site) failed the combined-budget «expected backend»
-   check. MISSING with EXTRA 0 and equal totals is a harness suspect first. Fix: `scripts/lib/searchDeepPageCap.ts`.
+   check. MISSING with EXTRA 0 and equal totals is a harness suspect first. Fix: the deep-page-cap helper in PR 8397.
 23. A checker's own «success» hides a quarantine (10-23): fleet-liveness reported success while aldarim was quarantined
    for 3 days. Read gate 3 per site from `ops_platform_liveness_coverage`, never from the job colour.
 
