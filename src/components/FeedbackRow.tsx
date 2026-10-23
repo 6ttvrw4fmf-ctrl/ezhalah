@@ -21,8 +21,11 @@ import { speakReadAloud, stopReadAloud, subscribeReadAloud, readAloudRefusal, ha
 import { readAloudRefusalMessageKey, type ReadAloudRefusal } from '@/lib/readAloudVoice';
 
 export default function FeedbackRow({
-  feedbackKey, shareUrl, shareText, prepareShare, onFeedback, readAloudSegments,
+  feedbackKey, shareUrl, shareText, prepareShare, onFeedback, readAloudSegments, rtl,
 }: {
+  // The reply's own direction (owner 2026-10-23: an English answer in the Arabic UI keeps its
+  // thumbs on the LEFT). Omitted = the UI locale's direction.
+  rtl?: boolean;
   feedbackKey: string;
   shareUrl?: string;
   // The line sent next to the link (owner 2026-10-17: a signed-in user shares THEIR SEARCH with
@@ -38,7 +41,8 @@ export default function FeedbackRow({
   // messages), this component only ever plays whatever it's given.
   readAloudSegments?: ReadAloudSegment[];
 }) {
-  const { t, isRTL, locale } = useI18n();
+  const { t, isRTL: uiRTL, locale } = useI18n();
+  const isRTL = rtl ?? uiRTL;
   const [rating, setRating] = useState<FeedbackRating | null>(() => getListingFeedback(feedbackKey));
   const reducedMotion = useReducedMotion();
   const [copied, setCopied] = useState(false);
