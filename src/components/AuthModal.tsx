@@ -295,7 +295,15 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
               {step === 'main' && (
                 <>
                   {/* What a shared link holds (owner 2026-10-18): «يوسف شاركك: شقق للإيجار في حي النرجس». */}
-                  {note ? <Text style={s.shareNote} accessibilityRole="text">{note}</Text> : null}
+                  {/* Owner-approved design 2026-10-22: the bold invite and «سجّل دخولك وتنفتح لك فوراً» under it, in
+                      a green box — no initial circle (owner: «no need for this letter») — in front of the visitor
+                      on phone and laptop. */}
+                  {note ? (
+                    <View style={s.shareNote} accessibilityRole="text">
+                      <Text style={s.shareNoteTitle}>{note}</Text>
+                      <Text style={s.shareNoteSub}>{t('Sign in and it opens right away')}</Text>
+                    </View>
+                  ) : null}
                   <Text style={[s.formHead, cp && c.formHead]}>{t('Sign in or create your free account')}</Text>
                   <Text style={[s.formSub, cp && c.formSub]}>{t('Sign in to unlock more of Ezhalah.')}</Text>
                   <Text style={[s.agree, cp && c.agree]}>
@@ -497,9 +505,12 @@ const s = StyleSheet.create({
 
   // Arabic typography: weights carry the hierarchy — no Latin letter-spacing on Arabic script.
   shareNote: {
-    alignSelf: 'stretch', textAlign: 'center', fontSize: 14, lineHeight: 21, fontWeight: '600', color: colors.ink,
-    backgroundColor: '#EEF5EF', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, marginBottom: 12,
+    alignSelf: 'stretch', alignItems: 'center',
+    backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine, borderRadius: 14,
+    paddingVertical: 10, paddingHorizontal: 14, marginBottom: 12,
   },
+  shareNoteTitle: { fontSize: 14.5, lineHeight: 21, fontWeight: '800', color: colors.chipIcon, textAlign: 'center' },
+  shareNoteSub: { fontSize: 12, lineHeight: 17, color: colors.muted, marginTop: 2, textAlign: 'center' },
   formHead: { fontSize: 24, fontWeight: '800', color: colors.ink, textAlign: 'center', marginBottom: 6, lineHeight: 34 },
   formSub: { fontSize: 14.5, color: colors.body, textAlign: 'center', marginBottom: 10, lineHeight: 22 },
   // Owner 2026-09-04: the agreement line reads as its own, separate block below the intro — not

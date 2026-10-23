@@ -6,6 +6,11 @@
 // the home link shows — «148 موقع · 390,592 إعلان · 353 مدينة» — in the card's language, and never a
 // word about the search itself. Any missing count → the plain tagline, never a zero.
 //
+// SUPERSEDED IN PART (owner 2026-10-22, approved mockup, after being told the numbers line would leave this
+// card): a card whose sender is known says the popup's own invite — «يوسف شاركك: عقارات في الرياض» — with
+// «افتحها على إزهله، محرك البحث العقاري بالذكاء الاصطناعي في السعودية» under it. The live numbers line stays
+// for a shared link whose card cannot be read (title «إزهله»), so the visitor still sees a real, true card.
+//
 // EXECUTED: the real api/share-card.ts handler runs here against a stubbed global fetch that answers
 // the two RPCs the way PostgREST does, plus the shared_chat_card lookup; the HTML it writes is read
 // back. Mutations re-break the line builder in a temp copy and prove the check fails.
@@ -14,7 +19,7 @@ import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { shareCardHtml, shareCardFactsLine, SHARE_CARD } from '../src/lib/shareSearch.ts';
+import { shareCardHtml, shareCardFactsLine, SHARE_CARD, SHARE_INVITE_LINE, shareInviteNote } from '../src/lib/shareSearch.ts';
 
 const root = join(import.meta.dirname, '..');
 let fail = 0;
@@ -29,6 +34,7 @@ const FACTS = { sites: 148, listings: 390592, cities: 353 };
 const LINE_AR = '148 موقع · 390,592 إعلان · 353 مدينة';
 const LINE_EN = '148 sites · 390,592 listings · 353 cities';
 const CARD = { q: { deal: 'Buy', category: 'Residential', location: 'الرياض' } as any, name: 'يوسف', locale: 'ar' as const };
+const INVITE = shareInviteNote(CARD.name, CARD.q, 'ar')!;
 
 console.log('\nThe shared-chat card carries the home link\'s live numbers line\n');
 
@@ -39,10 +45,12 @@ check('a missing count → the plain tagline, never a zero', shareCardFactsLine(
 check('no facts at all → the plain tagline', shareCardFactsLine(null, 'ar') === SHARE_CARD.ar.desc && shareCardFactsLine(undefined, 'en') === SHARE_CARD.en.desc);
 {
   const html = shareCardHtml('https://ezhalah-app.vercel.app', 'HvJnnVKT', CARD, FACTS);
-  check('the card HTML: title unchanged (the personal search title) …', ogTitle(html) === 'عقارات في الرياض من يوسف على إزهله', String(ogTitle(html)));
-  check('… and og:description is the live numbers line', ogDesc(html) === LINE_AR, String(ogDesc(html)));
+  check('the card HTML: title is the popup\'s invite «يوسف شاركك: …» …', ogTitle(html) === INVITE && INVITE.startsWith('يوسف شاركك'), String(ogTitle(html)));
+  check('… and og:description is the approved Saudi line', ogDesc(html) === SHARE_INVITE_LINE.ar, String(ogDesc(html)));
+  const unreadHtml = shareCardHtml('https://ezhalah-app.vercel.app', 'HvJnnVKT', null, FACTS);
+  check('a link whose card could not be read keeps the live numbers line under «إزهله»', ogTitle(unreadHtml) === 'إزهله' && ogDesc(unreadHtml) === LINE_AR, String(ogDesc(unreadHtml)));
   check('the line names nothing about the search (no deal, no district, no price)', !/شراء|للبيع|إيجار|الرياض|ر\.س/.test(ogDesc(html) ?? ''));
-  const noFacts = shareCardHtml('https://ezhalah-app.vercel.app', 'HvJnnVKT', CARD, null);
+  const noFacts = shareCardHtml('https://ezhalah-app.vercel.app', 'HvJnnVKT', null, null);
   check('without facts the card still renders, with the plain tagline', ogDesc(noFacts) === SHARE_CARD.ar.desc);
 }
 
@@ -77,8 +85,13 @@ answers = {
 };
 {
   const r = res(); await handler(req('HvJnnVKT'), r);
-  check('HANDLER: a saved chat renders the personal title …', ogTitle(r.body) === 'عقارات في الرياض من يوسف على إزهله', String(ogTitle(r.body)));
-  check('… and the live numbers line, with aqarmonthly folded into Aqar (148, the app\'s count)', ogDesc(r.body) === LINE_AR, String(ogDesc(r.body)));
+  check('HANDLER: a saved chat renders the popup\'s invite …', ogTitle(r.body) === INVITE, String(ogTitle(r.body)));
+  check('… and the approved Saudi line', ogDesc(r.body) === SHARE_INVITE_LINE.ar, String(ogDesc(r.body)));
+}
+answers = { ...answers, shared_chat_card: json([]) };
+{
+  const r = res(); await handler(req('HvJnnVKT'), r);
+  check('HANDLER: an unreadable chat → «إزهله» + the live numbers, aqarmonthly folded into Aqar (148, the app\'s count)', ogTitle(r.body) === 'إزهله' && ogDesc(r.body) === LINE_AR, String(ogDesc(r.body)));
 }
 answers = { ...answers, loader_scale_stats_ar: failing, loader_active_platforms_ar: failing };
 {
@@ -119,8 +132,9 @@ const mutant = async (from: string, to: string) => {
   mustCatch('the line drifting from the home card\'s approved shape (the «و» / «في» WhatsApp truncated)', m.shareCardFactsLine(FACTS, 'ar') !== LINE_AR);
 }
 {
-  const m = await mutant("const c = { site: SHARE_CARD[loc].site, desc: shareCardFactsLine(facts, loc) };", 'const c = SHARE_CARD[loc];');
-  mustCatch('the card ignoring the facts it was handed', ogDesc(m.shareCardHtml('https://e.app', 'HvJnnVKT', CARD, FACTS)) !== LINE_AR);
+  const m = await mutant("const c = { site: SHARE_CARD[loc].site, desc: invite ? SHARE_INVITE_LINE[loc] : shareCardFactsLine(facts, loc) };", 'const c = SHARE_CARD[loc];');
+  mustCatch('an unreadable link\'s card ignoring the facts it was handed', ogDesc(m.shareCardHtml('https://e.app', 'HvJnnVKT', null, FACTS)) !== LINE_AR);
+  mustCatch('a known sender\'s card losing the approved Saudi line', ogDesc(m.shareCardHtml('https://e.app', 'HvJnnVKT', CARD, FACTS)) !== SHARE_INVITE_LINE.ar);
 }
 {
   const handlerSrc = readFileSync(join(root, 'api/share-card.ts'), 'utf8');

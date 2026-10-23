@@ -191,6 +191,13 @@ export const SHARE_CARD = {
 // (11:42 PM screenshot, /s/lLzdSNTR); the 192 px one rendered as the small square beside the text (2:57 PM,
 // /s/bkTsnLiQ). Same 192 px file as the main link's card (middleware.ts, og-image-v6.png).
 export const SHARE_CARD_IMAGE_PATH = '/og-image-v6.png';
+// A SHARED LINK's card (owner 2026-10-22, approved mockup): the title is the SAME invite the visitor then sees
+// on the sign-in popup — «يوسف شاركك: شقق للإيجار في حي النرجس» (shareInviteNote) — and the line under it says
+// what Ezhalah is. The live counts stay on the plain home-link card (middleware.ts) and a broken link's card.
+export const SHARE_INVITE_LINE = {
+  ar: 'افتحها على إزهله، محرك البحث العقاري بالذكاء الاصطناعي في السعودية',
+  en: 'Open it on Ezhalah, the AI real estate search engine in Saudi Arabia',
+} as const;
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
@@ -221,8 +228,9 @@ export function shareCardHtml(origin: string, rawPayload: string | null | undefi
   const code = isShareCode(rawPayload);
   const d = code ? (chatCard ?? null) : decodeSharePayload(rawPayload);
   const loc = d?.locale ?? 'ar';
-  const c = { site: SHARE_CARD[loc].site, desc: shareCardFactsLine(facts, loc) };
-  const title = (d && shareTitle(d.name, d.q, loc)) || (loc === 'ar' ? 'إزهله' : 'Ezhalah');
+  const invite = d ? shareInviteNote(d.name, d.q, loc) : null;
+  const c = { site: SHARE_CARD[loc].site, desc: invite ? SHARE_INVITE_LINE[loc] : shareCardFactsLine(facts, loc) };
+  const title = invite || (loc === 'ar' ? 'إزهله' : 'Ezhalah');
   const ok = !!rawPayload && (code || !!d);
   const to = ok ? shareLandingPath(rawPayload!) : '/';
   const url = `${o}${ok ? `/s/${rawPayload}` : '/'}`;
