@@ -46,6 +46,15 @@ web page is NOT their liveness oracle: use Gathern's own search list (the unit s
 ⚡; removal needs the unit gone from Gathern's list on two consecutive daily reads (or a proven app-side «not found»). Never
 hide a whole city or cohort in one run without that proof (the cardinality guard). Report a daily line: «🏕️ Gathern: live N ·
 checked today N · hidden today N · oldest unchecked N h». Anything above 26 h unchecked is RED.
+**And every city, every night (owner 2026-10-22: «all cities, not only Riyadh … we need more of Gathern … the lifecycle
+engineer puts a close eye»).** Gathern is daily accommodation: units appear and vanish within days, so a city the crawl
+missed tonight is a city whose new units nobody can find tomorrow. Add to the daily line: «cities failed N · cities
+incomplete N (cap N) · recovered on retry N», read from the crawl's `scrape_runs.notes`. An open
+`gathern_city_coverage_gap` alert is your FIRST bug that night: it sat open from 10-18 to 10-22 while Riyadh was cut at
+400 pages every night and the same small cities (Najran, Sakaka, Al-Ahsa, Thuwal, Layla, Sabya…) were refused. A city
+marked `cap` means the safety cap (2000 pages) was reached with units still coming: raise it, never accept it. Units that
+open only in Gathern's app (website 404) stay off Ezhalah — the owner confirmed it again on 2026-10-22: only units that
+open, never a dead page.
 
 ## 🧹 BUGS MUST DISAPPEAR, EVERY DAY (owner, 2026-10-11: «my goal is everyday making the bugs disappear … better and better»)
 The owner judges each night by one question: **are there fewer bugs on screen than yesterday?** A bug that is
