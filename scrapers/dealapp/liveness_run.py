@@ -199,7 +199,14 @@ def _plan_worklist(cands: list[dict], limit: int) -> list[dict]:
     k = min(len(struck), max(1, int(limit * STRUCK_SHARE)))
     take_rest = min(len(rest), limit - k)
     k = min(len(struck), limit - take_rest)
-    return struck[:k] + rest[:take_rest]
+    # INTERLEAVED, struck first (2026-10-23): a struck ad's own page is usually dealapp's no-listing
+    # render, which counts only between two live-ad renders (bracketed_none). Read as one block, struck
+    # rows had only each other as neighbours, so the bracket could almost never close around them.
+    picked_struck, picked_rest = struck[:k], rest[:take_rest]
+    out: list[dict] = []
+    for i in range(max(len(picked_struck), len(picked_rest))):
+        out += picked_struck[i:i + 1] + picked_rest[i:i + 1]
+    return out
 
 
 BOGUS_ADID = "999999999"
