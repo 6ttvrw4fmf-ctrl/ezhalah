@@ -6,6 +6,11 @@
 // *_robot_gate_lets_front_door_visitors_through.sql lets a vouched front-door visitor through unless it carries the
 // robot pass. This file guards that edit's shape and that api/sb.ts still marks our robots with the pass — if the
 // front door stopped sending x-ezhalah-robot, our own post-deploy robots would skip the lanes and crowd users again.
+// FOLLOW-UP (2026-10-23, owner/coordinator): our own TEST COPIES (CI's headless builds, e.g. the required PR check
+// «built app runs») call the database directly with user-agent HeadlessChrome, so they skipped the lanes too.
+// *_robot_lanes_hold_our_test_copies_too.sql queues a caller with the handshake + the «ezhalah-gate» log marker and no
+// vouched visitor — exactly what scripts/lib/robotPassCore.mjs / gateFetch.mjs send. Guarded below with the marker
+// the harness adds, so dropping the marker from the harness (which would silently free the test copies) also fails.
 //   node --experimental-strip-types scripts/verify-robot-gate-lets-front-door-through.ts   (discovered by `npm test`)
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -46,6 +51,28 @@ mustCatch('a full-body replace', problems(sql + '\ncreate or replace function pu
 mustCatch('the front door dropping the robot pass', problems(sql, sb.replace("if (robot) headers.set('x-ezhalah-robot', '1');", '')).length > 0);
 mustCatch('no apply-time proof for direct scripts', problems(sql.replace('a direct node script no longer queues', 'x'), sb).length > 0);
 mustCatch('a later full redefinition without the branch', reverted([{ f: '29990101000000_x.sql', s: 'create or replace function public.robot_gate() returns void language plpgsql as $$ begin end $$;' }]).length > 0);
+
+// ── the test-copy follow-up ──────────────────────────────────────────────────────────────────────────────────
+const file2 = files.filter((f) => /_robot_lanes_hold_our_test_copies_too\.sql$/.test(f)).at(-1);
+const sql2 = file2 ? readFileSync(join(dir, file2), 'utf8') : '';
+const core = readFileSync(join(root, 'scripts', 'lib', 'robotPassCore.mjs'), 'utf8');
+const gf = readFileSync(join(root, 'scripts', 'lib', 'gateFetch.mjs'), 'utf8');
+function problems2(s: string, harness: string, fetchHook: string): string[] {
+  const fail: string[] = [];
+  if (!s) return ['migration *_robot_lanes_hold_our_test_copies_too.sql is missing'];
+  if (!/or \(visitor is null and coalesce\(hdr ->> 'x-ezhalah-gate', ''\) <> ''\s+and coalesce\(hdr ->> 'x-client-info', ''\) like '%ezhalah-gate%'\) then\s+null;/.test(s)) fail.push('a marked test copy (handshake + «ezhalah-gate», no vouched visitor) does not queue');
+  if (/create\s+or\s+replace\s+function\s+public\.robot_gate/i.test(s)) fail.push('full-body replace of robot_gate — use the needle edit');
+  if (!/a caller that must not queue did/.test(s) || !/a marked test copy does not queue/.test(s)) fail.push('no apply-time proof (no-lane callers + marked test copy)');
+  if (!/'Vercel Edge Functions', 'x-ezhalah-gate', sec\)/.test(s)) fail.push('the apply-time proof does not cover our link-preview helper (handshake without the marker)');
+  if (!/ezhalah-gate`\.trim\(\)/.test(harness)) fail.push('robotPassCore.mjs no longer marks direct robot calls with «ezhalah-gate» — test copies would skip the lanes');
+  if (!/ezhalah-gate`\.trim\(\)/.test(fetchHook)) fail.push('gateFetch.mjs no longer marks direct robot calls with «ezhalah-gate»');
+  return fail;
+}
+const p2 = problems2(sql2, core, gf);
+check('our test copies (handshake + marker, no vouched visitor) queue in the robot lanes; preview helpers do not', p2.length === 0, p2.join('; '));
+mustCatch('test copies freed again (marker branch removed)', problems2(sql2.replace("and coalesce(hdr ->> 'x-client-info', '') like '%ezhalah-gate%'", ''), core, gf).length > 0);
+mustCatch('the harness dropping the marker', problems2(sql2, core.replaceAll('ezhalah-gate`.trim()', '`.trim()'), gf).length > 0);
+mustCatch('no proof for the link-preview helper', problems2(sql2.replace("'Vercel Edge Functions', 'x-ezhalah-gate', sec)", "'x', 'y', sec)"), core, gf).length > 0);
 
 if (failed) { console.error(`\n❌ verify-robot-gate-lets-front-door-through: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-robot-gate-lets-front-door-through: real users never wait in the robot lanes.');
