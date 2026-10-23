@@ -39,10 +39,10 @@ env:
 jobs:
   sync:
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
-    timeout-minutes: 60
+    timeout-minutes: 150
     strategy:
       fail-fast: false        # one shard failing never blocks the others
-      max-parallel: 12
+      max-parallel: 6         # two waves of 6 — spreads our load on gathern over time (2026-10-23)
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
@@ -58,7 +58,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SCRAPE_MIN_INTERVAL: "0.3"
+          SCRAPE_MIN_INTERVAL: "1.2"   # 0.3 got Riyadh refused at page 128 (2026-10-23)
         run: |
           mkdir -p seen
           exec python -m scrapers.gathern.run --shard ${{ matrix.shard }}/12 \
