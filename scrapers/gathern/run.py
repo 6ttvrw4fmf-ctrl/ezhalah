@@ -185,12 +185,12 @@ def _throttle() -> None:
     _last = time.monotonic()
 
 
-def _on_throttled(attempt: int, sleep=time.sleep) -> None:
+def _on_throttled(attempt: int, sleep=None) -> None:
     """gathern refused us for speed: wait out its window, then keep the slower pace."""
     global _interval, _THROTTLE_HITS
     _THROTTLE_HITS += 1
     _interval = min(MAX_INTERVAL, max(_interval, MIN_INTERVAL) * 1.5)
-    sleep(THROTTLE_WAITS_S[min(attempt, len(THROTTLE_WAITS_S) - 1)])
+    (sleep or time.sleep)(THROTTLE_WAITS_S[min(attempt, len(THROTTLE_WAITS_S) - 1)])  # looked up at call time, so a patched time.sleep is honoured
 
 
 def pace_report() -> str:
