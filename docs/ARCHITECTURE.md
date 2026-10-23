@@ -1310,6 +1310,9 @@ migration-drift-guard rule in `AGENTS.md`).
   Big and medium cities (≥300 ads) only until 3 clean checker nights. The line ends with its greeting's
   emoji (☀️ 🌙 🕌 🌴 👋), changes every hour, two lines in three about the user's searched city, city
   picked before fact, never the same city or kind twice in a row; tapping it opens «كيف تشتغل؟».
+  The sheet heading uses the owner's simple green falconer with ghutra, agal and raised glove,
+  without a face circle, in place of the magnifying-glass emoji in both languages (owner 2026-10-23).
+  Artwork: `assets/icons/insight-falconer.png`; explanatory copy and dismissal stay the same.
   Guards: `scripts/verify-insight-welcome.ts`, `scripts/verify-filter-welcome.ts`.
 
 ---
