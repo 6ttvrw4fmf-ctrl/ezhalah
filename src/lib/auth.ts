@@ -73,7 +73,12 @@ export function persistDisplayName(v: string): void {
 
 export function mapSupabaseUser(u: any, method: AuthUser['method']): AuthUser {
   const meta = u?.user_metadata ?? {};
-  const name: string = meta.full_name || meta.name || u?.email?.split('@')[0] || 'User';
+  // The name is only ever what the provider SENT (owner 2026-10-23). Apple sends it on the FIRST
+  // authorization only, so a later sign-up has none. The old fallback, the email's local part, turned an
+  // Apple private-relay address («66s7zmj7t9@privaterelay.appleid.com») into a "name" that the
+  // translit backfill then rendered as Arabic gibberish («سدسزمجتت»). No name → '' → the UI shows
+  // «أضف اسمك» and the user types it. scripts/verify-display-name-never-from-email.ts pins this.
+  const name: string = String(meta.full_name || meta.name || '').trim();
   const sub: string = u?.email || name;
   return { method, name, initials: initialsFrom(name, sub), sub };
 }
