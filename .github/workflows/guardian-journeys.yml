@@ -47,10 +47,10 @@ concurrency:
 
 jobs:
   guardian:
-    # GitHub-hosted on purpose, every trigger: 20-48 runs a day would otherwise queue behind the
-    # scrapers on the single self-hosted runner, and the pulse would stop measuring the site and
-    # start measuring the runner. Chromium is all this needs; the repo is public, so minutes are free.
-    runs-on: ubuntu-latest
+    # The repo-wide runner switch (verify-runner-switch.ts): GitHub-hosted today. If EZ_RUNNER is ever
+    # set, this 30-minute pulse moves to our server with everything else; watch that it does not queue
+    # behind the scrapers there, or the pulse measures the runner instead of the site.
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 30
     # A deploy that FAILED shipped nothing; re-driving production would only measure the old bundle.
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
