@@ -3799,7 +3799,14 @@ export default function Agent() {
     // re-hydrates when it is opened again.
     if (conversationEpochRef.current !== epoch) return;
     const restored = t ? restoreChat(t) : null;
-    if (restored) {
+    const hasSearch = !!(q?.deal || q?.location || q?.category || q?.type || q?.detail || (q as any)?.priceBand || (q as any)?.priceInput);
+    // A SEARCH CHAT SAVED BEFORE ITS ANSWER LANDED (owner 2026-10-23: a saved chat reopened as his
+    // request alone, no listings — «this should never ever happen»). The capture effect stores the
+    // screen as it is, so a chat left mid-search (or whose search failed) ends on the user's own
+    // request. Restoring that verbatim is a dead end; the search re-runs instead (snapshot first),
+    // and the capture effect then saves the answered conversation over the half one.
+    const unansweredSearch = !!restored && hasSearch && restored.msgs[restored.msgs.length - 1]?.role === 'user';
+    if (restored && !unansweredSearch) {
       let restoringDone: Promise<void> = Promise.resolve();
       setMsgs(restored.msgs as unknown as ChatMsg[]);
       {
@@ -3835,7 +3842,6 @@ export default function Agent() {
     // No transcript anywhere. A search chat falls back to the legacy snapshot/replay view; a
     // chat-only entry (empty query — its conversation predates transcripts) has nothing to replay,
     // so it opens as the greeting screen, exactly as it always did.
-    const hasSearch = !!(q?.deal || q?.location || q?.category || q?.type || q?.detail || (q as any)?.priceBand || (q as any)?.priceInput);
     if (!hasSearch) { greetedRef.current = true; sendGreeting(); return; }
     openStatic(q, override, entry?.snapshot);
   };
@@ -4572,7 +4578,7 @@ export default function Agent() {
                     ) : null}
                     {/* 👍👎 + Share under a plain reply too (owner 2026-10-23): its Share is the invitation to join. */}
                     {!m.refine && (!m.typing || doneTyping[m.id]) ? (
-                      <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={buildResultsReadAloudSegments(txt, [], undefined, locale)} {...inviteFor()} />
+                      <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={buildResultsReadAloudSegments(txt, [], undefined, locale)} {...inviteFor()} />
                     ) : null}
                   </View>
                 );
@@ -4700,7 +4706,7 @@ export default function Agent() {
                     // but the RESPONSE-level feedback row still belongs to this turn (owner 2026-08-30: thumbs
                     // must not vanish merely because listing count = 0; the user is rating the answer, and
                     // "nothing matched" IS an answer). Read-aloud reads the zero-result intro alone.
-                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined, locale)} {...inviteFor()} />
+                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined, locale)} {...inviteFor()} />
                   ) : (
                     <>
                       {/* The default "مرتبة حسب الأقرب لطلبك" note was removed per owner request (2026-07-07).
@@ -4946,7 +4952,7 @@ export default function Agent() {
                                   absolute overlay, so without this gate the two buttons stayed rendered
                                   (and reachable) underneath it. */}
                               {showActionsRow ? (
-                                <View testID="results-actions" style={[s.mBtnRow, { flexDirection: locale === 'ar' ? 'row-reverse' : 'row', marginTop: 4 }]}>
+                                <View testID="results-actions" style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row', marginTop: 4 }]}>
                                   {hasMore ? (
                                     // Secondary now (owner 2026-09-20: gold primary is the narrow
                                     // button below). Dots go colors.primary — the fill is white now.
@@ -5027,7 +5033,7 @@ export default function Agent() {
                                 closing note + available actions above (owner 2026-08-23). Sliced to `shown`
                                 — never past what's actually rendered right now ("no hidden listing should be
                                 spoken") — but otherwise reads every visible card (owner 2026-08-22: no further cap). */}
-                            <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={readAloudSegments} {...shareFor(m.result.query)} />
+                            <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={readAloudSegments} {...shareFor(m.result.query)} />
                           </>
                         );
                       })()}
