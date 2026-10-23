@@ -2,7 +2,7 @@
 // One row per caller (address) for the past hour, aggregated from the API gateway logs by CALLER_SQL below.
 
 export type CallerHour = {
-  ip: string; country: string; city: string; network: string; user_agent: string;
+  ip: string; hour: string; country: string; city: string; network: string; user_agent: string;
   listing_rows: number; requests: number; top_paths: string[];
 };
 
@@ -31,10 +31,13 @@ export function findSuspects(rows: CallerHour[], knownIps: string[] = []): Calle
 // summed under a few server addresses, so it is NOT judged here: blocking those addresses would block everyone. The
 // front door forwards each visitor's real address to robot_gate instead (20261021120255). STATED GAP until a per-visitor
 // count exists for front-door traffic: a scraper using the front door is caught by BotID, not by this alarm.
+// ONE ROW PER CALLER PER HOUR, over every hour since the last successful run (2026-10-23: GitHub runs this "hourly"
+// schedule only every 3-5 hours, so a one-hour window left gaps a copier could use). The bar stays per hour.
 // Rows per response come from content-range ("0-999/*" is 1000 rows). Listing paths only: the location catalogue
 // (location_index_live, ~14k rows) is loaded whole by every visitor and is not inventory.
 export const CALLER_SQL = `
 select log_attributes['request.headers.cf_connecting_ip'] as ip,
+  toStartOfHour(timestamp) as hour,
   any(log_attributes['request.cf.country']) as country,
   any(log_attributes['request.cf.city']) as city,
   any(log_attributes['request.cf.asOrganization']) as network,
@@ -48,7 +51,22 @@ from logs
 where source = 'edge_logs'
   and (log_attributes['request.path'] like '/rest/v1/%listings%' or log_attributes['request.path'] like '/rest/v1/rpc/location_search%')
   and not (log_attributes['request.headers.x_client_info'] like '%ezhalah-front-door%' and log_attributes['request.cf.asOrganization'] ilike '%amazon%')
-group by ip
+group by ip, hour
 having listing_rows >= 5000 or requests >= 1000
 order by listing_rows desc
 limit 200`;
+
+/** Where a run's window starts: the hour of the last successful run, between 1 and 24 hours back (the log API's limit).
+ *  An unreadable last run means the full 24 hours, never a smaller window. */
+export function catchUpStart(lastOk: Date | null, end: Date): Date {
+  const maxBack = end.getTime() - 24 * 3600 * 1000 + 60 * 1000;
+  const minBack = end.getTime() - 3600 * 1000;
+  const from = lastOk && !Number.isNaN(lastOk.getTime()) ? Math.floor(lastOk.getTime() / 3600_000) * 3600_000 : maxBack;
+  return new Date(Math.min(minBack, Math.max(maxBack, from)));
+}
+
+/** The log row's hour («2026-10-23 03:00:00») as ISO, or the run's start if it cannot be read. */
+export function hourIso(hour: string, fallback: Date): string {
+  const d = new Date(`${hour.replace(' ', 'T')}Z`);
+  return Number.isNaN(d.getTime()) ? fallback.toISOString() : d.toISOString();
+}
