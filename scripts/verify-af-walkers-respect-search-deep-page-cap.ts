@@ -68,6 +68,17 @@ const fsd = readFileSync(join(root, 'scripts/verify-af-full-surface-differential
 const everyJudgeHasPage = (src: string) => [...src.matchAll(/judgeOption\(\{[^}]*\}/g)].every((m) => /page: PAGE/.test(m[0]));
 check('verify-af-full-surface-differential.ts hands every judgeOption() its page size', everyJudgeHasPage(fsd), 'a judgeOption call without page: PAGE');
 mustCatch('a judgeOption call losing its page size', !everyJudgeHasPage(fsd.replace('page: PAGE, ', '')));
+// The OR/AND set algebra must reason over the certified set, never over two truncated walks (10-23 Jeddah:
+// «intersection expected 11126 got 25500»): every judgeUnion/judgeIntersection call and every walked set handed to
+// the algebra goes through algebraIds().
+const algebraRouted = (src: string) =>
+  /judgeIntersection\(A\.ids, B\.ids, algebraIds\(r, o, v\)\)/.test(src)
+  && /judgeUnion\(a\[1\]\.ids, b\[1\]\.ids, algebraIds\(r, o, v\)\)/.test(src)
+  && (src.match(/return \{ ids: algebraIds\(r, o, v\), total: r\.total \}/g) ?? []).length >= 2
+  && /v\.ok && new Set\(r\.ids\)\.size < r\.total \? o\.ids : r\.ids/.test(src);
+check('the OR/AND set algebra reasons over the certified set (algebraIds) past the cap', algebraRouted(fsd), 'a judgeUnion/judgeIntersection/return not routed through algebraIds');
+mustCatch('the AND algebra back on the truncated walk', !algebraRouted(fsd.replace('judgeIntersection(A.ids, B.ids, algebraIds(r, o, v))', 'judgeIntersection(A.ids, B.ids, r.ids)')));
+mustCatch('algebraIds trusting a request that did NOT pass', !algebraRouted(fsd.replace('v.ok && new Set(r.ids).size < r.total ? o.ids : r.ids', 'new Set(r.ids).size < r.total ? o.ids : r.ids')));
 
 if (failed) { console.error(`\n❌ verify-af-walkers-respect-search-deep-page-cap: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-af-walkers-respect-search-deep-page-cap: the AF walks read the offset cap as a cap, not as lost listings.');

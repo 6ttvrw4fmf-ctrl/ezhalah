@@ -284,6 +284,13 @@ async function rpcIds(body: Record<string, unknown>): Promise<{ ids: string[]; t
   }
   return { ids, total };
 }
+// The id set the OR/AND set algebra reasons over. Past the search RPC's offset cap (scripts/lib/searchDeepPageCap.ts) a
+// walk holds only the reachable rows, so A ∩ B over two truncated walks is not A ∩ B (Jeddah Apartment/Buy, 10-23:
+// «intersection expected 11126 got 25500»). Once judgeOption() has PASSED this exact request — RPC total == oracle,
+// every reachable RPC row eligible, MISSING == the tail only — the oracle set is that request's result set, so the
+// algebra uses it. A request that did not pass keeps its own walk and fails loudly as before.
+const algebraIds = (r: { ids: string[]; total: number }, o: { ids: string[] }, v: { ok: boolean }) =>
+  (v.ok && new Set(r.ids).size < r.total ? o.ids : r.ids);
 type OracleOut = { ids: string[]; rows: Row[]; unhandled: string[] };
 async function oracle(body: Record<string, unknown>, cols: string[] = []): Promise<OracleOut> {
   const { qs, unhandled } = buildOracleQS(body, { typeMacros: TYPE_MACROS, ...(DIRECTION_VARIANTS.map ? { directionVariants: DIRECTION_VARIANTS.map } : {}) });
@@ -437,7 +444,7 @@ async function verifyOption(label: string, base: Record<string, unknown>, opt: O
       } else {
         pass(label, `chip=${chip ?? '—'} = rpc ${r.total} = oracle ${o.ids.length} · ${v.nullLeaks} null-leaks · ${v.rowViolations} violations`);
       }
-      return { ids: r.ids, total: r.total };
+      return { ids: algebraIds(r, o, v), total: r.total };
     } catch (e: any) {
       if (isSchemaCacheUnresolved(e)) { unmeasured(label, e); return null; }
       fail(label, `probe error: ${e.message}`); return null;
@@ -501,7 +508,7 @@ for (const scope of SCOPES) {
       M.basePurity++;
       if (!v.ok) { fail(`${tag} · baseline (no AF)`, v.reasons.join(' | ')); M.missing += v.missing.length; M.extra += v.extra.length; }
       else pass(`${tag} · baseline (no AF)`, `${r.total} rows, chip total ${total}`);
-      return { ids: r.ids, total: r.total };
+      return { ids: algebraIds(r, o, v), total: r.total };
     });
     if (!baseline || baseline.total === 0) { if (baseline) info(`${tag}: empty cohort in this scope — options skipped`); continue; }
 
@@ -566,9 +573,9 @@ for (const scope of SCOPES) {
         const params = { p_directions: [ka, kb] };
         const [r, o, footer] = await Promise.all([rpcIds(searchBody(base, params)), oracle(searchBody(base, params), ['direction_ar']), rpc('apartment_guided_counts_ar', countBody(base, params))]);
         M.orCombos++;
-        const u = judgeUnion(a[1].ids, b[1].ids, r.ids);
         const chip = Number(footer?.[0]?.cnt_selected);
         const v = judgeOption({ label: 'or', chip, applied: null, rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred: { kind: 'in', col: 'direction_ar', vs: [...(DIRECTION_VARIANTS.map?.[ka] ?? [ka]), ...(DIRECTION_VARIANTS.map?.[kb] ?? [kb])] } });
+        const u = judgeUnion(a[1].ids, b[1].ids, algebraIds(r, o, v));
         if (o.unhandled.length) skip(`${tag} · OR ${ka}+${kb}`, o.unhandled[0]);
         else if (!u.ok || !v.ok) fail(`${tag} · OR ${ka}+${kb}`, `union expected ${u.expected} got ${u.got} (missing ${u.missing.length}, extra ${u.extra.length}); ${v.reasons.join(' | ')}`);
         else pass(`${tag} · OR ${ka}+${kb}`, `${a[1].chip} ∪ ${b[1].chip} = ${r.total} (footer ${chip} = oracle ${o.ids.length})`);
@@ -590,8 +597,8 @@ for (const scope of SCOPES) {
         const [r, o] = await Promise.all([rpcIds(searchBody(base, params)), oracle(searchBody(base, params), strictColsOf(pred))]);
         M.andCombos++; M.secondRoundChips++;
         if (o.unhandled.length) { skip(`${tag} · AND ${A.opt.key} ∧ ${B.opt.key}`, o.unhandled[0]); return; }
-        const it = judgeIntersection(A.ids, B.ids, r.ids);
         const v = judgeOption({ label: 'and', chip: chipB, applied: null, rpcTotal: r.total, page: PAGE, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred });
+        const it = judgeIntersection(A.ids, B.ids, algebraIds(r, o, v));
         M.missing += v.missing.length; M.extra += v.extra.length; M.nullLeaks += v.nullLeaks; M.rowViolations += v.rowViolations;
         if (!it.ok || !v.ok) fail(`${tag} · AND ${A.opt.key} ∧ ${B.opt.key}`, `intersection expected ${it.expected} got ${it.got} (missing ${it.missing.length}, extra ${it.extra.length}); second-round chip ${chipB}; ${v.reasons.join(' | ')}`);
         else pass(`${tag} · AND ${A.opt.key} ∧ ${B.opt.key}`, `${A.chip} ∩ ${B.chip} = ${r.total} (chip-in-round-2 ${chipB} = oracle ${o.ids.length})`);
