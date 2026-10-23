@@ -314,6 +314,18 @@ const guardTellsBlockedFromBlank = (src: string) =>
 check('speed-live.mjs excludes a blank frame over a 4xx/5xx top-level load as inconclusive (never ✗)', guardTellsBlockedFromBlank(guardSrc));
 mustCatch('a guard that drops the top-level status check', !guardTellsBlockedFromBlank(guardSrc.replace('seen === null && (top === 0 || top >= 400)', 'false')));
 mustCatch('a guard that stops measuring a blank 200 page', !guardTellsBlockedFromBlank(guardSrc.replace('times.push(seen ?? 99_999)', 'if (seen !== null) times.push(seen)')));
+
+// AN ERROR PAGE'S HEADERS ARE NOT THE AD'S (🔧 2026-10-23). ibaax.sa answered HTTP 521 to the runner (run 39940456792)
+// and Cloudflare's 521 page carries X-Frame-Options: SAMEORIGIN, so step 1 read «REFUSES framing» ×3 on the very loads
+// step 2 excluded as inconclusive. The header check must run only on a 2xx/3xx answer: a 4xx/5xx or no answer is
+// skipped, said aloud, and left to the step-2 exclusion.
+const guardSkipsHeadersOnErrorPage = (src: string) =>
+  /if \(!res \|\| res\.status >= 400\) \{[^\n]*header check skipped[^\n]*continue; \}/.test(src)
+  && src.indexOf('if (!res || res.status >= 400)') < src.indexOf("res?.headers.get('x-frame-options')");
+check('speed-live.mjs skips the framing-header check on a 4xx/5xx (or absent) top-level answer', guardSkipsHeadersOnErrorPage(guardSrc));
+mustCatch('a guard that reads X-Frame-Options off an error page', !guardSkipsHeadersOnErrorPage(guardSrc.replace('if (!res || res.status >= 400)', 'if (false)')));
+mustCatch('a guard that checks the headers before it looks at the status', !guardSkipsHeadersOnErrorPage(
+  guardSrc.replace("const xfo = res?.headers.get('x-frame-options') ?? '';", '').replace("const topStatus = new Map();", "const xfo0 = res?.headers.get('x-frame-options') ?? ''; const topStatus = new Map();")));
 // A suffix match without the dot boundary (the lookalike mutant).
 const sloppySuffix = (url: string) => IN_APP_VIEWER_HOSTS.find((h) => new URL(url).hostname.endsWith(h)) ?? null;
 mustCatch('a host match without the dot boundary', sloppySuffix('https://notdealapp.sa/x') !== null);
