@@ -212,7 +212,28 @@ for (const marker of ['NOTHING WAS DEPLOYED', 'DEPLOY SUCCEEDED', 'POST-DEPLOY V
 // Comments are stripped first: prose *describing* the defect legitimately says "untouched", and
 // only executable lines can actually mislead a reader of the run summary.
 const wfCode = stripComments(wf);
-const shipsFromLog = wfCode.search(/grep[^\n]*"\$LOG"/);
+// The evidence-read may be inline (`grep ... "$LOG"`, the original shape) OR sourced from a shared,
+// independently-tested library (scripts/deploy-report.sh, extracted 2026-09-12 so the parsing could
+// finally be executed by scripts/verify-deploy-report.ts instead of only trusted by reading it).
+// Accept the sourced form ONLY if verified structurally, not by name: the workflow must both source
+// the file and call its function, AND that file must itself actually grep the log argument — a
+// same-named decoy that does nothing does not satisfy this.
+const REPORT_LIB = 'scripts/deploy-report.sh';
+const sourcesReportLib = new RegExp(`\\.\\s+${REPORT_LIB.replace(/\./g, '\\.')}\\b`).test(wfCode)
+  && /deploy_report_verdict\s+\/tmp\/safe-deploy\.log/.test(wfCode);
+// Not just "the library mentions $log somewhere" (deploy-report.sh also greps $log for
+// REFUSED_PRE/POST_FAILED/DEPLOY_URL, so that alone wouldn't catch SHIPPED specifically going
+// static) — require the SAME ordering proof one level deeper: a grep against $log genuinely
+// precedes the SHIPPED=yes assignment INSIDE the sourced file too.
+const libReallyReadsLog = existsSync(REPORT_LIB) && (() => {
+  const libCode = stripComments(readFileSync(REPORT_LIB, 'utf8'));
+  const libGrepsLog = libCode.search(/grep[^\n]*"\$log"/);
+  const libSetsShipped = libCode.search(/SHIPPED=yes/);
+  return libGrepsLog !== -1 && libSetsShipped !== -1 && libGrepsLog < libSetsShipped;
+})();
+const shipsFromLogInline = wfCode.search(/grep[^\n]*"\$LOG"/);
+const shipsFromLog = shipsFromLogInline !== -1 ? shipsFromLogInline
+  : (sourcesReportLib && libReallyReadsLog ? wfCode.search(new RegExp(`\\.\\s+${REPORT_LIB.replace(/\./g, '\\.')}\\b`)) : -1);
 const firstUntouched = wfCode.search(/untouched/);
 check(firstUntouched === -1 || (shipsFromLog !== -1 && shipsFromLog < firstUntouched),
   'any "production is untouched" claim is gated on log evidence, not job.status',
