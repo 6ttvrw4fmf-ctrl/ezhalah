@@ -1089,9 +1089,13 @@ def prune_unseen(
         resaw = f"re-saw {len(existing) - len(gone)} of {len(existing)} active"
         if len(gone) > max_prune_frac * len(existing):
             _PRUNE_TRIPS.append(f"{table} collapse ({resaw})")
+            _read_gone_after_refused_prune(table, seen, source, verify_gone, shards, len(existing),
+                                           max_prune_frac, min_active_guard, grace)
             return -1  # collapse guard: a big fraction vanished at once → treat as a broken crawl
         if (len(existing) - len(gone)) / len(existing) < min_coverage:
             _PRUNE_TRIPS.append(f"{table} coverage ({resaw}, floor {min_coverage:.0%})")
+            _read_gone_after_refused_prune(table, seen, source, verify_gone, shards, len(existing),
+                                           max_prune_frac, min_active_guard, grace)
             return -1  # partial-scrape guard: saw too little of the catalog to trust a prune
     if not gone:
         return 0
@@ -1300,9 +1304,38 @@ def _own_page_session():
 READ_GONE_MAX_READS = 60   # own-page reads per table per run when a prune is guarded or skipped
 
 
+# Tables whose refused prune already read the unseen ads' own pages this process (see below), so a
+# caller that also calls strike_read_gone() after the -1 (manzo) does not strike the same ad twice.
+_READ_GONE_DONE: set[str] = set()
+
+
+def _read_gone_after_refused_prune(table, seen, source, verify_gone, shards, n_active,
+                                   max_prune_frac, min_active_guard, grace) -> None:
+    """A refused absence prune must not freeze an ad whose OWN page reads gone (2026-10-23).
+
+    tawia: 10 active, its walk re-saw 4 (the site republished 5 ads under new ids on 10-21), so the
+    collapse guard refused the prune every night and 3 of the 6 unseen ads stayed on screen with
+    missing_count 0 (dead-visible 10-23: 3 of 5 sampled gone). 125 crawlers print «prune guard
+    tripped — kept existing active rows» and stop there; only 5 (manzo, opensooq, ashab, haraj,
+    muktamel) went on to read the unseen ads' own pages. This does it for every caller with no
+    oracle of its own: the same own_page_status_oracle prune_unseen would use (404/410 while a page
+    this crawl saw answers live), the collapse cap respected, never raised. A caller with its own
+    verify_gone, or a sharded slice, keeps its own handling, and so does a table of 1,000+ active
+    rows: strike_read_gone reads one 1,000-row slice, so a row past it would count as unseen."""
+    if verify_gone is not None or shards > 1 or not seen or n_active >= 1000:
+        return
+    _READ_GONE_DONE.add(table)
+    try:
+        strike_read_gone(table, seen, source, max_prune_frac=max_prune_frac,
+                         min_active_guard=min_active_guard, grace=grace, _from_refused_prune=True)
+    except Exception as e:  # noqa: BLE001 — a failed reading is UNKNOWN; the refused prune stands
+        print(f"{table}: own-page reading after a refused prune failed ({type(e).__name__}: {e})", flush=True)
+
+
 def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=None, *,
                      max_prune_frac: float = 0.30, min_active_guard: int = 8,
-                     max_reads: int = READ_GONE_MAX_READS, grace: int = 3) -> int:
+                     max_reads: int = READ_GONE_MAX_READS, grace: int = 3,
+                     _from_refused_prune: bool = False) -> int:
     """Strike ONLY the unseen active rows whose OWN page reads gone (2026-10-12).
 
     For a crawl whose absence prune was refused (a guard tripped, or the walk fell short) — the
@@ -1315,6 +1348,8 @@ def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=No
     needs a seen page to answer live first). UNKNOWN and live rows are counted as seen (kept, shown);
     only read-gone rows take a strike, at most the collapse cap's worth (oldest-seen first; the cap
     is respected, never raised). prune_unseen then runs with its grace and its at-grace re-read."""
+    if table in _READ_GONE_DONE and not _from_refused_prune:
+        return 0       # prune_unseen already read these unseen ads when it refused the prune
     seen = {str(a) for a in seen_ads if a}
     if not seen:
         return 0       # nothing seen this run: the source may be down — no control, no reading
