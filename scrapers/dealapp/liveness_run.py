@@ -47,7 +47,8 @@ from scrapers.common.liveness_contract import (
 )
 from scrapers.common.liveness_policies import policy_for
 from scrapers.dealapp.liveness import (  # FRESH_MAX_AGE_S: one rule, shared with the crawl's alive stamp
-    FRESH_MAX_AGE_S, OriginBudget, classify_dealapp, environment_is_trustworthy, from_edge, sitemap_candidate_rank,
+    FRESH_MAX_AGE_S, OriginBudget, classify_dealapp, environment_is_trustworthy, from_edge, is_registration_wall,
+    sitemap_candidate_rank,
 )
 
 BASE = "https://dealapp.sa"
@@ -65,6 +66,8 @@ RUN_NAME_PROXY = "dealapp_liveness_proxy"
 
 
 _ORIGIN = OriginBudget()
+_LAST_EDGE = [False]   # did probe()'s last response come from CloudFront (not an origin render)?
+_RENDERS: list[tuple[str, str]] = []   # this run's fresh reads in order (adid, render_kind)
 _DEADLINE = time.monotonic() + 50 * 60   # pacing must never outlast the 60-min job
 
 
@@ -231,9 +234,38 @@ def _variants(listing_url: str) -> list[str]:
     return [base + "/", en + "/", en]
 
 
+def render_kind(verdict: str, status: Optional[int], body: str, edge: bool) -> str:
+    """What one fresh read rendered, for the bracket below: 'ad' (read ALIVE), 'none' (an ORIGIN
+    render of dealapp's own page with no listing in it: ng-state present, no listing schema, not
+    the view-quota wall), else 'other'. Pure."""
+    if verdict == ALIVE:
+        return "ad"
+    if (not edge and status == 200 and 'id="ng-state"' in (body or "")
+            and "real-estate-listing" not in body and not is_registration_wall(body)):
+        return "none"
+    return "other"
+
+
+def bracketed_none(log: list[tuple[str, str]]) -> list[str]:
+    """adids whose render was 'none' with a live ad rendered immediately before AND after it on
+    this runner ('other' breaks nothing, a wall breaks the bracket by not being 'ad'). The same
+    rule as the crawl's confirmed_absent (scrapers/dealapp/run.py, oracle
+    dealapp.crawl_fresh_render_no_listing.bracketed.ci). Pure."""
+    out: list[str] = []
+    for i, (adid, kind) in enumerate(log):
+        if kind != "none":
+            continue
+        before = next((k for _, k in reversed(log[:i]) if k != "none"), None)
+        after = next((k for _, k in log[i + 1:] if k != "none"), None)
+        if before == "ad" and after == "ad":
+            out.append(adid)
+    return out
+
+
 def probe_listing(s: cc.Session, listing_url: str, budget: Optional[RequestBudget] = None
                   ) -> tuple[str, Optional[int]]:
-    """(verdict, http_status) for one ad: the first variant that is not UNKNOWN, else UNKNOWN."""
+    """(verdict, http_status) for one ad: the first variant that is not UNKNOWN, else UNKNOWN.
+    Each fresh read also lands in _RENDERS as (adid, render_kind), for the shadow bracket."""
     adid = _adid(listing_url)
     for url in _variants(listing_url):
         status, body, final = probe(s, url, budget)
@@ -242,8 +274,10 @@ def probe_listing(s: cc.Session, listing_url: str, budget: Optional[RequestBudge
         # A fresh render is final — every extra key is one more render against dealapp's
         # per-visitor quota (liveness.OriginBudget). requested_url without the trailing slash: a
         # slash-stripping redirect must not read as "moved off the ad path" (DEAD).
-        return classify_dealapp(status, body=body, adid=adid, final_url=final,
-                                requested_url=url.rstrip("/")), status
+        verdict = classify_dealapp(status, body=body, adid=adid, final_url=final,
+                                   requested_url=url.rstrip("/"))
+        _RENDERS.append((adid, render_kind(verdict, status, body, _LAST_EDGE[0])))
+        return verdict, status
     return UNKNOWN, None
 
 
@@ -264,7 +298,8 @@ def probe(s: cc.Session, url: str, budget: Optional[RequestBudget] = None
             # ~10 renders and leaves the wall cached under each ad's URL for days.
             slot = _ORIGIN.acquire()
             r = s.get(url, timeout=45, allow_redirects=True)
-            if from_edge(r):
+            _LAST_EDGE[0] = bool(from_edge(r))
+            if _LAST_EDGE[0]:
                 _ORIGIN.refund(slot)
             try:
                 age = int((r.headers or {}).get("age") or 0)
@@ -354,6 +389,12 @@ def main() -> int:
         # (row, action, strikes, http_status, read_iso): read_iso is WHEN this sweep read the ad,
         # kept per row because the sweep reads for up to 50 minutes and applies at the end.
         pending: list[tuple[dict, str, int, int, str]] = []
+        # SHADOW (2026-10-23, backlog 766): the crawl's bracketed no-listing render, read here too.
+        # 60 shown dealapp ads at 3+ strikes read UNKNOWN to every reader (a removed ad renders the
+        # bogus-id shell). This only COUNTS the struck rows the bracket would call gone; it writes
+        # no verdict until a shadow night proves it on known-live and known-gone ads.
+        _RENDERS.clear()   # the canaries' reads are not part of the worklist's sequence
+        struck_adids = {_adid(r["listing_url"]) for r in cands if int(r.get("missing_count") or 0) >= 1}
         for row in cands:
             adid = _adid(row["listing_url"])
             if budget.exhausted:
@@ -470,6 +511,9 @@ def main() -> int:
                 print(f"⚠ detail-log insert failed (non-fatal, {len(chunk)} rows): "
                       f"{str(exc)[:160]}", flush=True)
 
+        shadow = [a for a in bracketed_none(_RENDERS) if a in struck_adids]
+        print(f"SHADOW bracketed no-listing renders among struck rows ({len(shadow)}): "
+              f"{' '.join(shadow)}", flush=True)
         note = (f"{'APPLY' if args.apply else 'DRY-RUN'} "
                 f"egress={'proxy' if proxy_url else 'ci'} "
                 f"requests={budget.used}{f'/{budget.cap}' if budget.cap else ''} "
@@ -479,7 +523,8 @@ def main() -> int:
                 f"inactivated={stats['deactivated']} held_alive={stats.get('held_alive', 0)} "
                 f"sitemap_ids={stats['sitemap_ids']} "
                 f"canary_live={canary['live']}/{canary['live_n']} "
-                f"canary_bogus={'ALIVE!' if canary['bogus_alive'] else 'not-alive'}"
+                f"canary_bogus={'ALIVE!' if canary['bogus_alive'] else 'not-alive'} "
+                f"shadow_bracketed_none={len(shadow)}"
                 + ("" if trusted else " | QUARANTINED: verified-rate or canary failed, no deactivation written"))
         print(note, flush=True)
         end_run(run_id, ok=True, rows_seen=stats["scanned"],
