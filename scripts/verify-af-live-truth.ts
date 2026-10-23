@@ -507,7 +507,7 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     // NO-type journeys needed the EXACT TYPE tier and then one ordinary round question before the round's search fired.
     // The capture is judged exactly as before: a search that never fires still leaves it null and still fails.
     for (let tier = 0; tier < 2 && lastSearchBody === null; tier++) {
-      const next = await readCardUntil((s) => s.hasCard, 5000);
+      const next = await readCardUntil((s) => s.hasCard, AGENT_TURN_MS);
       const opts3 = next.hasCard
         ? await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')))
         : [];
