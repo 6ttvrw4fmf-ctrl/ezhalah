@@ -48,15 +48,23 @@ hours), and never over someone else's pending run. **A line-anchored pin** (`scr
 haraj `asking_price` line) moves whenever `scrapers/haraj/run.py` grows above it: re-pin in the same PR, and it makes
 the PR need the owner merge (scripts/).
 
-**Owed → first thing next run (10-20):**
-- **#7661 Haraj deal conflict (656/672/679):** 112 searchable ads whose own words disagree on Buy vs Rent (e.g.
-  «ايجار شقه … 20 الف السنه» served as Buy 1,000,000,000). Merge state first; then ONE `--ids` re-read of the 112 ids
-  (list in backlog 679 / proof row 10-19) when the slot is free → notes must show `skip_deal_conflict` ≈ 112. Removal
-  from search then comes from ♻️'s strikes (`_signal` → gone).
-- **615 Haraj catalogues:** routed to ♻️ (backlog lifecycle, 10-19): `fleet_liveness:haraj` was QUARANTINED on 2 of 3
-  passes («opening controls 3/3 live»), so no strikes landed. Read their missing_count; nothing else to do on our side.
-- **#7662 rows_collapse:** proven (20 → 1 open, dwelleo kept). Only the merge is owed (migration 20261019051932 live).
-- Kept: 575/612 photo floors · 564 gathern redirects · 565 almuteb 503 · 613 wasalt 13746442 (source's own price).
+**Owed → first thing next run (10-23):**
+- **razre 792 — the site was REBUILT, it is not a Wix auth change.** www.razre.sa is now a custom static site
+  («راز الماسية العقارية»): pages `/projects/<slug>/`, `/districts/<slug>/`, sitemap `/sitemap.xml`, robots
+  `Disallow: /api/`. Old card URLs `/onepro-1/N` and `/com/N` answer 200 but canonical → `/projects/…`. The
+  branch `probe/scraping-20261023` already carries a probe that prints a project page's LD-JSON, inline scripts
+  and unit markup: dispatch `small-sources-sync source=razre` from it **only into an empty queue**, then rewrite
+  fetch+parse in `scrapers/razre/run.py` (the mapper's rules in its docstring still hold). The 94 stale units are
+  routed to ♻️ (backlog 793).
+- **holoul (dormant 10-23 11:14 UTC):** API 504 on all 6 routes 10-22 + 10-23. PR #8374 now writes a FAILED run
+  naming the error; read tonight's holoul row (`ok=false … 504`, or ok + rows ⇒ the hourly auto-return flips it back).
+- **aljassim 784:** nightly 04:3x «challenge unsolved» on 3 fresh profiles, ok on the 07:4x re-crawl (10-20, 10-23).
+  Next step: log each profile's status code in the error before changing the solver.
+- Kept: 575/612 photo floors · 564 gathern redirects · 565 almuteb 503 · 613 wasalt 13746442.
+
+**NEW (10-23): `small-sources-sync` runs are effectively SERIAL — each dispatch is the full 143-job matrix (~28 min)
+and other engineers dispatch it too.** Count the queued runs before dispatching; a probe and a proof in the same
+night = ~1 h of queue. Never queue a probe ahead of a proof crawl.
 
 **10-19 facts:** `rows_seen` on `fleet_liveness:*` / `cleanup:*` / `verify_deletions:*` / `aqar_liveness*` labels is
 rows PROBED (fresh rows are skipped), never inventory; judge a site's size by its crawl label. The detector sweep
@@ -654,3 +662,7 @@ says Sell (656's class, backlog 672) — a rule that decides a contradiction is 
 - 🔧 adds: the DataImpulse proxy (407, funds — backlog 744/745) is the owner's money, never one of your three jobs; a site that
   needs it (wasalt, souq24, eilmalriyada, sadin) is not provable while it is down, so it is not chosen (same lesson 🆕 learned
   on snam the same night).
+- 🔧 10-23 (third night of the queue lesson, so it is now a rule): COUNT the queued runs before you dispatch anything
+  (`gh run list --workflow small-sources-sync.yml --status queued,in_progress`): the matrix is one slot (~28 min a run), so
+  a probe queued ahead of a proof costs the proof its slot — dispatch the PROOF first, the probe after (⚡ 10-23 cancelled
+  its own probe to land the tamyaz proof).

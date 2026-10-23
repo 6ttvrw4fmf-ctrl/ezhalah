@@ -141,6 +141,11 @@ try {
       // IP, not to a phone in Saudi, and it carries its own X-Frame-Options: SAMEORIGIN that says nothing
       // about the real ad page. Measured 2026-10-17 on sodasyat.sa (run 39032767927): 3/3 samples
       // challenged, the ad page itself frames fine. Same class as the Deal App 429: excluded, reported.
+      // An error page is not the ad page either. ibaax.sa answered HTTP 521 (Cloudflare «web server is down») to the
+      // runner on 2026-10-23 (run 39940456792) and that 521 page carries X-Frame-Options: SAMEORIGIN, so the header
+      // check read «REFUSES framing» ×3 while step 2 correctly excluded the same three loads as inconclusive. A 4xx/5xx
+      // (or no answer) says nothing about the ad's own headers: skip the check, say so, and let step 2 exclude it.
+      if (!res || res.status >= 400) { console.log(`· ${site.host}: ${u} — top-level load answered HTTP ${res ? res.status : 'nothing'} to this egress, not the ad page: header check skipped`); continue; }
       if (res?.headers.get('cf-mitigated') === 'challenge') { console.log(`· ${site.host}: ${u} — Cloudflare challenged the robot (${res.status} cf-mitigated: challenge), header check skipped`); continue; }
       const xfo = res?.headers.get('x-frame-options') ?? '';
       const fa = /frame-ancestors[^;]*/i.exec(res?.headers.get('content-security-policy') ?? '')?.[0] ?? '';

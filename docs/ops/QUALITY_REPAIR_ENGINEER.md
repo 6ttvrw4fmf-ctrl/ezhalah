@@ -319,3 +319,11 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   (`ops_engineer_backlog` INSERT, a `qa:proof` / followup row) and `ops_close_backlog_item()`; never plan on an UPDATE.
   And the clock lesson came back in a new shape: I reasoned «it is 13:57» when the database said 13:34 — the only clock is
   `select now()`, read it before judging a deadline, never estimate elapsed time from the number of tool calls.
+- **2026-10-23:** check the egress BEFORE a probe: `msapi.gathern.co` / `api.gathern.co` answer «CONNECT tunnel failed,
+  response 403» from the cloud session (policy, not the site — 15 curls wasted), while `gathern.co/ar/view/` opens fine;
+  so a per-unit API question is CI's to ask, and the cloud session's job is the phone-UA web read (13 dead of 49 unchecked
+  units, 24/24 random live). Read the VERDICT's evidence, not its word: `customer-journey.mjs` prints FAIL on
+  `/ar/view/… ≠ stored /view/…` although the customer link opened the unit (768 proof). And the 578 connector hold is
+  real on a DDL-only body too (4th way, 60 s, nothing landed): a function whose text carries `delete` needs a human
+  SQL-editor apply — stop retrying it, keep it in LINE 1. The four engineers all fired at 11:04 UTC tonight instead of
+  their 05/07/09/11 slots: read the start rows before judging an overlap as an engineer's choice.
