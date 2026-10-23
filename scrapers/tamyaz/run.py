@@ -147,6 +147,12 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     region_ar = parts[0] if len(parts) >= 3 else None
     city_ar = parts[1] if len(parts) >= 3 else (parts[0] if parts else None)
     district_raw = parts[2] if len(parts) >= 3 else (parts[1] if len(parts) == 2 else None)
+    # Since 2026-10-19 the API writes «<district>، <city>» (e.g. «الورود، جدة») instead of
+    # «<region> - <city> - <district>»: smallest place first, the city LAST. Read it in that order.
+    if len(parts) == 1 and re.search(r"[،,]", loc):
+        bits = [x.strip() for x in re.split(r"[،,]", loc) if x.strip()]
+        if len(bits) == 2:
+            district_raw, city_ar = bits
     if not city_ar:
         return None, category, "no_city"
     city_id, region_id = to_catalog(city_ar, re.sub(r"^منطقة\s+", "", region_ar) if region_ar else None)
