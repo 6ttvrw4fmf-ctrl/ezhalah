@@ -165,14 +165,36 @@ _PHONE_RE = re.compile(
 )
 
 _last = 0.0
+# The pace actually used. It starts at MIN_INTERVAL and only ever SLOWS: each time gathern says
+# «Too many requests» the gap between requests grows ×1.5 (up to MAX_INTERVAL) for the rest of the
+# run. Measured 2026-10-23 at a 0.3 s pace: Riyadh stopped at page 128 of ~390 and ~40 towns were
+# refused, because a refused page waited only 3-15 s in total before the city was given up.
+MAX_INTERVAL = 4.0
+_interval = MIN_INTERVAL
+# Waits after a throttle answer, per attempt. Long enough for gathern's window to clear (a
+# 3/6/9/12/15 s ladder was not); ~5.5 min in the worst case for one page.
+THROTTLE_WAITS_S = (20, 40, 60, 90, 120)
+_THROTTLE_HITS = 0
 
 
 def _throttle() -> None:
     global _last
-    wait = _last + MIN_INTERVAL - time.monotonic()
+    wait = _last + _interval - time.monotonic()
     if wait > 0:
         time.sleep(wait)
     _last = time.monotonic()
+
+
+def _on_throttled(attempt: int, sleep=time.sleep) -> None:
+    """gathern refused us for speed: wait out its window, then keep the slower pace."""
+    global _interval, _THROTTLE_HITS
+    _THROTTLE_HITS += 1
+    _interval = min(MAX_INTERVAL, max(_interval, MIN_INTERVAL) * 1.5)
+    sleep(THROTTLE_WAITS_S[min(attempt, len(THROTTLE_WAITS_S) - 1)])
+
+
+def pace_report() -> str:
+    return f"pace: started {MIN_INTERVAL:.2f}s/request, ended {_interval:.2f}s; throttled {_THROTTLE_HITS}×"
 
 
 def session() -> cc.Session:
@@ -311,7 +333,9 @@ def fetch_page(s: cc.Session, city_id: int, page: int, ci: str, co: str) -> tupl
             r = s.get(SEARCH, params=params, timeout=40)
         except Exception:
             time.sleep(2 * (attempt + 1)); continue
-        if r.status_code == 429 or r.status_code >= 500:
+        if r.status_code == 429:
+            _on_throttled(attempt); continue
+        if r.status_code >= 500:
             time.sleep(3 * (attempt + 1)); continue
         if r.status_code != 200:
             # gathern signals THROTTLING WITH HTTP 400, not 429. Observed live 2026-09-03 (run
@@ -328,7 +352,7 @@ def fetch_page(s: cc.Session, city_id: int, page: int, ci: str, co: str) -> tupl
             # Discriminate on the BODY, never on the status alone: a genuinely malformed request
             # must still fail fast rather than spin through the retry ladder.
             if _is_throttle_body(getattr(r, "text", "")):
-                time.sleep(3 * (attempt + 1)); continue
+                _on_throttled(attempt); continue
             # Capture the REJECTION ITSELF. Without the body and the exact params, the only way
             # forward is guessing which parameter is wrong, and guessing at an unobserved request is
             # how the sadin selector fix failed earlier today.
@@ -1257,6 +1281,7 @@ def crawl_once(s: cc.Session, cities: list[dict], ci: str, co: str,
         rep = reject_report()
         if rep:
             print(rep, flush=True)
+    print(f"  {pace_report()}", flush=True)
     return rows_by_ad, scanned, per_city, outcomes
 
 
