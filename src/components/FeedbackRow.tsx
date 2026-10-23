@@ -15,7 +15,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { getListingFeedback, setListingFeedback, type FeedbackRating } from '@/lib/listingFeedback';
-import { openWhatsAppCompose } from '@/lib/shareToWhatsApp';
+import { openWhatsAppCompose, isTouchDevice } from '@/lib/shareToWhatsApp';
 import { speakReadAloud, stopReadAloud, subscribeReadAloud, readAloudRefusal, hasSpeakableContent,
          type ReadAloudSegment } from '@/lib/readAloud';
 import { readAloudRefusalMessageKey, type ReadAloudRefusal } from '@/lib/readAloudVoice';
@@ -96,9 +96,9 @@ export default function FeedbackRow({
     if (next) onFeedback?.();
   };
 
-  // Share flow: on a phone, WhatsApp's own composer with the link (the ONLY route that shows the
-  // card — src/lib/shareToWhatsApp.ts; the phone's share menu handed WhatsApp a bare link, owner
-  // 2026-10-20); on a desktop, copy the link (the share icon briefly becomes a check). Never throws
+  // Share flow: on a phone, the phone's share menu with the link only (owner 2026-10-22), WhatsApp's
+  // composer when the browser has no menu (src/lib/shareToWhatsApp.ts); on a desktop, copy the link
+  // (the share icon briefly becomes a check). Never throws
   // to the user (cancel = no-op).
   const onShare = async () => {
     let url = shareUrl || 'https://ezhalah-app.vercel.app';
@@ -106,6 +106,15 @@ export default function FeedbackRow({
     const withText = shareText ? `${shareText}\n${url}` : url;
     try {
       if (Platform.OS === 'web') {
+        // THE PHONE'S OWN SHARE MENU (owner 2026-10-22: «why direct WhatsApp, that isn't what we agreed»), so
+        // the person can pick Instagram, Snapchat, Messages… The LINK ONLY is handed over — no text next to it —
+        // so the target builds the card from the link (2026-10-20: link + text through the menu reached
+        // WhatsApp without a card). A touch browser with no share menu still opens WhatsApp's composer;
+        // a desktop copies. A cancelled menu (AbortError) is a choice, not a failure.
+        const nav: any = typeof navigator !== 'undefined' ? navigator : null;
+        if (isTouchDevice(nav, typeof window !== 'undefined' ? (window as any) : null) && typeof nav?.share === 'function') {
+          try { await nav.share({ url }); return; } catch (e: any) { if (e?.name === 'AbortError') return; }
+        }
         if (openWhatsAppCompose(url)) return;
         await Clipboard.setStringAsync(withText);
         setCopied(true);

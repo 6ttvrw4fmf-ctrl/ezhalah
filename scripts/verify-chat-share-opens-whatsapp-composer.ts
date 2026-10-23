@@ -72,13 +72,19 @@ check('no window at all (SSR / native) → unhandled, never a throw',
 // ── the two buttons really use it ───────────────────────────────────────────────────────────────
 const rowSrc = readFileSync(ROW, 'utf8');
 const agentSrc = readFileSync(AGENT, 'utf8');
-const usesIt = (src: string) => /import \{ openWhatsAppCompose \} from '@\/lib\/shareToWhatsApp'/.test(src) && /openWhatsAppCompose\(url\)/.test(src);
+// OWNER 2026-10-22 («why direct WhatsApp, that isn't what we agreed»): on a phone the reply row's Share opens
+// the PHONE'S SHARE MENU with the LINK ONLY (no text beside it, so the target builds the card); WhatsApp's
+// composer is the fallback for a touch browser with no menu, and a desktop copies. The checks below pin that.
+const usesIt = (src: string) => /import \{ openWhatsAppCompose, isTouchDevice \} from '@\/lib\/shareToWhatsApp'/.test(src) && /openWhatsAppCompose\(url\)/.test(src);
+const menuLinkOnly = (src: string) => { const i = src.indexOf('const onShare = async'); const body = i < 0 ? '' : src.slice(i, i + 2000);
+  return /await nav\.share\(\{ url \}\)/.test(body) && !/nav\.share\(\{[^}]*text/.test(body) && body.indexOf('nav.share(') < body.indexOf('openWhatsAppCompose(url)'); };
 const sharesChatViaMenu = (src: string, fn: string) => {
   const i = src.indexOf(fn); if (i < 0) return true;
   return /\bnav(?:igator)?\??\.share\(/.test(src.slice(i, i + 1600));
 };
-check('FeedbackRow (the reply row\'s share icon) routes the chat link through openWhatsAppCompose', usesIt(rowSrc));
-check('FeedbackRow no longer hands the chat link to the phone\'s share menu', !sharesChatViaMenu(rowSrc, 'const onShare = async'));
+check('FeedbackRow keeps WhatsApp\'s composer as the fallback (touch browser without a share menu)', usesIt(rowSrc));
+check('FeedbackRow opens the phone\'s share menu FIRST, with the link only (no text beside it)', menuLinkOnly(rowSrc));
+void sharesChatViaMenu;
 // Owner 2026-10-20: the top «مشاركة» pill is the NORMAL share again (scripts/verify-share-search-link.ts
 // pins it); the chat is shared only from the reply row, so agent.tsx must not grow a second chat share.
 check('agent.tsx has no chat-share path of its own any more (the reply row is the one place)',
@@ -110,9 +116,11 @@ const mutant = (from: string, to: string) => {
   const w = fakeWin();
   mustCatch('"handled" reported without ever opening WhatsApp', !(m.openWhatsAppCompose(LINK, phone, w) === true && w.gone.length === 1));
 }
-mustCatch('FeedbackRow going back to the share menu for the chat link',
-  sharesChatViaMenu(rowSrc.replace('if (openWhatsAppCompose(url)) return;', "const nav: any = navigator; if (nav?.share) { await nav.share({ url }); return; }"), 'const onShare = async'));
-mustCatch('the import of the helper removed from FeedbackRow', !usesIt(rowSrc.replace("import { openWhatsAppCompose } from '@/lib/shareToWhatsApp';", '')));
+mustCatch('FeedbackRow going straight to WhatsApp again (no share menu)',
+  !menuLinkOnly(rowSrc.replace('try { await nav.share({ url }); return; }', 'try { /* menu removed */ }')));
+mustCatch('text sent beside the link through the menu (the 2026-10-20 card loss)',
+  !menuLinkOnly(rowSrc.replace('await nav.share({ url })', 'await nav.share({ text: shareText, url })')));
+mustCatch('the import of the helper removed from FeedbackRow', !usesIt(rowSrc.replace("import { openWhatsAppCompose, isTouchDevice } from '@/lib/shareToWhatsApp';", '')));
 
 if (fail || mutFail) { console.error(`\n❌ chat-share-opens-whatsapp-composer: ${fail} check(s), ${mutFail} mutation(s) failed`); process.exit(1); }
 console.log('\n✅ chat-share-opens-whatsapp-composer: all checks passed, every mutation caught.');
