@@ -68,7 +68,9 @@ function makePieces(): Piece[] {
   return out;
 }
 
-export function ConfettiOverlay() {
+// `burstKey`: an owner that fires its OWN party (the «وش نناديك؟» save, components/NamePrompt.tsx) passes a
+// counter instead of joining the card bus, so a card press on /agent never sets off two overlays.
+export function ConfettiOverlay({ burstKey }: { burstKey?: number } = {}) {
   const reduced = useReducedMotion();
   const { width, height } = useWindowDimensions();
   const t = useRef(new Animated.Value(0)).current;
@@ -76,11 +78,14 @@ export function ConfettiOverlay() {
   const [live, setLive] = useState(false);
   const pieces = useMemo(makePieces, []);
 
+  const owned = burstKey !== undefined;
   useEffect(() => {
+    if (owned) return;
     const l = () => setBurst((b) => b + 1);
     listeners.push(l);
     return () => { listeners = listeners.filter((x) => x !== l); };
-  }, []);
+  }, [owned]);
+  useEffect(() => { if (burstKey) setBurst(burstKey); }, [burstKey]);
 
   useEffect(() => {
     if (burst === 0 || reduced) return;

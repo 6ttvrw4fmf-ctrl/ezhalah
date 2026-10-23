@@ -11,6 +11,9 @@
 
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { liftSymbols } from './lib/liftSymbols.ts';
 
 const AUTH = 'src/lib/auth.ts';
@@ -131,14 +134,92 @@ const modalProblems = (f: Record<string, string>) => {
   check('§3 the prompt is mounted at the root', /<NamePrompt \/>/.test(files[LAYOUT]));
   // Owner 2026-10-23: the box speaks the UI's language — «وش نناديك؟» / «اكتب اسمك» / «حفظ» / «لاحقاً».
   const i18n = read('src/i18n.tsx');
-  const wordsOk = (p: string, i: string) => /t\('What should we call you\?'\)/.test(p) && /placeholder=\{t\('Type your name'\)\}/.test(p)
+  const wordsOk = (p: string, i: string) => /t\('What should we call you\?'\)/.test(p) && /placeholder=\{translate\(lang, 'Type your name'\)\}/.test(p)
     && /t\('Save'\)/.test(p) && /t\('Later'\)/.test(p)
     && /'What should we call you\?': 'وش نناديك؟'/.test(i) && /'Type your name': 'اكتب اسمك'/.test(i)
     && /'Save': 'حفظ'/.test(i) && /'Later': 'لاحقاً'/.test(i);
   check('§3 the owner\'s words, in both languages', wordsOk(files[PROMPT], i18n));
-  mustCatch('a placeholder other than «اكتب اسمك»', !wordsOk(files[PROMPT].replace("t('Type your name')", "t('Display Name')"), i18n));
+  mustCatch('a placeholder other than «اكتب اسمك»', !wordsOk(files[PROMPT].replace("translate(lang, 'Type your name')", "translate(lang, 'Display Name')"), i18n));
   mustCatch('the Arabic title drifting', !wordsOk(files[PROMPT], i18n.replace("'وش نناديك؟'", "'ما اسمك؟'")));
   check('§3 the field starts EMPTY (never prefilled)', /useState\(''\);/.test(files[PROMPT]) && !/email|user\.sub/.test(files[PROMPT].split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n')));
+}
+
+// ── §6 the mockup's switch and celebration (owner-approved 2026-10-23, mockups/apple-name-flow.png) ──
+{
+  // §6.1 EXECUTED: the real celebrationFor — a party only for a non-empty name, and it takes the
+  // sign-in welcome mark, so the home's own welcome line never greets a second time.
+  const liftParty = async (src: string) => {
+    const tmp = join(mkdtempSync(join(tmpdir(), 'ezh-np-')), 'NamePrompt.tsx');
+    writeFileSync(tmp, src);
+    return (await liftSymbols(tmp, [{ header: 'export function celebrationFor(' }], ['celebrationFor'])) as {
+      celebrationFor: (typed: string, take: () => unknown) => string | null;
+    };
+  };
+  const store = new Map<string, string>();
+  (globalThis as any).localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, String(v)); }, removeItem: (k: string) => { store.delete(k); } };
+  const lw = await import('../src/lib/loginWelcome.ts');
+  const welcomesAfter = async (src: string, typed: string) => {
+    store.clear();
+    lw.markJustSignedIn();                                   // the sign-in (OAuth landing / One Tap)
+    const { celebrationFor } = await liftParty(src);
+    const now = Date.now();
+    const party = celebrationFor(typed, () => lw.takeJustSignedIn(now));
+    return { party, homeWouldGreet: lw.hasJustSignedIn(now) };  // useFilterWelcome greets only on a fresh mark
+  };
+  const ok = await welcomesAfter(files[PROMPT], 'يوسف النشوان');
+  check('§6 a save with a name → the party, with the FIRST name', ok.party === 'يوسف', JSON.stringify(ok));
+  check('§6 exactly one welcome per sign-in: the party takes the mark, the home does not greet again', !ok.homeWouldGreet, JSON.stringify(ok));
+  const blank = await welcomesAfter(files[PROMPT], '   ');
+  check('§6 nothing typed → no party, and the mark is left alone', blank.party === null && blank.homeWouldGreet, JSON.stringify(blank));
+  const twice = await welcomesAfter(files[PROMPT].replace('  takeWelcomeMark();\n', ''), 'سارة');
+  mustCatch('a party that leaves the mark (the home would greet right after it — two welcomes)', twice.homeWouldGreet);
+  const empty = await welcomesAfter(files[PROMPT].replace("  if (!first) return null;\n", ''), '');
+  mustCatch('a party for an empty name', empty.party !== null);
+
+  // §6.2 the party follows «حفظ» with a name, and only that — never «لاحقاً».
+  const partyProblems = (src: string) => {
+    const out: string[] = [];
+    const code = src.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+    if (!/saveName\(v\);\n\s*close\(\);\n\s*const first = celebrationFor\(v, \(\) => takeJustSignedIn\(Date\.now\(\)\)\);\n\s*if \(first\) setParty\(/.test(code)) out.push('the party does not follow a real save');
+    if ((code.match(/setParty\(\{/g) ?? []).length !== 1) out.push('the party is started from somewhere other than the save');
+    const close = /const close = \(\) => \{[^\n]*\};/.exec(code)?.[0] ?? '';
+    if (!close || /setParty|celebrationFor|partyConfetti/.test(close)) out.push('«لاحقاً» (close) can start the party');
+    if (!/testID="name-prompt-later" style=\{s\.later\} onPress=\{close\}/.test(code)) out.push('«لاحقاً» is not plain close');
+    if (!/<ConfettiOverlay burstKey=\{burstKey\} \/>/.test(code) || !/from '@\/components\/ConfettiOverlay'/.test(code)) out.push('the party is not the app\'s own confetti');
+    if (!/t\('Welcome, \{name\}', \{ name: first \}\)/.test(code) || !/t\('What are you looking for today\?'\)/.test(code)) out.push('the welcome words changed');
+    return out;
+  };
+  const pp = partyProblems(files[PROMPT]);
+  check('§6 the party follows «حفظ» with a name — never «لاحقاً» — with the app\'s confetti', pp.length === 0, pp.join('; '));
+  mustCatch('«لاحقاً» throwing the party', partyProblems(files[PROMPT].replace('const close = () => { setClosed(true); markNamePromptSeen(); };', "const close = () => { setClosed(true); markNamePromptSeen(); setParty({ first: '', key: 1 }); };")).length > 0);
+  mustCatch('a party before (or without) the save', partyProblems(files[PROMPT].replace('    saveName(v);\n    close();\n', '    close();\n')).length > 0);
+  mustCatch('a home-made confetti instead of the app\'s', partyProblems(files[PROMPT].replace('<ConfettiOverlay burstKey={burstKey} />', '<MyConfetti />')).length > 0);
+  const i18nNow = read('src/i18n.tsx');
+  check('§6 the welcome speaks both languages', /'Welcome, \{name\}': 'هلا \{name\}، حياك الله'/.test(i18nNow) && /'What are you looking for today\?': 'وش تدور عليه اليوم؟'/.test(i18nNow) && /'Choose a language and type your name': 'اختر اللغة واكتب اسمك'/.test(i18nNow));
+
+  // §6.3 the switch sets the field's direction and placeholder; it starts on the app's language.
+  const switchProblems = (src: string) => {
+    const out: string[] = [];
+    if (!/const \[lang, setLang\] = useState<Lang>\(locale\);/.test(src)) out.push('the switch does not start on the app\'s language');
+    if (!/onPress=\{\(\) => setLang\(l\.id\)\}/.test(src)) out.push('the switch is not wired');
+    if (!/style=\{\[s\.input, lang === 'ar' \? s\.inputAr : s\.inputEn\]\}/.test(src)) out.push('the field\'s direction does not follow the switch');
+    if (!/inputAr: \{ textAlign: 'right', writingDirection: 'rtl' \}/.test(src) || !/inputEn: \{ textAlign: 'left', writingDirection: 'ltr' \}/.test(src)) out.push('the two directions are not RTL / LTR');
+    if (!/placeholder=\{translate\(lang, 'Type your name'\)\}/.test(src)) out.push('the placeholder does not follow the switch');
+    if (!/\{ id: 'en', label: 'English' \}, \{ id: 'ar', label: 'عربي' \}/.test(src)) out.push('the switch is not English | عربي');
+    return out;
+  };
+  const sp = switchProblems(files[PROMPT]);
+  check('§6 the عربي | English switch sets the field direction and placeholder', sp.length === 0, sp.join('; '));
+  mustCatch('the direction tied to the app language instead of the switch', switchProblems(files[PROMPT].replace("lang === 'ar' ? s.inputAr : s.inputEn", "locale === 'ar' ? s.inputAr : s.inputEn")).length > 0);
+  mustCatch('an Arabic field stuck left-to-right', switchProblems(files[PROMPT].replace("inputAr: { textAlign: 'right', writingDirection: 'rtl' }", "inputAr: { textAlign: 'left', writingDirection: 'ltr' }")).length > 0);
+  mustCatch('the placeholder stuck on the app language', switchProblems(files[PROMPT].replace("translate(lang, 'Type your name')", "t('Type your name')")).length > 0);
+  mustCatch('the switch tap doing nothing', switchProblems(files[PROMPT].replace('onPress={() => setLang(l.id)}', 'onPress={() => {}}')).length > 0);
+
+  // §6.4 the app's confetti, fired by its owner, never doubles the card party on /agent.
+  const ov = read('src/components/ConfettiOverlay.tsx');
+  const ownedOk = (o: string) => /if \(owned\) return;\n\s*const l = \(\) => setBurst/.test(o) && /useEffect\(\(\) => \{ if \(burstKey\) setBurst\(burstKey\); \}, \[burstKey\]\);/.test(o);
+  check('§6 an owned confetti stays off the card bus (no double party on /agent)', ownedOk(ov));
+  mustCatch('an owned confetti joining the card bus too', !ownedOk(ov.replace('    if (owned) return;\n', '')));
 }
 
 // ── §4 one writer: NamePrompt, AccountMenu and AuthModal all save through useSaveName ───────────────
