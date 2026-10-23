@@ -87,8 +87,12 @@ export function homeCardHtml(origin: string, description: string): string {
 }
 
 /** Link-preview fetchers (WhatsApp, iMessage = facebookexternalhit/Twitterbot, Telegram, Slack, …).
- *  Search engines are deliberately NOT here: they keep getting the real page. */
-export const PREVIEW_BOT_UA = /whatsapp|facebookexternalhit|facebot|twitterbot|telegrambot|slackbot|discordbot|linkedinbot|skypeuripreview|snapchat|pinterestbot|redditbot|viber/i;
+ *  Search engines are deliberately NOT here: they keep getting the real page.
+ *  ONLY BOT TOKENS — never an app name (owner 2026-10-23: a shared link «didn't open» inside Snapchat). An
+ *  in-app browser carries its app's name in its user agent («… Snapchat/13.12 …», «… Viber/…»), so the old
+ *  bare `snapchat|viber` sent PEOPLE the preview page instead of the site. Snapchat's preview fetcher is
+ *  «Snap URL Preview Service». verify-home-card-live-numbers.ts runs real in-app user agents against this. */
+export const PREVIEW_BOT_UA = /whatsapp|facebookexternalhit|facebot|twitterbot|telegrambot|slackbot|discordbot|linkedinbot|skypeuripreview|snap url preview|pinterestbot|redditbot/i;
 export const isPreviewBot = (ua: string | null | undefined) => !!ua && PREVIEW_BOT_UA.test(ua);
 // ── end of the card builder ─────────────────────────────────────────────────────────────────────────
 
