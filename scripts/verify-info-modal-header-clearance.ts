@@ -61,7 +61,7 @@ check(
 const xBtn = src.match(/xBtn:\s*\{[\s\S]*?\n {2}\}/)?.[0] ?? '';
 check(
   'the close button positions itself from CLOSE_INSET/CLOSE_SIZE (no re-hardcoded 14/34)',
-  /top:\s*CLOSE_INSET/.test(xBtn) && /right:\s*CLOSE_INSET/.test(xBtn) &&
+  /top:\s*CLOSE_INSET/.test(xBtn) && /xBtnRight: \{ right: CLOSE_INSET/.test(src) && /xBtnLeft: \{ left: CLOSE_INSET/.test(src) &&
     /width:\s*CLOSE_SIZE/.test(xBtn) && /height:\s*CLOSE_SIZE/.test(xBtn),
   `xBtn block:\n${xBtn}`,
 );
@@ -139,8 +139,9 @@ check(
 // the dialog kind; every dialog that keeps one (Support, the legal reader) starts its heading in
 // the title band BELOW the button's top, derived from TOP_CLEAR — never a re-hardcoded literal.
 check(
-  'the × is rendered only for dialogs that have one (gated on the kind, never unconditional)',
-  /const hasClose = kind !== 'about';/.test(src) && /\{hasClose && \(/.test(src),
+  // Owner 2026-10-23: EVERY info popup carries the × (reverses 2026-09-03's About-without-×).
+  'every info popup renders the × (About included), and an Arabic title keeps its room on the × side',
+  /const hasClose = true;/.test(src) && /\{hasClose && \(/.test(src) && /isRTL && s\.hClearLeft/.test(src),
 );
 check(
   'the title band derives its top padding from TOP_CLEAR (headings start below the ×, no literal)',

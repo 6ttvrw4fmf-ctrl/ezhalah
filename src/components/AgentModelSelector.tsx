@@ -3,8 +3,12 @@ import { Modal, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { useI18n } from '@/i18n';
+import { useAtLeast } from '@/lib/useAtLeast';
+import { MODELS_POPUP_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { cardShadow, colors, radius } from '@/theme/tokens';
 import { TAP44, TAP44_DOWN } from '@/theme/palette';
+
+const EZHALAH_LOGO = require('../../assets/images/ezhalah-logo.png');
 
 const MODELS = [
   { id: 'shaheen', ar: 'شاهين', en: 'Shaheen', version: '2.2',
@@ -40,6 +44,7 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
   const [anchor, setAnchor] = useState<{ x: number; y: number; width: number } | null>(null);
   const trigger = useRef<View>(null);
   const { width, height } = useWindowDimensions();
+  const wide = useAtLeast(MODELS_POPUP_WIDE_BREAKPOINT);
   const model = MODELS.find((item) => item.id === selected)!;
   const close = () => { setAnchor(null); };
 
@@ -119,9 +124,14 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
         <View style={styles.storyOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setAbout(false)}
             accessibilityLabel={arabic ? 'إغلاق' : 'Close'} accessibilityRole="button" />
-          <View testID="agent-models-story" style={[styles.storyCard, { width: Math.min(380, width - 32) }]} accessibilityViewIsModal>
+          {/* Bigger in the middle on a laptop, with the Ezhalah logo by the title (owner 2026-10-23). The card
+              opens only after a tap, so reading the window width here never meets the static export. */}
+          <View testID="agent-models-story" style={[styles.storyCard, wide && styles.storyCardWide, { width: Math.min(wide ? 540 : 380, width - 32) }]} accessibilityViewIsModal>
             <View style={[styles.storyHead, { flexDirection: 'row' }]}>
-              <Text style={[styles.storyTitle, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? 'نماذج إزهله' : "Ezhalah's models"}</Text>
+              <View style={[styles.storyTitleRow, { flexDirection: arabic ? 'row-reverse' : 'row' }]}>
+                <Image source={EZHALAH_LOGO} style={wide ? styles.storyLogoWide : styles.storyLogo} contentFit="contain" accessible={false} />
+                <Text style={[styles.storyTitle, wide && styles.storyTitleWide, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? 'نماذج إزهله' : "Ezhalah's models"}</Text>
+              </View>
               <Pressable accessibilityRole="button" accessibilityLabel={arabic ? 'إغلاق' : 'Close'} onPress={() => setAbout(false)} hitSlop={8}
                 style={({ pressed }) => [styles.storyClose, pressed && styles.pressed]}>
                 <Ionicons name="close" size={18} color={colors.muted} />
@@ -130,11 +140,11 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
             {MODELS.map((item) => (
               <View key={item.id} style={[styles.storyItem, item.id === 'hurr' && styles.unavailable]}>
                 <View style={[styles.modelIdentity, { direction: 'ltr', flexDirection: arabic ? 'row-reverse' : 'row' }]}>
-                  <ModelMark model={item} size={30} />
-                  <Text style={[styles.name, styles.storyName]}>{arabic ? item.ar : item.en} {item.version}</Text>
+                  <ModelMark model={item} size={wide ? 38 : 30} />
+                  <Text style={[styles.name, styles.storyName, wide && styles.storyNameWide]}>{arabic ? item.ar : item.en} {item.version}</Text>
                   {item.id === 'hurr' ? <Text style={styles.soon}>{arabic ? 'قريباً' : 'Coming soon'}</Text> : null}
                 </View>
-                <Text style={[styles.storyText, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? item.storyAr : item.storyEn}</Text>
+                <Text style={[styles.storyText, wide && styles.storyTextWide, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? item.storyAr : item.storyEn}</Text>
               </View>
             ))}
           </View>
@@ -174,6 +184,13 @@ const styles = StyleSheet.create({
   storyCard: { backgroundColor: colors.surface, borderRadius: 20, padding: 18, gap: 14, borderWidth: 1, borderColor: colors.fieldLine,
     ...cardShadow, shadowOpacity: 0.18, shadowRadius: 24, elevation: 12 },
   storyHead: { alignItems: 'center', justifyContent: 'space-between' },
+  storyCardWide: { padding: 28, gap: 20, borderRadius: 24 },
+  storyTitleRow: { alignItems: 'center', gap: 10, flexShrink: 1 },
+  storyLogo: { width: 30, height: 30 },
+  storyLogoWide: { width: 40, height: 40 },
+  storyTitleWide: { fontSize: 22, lineHeight: 32 },
+  storyNameWide: { fontSize: 17, lineHeight: 25 },
+  storyTextWide: { fontSize: 16, lineHeight: 27 },
   storyTitle: { color: colors.ink, fontSize: 17, lineHeight: 26, fontWeight: '700' },
   storyClose: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   storyItem: { gap: 4 },

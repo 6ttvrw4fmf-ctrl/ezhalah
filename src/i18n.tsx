@@ -1456,6 +1456,7 @@ const AR: Record<string, string> = {
   // «تواصل مع الدعم» in-app form (owner 2026-09-02). Saudi-natural, calm, no exclamation marks.
   'Subject': 'الموضوع',
   'Message': 'الرسالة',
+  'Your signed-in email': 'بريد حسابك',
   'Your email': 'بريدك الإلكتروني',
   'What is this about?': 'وش موضوع رسالتك؟',
   'Tell us what happened.': 'اكتب لنا التفاصيل.',
@@ -1538,6 +1539,7 @@ const AR: Record<string, string> = {
 
   // Settings (account)
   'Display Name': 'الاسم المعروض',
+  'Tap here to change your name': 'اضغط هنا لتغيير اسمك',
   'Edit': 'تعديل',
   'Save': 'حفظ',
   'Apple Account': 'حساب Apple',
