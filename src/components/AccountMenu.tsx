@@ -375,7 +375,7 @@ export default function AccountMenu({
                 {({ hovered, pressed }: any) => { const on = !!(hovered || pressed); return (<>
                   <View style={s.avatar}><Text style={s.avatarText}>{initialsOf(pickName(user, locale))}</Text></View>
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={[s.profileName, on && s.rowOn]} numberOfLines={1}>{pickName(user, locale)}</Text>
+                    <Text style={[s.profileName, on && s.rowOn]} numberOfLines={1}>{pickName(user, locale) || t('Add your name')}</Text>
                     {!!user.sub && <Text style={[s.profileSub, on && s.rowSubOn]} numberOfLines={1}>{user.sub}</Text>}
                   </View>
                   <Ionicons name="create-outline" size={15} color={on ? C.onFill : C.muted} />
