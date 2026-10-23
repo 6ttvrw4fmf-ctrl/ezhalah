@@ -54,7 +54,7 @@ const appJson = JSON.parse(readFileSync(new URL('../app.json', import.meta.url),
 check('the pages ARE pre-rendered (web.output static) — the reason the first render must match the server',
   appJson.expo?.web?.output === 'static');
 check('the server renders Arabic (readSavedLocale falls back to ar with no window) — SERVER_RENDERED_RTL agrees',
-  SERVER_RENDERED_RTL === true && /return 'ar';\s*\}\s*\n\s*\/\/ Whether the active language is REMEMBERED/.test(i18n));
+  SERVER_RENDERED_RTL === true && /function readSavedLocale\(\): Locale \{[\s\S]*?\n  return 'ar';\n\}/.test(i18n));
 check('useDocumentRtl starts from firstRenderDocRtl, not from reading the page',
   /useState<boolean \| null>\(\(\) => firstRenderDocRtl\(Platform\.OS === 'web'\)\)/.test(readFileSync(new URL('../src/lib/useDocumentRtl.ts', import.meta.url), 'utf8')));
 
