@@ -654,3 +654,7 @@ says Sell (656's class, backlog 672) — a rule that decides a contradiction is 
 - 🔧 adds: the DataImpulse proxy (407, funds — backlog 744/745) is the owner's money, never one of your three jobs; a site that
   needs it (wasalt, souq24, eilmalriyada, sadin) is not provable while it is down, so it is not chosen (same lesson 🆕 learned
   on snam the same night).
+- 🔧 10-23 (third night of the queue lesson, so it is now a rule): COUNT the queued runs before you dispatch anything
+  (`gh run list --workflow small-sources-sync.yml --status queued,in_progress`): the matrix is one slot (~28 min a run), so
+  a probe queued ahead of a proof costs the proof its slot — dispatch the PROOF first, the probe after (⚡ 10-23 cancelled
+  its own probe to land the tamyaz proof).
