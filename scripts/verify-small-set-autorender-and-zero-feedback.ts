@@ -67,8 +67,10 @@ check("the zero-result branch renders the FeedbackRow (not null)",
   /<FeedbackRow feedbackKey=\{m\.id\} onFeedback=\{showFbToast\}/.test(zero) && !/\n\s*null\n\s*\) : \(/.test(zero));
 check("its read-aloud reads the zero-result intro alone (no phantom listings)",
   /buildResultsReadAloudSegments\(introText, \[\], undefined, locale\)/.test(zero));
-check("the non-zero branch still has its own FeedbackRow (two sites total)",
-  (agent.match(/<FeedbackRow feedbackKey=\{m\.id\}/g) ?? []).length === 2);
+check("the non-zero branch still has its own FeedbackRow (three sites: results, zero results, and — owner 2026-10-23 — a plain reply's invitation Share)",
+  (agent.match(/<FeedbackRow feedbackKey={m.id}/g) ?? []).length === 3);
+
+
 
 if (failed) { console.error(`\n✗ ${failed} check(s) FAILED`); process.exit(1); }
 console.log("\nOK — small final sets render in full at the canonical stop line; thumbs survive zero results");

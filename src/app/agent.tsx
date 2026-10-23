@@ -96,8 +96,8 @@ import { useApp } from '@/store';
 import { pickResultsFoundSentence } from '@/data/resultsFoundRotation';
 import { pickNoResultsSentence } from '@/data/noResultsRotation';
 import { pickName } from '@/lib/nameSync';
-import { encodeSharePayload, shareLink, shareMessage, SHARE_INVITE_LINE } from '@/lib/shareSearch';
-import { SHARE_LINK, shareNative } from '@/lib/share';
+import { encodeSharePayload, encodeInvitePayload, shareLink, shareMessage, SHARE_INVITE_LINE } from '@/lib/shareSearch';
+import { SHARE_LINK, shareNative, shareLead, liveSiteCount } from '@/lib/share';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
@@ -716,6 +716,17 @@ export default function Agent() {
   // THAT chat — named after its latest search, or «محادثة من يوسف» when it has none. Guests and an empty
   // screen keep the homepage share. Phone: the phone's own share menu with the link alone (the card holds
   // the title). Desktop: the link is copied and the pill says so.
+  // AN INVITATION TO JOIN (owner 2026-10-23): the Share under a reply with no results to show (a «هلا», a
+  // question, a search that found nothing) sends a personal welcome — card «يوسف يرحّب بك للانضمام إلى إزهله»,
+  // popup with the same words — and, as the message text, the top Share's marketing line («ليش تدوّر في 148
+  // موقع؟ إزهله يدوّر عنك»). A guest has no name to invite with: the plain link with that same line.
+  const inviteFor = (): { shareUrl?: string; shareText?: string } => {
+    const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
+    const text = shareLead(loc, liveSiteCount());
+    const payload = user ? encodeInvitePayload(pickName(user, loc), loc) : null;
+    const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;
+    return { shareUrl: payload ? shareLink(origin, payload) : origin, shareText: text };
+  };
   const shareFor = (q: SearchQuery | undefined): { shareUrl?: string; shareText?: string; prepareShare?: () => Promise<string | null> } => {
     if (!user || !q) return {};
     const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
@@ -4515,7 +4526,11 @@ export default function Agent() {
                 // handled inside SearchLoader (the message column is LTR-pinned).
                 // An Advanced Filter round: one sentence of the user's picks, each landing in turn (owner 2026-10-11).
                 if (m.afRound) return <AfRoundLoader key={m.id} items={m.afRound.items} pools={m.afRound.pools} exiting={m.exiting} fontFamily={CHAT_FONT} />;
-                return <View key={m.id} ref={m.id === loaderId ? loaderNodeRef : undefined} collapsable={false}><SearchLoader bottomInset={loaderBottomInset} settleTop={loaderSettleTop} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} /></View>;
+                // The loader speaks the language of the message that started it (owner 2026-10-23: typed «hi» → the
+                // «thinking» line said «إزهله يفكر…» on the right). Same per-turn rule the result card uses below.
+                const asked = msgs.slice(0, msgs.indexOf(m)).reverse().find((x): x is Extract<typeof x, { role: 'user' }> => x.role === 'user');
+                const loaderLocale: Locale = asked?.text ? (msgRTL(asked.text) ? 'ar' : 'en') : locale;
+                return <View key={m.id} ref={m.id === loaderId ? loaderNodeRef : undefined} collapsable={false}><LocaleScope locale={loaderLocale}><SearchLoader bottomInset={loaderBottomInset} settleTop={loaderSettleTop} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} /></LocaleScope></View>;
               }
               if (m.role === 'agent') {
                 if (m.greeting) {
@@ -4554,6 +4569,10 @@ export default function Agent() {
                           </Pressable>
                         ))}
                       </View>
+                    ) : null}
+                    {/* 👍👎 + Share under a plain reply too (owner 2026-10-23): its Share is the invitation to join. */}
+                    {!m.refine && (!m.typing || doneTyping[m.id]) ? (
+                      <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={buildResultsReadAloudSegments(txt, [], undefined, locale)} {...inviteFor()} />
                     ) : null}
                   </View>
                 );
@@ -4681,7 +4700,7 @@ export default function Agent() {
                     // but the RESPONSE-level feedback row still belongs to this turn (owner 2026-08-30: thumbs
                     // must not vanish merely because listing count = 0; the user is rating the answer, and
                     // "nothing matched" IS an answer). Read-aloud reads the zero-result intro alone.
-                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined, locale)} />
+                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined, locale)} {...inviteFor()} />
                   ) : (
                     <>
                       {/* The default "مرتبة حسب الأقرب لطلبك" note was removed per owner request (2026-07-07).

@@ -1386,6 +1386,7 @@ const AR: Record<string, string> = {
   'Sign in or create your free account': 'سجّل دخولك أو أنشئ حسابك مجاناً',
   'Sign in to unlock more of Ezhalah.': 'احفظ بحثك واحصل على المزيد',
   'Sign in and it opens right away': 'سجّل دخولك وتنفتح لك فوراً',
+  'Sign up free and start searching': 'سجّل مجاناً وابدأ البحث',
   'More than 25 Saudi property platforms — in one place.': 'أكثر من ٢٥ منصة عقارية سعودية — في مكان واحد.',
   'Ezhalah brings property listings from the various Saudi real-estate platforms together in one place.':
     'إزهله تجمع العقارات المعروضة من مختلف منصات العقار السعودية في مكان واحد.',
