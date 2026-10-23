@@ -164,8 +164,10 @@ def fetch_all(s: cc.Session) -> list[dict]:
 #   description is its only statement, read by the shared prose reader: FG26842 «مطبخ مجهز بالكامل», «مرافق البرج:
 #   … مواقف». Prose is never read for a checklist column.
 # Only columns both fursaghyr tables carry are written (PGRST204, 10-09). A failed read writes nothing.
+# «furnished» joined on 2026-10-23 (backlog 763, migration 20261023111758 added the column to both tables): FG27238
+# says «الشقه مؤثثه بالكامل» and no checklist term expresses it, so its description decides it.
 FEATURE_COLS = ("elevator", "kitchen", "air_conditioner", "parking", "laundry_room", "balcony_terrace",
-                "maid_room", "driver_room", "private_entrance")
+                "maid_room", "driver_room", "private_entrance", "furnished")
 _TAG = re.compile(r"<[^>]+>")
 
 
