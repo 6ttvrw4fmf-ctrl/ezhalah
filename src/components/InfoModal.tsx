@@ -82,12 +82,14 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
   // which would fold our own cards back in (ops_incident #163). Zero unless something is docked.
   const promptInsets = useForeignPromptInsets();
   const { width, height } = useWindowDimensions();
-  const { t } = useI18n();
+  const { t, isRTL: closeOnLeft } = useI18n();
   const reduced = useReducedMotion();
   const about = kind === 'about';
   // «من نحن» has NO close button (owner 2026-09-03): the backdrop closes it, and its header is the
   // drag grip. Support and the legal reader keep the × — they are forms and long reads.
-  const hasClose = kind !== 'about';
+  // EVERY info popup carries the × (owner 2026-10-23: «all those information popups must show x» — reverses
+  // 2026-09-03's About-without-×). It sits at the reading END: right in English, LEFT in Arabic.
+  const hasClose = true;
 
   const progress = useSharedValue(0);
   useEffect(() => {
@@ -189,7 +191,7 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
               testID="info-modal-close"
               accessibilityRole="button"
               accessibilityLabel={t('Close')}
-              style={({ hovered, pressed }: any) => [s.xBtn, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
+              style={({ hovered, pressed }: any) => [s.xBtn, closeOnLeft ? s.xBtnLeft : s.xBtnRight, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
             >
               {({ hovered, pressed }: any) => (
                 <Ionicons name="close" size={20} color={hovered || pressed ? colors.ink : colors.muted} />
@@ -218,7 +220,7 @@ function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => stri
       {/* Style `h` keeps its CLOSE_CLEAR physical-right padding so the title can never slide under
           the floating × (verify-info-modal-header-clearance pins that arithmetic). */}
       <View style={s.head}>
-        <Text style={[s.h, !isRTL && s.textLtr]}>{t('Support')}</Text>
+        <Text style={[s.h, !isRTL && s.textLtr, isRTL && s.hClearLeft]}>{t('Support')}</Text>
       </View>
 
       <View style={s.bodyPad}>
@@ -256,12 +258,12 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
   // draft is restored from the session-scoped cache rather than starting empty. See the long note
   // in lib/supportDraft.ts for the measured loss and why the cache is memory, never disk.
   // Lazy initialisers: `recallSupportDraft()` must run on MOUNT, not on every render.
-  const [email, setEmail] = useState(
-    // Signed-in users authenticate with Google/Apple, so `sub` IS their email — prefill it rather
-    // than making them type an address we already know. Signed-out users type their own. A recalled
-    // address wins: the user may have deliberately typed a different one before being interrupted.
-    () => recallSupportDraft()?.email || (user?.sub && user.sub.includes('@') ? user.sub : ''),
-  );
+  // LOCKED FOR A SIGNED-IN USER (owner 2026-10-23: «lock the email … that's his logged-in email»): Google/Apple
+  // sign-in means `sub` IS their address, so the reply goes to the account itself and the field cannot be
+  // edited. A signed-out user types their own (a recalled draft address is kept for them).
+  const accountEmail = user?.sub && user.sub.includes('@') ? user.sub : '';
+  const [typedEmail, setEmail] = useState(() => (accountEmail ? '' : recallSupportDraft()?.email || ''));
+  const email = accountEmail || typedEmail;
   const [subject, setSubject] = useState(() => recallSupportDraft()?.subject ?? '');
   const [message, setMessage] = useState(() => recallSupportDraft()?.message ?? '');
   const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
@@ -365,14 +367,16 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
           onChangeText={setEmail}
           onFocus={() => setFocus('email')}
           onBlur={() => setFocus(null)}
-          editable={!sending}
+          editable={!sending && !accountEmail}
+          accessibilityHint={accountEmail ? t('Your signed-in email') : undefined}
           keyboardType="email-address"
           autoCapitalize="none"
           autoComplete="email"
           placeholder="name@example.com"
           placeholderTextColor={colors.muted}
-          style={[s.input, s.inputLtr]}
+          style={[s.input, s.inputLtr, !!accountEmail && s.inputLocked]}
         />
+        {accountEmail ? <Ionicons name="lock-closed" size={14} color={colors.muted} style={s.lockIcon} accessible={false} /> : null}
       </Field>
 
       {state === 'error' ? (
@@ -471,7 +475,8 @@ function AboutBody({ t, reduced, gripRef, drag }: {
   const animate = IS_WEB && !reduced;
   const shown = useShown(!animate);
   const rev = { shown, animate };
-  const a = useMemo(() => makeAbout(pal, dark), [pal, dark]);
+  const { isRTL: aboutRtl } = useI18n();
+  const a = useMemo(() => makeAbout(pal, dark, aboutRtl), [pal, dark, aboutRtl]);
 
   return (
     <View style={a.body}>
@@ -515,7 +520,7 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
       <View style={s.head}>
         <View style={s.legalLockup}>
           <RNImage source={EAGLE} style={s.legalEagle} resizeMode="contain" />
-          <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr]}>{t('Terms & Privacy')}</Text>
+          <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr, isRTL && s.hClearLeft]}>{t('Terms & Privacy')}</Text>
         </View>
       </View>
       <View style={s.bodyPad}>
@@ -600,11 +605,17 @@ const s = StyleSheet.create({
   xBtn: {
     // Physical top-right under BOTH directions: RTL (forced app-wide for Arabic) flips `right:` to
     // the physical left, so the physical right is spelled `left:` there. (owner 2026-08-29)
-    position: 'absolute', top: CLOSE_INSET, ...(I18nManager.isRTL ? { left: CLOSE_INSET } : { right: CLOSE_INSET }), zIndex: 5,
+    // The side is set per language below (xBtnSide): right in English, LEFT in Arabic (owner 2026-10-23).
+    position: 'absolute', top: CLOSE_INSET, zIndex: 5,
     width: CLOSE_SIZE, height: CLOSE_SIZE, borderRadius: CLOSE_SIZE / 2,
     alignItems: 'center', justifyContent: 'center',
     ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
   },
+  // Measured 2026-10-23: on the web physical sides are NOT mirrored under Arabic, so the × side is chosen by
+  // language. Both sides spelled so a merge never leaves the other one set.
+  xBtnRight: { right: CLOSE_INSET, left: 'auto' as any },
+  xBtnLeft: { left: CLOSE_INSET, right: 'auto' as any },
+  hClearLeft: { paddingRight: 0, paddingLeft: CLOSE_CLEAR },
   xBtnHover: { backgroundColor: colors.surface2 },
   scroll: { paddingTop: 0, paddingBottom: 0 },
   bodyPad: { paddingHorizontal: BODY_PAD, paddingTop: 4, paddingBottom: BODY_PAD },
@@ -647,6 +658,8 @@ const s = StyleSheet.create({
   },
   textLtr: { textAlign: 'left', writingDirection: 'ltr' as any },
   inputLtr: { textAlign: 'left', writingDirection: 'ltr' as any },
+  inputLocked: { color: colors.muted, paddingRight: 30 },
+  lockIcon: { position: 'absolute', right: 12, top: '50%', marginTop: -7 } as any,
   area: { minHeight: 132, paddingTop: 12, lineHeight: 22 },
   errRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 12 },
   errTx: { flex: 1, fontSize: 12.5, color: colors.danger, textAlign: 'right', lineHeight: 18 },
@@ -691,7 +704,9 @@ const s = StyleSheet.create({
 // Arabic script), weights carry the hierarchy, body leading stays generous (~1.7).
 // Keep this page intentionally close to the legal reader: one calm reading column, clear hierarchy,
 // and no decorative panels competing with the explanation.
-function makeAbout(pal: Record<string, string>, dark: boolean) {
+// English reads left-to-right (owner 2026-10-23, English screenshot: the About text sat on the right).
+function makeAbout(pal: Record<string, string>, dark: boolean, rtl = true) {
+  const start = rtl ? 'right' : 'left';
   void dark;
   return StyleSheet.create({
     body: { paddingHorizontal: BODY_PAD + 4, paddingTop: BODY_PAD, paddingBottom: BODY_PAD },
@@ -702,10 +717,10 @@ function makeAbout(pal: Record<string, string>, dark: boolean) {
     wordmark: { fontSize: 34, lineHeight: 42, fontWeight: '800', color: pal.ink },
     wordDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: pal.accentLeaf ?? pal.primary, alignSelf: 'flex-end', marginBottom: 8 },
     readingColumn: { maxWidth: 640, width: '100%', alignSelf: 'center' },
-    heroLine: { fontSize: 19, lineHeight: 31, fontWeight: '700', color: pal.ink, textAlign: 'right', marginTop: 8, marginBottom: 18 },
-    paragraph: { fontSize: 15, lineHeight: 28, fontWeight: '400', color: pal.body, textAlign: 'right', marginBottom: 16 },
+    heroLine: { fontSize: 19, lineHeight: 31, fontWeight: '700', color: pal.ink, textAlign: start as any, marginTop: 8, marginBottom: 18 },
+    paragraph: { fontSize: 15, lineHeight: 28, fontWeight: '400', color: pal.body, textAlign: start as any, marginBottom: 16 },
     rule: { height: 1, backgroundColor: pal.line, marginTop: 4, marginBottom: 18 },
-    note: { fontSize: 13.5, lineHeight: 24, fontWeight: '400', color: pal.muted, textAlign: 'right', marginBottom: 12 },
+    note: { fontSize: 13.5, lineHeight: 24, fontWeight: '400', color: pal.muted, textAlign: start as any, marginBottom: 12 },
   });
 }
 
