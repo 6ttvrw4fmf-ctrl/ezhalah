@@ -161,8 +161,12 @@ def session() -> cc.Session:
 # something that MIMICS death. The canary asks, before every single removal, whether the site is
 # still rendering real listings to us right now, using URLs THIS RUN already fetched successfully.
 # It fails CLOSED: no canary, no removal.
+# 2026-10-20 the site's ld+json changed «"@type":"RealEstate"» to «"@type":"RealEstateListing"» (live page
+# /en/properties/26049 read 2026-10-23). The old exact match missed every live page, so fleet_liveness quarantined
+# aldarim on «opening controls 0/5 live» every day from 10-20 and no listing was verified for 3 days (alert 10445).
+# Both forms are the page stating it renders this listing.
 _LD_REAL_ESTATE = re.compile(
-    r'<script[^>]+application/ld\+json[^>]*>\s*\{[^<]*"@type"\s*:\s*"RealEstate"', re.S)
+    r'<script[^>]+application/ld\+json[^>]*>\s*\{[^<]*"@type"\s*:\s*"RealEstate(?:Listing)?"', re.S)
 _NOT_FOUND_TITLE = re.compile(r"<title[^>]*>\s*Property Not Found\b", re.I)
 
 _canary: dict[str, Any] = {"urls": [], "verdict": None, "reason": "not evaluated"}
