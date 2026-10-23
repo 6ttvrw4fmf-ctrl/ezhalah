@@ -82,12 +82,14 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
   // which would fold our own cards back in (ops_incident #163). Zero unless something is docked.
   const promptInsets = useForeignPromptInsets();
   const { width, height } = useWindowDimensions();
-  const { t } = useI18n();
+  const { t, isRTL: closeOnLeft } = useI18n();
   const reduced = useReducedMotion();
   const about = kind === 'about';
   // «من نحن» has NO close button (owner 2026-09-03): the backdrop closes it, and its header is the
   // drag grip. Support and the legal reader keep the × — they are forms and long reads.
-  const hasClose = kind !== 'about';
+  // EVERY info popup carries the × (owner 2026-10-23: «all those information popups must show x» — reverses
+  // 2026-09-03's About-without-×). It sits at the reading END: right in English, LEFT in Arabic.
+  const hasClose = true;
 
   const progress = useSharedValue(0);
   useEffect(() => {
@@ -189,7 +191,7 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
               testID="info-modal-close"
               accessibilityRole="button"
               accessibilityLabel={t('Close')}
-              style={({ hovered, pressed }: any) => [s.xBtn, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
+              style={({ hovered, pressed }: any) => [s.xBtn, closeOnLeft ? s.xBtnLeft : s.xBtnRight, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
             >
               {({ hovered, pressed }: any) => (
                 <Ionicons name="close" size={20} color={hovered || pressed ? colors.ink : colors.muted} />
@@ -218,7 +220,7 @@ function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => stri
       {/* Style `h` keeps its CLOSE_CLEAR physical-right padding so the title can never slide under
           the floating × (verify-info-modal-header-clearance pins that arithmetic). */}
       <View style={s.head}>
-        <Text style={[s.h, !isRTL && s.textLtr]}>{t('Support')}</Text>
+        <Text style={[s.h, !isRTL && s.textLtr, isRTL && s.hClearLeft]}>{t('Support')}</Text>
       </View>
 
       <View style={s.bodyPad}>
@@ -518,7 +520,7 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
       <View style={s.head}>
         <View style={s.legalLockup}>
           <RNImage source={EAGLE} style={s.legalEagle} resizeMode="contain" />
-          <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr]}>{t('Terms & Privacy')}</Text>
+          <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr, isRTL && s.hClearLeft]}>{t('Terms & Privacy')}</Text>
         </View>
       </View>
       <View style={s.bodyPad}>
@@ -603,11 +605,17 @@ const s = StyleSheet.create({
   xBtn: {
     // Physical top-right under BOTH directions: RTL (forced app-wide for Arabic) flips `right:` to
     // the physical left, so the physical right is spelled `left:` there. (owner 2026-08-29)
-    position: 'absolute', top: CLOSE_INSET, ...(I18nManager.isRTL ? { left: CLOSE_INSET } : { right: CLOSE_INSET }), zIndex: 5,
+    // The side is set per language below (xBtnSide): right in English, LEFT in Arabic (owner 2026-10-23).
+    position: 'absolute', top: CLOSE_INSET, zIndex: 5,
     width: CLOSE_SIZE, height: CLOSE_SIZE, borderRadius: CLOSE_SIZE / 2,
     alignItems: 'center', justifyContent: 'center',
     ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
   },
+  // Measured 2026-10-23: on the web physical sides are NOT mirrored under Arabic, so the × side is chosen by
+  // language. Both sides spelled so a merge never leaves the other one set.
+  xBtnRight: { right: CLOSE_INSET, left: 'auto' as any },
+  xBtnLeft: { left: CLOSE_INSET, right: 'auto' as any },
+  hClearLeft: { paddingRight: 0, paddingLeft: CLOSE_CLEAR },
   xBtnHover: { backgroundColor: colors.surface2 },
   scroll: { paddingTop: 0, paddingBottom: 0 },
   bodyPad: { paddingHorizontal: BODY_PAD, paddingTop: 4, paddingBottom: BODY_PAD },

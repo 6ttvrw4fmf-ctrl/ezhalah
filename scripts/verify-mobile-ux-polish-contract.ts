@@ -75,9 +75,11 @@ check('the chat-delete dialog carries the top-right × — PHYSICAL right under 
   && /dcClose: \{ position: 'absolute', top: 12, \.\.\.\(I18nManager\.isRTL \? \{ left: 12 \} : \{ right: 12 \}\)/.test(sidebar));
 // The class rule across all three dialog files: a centered dialog's × must never use a bare
 // direction-flipped `right:` — Arabic's forced RTL would land it on the physical LEFT.
-check('every centered dialog × is direction-aware (AccountMenu + Sidebar + InfoModal)',
-  /centerClose: \{ position: 'absolute', top: 12, \.\.\.\(I18nManager\.isRTL/.test(account)
-  && /\.\.\.\(I18nManager\.isRTL \? \{ left: CLOSE_INSET \} : \{ right: CLOSE_INSET \}\)/.test(strip(readFileSync(join(root, 'src', 'components', 'InfoModal.tsx'), 'utf8'))));
+// Owner 2026-10-23: the × sits at the reading END — right in English, LEFT in Arabic — chosen by the SCREEN
+// language (measured: the web never mirrors physical sides, so the old I18nManager spelling pinned it right).
+check('every centered account/info dialog × follows the screen language (English right, Arabic left)',
+  /centerClose: \{ position: 'absolute', top: 12, \.\.\.\(rtl \? \{ left: 12 \} : \{ right: 12 \}\)/.test(account)
+  && /closeOnLeft \? s\.xBtnLeft : s\.xBtnRight/.test(strip(readFileSync(join(root, 'src', 'components', 'InfoModal.tsx'), 'utf8'))));
 
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
 console.log('\n  mutation proof — each guard must FAIL on its own defect\n');

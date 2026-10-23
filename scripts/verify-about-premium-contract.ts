@@ -75,8 +75,9 @@ check('3b. the reading page keeps its typography and dividers palette-driven',
   && /rule:[^\n]*backgroundColor: pal\.line/.test(modal));
 // 3c RETARGETED 2026-09-03: «من نحن» has NO close button (the backdrop closes it) and is DRAGGABLE
 // by its header on desktop, starting centered on every open (no position memory).
-check('3c. «من نحن» renders without a × (gated), drags by its header via the shared machinery, and never remembers a position',
-  /const hasClose = kind !== 'about';/.test(modal) && /\{hasClose && \(/.test(modal)
+// Owner 2026-10-23: «all those information popups must show x» — About now carries the × too.
+check('3c. «من نحن» carries the ×, drags by its header via the shared machinery, and never remembers a position',
+  /const hasClose = true;/.test(modal) && /\{hasClose && \(/.test(modal)
   && /<AboutBody[^>]*gripRef=\{gripRef\}/.test(modal) && /ref=\{gripRef\}/.test(modal)
   && /attachCardDrag\(node, grip, \{/.test(modal) && !/posKey:/.test(modal)
   && /const drag = about && canDragAuthPopup\(\{ isWeb: IS_WEB, docked \}\)/.test(modal));
