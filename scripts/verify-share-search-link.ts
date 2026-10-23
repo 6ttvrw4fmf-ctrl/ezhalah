@@ -11,7 +11,7 @@
 //   5. no name → no message (never a line with a blank name).
 import {
   encodeSharePayload, decodeSharePayload, shareLink, shareMessage, shareLandingTitle, SHARE_COPY, SHARE_PARAM,
-  shareLandingPath, shareCardHtml, SHARE_CARD, shareTitle, isShareCode, sharedChatCardFrom, shareInviteNote,
+  shareLandingPath, shareCardHtml, SHARE_CARD, SHARE_INVITE_LINE, shareTitle, isShareCode, sharedChatCardFrom, shareInviteNote,
 } from '../src/lib/shareSearch.ts';
 
 let failed = 0;
@@ -68,8 +68,11 @@ mustCatch('a link that deep-links straight into /agent?filter= (it would bypass 
 const fullPayload = encodeSharePayload(Q, 'يوسف', 'ar')!;
 const html = shareCardHtml('https://new-domain.example', fullPayload);
 const meta = (prop: string) => new RegExp(`<meta (?:property|name)="${prop}" content="([^"]*)"`).exec(html)?.[1] ?? null;
-check('the card title names the type, the place, the sender and إزهله; the line is Ezhalah\'s promise',
-  meta('og:title') === 'شقق للإيجار في حي النرجس من يوسف على إزهله' && meta('og:description') === 'كل مواقع العقار في مكان واحد');
+// Owner 2026-10-22 (approved mockup): the card says the SAME invite the visitor then sees on the sign-in popup.
+check('the card title is the popup\'s own invite; the line says what Ezhalah is, in Saudi Arabia',
+  meta('og:title') === 'يوسف شاركك: شقق للإيجار في حي النرجس' && meta('og:title') === shareInviteNote('يوسف', Q, 'ar')
+  && meta('og:description') === 'افتحها على إزهله، محرك البحث العقاري بالذكاء الاصطناعي في السعودية');
+mustCatch('a card title that drifts from the popup\'s invite', shareTitle('يوسف', Q, 'ar') !== shareInviteNote('يوسف', Q, 'ar'));
 check('every card URL follows the REQUEST\'S domain (a domain change needs no code change)',
   meta('og:image') === 'https://new-domain.example/og-image-v6.png' && meta('og:url') === `https://new-domain.example/s/${fullPayload}`
   && !/vercel\.app/.test(html));
@@ -77,7 +80,7 @@ check('the page sends a person to Home + ?share= (never /agent)',
   html.includes(`content="0;url=/?share=${fullPayload}"`) && html.includes(`location.replace("/?share=${fullPayload}")`) && !/\/agent/.test(html));
 const enHtml = shareCardHtml('https://x.example', encodeSharePayload(Q, 'Yusuf', 'en')!);
 check('an English sender gets the English card, brand kept as "Ezhalah"',
-  /<meta property="og:title" content="Apartments for rent from Yusuf on Ezhalah"/.test(enHtml) && /lang="en"/.test(enHtml));
+  enHtml.includes(`<meta property="og:title" content="${shareInviteNote('Yusuf', Q, 'en')}"`) && enHtml.includes(SHARE_INVITE_LINE.en) && /Saudi Arabia/.test(SHARE_INVITE_LINE.en) && /lang="en"/.test(enHtml));
 const evil = shareCardHtml('https://x.example', enc({ v: 1, n: '<script>alert(1)</script>', l: 'ar', q: Q }));
 check('a hostile name is escaped, never injected into the page', !evil.includes('<script>alert') && evil.includes('&lt;script&gt;'));
 mustCatch('a card builder that does not escape the name', (() => {
@@ -101,7 +104,7 @@ check('a database card row is validated (first name, sender\'s language) — any
 mustCatch('a card reader that trusts whatever row comes back', !cardOk((r: any) => (r ? { q: r.query, name: r.sender_name, locale: r.locale } : null) as any));
 const chatHtml = shareCardHtml('https://x.example', 'a7Kx2bQ9', sharedChatCardFrom({ sender_name: 'يوسف', locale: 'ar', query: Q }));
 check('a shared chat\'s card says the approved title and sends the person to Home + ?share=<code>',
-  /og:title" content="شقق للإيجار في حي النرجس من يوسف على إزهله"/.test(chatHtml) && chatHtml.includes('location.replace("/?share=a7Kx2bQ9")') && !/\/agent/.test(chatHtml));
+  /og:title" content="يوسف شاركك: شقق للإيجار في حي النرجس"/.test(chatHtml) && chatHtml.includes('location.replace("/?share=a7Kx2bQ9")') && !/\/agent/.test(chatHtml));
 const unread = shareCardHtml('https://x.example', 'a7Kx2bQ9', null);
 check('a code whose card could not be read still goes to Home + ?share=<code> (the app reads the chat) — never a dead link',
   /og:title" content="إزهله"/.test(unread) && unread.includes('location.replace("/?share=a7Kx2bQ9")'));
