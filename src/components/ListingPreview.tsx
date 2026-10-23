@@ -75,6 +75,33 @@ function Chevron({ dir }: { dir: 'left' | 'right' }) {
 // Pin the row to physical LTR (web DOM dir), like AdViewer's browser chrome.
 const setLtr = (node: any) => { if (IS_WEB && node?.setAttribute) node.setAttribute('dir', 'ltr'); };
 
+// One gallery photo. Photos load from the SOURCE's own server, and when that server is down (iBaax, 2026-10-23:
+// every request hung) the slide used to stay an empty grey box. A photo that fails, or has not arrived after
+// PHOTO_STALL_MS, shows a plain line saying the site's photos are not available — never a blank box. A photo
+// that arrives later still replaces the line.
+const PHOTO_STALL_MS = 4000;
+function PhotoSlide({ uri, eager, label, unavailable }: { uri: string; eager: boolean; label: string; unavailable: string }) {
+  const [loaded, setLoaded] = useState(false);
+  const [stalled, setStalled] = useState(false);
+  useEffect(() => {
+    setLoaded(false); setStalled(false);
+    const timer = setTimeout(() => setStalled(true), PHOTO_STALL_MS);
+    return () => clearTimeout(timer);
+  }, [uri]);
+  return (
+    <View style={s.fill}>
+      {stalled && !loaded && (
+        <View testID="listing-preview-photo-unavailable" style={s.photoUnavailable}>
+          <Ionicons name="image-outline" size={28} color={colors.muted} />
+          <Text style={s.photoUnavailableTx}>{unavailable}</Text>
+        </View>
+      )}
+      <Image source={{ uri }} style={s.fill} contentFit="cover" priority={eager ? 'high' : 'low'} loading={eager ? 'eager' : 'lazy'}
+        accessibilityLabel={label} onLoad={() => setLoaded(true)} onError={() => setStalled(true)} />
+    </View>
+  );
+}
+
 export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
   listing: Listing; url: string;
   /** The viewer's own close for this tab (the ✕ in the page's top bar). */
@@ -503,11 +530,10 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
           >
             {photos.map((p, i) => (
               <View key={p + i} style={{ width: slideW || '100%', height: heroH }}>
-                {i === main
-                  ? <Image source={{ uri: p }} style={s.fill} contentFit="cover" priority="high" loading="eager" accessibilityLabel={t('Photo {n} of {total}', { n: i + 1, total: photos.length })} />
-                  : Math.abs(i - main) <= 1
-                    ? <Image source={{ uri: p }} style={s.fill} contentFit="cover" priority="low" loading="lazy" accessibilityLabel={t('Photo {n} of {total}', { n: i + 1, total: photos.length })} />
-                    : null}
+                {Math.abs(i - main) <= 1 && (
+                  <PhotoSlide uri={p} eager={i === main} label={t('Photo {n} of {total}', { n: i + 1, total: photos.length })}
+                    unavailable={t('Photos are not available from {site} right now', { site: name })} />
+                )}
               </View>
             ))}
           </ScrollView>
@@ -1029,6 +1055,8 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
 const s = StyleSheet.create({
   root: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.surface, overflow: 'hidden' },
   fill: { width: '100%', height: '100%' },
+  photoUnavailable: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 24 },
+  photoUnavailableTx: { color: colors.muted, fontSize: 14, textAlign: 'center' },
   hover: { backgroundColor: colors.tint },
   // top bar
   bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingHorizontal: 10, paddingVertical: 6, minWidth: 0 },

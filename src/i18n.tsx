@@ -1277,6 +1277,7 @@ const AR: Record<string, string> = {
   'Photo {n} of {total}': 'الصورة {n} من {total}',
   // The in-app ad page (components/ListingPreview.tsx, owner 2026-10-10).
   'Next photo': 'الصورة التالية',
+  'Photos are not available from {site} right now': 'الصور غير متاحة حالياً من {site}',
   '{n} rooms': '{n} غرف',
   '{n} bathrooms': '{n} دورات',
   'Location as published by {name}': 'الموقع كما نشره {name}',
