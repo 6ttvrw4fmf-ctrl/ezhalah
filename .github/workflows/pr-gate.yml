@@ -29,6 +29,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): required of every workflow by verify-gate-handshake.ts so a
+  # robot of ours is never refused by our own front door. Nothing in this workflow reaches production
+  # today; the variable is here so the next job added to it cannot forget it. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 concurrency:
   group: pr-gate-${{ github.ref }}
   cancel-in-progress: true
