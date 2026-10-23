@@ -43,7 +43,7 @@ import { liftSymbols } from './lib/liftSymbols.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const STORE = join(ROOT, 'src/store.tsx');
-const ACC = join(ROOT, 'src/components/AccountMenu.tsx');
+const ACC = join(ROOT, 'src/lib/useSaveName.ts'); // the rename path, moved out of AccountMenu 2026-10-23
 const AUTH = join(ROOT, 'src/lib/auth.ts');
 
 let failures = 0;
@@ -259,7 +259,7 @@ const routesThroughGuard = (text: string) =>
 // explicitly, so a scanner that over-skips fails here instead of reporting a clean sweep of nothing.
 const files = new Set(callSites.map((c) => c.file));
 check('§B both known buildSyncedName call sites are discovered (the scanner is not blind)',
-  callSites.length >= 2 && files.has('src/store.tsx') && files.has('src/components/AccountMenu.tsx'),
+  callSites.length >= 2 && files.has('src/store.tsx') && files.has('src/lib/useSaveName.ts'),
   `found ${callSites.length} in ${JSON.stringify([...files])}`);
 
 const offenders = callSites.filter((c) => !routesThroughGuard(c.text));
