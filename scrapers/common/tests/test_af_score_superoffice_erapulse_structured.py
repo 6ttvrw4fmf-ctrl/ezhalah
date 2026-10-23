@@ -53,3 +53,25 @@ def test_mutation_without_the_entries_the_prose_would_have_asked():
     assert A.page_says_yes(["نحن نقدم: مواقف السيارات"], "parking")
     assert A.page_says_yes(["3 غرف مطبخ مستودع"], "kitchen")
     assert A.SITE_PROPS["superoffice"] is A.superoffice_props and A.SITE_PROPS["erapulse"] is A.erapulse_props
+
+
+MQ_CHIPS = ('<span class="ap-ro-field-label">خدمات العقار</span> <div class="pd-chip-row"><span class="pd-chip">كهرباء</span>'
+            '<span class="pd-chip">مياه</span></div>')
+
+
+def test_maqrat_prose_elevator_is_silent_against_its_chips():
+    """🔬 10-23: maqrat 13605174 / 19039930 were asked elevator from «حارس ومصعدين» on ads whose chips name none."""
+    page = _page(A.maqrat_props, MQ_CHIPS + "<p>عمارة هادئة حارس ومصعدين</p>")
+    assert A.structured_says(page, "elevator") is None
+    assert A.structured_only("maqrat", {"elevator": A.WE_MISS}, {"elevator": None}, page)["elevator"] == A.PAGE_SILENT
+    assert not A.says_yes(["حارس ومصعدين"], "elevator", "maqrat", page)
+    lift = _page(A.maqrat_props, MQ_CHIPS.replace("مياه", "مصعد"))
+    assert A.structured_says(lift, "elevator") is True
+    assert A.says_yes(["مطبخ راكب"], "kitchen", "maqrat", page)     # no structured home: prose still states it
+
+
+def test_a_deed_boundary_is_not_an_amenity():
+    """🔬 10-23: fursaghyr 3237533 was asked elevator from «وتمام الحد المصعد», its licence boundary text."""
+    line = "الوحدة العقارية رقم 1 وتمام الحد بهو الدرج والدرج وتمام الحد المصعد وتمام الحد المنور"
+    assert not A.page_says_yes([line], "elevator")
+    assert A.page_says_yes(["العمارة فيها مصعد"], "elevator")

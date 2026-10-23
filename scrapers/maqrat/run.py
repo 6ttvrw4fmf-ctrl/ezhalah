@@ -72,6 +72,13 @@ _UNSTATED = {"غير محدد", "بدون", "لا يوجد", "لايوجد", ""}
 _OFFPLAN_RE = re.compile(r"تحت\s*ال[إا]نشاء|قيد\s*ال[إا]نشاء|على\s*الخارطة|على\s*المخطط")
 _SERVICES = {"كهرباء": "electricity", "مياه": "water_supply", "صرف صحي": "sanitation",
              "ألياف ضوئية": "optical_fibers", "الياف ضوئية": "optical_fibers", "مصعد": "elevator"}
+# The «خدمات العقار» chips are maqrat's only structured amenity field, and their whole vocabulary (measured over every
+# stored row, 🔬 2026-10-23) is utilities plus «مصعد»: elevator is the one Advanced Filter column they can express.
+# Every other column has no structured field, so the ad's own words are its only statement (law §2), read by the
+# shared prose reader: 13605174 «مطبخ راكب مكيفات اسبلت», 19039930 «شقة مؤثثة». Backlog 790: 213 active, 2 answered.
+# Prose never answers elevator. Only columns both maqrat tables carry.
+PROSE_COLS = ("furnished", "kitchen", "air_conditioner", "parking", "maid_room", "driver_room", "laundry_room",
+              "balcony_terrace", "private_entrance")
 _PAIR_A = re.compile(r'class="pd-overview-label">(.*?)</span>.*?class="pd-overview-value[^"]*">(.*?)</span>', re.S)
 _PAIR_B = re.compile(r'class="ap-ro-field-label">([^<]*)</span>\s*<span class="ap-ro-field-value[^"]*">(.*?)</span>', re.S)
 _CHIPS = re.compile(r'class="ap-ro-field-label">خدمات العقار</span>\s*<div class="pd-chip-row">(.*?)</div>', re.S)
@@ -158,6 +165,23 @@ def parse_detail(page: str, pid: str) -> dict[str, Any]:
             "photos": photos}
 
 
+# Two shapes in maqrat's stored text that name a fixture which is not this unit's (replayed over every active row,
+# 2026-10-23): a distance phrase names a PLACE («يبعد 3 دقائق عن مواقف كدي», 13605218), and «نفس المشروع» / «شقق
+# مفروشة» speak of ANOTHER unit or a suggested use («يوجد شقة في نفس المشروع داخليه مؤثثة» 13605205, a plot whose
+# uses list «شقق مفروشة» 13605199). The distance clause is dropped before reading; the other-unit shapes make
+# furnished unknown.
+_ELSEWHERE = re.compile(r"(?:يبعد|تبعد|على\s*بعد)[^،.\n]*")
+_OTHER_UNIT = re.compile(r"نفس\s*المشروع|شقق\s*مفروشة")
+
+
+def prose_answers(title: Optional[str], desc: Optional[str]) -> dict[str, bool]:
+    text = "\n".join(x for x in (title, desc) if x)
+    said = normalize.amenities_from_text(_ELSEWHERE.sub(" ", text))
+    if _OTHER_UNIT.search(text):
+        said.pop("furnished", None)
+    return {c: v for c, v in said.items() if c in PROSE_COLS}
+
+
 def map_listing(pid: str, card: dict, d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
     kv, title, desc = d["kv"], d["title"], d["description"]
     if _OFFPLAN_RE.search(title) or _OFFPLAN_RE.search(desc):
@@ -225,6 +249,7 @@ def map_listing(pid: str, card: dict, d: dict[str, Any]) -> tuple[Optional[tuple
     for word, col in _SERVICES.items():
         if word in d["services"]:
             row[col] = True
+    row.update(prose_answers(title, desc))
     stored = row.get("price_total") if deal == "Buy" else row.get("price_annual")
     field = "إجمالي سعر بيع الأرض" if (deal == "Buy" and is_land and land_total) else "سعر الوحدة"
     row["price_evidence"] = normalize.price_evidence(
