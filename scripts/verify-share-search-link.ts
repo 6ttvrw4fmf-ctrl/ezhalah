@@ -11,7 +11,7 @@
 //   5. no name → no message (never a line with a blank name).
 import {
   encodeSharePayload, decodeSharePayload, shareLink, shareMessage, shareLandingTitle, SHARE_COPY, SHARE_PARAM,
-  shareLandingPath, shareCardHtml, SHARE_CARD, SHARE_INVITE_LINE, shareTitle, isShareCode, sharedChatCardFrom, shareInviteNote,
+  shareLandingPath, shareCardHtml, SHARE_CARD, SHARE_INVITE_LINE, shareTitle, isShareCode, sharedChatCardFrom, shareInviteNote, encodeInvitePayload, decodeInvitePayload, shareJoinNote,
 } from '../src/lib/shareSearch.ts';
 
 let failed = 0;
@@ -153,6 +153,28 @@ mustCatch('the 512 px logo that WhatsApp draws as a big banner', !smallSquare(51
     /const prepareShare = \(\) => chatShareUrl\(q\);/.test(agentSrc) && /<FeedbackRow[\s\S]*shareFor\(/.test(agentSrc));
   mustCatch('the top pill going back to sharing the chat first',
     !top.test(agentSrc.replace('if (!(await shareNative())) setShareOpen(true);', 'if (await shareThisChat()) return; if (!(await shareNative())) setShareOpen(true);')));
+}
+
+// ── 7b. AN INVITATION TO JOIN (owner 2026-10-23): the Share under a plain reply («هلا») or a search with
+// nothing found sends «يوسف يرحّب بك للانضمام إلى إزهله» — card, popup — with the top Share's line as text. ──
+{
+  const fsx = await import('node:fs');
+  const inv = encodeInvitePayload('يوسف الأحمد', 'ar')!;
+  check('an invite carries the first name and language, and only decodes as an invite',
+    JSON.stringify(decodeInvitePayload(inv)) === '{"name":"يوسف","locale":"ar"}' && decodeSharePayload(inv) === null
+    && decodeInvitePayload(encodeSharePayload(Q, 'يوسف', 'ar')) === null && decodeInvitePayload('junk') === null);
+  check('the owner\'s exact welcome, Arabic and English',
+    shareJoinNote('يوسف', 'ar') === 'يوسف يرحّب بك للانضمام إلى إزهله' && shareJoinNote('Yusuf', 'en') === 'Yusuf welcomes you to join Ezhalah' && shareJoinNote('  ', 'ar') === null);
+  const card = shareCardHtml('https://x.example', inv);
+  check('the invite card: the welcome as title, the short tagline, and a person goes Home + ?share=<invite>',
+    card.includes('og:title" content="يوسف يرحّب بك للانضمام إلى إزهله"') && card.includes(`og:description" content="${SHARE_CARD.ar.desc}"`) && card.includes(`location.replace("/?share=${inv}")`));
+  const home = fsx.readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
+  check('Home opens the sign-in popup with the welcome for a guest who opens an invite',
+    /const inv = decodeInvitePayload\(raw\);/.test(home) && /if \(!user\) openAuth\(shareJoinNote\(/.test(home));
+  const ag = fsx.readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
+  check('a plain reply and a no-results reply both carry the invitation Share, with the top Share\'s line as text',
+    (ag.match(/\{\.\.\.inviteFor\(\)\}/g) ?? []).length >= 2 && /const text = shareLead\(loc, liveSiteCount\(\)\);/.test(ag) && /encodeInvitePayload\(pickName\(user, loc\), loc\)/.test(ag));
+  mustCatch('an invite link read as a broken link (the plain «إزهله» card)', !card.includes('og:title" content="إزهله"'));
 }
 
 console.log(`\nexample link: ${link.slice(0, 90)}…`);
