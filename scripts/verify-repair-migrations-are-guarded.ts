@@ -48,6 +48,13 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-10-22. Pins the ads' own sources published, read at save time (owner: «fix all the bugs»).
+  '20261022230940_pins_nine_sites.sql':
+    'the re-save only lets the new per-table BEFORE trigger (tg_pin_from_source_link) read a pin the row already holds, ' +
+    'and a re-scrape runs the same trigger, so it cannot be undone by a crawl. It IS watched: ' +
+    'mon_detect_captured_pin_not_served (rostered), widened 4 minutes later in 20261022231345_captured_pin_any_shape to read ' +
+    'every pin shape this repair reads and to raise from 3 ads per table; that migration\'s apply-time proof asserted no table ' +
+    'holds 3+ pins it does not show. The applied file cannot be edited to name the detector (content parity).',
   // 2026-10-21. Dwelleo fresh start (owner): 7,953 rows absent from the full catalogue walk switched off.
   '20261021132404_dwelleo_fresh_start_retire_unseen.sql':
     'a one-shot retirement, not a field repair a re-scrape can undo: every switched-off row is registered in ' +
