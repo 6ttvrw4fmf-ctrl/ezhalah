@@ -62,10 +62,26 @@ const filtered = (src: string) =>
   && /const liveNames = livePickerNames\(\);/.test(src) && /const downNames = hiddenPlatformNames\(\);/.test(src);
 check('the strip names go through pickerMayOffer with the live + down lists (the picker\'s rule)', filtered(SHARED_SRC));
 check('the strip re-filters when the live list lands', /void loadLivePickerNames\(\)\.then\(\(\) => \{ if \(alive\) setLiveTick/.test(SHARED_SRC));
-check('the web strip takes its names and phase from the shared contract (animation-delay = −phase/speed)',
-  /useStripNames\(\)/.test(WEB) && /stripPhase\(Date\.now\(\), cycleWidth\)/.test(WEB) && /animationDelay: `\$\{-phase \/ STRIP_SPEED\}s`/.test(WEB));
+check('the web strip takes its names and its every-frame position from the shared clock contract',
+  /useStripNames\(\)/.test(WEB) && /stripWindow\(stripPhase\(Date\.now\(\), cycleWidth\), n\)/.test(WEB));
+// SMALL WINDOW (owner iPhone screenshot 2026-10-22: lower half of Home painted white). The track must mount
+// only STRIP_WINDOW logos, never every logo twice (a ~32,000 px will-change layer iOS Safari drops tiles for).
+// EXECUTED: the window's start × slot + offset must equal the clock phase, so the strip is where the clock says.
+{
+  const lifted = await liftSymbols(join(ROOT, 'src/components/HomeWebsiteStrip.web.tsx'),
+    [{ header: 'export function stripWindow(' }], ['stripWindow'], 'const STRIP_SLOT = 108;');
+  const win = lifted.stripWindow as (p: number, n: number) => { start: number; offset: number };
+  const n = 149, cyc = n * 108;
+  const places = [0, 1, 107.9, 108, 5000.5, cyc - 0.5].every((p) => { const w = win(p, n); return Math.abs(w.start * 108 + w.offset - p) < 1e-6 && w.offset >= 0 && w.offset < 108 && w.start < n; });
+  check('the window sits exactly where the clock phase says (start × slot + offset = phase)', places);
+  check('a missing list is a still, empty strip — never NaN', JSON.stringify(win(NaN, n)) === '{"start":0,"offset":0}' && JSON.stringify(win(500, 0)) === '{"start":0,"offset":0}');
+  const smallTrack = (src: string) => /Array\.from\(\{ length: STRIP_WINDOW \}/.test(src) && !/\[0, 1\]\.map\(copy =>/.test(src);
+  check('the web track mounts only STRIP_WINDOW logos, not the whole loop twice', smallTrack(WEB));
+  check('(mutation) catches the 32,000 px two-copy track coming back', !smallTrack(`${WEB}\n{[0, 1].map(copy => names.map(...))}`));
+}
 check('the web strip stays invisible until the client knows the phase (no first-logos flash on a static page)', /opacity: phase === null \? 0 : 1/.test(WEB));
-check('the web strip under reduced motion is static AT the phase', /animation: 'none', transform: `translateX\(\$\{-phase\}px\)`/.test(WEB));
+check('the web strip under reduced motion is static AT the phase (no frame loop; the slide is set once)',
+  /if \(phase === null \|\| reduced \|\| !n\) return;/.test(WEB) && /offsetRef\.current = w\.offset;\s*setPhase\(p\);/.test(WEB));
 check('the native strip takes its names and phase from the shared contract', /useStripNames\(\)/.test(NATIVE) && /motion\.setValue\(-phase\)/.test(NATIVE) && /stripPhase\(Date\.now\(\), cycleWidth\)/.test(NATIVE));
 const landingGated = (src: string) => /\{introLanding \? <View style=\{s\.landingStrip\}><HomeWebsiteStrip \/><\/View> : null\}/.test(src) && /if \(!introLanding\) return null;/.test(src);
 check('the AI landing renders the same strip, gated by the landing-title flag (introLanding)', landingGated(AGENT));
