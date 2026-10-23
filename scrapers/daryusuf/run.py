@@ -400,6 +400,14 @@ _DISTRICT_EN_RE = re.compile(r"((?:Al[\s\-]?)?[A-Z][A-Za-z\-']+(?:\s+[A-Z][A-Za-
 _EN_DIRECTION = re.compile(r"\b(?:north|south|east|west|new|old)\b", re.I)
 
 
+# Names the bridge holds no unique pair for, each in THIS city's catalogue (2026-10-23, New Listings, contract G:
+# unknown_named_districts(3) listed «Al Ranoonah district» ×3 and «Al-Aridh District» ×3 under المدينة المنورة).
+# Still confirmed against the catalogue by find_district_in_text, so a wrong city writes NULL.
+_HAND_EN_AR = {
+    ("medina", "ranoonah"): "حي الرانوناء", ("medina", "aridh"): "حي العريض",
+}
+
+
 @lru_cache(maxsize=None)
 def _bridge_en_ar(city_en: str) -> dict[str, str]:
     """The source-attested EN→AR district bridge for one city, unique keys only (scrapers/common/district_bridge)."""
@@ -417,15 +425,14 @@ def english_district(hood: Optional[str], city_ar: str, city_id: Optional[int]) 
     if not city_en:
         return None
     bridge = _bridge_en_ar(city_en)
-    if not bridge:
-        return None
     words = re.sub(r"\s+[Dd]istrict\b.*$", "", hood.strip()).split()
     names = [" ".join(words)]
     for k in (2, 1):
         if len(words) > k and not _EN_DIRECTION.search(" ".join(words[:-k])):
             names.append(" ".join(words[-k:]))
     for name in names:
-        ar = bridge.get(norm_en(name) or "")
+        key = norm_en(name) or ""
+        ar = bridge.get(key) or _HAND_EN_AR.get((city_en.lower(), key))
         if ar:
             return find_district_in_text(ar, city_id)
     return None
