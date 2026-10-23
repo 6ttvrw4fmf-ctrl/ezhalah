@@ -25,6 +25,7 @@ import { pairCountForSelection, isResultsRequest } from './lib/afCountPairing.ts
 import { AGENT_TURN_MS, PACE_BUDGET_MS, PACE_POLL_MS, describeLoad, paceUntilHealthy, readSearchLoad } from './lib/afJourneyPacing.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
+import { missingVerdict } from './lib/searchDeepPageCap.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { resultsFoundCount } from '../e2e/lib/resultsSentence.mjs';
@@ -601,7 +602,10 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
         oracleIds(lastSearchBody),
       ]);
       const d = diffIds(rIds, oIds);
-      check(`${name}: MISSING eligible IDs == 0`, d.missing.length === 0, `missing=${d.missing.length} sample=${d.missing.slice(0, 5).join(',')}`);
+      // Cap-aware (scripts/lib/searchDeepPageCap.ts): above ~26k rows the RPC stops paging, so MISSING must equal
+      // exactly the unreachable tail and the walk must return every reachable row — never «missing == 0».
+      const mv = missingVerdict(d.missing.length, d.rpcCount, rpcTotal, 1000);
+      check(`${name}: MISSING eligible IDs == 0${mv.tail ? ' (beyond the RPC\'s offset cap: == the unreachable tail)' : ''}`, mv.ok, `${mv.detail} sample=${d.missing.slice(0, 5).join(',')}`);
       check(`${name}: EXTRA ineligible IDs == 0`, d.extra.length === 0, `extra=${d.extra.length} sample=${d.extra.slice(0, 5).join(',')}`);
       check(`${name}: DUPLICATE IDs == 0`, d.duplicates.length === 0, `duplicates=${d.duplicates.length}`);
     }
