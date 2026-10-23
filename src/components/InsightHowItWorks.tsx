@@ -47,7 +47,7 @@ const s = StyleSheet.create({
     backgroundColor: '#ffffff', borderTopLeftRadius: 20, borderTopRightRadius: 20,
   },
   body: { padding: 20, paddingBottom: 28, gap: 14 },
-  heading: { alignItems: 'center', gap: 10 },
+  heading: { direction: 'ltr', alignItems: 'center', gap: 10 },
   falconer: { width: 46, height: 54 },
   title: { flexShrink: 1, fontSize: 20, fontWeight: '700', color: '#111827' },
   section: { gap: 4 },
