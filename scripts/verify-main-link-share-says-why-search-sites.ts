@@ -93,6 +93,22 @@ const { sitesFromSlugs } = await liftSymbols(
     sitesFromSlugs(slugs) === 148 && card === 148, `sentence=${sitesFromSlugs(slugs)} card=${card}`);
   check('an empty or failed slug list is unknown, never 0', sitesFromSlugs([]) === null && sitesFromSlugs(null) === null && sitesFromSlugs([1, 2]) === null);
 }
+// ── REMEMBERED ON THE DEVICE (owner 2026-10-23: Arabic share said «كل المواقع» — the count lands ~4 s after load) ──
+{
+  const { rememberedCount } = await liftSymbols(join(root, 'src/data/siteCount.ts'),
+    [{ header: 'export function rememberedCount(', endsWith: /^\}$/ }], ['rememberedCount'],
+    'const COUNT_KEEP_MS = 6 * 60 * 60 * 1000;') as { rememberedCount: (raw: string | null, now: number) => number | null };
+  const now = Date.UTC(2026, 9, 23, 12);
+  const keep = (n: unknown, ageMs: number) => rememberedCount(JSON.stringify({ n, at: now - ageMs }), now);
+  check('a count this device read within 6 h is used at once', keep(148, 60_000) === 148 && keep(148, 6 * 3600_000 - 1) === 148);
+  check('older than 6 h, from the future, zero, junk or missing → unknown (never a stale or made-up number)',
+    keep(148, 6 * 3600_000 + 1) === null && keep(148, -5000) === null && keep(0, 1) === null && keep('148', 1) === null
+    && rememberedCount('not json', now) === null && rememberedCount(null, now) === null);
+  const src = readFileSync(join(root, 'src/data/siteCount.ts'), 'utf8');
+  check('the device keeps the count it READ (written only on a successful read) and seeds from it at start',
+    /if \(n !== null\) \{[\s\S]{0,80}setItem\(SITE_COUNT_KEY/.test(src) && /known = rememberedCount\(globalThis\.localStorage\?\.getItem\(SITE_COUNT_KEY\)/.test(src));
+  check('(mutation) catches a remembered count kept forever', (() => { const forever = (raw: string) => JSON.parse(raw).n; return forever(JSON.stringify({ n: 148, at: now - 30 * 86400_000 })) === 148 && keep(148, 30 * 86400_000) === null; })());
+}
 const welcome = readFileSync(join(root, 'src/data/welcomeFacts.ts'), 'utf8');
 check('the Filter home\'s welcome line takes the same count (it used to count raw slugs: 149)', /const siteCount = loadSiteCount;/.test(welcome) && !/data\.length : null/.test(welcome));
 check('share.ts starts the read at app load so a tap never has to await', /void loadSiteCount\(\);/.test(shareSrc));

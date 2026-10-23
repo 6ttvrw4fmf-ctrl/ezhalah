@@ -16,6 +16,24 @@ const SITE_COUNT_MS = 6000;
 let known: number | null = null;
 let inFlight: Promise<number | null> | null = null;
 
+// REMEMBERED ON THE DEVICE (owner 2026-10-23: «the Arabic share message doesn't show 148»). Measured on a fresh
+// phone load: the count lands ~4 s after the page opens (it waits for the app bundle, not the database — the
+// RPC itself is ~0.3 s), so a Share tapped sooner said «كل المواقع». The last count this device READ is kept
+// for COUNT_KEEP_MS and used at once; a fresh read still runs and replaces it. Older than that → unknown, so
+// a number is never shown from a stale guess. The count moves by a site at most every few days.
+export const SITE_COUNT_KEY = 'ezhalah:siteCount';
+export const COUNT_KEEP_MS = 6 * 60 * 60 * 1000;
+/** The remembered count if it is a real count and young enough, else null. Pure (barrier-executed). */
+export function rememberedCount(raw: string | null | undefined, nowMs: number): number | null {
+  try {
+    const v = raw ? JSON.parse(raw) : null;
+    const n = v?.n, at = v?.at;
+    if (!Number.isInteger(n) || n <= 0 || !Number.isFinite(at) || at > nowMs || nowMs - at > COUNT_KEEP_MS) return null;
+    return n;
+  } catch { return null; }
+}
+try { known = rememberedCount(globalThis.localStorage?.getItem(SITE_COUNT_KEY), Date.now()); } catch { /* storage off */ }
+
 /** The number of platforms behind a list of source slugs — the same fold the card and the logo strip use. */
 export function sitesFromSlugs(slugs: unknown): number | null {
   if (!Array.isArray(slugs) || slugs.length === 0 || !slugs.every((s) => typeof s === 'string')) return null;
@@ -28,16 +46,20 @@ export function sitesFromSlugs(slugs: unknown): number | null {
 export function siteCountNow(): number | null { return known; }
 
 /** Reads loader_active_platforms_ar() once per session; a failure is not cached. */
+let fresh = false; // a remembered count is used at once but still refreshed once per session
 export function loadSiteCount(): Promise<number | null> {
-  if (known !== null) return Promise.resolve(known);
+  if (known !== null && fresh) return Promise.resolve(known);
   if (inFlight) return inFlight;
   inFlight = (async () => {
     if (!supabase) return null;
     try {
       const { data, error } = await boundedRpc<string[]>(supabase.rpc('loader_active_platforms_ar'), SITE_COUNT_MS);
       const n = error ? null : sitesFromSlugs(data);
-      if (n !== null) known = n;
-      return n;
+      if (n !== null) {
+        known = n; fresh = true;
+        try { globalThis.localStorage?.setItem(SITE_COUNT_KEY, JSON.stringify({ n, at: Date.now() })); } catch { /* per-device nicety */ }
+      }
+      return n ?? known;
     } catch { return null; } finally { inFlight = null; }
   })();
   return inFlight;
