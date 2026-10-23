@@ -70,6 +70,19 @@ def own_section(page_html: str) -> str:
     b = re.sub(r"<(script|style|nav|header|footer).*?</\1>", " ", own, flags=re.S)
     return re.sub(r"\s+", " ", ihtml.unescape(re.sub(r"<[^>]+>", " ", b))).strip()
 
+# The ad's own description box («تفاصيل الإعلان»: `<div class="all-desc">…</div>`), cut before «اعلانات مشابهة»
+# like own_section(), so a neighbour's words never answer for this ad.
+_ALL_DESC = re.compile(r'class="all-desc"[^>]*>(.*?)</div>', re.S)
+
+
+def ad_description(page_html: str) -> Optional[str]:
+    i = page_html.find(_SIMILAR)
+    m = _ALL_DESC.search(page_html[:i] if i > 0 else page_html)
+    if not m:
+        return None
+    return re.sub(r"\s+", " ", ihtml.unescape(re.sub(r"<[^>]+>", " ", m.group(1)))).strip() or None
+
+
 # PHOTOS — the ad's own gallery, and ONLY the own gallery. own_section() has already dropped the
 # «اعلانات مشابهة» block, so a similar ad's slides cannot leak in; we still exclude the site's
 # chrome (settings icons, /assets/ logos) by path. The slide markup is
@@ -574,7 +587,9 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
     # The site has no amenity field at all; this labelled list is its statement. Yes or nothing, never
     # no (ADVANCED_FILTER_SOURCE_TRUTH §2). Kitchen was 0 of 1,512 active while 272 lists name one
     # (🔬 AF engineer 2026-10-09; ops_af_score kitchen we_miss 3/3).
-    row.update(normalize.prose_amenities_yes(extra["components"]))
+    # The whole description box is the ad's own words, not only that row (🔬 2026-10-23, backlog 794):
+    # 12218852 says «البيع شامل الاثاث (المكيفات)» before «المكونات», and AC stayed NULL (CI re-read 39948473496).
+    row.update(normalize.prose_amenities_yes(ad_description(page_html) or extra["components"]))
     return row, category, ""
 
 

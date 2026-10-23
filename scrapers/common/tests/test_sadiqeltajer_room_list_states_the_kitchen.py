@@ -61,3 +61,15 @@ def test_mutation_without_the_reader_the_kitchen_is_lost(monkeypatch):
     monkeypatch.setattr(S.normalize, "prose_amenities_yes", lambda raw, skip=(): {})
     row = row_for("صالة . مطبخ . دورة مياة")
     assert "kitchen" not in row   # so test_a_room_list_with_a_kitchen_is_a_kitchen is what catches its loss
+
+
+def test_12218852_ac_stated_in_its_description_box():
+    """🔬 2026-10-23 (backlog 794): «البيع شامل الاثاث (المكيفات)» sits before «المكونات» (CI re-read 39948473496)."""
+    box = ('<div class="all-desc">للبيع شاليه دورين بحي النقيب (النخيل) , العمر 7 سنوات , البيع شامل الاثاث (المكيفات ) , '
+           'المكونات : مسطحات خضراء , ملحق , مسبح , مجلس , صالة , مطبخ دورة مياه</div>')
+    similar = ' اعلانات مشابهة <div class="all-desc">غرفة خادمة وغرفة سائق</div>'
+    row, _cat, why = S.map_listing("https://sadiq-eltajer.sa/ad/8134",
+                                   "<html><body>" + HEAD + box + TAIL.replace(" اعلانات مشابهة", similar) + "</body></html>")
+    assert row, why
+    assert row.get("air_conditioner") is True and row.get("kitchen") is True
+    assert "maid_room" not in row and "driver_room" not in row, "a similar ad's words never answer for this one"
