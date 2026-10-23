@@ -174,16 +174,19 @@ def main() -> int:
 
     # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
     # every crawler on the shared resilient path; backlog 63). The session owns the profile.
-    s, tried = retry_smarter_session(f"{API}?page=0&per_page=1", timeout=40, headers={"Accept-Language": "ar"})
-    print(f"  route: {' · '.join(tried)}", flush=True)
-    units, declared = walk(s)
-    print(f"{SOURCE}: {len(units)} unit record(s) (API declares total={declared})", flush=True)
-
+    # The run is registered BEFORE the first fetch (2026-10-23): on 10-22 and 10-23 every route
+    # answered 504 and walk() raised before begin_run, so no scrape_runs row existed and the
+    # early-warning robot could only say «no run recorded» instead of naming the 504.
     run_id = None if dry else db.begin_run(SLUG)
+    units: list[dict] = []
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
     try:
+        s, tried = retry_smarter_session(f"{API}?page=0&per_page=1", timeout=40, headers={"Accept-Language": "ar"})
+        print(f"  route: {' · '.join(tried)}", flush=True)
+        units, declared = walk(s)
+        print(f"{SOURCE}: {len(units)} unit record(s) (API declares total={declared})", flush=True)
         for u in units:
             got, why = map_unit(u)
             if not got:
