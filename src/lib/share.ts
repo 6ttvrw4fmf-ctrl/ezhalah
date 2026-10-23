@@ -30,9 +30,11 @@ export const SHARE_BLURB_EN = 'Looking for a property and want to see everything
 // SHARE_BLURB_* above stay the page's SEO description and the in-app preview text.
 export const SHARE_LEAD_AR_TEMPLATE = 'ليش تدوّر في {count} موقع؟ إزهله يدوّر عنك';
 export const SHARE_LEAD_AR_NO_COUNT = 'ليش تدوّر في كل المواقع؟ إزهله يدوّر عنك';
-// English (owner 2026-10-20): «Ezhalah, the AI meta search engine. 148 sites, one search.»
-export const SHARE_LEAD_EN_TEMPLATE = 'Ezhalah, the AI meta search engine. {count} sites, one search.';
-export const SHARE_LEAD_EN_NO_COUNT = 'Ezhalah, the AI meta search engine. Every site, one search.';
+// English (owner 2026-10-22, replacing 2026-10-20's «AI meta search engine… one search»): the Arabic line
+// translated, longer, and saying what Ezhalah is — «Why search 148 sites one by one? Ezhalah, the AI real
+// estate search engine, searches them all for you, in one place.»
+export const SHARE_LEAD_EN_TEMPLATE = 'Why search {count} sites one by one? Ezhalah, the AI real estate search engine, searches them all for you, in one place.';
+export const SHARE_LEAD_EN_NO_COUNT = 'Why search every site one by one? Ezhalah, the AI real estate search engine, searches them all for you, in one place.';
 /**
  * The live site count — THE SAME number the WhatsApp card shows (src/data/siteCount.ts: sites with
  * searchable listings, one per platform), or null while it has not been read yet. Owner 2026-10-20:

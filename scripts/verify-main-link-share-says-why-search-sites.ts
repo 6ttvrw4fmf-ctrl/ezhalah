@@ -61,9 +61,9 @@ const real = await load(shareSrc);
 check('liveSiteCount() is the shared site count (148, the card\'s number)', real.liveSiteCount() === 148, String(real.liveSiteCount()));
 check('the Arabic sentence is the owner\'s exact words with that live number', real.shareLead('ar', real.liveSiteCount()) === OWNER_AR, real.shareLead('ar', real.liveSiteCount()));
 check('the message = that sentence, a newline, the link — nothing else', real.shareMessage('ar', 148) === `${OWNER_AR}\n${LINK}`);
-const OWNER_EN = 'Ezhalah, the AI meta search engine. 148 sites, one search.';
-check('the English sentence is the owner\'s exact words (2026-10-20) with the same live number', real.shareLead('en', 148) === OWNER_EN, real.shareLead('en', 148));
-check('the English unknown-count form keeps the owner\'s shape with no number', real.shareLead('en', null) === 'Ezhalah, the AI meta search engine. Every site, one search.');
+const OWNER_EN = 'Why search 148 sites one by one? Ezhalah, the AI real estate search engine, searches them all for you, in one place.';
+check('the English sentence is the owner\'s exact words (2026-10-22) with the same live number', real.shareLead('en', 148) === OWNER_EN, real.shareLead('en', 148));
+check('the English unknown-count form keeps the owner\'s shape with no number', real.shareLead('en', null) === 'Why search every site one by one? Ezhalah, the AI real estate search engine, searches them all for you, in one place.');
 g.__siteCount = null;
 check('count not read yet → unknown (null), never 0', real.liveSiteCount() === null, String(real.liveSiteCount()));
 check('unknown count → «كل المواقع», never a zero or a typed number', real.shareLead('ar', null) === 'ليش تدوّر في كل المواقع؟ إزهله يدوّر عنك' && !/\d/.test(real.shareLead('ar', null)) && !/\d/.test(real.shareLead('en', null)));
@@ -123,7 +123,7 @@ const mutant = (from: string, to: string) => {
   mustCatch('the owner\'s wording drifting by one word', m.shareLead('ar', 148) !== OWNER_AR);
 }
 {
-  const m = await mutant("'Ezhalah, the AI meta search engine. {count} sites, one search.'", "'Why search {count} sites? Ezhalah searches for you.'");
+  const m = await mutant("'Why search {count} sites one by one? Ezhalah, the AI real estate search engine, searches them all for you, in one place.'", "'Ezhalah, the AI meta search engine. {count} sites, one search.'");
   mustCatch('the English wording drifting back to the old sentence', m.shareLead('en', 148) !== OWNER_EN);
 }
 {
