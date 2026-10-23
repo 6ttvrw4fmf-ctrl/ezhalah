@@ -11,8 +11,9 @@ import { useApp } from '@/store';
 import { useI18n } from '@/i18n';
 import { detectDevice, readDeviceEnv } from '@/lib/deviceInfo';
 import { useReducedMotion } from '@/lib/useReducedMotion';
-import { pickName, buildSyncedName, scriptOf, initialsOf } from '@/lib/nameSync';
-import { isBackendLive, persistDisplayName, signOutBackend } from '@/lib/auth';
+import { pickName, initialsOf } from '@/lib/nameSync';
+import { isBackendLive, signOutBackend } from '@/lib/auth';
+import { useSaveName } from '@/lib/useSaveName';
 import {
   currentSessionId, lastActiveLabel, listDeviceSessions, revokeDeviceSession,
   signOutOtherDevices, type DeviceSession,
@@ -74,7 +75,7 @@ export default function AccountMenu({
   const router = useRouter();
   const { height: winH } = useWindowDimensions();
   const { t, locale, setLocale } = useI18n();
-  const { user, updateUser, applySyncedName, signOut, deleteAccount } = useApp();
+  const { user, signOut, deleteAccount } = useApp();
   const { mode, setMode, resolved, colors: C } = useTheme();
   const reduced = useReducedMotion();
   const s = useMemo(() => makeStyles(C, resolved === 'dark', locale === 'ar'), [C, resolved, locale]);
@@ -163,20 +164,8 @@ export default function AccountMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locale, user?.name, user?.nameEn, user?.nameAr]);
 
-  const persistName = (v: string) => {
-    const sc = scriptOf(v);
-    const immediate = sc === 'ar' ? { name: v, nameAr: v } : { name: v, nameEn: v };
-    updateUser({ ...immediate, initials: initialsOf(v) });
-    // Refresh-proof (owner 2026-08-29): the store patch above is in-memory only — the auth
-    // backend's user_metadata is what mapSupabaseUser rebuilds from on the next load.
-    persistDisplayName(v);
-    // applySyncedName, NOT updateUser: this is a network round trip, so renaming twice in quick
-    // succession leaves two continuations in flight and the slower one lands last. An unguarded
-    // updateUser here reverted the name AND the avatar initial to a value the user had already
-    // replaced (routine #8, 2026-09-24 — the #319/#599/#648 stale-continuation class). The store's
-    // applySyncedName drops a patch whose `name` is no longer the current one.
-    buildSyncedName(v).then((synced) => applySyncedName({ ...synced, initials: initialsOf(v) }));
-  };
+  // The one rename path, shared with «وش نناديك؟» and Apple's first-sign-in name (src/lib/useSaveName.ts).
+  const persistName = useSaveName();
   const saveName = () => {
     const v = name.trim();
     if (v && v !== shownName) {
