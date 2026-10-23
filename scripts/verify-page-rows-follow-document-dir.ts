@@ -32,5 +32,31 @@ mutantCaught('the old locale-keyed shell row is no longer what the guard accepts
 mutantCaught('the old locale-keyed split row is no longer what the guard accepts',
   !splitRow.test(agent.replace('flexDirection: firstChildLeftRow(docRtl), backgroundColor', "flexDirection: locale === 'ar' ? 'row-reverse' : 'row', backgroundColor")));
 
+// ── REFRESH IN ENGLISH (owner 2026-10-23: signed in, English, refresh → sidebar on the RIGHT) ─────────────────
+// The served HTML is pre-rendered in Arabic, so its row is `row-reverse`. React hydration keeps a server
+// attribute/class that differs from the client's first render, and afterwards writes the DOM only when a render's
+// value CHANGES from the previous render. Model exactly that, then run the hook's two renders through it.
+const { firstRenderDocRtl, SERVER_RENDERED_RTL } = await import('../src/lib/firstRenderDocRtl.ts');
+const afterHydration = (serverDocRtl: boolean, renders: boolean[]) => {
+  let dom = firstChildLeftRow(serverDocRtl);          // what the pre-rendered HTML carries
+  for (let i = 1; i < renders.length; i++) if (renders[i] !== renders[i - 1]) dom = firstChildLeftRow(renders[i]);
+  return dom;
+};
+const hookRenders = (first: (web: boolean) => boolean | null, pageRtl: boolean) => [first(true) ?? !pageRtl, pageRtl];
+for (const pageRtl of [false, true]) {
+  const dom = afterHydration(SERVER_RENDERED_RTL, hookRenders(firstRenderDocRtl, pageRtl));
+  check(`refresh with the page ${pageRtl ? 'Arabic (rtl)' : 'English (ltr)'} → sidebar on the LEFT`, firstChildSide(pageRtl, dom) === 'left');
+}
+mutantCaught('a first render that reads the page (the old hook) leaves the sidebar on the RIGHT after an English refresh',
+  firstChildSide(false, afterHydration(SERVER_RENDERED_RTL, hookRenders(() => false, false))) === 'right');
+const i18n = readFileSync(new URL('../src/i18n.tsx', import.meta.url), 'utf8');
+const appJson = JSON.parse(readFileSync(new URL('../app.json', import.meta.url), 'utf8'));
+check('the pages ARE pre-rendered (web.output static) — the reason the first render must match the server',
+  appJson.expo?.web?.output === 'static');
+check('the server renders Arabic (readSavedLocale falls back to ar with no window) — SERVER_RENDERED_RTL agrees',
+  SERVER_RENDERED_RTL === true && /function readSavedLocale\(\): Locale \{[\s\S]*?\n  return 'ar';\n\}/.test(i18n));
+check('useDocumentRtl starts from firstRenderDocRtl, not from reading the page',
+  /useState<boolean \| null>\(\(\) => firstRenderDocRtl\(Platform\.OS === 'web'\)\)/.test(readFileSync(new URL('../src/lib/useDocumentRtl.ts', import.meta.url), 'utf8')));
+
 if (failed) { console.log(`\n❌ verify-page-rows-follow-document-dir: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-page-rows-follow-document-dir: both page rows follow the page direction itself.');
