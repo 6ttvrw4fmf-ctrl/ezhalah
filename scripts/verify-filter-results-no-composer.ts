@@ -148,8 +148,8 @@ mustCatch('an ungated model selector appearing on Filter-origin results',
 // Mutation 1: someone "simplifies" the JSX by dropping the whole three-way branch, leaving the
 // composer unconditional again (the ORIGINAL 09-11 bug this barrier prevents).
 const mutatedNoGate = agent.replace(
-  '{!filterOrigin || completed ? (\n            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused, modeSearched && s.composerNoModel]} ref={composerRef}>',
-  '<View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused, modeSearched && s.composerNoModel]} ref={composerRef}>',
+  '{!filterOrigin || completed ? (\n            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>',
+  '<View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>',
 );
 mustCatch('removing the branch (composer unconditional again)',
   !COMPOSER_BRANCH.test(decomment(mutatedNoGate)));

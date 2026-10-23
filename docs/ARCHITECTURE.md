@@ -1404,3 +1404,6 @@ KSA region; recommendation delivered was "don't migrate," awaiting owner call).
 
 ### Platform logo visibility (owner, 2026-10-17)
 Haraj uses its official header wordmark across the loader, website picker, and cards. Haraj, Maskan United, and The Address must have transparent backgrounds without boxed panels (owner correction, 2026-10-17). Their white-only artwork uses dark ink in light mode and light ink in dark mode, preserving its silhouette. Other logos keep their existing presentation.
+
+### Persistent composer model label (owner, 2026-10-21)
+The AI chat composer always shows its existing model name/version and falcon mark on their own line inside the input box, below the typing row. Keep the space for this line before and after sending, while searching/revealing, and during voice input. The selector remains visible but disabled while busy or recording. This supersedes the 2026-10-17 first-message hiding behavior; Filter-origin composer visibility is unchanged.

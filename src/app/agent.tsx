@@ -5058,7 +5058,7 @@ export default function Agent() {
                 finished search keeps the box, and the next message simply starts the next search (send() clears
                 `completed`). ☰ still starts a clean chat. */}
             {!filterOrigin || completed ? (
-            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused, modeSearched && s.composerNoModel]} ref={composerRef}>
+            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size
                   never jumps during the morph — one physical object changing state, not a component
@@ -5310,11 +5310,9 @@ export default function Agent() {
                   the microphone and send all in the same line — the model only below»). A zero-width anchor
                   centred on the mic (the row is LTR-pinned, so the same offset holds in both locales); the box's
                   bottom padding makes the room, so the one-line row above it never moves. */}
-              {!modeSearched ? (
-              <View pointerEvents="box-none" style={s.composerModelAnchor}>
+              <View testID="composer-model-row" pointerEvents="box-none" style={s.composerModelAnchor}>
                 <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />
               </View>
-              ) : null}
             </View>
             ) : null}
             {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY (owner, 2026-09-12, second tightening:
@@ -5662,8 +5660,6 @@ const s = StyleSheet.create({
   // Focus glow target — COMPOSER_EASE (web) glides border-color and box-shadow between these two.
   // Carries the FULL shadow set: RNW compiles box-shadow per-style, so a partial override here
   // would win wholesale and drop the green tint + offset (observed live).
-  // «شاهين 2.2» is gone after the first message (owner 2026-10-17): the 24 px that made room for it go with it.
-  composerNoModel: { paddingBottom: 6 },
   composerFocused: { borderColor: colors.primary, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.2, shadowRadius: 18, shadowOffset: { width: 0, height: 6 } },
   // The wrapper owns the glide (INPUT_EASE) and the row position; marginVertical 6 =
   // (34 send-button − 22 line) / 2, the single-line centering trick above.
