@@ -1357,3 +1357,10 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
 - **A customer-side link check finds what the oracle stamps alive.** 🔧's 80-unit Gathern check: unit 272013 (17836636) is
   served, stamped alive 10-19 22:37, and answers `307 → gathern.co/ar?error=500` on 3/3 reads (backlog 768). A 5xx is UNKNOWN,
   never a kill — but a reader that stamps it ALIVE is wrong in the other direction; measure the class before trusting the stamp.
+
+## Trap from 🦅 Falcon 2026-10-23
+- **A fleet site QUARANTINED two days running means its signal is stale, not that the site is down.** aldarim went
+  3 days with 0 of 171 ads verified: `fleet-liveness` logged «QUARANTINED: opening controls 0/5 live … HTTP 200, but this
+  platform's signal had no opinion» every morning from 10-20 while the job reported `success`, and alert 10445 stayed
+  open. The page had changed `"@type":"RealEstate"` to `"RealEstateListing"`. Fix: PR 8403. On the second QUARANTINED
+  morning, fetch ONE live control page and run the site's `_signal()` on it before anything else.
