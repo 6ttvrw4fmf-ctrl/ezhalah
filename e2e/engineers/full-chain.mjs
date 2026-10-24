@@ -109,7 +109,10 @@ try {
     await page.waitForTimeout(2500);
     await revealAll();
     if (await card.count()) {
-      const text = (await card.first().innerText()).replace(/\s*\n+\s*/g, ' | ');
+      // innerText is "" for a card the browser has not painted yet (the phone result list, 2026-10-24:
+      // every card read empty, so a price check could never pass); textContent still has the words.
+      const text = ((await card.first().innerText()) || (await card.first().textContent()) || '')
+        .replace(/\s*\n+\s*/g, ' | ');
       await card.first().getByRole('link').first().click();
       await page.waitForTimeout(800);
       // Hosts on the in-app viewer allowlist (src/lib/inAppViewer.ts, e.g. aqargate) open INSIDE
