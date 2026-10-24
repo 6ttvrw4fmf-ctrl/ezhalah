@@ -7,10 +7,6 @@ import { skyScene } from '@/theme/skyScene';
 import CloudWisp from './CloudWisp';
 
 const EAGLE = require('../../assets/images/eagle-mark.png');
-const sidebarDrift = {
-  from: { transform: [{ translateX: -skyScene.sidebarDriftPx }] },
-  to: { transform: [{ translateX: skyScene.sidebarDriftPx }] },
-};
 const eagleDrift = {
   from: { transform: [{ translateX: -skyScene.eagleDriftPx }] },
   to: { transform: [{ translateX: skyScene.eagleDriftPx }] },
@@ -22,18 +18,35 @@ const motion = {
   animationTimingFunction: 'ease-in-out',
 } as const;
 
+/** The same soft clouds as the main sky, spread down the sidebar, each drifting on its own slow clock so they
+ *  never move in step (owner 2026-10-24). Kept faint enough that chat titles stay easy to read. */
+const SIDEBAR_CLOUDS = [
+  { variant: 0, width: 300, height: 110, opacity: 0.42, style: { top: -18, left: -70 } },
+  { variant: 1, width: 260, height: 110, opacity: 0.3, style: { top: '30%', right: -110 } },
+  { variant: 2, width: 290, height: 120, opacity: 0.34, style: { top: '56%', left: -90 } },
+  { variant: 3, width: 250, height: 100, opacity: 0.28, style: { bottom: '8%', right: -90 } },
+] as const;
+const cloudDrift = (i: number) => ({
+  animationName: { from: { transform: [{ translateX: -skyScene.sidebarCloudPx[i] }] }, to: { transform: [{ translateX: skyScene.sidebarCloudPx[i] }] } },
+  animationDuration: skyScene.sidebarCloudMs[i],
+  animationIterationCount: 'infinite',
+  animationDirection: 'alternate',
+  animationTimingFunction: 'ease-in-out',
+} as const);
+
 /** Sparse atmosphere behind the sidebar controls, clipped to this column rather than the page. */
 export function SidebarClouds() {
   const reduced = useReducedMotion();
   return <View testID="sidebar-clouds" pointerEvents="none" accessible={false}
     accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
     style={[StyleSheet.absoluteFill, styles.clip]}>
-    <Animated.View testID="sidebar-cloud-drift" style={[StyleSheet.absoluteFill,
-      !reduced && { ...motion, animationName: sidebarDrift }]}>
-      <CloudWisp width={280} height={100} opacity={0.38} style={styles.topCloud} />
-      <CloudWisp variant={1} width={240} height={110} opacity={0.25} style={styles.middleCloud} />
-      <CloudWisp variant={2} width={270} height={120} opacity={0.3} style={styles.bottomCloud} />
-    </Animated.View>
+    <View testID="sidebar-cloud-drift" style={StyleSheet.absoluteFill}>
+      {SIDEBAR_CLOUDS.map((c, i) => (
+        <Animated.View key={i} style={[StyleSheet.absoluteFill, !reduced && cloudDrift(i)]}>
+          <CloudWisp variant={c.variant} width={c.width} height={c.height} opacity={c.opacity} style={c.style} />
+        </Animated.View>
+      ))}
+    </View>
   </View>;
 }
 
@@ -56,9 +69,6 @@ export function SkyEagleMark() {
 
 const styles = StyleSheet.create({
   clip: { overflow: 'hidden' },
-  topCloud: { top: -18, left: -65 },
-  middleCloud: { top: '34%', right: -100 },
-  bottomCloud: { bottom: '9%', left: -65 },
   eagleTile: { width: 44, height: 44, flexShrink: 0, borderRadius: 13, borderWidth: 1,
     overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   eagle: { width: 36, height: 35 },

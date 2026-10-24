@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 
 const HERO = readFileSync('src/components/HeroBackground.tsx', 'utf8');
 const SCENE = readFileSync('src/theme/skyScene.ts', 'utf8');
+const SIDE = readFileSync('src/components/SidebarSky.tsx', 'utf8');
 
 export function driftProblems(hero: string, scene: string): string[] {
   const out: string[] = [];
@@ -23,7 +24,21 @@ export function driftProblems(hero: string, scene: string): string[] {
   return out;
 }
 
-const problems = driftProblems(HERO, SCENE);
+
+/** The sidebar uses the same soft clouds, each drifting on its own slow clock (owner 2026-10-24). */
+export function sidebarProblems(side: string, scene: string): string[] {
+  const out: string[] = [];
+  if (!/SIDEBAR_CLOUDS\.map\(\(c, i\) =>[\s\S]{0,160}!reduced && cloudDrift\(i\)/.test(side)) out.push('sidebar clouds do not each drift, or drift under «reduce motion»');
+  const n = (side.match(/\{ variant: \d, width: \d+/g) ?? []).length;
+  const ms = (scene.match(/sidebarCloudMs:\s*\[([^\]]+)\]/)?.[1] ?? '').split(',').map((x) => Number(x.trim())).filter(Boolean);
+  if (n < 3) out.push(`the sidebar has too few clouds (${n})`);
+  if (ms.length < n) out.push('each sidebar cloud needs its own clock');
+  if (ms.some((m) => m < 30000)) out.push('a sidebar cloud drifts faster than gently');
+  if (new Set(ms).size !== ms.length) out.push('two sidebar clouds share one clock');
+  return out;
+}
+
+const problems = [...driftProblems(HERO, SCENE), ...sidebarProblems(SIDE, SCENE)];
 for (const p of problems) console.error(`✗ ${p}`);
 if (!problems.length) console.log('✓ hero clouds drift gently, each on its own clock, and stay still under «reduce motion»');
 
@@ -37,5 +52,7 @@ mustCatch('a cloud that stopped drifting', driftProblems(HERO.replace('!reduced 
 mustCatch('a hurried drift (5 s)', driftProblems(HERO, SCENE.replace(/heroDriftMs:\s*\[(\d+)/, 'heroDriftMs: [5000')).length > 0);
 mustCatch('a cloud flying across the screen (300 px)', driftProblems(HERO, SCENE.replace(/heroDriftPx:\s*\[(\d+)/, 'heroDriftPx: [300')).length > 0);
 mustCatch('two clouds in lock-step', driftProblems(HERO, SCENE.replace(/heroDriftMs:\s*\[(\d+), (\d+)/, 'heroDriftMs: [$1, $1')).length > 0);
+mustCatch('sidebar clouds ignoring «reduce motion»', sidebarProblems(SIDE.replace('!reduced && cloudDrift(i)', 'cloudDrift(i)'), SCENE).length > 0);
+mustCatch('sidebar clouds in lock-step', sidebarProblems(SIDE, SCENE.replace(/sidebarCloudMs:\s*\[(\d+), (\d+)/, 'sidebarCloudMs: [$1, $1')).length > 0);
 mustCatch('the shipped files are clean (not vacuously red)', problems.length === 0);
 if (problems.length || mutFail) process.exit(1);
