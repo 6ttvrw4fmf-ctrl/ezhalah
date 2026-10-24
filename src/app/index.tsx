@@ -33,6 +33,7 @@ import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
 import { useFilterWelcome } from '@/lib/useFilterWelcome';
+import { NAME_PARTY_EVENT, SHINE_MS } from '@/lib/nameParty';
 import { InsightHowItWorks } from '@/components/InsightHowItWorks';
 import { decodeSharePayload, decodeInvitePayload, shareJoinNote, shareLandingTitle, shareInviteNote, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
 import { fetchSharedChat, fetchSharedChatCard } from '@/lib/sharedChat';
@@ -264,6 +265,14 @@ export default function Home() {
   // «كيف تشتغل؟» opens when the user taps a market fact in the headline (owner 2026-10-22).
   const [howOpen, setHowOpen] = useState(false);
   const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey, isInsight: welcomeIsInsight } = useFilterWelcome(!!user, pickName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
+  // «حفظ» in the «وش نناديك؟» box: while its party plays, the welcome headline shines (2 passes, owner-approved demo).
+  const [heroShine, setHeroShine] = useState(false);
+  useEffect(() => {
+    let id: ReturnType<typeof setTimeout> | undefined;
+    const on = () => { setHeroShine(true); if (id) clearTimeout(id); id = setTimeout(() => setHeroShine(false), SHINE_MS); };
+    globalThis.addEventListener?.(NAME_PARTY_EVENT, on);
+    return () => { globalThis.removeEventListener?.(NAME_PARTY_EVENT, on); if (id) clearTimeout(id); };
+  }, []);
   // THE ONE QUERY THIS SCREEN DERIVES EVERYTHING FROM (owner P0 2026-09-01).
   //
   // The store may now carry Advanced Filter answers committed in the chat — that is the whole fix:
@@ -1444,7 +1453,7 @@ export default function Home() {
           <HomeWebsiteStrip />
           <View style={s.hero}>
             <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
-              <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
+              <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' } } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
             </Pressable>
             <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
             <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>

@@ -93,7 +93,7 @@ export function mapSupabaseUser(u: any, method: AuthUser['method']): AuthUser {
   // «أضف اسمك» and the user types it. scripts/verify-display-name-never-from-email.ts pins this.
   const name: string = String(meta.full_name || meta.name || '').trim();
   const sub: string = u?.email || name;
-  return { method, name, initials: initialsFrom(name, sub), sub, namePromptSeen: meta.name_prompt_seen === true };
+  return { method, name, initials: initialsFrom(name, sub), sub, namePromptSeen: meta.name_prompt_seen === true, createdAt: u?.created_at, lastSignInAt: u?.last_sign_in_at };
 }
 
 // ── OAuth (Google / Apple) ───────────────────────────────────────────────────
