@@ -4352,7 +4352,7 @@ export default function Agent() {
             ]}
           >
             {pickerSheet ? <View style={s.platformPickerGrabber} /> : null}
-            <View style={s.platformPickerHeader}>
+            <View style={[s.platformPickerHeader, locale === 'ar' && { flexDirection: 'row-reverse' }]}>
               <View style={s.platformPickerHeading}>
                 <Text style={s.platformPickerTitle}>{t('Deep search across websites')}</Text>
                 <Text style={s.platformPickerSubtitle}>{t('Focus your search on one or more specific websites. We show only their listings.')}</Text>

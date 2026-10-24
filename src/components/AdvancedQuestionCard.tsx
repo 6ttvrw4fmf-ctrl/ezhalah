@@ -80,7 +80,7 @@ export type ShellPills = {
 function Shell({ children, onClose, countChip, pills }: {
   children: React.ReactNode; onClose: () => void; countChip?: number | null; pills?: ShellPills;
 }) {
-  const { t } = useI18n();
+  const { t, isRTL } = useI18n();
   return (
     // testIDs (2026-08-22): stable hooks so a production browser test can scope to THIS card. Arabic
     // label matching is unsafe here — «عرض المزيد» alone maps from THREE different English keys
@@ -88,7 +88,7 @@ function Shell({ children, onClose, countChip, pills }: {
     <View style={s.overlay} testID="af-card">
       <Pressable style={s.backdrop} onPress={onClose} />
       <Reveal style={s.card}>
-        <View style={s.bar}>
+        <View style={[s.bar, isRTL && { flexDirection: 'row-reverse', justifyContent: 'flex-end' }]}>
           <View style={s.titleWrap}>
             <View style={s.brandMark}><Ionicons name="sparkles" size={18} color={colors.primary} /></View>
             <Text style={s.barTitle} numberOfLines={1}>{t('Ezhalah AI Agent')}</Text>

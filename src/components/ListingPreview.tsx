@@ -928,7 +928,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
               onPress={closeMap}
               accessibilityRole="button"
               accessibilityLabel={t('Close')}
-              style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
+              style={({ hovered }: any) => [s.mapClose, { right: 12 }, hovered && s.hover]}
               // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
               dataSet={{ ...TAP44 }}
             >
@@ -945,7 +945,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             onPress={closeMap}
             accessibilityRole="button"
             accessibilityLabel={t('Back')}
-            style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
+            style={({ hovered }: any) => [s.mapClose, { right: 12 }, hovered && s.hover]}
             // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
             dataSet={{ ...TAP44 }}
           >
@@ -991,7 +991,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             onPress={closeSimilar}
             accessibilityRole="button"
             accessibilityLabel={t('Back')}
-            style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
+            style={({ hovered }: any) => [s.mapClose, { right: 12 }, hovered && s.hover]}
             // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
             dataSet={{ ...TAP44 }}
           >
@@ -1040,7 +1040,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             onPress={closeDeals}
             accessibilityRole="button"
             accessibilityLabel={t('Back')}
-            style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
+            style={({ hovered }: any) => [s.mapClose, { right: 12 }, hovered && s.hover]}
             // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
             dataSet={{ ...TAP44 }}
           >
