@@ -194,7 +194,7 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
               style={({ hovered, pressed }: any) => [s.xBtn, s.xBtnRight, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
             >
               {({ hovered, pressed }: any) => (
-                <Ionicons name="close" size={20} color={hovered || pressed ? colors.ink : colors.muted} />
+                <Ionicons name="close" size={20} color={colors.ink} />
               )}
             </Pressable>
           )}
@@ -603,10 +603,8 @@ const s = StyleSheet.create({
   // Close, pinned to the PHYSICAL top-right (RN `right` is physical — RTL never flips it): a
   // quiet neutral glyph at rest, a soft fill on hover, hitSlop widening the target to ≥ 44.
   xBtn: {
-    // Physical top-right under BOTH directions: RTL (forced app-wide for Arabic) flips `right:` to
-    // the physical left, so the physical right is spelled `left:` there. (owner 2026-08-29)
-    // The side is set per language below (xBtnSide): right in English, LEFT in Arabic (owner 2026-10-23).
-    position: 'absolute', top: CLOSE_INSET, zIndex: 5,
+    // Top-RIGHT in both languages (owner 2026-10-24), on a soft circle so it reads clearly, apart from the words.
+    position: 'absolute', top: CLOSE_INSET, zIndex: 5, backgroundColor: colors.surface2,
     width: CLOSE_SIZE, height: CLOSE_SIZE, borderRadius: CLOSE_SIZE / 2,
     alignItems: 'center', justifyContent: 'center',
     ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
