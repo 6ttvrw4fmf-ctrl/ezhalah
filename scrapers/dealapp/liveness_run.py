@@ -269,6 +269,26 @@ def bracketed_none(log: list[tuple[str, str]]) -> list[str]:
     return out
 
 
+def promote_bracketed(pending: list, bracketed: set, policy) -> tuple[list, int]:
+    """A struck row this run read UNKNOWN whose render was a bracketed no-listing page becomes a DIRECT
+    DEAD reading (2026-10-24, backlog 766): one strike, the 3-strike grace and the trust gate unchanged.
+
+    Shadow evidence first (10-23 13:00 → 10-24 09:30, runs 40046091086…40078921277): 124 struck ads read
+    bracketed-none; 0 of them read alive by any reader since, and 8 were hidden meanwhile by the crawl's
+    own confirmed_absent (the same rule). Only rows ALREADY struck (missing_count >= 1) qualify, the way
+    the shadow counted them. Pure."""
+    out, n = [], 0
+    for row, action, strikes, status, read_iso in pending:
+        mc = int(row.get("missing_count") or 0)
+        if action == "none" and mc >= 1 and _adid(row["listing_url"]) in bracketed:
+            d = decide(DEAD, strikes=mc, policy=policy, evidence=EvidenceKind.DIRECT)
+            out.append((row, d.action, d.strikes, status, read_iso))
+            n += 1
+        else:
+            out.append((row, action, strikes, status, read_iso))
+    return out, n
+
+
 def probe_listing(s: cc.Session, listing_url: str, budget: Optional[RequestBudget] = None
                   ) -> tuple[str, Optional[int]]:
     """(verdict, http_status) for one ad: the first variant that is not UNKNOWN, else UNKNOWN.
@@ -396,10 +416,10 @@ def main() -> int:
         # (row, action, strikes, http_status, read_iso): read_iso is WHEN this sweep read the ad,
         # kept per row because the sweep reads for up to 50 minutes and applies at the end.
         pending: list[tuple[dict, str, int, int, str]] = []
-        # SHADOW (2026-10-23, backlog 766): the crawl's bracketed no-listing render, read here too.
-        # 60 shown dealapp ads at 3+ strikes read UNKNOWN to every reader (a removed ad renders the
-        # bogus-id shell). This only COUNTS the struck rows the bracket would call gone; it writes
-        # no verdict until a shadow night proves it on known-live and known-gone ads.
+        # The crawl's bracketed no-listing render, read here too (backlog 766): 60 shown dealapp ads at
+        # 3+ strikes read UNKNOWN to every reader (a removed ad renders the bogus-id shell). Shadow from
+        # 10-23 13:00; promoted to a DIRECT reading 10-24 (promote_bracketed) after 124 shadow ads read
+        # alive 0 times since.
         _RENDERS.clear()   # the canaries' reads are not part of the worklist's sequence
         struck_adids = {_adid(r["listing_url"]) for r in cands if int(r.get("missing_count") or 0) >= 1}
         for row in cands:
@@ -423,6 +443,11 @@ def main() -> int:
                          **verification_patch(d, now_iso=now_iso)}
                 _execute(client.table(TABLE).update(patch).eq("id", row["id"]), what="dealapp verify")
                 stats["verified"] += 1
+
+        bracketed = [a for a in bracketed_none(_RENDERS) if a in struck_adids]
+        pending, stats["bracketed_dead"] = promote_bracketed(pending, set(bracketed), policy)
+        stats["dead"] += stats["bracketed_dead"]
+        stats["unknown"] -= stats["bracketed_dead"]
 
         # A run that verified almost nothing is being served shells; its deaths are not evidence.
         trusted = (environment_is_trustworthy(stats["alive"], stats["scanned"])
@@ -518,9 +543,8 @@ def main() -> int:
                 print(f"⚠ detail-log insert failed (non-fatal, {len(chunk)} rows): "
                       f"{str(exc)[:160]}", flush=True)
 
-        shadow = [a for a in bracketed_none(_RENDERS) if a in struck_adids]
-        print(f"SHADOW bracketed no-listing renders among struck rows ({len(shadow)}): "
-              f"{' '.join(shadow)}", flush=True)
+        print(f"BRACKETED no-listing renders among struck rows ({len(bracketed)}): "
+              f"{' '.join(bracketed)}", flush=True)
         note = (f"{'APPLY' if args.apply else 'DRY-RUN'} "
                 f"egress={'proxy' if proxy_url else 'ci'} "
                 f"requests={budget.used}{f'/{budget.cap}' if budget.cap else ''} "
@@ -531,7 +555,7 @@ def main() -> int:
                 f"sitemap_ids={stats['sitemap_ids']} "
                 f"canary_live={canary['live']}/{canary['live_n']} "
                 f"canary_bogus={'ALIVE!' if canary['bogus_alive'] else 'not-alive'} "
-                f"shadow_bracketed_none={len(shadow)}"
+                f"bracketed_none={len(bracketed)} bracketed_dead={stats['bracketed_dead']}"
                 + ("" if trusted else " | QUARANTINED: verified-rate or canary failed, no deactivation written"))
         print(note, flush=True)
         end_run(run_id, ok=True, rows_seen=stats["scanned"],
