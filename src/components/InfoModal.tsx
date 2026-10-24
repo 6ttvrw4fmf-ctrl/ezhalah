@@ -220,7 +220,7 @@ function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => stri
       {/* Style `h` keeps its CLOSE_CLEAR physical-right padding so the title can never slide under
           the floating × (verify-info-modal-header-clearance pins that arithmetic). */}
       <View style={s.head}>
-        <Text style={[s.h, !isRTL && s.textLtr, isRTL && s.hClearLeft]}>{t('Support')}</Text>
+        <Text style={[s.h, !isRTL && s.textLtr]}>{t('Support')}</Text>
       </View>
 
       <View style={s.bodyPad}>
@@ -520,7 +520,7 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
       <View style={s.head}>
         <View style={s.legalLockup}>
           <RNImage source={EAGLE} style={s.legalEagle} resizeMode="contain" />
-          <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr, isRTL && s.hClearLeft]}>{t('Terms & Privacy')}</Text>
+          <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr]}>{t('Terms & Privacy')}</Text>
         </View>
       </View>
       <View style={s.bodyPad}>
@@ -614,7 +614,6 @@ const s = StyleSheet.create({
   // Measured 2026-10-23: on the web physical sides are NOT mirrored under Arabic, so the × side is chosen by
   // language. Both sides spelled so a merge never leaves the other one set.
   xBtnRight: { right: CLOSE_INSET, left: 'auto' as any },
-  hClearLeft: { paddingRight: 0, paddingLeft: CLOSE_CLEAR },
   xBtnHover: { backgroundColor: colors.surface2 },
   scroll: { paddingTop: 0, paddingBottom: 0 },
   bodyPad: { paddingHorizontal: BODY_PAD, paddingTop: 4, paddingBottom: BODY_PAD },

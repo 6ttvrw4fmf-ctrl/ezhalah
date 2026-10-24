@@ -800,7 +800,7 @@ function makeStyles(C: Record<string, string>, dark: boolean, rtl = true) {
     // × top-RIGHT in both languages, never mirrored (owner 2026-10-24, supersedes 10-23 «Arabic left»).
     centerClose: { position: 'absolute', top: 12, right: 12, zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
     // Room for the × on its side (owner 2026-10-23: the × sat on top of «Manage account»).
-    centerTitle: { fontSize: 19, lineHeight: 26, fontWeight: '800', color: C.ink, textAlign: start as any, writingDirection: 'auto' as any, paddingTop: 4, paddingBottom: 14, paddingHorizontal: 8, ...(rtl ? { paddingLeft: 44 } : { paddingRight: 44 }) },
+    centerTitle: { fontSize: 19, lineHeight: 26, fontWeight: '800', color: C.ink, textAlign: start as any, writingDirection: 'auto' as any, paddingTop: 4, paddingBottom: 14, paddingHorizontal: 8, paddingRight: 44 }, // the × is top-right in both languages (owner 2026-10-24)
     // Identity fields live in ONE inset group (iOS grouped-list idiom, 2026-08-30 refresh): the
     // group surface owns the boundary, an inset hairline separates the rows, and the fields keep
     // their exact structures — the wrapper is the only new element.
