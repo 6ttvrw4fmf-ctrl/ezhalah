@@ -11,6 +11,16 @@ const contrast = (a: string, b: string) => {
   const x = luminance(a), y = luminance(b);
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 };
+const assertReadable = (foreground: string, background: string, label: string) => {
+  const ratio = contrast(foreground, background);
+  assert.ok(ratio >= 4.5, `${label} is ${ratio.toFixed(2)}:1; needs 4.5:1`);
+};
+const assertImageBudget = (bytes: number, name: string) =>
+  assert.ok(bytes < 180_000, `${name} exceeds the decorative image budget`);
+const mustCatch = (label: string, check: () => void) => {
+  assert.throws(check, assert.AssertionError, label);
+  console.log(`PASS mutation: ${label}`);
+};
 for (const [name, p] of [['light', lightColors], ['dusk', darkColors]] as const) {
   for (const [foreground, background] of [
     ['ink', 'surface'], ['body', 'surface'], ['muted', 'surface'], ['primary', 'surface'],
@@ -19,15 +29,15 @@ for (const [name, p] of [['light', lightColors], ['dusk', darkColors]] as const)
     ['muted', 'skyTop'], ['muted', 'skyBottom'], ['onFill', 'selFill'], ['onFill', 'dark'],
     ['userBubbleText', 'userBubble'],
   ] as const) {
-    const ratio = contrast(p[foreground], p[background]);
-    assert.ok(ratio >= 4.5, `${name}: ${foreground} on ${background} is ${ratio.toFixed(2)}:1; needs 4.5:1`);
+    assertReadable(p[foreground], p[background], `${name}: ${foreground} on ${background}`);
   }
   console.log(`PASS ${name}: small copy and filled controls meet 4.5:1`);
 }
-// A white-on-white mutant must actually fail the same measure.
-assert.ok(contrast('#ffffff', '#ffffff') < 4.5);
+// Execute the same assertions against deliberately broken inputs.
+mustCatch('white text on a white control is rejected', () => assertReadable('#ffffff', '#ffffff', 'broken control'));
+mustCatch('low-contrast secondary copy is rejected', () => assertReadable('#aaaaaa', '#ffffff', 'broken copy'));
+mustCatch('an oversized decorative image is rejected', () => assertImageBudget(180_000, 'oversized cloud'));
 for (const name of ['desert-day', 'desert-dusk', 'cloud-wisp']) {
-  assert.ok(statSync(new URL(`../assets/images/${name}.webp`, import.meta.url)).size < 180_000,
-    `${name} exceeds the decorative image budget`);
+  assertImageBudget(statSync(new URL(`../assets/images/${name}.webp`, import.meta.url)).size, name);
 }
 console.log('PASS decorative images stay below 180 KB each');
