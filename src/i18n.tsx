@@ -1442,8 +1442,6 @@ const AR: Record<string, string> = {
   "We'll greet you by name and share a property fact every day": 'نرحّب فيك باسمك، ونعطيك معلومة عقارية كل يوم',
   'In English:': 'بالإنجليزي:',
   'In Arabic:': 'بالعربي:',
-  'Welcome, {name}': 'هلا {name}، حياك الله',
-  'What are you looking for today?': 'وش تدور عليه اليوم؟',
   'Save searches and continue beyond your free search': 'احفظ عمليات بحثك وتابع بعد بحثك المجاني',
   'Language': 'اللغة',
   'How Ezhalah works': 'كيف تعمل إزهله',
