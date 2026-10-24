@@ -239,3 +239,44 @@ def test_a_wix_era_redirect_shell_and_an_error_are_unknown_and_a_404_is_gone():
 def test_a_wix_era_ad_number_is_never_probed_into_a_kill():
     assert R._uid("RAZ00e25e19-b39c-40c9-a67f-8b33a709ee1e") == ""
     assert R._uid("RAZ-raz-55-u23") == "u23" and R._uid("RAZ-haven-1-u684") == "u684"
+
+
+# ── the crawl's own completeness (what lets prune_unseen run at all) ────────────────────────────
+class _Resp:
+    def __init__(self, status, text):
+        self.status_code, self.text = status, text
+
+
+class _Session:
+    def __init__(self, pages):
+        self.pages = pages
+
+    def get(self, url, timeout=None):
+        return self.pages.get(url) or _Resp(404, "")
+
+
+SITEMAP = ("<urlset><url><loc>https://www.razre.sa/projects/raz-55/</loc></url>"
+           "<url><loc>https://www.razre.sa/projects/raz-elevate/</loc></url></urlset>")
+
+
+def _elevate_page():
+    ld = copy.deepcopy(LD)
+    del ld[0]["@graph"][1]["numberOfAccommodationUnits"]
+    cfg = copy.deepcopy(CONFIG)
+    cfg["lead"]["projects"].append({"s": "raz-elevate", "n": "راز إليفيت", "d": "درب الحرمين", "st": "soon"})
+    proj = {**PROJECT, "slug": "raz-elevate", "name_ar": "راز إليفيت", "path": "/projects/raz-elevate/"}
+    return page_html(units=[], project=proj, config=cfg, ld=ld)
+
+
+def test_a_soon_project_with_no_units_does_not_switch_the_prune_off():
+    s = _Session({R.SITEMAP: _Resp(200, SITEMAP), URL: _Resp(200, page_html()),
+                  "https://www.razre.sa/projects/raz-elevate/": _Resp(200, _elevate_page())})
+    res, com, skipped, complete = R.crawl(s)
+    assert len(res) == 2 and complete is True
+
+
+def test_an_unreadable_project_page_keeps_the_prune_off():
+    s = _Session({R.SITEMAP: _Resp(200, SITEMAP), URL: _Resp(200, page_html()),
+                  "https://www.razre.sa/projects/raz-elevate/": _Resp(503, "")})
+    _, _, skipped, complete = R.crawl(s)
+    assert complete is False and skipped.get("page_503") == 1

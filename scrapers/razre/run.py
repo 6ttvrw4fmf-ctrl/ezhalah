@@ -356,8 +356,12 @@ def crawl(s: cc.Session, limit: int = 0) -> tuple[list[dict], list[dict], dict, 
             skipped[why] = skipped.get(why, 0) + 1
             print(f"  ⚠ {url}: {why}", flush=True)
             continue
-        if not page_lists_every_unit(page):
-            complete = False
+        # A page whose unit list is shorter than its own LD count does NOT make the catalogue
+        # incomplete: absence on such a page is already UNKNOWN in _signal, so the prune cannot
+        # kill through it. Only an unreadable page does. (raz-elevate, «soon», publishes 0 units
+        # and no count; gating on it kept every prune off from the first crawl, 2026-10-24.)
+        print(f"  {page['project'].get('slug')}: status={page['status']} units={len(page['units'])} "
+              f"declared={declared_units(page)}", flush=True)
         for unit in page["units"]:
             row, cat, why = map_listing(unit, page, url)
             if not row:
