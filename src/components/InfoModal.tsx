@@ -706,7 +706,7 @@ function makeAbout(pal: Record<string, string>, dark: boolean, rtl = true) {
   void dark;
   return StyleSheet.create({
     body: { paddingHorizontal: BODY_PAD + 4, paddingTop: BODY_PAD, paddingBottom: BODY_PAD },
-    head: { paddingBottom: 12 },
+    head: { paddingBottom: 12, paddingRight: CLOSE_CLEAR }, // keeps «من نحن» clear of the top-right × (owner 2026-10-24)
     eyebrow: { fontSize: 12.5, lineHeight: 18, fontWeight: '700', color: pal.muted, marginBottom: 8 },
     lockup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     eagle: { width: 30, height: 30, opacity: 0.9 },
