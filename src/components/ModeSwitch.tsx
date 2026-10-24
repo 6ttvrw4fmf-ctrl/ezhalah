@@ -43,7 +43,31 @@ let lastMode: SearchMode | null = null;
 // itself too so the halves never mirror under the Arabic locale (labels themselves render RTL fine).
 const setLtr = (node: any) => {
   if (IS_WEB && node?.setAttribute) node.setAttribute('dir', 'ltr');
+  // The same name on both screens' pill lets the browser glide it from the Filter spot to the Smart Broker spot.
+  if (IS_WEB && node?.style) node.style.viewTransitionName = 'ez-mode-switch';
 };
+
+// SMOOTH SWITCH (owner 2026-10-24: «the transition between filter and AI agent doesn't feel smooth»). Measured on
+// production at 390×844: the Filter screen vanished in one frame and the pill jumped 87px up. On the web the browser's
+// own View Transition cross-fades the two screens and glides the pill (named above); where it is missing (older
+// browsers) or the user asked for reduced motion, the switch is the instant one it was before.
+function withScreenFade(navigate: () => void): void {
+  const doc: any = IS_WEB && typeof document !== 'undefined' ? document : null;
+  const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  if (!doc?.startViewTransition || reduced) { navigate(); return; }
+  const from = window.location.pathname;
+  doc.startViewTransition(() => new Promise<void>((done) => {
+    navigate();
+    const t0 = Date.now();
+    // Timers, never requestAnimationFrame: the browser pauses frames while this callback runs, so a frame-based wait
+    // froze the page for its 4s safety limit (measured). Done once the path changed and React has had a beat to render
+    // the new screen; never hold the page longer than 400ms.
+    const wait = () => (window.location.pathname !== from || Date.now() - t0 > 400)
+      ? setTimeout(done, 40)
+      : setTimeout(wait, 16);
+    wait();
+  }));
+}
 
 const SEG_W = 106;   // each half — wider than the old 98 for a more generous, premium footprint
 const SEG_W_EN = 126; // English: «Smart Broker» (~86px) gets the same ~20px air each side as «الوسيط الذكي»
@@ -99,7 +123,7 @@ export default function ModeSwitch({
     // Begin the glide immediately so the tap answers instantly, then let the screen navigate; the
     // destination control picks the motion up from `lastMode` and settles it.
     Animated.spring(x, { toValue: to === 'filter' ? 0 : segW, ...GLIDE, useNativeDriver: !IS_WEB }).start();
-    onSwitch(to);
+    withScreenFade(() => onSwitch(to));
   };
 
   return (
