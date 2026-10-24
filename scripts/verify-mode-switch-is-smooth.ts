@@ -4,7 +4,7 @@
 // froze the page for the browser's 4s limit (frames are paused there) — the wait must use timers.
 import { readFileSync } from 'node:fs';
 const src = readFileSync(new URL('../src/components/ModeSwitch.tsx', import.meta.url), 'utf8');
-const fade = /function withScreenFade[\s\S]*?\n}\n/.exec(src)?.[0] ?? '';
+const fade = (/function withScreenFade[\s\S]*?\n}\n/.exec(src)?.[0] ?? '').replace(/\/\/.*$/gm, ''); // code only, not its comments
 const checks: [string, boolean][] = [
   ['press() navigates through withScreenFade', /withScreenFade\(\(\) => onSwitch\(to\)\)/.test(src)],
   ['uses the browser View Transition when it exists', /startViewTransition/.test(fade)],
