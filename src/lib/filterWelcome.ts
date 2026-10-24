@@ -346,9 +346,9 @@ export type WelcomeCache = { id: number; at: number; ar: string; en: string };
 // then held GREET_HOLD_MS so a reload keeps it; after that the normal rotation resumes. Never chosen
 // by the normal rotation (they are not in WELCOME_LINES).
 export const GREET_LINES: readonly WelcomeLine[] = [
-  { id: 101, when: 'any', needs: [], ar: 'حياك الله {n}، إزهله طريقتك الجديدة لتلاقي عقارك في السعودية. 🥳', en: 'Welcome {n}, Ezhalah is your new way to find your property in Saudi Arabia. 🥳' },
+  { id: 101, when: 'any', needs: [], ar: 'حياك {n}، إزهله طريقتك الجديدة لتلاقي عقارك في السعودية. 🥳', en: 'Welcome {n}, Ezhalah is your new way to find your property in Saudi Arabia. 🥳' },
   { id: 102, when: 'any', needs: [], ar: 'أهلاً {n}، مع إزهله صار البحث عن عقارك في السعودية أسهل. 🥳', en: 'Hello {n}, with Ezhalah, finding your property in Saudi Arabia just got easier. 🥳' },
-  { id: 103, when: 'any', needs: [], ar: 'حياك الله {n}، إزهله يدور لك على عقارك في كل السعودية. 🥳', en: 'Welcome {n}, Ezhalah searches all of Saudi Arabia for your property. 🥳' },
+  { id: 103, when: 'any', needs: [], ar: 'حياك {n}، إزهله يدور لك على عقارك في كل السعودية. 🥳', en: 'Welcome {n}, Ezhalah searches all of Saudi Arabia for your property. 🥳' },
   { id: 104, when: 'any', needs: [], ar: 'هلا {n}، عقارك في السعودية صار أقرب مع إزهله. 🥳', en: 'Hi {n}, your property in Saudi Arabia is closer with Ezhalah. 🥳' },
   { id: 105, when: 'any', needs: [], ar: 'مرحباً {n}، إزهله بدايتك الجديدة للبحث عن عقارك في السعودية. 🥳', en: 'Welcome {n}, Ezhalah is your fresh start in the search for property in Saudi Arabia. 🥳' },
 ];

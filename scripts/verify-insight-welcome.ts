@@ -51,7 +51,7 @@ for (const off of [RIYADH, LONDON, NEW_YORK, 330 /* India */, 0]) {
 }
 check('a whole week, hour by hour, in five places: the picked greeting always fits the local time of that place', allFit);
 const owner = ['صباح الخير', 'صباح النور', 'صباح الورد', 'مساء الخير', 'مساء النور', 'مساء الورد', 'جمعة مباركة', 'جمعتك مباركة',
-  'إجازة سعيدة', 'استمتع بإجازتك', 'هلا', 'أهلاً', 'هلا والله', 'مرحباً', 'يا هلا', 'حياك الله'];
+  'إجازة سعيدة', 'استمتع بإجازتك', 'هلا', 'أهلاً', 'هلا فيك', 'مرحباً', 'يا هلا', 'حياك'];
 check('the greetings are exactly the owner-approved list (no occasions, no afternoon wordings)',
   GREETINGS.length === owner.length && GREETINGS.every((g, i) => g.ar === owner[i] && !!g.en));
 
