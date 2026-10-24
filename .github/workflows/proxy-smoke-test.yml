@@ -1,0 +1,44 @@
+# Proxy smoke test (non-destructive) — validate a CANDIDATE Saudi residential proxy (e.g. DataImpulse)
+# BEFORE switching off Webshare. Fetches real Wasalt + Souq24 listing pages through the candidate proxy
+# and reports per-site real-page success rate + exit-IP country. Reads a SEPARATE DATAIMPULSE_PROXY_URL
+# secret and never changes WASALT_PROXY_URL, so Webshare stays wired. Manual only (workflow_dispatch).
+name: Proxy smoke test
+
+on:
+  workflow_dispatch:
+    inputs:
+      proxy_env:
+        description: "Which proxy secret to test (DATAIMPULSE_PROXY_URL = candidate, WASALT_PROXY_URL = Webshare baseline)"
+        required: false
+        default: "DATAIMPULSE_PROXY_URL"
+      n:
+        description: "Sample size per site"
+        required: false
+        default: "30"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Smoke test ${{ github.event.inputs.proxy_env || 'DATAIMPULSE_PROXY_URL' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Candidate proxy under test (set this secret after buying the $5 DataImpulse credit).
+          DATAIMPULSE_PROXY_URL: ${{ secrets.DATAIMPULSE_PROXY_URL }}
+          # Webshare, exposed only so the SAME harness can baseline it when it has bandwidth.
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          SCRAPE_MIN_INTERVAL: "0.4"
+        run: |
+          python -m scrapers._probe.proxy_smoke \
+            --proxy-env "${{ github.event.inputs.proxy_env || 'DATAIMPULSE_PROXY_URL' }}" \
+            --n "${{ github.event.inputs.n || 30 }}"
