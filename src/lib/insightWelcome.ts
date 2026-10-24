@@ -40,10 +40,10 @@ export const GREETINGS: readonly Greeting[] = [
   { when: 'weekend', ar: 'استمتع بإجازتك', en: 'Enjoy your weekend' },
   { when: 'any', ar: 'هلا', en: 'Hi' },
   { when: 'any', ar: 'أهلاً', en: 'Hello' },
-  { when: 'any', ar: 'هلا والله', en: 'Hey' },
+  { when: 'any', ar: 'هلا فيك', en: 'Hey' },
   { when: 'any', ar: 'مرحباً', en: 'Hello' },
   { when: 'any', ar: 'يا هلا', en: 'Hi there' },
-  { when: 'any', ar: 'حياك الله', en: 'Welcome' },
+  { when: 'any', ar: 'حياك', en: 'Welcome' },
 ];
 
 /** Minutes ahead of UTC where the user is (the device's zone); Saudi time when the device says nothing usable. */

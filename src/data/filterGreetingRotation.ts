@@ -29,14 +29,14 @@ export type FilterGreeting = { greeting: string; emoji: string };
 const BAKED: FilterGreeting[] = [
   { greeting: 'هلا', emoji: '👋' },
   { greeting: 'يا هلا', emoji: '🤍' },
-  { greeting: 'حياك الله', emoji: '☕' },
+  { greeting: 'حياك', emoji: '☕' },
   { greeting: 'هلا ومسهلا', emoji: '🌿' },
   { greeting: 'مرحبا بك', emoji: '😊' },
   { greeting: 'أهلًا بك', emoji: '🌤️' },
   { greeting: 'السلام عليكم', emoji: '🌿' },
   { greeting: 'هلا فيك', emoji: '🤍' },
   { greeting: 'يا مرحبا', emoji: '🏡' },
-  { greeting: 'الله يحييك', emoji: '🌴' },
+  { greeting: 'سلامات', emoji: '🌴' },
   { greeting: 'أرحب', emoji: '✨' },
 ];
 
