@@ -528,8 +528,13 @@ overwrite it (`canAutoRetitle`). Title is deliberately NOT coupled to `sameQuery
 sky (muted blue-hour dusk in dark mode), with sparse realistic transparent clouds. The landing foreground
 has pale dunes, one palm and one small Bedouin tent; a separate dusk asset preserves readable sand and a
 warm tent light. Only this foreground fades when search starts; results and the search loader retain the
-sky, with solid readable cards. The header/wordmark shares the sky; the sidebar does not duplicate cloud
-clusters at its seam. Assets contain no UI or text. Headline cloud wisps touch the outer edges and never
+sky, with solid readable cards. The header/wordmark shares the sky. The sidebar has its own sparse,
+column-sized clouds behind its header and chat list, clipped at the seam rather than duplicating the
+page's cloud clusters. `SidebarSky` adds the original green eagle on a small sky tile with thin clouds
+passing below its eye. Both signed-in and guest headers, docked and mobile drawers, use this treatment
+in either language and theme. Cloud transforms drift over 18 seconds per direction with eased turns;
+reduced motion makes them static. They never intercept taps or obscure the wordmark and controls.
+Assets contain no UI or text. Headline cloud wisps touch the outer edges and never
 mask the copy. `CloudWisp` is decorative, pointer-transparent, and hidden from assistive technology.
 Source logos keep their measured frames and original colors, with small varied wisps touching their edges.
 The website strip moves each logo and cloud together at **12 px/s** (one 108px slot per **9 seconds**),

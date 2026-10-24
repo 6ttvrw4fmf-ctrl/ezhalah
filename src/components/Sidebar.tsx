@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { I18nManager, Image as RNImage, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { I18nManager, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { OPEN_DELAY_MS, armOpen, cancelOpen, openShouldFire, type ArmedOpen } from '@/lib/rowClick';
 import Animated, {
   Easing,
@@ -17,6 +17,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, darkColors, radius, space, cardShadow } from '@/theme/tokens';
 import { useTheme } from '@/theme/theme';
 import HeroBackground from '@/components/HeroBackground';
+import { SidebarClouds, SkyEagleMark } from '@/components/SidebarSky';
 import AccountMenu from '@/components/AccountMenu';
 import { useApp, type HistoryItem } from '@/store';
 import { sanitizeArabicSearch, isSearchableQuery, filterChats, arabicHintAfterInput, boldSpans } from '@/lib/chatSearch';
@@ -664,7 +665,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                 reveals the field below. While search is open the header icon steps aside so
                 there is exactly ONE search affordance on screen at a time. */}
             <View style={s.brandRow}>
-              <RNImage source={require('../../assets/images/eagle-mark.png')} style={s.logo} resizeMode="contain" />
+              <SkyEagleMark />
               <Text ref={noTranslateRef} style={[s.word, !isRTL && s.wordLatin, dark && dks.word]}>{t('EZHALAH')}</Text>
               {!searching && (
                 <Pressable
@@ -891,7 +892,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
           // the sign-up CTA pinned to the bottom on tall screens. (user request 2026-06-22.)
           <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
             <View style={s.brandRow}>
-              <RNImage source={require('../../assets/images/eagle-mark.png')} style={s.logo} resizeMode="contain" />
+              <SkyEagleMark />
               <Text ref={noTranslateRef} style={[s.word, !isRTL && s.wordLatin, dark && dks.word]}>{t('EZHALAH')}</Text>
             </View>
 
@@ -1004,8 +1005,9 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       // a sibling stacking context later in the DOM otherwise paints over it). Closed → back to
       // z-auto ordering so the root overlays (Support/About/Auth) keep painting above the sidebar.
       <View ref={panelRef} style={[s.dockPanel, dark && dks.dockPanel, acctOpen && ({ zIndex: 30 } as any), { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, LTR_PIN]}>
-        {/* Continue the sky behind the wordmark; avoid repeating the page clouds at the column seam. */}
+        {/* Continue the sky, with sparse column-sized clouds behind the controls. */}
         <HeroBackground clouds={false} />
+        <SidebarClouds />
         {body}
         {dropAnnounce ? (
           <Text accessibilityLiveRegion="polite" style={s.srOnly}>{dropAnnounce}</Text>
@@ -1026,6 +1028,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
         dataSet={{ consentKeep: '1' }} />
       <Animated.View ref={panelRef as any} style={[s.panel, dark && dks.panel, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, panelStyle, LTR_PIN]}>
         <HeroBackground clouds={false} />
+        <SidebarClouds />
         {body}
         {menuOverlay}
         {deleteConfirmOverlay}
@@ -1057,7 +1060,6 @@ const s = StyleSheet.create({
   // neutral by default, a soft green wash on hover/press. Never a big outlined button.
   searchTopBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', marginLeft: 'auto' },
   searchTopBtnHover: { backgroundColor: colors.hoverRow },
-  logo: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   // Bigger brand name (owner 2026-10-04: «make Ezhalah big»). Letter-spacing only on the Latin wordmark —
   // it pulls Arabic letters apart and breaks their joining.
   word: { fontSize: 22, fontWeight: '800', color: colors.ink },

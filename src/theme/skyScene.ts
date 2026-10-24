@@ -4,6 +4,9 @@ export const skyScene = {
   stripHeight: 68,
   cloudOpacity: 0.72,
   duskCloudOpacity: 0.26,
+  sidebarDriftMs: 18000,
+  sidebarDriftPx: 20,
+  eagleDriftPx: 12,
 } as const;
 
 /** Stable variation per logo, so virtualized tiles don't change clouds while they move. */
