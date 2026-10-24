@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, norm_district_tok, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 
 BASE = "https://sadiq-eltajer.sa"
 SOURCE = "Sadiq Eltajer"
@@ -89,6 +90,22 @@ def photos(page_html: str) -> Optional[list[str]]:
             if u.startswith("http") and "/storage/" in u
             and "/settings/" not in u and "/assets/" not in u]
     return urls or None
+
+
+# PIN — the ad's own «موقع العقار» map link in its title row (owner 2026-10-24: every pin the source has).
+# Measured on 5 live ads (source-reread 40072817782): the title row carries
+# `<a href="https://www.google.com/maps?q=26.30,44.02" class="ad-map-wrap">`, and each «اعلانات مشابهة»
+# card carries its OWN `class="ad-map-icon"` link with a different pair. So only the ad-map-wrap link, and
+# only above «اعلانات مشابهة» — a neighbour's pin can never be read, the same construction as the price.
+_OWN_MAP_LINK = re.compile(r'<a\s+href="([^"]*maps\?q=[^"]*)"\s+class="ad-map-wrap"')
+
+
+def own_pin(page_html: str) -> dict:
+    """{"latitude","longitude"} from the ad's own title-row map link, else {} (no link = the ad has no pin)."""
+    i = (page_html or "").find(_SIMILAR)
+    own = page_html[:i] if i > 0 else (page_html or "")
+    m = _OWN_MAP_LINK.search(own)
+    return pin_from_html(ihtml.unescape(m.group(1))) if m else {}
 
 
 # ── header: code, price, area ────────────────────────────────────────────────────────────────────
@@ -569,7 +586,7 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         "price_is_per_metre": price_per_meter is not None,
         "price_published": (price_total is not None) or (price_per_meter is not None),
     }
-    row["additional_info"] = {k: v for k, v in extra.items() if v is not None}
+    row["additional_info"] = {**own_pin(page_html), **{k: v for k, v in extra.items() if v is not None}}
     # The kitchen / maid room / laundry the ad's OWN room list names («المكونات : … مطبخ . دورة مياة»).
     # The site has no amenity field at all; this labelled list is its statement. Yes or nothing, never
     # no (ADVANCED_FILTER_SOURCE_TRUTH §2). Kitchen was 0 of 1,512 active while 272 lists name one
