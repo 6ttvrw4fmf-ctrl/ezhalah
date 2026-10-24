@@ -176,6 +176,14 @@ const WAIVED: Record<string, string> = {
     'AUTHORITATIVE_NULL (scrapers/bossbih/run.py), pinned by test_bossbih_price_basis_and_traps.py',
   // 🔬 AF engineer, 2026-10-08. Each of tonight's three repairs is watched by its own companion or pinned the
   // same way as the 2026-10-07 entries below.
+  // 🦅 Falcon 2026-10-23: same shape — the 3-row repair was applied before its watcher existed.
+  '20261023215159_haraj_three_districts_unglued_from_the_rega_block.sql':
+    'watched by its companion 20261023215519_mon_detect_district_carries_ad_block_text.sql, which creates ' +
+    'mon_detect_district_carries_ad_block_text() (P2) over every SERVED district_ar carrying a REGA block label or a colon, ' +
+    'on every platform, and splices it into the mon_run_all_detectors() roster (a planted glued district is caught at apply)',
+  '20261023222823_haraj_three_district_ar_unglued_from_the_rega_block.sql':
+    'the second half of 20261023215159 (haraj serves its own district_ar column, not neighborhood); watched by the same ' +
+    'companion 20261023215519_mon_detect_district_carries_ad_block_text.sql over every SERVED district_ar',
   // 2026-10-18 (owner P1 «we can get sued»): the repair was applied before its watcher existed, so the applied file cannot
   // name it; the companion creates it and splices it into the roster.
   '20261018123454_wasalt_rate_is_not_the_total.sql':

@@ -108,7 +108,9 @@ check('both centered popups pin that direction',
 check("no physical-left text anywhere in the menu (RTL-first hierarchy)", !/textAlign: 'left'(?!' as const, writingDirection: 'ltr')/.test(menu.replace("textAlign: 'left' as const, writingDirection: 'ltr'", '')));
 check('renames write through to auth user_metadata (refresh-proof — owner 2026-08-29)',
   /persistDisplayName[\s\S]{0,300}auth\.updateUser\(\{ data: \{ full_name: v, name: v \} \}\)/.test(read('src/lib/auth.ts')));
-check('persistName routes the rename through persistDisplayName', /const persistName[\s\S]{0,500}persistDisplayName\(v\)/.test(menu));
+// The rename body moved to src/lib/useSaveName.ts (2026-10-23) so «وش نناديك؟» and Apple's name share it.
+check('persistName routes the rename through persistDisplayName',
+  /const persistName = useSaveName\(\);/.test(menu) && /const persistName[\s\S]{0,500}persistDisplayName\(v\)/.test(read('src/lib/useSaveName.ts')));
 // Same intent, direction-aware form (reconciled 2026-08-29, mobile-UX pass): under Arabic's forced
 // RTL the physical top-right is spelled `left:` — the conditional keeps that AND stays correct for
 // a future LTR locale, which the bare literal did not.
