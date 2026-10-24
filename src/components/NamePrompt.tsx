@@ -108,11 +108,15 @@ export default function NamePrompt() {
   const shown = open || (reopened && !!user && !user.name.trim());
   // Mount → next frames «on» (the CSS spring plays) → «leave» (shrink + fade, 220 ms) → unmount.
   useEffect(() => { if (shown && (phase === 'off' || phase === 'leave')) setPhase('enter'); }, [shown]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A timer, not an animation frame: frames never fire in a background tab, which would leave an invisible
+  // box (opacity 0) over the page. Reading layout first commits the «enter» styles, so the CSS spring plays.
   useEffect(() => {
     if (phase !== 'enter') return;
-    let r2 = 0;
-    const r1 = requestAnimationFrame(() => { r2 = requestAnimationFrame(() => setPhase('on')); });
-    return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); };
+    const id = setTimeout(() => {
+      if (typeof document !== 'undefined') void document.body?.offsetHeight;
+      setPhase('on');
+    }, 20);
+    return () => clearTimeout(id);
   }, [phase]);
 
   // The other script's spelling, 400 ms after typing stops. A late answer for an older input is dropped

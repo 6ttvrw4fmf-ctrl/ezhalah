@@ -300,6 +300,8 @@ const modalProblems = (f: Record<string, string>) => {
     // «أضف اسمك ✏️» reopens the same box
     if (!/if \(!pickName\(user, locale\)\) \{ onClose\(\); openNamePrompt\(\); return; \}/.test(f[MENU])) out.push('«أضف اسمك» in the menu does not open the box');
     if (!/\{pickName\(user, locale\) \? '' : ' ✏️'\}/.test(f[MENU]) || !/!pickName\(user, locale\) && s\.addName/.test(f[MENU])) out.push('the menu row is not the green «أضف اسمك ✏️»');
+    // the box becomes visible on a TIMER (rAF never fires in a background tab → an invisible overlay over the page)
+    if (!/if \(phase !== 'enter'\) return;\n\s*const id = setTimeout\(\(\) => \{/.test(p) || /requestAnimationFrame/.test(p)) out.push('the box can stay invisible over the page (enter → on waits on requestAnimationFrame)');
     if (!/const shown = open \|\| \(reopened && !!user && !user\.name\.trim\(\)\);/.test(p) || !/if \(shown && \(phase === 'off' \|\| phase === 'leave'\)\) setPhase\('enter'\);/.test(p)) out.push('the box ignores the reopen');
     return out;
   };
@@ -312,6 +314,7 @@ const modalProblems = (f: Record<string, string>) => {
   mustCatch('a chip with no debounce (a backend call per keystroke)', v4Problems({ ...files, [PROMPT]: files[PROMPT].replace('const PREVIEW_DEBOUNCE_MS = 400;', 'const PREVIEW_DEBOUNCE_MS = 0;') }, NS).length > 0);
   mustCatch('the save spelling drifting from the chip\'s source', v4Problems(files, NS.replace('const other = await otherSpelling(v);', 'const other = await transliterateName(v, "en");')).length > 0);
   mustCatch('the menu row opening the old pencil field instead of the box', v4Problems({ ...files, [MENU]: files[MENU].replace('if (!pickName(user, locale)) { onClose(); openNamePrompt(); return; } ', '') }, NS).length > 0);
+  mustCatch('the enter → on step back on requestAnimationFrame (invisible box in a background tab)', v4Problems({ ...files, [PROMPT]: files[PROMPT].replace("const id = setTimeout(() => {", "const id = requestAnimationFrame(() => {") }, NS).length > 0);
   mustCatch('a reopen the box never shows', v4Problems({ ...files, [PROMPT]: files[PROMPT].replace('const shown = open || (reopened && !!user && !user.name.trim());', 'const shown = open;') }, NS).length > 0);
   mustCatch('a static circle instead of the live letter', v4Problems({ ...files, [PROMPT]: files[PROMPT].replace('const letter = letterOf(name);', "const letter = '';") }, NS).length > 0);
 }
