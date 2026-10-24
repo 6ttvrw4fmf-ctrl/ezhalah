@@ -2408,12 +2408,12 @@ const s = StyleSheet.create({
   top: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 4 },
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   // Note #4 — mobile brand text next to the hamburger.
-  topBrand: { fontSize: 18, fontWeight: '800', color: colors.dark, letterSpacing: -0.4 },
+  topBrand: { fontSize: 18, fontWeight: '800', color: colors.dark },
   // AI Agent badge + Share icon, grouped and pushed to the far-right edge (marginStart:auto) so they
   // sit together in the top-right corner in BOTH languages. (user request.)
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginStart: 'auto' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  word: { fontSize: 12, fontWeight: '700', letterSpacing: 1.2, color: colors.ink },
+  word: { fontSize: 12, fontWeight: '700', color: colors.ink },
   // The bar is forced LTR (see s.top), so `marginStart: 'auto'` pushes the badge away from the
   // left-pinned hamburger toward the share button on the right.
   // Redesigned to match the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius,
@@ -2452,7 +2452,10 @@ const s = StyleSheet.create({
   hero: { alignItems: 'center', marginTop: 8, marginHorizontal: 4 },
   // The Filter / AI Agent control, centered in the hero flow between the tagline and the card.
   modeWrap: { alignSelf: 'center', marginTop: 8 },
-  heroTitle: { fontSize: 24, fontWeight: '700', color: colors.primary, letterSpacing: -0.6, textAlign: 'center', lineHeight: 28 },
+  // NO letter-spacing on Arabic: it breaks joining and ligatures («الله» lost its ligature in the welcome
+  // headline, owner 2026-10-24). Latin tracking lives in the English-only layer E. Guard:
+  // scripts/verify-no-letter-spacing-on-arabic.ts
+  heroTitle: { fontSize: 24, fontWeight: '700', color: colors.primary, textAlign: 'center', lineHeight: 28 },
   heroSub: { fontSize: 12, fontWeight: '600', color: colors.dark, textAlign: 'center', marginTop: 4, lineHeight: 17 },
   heroTagline: { fontSize: 12.5, fontWeight: '700', color: colors.primary, textAlign: 'center', marginTop: 8, fontStyle: 'italic' },
   // Small inline hint under the Rent Monthly/Yearly toggle — explains the period the user picked.
