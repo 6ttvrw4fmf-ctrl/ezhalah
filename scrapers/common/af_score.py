@@ -258,6 +258,29 @@ def template_lines(pages: list[list[str]]) -> set[str]:
 DEED_BOUNDARY = re.compile(r"تمام\s*الحد|يحده|الحد\s*(?:الشمالي|الجنوبي|الشرقي|الغربي)")
 
 
+# The same boundary text printed as a labelled detail row («وصف الحد الغربي: الوحدة رقم 4 / أ والمنور رقم 2 وبيت الدرج
+# والمصعد», the Houzez detail list on fursaghyr): the evidence line keeps the VALUE and loses its label, so
+# DEED_BOUNDARY cannot see it. fursaghyr 4367079 was asked elevator from exactly that row on 10-24 (run 40076306911)
+# while its «خدمات العقار» names none. Every value printed under a «… الحد …» label is dropped before the page is read.
+_BOUNDARY_ROW = re.compile(r"<strong>\s*(?:وصف|نوع|طول)\s+(?:ال)?حد[^<:]{0,20}:?\s*</strong>\s*<span[^>]*>([^<]{1,300})</span>")
+
+
+def strip_boundary(page: dict, body: str) -> dict:
+    rows = {norm(html.unescape(v)) for v in _BOUNDARY_ROW.findall(body or "") if v.strip()}
+    rows.discard("")
+    if not rows:
+        return page
+
+    def keep_line(x: str) -> bool:
+        nx = norm(x)
+        # a short value («شارع») is matched whole, so it cannot take an unrelated line with it
+        return not any(nx == r or (len(r) >= 12 and r in nx) for r in rows)
+
+    keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
+    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))
+    return {**page, "evidence_lines": keep, "text_head": head}
+
+
 def page_says_yes(lines: list[str], field: str) -> bool:
     """The ad itself names the amenity and does not negate it («مصعد» yes, «لا يوجد مصعد» no)."""
     kw = BOOL_KW[field]
@@ -747,6 +770,8 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
             except Exception:  # noqa: BLE001
                 status, body = None, ""
             page = page_evidence(body) if status == 200 and body else None
+            if page is not None:
+                page = strip_boundary(page, body)
             if page is not None and platform in NAV_LINK_SITES:
                 page = strip_nav(page, body)
             if page is not None and platform in WARRANTY_SITES:
