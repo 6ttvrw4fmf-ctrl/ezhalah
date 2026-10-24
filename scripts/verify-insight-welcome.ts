@@ -80,8 +80,13 @@ check('no live sentence names a region (city, then district)', templates.every((
   templates.filter((t) => t.ar.includes('{region}')).map((t) => t.id).join(','));
 check('the retired lines are gone (pool, websites, maid, one-ad towns, lowest rent, local offices, regions)',
   !templates.some((t) => ['pool', 'district_sites', 'region_sites', 'maid', 'town_single', 'town_few', 'min_rent_apt', 'local_office', 'region_week', 'region_land'].includes(t.kind)));
-check('every price line says the ASKING price («المعروض» / "asking")',
-  templates.filter((t) => /متوسط (السعر|الإيجار)/.test(t.ar)).every((t) => t.ar.includes('المعروض') && t.en.includes('asking')));
+// 2026-10-24 (owner: «we can get sued»): a price line is a MEDIAN and says so plainly — «نص … أو أقل» — of what is
+// ON OFFER («المعروض…» / «انعرضت»; "listed" / "ask"), never «متوسط» / "average" (scripts/verify-welcome-wording-matches-math.ts).
+check('every price line says the ASKING price («المعروض» / "listed", "ask") as a median («نص … أو أقل»), never «متوسط»',
+  templates.filter((t) => /(سعر|إيجار|مساحت)/.test(t.ar) && /نص/.test(t.ar)).length >= 12
+  && templates.filter((t) => /نص/.test(t.ar)).every((t) => /(المعروض|انعرضت)/.test(t.ar) && /أو أقل/.test(t.ar) && /\b(listed|ask|asks)\b/.test(t.en))
+  && templates.every((t) => !/متوسط/.test(t.ar) && !/\baverage\b/i.test(t.en)),
+  templates.filter((t) => /متوسط/.test(t.ar)).map((t) => t.id).join(','));
 // owner + their dad 2026-10-22: «investment usually happens أراضي، شقق، عماير» — purchase leads
 check('investors get purchase volume for land, apartments and buildings, this week against last, and month against month',
   ['week_land', 'week_apt_sale', 'week_bld_sale', 'wow_land_up', 'wow_apt_sale_up', 'wow_bld_up', 'month_land_ppm', 'month_apt_ppm', 'month_bld_ppm']
