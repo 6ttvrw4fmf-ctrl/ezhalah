@@ -2,14 +2,15 @@
 // the same way English is … don't mirror the x»). Measured before the fix on a local build in Arabic: the About/Support
 // sheet, account sheet, share card, map, delete-chat dialog and the deep-search sheet put the ✕ on the LEFT, some by an
 // explicit `isRTL ? { left } : { right }`, the header rows because a flex row follows the page direction.
-// Out of scope on purpose: the ad viewer's browser-tab strip (owner: «the phone is perfect»).
+// The ad viewer's phone tab strip and its «slow site» pill are pinned left-to-right too (owner 2026-10-24: «don't mirror it
+// cuz it's Arabic»); the laptop browser chrome already was.
 import { readFileSync } from 'node:fs';
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 
 type Files = Record<string, string>;
 const FILES = ['src/app/index.tsx', 'src/components/ListingPreview.tsx', 'src/components/Sidebar.tsx', 'src/components/InfoModal.tsx',
   'src/components/AccountMenu.tsx', 'src/app/agent.tsx', 'src/app/interview.tsx', 'src/components/AdvancedQuestionCard.tsx',
-  'src/components/AgentModelSelector.tsx'];
+  'src/components/AgentModelSelector.tsx', 'src/components/AdViewer.tsx'];
 
 function problems(f: Files): string[] {
   const out: string[] = [];
@@ -22,6 +23,8 @@ function problems(f: Files): string[] {
   if (!/\[s\.bar, isRTL && \{ flexDirection: 'row-reverse'/.test(f['src/app/interview.tsx'])) out.push('interview header ✕ follows the page direction');
   if (!/\[s\.bar, isRTL && \{ flexDirection: 'row-reverse'/.test(f['src/components/AdvancedQuestionCard.tsx'])) out.push('AF card header ✕ follows the page direction');
   if (!/storyHead, \{ flexDirection: arabic \? 'row-reverse' : 'row' \}/.test(f['src/components/AgentModelSelector.tsx'])) out.push('models sheet ✕ follows the page direction');
+  if (!/<View style=\{s\.tabRow\} ref=\{setLtr\}>/.test(f['src/components/AdViewer.tsx'])) out.push('ad viewer phone tab strip mirrors its ✕');
+  if (!/testID="ad-slow-hint" style=\{s\.slowPill\} ref=\{setLtr\}/.test(f['src/components/AdViewer.tsx'])) out.push('ad viewer slow-site pill mirrors its ✕');
   return out;
 }
 
@@ -35,6 +38,8 @@ check('every ✕ is top-right in both languages', found.length === 0);
 for (const p of found) console.log(`     ✗ ${p}`);
 mutation('a ✕ that flips left in Arabic again', problems({ ...real, 'src/app/index.tsx': real['src/app/index.tsx'].replace('[s.sharedClose, { right: 12 }]', '[s.sharedClose, isRTL ? { left: 12 } : { right: 12 }]') }).length === 0);
 mutation('a header row that mirrors the ✕ again', problems({ ...real, 'src/app/agent.tsx': real['src/app/agent.tsx'].replace("[s.platformPickerHeader, locale === 'ar' && { flexDirection: 'row-reverse' }]", 's.platformPickerHeader') }).length === 0);
+
+mutation('the ad viewer tab strip mirroring again', problems({ ...real, 'src/components/AdViewer.tsx': real['src/components/AdViewer.tsx'].replace('<View style={s.tabRow} ref={setLtr}>', '<View style={s.tabRow}>') }).length === 0);
 
 if (failed) { console.error(`\n✗ close ✕ side: ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✓ every ✕ sits top-right, the same as English');

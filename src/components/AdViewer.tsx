@@ -278,7 +278,8 @@ export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, 
       <View style={s.grabberRow} ref={grabRef}>
         <View style={s.grabber} />
       </View>
-      <View style={s.tabRow}>
+      {/* Pinned left-to-right like English, so the ✕ stays at the right (owner 2026-10-24: «don't mirror it cuz it's Arabic»). */}
+      <View style={s.tabRow} ref={setLtr}>
         <ScrollView horizontal style={{ flex: 1 }} showsHorizontalScrollIndicator={false} contentContainerStyle={s.tabStrip}>
           {tabs.map((l, i) => {
             const on = i === active;
@@ -509,7 +510,7 @@ function TabFrame({ tab, visible, t, onNavigated }: { tab: AdTab; visible: boole
         />
       )}
       {!loaded && (slow || knownSlow) && !slowDismissed && (
-        <View testID="ad-slow-hint" style={s.slowPill}>
+        <View testID="ad-slow-hint" style={s.slowPill} ref={setLtr}>
           <Text style={s.slowTx}>{t(knownSlow ? 'This site is slow to open' : 'Taking a while?')}</Text>
           <Pressable testID="ad-slow-open-new-window" onPress={openNewTab} accessibilityRole="link" style={({ hovered }: any) => [s.slowGo, hovered && s.slowGoHover]}>
             <Ionicons name="open-outline" size={16} color={colors.onFill} />
