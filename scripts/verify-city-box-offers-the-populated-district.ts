@@ -15,7 +15,7 @@
 //
 //   node --experimental-strip-types scripts/verify-city-box-offers-the-populated-district.ts
 import { readFileSync } from 'node:fs';
-import { populatedDistrictRows, orderCityBoxRows, type LiveDistrictRow } from '../src/lib/locationSuggest.ts';
+import { populatedDistrictRows, orderCityBoxRows, cityOutweighsDistricts, type LiveDistrictRow } from '../src/lib/locationSuggest.ts';
 
 let failed = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -55,6 +55,17 @@ const LIVE: LiveDistrictRow[] = [
   check('…ظهرة البديعة is not a prefix match', !rows.some((r) => r.districtAr.includes('ظهرة')));
   check('…one row per city, capped at 4', rows.length === 4 && new Set(rows.map((r) => r.cityId)).size === 4);
   check('…a limit of 2 keeps the two biggest', populatedDistrictRows('البديعة', LIVE, 2).map((r) => r.cityId).join() === '3,1061');
+}
+// 2b. A typed CITY wins (owner 2026-10-24): «مكة» = مكة المكرمة 9,133 listings vs «حي مكة · الجبيل» 16 → no district rows;
+//     «البديعة» = a 0-listing city vs حي البديعة 113 → the district rows stay.
+{
+  const mecca = [{ n: 16 }, { n: 5 }, { n: 2 }];
+  check('«مكة»: a 9,133-listing city drops the district rows', cityOutweighsDistricts([9133], mecca));
+  check('«البديعة»: a 0-listing city keeps the district rows', !cityOutweighsDistricts([0], populatedDistrictRows('البديعة', LIVE)));
+  check('no matching city keeps the district rows', !cityOutweighsDistricts([], mecca));
+  check('wired: matchCitiesByText drops the rows when the typed city outweighs them',
+    /cityOutweighsDistricts\(scored\.filter\(\(sc\) => sc\.rank === 0\)[\s\S]{0,120}\(typedCity \? \[\] : liveRows\)/.test(readFileSync('src/data/locations.ts', 'utf8')));
+  mutation('a rule that always keeps the rows', ((_c: readonly number[], _d: readonly { n: number }[]) => false)([9133], mecca));
 }
 // 3. Nothing is offered for a short, Latin or empty query.
 check('two letters offer nothing', populatedDistrictRows('ال', LIVE).length === 0);

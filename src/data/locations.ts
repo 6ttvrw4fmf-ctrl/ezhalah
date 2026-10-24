@@ -6,7 +6,7 @@
 // first with English fallbacks. (PRD §5.1, prototype matchLocations — extended to nationwide data.)
 
 import raw from './sa-locations.json';
-import { norm, catalogCityExtras, catalogDistrictExtras, isLatinQuery, latinRank, populatedDistrictRows, orderCityBoxRows, liveDistrictKey, type CatalogCity, type CatalogDistrict, type LiveDistrictRow } from '../lib/locationSuggest';
+import { norm, catalogCityExtras, catalogDistrictExtras, isLatinQuery, latinRank, populatedDistrictRows, orderCityBoxRows, cityOutweighsDistricts, liveDistrictKey, type CatalogCity, type CatalogDistrict, type LiveDistrictRow } from '../lib/locationSuggest';
 import { supabase } from '@/lib/supabase';
 import { CITY_AR_DISPLAY, CITY_TOKENS, cityTokensReverseLookup } from '@/lib/cityDisplay';
 import { arabicOrPlaceholder, cutPlaceName } from '@/lib/arabicText';
@@ -1347,7 +1347,9 @@ export function matchCitiesByText(deal: Deal | null, periodTok: string | null, c
   }));
   // A typed DISTRICT name offers its populated «حي X · City» rows, ranked above the 0-served homonym cities (owner
   // decision 2026-10-19, backlog 522/566: «البديعة» → حي البديعة · الرياض, «الراكة» → حي الراكة الجنوبية · الخبر).
-  const districtRows = populatedDistrictRows(query, liveDistrictRows(), 4).flatMap((r): CityOption[] => {
+  const liveRows = populatedDistrictRows(query, liveDistrictRows(), 4);
+  const typedCity = cityOutweighsDistricts(scored.filter((sc) => sc.rank === 0).map((sc) => sc.opt.listingCount), liveRows);
+  const districtRows = (typedCity ? [] : liveRows).flatMap((r): CityOption[] => {
     const cat = CITY_BY_ID.get(r.cityId);
     if (!cat) return [];
     return [{
