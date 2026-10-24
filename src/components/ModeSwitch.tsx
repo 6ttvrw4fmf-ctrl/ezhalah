@@ -121,7 +121,7 @@ export default function ModeSwitch({
         accessibilityState={{ selected: active === 'filter' }}
         accessibilityLabel={t('Filter')}
       >
-        <Ionicons name="funnel-outline" size={17} color={active === 'filter' ? colors.dark : colors.muted} />
+        <Ionicons name="funnel-outline" size={17} color={active === 'filter' ? colors.ink : colors.muted} />
         <Text style={[s.segT, active === 'filter' ? s.segTOn : null, en && { fontFamily: SYSTEM_FONT, fontWeight: active === 'filter' ? '600' : '500' }]} numberOfLines={1}>{t('Filter')}</Text>
       </Pressable>
 
@@ -136,7 +136,7 @@ export default function ModeSwitch({
         accessibilityState={{ selected: aiSteady }}
         accessibilityLabel={t('Smart Assistant')}
       >
-        <Ionicons name="sparkles-outline" size={17} color={aiSteady ? colors.dark : colors.muted} />
+        <Ionicons name="sparkles-outline" size={17} color={aiSteady ? colors.ink : colors.muted} />
         <Text style={[s.segT, aiSteady ? s.segTOn : null, en && { fontFamily: SYSTEM_FONT, fontWeight: aiSteady ? '600' : '500' }]} numberOfLines={1}>{t('Smart Assistant')}</Text>
       </Pressable>
     </View>
