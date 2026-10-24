@@ -305,7 +305,7 @@ jobs:
             # These fire only AFTER a successful deploy (alias/env/smoke-test/drift checks).
             if grep -q 'REFUSING TO ADVANCE THE BASELINE' "$LOG"; then POST_FAILED=yes; fi
             # The canary gate (scripts/canary-gate.sh) prints exactly one of these when a rolling release was in flight.
-            if grep -q 'CANARY ABORTED' "$LOG"; then CANARY=aborted; elif grep -q 'CANARY PASSED' "$LOG"; then CANARY=passed; fi
+            if grep -q 'CANARY UNRESOLVED' "$LOG"; then CANARY=unresolved; elif grep -q 'CANARY ABORTED' "$LOG"; then CANARY=aborted; elif grep -q 'CANARY PASSED' "$LOG"; then CANARY=passed; fi
             DEPLOY_URL="$(grep -oE 'https://ezhalah-[a-z0-9]+-[a-z0-9-]+\.vercel\.app' "$LOG" | tail -1)"
           fi
 
@@ -314,10 +314,15 @@ jobs:
               echo "### 🧪 Dry run — NOTHING WAS DEPLOYED"
               echo "Verification only. The deploy step was skipped by design."
 
+            elif [ "$CANARY" = "unresolved" ]; then
+              echo "### ⚠️ CANARY UNRESOLVED — rollback was not confirmed"
+              echo "The rollout command failed. Traffic may still reach the canary; inspect the active rolling release in Vercel."
+              echo "The baseline did not advance. Read the command failure in the log before recovering the release."
+
             elif [ "$CANARY" = "aborted" ]; then
               echo "### 🔁 CANARY ABORTED — rolled back automatically"
               echo ""
-              echo "The new build went to 10% of visitors, the guardian journeys did not pass on it, and"
+              echo "The new build went to 10% of visitors, a guard or rollout command failed, and"
               echo "the release was aborted by scripts/canary-gate.sh: all traffic is back on the previous build. The baseline"
               echo "did not advance. Read the guardian lines in the log, fix, and deploy again."
 

@@ -276,8 +276,18 @@ export const AUTH_INVITATION_SELECTOR = '[data-testid="auth-popup"],[data-testid
 const DISMISSAL_HOLD_MS = 1500;   // > the ~250-750 ms modal→card re-mount measured above
 
 /** 'dismissed' (a zero that held) | 'reappeared' (closed, then another presentation took its
- *  place — the documented modal→card hand-off) | 'still-open' (nothing closed at all). */
-async function invitationSettled(page, budgetMs) {
+ *  place — the documented modal→card hand-off) | 'still-open' (nothing closed at all).
+ *  `closed` is the selector of the ONE presentation that was just dismissed.
+ *
+ *  THE HAND-OFF NO LONGER HAS A GAP (canary aborts 06:26 + 07:45 UTC, 2026-10-24). Sampled every
+ *  ~40 ms after the ground press, desktop 1440, 6/6 concurrent fresh contexts: the modal goes and the
+ *  card is already mounted — `auth-popup → signin-card`, zero DOM samples with neither. The only
+ *  «zero» left is the card's own first frame at opacity 0 (SignInCard materialize), a few ms wide,
+ *  which a 250 ms poll catches by luck. When it missed, a modal that HAD closed was reported
+ *  'still-open' → HarnessError → UNDETERMINED (reproduced locally 1 in 3, 24 s). So the hand-off is
+ *  judged by identity, not by catching a gap: the presentation we closed is gone and the other one is
+ *  up — that IS 'reappeared'. A presentation that never closes is still 'still-open'. */
+async function invitationSettled(page, budgetMs, closed) {
   const deadline = Date.now() + budgetMs;
   for (;;) {
     if ((await countVisible(page, AUTH_INVITATION_SELECTOR)) === 0) {
@@ -288,6 +298,7 @@ async function invitationSettled(page, budgetMs) {
       }
       return 'dismissed';
     }
+    if ((await countVisible(page, closed)) === 0) return 'reappeared';
     if (Date.now() > deadline) return 'still-open';
     await sleep(250);
   }
@@ -317,10 +328,11 @@ async function invitationSettled(page, budgetMs) {
 export async function dismissAuthInvitation(page, budgetMs = 6000) {
   const invitation = await until(() => page.$(AUTH_INVITATION_SELECTOR), budgetMs);
   if (!invitation) return 'absent';
+  const shown = `[data-testid="${await invitation.getAttribute('data-testid')}"]`;
   const close = await invitation.$('[data-testid="auth-popup-close"]');
   if (close) await close.click().catch(() => {});
   else await page.mouse.click(10, 10).catch(() => {});  // the empty ground, well clear of the card
-  return invitationSettled(page, 8000);
+  return invitationSettled(page, 8000, shown);
 }
 
 // ── driving a real search ────────────────────────────────────────────────────────────────────────
