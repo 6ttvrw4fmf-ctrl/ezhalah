@@ -32,6 +32,10 @@ function gateProblems(g: string): string[] {
   const completeAt = g.lastIndexOf('rolling-release complete --dpl'); const runAt = g.lastIndexOf('node e2e/guardian/run.mjs');
   if (completeAt < 0 || runAt < 0 || completeAt < runAt) bad.push('`complete` is not after the guardian runs');
   if (!/rolling-release abort --dpl "\$DPL" --non-interactive/.test(g)) bad.push('abort does not target the deployment with supported CLI options');
+  // Measured 2026-10-24 04:41 UTC (deploy of #8400): vercel CLI 54.18 rejects `--yes` on rolling-release
+  // complete AND abort («unknown or unexpected option: --yes»), so a passing canary could neither promote
+  // nor roll back and the release sat at 10% until a person completed it by hand.
+  if (/rolling-release (complete|abort)[^\n]*--yes/.test(g)) bad.push('`--yes` on rolling-release complete/abort: the CLI rejects it and the release is stranded at 10%');
   if (!g.includes('CANARY ABORTED — traffic restored to the previous deployment')) bad.push('the ABORTED phrase changed (the workflow Report step greps it)');
   if (!g.includes('CANARY PASSED — promoted to 100%')) bad.push('the PASSED phrase changed (the workflow Report step greps it)');
   if (!/if \[ -z "\$DPL" \]; then[\s\S]*?exit 1/.test(g)) bad.push('a missing deployment URL does not fail');
@@ -76,6 +80,7 @@ check('canary-gate.sh aborts on failure or silence, completes only after the run
 check('safe-deploy.sh: smoke + drift → gate → baseline, alias reads pinned to the canary', deployProblems(deploy));
 check('guardian harness opens every page on the canary when asked', harnessProblems(harness));
 check('deploy workflow installs the browser and hands the gate its switch', wfProblems(wf));
+mustCatch('the 2026-10-24 stranded release (--yes on complete)', gateProblems(gate.replace('rolling-release complete --dpl "$DPL"', 'rolling-release complete --dpl "$DPL" --yes')));
 mustCatch('a gate that completes on a silent run', gateProblems(gate.replace('if [ "$CANARY_N" -lt 8 ] || [ "$STABLE_N" -lt 8 ]; then', 'if false; then')));
 mustCatch('a gate that ignores a regression', gateProblems(gate.replace('if [ -n "$REGRESSIONS" ]; then', 'if false; then')));
 mustCatch('a gate that only looks at the canary (absolute, not relative)', gateProblems(gate.replace("CANARY_QUERY='vcrrForceStable=true'", "CANARY_QUERY=''")));

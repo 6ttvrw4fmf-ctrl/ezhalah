@@ -152,7 +152,7 @@ production deploy. Use it as the rollback target if a future deploy needs to be 
 | Known gaps (unrelated, not a regression) | `log-click` edge function still not deployed (client-side click tracking silently no-ops — this deploy's `clicks.ts` is the OLDER pre-existing version, since click/session work was deliberately excluded from PR #42's scope); custom domain `ezhalah.com` does not point to this project — neither affects the UI baseline |
 | Main has since moved further | `origin/main` is at `fb6107b` (this same PR's baseline-table doc update, #46) — no code change ahead of what's live as of this entry. |
 
-### 2026-10-24 — Model label remains steady during replies (current verified deployment)
+### 2026-10-24 — Model label remains steady during replies (verified deployment)
 
 | Field | Value |
 |---|---|
