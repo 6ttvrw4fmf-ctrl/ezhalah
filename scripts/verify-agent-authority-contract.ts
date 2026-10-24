@@ -34,6 +34,10 @@ const lc = contract.toLowerCase();
 // **bold** on exactly the phrases worth pinning, which would otherwise break a naive literal match
 // and make this guard fail for a formatting reason rather than a substantive one.
 const plain = contract.replace(/[*_`]/g, '');
+// Prose in this file is hard-wrapped at ~100 cols, so any pinned phrase long enough to matter will
+// straddle a newline. Collapse whitespace for those — otherwise a guard silently stops guarding the
+// moment someone reflows a paragraph, which is the worst failure mode a guard can have.
+const flat = plain.replace(/\s+/g, ' ');
 
 // ── 1. AGENTS.md must still route agents to the contract. ────────────────────────────────────
 // AGENTS.md is loaded into every session and declared as overriding; the contract only has force
@@ -80,6 +84,23 @@ check(/evidence before the write/i.test(plain),
 check(/fidelity/i.test(plain),
   'contract preserves the source-fidelity rule',
   'contract must preserve source fidelity (never "correct" a source-published value)');
+
+// ── 4b. RED #5 keeps its core even though count defects were carved out of it. ───────────────
+// Checks 2 pins that the nine RED categories still EXIST by name. It cannot see scope erosion
+// INSIDE one — a carve-out that hollows a category out passes every check above. That is not
+// hypothetical: the 2026-08-22 count-correctness ruling did exactly that to RED #5 (correctly, and
+// by owner decision), and this guard did not notice. So pin the boundary the carve-out must not
+// cross: fixing a surface so an EXISTING rule holds is GREEN, but *changing the rule itself* stays
+// the owner's. Without this, a later agent can widen "count fixes are GREEN" into "filter semantics
+// are GREEN" one sentence at a time, each step passing CI.
+check(/redefining what a filter means/i.test(flat),
+  'RED #5 still reserves redefining what a filter means',
+  'contract must keep "redefining what a filter means" RED — the count-defect carve-out may not ' +
+    'grow into a licence to change filter semantics');
+check(/implementing an existing rule correctly is never a new product decision/i.test(flat),
+  'count-defect carve-out states its own basis (existing rule, not a new one)',
+  'the count-defect carve-out must state that it only covers implementing an EXISTING rule — ' +
+    'otherwise it reads as blanket authority over counts');
 
 // ── 5. Self-amendment is an owner decision. ──────────────────────────────────────────────────
 check(/owner decision and requires owner approval/i.test(plain),
