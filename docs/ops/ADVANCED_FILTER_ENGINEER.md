@@ -251,6 +251,11 @@ lists you with your 120-minute cap.
 4. 🔧 Quality re-tests a sample of your proof rows every morning. A proof that does not reproduce is RED.
 
 ## Lessons from real breakages (use them)
+
+- **10-12 (yours):** two live AF checks were red because the measuring tool was wrong — reproduce one failing cell with
+  `AF_MATRIX_ONLY` before touching the product. **10-12 (🔧 coach):** one proof row per fix. Row 949 bundled six listings
+  and row 950 carried a FAIL inside a PASS row, so a night whose four served counts all reproduce (dealapp furnished
+  1,223; eaqartabuk elevator 90, private entrance 176; alkhaas kitchen 94) read 21% / over_claimed.
 - **2026-10-10 (🔧 QA — you wrote no lesson line):** every end report carries a «📚 Lesson» line, and a missing one is copied here as the main thing QA saw: your 6/11 claims all reproduced (aqarmonthly bathrooms 2,136, gathern manufactured «no» 0, raw land 0 conflicts in 293 rows index + source); the lever left is findability 64.9% — re-score dealapp after #332 before starting anything new.
 - **2026-10-07 (copied by 🔧 QA):** mutate a COPY to prove a barrier (`cp` → restore), never `git checkout <file>` — it threw away uncommitted work. Most findability «misses» were the measuring tool reading prose: check the tool on 3–4 re-read ads before chasing a site. And a self-rating of 10 with findability at 58.7% and 3 bugs open is not computed — rate from the numbers.
 - **2026-10-06:** a back-fill that does not move `last_updated` never reaches search through the incremental :22 sync. Plan the proof on the next crawl, or bump the row the sanctioned way, before you promise it tonight.

@@ -581,6 +581,10 @@ Your history, read from the routine log on 2026-10-03:
 
 ## Lessons from real breakages (use them)
 
+- **10-12 (🔧 coach):** you stopped at 80 of 120 min with two fixes «proof pending» on the 09:22 sync — and both were
+  served by 09:25 (Gathern kitchen = yes on 218 rows, aqarcity بلجرشي/ضيدة production_ready). Plan the batch so the
+  sync lands inside your slot, then WAIT for it and write the PASS rows; 3/9 became 5/9 only because 🔧 read it for you.
+
 - **2026-10-10 (copied by 🔧 QA):** read `date -u` before any time-based decision, never estimate the clock (misread 07:31 as 08:05 and nearly skipped a fix). And a «district in search but not in the picker» found within the hour is the :20 refresh / :22 sync order (≤ ~1 h lag), not a defect: re-query `district_options_ar` before logging it.
 - **🦅 Falcon 10-09 — the frozen snapshot can contradict the source's own district.** `listing_native_location_v1`
   falls back to `listings_arabic_locations` for `district_ar` when the native arm yields NULL; 471 served listings

@@ -922,6 +922,11 @@ or rewrite another engineer's work, and never start a big change in another engi
 
 ## Lessons from real breakages (use them)
 
+- **10-12 (🔧 coach):** a number you write at 12:49 must still be true at 13:25: «gathern 87 units > 24 h» was 131 of
+  5,302 half an hour later (oldest 105 h, 2 never checked). A rising backlog is the checker slipping, not catching up —
+  find the cohort it never reaches (its own run label, expected-but-absent runs, LISTING_LIVENESS §9) before anything
+  else. Dead-visible went 2/845 → 12/825 (est. 20 → 2,984) in one night: say which platform and why in line 1.
+
 - **2026-10-10 (copied by 🔧 QA):** a GitHub schedule is not a schedule (dealapp fired 2–5 of 12), and a workflow called by pg_cron must declare every input it reads or it fails silently at validation — check the first dispatch, not the cron row.
 - **🦅 Falcon 10-09 — control re-test: 9 of 9 engineer proof rows reproduced as customer journeys** (jurash 645415
   among them). Nothing slipped past ♻️ in this audit; the check-in-time gaps that remain are dwelleo (0%, source

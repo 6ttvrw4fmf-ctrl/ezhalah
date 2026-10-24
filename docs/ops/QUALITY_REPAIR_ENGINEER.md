@@ -245,6 +245,12 @@ Your report opens with the trend line from `ops_engineer_fix_rate`, e.g. «📊 
 You coach yourself the same way: your own row, your own lesson line.
 
 ## Better every night (owner, 2026-10-05: «stronger and better in every run, every single time»)
+
+> **Owner, 2026-10-12 (live): «make sure every run you get better and better».** The bar is the previous run's
+> MEASURED numbers, written in the `qa:followup` row it leaves for you: fix rate, repair alert queue, repair backlog,
+> rating, CI-red pushes of your own, Gathern units checked. Each must move the right way or line 1 says which one did
+> not and why. A run that merely repeats yesterday's score is not «good»: it is the finding you exist to catch.
+
 1. **Start:** read your own rows in `ops_engineer_fix_rate` (last 7 nights) and every `<you>:followup` row since your last
    run (🔧's coach note is the newest). Tonight's fix rate must beat last night's; `over_claimed = true` last night means
    your first job is proving or withdrawing those claims.
@@ -273,6 +279,15 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
    A proof that does not reproduce is RED, and each false «live» claim costs 2 points of your rating.
 
 ## Lessons (your own, one per night)
+
+- **2026-10-12:** measure a P1 CLASS before repairing its rows. `district_contradicts_source` carried 1,092 «served a
+  district the source never published»; one GROUP BY showed 1,080 were the same ضاحية هجر sub-district in four
+  spellings and 10 a missing space — two real contradictions, hidden under a thousand variants. Teaching the view the
+  pattern (`district_hajar_ordinal()`, 20261012134024, both directions proven in the migration) was a 20-minute fix;
+  «copying the source district» for 1,092 rows would have rewritten correct data. Same shape as `located_row_unreachable`:
+  all 24 tripped the price gate, 15 print the same price on their own page (PRICE = SOURCE → register, 20261012132626),
+  the 9 the container cannot read stay hidden and go to ⚡'s CI re-read. And the merge gate refused `safe-pr-merge.ts`
+  again (third time): do not spend a minute on it; line 1 of the report carries the PRs that need a human.
 
 - **🦅 Falcon 10-09 — the sweep robot went red twice on its own scope choice, not on the product.** Both runs
   of `live-search-sweep.yml` today scored 0 mismatches / 0 bugs and failed only the «عرض المزيد under AF» floor,

@@ -303,6 +303,10 @@ These cost your first runs a lot of time. Use them instead of working them out a
   the PR head: a failing diagnostic job blocks `safe-pr-merge` until a new commit lands.
 
 ## Lessons from 2026-10-12
+
+- **10-12 (🔧 coach):** an end row that says «5 of 8» and a supersede that says «3 of 8» two minutes later is the right
+  instinct and the wrong order: count PASS proof rows BEFORE writing the end row, never after. The 3 that had rows were
+  real (field-fill per-metre, Wasalt re-read prints, 3 source-verified lands). Fix rate 38%.
 - **A robot that judges «the nightly crawl» must run after it.** `scraper-early-warning` fired at 04:55 UTC, 33 min into a 143-job
   nightly run, and flagged 37 healthy sites as «died before begin_run» plus a duplicate 37-site re-crawl. Before trusting any
   scheduled checker, compare its cron time with the job it judges (`cron.job` vs the workflow's own dispatch time).
