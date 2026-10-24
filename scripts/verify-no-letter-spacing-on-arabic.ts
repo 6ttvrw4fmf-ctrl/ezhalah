@@ -62,7 +62,7 @@ const mut = (f: string, from: string, to: string) => {
   return { ...files, [f]: files[f].replace(from, to) };
 };
 mustCatch('the 2026-10-24 bug back: tracking on the Arabic hero headline',
-  trackingProblems(mut(HOME, "heroTitle: { fontSize: 24, fontWeight: '700', color: colors.primary, textAlign: 'center', lineHeight: 28 },", "heroTitle: { fontSize: 24, fontWeight: '700', color: colors.primary, letterSpacing: -0.6, textAlign: 'center', lineHeight: 28 },")).length > 0);
+  trackingProblems(mut(HOME, "heroTitle: { fontSize: 24, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 28 },", "heroTitle: { fontSize: 24, fontWeight: '700', color: colors.ink, letterSpacing: -0.6, textAlign: 'center', lineHeight: 28 },")).length > 0);
 mustCatch('tracking on Arabic listing titles', trackingProblems(mut(CARD, "title: { fontSize: 15, fontWeight: '700', color: colors.ink, flexShrink: 1 },", "title: { fontSize: 15, fontWeight: '700', color: colors.ink, letterSpacing: -0.3, flexShrink: 1 },")).length > 0);
 mustCatch('the sidebar\'s Arabic group titles tracked again', trackingProblems(mut(SIDE, "textTransform: 'uppercase' },", "textTransform: 'uppercase', letterSpacing: 0.5 },")).length > 0);
 mustCatch('the Arabic field labels tracked again', trackingProblems(mut(UI, "color: colors.primary, marginBottom: 8,", "color: colors.primary, letterSpacing: 0.55, marginBottom: 8,")).length > 0);

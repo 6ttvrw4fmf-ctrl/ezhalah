@@ -37,6 +37,6 @@ const s = StyleSheet.create({
   card: { width: '100%', maxWidth: 380, backgroundColor: colors.surface, borderRadius: radius.card, padding: 22, gap: 10 },
   title: { fontSize: 18, fontWeight: '700', color: colors.ink },
   body: { fontSize: 15, lineHeight: 22, color: colors.muted },
-  button: { marginTop: 6, alignSelf: 'stretch', backgroundColor: colors.primary, borderRadius: radius.field, paddingVertical: 12, alignItems: 'center' },
+  button: { marginTop: 6, alignSelf: 'stretch', backgroundColor: colors.selFill, borderRadius: radius.field, paddingVertical: 12, alignItems: 'center' },
   buttonText: { color: colors.onFill, fontSize: 15, fontWeight: '700' },
 });

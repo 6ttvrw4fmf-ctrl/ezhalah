@@ -8,6 +8,8 @@ import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
+import CloudWisp from '@/components/CloudWisp';
+import { useReducedMotion } from '@/lib/useReducedMotion';
 import { HERO_TAGLINE_KEYS, nextHeroTaglineIndex } from '@/data/heroTaglineRotation';
 import { OptionBox, FieldLabel, Tappable, Reveal, DropdownReveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -303,6 +305,7 @@ export default function Home() {
     () => reconcileCommittedAf(storeQuery, AF_ALL_QUESTIONS),
     [storeQuery],
   );
+  const reducedSceneMotion = useReducedMotion();
   const docked = useDocked(); // website: sidebar is a permanent column, so hide the menu button
   // CITY-ONLY FIELD (owner spec 2026-07-17): citySuggestions holds either the Top-6-by-listings
   // (focus, empty text) or the Arabic-matched typed results — never a mix, and never a
@@ -1150,7 +1153,7 @@ export default function Home() {
     runAfterAnimation(
       (onFinished) => RNAnimated.timing(heroAnim, {
         toValue: 1,
-        duration: 300,
+        duration: reducedSceneMotion ? 0 : 300,
         easing: RNEasing.out(RNEasing.cubic),
         useNativeDriver: true,
       }).start(onFinished),
@@ -1357,20 +1360,13 @@ export default function Home() {
   };
   const heroOpacity = heroAnim.interpolate({
     inputRange: [0, 1],
-    // idle → searching. Web idles a bit darker; both lighten to the same soft level on Search.
-    outputRange: [Platform.OS === 'web' ? 0.92 : 0.82, 0.3],
+    // Idle → search: the dunes fade away while the sky remains continuous.
+    outputRange: [1, 0],
   });
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      {/* Hand-drawn Saudi landmarks sketch — soft full-bleed backdrop. On phones it shows in full
-          ('contain'); on wide web it fills ('cover'). It dims when idle and lightens while searching. */}
-      <HeroBackground
-        imageOpacity={heroOpacity}
-        resizeMode={Platform.OS === 'web' ? 'cover' : 'contain'}
-        fadeStart={0.8}
-        fadeEnd={1}
-      />
+      <HeroBackground landscape imageOpacity={heroOpacity} />
 
       <ScrollView
         ref={scrollRef}
@@ -1452,6 +1448,8 @@ export default function Home() {
           {/* Hero — title then subtitle rise in, staggered (user request). */}
           <HomeWebsiteStrip />
           <View style={s.hero}>
+            <CloudWisp variant={1} width={100} height={34} opacity={0.38} style={{ left: -40, top: 12 }} />
+            <CloudWisp variant={2} width={90} height={28} opacity={0.32} style={{ right: -35, bottom: 18 }} />
             <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
               <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
             </Pressable>
@@ -2394,7 +2392,7 @@ const s = StyleSheet.create({
   sharedEagle: { width: 36, height: 36, marginBottom: 10 },
   sharedTitle: { fontSize: 16, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 24 },
   sharedButton: {
-    marginTop: 20, alignSelf: 'stretch', backgroundColor: colors.primary, borderRadius: 14,
+    marginTop: 20, alignSelf: 'stretch', backgroundColor: colors.selFill, borderRadius: 14,
     paddingVertical: 14, alignItems: 'center',
   },
   sharedButtonText: { color: colors.onFill, fontSize: 16, fontWeight: '700' },
@@ -2408,7 +2406,7 @@ const s = StyleSheet.create({
   top: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 4 },
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   // Note #4 — mobile brand text next to the hamburger.
-  topBrand: { fontSize: 18, fontWeight: '800', color: colors.dark },
+  topBrand: { fontSize: 18, fontWeight: '800', color: colors.ink },
   // AI Agent badge + Share icon, grouped and pushed to the far-right edge (marginStart:auto) so they
   // sit together in the top-right corner in BOTH languages. (user request.)
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginStart: 'auto' },
@@ -2455,8 +2453,8 @@ const s = StyleSheet.create({
   // NO letter-spacing on Arabic: it breaks joining and ligatures («الله» lost its ligature in the welcome
   // headline, owner 2026-10-24). Latin tracking lives in the English-only layer E. Guard:
   // scripts/verify-no-letter-spacing-on-arabic.ts
-  heroTitle: { fontSize: 24, fontWeight: '700', color: colors.primary, textAlign: 'center', lineHeight: 28 },
-  heroSub: { fontSize: 12, fontWeight: '600', color: colors.dark, textAlign: 'center', marginTop: 4, lineHeight: 17 },
+  heroTitle: { fontSize: 24, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 28 },
+  heroSub: { fontSize: 12, fontWeight: '600', color: colors.ink, textAlign: 'center', marginTop: 4, lineHeight: 17 },
   heroTagline: { fontSize: 12.5, fontWeight: '700', color: colors.primary, textAlign: 'center', marginTop: 8, fontStyle: 'italic' },
   // Small inline hint under the Rent Monthly/Yearly toggle — explains the period the user picked.
   rentHint: { fontSize: 11.5, color: colors.muted, marginTop: 6, paddingHorizontal: 4, lineHeight: 16 },
@@ -2524,7 +2522,7 @@ const s = StyleSheet.create({
     borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10,
   },
   // flexShrink so the NAME truncates at narrow widths — the fixed 14px art and the ✕ never overflow.
-  districtChipText: { fontSize: 12.5, fontWeight: '700', color: colors.dark, flexShrink: 1 },
+  districtChipText: { fontSize: 12.5, fontWeight: '700', color: colors.ink, flexShrink: 1 },
   districtChipIcon: { width: 14, height: 14, resizeMode: 'contain' },
   suggIconEmpty: { opacity: 0.5 },
   suggCityEmpty: { color: colors.muted, fontWeight: '500' },

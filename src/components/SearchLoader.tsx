@@ -20,6 +20,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { PlatformLogo } from './platform-logo';
+import CloudWisp from './CloudWisp';
+import { cloudVariant } from '@/theme/skyScene';
+import { useThemePalette } from '@/lib/appearance';
 import PlatformRosterPager from './PlatformRosterPager';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { PLATFORM_LOGO_BREAKPOINT } from '@/lib/responsive';
@@ -36,7 +39,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
-import { useResolvedTheme } from '@/lib/appearance';
 import { useI18n, tWord } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import {
@@ -160,8 +162,8 @@ function PlatformPill({
   // values — colors.* resolves to var(--ez-*) on web, which it cannot parse). Same pattern the
   // pre-existing glow literals below already used; verify-theme-contract.ts fails the build on a
   // colors.* token reaching this call.
-  const darkTheme = useResolvedTheme() === 'dark';
-  const nameBase: [string, string] = darkTheme ? ['#c9cbc9', '#2b6f4c'] : ['#34403a', '#1d4a37'];
+  const pal = useThemePalette();
+  const nameBase: [string, string] = [pal.body, pal.primary];
   useEffect(() => {
     if (reduced) { h.value = 0; return; }
     // The wave reaches pill `index` at waveDelayMs(index, step) — pills share a step in groups of
@@ -193,8 +195,8 @@ function PlatformPill({
       // Soft green glow — SHADOW ONLY, no fill/border, so the highlight reads as ambient light under
       // the logo+name, never a filled box. Same rgba/blur curve ui.tsx's own selection glow uses.
       ...(IS_WEB
-        ? ({ boxShadow: `0px ${4 * g}px ${14 * g}px rgba(20,80,45,${0.16 * g})` } as any)
-        : { shadowColor: '#14502d', shadowOpacity: 0.16 * g, shadowRadius: 14 * g, shadowOffset: { width: 0, height: 4 * g }, elevation: 4 * g }),
+        ? ({ boxShadow: `0px ${4 * g}px ${14 * g}px rgba(73,57,83,${0.16 * g})` } as any)
+        : { shadowColor: pal.primary, shadowOpacity: 0.16 * g, shadowRadius: 14 * g, shadowOffset: { width: 0, height: 4 * g }, elevation: 4 * g }),
     };
   });
   const nameGlow = useAnimatedStyle(() => ({
@@ -203,7 +205,10 @@ function PlatformPill({
   return (
     <Appear delay={index * (reduced ? 25 : PILL_STAGGER)} reduced={reduced}>
       <Animated.View style={[s.pill, pillOverride, rowGlow]}>
-        <PlatformLogo source={item.logo} />
+        <View style={{ position: 'relative' }}>
+          <CloudWisp variant={cloudVariant(name)} width={72} height={22} opacity={0.65} style={{ bottom: -3, left: cloudVariant(name) % 2 ? -12 : 36 }} />
+          <PlatformLogo source={item.logo} />
+        </View>
         <Animated.Text
           style={[s.pillName, nameOverride, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: 'center' }, nameGlow]}
         >
