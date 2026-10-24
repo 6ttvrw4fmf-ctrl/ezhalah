@@ -65,6 +65,55 @@ the §G.10 block — never a deletion, never a clock start, and never a claim th
 
 ## §1 — WHAT THIS ROUTINE OWNS, AND WHAT IT DOES NOT
 
+### §1.0 — EVERY PLATFORM, NOT THE BIG ONES (owner rule, 2026-09-19, permanent)
+
+> **Owner, 2026-09-19: "your job must be applied to all the websites we have."**
+
+This routine's guarantees are **fleet-wide**. A listing on the 51st platform earns exactly the same
+promise as one on aqar: if its source says it is gone, the user stops seeing it; and it is never
+destroyed on a signal that only means *we could not tell*. There is no tier of platform where
+§0 applies less, and "it is a small platform" is never a reason a dead listing may stay on screen or
+a live one may be put on the deletion clock.
+
+**Measured against that rule on the day it was given, and it is NOT yet met.** Read
+`ops_platform_liveness_coverage` for the current numbers; these were 2026-09-19:
+
+| strategy | platforms | active listings | ever proven dead by a DIRECT check |
+|---|---|---|---|
+| `DIRECT_REVISIT` | 3 — aqar, wasalt, gathern | 183,400 | 94,259 |
+| `CANDIDATE_PLUS_DIRECT` | 1 — dealapp | 16,802 | 907 |
+| **`CRAWL_PRESENCE_ONLY`** | **47** | **25,921** | **0** |
+
+Two separate things are unevenly covered, and conflating them hides the gap:
+
+1. **WATCHING is already fleet-wide.** The detectors in §2.6 and §4 are platform-agnostic and key
+   off `source_table`, so they fire on any platform — on 2026-09-19 they raised on rakez, satel,
+   raghdan, wasalt and aqaratikom without anyone registering those platforms anywhere.
+2. **PROVING a listing dead is not.** 47 of 51 platforms are `CRAWL_PRESENCE_ONLY`: the only signal
+   we have is *absence from our own crawl*, which `LISTING_LIVENESS.md` rules a candidate signal and
+   never a verdict. Not one of their 25,921 active listings has ever been proven dead by fetching
+   its own URL — and **1,003 of them are under strike right now**, accumulating toward deactivation
+   on exactly the evidence §0 forbids as a death verdict.
+
+Even inside the four covered platforms the coverage is lopsided and the reason is egress, not
+design: aqar is 92,604/98,174, but wasalt is 242/55,498 and gathern 1,413/29,728 because both
+null-route or 404 our transport (re-confirmed by hand 2026-09-19: wasalt.sa answered HTTP 403 and
+rakez.sa was refused at the gateway).
+
+**What this rule therefore requires, and what it does not.** It does not authorise deleting or
+deactivating anything on the 47 — the opposite: while a platform has no death oracle, its listings
+are UNKNOWN and §0's protection applies at full strength, which is why `prune_unseen()`'s
+absence-only deactivation on those platforms is a defect (`ops_incident` #84) and not a feature. The
+work the rule demands is **more verification, never more deletion** (`LISTING_LIVENESS.md` §7):
+every platform earns a real death oracle, control-validated per §4.2's three lessons, and until it
+has one this routine reports it as UNCOVERED rather than clean. A platform activated without one is
+activated with this guarantee missing, and §4.1's shrink-only ledger
+(`scrapers/absence-only-prune.txt`) is the ratchet that must keep falling.
+
+**A coverage number that excludes the long tail does not answer this rule.** Any report of lifecycle
+health states the count of platforms with no death oracle, not only the percentage of listings
+covered — 88% of listings covered still leaves 47 of 51 websites unable to tell dead from unreachable.
+
 ### §1.1 The object
 
 **What happens to a listing AFTER its source confirms it is gone.** The owner's rule, in his words:
