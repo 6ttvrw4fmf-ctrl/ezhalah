@@ -9,9 +9,9 @@ export type AfCourtesyOpener = { opener: string; emoji: string; ask: string };
 export const AF_COURTESY_OPENERS: AfCourtesyOpener[] = [
   { opener: 'لاهنت', emoji: '🤍', ask: 'أبغى' },
   { opener: 'يعطيك العافية', emoji: '🌿', ask: 'أدوّر على' },
-  { opener: 'الله يعافيك', emoji: '🙏', ask: 'تأكد لي من' },
+  { opener: 'مشكور', emoji: '🙏', ask: 'تأكد لي من' },
   { opener: 'لو سمحت', emoji: '😊', ask: 'ابحث لي عن' },
-  { opener: 'الله يسعدك', emoji: '✨', ask: 'يهمني' },
+  { opener: 'ما قصرت', emoji: '✨', ask: 'يهمني' },
   { opener: 'ممكن', emoji: '🙂', ask: 'تشوف لي' },
   { opener: 'يا هلا', emoji: '👋', ask: 'أبي أشوف' },
   { opener: 'يا ليت', emoji: '🌟', ask: 'تدوّر لي على' },
