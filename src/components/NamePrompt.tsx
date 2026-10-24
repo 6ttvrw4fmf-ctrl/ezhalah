@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useApp, type AuthUser } from '@/store';
 import { useI18n, translate } from '@/i18n';
@@ -7,9 +7,8 @@ import { useTheme } from '@/theme/theme';
 import { isBackendLive, markNamePromptSeen } from '@/lib/auth';
 import { useSaveName } from '@/lib/useSaveName';
 import { otherSpelling, scriptOf } from '@/lib/nameSync';
-import { takeJustSignedIn } from '@/lib/loginWelcome';
-import { useReducedMotion } from '@/lib/useReducedMotion';
-import { ConfettiOverlay } from '@/components/ConfettiOverlay';
+import { markJustSignedIn } from '@/lib/loginWelcome';
+import { supabase } from '@/lib/supabase';
 
 // «وش نناديك؟» — asked ONCE per account when a sign-in arrives with no name (owner 2026-10-23).
 // Apple sends the name only on the first authorization and Google accounts can lack one; the name is
@@ -18,11 +17,11 @@ import { ConfettiOverlay } from '@/components/ConfettiOverlay';
 // Either way user_metadata.name_prompt_seen is set, so it never returns on any device — «أضف اسمك» in
 // the sidebar stays the permanent way to add it later. Guarded by scripts/verify-apple-name-and-prompt.ts.
 //
-// The owner-approved mockup (mockups/apple-name-flow.png, 2026-10-23): a عربي | English switch above the
-// field picks the field's direction and placeholder (default: the app's language). A save with a name ends
-// in the celebration — the app's own party confetti (ConfettiOverlay) and «هلا {first}، حياك الله» /
-// «وش تدور عليه اليوم؟». It IS this sign-in's welcome: it takes the login-welcome mark (lib/loginWelcome.ts)
-// so the home's sign-in line does not greet a second time. «لاحقاً» has no party.
+// AFTER «حفظ», THE WELCOME A GOOGLE SIGN-IN GETS (owner 2026-10-23: «it should become "Hi Yusuf" … like the
+// Gmail thing»): the home headline swaps to the personal greeting — the same markJustSignedIn() the /auth
+// landing and One Tap call (lib/loginWelcome.ts → useFilterWelcome), same text, animation and timing. A
+// nameless sign-in gets no greeting (useFilterWelcome needs a name), so the welcome waits for the box and
+// fires ONCE, after the saved name is in the stored session the headline reads. «لاحقاً»: no welcome.
 //
 // FINAL design, mockups/name-box-v4.png (owner 2026-10-23): centered box; the circle shows the typed name's
 // first letter live; the switch flips the WHOLE box (language + direction); under the field, the other
@@ -32,13 +31,19 @@ export function shouldAskName(user: AuthUser | null, authChecked: boolean, authO
   return isBackendLive && authChecked && !authOpen && !!user && !user.name.trim() && !user.namePromptSeen;
 }
 
-/** After «حفظ»: the first name to celebrate, or null (nothing typed → no party). Takes the sign-in
- *  welcome mark, so exactly one welcome follows this sign-in. */
-export function celebrationFor(typed: string, takeWelcomeMark: () => unknown): string | null {
-  const first = typed.trim().split(/\s+/)[0] ?? '';
-  if (!first) return null;
-  takeWelcomeMark();
-  return first;
+/** After «حفظ»: fire the sign-in welcome ONCE, the moment the saved name `v` is in the stored session
+ *  (USER_UPDATED is emitted after supabase-js saves it; the headline reads the name from there). No
+ *  update within 20 s (offline, failed write) → no welcome, never a nameless one. */
+export function welcomeOnceSaved(v: string): void {
+  if (!supabase) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const { data } = supabase.auth.onAuthStateChange((event, session) => {
+    if (event !== 'USER_UPDATED' || String(session?.user?.user_metadata?.full_name ?? '') !== v) return;
+    stop();
+    markJustSignedIn();
+  });
+  const stop = () => { if (timer) clearTimeout(timer); data.subscription.unsubscribe(); };
+  timer = setTimeout(stop, 20000);
 }
 
 /** The circle's letter: the typed name's first character, live ('' → the person icon). */
@@ -57,20 +62,18 @@ export function openNamePrompt(): void { for (const o of openers) { try { o(); }
 
 type Lang = 'ar' | 'en';
 const LANGS: { id: Lang; label: string }[] = [{ id: 'en', label: 'English' }, { id: 'ar', label: 'عربي' }];
-const PARTY_MS = 3200;
 const PREVIEW_DEBOUNCE_MS = 400;
 
 export default function NamePrompt() {
   const { user, authChecked, authOpen } = useApp();
   const { t, locale } = useI18n();
   const { resolved, colors: C } = useTheme();
-  const s = useMemo(() => makeStyles(C, resolved === 'dark', locale === 'ar'), [C, resolved, locale]);
+  const s = useMemo(() => makeStyles(C, resolved === 'dark'), [C, resolved, locale]);
   const saveName = useSaveName();
   const [closed, setClosed] = useState(false);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [lang, setLang] = useState<Lang>(locale);
-  const [party, setParty] = useState<{ first: string; key: number } | null>(null);
   const [preview, setPreview] = useState<{ for: string; text: string } | null>(null);
   const [reopened, setReopened] = useState(false);
   const ask = shouldAskName(user, authChecked, authOpen) && !closed;
@@ -108,20 +111,13 @@ export default function NamePrompt() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask]);
 
-  useEffect(() => {
-    if (!party) return;
-    const id = setTimeout(() => setParty(null), PARTY_MS);
-    return () => clearTimeout(id);
-  }, [party]);
-
   const close = () => { setClosed(true); setReopened(false); markNamePromptSeen(); };
   const save = () => {
     const v = name.trim();
     if (!v) return;
     saveName(v);
     close();
-    const first = celebrationFor(v, () => takeJustSignedIn(Date.now()));
-    if (first) setParty({ first, key: Date.now() });
+    welcomeOnceSaved(v);
   };
 
   return (
@@ -171,33 +167,11 @@ export default function NamePrompt() {
           </View>
         </Modal>
       )}
-      {party && <Celebration key={party.key} first={party.first} burstKey={party.key} s={s} />}
     </>
   );
 }
 
-// The welcome after «حفظ»: decoration only — it never takes a tap and leaves on a timer.
-function Celebration({ first, burstKey, s }: { first: string; burstKey: number; s: ReturnType<typeof makeStyles> }) {
-  const { t } = useI18n();
-  const reduced = useReducedMotion();
-  const fade = useRef(new Animated.Value(reduced ? 1 : 0)).current;
-  useEffect(() => {
-    if (reduced) return;
-    Animated.timing(fade, { toValue: 1, duration: 260, useNativeDriver: Platform.OS !== 'web' }).start();
-  }, [fade, reduced]);
-  return (
-    <View pointerEvents="none" style={s.party} testID="name-celebration">
-      <Animated.View style={[s.partyCard, { opacity: fade }]}>
-        <Text style={s.partyEmoji}>🎉</Text>
-        <Text style={s.partyTitle}>{t('Welcome, {name}', { name: first })}</Text>
-        <Text style={s.partySub}>{t('What are you looking for today?')}</Text>
-      </Animated.View>
-      <ConfettiOverlay burstKey={burstKey} />
-    </View>
-  );
-}
-
-const makeStyles = (C: any, dark: boolean, rtl: boolean) => {
+const makeStyles = (C: any, dark: boolean) => {
   const web = Platform.OS === 'web';
   const ptr = web ? { cursor: 'pointer' as any } : {};
   return StyleSheet.create({
@@ -233,10 +207,5 @@ const makeStyles = (C: any, dark: boolean, rtl: boolean) => {
     save: { backgroundColor: C.primary, borderRadius: 14, paddingVertical: 14, alignItems: 'center', ...ptr },
     saveOff: { opacity: 0.45 },
     saveText: { color: '#fff', fontSize: 17, fontWeight: '700' },
-    party: { position: (web ? 'fixed' : 'absolute') as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, alignItems: 'center', justifyContent: 'center', padding: 24 },
-    partyCard: { direction: (rtl ? 'rtl' : 'ltr') as any, alignItems: 'center', backgroundColor: dark ? 'rgba(18,28,22,0.94)' : 'rgba(255,255,255,0.95)', borderRadius: 24, paddingVertical: 26, paddingHorizontal: 28, maxWidth: 360, shadowColor: '#000', shadowOpacity: dark ? 0.5 : 0.18, shadowRadius: 26, shadowOffset: { width: 0, height: 14 }, elevation: 12 },
-    partyEmoji: { fontSize: 46, lineHeight: 56 },
-    partyTitle: { fontSize: 26, lineHeight: 36, fontWeight: '800', color: C.ink, textAlign: 'center', marginTop: 6 },
-    partySub: { fontSize: 16, lineHeight: 22, color: C.muted, textAlign: 'center', marginTop: 6 },
   });
 };

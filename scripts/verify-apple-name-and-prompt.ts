@@ -144,58 +144,66 @@ const modalProblems = (f: Record<string, string>) => {
   check('§3 the field starts EMPTY (never prefilled)', /useState\(''\);/.test(files[PROMPT]) && !/email|user\.sub/.test(files[PROMPT].split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n')));
 }
 
-// ── §6 the mockup's switch and celebration (owner-approved 2026-10-23, mockups/apple-name-flow.png) ──
+// ── §6 after «حفظ»: the SAME welcome a Google sign-in gets, once; the switch (owner 2026-10-23) ───────
 {
-  // §6.1 EXECUTED: the real celebrationFor — a party only for a non-empty name, and it takes the
-  // sign-in welcome mark, so the home's own welcome line never greets a second time.
-  const liftParty = async (src: string) => {
-    const tmp = join(mkdtempSync(join(tmpdir(), 'ezh-np-')), 'NamePrompt.tsx');
+  // §6.1 EXECUTED: the real welcomeOnceSaved, with supabase's auth events and markJustSignedIn stubbed.
+  // It must fire the sign-in welcome exactly once, and only after the SAVED name is in the session.
+  const PRE6 = `const g = globalThis as any;\n` +
+    `const setTimeout = (_f: any, _ms: number) => 0 as any; const clearTimeout = (_t: any) => {};\n` +
+    `const supabase = { auth: { onAuthStateChange: (cb: any) => { g.__subs.push(cb); return { data: { subscription: { unsubscribe: () => { g.__subs = g.__subs.filter((x: any) => x !== cb); } } } }; } } };\n` +
+    `const markJustSignedIn = () => { g.__marks++; };\n`;
+  const liftWelcome = async (src: string) => {
+    const tmp = join(mkdtempSync(join(tmpdir(), 'ezh-w-')), 'NamePrompt.tsx');
     writeFileSync(tmp, src);
-    return (await liftSymbols(tmp, [{ header: 'export function celebrationFor(' }], ['celebrationFor'])) as {
-      celebrationFor: (typed: string, take: () => unknown) => string | null;
-    };
+    return (await liftSymbols(tmp, [{ header: 'export function welcomeOnceSaved(' }], ['welcomeOnceSaved'], PRE6)) as { welcomeOnceSaved: (v: string) => void };
   };
-  const store = new Map<string, string>();
-  (globalThis as any).localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, String(v)); }, removeItem: (k: string) => { store.delete(k); } };
-  const lw = await import('../src/lib/loginWelcome.ts');
-  const welcomesAfter = async (src: string, typed: string) => {
-    store.clear();
-    lw.markJustSignedIn();                                   // the sign-in (OAuth landing / One Tap)
-    const { celebrationFor } = await liftParty(src);
-    const now = Date.now();
-    const party = celebrationFor(typed, () => lw.takeJustSignedIn(now));
-    return { party, homeWouldGreet: lw.hasJustSignedIn(now) };  // useFilterWelcome greets only on a fresh mark
+  const gg = globalThis as any;
+  const emit = (event: string, fullName?: string) => { for (const cb of [...gg.__subs]) cb(event, fullName === undefined ? null : { user: { user_metadata: { full_name: fullName } } }); };
+  const run = async (src: string) => {
+    gg.__subs = []; gg.__marks = 0;
+    const { welcomeOnceSaved } = await liftWelcome(src);
+    welcomeOnceSaved('يوسف النشوان');
+    const afterSave = gg.__marks;                    // nothing yet: the name is not in the session
+    emit('INITIAL_SESSION', 'يوسف النشوان');
+    emit('USER_UPDATED', 'سارة');                    // someone else's / an older write
+    const beforeOwn = gg.__marks;
+    emit('USER_UPDATED', 'يوسف النشوان');            // the saved name has landed
+    const once = gg.__marks;
+    emit('USER_UPDATED', 'يوسف النشوان');            // a later update (the «seen» flag write)
+    return { afterSave, beforeOwn, once, total: gg.__marks, subs: gg.__subs.length };
   };
-  const ok = await welcomesAfter(files[PROMPT], 'يوسف النشوان');
-  check('§6 a save with a name → the party, with the FIRST name', ok.party === 'يوسف', JSON.stringify(ok));
-  check('§6 exactly one welcome per sign-in: the party takes the mark, the home does not greet again', !ok.homeWouldGreet, JSON.stringify(ok));
-  const blank = await welcomesAfter(files[PROMPT], '   ');
-  check('§6 nothing typed → no party, and the mark is left alone', blank.party === null && blank.homeWouldGreet, JSON.stringify(blank));
-  const twice = await welcomesAfter(files[PROMPT].replace('  takeWelcomeMark();\n', ''), 'سارة');
-  mustCatch('a party that leaves the mark (the home would greet right after it — two welcomes)', twice.homeWouldGreet);
-  const empty = await welcomesAfter(files[PROMPT].replace("  if (!first) return null;\n", ''), '');
-  mustCatch('a party for an empty name', empty.party !== null);
+  const r = await run(files[PROMPT]);
+  check('§6 the welcome waits for the saved name (nothing at the tap, nothing on other events)', r.afterSave === 0 && r.beforeOwn === 0, JSON.stringify(r));
+  check('§6 …then fires exactly once, and stops listening', r.once === 1 && r.total === 1 && r.subs === 0, JSON.stringify(r));
+  mustCatch('a welcome that keeps listening (two welcomes)', (await run(files[PROMPT].replace('    stop();\n    markJustSignedIn();', '    markJustSignedIn();'))).total > 1);
+  mustCatch('a welcome before the saved name is in the session (a nameless greeting)', (await run(files[PROMPT].replace(" || String(session?.user?.user_metadata?.full_name ?? '') !== v", ''))).beforeOwn > 0);
+  mustCatch('a welcome on any auth event', (await run(files[PROMPT].replace("event !== 'USER_UPDATED' || ", ''))).beforeOwn > 0);
 
-  // §6.2 the party follows «حفظ» with a name, and only that — never «لاحقاً».
-  const partyProblems = (src: string) => {
+  // §6.2 the SAME function a Google sign-in uses; after «حفظ» only; never «لاحقاً»; no celebration card.
+  const AUTHPAGE = read('src/app/auth.tsx'), ONETAP = read('src/components/GoogleOneTap.tsx'), WELCOME = read('src/lib/useFilterWelcome.ts');
+  const welcomeProblems = (p: string, w: string) => {
     const out: string[] = [];
-    const code = src.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-    if (!/saveName\(v\);\n\s*close\(\);\n\s*const first = celebrationFor\(v, \(\) => takeJustSignedIn\(Date\.now\(\)\)\);\n\s*if \(first\) setParty\(/.test(code)) out.push('the party does not follow a real save');
-    if ((code.match(/setParty\(\{/g) ?? []).length !== 1) out.push('the party is started from somewhere other than the save');
+    const code = p.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+    if (!/import \{ markJustSignedIn \} from '@\/lib\/loginWelcome';/.test(code) || !/markJustSignedIn\(\);/.test(code)) out.push('not the sign-in welcome Google uses (markJustSignedIn)');
+    if (!/markJustSignedIn\(\);/.test(AUTHPAGE) || !/markJustSignedIn\(\)/.test(ONETAP)) out.push('the Google paths no longer use markJustSignedIn');
+    if (!/saveName\(v\);\n\s*close\(\);\n\s*welcomeOnceSaved\(v\);/.test(code)) out.push('the welcome does not follow «حفظ»');
+    if ((code.match(/welcomeOnceSaved\(v\)/g) ?? []).length !== 1) out.push('the welcome is started from somewhere other than «حفظ»');
     const close = /const close = \(\) => \{[^\n]*\};/.exec(code)?.[0] ?? '';
-    if (!close || /setParty|celebrationFor|partyConfetti/.test(close)) out.push('«لاحقاً» (close) can start the party');
-    if (!/testID="name-prompt-later" style=\{s\.later\} onPress=\{close\}/.test(code)) out.push('«لاحقاً» is not plain close');
-    if (!/<ConfettiOverlay burstKey=\{burstKey\} \/>/.test(code) || !/from '@\/components\/ConfettiOverlay'/.test(code)) out.push('the party is not the app\'s own confetti');
-    if (!/t\('Welcome, \{name\}', \{ name: first \}\)/.test(code) || !/t\('What are you looking for today\?'\)/.test(code)) out.push('the welcome words changed');
+    if (!close || /markJustSignedIn|welcomeOnceSaved/.test(close)) out.push('«لاحقاً» (close) can fire the welcome');
+    if (/name-celebration|ConfettiOverlay|partyConfetti\(|Welcome, \{name\}/.test(code)) out.push('a separate celebration card is back');
+    // a nameless sign-in gets NO greeting before the box (the home greets only a named session)
+    if (!/if \(!session\.present \|\| !\(session\.nameAr \|\| session\.nameEn\) \|\| !hasJustSignedIn\(now\)\) return null;/.test(w)) out.push('the home could greet a nameless sign-in before the box');
     return out;
   };
-  const pp = partyProblems(files[PROMPT]);
-  check('§6 the party follows «حفظ» with a name — never «لاحقاً» — with the app\'s confetti', pp.length === 0, pp.join('; '));
-  mustCatch('«لاحقاً» throwing the party', partyProblems(files[PROMPT].replace('const close = () => { setClosed(true); setReopened(false); markNamePromptSeen(); };', "const close = () => { setClosed(true); setReopened(false); markNamePromptSeen(); setParty({ first: '', key: 1 }); };")).length > 0);
-  mustCatch('a party before (or without) the save', partyProblems(files[PROMPT].replace('    saveName(v);\n    close();\n', '    close();\n')).length > 0);
-  mustCatch('a home-made confetti instead of the app\'s', partyProblems(files[PROMPT].replace('<ConfettiOverlay burstKey={burstKey} />', '<MyConfetti />')).length > 0);
+  const wp = welcomeProblems(files[PROMPT], WELCOME);
+  check('§6 after «حفظ»: the Google sign-in welcome (markJustSignedIn), once; never «لاحقاً»; no celebration card', wp.length === 0, wp.join('; '));
+  mustCatch('the celebration card coming back', welcomeProblems(files[PROMPT].replace('<View style={s.prev}>', '<View testID="name-celebration" />\n              <View style={s.prev}>'), WELCOME).length > 0);
+  mustCatch('a save with no welcome', welcomeProblems(files[PROMPT].replace('    welcomeOnceSaved(v);\n', ''), WELCOME).length > 0);
+  mustCatch('«لاحقاً» firing the welcome', welcomeProblems(files[PROMPT].replace('const close = () => { setClosed(true); setReopened(false); markNamePromptSeen(); };', "const close = () => { setClosed(true); setReopened(false); markNamePromptSeen(); welcomeOnceSaved(''); };"), WELCOME).length > 0);
+  mustCatch('a home-made welcome instead of Google\'s (an event without the mark)', welcomeProblems(files[PROMPT].replace('    markJustSignedIn();\n  });', "    globalThis.dispatchEvent(new Event('ezhalah:signed-in'));\n  });"), WELCOME).length > 0);
+  mustCatch('the home greeting a nameless Apple sign-in (a welcome BEFORE the box)', welcomeProblems(files[PROMPT], WELCOME.replace('!session.present || !(session.nameAr || session.nameEn) || ', '!session.present || ')).length > 0);
   const i18nNow = read('src/i18n.tsx');
-  check('§6 the welcome speaks both languages', /'Welcome, \{name\}': 'هلا \{name\}، حياك الله'/.test(i18nNow) && /'What are you looking for today\?': 'وش تدور عليه اليوم؟'/.test(i18nNow) && /"We'll greet you by name and share a property fact every day": 'نرحّب فيك باسمك، ونعطيك معلومة عقارية كل يوم'/.test(i18nNow)
+  check('§6 the box speaks both languages', /"We'll greet you by name and share a property fact every day": 'نرحّب فيك باسمك، ونعطيك معلومة عقارية كل يوم'/.test(i18nNow)
     && /'In English:': 'بالإنجليزي:'/.test(i18nNow) && /'In Arabic:': 'بالعربي:'/.test(i18nNow));
 
   // §6.3 the switch sets the field's direction and placeholder; it starts on the app's language.
@@ -216,11 +224,6 @@ const modalProblems = (f: Record<string, string>) => {
   mustCatch('the placeholder stuck on the app language', switchProblems(files[PROMPT].replace("translate(lang, 'Type your name')", "t('Type your name')")).length > 0);
   mustCatch('the switch tap doing nothing', switchProblems(files[PROMPT].replace('onPress={() => setLang(l.id)}', 'onPress={() => {}}')).length > 0);
 
-  // §6.4 the app's confetti, fired by its owner, never doubles the card party on /agent.
-  const ov = read('src/components/ConfettiOverlay.tsx');
-  const ownedOk = (o: string) => /if \(owned\) return;\n\s*const l = \(\) => setBurst/.test(o) && /useEffect\(\(\) => \{ if \(burstKey\) setBurst\(burstKey\); \}, \[burstKey\]\);/.test(o);
-  check('§6 an owned confetti stays off the card bus (no double party on /agent)', ownedOk(ov));
-  mustCatch('an owned confetti joining the card bus too', !ownedOk(ov.replace('    if (owned) return;\n', '')));
 }
 
 // ── §7 the FINAL box, mockups/name-box-v4.png (owner 2026-10-23) ─────────────────────────────────────
