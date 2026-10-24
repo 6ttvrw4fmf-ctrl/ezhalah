@@ -570,7 +570,7 @@ export default function AccountMenu({
                               <Text style={s.deviceNote}>{t('Signs out within an hour at most')}</Text>
                             ) : (
                               <Text style={s.deviceActive} numberOfLines={1}>
-                                {lastActiveLabel(s0.refreshed_at, Date.now())}
+                                {lastActiveLabel(s0.refreshed_at, Date.now(), locale === 'en')}
                               </Text>
                             )}
                             {revokeErrSid === s0.session_id ? (
