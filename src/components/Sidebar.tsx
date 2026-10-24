@@ -674,7 +674,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                   accessibilityLabel={t('Search chats')}
                   testID="sidebar-search-btn"
                 >
-                  {(st) => <Ionicons name="search" size={18} color={isOn(st) ? colors.onFill : dark ? '#a9c9b4' : colors.dark} />}
+                  {(st) => <Ionicons name="search" size={18} color={isOn(st) ? colors.onFill : colors.ink} />}
                 </Pressable>
               )}
             </View>
@@ -705,7 +705,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                       {/* Dark appearance lightens only the RESTING glyph; the light-mode contract
                           (rest = dark green, interaction = white) is untouched and still pinned by
                           verify-sidebar-light-green-interaction.ts. */}
-                      <Ionicons name="add" size={18} color={dark && !on ? '#cfe0d5' : on ? colors.onFill : colors.dark} />
+                      <Ionicons name="add" size={18} color={on ? colors.onFill : colors.ink} />
                       <Text style={[s.newChatText, dark && dks.newChatText, on && s.newChatTextOn]}>{t('New Chat')}</Text>
                     </>
                   );
@@ -1004,9 +1004,8 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       // a sibling stacking context later in the DOM otherwise paints over it). Closed → back to
       // z-auto ordering so the root overlays (Support/About/Auth) keep painting above the sidebar.
       <View ref={panelRef} style={[s.dockPanel, dark && dks.dockPanel, acctOpen && ({ zIndex: 30 } as any), { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, LTR_PIN]}>
-        {/* Dark appearance drops the light pencil-sketch backdrop: the deep green paper IS the
-            dark surface (the sketch and its fade-to-light-paper gradient assume light ground). */}
-        {!dark && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
+        {/* Continue the sky behind the wordmark; avoid repeating the page clouds at the column seam. */}
+        <HeroBackground clouds={false} />
         {body}
         {dropAnnounce ? (
           <Text accessibilityLiveRegion="polite" style={s.srOnly}>{dropAnnounce}</Text>
@@ -1026,7 +1025,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
         // @ts-expect-error web-only DOM props on the RNW host node
         dataSet={{ consentKeep: '1' }} />
       <Animated.View ref={panelRef as any} style={[s.panel, dark && dks.panel, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, panelStyle, LTR_PIN]}>
-        {!dark && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
+        <HeroBackground clouds={false} />
         {body}
         {menuOverlay}
         {deleteConfirmOverlay}
@@ -1061,14 +1060,14 @@ const s = StyleSheet.create({
   logo: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   // Bigger brand name (owner 2026-10-04: «make Ezhalah big»). Letter-spacing only on the Latin wordmark —
   // it pulls Arabic letters apart and breaks their joining.
-  word: { fontSize: 22, fontWeight: '800', color: colors.dark },
+  word: { fontSize: 22, fontWeight: '800', color: colors.ink },
   wordLatin: { letterSpacing: 2 },
 
   // Owner 2026-08-24: LIGHT green default (dark-green text) → DARK green with white text only on
   // hover/focus/press. The dark green is the interaction color, never the resting color.
   newChat: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: colors.tint, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 13, marginTop: 12, borderWidth: 1, borderColor: colors.tintLine },
   newChatHover: { backgroundColor: colors.hoverRow, borderColor: colors.hoverRow },
-  newChatText: { fontSize: 14, fontWeight: '600', color: colors.dark },
+  newChatText: { fontSize: 14, fontWeight: '600', color: colors.ink },
   newChatTextOn: { color: colors.onFill },
   // Chat search (owner 2026-08-24). The button mirrors the nav-link language (quiet, discoverable);
   // the input row keeps the exact same footprint so the sidebar never jumps when it morphs.
@@ -1098,7 +1097,7 @@ const s = StyleSheet.create({
   histLabelHot: { color: colors.onFill },
   histRowOpen: { backgroundColor: '#f3f5f3' },
   // The chat the user is currently in — a light green wash so it's obvious which conversation is open.
-  histRowActive: { backgroundColor: '#dcefe1' },
+  histRowActive: { backgroundColor: colors.userBubble },
   histItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 8 },
   histLabel: { flex: 1, fontSize: 13.5, fontWeight: '500', color: colors.ink },
   histLabelMatch: { fontWeight: '800' },
@@ -1140,7 +1139,7 @@ const s = StyleSheet.create({
 
   lang: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: colors.segTrack, borderRadius: radius.pill, padding: 4, gap: 4, marginBottom: 18 },
   langBtn: { paddingVertical: 8, paddingHorizontal: 22, borderRadius: radius.pill },
-  langBtnOn: { backgroundColor: colors.primary },
+  langBtnOn: { backgroundColor: colors.selFill },
   langText: { fontSize: 13.5, fontWeight: '600', color: colors.muted },
   langTextOn: { color: '#fff' },
 
@@ -1149,7 +1148,7 @@ const s = StyleSheet.create({
   userRowHover: { backgroundColor: colors.hoverRow },
   userTextOn: { color: colors.onFill },
   userSubOn: { color: 'rgba(255,255,255,0.78)' },
-  userAv: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  userAv: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   userAvText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   // Name + email both ALIGN LEFT (same left edge) and use writingDirection 'auto' so the Arabic name
   // still reads right-to-left INTERNALLY but its block starts flush against the avatar. Keeps the
@@ -1171,7 +1170,7 @@ const s = StyleSheet.create({
   dcCancel: { width: '100%', paddingVertical: 12, alignItems: 'center', marginTop: 4 },
   dcCancelText: { fontSize: 14, fontWeight: '500', color: colors.muted },
   srOnly: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 },
-  cta: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 13, ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : null) },
+  cta: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.selFill, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 13, ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : null) },
   ctaHover: { backgroundColor: colors.hoverRow },
   ctaTitle: { fontSize: 13, fontWeight: '700', color: '#fff' },
   ctaSub: { fontSize: 10.5, color: 'rgba(255,255,255,0.75)', marginTop: 1 },
@@ -1186,22 +1185,22 @@ const dks = StyleSheet.create({
   dockPanel: { backgroundColor: darkColors.paper, borderRightColor: darkColors.line },
   word: { color: darkColors.ink },
   newChat: { backgroundColor: darkColors.tint, borderColor: darkColors.tintLine },
-  newChatText: { color: '#cfe0d5' },
+  newChatText: { color: darkColors.ink },
   searchRow: { backgroundColor: darkColors.surface, borderColor: darkColors.primary },
-  searchClose: { backgroundColor: '#1d2620' },
+  searchClose: { backgroundColor: darkColors.surface2 },
   searchInput: { color: darkColors.ink },
   searchHint: { color: darkColors.muted },
   empty: { color: darkColors.muted },
   groupTitle: { color: darkColors.muted },
-  histRowActive: { backgroundColor: '#1f3a2c' },
-  histRowOpen: { backgroundColor: '#1d2620' },
+  histRowActive: { backgroundColor: darkColors.userBubble },
+  histRowOpen: { backgroundColor: darkColors.surface2 },
   histLabel: { color: darkColors.ink },
   histInput: { backgroundColor: darkColors.surface, borderColor: darkColors.primary },
   rowMenu: { backgroundColor: darkColors.surface, borderColor: darkColors.fieldLine },
   rowMenuText: { color: darkColors.ink },
   divider: { backgroundColor: darkColors.fieldLine },
   navText: { color: darkColors.ink },
-  userRow: { borderTopColor: '#1d2620' },
+  userRow: { borderTopColor: darkColors.line },
   userName: { color: darkColors.ink },
   userSub: { color: darkColors.muted },
 });
