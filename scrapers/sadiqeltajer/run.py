@@ -71,6 +71,40 @@ def own_section(page_html: str) -> str:
     b = re.sub(r"<(script|style|nav|header|footer).*?</\1>", " ", own, flags=re.S)
     return re.sub(r"\s+", " ", ihtml.unescape(re.sub(r"<[^>]+>", " ", b))).strip()
 
+# The ad's own description box («تفاصيل الإعلان»: `<div class="all-desc">…</div>`), cut before «اعلانات مشابهة»
+# like own_section(), so a neighbour's words never answer for this ad. 12218852 says «البيع شامل الاثاث (المكيفات)»
+# before its «المكونات» row and AC stayed NULL (🔬 backlog 794, CI re-read 39948473496).
+#
+# Read ONLY for a built unit, and never a clause that names a NEIGHBOUR. 10-23's first attempt read the box on
+# every ad and stamped parking on plots: 12218009 «يليه مواقف» (a car park next to the plot), and four more land
+# ads (reverted the same run, migration 20261023123442). A plot has no AC / kitchen / parking of its own, and
+# «يليه / مقابل / بجوار / قريب من …» describes what is AROUND the property, not what it has.
+_ALL_DESC = re.compile(r'class="all-desc"[^>]*>(.*?)</div>', re.S)
+_NOT_A_UNIT = {"Residential Land", "Commercial Land", "Raw Land", "Agricultural Land", "Farm"}
+_NEARBY = re.compile(r"يلي|مقابل|بجوار|بجانب|جنب|قريب|بالقرب|مجاور|يجاور|امام|أمام|خلف|على شارع|علي شارع")
+_CLAUSE = re.compile(r"[\n\r،,.;؛|()\-]+")
+
+
+def ad_description(page_html: str) -> Optional[str]:
+    i = page_html.find(_SIMILAR)
+    m = _ALL_DESC.search(page_html[:i] if i > 0 else page_html)
+    if not m:
+        return None
+    return normalize.html_block_lines(m.group(1)) or None
+
+
+def unit_description_text(page_html: str, property_type: Optional[str]) -> Optional[str]:
+    """The description box's own clauses, one per line, for a built unit; None for land and every clause
+    that names what is near the property."""
+    if not property_type or property_type in _NOT_A_UNIT:
+        return None
+    box = ad_description(page_html)
+    if not box:
+        return None
+    keep = [c.strip() for c in _CLAUSE.split(box) if c.strip() and not _NEARBY.search(c)]
+    return "\n".join(keep) or None
+
+
 # PHOTOS — the ad's own gallery, and ONLY the own gallery. own_section() has already dropped the
 # «اعلانات مشابهة» block, so a similar ad's slides cannot leak in; we still exclude the site's
 # chrome (settings icons, /assets/ logos) by path. The slide markup is
@@ -592,6 +626,8 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
     # no (ADVANCED_FILTER_SOURCE_TRUTH §2). Kitchen was 0 of 1,512 active while 272 lists name one
     # (🔬 AF engineer 2026-10-09; ops_af_score kitchen we_miss 3/3).
     row.update(normalize.prose_amenities_yes(extra["components"]))
+    # …and the description box's own clauses, for a built unit only (backlog 794, see unit_description_text).
+    row.update(normalize.prose_amenities_yes(unit_description_text(page_html, property_type)))
     return row, category, ""
 
 
