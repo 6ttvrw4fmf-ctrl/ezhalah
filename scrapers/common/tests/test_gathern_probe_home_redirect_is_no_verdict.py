@@ -187,3 +187,16 @@ def test_crawl_canary_does_not_count_a_home_landing_as_a_live_control(monkeypatc
     gr.arm_liveness_canaries(["GTH276709", "GTH2", "GTH3"])
     ok, why = gr._canary()
     assert not ok, why
+
+
+def test_proxy_fallback_only_rereads_no_verdict_and_only_takes_a_200(monkeypatch):
+    """2026-10-24: the datacenter egress landed on gathern's home page for 15 served units for 1-3
+    days; the proxy read 11 alive. The fallback may say ALIVE, never DEAD (its 404 is unguarded)."""
+    _no_wait(monkeypatch)
+    live = _Route({UNIT: (200, UNIT, "unit 276709")})
+    gone = _Route({UNIT: (404, UNIT, "الصفحة غير موجودة")})
+    assert gl.fallback_read(0, live, UNIT) == 200
+    assert gl.fallback_read(0, gone, UNIT) == 0, "a proxy 404 is never a strike"
+    assert gl.fallback_read(404, live, UNIT) == 404, "a direct verdict is never second-guessed"
+    assert gl.fallback_read(200, gone, UNIT) == 200
+    assert gl.fallback_read(0, None, UNIT) == 0, "no --proxy-fallback, no proxy read"
