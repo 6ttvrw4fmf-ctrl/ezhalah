@@ -25,6 +25,8 @@ function problems(f: Files): string[] {
   if (!/storyHead, \{ flexDirection: arabic \? 'row-reverse' : 'row' \}/.test(f['src/components/AgentModelSelector.tsx'])) out.push('models sheet ✕ follows the page direction');
   if (!/<View style=\{s\.tabRow\} ref=\{setLtr\}>/.test(f['src/components/AdViewer.tsx'])) out.push('ad viewer phone tab strip mirrors its ✕');
   if (!/testID="ad-slow-hint" style=\{s\.slowPill\} ref=\{setLtr\}/.test(f['src/components/AdViewer.tsx'])) out.push('ad viewer slow-site pill mirrors its ✕');
+  if (/rtl \? \{ paddingLeft: 44 \}/.test(f['src/components/AccountMenu.tsx'])) out.push('account title reserves room on the LEFT — the right-side × covers it in Arabic');
+  if (/hClearLeft/.test(f['src/components/InfoModal.tsx'])) out.push('info title reserves room on the LEFT — the right-side × covers it in Arabic');
   return out;
 }
 
@@ -40,6 +42,8 @@ mutation('a ✕ that flips left in Arabic again', problems({ ...real, 'src/app/i
 mutation('a header row that mirrors the ✕ again', problems({ ...real, 'src/app/agent.tsx': real['src/app/agent.tsx'].replace("[s.platformPickerHeader, locale === 'ar' && { flexDirection: 'row-reverse' }]", 's.platformPickerHeader') }).length === 0);
 
 mutation('the ad viewer tab strip mirroring again', problems({ ...real, 'src/components/AdViewer.tsx': real['src/components/AdViewer.tsx'].replace('<View style={s.tabRow} ref={setLtr}>', '<View style={s.tabRow}>') }).length === 0);
+
+mutation('an Arabic title sliding under the × again', problems({ ...real, 'src/components/AccountMenu.tsx': real['src/components/AccountMenu.tsx'].replace('paddingHorizontal: 8, paddingRight: 44 },', 'paddingHorizontal: 8, ...(rtl ? { paddingLeft: 44 } : { paddingRight: 44 }) },') }).length === 0);
 
 if (failed) { console.error(`\n✗ close ✕ side: ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✓ every ✕ sits top-right, the same as English');

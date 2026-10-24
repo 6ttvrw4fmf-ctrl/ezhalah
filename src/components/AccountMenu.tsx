@@ -444,7 +444,7 @@ export default function AccountMenu({
                 hitSlop={8}
                 style={({ hovered }: any) => [s.centerClose, hovered && s.quietHover]}
               >
-                <Ionicons name="close" size={18} color={C.muted} />
+                <Ionicons name="close" size={18} color={C.ink} />
               </Pressable>
           {view === 'account' && (
             <ScrollView style={{ maxHeight: winH * 0.72 }} showsVerticalScrollIndicator={false}>
@@ -798,9 +798,9 @@ function makeStyles(C: Record<string, string>, dark: boolean, rtl = true) {
     // physical LEFT — so under RTL the physical right is spelled `left:`. Direction-aware so a
     // future LTR locale keeps the × on the same physical corner.
     // × top-RIGHT in both languages, never mirrored (owner 2026-10-24, supersedes 10-23 «Arabic left»).
-    centerClose: { position: 'absolute', top: 12, right: 12, zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+    centerClose: { position: 'absolute', top: 12, right: 12, zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: dark ? C.surface2 : C.tint }, // a soft circle so the × reads clearly, apart from the words (owner 2026-10-24)
     // Room for the × on its side (owner 2026-10-23: the × sat on top of «Manage account»).
-    centerTitle: { fontSize: 19, lineHeight: 26, fontWeight: '800', color: C.ink, textAlign: start as any, writingDirection: 'auto' as any, paddingTop: 4, paddingBottom: 14, paddingHorizontal: 8, ...(rtl ? { paddingLeft: 44 } : { paddingRight: 44 }) },
+    centerTitle: { fontSize: 19, lineHeight: 26, fontWeight: '800', color: C.ink, textAlign: start as any, writingDirection: 'auto' as any, paddingTop: 4, paddingBottom: 14, paddingHorizontal: 8, paddingRight: 44 }, // the × is top-right in both languages (owner 2026-10-24)
     // Identity fields live in ONE inset group (iOS grouped-list idiom, 2026-08-30 refresh): the
     // group surface owns the boundary, an inset hairline separates the rows, and the fields keep
     // their exact structures — the wrapper is the only new element.

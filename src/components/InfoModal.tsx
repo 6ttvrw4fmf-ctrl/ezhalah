@@ -194,7 +194,7 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
               style={({ hovered, pressed }: any) => [s.xBtn, s.xBtnRight, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
             >
               {({ hovered, pressed }: any) => (
-                <Ionicons name="close" size={20} color={hovered || pressed ? colors.ink : colors.muted} />
+                <Ionicons name="close" size={20} color={colors.ink} />
               )}
             </Pressable>
           )}
@@ -220,7 +220,7 @@ function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => stri
       {/* Style `h` keeps its CLOSE_CLEAR physical-right padding so the title can never slide under
           the floating × (verify-info-modal-header-clearance pins that arithmetic). */}
       <View style={s.head}>
-        <Text style={[s.h, !isRTL && s.textLtr, isRTL && s.hClearLeft]}>{t('Support')}</Text>
+        <Text style={[s.h, !isRTL && s.textLtr]}>{t('Support')}</Text>
       </View>
 
       <View style={s.bodyPad}>
@@ -520,7 +520,7 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
       <View style={s.head}>
         <View style={s.legalLockup}>
           <RNImage source={EAGLE} style={s.legalEagle} resizeMode="contain" />
-          <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr, isRTL && s.hClearLeft]}>{t('Terms & Privacy')}</Text>
+          <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr]}>{t('Terms & Privacy')}</Text>
         </View>
       </View>
       <View style={s.bodyPad}>
@@ -603,10 +603,8 @@ const s = StyleSheet.create({
   // Close, pinned to the PHYSICAL top-right (RN `right` is physical — RTL never flips it): a
   // quiet neutral glyph at rest, a soft fill on hover, hitSlop widening the target to ≥ 44.
   xBtn: {
-    // Physical top-right under BOTH directions: RTL (forced app-wide for Arabic) flips `right:` to
-    // the physical left, so the physical right is spelled `left:` there. (owner 2026-08-29)
-    // The side is set per language below (xBtnSide): right in English, LEFT in Arabic (owner 2026-10-23).
-    position: 'absolute', top: CLOSE_INSET, zIndex: 5,
+    // Top-RIGHT in both languages (owner 2026-10-24), on a soft circle so it reads clearly, apart from the words.
+    position: 'absolute', top: CLOSE_INSET, zIndex: 5, backgroundColor: colors.surface2,
     width: CLOSE_SIZE, height: CLOSE_SIZE, borderRadius: CLOSE_SIZE / 2,
     alignItems: 'center', justifyContent: 'center',
     ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
@@ -614,7 +612,6 @@ const s = StyleSheet.create({
   // Measured 2026-10-23: on the web physical sides are NOT mirrored under Arabic, so the × side is chosen by
   // language. Both sides spelled so a merge never leaves the other one set.
   xBtnRight: { right: CLOSE_INSET, left: 'auto' as any },
-  hClearLeft: { paddingRight: 0, paddingLeft: CLOSE_CLEAR },
   xBtnHover: { backgroundColor: colors.surface2 },
   scroll: { paddingTop: 0, paddingBottom: 0 },
   bodyPad: { paddingHorizontal: BODY_PAD, paddingTop: 4, paddingBottom: BODY_PAD },

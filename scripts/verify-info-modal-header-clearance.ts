@@ -140,8 +140,10 @@ check(
 // the title band BELOW the button's top, derived from TOP_CLEAR — never a re-hardcoded literal.
 check(
   // Owner 2026-10-23: EVERY info popup carries the × (reverses 2026-09-03's About-without-×).
-  'every info popup renders the × (About included), and an Arabic title keeps its room on the × side',
-  /const hasClose = true;/.test(src) && /\{hasClose && \(/.test(src) && /isRTL && s\.hClearLeft/.test(src),
+  // Owner 2026-10-24: the × is top-RIGHT in both languages, so every heading keeps its room on the RIGHT (h's own
+  // paddingRight: CLOSE_CLEAR) — no Arabic-only left clearance that would leave the title under the ×.
+  'every info popup renders the × (About included), and every title keeps its room on the right, under the ×',
+  /const hasClose = true;/.test(src) && /\{hasClose && \(/.test(src) && !/hClearLeft/.test(src) && /paddingRight: CLOSE_CLEAR/.test(src),
 );
 check(
   'the title band derives its top padding from TOP_CLEAR (headings start below the ×, no literal)',
