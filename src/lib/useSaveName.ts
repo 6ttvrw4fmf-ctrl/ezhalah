@@ -1,5 +1,5 @@
 import { useApp } from '@/store';
-import { persistDisplayName } from '@/lib/auth';
+import { persistDisplayName, persistNameSpellings } from '@/lib/auth';
 import { buildSyncedName, scriptOf, initialsOf } from '@/lib/nameSync';
 
 // THE ONE WAY a typed name is saved. The pencil rename (AccountMenu), «وش نناديك؟» (NamePrompt) and
@@ -20,7 +20,8 @@ export function useSaveName(): (v: string) => void {
     // updateUser here reverted the name AND the avatar initial to a value the user had already
     // replaced (routine #8, 2026-09-24 — the #319/#599/#648 stale-continuation class). The store's
     // applySyncedName drops a patch whose `name` is no longer the current one.
-    buildSyncedName(v).then((synced) => applySyncedName({ ...synced, initials: initialsOf(v) }));
+    // …and both spellings are stored with the name (persistNameSpellings), so a refresh paints them at once.
+    buildSyncedName(v).then((synced) => { applySyncedName({ ...synced, initials: initialsOf(v) }); persistNameSpellings(synced); });
   };
   return persistName;
 }

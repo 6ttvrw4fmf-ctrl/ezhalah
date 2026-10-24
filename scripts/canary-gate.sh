@@ -36,7 +36,7 @@ abort() {
   echo ""
   echo "❌ CANARY ABORTED — $1"
   echo "   Rolling back: traffic returns to the previous production build."
-  npx vercel rolling-release abort --dpl "$DPL" --yes || echo "   (abort command failed — check the Vercel dashboard NOW: the release may still be at 10%)"
+  npx vercel rolling-release abort --dpl "$DPL" || echo "   (abort command failed — check the Vercel dashboard NOW: the release may still be at 10%)"
   echo "CANARY ABORTED — traffic restored to the previous deployment"
   exit 1
 }
@@ -77,7 +77,7 @@ fi
 
 echo ""
 echo "Canary gate: no regression against the stable build — promoting the release to 100%…"
-if ! npx vercel rolling-release complete --dpl "$DPL" --yes; then
+if ! npx vercel rolling-release complete --dpl "$DPL"; then
   abort "'vercel rolling-release complete' failed"
 fi
 echo "CANARY PASSED — promoted to 100%"

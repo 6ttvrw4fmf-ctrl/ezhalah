@@ -60,6 +60,15 @@ export function pickName(
   return en || (scriptOf(base) === 'en' ? base : '') || base;
 }
 
+/** The name to put INSIDE A SENTENCE in `locale`: pickName's spelling, but never one in the other script —
+ *  no Arabic name in an English line («يوسف, the market…», owner P1 2026-10-24), no Latin in an Arabic one.
+ *  '' while the right spelling isn't known yet: the caller shows its line without a name instead. */
+export function sentenceName(u: { name?: string; nameEn?: string; nameAr?: string } | null | undefined, locale: Locale): string {
+  const n = pickName(u, locale);
+  const wrongScript = locale === 'en' ? /[\u0600-\u06FF]/.test(n) : /[A-Za-z]/.test(n);
+  return wrongScript ? '' : n;
+}
+
 // Build the synced {name, nameEn, nameAr} patch from a freshly-typed value. `name` stays the value
 // the user actually typed; the opposite script is generated (Gemini, with phonetic fallback for AR).
 export async function buildSyncedName(typed: string): Promise<BilingualName> {
