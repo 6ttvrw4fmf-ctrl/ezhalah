@@ -114,8 +114,8 @@ check('persistName routes the rename through persistDisplayName',
 // Same intent, direction-aware form (reconciled 2026-08-29, mobile-UX pass): under Arabic's forced
 // RTL the physical top-right is spelled `left:` — the conditional keeps that AND stays correct for
 // a future LTR locale, which the bare literal did not.
-check('the close × sits at the reading end — English right, Arabic left (owner 2026-10-23)',
-  /centerClose: \{ position: 'absolute', top: 12, \.\.\.\(rtl \? \{ left: 12 \} : \{ right: 12 \}\)/.test(menu));
+check('the close × sits top-right in both languages, never mirrored (owner 2026-10-24, supersedes 10-23)',
+  /centerClose: \{ position: 'absolute', top: 12, right: 12,/.test(menu));
 
 // ── 7. ForceLightTheme the UTILITY still works, in case something needs it later ────────────────
 // EXECUTED: the real buildThemeCss() still emits the [data-ez-light] subtree block, and the

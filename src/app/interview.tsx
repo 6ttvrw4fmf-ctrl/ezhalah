@@ -420,7 +420,7 @@ export default function Interview() {
     <View style={[s.overlay, { paddingTop: insets.top + 18, paddingBottom: insets.bottom + 18 }]}>
       <Pressable style={s.backdrop} onPress={() => router.back()} />
       <View style={s.card}>
-        <View style={s.bar}>
+        <View style={[s.bar, isRTL && { flexDirection: 'row-reverse', justifyContent: 'flex-end' }]}>
           <View style={s.barLeft}>
             {curQ && order.length > 0 ? (
               <Pressable onPress={back} style={s.backBtn} hitSlop={6}>

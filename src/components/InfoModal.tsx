@@ -82,13 +82,13 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
   // which would fold our own cards back in (ops_incident #163). Zero unless something is docked.
   const promptInsets = useForeignPromptInsets();
   const { width, height } = useWindowDimensions();
-  const { t, isRTL: closeOnLeft } = useI18n();
+  const { t } = useI18n();
   const reduced = useReducedMotion();
   const about = kind === 'about';
   // «من نحن» has NO close button (owner 2026-09-03): the backdrop closes it, and its header is the
   // drag grip. Support and the legal reader keep the × — they are forms and long reads.
   // EVERY info popup carries the × (owner 2026-10-23: «all those information popups must show x» — reverses
-  // 2026-09-03's About-without-×). It sits at the reading END: right in English, LEFT in Arabic.
+  // 2026-09-03's About-without-×). It sits top-RIGHT in both languages, never mirrored (owner 2026-10-24).
   const hasClose = true;
 
   const progress = useSharedValue(0);
@@ -191,7 +191,7 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
               testID="info-modal-close"
               accessibilityRole="button"
               accessibilityLabel={t('Close')}
-              style={({ hovered, pressed }: any) => [s.xBtn, closeOnLeft ? s.xBtnLeft : s.xBtnRight, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
+              style={({ hovered, pressed }: any) => [s.xBtn, s.xBtnRight, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
             >
               {({ hovered, pressed }: any) => (
                 <Ionicons name="close" size={20} color={hovered || pressed ? colors.ink : colors.muted} />
@@ -614,7 +614,6 @@ const s = StyleSheet.create({
   // Measured 2026-10-23: on the web physical sides are NOT mirrored under Arabic, so the × side is chosen by
   // language. Both sides spelled so a merge never leaves the other one set.
   xBtnRight: { right: CLOSE_INSET, left: 'auto' as any },
-  xBtnLeft: { left: CLOSE_INSET, right: 'auto' as any },
   hClearLeft: { paddingRight: 0, paddingLeft: CLOSE_CLEAR },
   xBtnHover: { backgroundColor: colors.surface2 },
   scroll: { paddingTop: 0, paddingBottom: 0 },

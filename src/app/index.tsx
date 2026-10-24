@@ -2333,7 +2333,7 @@ export default function Home() {
       {sharedSearch && user && !sharedSearch.code && (
         <View style={s.sharedBackdrop} accessibilityViewIsModal>
           <View style={s.sharedCard}>
-            <Pressable onPress={() => setSharedSearch(null)} hitSlop={10} style={[s.sharedClose, isRTL ? { left: 12 } : { right: 12 }]} accessibilityRole="button" accessibilityLabel={t('Close')}>
+            <Pressable onPress={() => setSharedSearch(null)} hitSlop={10} style={[s.sharedClose, { right: 12 }]} accessibilityRole="button" accessibilityLabel={t('Close')}>
               <Ionicons name="close" size={20} color={colors.muted} />
             </Pressable>
             <Image source={require('../../assets/images/eagle-mark.png')} style={s.sharedEagle} resizeMode="contain" accessibilityIgnoresInvertColors />

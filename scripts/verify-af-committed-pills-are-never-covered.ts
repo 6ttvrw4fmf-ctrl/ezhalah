@@ -66,7 +66,10 @@ const placement = (code: string): string[] => {
   const overlay = code.indexOf('style={s.overlay}');
   const backdrop = code.indexOf('style={s.backdrop}', overlay);
   const cardEl = code.indexOf('<Reveal style={s.card}>', overlay);
-  const bar = code.indexOf('<View style={s.bar}>', cardEl);
+  // The title bar may carry an Arabic-only style next to s.bar (owner 2026-10-24: the ✕ stays top-right), so match
+  // `<View style={s.bar}>` and `<View style={[s.bar, …]}>` alike.
+  const barAt = cardEl >= 0 ? code.slice(cardEl).search(/<View style=\{\[?s\.bar[\]},]/) : -1;
+  const bar = barAt >= 0 ? cardEl + barAt : -1;
   const pills = code.indexOf('<CommittedPills', overlay);
   const body = code.indexOf('{children}', cardEl);
   if (!(overlay >= 0 && pills > overlay)) out.push('no <CommittedPills> inside the AF overlay');

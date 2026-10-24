@@ -61,7 +61,7 @@ check(
 const xBtn = src.match(/xBtn:\s*\{[\s\S]*?\n {2}\}/)?.[0] ?? '';
 check(
   'the close button positions itself from CLOSE_INSET/CLOSE_SIZE (no re-hardcoded 14/34)',
-  /top:\s*CLOSE_INSET/.test(xBtn) && /xBtnRight: \{ right: CLOSE_INSET/.test(src) && /xBtnLeft: \{ left: CLOSE_INSET/.test(src) &&
+  /top:\s*CLOSE_INSET/.test(xBtn) && /xBtnRight: \{ right: CLOSE_INSET/.test(src) &&
     /width:\s*CLOSE_SIZE/.test(xBtn) && /height:\s*CLOSE_SIZE/.test(xBtn),
   `xBtn block:\n${xBtn}`,
 );
