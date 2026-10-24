@@ -39,6 +39,7 @@ export type AuthUser = {
   nameAr?: string;
   initials: string;
   sub: string; // phone or email
+  namePromptSeen?: boolean; // user_metadata.name_prompt_seen — «وش نناديك؟» already shown to this account
 };
 
 // snapshot = the results the search actually returned, saved WITH the entry so reopening a saved

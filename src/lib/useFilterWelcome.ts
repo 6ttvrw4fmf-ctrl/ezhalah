@@ -74,7 +74,7 @@ function readStoredSession(): StoredSession {
       if (!raw) continue;
       const u = JSON.parse(raw)?.user;
       const m = u?.user_metadata ?? {};
-      const base = String(m.full_name || m.name || m.nameEn || m.nameAr || (u?.email ? String(u.email).split('@')[0] : '')).trim();
+      const base = String(m.full_name || m.name || m.nameEn || m.nameAr || '').trim(); // never the email (see mapSupabaseUser)
       const names = { name: base, nameAr: m.nameAr, nameEn: m.nameEn };
       return { present: true, nameAr: pickName(names, 'ar'), nameEn: pickName(names, 'en'), uid: String(u?.id ?? '') };
     }

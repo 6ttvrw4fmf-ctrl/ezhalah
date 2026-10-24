@@ -46,7 +46,7 @@ function verify(text: string) {
     const arabic = /[\u0600-\u06ff]/.test(message);
     const edge = arabic ? 'flex-end' : 'flex-start';
     const flow = arabic ? 'row-reverse' : 'row';
-    assert.equal(run(user, message)[1].alignSelf, edge);
+    assert.equal(run(user, message)[1].alignSelf, 'flex-end'); // the user's bubble is on the right in BOTH languages (owner 2026-10-23)
     assert.equal(run(wrapper, message).alignSelf, edge);
     assert.equal(run(row, message)[1].alignSelf, edge);
     assert.equal(run(row, message)[1].flexDirection, flow);
@@ -62,7 +62,7 @@ function mustCatch(brokenSource: string) {
   assert.throws(() => verify(brokenSource), assert.AssertionError);
 }
 mustCatch(mutant);
-const userMutant = source.replace("[s.userBubble, { alignSelf: rtl ? 'flex-end' : 'flex-start' }]", "[s.userBubble, { alignSelf: 'flex-end' }]");
+const userMutant = source.replace("[s.userBubble, { alignSelf: 'flex-end' }]", "[s.userBubble, { alignSelf: rtl ? 'flex-end' : 'flex-start' }]"); // the pre-2026-10-23 rule: English on the left
 assert.notEqual(userMutant, source, 'user bubble mutation target exists');
 mustCatch(userMutant);
-console.log('PASS: Arabic replies/results/sparkles align right, English left; original defect mutation rejected.');
+console.log('PASS: user bubble right in both languages; Arabic replies/results/sparkles align right, English left; mutations rejected.');
