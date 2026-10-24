@@ -23,6 +23,8 @@
 // own column values, so "every returned listing satisfies every active filter" is checked by a
 // THIRD evaluator (PostgREST's filter engine and this file), never by the RPC that produced them.
 
+import { missingVerdict, reachableRows } from './searchDeepPageCap.ts';
+
 export type Row = Record<string, unknown>;
 
 /** A predicate over one index row, mirroring the Advanced Filter answer the user committed. */
@@ -69,11 +71,16 @@ export type OptionEvidence = {
   oracleIds: string[];
   oracleRows?: Row[];           // the oracle's rows, with the predicate's columns selected
   pred?: Pred;
+  // The page size the RPC was walked with. When given, the search RPC's offset cap (nothing past offset 25,000 —
+  // *_search_page_is_capped.sql) is honoured: on a scope bigger than the walk can reach, MISSING must equal exactly
+  // the unreachable tail and the paged set must hold exactly the reachable rows (scripts/lib/searchDeepPageCap.ts).
+  page?: number;
 };
 
 export type Verdict = {
   ok: boolean;
-  missing: string[];            // eligible per the oracle, absent from the RPC set
+  missing: string[];            // eligible per the oracle, absent from the RPC set (excluding an explained cap tail)
+  tail?: number;                // rows past the RPC's offset cap, unreachable by any walk (only when `page` was given)
   extra: string[];              // returned by the RPC, ineligible per the oracle
   dupes: number;
   counts: { chip: number | null; applied: number | null; rpcTotal: number; rpcIds: number; oracle: number };
@@ -95,8 +102,11 @@ export function judgeOption(e: OptionEvidence): Verdict {
   if (e.applied != null && e.applied !== oracle) reasons.push(`af_eligible_count ${e.applied} ≠ DB truth ${oracle}`);
   if (e.rpcTotal !== oracle) reasons.push(`search total_count ${e.rpcTotal} ≠ DB truth ${oracle}`);
   if (e.chip != null && e.chip !== e.rpcTotal) reasons.push(`chip ${e.chip} ≠ search total_count ${e.rpcTotal}`);
-  if (rs.size !== e.rpcTotal) reasons.push(`paged RPC set has ${rs.size} ids but total_count says ${e.rpcTotal}`);
-  if (missing.length) reasons.push(`MISSING ${missing.length} eligible listing(s)`);
+  const cap = e.page ? missingVerdict(missing.length, rs.size, e.rpcTotal, e.page) : null;
+  const reach = e.page ? reachableRows(e.rpcTotal, e.page) : e.rpcTotal;
+  if (rs.size !== reach) reasons.push(`paged RPC set has ${rs.size} ids but total_count says ${e.rpcTotal}${reach !== e.rpcTotal ? ` (${reach} reachable under the offset cap)` : ''}`);
+  const explained = !!cap && cap.tail > 0 && cap.ok;
+  if (missing.length && !explained) reasons.push(`MISSING ${missing.length} eligible listing(s)${cap?.tail ? ` (${cap.detail})` : ''}`);
   if (extra.length) reasons.push(`EXTRA ${extra.length} ineligible listing(s)`);
   if (dupes) reasons.push(`DUPLICATES ${dupes}`);
 
@@ -116,7 +126,7 @@ export function judgeOption(e: OptionEvidence): Verdict {
 
   return {
     ok: reasons.length === 0,
-    missing, extra, dupes,
+    missing: explained ? [] : missing, ...(cap ? { tail: cap.tail } : {}), extra, dupes,
     counts: { chip: e.chip, applied: e.applied, rpcTotal: e.rpcTotal, rpcIds: rs.size, oracle },
     rowViolations, nullLeaks, reasons,
   };

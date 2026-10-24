@@ -24,7 +24,7 @@ import {
 } from '@/lib/insightWelcome';
 import { fetchWelcomeInsights } from '@/data/welcomeInsights';
 import { cityNameEnOfficial, districtNameEnOfficial } from '@/data/locations';
-import { hasJustSignedIn, takeJustSignedIn, SIGNED_IN_EVENT } from '@/lib/loginWelcome';
+import { hasJustSignedIn, takeJustSignedIn, SIGNED_IN_EVENT, isFreshSignUp } from '@/lib/loginWelcome';
 
 // v2: remembered lines hold NAME_SLOT, not a name. v1 entries had the name baked in (a Latin name
 // inside the Arabic line, owner 2026-10-17) and are ignored.
@@ -62,7 +62,7 @@ const writeCache = (c: WelcomeCache) => writeKey(CACHE_KEY, c);
 // Same key shape src/lib/authStorageGuard.ts and src/i18n.tsx read: `sb-<ref>-auth-token`.
 // The name in BOTH spellings, by the same pickName() the sidebar and account menu use — so the
 // Arabic line gets «يوسف», never «yusuf».
-type StoredSession = { present: boolean; nameAr: string; nameEn: string; uid: string };
+type StoredSession = { present: boolean; nameAr: string; nameEn: string; uid: string; awaitingName?: boolean };
 function readStoredSession(): StoredSession {
   try {
     const ls = globalThis.localStorage;
@@ -74,9 +74,11 @@ function readStoredSession(): StoredSession {
       if (!raw) continue;
       const u = JSON.parse(raw)?.user;
       const m = u?.user_metadata ?? {};
-      const base = String(m.full_name || m.name || m.nameEn || m.nameAr || (u?.email ? String(u.email).split('@')[0] : '')).trim();
+      const base = String(m.full_name || m.name || m.nameEn || m.nameAr || '').trim(); // never the email (see mapSupabaseUser)
       const names = { name: base, nameAr: m.nameAr, nameEn: m.nameEn };
-      return { present: true, nameAr: pickName(names, 'ar'), nameEn: pickName(names, 'en'), uid: String(u?.id ?? '') };
+      // A fresh sign-up whose «وش نناديك؟» box is still open: its welcome waits for «حفظ» (NamePrompt fires it).
+      const awaitingName = isFreshSignUp(u?.created_at, u?.last_sign_in_at, Date.now()) && m.name_prompt_seen !== true;
+      return { present: true, nameAr: pickName(names, 'ar'), nameEn: pickName(names, 'en'), uid: String(u?.id ?? ''), awaitingName };
     }
   } catch { /* fall through */ }
   return { present: false, nameAr: '', nameEn: '', uid: '' };
@@ -85,7 +87,7 @@ function readStoredSession(): StoredSession {
 // The sign-in welcome for THIS device's session, if a sign-in was just marked (lib/loginWelcome.ts).
 // Takes the mark, so one sign-in greets once.
 function takeGreeting(session: StoredSession, now: number): { id: number; ar: string; en: string } | null {
-  if (!session.present || !(session.nameAr || session.nameEn) || !hasJustSignedIn(now)) return null;
+  if (!session.present || session.awaitingName || !(session.nameAr || session.nameEn) || !hasJustSignedIn(now)) return null;
   const t = takeJustSignedIn(now);
   return t ? greetingFor(session.uid, t.count, NAME_SLOT) : null;
 }

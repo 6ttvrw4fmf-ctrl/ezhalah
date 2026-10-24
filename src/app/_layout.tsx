@@ -21,6 +21,7 @@ import Sidebar, { useDocked } from '@/components/Sidebar';
 import NetworkBlockedNotice from '@/components/NetworkBlockedNotice';
 import InfoModal from '@/components/InfoModal';
 import AuthModal from '@/components/AuthModal';
+import NamePrompt from '@/components/NamePrompt';
 import SignInCard from '@/components/SignInCard';
 import GoogleOneTap from '@/components/GoogleOneTap';
 import CookieConsent from '@/components/CookieConsent';
@@ -168,6 +169,8 @@ function Shell() {
           is active (owner 2026-08-15), never a route the user navigates to. Since the 2026-08-29
           revision it opens ONLY via explicit sign-in controls (openAuth) — it never auto-raises. */}
       <AuthModal />
+      {/* «وش نناديك؟» — once per account, only when a sign-in arrived with no name (owner 2026-10-23). */}
+      <NamePrompt />
       {/* Cookie consent — bottom-corner card, once per signed-out web visitor (owner 2026-09-06). */}
       <CookieConsent />
       {/* «Please turn off your VPN» — shown once when the network guard refuses this visitor (owner 2026-10-21). */}

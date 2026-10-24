@@ -11,8 +11,10 @@ import { useApp } from '@/store';
 import { useI18n } from '@/i18n';
 import { detectDevice, readDeviceEnv } from '@/lib/deviceInfo';
 import { useReducedMotion } from '@/lib/useReducedMotion';
-import { pickName, buildSyncedName, scriptOf, initialsOf } from '@/lib/nameSync';
-import { isBackendLive, persistDisplayName, signOutBackend } from '@/lib/auth';
+import { pickName, initialsOf } from '@/lib/nameSync';
+import { isBackendLive, signOutBackend } from '@/lib/auth';
+import { openNamePrompt } from '@/components/NamePrompt';
+import { useSaveName } from '@/lib/useSaveName';
 import {
   currentSessionId, lastActiveLabel, listDeviceSessions, revokeDeviceSession,
   signOutOtherDevices, type DeviceSession,
@@ -74,7 +76,7 @@ export default function AccountMenu({
   const router = useRouter();
   const { height: winH } = useWindowDimensions();
   const { t, locale, setLocale } = useI18n();
-  const { user, updateUser, applySyncedName, signOut, deleteAccount } = useApp();
+  const { user, signOut, deleteAccount } = useApp();
   const { mode, setMode, resolved, colors: C } = useTheme();
   const reduced = useReducedMotion();
   const s = useMemo(() => makeStyles(C, resolved === 'dark', locale === 'ar'), [C, resolved, locale]);
@@ -163,20 +165,8 @@ export default function AccountMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locale, user?.name, user?.nameEn, user?.nameAr]);
 
-  const persistName = (v: string) => {
-    const sc = scriptOf(v);
-    const immediate = sc === 'ar' ? { name: v, nameAr: v } : { name: v, nameEn: v };
-    updateUser({ ...immediate, initials: initialsOf(v) });
-    // Refresh-proof (owner 2026-08-29): the store patch above is in-memory only — the auth
-    // backend's user_metadata is what mapSupabaseUser rebuilds from on the next load.
-    persistDisplayName(v);
-    // applySyncedName, NOT updateUser: this is a network round trip, so renaming twice in quick
-    // succession leaves two continuations in flight and the slower one lands last. An unguarded
-    // updateUser here reverted the name AND the avatar initial to a value the user had already
-    // replaced (routine #8, 2026-09-24 — the #319/#599/#648 stale-continuation class). The store's
-    // applySyncedName drops a patch whose `name` is no longer the current one.
-    buildSyncedName(v).then((synced) => applySyncedName({ ...synced, initials: initialsOf(v) }));
-  };
+  // The one rename path, shared with «وش نناديك؟» and Apple's first-sign-in name (src/lib/useSaveName.ts).
+  const persistName = useSaveName();
   const saveName = () => {
     const v = name.trim();
     if (v && v !== shownName) {
@@ -367,15 +357,16 @@ export default function AccountMenu({
               {/* Profile header — clean and compact (owner 2026-08-29: no banner/hero image here):
                   avatar · name · email, nothing else. Tapping it opens إدارة الحساب with the
                   display-name editor already active — the profile IS the edit affordance. */}
+              {/* No name yet → «أضف اسمك ✏️» opens the «وش نناديك؟» box itself (owner 2026-10-23, name-box-v4 frame 3). */}
               <Pressable
                 testID="account-menu-profile"
-                onPress={() => { setEditing(true); go('account', 1); }}
+                onPress={() => { if (!pickName(user, locale)) { onClose(); openNamePrompt(); return; } setEditing(true); go('account', 1); }}
                 style={({ hovered, pressed }: any) => [s.profile, (hovered || pressed) && s.rowHover]}
               >
                 {({ hovered, pressed }: any) => { const on = !!(hovered || pressed); return (<>
                   <View style={s.avatar}><Text style={s.avatarText}>{initialsOf(pickName(user, locale))}</Text></View>
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={[s.profileName, on && s.rowOn]} numberOfLines={1}>{pickName(user, locale)}</Text>
+                    <Text style={[s.profileName, !pickName(user, locale) && s.addName, on && s.rowOn]} numberOfLines={1}>{pickName(user, locale) || t('Add your name')}{pickName(user, locale) ? '' : ' ✏️'}</Text>
                     {!!user.sub && <Text style={[s.profileSub, on && s.rowSubOn]} numberOfLines={1}>{user.sub}</Text>}
                   </View>
                   <Ionicons name="create-outline" size={15} color={on ? C.onFill : C.muted} />
@@ -788,6 +779,7 @@ function makeStyles(C: Record<string, string>, dark: boolean, rtl = true) {
     profile: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 10, borderRadius: 10 },
     avatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' },
     avatarText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+    addName: { color: C.primary },
     profileName: { fontSize: 13.5, fontWeight: '700', color: C.ink, textAlign: start as any, writingDirection: 'auto' as any },
     profileSub: { fontSize: 11, color: C.muted, marginTop: 1, textAlign: start as any, writingDirection: 'auto' as any },
 
