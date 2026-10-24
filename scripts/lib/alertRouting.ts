@@ -115,6 +115,37 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   // so the engineer who would have received the finding also receives the fact that the finder
   // stopped working. `seam_check_failed` is the deploy/certification plumbing this routine owns.
   { routine: 7, test: /^seam_check_failed$/ },
+
+  // ── The fallback column, re-measured 2026-09-27 (routine #2). ────────────────────────────────
+  // ALERT_ROUTING.md:57-59 names ONE number as this file's own drift signal: how many kinds reach
+  // no rule and land on #2. Measured 1 on 2026-08-28, 26 on 2026-09-05, and **58 of 230 today** by
+  // executing routineForKind() over every distinct kind in alert_event. The header above already
+  // says why that matters — "#2 inheriting the whole backlog by default is how a triage router
+  // stops being read" — and it is no longer hypothetical: 55 open liveness_verification_sla alerts
+  // and ~40 incidents now sit on #2 because no pattern claims their kind.
+  //
+  // The rules below claim ELEVEN of those 58, and only those that pass one mechanical test: an
+  // explicitly-routed SIBLING kind already names #7 for the same mechanism, so adding them decides
+  // nothing new. The other 47 are deliberately LEFT on the fallback. Several of them (the
+  // liveness_* family above all) sit on the #1/#3/#11 boundary that
+  // LISTING_LIFECYCLE_ENGINEER.md §1.2-§1.3 draws — and that file names THIS file as the
+  // tie-breaker, so moving them is an ownership decision for the owner, not a tidy-up. #2 is a
+  // real owner for them meanwhile, which is exactly what the fallback is for.
+  //
+  //   alert_flapping / alert_reaffirmation / stuck_open_alert  → siblings alert_delivery,
+  //     alert_acknowledgment, alert_queue_unworked, incident_stalled (an alert's own lifecycle).
+  //   autoresolve_kind_unregistered / declared_kind_without_emitter → siblings orphaned_detector,
+  //     unresolvable_detector (the detector/kind roster watching itself).
+  //   seam_delivery_probe / seam_selftest → sibling seam_check_failed.
+  //   p0_slo_selftest → sibling p0_delivery_sla ("this routine owns that mechanism end to end").
+  //   migration_content_parity → siblings migration_drift, sql_mirror_drift.
+  //   ungated_expensive_detector → sibling ^detector_ (a detector missing its own cost gate).
+  //   gh_dispatch_credential → the Actions dispatch plumbing this routine already owns.
+  { routine: 7, test: /^(alert_flapping|alert_reaffirmation|stuck_open_alert)$/ },
+  { routine: 7, test: /^(autoresolve_kind_unregistered|declared_kind_without_emitter)$/ },
+  { routine: 7, test: /^(seam_delivery_probe|seam_selftest|p0_slo_selftest)$/ },
+  { routine: 7, test: /^(migration_content_parity|ungated_expensive_detector)$/ },
+  { routine: 7, test: /^gh_dispatch_credential$/ },
   // p0_delivery_sla — the 5-minute P0 delivery SLO and its dedicated fast lane (2026-08-30). This
   // routine owns that mechanism end to end, yet the kind matched no rule and fell through to the
   // #2 fallback: the alert saying "a P0 did not reach a human in time" was itself being filed to
