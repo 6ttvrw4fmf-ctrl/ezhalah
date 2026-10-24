@@ -98,6 +98,10 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # _FEATURE_COLS). Its 10-13 misses (13602723, 13602726, CI re-read 38384423613) were description prose
     # («يوجد مصعد في العمارة», «غرفة خادمة مع دورة مياة») on ads whose chip list names neither (🔬, backlog 515).
     "squares": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room"),
+    # reinvest publishes parking as a COUNT, `info_fields.parking_count` (scrapers/reinvest/run.py: «parking» is
+    # count_flag(parking_count) and wins over prose). Its 10-24 misses (6 of 7, af-score run 40076306911) all asked
+    # parking from description prose («موقف») on ads whose count is blank; our NULL is the source's answer (law §2).
+    "reinvest": ("parking",),
     # eastabha (WordPress «WP Residence») prints its WHOLE feature taxonomy as a checklist: a ticked item is
     # `<div class="listing_detail col-md-4 …"><i class="fas fa-check"></i>مطبخ مجهز</div>`, an unticked one the
     # same with `not_present` and an ✗ (CI source-reread 39020724177, 595393 and 595406). The scraper reads
