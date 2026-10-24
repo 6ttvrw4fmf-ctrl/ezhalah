@@ -608,6 +608,19 @@ def _period_text(amount: Optional[int], blocks: list[str]) -> str:
     return " ".join(out)
 
 
+# The office writes the catalog's numbered districts in the feminine — «الفيصلية الثانية» (4 ads),
+# «الفيصلية الاولى» — where the catalog says «حي الفيصلية الثاني» / «حي الفيصلية الأول»
+# (unknown_named_districts, 2026-10-24). Same place, so it is a spelling, mapped here and never added
+# to the catalog (contract G). Only a trailing ordinal is folded; the bare «الفيصلية» names neither
+# half and stays without a district.
+_FEM_ORDINAL = re.compile(r"\s(ال)?(اولى|أولى|ثانية|ثالثة|رابعة|خامسة)$")
+_MASC = {"اولى": "اول", "أولى": "أول", "ثانية": "ثاني", "ثالثة": "ثالث", "رابعة": "رابع", "خامسة": "خامس"}
+
+
+def masculine_ordinal(name: str) -> str:
+    return _FEM_ORDINAL.sub(lambda m: " " + (m.group(1) or "") + _MASC[m.group(2)], name.strip())
+
+
 def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason). row is None exactly when skip_reason is set."""
     title_text = " ".join(ix["title_lines"])
@@ -639,6 +652,8 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         return None, category, "city_not_in_catalog"
     district_raw = (ix["district"] or "").strip() or None
     district_ar = find_district_in_text(district_raw, city_id) if district_raw else None
+    if not district_ar and district_raw and _FEM_ORDINAL.search(district_raw):
+        district_ar = find_district_in_text(masculine_ordinal(district_raw), city_id)
 
     p = ix["price"]
     basis, basis_from = p["basis"], ("index_label" if p["basis"] else None)
