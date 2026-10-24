@@ -33,6 +33,7 @@ import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
 import { useFilterWelcome } from '@/lib/useFilterWelcome';
+import { NAME_PARTY_EVENT, SHINE_MS } from '@/lib/nameParty';
 import { InsightHowItWorks } from '@/components/InsightHowItWorks';
 import { decodeSharePayload, decodeInvitePayload, shareJoinNote, shareLandingTitle, shareInviteNote, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
 import { fetchSharedChat, fetchSharedChatCard } from '@/lib/sharedChat';
@@ -264,6 +265,14 @@ export default function Home() {
   // «كيف تشتغل؟» opens when the user taps a market fact in the headline (owner 2026-10-22).
   const [howOpen, setHowOpen] = useState(false);
   const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey, isInsight: welcomeIsInsight } = useFilterWelcome(!!user, pickName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
+  // «حفظ» in the «وش نناديك؟» box: while its party plays, the welcome headline shines (2 passes, owner-approved demo).
+  const [heroShine, setHeroShine] = useState(false);
+  useEffect(() => {
+    let id: ReturnType<typeof setTimeout> | undefined;
+    const on = () => { setHeroShine(true); if (id) clearTimeout(id); id = setTimeout(() => setHeroShine(false), SHINE_MS); };
+    globalThis.addEventListener?.(NAME_PARTY_EVENT, on);
+    return () => { globalThis.removeEventListener?.(NAME_PARTY_EVENT, on); if (id) clearTimeout(id); };
+  }, []);
   // THE ONE QUERY THIS SCREEN DERIVES EVERYTHING FROM (owner P0 2026-09-01).
   //
   // The store may now carry Advanced Filter answers committed in the chat — that is the whole fix:
@@ -710,12 +719,17 @@ export default function Home() {
       await ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).catch(() => null);
       // Then the trending DISTRICTS of the six trending cities (owner 2026-10-04: «the moment the user opens Ezhalah it
       // loads, not when he clicks»): most users pick one of them, and its district list is then already there.
+      // TOGETHER, not one after another (P1 2026-10-23): each call is ~40-60 ms of database time since the AF RPCs plan
+      // per call, but ~0.6 s of round trip through the front door, so six in a row kept city #6's list ~4 s away.
+      // Same six calls, same arguments, same cache keys — only the waiting changed.
+      // scripts/verify-trending-pools-warm-at-open.ts
+      if (cancelled) return;
+      const warm: number[] = [];
       for (const c of topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams)) {
-        if (cancelled) return;
         if (c.scopeKnown === false) break; // provisional names only: the pool did not load, nothing honest to warm
-        const cid = c.cityId;
-        await ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).catch(() => null);
+        warm.push(c.cityId);
       }
+      await Promise.all(warm.map((cid) => ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).catch(() => null)));
       for (const sel of ['Rent', 'Both', 'Buy'] as const) {
         if (cancelled) return;
         const sc = cityPoolScopeOf({ ...query, ...dealSelectionToQuery(sel, query.deal) });
@@ -1439,7 +1453,7 @@ export default function Home() {
           <HomeWebsiteStrip />
           <View style={s.hero}>
             <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
-              <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
+              <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' } } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
             </Pressable>
             <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
             <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>

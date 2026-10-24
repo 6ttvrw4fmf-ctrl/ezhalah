@@ -12,11 +12,12 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
-const PATTERN = String.raw`(vercel[[:space:]]+(--prod|deploy|promote|alias|rollback))|deploy_to_vercel`;
+const PATTERN = String.raw`(vercel[[:space:]]+(--prod|deploy|promote|alias|rollback|rolling-release|rr[[:space:]]))|deploy_to_vercel`;
 
 const SANCTIONED = new Set([
   'scripts/safe-deploy.sh',        // the one sanctioned deploy entrypoint
   'scripts/emergency-rollback.sh', // the one sanctioned rollback entrypoint
+  'scripts/canary-gate.sh',        // the one sanctioned rolling-release complete/abort (owner 2026-10-23)
   'scripts/deploy-lock.sh',        // lock helper the above call
   'scripts/deploy-target-guard.sh',// shared guard library (documents the commands in comments)
   'scripts/preflight-verify.sh',   // references the command in comments only
