@@ -18,7 +18,7 @@ import {
   type HeldWelcome, type WelcomeCache, type WelcomeLine, type WelcomeFacts,
 } from '@/lib/filterWelcome';
 import { loadWelcomeFacts } from '@/data/welcomeFacts';
-import { pickName } from '@/lib/nameSync';
+import { sentenceName } from '@/lib/nameSync';
 import {
   pickGreeting, fillGreeting, chooseInsightLine, isInsightLineId, INSIGHT_ID_BASE, SEEN_DAYS, type Seen,
 } from '@/lib/insightWelcome';
@@ -75,10 +75,11 @@ function readStoredSession(): StoredSession {
       const u = JSON.parse(raw)?.user;
       const m = u?.user_metadata ?? {};
       const base = String(m.full_name || m.name || m.nameEn || m.nameAr || '').trim(); // never the email (see mapSupabaseUser)
-      const names = { name: base, nameAr: m.nameAr, nameEn: m.nameEn };
+      const spelled = !!base && String(m.name_spellings_for ?? '') === base; // stored spellings belong to THIS name
+      const names = { name: base, nameAr: spelled ? m.nameAr : undefined, nameEn: spelled ? m.nameEn : undefined };
       // A fresh sign-up whose «وش نناديك؟» box is still open: its welcome waits for «حفظ» (NamePrompt fires it).
       const awaitingName = isFreshSignUp(u?.created_at, u?.last_sign_in_at, Date.now()) && m.name_prompt_seen !== true;
-      return { present: true, nameAr: pickName(names, 'ar'), nameEn: pickName(names, 'en'), uid: String(u?.id ?? ''), awaitingName };
+      return { present: true, nameAr: sentenceName(names, 'ar'), nameEn: sentenceName(names, 'en'), uid: String(u?.id ?? ''), awaitingName };
     }
   } catch { /* fall through */ }
   return { present: false, nameAr: '', nameEn: '', uid: '' };

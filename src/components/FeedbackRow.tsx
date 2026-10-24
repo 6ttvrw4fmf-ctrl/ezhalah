@@ -132,12 +132,15 @@ export default function FeedbackRow({
 
   return (
     <View style={[fb.container, { alignItems: isRTL ? 'flex-end' : 'flex-start' }]}>
-      <View style={[fb.row, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+      {/* THE ICON ORDER NEVER MIRRORS (owner 2026-10-23: «keep it standard, copied like the English, just fix the
+          order»): 👍 👎 share 🔊 reads left to right in every language. Only the row's EDGE follows the
+          language — the container above right-aligns it for an Arabic reply. */}
+      <View style={[fb.row, { flexDirection: 'row' }]}>
         {/* Reserve the pair's space so share/read-aloud never jump as the thumbs merge. */}
         <View style={fb.thumbs}>
           {(['up', 'down'] as const).map((direction, index) => (
             <ThumbVote key={direction} direction={direction} index={index} rating={rating}
-              rtl={isRTL} reducedMotion={reducedMotion} onPress={() => vote(direction)}
+              rtl={false} reducedMotion={reducedMotion} onPress={() => vote(direction)}
               label={t(direction === 'up' ? 'Helpful' : 'Not helpful')} />
           ))}
         </View>
