@@ -28,21 +28,24 @@ if [ "${EZ_ROLLING_RELEASE:-}" != "1" ]; then
   exit 0
 fi
 if [ -z "$DPL" ]; then
-  echo "❌ CANARY ABORTED — no deployment URL was handed to the gate; nothing can be judged, so nothing is promoted."
+  echo "❌ CANARY UNRESOLVED — no deployment URL was handed to the gate; nothing can be judged, so nothing is promoted."
   exit 1
 fi
 
 abort() {
   echo ""
-  echo "❌ CANARY ABORTED — $1"
-  echo "   Rolling back: traffic returns to the previous production build."
-  npx vercel rolling-release abort --dpl "$DPL" --yes || echo "   (abort command failed — check the Vercel dashboard NOW: the release may still be at 10%)"
+  echo "❌ Canary gate stopped — $1"
+  echo "   Requesting rollback to the previous production build."
+  if ! npx vercel rolling-release abort --dpl "$DPL" --non-interactive; then
+    echo "CANARY UNRESOLVED — abort failed; check the Vercel dashboard: the release may still be at 10%"
+    exit 1
+  fi
   echo "CANARY ABORTED — traffic restored to the previous deployment"
   exit 1
 }
 
 # One verdict line per journey×viewport, as run.mjs prints them: «▶ <id> [<viewport>] … PASS|FAIL|UNDETERMINED (…)».
-verdicts() { grep -oE '▶ [a-z0-9-]+ \[[a-z]+\] … (PASS|FAIL|UNDETERMINED)' "$1" | sed -E 's/^▶ //; s/ … / /' | sort; }
+verdicts() { { grep -oE '▶ [a-z0-9-]+ \[[a-z]+\] … (PASS|FAIL|UNDETERMINED)' "$1" || true; } | sed -E 's/^▶ //; s/ … / /' | sort; }
 
 echo ""
 echo "Canary gate: driving the guardian journeys against STABLE and the 10% CANARY ($DPL), concurrently…"
@@ -77,7 +80,7 @@ fi
 
 echo ""
 echo "Canary gate: no regression against the stable build — promoting the release to 100%…"
-if ! npx vercel rolling-release complete --dpl "$DPL" --yes; then
+if ! npx vercel rolling-release complete --dpl "$DPL" --non-interactive; then
   abort "'vercel rolling-release complete' failed"
 fi
 echo "CANARY PASSED — promoted to 100%"
