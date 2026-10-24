@@ -27,6 +27,7 @@ function problems(f: Files): string[] {
   if (!/testID="ad-slow-hint" style=\{s\.slowPill\} ref=\{setLtr\}/.test(f['src/components/AdViewer.tsx'])) out.push('ad viewer slow-site pill mirrors its ✕');
   if (/rtl \? \{ paddingLeft: 44 \}/.test(f['src/components/AccountMenu.tsx'])) out.push('account title reserves room on the LEFT — the right-side × covers it in Arabic');
   if (/hClearLeft/.test(f['src/components/InfoModal.tsx'])) out.push('info title reserves room on the LEFT — the right-side × covers it in Arabic');
+  if (!/head: \{ paddingBottom: 12, paddingRight: CLOSE_CLEAR \}/.test(f['src/components/InfoModal.tsx'])) out.push('About header has no room for the × — «من نحن» sits under it');
   return out;
 }
 
@@ -44,6 +45,8 @@ mutation('a header row that mirrors the ✕ again', problems({ ...real, 'src/app
 mutation('the ad viewer tab strip mirroring again', problems({ ...real, 'src/components/AdViewer.tsx': real['src/components/AdViewer.tsx'].replace('<View style={s.tabRow} ref={setLtr}>', '<View style={s.tabRow}>') }).length === 0);
 
 mutation('an Arabic title sliding under the × again', problems({ ...real, 'src/components/AccountMenu.tsx': real['src/components/AccountMenu.tsx'].replace('paddingHorizontal: 8, paddingRight: 44 },', 'paddingHorizontal: 8, ...(rtl ? { paddingLeft: 44 } : { paddingRight: 44 }) },') }).length === 0);
+
+mutation('the About title sliding under the × again', problems({ ...real, 'src/components/InfoModal.tsx': real['src/components/InfoModal.tsx'].replace('head: { paddingBottom: 12, paddingRight: CLOSE_CLEAR }', 'head: { paddingBottom: 12 }') }).length === 0);
 
 if (failed) { console.error(`\n✗ close ✕ side: ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✓ every ✕ sits top-right, the same as English');
