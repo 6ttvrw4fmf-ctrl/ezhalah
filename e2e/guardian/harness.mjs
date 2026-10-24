@@ -171,8 +171,13 @@ export async function withPage(viewport, fn) {
  * failure by construction: if the filter form never mounted, nothing downstream can be a statement
  * about the product.
  */
+// CANARY_QUERY (scripts/canary-gate.sh): `vcrrForceCanary=true` pins this context to the new deployment
+// of a Vercel rolling release (Vercel sets its `_vcrr_*` cookie from the query, so later requests in
+// the same context follow). Empty = production as every visitor sees it.
+const CANARY_QUERY = process.env.CANARY_QUERY || '';
+export const withCanary = (path) => (CANARY_QUERY ? `${path}${path.includes('?') ? '&' : '?'}${CANARY_QUERY}` : path);
 export async function open(page, path = '/', { expect = '[data-testid="city-input"]' } = {}) {
-  const res = await page.goto(`${BASE}${path}`, { waitUntil: 'load', timeout: 90000 })
+  const res = await page.goto(`${BASE}${withCanary(path)}`, { waitUntil: 'load', timeout: 90000 })
     .catch((e) => { throw new HarnessError(`navigation to ${path} failed: ${String(e).slice(0, 160)}`); });
   if (res && res.status() >= 500) throw new HarnessError(`${path} answered HTTP ${res.status()} — production is not serving the app`);
   if (expect) {
