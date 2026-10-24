@@ -4232,11 +4232,8 @@ export default function Agent() {
     <View style={{ flex: 1, flexDirection: firstChildLeftRow(docRtl), backgroundColor: colors.paper }}>
     {/* The results column. A row so the in-app ad viewer can sit BESIDE it, full height (split). */}
     <View style={{ flex: 1 }}>
-      {/* Sketch backdrop behind the chat. The bottom fade is pushed all the way down (0.8→1, same as
-          Home) so the landmarks fill the whole frame — including the center, which used to wash out
-          to plain white during "Ezhalah is searching…". A light opacity + paper scrim keep it faint
-          enough that message text stays readable: the user sees the same sketch, just light. */}
-      <HeroBackground imageOpacity={0.55} scrim={0.2} fadeStart={0.8} fadeEnd={1} />
+      {/* The landing foreground fades when searching; results retain the calm sky. */}
+      <HeroBackground landscape={introLanding && !busy} />
       {/* Header */}
       <View ref={setLtr} style={[s.topBar, { paddingTop: insets.top + 8 }]}>
         {/* Mobile only: a plain hamburger that opens the existing sidebar — same clean style as the
@@ -5513,7 +5510,7 @@ const s = StyleSheet.create({
   fbToastText: { fontSize: 12.5, fontWeight: '600', color: colors.ink },
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
-  title: { fontSize: 22, fontWeight: '800', color: colors.dark },
+  title: { fontSize: 22, fontWeight: '800', color: colors.ink },
   // Note #5 — share icon sits beside the Filter pill in the agent header.
   // Matches the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius, soft lift) so
   // the pill + share read as one cluster across both screens (owner redesign 2026-07-24 r2).
@@ -5563,14 +5560,14 @@ const s = StyleSheet.create({
   aiex: { marginTop: 12, gap: 11 },
   greet: { marginBottom: 6 },
   greetTag: { fontSize: 20, fontWeight: '800', color: colors.primary },
-  greetBody: { fontSize: 14, color: colors.dark, fontWeight: '600', marginTop: 6, lineHeight: 21 },
+  greetBody: { fontSize: 14, color: colors.ink, fontWeight: '600', marginTop: 6, lineHeight: 21 },
   startHead: { flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 4 },
-  startT: { fontSize: 18, fontWeight: '700', color: colors.dark },
-  startS: { fontSize: 12, color: colors.dark, fontWeight: '600', marginTop: 1 },
+  startT: { fontSize: 18, fontWeight: '700', color: colors.ink },
+  startS: { fontSize: 12, color: colors.ink, fontWeight: '600', marginTop: 1 },
   // On the website the chips are deliberately BIG — tall blocks with large text that fill the screen
   // and pop in one by one; on phone they stay the snug original size. (user request.)
   suggest: { gap: IS_WEB ? 14 : 10, marginTop: IS_WEB ? 18 : 14 },
-  suggestLead: { fontSize: IS_WEB ? 15 : 13.5, fontWeight: '700', color: colors.dark, marginBottom: IS_WEB ? 4 : 1 },
+  suggestLead: { fontSize: IS_WEB ? 15 : 13.5, fontWeight: '700', color: colors.ink, marginBottom: IS_WEB ? 4 : 1 },
   // Centered onboarding header above the example cards — icon, bold heading, lighter description.
   onbWrap: { alignItems: 'center', gap: 7, marginBottom: IS_WEB ? 14 : 10, paddingHorizontal: 12 },
   onbHeading: { fontSize: IS_WEB ? 19 : 16.5, fontWeight: '700', color: colors.ink, textAlign: 'center' },
@@ -5658,7 +5655,7 @@ const s = StyleSheet.create({
   replyText: { fontFamily: CHAT_FONT, minWidth: 0, fontSize: IS_WEB ? 16 : 15.5, lineHeight: IS_WEB ? 28 : 26, color: colors.ink },
   introScroll: { flexGrow: 1, justifyContent: 'center' },
   greeting: { width: '100%', alignItems: 'center', gap: 8, paddingVertical: 24 },
-  greetingText: { fontSize: 24, lineHeight: 36, fontWeight: '600', color: colors.dark, textAlign: 'center', writingDirection: 'rtl' as any },
+  greetingText: { fontSize: 24, lineHeight: 36, fontWeight: '600', color: colors.ink, textAlign: 'center', writingDirection: 'rtl' as any },
   greetingSubtitle: { fontSize: 16, lineHeight: 26, color: colors.body, textAlign: 'center', writingDirection: 'rtl' as any },
   // Rotating composer examples (owner brief 2026-08-23): the absolute overlay fills the input's own
   // clipped wrapper (inputGrow), so it is structurally unable to move the mic/Send or overflow; the

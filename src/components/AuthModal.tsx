@@ -563,7 +563,7 @@ const s = StyleSheet.create({
   gauthBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 18, borderBottomWidth: 1, borderBottomColor: '#ececec' },
   gauthBarText: { fontSize: 14, fontWeight: '500', color: '#3c4043' },
   gauthApp: { alignItems: 'center', paddingVertical: 22 },
-  gauthAppLogo: { width: 46, height: 46, borderRadius: 23, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  gauthAppLogo: { width: 46, height: 46, borderRadius: 23, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   gauthTitle: { fontSize: 22, fontWeight: '400', color: '#202124' },
   gauthSub: { fontSize: 14, color: '#5f6368', marginTop: 4 },
   gauthList: { paddingVertical: 4 },
@@ -591,7 +591,7 @@ const s = StyleSheet.create({
   appleEmailT: { fontSize: 14, fontWeight: '600', color: colors.ink },
   appleEmailS: { fontSize: 12, color: colors.muted },
   toggle: { width: 44, height: 26, borderRadius: 13, backgroundColor: '#d3d6d4', justifyContent: 'center' },
-  toggleOn: { backgroundColor: colors.primary },
+  toggleOn: { backgroundColor: colors.selFill },
   knob: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff', marginLeft: 3, ...cardShadow },
   knobOn: { marginLeft: 21 },
   appleContinue: { backgroundColor: '#000', height: 50, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginTop: 18 },
@@ -600,7 +600,7 @@ const s = StyleSheet.create({
   // Face ID
   faceWrap: { alignItems: 'center', justifyContent: 'center', minHeight: 360, gap: 14 },
   faceIc: { width: 86, height: 86, borderRadius: 24, backgroundColor: colors.dark, alignItems: 'center', justifyContent: 'center' },
-  faceIcDone: { backgroundColor: colors.primary },
+  faceIcDone: { backgroundColor: colors.selFill },
   faceT: { fontSize: 18, fontWeight: '700', color: colors.ink, marginTop: 4 },
   faceS: { fontSize: 13.5, color: colors.muted },
 

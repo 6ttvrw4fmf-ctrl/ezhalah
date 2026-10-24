@@ -666,14 +666,14 @@ const s = StyleSheet.create({
   // Send: full width, the brand green, the same radius as the inputs, spaced from the email field.
   sendBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: colors.primary, borderRadius: 12, height: 50, marginTop: 6,
+    backgroundColor: colors.selFill, borderRadius: 12, height: 50, marginTop: 6,
     ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
   },
   sendBtnHover: { backgroundColor: colors.dark },
   sendBtnBusy: { opacity: 0.75 },
   sendTx: { fontSize: 15, fontWeight: '800', color: colors.onFill },
   sentCard: { alignItems: 'center', paddingVertical: 28, paddingHorizontal: 18 },
-  sentIc: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  sentIc: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   sentH: { fontSize: 17, fontWeight: '800', color: colors.ink, textAlign: 'center' },
   sentTx: { fontSize: 13.5, color: colors.body, textAlign: 'center', marginTop: 6, lineHeight: 20 },
   againBtn: { marginTop: 16, paddingVertical: 8, paddingHorizontal: 14, ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}) },

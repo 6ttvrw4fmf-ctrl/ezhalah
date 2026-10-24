@@ -75,7 +75,7 @@ STOP → restore → fix → continue. Checklist: `ezhalah-app/docs/DEPLOY_REGRE
 
 The empty English chat subtitle is “Describe it and Ezhalah” without punctuation; English model descriptions use ordinary sentence punctuation rather than long dashes (owner, 2026-10-14).
 
-The header and sidebar Ezhalah name uses dark green. Assistant replies and result slogans keep the same green sparkle stars as the thinking state (owner, 2026-10-07).
+The header and sidebar Ezhalah name uses the theme ink, and assistant sparkle stars use the theme accent (sky/dusk redesign, owner 2026-10-24). Source artwork retains its original colors.
 
 The AI Agent’s empty composer hint aligns left in English and right in Arabic (owner, 2026-10-07). Typed messages keep their own language direction. The entire user bubble sits on the left for English and on the right for Arabic, determined per message (owner clarification, 2026-10-13).
 
@@ -517,10 +517,31 @@ overwrite it (`canAutoRetitle`). Title is deliberately NOT coupled to `sameQuery
 
 
 **Design tokens (`src/theme/tokens.ts`) — never hard-code hex/sizes in components:**
-- primary `#2f7247`, dark `#1d4a37`, tint `#eef6f0`, ink `#15201b`, body `#34403a`, muted `#7b8a82`,
-  paper `#fbfbfa`, surface `#ffffff`, whatsApp `#25d366`, accentLeaf `#2fb672`.
-- radius chip 12 / card 16 / field 13 / sheet 22 / pill 999. space base 8 / screenTop 56 / screenSide 18.
-- Font **Poppins** (400/500/600/700). Soft green-tinted `cardShadow`. Per-platform brand colors.
+- Values live in `src/theme/palette.ts`: light charcoal text (`#24232B`), plum controls
+  (`#493953`), white solid cards, pale blue sky; dusk blue sky, charcoal-plum cards (`#25232D`),
+  warm ivory copy (`#F5F2ED`) and soft lavender accents. Semantic warning colors, original
+  source logos/photos, WhatsApp green, and featured gold/silver treatment are unchanged.
+- Radius chip 12 / card 16 / field 13 / sheet 22 / pill 999. Space base 8 / screenTop 56 / screenSide 18.
+- Existing Arabic and English typography stays unchanged. All controls and dialogs use the shared palette.
+
+**Sky and desert theme (owner approved 2026-10-24):** `HeroBackground` renders a continuous light-blue
+sky (muted blue-hour dusk in dark mode), with sparse realistic transparent clouds. The landing foreground
+has pale dunes, one palm and one small Bedouin tent; a separate dusk asset preserves readable sand and a
+warm tent light. Only this foreground fades when search starts; results and the search loader retain the
+sky, with solid readable cards. The header/wordmark shares the sky. The sidebar has its own sparse,
+column-sized clouds behind its header and chat list, clipped at the seam rather than duplicating the
+page's cloud clusters. `SidebarSky` adds the original green eagle on a small sky tile with thin clouds
+passing below its eye. Both signed-in and guest headers, docked and mobile drawers, use this treatment
+in either language and theme. Cloud transforms drift over 18 seconds per direction with eased turns;
+reduced motion makes them static. They never intercept taps or obscure the wordmark and controls.
+Assets contain no UI or text. Headline cloud wisps touch the outer edges and never
+mask the copy. `CloudWisp` is decorative, pointer-transparent, and hidden from assistive technology.
+Source logos keep their measured frames and original colors, with small varied wisps touching their edges.
+The website strip moves each logo and cloud together at **12 px/s** (one 108px slot per **9 seconds**),
+retains the shared wall-clock phase and the iOS-safe bounded window, and becomes static with reduced
+motion. This supersedes the earlier 45 px/s setting. Search-loader roster, ten-second cycle, eligibility,
+and result ordering are unchanged. Ground fade is 300ms (instant with reduced motion); animation never
+owns or delays search readiness. These rules supersede earlier green UI/sketched-building descriptions.
 
 **Desktop UI scale — 1:1, by owner decision (2026-08-14, PR #617):** the app is a mobile-first px
 design (body 13–15, titles 18–26, 560px content column) rendered 1:1 at every viewport. A tiered

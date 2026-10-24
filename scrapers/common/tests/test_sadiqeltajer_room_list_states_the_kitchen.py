@@ -61,3 +61,51 @@ def test_mutation_without_the_reader_the_kitchen_is_lost(monkeypatch):
     monkeypatch.setattr(S.normalize, "prose_amenities_yes", lambda raw, skip=(): {})
     row = row_for("صالة . مطبخ . دورة مياة")
     assert "kitchen" not in row   # so test_a_room_list_with_a_kitchen_is_a_kitchen is what catches its loss
+
+
+SIMILAR = ' اعلانات مشابهة <div class="all-desc">غرفة خادمة وغرفة سائق مكيفات</div>'
+
+
+def page_with_box(head: str, box_text: str) -> str:
+    box = f'<div class="all-desc">{box_text}</div>'
+    return "<html><body>" + head + box + TAIL.replace(" اعلانات مشابهة", SIMILAR) + "</body></html>"
+
+
+def test_12218852_ac_stated_in_its_description_box():
+    """🔬 2026-10-24 (backlog 794): «البيع شامل الاثاث (المكيفات)» sits before «المكونات» (CI re-read 39948473496)."""
+    row, _cat, why = S.map_listing("https://sadiq-eltajer.sa/ad/8134", page_with_box(
+        HEAD, "للبيع شاليه دورين بحي النقيب (النخيل) , العمر 7 سنوات , البيع شامل الاثاث (المكيفات ) , "
+              "المكونات : مسطحات خضراء , ملحق , مسبح , مجلس , صالة , مطبخ دورة مياه"))
+    assert row, why
+    assert row.get("air_conditioner") is True and row.get("kitchen") is True
+    assert "maid_room" not in row and "driver_room" not in row, "a similar ad's words never answer for this one"
+
+
+def test_a_neighbouring_car_park_is_not_parking():
+    """10-23: 12218009 «يليه مواقف» became parking yes. A clause about what is NEXT to the property says nothing."""
+    row, _cat, why = S.map_listing("https://sadiq-eltajer.sa/ad/8134", page_with_box(
+        HEAD, "فيلا دورين , يليه مواقف عامة , مقابل مسجد , بجوار حديقة فيها مكيفات"))
+    assert row, why
+    assert "parking" not in row and "air_conditioner" not in row
+
+
+def test_a_plot_never_reads_its_description_box():
+    head = HEAD.replace("للبيع فله --&gt; مميز بيع فلل", "للبيع ارض --&gt; مميز بيع اراضي").replace("للبيع فله 875", "للبيع ارض 875")
+    row, _cat, why = S.map_listing("https://sadiq-eltajer.sa/ad/8134", page_with_box(head, "ارض سكنية , مواقف سيارات , مكيفات"))
+    assert row, why
+    assert row["property_type"] in S._NOT_A_UNIT, row["property_type"]
+    assert "parking" not in row and "air_conditioner" not in row
+
+
+def test_mutation_without_the_box_reader_ac_is_lost(monkeypatch):
+    monkeypatch.setattr(S, "unit_description_text", lambda page_html, property_type: None)
+    row, _cat, _why = S.map_listing("https://sadiq-eltajer.sa/ad/8134", page_with_box(HEAD, "البيع شامل (المكيفات)"))
+    assert "air_conditioner" not in row   # so test_12218852_ac_stated_in_its_description_box catches its loss
+
+
+def test_only_columns_the_tables_have_are_written():
+    """information_schema 2026-10-24: neither sadiqeltajer table has balcony_terrace or optical_fibers."""
+    row, _cat, why = S.map_listing("https://sadiq-eltajer.sa/ad/8134", page_with_box(HEAD, "بلكونة , الياف بصرية , مطبخ"))
+    assert row, why
+    assert row.get("kitchen") is True
+    assert "balcony_terrace" not in row and "optical_fibers" not in row

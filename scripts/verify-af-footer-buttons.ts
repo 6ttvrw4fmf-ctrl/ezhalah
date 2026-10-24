@@ -90,10 +90,10 @@ check('both controls declare accessibilityRole="button"',
   /accessibilityRole="button"/.test(backBlock) && /accessibilityRole="button"/.test(skipBlock));
 check('«رجوع» carries the RTL-aware back chevron (the AuthModal idiom: forward in RTL, back in LTR)',
   /isRTL \? 'chevron-forward' : 'chevron-back'/.test(backBlock));
-check('the labels are button-weight, not footnote-weight (semibold ≥14, ink-dark)',
+check('the labels are button-weight, not footnote-weight (semibold ≥14, theme-aware ink)',
   /secondaryTxt:\s*\{[^}]*font\.family\.semibold/.test(cardRaw)
   && /secondaryTxt:\s*\{[^}]*fontSize:\s*14/.test(cardRaw)
-  && /secondaryTxt:\s*\{[^}]*color:\s*colors\.dark/.test(cardRaw));
+  && /secondaryTxt:\s*\{[^}]*color:\s*colors\.ink/.test(cardRaw));
 check('design tokens only — no raw hex/rgba anywhere in the card',
   !/#[0-9a-fA-F]{3,8}\b/.test(cardSrc) && !/rgba\(/.test(cardSrc));
 
