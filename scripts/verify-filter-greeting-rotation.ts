@@ -136,7 +136,7 @@ check('exactly 100 English rows are seeded (stored for future English support, p
 const arSeedFile = readdirSync(join(root, 'supabase/migrations')).filter((f) => f.endsWith('.sql')).sort().reverse()
   .find((f) => /delete from public\.ui_filter_greetings where lang = 'ar';/.test(read(`supabase/migrations/${f}`)))!;
 const arSeedMigration = read(`supabase/migrations/${arSeedFile}`);
-check('the newest AR-seeding migration is the 2026-10-24 cut without the word «الله» (same 11 openings, rows 3 and 10 reworded)', arSeedFile === '20261024071112_filter_greetings_without_allah.sql', `found ${arSeedFile}`);
+check('the newest AR-seeding migration is the owner\'s 2026-10-24 wording update', arSeedFile === '20261024071112_filter_greetings_without_allah.sql', `found ${arSeedFile}`);
 check('the AR-seeding migration deletes the old pool before inserting the new one (sort_order stays unique)',
   /delete from public\.ui_filter_greetings where lang = 'ar';/.test(arSeedMigration));
 const arCount = (arSeedMigration.match(/\n {2}\('ar', \d+, /g) ?? []).length;

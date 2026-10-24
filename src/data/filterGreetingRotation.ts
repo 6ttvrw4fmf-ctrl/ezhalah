@@ -4,7 +4,8 @@
 // a rotation between one of those." The previous shape shipped a first-search fallback that showed
 // the retired text on every first search of a session and looked broken to the user.)
 //
-// The 11 rows here are the owner's list from 2026-10-11 (60 on 2026-09-26, originally 100 on 2026-09-18):
+// The 11 rows here are the owner's list from 2026-10-11, with rows 3 and 10 updated on
+// 2026-10-24 to remove «الله» (20261024071112_filter_greetings_without_allah.sql).
 // «there is a lot of cringe … just 2 words with an emoji» — short, natural Saudi greetings, calm emojis,
 // nothing over the top. The 2026-09-26 cut had already removed Gulf-wide/Emirati-leaning entries
 // («مرحبا الساع») and phrases that read forced in Saudi Arabic («أرحب وأسهِل», «مرحبتين كبار»). Also stored
