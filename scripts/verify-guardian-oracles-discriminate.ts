@@ -126,7 +126,12 @@ function makePage(
     if (stubborn) return;
     live = new Set();
     // The hand-off, on a real timer: the card mounts a beat after the modal unmounts.
-    if (pending) { const { hosts, afterMs } = pending; pending = null; setTimeout(() => { live = new Set(hosts); }, afterMs); }
+    // afterMs 0 = NO GAP: the card is already mounted when the modal goes (production since at
+    // least 2026-10-24, sampled every ~40 ms, 6/6) — a poll can never land on an empty screen.
+    if (pending) {
+      const { hosts, afterMs } = pending; pending = null;
+      if (afterMs <= 0) live = new Set(hosts); else setTimeout(() => { live = new Set(hosts); }, afterMs);
+    }
   };
   const p = {
     groundPresses: 0,
@@ -142,6 +147,7 @@ function makePage(
       const click = async () => { p.closeClicks++; closed(); };
       return {
         host,
+        getAttribute: async (a: string) => (a === 'data-testid' ? host.match(/"([^"]+)"/)![1] : null),
         click,
         $: async (s: string) => (s === CLOSE_X && live.has(CLOSE_X) && host !== MODAL ? { click } : null),
       };
@@ -216,6 +222,16 @@ console.log('\n§2b a dismissal verdict survives the modal→card hand-off (#118
   const second = await dismissAuthInvitation(p as never, 2000);
   check('dismiss → reappeared → dismiss again ends stably gone (the journey\'s own sequence)',
     first === 'reappeared' && second === 'dismissed');
+}
+{
+  // THE 2026-10-24 CANARY FLAKE: the hand-off with NO gap. The old verdict needed to SEE a zero, so
+  // against this page it waited out its budget and called a closed modal 'still-open' — a
+  // HarnessError, an UNDETERMINED journey, an aborted release. The identity check reads it right.
+  const p = makePage([MODAL], false, { hosts: [CARD, CLOSE_X], afterMs: 0 });
+  const first = await dismissAuthInvitation(p as never, 1000);
+  const second = await dismissAuthInvitation(p as never, 1000);
+  check('a gapless modal→card hand-off reports "reappeared", never "still-open"', first === 'reappeared');
+  check('…and the card that took over then dismisses for real', second === 'dismissed');
 }
 // KNOWN BOUND, stated rather than hidden: the hold is 1500 ms against a measured 250-750 ms
 // hand-off. A presentation that took longer than the hold to mount would read as 'dismissed'. The
@@ -343,6 +359,16 @@ console.log('§2 mutations — the real file is edited and re-executed');
       return 'dismissed';`, `      return 'dismissed';`),
     (r) => r === 'dismissed',
     () => makePage([MODAL], false, { hosts: [CARD, CLOSE_X], afterMs: 600 }),
+  );
+
+  // M6 — THE 2026-10-24 FLAKE ITSELF: judge the hand-off only by catching an empty screen. On the
+  // gapless page there is none to catch, so a modal that closed reads 'still-open' — the UNDETERMINED
+  // that aborted two canaries on a healthy build.
+  await withMutation(
+    'dropping the identity check, so a gapless modal→card hand-off reads as a modal that never closed',
+    (s) => s.replace("    if ((await countVisible(page, closed)) === 0) return 'reappeared';\n", ''),
+    (r) => r === 'still-open',
+    () => makePage([MODAL], false, { hosts: [CARD, CLOSE_X], afterMs: 0 }),
   );
 
   // M5 — the scoped × reverted to a page-wide lookup: it reaches for a control that belongs to a
