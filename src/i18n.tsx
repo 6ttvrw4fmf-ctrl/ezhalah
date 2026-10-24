@@ -174,7 +174,7 @@ const AR: Record<string, string> = {
   'Annual: 12-month lease, price/year.': 'سنوي: السعر المعروض سنوي.',
   // Owner 2026-08-18: the Monthly note says ONLY that prices are displayed per month — never any
   // claim about contract length (the old «من شهر إلى 11 شهر» wording is banned; a guard pins it out).
-  'Monthly: the displayed price is the monthly price.': 'الأسعار معروضة بالشهر',
+  'Monthly: prices are per month as the source states them. Short stays are included; open one to see prices by length of stay.': 'شهري: الأسعار بالشهر كما يذكرها المصدر. الإقامات القصيرة مشمولة، وأسعارها حسب مدة الإقامة عند فتح الإعلان.',
   'Yearly: the displayed price is the yearly price.': 'سنوي: السعر المعروض سنوي.',
   // Owner feedback (2026-08-22): trimmed — the old wording ("Both: we show monthly and yearly
   // together") re-explained what selecting both buttons already makes obvious. Kept only the one
