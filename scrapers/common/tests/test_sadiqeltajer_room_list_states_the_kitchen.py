@@ -101,3 +101,11 @@ def test_mutation_without_the_box_reader_ac_is_lost(monkeypatch):
     monkeypatch.setattr(S, "unit_description_text", lambda page_html, property_type: None)
     row, _cat, _why = S.map_listing("https://sadiq-eltajer.sa/ad/8134", page_with_box(HEAD, "البيع شامل (المكيفات)"))
     assert "air_conditioner" not in row   # so test_12218852_ac_stated_in_its_description_box catches its loss
+
+
+def test_only_columns_the_tables_have_are_written():
+    """information_schema 2026-10-24: neither sadiqeltajer table has balcony_terrace or optical_fibers."""
+    row, _cat, why = S.map_listing("https://sadiq-eltajer.sa/ad/8134", page_with_box(HEAD, "بلكونة , الياف بصرية , مطبخ"))
+    assert row, why
+    assert row.get("kitchen") is True
+    assert "balcony_terrace" not in row and "optical_fibers" not in row
