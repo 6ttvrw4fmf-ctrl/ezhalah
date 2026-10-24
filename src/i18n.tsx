@@ -81,7 +81,37 @@ export function persistLocale(l: Locale): void {
   }
 }
 
-let _locale: Locale = readSavedLocale();
+// THE LANGUAGE SURVIVES THE SIGN-IN ROUND TRIP (2026-10-24: a visitor who picked English and signed in
+// with Google or Apple landed back in Arabic). The OAuth redirect leaves the page and comes back on a
+// FRESH load, where a guest's choice is never read (guests start in Arabic — pinned by
+// scripts/verify-chat-language-is-not-interface-language.ts). So the choice is handed across that ONE
+// trip: written just before the redirect (lib/auth.ts signInWithProvider), read once by the /auth
+// landing and removed there, and only while fresh. Once signed in, the store saves it like any
+// signed-in choice. Any other page ignores it, so an abandoned sign-in never turns a guest's next
+// visit English. Guard: scripts/verify-language-survives-sign-in.ts
+export const SIGN_IN_LOCALE_KEY = 'ezhalah:signInLocale:v1';
+export const SIGN_IN_LOCALE_MAX_MS = 10 * 60 * 1000;
+type KeyStore = { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void };
+/** The language to start the /auth landing in, taken (read + removed) from the store; null anywhere else. */
+export function takeSignInLocale(store: KeyStore | null | undefined, path: string, now: number): Locale | null {
+  if (!store || !/^\/auth(\.html)?\/?$/.test(path)) return null;
+  try {
+    const raw = store.getItem(SIGN_IN_LOCALE_KEY);
+    store.removeItem(SIGN_IN_LOCALE_KEY);
+    const v = JSON.parse(raw ?? 'null');
+    const age = now - Number(v?.at);
+    return (v?.locale === 'en' || v?.locale === 'ar') && age >= 0 && age < SIGN_IN_LOCALE_MAX_MS ? v.locale : null;
+  } catch { return null; }
+}
+/** Called right before an OAuth redirect: carry the language on screen to the /auth landing. */
+export function rememberLocaleForSignIn(): void {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  try { window.localStorage?.setItem(SIGN_IN_LOCALE_KEY, JSON.stringify({ locale: _locale, at: Date.now() })); } catch {}
+}
+const signInLandingLocale = (): Locale | null =>
+  Platform.OS === 'web' && typeof window !== 'undefined' ? takeSignInLocale(window.localStorage, window.location?.pathname ?? '', Date.now()) : null;
+
+let _locale: Locale = signInLandingLocale() ?? readSavedLocale();
 let _localeRevision = 0;
 export const getLocaleRevision = (): number => _localeRevision;
 export const getLocale = (): Locale => _locale;
