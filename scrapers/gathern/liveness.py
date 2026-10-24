@@ -318,6 +318,15 @@ def _opens_at_ar_view(s, url: str) -> bool:
     return _ar_view_status(s, url) == 200
 
 
+def fallback_read(status: int, fb, url: str) -> int:
+    """A direct read that gave no verdict, re-read through `fb` (the proxy) when one is given; only a
+    200 from it is taken (the run's controls were read on the direct egress, so a proxy-side 404 is
+    unguarded and stays no verdict). Anything the direct read decided is returned untouched."""
+    if fb is None or status not in (0, HOME_LANDED):
+        return status
+    return 200 if probe(fb, url) == 200 else status
+
+
 def proxied_session(use_proxy: bool):
     """gathern's own detail session, optionally routed through the shared Saudi residential proxy.
 
@@ -864,6 +873,12 @@ def main() -> int:
                          "manufacturing false deaths. EXPLICIT opt-in: the secret is metered and "
                          "shared, so it is never inherited silently, and the run reports under "
                          f"'{RUN_NAME_PROXY}' so mon_detect_proxy_contention() counts it.")
+    ap.add_argument("--proxy-fallback", action="store_true",
+                    help="Re-read ONLY the units the direct read left without a verdict through the "
+                         "residential proxy (WASALT_PROXY_URL), and take only a 200 from it. Explicit "
+                         "opt-in like --proxy (2026-10-24: 15 served units read «transient» for 1-3 "
+                         "days because the datacenter egress lands on gathern's home page; the proxy "
+                         "read 11 of them alive and the rest 404). About 20 pages an hour.")
     ap.add_argument("--canaries", type=int, default=MIN_CANARIES * 2,
                     help="How many known-alive control listings to probe BEFORE the worklist. If "
                          "they do not come back alive the whole run is quarantined: 0 strikes, 0 "
@@ -939,6 +954,7 @@ def main() -> int:
         kill_cap = resolve_kill_cap(active_now)
 
     s = proxied_session(args.proxy)
+    fb = proxied_session(True) if (args.proxy_fallback and not args.proxy) else None
 
     # ── CANARY: prove the environment BEFORE deciding any real listing's fate ────────────────────
     # Owner rule 2026-09-03. The trust gate is a lagging signal — it can only condemn a run once the
@@ -1010,7 +1026,7 @@ def main() -> int:
             if not url:
                 continue
             seen += 1
-            status = probe(s, url)
+            status = fallback_read(probe(s, url), fb, url)
             mc_before = int(row.get("missing_count") or 0)
             action, new_missing = classify(status, row.get("missing_count"), args.grace)
             evidence = {
