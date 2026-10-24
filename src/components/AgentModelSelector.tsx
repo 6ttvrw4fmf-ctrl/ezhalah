@@ -70,7 +70,7 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
         // (TAP44_DOWN) so it never takes the bottom of the mic 3px above it.
         // @ts-expect-error web-only DOM props on the RNW host node
         dataSet={{ ...TAP44, ...TAP44_DOWN }}
-        style={({ pressed }) => [styles.trigger, { direction: 'ltr', flexDirection: arabic ? 'row-reverse' : 'row', opacity: disabled ? 0.45 : 1 }, pressed && styles.pressed]}>
+        style={[styles.trigger, { direction: 'ltr', flexDirection: arabic ? 'row-reverse' : 'row' }]}>
         {/* No ⌄ arrow (owner 2026-10-10: «for shaheen 2.2 don't include this drop menu thing») — keep the name and decorative mark compact. */}
         <ModelMark model={model} size={16} />
         <Text style={styles.label} numberOfLines={1}>{arabic ? model.ar : model.en} {model.version}</Text>
