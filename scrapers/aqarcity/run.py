@@ -392,6 +392,30 @@ def _redact(text: Optional[str]) -> Optional[str]:
 
 
 # ── Sitemap enumeration ───────────────────────────────────────────────────────
+# THE ARABIC PAGE IS THE SOURCE (2026-10-24, 🆕). Since 2026-10-22 04:34 UTC aqarcity's sitemap lists
+# /en/property/<id>, and that page is now really English: «Apartment for rent in Ar Rawdah, Riyadh», an English
+# spec table and JSON-LD city «Riyadh». Every label this parser reads is Arabic (التصنيف, نوع العرض …), so all
+# 2,102 /en/ rows were stored as Buy with type «unknown», rents included, and 298 new ones with no city at all
+# (1,901 served as «بيع / غير معروف»). The same ad at /property/<id> is the Arabic page (214 rows read right in
+# the same crawl). So every url is fetched as /property/<id>, one per id.
+_EN_PREFIX = re.compile(r"^(https?://[^/]+)/en(/property/\d+)$")
+
+
+def arabic_url(u: str) -> str:
+    return _EN_PREFIX.sub(r"\1\2", u)
+
+
+def is_english_page(body: str, pi: dict, ld: Optional[dict]) -> bool:
+    """True for the English rendering. Its labels are not the Arabic ones this parser reads, so a row mapped
+    from it would be Buy / «unknown» by construction — it is skipped, never written."""
+    if re.search(r"<html[^>]*\blang=\"en", body or "", re.I):
+        return True
+    arabic = re.compile(r"[\u0600-\u06FF]")
+    if pi:
+        return not any(arabic.search(k) for k in pi)
+    return not arabic.search(str((ld or {}).get("name") or ""))
+
+
 def sitemap_urls(s: cc.Session) -> list[str]:
     """Return /property/<id> URLs from the sitemap (a plain urlset, or an index of child sitemaps)."""
     urls: list[str] = []
@@ -417,7 +441,7 @@ def sitemap_urls(s: cc.Session) -> list[str]:
             pass
     # de-dup, keep ONLY /property/<id> (exclude /properties/, /property/create, etc.)
     seen, out = set(), []
-    for u in urls:
+    for u in map(arabic_url, urls):
         if re.search(r"/property/\d+$", u) and u not in seen:
             seen.add(u)
             out.append(u)
@@ -790,6 +814,8 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         return None, "residential"
     pid = re.search(r"/property/(\d+)", url).group(1)
     pi = _pi_table(body)
+    if is_english_page(body, pi, ld):
+        return None, "residential"
     crumb = _breadcrumb_parts(bc)
 
     # ── type + category ──
