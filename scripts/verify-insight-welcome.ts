@@ -122,8 +122,10 @@ check('no sentence uses «حيك» (owner rule 2026-10-17)', templates.every((t)
 const t1 = templates.find((t) => t.kind === 'land_ppm_city')!;
 const r1 = renderInsight(t1, { id: 1, kind: t1.kind, ...base }, en)!;
 const morning = GREETINGS.findIndex((g) => g.ar === 'صباح الخير');
-const shownAr = fillName(fillGreeting(r1.ar, morning, 'ar'), 'يوسف', 'ar')!;
-const shownEn = fillName(fillGreeting(r1.en, morning, 'en'), 'Yusuf', 'en')!;
+// The name is bidi-isolated (U+2068 … U+2069, invisible): compare what the reader sees.
+const vis = (s: string) => s.replace(/[\u2068\u2069]/g, '');
+const shownAr = vis(fillName(fillGreeting(r1.ar, morning, 'ar'), 'يوسف', 'ar')!);
+const shownEn = vis(fillName(fillGreeting(r1.en, morning, 'en'), 'Yusuf', 'en')!);
 check('Arabic shows «صباح الخير يوسف، تدري إن …»', shownAr.startsWith('صباح الخير يوسف، تدري إن'), shownAr);
 check('English shows the SAME line translated, with «Good morning Yusuf»', shownEn.startsWith('Good morning Yusuf, did you know'), shownEn);
 check('an Arabic line never shows the Latin name', fillName(fillGreeting(r1.ar, morning, 'ar'), 'Yusuf', 'ar') === null);
@@ -182,7 +184,7 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
   check('every line ends with its greeting\'s emoji (☀️ morning, 🌙 evening, 🕌 Friday, 🌴 weekend, 👋 any time), the full stop dropped', allEnds, bad.join(' | '));
   check('the emoji table is exactly the owner\'s', JSON.stringify(GREETING_EMOJI) === JSON.stringify(want));
   const morning = GREETINGS.findIndex((g) => g.ar === 'صباح الخير');
-  const shown = fillName(fillGreeting(line.ar, morning, 'ar'), 'يوسف', 'ar')!;
+  const shown = vis(fillName(fillGreeting(line.ar, morning, 'ar'), 'يوسف', 'ar')!);
   check('Arabic reads «صباح الخير يوسف، تدري إن … اكتشف أراضيها مع إزهله ☀️»', shown.startsWith('صباح الخير يوسف، تدري إن') && shown.endsWith('مع إزهله ☀️'), shown);
 }
 

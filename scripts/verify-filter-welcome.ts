@@ -179,7 +179,7 @@ mustCatch('a reducer that never settles on timeout (the title would hold at opac
   !neverSwaps((s, ev) => (ev.type === 'timeout' ? s : headlineReduce(s, ev))));
 const homeSrc = (await import('node:fs')).readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
 check('the Filter home holds the title\'s entrance on welcomeSettled',
-  /useFilterWelcome\(!!user, pickName\(user, locale\)/.test(homeSrc) && /if \(!welcomeSettled\) return;/.test(homeSrc)
+  /useFilterWelcome\(!!user, sentenceName\(user, locale\)/.test(homeSrc) && /if \(!welcomeSettled\) return;/.test(homeSrc)
   && !/RNAnimated\.parallel\(\[rise\(badgeAnim, 80\), rise\(titleAnim, 230\)/.test(homeSrc));
 
 // ── 11. instant: the headline comes from device memory, no network in the way (owner 2026-10-17) ──
@@ -311,7 +311,8 @@ mustCatch('a picker that ignores the previous line', !neverRepeats((now, _last, 
   check('a Latin name is never put into an Arabic line', fillName(slotted, 'yusuf', 'ar') === null);
   check('English line gets the Latin name', fillName(renderWelcome(line(24), NAME_SLOT, { ...FACTS, city: { ar: 'الرياض', en: 'Riyadh', count: 162_312 } }, 'en'), 'yusuf', 'en')?.includes('yusuf') === true, String(renderWelcome(line(24), NAME_SLOT, FACTS, 'en')));
   check('no name → no line', fillName(slotted, '  ', 'ar') === null);
-  check("the hook takes BOTH spellings from pickName (the menu's own rule)", /pickName\(names, 'ar'\)/.test(hookSrc) && /pickName\(names, 'en'\)/.test(hookSrc));
+  // sentenceName = pickName (the menu's own rule) minus the other script (owner P1 2026-10-24: «يوسف, the market…»).
+  check("the hook takes BOTH spellings from sentenceName (pickName, never the other script)", /sentenceName\(names, 'ar'\)/.test(hookSrc) && /sentenceName\(names, 'en'\)/.test(hookSrc));
   check('the hook remembers lines with the name SLOT and fills the name per language when shown',
     /name: NAME_SLOT/.test(hookSrc) && /const nm = NAME_SLOT;/.test(hookSrc) && /fillName\(fillGreeting\(shown\.ar, shown\.greet \?\? null, 'ar'\), live \|\| shown\.nameAr, 'ar'\)/.test(hookSrc)
     && /fillName\(fillGreeting\(shown\.en, shown\.greet \?\? null, 'en'\), live \|\| shown\.nameEn, 'en'\)/.test(hookSrc)
@@ -367,7 +368,7 @@ mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a U
   const g = greetingFor(uids[3], 0, NAME_SLOT)!;
   check('the welcome is rendered in BOTH languages at once, so switching language shows the same line translated',
     !!g && fillName(g.ar, 'يوسف', 'ar')!.includes('يوسف') && fillName(g.en, 'Yusuf', 'en')!.includes('Yusuf')
-    && GREET_LINES.find((l) => l.id === g.id)!.en.replace('{n}', 'Yusuf') === fillName(g.en, 'Yusuf', 'en'));
+    && GREET_LINES.find((l) => l.id === g.id)!.en.replace('{n}', 'Yusuf') === fillName(g.en, 'Yusuf', 'en')!.replace(/[\u2068\u2069]/g, '')); // the name is bidi-isolated (invisible)
   check('an Arabic welcome never shows a Latin name (the normal headline stays instead)', fillName(g.ar, 'Yusuf', 'ar') === null);
   const tNow = new Date('2026-10-14T21:00:00');
   const held = { id: g.id, at: tNow.getTime() - 10 * 60_000, ar: g.ar, en: g.en };

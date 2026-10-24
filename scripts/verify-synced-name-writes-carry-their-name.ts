@@ -128,6 +128,7 @@ const liftPersistName = async (src = ACC) => {
     `const applySyncedName = (p: any) => __g.__liftedGuard(p);\n` +
     `const updateUser = (p: any) => { const g = __g.__nameRig; if (g.user) g.user = { ...g.user, ...p }; };\n` +
     `const persistDisplayName = (v: string) => { __g.__nameRig.backend.push(v); };\n` +
+    `const persistNameSpellings = (_s: any) => {};\n` +
     `const scriptOf = (v: string) => (/[\\u0600-\\u06FF]/.test(v) ? 'ar' : 'en');\n` +
     `const initialsOf = (v: string) => v.trim().charAt(0).toUpperCase();\n` +
     `const buildSyncedName = (typed: string) => {\n` +

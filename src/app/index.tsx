@@ -38,7 +38,7 @@ import { InsightHowItWorks } from '@/components/InsightHowItWorks';
 import { decodeSharePayload, decodeInvitePayload, shareJoinNote, shareLandingTitle, shareInviteNote, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
 import { fetchSharedChat, fetchSharedChatCard } from '@/lib/sharedChat';
 import { isProbeFailure } from '@/lib/afProbe';
-import { pickName } from '@/lib/nameSync';
+import { sentenceName } from '@/lib/nameSync';
 import { useI18n, tDetailOption, tPriceTab, isLatinOnlyInput, ARABIC_ONLY_MSG, CITY_REQUIRED_MSG, DISTRICT_UNCONFIRMED_MSG } from '@/i18n';
 
 const MAX_W = 560; // desktop-web: keep the mobile-first column centered
@@ -264,7 +264,7 @@ export default function Home() {
   // signed in, until the line's numbers are in — then it rises once and is final for this load.
   // «كيف تشتغل؟» opens when the user taps a market fact in the headline (owner 2026-10-22).
   const [howOpen, setHowOpen] = useState(false);
-  const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey, isInsight: welcomeIsInsight } = useFilterWelcome(!!user, pickName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
+  const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey, isInsight: welcomeIsInsight } = useFilterWelcome(!!user, sentenceName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
   // «حفظ» in the «وش نناديك؟» box: while its party plays, the welcome headline shines (2 passes, owner-approved demo).
   const [heroShine, setHeroShine] = useState(false);
   useEffect(() => {
@@ -1453,7 +1453,7 @@ export default function Home() {
           <HomeWebsiteStrip />
           <View style={s.hero}>
             <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
-              <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' } } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
+              <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
             </Pressable>
             <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
             <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>
