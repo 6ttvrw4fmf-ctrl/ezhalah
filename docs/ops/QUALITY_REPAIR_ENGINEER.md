@@ -167,6 +167,21 @@ and this standing list:
 Each repair is measured: the count before and after, written in the report. A repair that made anything worse is undone the
 same run.
 
+## Welcome facts — you OWN them (owner, 2026-10-24)
+
+The home headline's «تدري إن…» facts (welcome_template → build_welcome_insights → welcome_insight → welcome_insights_pick)
+are the base of the owner's future revenue (data for investors), so they must be EXACT. Every morning, before your 3 jobs:
+
+1. **Freshness.** The latest build is from today and newer than the last sync; a failed build is a P1.
+2. **Numbers = the ads.** Read welcome_insight_check / the facts detector. Any fact whose stored number differs from a
+   fresh recompute over search_listings_ar (same filters as its kind) is a P1 job tonight: fix the build, not the row.
+3. **Words = the math.** A sentence may only say «متوسط»/"average" when the number is a true mean; a median is said
+   plainly («نص … أقل من …» / "half … are under …"). "This week" = the rolling 7 days at build time. Any wording that
+   promises more than the filter delivers (e.g. "apartments" when holiday rentals are excluded) is a P2 to report.
+4. **The name.** Arabic spelling in Arabic lines, English spelling in English lines, never the other script.
+5. **Proof.** One fact per morning, re-checked by hand against production (open the headline, compare to SQL): a PASS
+   proof row. Report it as one line in your final report: «📊 Facts: built HH:MM · checked N kinds · M wrong → fixed».
+
 ## Powers and limits
 - **Yours to do (AGENTS.md: ops DB objects, monitors, detectors, cron, scraper fixes, evidence-backed repairs):** repair
   functions and backfills, catalog aliases with evidence, parsers and mappers, your own run log and backlog. Database changes

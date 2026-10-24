@@ -23,6 +23,13 @@ export function InsightHowItWorks({ visible, locale, onClose }: { visible: boole
               accessible={false}
               testID="insight-how-falconer"
             />
+            <Image
+              source={require('../../assets/icons/insight-falconer-original.png')}
+              style={s.falconer}
+              resizeMode="contain"
+              accessible={false}
+              testID="insight-how-falconer-original"
+            />
           </View>
           {c.sections.map((x) => (
             <View key={x.title} style={s.section}>
