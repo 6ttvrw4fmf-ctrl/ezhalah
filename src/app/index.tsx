@@ -1374,7 +1374,8 @@ export default function Home() {
         contentContainerStyle={[s.scroll, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}
         keyboardShouldPersistTaps="handled"
       >
-        <RNAnimated.View style={[s.col, entranceStyle]}>
+        <RNAnimated.View style={[s.page, entranceStyle]}>
+          <View style={s.col}>
           {/* Top bar is pinned LTR (see s.top) so the menu always sits on the physical LEFT — it does
               NOT mirror to the right under Arabic. Matches the docked side menu, which is left in both
               languages per product decision. */}
@@ -1445,8 +1446,12 @@ export default function Home() {
             </View>
           </View>
 
-          {/* Hero — title then subtitle rise in, staggered (user request). */}
+          </View>
+
+          {/* Logos use the available page width; the form keeps its readable column. */}
           <HomeWebsiteStrip />
+          <View style={s.col}>
+          {/* Hero — title then subtitle rise in, staggered (user request). */}
           <View style={s.hero}>
             <CloudWisp variant={1} width={100} height={34} opacity={0.38} style={{ left: -40, top: 12 }} />
             <CloudWisp variant={2} width={90} height={28} opacity={0.32} style={{ right: -35, bottom: 18 }} />
@@ -2316,6 +2321,7 @@ export default function Home() {
               behind — `git revert` of that commit restores the whole block. The styles (onbWrap/
               onbHeading/onbDesc/suggGrid/chip*) are deliberately KEPT so a restore needs no re-authoring.
               The AI Agent page still shows its own version of this block to guests. */}
+          </View>
         </RNAnimated.View>
       </ScrollView>
 
@@ -2398,6 +2404,7 @@ const s = StyleSheet.create({
   sharedButtonText: { color: colors.onFill, fontSize: 16, fontWeight: '700' },
 
   scroll: { paddingHorizontal: space.screenSide, alignItems: 'center' },
+  page: { width: '100%', alignItems: 'center' },
   col: { width: '100%', maxWidth: MAX_W },
 
   // Force LTR for the top bar so it never mirrors under Arabic: the hamburger stays pinned to the
