@@ -541,7 +541,7 @@ export default function AdvancedQuestionCard({
             ]}
             testID="af-back" onPress={onBack} hitSlop={8} accessibilityRole="button"
           >
-            <Ionicons name={isRTL ? 'chevron-forward' : 'chevron-back'} size={16} color={colors.dark} />
+            <Ionicons name={isRTL ? 'chevron-forward' : 'chevron-back'} size={16} color={colors.ink} />
             <Text style={s.secondaryTxt}>{t('Back')}</Text>
           </Pressable>
           {hideSkip ? null : (
@@ -598,7 +598,7 @@ const s = StyleSheet.create({
 
   // Opening state — count first (the reward), then the invitation, then one soft supporting line.
   introBody: { paddingHorizontal: space.card, paddingTop: 22, paddingBottom: 20, alignItems: 'center' },
-  introCount: { fontFamily: font.family.bold, fontSize: 26, color: colors.dark, fontVariant: ['tabular-nums'] },
+  introCount: { fontFamily: font.family.bold, fontSize: 26, color: colors.ink, fontVariant: ['tabular-nums'] },
   introTitle: { fontFamily: font.family.bold, fontSize: 17, color: colors.ink, marginTop: 10, textAlign: 'center' },
   introSupport: { fontFamily: font.family.regular, fontSize: 13, color: colors.muted, lineHeight: 20, marginTop: 8, textAlign: 'center', maxWidth: 300 },
   introFoot: { marginTop: 20, alignSelf: 'stretch', gap: 12, alignItems: 'center' },
@@ -669,5 +669,5 @@ const s = StyleSheet.create({
   secondaryBtnHover: { backgroundColor: colors.segTrack },
   secondaryBtnPress: { backgroundColor: colors.segTrack, borderColor: colors.pickLine, transform: [{ scale: 0.98 }] },
   secondaryBtnFocus: { borderColor: colors.primary },
-  secondaryTxt: { fontFamily: font.family.semibold, fontSize: 14, color: colors.dark },
+  secondaryTxt: { fontFamily: font.family.semibold, fontSize: 14, color: colors.ink },
 });

@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Image } from 'expo-image';
+import CloudWisp from './CloudWisp';
+import { cloudVariant, skyScene } from '@/theme/skyScene';
 import { useResolvedTheme } from '@/lib/appearance';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { PLATFORM_PICKER_PROFILES } from '@/data/platformPickerProfiles';
@@ -18,7 +20,7 @@ export function stripWindow(phase: number, count: number): { start: number; offs
  *  painted white). The track used to hold every logo twice — ~150 × 2 × 108 px ≈ 32,000 px wide — as ONE
  *  `will-change: transform` layer, the shape iOS Safari drops tiles for under memory pressure. Now only
  *  STRIP_WINDOW logos are mounted. Every frame reads the wall clock (homeWebsiteStripShared.ts stripPhase,
- *  same 45 px/s, same place on both screens) and slides the small track; when a logo has fully left, the
+ *  same 12 px/s, same place on both screens) and slides the small track; when a logo has fully left, the
  *  window steps to the next one and the slide restarts from 0 in the same commit (useLayoutEffect), so the
  *  step is invisible. The static export pre-renders this markup; the phase is read on the client AFTER
  *  mount and the strip stays invisible until then. Reduced motion: static at the clock's position. */
@@ -63,11 +65,12 @@ export default function HomeWebsiteStrip() {
     const at = start + j;
     return { name: names[at % n], key: `${names[at % n]}-${Math.floor(at / n)}` };
   });
-  return <div data-testid="home-website-strip" aria-hidden="true" dir="ltr" style={{ width: '100%', maxWidth: 560, height: 48, alignSelf: 'center', marginTop: 8, marginBottom: 12, overflow: 'hidden', opacity: phase === null ? 0 : 1, transition: reduced ? undefined : 'opacity 240ms ease-out' }}>
+  return <div data-testid="home-website-strip" aria-hidden="true" dir="ltr" style={{ width: '100%', maxWidth: 560, height: skyScene.stripHeight, alignSelf: 'center', marginTop: 8, marginBottom: 12, overflow: 'hidden', opacity: phase === null ? 0 : 1, transition: reduced ? undefined : 'opacity 240ms ease-out' }}>
     <div ref={trackRef} data-testid="home-website-track" data-phase={phase === null ? undefined : Math.round(phase)} style={{ display: 'flex', width: 'max-content', visibility: phase === null ? 'hidden' : undefined }}>
       {slots.map(({ name, key }) => {
         const profile = PLATFORM_PICKER_PROFILES[name];
-        return <div key={key} data-website={name} style={{ flex: `0 0 ${STRIP_SLOT}px`, height: 48, display: 'flex', justifyContent: 'center' }}>
+        return <div key={key} data-website={name} style={{ flex: `0 0 ${STRIP_SLOT}px`, position: 'relative', height: skyScene.stripHeight, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <CloudWisp variant={cloudVariant(name)} width={112} height={44} opacity={0.8} style={{ left: -4, bottom: 0 }} />
           {/* clipPath + contain, not overflow alone: 17 logos are laid out LARGER than this frame and rely on
               the clip. iOS Safari skips an overflow:hidden clip inside the animated (composited) track, so
               those logos spilled across their neighbours — owner iPhone screenshot 2026-10-17. */}
