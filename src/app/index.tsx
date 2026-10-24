@@ -1572,7 +1572,7 @@ export default function Home() {
                   ))}
                 </View>
                 <Text style={s.rentHint}>
-                  {t(rentPeriod === 'monthly' ? 'Monthly: the displayed price is the monthly price.'
+                  {t(rentPeriod === 'monthly' ? 'Monthly: includes short stays, priced by length of stay.'
                     // Owner feedback (2026-08-22): drop the "this means you want both, so you get
                     // both" framing — selecting both buttons is already self-explanatory. Keep only
                     // the one genuinely non-obvious fact: mixed results show mixed price units.
