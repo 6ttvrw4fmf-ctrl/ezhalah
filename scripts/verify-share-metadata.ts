@@ -50,6 +50,20 @@ const NAMES_COUNTRY = /المملكة|السعودية/;
 // JSX comments are stripped: this file's own prose quotes the tags it is checking for.
 const code = (s: string) => s.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
 
+// Owner 2026-10-24: the in-app tile now uses the original eagle over moving clouds.
+// External crawlers still receive the approved static OG image; those checks remain separate.
+function auditInAppPreview(sheet: string, sky: string): string[] {
+  const s = code(sheet), mark = code(sky).split('export function SkyEagleMark')[1]?.split('const styles')[0] ?? '';
+  const bad: string[] = [];
+  if (!/import \{ SkyEagleMark \} from '\.\/SidebarSky'/.test(s) || !/<SkyEagleMark\b/.test(s))
+    bad.push('the share preview lost its cloud-backed eagle');
+  if (!sky.includes("require('../../assets/images/eagle-mark.png')") || !/<Image source=\{EAGLE\}/.test(mark))
+    bad.push('the original eagle artwork is missing');
+  if (!/<LinearGradient\b/.test(mark) || !/<CloudWisp\b/.test(mark))
+    bad.push('the eagle tile lost its sky or clouds');
+  return bad;
+}
+
 /** Every way a shared link can arrive without a preview. Pure, so the proofs below can break it. */
 export function auditShareMeta(layout: string, share: string, exists: (p: string) => boolean): string[] {
   const l = code(layout), s = code(share);
@@ -130,7 +144,12 @@ if (existsSync(OG_FILE)) {
   check('the share artwork matches the owner-selected icon exactly', buf.equals(readFileSync('public/icon-192.png')));
   check('metadata dimensions match the actual image', L.includes('property="og:image:width" content="192"') && L.includes('property="og:image:height" content="192"'));
   const sheet = readFileSync('src/components/ShareSheet.tsx', 'utf8');
-  check('the in-app preview uses the same approved artwork', sheet.includes("require('../../public/og-image-v6.png')"));
+  const sky = readFileSync('src/components/SidebarSky.tsx', 'utf8');
+  check('the in-app preview uses the approved eagle with sky and clouds', auditInAppPreview(sheet, sky).length === 0);
+  mustCatch('the in-app eagle tile is removed', auditInAppPreview(sheet.replace(/<SkyEagleMark\b[^>]*\/>/, ''), sky));
+  mustCatch('the original eagle artwork is removed', auditInAppPreview(sheet, sky.replace('<Image source={EAGLE}', '<Image source={null}')));
+  mustCatch('the eagle clouds are removed', auditInAppPreview(sheet, sky.replace(/<CloudWisp\b/g, '<View')));
+  mustCatch('the eagle sky is removed', auditInAppPreview(sheet, sky.replace(/<LinearGradient\b/g, '<View')));
   const kb = Math.round(buf.length / 1024);
   check(`the share image is under 300KB so crawlers fetch it (${kb}KB)`, kb <= 300);
 }
@@ -139,4 +158,4 @@ if (failed) {
   console.error(`\n${failed} check(s) FAILED — a shared Ezhalah link would arrive without its preview`);
   process.exit(1);
 }
-console.log('\nOK — title, og:title, og:description, og:image and twitter tags all declared; 9 mutations caught.');
+console.log('\nOK — share metadata, static OG artwork and cloud-backed in-app preview verified; mutations caught.');

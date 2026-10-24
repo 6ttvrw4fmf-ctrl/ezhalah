@@ -30,10 +30,10 @@ export default function HeroBackground({ landscape = false, clouds = true, image
     <View onLayout={(event) => setSceneWidth(event.nativeEvent.layout.width)} testID="sky-backdrop" pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[StyleSheet.absoluteFill, { overflow: 'hidden' }]}>
       <LinearGradient colors={[pal.skyTop, pal.skyBottom]} style={StyleSheet.absoluteFill} />
       {clouds && <>
-      <CloudWisp variant={0} width={Math.min(sceneWidth * 0.7, 760)} height={180} opacity={0.48} style={{ top: '5%', left: '-16%' }} />
-      <CloudWisp variant={1} width={Math.min(sceneWidth * 0.6, 620)} height={150} opacity={0.4} style={{ top: '20%', right: '-15%' }} />
-      <CloudWisp variant={2} width={Math.min(sceneWidth * 0.62, 670)} height={160} opacity={0.3} style={{ top: '55%', left: '-24%' }} />
-      <CloudWisp variant={3} width={Math.min(sceneWidth * 0.5, 540)} height={130} opacity={0.32} style={{ top: '72%', right: '-18%' }} />
+      <CloudWisp drift variant={0} width={Math.min(sceneWidth * 0.7, 760)} height={180} opacity={0.48} style={{ top: '5%', left: '-16%' }} />
+      <CloudWisp drift variant={1} width={Math.min(sceneWidth * 0.6, 620)} height={150} opacity={0.4} style={{ top: '20%', right: '-15%' }} />
+      <CloudWisp drift variant={2} width={Math.min(sceneWidth * 0.62, 670)} height={160} opacity={0.3} style={{ top: '55%', left: '-24%' }} />
+      <CloudWisp drift variant={3} width={Math.min(sceneWidth * 0.5, 540)} height={130} opacity={0.32} style={{ top: '72%', right: '-18%' }} />
       </>}
       <Animated.View testID="desert-foreground" style={[StyleSheet.absoluteFill, fade]}>
         <RNAnimated.View style={[StyleSheet.absoluteFill, { opacity: imageOpacity }]}>

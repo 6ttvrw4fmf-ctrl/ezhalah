@@ -18,6 +18,7 @@ import { colors, darkColors, radius, space, cardShadow } from '@/theme/tokens';
 import { useTheme } from '@/theme/theme';
 import HeroBackground from '@/components/HeroBackground';
 import { SidebarClouds, SkyEagleMark } from '@/components/SidebarSky';
+import CloudWisp from '@/components/CloudWisp';
 import AccountMenu from '@/components/AccountMenu';
 import { useApp, type HistoryItem } from '@/store';
 import { sanitizeArabicSearch, isSearchableQuery, filterChats, arabicHintAfterInput, boldSpans } from '@/lib/chatSearch';
@@ -825,6 +826,8 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                             // must never rename, and a double-click must never drag.
                             accessibilityHint={t('Hold to reorder the conversation')}
                           >
+                            <CloudWisp drift variant={idx % 4} width={130} height={22} opacity={hot ? 0.08 : 0.25}
+                              style={{ bottom: -5, right: 25 }} />
                             <Ionicons name="chatbubble-outline" size={15} color={hot ? colors.surface : '#8a978f'} />
                             <Text style={[s.histLabel, dark && dks.histLabel, (hot || drag?.id === c.id) && s.histLabelHot]} numberOfLines={1}>
                               {/* Bold the matching text (owner request 2026-09-11) — only while an active
