@@ -218,6 +218,8 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). All registered
 
 - **Model selector (owner, 2026-10-08):** a subtle label below the microphone area opens two
   Claude-style options: **شاهين 2.2 / Shaheen 2.2** (default) and **حُر 4.4 / Hurr 4.4**.
+  The current-model label and mark keep their normal colours while a reply loads, with no pressed
+  background highlight (owner, 2026-10-23). The control remains disabled while the agent is busy.
   Hurr is visible in light gray and disabled, like the unavailable Haiku option in the owner's reference.
   Keep the menu compact: two name/version rows with their descriptions, then a separated
   «لماذا شاهين وحُر؟ / Why Shaheen and Hurr?» link opening the centered «نماذج إزهله» story card
