@@ -3,8 +3,14 @@
 //   node e2e/engineers/journey-lib.mjs        ← runs the asserts below, exits 0 when sound.
 
 /** URL equality the way full-chain.mjs compares: scheme-normalised, no fragment, no trailing /. */
+// A stored ad URL and the URL the card opened are the SAME ad when they differ only by scheme, a
+// trailing slash, a fragment, or a leading language segment: since #7890 the Arabic app opens the
+// localized form of a source URL (src/lib/localizeAdUrl.ts: gathern.co/view/… → /ar/view/…), so a
+// customer who opened the unit still read FAIL «opened …/ar/view/… ≠ stored …/view/…» (🔧 10-23,
+// backlog 801). One leading /ar/ or /en/ is dropped on BOTH sides; the rest of the path must match.
 export const normUrl = (u) =>
-  String(u || '').split('#')[0].replace(/\/+$/, '').replace(/^http:/, 'https:');
+  String(u || '').split('#')[0].replace(/\/+$/, '').replace(/^http:/, 'https:')
+    .replace(/^(https:\/\/[^/]+)\/(?:ar|en)(?=\/|$)/i, '$1');
 
 /** The main search of a بحث press: page 0 of a real page size. index.tsx also fires one
  *  p_limit:1 count probe per visible district, and those can land AFTER the main search —
@@ -161,6 +167,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const assert = (await import('node:assert')).strict;
   assert.equal(normUrl('http://x.sa/a/#frag'), 'https://x.sa/a');
   assert.equal(normUrl('https://x.sa/a'), normUrl('http://x.sa/a/'));
+  // the localized form the Arabic app opens is the stored ad (backlog 801)
+  assert.equal(normUrl('https://gathern.co/ar/view/175503/unit/245201'), normUrl('https://gathern.co/view/175503/unit/245201'));
+  assert.equal(normUrl('https://aoujestates.com/ar/properties/x'), normUrl('https://aoujestates.com/ar/properties/x'));
+  assert.notEqual(normUrl('https://gathern.co/ar/view/1/unit/2'), normUrl('https://gathern.co/view/1/unit/3'), 'a different unit is a different ad');
+  assert.notEqual(normUrl('https://x.sa/area/1'), normUrl('https://x.sa/1'), 'only a whole /ar/ segment is a language, not a prefix of a word');
   assert.ok(isMainSearch({ p_offset: 0, p_limit: 24 }));
   assert.ok(!isMainSearch({ p_offset: 0, p_limit: 1 }), 'district count probe is not the main search');
   assert.ok(!isMainSearch({ p_offset: 24, p_limit: 24 }), 'page 2 is not the main search');
