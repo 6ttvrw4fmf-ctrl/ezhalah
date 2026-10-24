@@ -152,7 +152,18 @@ production deploy. Use it as the rollback target if a future deploy needs to be 
 | Known gaps (unrelated, not a regression) | `log-click` edge function still not deployed (client-side click tracking silently no-ops — this deploy's `clicks.ts` is the OLDER pre-existing version, since click/session work was deliberately excluded from PR #42's scope); custom domain `ezhalah.com` does not point to this project — neither affects the UI baseline |
 | Main has since moved further | `origin/main` is at `fb6107b` (this same PR's baseline-table doc update, #46) — no code change ahead of what's live as of this entry. |
 
-### 2026-10-03 — All lands in one place + «الأراضي» + New Listings Engineer tools (CURRENT LIVE)
+### 2026-10-24 — Model label remains steady during replies (verified deployment)
+
+| Field | Value |
+|---|---|
+| Vercel deployment ID | `dpl_8LsiSnHX87d9SHEnGkrRDiDFWEiT` |
+| Bundle hash | `entry-c2ace1fd590b24c5b9d4cc7b3f8a134a.js` |
+| Deployed from | `main` @ `d6f850bf0f84a4f24c6c258261c18b788da285e4` (PR #8434), guarded workflow run `40061412746`. |
+| Recovery | Stable and canary guardian verdicts matched, with no new regression. CLI 54.18.0 rejected `--yes` on both `rolling-release complete` and `abort`, leaving 10% active despite the old script claiming rollback. Under production lock `codex-model-label-8434-recovery`, retried only completion of the same tested deployment using its ID and supported `--non-interactive` option. Vercel then reported `state: COMPLETE`, `currentCanaryPercentage: 100`. Lock released. |
+| Browser verification | Reloaded the canonical production site, opened «الوسيط الذكي», searched «أرض للبيع في رابغ». While the stop control was visible, «شاهين 2.2» was disabled with opacity `1` and transparent background. After the reply, its model menu opened normally. Opened the first DealApp card and its source `/ar/ad-details/598628?market_place_ad=true`: residential land, Rabigh/Al Marjaniyah, SAR 170,636, licence 7201150652; source area 458.7 m², displayed card area 459 m². |
+| Previous deployment | `dpl_9LokFuPyoTPFccV3DLhy4pG5PW9h` (`ezhalah-c5vhuc1bh-enzalah.vercel.app`). |
+
+### 2026-10-03 — All lands in one place + «الأراضي» + New Listings Engineer tools (superseded)
 
 | Field | Value |
 |---|---|

@@ -12,7 +12,11 @@
 //       EZ_ROLLING_RELEASE, or the gate can never run inside the deploy.
 //
 //   node --experimental-strip-types scripts/verify-canary-gate-fails-closed.ts   (in `npm test`)
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import assert from 'node:assert/strict';
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 const gate = read('scripts/canary-gate.sh');
 const deploy = read('scripts/safe-deploy.sh');
@@ -27,7 +31,7 @@ function gateProblems(g: string): string[] {
   if (!/awk '\$3=="PASS"\{print \$1" "\$2\}'/.test(g) || !/awk '\$3!="PASS"\{print \$1" "\$2\}'/.test(g)) bad.push('regression is not «passed on stable AND not passed on canary» per journey×viewport');
   const completeAt = g.lastIndexOf('rolling-release complete --dpl'); const runAt = g.lastIndexOf('node e2e/guardian/run.mjs');
   if (completeAt < 0 || runAt < 0 || completeAt < runAt) bad.push('`complete` is not after the guardian runs');
-  if (!/rolling-release abort --dpl "\$DPL"/.test(g)) bad.push('abort does not target the deployment');
+  if (!/rolling-release abort --dpl "\$DPL" --non-interactive/.test(g)) bad.push('abort does not target the deployment with supported CLI options');
   // Measured 2026-10-24 04:41 UTC (deploy of #8400): vercel CLI 54.18 rejects `--yes` on rolling-release
   // complete AND abort («unknown or unexpected option: --yes»), so a passing canary could neither promote
   // nor roll back and the release sat at 10% until a person completed it by hand.
@@ -65,6 +69,7 @@ function wfProblems(w: string): string[] {
   if (installAt < 0 || deployAt < 0 || installAt > deployAt) bad.push('the browser is not installed before the deploy step');
   if (!/EZ_ROLLING_RELEASE: \$\{\{ vars\.EZ_ROLLING_RELEASE \}\}/.test(w)) bad.push('the deploy step is not handed EZ_ROLLING_RELEASE');
   if (!/CANARY ABORTED/.test(w)) bad.push('the Report step does not recognise an aborted canary');
+  if (!/CANARY UNRESOLVED/.test(w) || !/rollback was not confirmed/.test(w)) bad.push('the Report step can misreport a failed abort as a successful rollback');
   return bad;
 }
 let failed = 0;
@@ -83,5 +88,72 @@ mustCatch('a baseline advanced before the gate', deployProblems(deploy.replace('
 mustCatch('alias reads that forget the canary pin', deployProblems(deploy.replace(/\$\{CANARY_Q\}/g, '')));
 mustCatch('a harness that drops the pin', harnessProblems(harness.replace('${withCanary(path)}', '${path}')));
 mustCatch('a workflow that forgets the browser', wfProblems(wf.replace('npx playwright install --with-deps chromium', 'true')));
+// Execute the real shell against the CLI's argument contract. A source-text check previously
+// required the unsupported --yes flag, so every gate was green while complete AND abort failed.
+const fixture = mkdtempSync(join(tmpdir(), 'ez-canary-cli-'));
+const bin = join(fixture, 'bin');
+mkdirSync(bin);
+const stub = (name: string, source: string) => writeFileSync(join(bin, name), '#!/usr/bin/env bash\n' + source, { mode: 0o755 });
+stub('git', 'printf "%s\\n" "$CANARY_TEST_ROOT"\n');
+stub('node', `
+if [ "$CANARY_TEST_MODE" = "empty" ]; then exit 0; fi
+for i in a b c d e f g h; do
+  verdict=PASS
+  if [[ "$CANARY_QUERY" = *Canary* && "$i" = a && ( "$CANARY_TEST_MODE" = regression || "$CANARY_TEST_MODE" = abort-fails ) ]]; then verdict=FAIL; fi
+  printf '▶ journey-%s [desktop] … %s\\n' "$i" "$verdict"
+done
+`);
+stub('npx', `
+printf '%s\\n' "$*" >> "$CANARY_TEST_ROOT/cli.log"
+if [ "$#" -ne 6 ] || [ "$1" != vercel ] || [ "$2" != rolling-release ] || [ "$4" != --dpl ] || [ "$5" != dpl_test ] || [ "$6" != --non-interactive ]; then
+  echo 'unsupported CLI options' >&2; exit 2
+fi
+if [ "$3" = complete ] && [ "$CANARY_TEST_MODE" = complete-fails ]; then exit 1; fi
+if [ "$3" = abort ] && [ "$CANARY_TEST_MODE" = abort-fails ]; then exit 1; fi
+`);
+function exercise(source: string, mode: string) {
+  const script = join(fixture, 'gate.sh');
+  writeFileSync(script, source);
+  writeFileSync(join(fixture, 'cli.log'), '');
+  const run = spawnSync('bash', [script, 'dpl_test'], {
+    cwd: fixture, encoding: 'utf8', timeout: 5000,
+    env: { ...process.env, PATH: bin + ':' + process.env.PATH, EZ_ROLLING_RELEASE: '1', CANARY_TEST_ROOT: fixture, CANARY_TEST_MODE: mode },
+  });
+  assert.ifError(run.error);
+  return { status: run.status, output: run.stdout + run.stderr, calls: readFileSync(join(fixture, 'cli.log'), 'utf8') };
+}
+function promotion(source: string) {
+  const run = exercise(source, 'pass');
+  assert.equal(run.status, 0, run.output);
+  assert.match(run.output, /CANARY PASSED/);
+  assert.doesNotMatch(run.calls, /rolling-release abort/);
+}
+function rollback(source: string) {
+  const run = exercise(source, 'regression');
+  assert.equal(run.status, 1);
+  assert.match(run.output, /CANARY ABORTED — traffic restored/);
+  assert.doesNotMatch(run.output, /unsupported CLI options|CANARY PASSED|CANARY UNRESOLVED/);
+}
+try {
+  promotion(gate);
+  rollback(gate);
+  for (const mode of ['empty', 'complete-fails']) {
+    const run = exercise(gate, mode);
+    assert.equal(run.status, 1);
+    assert.match(run.output, /CANARY ABORTED — traffic restored/);
+    assert.doesNotMatch(run.output, /CANARY PASSED/);
+  }
+  const unresolved = exercise(gate, 'abort-fails');
+  assert.equal(unresolved.status, 1);
+  assert.match(unresolved.output, /CANARY UNRESOLVED/);
+  assert.doesNotMatch(unresolved.output, /CANARY ABORTED|CANARY PASSED|traffic restored/);
+  assert.throws(() => promotion(gate.replace('complete --dpl "$DPL" --non-interactive', 'complete --dpl "$DPL" --yes')));
+  assert.throws(() => rollback(gate.replace('abort --dpl "$DPL" --non-interactive', 'abort --dpl "$DPL" --yes')));
+  check('executed CLI contract: promote, regress, silence, completion failure, abort failure; both --yes mutants caught', []);
+} catch (error) {
+  check('executed canary CLI contract', [String(error)]);
+} finally {
+  rmSync(fixture, { recursive: true, force: true });
+}
 console.log(failed ? `\n${failed} FAILED` : '\nAll canary-gate assertions passed');
 process.exit(failed ? 1 : 0);
