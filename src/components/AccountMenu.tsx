@@ -13,6 +13,7 @@ import { detectDevice, readDeviceEnv } from '@/lib/deviceInfo';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { pickName, initialsOf } from '@/lib/nameSync';
 import { isBackendLive, signOutBackend } from '@/lib/auth';
+import { openNamePrompt } from '@/components/NamePrompt';
 import { useSaveName } from '@/lib/useSaveName';
 import {
   currentSessionId, lastActiveLabel, listDeviceSessions, revokeDeviceSession,
@@ -356,15 +357,16 @@ export default function AccountMenu({
               {/* Profile header — clean and compact (owner 2026-08-29: no banner/hero image here):
                   avatar · name · email, nothing else. Tapping it opens إدارة الحساب with the
                   display-name editor already active — the profile IS the edit affordance. */}
+              {/* No name yet → «أضف اسمك ✏️» opens the «وش نناديك؟» box itself (owner 2026-10-23, name-box-v4 frame 3). */}
               <Pressable
                 testID="account-menu-profile"
-                onPress={() => { setEditing(true); go('account', 1); }}
+                onPress={() => { if (!pickName(user, locale)) { onClose(); openNamePrompt(); return; } setEditing(true); go('account', 1); }}
                 style={({ hovered, pressed }: any) => [s.profile, (hovered || pressed) && s.rowHover]}
               >
                 {({ hovered, pressed }: any) => { const on = !!(hovered || pressed); return (<>
                   <View style={s.avatar}><Text style={s.avatarText}>{initialsOf(pickName(user, locale))}</Text></View>
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={[s.profileName, on && s.rowOn]} numberOfLines={1}>{pickName(user, locale) || t('Add your name')}</Text>
+                    <Text style={[s.profileName, !pickName(user, locale) && s.addName, on && s.rowOn]} numberOfLines={1}>{pickName(user, locale) || t('Add your name')}{pickName(user, locale) ? '' : ' ✏️'}</Text>
                     {!!user.sub && <Text style={[s.profileSub, on && s.rowSubOn]} numberOfLines={1}>{user.sub}</Text>}
                   </View>
                   <Ionicons name="create-outline" size={15} color={on ? C.onFill : C.muted} />
@@ -777,6 +779,7 @@ function makeStyles(C: Record<string, string>, dark: boolean, rtl = true) {
     profile: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 10, borderRadius: 10 },
     avatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' },
     avatarText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+    addName: { color: C.primary },
     profileName: { fontSize: 13.5, fontWeight: '700', color: C.ink, textAlign: start as any, writingDirection: 'auto' as any },
     profileSub: { fontSize: 11, color: C.muted, marginTop: 1, textAlign: start as any, writingDirection: 'auto' as any },
 

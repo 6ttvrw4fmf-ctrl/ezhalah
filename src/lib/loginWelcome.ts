@@ -48,3 +48,14 @@ export function takeJustSignedIn(now: number): { count: number } | null {
     return { count: Number(v?.count) || 0 };
   } catch { return null; }
 }
+
+// SIGN-UP, NOT LOG-IN (owner 2026-10-23): the «وش نناديك؟» box and its party are for the sign-in that
+// CREATED the account — created within the last 10 minutes and still on its first sign-in (a returning
+// user's last_sign_in_at moves past created_at). A returning Google/Apple user keeps today's welcome only.
+export const SIGN_UP_WINDOW_MS = 10 * 60 * 1000;
+export function isFreshSignUp(createdAt: unknown, lastSignInAt: unknown, now: number): boolean {
+  const c = Date.parse(String(createdAt ?? ''));
+  const l = Date.parse(String(lastSignInAt ?? ''));
+  if (!Number.isFinite(c) || !Number.isFinite(l)) return false;
+  return now - c >= 0 && now - c <= SIGN_UP_WINDOW_MS && Math.abs(l - c) <= 60_000;
+}

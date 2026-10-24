@@ -109,7 +109,11 @@ const hydrated: any[] = [];
 page.on('response', async (r) => {
   const url = r.url();
   if (url.includes('/rpc/location_search_candidates_ar') && r.request().method() === 'POST') {
-    try { searchOrigins.add(new URL(url).origin); } catch {}
+    // THE FRONT DOOR (src/lib/supabase.ts, ON since 2026-10-21): on the real site the app reads through
+    // ${BASE}/sb/rest/v1/… — our own proxy to the SAME project — instead of supabase.co. Run 39940963632 failed
+    // here with «origins seen: https://ezhalah-app.vercel.app» on a correct production. A front-door call counts as
+    // the expected backend; any OTHER origin (a preview, another project) still fails.
+    try { searchOrigins.add(url.startsWith(`${BASE}/sb/rest/v1/`) ? EXPECTED_SUPABASE : new URL(url).origin); } catch {}
     try {
       const j = await r.json();
       if (Array.isArray(j)) searches.push(JSON.parse(r.request().postData() || '{}'));
