@@ -1,4 +1,8 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-09-27 (migration 20260811130514_sql_mirror_live_drift_detector): UNCHANGED.
+--   md5(pg_get_functiondef) in production = 3347a572f90a29a1ab2de739f987975b, identical to this file.
+--   Stamped for verify-sql-mirrors-not-stale (B2): the previous same-day stamp named no version at or
+--   after this migration, so nothing proved it was re-checked AFTER it. Nothing in the body was edited.
 -- Refreshed 2026-08-11 for the labeled-total-beats-sub-floor-pick fix (migration 20260811064231).
 --   THIS MIRROR WAS FOUND STALE by senior audit run #10 and is regenerated verbatim here. It had
 --   been missing the ENTIRE «AREA-ARTIFACT GUARD (2026-08-10)» block shipped by migration
