@@ -126,6 +126,24 @@ for (const [label, value, expected] of [
   ['Amenities', 'موقف', 'Parking'], ['Property services', 'الكهرباء، المياه، الصرف الصحي', 'Electricity, Water Supply, Sanitation'],
   ['Plan number', '7489/ق/ب', '7489/ق/ب'],
 ]) check(`English ${label}: ${value}`, format(label, value, 'en') === expected);
+// Owner 2026-10-24: the English card showed Arabic deed labels and values (sanadak/therc/gathern). Every
+// Arabic label the sources publish, and every closed value, must read as English on the English card.
+for (const label of ['المنفعة وثيقة نوع / الملكية وثيقة نوع', 'مصدر ترخيص الاعلان', 'تاريخ ترخيص الاعلان', 'تاريخ انتهاء الصلاحية',
+  'قنوات العقار', 'رقم البناية', 'الرمز البريدي', 'الرقم الإضافي', 'خدمات العقار', 'الإلتزامات على العقار', 'الضمانات ومدتها',
+  'رقم القطعة', 'رقم المخطط', 'نوع الحد الشمالي', 'وصف الحد الجنوبي', 'طول الحد الشرقي', 'سعر بيع المتر', 'اجمالي سعر بيع الارض',
+  'مطابقة كود البناء السعودي', 'مفروشة', 'وجود قيد ؟', 'وجود رهن ؟', 'استخدام العقار', 'الملاحظات', 'غرفة سائق', 'بركة سباحة',
+  'اجمالي الايجار السنوي للأرض', 'عدد البلوكات']) {
+  check(`English label: ${label}`, !/[ء-ي]/.test(englishCatalogText(label)));
+}
+for (const [label, value, expected] of [
+  ['قنوات العقار', 'منصة مرخصة,الإذاعة,منصات التواصل الإجتماعي,أخرى', 'Licensed platform, Radio, Social media, Other'],
+  ['خدمات العقار', 'كهرباء,مياه,صرف صحي', 'Electricity, Water Supply, Sanitation'],
+  ['الإلتزامات على العقار', 'لأيوجد', 'None'],
+  ['المنفعة وثيقة نوع / الملكية وثيقة نوع', 'صك إلكتروني', 'Electronic deed'],
+  ['نوع الحد الشمالي', 'شارع', 'Street'],
+  ['Price as published', '32,000 ر.س \n / yearly', '32,000 SAR / yearly'],
+  ['Amenities', 'إضاءة إضافية, بروجكتر, ماستر', 'Extra lighting, Projector, Master bedroom'],
+]) check(`English value ${label}: ${value}`, format(label, value, 'en') === expected);
 check('Arabic source authority retained', format('Ad source', 'الهيئة العامة للعقار', 'ar') === 'الهيئة العامة للعقار');
 check('Arabic explicit absence retained', format('Other obligations on the property', 'لايوجد', 'ar') === 'لايوجد');
 check('Arabic enum rendering retained', format('Facade', 'east', 'ar') === 'شرقية');
