@@ -258,6 +258,14 @@ if [ "${EZ_ROLLING_RELEASE:-}" = "1" ]; then
   CANARY_JAR="$(mktemp)"
   echo ""
   echo "Rolling release: this build is serving 10% of traffic; verifying the CANARY first, then the gate decides."
+  # AFTER AN ABORT VERCEL NO LONGER STARTS THE NEXT RELEASE BY ITSELF (team events, 2026-10-24): an abort is
+  # an instant rollback, and the deployments that followed one (05:37, 05:46, 06:05, 08:03, 08:20 UTC) came
+  # up STAGED with no traffic — each waited out the 5-minute alias read below and refused, until a person
+  # started the release by hand (06:18, 07:49, 08:32). `start` is idempotent (Vercel: «returns the current
+  # state if auto-assignment already started the release»), so it always runs; if it fails, the alias read
+  # below still refuses a build that is not serving.
+  npx vercel rolling-release start --dpl "${DEPLOYED_URL:-}" --non-interactive \
+    || echo "   (rolling-release start failed — the alias read below decides whether the canary is serving)"
 fi
 curl_jar() { if [ -n "$CANARY_JAR" ]; then curl -b "$CANARY_JAR" -c "$CANARY_JAR" "$@"; else curl "$@"; fi; }
 echo ""
