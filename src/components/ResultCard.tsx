@@ -1558,7 +1558,7 @@ const card = StyleSheet.create({
   headline: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', columnGap: 8, rowGap: 2 },
   typeRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   typeLabel: { fontSize: 10.5, color: colors.muted, fontWeight: '500', flexShrink: 1 },
-  title: { fontSize: 15, fontWeight: '700', color: colors.ink, letterSpacing: -0.3, flexShrink: 1 },
+  title: { fontSize: 15, fontWeight: '700', color: colors.ink, flexShrink: 1 }, // no tracking: titles are Arabic (joining + ligatures)
   // Owner 2026-10-01: omit the bio from compact cards; details remain on the source page.
   desc: { display: 'none' },
   locRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
