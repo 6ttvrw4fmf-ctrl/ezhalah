@@ -6,6 +6,7 @@ import { useI18n, translate } from '@/i18n';
 import { useTheme } from '@/theme/theme';
 import { isBackendLive, markNamePromptSeen } from '@/lib/auth';
 import { useSaveName } from '@/lib/useSaveName';
+import { otherSpelling, scriptOf } from '@/lib/nameSync';
 import { takeJustSignedIn } from '@/lib/loginWelcome';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { ConfettiOverlay } from '@/components/ConfettiOverlay';
@@ -22,6 +23,11 @@ import { ConfettiOverlay } from '@/components/ConfettiOverlay';
 // in the celebration — the app's own party confetti (ConfettiOverlay) and «هلا {first}، حياك الله» /
 // «وش تدور عليه اليوم؟». It IS this sign-in's welcome: it takes the login-welcome mark (lib/loginWelcome.ts)
 // so the home's sign-in line does not greet a second time. «لاحقاً» has no party.
+//
+// FINAL design, mockups/name-box-v4.png (owner 2026-10-23): centered box; the circle shows the typed name's
+// first letter live; the switch flips the WHOLE box (language + direction); under the field, the other
+// script's spelling (the same translit source as the save, 400 ms after typing stops, never a stale one);
+// small «لاحقاً» above the full-width «حفظ» at the very bottom. «أضف اسمك ✏️» in the account menu reopens it.
 export function shouldAskName(user: AuthUser | null, authChecked: boolean, authOpen: boolean): boolean {
   return isBackendLive && authChecked && !authOpen && !!user && !user.name.trim() && !user.namePromptSeen;
 }
@@ -35,9 +41,24 @@ export function celebrationFor(typed: string, takeWelcomeMark: () => unknown): s
   return first;
 }
 
+/** The circle's letter: the typed name's first character, live ('' → the person icon). */
+export function letterOf(typed: string): string {
+  return (typed ?? '').trim().charAt(0).toUpperCase();
+}
+
+/** The preview chip's text, only when it was computed for exactly what is typed now — never a stale one. */
+export function previewFor(p: { for: string; text: string } | null, typed: string): string {
+  return p && p.text && p.for === (typed ?? '').trim() ? p.text : '';
+}
+
+// «أضف اسمك ✏️» (AccountMenu) reopens THIS box — a one-line bus, like ConfettiOverlay's partyConfetti.
+let openers: Array<() => void> = [];
+export function openNamePrompt(): void { for (const o of openers) { try { o(); } catch { /* UI only */ } } }
+
 type Lang = 'ar' | 'en';
 const LANGS: { id: Lang; label: string }[] = [{ id: 'en', label: 'English' }, { id: 'ar', label: 'عربي' }];
 const PARTY_MS = 3200;
+const PREVIEW_DEBOUNCE_MS = 400;
 
 export default function NamePrompt() {
   const { user, authChecked, authOpen } = useApp();
@@ -50,7 +71,31 @@ export default function NamePrompt() {
   const [name, setName] = useState('');
   const [lang, setLang] = useState<Lang>(locale);
   const [party, setParty] = useState<{ first: string; key: number } | null>(null);
+  const [preview, setPreview] = useState<{ for: string; text: string } | null>(null);
+  const [reopened, setReopened] = useState(false);
   const ask = shouldAskName(user, authChecked, authOpen) && !closed;
+  useEffect(() => {
+    const o = () => { setLang(locale); setReopened(true); };
+    openers.push(o);
+    return () => { openers = openers.filter((x) => x !== o); };
+  }, [locale]);
+  const shown = open || (reopened && !!user && !user.name.trim());
+
+  // The other script's spelling, 400 ms after typing stops. A late answer for an older input is dropped
+  // (previewFor), so the chip never shows a spelling of something no longer typed.
+  useEffect(() => {
+    const v = name.trim();
+    if (!v) { setPreview(null); return; }
+    let live = true;
+    const id = setTimeout(() => {
+      otherSpelling(v).then((text) => { if (live) setPreview({ for: v, text }); }).catch(() => {});
+    }, PREVIEW_DEBOUNCE_MS);
+    return () => { live = false; clearTimeout(id); };
+  }, [name]);
+  const chip = previewFor(preview, name);
+  const letter = letterOf(name);
+  const other = scriptOf(name.trim()) === 'ar' ? 'en' : 'ar';
+  const tr = (en: string) => translate(lang, en);
   useEffect(() => { setClosed(false); setName(''); }, [user?.sub]); // another account on this tab is asked afresh
 
   // A short settle: Apple's first-sign-in name is saved a beat after the session lands, and the
@@ -69,7 +114,7 @@ export default function NamePrompt() {
     return () => clearTimeout(id);
   }, [party]);
 
-  const close = () => { setClosed(true); markNamePromptSeen(); };
+  const close = () => { setClosed(true); setReopened(false); markNamePromptSeen(); };
   const save = () => {
     const v = name.trim();
     if (!v) return;
@@ -81,14 +126,16 @@ export default function NamePrompt() {
 
   return (
     <>
-      {open && (
+      {shown && (
         <Modal transparent visible animationType="fade" onRequestClose={close}>
           <View style={s.back}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel={t('Later')} />
-            <View style={s.card} testID="name-prompt">
-              <View style={s.avatar}><Ionicons name="person" size={26} color="#fff" /></View>
-              <Text style={s.title}>{t('What should we call you?')}</Text>
-              <Text style={s.sub}>{t('Choose a language and type your name')}</Text>
+            <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel={tr('Later')} />
+            <View style={[s.card, lang === 'ar' ? s.rtl : s.ltr]} testID="name-prompt">
+              <View style={s.avatar} testID="name-prompt-letter">
+                {letter ? <Text style={s.avatarText}>{letter}</Text> : <Ionicons name="person" size={26} color="#fff" />}
+              </View>
+              <Text style={s.title}>{tr('What should we call you?')}</Text>
+              <Text style={s.sub}>{tr("We'll greet you by name and share a property fact every day")}</Text>
               <View style={s.seg} testID="name-prompt-lang">
                 {LANGS.map((l) => (
                   <Pressable key={l.id} testID={`name-prompt-lang-${l.id}`} style={[s.segItem, lang === l.id && s.segOn]} onPress={() => setLang(l.id)} accessibilityRole="button" accessibilityState={{ selected: lang === l.id }}>
@@ -108,11 +155,17 @@ export default function NamePrompt() {
                 returnKeyType="done"
                 autoComplete="name"
               />
-              <Pressable testID="name-prompt-save" style={[s.save, !name.trim() && s.saveOff]} onPress={save} disabled={!name.trim()}>
-                <Text style={s.saveText}>{t('Save')}</Text>
+              <View style={s.prev}>
+                {!!chip && (<>
+                  <Text style={s.prevLabel}>{tr(other === 'en' ? 'In English:' : 'In Arabic:')}</Text>
+                  <Text testID="name-prompt-preview" style={[s.chip, other === 'en' ? s.ltr : s.rtl]} numberOfLines={1}>{chip}</Text>
+                </>)}
+              </View>
+              <Pressable testID="name-prompt-later" style={s.later} onPress={close} hitSlop={8}>
+                <Text style={s.laterText}>{tr('Later')}</Text>
               </Pressable>
-              <Pressable testID="name-prompt-later" style={s.later} onPress={close} hitSlop={6}>
-                <Text style={s.laterText}>{t('Later')}</Text>
+              <Pressable testID="name-prompt-save" style={[s.save, !name.trim() && s.saveOff]} onPress={save} disabled={!name.trim()}>
+                <Text style={s.saveText}>{tr('Save')}</Text>
               </Pressable>
             </View>
           </View>
@@ -150,29 +203,36 @@ const makeStyles = (C: any, dark: boolean, rtl: boolean) => {
   return StyleSheet.create({
     // Same scrim and card as AccountMenu's centered views.
     back: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: dark ? 'rgba(4,8,6,0.62)' : 'rgba(8,18,12,0.5)', ...(web ? ({ backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' } as any) : null) },
-    card: { direction: (rtl ? 'rtl' : 'ltr') as any, width: '100%', maxWidth: 360, alignItems: 'stretch', backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: C.fieldLine, paddingTop: 24, paddingHorizontal: 20, paddingBottom: 18, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 14 },
-    avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 12 },
-    title: { fontSize: 22, lineHeight: 30, fontWeight: '800', color: C.ink, textAlign: 'center' },
-    sub: { fontSize: 14, lineHeight: 20, color: C.muted, textAlign: 'center', marginTop: 4, marginBottom: 16 },
+    card: { width: '100%', maxWidth: 360, alignItems: 'stretch', backgroundColor: C.surface, borderRadius: 24, paddingTop: 24, paddingHorizontal: 20, paddingBottom: 18, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 14 },
+    rtl: { direction: 'rtl' as any, writingDirection: 'rtl' },
+    ltr: { direction: 'ltr' as any, writingDirection: 'ltr' },
+    avatar: { width: 60, height: 60, borderRadius: 30, backgroundColor: C.primary, borderWidth: 4, borderColor: dark ? C.surface2 : C.tint, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 12 },
+    avatarText: { color: '#fff', fontSize: 26, fontWeight: '700' },
+    title: { fontSize: 23, lineHeight: 31, fontWeight: '700', color: C.ink, textAlign: 'center' },
+    sub: { fontSize: 14, lineHeight: 21, color: C.muted, textAlign: 'center', marginTop: 6, marginBottom: 16 },
     // The switch reads English | عربي in both languages (as in the mockup), so it never flips under RTL.
-    seg: { flexDirection: 'row', direction: 'ltr' as any, borderWidth: 1, borderColor: C.fieldLine, borderRadius: 999, padding: 4, marginBottom: 14 },
+    seg: { flexDirection: 'row', direction: 'ltr' as any, backgroundColor: dark ? C.surface2 : C.tint, borderRadius: 999, padding: 4, marginBottom: 14 },
     segItem: { flex: 1, paddingVertical: 8, borderRadius: 999, alignItems: 'center', ...ptr },
-    segOn: { backgroundColor: C.primary },
+    segOn: { backgroundColor: C.surface, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
     segText: { fontSize: 15, fontWeight: '600', color: C.muted },
-    segTextOn: { color: '#fff' },
+    segTextOn: { color: dark ? C.ink : '#1d4a37' },
     input: {
       fontSize: 18, fontWeight: '500', color: C.ink,
-      borderWidth: 1.5, borderColor: C.primary, backgroundColor: C.surface, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14,
+      borderWidth: 1.5, borderColor: C.primary, backgroundColor: C.surface, borderRadius: 14, paddingVertical: 13, paddingHorizontal: 14,
       ...(web ? { outlineStyle: 'none' as any } : {}),
     },
     // The switch decides the field's direction — never the app's language.
     inputAr: { textAlign: 'right', writingDirection: 'rtl' },
     inputEn: { textAlign: 'left', writingDirection: 'ltr' },
-    save: { marginTop: 16, backgroundColor: C.primary, borderRadius: 12, paddingVertical: 13, alignItems: 'center', ...ptr },
+    // Reserved height, so the chip arriving never shifts «لاحقاً» / «حفظ» under a finger.
+    prev: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 30, marginTop: 10, marginBottom: 14, marginHorizontal: 2 },
+    prevLabel: { fontSize: 14, color: C.muted },
+    chip: { flexShrink: 1, backgroundColor: dark ? C.surface2 : C.tint, color: dark ? C.ink : '#1d4a37', borderRadius: 999, paddingVertical: 5, paddingHorizontal: 12, fontSize: 14, fontWeight: '600', overflow: 'hidden' },
+    later: { alignSelf: 'center', paddingVertical: 4, paddingHorizontal: 12, marginBottom: 12, ...ptr },
+    laterText: { color: '#9aa6a0', fontSize: 12, fontWeight: '500' },
+    save: { backgroundColor: C.primary, borderRadius: 14, paddingVertical: 14, alignItems: 'center', ...ptr },
     saveOff: { opacity: 0.45 },
     saveText: { color: '#fff', fontSize: 17, fontWeight: '700' },
-    later: { marginTop: 6, paddingVertical: 10, alignItems: 'center', ...ptr },
-    laterText: { color: C.muted, fontSize: 14, fontWeight: '600' },
     party: { position: (web ? 'fixed' : 'absolute') as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, alignItems: 'center', justifyContent: 'center', padding: 24 },
     partyCard: { direction: (rtl ? 'rtl' : 'ltr') as any, alignItems: 'center', backgroundColor: dark ? 'rgba(18,28,22,0.94)' : 'rgba(255,255,255,0.95)', borderRadius: 24, paddingVertical: 26, paddingHorizontal: 28, maxWidth: 360, shadowColor: '#000', shadowOpacity: dark ? 0.5 : 0.18, shadowRadius: 26, shadowOffset: { width: 0, height: 14 }, elevation: 12 },
     partyEmoji: { fontSize: 46, lineHeight: 56 },
