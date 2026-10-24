@@ -75,7 +75,7 @@ STOP → restore → fix → continue. Checklist: `ezhalah-app/docs/DEPLOY_REGRE
 
 The empty English chat subtitle is “Describe it and Ezhalah” without punctuation; English model descriptions use ordinary sentence punctuation rather than long dashes (owner, 2026-10-14).
 
-The header and sidebar Ezhalah name uses the theme ink, and assistant sparkle stars use the theme accent (sky/dusk redesign, owner 2026-10-24). Source artwork retains its original colors.
+The header and sidebar Ezhalah name uses the theme ink, and ordinary assistant sparkle stars use the theme accent (sky/dusk redesign, owner 2026-10-24). Once property cards become visible, the results header uses the gold Shaheen mark instead. Source artwork retains its original colors.
 
 The AI Agent’s empty composer hint aligns left in English and right in Arabic (owner, 2026-10-07). Typed messages keep their own language direction. The entire user bubble sits on the left for English and on the right for Arabic, determined per message (owner clarification, 2026-10-13).
 
@@ -215,6 +215,14 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). All registered
 ## 6. Frontend — the AI agent
 
 ### 6.1 `src/app/agent.tsx` — chat + inline results
+
+**Gold result identity (owner approved 2026-10-24):** when the first property card is actually visible,
+replace the sparkle beside the Ezhalah results heading with the original Shaheen silhouette in warm gold,
+26 px. This shared results renderer covers Filter, Advanced Filter and AI Agent in both languages.
+A newly revealed result plays one gentle wink and one soft glint over 1.6 seconds, then remains gold;
+ordinary text, loading and zero-card replies keep their existing mark. History opens with a static gold
+mark. Reduced motion skips the wink/glint. The decoration never gates cards, changes source artwork,
+or denotes recommendation/verification of a listing.
 
 - **Model selector (owner, 2026-10-08):** a subtle label below the microphone area opens two
   Claude-style options: **شاهين 2.2 / Shaheen 2.2** (default) and **حُر 4.4 / Hurr 4.4**.
@@ -534,6 +542,9 @@ page's cloud clusters. `SidebarSky` adds the original green eagle on a small sky
 passing below its eye. Both signed-in and guest headers, docked and mobile drawers, use this treatment
 in either language and theme. Cloud transforms drift over 18 seconds per direction with eased turns;
 reduced motion makes them static. They never intercept taps or obscure the wordmark and controls.
+The lower sidebar cloud has an additional slow drift, and small independently drifting wisps sit beneath
+chat titles. The share sheet preview reuses the same sky eagle tile instead of an opaque white logo image.
+Page and headline clouds also drift slowly, using 18–24 second alternating transforms.
 Assets contain no UI or text. Headline cloud wisps touch the outer edges and never
 mask the copy. `CloudWisp` is decorative, pointer-transparent, and hidden from assistive technology.
 Source logos keep their measured frames and original colors, with small varied wisps touching their edges.

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Image as RNImage, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SkyEagleMark } from './SidebarSky';
 import Animated, {
   Easing,
   interpolate,
@@ -114,9 +115,7 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
         <View style={s.preview}>
           {/* Link-preview look (owner 2026-10-18: «smaller … professional»): a small framed logo, the
               name, a two-line description, and the bare domain in small muted type — not a big link. */}
-          <View style={s.logoFrame}>
-            <RNImage source={require('../../public/og-image-v6.png')} style={s.logo} resizeMode="contain" />
-          </View>
+          <SkyEagleMark size={40} />
           <View style={{ flex: 1 }}>
             <Text style={s.pvT}>{t('Ezhalah')}</Text>
             {/* The sentence that will actually be sent (owner 2026-10-20), never the page's SEO description. */}
@@ -163,8 +162,6 @@ const s = StyleSheet.create({
   grip: { width: 38, height: 5, borderRadius: 3, backgroundColor: colors.line, alignSelf: 'center', marginTop: 2, marginBottom: 12 },
 
   preview: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.surface, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 12 },
-  logoFrame: { width: 40, height: 40, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line, backgroundColor: colors.paper, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  logo: { width: 30, height: 30 },
   pvT: { fontSize: 14, fontWeight: '700', color: colors.ink },
   pvS: { fontSize: 12, color: colors.muted, lineHeight: 16, marginTop: 1 },
   pvL: { fontSize: 11, color: colors.muted, marginTop: 3 },

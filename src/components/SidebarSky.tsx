@@ -32,20 +32,20 @@ export function SidebarClouds() {
       !reduced && { ...motion, animationName: sidebarDrift }]}>
       <CloudWisp width={280} height={100} opacity={0.38} style={styles.topCloud} />
       <CloudWisp variant={1} width={240} height={110} opacity={0.25} style={styles.middleCloud} />
-      <CloudWisp variant={2} width={270} height={120} opacity={0.3} style={styles.bottomCloud} />
+      <CloudWisp drift variant={2} width={270} height={120} opacity={0.3} style={styles.bottomCloud} />
     </Animated.View>
   </View>;
 }
 
 /** Original eagle artwork, with a small cloud pass below its eye. The adjacent wordmark labels it. */
-export function SkyEagleMark() {
+export function SkyEagleMark({ size = 44 }: { size?: number }) {
   const pal = useThemePalette();
   const reduced = useReducedMotion();
   return <View testID="sidebar-sky-eagle" pointerEvents="none" accessible={false}
     accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
-    style={[styles.eagleTile, { borderColor: pal.line }]}>
+    style={[styles.eagleTile, { width: size, height: size, borderColor: pal.line }]}>
     <LinearGradient colors={[pal.skyTop, pal.skyBottom]} style={StyleSheet.absoluteFill} />
-    <Image source={EAGLE} resizeMode="contain" accessible={false} style={styles.eagle} />
+    <Image source={EAGLE} resizeMode="contain" accessible={false} style={{ width: size * 36 / 44, height: size * 35 / 44 }} />
     <Animated.View style={[StyleSheet.absoluteFill,
       !reduced && { ...motion, animationName: eagleDrift }]}>
       <CloudWisp width={65} height={24} opacity={0.62} style={styles.eagleCloud} />
@@ -61,7 +61,6 @@ const styles = StyleSheet.create({
   bottomCloud: { bottom: '9%', left: -65 },
   eagleTile: { width: 44, height: 44, flexShrink: 0, borderRadius: 13, borderWidth: 1,
     overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
-  eagle: { width: 36, height: 35 },
   eagleCloud: { bottom: -3, left: -12 },
   eagleTopCloud: { top: -6, right: -12 },
 });

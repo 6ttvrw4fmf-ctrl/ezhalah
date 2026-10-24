@@ -1,3 +1,4 @@
+import GoldenShaheen from '@/components/GoldenShaheen';
 import { agentResultRequest, resultQuantityChange } from '@/lib/agentResultRequest';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -4663,7 +4664,9 @@ export default function Agent() {
                       (sparkle on the far right). */}
                   {m.slogan ? (
                     <View style={[s.reply, { flexDirection: msgRTL(m.slogan) ? 'row-reverse' : 'row', alignItems: 'center' }]}>
-                      <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
+                      {m.result.listings.length > 0 && (revealCount[m.id] ?? (m.typing ? 0 : initialReveal(m.result, m.afCompleted))) > 0
+                        ? <GoldenShaheen animate={!!m.typing} />
+                        : <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />}
                       <Text style={[s.sloganText, { writingDirection: msgRTL(m.slogan) ? 'rtl' : 'ltr', textAlign: msgRTL(m.slogan) ? 'right' : 'left' }]}>{m.slogan}</Text>
 
                     </View>
