@@ -276,6 +276,13 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
 21. Before a heavy scan, explain it or bound it: a per-row _redact_pii_sql over 170k descriptions ran past 60 s
    on production (10-16) and had to be cancelled with pg_cancel_backend. Use one regex pass, gated to the daily slot.
 
+22. A security or infrastructure change breaks robots the next day, not the product (10-23): the 10-21 search offset
+   cap (nothing past offset 25,000) made three AF full-walk robots read the unreachable tail as MISSING (total == oracle,
+   EXTRA 0), and the 10-21 front door (`/sb/rest/v1/` on our own site) failed the combined-budget «expected backend»
+   check. MISSING with EXTRA 0 and equal totals is a harness suspect first. Fix: the deep-page-cap helper in PR 8397.
+23. A checker's own «success» hides a quarantine (10-23): fleet-liveness reported success while aldarim was quarantined
+   for 3 days. Read gate 3 per site from `ops_platform_liveness_coverage`, never from the job colour.
+
 ## Rating (computed, must be earned)
 - **10/10** only when: every map line A–E is covered 100% (or its minimum), the sweep is green, all 10 golden searches pass,
   the quick searches show 0 missing / extra / duplicates / count mismatches, ≥ 99 of 100 real listings were found in each
