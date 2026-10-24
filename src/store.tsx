@@ -15,7 +15,7 @@ import { shelfCount, zeroContradictsShelf } from '@/lib/shelfCheck';
 import { logZeroResult } from '@/data/zeroResultLog';
 import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
-import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/auth';
+import { mapSupabaseUser, signOutBackend, deleteAccountBackend, persistNameSpellings } from '@/lib/auth';
 import { setThemeAuthState, resetThemeForSignOut } from '@/theme/theme';
 import { restoreChat, persistedOnly, pickLocalTranscripts, type PersistedChat } from '@/lib/chatTranscript';
 import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, chatsToDelete, type ChatMeta } from '@/lib/chatSync';
@@ -29,6 +29,12 @@ import { LOAD_MORE_PAGE_SIZE } from '@/data/resultCount';
 import { truncateGlyphs } from '@/lib/typedReveal';
 
 type DataSource = 'local' | 'supabase';
+
+/** The re-mapped user, keeping the in-memory spellings of the same name when the session has none yet. */
+export function keepSpellings(prev: AuthUser | null, next: AuthUser): AuthUser {
+  if (!prev || prev.name !== next.name || next.nameAr || next.nameEn) return next;
+  return { ...next, ...(prev.nameAr ? { nameAr: prev.nameAr } : {}), ...(prev.nameEn ? { nameEn: prev.nameEn } : {}) };
+}
 
 export type AuthUser = {
   method: 'google' | 'apple'; // phone sign-in removed (owner 2026-09-01)
@@ -382,7 +388,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (nameSyncRef.current === nm) return;
     nameSyncRef.current = nm;
     let cancelled = false;
-    buildSyncedName(nm).then((synced) => { if (!cancelled) applySyncedName(synced); });
+    // Written ONCE to user_metadata (the queue in lib/auth.ts), so the next load starts with both spellings.
+    buildSyncedName(nm).then((synced) => { if (!cancelled) { applySyncedName(synced); persistNameSpellings(synced); } });
     return () => { cancelled = true; };
   }, [user?.name, user?.nameEn, user?.nameAr, applySyncedName]);
 
@@ -830,7 +837,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Apple stays Apple; everything else (Google, and the two internal email test accounts) reads as
         // Google — the only other provider the product offers since phone sign-in was removed.
         const method = su.app_metadata?.provider === 'apple' ? 'apple' : 'google';
-        setUser(mapSupabaseUser(su, method));
+        // A re-map (token refresh, tab focus) must not drop spellings this tab already has for the SAME name
+        // before they are stored — that drop flipped «Yusuf» back to «يوسف» on an English screen.
+        setUser((prev) => keepSpellings(prev, mapSupabaseUser(su, method)));
       } else {
         setUser(null);
       }

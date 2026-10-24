@@ -9,7 +9,7 @@
 //   §5 Flag OFF → Apple sign-in is today's redirect, byte for byte.
 //   node --experimental-strip-types scripts/verify-apple-name-and-prompt.ts
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -300,6 +300,8 @@ const modalProblems = (f: Record<string, string>) => {
     // «أضف اسمك ✏️» reopens the same box
     if (!/if \(!pickName\(user, locale\)\) \{ onClose\(\); openNamePrompt\(\); return; \}/.test(f[MENU])) out.push('«أضف اسمك» in the menu does not open the box');
     if (!/\{pickName\(user, locale\) \? '' : ' ✏️'\}/.test(f[MENU]) || !/!pickName\(user, locale\) && s\.addName/.test(f[MENU])) out.push('the menu row is not the green «أضف اسمك ✏️»');
+    // the box becomes visible on a TIMER (rAF never fires in a background tab → an invisible overlay over the page)
+    if (!/if \(phase !== 'enter'\) return;\n\s*const id = setTimeout\(\(\) => \{/.test(p) || /requestAnimationFrame/.test(p)) out.push('the box can stay invisible over the page (enter → on waits on requestAnimationFrame)');
     if (!/const shown = open \|\| \(reopened && !!user && !user\.name\.trim\(\)\);/.test(p) || !/if \(shown && \(phase === 'off' \|\| phase === 'leave'\)\) setPhase\('enter'\);/.test(p)) out.push('the box ignores the reopen');
     return out;
   };
@@ -312,6 +314,7 @@ const modalProblems = (f: Record<string, string>) => {
   mustCatch('a chip with no debounce (a backend call per keystroke)', v4Problems({ ...files, [PROMPT]: files[PROMPT].replace('const PREVIEW_DEBOUNCE_MS = 400;', 'const PREVIEW_DEBOUNCE_MS = 0;') }, NS).length > 0);
   mustCatch('the save spelling drifting from the chip\'s source', v4Problems(files, NS.replace('const other = await otherSpelling(v);', 'const other = await transliterateName(v, "en");')).length > 0);
   mustCatch('the menu row opening the old pencil field instead of the box', v4Problems({ ...files, [MENU]: files[MENU].replace('if (!pickName(user, locale)) { onClose(); openNamePrompt(); return; } ', '') }, NS).length > 0);
+  mustCatch('the enter → on step back on requestAnimationFrame (invisible box in a background tab)', v4Problems({ ...files, [PROMPT]: files[PROMPT].replace("const id = setTimeout(() => {", "const id = requestAnimationFrame(() => {") }, NS).length > 0);
   mustCatch('a reopen the box never shows', v4Problems({ ...files, [PROMPT]: files[PROMPT].replace('const shown = open || (reopened && !!user && !user.name.trim());', 'const shown = open;') }, NS).length > 0);
   mustCatch('a static circle instead of the live letter', v4Problems({ ...files, [PROMPT]: files[PROMPT].replace('const letter = letterOf(name);', "const letter = '';") }, NS).length > 0);
 }
@@ -367,6 +370,129 @@ const modalProblems = (f: Record<string, string>) => {
     && /@media \(prefers-reduced-motion:reduce\)\{\[data-ezh-scrim\],\[data-ezh-scrim\] \*,\[data-ezh-shine\],\[data-ezh-disco\],\[data-ezh-disco\] \*\{animation:none!important;transition:none!important\}\}/.test(css);
   check('§8 the box hands the real reduced-motion flag to the party, and the CSS stills every motion', passOk(files[PROMPT], SRC));
   mustCatch('the party told motion is fine regardless', !passOk(files[PROMPT].replace('startNameParty(reduced)', 'startNameParty(false)'), SRC));
+}
+
+// ── §9 owner P1s 2026-10-24: both spellings stored · never the other script in a sentence · the name
+//     bidi-isolated · one paint on refresh · the «seen» flag only from «حفظ» / «لاحقاً» ───────────────────
+{
+  const NS9 = 'src/lib/nameSync.ts', FW = 'src/lib/filterWelcome.ts', UFW = 'src/lib/useFilterWelcome.ts', STORE = 'src/store.tsx', HOME = 'src/app/index.tsx';
+  const src9: Record<string, string> = { [AUTH]: files[AUTH], [NS9]: read(NS9), [FW]: read(FW), [UFW]: read(UFW), [STORE]: read(STORE), [HOOK]: files[HOOK], [HOME]: read(HOME), [PROMPT]: files[PROMPT] };
+  const liftFrom = async (name: string, code: string, syms: { header: string; endsWith?: RegExp }[], names: string[], pre: string) => {
+    const tmp = join(mkdtempSync(join(tmpdir(), 'ezh-p1-')), name);
+    writeFileSync(tmp, code);
+    return liftSymbols(tmp, syms, names, pre) as Promise<any>;
+  };
+  const g9 = globalThis as any;
+  // the real name helpers (pickName → sentenceName), with the phonetic table stubbed
+  const names9 = (f: Record<string, string>) => liftFrom('nameSync.ts', f[NS9], [
+    { header: 'export function scriptOf(' }, { header: 'export function pickName(' }, { header: 'export function sentenceName(' },
+  ], ['scriptOf', 'pickName', 'sentenceName'], `type Locale = 'ar' | 'en';\nconst phoneticAr = (s: string, _x?: boolean) => (globalThis as any).__phon(s);\n`);
+  // the real mapSupabaseUser
+  const map9 = (f: Record<string, string>) => liftFrom('auth.ts', f[AUTH], [
+    { header: 'function initialsFrom(' }, { header: 'export function mapSupabaseUser(' },
+  ], ['mapSupabaseUser'], `type AuthUser = any;\n`);
+  // the real readStoredSession (what the headline reads at first paint)
+  const stored9 = (f: Record<string, string>) => liftFrom('useFilterWelcome.ts', f[UFW], [{ header: 'function readStoredSession(' }], ['readStoredSession'],
+    `type StoredSession = any;\nconst g = globalThis as any;\nconst sentenceName = (u: any, l: any) => g.__sentence(u, l);\nconst isFreshSignUp = () => false;\n`);
+  const fill9 = (f: Record<string, string>) => liftFrom('filterWelcome.ts', f[FW], [{ header: 'export const NAME_SLOT', endsWith: /;$/ }, { header: 'export function fillName(' }], ['fillName', 'NAME_SLOT'], '');
+
+  // A refresh: the stored session (first paint), then the store's user (after the restore). Same text, no translit.
+  const meta = { full_name: 'يوسف النشوان', name: 'يوسف النشوان', nameAr: 'يوسف النشوان', nameEn: 'Yusuf AlNashwan', name_spellings_for: 'يوسف النشوان' };
+  const refresh = async (f: Record<string, string>, m: any = meta) => {
+    const N = await names9(f); g9.__phon = () => ''; g9.__sentence = N.sentenceName;
+    const M = await map9(f), S = await stored9(f), F = await fill9(f);
+    const store = new Map<string, string>([['sb-x-auth-token', JSON.stringify({ user: { id: 'u1', user_metadata: m } })]]);
+    (globalThis as any).localStorage = { length: store.size, key: (i: number) => [...store.keys()][i] ?? null, getItem: (k: string) => store.get(k) ?? null };
+    const first = S.readStoredSession();                                   // paint 1: device storage only
+    const user = M.mapSupabaseUser({ email: 'x@privaterelay.appleid.com', user_metadata: m }, 'apple'); // paint 2: the restored user
+    const line = `Hi ${F.NAME_SLOT}, the market moves every day.`;
+    return { en1: F.fillName(line, first.nameEn, 'en'), en2: F.fillName(line, N.sentenceName(user, 'en') || first.nameEn, 'en'), user, N, F };
+  };
+  const r9 = await refresh(src9);
+  check('§9 a refresh paints the English greeting ONCE, with the English spelling, no translit (both spellings stored)',
+    r9.en1 === 'Hi ⁨Yusuf⁩, the market moves every day.' && r9.en2 === r9.en1 && r9.user.nameEn === 'Yusuf AlNashwan' && r9.user.nameAr === 'يوسف النشوان', JSON.stringify([r9.en1, r9.en2]));
+  mustCatch('mapSupabaseUser not reading the stored spellings (translit on every load; the line changes when it answers)', !(await refresh({ ...src9, [AUTH]: src9[AUTH].replace("const spelled = !!name && String(meta.name_spellings_for ?? '') === name;", 'const spelled = false;') })).user.nameEn);
+  const stale = await refresh(src9, { ...meta, name_spellings_for: 'خالد' });
+  check('§9 spellings stored for a PREVIOUS name are ignored (never another name in the line)', !stale.user.nameEn && stale.en1 === null, JSON.stringify([stale.user.nameEn, stale.en1]));
+  // never the other script inside a sentence
+  const N = r9.N, F = r9.F;
+  check('§9 an Arabic-only name never goes into an English sentence («يوسف, the market…»)', N.sentenceName({ name: 'يوسف' }, 'en') === '' && F.fillName('Hi ⟦n⟧, x', 'يوسف', 'en') === null);
+  check('§9 …and a Latin-only name never into an Arabic one', N.sentenceName({ name: 'Yusuf' }, 'ar') === '' && F.fillName('هلا ⟦n⟧', 'Yusuf', 'ar') === null);
+  check('§9 the right spelling is used when it is known', N.sentenceName({ name: 'يوسف', nameEn: 'Yusuf' }, 'en') === 'Yusuf' && N.sentenceName({ name: 'Yusuf', nameAr: 'يوسف' }, 'ar') === 'يوسف');
+  mustCatch('sentenceName falling back to the other script (pickName as-is)', (await names9({ ...src9, [NS9]: src9[NS9].replace('return wrongScript ? \'\' : n;', 'return n;') })).sentenceName({ name: 'يوسف' }, 'en') !== '');
+  mustCatch('fillName letting an Arabic name into an English line', (await fill9({ ...src9, [FW]: src9[FW].replace(" || (locale === 'en' && /[\\u0600-\\u06FF]/.test(first))", '') })).fillName('Hi ⟦n⟧, x', 'يوسف', 'en') !== null);
+  // the name is isolated; the headline has an explicit direction
+  check('§9 the name is bidi-isolated (U+2068 … U+2069) in both languages', F.fillName('Hi ⟦n⟧, x', 'Yusuf', 'en') === 'Hi ⁨Yusuf⁩, x' && F.fillName('هلا ⟦n⟧، x', 'يوسف', 'ar') === 'هلا ⁨يوسف⁩، x');
+  mustCatch('a bare name (punctuation can jump across it)', (await fill9({ ...src9, [FW]: src9[FW].replace('join(`\\u2068${first}\\u2069`)', 'join(first)') })).fillName('Hi ⟦n⟧, x', 'Yusuf', 'en') !== 'Hi ⁨Yusuf⁩, x');
+  const dirOk = (h: string) => /dir: locale === 'ar' \? 'rtl' : 'ltr'/.test(h) && /useFilterWelcome\(!!user, sentenceName\(user, locale\)/.test(h);
+  check('§9 the headline carries the UI direction and a sentence name', dirOk(src9[HOME]));
+  mustCatch('the headline with no explicit direction', !dirOk(src9[HOME].replace("dir: locale === 'ar' ? 'rtl' : 'ltr'", "dir: 'auto'")));
+
+  // both spellings PERSISTED: on every save, and once on the backfill; a spelling for a replaced name is skipped
+  const liftPersist = (code: string) => liftFrom('auth.ts', code, [
+    { header: 'let nameWriteQueue: Promise<unknown> = Promise.resolve();', endsWith: /;$/ },
+    { header: 'let latestIntendedName: string | null = null;', endsWith: /;$/ },
+    { header: 'export function persistDisplayName(v: string): void {', endsWith: /^\}$/ },
+    { header: 'export function persistNameSpellings(', endsWith: /^\}$/ },
+  ], ['persistNameSpellings', 'persistDisplayName'], `const NAME_WRITE_TIMEOUT_MS = 300;\nconst supabase = { auth: { updateUser: async (p: any) => { (globalThis as any).__w.push(p.data); return {}; } } };\n`);
+  const writes = async (code: string) => {
+    const P = await liftPersist(code);
+    g9.__w = [];
+    P.persistDisplayName('يوسف');
+    P.persistNameSpellings({ name: 'يوسف', nameAr: 'يوسف', nameEn: 'Yusuf' });
+    await new Promise((r) => setTimeout(r, 30));
+    const saved = [...g9.__w];
+    P.persistDisplayName('خالد');
+    P.persistNameSpellings({ name: 'يوسف', nameAr: 'يوسف', nameEn: 'Yusuf' });   // a late answer for the replaced name
+    await new Promise((r) => setTimeout(r, 30));
+    return { saved, late: g9.__w.slice(saved.length) as any[] };
+  };
+  const w9 = await writes(src9[AUTH]);
+  check('§9 the spellings are written with the name they belong to', w9.saved.some((d: any) => d.nameEn === 'Yusuf' && d.nameAr === 'يوسف' && d.name_spellings_for === 'يوسف'), JSON.stringify(w9));
+  check('§9 …and a late spelling for a name the user already replaced is skipped', !w9.late.some((d: any) => d.name_spellings_for === 'يوسف'), JSON.stringify(w9.late));
+  mustCatch('a late spelling overwriting the new name\'s (no supersede check)', (await writes(src9[AUTH].replace('      if (latestIntendedName !== null && latestIntendedName !== s.name) return; // superseded by a newer name\n', ''))).late.some((d: any) => d.name_spellings_for === 'يوسف'));
+  const persistOk = (f: Record<string, string>) =>
+    /buildSyncedName\(v\)\.then\(\(synced\) => \{ applySyncedName\(\{ \.\.\.synced, initials: initialsOf\(v\) \}\); persistNameSpellings\(synced\); \}\);/.test(f[HOOK])
+    && /buildSyncedName\(nm\)\.then\(\(synced\) => \{ if \(!cancelled\) \{ applySyncedName\(synced\); persistNameSpellings\(synced\); \} \}\);/.test(f[STORE])
+    && /if \(!nm \|\| \(user\?\.nameEn && user\?\.nameAr\)\) return;/.test(f[STORE]);
+  check('§9 spellings persisted on every save (box, pencil, Apple) and on the backfill, which skips a user who has both', persistOk(src9));
+  mustCatch('a save that keeps the spellings in memory only', !persistOk({ ...src9, [HOOK]: src9[HOOK].replace(' persistNameSpellings(synced); });', ' });') }));
+  mustCatch('a backfill that never stores what it generated (translit on every load)', !persistOk({ ...src9, [STORE]: src9[STORE].replace(' persistNameSpellings(synced); } });', ' } });') }));
+  // a re-map never drops spellings of the same name (the «Yusuf» → «يوسف» flip)
+  const { keepSpellings } = await liftFrom('store.tsx', src9[STORE], [{ header: 'export function keepSpellings(' }], ['keepSpellings'], 'type AuthUser = any;\n');
+  const kept = keepSpellings({ name: 'يوسف', nameEn: 'Yusuf', nameAr: 'يوسف' }, { name: 'يوسف' });
+  check('§9 an auth re-map keeps this tab\'s spellings of the same name; a new name starts clean',
+    kept.nameEn === 'Yusuf' && !keepSpellings({ name: 'يوسف', nameEn: 'Yusuf' }, { name: 'خالد' }).nameEn);
+  const remapOk = (st: string) => /setUser\(\(prev\) => keepSpellings\(prev, mapSupabaseUser\(su, method\)\)\);/.test(st);
+  check('§9 the auth listener re-maps through keepSpellings', remapOk(src9[STORE]));
+  mustCatch('a re-map that drops the spellings (the flip on tab focus)', !remapOk(src9[STORE].replace('setUser((prev) => keepSpellings(prev, mapSupabaseUser(su, method)));', 'setUser(mapSupabaseUser(su, method));')));
+
+  // the «seen» flag: ONLY «حفظ» or «لاحقاً» (owner P1: a Google sign-up was marked seen 3.4 s after the callback)
+  const seenProblems = (f: Record<string, string>, extra: Record<string, string> = {}) => {
+    const out: string[] = [];
+    const all = { ...walkSrc(), ...extra };
+    for (const [file, text] of Object.entries(all)) {
+      const code = text.split('\n').filter((l) => !/^\s*(\/\/|\*|\{\/\*)/.test(l)).join('\n');
+      if (file !== AUTH && /name_prompt_seen: true/.test(code)) out.push(`${file} writes name_prompt_seen itself`);
+      if (file !== PROMPT && file !== AUTH && /markNamePromptSeen\(/.test(code)) out.push(`${file} marks the box seen`);
+    }
+    const p = f[PROMPT].split('\n').filter((l) => !/^\s*(\/\/|\{\/\*)/.test(l)).join('\n');
+    if ((p.match(/markNamePromptSeen\(\)/g) ?? []).length !== 1 || !/const close = \(\) => \{ setClosed\(true\); setReopened\(false\); markNamePromptSeen\(\);/.test(p)) out.push('the seen write is not only in close()');
+    const closeUses = (p.match(/\bclose\b(?!\s*=)/g) ?? []).length;
+    if (!/testID="name-prompt-later" style=\{s\.later\} onPress=\{close\}/.test(p) || !/\n\s*close\(\);\n\s*welcomeOnceSaved/.test(p) || closeUses !== 2) out.push(`close() is reachable from something other than «لاحقاً» / «حفظ» (${closeUses} uses)`);
+    return out;
+  };
+  const walkSrc = (): Record<string, string> => {
+    const out: Record<string, string> = {};
+    const walk = (d: string) => { for (const e of readdirSync(d, { withFileTypes: true })) { const p = join(d, e.name); if (e.isDirectory()) walk(p); else if (/\.(ts|tsx)$/.test(e.name)) out[p] = read(p); } };
+    walk('src');
+    return out;
+  };
+  const sp9 = seenProblems(files);
+  check('§9 the «seen» flag is written ONLY by «حفظ» or «لاحقاً» (no tap-outside, no automatic path)', sp9.length === 0, sp9.join('; '));
+  mustCatch('a tap outside the box marking it seen (the Google sign-up P1)', seenProblems({ ...files, [PROMPT]: files[PROMPT].replace('<View style={[s.card,', '<Pressable style={StyleSheet.absoluteFill} onPress={close} />\n      <View style={[s.card,') }).length > 0);
+  mustCatch('a "has a name → mark seen" shortcut', seenProblems({ ...files, [PROMPT]: files[PROMPT].replace('    setName(given);\n', '    setName(given);\n    if (given) markNamePromptSeen();\n') }).length > 0);
+  mustCatch('another file writing the flag (e.g. the /auth landing)', seenProblems(files, { 'src/app/auth.tsx': read('src/app/auth.tsx').replace('markJustSignedIn();', 'markJustSignedIn(); supabase.auth.updateUser({ data: { name_prompt_seen: true } });') }).length > 0);
 }
 
 // ── §4 one writer: NamePrompt, AccountMenu and AuthModal all save through useSaveName ───────────────

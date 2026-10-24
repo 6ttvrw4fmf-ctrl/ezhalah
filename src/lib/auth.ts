@@ -71,6 +71,27 @@ export function persistDisplayName(v: string): void {
     .catch(() => {});
 }
 
+// BOTH SPELLINGS ARE STORED (owner P1 2026-10-24: an English refresh showed «يوسف, the market…» and the
+// name blinked). nameAr/nameEn used to live in memory only, so every page load (and every auth re-map)
+// started with the typed script alone until translit answered. Now the synced spellings are written to
+// user_metadata with the name they belong to (name_spellings_for), on every save AND on the backfill, on
+// the SAME serialized queue as the name — a spelling for a name the user already replaced is skipped.
+export function persistNameSpellings(s: { name: string; nameAr?: string; nameEn?: string }): void {
+  if (!supabase || !s?.name || !(s.nameAr || s.nameEn)) return;
+  nameWriteQueue = nameWriteQueue
+    .then(() => {
+      if (latestIntendedName !== null && latestIntendedName !== s.name) return; // superseded by a newer name
+      const data: Record<string, string> = { name_spellings_for: s.name };
+      if (s.nameAr) data.nameAr = s.nameAr;
+      if (s.nameEn) data.nameEn = s.nameEn;
+      return Promise.race([
+        supabase!.auth.updateUser({ data }),
+        new Promise((r) => setTimeout(r, NAME_WRITE_TIMEOUT_MS)),
+      ]);
+    })
+    .catch(() => {});
+}
+
 // «وش نناديك؟» was answered or put off — written ONCE to user_metadata so the prompt follows the
 // account to every device (owner 2026-10-23). On the same queue as the name write, so a Save's two
 // writes reach the server in the order they were called and neither response can overwrite the other.
@@ -93,7 +114,11 @@ export function mapSupabaseUser(u: any, method: AuthUser['method']): AuthUser {
   // «أضف اسمك» and the user types it. scripts/verify-display-name-never-from-email.ts pins this.
   const name: string = String(meta.full_name || meta.name || '').trim();
   const sub: string = u?.email || name;
-  return { method, name, initials: initialsFrom(name, sub), sub, namePromptSeen: meta.name_prompt_seen === true, createdAt: u?.created_at, lastSignInAt: u?.last_sign_in_at };
+  // The stored spellings count only for the name they were made for (a rename makes them stale).
+  const spelled = !!name && String(meta.name_spellings_for ?? '') === name;
+  const nameAr = spelled && typeof meta.nameAr === 'string' && meta.nameAr.trim() ? meta.nameAr.trim() : undefined;
+  const nameEn = spelled && typeof meta.nameEn === 'string' && meta.nameEn.trim() ? meta.nameEn.trim() : undefined;
+  return { method, name, ...(nameAr ? { nameAr } : {}), ...(nameEn ? { nameEn } : {}), initials: initialsFrom(name, sub), sub, namePromptSeen: meta.name_prompt_seen === true, createdAt: u?.created_at, lastSignInAt: u?.last_sign_in_at };
 }
 
 // ── OAuth (Google / Apple) ───────────────────────────────────────────────────

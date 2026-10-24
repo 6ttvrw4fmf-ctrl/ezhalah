@@ -108,11 +108,15 @@ export default function NamePrompt() {
   const shown = open || (reopened && !!user && !user.name.trim());
   // Mount → next frames «on» (the CSS spring plays) → «leave» (shrink + fade, 220 ms) → unmount.
   useEffect(() => { if (shown && (phase === 'off' || phase === 'leave')) setPhase('enter'); }, [shown]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A timer, not an animation frame: frames never fire in a background tab, which would leave an invisible
+  // box (opacity 0) over the page. Reading layout first commits the «enter» styles, so the CSS spring plays.
   useEffect(() => {
     if (phase !== 'enter') return;
-    let r2 = 0;
-    const r1 = requestAnimationFrame(() => { r2 = requestAnimationFrame(() => setPhase('on')); });
-    return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); };
+    const id = setTimeout(() => {
+      if (typeof document !== 'undefined') void document.body?.offsetHeight;
+      setPhase('on');
+    }, 20);
+    return () => clearTimeout(id);
   }, [phase]);
 
   // The other script's spelling, 400 ms after typing stops. A late answer for an older input is dropped
@@ -159,7 +163,8 @@ export default function NamePrompt() {
   const thumbW = segW > 8 ? (segW - 8) / 2 : 0;
   return (
     <View style={s.overlay} {...ds({ ezhScrim: phase })}>
-      <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel={tr('Later')} />
+      {/* No tap-outside dismiss (owner P1 2026-10-24): a stray tap while the box was still fading in marked a
+          Google sign-up «seen» without the box ever being seen. Only «حفظ» or «لاحقاً» answer it. */}
       <View style={[s.card, lang === 'ar' ? s.rtl : s.ltr]} testID="name-prompt" {...ds({ ezhCard: '1' })} {...({ role: 'dialog', 'aria-modal': true } as any)}>
         <View style={s.avatar} testID="name-prompt-letter" {...ds({ ezhAv: '1' })}>
           {letter
