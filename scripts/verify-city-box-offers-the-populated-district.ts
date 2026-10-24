@@ -65,6 +65,8 @@ const LIVE: LiveDistrictRow[] = [
   check('no matching city keeps the district rows', !cityOutweighsDistricts([], mecca));
   check('wired: matchCitiesByText drops the rows when the typed city outweighs them',
     /cityOutweighsDistricts\(scored\.filter\(\(sc\) => sc\.rank === 0\)[\s\S]{0,120}\(typedCity \? \[\] : liveRows\)/.test(readFileSync('src/data/locations.ts', 'utf8')));
+  check('wired: only a district our catalog knows for that city becomes a city-box row (owner 2026-10-24)',
+    /d\.district && districtEnKeys\(\)\.has\(districtEnKey\(id, d\.district\)\)\) out\.push/.test(readFileSync('src/data/locations.ts', 'utf8')));
   mutation('a rule that always keeps the rows', ((_c: readonly number[], _d: readonly { n: number }[]) => false)([9133], mecca));
 }
 // 3. Nothing is offered for a short, Latin or empty query.
