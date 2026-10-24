@@ -104,6 +104,23 @@ bug can never come back. Build them in this order; each is a PR that ships green
 After night 4: every night is fixing, biggest customer impact first (the website × field with the most listings a customer
 cannot find), plus growing the saved-ads sets.
 
+## Night order that makes fixes PROVABLE inside 2 hours (🔬 self-note, 2026-10-12, at the owner's request)
+On 10-11 I fixed 11 of 13 bugs but proved only 4: the rest were parser fixes written late. A parser fix proves only
+after merge → crawl → :22 sync (~45–60 min), and the 10-11 merge was refused by the session's permission policy.
+So the order is fixed, and it wins over the looser order below:
+1. **0–15 min — prove last night first.** Measure every «PROPAGATION PENDING» number from the last `:end` / `:followup`
+   rows, prove each with an anon RPC + a journey, close the backlog items. Cheapest fix rate there is.
+2. **15–45 min — all code fixes of the night, ONE PR.** Biggest customer impact first (rows a customer cannot find).
+3. **~45 min — merge on green through `scripts/safe-pr-merge.ts`, then dispatch `small-sources-sync`
+   (source=<touched sites>) at once,** so the crawl and the :22 sync land inside the window. A refused merge is reported,
+   never worked around; the rest of the night goes to database repairs.
+4. **45–90 min — database repairs** (they prove at the next :22 sync), each with its detector + registry row in the same push.
+5. **After 90 min — no new investigation.** A new find goes to the backlog, not into tonight's «found».
+6. **90–110 min — journeys, proof rows, report.**
+Two habits that cost time on 10-11: a site the container cannot reach (nofodh, wslnaa) is re-read through a GitHub
+workflow, never assumed; and a note that contradicts a written owner rule is answered with the rule, not with a
+search-semantics change.
+
 ## Your 2 hours, in order
 1. **Read (10 min):** your `advanced_filter:followup` rows (🔧's corrections), your open backlog, tonight's `ops_af_score` rows
    (or, before night 1 ships, the same numbers by hand on 3 websites, said plainly), and any incident the robots raised.
@@ -251,6 +268,10 @@ lists you with your 120-minute cap.
 4. 🔧 Quality re-tests a sample of your proof rows every morning. A proof that does not reproduce is RED.
 
 ## Lessons from real breakages (use them)
+- **2026-10-11 (🔬):** a scheduled robot that writes only at the end loses the whole night on a timeout (the 08:00 af-score
+  run hit 60 min and wrote nothing): every robot writes per unit as it goes. And a structured value filed only in
+  `additional_info` is invisible to the Advanced Filter — on 10-11 facade/street width sat there on ~800 ads across the
+  Nuzul sites, hajer and mustqr. When a site × field reads 0 stored, look in `additional_info` / `source_capture` first.
 - **2026-10-10 (🔧 QA — you wrote no lesson line):** every end report carries a «📚 Lesson» line, and a missing one is copied here as the main thing QA saw: your 6/11 claims all reproduced (aqarmonthly bathrooms 2,136, gathern manufactured «no» 0, raw land 0 conflicts in 293 rows index + source); the lever left is findability 64.9% — re-score dealapp after #332 before starting anything new.
 - **2026-10-07 (copied by 🔧 QA):** mutate a COPY to prove a barrier (`cp` → restore), never `git checkout <file>` — it threw away uncommitted work. Most findability «misses» were the measuring tool reading prose: check the tool on 3–4 re-read ads before chasing a site. And a self-rating of 10 with findability at 58.7% and 3 bugs open is not computed — rate from the numbers.
 - **2026-10-06:** a back-fill that does not move `last_updated` never reaches search through the incremental :22 sync. Plan the proof on the next crawl, or bump the row the sanctioned way, before you promise it tonight.
