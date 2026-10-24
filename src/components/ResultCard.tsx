@@ -1363,13 +1363,13 @@ function sourceHost(source: string): string {
   if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return 'vm-ksa.com';
   if (s.includes('مكسب العقارية') || s.includes('macsaib')) return 'macsaib.sa';
   if (s.includes('maqrat')) return 'maqrat.com';
-  if (s.includes('عرش العقارية') || s.includes('arshglobal')) return 'arshglobal.com.sa';
+  if (raw === 'arsh' || s.includes('عرش العقارية') || s.includes('arshglobal')) return 'arshglobal.com.sa';
   if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return 'superoffice.sa';
   if (s.includes('شموع العقار') || s.includes('shomou')) return 'shomoalaqar.com.sa';
   if (s.includes('حراج') || s.includes('haraj')) return 'haraj.com.sa';
   if (s.includes('منصة مكتب') || s.includes('maktab')) return 'maktab.sa';
   if (s.includes('سرداب') || s.includes('sirdab')) return 'marketplace.sirdab.co';
-  if (s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'ashab.sa';
+  if (raw === 'ashab' || s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'ashab.sa';
   if (s.includes('منافع العقارية') || s.includes('manafe')) return 'manafe.com.sa';
   if (s.includes('وجف العقارية') || s.includes('wajaf')) return 'wajaf.sa';
   if (s.includes('البكيري العقارية') || s.includes('albukaeri')) return 'albukaeri.sa';
@@ -1385,7 +1385,7 @@ function sourceHost(source: string): string {
   if (s.includes('مباشر') || s.includes('mobasher')) return 'mobasher.sa';
   if (s.includes('مؤاجرة') || s.includes('muajarh')) return 'muajarh.com';
   if (s.includes('دلّالي') || s.includes('dallali')) return 'dallali.com';
-  if (s.includes('شركة مقام للتطوير العقاري') || s.includes('maqamco') || s.includes('maqam development')) return 'property.maqamco.sa';
+  if (raw === 'maqam' || s.includes('شركة مقام للتطوير العقاري') || s.includes('maqamco') || s.includes('maqam development')) return 'property.maqamco.sa';
   if (s.includes('تطبيق أرض') || s.includes('earthapp')) return 'earthapp.com.sa';
   if (s.includes('نوافذ الوطن') || s.includes('nawafeth') || s.includes('nawafethalwatan')) return 'nawafethalwatan.com';
   if (s.includes('re/max') || s.includes('remaxsa')) return 'remax.sa';
