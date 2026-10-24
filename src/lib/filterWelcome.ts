@@ -162,8 +162,9 @@ export const NAME_SLOT = '⟦n⟧';
 export function fillName(text: string | null | undefined, name: string, locale: 'ar' | 'en'): string | null {
   if (!text) return null;
   const first = (name ?? '').trim().split(/\s+/)[0] ?? '';
-  if (!first || (locale === 'ar' && /[A-Za-z]/.test(first))) return null;
-  return text.split(NAME_SLOT).join(first);
+  if (!first || (locale === 'ar' && /[A-Za-z]/.test(first)) || (locale === 'en' && /[\u0600-\u06FF]/.test(first))) return null;
+  // Isolated (U+2068 … U+2069): an Arabic name in an English line (or the reverse) can't drag the comma.
+  return text.split(NAME_SLOT).join(`\u2068${first}\u2069`);
 }
 
 /** Fill a line, or null when any fact it states is missing or not true today. */
