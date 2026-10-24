@@ -377,6 +377,6 @@ const s = StyleSheet.create({
   cta: { backgroundColor: colors.primary, borderRadius: radius.field, paddingVertical: 15, alignItems: 'center' },
   ctaText: { color: '#fff', fontSize: 15.5, fontWeight: '600' },
 
-  fieldLabel: { fontSize: 11, fontWeight: '700', color: colors.primary, letterSpacing: 0.55, marginBottom: 8, marginHorizontal: 2 },
+  fieldLabel: { fontSize: 11, fontWeight: '700', color: colors.primary, marginBottom: 8, marginHorizontal: 2 }, // Arabic: no tracking
   fieldLabelEn: { fontSize: 13, fontWeight: '500', letterSpacing: 0 },
 });

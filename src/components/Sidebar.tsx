@@ -765,7 +765,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                         // the drop commits.
                         ((drag?.cross === 'star' && g.key === 'Starred') || (drag?.cross === 'unstar' && g.key === 'Recent')) && s.groupHeadTarget]}>
                         {g.key === 'Starred' && <Ionicons name="star" size={11} color={GOLD} />}
-                        <Text style={[s.groupTitle, dark && dks.groupTitle]}>{t(g.key)}</Text>
+                        <Text style={[s.groupTitle, !isRTL && s.groupTitleEn, dark && dks.groupTitle]}>{t(g.key)}</Text>
                       </View>
                     )}
                     {/* Note #8 — chat row layout is IDENTICAL in both languages: icon → title → star → ⋯
@@ -1084,7 +1084,8 @@ const s = StyleSheet.create({
   groupHead: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 6, paddingBottom: 6 },
   // Drag-to-Favorites target glow (drop-would-star/unstar here) — calm, matches the gold star.
   groupHeadTarget: { backgroundColor: 'rgba(227, 160, 8, 0.14)', borderRadius: 6 },
-  groupTitle: { fontSize: 11, fontWeight: '700', color: '#9aa6a0', textTransform: 'uppercase', letterSpacing: 0.5 },
+  groupTitle: { fontSize: 11, fontWeight: '700', color: '#9aa6a0', textTransform: 'uppercase' },
+  groupTitleEn: { letterSpacing: 0.5 }, // Latin only — tracking breaks Arabic joining
   histRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 10 },
   // Interaction color for rows (owner 2026-08-24): dark-green fill with white label on hover/press.
   // DISTINCT from histRowActive below — the current chat keeps its persistent light-green highlight
