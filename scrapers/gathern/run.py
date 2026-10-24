@@ -526,8 +526,8 @@ def _canary() -> tuple[bool, str]:
         if not url:
             continue
         tried += 1
-        status, body, _ = _probe.fetch(url)
-        if _oracle_signal(status, body, False) == "live":
+        status, body, home = _probe.fetch(url)
+        if _oracle_signal(status, body, home) == "live":   # a home landing is no control (10-24)
             ok, why = True, f"control {ad} still reads live (HTTP {status})"
             break
         if tried >= 3:
@@ -650,9 +650,17 @@ def held_strikes(rows: list[dict]) -> dict[str, tuple[int, bool]]:
         for x in (res.data if res else None) or []:
             held[x["ad_number"]] = (int(x["missing_count"]), bool(x["active"]))
     url = {r["ad_number"]: r.get("listing_url") or "" for r in rows}
+    # A 200 that LANDED ON GATHERN'S HOME PAGE is not this unit (2026-10-24): passing False here read
+    # it as live, so a unit hidden on three own-page 404s (10987196, killed 10-23 17:02) was revived
+    # by the next crawl, and struck units lost their strikes the same way. Only the unit's own page
+    # — /view/ itself, or its /ar/view/ address — answering live releases it.
+    from scrapers.gathern import liveness as _L  # lazy: liveness imports this module
     for ad in list(held):
-        status, body, _ = _probe.fetch(url[ad])
-        if body and _oracle_signal(status, body, False) == "live":
+        status, body, home = _probe.fetch(url[ad])
+        if home:
+            if _L._opens_at_ar_view(_oracle_session(), url[ad]):
+                del held[ad]
+        elif body and _oracle_signal(status, body, False) == "live":
             del held[ad]
     return held
 

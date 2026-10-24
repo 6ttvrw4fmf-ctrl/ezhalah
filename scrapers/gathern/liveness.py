@@ -274,7 +274,14 @@ def probe(s, url: str, retries: int = 3, home_status: int = 0) -> int:
             # opens them (2026-10-17, gathern-api-probe 39029117183: 8 of 8 «home» units opened
             # named on /ar/view/, phone and laptop): 919 served units read no verdict every hour.
             # Their own /ar/ page may only ever say ALIVE here; anything else stays no verdict.
-            return 200 if _opens_at_ar_view(s, url) else home_status
+            # And when that /ar/ page answers its own 404 «الصفحة غير موجودة» (2026-10-24, backlog
+            # 800): that IS the unit's own page reading, and the sweep never took it — 6 served units
+            # whose /ar/view/ is 404 from CI and the cloud alike read «transient» every hour for 2
+            # days, so their 3rd strike never came. The canary keeps HOME_LANDED (a control skipped,
+            # never counted), and the run's controls + three readings still decide every hide.
+            if home_status == HOME_LANDED:
+                return 200 if _opens_at_ar_view(s, url) else home_status
+            return _ar_view_status(s, url) or home_status
         return r.status_code
     return 0
 
@@ -283,21 +290,41 @@ _VIEW = re.compile(r"^(https://gathern\.co)/view/(\d+)/unit/(\d+)/?$")
 _NOT_FOUND = ("الصفحة غير موجودة", "page not found")
 
 
-def _opens_at_ar_view(s, url: str) -> bool:
-    """True only when the unit's /ar/view/ address answers 200 ON that address, with a body that
-    names the unit and is not gathern's not-found page. Never a death: False is no verdict."""
+def _ar_view_status(s, url: str) -> int:
+    """The unit's /ar/view/ answer, read ON that address: 200 = it opens and names the unit, 404/410 =
+    gathern's own not-found page for it, 0 = no verdict (a landing elsewhere, a block, an error)."""
     m = _VIEW.match(url or "")
     if not m:
-        return False
+        return 0
     alt = f"{m.group(1)}/ar/view/{m.group(2)}/unit/{m.group(3)}"
     _throttle()
     try:
         r = s.get(alt, timeout=25, allow_redirects=True)
     except Exception:  # noqa: BLE001 — no answer is no verdict
-        return False
+        return 0
     body = getattr(r, "text", "") or ""
-    return (r.status_code == 200 and not _landed_on_home(alt, str(getattr(r, "url", "") or ""))
-            and m.group(3) in body and not any(n in body for n in _NOT_FOUND))
+    if _landed_on_home(alt, str(getattr(r, "url", "") or "")):
+        return 0
+    if r.status_code == 200 and m.group(3) in body and not any(n in body for n in _NOT_FOUND):
+        return 200
+    if r.status_code in (404, 410) and any(n in body for n in _NOT_FOUND):
+        return r.status_code
+    return 0
+
+
+def _opens_at_ar_view(s, url: str) -> bool:
+    """True only when the unit's /ar/view/ address answers 200 ON that address, with a body that
+    names the unit and is not gathern's not-found page. Never a death: False is no verdict."""
+    return _ar_view_status(s, url) == 200
+
+
+def fallback_read(status: int, fb, url: str) -> int:
+    """A direct read that gave no verdict, re-read through `fb` (the proxy) when one is given; only a
+    200 from it is taken (the run's controls were read on the direct egress, so a proxy-side 404 is
+    unguarded and stays no verdict). Anything the direct read decided is returned untouched."""
+    if fb is None or status not in (0, HOME_LANDED):
+        return status
+    return 200 if probe(fb, url) == 200 else status
 
 
 def proxied_session(use_proxy: bool):
@@ -846,6 +873,12 @@ def main() -> int:
                          "manufacturing false deaths. EXPLICIT opt-in: the secret is metered and "
                          "shared, so it is never inherited silently, and the run reports under "
                          f"'{RUN_NAME_PROXY}' so mon_detect_proxy_contention() counts it.")
+    ap.add_argument("--proxy-fallback", action="store_true",
+                    help="Re-read ONLY the units the direct read left without a verdict through the "
+                         "residential proxy (WASALT_PROXY_URL), and take only a 200 from it. Explicit "
+                         "opt-in like --proxy (2026-10-24: 15 served units read «transient» for 1-3 "
+                         "days because the datacenter egress lands on gathern's home page; the proxy "
+                         "read 11 of them alive and the rest 404). About 20 pages an hour.")
     ap.add_argument("--canaries", type=int, default=MIN_CANARIES * 2,
                     help="How many known-alive control listings to probe BEFORE the worklist. If "
                          "they do not come back alive the whole run is quarantined: 0 strikes, 0 "
@@ -921,6 +954,7 @@ def main() -> int:
         kill_cap = resolve_kill_cap(active_now)
 
     s = proxied_session(args.proxy)
+    fb = proxied_session(True) if (args.proxy_fallback and not args.proxy) else None
 
     # ── CANARY: prove the environment BEFORE deciding any real listing's fate ────────────────────
     # Owner rule 2026-09-03. The trust gate is a lagging signal — it can only condemn a run once the
@@ -992,7 +1026,7 @@ def main() -> int:
             if not url:
                 continue
             seen += 1
-            status = probe(s, url)
+            status = fallback_read(probe(s, url), fb, url)
             mc_before = int(row.get("missing_count") or 0)
             action, new_missing = classify(status, row.get("missing_count"), args.grace)
             evidence = {

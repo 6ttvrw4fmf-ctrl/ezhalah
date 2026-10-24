@@ -7,8 +7,10 @@ import { useReducedMotion } from '@/lib/useReducedMotion';
 import { PLATFORM_PICKER_PROFILES } from '@/data/platformPickerProfiles';
 import { STRIP_SLOT, stripPhase, useStripNames } from './homeWebsiteStripShared';
 
-/** Logos mounted at once: enough to cover the 560 px strip plus the one sliding in from the right. */
-export const STRIP_WINDOW = Math.ceil(560 / STRIP_SLOT) + 1;
+/** Cover the measured strip, plus one entering logo, without mounting the whole roster. */
+export function stripWindowSize(width: number): number {
+  return Math.ceil(Math.max(0, Number.isFinite(width) ? width : 0) / STRIP_SLOT) + 1;
+}
 
 /** Where the window starts and how far it has slid, for a given clock phase. Pure (barrier-executed). */
 export function stripWindow(phase: number, count: number): { start: number; offset: number } {
@@ -19,7 +21,7 @@ export function stripWindow(phase: number, count: number): { start: number; offs
 /** A SMALL window, not the whole loop (owner iPhone screenshot 2026-10-22: the home page's lower half
  *  painted white). The track used to hold every logo twice — ~150 × 2 × 108 px ≈ 32,000 px wide — as ONE
  *  `will-change: transform` layer, the shape iOS Safari drops tiles for under memory pressure. Now only
- *  STRIP_WINDOW logos are mounted. Every frame reads the wall clock (homeWebsiteStripShared.ts stripPhase,
+ *  enough logos to fill the measured viewport plus one are mounted. Every frame reads the wall clock (homeWebsiteStripShared.ts stripPhase,
  *  same 12 px/s, same place on both screens) and slides the small track; when a logo has fully left, the
  *  window steps to the next one and the slide restarts from 0 in the same commit (useLayoutEffect), so the
  *  step is invisible. The static export pre-renders this markup; the phase is read on the client AFTER
@@ -30,10 +32,21 @@ export default function HomeWebsiteStrip() {
   const names = useStripNames();
   const n = names.length;
   const cycleWidth = n * STRIP_SLOT;
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const [windowSize, setWindowSize] = useState(() => stripWindowSize(560));
   const trackRef = useRef<HTMLDivElement | null>(null);
   const offsetRef = useRef(0);
   const [phase, setPhase] = useState<number | null>(null);
   const [start, setStart] = useState(0);
+  useLayoutEffect(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const measure = () => setWindowSize(stripWindowSize(strip.clientWidth));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, []);
   useLayoutEffect(() => {
     const p = stripPhase(Date.now(), cycleWidth);
     const w = stripWindow(p, n);
@@ -61,11 +74,11 @@ export default function HomeWebsiteStrip() {
     // `start` is read once to seed `shown`; the loop owns it from then on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, reduced, n, cycleWidth]);
-  const slots = n === 0 ? [] : Array.from({ length: STRIP_WINDOW }, (_, j) => {
+  const slots = n === 0 ? [] : Array.from({ length: windowSize }, (_, j) => {
     const at = start + j;
     return { name: names[at % n], key: `${names[at % n]}-${Math.floor(at / n)}` };
   });
-  return <div data-testid="home-website-strip" aria-hidden="true" dir="ltr" style={{ width: '100%', maxWidth: 560, height: skyScene.stripHeight, alignSelf: 'center', marginTop: 8, marginBottom: 12, overflow: 'hidden', opacity: phase === null ? 0 : 1, transition: reduced ? undefined : 'opacity 240ms ease-out' }}>
+  return <div ref={stripRef} data-testid="home-website-strip" aria-hidden="true" dir="ltr" style={{ width: '100%', height: skyScene.stripHeight, alignSelf: 'center', marginTop: 8, marginBottom: 12, overflow: 'hidden', opacity: phase === null ? 0 : 1, transition: reduced ? undefined : 'opacity 240ms ease-out' }}>
     <div ref={trackRef} data-testid="home-website-track" data-phase={phase === null ? undefined : Math.round(phase)} style={{ display: 'flex', width: 'max-content', visibility: phase === null ? 'hidden' : undefined }}>
       {slots.map(({ name, key }) => {
         const profile = PLATFORM_PICKER_PROFILES[name];
