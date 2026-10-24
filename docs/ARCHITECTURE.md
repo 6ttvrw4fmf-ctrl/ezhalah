@@ -111,6 +111,8 @@ only, shown once).
 
 ## 4. Frontend — the Filter Search screen (`src/app/index.tsx`)
 
+**Website logo strip width (owner, 2026-10-24):** on web, the rotating website logos span the available main-content width beside the sidebar, with the existing page gutters. The Filter form and headline retain their centered 560 px column. The shared strip also fills the AI Agent landing's available width. Mount only enough logos to cover the measured width plus one entering slot, updating when the container resizes. Logo size, spacing, speed, clock phase, and reduced-motion behavior remain unchanged; phone layouts continue to fit the viewport.
+
 The single search state is `query` (a `SearchQuery` in the store). Every control mutates it via
 `setQuery`. **Selecting an upstream step cascade-resets all downstream fields.**
 
