@@ -4514,10 +4514,13 @@ export default function Agent() {
           <View style={s.col}>
             {(() => { const lastId = msgs[msgs.length - 1]?.id; const latestResult = msgs.filter(x => x.role === 'results').slice(-1)[0]; return msgs.map((m) => {
               if (m.role === 'user') {
-                // Owner: English bubbles sit on the left; Arabic bubbles sit on the right.
+                // The user's own bubble sits on the RIGHT in both languages (owner 2026-10-23, Perplexity
+                // reference: «for English it should be like this», then «Arabic leave it how it is»). The
+                // reply and its action rows still follow the reply's language. Text direction inside the
+                // bubble still follows the message.
                 const rtl = msgRTL(m.text);
                 return (
-                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={[s.userBubble, { alignSelf: rtl ? 'flex-end' : 'flex-start' }]}>
+                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={[s.userBubble, { alignSelf: 'flex-end' }]}>
                     <Text style={[s.userText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
                       {m.typing ? <Typer text={m.text} onDone={onBubbleDone} /> : m.text}
                     </Text>
