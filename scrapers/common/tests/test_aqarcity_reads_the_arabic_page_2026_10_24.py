@@ -73,3 +73,10 @@ def test_an_english_page_writes_no_row():
 def test_the_arabic_page_still_maps():
     row, cat = R.map_listing(page(LD_AR, "ar", DL), "https://www.aqarcity.net/property/27257")
     assert row is not None and row["property_type"] == "Building"
+
+
+def test_the_side_of_the_price_that_does_not_apply_is_cleared():
+    # The English era stored a sale total on 249 rent rows; a plain None never clears it (the upsert drops None).
+    from scrapers.common import db
+    row, _ = R.map_listing(page(LD_AR, "ar", DL), "https://www.aqarcity.net/property/27257")
+    assert row["transaction_type"] == "Buy" and row["price_annual"] is db.AUTHORITATIVE_NULL

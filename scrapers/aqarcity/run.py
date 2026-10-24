@@ -1011,11 +1011,14 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "property_age": 0 if pi.get("عمر العقار") in ("جديد", "جديده") else None,
         "direction": pi.get("واجهة العقار") or None,
         "street_width_m": _int(pi.get("عرض الشارع")),
-        "price_total": price if not is_rent else None,
+        # The other side of the price is SETTLED empty, so it is written as AUTHORITATIVE_NULL: a plain None is
+        # dropped by the upsert and would leave the total that the English-page era (2026-10-22..24) stored on
+        # 249 rent rows. A rent has no sale total; a sale has no annual rent.
+        "price_total": price if not is_rent else db.AUTHORITATIVE_NULL,
         # Monthly rentals must store the ANNUALIZED figure (monthly×12); the app displays
         # round(price_annual/12), so storing the raw monthly showed 1/12 of the real rent.
         # (price-fidelity fix 2026-07-13)
-        "price_annual": (normalize.annualize_rent(price, "monthly") if rent_period == "monthly" else price) if is_rent else None,
+        "price_annual": (normalize.annualize_rent(price, "monthly") if rent_period == "monthly" else price) if is_rent else db.AUTHORITATIVE_NULL,
         "price_per_meter": price_per_meter,
         "rent_period": rent_period,
         "city": city,
