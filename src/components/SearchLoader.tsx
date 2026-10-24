@@ -245,11 +245,13 @@ function PhaseTitle({
   }, [placeKey]);
   const titles = useMemo(() => {
     const arabic = /[؀-ۿ]/;
-    const placeLine = (p: FunnelPlace | undefined, moreKey: string, exactKey: string, slot: 'city' | 'district'): string | null => {
+    // Exact digits only (owner 2026-10-17, countWording): there is no «more than» wording any more, and
+    // the old branch on it was the one TypeScript error in the app (TS2367) once tsc became a PR gate.
+    const placeLine = (p: FunnelPlace | undefined, exactKey: string, slot: 'city' | 'district'): string | null => {
       const w = countWording(p?.count, loc);
       const name = p ? (loc === 'ar' ? p.ar : p.en) : '';
       if (!w || !name || (loc === 'en' && arabic.test(name))) return null; // never Arabic mid-English
-      return t(w.kind === 'more' ? moreKey : exactKey, { count: w.text, [slot]: name });
+      return t(exactKey, { count: w.text, [slot]: name });
     };
     const kingdom = countWording(scaleStats?.listingCount, loc);
     // WHAT THEY ASKED FOR: the type (one picked type, else the category) + buy/rent. No type at all →
@@ -261,8 +263,8 @@ function PhaseTitle({
     return buildSearchLoaderTitles({
       search: platformCount > 0 ? t('Searching {count} real-estate platforms…', { count: platformCount }) : t(SEARCH_TITLES[0]),
       checking: kingdom ? t('Checking {count} listings across the Kingdom…', { count: kingdom.text }) : t(SEARCH_TITLES[1]),
-      city: placeLine(funnel.city, 'Reviewing more than {count} listings in {city}…', 'Reviewing {count} listings in {city}…', 'city'),
-      district: placeLine(funnel.district, 'Going through more than {count} listings in {district}…', 'Going through {count} listings in {district}…', 'district'),
+      city: placeLine(funnel.city, 'Reviewing {count} listings in {city}…', 'city'),
+      district: placeLine(funnel.district, 'Going through {count} listings in {district}…', 'district'),
       matching: what ? t('Matching your request: {what}…', { what }) : t(SEARCH_TITLES[2]),
       preparing: t(SEARCH_TITLES[4]),
     });

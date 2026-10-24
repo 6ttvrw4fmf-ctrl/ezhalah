@@ -65,12 +65,18 @@ export function pickName(
 export async function buildSyncedName(typed: string): Promise<BilingualName> {
   const v = (typed ?? '').trim();
   if (!v) return { name: v };
-  const sc = scriptOf(v);
-  if (sc === 'ar') {
-    const en = await transliterateName(v, 'en'); // no deterministic AR→EN fallback
-    return { name: v, nameAr: v, ...(en ? { nameEn: en } : {}) };
-  }
-  // Typed in Latin: generate Arabic (Gemini, else phonetic table so it's never empty).
-  const ar = (await transliterateName(v, 'ar')) || phoneticAr(v, true);
-  return { name: v, nameEn: v, ...(ar ? { nameAr: ar } : {}) };
+  const other = await otherSpelling(v);
+  return scriptOf(v) === 'ar'
+    ? { name: v, nameAr: v, ...(other ? { nameEn: other } : {}) }
+    : { name: v, nameEn: v, ...(other ? { nameAr: other } : {}) };
+}
+
+/** The OTHER script's spelling of a typed name: Arabic → Latin (Gemini only — no deterministic AR→EN
+ *  fallback), Latin → Arabic (Gemini, else the phonetic table so it's never empty). '' when none.
+ *  buildSyncedName and the «وش نناديك؟» live preview both use it, so the preview is the saved spelling's source. */
+export async function otherSpelling(typed: string): Promise<string> {
+  const v = (typed ?? '').trim();
+  if (!v) return '';
+  if (scriptOf(v) === 'ar') return (await transliterateName(v, 'en')) ?? '';
+  return (await transliterateName(v, 'ar')) || phoneticAr(v, true) || '';
 }

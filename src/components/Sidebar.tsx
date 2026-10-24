@@ -878,7 +878,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
               {(st) => { const on = isOn(st) || acctOpen; return (<>
                 <View style={s.userAv}><Text style={s.userAvText}>{initialsOf(pickName(user, locale))}</Text></View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[s.userName, dark && dks.userName, on && s.userTextOn]} numberOfLines={1}>{pickName(user, locale)}</Text>
+                  <Text style={[s.userName, dark && dks.userName, !pickName(user, locale) && { color: TC.primary }, on && s.userTextOn]} numberOfLines={1}>{pickName(user, locale) || t('Add your name')}{pickName(user, locale) ? '' : ' ✏️'}</Text>
                   {!!user.sub && <Text style={[s.userSub, dark && dks.userSub, on && s.userSubOn]} numberOfLines={1}>{user.sub}</Text>}
                 </View>
                 <Ionicons name="ellipsis-horizontal" size={15} color={on ? colors.onFill : dark ? darkColors.muted : '#9aa6a0'} />
