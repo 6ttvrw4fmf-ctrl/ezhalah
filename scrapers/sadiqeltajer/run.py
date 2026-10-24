@@ -80,6 +80,9 @@ def own_section(page_html: str) -> str:
 # ads (reverted the same run, migration 20261023123442). A plot has no AC / kitchen / parking of its own, and
 # «يليه / مقابل / بجوار / قريب من …» describes what is AROUND the property, not what it has.
 _ALL_DESC = re.compile(r'class="all-desc"[^>]*>(.*?)</div>', re.S)
+# Amenities the shared reader can name that neither sadiqeltajer table has a column for (information_schema,
+# 2026-10-24): writing one would fail the whole batch with PGRST204 (the raghdan crawl, 2026-10-09).
+_NO_COLUMN = ("balcony_terrace", "optical_fibers")
 _NOT_A_UNIT = {"Residential Land", "Commercial Land", "Raw Land", "Agricultural Land", "Farm"}
 _NEARBY = re.compile(r"يلي|مقابل|بجوار|بجانب|جنب|قريب|بالقرب|مجاور|يجاور|امام|أمام|خلف|على شارع|علي شارع")
 _CLAUSE = re.compile(r"[\n\r،,.;؛|()\-]+")
@@ -625,9 +628,9 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
     # The site has no amenity field at all; this labelled list is its statement. Yes or nothing, never
     # no (ADVANCED_FILTER_SOURCE_TRUTH §2). Kitchen was 0 of 1,512 active while 272 lists name one
     # (🔬 AF engineer 2026-10-09; ops_af_score kitchen we_miss 3/3).
-    row.update(normalize.prose_amenities_yes(extra["components"]))
+    row.update(normalize.prose_amenities_yes(extra["components"], skip=_NO_COLUMN))
     # …and the description box's own clauses, for a built unit only (backlog 794, see unit_description_text).
-    row.update(normalize.prose_amenities_yes(unit_description_text(page_html, property_type)))
+    row.update(normalize.prose_amenities_yes(unit_description_text(page_html, property_type), skip=_NO_COLUMN))
     return row, category, ""
 
 
