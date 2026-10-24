@@ -6,7 +6,7 @@
 // first with English fallbacks. (PRD §5.1, prototype matchLocations — extended to nationwide data.)
 
 import raw from './sa-locations.json';
-import { norm, catalogCityExtras, catalogDistrictExtras, isLatinQuery, latinRank, populatedDistrictRows, orderCityBoxRows, liveDistrictKey, type CatalogCity, type CatalogDistrict, type LiveDistrictRow } from '../lib/locationSuggest';
+import { norm, catalogCityExtras, catalogDistrictExtras, isLatinQuery, latinRank, populatedDistrictRows, orderCityBoxRows, cityOutweighsDistricts, liveDistrictKey, type CatalogCity, type CatalogDistrict, type LiveDistrictRow } from '../lib/locationSuggest';
 import { supabase } from '@/lib/supabase';
 import { CITY_AR_DISPLAY, CITY_TOKENS, cityTokensReverseLookup } from '@/lib/cityDisplay';
 import { arabicOrPlaceholder, cutPlaceName } from '@/lib/arabicText';
@@ -105,6 +105,15 @@ export const regionNameEn = (regionId: number | null, regionAr: string | null): 
   (regionId != null ? REGION_BY_ID.get(regionId)?.en : undefined) ?? (regionAr ? translitPlace(regionAr) : null);
 let _districtEn: Map<string, string> | null = null;
 const districtEnKey = (cityId: number, ar: string) => `${cityId}:${stripAl(stripDistrictWord(norm(ar)))}`;
+let _districtKeys: Set<string> | null = null;
+/** Every catalog district, keyed per city exactly like districtEnMap (folded, «حي» and «ال» dropped). */
+function districtEnKeys(): Set<string> {
+  if (!_districtKeys) {
+    _districtKeys = new Set();
+    for (const list of CATALOG_DISTRICTS_BY_CITY.values()) for (const d of list) _districtKeys.add(districtEnKey(d.cityId, d.districtAr));
+  }
+  return _districtKeys;
+}
 function districtEnMap(): Map<string, string> {
   if (!_districtEn) {
     _districtEn = new Map();
@@ -1301,7 +1310,9 @@ function liveDistrictRows(): LiveDistrictRow[] {
     }
     if (id === null) continue;
     const n = Number(d.n) || 0;
-    if (n > 0 && d.district) out.push({ districtAr: d.district, cityId: id, n, key: liveDistrictKey(d.district) });
+    // Only a district our catalog knows for THAT city becomes a row (owner 2026-10-24): an address the advertiser
+    // typed («مكة المكرمة السعودية», «… شارع 60 مخطط ولي العهد») is not a district and is never offered.
+    if (n > 0 && d.district && districtEnKeys().has(districtEnKey(id, d.district))) out.push({ districtAr: d.district, cityId: id, n, key: liveDistrictKey(d.district) });
   }
   _liveDistrictRows = { src: LIVE_DISTRICTS, rows: out };
   return out;
@@ -1347,7 +1358,9 @@ export function matchCitiesByText(deal: Deal | null, periodTok: string | null, c
   }));
   // A typed DISTRICT name offers its populated «حي X · City» rows, ranked above the 0-served homonym cities (owner
   // decision 2026-10-19, backlog 522/566: «البديعة» → حي البديعة · الرياض, «الراكة» → حي الراكة الجنوبية · الخبر).
-  const districtRows = populatedDistrictRows(query, liveDistrictRows(), 4).flatMap((r): CityOption[] => {
+  const liveRows = populatedDistrictRows(query, liveDistrictRows(), 4);
+  const typedCity = cityOutweighsDistricts(scored.filter((sc) => sc.rank === 0).map((sc) => sc.opt.listingCount), liveRows);
+  const districtRows = (typedCity ? [] : liveRows).flatMap((r): CityOption[] => {
     const cat = CITY_BY_ID.get(r.cityId);
     if (!cat) return [];
     return [{
