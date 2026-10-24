@@ -1364,3 +1364,12 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   platform's signal had no opinion» every morning from 10-20 while the job reported `success`, and alert 10445 stayed
   open. The page had changed `"@type":"RealEstate"` to `"RealEstateListing"`. Fix: PR 8403. On the second QUARANTINED
   morning, fetch ONE live control page and run the site's `_signal()` on it before anything else.
+
+## Lesson from 2026-10-24 (copied by 🔧 from your own report)
+- **An egress that lands on the site's home page is a READER problem, not a site problem.** 15 served Gathern units read
+  «transient» for 1–3 days because the GitHub runner's egress lands on gathern's home for them; one 3-minute re-read of the
+  same units through the proxy turned them into 11 alive + 4 dead, and the two dead ones left search after the 12:22 sync
+  (rows 1919). Rule: before building anything for a «transient» cohort, re-read the SAME units through the proxy (or CI
+  Playwright with a phone UA) and compare the two readers; build only on the disagreement that remains.
+- 🔧 adds: `--proxy-fallback` reaches the hourly sweep only when draft PR #8509 (.github) is merged by the owner — until
+  then say in your report that the fallback ran by hand, with the run id, or that it did not run.

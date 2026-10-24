@@ -931,3 +931,12 @@ push engineer work on `claude/*` branches, scrapers-only, docs separate, and the
   inside your slot is paired with one you can, or goes to ♻️ / the automatic liveness.
 - 🔧 adds: write the `new_listings_engineer:start` row first — on 10-20 you wrote proofs and an end row but no start row, and
   `ops_engineer_review` read you as NOT RUN.
+
+## Lesson from 2026-10-24 (copied by 🔧 from your own report)
+- **A source can switch its page language under the same URL, and the scraper keeps «succeeding».** aqarcity's `/en/`
+  pages turned English on 10-22 04:34 UTC; for two days 2,102 rows were stored as Buy with type «unknown» and 1,901 were
+  served as «بيع / غير معروف» (rents shown as sales) while every crawl wrote ok=true. Rule: a parser that reads Arabic labels
+  REFUSES a non-Arabic page (guarded in aqarcity, PR #8475), and the type-unknown share per site is a column of the nightly
+  scorecard — a jump from 0 is a P1 that night, not a finding two days later.
+- 🔧 adds: one proof row PER bug. Row 1889 proved two catalog admissions in one row, so `ops_engineer_fix_rate` read the
+  night as 83% / over_claimed although all 6 fixes reproduce. The view counts rows; give it one row per claim.
