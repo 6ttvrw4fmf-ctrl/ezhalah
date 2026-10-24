@@ -518,7 +518,9 @@ const writerProblems = (f: Record<string, string>) => {
 // ── §5 flag OFF = today's redirect, byte for byte ───────────────────────────────────────────────────
 // sha256 of the pre-change texts (origin/main 2026-10-23): signInWithProvider, and onAppleContinue
 // with the flagged block removed. A change to either must update this pin on purpose.
-const PIN_PROVIDER = '61cbee466afe595548e0fa374850ef4ca2d2a3b44377e47ca8cde4b978f3667e';
+// Re-pinned 2026-10-24 on purpose: signInWithProvider now hands the language on screen to the /auth landing
+// (rememberLocaleForSignIn, verify-language-survives-sign-in.ts) before the SAME redirect call — unchanged.
+const PIN_PROVIDER = '96027308a636611ebb4b45c26adb47e9e23c213607521e48ac89a389ea2a0bd5';
 const PIN_APPLE = 'b92d8266e4122734558bf9687519eb3c8380a55c799c37f12ebe50d2f497f1e6';
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const between = (src: string, head: string, end: string) => {

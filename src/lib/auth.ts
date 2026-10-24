@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
-import { getLocale } from '@/i18n';
+import { getLocale, rememberLocaleForSignIn } from '@/i18n';
 import type { AuthUser } from '@/store';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,6 +138,8 @@ export async function signInWithProvider(
     // One Tap prompt, so both Google entry points speak Ezhalah's current language consistently.
     // Apple has no equivalent knob here, so it's a no-op for that provider.
     const queryParams = provider === 'google' ? { hl: getLocale() } : undefined;
+    // The redirect is a fresh page load: carry the language on screen to the /auth landing (i18n.tsx).
+    rememberLocaleForSignIn();
     const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo, queryParams } });
     if (error) return { error: error.message };
     return { redirected: true };
