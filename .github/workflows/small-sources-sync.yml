@@ -111,7 +111,7 @@ jobs:
           # site is plain nginx with no Cloudflare and answers a direct request in 1-3s.
           - { source: akariyoun,   cmd: "python -m scrapers.akariyoun.run --type all", tmo: 45 }
           - { source: ksaaqar,     cmd: "python -m scrapers.ksaaqar.run --type all", tmo: 90 }
-          - { source: sadiqeltajer, cmd: "python -m scrapers.sadiqeltajer.run --type all", tmo: 90 }
+          - { source: sadiqeltajer, cmd: "python -m scrapers.sadiqeltajer.replay_794", tmo: 90 }
           # ── onboarded 2026-09-20 ──────────────────────────────────────────────────────────────
           # gudai / safera / alhumaidan are three tenant offices of ONE inblaj.net WordPress
           # product and share scrapers/common/inblaj_platform.py, but each runs as its own source
