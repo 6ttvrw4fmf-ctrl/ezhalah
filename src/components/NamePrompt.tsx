@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useApp, type AuthUser } from '@/store';
 import { useI18n, translate } from '@/i18n';
@@ -7,8 +7,10 @@ import { useTheme } from '@/theme/theme';
 import { isBackendLive, markNamePromptSeen } from '@/lib/auth';
 import { useSaveName } from '@/lib/useSaveName';
 import { otherSpelling, scriptOf } from '@/lib/nameSync';
-import { markJustSignedIn } from '@/lib/loginWelcome';
+import { markJustSignedIn, isFreshSignUp } from '@/lib/loginWelcome';
 import { supabase } from '@/lib/supabase';
+import { useReducedMotion } from '@/lib/useReducedMotion';
+import { ensureNameBoxCss, startNameParty } from '@/lib/nameParty';
 
 // «وش نناديك؟» — asked ONCE per account when a sign-in arrives with no name (owner 2026-10-23).
 // Apple sends the name only on the first authorization and Google accounts can lack one; the name is
@@ -27,20 +29,30 @@ import { supabase } from '@/lib/supabase';
 // first letter live; the switch flips the WHOLE box (language + direction); under the field, the other
 // script's spelling (the same translit source as the save, 400 ms after typing stops, never a stale one);
 // small «لاحقاً» above the full-width «حفظ» at the very bottom. «أضف اسمك ✏️» in the account menu reopens it.
-export function shouldAskName(user: AuthUser | null, authChecked: boolean, authOpen: boolean): boolean {
-  return isBackendLive && authChecked && !authOpen && !!user && !user.name.trim() && !user.namePromptSeen;
+//
+// SIGN-UP ONLY + THE PARTY (owner-approved demo mockups/name-box-party.html, 2026-10-23): the box opens by
+// itself only for the sign-in that CREATED the account (lib/loginWelcome isFreshSignUp) — a returning
+// Google/Apple user never sees it. A Google sign-up's box is PREFILLED with the name Google sent (the
+// switch on that name's script); an Apple sign-up's is empty. «حفظ» → the box shrinks away, the home
+// headline's sign-in welcome (+ a shine), and a 5-second confetti party (lib/nameParty.ts). «لاحقاً»: no
+// party, and Google's name stays as it is. The motion is the demo's CSS (data-ezh-* + lib/nameParty.ts).
+export function shouldAskName(user: AuthUser | null, authChecked: boolean, authOpen: boolean, now: number): boolean {
+  return isBackendLive && authChecked && !authOpen && !!user && !user.namePromptSeen && isFreshSignUp(user.createdAt, user.lastSignInAt, now);
 }
 
-/** After «حفظ»: fire the sign-in welcome ONCE, the moment the saved name `v` is in the stored session
- *  (USER_UPDATED is emitted after supabase-js saves it; the headline reads the name from there). No
- *  update within 20 s (offline, failed write) → no welcome, never a nameless one. */
-export function welcomeOnceSaved(v: string): void {
+/** After «حفظ»: fire the sign-in welcome ONCE (and the party with it), the moment the saved name `v` AND
+ *  the «seen» flag are in the stored session (USER_UPDATED is emitted after supabase-js saves it; the
+ *  headline reads the name from there, and waits while a sign-up's box is unanswered). No update within
+ *  20 s (offline, failed write) → no welcome, never a nameless one. */
+export function welcomeOnceSaved(v: string, onWelcome: () => void): void {
   if (!supabase) return;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const { data } = supabase.auth.onAuthStateChange((event, session) => {
-    if (event !== 'USER_UPDATED' || String(session?.user?.user_metadata?.full_name ?? '') !== v) return;
+    const m = session?.user?.user_metadata ?? {};
+    if (event !== 'USER_UPDATED' || String(m.full_name ?? '') !== v || m.name_prompt_seen !== true) return;
     stop();
     markJustSignedIn();
+    onWelcome();
   });
   const stop = () => { if (timer) clearTimeout(timer); data.subscription.unsubscribe(); };
   timer = setTimeout(stop, 20000);
@@ -63,12 +75,17 @@ export function openNamePrompt(): void { for (const o of openers) { try { o(); }
 type Lang = 'ar' | 'en';
 const LANGS: { id: Lang; label: string }[] = [{ id: 'en', label: 'English' }, { id: 'ar', label: 'عربي' }];
 const PREVIEW_DEBOUNCE_MS = 400;
+const LEAVE_MS = 230;
+type Phase = 'off' | 'enter' | 'on' | 'leave';
+// react-native-web's data-* attributes (the demo CSS targets them); untyped on RN's host props.
+const ds = (d: Record<string, string>) => ({ dataSet: d } as any);
 
 export default function NamePrompt() {
   const { user, authChecked, authOpen } = useApp();
   const { t, locale } = useI18n();
   const { resolved, colors: C } = useTheme();
   const s = useMemo(() => makeStyles(C, resolved === 'dark'), [C, resolved, locale]);
+  const reduced = useReducedMotion();
   const saveName = useSaveName();
   const [closed, setClosed] = useState(false);
   const [open, setOpen] = useState(false);
@@ -76,13 +93,27 @@ export default function NamePrompt() {
   const [lang, setLang] = useState<Lang>(locale);
   const [preview, setPreview] = useState<{ for: string; text: string } | null>(null);
   const [reopened, setReopened] = useState(false);
-  const ask = shouldAskName(user, authChecked, authOpen) && !closed;
+  const [phase, setPhase] = useState<Phase>('off');
+  const [focused, setFocused] = useState(false);
+  const [shakeN, setShakeN] = useState(0);
+  const [segW, setSegW] = useState(0);
+  const field = useRef<TextInput>(null);
+  const ask = shouldAskName(user, authChecked, authOpen, Date.now()) && !closed;
+  useEffect(() => { ensureNameBoxCss(); }, []);
   useEffect(() => {
-    const o = () => { setLang(locale); setReopened(true); };
+    const o = () => { setName(''); setLang(locale); setReopened(true); };
     openers.push(o);
     return () => { openers = openers.filter((x) => x !== o); };
   }, [locale]);
   const shown = open || (reopened && !!user && !user.name.trim());
+  // Mount → next frames «on» (the CSS spring plays) → «leave» (shrink + fade, 220 ms) → unmount.
+  useEffect(() => { if (shown && (phase === 'off' || phase === 'leave')) setPhase('enter'); }, [shown]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (phase !== 'enter') return;
+    let r2 = 0;
+    const r1 = requestAnimationFrame(() => { r2 = requestAnimationFrame(() => setPhase('on')); });
+    return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); };
+  }, [phase]);
 
   // The other script's spelling, 400 ms after typing stops. A late answer for an older input is dropped
   // (previewFor), so the chip never shows a spelling of something no longer typed.
@@ -105,69 +136,83 @@ export default function NamePrompt() {
   // sign-in popup is still closing — neither should flash this sheet.
   useEffect(() => {
     if (!ask) { setOpen(false); return; }
-    setLang(locale);
+    // A Google sign-up arrives with Google's name: the box opens PREFILLED, the switch on its script.
+    const given = (user?.name ?? '').trim();
+    setName(given);
+    setLang(given ? scriptOf(given) : locale);
     const id = setTimeout(() => setOpen(true), 900);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask]);
 
-  const close = () => { setClosed(true); setReopened(false); markNamePromptSeen(); };
+  const close = () => { setClosed(true); setReopened(false); markNamePromptSeen(); setPhase('leave'); setTimeout(() => setPhase((p) => (p === 'leave' ? 'off' : p)), LEAVE_MS); };
   const save = () => {
     const v = name.trim();
-    if (!v) return;
+    // An empty «حفظ» is not disabled: the field gives a small shake and takes the focus.
+    if (!v) { setShakeN((n) => n + 1); field.current?.focus(); return; }
     saveName(v);
     close();
-    welcomeOnceSaved(v);
+    welcomeOnceSaved(v, () => startNameParty(reduced));
   };
 
+  if (phase === 'off') return null;
+  const thumbW = segW > 8 ? (segW - 8) / 2 : 0;
   return (
-    <>
-      {shown && (
-        <Modal transparent visible animationType="fade" onRequestClose={close}>
-          <View style={s.back}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel={tr('Later')} />
-            <View style={[s.card, lang === 'ar' ? s.rtl : s.ltr]} testID="name-prompt">
-              <View style={s.avatar} testID="name-prompt-letter">
-                {letter ? <Text style={s.avatarText}>{letter}</Text> : <Ionicons name="person" size={26} color="#fff" />}
-              </View>
-              <Text style={s.title}>{tr('What should we call you?')}</Text>
-              <Text style={s.sub}>{tr("We'll greet you by name and share a property fact every day")}</Text>
-              <View style={s.seg} testID="name-prompt-lang">
-                {LANGS.map((l) => (
-                  <Pressable key={l.id} testID={`name-prompt-lang-${l.id}`} style={[s.segItem, lang === l.id && s.segOn]} onPress={() => setLang(l.id)} accessibilityRole="button" accessibilityState={{ selected: lang === l.id }}>
-                    <Text style={[s.segText, lang === l.id && s.segTextOn]}>{l.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <TextInput
-                testID="name-prompt-input"
-                style={[s.input, lang === 'ar' ? s.inputAr : s.inputEn]}
-                value={name}
-                autoFocus
-                placeholder={translate(lang, 'Type your name')}
-                placeholderTextColor={C.muted}
-                onChangeText={setName}
-                onSubmitEditing={save}
-                returnKeyType="done"
-                autoComplete="name"
-              />
-              <View style={s.prev}>
-                {!!chip && (<>
-                  <Text style={s.prevLabel}>{tr(other === 'en' ? 'In English:' : 'In Arabic:')}</Text>
-                  <Text testID="name-prompt-preview" style={[s.chip, other === 'en' ? s.ltr : s.rtl]} numberOfLines={1}>{chip}</Text>
-                </>)}
-              </View>
-              <Pressable testID="name-prompt-later" style={s.later} onPress={close} hitSlop={8}>
-                <Text style={s.laterText}>{tr('Later')}</Text>
-              </Pressable>
-              <Pressable testID="name-prompt-save" style={[s.save, !name.trim() && s.saveOff]} onPress={save} disabled={!name.trim()}>
-                <Text style={s.saveText}>{tr('Save')}</Text>
-              </Pressable>
+    <View style={s.overlay} {...ds({ ezhScrim: phase })}>
+      <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel={tr('Later')} />
+      <View style={[s.card, lang === 'ar' ? s.rtl : s.ltr]} testID="name-prompt" {...ds({ ezhCard: '1' })} {...({ role: 'dialog', 'aria-modal': true } as any)}>
+        <View style={s.avatar} testID="name-prompt-letter" {...ds({ ezhAv: '1' })}>
+          {letter
+            ? <Text key={letter} style={s.avatarText} {...ds({ ezhLetter: '1' })}>{letter}</Text>
+            : <View key="person" {...ds({ ezhLetter: '1' })}><Ionicons name="person" size={26} color="#fff" /></View>}
+        </View>
+        <Text style={s.title}>{tr('What should we call you?')}</Text>
+        <Text style={s.sub}>{tr("We'll greet you by name and share a property fact every day")}</Text>
+        <View style={s.seg} testID="name-prompt-lang" onLayout={(e) => setSegW(e.nativeEvent.layout.width)}>
+          {thumbW > 0 && <View style={[s.thumb, { width: thumbW, transform: [{ translateX: lang === 'ar' ? thumbW : 0 }] }]} {...ds({ ezhThumb: '1' })} />}
+          {LANGS.map((l) => (
+            <Pressable key={l.id} testID={`name-prompt-lang-${l.id}`} style={s.segItem} onPress={() => setLang(l.id)} accessibilityRole="button" accessibilityState={{ selected: lang === l.id }}>
+              <Text style={[s.segText, lang === l.id && s.segTextOn]} {...ds({ ezhSegtext: '1' })}>{l.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <View {...ds({ ezhShake: shakeN === 0 ? 'n' : shakeN % 2 ? 'a' : 'b' })}>
+          <TextInput
+            ref={field}
+            testID="name-prompt-input"
+            style={[s.input, focused && s.inputFocus, lang === 'ar' ? s.inputAr : s.inputEn]}
+            {...ds({ ezhField: '1' })}
+            value={name}
+            autoFocus
+            placeholder={translate(lang, 'Type your name')}
+            placeholderTextColor={C.muted}
+            onChangeText={setName}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            onSubmitEditing={save}
+            returnKeyType="done"
+            autoComplete="name"
+          />
+        </View>
+        <View {...ds({ ezhChipwrap: chip ? 'show' : 'hide' })}>
+          <View>
+            <View style={s.prev}>
+              {!!chip && (<>
+                <Text style={s.prevLabel}>{tr(other === 'en' ? 'In English:' : 'In Arabic:')}</Text>
+                <Text testID="name-prompt-preview" style={[s.chip, other === 'en' ? s.ltr : s.rtl]} numberOfLines={1}>{chip}</Text>
+              </>)}
             </View>
           </View>
-        </Modal>
-      )}
-    </>
+        </View>
+        {!chip && <Text style={s.hint} testID="name-prompt-hint">{tr(lang === 'ar' ? "We'll write it in English for you" : "We'll write it in Arabic for you")}</Text>}
+        <Pressable testID="name-prompt-later" style={s.later} onPress={close} hitSlop={8}>
+          <Text style={s.laterText}>{tr('Later')}</Text>
+        </Pressable>
+        <Pressable testID="name-prompt-save" style={[s.save, !name.trim() && s.saveOff]} onPress={save} {...ds({ ezhSave: '1' })}>
+          <Text style={s.saveText}>{tr('Save')}</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -175,37 +220,42 @@ const makeStyles = (C: any, dark: boolean) => {
   const web = Platform.OS === 'web';
   const ptr = web ? { cursor: 'pointer' as any } : {};
   return StyleSheet.create({
-    // Same scrim and card as AccountMenu's centered views.
-    back: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: dark ? 'rgba(4,8,6,0.62)' : 'rgba(8,18,12,0.5)', ...(web ? ({ backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' } as any) : null) },
-    card: { width: '100%', maxWidth: 360, alignItems: 'stretch', backgroundColor: C.surface, borderRadius: 24, paddingTop: 24, paddingHorizontal: 20, paddingBottom: 18, shadowColor: '#000', shadowOpacity: dark ? 0.6 : 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 14 },
+    // The demo's scrim (its fade + blur are CSS, lib/nameParty.ts) over everything, like AuthModal's overlay.
+    overlay: { position: (web ? 'fixed' : 'absolute') as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 10000, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: dark ? 'rgba(4,8,6,0.62)' : 'rgba(14,28,20,0.38)' },
+    card: { width: '100%', maxWidth: 360, alignItems: 'stretch', backgroundColor: C.surface, borderRadius: 26, paddingTop: 26, paddingHorizontal: 20, paddingBottom: 20, shadowColor: '#0a1e14', shadowOpacity: dark ? 0.6 : 0.22, shadowRadius: 50, shadowOffset: { width: 0, height: 18 }, elevation: 14 },
     rtl: { direction: 'rtl' as any, writingDirection: 'rtl' },
     ltr: { direction: 'ltr' as any, writingDirection: 'ltr' },
-    avatar: { width: 60, height: 60, borderRadius: 30, backgroundColor: C.primary, borderWidth: 4, borderColor: dark ? C.surface2 : C.tint, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 12 },
+    avatar: { width: 62, height: 62, borderRadius: 31, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 12, ...(web ? ({ boxShadow: `0 0 0 5px ${dark ? C.surface2 : C.tint}` } as any) : { borderWidth: 4, borderColor: dark ? C.surface2 : C.tint }) },
     avatarText: { color: '#fff', fontSize: 26, fontWeight: '700' },
     title: { fontSize: 23, lineHeight: 31, fontWeight: '700', color: C.ink, textAlign: 'center' },
     sub: { fontSize: 14, lineHeight: 21, color: C.muted, textAlign: 'center', marginTop: 6, marginBottom: 16 },
     // The switch reads English | عربي in both languages (as in the mockup), so it never flips under RTL.
-    seg: { flexDirection: 'row', direction: 'ltr' as any, backgroundColor: dark ? C.surface2 : C.tint, borderRadius: 999, padding: 4, marginBottom: 14 },
-    segItem: { flex: 1, paddingVertical: 8, borderRadius: 999, alignItems: 'center', ...ptr },
-    segOn: { backgroundColor: C.surface, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
+    seg: { flexDirection: 'row', direction: 'ltr' as any, backgroundColor: dark ? C.surface2 : C.tint, borderRadius: 999, padding: 4, marginBottom: 12 },
+    // The white thumb glides under the picked side (transition: lib/nameParty.ts [data-ezh-thumb]).
+    thumb: { position: 'absolute', top: 4, bottom: 4, left: 4, borderRadius: 999, backgroundColor: C.surface, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
+    segItem: { flex: 1, paddingVertical: 9, borderRadius: 999, alignItems: 'center', zIndex: 1, ...ptr },
     segText: { fontSize: 15, fontWeight: '600', color: C.muted },
     segTextOn: { color: dark ? C.ink : '#1d4a37' },
     input: {
       fontSize: 18, fontWeight: '500', color: C.ink,
-      borderWidth: 1.5, borderColor: C.primary, backgroundColor: C.surface, borderRadius: 14, paddingVertical: 13, paddingHorizontal: 14,
+      borderWidth: 1.5, borderColor: C.fieldLine, backgroundColor: C.surface, borderRadius: 14, paddingVertical: 13, paddingHorizontal: 14,
       ...(web ? { outlineStyle: 'none' as any } : {}),
     },
+    // The focus ring (eased by lib/nameParty.ts [data-ezh-field]).
+    inputFocus: { borderColor: C.primary, ...(web ? ({ boxShadow: '0 0 0 4px rgba(47,114,71,0.12)' } as any) : {}) },
     // The switch decides the field's direction — never the app's language.
     inputAr: { textAlign: 'right', writingDirection: 'rtl' },
     inputEn: { textAlign: 'left', writingDirection: 'ltr' },
-    // Reserved height, so the chip arriving never shifts «لاحقاً» / «حفظ» under a finger.
-    prev: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 30, marginTop: 10, marginBottom: 14, marginHorizontal: 2 },
-    prevLabel: { fontSize: 14, color: C.muted },
+    // The chip row slides open (grid-rows 0fr→1fr, lib/nameParty.ts); the hint holds its place until then.
+    prev: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 10, marginHorizontal: 2 },
+    prevLabel: { fontSize: 13, color: C.muted },
+    hint: { fontSize: 12.5, color: C.muted, paddingTop: 9, textAlign: 'center' },
     chip: { flexShrink: 1, backgroundColor: dark ? C.surface2 : C.tint, color: dark ? C.ink : '#1d4a37', borderRadius: 999, paddingVertical: 5, paddingHorizontal: 12, fontSize: 14, fontWeight: '600', overflow: 'hidden' },
-    later: { alignSelf: 'center', paddingVertical: 4, paddingHorizontal: 12, marginBottom: 12, ...ptr },
+    later: { alignSelf: 'center', paddingVertical: 4, paddingHorizontal: 10, marginTop: 18, marginBottom: 10, ...ptr },
     laterText: { color: '#9aa6a0', fontSize: 12, fontWeight: '500' },
-    save: { backgroundColor: C.primary, borderRadius: 14, paddingVertical: 14, alignItems: 'center', ...ptr },
-    saveOff: { opacity: 0.45 },
+    save: { backgroundColor: C.primary, borderRadius: 15, paddingVertical: 15, alignItems: 'center', ...ptr },
+    // Not disabled-looking: a soft green until there is a name, then the app green (eased).
+    saveOff: { backgroundColor: dark ? '#3c5546' : '#b9cbbf' },
     saveText: { color: '#fff', fontSize: 17, fontWeight: '700' },
   });
 };
