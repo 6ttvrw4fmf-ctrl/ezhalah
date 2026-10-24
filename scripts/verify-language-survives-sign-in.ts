@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { liftSymbols } from './lib/liftSymbols.ts';
+import { windowBetween } from './lib/sourceWindow.ts';
 
 const root = resolve(import.meta.dirname, '..');
 const I18N = join(root, 'src/i18n.tsx');
@@ -99,7 +100,7 @@ for (const p of found) console.log(`      ↳ ${p}`);
 const authSrc = readFileSync(AUTH, 'utf8');
 const wiringProblems = (auth: string, i18n: string): string[] => {
   const bad: string[] = [];
-  const fn = auth.slice(auth.indexOf('export async function signInWithProvider('), auth.indexOf('\n}\n', auth.indexOf('export async function signInWithProvider(')));
+  const fn = windowBetween(auth, 'export async function signInWithProvider(', '\n}\n', 'src/lib/auth.ts');
   const w = fn.indexOf('rememberLocaleForSignIn()'), o = fn.indexOf('signInWithOAuth(');
   if (w < 0 || o < 0 || w > o) bad.push('signInWithProvider does not hand the language over before the OAuth redirect');
   if (!/^let _locale: Locale = signInLandingLocale\(\) \?\? readSavedLocale\(\);$/m.test(i18n)) bad.push('the first language does not read the sign-in hand-over first');

@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 type Catalog = { regions: [number, string, string][]; cities: [number, number, string, string][]; districts: [number, number, string, string][] };
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${!ok && detail ? ` — ${detail}` : ''}`); if (!ok) failed++; };
+const mustCatch = (label: string, problems: string[]) => check(`(mutation) catches ${label}`, problems.length > 0);
 
 /** Every English name in the catalog with a vowelless Latin word in it. */
 export function unreadableNames(c: Catalog): string[] {
@@ -22,7 +23,7 @@ const bad = unreadableNames(catalog);
 check('every English region/city/district name in the catalog is a readable word', bad.length === 0, bad.slice(0, 10).join(', '));
 check('حي الغطغط (Al Muzahimiyah) reads «Al Ghatghat Dist.»', catalog.districts.some((d) => d[3] === 'حي الغطغط' && d[2] === 'Al Ghatghat Dist.'));
 // Mutation proof: the exact broken row must be caught.
-check('(mutation) catches «Al Ghtght Dist.»', unreadableNames(JSON.parse(raw.replace('"Al Ghatghat Dist."', '"Al Ghtght Dist."'))).length > 0);
+mustCatch('«Al Ghtght Dist.»', unreadableNames(JSON.parse(raw.replace('"Al Ghatghat Dist."', '"Al Ghtght Dist."'))));
 
 if (failed) { console.error(`\n❌ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✅ catalog English names are readable words');
