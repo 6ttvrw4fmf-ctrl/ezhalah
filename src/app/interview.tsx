@@ -424,7 +424,7 @@ export default function Interview() {
           <View style={s.barLeft}>
             {curQ && order.length > 0 ? (
               <Pressable onPress={back} style={s.backBtn} hitSlop={6}>
-                <Ionicons name="chevron-back" size={16} color={colors.dark} />
+                <Ionicons name="chevron-back" size={16} color={colors.ink} />
               </Pressable>
             ) : null}
             <View style={s.titleWrap}>
@@ -478,7 +478,7 @@ export default function Interview() {
                           <Text style={s.lbl}>{optMain(curQ.key, o)}</Text>
                           {sub ? <Text style={s.sub2}>{sub}</Text> : null}
                         </View>
-                        {on ? <Ionicons name="checkmark" size={17} color={colors.dark} /> : null}
+                        {on ? <Ionicons name="checkmark" size={17} color={colors.ink} /> : null}
                       </Pressable>
                     );
                   })}
@@ -558,7 +558,7 @@ const s = StyleSheet.create({
   barLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
   backBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.surface2, alignItems: 'center', justifyContent: 'center' },
   titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 1 },
-  title: { fontSize: 14, fontWeight: '700', color: colors.dark },
+  title: { fontSize: 14, fontWeight: '700', color: colors.ink },
   xBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.surface2, alignItems: 'center', justifyContent: 'center' },
 
   progTrack: { height: 3, backgroundColor: colors.line, marginHorizontal: 16, marginBottom: 4, borderRadius: 3, overflow: 'hidden' },
@@ -568,7 +568,7 @@ const s = StyleSheet.create({
 
   crumbs: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
   crumb: { borderWidth: 1, borderColor: colors.chipLine, backgroundColor: colors.chipFill, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 11 },
-  crumbText: { color: colors.dark, fontSize: 11.5, fontWeight: '600' },
+  crumbText: { color: colors.ink, fontSize: 11.5, fontWeight: '600' },
 
   qhead: { paddingHorizontal: 2, paddingTop: 6, paddingBottom: 10 },
   lead: { fontSize: 12.5, fontWeight: '600', color: colors.primary, marginBottom: 4 },
@@ -601,5 +601,5 @@ const s = StyleSheet.create({
   nextBtn: { backgroundColor: colors.dark, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
   nextText: { color: '#fff', fontSize: 14.5, fontWeight: '700' },
   skipLink: { borderWidth: 1, borderColor: colors.chipLine, backgroundColor: colors.chipFill, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-  skipText: { color: colors.dark, fontSize: 14, fontWeight: '700' },
+  skipText: { color: colors.ink, fontSize: 14, fontWeight: '700' },
 });

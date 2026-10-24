@@ -67,7 +67,8 @@ export const ABOUT_ART_BREAKPOINT = 640;
 // Text node existed on every ≥380px client while the served HTML (width 0) had none: React #418 on
 // every deploy's post-deploy hydration gate from 2026-09-05 21:33Z onward. Routed through
 // useAtLeast() like every other width-gated flag; the scan now also catches renamed width reads.
-export const SHARE_LABEL_BREAKPOINT = 380;
+// At 390px the English Agent header exceeded the viewport by 13px; keep both labels inside.
+export const SHARE_LABEL_BREAKPOINT = 420;
 
 // AI-chat site picker (owner 2026-10-09, Perplexity-style): below this width it is a bottom sheet
 // with a drag-handle look; at/above it a compact floating card. Same SSR rule as every gate above.

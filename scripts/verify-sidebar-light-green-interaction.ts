@@ -1,11 +1,11 @@
-// SIDEBAR INTERACTION COLOR — light green at rest, dark green ONLY on interaction.
+// SIDEBAR INTERACTION COLOR — light green at rest, dark plum ONLY on interaction.
 //
-// Owner 2026-08-24: «I want the sidebar to feel lighter... The dark green should be an interaction
+// Owner 2026-08-24: «I want the sidebar to feel lighter... The dark plum should be an interaction
 // color, not the permanent background color for everything.» Supersedes the 2026-08-14 solid-green
 // New Chat. The rules:
-//   * «محادثة جديدة»: LIGHT green fill + dark-green text at rest → DARK green fill + white text on
+//   * «محادثة جديدة»: LIGHT green fill + ink text at rest → DARK green fill + white text on
 //     hover/keyboard-focus/press, ~160ms restrained transition, no bounce.
-//   * Chat rows: light/neutral at rest → dark-green fill + white label on hover (web) / press
+//   * Chat rows: light/neutral at rest → ink fill + white label on hover (web) / press
 //     (touch). The feedback must always REVERT (leave/press-out clears), never stick.
 //   * The SELECTED chat keeps its persistent light-green highlight and never takes the hover fill —
 //     current vs hovered must stay visually distinct.
@@ -13,8 +13,8 @@
 //
 // Owner 2026-09-03 (extends the rule to the WHOLE sidebar, both themes): EVERY clickable sidebar row
 // gives the exact same feedback «محادثة جديدة» gives — the whole row fills, icon + label turn white —
-// through ONE semantic token, colors.hoverRow: the dark green in light, a MUTED deep green-gray
-// (#26483f) in dark (never the bright interaction green, never white, never neon). White-on-fill is
+// through ONE semantic token, colors.hoverRow: the dark plum in light, a MUTED deep plum
+// (#594660) in dark (never the bright interaction green, never white, never neon). White-on-fill is
 // colors.onFill (white in BOTH themes; colors.surface is dark in dark mode — the old pin would have
 // painted dark text on the dark fill). The account menu is anchored IN the sidebar, so its rows
 // follow the same rule; non-clickable elements never take a hover.
@@ -69,21 +69,21 @@ const hexDark = (name: string): string => {
   return m[1];
 };
 const HOVER_D = hexDark('hoverRow'), PAPER_D = hexDark('paper'), ONFILL_D = hexDark('onFill'), DARK_D = hexDark('dark');
-const SELECTED = '#dcefe1'; // histRowActive — the persistent current-chat highlight
+const SELECTED = hex('userBubble'); // histRowActive — the persistent current-chat highlight
 const menu = stripComments(read('src/components/AccountMenu.tsx'));
 
-console.log('\nSidebar interaction color — light at rest, dark green on interaction\n');
+console.log('\nSidebar interaction color — light at rest, dark plum on interaction\n');
 
 // ── 1. New Chat: light default, dark interaction, text flips with the fill ──────────────────────
 check('New Chat DEFAULT fill is the light tint (never primary/dark at rest)',
   /newChat: \{[^}]*backgroundColor: colors\.tint/.test(sidebar)
   && !/newChat: \{[^}]*backgroundColor: colors\.(primary|dark)/.test(sidebar));
-check('New Chat hover/focus/press fill is the sidebar interaction token (hoverRow = the dark green in light)',
+check('New Chat hover/focus/press fill is the sidebar interaction token (hoverRow = the dark plum in light)',
   /newChatHover: \{ backgroundColor: colors\.hoverRow/.test(sidebar) && HOVER.toLowerCase() === DARK.toLowerCase());
-check('New Chat text is dark-green at rest and flips to WHITE-ON-FILL (onFill, white in both themes) with the fill',
-  /newChatText: \{[^}]*color: colors\.dark/.test(sidebar)
+check('New Chat text is ink at rest and flips to WHITE-ON-FILL (onFill, white in both themes) with the fill',
+  /newChatText: \{[^}]*color: colors\.ink/.test(sidebar)
   && /newChatTextOn: \{ color: colors\.onFill \}/.test(sidebar)
-  && /on \? colors\.onFill : colors\.dark/.test(sidebar));
+  && /on \? colors\.onFill : colors\.ink/.test(sidebar));
 check('the hover state also covers keyboard focus',
   /state\.pressed \|\| \(\(state as \{ focused\?: boolean \}\)\.focused/.test(sidebar)
   || /focused/.test(sidebar.slice(sidebar.indexOf('s.newChat,'), sidebar.indexOf('onPress={onNewChat}'))));
@@ -101,7 +101,7 @@ check('web hover reverts on mouseleave; touch press ALWAYS clears on pressOut (n
 // never takes the hover fill. On the Filter home no row is selected, so hover may darken freely.
 check('the SELECTED chat never takes the hover fill (current ≠ hovered, structurally)',
   /!\(onAgentScreen && activeChatId === c\.id\)/.test(sidebar)
-  && /histRowActive: \{ backgroundColor: '#dcefe1' \}/.test(sidebar));
+  && /histRowActive: \{ backgroundColor: colors\.userBubble \}/.test(sidebar));
 check('selected and hover are different colors entirely (light persistent vs dark interactive)',
   SELECTED.toLowerCase() !== DARK.toLowerCase());
 
@@ -109,7 +109,7 @@ check('selected and hover are different colors entirely (light persistent vs dar
 check('header 🔍 is neutral at rest and takes the SAME interaction fill on hover — never permanently dark',
   /searchTopBtnHover: \{ backgroundColor: colors\.hoverRow \}/.test(sidebar)
   && !/searchTopBtn: \{[^}]*backgroundColor: colors\.(dark|primary)/.test(sidebar)
-  && /isOn\(st\) \? colors\.onFill : dark \? '#a9c9b4' : colors\.dark/.test(sidebar));
+  && /isOn\(st\) \? colors\.onFill : colors\.ink/.test(sidebar));
 check('nav links (اللغة / الإعدادات / المساعدة / من نحن), the profile row, the guest CTA and the ⋯ menu items ALL fill with hoverRow',
   /navLinkHover: \{ backgroundColor: colors\.hoverRow \}/.test(sidebar)
   && /userRowHover: \{ backgroundColor: colors\.hoverRow \}/.test(sidebar)
@@ -131,8 +131,8 @@ check('dark mode has NO per-theme hover overrides — the token carries both the
 check('the account menu (anchored in the sidebar) rows take the same fill and flip to white',
   /rowHover: \{ backgroundColor: C\.hoverRow \}/.test(menu) && /rowOn: \{ color: C\.onFill \}/.test(menu)
   && (menu.match(/s\.rowHover/g) ?? []).length === 3 && /quietHover: \{ backgroundColor: dark \?/.test(menu));
-check(`DARK hoverRow is the owner's muted deep green-gray (${HOVER_D}), not the bright interaction green (${DARK_D})`,
-  HOVER_D.toLowerCase() === '#26483f' && HOVER_D.toLowerCase() !== DARK_D.toLowerCase());
+check(`DARK hoverRow is the owner's muted deep plum (${HOVER_D}), not the bright interaction green (${DARK_D})`,
+  HOVER_D.toLowerCase() === '#594660' && HOVER_D.toLowerCase() !== DARK_D.toLowerCase());
 
 // ── 4. motion: restrained web transition, no bounce ─────────────────────────────────────────────
 check('New Chat and rows ride the shared 160ms background transition (no spring/bounce)',
@@ -142,11 +142,11 @@ check('New Chat and rows ride the shared 160ms background transition (no spring/
 
 // ── 5. contrast, computed from the shipped hexes ────────────────────────────────────────────────
 const pairs: Array<[string, string, string, number]> = [
-  ['New Chat rest: dark-green text on tint', DARK, TINT, 4.5],
+  ['New Chat rest: ink text on tint', INK, TINT, 4.5],
   ['LIGHT hover: white-on-fill text on hoverRow', ONFILL, HOVER, 4.5],
   ['LIGHT row hover: white-on-fill label on hoverRow', ONFILL, HOVER, 4.5],
   ['selected row: ink label on light highlight', INK, SELECTED, 4.5],
-  ['DARK hover: white-on-fill text on the muted deep green', ONFILL_D, HOVER_D, 4.5],
+  ['DARK hover: white-on-fill text on the muted deep plum', ONFILL_D, HOVER_D, 4.5],
   ['DARK hover fill is visible against the charcoal panel (non-text)', HOVER_D, PAPER_D, 1.5],
 ];
 for (const [label, fg, bg, min] of pairs) {
@@ -175,7 +175,7 @@ mustCatch('the hover state being deleted',
   !/newChatHover: \{ backgroundColor: colors\.hoverRow/.test(
     mut(sidebar, 'newChatHover: { backgroundColor: colors.hoverRow', 'newChatHover: { backgroundColor: colors.tint')));
 mustCatch('the dark hover drifting to the bright interaction green (owner: never bright/neon)',
-  !/hoverRow: '#26483f'/.test(mut(darkBlock, "hoverRow: '#26483f'", `hoverRow: '${DARK_D}'`)));
+  !/hoverRow: '#594660'/.test(mut(darkBlock, "hoverRow: '#594660'", `hoverRow: '${DARK_D}'`)));
 mustCatch('hover text going back to colors.surface (dark-on-dark in dark mode)',
   !/histLabelHot: \{ color: colors\.onFill \}/.test(mut(sidebar, 'histLabelHot: { color: colors.onFill }', 'histLabelHot: { color: colors.surface }')));
 mustCatch('a per-theme hover override sneaking back into dks',
