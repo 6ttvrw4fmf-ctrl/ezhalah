@@ -133,7 +133,11 @@ def listing_schema_present(body: str, adid: str) -> bool:
     shell page could be mistaken for a verified one."""
     if not body or not adid:
         return False
-    return bool(re.search(rf"real-estate-listing-schema-{re.escape(str(adid))}\b", body))
+    # dealapp's URL keeps a leading zero its schema drops: /ad-details/089639 renders
+    # real-estate-listing-schema-89639 (2026-10-25). Matching the literal URL id made such an ad
+    # unreadable forever, alive or sold: 1143135 sat at 11 strikes, served, while its page was live.
+    core = str(adid).lstrip("0") or "0"
+    return bool(re.search(rf"real-estate-listing-schema-0*{re.escape(core)}\b", body))
 
 
 def sold_or_rented(body: str) -> bool:
