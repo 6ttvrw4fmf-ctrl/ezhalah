@@ -98,5 +98,26 @@ const dwm = DW.includes(DW_FROM)
 if (!dwm) check(`ANCHOR DRIFTED: ${DW_FROM}`, false);
 mustCatch('dwelleo\'s furnishing_status overriding the ad\'s own «مفروشة: لا» (served as yes)', dwm !== null && dwm.some((g, i) => g !== DW_CASES[i][2]));
 
+// The prose-only reader every yes-or-nothing site moved to (owner 2026-10-24): yes / an explicit no tied to the
+// token / unknown, and a column the site publishes structurally (skip) is never read from prose at all.
+const PROSE: [string, string[], Record<string, boolean>][] = [
+  ['لا يوجد مصعد', [], { elevator: false }],
+  ['يتوفر مصعد', [], { elevator: true }],
+  ['تأسيس مصعد', [], {}],
+  ['قريب من مواقف عامة', [], {}],
+  ['لا يوجد مصعد، شقة مفروشة', ['elevator', 'furnished'], {}],
+];
+const prose = (src?: string) =>
+  (pyCall(ROOT, MOD, 'prose_amenities', PROSE.map(([t, skip]) => [t, skip]), src) as Record<string, boolean>[]);
+const same = (a: Record<string, boolean>, b: Record<string, boolean>) => JSON.stringify(a, Object.keys(a).sort()) === JSON.stringify(b, Object.keys(b).sort());
+const pr = prose();
+PROSE.forEach(([t, skip, want], i) => check(`prose_amenities(«${t}», skip=[${skip}]) → ${JSON.stringify(want)}`, same(pr[i], want), JSON.stringify(pr[i])));
+const P_FROM = 'return {k: v for k, v in amenities_from_lines(raw).items() if k not in skip}';
+const pm1 = SRC.includes(P_FROM) ? prose(SRC.replace(P_FROM, 'return {k: True for k, v in amenities_from_lines(raw).items() if v is True and k not in skip}')) : null;
+const pm2 = SRC.includes(P_FROM) ? prose(SRC.replace(P_FROM, 'return dict(amenities_from_lines(raw))')) : null;
+if (!pm1) check(`ANCHOR DRIFTED: ${P_FROM}`, false);
+mustCatch('the yes-only reader back (a stated «لا يوجد مصعد» never stored as no)', pm1 !== null && pm1.some((g, i) => !same(g, PROSE[i][2])));
+mustCatch('prose reading a column the site publishes structurally (skip ignored)', pm2 !== null && pm2.some((g, i) => !same(g, PROSE[i][2])));
+
 if (failed) { console.error(`\n❌ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✅ a labelled «لا» is a NO');

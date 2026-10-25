@@ -21,13 +21,14 @@ def test_real_descriptions_state_the_elevator():
     assert got == {"private_entrance": True, "air_conditioner": True}
 
 
-def test_negation_prepared_and_proximity_stay_unknown_never_false():
-    assert E.prose_amenities(_d("<p>لا يوجد مصعد</p>")) == {}
+def test_negation_is_a_no_and_prepared_and_proximity_stay_unknown():
+    # owner 2026-10-24: yes / an explicit no tied to the word / unknown
+    assert E.prose_amenities(_d("<p>لا يوجد مصعد</p>")) == {"elevator": False}
     assert E.prose_amenities(_d("<p>تأسيس مصعد</p><p>تأسيس مكيفات</p>")) == {}
     assert E.prose_amenities(_d("<p>بالقرب من مدخل خاص للحي</p>")) == {}
     # two statements that disagree have not stated the fact
     assert E.prose_amenities(_d("<p>مصعد</p><p>بدون مصعد</p>")) == {}
-    assert all(v is True for v in E.prose_amenities(_d("<p>مصعد</p><p>غير مكيفة</p>")).values())
+    assert E.prose_amenities(_d("<p>مصعد</p><p>غير مكيفة</p>")) == {"elevator": True, "air_conditioner": False}
 
 
 def test_fields_wasalt_publishes_structurally_are_never_read_from_prose():
@@ -104,7 +105,7 @@ class _DB:
         return _Q(self, t)
 
 
-def test_backfill_writes_yes_only_into_null_columns_and_never_overwrites():
+def test_backfill_writes_yes_or_a_stated_no_into_null_columns_then_rejudges_its_own_answers():
     db = _DB([
         {"id": 1, "desc": "<p>يتوفر مصعد</p>", "elevator": None, "air_conditioner": None, "private_entrance": None},
         {"id": 2, "desc": "<p>لا يوجد مصعد</p>", "elevator": None, "air_conditioner": None, "private_entrance": None},
@@ -112,15 +113,16 @@ def test_backfill_writes_yes_only_into_null_columns_and_never_overwrites():
         {"id": 4, "desc": None, "elevator": None, "air_conditioner": None, "private_entrance": None},
     ])
     out = E.prose_backfill(db, "wasalt_residential_listings", page=2)
-    assert {k: v for k, v in out.items() if not k.endswith("_unset")} == {"elevator": 1, "air_conditioner": 0, "private_entrance": 0}
-    assert db.writes == [(1, {"elevator": True})]
-    assert db.rows[1]["elevator"] is None and db.rows[2]["elevator"] is False
-    assert all(v is True for _, w in db.writes for v in w.values())
+    assert {k: v for k, v in out.items() if not k.endswith("_unset")} == {"elevator": 2, "air_conditioner": 0, "private_entrance": 0}
+    # NULL columns get the stated answer; row 3's «no» (only this module writes these columns) is re-judged to the
+    # yes its own words give; row 4 has no words and is never written.
+    assert db.writes == [(1, {"elevator": True}), (2, {"elevator": False}), (3, {"elevator": True})]
+    assert db.rows[1]["elevator"] is False and db.rows[2]["elevator"] is True and db.rows[3]["elevator"] is None
 
 
 def test_the_four_wrong_yes_of_the_first_backfill_are_unknown():
     """Verbatim shapes of rows 9313822, 11923578, 442940 and 526753 (2026-10-16): each was written elevator = YES."""
-    assert E.prose_amenities(_d("الخدمات: شبكة كهرباء - شبكة مياه\\n\\n🔘 المصعد: لا يوجد مصعد\\n\\n☀️ مميزات العقار:")) == {}
+    assert E.prose_amenities(_d("الخدمات: شبكة كهرباء - شبكة مياه\\n\\n🔘 المصعد: لا يوجد مصعد\\n\\n☀️ مميزات العقار:")) == {"elevator": False}
     assert "elevator" not in E.prose_amenities(_d("<p>المصعد: غير راكب، ويوجد تأسيس للمصعد</p><p>تأسيس مصعد</p>"))
     assert E.prose_amenities(_d("ضمانات تصل حتى 25 سنة\\n\\n \\n•\\n \\nتأسيس مصعد\\n\\n \\n•\\n \\nعدادات كهرباء")) == {}
     assert "elevator" not in E.prose_amenities(_d("* سطح مع الملحق&nbsp;\\n\\n* مؤسس مصعد.\\n\\n* يتوفر لكل وحدة خزان"))
@@ -139,7 +141,7 @@ def test_a_prepared_or_uninstalled_fixture_anywhere_makes_the_answer_unknown():
     assert E.prose_amenities(_d("<p>مصعد</p><p>تأسيس مكيفات</p>")) == {"elevator": True}
 
 
-def test_recheck_returns_a_yes_the_current_reader_no_longer_reads_to_unknown():
+def test_recheck_moves_a_yes_the_current_reader_no_longer_reads_to_what_it_reads_now():
     """The first backfill wrote 9313822 elevator = YES from «المصعد: لا يوجد مصعد»; the next run must undo it,
     and must leave a real YES alone."""
     db = _DB([
@@ -148,8 +150,8 @@ def test_recheck_returns_a_yes_the_current_reader_no_longer_reads_to_unknown():
     ])
     out = E.prose_backfill(db, "wasalt_residential_listings", page=1)
     assert out["elevator_unset"] == 1
-    assert db.rows[0]["elevator"] is None and db.rows[1]["elevator"] is True
-    assert (1, {"elevator": None}) in db.writes
+    assert db.rows[0]["elevator"] is False and db.rows[1]["elevator"] is True     # «لا يوجد مصعد» is a stated no
+    assert (1, {"elevator": False}) in db.writes
 
 
 def test_the_plural_lifts_reaches_the_backfill_candidates():

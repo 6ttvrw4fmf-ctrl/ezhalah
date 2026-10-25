@@ -1023,11 +1023,13 @@ def _says_partly_furnished(raw: Optional[str]) -> bool:
     return False
 
 
-def prose_amenities_yes(raw: Optional[str], skip: tuple[str, ...] = ()) -> dict[str, bool]:
-    """Amenities an ad's own PROSE states, for a site with NO structured field for them. Prose only ever
-    says YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2): «لا يوجد مصعد» and a contradiction both stay
-    NULL here, never False. `skip` = columns the site publishes structurally (never read from prose)."""
-    return {k: True for k, v in amenities_from_lines(raw).items() if v is True and k not in skip}
+def prose_amenities(raw: Optional[str], skip: tuple[str, ...] = ()) -> dict[str, bool]:
+    """Amenities an ad's own PROSE states, for a site with NO structured field for them: YES, NO only on an
+    explicit negation tied to the token («لا يوجد مصعد», «مفروشة: لا»), or nothing — silence, «تأسيس»/prepared,
+    «قريب من»/nearby, partly and a contradiction all stay NULL (owner 2026-10-24; the 2026-09-20 four outcomes of
+    amenities_from_text; ADVANCED_FILTER_SOURCE_TRUTH §2). It replaced the yes-only reader, which could never take
+    a yes back. `skip` = columns the site publishes structurally: prose never touches those, not even as a fallback."""
+    return {k: v for k, v in amenities_from_lines(raw).items() if k not in skip}
 
 
 def html_block_lines(fragment: Optional[str]) -> str:

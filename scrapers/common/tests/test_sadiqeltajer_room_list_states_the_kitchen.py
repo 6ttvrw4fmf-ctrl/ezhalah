@@ -58,7 +58,7 @@ def test_no_room_list_writes_no_amenity():
 
 
 def test_mutation_without_the_reader_the_kitchen_is_lost(monkeypatch):
-    monkeypatch.setattr(S.normalize, "prose_amenities_yes", lambda raw, skip=(): {})
+    monkeypatch.setattr(S.normalize, "prose_amenities", lambda raw, skip=(): {})
     row = row_for("صالة . مطبخ . دورة مياة")
     assert "kitchen" not in row   # so test_a_room_list_with_a_kitchen_is_a_kitchen is what catches its loss
 
