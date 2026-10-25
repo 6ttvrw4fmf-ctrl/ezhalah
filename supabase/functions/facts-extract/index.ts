@@ -36,10 +36,10 @@ const SYSTEM = `أنت قارئ حقائق لإعلانات عقارية سعو�
 6. حقيقة واحدة لكل مفتاح لكل إعلان. إن تعارض النص مع نفسه (مصعد ثم بدون مصعد) فلا تُخرجها.
 
 الكتالوج — مفاتيح منطقية (value: true/false):
-air_conditioner (مكيف، مكيفات، تكييف) · balcony (بلكونة، شرفة، تراس) · car_entrance (مدخل سيارة/سيارات) · driver_room (غرفة سائق) · electricity (كهرباء موصلة/متوفرة، عداد كهرباء) · elevator (مصعد، مصاعد) · furnished (مفروش، مؤثث — كاملاً فقط) · garden (حديقة) · gym (نادي رياضي، جيم، صالة رياضية) · installment_available (تقسيط، أقساط) · kitchen (مطبخ راكب، مطبخ) · laundry_room (غرفة غسيل) · maid_room (غرفة خادمة/شغالة) · optical_fibers (ألياف بصرية، فايبر) · parking (موقف، مواقف سيارات) · payment_monthly (الدفع شهري، إيجار شهري) · pool (مسبح، بركة سباحة) · private_entrance (مدخل خاص، مدخل مستقل) · rent_now_pay_later (إيجار الآن وادفع لاحقاً، ادفع لاحقاً) · sanitation (صرف صحي) · separate_electricity_meter (عداد كهرباء مستقل) · separate_water_meter (عداد ماء/مياه مستقل) · water_supply (ماء/مياه موصلة أو متوفرة، شبكة مياه) · majlis (مجلس) · roof (سطح، روف) · warranty (ضمان، ضمانات) · water_tank (خزان ماء/مياه) · well (بئر) · annex (ملحق) · two_entrances (مدخلين) · yard (حوش) · electronic_deed (صك إلكتروني) · grill (مشب، شواية، منطقة شواء) · basement (بدروم، قبو) · storage (مستودع، مخزن) · garage (كراج، جراج).
+air_conditioner (مكيف، مكيفات، تكييف) · balcony (بلكونة، شرفة، تراس) · car_entrance (مدخل سيارة/سيارات) · driver_room (غرفة سائق) · electricity (كهرباء موصلة/متوفرة، عداد كهرباء — «غرفة كهرباء» أو «سليمة من غرفة الكهرباء» ليست دليلاً) · elevator (مصعد، مصاعد) · furnished (مفروش، مؤثث — كاملاً فقط) · garden (حديقة) · gym (نادي رياضي، جيم، صالة رياضية) · installment_available (تقسيط، أقساط) · kitchen (مطبخ راكب، مطبخ) · laundry_room (غرفة غسيل) · maid_room (غرفة خادمة/شغالة) · optical_fibers (ألياف بصرية، فايبر) · parking (موقف، مواقف سيارات) · payment_monthly (الدفع شهري، إيجار شهري) · pool (مسبح، بركة سباحة) · private_entrance (مدخل خاص، مدخل مستقل) · rent_now_pay_later (إيجار الآن وادفع لاحقاً، ادفع لاحقاً) · sanitation (صرف صحي) · separate_electricity_meter (عداد كهرباء مستقل) · separate_water_meter (عداد ماء/مياه مستقل) · water_supply (ماء/مياه موصلة أو متوفرة، شبكة مياه) · majlis (مجلس) · roof (سطح، روف) · warranty (ضمان، ضمانات) · water_tank (خزان ماء/مياه) · well (بئر) · annex (ملحق) · two_entrances (مدخلين) · yard (حوش) · electronic_deed (صك إلكتروني) · grill (مشب، شواية، منطقة شواء) · basement (بدروم، قبو) · storage (مستودع، مخزن) · garage (كراج، جراج).
 
 مفاتيح رقمية (value: رقم فقط، بالأرقام الإنجليزية):
-street_width_m (عرض الشارع بالمتر — إن ذُكر أكثر من شارع بعروض مختلفة فلا تُخرجها) · floors (عدد الأدوار الكلي: «دورين» = 2، «ثلاث أدوار» = 3 — «الدور الأول» رقم طابق وليس عدداً فلا يُخرج) · apartments_count (عدد الشقق) · shops_count (عدد المحلات) · property_age_years (عمر العقار بالسنوات — «جديد» ليست رقماً فلا تُخرج).
+street_width_m (عرض الشارع بالمتر — فقط مع كلمة «عرض» أو وحدة «م/متر» أو اتجاه بجانب الرقم؛ «شارع 25» وحده قد يكون اسم شارع فلا يُخرج؛ طول الضلع على الشارع ليس عرضاً؛ إن ذُكر أكثر من شارع بعروض مختلفة فلا تُخرجها) · floors (عدد الأدوار الكلي: «دورين» = 2، «ثلاث أدوار» = 3 — «الدور الأول» رقم طابق وليس عدداً فلا يُخرج) · apartments_count (عدد الشقق) · shops_count (عدد المحلات) · property_age_years (عمر العقار بالسنوات — «جديد» ليست رقماً فلا تُخرج).
 
 مفتاح نصي: boundaries (الحدود والأطوال — value = العبارة كاملة كما وردت، quote = نفس العبارة).
 
@@ -63,6 +63,28 @@ function sameSecret(a: string, b: string): boolean {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+// Is the caller's key a SERVICE-ROLE credential? Asked of the database itself, not by comparing bytes:
+// the Actions secret and this runtime's SUPABASE_SERVICE_ROLE_KEY can be two different valid service
+// keys (legacy JWT vs. the newer secret format), and the pilot's first call read 401 for exactly that
+// reason (2026-10-25). listing_facts_runs has RLS on, no policies, and anon/authenticated revoked, so
+// only a service-role key reads it (200); a publishable/anon key is refused by Postgres (401/403).
+// FAIL CLOSED: any error, timeout or non-2xx is "not service role".
+async function callerIsServiceRole(key: string): Promise<boolean> {
+  if (!key || !SUPABASE_URL) return false;
+  try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), GATE_TIMEOUT_MS);
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/listing_facts_runs?select=id&limit=1`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      signal: ac.signal,
+    }).finally(() => clearTimeout(timer));
+    await r.body?.cancel().catch(() => {});
+    return r.ok;
+  } catch {
+    return false;
+  }
 }
 
 // FAIL CLOSED: any failure to reach or read the gate is a denial (an unreachable ceiling is unbounded).
@@ -91,7 +113,10 @@ type Ad = { id: string; text: string };
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
   const auth = req.headers.get("authorization") ?? "";
-  if (!sameSecret(auth, `Bearer ${SERVICE_KEY}`)) return json({ error: "unauthorized" }, 401);
+  const callerKey = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!sameSecret(callerKey, SERVICE_KEY) && !(await callerIsServiceRole(callerKey))) {
+    return json({ error: "unauthorized" }, 401);
+  }
   if (!DEEPSEEK_API_KEY) return json({ error: "model key not configured" }, 503);
 
   let ads: Ad[];

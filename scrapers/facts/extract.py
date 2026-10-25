@@ -275,11 +275,18 @@ def sample_table(table: str, n: int, rng: random.Random) -> list[dict[str, Any]]
     rows: dict[str, dict[str, Any]] = {}
 
     def fetch(off: int, lim: int) -> list[dict[str, Any]]:
-        try:
-            return q(",".join(cols)).range(off, off + lim - 1).execute().data or []
-        except Exception as e:   # a table without some ground-truth column: keep going without it
-            print(f"  ! {table}: {str(e)[:120]} — retrying without ground-truth columns")
-            return q(",".join(base_cols)).range(off, off + lim - 1).execute().data or []
+        # A small site's table may lack a ground-truth column (aqarcity/mustqr/raghdan have no `furnished`,
+        # eaqartabuk no `num_apartments` — pilot 2026-10-25). Drop ONLY the named column and keep the rest.
+        for _ in range(len(GT_COLUMNS)):
+            try:
+                return q(",".join(cols)).range(off, off + lim - 1).execute().data or []
+            except Exception as e:
+                m = re.search(r"column \w+\.(\w+) does not exist", str(e))
+                if not m or m.group(1) not in cols or m.group(1) in base_cols:
+                    raise
+                cols.remove(m.group(1))
+                print(f"  ! {table}: no column {m.group(1)} — sampling without it")
+        return q(",".join(cols)).range(off, off + lim - 1).execute().data or []
 
     if total <= max(n * 3, 600):
         off = 0
