@@ -65,8 +65,12 @@ nothing read, verbatim into `additional_info`: «هل يوجد قيود / رهن
 `mortgage_q`, `waqf_q`, `will_q` — e.g. TXX0OSWX2x9tR5bkjtDO «رهن: نعم»), «نوع منع التصرف» (`disposal_ban_type`),
 «استخدام العقار» (`property_use`, e.g. «استعمال مختلط»), the full «المرافق» list as printed (`utilities_listed`,
 incl. هاتف / تصريف الفيضانات that have no column), and the generated line itself (`ld_description`).
-**Not yet captured:** the deed boundaries block («الحدود»: four sides with length + neighbour) — a different
-page structure; left for a follow-up.
+**Deed boundaries (follow-up, same day):** the «الحدود» box (per side: «النوع», «الطول», «الوصف») is now kept word
+for word in `additional_info.boundaries` as `{side: {label: value}}`. All 401 live pages measured: 272 show the
+box (270 with four sides), 2,443 non-empty cells kept; raghdan's empty «:» cells are left out. PDPL: 3 «الوصف»
+cells were a neighbour's full name («… بن …») that the shared redactor misses — any cell with a patronymic is
+left out. Check: `scripts/verify-raghdan-keeps-the-deed-boundaries.ts` (live ad 194723340572's box verbatim;
+both the reader and the name guard mutation-proven).
 
 Code: `scrapers/raghdan/run.py` (`map_listing`, `_rendered_panel`); check:
 `scripts/verify-raghdan-description-is-the-brokers-text.ts` (real page snippet; the old line is mutation-proven
