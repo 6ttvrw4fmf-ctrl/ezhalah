@@ -462,6 +462,11 @@ def names_a_person(text: str) -> bool:
                for i, x in enumerate(w))
 
 
+# «… مثل المياه وتكييف الهواء ومواقف السيارات، حيث لم يتم ذكرها في العرض» (muhaysini, 89 of 19,816 ads):
+# the ad says these were NOT stated — that clause and the list right before it are silent (bench-v3).
+_NOT_STATED = tuple(_n(w) for w in ("لم يتم ذكر", "لم يذكر", "لم تذكر", "غير مذكور", "not mentioned", "not stated"))
+
+
 class Hit:
     __slots__ = ("fact", "value", "s", "e", "clause")
 
@@ -513,8 +518,9 @@ def check(text: str) -> list[dict[str, Any]]:
     bool_hits: dict[str, dict[bool, tuple[int, int, int]]] = {}
     num_hits: dict[str, list[Hit]] = {}
     cue_in = near_in = False
+    void = {j for ci, (_o, _c, t, _i) in enumerate(clauses) if any(p in t for p in _NOT_STATED) for j in (ci - 1, ci)}
     for ci, (_off, _c, t, _idx) in enumerate(clauses):
-        if not t:
+        if not t or ci in void:
             continue
         words = t.split()
         n_words = len(words)
@@ -751,6 +757,8 @@ def selftest() -> None:
         ("توجد رخصة بناء تسوير وملاحق", {}, ("annex",)),
         ("رقم رخصة فال: 1200 مجلس", {"majlis": True}, ()),
         ("• نظام الكهرباء: الفنار • السباكة", {}, ("electricity",)),
+        ("خدمات أخرى مثل المياه وتكييف الهواء ومواقف السيارات، حيث لم يتم ذكرها في العرض. مطبخ راكب",
+         {"kitchen": True}, ("parking", "air_conditioner", "water_supply")),
         ("نظام البناء: سكني 3 ادوار", {}, ("floors",)),
         # PDPL: a neighbour's name in a boundaries cell drops the whole row; a street named after a person does not
         ("شمالاً: ملك فلان بن فلان بطول 20م، جنوباً: شارع بعرض 15م بطول 20م", {}, ("boundaries",)),
