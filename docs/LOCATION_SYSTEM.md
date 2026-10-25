@@ -395,6 +395,21 @@ dealapp 883 · sanadak 816 · aqarmonthly 753 · eaqartabuk 516 · aqargate 241 
   A real new district goes onto the list first, through the guards above.
 - **Alarm:** `mon_detect_district_guards_missing()` (P1, rostered) fires if any of the three triggers is dropped or
   disabled. Barrier: `scripts/verify-district-guards.ts`.
+- **The strong twin rule (owner 2026-10-25, «never duplicates», migrations `20261025223135` + `20261025225540`):** a new or
+  renamed name is also refused when its LETTERS equal a listed name in that city — `district_key_letters()`: spaces and
+  punctuation ignored, a final ا/ه run is one marker («غبيرا» = «غبيرة», «الملقا» = «الملقاه»), a final hamza is kept
+  («الزهراء» ≠ «الزهرة»), a one-letter sequel tail is kept («الجابرية أ» ≠ «الجابرية») — or equal it without «ال», or
+  equal it with the town's name stuck on («حي أشبيلية - بقيق»), or are ONE letter away («البغددية» ~ «البغدادية»).
+  The owner exception must NAME the district: `set ezhalah.district_guard_ok = '<name>'`; it never unlocks a delete.
+- **For every listing (owner 2026-10-25, migrations `20261025224235` + `20261025224627`):** `loc_display_district_ar()`
+  now folds a site's spelling onto the list name when the letters match (same letters, without «ال», or with the town
+  stuck on) — `district_copy_of()`, 0.03 ms per row — so a copy spelling never becomes a second district in search, for
+  old listings at the next hourly sync and for every new arrival. A name ONE letter away is never folded by itself: two
+  real districts can differ by one letter («الريحان» / «الريان»), so the owner decides through `loc_district_alias`.
+- **Alarm for every listing:** `mon_detect_district_served_twins()` (rostered): P1 `district_copies_served` when two
+  served names in one city are copies and one is on the list but the fold did not join them (a gap in the rule); P2
+  `district_copies_unlisted` when neither is on the list (the engineer adds the real name through the guards); P2
+  `district_near_twins_served` with examples when two served names are one letter apart (owner decides).
 
 ### 🔤 Spelling memory — one district, one search identity (owner 2026-10-25)
 - `loc_district_alias(city_id, from_norm, to_norm)`: a spelling sites use that IS one of our districts. Applied inside
