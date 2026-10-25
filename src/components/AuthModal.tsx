@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image as XImage } from 'expo-image'; // SVG logo: a vector drawing, not a photo (owner 2026-10-24)
 import Animated, { Easing, interpolate, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, cardShadow } from '@/theme/tokens';
@@ -22,7 +23,7 @@ import {
 } from '@/lib/auth';
 import { useSaveName } from '@/lib/useSaveName';
 
-const LOGO = require('../../assets/images/ezhalah-logo.png');
+const LOGO = require('../../assets/images/logo-cloud-lit.svg');
 type Step = 'main' | 'google' | 'apple' | 'appleface';
 
 // Open/close animation (owner spec, 2026-08-15): overlay fade ~200-250ms, popup fades in while
@@ -312,7 +313,7 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
                   />
                 </Pressable>
               )}
-              <RNImage source={LOGO} style={[s.popEagle, cp && c.popEagle]} resizeMode="contain" />
+              <XImage source={LOGO} style={[s.popEagle, cp && c.popEagle]} contentFit="contain" />
               {/* ── main ───────────────────────────────────────────────── */}
               {step === 'main' && (
                 <>
@@ -378,7 +379,7 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
                     <Text style={s.gauthBarText}>{t('Sign in with Google')}</Text>
                   </View>
                   <View style={s.gauthApp}>
-                    <RNImage source={LOGO} style={s.gauthAppLogo} resizeMode="cover" />
+                    <XImage source={LOGO} style={s.gauthAppLogo} contentFit="contain" />
                     <Text style={s.gauthTitle}>{t('Choose an account')}</Text>
                     <Text style={s.gauthSub}>
                       {t('to continue to')} <Text style={{ fontWeight: '600', color: '#202124' }}>{t('Ezhalah')}</Text>
