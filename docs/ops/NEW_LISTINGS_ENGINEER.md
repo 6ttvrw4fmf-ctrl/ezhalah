@@ -434,6 +434,19 @@ district».
    Batch 2 (315 homes) was switched on 2026-10-25 by `20261025214336`. The 123 edge homes and the 430 Apple
    couldn't answer are in the nightly Google Maps check: scheduled task `google-maps-district-check`, folder
    `~/Documents/google-maps-key/daily-check/` on the owner's Mac.
+9. **NEVER DUPLICATES, FOR EVERY LISTING (owner 2026-10-25, permanent).** Two things are now automatic, and you must
+   never work around them:
+   - **The list:** besides rule 7, a name is refused when its LETTERS equal a listed name in that city (spaces, punctuation
+     and a final ا/ه ignored; a final hamza and a one-letter sequel tail kept), equal it without «ال», equal it with the
+     town's name stuck on, or are one letter away. If the guard refuses your name, the error tells you which listed name
+     it is a copy of: use THAT name. A real district that is one letter from another («الريحان» / «الريان») needs the
+     owner, who names it: `set ezhalah.district_guard_ok = '<name>'` in the same statement.
+   - **Search:** `loc_display_district_ar()` folds a site's copy spelling onto the list name at every sync (same letters /
+     without «ال» / town stuck on). So a copy can only show as a second district when the real name is NOT on the list.
+     The alarm `district_copies_unlisted` (P2) lists those pairs with ad counts: your job is to add the real district name,
+     ONE spelling, through the guards (rule 6: 3+ ads, Apple confirms); the fold joins the copies at the next sync.
+     Never add the second spelling. `district_near_twins_served` (P2) pairs are the OWNER's, not yours: report them.
+     Hofuf «ضاحية هجر …» names stay with the owner.
 
 ## Your run, step by step
 1. **Log the start** in `ops_daily_engineer_run`.
