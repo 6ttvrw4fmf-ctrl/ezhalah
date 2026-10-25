@@ -129,6 +129,7 @@ const DECLARED: Record<string, Verdict> = {
   'verify-mustqr-absence-cannot-deactivate.ts': 'offline-safe',
   'verify-prune-without-oracle-is-declared.ts': 'offline-safe',
   'verify-raghdan-absence-cannot-deactivate.ts': 'offline-safe',  // re-measured in a clean venv (first run was red on a broken interpreter)
+  'verify-raghdan-description-is-the-brokers-text.ts': 'offline-safe',  // 2026-10-25: normal=0, SUPABASE_URL blackholed=0; pure map_listing over a page string, no client is ever built
   'verify-rent-scrapers-annualise.ts': 'offline-safe',
   'verify-sanadak-absence-cannot-deactivate.ts': 'offline-safe',  // re-measured in a clean venv (first run was red on a broken interpreter)
   'verify-sanadak-rsc-object-match.ts': 'offline-safe',
