@@ -999,7 +999,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         # utilities: listed ⇒ True, not listed ⇒ absent ⇒ NULL (never False)
         **_rendered_utilities(body),
     }
-    row.update(normalize.prose_amenities_yes(broker, skip=_PROSE_SKIP))
+    row.update(normalize.prose_amenities(broker, skip=_PROSE_SKIP))
     baths = normalize.baths_from_leading_count(broker)
     if baths is not None:
         row["bathrooms"] = baths
