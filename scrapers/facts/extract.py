@@ -436,6 +436,7 @@ def run(args: argparse.Namespace) -> int:
             return
         rows: list[dict[str, Any]] = []
         drops = Counter()
+        drops_by_fact: dict[str, Counter] = {}   # a dropped row is never stored; its fact name survives here
         returned = 0
         for r in batch:
             ad_id = f"{r['_platform']}:{r['ad_number']}"
@@ -446,6 +447,10 @@ def run(args: argparse.Namespace) -> int:
                 row, why = validate(f, ntext)
                 if row is None:
                     drops[why] += 1
+                    name = f.get("fact")
+                    if name == "other":
+                        name = f"other:{f.get('label')}"
+                    drops_by_fact.setdefault(str(name)[:60], Counter())[why] += 1
                     continue
                 if row["fact"] in seen:
                     drops["invalid"] += 1
@@ -464,7 +469,8 @@ def run(args: argparse.Namespace) -> int:
         tot["pii"] += drops["pii"]
         tot["invalid"] += drops["invalid"]
         log_call({**base, "json_ok": True, "facts_returned": returned, "facts_stored": stored,
-                  "dropped_unverified": drops["unverified"], "dropped_pii": drops["pii"], "dropped_invalid": drops["invalid"]})
+                  "dropped_unverified": drops["unverified"], "dropped_pii": drops["pii"], "dropped_invalid": drops["invalid"],
+                  "drops_by_fact": {k: dict(v) for k, v in drops_by_fact.items()} or None})
 
     def checkpoint(final: bool = False) -> None:
         nonlocal checkpointed
