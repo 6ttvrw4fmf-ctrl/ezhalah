@@ -396,6 +396,18 @@ dealapp 883 · sanadak 816 · aqarmonthly 753 · eaqartabuk 516 · aqargate 241 
 - **Alarm:** `mon_detect_district_guards_missing()` (P1, rostered) fires if any of the three triggers is dropped or
   disabled. Barrier: `scripts/verify-district-guards.ts`.
 
+### 🔤 Spelling memory — one district, one search identity (owner 2026-10-25)
+- `loc_district_alias(city_id, from_norm, to_norm)`: a spelling sites use that IS one of our districts. Applied inside
+  `loc_display_district_ar()`, so the served `district_ar`, its stored token, the picker and the counts fold into one
+  district; cards keep the source's own words.
+- Per-name and owner-approved only. A blanket «الجديد» fold is wrong: «منفوحة الجديدة» and «منفوحة» are two districts.
+- Seeded 10-25: مكة «الهجلة الجديد»→«الهجلة», «الشبيكة الجديد»→«الشبيكة»; حائل «السويفلة الجديد»→«السويفلة».
+  Owner 10-25 (asked same or separate, answer: same): الدرعية «الدرعية الجديدة»→«الدرعية» (452 ads).
+  **Permanent rule (owner 10-25, "don't ask again"):** «X الجديد / X الجديدة» is our district X, applied automatically
+  inside `loc_display_district_ar()` whenever X is in our list for that city and «X الجديد(ة)» is not itself a district in
+  our list. Stays separate: «منفوحة الجديدة» (الرياض), and official names with no base («الشامية الجديد», «الفلق الجديد»).
+- `verify-district-spelling-memory.ts` pins it.
+
 ### ⏳ Pending (optional, ready when wanted)
 - **Grow the district map** — convert more of the ~33k English‑district listings to Arabic districts (same
   confident‑match method, run wider) so more listings carry an Arabic district.
