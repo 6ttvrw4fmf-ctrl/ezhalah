@@ -6,10 +6,13 @@
 // 20261025072931 the AF clause read those 10s as exact, so «أقل من 15 سنة» (p_age_max = 15) listed ~32k ads
 // the source calls older than ten, one of them «عمرها ٥٠ سنه». This EXECUTES the committed clause's age arm
 // (sql/mirrors/af_eligibility_clause.sql, md5-pinned to production) on sample rows, and checks the
-// independent oracle excludes exactly the same platforms.
+// independent oracle excludes exactly the same platforms. Its scraper half runs haraj's REAL parser: REGA's open
+// top bucket «اكثر من عشر سنوات» is stored as 10 (was NULL — 983 live ads stated an age and showed none), so
+// «10+» finds it and «up to N» never does.
 //
 //   node --experimental-strip-types scripts/verify-open-age-bucket-never-answers-up-to.ts   (in `npm test`)
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { buildOracleQS, AGE_OPEN_10_PLATFORMS } from './lib/afOracleFilter.ts';
 
@@ -80,6 +83,28 @@ mustCatch('an arm that forgets one proven platform (haraj)', !holds(ageArm(mirro
 mustCatch('an arm that excludes every 10 (kills dealapp\'s exact 10s)', !holds(ageArm(mirror.replace(/or s\.platform not in \([^)]*\)/, 'or false'))));
 mustCatch('a clause/oracle platform list that drifted apart', clausePlatforms(mirror.replace("''tuba'', ", '')).join(',') !== [...AGE_OPEN_10_PLATFORMS].sort().join(','));
 check('the committed clause satisfies the invariant', holds(arm));
+
+// ── the scraper half: haraj's own parser, executed ──────────────────────────────────────────────────
+const HARAJ_EXPECT: Record<string, number | null> = {
+  'اكثر من عشر سنوات': 10, 'Ten Year': 10, 'عشر سنوات': 10, 'Seven Year': 7, '45سنه': 45,
+  'أكثر من 20 سنة': null,   // not REGA's vocabulary: an open bound we cannot floor honestly stays unknown
+};
+const py = spawnSync('python3', ['-c', `import json, sys
+sys.path.insert(0, '.')
+from scrapers.haraj.parse import age_of
+print(json.dumps({k: age_of(k) for k in json.loads(sys.argv[1])}, ensure_ascii=False))`, JSON.stringify(Object.keys(HARAJ_EXPECT))],
+  { encoding: 'utf8', cwd: join(import.meta.dirname, '..') });
+let harajOut: Record<string, number | null> = {};
+try { harajOut = JSON.parse(py.stdout.trim().split('\n').pop() ?? '{}'); } catch { /* reported below */ }
+check('haraj\'s parser ran', py.status === 0 && Object.keys(harajOut).length === Object.keys(HARAJ_EXPECT).length, py.stderr.slice(0, 200));
+/** The scraper invariant: every REGA value lands where the AF can read it, and nothing is guessed. */
+export const harajOk = (out: Record<string, number | null>) =>
+  Object.entries(HARAJ_EXPECT).every(([k, want]) => out[k] === want)
+  && arm(row('haraj', out['اكثر من عشر سنوات'] as number), 10, null) && !arm(row('haraj', out['اكثر من عشر سنوات'] as number), null, 15);
+for (const [k, want] of Object.entries(HARAJ_EXPECT)) check(`haraj «${k}» → ${want}`, harajOut[k] === want, `got ${harajOut[k]}`);
+check('a haraj «اكثر من عشر سنوات» ad is found by «10+» and never by «up to 15»', harajOk(harajOut));
+mustCatch('the pre-2026-10-25 haraj parser that stored «اكثر من عشر سنوات» as NULL', !harajOk({ ...harajOut, 'اكثر من عشر سنوات': null }));
+mustCatch('a parser that floors a non-REGA open bound («أكثر من 20» → 20)', !harajOk({ ...harajOut, 'أكثر من 20 سنة': 20 }));
 
 console.log(failures ? `\n✗ ${failures} failed` : '\n✓ an open age bucket never answers «up to N»');
 process.exit(failures ? 1 : 0);
