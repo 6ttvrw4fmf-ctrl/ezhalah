@@ -40,7 +40,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 
 const LAYOUT = 'src/app/_layout.tsx';
 const SHARE = 'src/lib/share.ts';
-const OG_FILE = 'public/og-image-v6.png';
+const OG_FILE = 'public/og-image-v7.png';
 const REQUIRED_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى للبحث على العقار في المملكة.';
 const REQUIRED_EN = 'Looking for a property and want to see everything on offer in one place? Ezhalah, the smarter way to find properties in the Kingdom.';
 // Either word, anywhere in the line, names the country — «في» is not required: the 2026-09-25
@@ -127,10 +127,11 @@ if (existsSync(OG_FILE)) {
   const smallCard = (iw: number, ih: number) => iw === ih && iw > 0 && iw < 300;
   check('the share image is a small square PNG (<300px → WhatsApp small thumbnail, not a big banner)', png && smallCard(w, h), `${w}x${h}`);
   check('(mutation) a 512×512 image (the big WhatsApp banner) is refused', !smallCard(512, 512));
+  // Owner 2026-10-24: the cloud-eagle logo is the final logo; the preview is the same art as the 192 app icon.
   check('the share artwork matches the owner-selected icon exactly', buf.equals(readFileSync('public/icon-192.png')));
   check('metadata dimensions match the actual image', L.includes('property="og:image:width" content="192"') && L.includes('property="og:image:height" content="192"'));
   const sheet = readFileSync('src/components/ShareSheet.tsx', 'utf8');
-  check('the in-app preview uses the same approved artwork', sheet.includes("require('../../public/og-image-v6.png')"));
+  check('the in-app preview uses the same approved artwork', sheet.includes("require('../../public/og-image-v7.png')"));
   const kb = Math.round(buf.length / 1024);
   check(`the share image is under 300KB so crawlers fetch it (${kb}KB)`, kb <= 300);
 }
