@@ -227,7 +227,9 @@ def finder(E, facts: list[dict[str, Any]], texts: list[str], llm: Optional[list[
                 if c < min_count or any(kw and kw in g for kw in known[fact]):
                     continue
                 pc, pb = c / len(cand), c_b[g] / nb
-                if pc > 3 * pb:
+                # pb < 2 %: a word in every 50th ad is boilerplate («حسب الرخصه», «منطقه مكه»), not a missed spelling.
+                # bench-v1 without this cap listed only template n-grams — the vectors find ads of the same TEMPLATE.
+                if pc > 3 * pb and pb < 0.02:
                     scored.append((round(pc - pb, 4), g, c, c_b[g]))
             scored.sort(reverse=True)
             row["new_words"] = [[g, c, b] for _s, g, c, b in scored[:30]]
