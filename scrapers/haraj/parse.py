@@ -157,7 +157,8 @@ def licence_deals(desc: str) -> list[Optional[str]]:
 
 
 def age_of(raw: Optional[str]) -> Optional[int]:
-    """«جديد»/«New» → 0, «ثلاث سنوات», «Seven Year» → 7, «5» → 5; an open bound («أكثر من 10») → None."""
+    """«جديد»/«New» → 0, «ثلاث سنوات», «Seven Year» → 7, «5» / «45سنه» → 5 / 45; REGA's open top bucket
+    «اكثر من عشر سنوات» → 10; any other open bound («أكثر من 20») → None."""
     from scrapers.common.normalize import exact_age
     v = _clean(raw)
     if not v:
@@ -167,6 +168,15 @@ def age_of(raw: Optional[str]) -> Optional[int]:
     m = re.fullmatch(r"(?i)\s*(one|two|three|four|five|six|seven|eight|nine|ten)\s+years?\s*", v)
     if m:
         return _EN_NUM[m.group(1).lower()]
+    # REGA's open top bucket is «10 or more». A haraj 10 is read as «≥ 10, upper end unknown» by the AF clause
+    # (20261025072931 — the English «Ten Year» already meant both), so «10+» finds it and «up to N» never does.
+    # Was None: 983 live licensed ads stated an age and showed none (2026-10-25).
+    if re.fullmatch(r"\s*[اأ]كثر\s+من\s+(?:عشر|10)\s+سنوات?\s*", v):
+        return 10
+    m = re.fullmatch(r"\s*(\d{1,3})\s*(?:سنه|سنة|سنوات|سنين|عام)\s*", v)   # \d and int() read ٤٥ too
+    if m:                           # «45سنه»: the number glued to its unit, which the shared parser cannot read
+        n = int(m.group(1))
+        return n if n <= 100 else None
     return exact_age(v)
 
 
