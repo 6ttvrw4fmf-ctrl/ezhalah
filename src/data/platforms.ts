@@ -192,7 +192,7 @@ export const PLATFORMS: Platform[] = [
   // opensooq: 78 real-estate items measured 2026-09-26 (72 kept: 2 under construction, 1 deal conflict, 1 multi-use plot, 2 duplicate posts skipped).
   { name: 'السوق المفتوح', domain: 'sa.opensooq.com', brand: 'OpenSooq', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // nafithh: 30 measured 2026-09-26 (22 sale + 8 rent; 2 «مجمع» unmapped). Server-rendered REGA blocks.
-  { name: 'معرض نافذة', domain: 'nafithh.sa', brand: 'Nafithh', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'معرض نافذة', domain: 'nafithh.com', brand: 'Nafithh', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // mobasher: 28 DIRECT-SALE real estate measured 2026-09-26 (auctions are a separate feed and never read). Owner 2026-09-25: keep.
   { name: 'مباشر', domain: 'mobasher.sa', brand: 'Mobasher', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
   // muajarh: 11 real of 18 feed rows measured 2026-09-26 (7 are the platform's own demo records, no REGA licence); all Riyadh yearly rents.
