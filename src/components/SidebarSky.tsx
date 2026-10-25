@@ -78,6 +78,22 @@ export function SkyEagleMark({ lit = false }: { lit?: boolean }) {
   </View>;
 }
 
+/** The sign-in popup's logo: the very same look as the sidebar eagle — the white cloud eagle in its soft sky glow
+ *  with small clouds drifting over it — and then its green lights switch on (owner 2026-10-25: «this cloud I like,
+ *  then it lights»). Scales the sidebar's cloud pass to `size`. */
+export function SkyEagleLightUp({ size }: { size: number }) {
+  const reduced = useReducedMotion();
+  const k = size / 46;
+  return <View pointerEvents="none" accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+    style={{ width: size, height: size, alignSelf: 'center', alignItems: 'center', justifyContent: 'center' }}>
+    <XImage source={EAGLE_LIGHTUP} contentFit="contain" accessible={false} style={{ width: size, height: size }} />
+    <Animated.View style={[StyleSheet.absoluteFill, !reduced && { ...motion, animationName: eagleDrift }]}>
+      <CloudWisp width={65 * k} height={24 * k} opacity={0.62} style={{ bottom: -3 * k, left: -12 * k }} />
+      <CloudWisp variant={1} width={42 * k} height={13 * k} opacity={0.32} style={{ top: -6 * k, right: -12 * k }} />
+    </Animated.View>
+  </View>;
+}
+
 const styles = StyleSheet.create({
   clip: { overflow: 'hidden' },
   // No tile, no frame: the cloud eagle sits straight on the sidebar sky, blended with it (owner 2026-10-24:
