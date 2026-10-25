@@ -619,7 +619,8 @@ runQuery(q):  normalize (Room=1) ─► resolveLocation()/ensureLocationIndex() 
 - **Sources:** Aqar (res + com; deep page-range batching), Wasalt (res + com; Saudi residential proxy for
   cloud, enrichment via home IP), **Gathern (rent-only monthly furnished ~16k)**, **aqarmonthly** (Aqar
   DailyRenting GraphQL ~3.8k monthly furnished), Muktamel (weekly), and ~30 small sources via one matrix
-  workflow `small-sources-sync.yml` (add a platform = one matrix line).
+  workflow `small-sources-sync.yml` (add a platform = one line in its SMALL_SOURCES list; a `source=` dispatch
+  creates only the named jobs — 2026-10-25).
 - **Retired platforms:** **toor** — retired 2026-07-06 (owner-approved). Host `www.toor.ooo` IP-blocks
   datacenter IPs *and* the Saudi residential proxy (every fetch `exc:Timeout`, 0 rows for weeks).
   Removed from the `small-sources-sync.yml` matrix (PR #33) → no longer scheduled/dispatched.
