@@ -386,6 +386,18 @@ district».
      every listing with it tonight.
    - If you are not sure it is the same place, **ask the owner** with the example
      (`ADVANCED_FILTER_SOURCE_TRUTH.md` §6). Never guess a district.
+6. **THE TWIN GUARD (owner 2026-10-24: «I am scared of duplicates, same district twice»).** The catalogue
+   already refuses an exact repeat; it cannot see the same place spelled two ways («الضاحية الأول» and
+   «الضاحية الحي الأول»). So before you add ANY district to `loc_catalog_district`, read the alarm through
+   `select * from unknown_named_districts_checked(3)` (not the plain `unknown_named_districts`) and obey its verdict:
+   - `exists` or `twin`: **never insert it.** It is the same place as `twin_ar`. Teach the matcher (or record it in
+     `ops_district_name_decision` as `variant`) and fix the listings tonight; the district list gets no new row.
+   - `sequel`: same base, different ordinal / letter / number («شرق المطار أ» and «ب»). Allowed, if the normal rule passes.
+   - `new`: admit it only by the normal rule: named by **3 or more** distinct active ads, not a city, street, plan or
+     direction; spelling = the source's own form.
+   Then prove it: the district shows in `district_options_ar(p_city_id := …)` and a real search for it returns the listing.
+   Put one line in your report: **«Districts: added N · twins refused N · waiting for the owner N»**. The Hofuf (الأحساء)
+   «الضاحية الحي …» names wait for the owner's naming decision; never invent a spelling for them.
 
 ## Your run, step by step
 1. **Log the start** in `ops_daily_engineer_run`.
