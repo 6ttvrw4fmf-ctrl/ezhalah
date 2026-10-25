@@ -182,6 +182,26 @@ are the base of the owner's future revenue (data for investors), so they must be
 5. **Proof.** One fact per morning, re-checked by hand against production (open the headline, compare to SQL): a PASS
    proof row. Report it as one line in your final report: «📊 Facts: built HH:MM · checked N kinds · M wrong → fixed».
 
+## Text facts — you OWN the conflict list (owner, 2026-10-25, Rule B)
+
+The Advanced Filter serves the seller's own quoted sentence beside the site's box
+(docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md, «The seller's sentence — Rule B»). Each morning read
+`select public.ops_text_facts_status();` (≈ 10 s, one call — never hand-run the detector or the sync):
+
+1. **Freshness.** `last_read_at` is from today (the nightly reader, 07:05 UTC) and `ads_read_last_36h` > 0. Older = P1
+   (the `text_facts_reader_stale` alert says the same).
+2. **Conflicts.** `conflicts` = ads whose box is ticked while their own words say no; they are served as unknown. Read
+   `select * from ops_text_facts_conflicts order by read_at desc limit 20`: open the ad, and if the box is a scraper
+   misread, fix the reader (a backlog row); if the seller really wrote both, nothing to do — unknown is the honest answer.
+   Never edit `listing_text_facts` or a `*_listings` column by hand to "resolve" one.
+3. **Overlay coverage.** `served_from_text` (values the index serves that the ad's sentence answered) should not fall
+   between nights; `open_alerts` must be empty (`text_facts_not_applied`, `text_facts_stale_applied`,
+   `text_facts_unquoted`, `text_facts_switch_ignored`: each P1, all from `mon_detect_text_facts`, 11:52 UTC).
+4. **The switch is the owner's.** `switch.on` false is only ever the owner's (or an incident commander's) decision.
+   Report it; never turn it back on yourself.
+
+Report it as one line: «📊 Text facts: read HH:MM · N conflicts (±d) · M values from ad text · alerts none».
+
 ## Powers and limits
 - **Yours to do (AGENTS.md: ops DB objects, monitors, detectors, cron, scraper fixes, evidence-backed repairs):** repair
   functions and backfills, catalog aliases with evidence, parsers and mappers, your own run log and backlog. Database changes

@@ -145,7 +145,8 @@ const mustCatch = (what: string, find: string, repl: string) => {
 mustCatch('sanadak prose read again (not structured-only)', '"sanadak": ("elevator", "parking", "kitchen",', '"sanadak_off": ("elevator", "parking", "kitchen",');
 mustCatch('a prepared sanadak kitchen read as a kitchen', 'if k.startswith("نعم") and "تأسيس" not in k', 'if k.startswith("نعم")');
 mustCatch('an unticked sanadak driver box read as a no', '"driver_room": True if o.get("isDriverRoomAvailable") is True else None,', '"driver_room": bool(o.get("isDriverRoomAvailable")),');
-mustCatch('customer request built from prose the score refused', 'return structured_says(page or {}, field) is True', 'return page_says_yes(lines, field)');
+// Rule B (owner 2026-10-25): the structured box is merged with the overlay's QUOTED sentence, never with raw prose.
+mustCatch('customer request built from prose the score refused', 'return rule_b(structured_says(page or {}, field), text_says(text, COL[field], page or {})) is True', 'return page_says_yes(lines, field)');
 mustCatch('a failed sanadak fetch read as a page', 'if not got:\n        return None', 'if not got:\n        got = ({}, "", url)');
 mustCatch('a NULL read as a miss when the list was capped', 'return None if len(rows) >= RPC_LIMIT else False', 'return False');
 mustCatch('a failed request read as not found', 'if rows is None:\n        return None', 'if rows is None:\n        return False');
@@ -164,7 +165,7 @@ mustCatch('a lift shaft read as a lift', 'hit = [x for x in (unprepared(y, kw) f
 mustCatch('dealapp bathrooms judged from prose again', 'STRUCTURED_LABEL: dict[tuple[str, str], str] = {("dealapp", "bathrooms"): r"عدد الحمامات"}', 'STRUCTURED_LABEL: dict[tuple[str, str], str] = {}');
 mustCatch('parity compares the wrong count', 'return int(promised) == int(after)', 'return True');
 mustCatch('a failed parity read counted as a pass', 'except Exception:  # noqa: BLE001\n        return None\n    promised', 'except Exception:  # noqa: BLE001\n        return True\n    promised');
-mustCatch('prose read for a field the site publishes structurally', 'af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page)', 'af_only = {k: v for k, v in results.items() if k in AF_FIELDS}');
+mustCatch('prose read for a field the site publishes structurally', 'af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page,\n                                  texts.get((table, rid)))', 'af_only = {k: v for k, v in results.items() if k in AF_FIELDS}');
 mustCatch('aqar parking no longer structured-only', '"aqar": ("elevator", "parking",', '"aqar": ("elevator",');
 mustCatch('a silent structured block read as a miss', 'if says is None:\n        return PAGE_SILENT', 'if says is None:\n        return WE_MISS');
 mustCatch('site navigation read as the ad', 'if x and not CHROME.match(x) and', 'if x and');
