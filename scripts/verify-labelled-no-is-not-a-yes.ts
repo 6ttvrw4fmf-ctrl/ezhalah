@@ -72,5 +72,26 @@ mustCatch('a label widened to any words («مطبخ ملاحظة: بدون مص�
 const m7 = mutant('            if col in out or col in settled:', '            if col in out:');
 mustCatch('a settled «unknown» label overridden by the next spelling (kitchen = no from «بدون مكيفات»)', m7 !== null && !allRight(m7));
 
+// dwelleo: the site's own furnishing_status vs the ad's own words. Agreement keeps the status; a contradiction is
+// unknown, written as the AUTHORITATIVE_NULL sentinel so the upsert clears a stale yes (dwelleo 13130631: status
+// «furnished», text «مفروشة: لا»).
+const DW = readFileSync(join(ROOT, 'scrapers/dwelleo/run.py'), 'utf8');
+const DW_CASES: [Record<string, string>, string, unknown][] = [
+  [{ furnishing_status: 'furnished' }, 'غرف النوم: 3 دورات المياه: 3 مفروشة: لا مميزات إضافية', 'AUTHORITATIVE_NULL'],
+  [{ furnishing_status: 'unfurnished' }, 'شقة مفروشة غرفتين وصالة للإيجار', 'AUTHORITATIVE_NULL'],
+  [{ furnishing_status: 'furnished' }, 'شقة مفروشة بالكامل', true],
+  [{ furnishing_status: 'unfurnished' }, 'العقار غير مفروش', false],
+  [{ furnishing_status: 'furnished' }, 'شقة واسعة', true],
+];
+const dwelleo = (src?: string) =>
+  (pyCall(ROOT, 'scrapers.dwelleo.run', '_amenities', DW_CASES.map(([r, d]) => [r, d]), src) as Record<string, unknown>[])
+    .map((o) => o.furnished);
+const dw = dwelleo();
+DW_CASES.forEach(([r, d, want], i) => check(`dwelleo ${r.furnishing_status} + «${d}» → ${want}`, dw[i] === want, `got ${dw[i]}`));
+const DW_FROM = 'out["furnished"] = status if said is None or said == status else db.AUTHORITATIVE_NULL';
+const dwm = DW.includes(DW_FROM) ? dwelleo(DW.replace(DW_FROM, 'out["furnished"] = status')) : null;
+if (!dwm) check(`ANCHOR DRIFTED: ${DW_FROM}`, false);
+mustCatch('dwelleo\'s furnishing_status overriding the ad\'s own «مفروشة: لا» (served as yes)', dwm !== null && dwm.some((g, i) => g !== DW_CASES[i][2]));
+
 if (failed) { console.error(`\n❌ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✅ a labelled «لا» is a NO');

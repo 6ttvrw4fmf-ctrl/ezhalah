@@ -924,8 +924,9 @@ _AMENITY_TOKENS: dict[str, tuple[str, ...]] = {
 }
 
 # «غير مؤثثة» / «بدون مصعد» / «لا يوجد مصعد» — the negator sits BEFORE the token.
-# «لا يتوفر موقف خاص للشقة» (aqar, stored 2026-10-25) is «لا يوجد» in other words.
-_NEGATORS = ("غير", "بدون", "لا يوجد", "لايوجد", "لا يتوفر", "لا تتوفر", "un", "no ")
+# «لا يتوفر موقف خاص للشقة» (aqar) and «لا توجد أية مفروشات داخل المنزل» (dwelleo 13129552), both stored 2026-10-25,
+# are «لا يوجد» in other words.
+_NEGATORS = ("غير", "بدون", "لا يوجد", "لايوجد", "لا توجد", "لاتوجد", "لا يتوفر", "لا تتوفر", "un", "no ")
 
 # …and some qualifiers sit AFTER it and mean the thing is NOT there. «مصعد مؤسس» is an elevator
 # SHAFT that has been prepared — there is no elevator (seen on fahadalshahri, 2026-09-20). Reading
@@ -1071,11 +1072,11 @@ _LABEL_UNSPECIFIED_RE = re.compile(r"غير\s+(?:محدد|مذكور|موضح|م
 
 # A stated NO the 12-character negator window cannot see, both verified on stored ads 2026-10-25:
 #   «عدم وجود مصعد», «لعدم توفر مصعد», «حالة عدم المفروشات», «غياب المفروشات» (aqar, gathern, muhaysini, tuba: 20 ads)
-#   «لا تأتي هذه الشقة مفروشة», «لا يأتي هذا الشقة مفروشة», «لا تأتي مفروشة» (muhaysini: 7 ads)
+#   «لا تأتي هذه الشقة مفروشة», «لا يأتي هذا الشقة مفروشة», «لا تأتي مفروشة» (muhaysini: 7 ads), «ولا تأتي مفروشة» (dwelleo)
 # Anchored to the token (≤ 3 words between), on the normalised text («تأتي» → «تاتي»).
 _ABSENT_BEFORE_RE = re.compile(
     r"(?:(?<!\w)(?:و|ل|ول)?(?:عدم|غياب)\s+(?:(?:وجود|توفر|توافر)\s+)?"
-    r"|(?<!\w)لا\s+[تي]اتي(?:\s+[^\s،,.]+){0,3}\s+)(?:ال)?$")
+    r"|(?<!\w)و?لا\s+[تي]اتي(?:\s+[^\s،,.]+){0,3}\s+)(?:ال)?$")
 
 
 # A token can sit inside a PLACE NAME: «شرفة» is the tail of Jeddah's district «مشرفة», and every ad there read
