@@ -702,6 +702,7 @@ _AGE_VOCAB_AR = {
     "ثلاث سنوات": 3, "اربع سنوات": 4, "أربع سنوات": 4, "خمس سنوات": 5, "ست سنوات": 6,
     "سبع سنوات": 7, "ثمان سنوات": 8, "ثماني سنوات": 8, "تسع سنوات": 9, "عشر سنوات": 10,
     # Open-ended -> FLOOR (see fidelity rules above). Both the numeric and the spelled-out forms.
+    # A floored 10 has NO upper end: for aqar the AF clause keeps it out of every «up to N» (20261025065509).
     "اكثر من عشر سنوات": 10, "أكثر من عشر سنوات": 10,
     "اكثر من 10 سنوات": 10, "أكثر من 10 سنوات": 10,
 }
