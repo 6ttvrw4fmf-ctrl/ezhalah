@@ -62,7 +62,7 @@ env:
 
 jobs:
   plan:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     outputs:
       shards: ${{ steps.m.outputs.shards }}
       n: ${{ steps.m.outputs.n }}
@@ -80,7 +80,7 @@ jobs:
 
   run:
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 340
     strategy:
       fail-fast: false
