@@ -404,9 +404,104 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── incremental: the nightly reader that feeds the Advanced Filter overlay (Rule B, owner 2026-10-25) ──────
+# The 20 search-index columns an ad's text may answer — public.text_facts_af_columns(), same order. The DB's
+# CHECK refuses any other key and any value without its quote, so this list cannot drift silently.
+AF_COLUMNS = ("furnished", "elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room",
+              "private_entrance", "separate_electricity_meter", "separate_water_meter", "electricity",
+              "water_supply", "sanitation", "balcony", "laundry_room", "pool", "gym", "garden", "car_entrance",
+              "optical_fibers")
+
+
+def overlay_row(table: str, r: dict[str, Any], run_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """One text_facts_todo row → (its listing_text_facts row, every fact the checker found).
+
+    The overlay row keeps only the 20 AF columns, each {v, q}. An ad with no AF fact (or too little text)
+    still gets a row with facts {} — that row is the memory that this exact text (src_hash) was read."""
+    text = W.clean_text(r.get("title"), r.get("body"))
+    found = W.check(text) if len(norm(text)) >= MIN_NORM_CHARS else []
+    facts = {f["fact"]: {"v": f["value_bool"], "q": f["quote"]}
+             for f in found if f["fact"] in AF_COLUMNS and f["value_bool"] is not None and (f["quote"] or "").strip()}
+    row = {"source_table": table, "listing_id": int(r["id"]), "platform": platform_of(table),
+           "listing_key": str(r["ad_number"]), "src_hash": r["src_hash"], "facts": facts, "run_id": run_id,
+           "read_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "stale_at": None}
+    return row, found
+
+
+def run_incremental(args: argparse.Namespace) -> int:
+    """Read every active ad that was never read, or whose text changed since (the DB decides: text_facts_todo),
+    and replace its overlay row. New and changed ads also get their full fact list in listing_facts (history,
+    every fact incl. the ones with no filter column yet). source_value is not snapshotted on these rows (NULL
+    = not read here, NOT «the site has no such field»). No embeddings, no paid AI."""
+    from scrapers.common.db import sb
+    client = sb()
+    shard, shards = (int(x) for x in args.shard.split("/"))
+    platforms = set(args.platforms.split(",")) - {""} if args.platforms else None
+    t_start = time.time()
+    stats: Counter = Counter()
+
+    def write(tbl: str, rows: list[dict[str, Any]], conflict: str, ignore: bool) -> None:
+        for i in range(0, len(rows), 500):
+            for attempt in range(4):
+                try:
+                    client.table(tbl).upsert(rows[i:i + 500], on_conflict=conflict, ignore_duplicates=ignore).execute()
+                    break
+                except Exception as e:
+                    if attempt == 3:
+                        raise
+                    print(f"  ! {tbl} upsert retry: {str(e)[:120]}")
+                    time.sleep(5 * (attempt + 1))
+
+    for table in all_tables(platforms):
+        after, got = 0, 0
+        while not args.limit or got < args.limit:
+            page = client.rpc("text_facts_todo", {"p_table": table, "p_after": after, "p_limit": PAGE,
+                                                 "p_shard": shard, "p_shards": shards}).execute().data or []
+            if not page:
+                break
+            after = int(page[-1]["id"])
+            got += len(page)
+            cur, hist = [], []
+            for r in page:
+                row, found = overlay_row(table, r, args.run_id)
+                cur.append(row)
+                stats["ads_read"] += 1
+                stats["ads_with_af_fact"] += bool(row["facts"])
+                stats["af_values"] += len(row["facts"])
+                stats["changed_text"] += bool(r.get("changed"))
+                if found and (r.get("changed") or not r.get("has_history")):
+                    hist += [{"run_id": args.run_id, "platform": row["platform"], "table_name": table,
+                              "listing_key": row["listing_key"], "listing_url": None, "model": W.MODEL,
+                              "source_value": None, **f} for f in found]
+            write("listing_text_facts", cur, "source_table,listing_id", False)
+            write("listing_facts", hist, "platform,listing_key,fact,run_id", True)
+            stats["history_rows"] += len(hist)
+            time.sleep(PAUSE_S)
+        if got:
+            print(f"  {table}: {got} ads read · {stats['ads_read']} so far · {int(time.time() - t_start)}s")
+    summary = {"run_id": args.run_id, "phase": "incremental", "shard": args.shard,
+               "seconds": int(time.time() - t_start), **stats}
+    os.makedirs(args.out, exist_ok=True)
+    with open(os.path.join(args.out, f"words-incremental-{shard}of{shards}.json"), "w", encoding="utf-8") as fh:
+        json.dump(summary, fh, ensure_ascii=False, indent=1)
+    print(json.dumps(summary, ensure_ascii=False))
+    return 0
+
+
 def selftest() -> None:
     import numpy as np
     W.selftest()
+    # the overlay row: AF columns only, each with its quote; silence and non-AF facts never reach it; a
+    # too-short text still yields a row (the memory that this text was read).
+    row, found = overlay_row("aqar_residential_listings", {"id": 7, "ad_number": "A7", "src_hash": "0" * 32,
+                             "title": "شقة للايجار", "body": "يوجد مصعد ولا يوجد مسبح، مجلس كبير"}, "facts-words-t")
+    assert row["facts"].get("elevator", {}).get("v") is True and row["facts"]["elevator"]["q"], row
+    assert row["facts"].get("pool", {}).get("v") is False, row
+    assert "majlis" not in row["facts"] and any(f["fact"] == "majlis" for f in found), (row, found)
+    assert set(row["facts"]) <= set(AF_COLUMNS) and row["stale_at"] is None and row["listing_id"] == 7
+    short, _ = overlay_row("aqar_residential_listings", {"id": 8, "ad_number": "A8", "src_hash": "0" * 32,
+                           "title": "", "body": "مصعد"}, "facts-words-t")
+    assert short["facts"] == {}, short
     assert vec_literal([0.12345, -1.0]) == "[0.1235,-1.0000]"
     assert all_tables({"aqar"}) == ["aqar_residential_listings", "aqar_commercial_listings"]
     # finder on a toy space: two "pool" ads + one blank ad sitting right next to them → it is the candidate,
@@ -441,7 +536,7 @@ def selftest() -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--phase", choices=("benchmark", "full"), default="benchmark")
+    ap.add_argument("--phase", choices=("benchmark", "full", "incremental"), default="benchmark")
     ap.add_argument("--run-id", default="")
     ap.add_argument("--limit", type=int, default=0, help="max ads per table (0 = all)")
     ap.add_argument("--platforms", default="")
@@ -460,7 +555,7 @@ def main() -> int:
         ap.error("--run-id must start with facts-words (letters, digits, . _ -)")
     if not re.fullmatch(r"\d/\d", args.shard) or int(args.shard[0]) >= int(args.shard[2]):
         ap.error("--shard i/n")
-    return run(args)
+    return run_incremental(args) if args.phase == "incremental" else run(args)
 
 
 if __name__ == "__main__":
