@@ -43,7 +43,8 @@ const good = homeCardDescription(homeCardFactsFrom(SITES, SCALE));
   check('aqarmonthly folds into aqar: 150 raw slugs with both → 149 sites', homeCardFactsFrom([...SITES, 'aqar', 'aqarmonthly'].slice(1), SCALE).sites === 149);
   mustCatch('a card that counts raw slugs (149 where the app shows 148)', REAL_SLUGS.length !== cardCount);
 }
-check('the owner-approved numbers line, exact digits (2026-10-19: counts only, middle dots, no tail)', good === '149 موقع · 385,330 إعلان · 346 مدينة', good);
+check('the owner-approved numbers line, exact digits (2026-10-25: no site count — the message says it — and «بالمملكة»)', good === '385,330 إعلان · 346 مدينة بالمملكة', good);
+mustCatch('the site count printed twice (message + card, owner 2026-10-25)', good !== '149 موقع · 385,330 إعلان · 346 مدينة');
 mustCatch('the «و…في…، كلها في مكان واحد.» line WhatsApp cut at the city count', good !== '149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.');
 check('the owner-approved title', HOME_CARD_HEADLINE_AR === 'إزهله، محرك بحث عقاري بالذكاء الاصطناعي');
 // IT ALL SHOWS (owner 2026-10-18: «the message doesn't show fully»). WhatsApp's small card shows ~2 lines
