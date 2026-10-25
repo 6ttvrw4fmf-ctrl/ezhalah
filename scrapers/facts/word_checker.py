@@ -446,6 +446,22 @@ _BOUNDARY_LABEL = re.compile(r"(?:ال)?(?:اطوال|ابعاد|اضلاع|مق
 _BOUND_SIDE = re.compile(rf"({_BEARING}) [^ ]*(?: [^ ]+){{0,5}}? بطول ?(\d{{1,4}})")
 
 
+# PDPL: a person's name in a quote or a value («ملك فلان بن فلان» in a boundaries cell) drops the WHOLE row —
+# the sanitizer strips phones and kunyas, not «بن / ابن / بنت / آل» names (raghdan boundaries, 2026-10-25).
+# A street, mosque or school named after a person keeps its row: «شارع … بن …» within four words.
+_NAME_MARKS = frozenset({"بن", "ابن", "بنت", "ال"})       # «آل» folds to «ال»; the article never stands alone
+_NAMED_PLACES = tuple(_n(w) for w in ("شارع", "طريق", "ميدان", "دوار", "جسر", "مسجد", "جامع", "مدرسة", "مستشفى",
+                                       "حي", "مخطط", "مجمع", "مركز", "جامعة", "كلية", "برج"))
+
+
+def names_a_person(text: str) -> bool:
+    w = norm(text).split()
+    return any(x in _NAME_MARKS and i + 1 < len(w)
+               and not any(_strip_wa(p).startswith(_NAMED_PLACES) or p.startswith(_NAMED_PLACES)
+                           for p in w[max(0, i - 4):i])
+               for i, x in enumerate(w))
+
+
 class Hit:
     __slots__ = ("fact", "value", "s", "e", "clause")
 
@@ -552,6 +568,8 @@ def check(text: str) -> list[dict[str, Any]]:
         nq = norm(q)
         if not nq or nq not in full_norm:          # PROOF OR DROP — the same check the LLM run passed
             return
+        if names_a_person(q) or (isinstance(value, str) and names_a_person(value)):
+            return                                 # PDPL: never store a person's name, drop the whole row
         row = {"fact": fact, "value_bool": None, "value_num": None, "value_text": None, "quote": q[:300]}
         row["value_bool" if isinstance(value, bool) else "value_text" if isinstance(value, str) else "value_num"] = value
         out.append(row)
@@ -734,6 +752,10 @@ def selftest() -> None:
         ("رقم رخصة فال: 1200 مجلس", {"majlis": True}, ()),
         ("• نظام الكهرباء: الفنار • السباكة", {}, ("electricity",)),
         ("نظام البناء: سكني 3 ادوار", {}, ("floors",)),
+        # PDPL: a neighbour's name in a boundaries cell drops the whole row; a street named after a person does not
+        ("شمالاً: ملك فلان بن فلان بطول 20م، جنوباً: شارع بعرض 15م بطول 20م", {}, ("boundaries",)),
+        ("الحدود: شمالا آل فلان بطول 20 جنوبا شارع بطول 20", {}, ("boundaries",)),
+        ("الاطوال 20 × 30 على طريق الملك فلان بن فلان", {"boundaries": "الاطوال 20 × 30"}, ()),
         ("الدفع شهري", {"payment_monthly": True}, ()),
         ("لا نقبل الدفع الشهري", {"payment_monthly": False}, ()),
         ("مسبح خاص", {"pool": True}, ()),
@@ -760,6 +782,8 @@ def selftest() -> None:
     # PDPL: the sanitizer runs per line — contact data never reaches a quote
     t = clean_text(None, "مسبح للتواصل 0501234567\nواتساب 966501234567\nمجلس")
     assert "050" not in t and "966" not in t and facts_of(t).get("majlis") is True, t
+    assert names_a_person("ملك فلان بنت فلان") and names_a_person("آل فلان") and not names_a_person("مسجد فلان بن فلان")
+    assert not names_a_person("بن") and not names_a_person("شارع 15 م")
     print(f"word_checker selftest ok ({len(cases)} phrases)")
 
 
