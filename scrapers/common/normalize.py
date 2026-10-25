@@ -931,6 +931,10 @@ _NEGATORS = ("غير", "بدون", "لا يوجد", "لايوجد", "un", "no ")
 # that as elevator=True publishes a fixture the listing does not have, so these suppress the token
 # entirely: the source has not said yes and has not said no, so the column stays NULL.
 _PREPARED_ONLY = ("مؤسس", "مؤسسة", "مهيأ", "مهيا", "تأسيس", "prepared for", "roughed")
+# …and a fixture that can be added LATER is not there now either: «تصميم يستوعب … إضافة مصعد لاحقًا» (aouj
+# 10283198, 🔬 2026-10-25) read elevator = yes. «لاحق» after the token, «إمكانية» before it: NULL.
+_LATER_AFTER = ("لاحق", "مستقبلا", "later")
+_LATER_BEFORE = ("امكانية", "إمكانية", "امكانيه", "possibility")
 
 # …and a third case that is neither yes nor no: the amenity belongs to the NEIGHBOURHOOD, not to
 # the property. Listing prose is full of «قريب من مستشفى السرطان», «مقابل كمباوند معهد الإدارة»,
@@ -1090,6 +1094,9 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
                 # «* تأسيس مصعد» was served as elevator = yes). Same 12-char window as the negators.
                 if any(_norm_ar(q).lower() in before for q in _PREPARED_ONLY):
                     break
+                if (any(_norm_ar(q).lower() in after for q in _LATER_AFTER)
+                        or any(_norm_ar(q).lower() in t[max(0, m.start() - 22):m.start()] for q in _LATER_BEFORE)):
+                    break          # can be added later — not there now: NULL
                 if col == "furnished" and (
                         any(_norm_ar(q).lower() in after for q in _PARTIAL_ONLY + _FLOOR_COVERING)
                         or any(_norm_ar(q).lower() in before[-6:] for q in _PARTIAL_BEFORE)):
