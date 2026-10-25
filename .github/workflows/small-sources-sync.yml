@@ -5,8 +5,8 @@
 # cadence the big sources (Aqar, Wasalt) get — daily is plenty. And ONE established daily cron fires
 # reliably, where many separate brand-new 4h crons get skipped by GitHub's scheduler.
 #
-# Add a new small platform = add ONE line to the matrix below: its name + the command that scrapes
-# both its verticals in one run. That's it.
+# Add a new small platform = add ONE line to SMALL_SOURCES in the `plan` job below: its name + the
+# command that scrapes both its verticals in one run. That's it.
 
 name: Small sources sync
 
@@ -35,7 +35,424 @@ env:
   EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
 
 jobs:
+  # A TARGETED dispatch (input `source`) creates ONLY the jobs it names (2026-10-25). The matrix used to be
+  # a literal list, so `source=<one site>` still created all ~143 jobs and every other site's job spent a
+  # runner on checkout + Python + pip before skipping its scrape: on 10-25 five such runs held 41–143 queued
+  # jobs each and nothing in this workflow started from 08:25 to 13:00 UTC. `plan` turns the list below into
+  # the matrix — every line for the nightly (blank input, pg_cron gh-small-sources 04:22 UTC), only the named
+  # lines otherwise; an unknown name fails the plan instead of running nothing. Guarded by
+  # scripts/verify-small-sources-targeted-dispatch-is-one-job.ts.
+  plan:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/small_sources_matrix.py
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Plan the matrix
+        id: plan
+        env:
+          SOURCE: ${{ github.event.inputs.source }}
+          # THE LIST — add a new small platform = add ONE line here: its name + the command that scrapes
+          # both its verticals. Optional keys: tmo (job timeout in minutes, default 90), proxy, browser,
+          # every_n_days. Keep every line inside this block (indented under SMALL_SOURCES).
+          SMALL_SOURCES: |
+            - { source: aldarim,  cmd: "python -m scrapers.aldarim.run --pages 50" }
+            - { source: aqargate, cmd: "python -m scrapers.aqargate.run --type all" }
+            - { source: hajer,    cmd: "python -m scrapers.hajer.run --type all" }
+            #   alhoshan + macsaib: `proxy: true` (2026-10-03, Scraping Engineer): two runs in a row timed out
+            #   CONNECTING from the runner; each probes 3 profiles DIRECT first, so the proxy is spent only when walled.
+            - { source: alhoshan, cmd: "python -m scrapers.alhoshan.run --type all", proxy: true }
+            - { source: sanadak,  cmd: "python -m scrapers.sanadak.run --type all" }
+            #   eastabha: `proxy: true` (2026-10-06, Scraping Engineer) — every DIRECT route (4 profiles) timed out
+            #   connecting from the runner and the shared http.get logged «proxy fallback not enabled»: 0 rows (223 on 10-05).
+            #   With SCRAPE_PROXY_FALLBACK_URL below, http.get tries the proxy only after every DIRECT profile fails.
+            - { source: eastabha, cmd: "python -m scrapers.eastabha.run --type all", proxy: true }
+            - { source: aqarcity, cmd: "python -m scrapers.aqarcity.run --type all" }
+            - { source: raghdan,    cmd: "python -m scrapers.raghdan.run --type all" }
+            - { source: eaqartabuk, cmd: "python -m scrapers.eaqartabuk.run --type all" }
+            - { source: satel,      cmd: "python -m scrapers.satel.run --type all" }
+            - { source: sadin,      cmd: "python -m scrapers.sadin.run --type all", proxy: true }
+            - { source: mustqr,      cmd: "python -m scrapers.mustqr.run --type all" }
+            - { source: ramzalqasim, cmd: "python -m scrapers.ramzalqasim.run --type all" }
+            - { source: fursaghyr,   cmd: "python -m scrapers.fursaghyr.run --type all" }
+            - { source: mizlaj,      cmd: "python -m scrapers.mizlaj.run --type all" }
+            - { source: aqaratikom,  cmd: "python -m scrapers.aqaratikom.run --type all" }
+            # awal — RE-ADDED 2026-09-04 (owner-instructed), satisfying this line's own precondition:
+            # "Do not re-add without confirming the domain serves real listings again." Confirmed live
+            # 2026-09-04: /wp-json/wp/v2/rtcl_listing returns HTTP 200 with x-wp-total: 128 (the
+            # parking stub is gone), and the SHIPPED scraper parses all 128 into rows with 128
+            # DISTINCT ad_numbers / listing_urls / descriptions — real inventory, no duplication.
+            # Two source facts recorded so neither is mistaken for a bug later: the newest listing is
+            # 2026-02-14 (real but LOW-CHURN, so a run returning the same 128 is healthy), and the
+            # source publishes NO price at all (0/128 in the REST payload AND the detail pages) —
+            # nothing is inferred to fill it, exactly like the 7,534 priceless rows already live.
+            # awal: `proxy: true` (2026-09-27, Scraping Engineer). Every crawl since 09-24 died on one
+            # chrome124 request answering HTTP 500; scrapers/awal/run.py now probes 3 profiles direct and
+            # then the same 3 through the proxy (only if all direct ones fail), so the metered proxy is
+            # spent only when the source refuses a datacenter handshake.
+            - { source: awal,        cmd: "python -m scrapers.awal.run --type all", proxy: true }
+            - { source: alkhaas,     cmd: "python -m scrapers.alkhaas.run --type all" }
+            - { source: abeea,       cmd: "python -m scrapers.abeea.run --type all" }
+            - { source: jurash,      cmd: "python -m scrapers.jurash.run --type all" }
+            # DEALAPP_MAX_LISTINGS caps each run so it finishes inside the 90m budget (prune+end_run
+            # run cleanly). enumerate_ids orders NEW sitemap listings first, so coverage climbs
+            # run-over-run toward the full ~58k catalogue.
+            #
+            # The cap is now sized from MEASURED CI throughput, not guessed. The 2026-08-07 cap of
+            # 12000 did NOT fit: run 31239278341 (2026-08-08) was cancelled at exactly 90m
+            # (04:22:49 -> 05:52:46), so prune_unseen() and end_run() never ran, scrape_runs id 25397
+            # is dangling ok=NULL forever, and dealapp's last-OK freshness signal froze at 08-07.
+            # That run fetched 1,800 detail pages in ~83m of fetching = ~21.7/min at WORKERS=3
+            # (dealapp's anonymous origin trips a login-wall above ~3 workers, so this is the ceiling
+            # without a proxy). Budget: 90m - ~1m setup - ~7m sitemap enumeration - ~5m prune/end_run
+            # = ~77m of fetching. 1200 listings = ~55m, leaving >20m of headroom for throttle
+            # variance. scripts/verify-dealapp-crawl-budget.ts enforces this arithmetic.
+            # To go faster, raise throughput (a proxy lifts the 3-worker throttle) or raise `tmo`
+            # AND the cap together — never the cap alone. (bug-fix 2026-08-08)
+            # dealapp MOVED OUT of this matrix 2026-08-11 (owner-approved option b) to
+            # .github/workflows/dealapp-sharded.yml — a 12-shard fleet that covers the FULL active
+            # inventory in one night. It must not run here as well: two crawls of the same catalogue
+            # would double the load on an origin that already blocks under burst, and the unsharded
+            # run would re-introduce the ~25%-coverage state that kept prune_unseen's coverage guard
+            # permanently tripped. scripts/verify-dealapp-crawl-budget.ts fails CI if dealapp
+            # reappears in this matrix.
+            # عقاريون — 277 Riyadh listings across 31 pages, one detail fetch each. No proxy: the
+            # site is plain nginx with no Cloudflare and answers a direct request in 1-3s.
+            - { source: akariyoun,   cmd: "python -m scrapers.akariyoun.run --type all", tmo: 45 }
+            - { source: ksaaqar,     cmd: "python -m scrapers.ksaaqar.run --type all", tmo: 90 }
+            - { source: sadiqeltajer, cmd: "python -m scrapers.sadiqeltajer.run --type all", tmo: 90 }
+            # ── onboarded 2026-09-20 ──────────────────────────────────────────────────────────────
+            # gudai / safera / alhumaidan are three tenant offices of ONE inblaj.net WordPress
+            # product and share scrapers/common/inblaj_platform.py, but each runs as its own source
+            # so one office being down never hides another, and each keeps its own run ledger.
+            #   gudai: `proxy: true` (2026-10-05, Scraping Engineer) — its sitemap stalled on every DIRECT route on
+            #   09-30 and 10-04; inblaj_platform.fetch_catalogue tries the proxy ONLY after a transport stall.
+            - { source: gudai,         cmd: "python -m scrapers.gudai.run --type all", tmo: 20, proxy: true }
+            - { source: safera,        cmd: "python -m scrapers.safera.run --type all", tmo: 20 }
+            - { source: alhumaidan,    cmd: "python -m scrapers.alhumaidan.run --type all", tmo: 20 }
+            #   aqarnajran: `proxy: true` (2026-10-05, Scraping Engineer) — walk_session() probes 3 profiles DIRECT first;
+            #   the proxy is spent only when DIRECT is refused (failed 10-05 on one pinned profile).
+            - { source: aqarnajran,    cmd: "python -m scrapers.aqarnajran.run --type all", tmo: 20, proxy: true }
+            - { source: fahadalshahri, cmd: "python -m scrapers.fahadalshahri.run --type all", tmo: 20 }
+            # compoundin walks 129 compound pages and emits one row per UNIT, so it is the slowest
+            # of this batch by page count even though its row count is small.
+            - { source: compoundin,    cmd: "python -m scrapers.compoundin.run --type all", tmo: 45 }
+            # wslnaa makes one tRPC call per slug (59) on top of the sitemap fetch.
+            - { source: wslnaa,        cmd: "python -m scrapers.wslnaa.run --type all", tmo: 30 }
+            # ── onboarded 2026-09-21: eleven platforms ─────────────────────────────────────────────
+            # Each is its own matrix job, so one source down never hides another and each keeps its
+            # own run ledger. None reads WASALT_PROXY_URL (checked) — no `proxy:` flag. `tmo` is sized
+            # from each scraper's MEASURED cost (pages × (pause + response), response timed live on
+            # 2026-09-21) with >=2x headroom, because a job killed at its limit never reaches
+            # prune_unseen() or end_run() and leaves a dangling scrape_runs row (the dealapp lesson).
+            # The first scrape of each is a manual dispatch with `source: <slug>` (the input above).
+            #   API / REST sources — a handful of calls each:
+            - { source: alsidra,     cmd: "python -m scrapers.alsidra.run --type all", tmo: 20, proxy: true }
+            - { source: moftah,      cmd: "python -m scrapers.moftah.run --type all", tmo: 20 }
+            - { source: masar,       cmd: "python -m scrapers.masar.run --type all", tmo: 20 }
+            #   aljassim: ~90 detail pages behind an hcdn challenge it solves in-process.
+            - { source: aljassim,    cmd: "python -m scrapers.aljassim.run --type all", tmo: 20 }
+            #   gomenassat: one POST for 256 offers, then ~150 detail pages (transacted ones skipped).
+            - { source: gomenassat,  cmd: "python -m scrapers.gomenassat.run --type all", tmo: 20, proxy: true }
+            #   nufouth: 4 index pages + one API record per property (~270).
+            - { source: nufouth,     cmd: "python -m scrapers.nufouth.run --type all", tmo: 30 }
+            #   almotmkenah: all 361 index ads are fetched (the ~339 archived ones ARE its removal
+            #   signal), 0.2s apart.
+            - { source: almotmkenah, cmd: "python -m scrapers.almotmkenah.run --type all", tmo: 30, proxy: true }
+            #   ialqarawi: 66 whole-category pages, then ~2,641 detail pages over 8 worker threads
+            #   (~0.6s each → ~4 min).
+            #   ialqarawi: `proxy: true` (2026-09-28, Scraping Engineer) — every profile DIRECT drew an
+            #   empty HTTP 202 challenge on 4 of 7 crawls; session() now tries DIRECT first and rides
+            #   the residential proxy only when DIRECT is walled.
+            - { source: ialqarawi,   cmd: "python -m scrapers.ialqarawi.run --type all", tmo: 45, proxy: true, browser: true }
+            #   bossbih: 10 index pages + ~1,485 detail pages, sequential, 0.25s pause + ~0.2s
+            #   response → ~11 min.
+            # bossbih + aqalemhajer: `proxy: true` (owner 2026-10-19) ONLY for the maps.app.goo.gl pin hop in
+            # scrapers/common/page_pin.py — Google answers the runner with a script page instead of the redirect.
+            - { source: bossbih,     cmd: "python -m scrapers.bossbih.run --type all", tmo: 60, proxy: true, browser: true }
+            #   alshawaf: 26 index pages + ~987 detail pages, sequential, 0.3s pause + ~0.7s
+            #   response → ~17 min.
+            - { source: alshawaf,    cmd: "python -m scrapers.alshawaf.run --type all", tmo: 60 }
+            #   sakan: ~3,160 detail pages (~500 KB each), sequential, 0.35s pause + ~0.7s response →
+            #   ~56 min from a nearby egress; a US runner is slower per page, so 180 keeps >=2x
+            #   headroom over a realistic ~90 min.
+            - { source: sakan,       cmd: "python -m scrapers.sakan.run --type all", tmo: 180 }
+            # ── onboarded 2026-09-24: thirty-five platforms ───────────────────────────────────────
+            # Same shape as the 2026-09-21 batch above: one matrix job per platform, so one source
+            # down never hides another and each keeps its own run ledger. Two carry `proxy: true` and read
+            # WASALT_PROXY_URL / SCRAPE_PROXY_URL — sakani (Cloudflare challenge from a datacenter IP) and
+            # eilmalriyada (api.eilmalriyada.com 403s datacenter IPs, 200 to residential on every TLS
+            # profile) — both measured on the 2026-09-24 first cloud crawl; the other 33 hit their
+            # sources directly. Every run.py
+            # takes `--type all` (its argparse default) and prunes ONLY on a complete `all` walk.
+            # `tmo` is sized from each scraper's MEASURED cost (its docstring: requests × (pause +
+            # response)) with >=2x headroom, because a job killed at its limit never reaches
+            # prune_unseen() or end_run() and leaves a dangling scrape_runs row (the dealapp lesson).
+            # The first scrape of each is a manual dispatch with `source: <slug>` (the input above).
+            #   dwelleo: RE-ONBOARDED 2026-09-24 (owner decision). 575 API pages + one detail record
+            #   per listing (~11.5k, sequential, ~0.8 s response + SCRAPE_MIN_INTERVAL) — measured
+            #   ~3.7 h for a full detailed walk. 360 is GitHub's hard job cap (6 h), so the headroom
+            #   is ~1.6x, below the 2x rule; run.py's documented fallback is `--no-detail` (~5 min,
+            #   one cover photo, no halls/amenity chips, no direct-alive stamp) if runs get killed at
+            #   the limit. The detailed walk is kept deliberately (listing fidelity over runtime).
+            #   KNOWN, NOT YET TUNED: mon_detect_dangling_scrape_run (migration 20260808062049) flags
+            #   any run still open after 3 h, so every healthy dwelleo run raises a false "dangling"
+            #   alert that self-resolves at end_run — that detector needs a per-platform floor
+            #   (dwelleo >= 6 h) before this line goes live, or the daily alert must be acked.
+            - { source: dwelleo,        cmd: "python -m scrapers.dwelleo.run --type all", tmo: 360 }
+            #   aqalemhajer: 25 index pages (0.5 s pause) + ~1,229 detail pages (0.3 s pause). Its
+            #   docstring records no live wall-clock (coverage was measured offline over saved
+            #   pages): ~27 min at a 1 s response, ~47 min at 2 s from a US runner. 90 (the workflow
+            #   default) keeps >=2x at 2 s; re-size from the first dispatched run's duration.
+            - { source: aqalemhajer,    cmd: "python -m scrapers.aqalemhajer.run --type all", tmo: 90, proxy: true, browser: true }
+            #   sakani: 15 API pages + 282 detail records at 1.5 s (measured 740 s dry run).
+            - { source: sakani,         cmd: "python -m scrapers.sakani.run --type all", tmo: 45, proxy: true }
+            #   API / REST sources whose whole catalogue is one page or a handful of calls:
+            #   shatri: `proxy: true` (2026-10-02, Scraping Engineer) — WP REST answered 403 to the runner IP;
+            #   the scraper probes 3 profiles DIRECT first, so the proxy is spent only when refused.
+            - { source: shatri,         cmd: "python -m scrapers.shatri.run --type all", tmo: 20, proxy: true }
+            - { source: almuteb,        cmd: "python -m scrapers.almuteb.run --type all", tmo: 20 }
+            - { source: aalbarrak,      cmd: "python -m scrapers.aalbarrak.run --type all", tmo: 20 }
+            - { source: aqaralriyadh,   cmd: "python -m scrapers.aqaralriyadh.run --type all", tmo: 20 }
+            - { source: snam,           cmd: "python -m scrapers.snam.run --type all", tmo: 20 }
+            - { source: goldendeal,     cmd: "python -m scrapers.goldendeal.run --type all", tmo: 30, browser: true }
+            - { source: yameen,         cmd: "python -m scrapers.yameen.run --type all", tmo: 20 }
+            - { source: tamyaz,         cmd: "python -m scrapers.tamyaz.run --type all", tmo: 20 }
+            - { source: hazim,          cmd: "python -m scrapers.hazim.run --type all", tmo: 20, browser: true }
+            #   jawher / m3tmd / senan: one API engine (scrapers/jawher/run.py), 145 / 46 / 82 detail
+            #   records each, 0.4 s apart.
+            - { source: jawher,         cmd: "python -m scrapers.jawher.run --type all", tmo: 20 }
+            - { source: m3tmd,          cmd: "python -m scrapers.m3tmd.run --type all", tmo: 20 }
+            - { source: senan,          cmd: "python -m scrapers.senan.run --type all", tmo: 20 }
+            #   Small HTML catalogues — tens of detail pages at <=1 s each:
+            - { source: alqasem,        cmd: "python -m scrapers.alqasem.run --type all", tmo: 20, proxy: true }
+            - { source: fkralemar,      cmd: "python -m scrapers.fkralemar.run --type all", tmo: 20, proxy: true }
+            - { source: wadod,          cmd: "python -m scrapers.wadod.run --type all", tmo: 20, proxy: true }
+            - { source: alrifai,        cmd: "python -m scrapers.alrifai.run --type all", tmo: 20, proxy: true }
+            - { source: sodasyat,       cmd: "python -m scrapers.sodasyat.run --type all", tmo: 20, proxy: true }
+            #   hasaad: `proxy: true` (2026-10-05, Scraping Engineer) — walk_session() probes 3 profiles DIRECT first;
+            #   the proxy is spent only when DIRECT is refused (failed 10-05 on one pinned profile).
+            - { source: hasaad,         cmd: "python -m scrapers.hasaad.run --type all", tmo: 20, proxy: true }
+            #   justsa: `proxy: true` (2026-10-05, Scraping Engineer) — walk_session() probes 3 profiles DIRECT first;
+            #   the proxy is spent only when DIRECT is refused (failed 10-05 on one pinned profile).
+            - { source: justsa,         cmd: "python -m scrapers.justsa.run --type all", tmo: 20, proxy: true }
+            - { source: albdah,         cmd: "python -m scrapers.albdah.run --type all", tmo: 20 }
+            - { source: eydah,          cmd: "python -m scrapers.eydah.run --type all", tmo: 20 }
+            - { source: villassa,       cmd: "python -m scrapers.villassa.run --type all", tmo: 20 }
+            - { source: marksa,         cmd: "python -m scrapers.marksa.run --type all", tmo: 20 }
+            #   thousand: 105 cards + 105 detail pages at 0.5 s (measured 383 s).
+            - { source: thousand,       cmd: "python -m scrapers.thousand.run --type all", tmo: 20, proxy: true }
+            #   ebriza: 22 API pages + one POST detail per record (207) at 0.7 s.
+            - { source: ebriza,         cmd: "python -m scrapers.ebriza.run --type all", tmo: 20 }
+            #   eilmalriyada: one catalogue call + 283 gallery records at 0.6 s.
+            - { source: eilmalriyada,   cmd: "python -m scrapers.eilmalriyada.run --type all", tmo: 20, proxy: true }
+            #   daryusuf: 3 REST pages + one page per post (290) at 1.0 s.
+            - { source: daryusuf,       cmd: "python -m scrapers.daryusuf.run --type all", tmo: 30, proxy: true }
+            #   Compound sites (one row per unit type; the compound page is the unit of work):
+            #   rightcompound walks 254 compound pages at 0.8 s; the other four walk 4-43 pages.
+            - { source: rightcompound,  cmd: "python -m scrapers.rightcompound.run --type all", tmo: 30 }
+            - { source: livingcompound, cmd: "python -m scrapers.livingcompound.run --type all", tmo: 20, proxy: true }
+            - { source: azure,          cmd: "python -m scrapers.azure.run --type all", tmo: 20, proxy: true }
+            - { source: expattrusted,   cmd: "python -m scrapers.expattrusted.run --type all", tmo: 20 }
+            - { source: flow,           cmd: "python -m scrapers.flow.run --type all", tmo: 20 }
+            - { source: abaad,          cmd: "python -m scrapers.abaad.run --type all", tmo: 20 }
+            #   WAVE 1, 2026-09-25. tmo is scaled to the catalogue each one actually walks in its own
+            #   build run: tuba 4,417 rows and muhaysini 2,819 / nofodh 2,556 are the long ones; ego 33
+            #   and razre 57 and safa 41 are minutes. A scraper with no entry here is a scraper that
+            #   never runs again after its first crawl — verify-every-scraper-has-a-scheduled-workflow.
+            - { source: alsaedan,      cmd: "python -m scrapers.alsaedan.run --type all", tmo: 30 }
+            - { source: ego,           cmd: "python -m scrapers.ego.run --type all", tmo: 20 }
+            # muhaysini: 180, not 45 — the catalogue went from ~3,260 to 7,470 listings on 2026-09-30 and each
+            # one costs a detail read (~0.8 s), so the 45-minute job was cancelled two nights running
+            # with nothing recorded. 240, not 180 (2026-10-07, Scraping Engineer): the catalogue keeps
+            # growing (7,433 → 10,575 rows 10-03 → 10-06) and the walk with it (1h42 → 2h06 → 2h11 →
+            # 2h25), ~10 min a night — 180 would cut it within about four nights.
+            - { source: muhaysini,     cmd: "python -m scrapers.muhaysini.run --type all", tmo: 240 }
+            #   nofodh raised 45 -> 90 after its first crawl was CANCELLED on the 45-minute budget:
+            #   2,601 listings, each needing its own detail fetch to read the «حالة البيع» state.
+            - { source: nofodh,        cmd: "python -m scrapers.nofodh.run --type all", tmo: 90 }
+            - { source: razre,         cmd: "python -m scrapers.razre.run --type all", tmo: 20 }
+            - { source: reinvest,      cmd: "python -m scrapers.reinvest.run --type all", tmo: 30 }
+            - { source: safa,          cmd: "python -m scrapers.safa.run --type all", tmo: 20 }
+            - { source: sokok,         cmd: "python -m scrapers.sokok.run --type all", tmo: 30 }
+            - { source: sukna,         cmd: "python -m scrapers.sukna.run --type all", tmo: 25 }
+            - { source: tuba,          cmd: "python -m scrapers.tuba.run --type all", tmo: 60 }
+            #   WAVE 2, 2026-09-26. ibaax pages through 160 rows (16 requests); remaxsa/qmra/alajlan
+            #   are small single-shot catalogues (21/19/13 records respectively).
+            - { source: ibaax,        cmd: "python -m scrapers.ibaax.run --type all", tmo: 20 }
+            - { source: remaxsa,      cmd: "python -m scrapers.remaxsa.run --type all", tmo: 15 }
+            - { source: qmra,         cmd: "python -m scrapers.qmra.run --type all", tmo: 15 }
+            - { source: alajlan,      cmd: "python -m scrapers.alajlan.run --type all", tmo: 15, proxy: true }
+            # wave 3. wahadat fetches 100 project pages (~56 MB of RSC payload) so it gets a wider
+            # timeout; squares is one REST call plus 18 detail pages; rawaf is 11 projects + 11 unit calls.
+            - { source: wahadat,      cmd: "python -m scrapers.wahadat.run --type all", tmo: 30 }
+            - { source: squares,      cmd: "python -m scrapers.squares.run --type all", tmo: 15, proxy: true }
+            - { source: rawaf,        cmd: "python -m scrapers.rawaf.run --type all", tmo: 15 }
+            # wave 3, batch 2. vmksa walks 11 index pages + 163 ad pages (RSC); macsaib is Taearif's JSON
+            # feed: 4 list pages, 20 category walks and 77 detail records.
+            - { source: vmksa,        cmd: "python -m scrapers.vmksa.run --type all", tmo: 20 }
+            - { source: macsaib,      cmd: "python -m scrapers.macsaib.run --type all", tmo: 15, proxy: true }
+            # wave 3, batch 3. maqrat pages its own POST index (/Property/_Properities) then reads 83 details pages.
+            - { source: maqrat,       cmd: "python -m scrapers.maqrat.run --type all", tmo: 20 }
+            # wave 3, batch 6: arsh is a hand-built Duda site (1 index + 23 pages).
+            - { source: arsh,         cmd: "python -m scrapers.arsh.run --type all", tmo: 10, proxy: true }
+            # batch 7 (2026-09-27): the owner's 15-site list.
+            - { source: sirdab,      cmd: "python -m scrapers.sirdab.run --type all", tmo: 15, proxy: true }
+            - { source: ashab,       cmd: "python -m scrapers.ashab.run --type all", tmo: 45, proxy: true }
+            - { source: manafe,      cmd: "python -m scrapers.manafe.run --type all", tmo: 25 }
+            - { source: wajaf,       cmd: "python -m scrapers.wajaf.run --type all", tmo: 10, proxy: true }
+            - { source: albukaeri,   cmd: "python -m scrapers.albukaeri.run --type all", tmo: 10, proxy: true }
+            #   ryadah: `proxy: true` (2026-09-28) — WP REST 403'd the runner IP; the probe tries 3
+            #   profiles DIRECT before the proxy, so the proxy is only used when DIRECT is refused.
+            - { source: ryadah,      cmd: "python -m scrapers.ryadah.run --type all", tmo: 10, proxy: true }
+            - { source: sqcc,        cmd: "python -m scrapers.sqcc.run --type all", tmo: 10, proxy: true }
+            - { source: daraa,       cmd: "python -m scrapers.daraa.run --type all", tmo: 10, proxy: true }
+            - { source: tawia,       cmd: "python -m scrapers.tawia.run --type all", tmo: 10, proxy: true }
+            # SuperOffice (2026-09-27): owner-approved — available private offices only.
+            - { source: superoffice, cmd: "python -m scrapers.superoffice.run --type all", tmo: 10, proxy: true }
+            # 2026-09-28 (owner-approved): Shomou = 26 index pages + ~1,028 ad pages (only in-date ads kept);
+            #   Maktab = one public JSON page of offices.
+            #   shomou: `proxy: true` (2026-10-14, Scraping Engineer) — 10-14 read index page 0 as no ad on one pinned profile.
+            - { source: shomou,      cmd: "python -m scrapers.shomou.run --type all", tmo: 30, proxy: true, browser: true }
+            - { source: maktab,      cmd: "python -m scrapers.maktab.run --type all", tmo: 10 }
+            # wave 3, batch 5: holoul is an open JSON API (238 rows → 30); eightfloor is a Nuzul tenant (public API, 2 rows); manzo is an open JSON API (1 row).
+            - { source: manzo,        cmd: "python -m scrapers.manzo.run --type all", tmo: 10, proxy: true }
+            - { source: eightfloor,   cmd: "python -m scrapers.eightfloor.run --type all", tmo: 10, proxy: true }
+            - { source: holoul,       cmd: "python -m scrapers.holoul.run --type all", tmo: 10, proxy: true }
+            # wave 3, batch 4: dallali is an open JSON storefront (7 rows); muajarh is an open JSON API (18 rows, 11 real); mobasher reads its discovery API + 28 pages for age/facade; nafithh is server-rendered HTML (3 list pages + 30 details); opensooq's SERP carries the whole vertical as inline JSON (3 pages).
+            - { source: opensooq,     cmd: "python -m scrapers.opensooq.run --type all", tmo: 10 }
+            - { source: nafithh,      cmd: "python -m scrapers.nafithh.run --type all", tmo: 15 }
+            - { source: mobasher,     cmd: "python -m scrapers.mobasher.run --type all", tmo: 15, proxy: true }
+            - { source: muajarh,      cmd: "python -m scrapers.muajarh.run --type all", tmo: 10, proxy: true }
+            - { source: dallali,      cmd: "python -m scrapers.dallali.run --type all", tmo: 10, proxy: true }
+            # wave 3b (2026-09-27): maqam is a Nuzul tenant feed (130 records, only `available` kept); earthapp and
+            # nawafeth are small complete feeds (54 / 20 ads).
+            - { source: maqam,        cmd: "python -m scrapers.maqam.run --type all", tmo: 15 }
+            - { source: earthapp,     cmd: "python -m scrapers.earthapp.run --type all", tmo: 15, proxy: true }
+            - { source: nawafeth,     cmd: "python -m scrapers.nawafeth.run --type all", tmo: 15 }
+            - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
+            - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all", browser: true }
+            - { source: october,    cmd: "python -m scrapers.october.run --type all" }
+            # souq24 probes ~1,300 candidate ids/run through the metered Saudi proxy for only ~52 active
+            # listings, and the sweep deliberately re-checks the whole id range (skipping ids would miss
+            # reactivated ads). So we cut its bandwidth by cadence instead: every_n_days=2 (owner 2026-07-07).
+            # (tmo+cadence restored 2026-07-16 — PR #77 accidentally dropped both overrides.)
+            - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all", tmo: 150, every_n_days: 2, proxy: true }
+            # NOTE: toor is NOT here. RETIRED 2026-07-06 (owner-approved, commit d5ca9d6).
+            # THE ORIGINAL REASON (IP-block: every detail fetch exc:Timeout) IS FIXED — re-probed
+            # 2026-09-19, sitemap + details all return HTTP 200 from a clean egress. It stays out for
+            # a DIFFERENT verified reason: toor.ooo is now an SPA whose public HTML serves ONE SAMPLE
+            # LISTING for every PropertyId (6 different ids -> 1 distinct licence/ref), so running it
+            # would write 82 copies of one fabricated listing. The real data is behind an
+            # authenticated API (401). See scrapers/RETIRED_PLATFORMS.txt for the measurement.
+            # Historical toor rows are KEPT in the DB (not deleted) and scrapers/toor/ remains in
+            # the repo for reference. PR #77 (da19962) accidentally re-added the matrix line on
+            # 2026-07-15; re-removed 2026-07-16 and now guarded by scrapers/RETIRED_PLATFORMS.txt +
+            # scrapers/common/tests/test_retired_platforms_guard.py, which fails CI if any retired
+            # platform re-enters an active matrix. Do NOT re-add without owner approval (un-retire
+            # by removing the slug from RETIRED_PLATFORMS.txt in the same PR). See ARCHITECTURE.md
+            # "Retired platforms".
+            # jazwtn UN-RETIRED 2026-07-27 (owner-instructed, same day): the retirement note below
+            # said "a non-runner egress IP (residential proxy) is required — re-adding this line
+            # alone will not work". PR#230 delivered that proxy egress, and it records a scrape_runs
+            # row BEFORE the sitemap fetch so a re-block fails LOUD, not silently.
+            #
+            # 2026-07-28: the proxy fallback was REMOVED. Two fixes shipped for the same 07-23 root
+            # cause within 24h — the proxy (PR#230) and the curl_cffi 0.7.4->0.15.0 fingerprint bump
+            # (PR#245) — and the proxy became the failing half: every run since 07-27 15:16 died with
+            # `curl (35) TLS connect error: invalid library (OPENSSL_internal)`, a CONNECT-tunnel
+            # failure, not a rejection by jazwtn.sa. Measured 07-28 with 0.15.0 straight at the
+            # origin: `/` -> 200/204,697B and `/sitemap.xml` -> 200/1,768B. So this leg now goes
+            # DIRECT; JAZWTN_PROXY_URL / SCRAPE_PROXY_URL remain explicit opt-ins if the
+            # datacenter-IP block returns. It no longer inherits WASALT_PROXY_URL (provisioned for
+            # Wasalt, metered, and empirically broken for this host).
+            # If this leg fails again DIRECT with a reset, set JAZWTN_PROXY_URL to a WORKING proxy
+            # (verify the tunnel first) or re-retire — do not re-point it at the wasalt secret.
+            - { source: jazwtn,      cmd: "python -m scrapers.jazwtn.run --type all" }
+            - { source: therc,       cmd: "python -m scrapers.therc.run --type all", browser: true }
+            - { source: aouj,        cmd: "python -m scrapers.aouj.run --type all" }
+            # Two GREEN-audited additions (owner-instructed 2026-09-05, from the 40-candidate audit).
+            # Both are WordPress REST sources whose taxonomies resolve live, so their type/city maps
+            # are fetched per run rather than frozen here.
+            #   alta          17 posts; 10 already تم البيع/تم التأجير → stored active=false. Only 1
+            #                 post states a price, so 15 carry NULL — a SOURCE fact, never inferred.
+            #   shmoualshmal   6 posts, all Tabuk. The site publishes NO price at all (it shows
+            #                 «اتصل»), so every price column is NULL by design. See each run.py.
+            # Daily since 2026-10-02 (owner: «check them every single day»): alta, shmoualshmal, remal
+            # and amaall ran every 2 days for no bandwidth reason (no proxy, 133 ads between them), and
+            # remal and amaall are now SOURCE_LIST_PRESENCE with a 48 h window a 2-day cadence cannot keep.
+            - { source: alta,         cmd: "python -m scrapers.alta.run --type all" }
+            # shmoualshmal: `proxy: true` (2026-10-11, Scraping Engineer, backlog 375) — page 1 answered 403 to
+            # all three DIRECT profiles at 04:51 and 05:02 UTC. Direct stays first; the proxy is the last try.
+            - { source: shmoualshmal, cmd: "python -m scrapers.shmoualshmal.run --type all", proxy: true }
+            # Two more GREEN-audited additions (owner-instructed 2026-09-06).
+            #   remal   87 posts -> 84 listings. class_list carries city/type/offer; images bind by
+            #           attachment PARENT because the detail page renders OTHER listings' photos.
+            #   amaall  135 posts -> 50 listings, ARABIC ONLY: the site publishes every listing twice
+            #           (68 EN + 67 AR), so taking both languages would double every property.
+            - { source: remal,        cmd: "python -m scrapers.remal.run --type all" }
+            - { source: amaall,       cmd: "python -m scrapers.amaall.run --type all" }
+            # abwbna (owner-instructed 2026-09-06): a DIFFERENT TENANT of the SAME Nuzul SaaS platform
+            # aldarim already scrapes (same S3 bucket family, same public JSON API shape). Full crawl +
+            # prune, same as aldarim — not a --type flag scraper.
+            - { source: abwbna,       cmd: "python -m scrapers.abwbna.run --pages 50" }
+            # bahadhabab + alobid (owner-instructed 2026-09-06): third and fourth Nuzul SaaS tenants
+            # found the same way — full crawl + prune, same as aldarim/abwbna, not a --type flag scraper.
+            # bahadhabab: city is a hardcoded owner-confirmed business fact (single-region brokerage in
+            # الباحة) — see scrapers/bahadhabab/run.py's module docstring.
+            - { source: bahadhabab,   cmd: "python -m scrapers.bahadhabab.run --pages 50" }
+            - { source: alobid,       cmd: "python -m scrapers.alobid.run --pages 50" }
+            # azdad (corrected 40-candidate-audit link, 2026-09-06): own Next.js + Supabase stack, not
+            # a Nuzul/Wasalt clone. The whole catalogue (25 listings) fits in one request — no
+            # --pages/--type flag, run.py fetches everything and prunes on absence every run.
+            - { source: azdad,        cmd: "python -m scrapers.azdad.run" }
+            #   abralosol: `proxy: true` (2026-10-13, Scraping Engineer) — 10-13 read index page 0 as nothing on one pinned
+            #   profile; retry_smarter_session now probes 3 profiles DIRECT, the proxy only when every DIRECT one fails.
+            - { source: abralosol,   cmd: "python -m scrapers.abralosol.run --type all", proxy: true, browser: true }
+            - { source: arkaan,      cmd: "python -m scrapers.arkaan.run --type all" }
+            - { source: rawasidark,  cmd: "python -m scrapers.rawasidark.run --type all" }
+            # amlakalahsa (owner-approved 2026-09-12, ops_incident #2667/daily-engineer 2026-09-13):
+            # scrapers/amlakalahsa/run.py shipped the same day the platform was approved, but no
+            # workflow ever scheduled it — zero scrape_runs rows ever existed for it (its own 236
+            # production_ready rows came from a one-off manual/backfill run). No --type/--pages flag:
+            # like azdad, run.py fetches its whole small WordPress catalogue in one pass.
+            - { source: amlakalahsa, cmd: "python -m scrapers.amlakalahsa.run" }
+            # aqaralsaudia (owner-approved 2026-09-13): العروض العقارية, Riyadh-only RealHomes site.
+            # Scheduled in the SAME change that adds the scraper — the barrier that caught amlakalahsa
+            # shipping unscheduled exists precisely so this is never a follow-up.
+            - { source: aqaralsaudia, cmd: "python -m scrapers.aqaralsaudia.run", proxy: true }
+            # suwar (owner-approved 2026-09-14): سوار العقارية, a Makkah freehold developer, 167
+            # published listings. Scheduled in the SAME change that adds the scraper — the barrier
+            # that caught amlakalahsa shipping unscheduled exists precisely so this is never a
+            # follow-up. It fetches one detail page per listing (~170 GETs, ~2 min), so it needs no
+            # timeout override.
+            - { source: suwar, cmd: "python -m scrapers.suwar.run" }
+            # rakez (owner-approved 2026-09-14): راكز العقارية, a Riyadh-led developer. Its unit
+            # feed is 145 REST pages plus one Arabic-twin page per project (~420 requests, ~6 min).
+            # Scheduled in the SAME change that adds the scraper — the barrier
+            # verify-every-scraper-has-a-scheduled-workflow.ts caught this exact omission before merge.
+            - { source: rakez, cmd: "python -m scrapers.rakez.run" }
+            # NOTE: alnokhba is NOT here. Deprecated 2026-07-14 — alnokhba-services.com's domain
+            # lapsed into a parking page (HTTP 200, but a domain-resale placeholder, no
+            # property-card markup); scrape_runs went from rows_seen=5 (2026-07-07) to
+            # rows_seen=0/ok=true for 7 straight daily runs (2026-07-08..2026-07-14). See
+            # deprecated_platforms / platforms_deprecated_status and docs/ARCHITECTURE.md §12 for
+            # the full record. Do not re-add without confirming the domain serves real listings
+            # again.
+            # NOTE: muktamel is NOT here. Its pages are ~1.4MB each and it has no list API / usable
+            # sitemap, so a full sequential-ID scan is ~45GB over hours — impossible on a 4h cadence.
+            # It runs on its OWN weekly workflow (muktamel-sync.yml), scoped to the live ID band.
+        run: python scripts/small_sources_matrix.py "$SOURCE" >> "$GITHUB_OUTPUT"
+
   sync:
+    needs: plan
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # Per-source override via matrix.tmo — souq24's ~1.3k-GET sweep through the metered Saudi proxy
     # sometimes needs >90m (killed at exactly 90:16 on 07-03 AND 07-04, marking those RUNS
@@ -45,394 +462,7 @@ jobs:
     strategy:
       fail-fast: false    # one source failing never blocks the others
       max-parallel: 18
-      matrix:
-        include:
-          - { source: aldarim,  cmd: "python -m scrapers.aldarim.run --pages 50" }
-          - { source: aqargate, cmd: "python -m scrapers.aqargate.run --type all" }
-          - { source: hajer,    cmd: "python -m scrapers.hajer.run --type all" }
-          #   alhoshan + macsaib: `proxy: true` (2026-10-03, Scraping Engineer): two runs in a row timed out
-          #   CONNECTING from the runner; each probes 3 profiles DIRECT first, so the proxy is spent only when walled.
-          - { source: alhoshan, cmd: "python -m scrapers.alhoshan.run --type all", proxy: true }
-          - { source: sanadak,  cmd: "python -m scrapers.sanadak.run --type all" }
-          #   eastabha: `proxy: true` (2026-10-06, Scraping Engineer) — every DIRECT route (4 profiles) timed out
-          #   connecting from the runner and the shared http.get logged «proxy fallback not enabled»: 0 rows (223 on 10-05).
-          #   With SCRAPE_PROXY_FALLBACK_URL below, http.get tries the proxy only after every DIRECT profile fails.
-          - { source: eastabha, cmd: "python -m scrapers.eastabha.run --type all", proxy: true }
-          - { source: aqarcity, cmd: "python -m scrapers.aqarcity.run --type all" }
-          - { source: raghdan,    cmd: "python -m scrapers.raghdan.run --type all" }
-          - { source: eaqartabuk, cmd: "python -m scrapers.eaqartabuk.run --type all" }
-          - { source: satel,      cmd: "python -m scrapers.satel.run --type all" }
-          - { source: sadin,      cmd: "python -m scrapers.sadin.run --type all", proxy: true }
-          - { source: mustqr,      cmd: "python -m scrapers.mustqr.run --type all" }
-          - { source: ramzalqasim, cmd: "python -m scrapers.ramzalqasim.run --type all" }
-          - { source: fursaghyr,   cmd: "python -m scrapers.fursaghyr.run --type all" }
-          - { source: mizlaj,      cmd: "python -m scrapers.mizlaj.run --type all" }
-          - { source: aqaratikom,  cmd: "python -m scrapers.aqaratikom.run --type all" }
-          # awal — RE-ADDED 2026-09-04 (owner-instructed), satisfying this line's own precondition:
-          # "Do not re-add without confirming the domain serves real listings again." Confirmed live
-          # 2026-09-04: /wp-json/wp/v2/rtcl_listing returns HTTP 200 with x-wp-total: 128 (the
-          # parking stub is gone), and the SHIPPED scraper parses all 128 into rows with 128
-          # DISTINCT ad_numbers / listing_urls / descriptions — real inventory, no duplication.
-          # Two source facts recorded so neither is mistaken for a bug later: the newest listing is
-          # 2026-02-14 (real but LOW-CHURN, so a run returning the same 128 is healthy), and the
-          # source publishes NO price at all (0/128 in the REST payload AND the detail pages) —
-          # nothing is inferred to fill it, exactly like the 7,534 priceless rows already live.
-          # awal: `proxy: true` (2026-09-27, Scraping Engineer). Every crawl since 09-24 died on one
-          # chrome124 request answering HTTP 500; scrapers/awal/run.py now probes 3 profiles direct and
-          # then the same 3 through the proxy (only if all direct ones fail), so the metered proxy is
-          # spent only when the source refuses a datacenter handshake.
-          - { source: awal,        cmd: "python -m scrapers.awal.run --type all", proxy: true }
-          - { source: alkhaas,     cmd: "python -m scrapers.alkhaas.run --type all" }
-          - { source: abeea,       cmd: "python -m scrapers.abeea.run --type all" }
-          - { source: jurash,      cmd: "python -m scrapers.jurash.run --type all" }
-          # DEALAPP_MAX_LISTINGS caps each run so it finishes inside the 90m budget (prune+end_run
-          # run cleanly). enumerate_ids orders NEW sitemap listings first, so coverage climbs
-          # run-over-run toward the full ~58k catalogue.
-          #
-          # The cap is now sized from MEASURED CI throughput, not guessed. The 2026-08-07 cap of
-          # 12000 did NOT fit: run 31239278341 (2026-08-08) was cancelled at exactly 90m
-          # (04:22:49 -> 05:52:46), so prune_unseen() and end_run() never ran, scrape_runs id 25397
-          # is dangling ok=NULL forever, and dealapp's last-OK freshness signal froze at 08-07.
-          # That run fetched 1,800 detail pages in ~83m of fetching = ~21.7/min at WORKERS=3
-          # (dealapp's anonymous origin trips a login-wall above ~3 workers, so this is the ceiling
-          # without a proxy). Budget: 90m - ~1m setup - ~7m sitemap enumeration - ~5m prune/end_run
-          # = ~77m of fetching. 1200 listings = ~55m, leaving >20m of headroom for throttle
-          # variance. scripts/verify-dealapp-crawl-budget.ts enforces this arithmetic.
-          # To go faster, raise throughput (a proxy lifts the 3-worker throttle) or raise `tmo`
-          # AND the cap together — never the cap alone. (bug-fix 2026-08-08)
-          # dealapp MOVED OUT of this matrix 2026-08-11 (owner-approved option b) to
-          # .github/workflows/dealapp-sharded.yml — a 12-shard fleet that covers the FULL active
-          # inventory in one night. It must not run here as well: two crawls of the same catalogue
-          # would double the load on an origin that already blocks under burst, and the unsharded
-          # run would re-introduce the ~25%-coverage state that kept prune_unseen's coverage guard
-          # permanently tripped. scripts/verify-dealapp-crawl-budget.ts fails CI if dealapp
-          # reappears in this matrix.
-          # عقاريون — 277 Riyadh listings across 31 pages, one detail fetch each. No proxy: the
-          # site is plain nginx with no Cloudflare and answers a direct request in 1-3s.
-          - { source: akariyoun,   cmd: "python -m scrapers.akariyoun.run --type all", tmo: 45 }
-          - { source: ksaaqar,     cmd: "python -m scrapers.ksaaqar.run --type all", tmo: 90 }
-          - { source: sadiqeltajer, cmd: "python -m scrapers.sadiqeltajer.run --type all", tmo: 90 }
-          # ── onboarded 2026-09-20 ──────────────────────────────────────────────────────────────
-          # gudai / safera / alhumaidan are three tenant offices of ONE inblaj.net WordPress
-          # product and share scrapers/common/inblaj_platform.py, but each runs as its own source
-          # so one office being down never hides another, and each keeps its own run ledger.
-          #   gudai: `proxy: true` (2026-10-05, Scraping Engineer) — its sitemap stalled on every DIRECT route on
-          #   09-30 and 10-04; inblaj_platform.fetch_catalogue tries the proxy ONLY after a transport stall.
-          - { source: gudai,         cmd: "python -m scrapers.gudai.run --type all", tmo: 20, proxy: true }
-          - { source: safera,        cmd: "python -m scrapers.safera.run --type all", tmo: 20 }
-          - { source: alhumaidan,    cmd: "python -m scrapers.alhumaidan.run --type all", tmo: 20 }
-          #   aqarnajran: `proxy: true` (2026-10-05, Scraping Engineer) — walk_session() probes 3 profiles DIRECT first;
-          #   the proxy is spent only when DIRECT is refused (failed 10-05 on one pinned profile).
-          - { source: aqarnajran,    cmd: "python -m scrapers.aqarnajran.run --type all", tmo: 20, proxy: true }
-          - { source: fahadalshahri, cmd: "python -m scrapers.fahadalshahri.run --type all", tmo: 20 }
-          # compoundin walks 129 compound pages and emits one row per UNIT, so it is the slowest
-          # of this batch by page count even though its row count is small.
-          - { source: compoundin,    cmd: "python -m scrapers.compoundin.run --type all", tmo: 45 }
-          # wslnaa makes one tRPC call per slug (59) on top of the sitemap fetch.
-          - { source: wslnaa,        cmd: "python -m scrapers.wslnaa.run --type all", tmo: 30 }
-          # ── onboarded 2026-09-21: eleven platforms ─────────────────────────────────────────────
-          # Each is its own matrix job, so one source down never hides another and each keeps its
-          # own run ledger. None reads WASALT_PROXY_URL (checked) — no `proxy:` flag. `tmo` is sized
-          # from each scraper's MEASURED cost (pages × (pause + response), response timed live on
-          # 2026-09-21) with >=2x headroom, because a job killed at its limit never reaches
-          # prune_unseen() or end_run() and leaves a dangling scrape_runs row (the dealapp lesson).
-          # The first scrape of each is a manual dispatch with `source: <slug>` (the input above).
-          #   API / REST sources — a handful of calls each:
-          - { source: alsidra,     cmd: "python -m scrapers.alsidra.run --type all", tmo: 20, proxy: true }
-          - { source: moftah,      cmd: "python -m scrapers.moftah.run --type all", tmo: 20 }
-          - { source: masar,       cmd: "python -m scrapers.masar.run --type all", tmo: 20 }
-          #   aljassim: ~90 detail pages behind an hcdn challenge it solves in-process.
-          - { source: aljassim,    cmd: "python -m scrapers.aljassim.run --type all", tmo: 20 }
-          #   gomenassat: one POST for 256 offers, then ~150 detail pages (transacted ones skipped).
-          - { source: gomenassat,  cmd: "python -m scrapers.gomenassat.run --type all", tmo: 20, proxy: true }
-          #   nufouth: 4 index pages + one API record per property (~270).
-          - { source: nufouth,     cmd: "python -m scrapers.nufouth.run --type all", tmo: 30 }
-          #   almotmkenah: all 361 index ads are fetched (the ~339 archived ones ARE its removal
-          #   signal), 0.2s apart.
-          - { source: almotmkenah, cmd: "python -m scrapers.almotmkenah.run --type all", tmo: 30, proxy: true }
-          #   ialqarawi: 66 whole-category pages, then ~2,641 detail pages over 8 worker threads
-          #   (~0.6s each → ~4 min).
-          #   ialqarawi: `proxy: true` (2026-09-28, Scraping Engineer) — every profile DIRECT drew an
-          #   empty HTTP 202 challenge on 4 of 7 crawls; session() now tries DIRECT first and rides
-          #   the residential proxy only when DIRECT is walled.
-          - { source: ialqarawi,   cmd: "python -m scrapers.ialqarawi.run --type all", tmo: 45, proxy: true, browser: true }
-          #   bossbih: 10 index pages + ~1,485 detail pages, sequential, 0.25s pause + ~0.2s
-          #   response → ~11 min.
-          # bossbih + aqalemhajer: `proxy: true` (owner 2026-10-19) ONLY for the maps.app.goo.gl pin hop in
-          # scrapers/common/page_pin.py — Google answers the runner with a script page instead of the redirect.
-          - { source: bossbih,     cmd: "python -m scrapers.bossbih.run --type all", tmo: 60, proxy: true, browser: true }
-          #   alshawaf: 26 index pages + ~987 detail pages, sequential, 0.3s pause + ~0.7s
-          #   response → ~17 min.
-          - { source: alshawaf,    cmd: "python -m scrapers.alshawaf.run --type all", tmo: 60 }
-          #   sakan: ~3,160 detail pages (~500 KB each), sequential, 0.35s pause + ~0.7s response →
-          #   ~56 min from a nearby egress; a US runner is slower per page, so 180 keeps >=2x
-          #   headroom over a realistic ~90 min.
-          - { source: sakan,       cmd: "python -m scrapers.sakan.run --type all", tmo: 180 }
-          # ── onboarded 2026-09-24: thirty-five platforms ───────────────────────────────────────
-          # Same shape as the 2026-09-21 batch above: one matrix job per platform, so one source
-          # down never hides another and each keeps its own run ledger. Two carry `proxy: true` and read
-          # WASALT_PROXY_URL / SCRAPE_PROXY_URL — sakani (Cloudflare challenge from a datacenter IP) and
-          # eilmalriyada (api.eilmalriyada.com 403s datacenter IPs, 200 to residential on every TLS
-          # profile) — both measured on the 2026-09-24 first cloud crawl; the other 33 hit their
-          # sources directly. Every run.py
-          # takes `--type all` (its argparse default) and prunes ONLY on a complete `all` walk.
-          # `tmo` is sized from each scraper's MEASURED cost (its docstring: requests × (pause +
-          # response)) with >=2x headroom, because a job killed at its limit never reaches
-          # prune_unseen() or end_run() and leaves a dangling scrape_runs row (the dealapp lesson).
-          # The first scrape of each is a manual dispatch with `source: <slug>` (the input above).
-          #   dwelleo: RE-ONBOARDED 2026-09-24 (owner decision). 575 API pages + one detail record
-          #   per listing (~11.5k, sequential, ~0.8 s response + SCRAPE_MIN_INTERVAL) — measured
-          #   ~3.7 h for a full detailed walk. 360 is GitHub's hard job cap (6 h), so the headroom
-          #   is ~1.6x, below the 2x rule; run.py's documented fallback is `--no-detail` (~5 min,
-          #   one cover photo, no halls/amenity chips, no direct-alive stamp) if runs get killed at
-          #   the limit. The detailed walk is kept deliberately (listing fidelity over runtime).
-          #   KNOWN, NOT YET TUNED: mon_detect_dangling_scrape_run (migration 20260808062049) flags
-          #   any run still open after 3 h, so every healthy dwelleo run raises a false "dangling"
-          #   alert that self-resolves at end_run — that detector needs a per-platform floor
-          #   (dwelleo >= 6 h) before this line goes live, or the daily alert must be acked.
-          - { source: dwelleo,        cmd: "python -m scrapers.dwelleo.run --type all", tmo: 360 }
-          #   aqalemhajer: 25 index pages (0.5 s pause) + ~1,229 detail pages (0.3 s pause). Its
-          #   docstring records no live wall-clock (coverage was measured offline over saved
-          #   pages): ~27 min at a 1 s response, ~47 min at 2 s from a US runner. 90 (the workflow
-          #   default) keeps >=2x at 2 s; re-size from the first dispatched run's duration.
-          - { source: aqalemhajer,    cmd: "python -m scrapers.aqalemhajer.run --type all", tmo: 90, proxy: true, browser: true }
-          #   sakani: 15 API pages + 282 detail records at 1.5 s (measured 740 s dry run).
-          - { source: sakani,         cmd: "python -m scrapers.sakani.run --type all", tmo: 45, proxy: true }
-          #   API / REST sources whose whole catalogue is one page or a handful of calls:
-          #   shatri: `proxy: true` (2026-10-02, Scraping Engineer) — WP REST answered 403 to the runner IP;
-          #   the scraper probes 3 profiles DIRECT first, so the proxy is spent only when refused.
-          - { source: shatri,         cmd: "python -m scrapers.shatri.run --type all", tmo: 20, proxy: true }
-          - { source: almuteb,        cmd: "python -m scrapers.almuteb.run --type all", tmo: 20 }
-          - { source: aalbarrak,      cmd: "python -m scrapers.aalbarrak.run --type all", tmo: 20 }
-          - { source: aqaralriyadh,   cmd: "python -m scrapers.aqaralriyadh.run --type all", tmo: 20 }
-          - { source: snam,           cmd: "python -m scrapers.snam.run --type all", tmo: 20 }
-          - { source: goldendeal,     cmd: "python -m scrapers.goldendeal.run --type all", tmo: 30, browser: true }
-          - { source: yameen,         cmd: "python -m scrapers.yameen.run --type all", tmo: 20 }
-          - { source: tamyaz,         cmd: "python -m scrapers.tamyaz.run --type all", tmo: 20 }
-          - { source: hazim,          cmd: "python -m scrapers.hazim.run --type all", tmo: 20, browser: true }
-          #   jawher / m3tmd / senan: one API engine (scrapers/jawher/run.py), 145 / 46 / 82 detail
-          #   records each, 0.4 s apart.
-          - { source: jawher,         cmd: "python -m scrapers.jawher.run --type all", tmo: 20 }
-          - { source: m3tmd,          cmd: "python -m scrapers.m3tmd.run --type all", tmo: 20 }
-          - { source: senan,          cmd: "python -m scrapers.senan.run --type all", tmo: 20 }
-          #   Small HTML catalogues — tens of detail pages at <=1 s each:
-          - { source: alqasem,        cmd: "python -m scrapers.alqasem.run --type all", tmo: 20, proxy: true }
-          - { source: fkralemar,      cmd: "python -m scrapers.fkralemar.run --type all", tmo: 20, proxy: true }
-          - { source: wadod,          cmd: "python -m scrapers.wadod.run --type all", tmo: 20, proxy: true }
-          - { source: alrifai,        cmd: "python -m scrapers.alrifai.run --type all", tmo: 20, proxy: true }
-          - { source: sodasyat,       cmd: "python -m scrapers.sodasyat.run --type all", tmo: 20, proxy: true }
-          #   hasaad: `proxy: true` (2026-10-05, Scraping Engineer) — walk_session() probes 3 profiles DIRECT first;
-          #   the proxy is spent only when DIRECT is refused (failed 10-05 on one pinned profile).
-          - { source: hasaad,         cmd: "python -m scrapers.hasaad.run --type all", tmo: 20, proxy: true }
-          #   justsa: `proxy: true` (2026-10-05, Scraping Engineer) — walk_session() probes 3 profiles DIRECT first;
-          #   the proxy is spent only when DIRECT is refused (failed 10-05 on one pinned profile).
-          - { source: justsa,         cmd: "python -m scrapers.justsa.run --type all", tmo: 20, proxy: true }
-          - { source: albdah,         cmd: "python -m scrapers.albdah.run --type all", tmo: 20 }
-          - { source: eydah,          cmd: "python -m scrapers.eydah.run --type all", tmo: 20 }
-          - { source: villassa,       cmd: "python -m scrapers.villassa.run --type all", tmo: 20 }
-          - { source: marksa,         cmd: "python -m scrapers.marksa.run --type all", tmo: 20 }
-          #   thousand: 105 cards + 105 detail pages at 0.5 s (measured 383 s).
-          - { source: thousand,       cmd: "python -m scrapers.thousand.run --type all", tmo: 20, proxy: true }
-          #   ebriza: 22 API pages + one POST detail per record (207) at 0.7 s.
-          - { source: ebriza,         cmd: "python -m scrapers.ebriza.run --type all", tmo: 20 }
-          #   eilmalriyada: one catalogue call + 283 gallery records at 0.6 s.
-          - { source: eilmalriyada,   cmd: "python -m scrapers.eilmalriyada.run --type all", tmo: 20, proxy: true }
-          #   daryusuf: 3 REST pages + one page per post (290) at 1.0 s.
-          - { source: daryusuf,       cmd: "python -m scrapers.daryusuf.run --type all", tmo: 30, proxy: true }
-          #   Compound sites (one row per unit type; the compound page is the unit of work):
-          #   rightcompound walks 254 compound pages at 0.8 s; the other four walk 4-43 pages.
-          - { source: rightcompound,  cmd: "python -m scrapers.rightcompound.run --type all", tmo: 30 }
-          - { source: livingcompound, cmd: "python -m scrapers.livingcompound.run --type all", tmo: 20, proxy: true }
-          - { source: azure,          cmd: "python -m scrapers.azure.run --type all", tmo: 20, proxy: true }
-          - { source: expattrusted,   cmd: "python -m scrapers.expattrusted.run --type all", tmo: 20 }
-          - { source: flow,           cmd: "python -m scrapers.flow.run --type all", tmo: 20 }
-          - { source: abaad,          cmd: "python -m scrapers.abaad.run --type all", tmo: 20 }
-          #   WAVE 1, 2026-09-25. tmo is scaled to the catalogue each one actually walks in its own
-          #   build run: tuba 4,417 rows and muhaysini 2,819 / nofodh 2,556 are the long ones; ego 33
-          #   and razre 57 and safa 41 are minutes. A scraper with no entry here is a scraper that
-          #   never runs again after its first crawl — verify-every-scraper-has-a-scheduled-workflow.
-          - { source: alsaedan,      cmd: "python -m scrapers.alsaedan.run --type all", tmo: 30 }
-          - { source: ego,           cmd: "python -m scrapers.ego.run --type all", tmo: 20 }
-          # muhaysini: 180, not 45 — the catalogue went from ~3,260 to 7,470 listings on 2026-09-30 and each
-          # one costs a detail read (~0.8 s), so the 45-minute job was cancelled two nights running
-          # with nothing recorded. 240, not 180 (2026-10-07, Scraping Engineer): the catalogue keeps
-          # growing (7,433 → 10,575 rows 10-03 → 10-06) and the walk with it (1h42 → 2h06 → 2h11 →
-          # 2h25), ~10 min a night — 180 would cut it within about four nights.
-          - { source: muhaysini,     cmd: "python -m scrapers.muhaysini.run --type all", tmo: 240 }
-          #   nofodh raised 45 -> 90 after its first crawl was CANCELLED on the 45-minute budget:
-          #   2,601 listings, each needing its own detail fetch to read the «حالة البيع» state.
-          - { source: nofodh,        cmd: "python -m scrapers.nofodh.run --type all", tmo: 90 }
-          - { source: razre,         cmd: "python -m scrapers.razre.run --type all", tmo: 20 }
-          - { source: reinvest,      cmd: "python -m scrapers.reinvest.run --type all", tmo: 30 }
-          - { source: safa,          cmd: "python -m scrapers.safa.run --type all", tmo: 20 }
-          - { source: sokok,         cmd: "python -m scrapers.sokok.run --type all", tmo: 30 }
-          - { source: sukna,         cmd: "python -m scrapers.sukna.run --type all", tmo: 25 }
-          - { source: tuba,          cmd: "python -m scrapers.tuba.run --type all", tmo: 60 }
-          #   WAVE 2, 2026-09-26. ibaax pages through 160 rows (16 requests); remaxsa/qmra/alajlan
-          #   are small single-shot catalogues (21/19/13 records respectively).
-          - { source: ibaax,        cmd: "python -m scrapers.ibaax.run --type all", tmo: 20 }
-          - { source: remaxsa,      cmd: "python -m scrapers.remaxsa.run --type all", tmo: 15 }
-          - { source: qmra,         cmd: "python -m scrapers.qmra.run --type all", tmo: 15 }
-          - { source: alajlan,      cmd: "python -m scrapers.alajlan.run --type all", tmo: 15, proxy: true }
-          # wave 3. wahadat fetches 100 project pages (~56 MB of RSC payload) so it gets a wider
-          # timeout; squares is one REST call plus 18 detail pages; rawaf is 11 projects + 11 unit calls.
-          - { source: wahadat,      cmd: "python -m scrapers.wahadat.run --type all", tmo: 30 }
-          - { source: squares,      cmd: "python -m scrapers.squares.run --type all", tmo: 15, proxy: true }
-          - { source: rawaf,        cmd: "python -m scrapers.rawaf.run --type all", tmo: 15 }
-          # wave 3, batch 2. vmksa walks 11 index pages + 163 ad pages (RSC); macsaib is Taearif's JSON
-          # feed: 4 list pages, 20 category walks and 77 detail records.
-          - { source: vmksa,        cmd: "python -m scrapers.vmksa.run --type all", tmo: 20 }
-          - { source: macsaib,      cmd: "python -m scrapers.macsaib.run --type all", tmo: 15, proxy: true }
-          # wave 3, batch 3. maqrat pages its own POST index (/Property/_Properities) then reads 83 details pages.
-          - { source: maqrat,       cmd: "python -m scrapers.maqrat.run --type all", tmo: 20 }
-          # wave 3, batch 6: arsh is a hand-built Duda site (1 index + 23 pages).
-          - { source: arsh,         cmd: "python -m scrapers.arsh.run --type all", tmo: 10, proxy: true }
-          # batch 7 (2026-09-27): the owner's 15-site list.
-          - { source: sirdab,      cmd: "python -m scrapers.sirdab.run --type all", tmo: 15, proxy: true }
-          - { source: ashab,       cmd: "python -m scrapers.ashab.run --type all", tmo: 45, proxy: true }
-          - { source: manafe,      cmd: "python -m scrapers.manafe.run --type all", tmo: 25 }
-          - { source: wajaf,       cmd: "python -m scrapers.wajaf.run --type all", tmo: 10, proxy: true }
-          - { source: albukaeri,   cmd: "python -m scrapers.albukaeri.run --type all", tmo: 10, proxy: true }
-          #   ryadah: `proxy: true` (2026-09-28) — WP REST 403'd the runner IP; the probe tries 3
-          #   profiles DIRECT before the proxy, so the proxy is only used when DIRECT is refused.
-          - { source: ryadah,      cmd: "python -m scrapers.ryadah.run --type all", tmo: 10, proxy: true }
-          - { source: sqcc,        cmd: "python -m scrapers.sqcc.run --type all", tmo: 10, proxy: true }
-          - { source: daraa,       cmd: "python -m scrapers.daraa.run --type all", tmo: 10, proxy: true }
-          - { source: tawia,       cmd: "python -m scrapers.tawia.run --type all", tmo: 10, proxy: true }
-          # SuperOffice (2026-09-27): owner-approved — available private offices only.
-          - { source: superoffice, cmd: "python -m scrapers.superoffice.run --type all", tmo: 10, proxy: true }
-          # 2026-09-28 (owner-approved): Shomou = 26 index pages + ~1,028 ad pages (only in-date ads kept);
-          #   Maktab = one public JSON page of offices.
-          #   shomou: `proxy: true` (2026-10-14, Scraping Engineer) — 10-14 read index page 0 as no ad on one pinned profile.
-          - { source: shomou,      cmd: "python -m scrapers.shomou.run --type all", tmo: 30, proxy: true, browser: true }
-          - { source: maktab,      cmd: "python -m scrapers.maktab.run --type all", tmo: 10 }
-          # wave 3, batch 5: holoul is an open JSON API (238 rows → 30); eightfloor is a Nuzul tenant (public API, 2 rows); manzo is an open JSON API (1 row).
-          - { source: manzo,        cmd: "python -m scrapers.manzo.run --type all", tmo: 10, proxy: true }
-          - { source: eightfloor,   cmd: "python -m scrapers.eightfloor.run --type all", tmo: 10, proxy: true }
-          - { source: holoul,       cmd: "python -m scrapers.holoul.run --type all", tmo: 10, proxy: true }
-          # wave 3, batch 4: dallali is an open JSON storefront (7 rows); muajarh is an open JSON API (18 rows, 11 real); mobasher reads its discovery API + 28 pages for age/facade; nafithh is server-rendered HTML (3 list pages + 30 details); opensooq's SERP carries the whole vertical as inline JSON (3 pages).
-          - { source: opensooq,     cmd: "python -m scrapers.opensooq.run --type all", tmo: 10 }
-          - { source: nafithh,      cmd: "python -m scrapers.nafithh.run --type all", tmo: 15 }
-          - { source: mobasher,     cmd: "python -m scrapers.mobasher.run --type all", tmo: 15, proxy: true }
-          - { source: muajarh,      cmd: "python -m scrapers.muajarh.run --type all", tmo: 10, proxy: true }
-          - { source: dallali,      cmd: "python -m scrapers.dallali.run --type all", tmo: 10, proxy: true }
-          # wave 3b (2026-09-27): maqam is a Nuzul tenant feed (130 records, only `available` kept); earthapp and
-          # nawafeth are small complete feeds (54 / 20 ads).
-          - { source: maqam,        cmd: "python -m scrapers.maqam.run --type all", tmo: 15 }
-          - { source: earthapp,     cmd: "python -m scrapers.earthapp.run --type all", tmo: 15, proxy: true }
-          - { source: nawafeth,     cmd: "python -m scrapers.nawafeth.run --type all", tmo: 15 }
-          - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
-          - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all", browser: true }
-          - { source: october,    cmd: "python -m scrapers.october.run --type all" }
-          # souq24 probes ~1,300 candidate ids/run through the metered Saudi proxy for only ~52 active
-          # listings, and the sweep deliberately re-checks the whole id range (skipping ids would miss
-          # reactivated ads). So we cut its bandwidth by cadence instead: every_n_days=2 (owner 2026-07-07).
-          # (tmo+cadence restored 2026-07-16 — PR #77 accidentally dropped both overrides.)
-          - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all", tmo: 150, every_n_days: 2, proxy: true }
-          # NOTE: toor is NOT here. RETIRED 2026-07-06 (owner-approved, commit d5ca9d6).
-          # THE ORIGINAL REASON (IP-block: every detail fetch exc:Timeout) IS FIXED — re-probed
-          # 2026-09-19, sitemap + details all return HTTP 200 from a clean egress. It stays out for
-          # a DIFFERENT verified reason: toor.ooo is now an SPA whose public HTML serves ONE SAMPLE
-          # LISTING for every PropertyId (6 different ids -> 1 distinct licence/ref), so running it
-          # would write 82 copies of one fabricated listing. The real data is behind an
-          # authenticated API (401). See scrapers/RETIRED_PLATFORMS.txt for the measurement.
-          # Historical toor rows are KEPT in the DB (not deleted) and scrapers/toor/ remains in
-          # the repo for reference. PR #77 (da19962) accidentally re-added the matrix line on
-          # 2026-07-15; re-removed 2026-07-16 and now guarded by scrapers/RETIRED_PLATFORMS.txt +
-          # scrapers/common/tests/test_retired_platforms_guard.py, which fails CI if any retired
-          # platform re-enters an active matrix. Do NOT re-add without owner approval (un-retire
-          # by removing the slug from RETIRED_PLATFORMS.txt in the same PR). See ARCHITECTURE.md
-          # "Retired platforms".
-          # jazwtn UN-RETIRED 2026-07-27 (owner-instructed, same day): the retirement note below
-          # said "a non-runner egress IP (residential proxy) is required — re-adding this line
-          # alone will not work". PR#230 delivered that proxy egress, and it records a scrape_runs
-          # row BEFORE the sitemap fetch so a re-block fails LOUD, not silently.
-          #
-          # 2026-07-28: the proxy fallback was REMOVED. Two fixes shipped for the same 07-23 root
-          # cause within 24h — the proxy (PR#230) and the curl_cffi 0.7.4->0.15.0 fingerprint bump
-          # (PR#245) — and the proxy became the failing half: every run since 07-27 15:16 died with
-          # `curl (35) TLS connect error: invalid library (OPENSSL_internal)`, a CONNECT-tunnel
-          # failure, not a rejection by jazwtn.sa. Measured 07-28 with 0.15.0 straight at the
-          # origin: `/` -> 200/204,697B and `/sitemap.xml` -> 200/1,768B. So this leg now goes
-          # DIRECT; JAZWTN_PROXY_URL / SCRAPE_PROXY_URL remain explicit opt-ins if the
-          # datacenter-IP block returns. It no longer inherits WASALT_PROXY_URL (provisioned for
-          # Wasalt, metered, and empirically broken for this host).
-          # If this leg fails again DIRECT with a reset, set JAZWTN_PROXY_URL to a WORKING proxy
-          # (verify the tunnel first) or re-retire — do not re-point it at the wasalt secret.
-          - { source: jazwtn,      cmd: "python -m scrapers.jazwtn.run --type all" }
-          - { source: therc,       cmd: "python -m scrapers.therc.run --type all", browser: true }
-          - { source: aouj,        cmd: "python -m scrapers.aouj.run --type all" }
-          # Two GREEN-audited additions (owner-instructed 2026-09-05, from the 40-candidate audit).
-          # Both are WordPress REST sources whose taxonomies resolve live, so their type/city maps
-          # are fetched per run rather than frozen here.
-          #   alta          17 posts; 10 already تم البيع/تم التأجير → stored active=false. Only 1
-          #                 post states a price, so 15 carry NULL — a SOURCE fact, never inferred.
-          #   shmoualshmal   6 posts, all Tabuk. The site publishes NO price at all (it shows
-          #                 «اتصل»), so every price column is NULL by design. See each run.py.
-          # Daily since 2026-10-02 (owner: «check them every single day»): alta, shmoualshmal, remal
-          # and amaall ran every 2 days for no bandwidth reason (no proxy, 133 ads between them), and
-          # remal and amaall are now SOURCE_LIST_PRESENCE with a 48 h window a 2-day cadence cannot keep.
-          - { source: alta,         cmd: "python -m scrapers.alta.run --type all" }
-          # shmoualshmal: `proxy: true` (2026-10-11, Scraping Engineer, backlog 375) — page 1 answered 403 to
-          # all three DIRECT profiles at 04:51 and 05:02 UTC. Direct stays first; the proxy is the last try.
-          - { source: shmoualshmal, cmd: "python -m scrapers.shmoualshmal.run --type all", proxy: true }
-          # Two more GREEN-audited additions (owner-instructed 2026-09-06).
-          #   remal   87 posts -> 84 listings. class_list carries city/type/offer; images bind by
-          #           attachment PARENT because the detail page renders OTHER listings' photos.
-          #   amaall  135 posts -> 50 listings, ARABIC ONLY: the site publishes every listing twice
-          #           (68 EN + 67 AR), so taking both languages would double every property.
-          - { source: remal,        cmd: "python -m scrapers.remal.run --type all" }
-          - { source: amaall,       cmd: "python -m scrapers.amaall.run --type all" }
-          # abwbna (owner-instructed 2026-09-06): a DIFFERENT TENANT of the SAME Nuzul SaaS platform
-          # aldarim already scrapes (same S3 bucket family, same public JSON API shape). Full crawl +
-          # prune, same as aldarim — not a --type flag scraper.
-          - { source: abwbna,       cmd: "python -m scrapers.abwbna.run --pages 50" }
-          # bahadhabab + alobid (owner-instructed 2026-09-06): third and fourth Nuzul SaaS tenants
-          # found the same way — full crawl + prune, same as aldarim/abwbna, not a --type flag scraper.
-          # bahadhabab: city is a hardcoded owner-confirmed business fact (single-region brokerage in
-          # الباحة) — see scrapers/bahadhabab/run.py's module docstring.
-          - { source: bahadhabab,   cmd: "python -m scrapers.bahadhabab.run --pages 50" }
-          - { source: alobid,       cmd: "python -m scrapers.alobid.run --pages 50" }
-          # azdad (corrected 40-candidate-audit link, 2026-09-06): own Next.js + Supabase stack, not
-          # a Nuzul/Wasalt clone. The whole catalogue (25 listings) fits in one request — no
-          # --pages/--type flag, run.py fetches everything and prunes on absence every run.
-          - { source: azdad,        cmd: "python -m scrapers.azdad.run" }
-          #   abralosol: `proxy: true` (2026-10-13, Scraping Engineer) — 10-13 read index page 0 as nothing on one pinned
-          #   profile; retry_smarter_session now probes 3 profiles DIRECT, the proxy only when every DIRECT one fails.
-          - { source: abralosol,   cmd: "python -m scrapers.abralosol.run --type all", proxy: true, browser: true }
-          - { source: arkaan,      cmd: "python -m scrapers.arkaan.run --type all" }
-          - { source: rawasidark,  cmd: "python -m scrapers.rawasidark.run --type all" }
-          # amlakalahsa (owner-approved 2026-09-12, ops_incident #2667/daily-engineer 2026-09-13):
-          # scrapers/amlakalahsa/run.py shipped the same day the platform was approved, but no
-          # workflow ever scheduled it — zero scrape_runs rows ever existed for it (its own 236
-          # production_ready rows came from a one-off manual/backfill run). No --type/--pages flag:
-          # like azdad, run.py fetches its whole small WordPress catalogue in one pass.
-          - { source: amlakalahsa, cmd: "python -m scrapers.amlakalahsa.run" }
-          # aqaralsaudia (owner-approved 2026-09-13): العروض العقارية, Riyadh-only RealHomes site.
-          # Scheduled in the SAME change that adds the scraper — the barrier that caught amlakalahsa
-          # shipping unscheduled exists precisely so this is never a follow-up.
-          - { source: aqaralsaudia, cmd: "python -m scrapers.aqaralsaudia.run", proxy: true }
-          # suwar (owner-approved 2026-09-14): سوار العقارية, a Makkah freehold developer, 167
-          # published listings. Scheduled in the SAME change that adds the scraper — the barrier
-          # that caught amlakalahsa shipping unscheduled exists precisely so this is never a
-          # follow-up. It fetches one detail page per listing (~170 GETs, ~2 min), so it needs no
-          # timeout override.
-          - { source: suwar, cmd: "python -m scrapers.suwar.run" }
-          # rakez (owner-approved 2026-09-14): راكز العقارية, a Riyadh-led developer. Its unit
-          # feed is 145 REST pages plus one Arabic-twin page per project (~420 requests, ~6 min).
-          # Scheduled in the SAME change that adds the scraper — the barrier
-          # verify-every-scraper-has-a-scheduled-workflow.ts caught this exact omission before merge.
-          - { source: rakez, cmd: "python -m scrapers.rakez.run" }
-          # NOTE: alnokhba is NOT here. Deprecated 2026-07-14 — alnokhba-services.com's domain
-          # lapsed into a parking page (HTTP 200, but a domain-resale placeholder, no
-          # property-card markup); scrape_runs went from rows_seen=5 (2026-07-07) to
-          # rows_seen=0/ok=true for 7 straight daily runs (2026-07-08..2026-07-14). See
-          # deprecated_platforms / platforms_deprecated_status and docs/ARCHITECTURE.md §12 for
-          # the full record. Do not re-add without confirming the domain serves real listings
-          # again.
-          # NOTE: muktamel is NOT here. Its pages are ~1.4MB each and it has no list API / usable
-          # sitemap, so a full sequential-ID scan is ~45GB over hours — impossible on a 4h cadence.
-          # It runs on its OWN weekly workflow (muktamel-sync.yml), scoped to the live ID band.
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -447,13 +477,11 @@ jobs:
         # pins ONLY as a Google short link, and Google answers a plain HTTP client on a datacenter
         # address with a script page, not the redirect. A headless Chromium runs that script
         # (scrapers/common/page_pin.py _browser_hop). Only the `browser: true` sources pay for it.
-        if: ${{ matrix.browser && (github.event.inputs.source == '' || contains(format(',{0},', github.event.inputs.source), format(',{0},', matrix.source))) }}
+        if: ${{ matrix.browser }}
         run: python -m playwright install --with-deps chromium
       - name: Sync ${{ matrix.source }}
-        # Skip non-matching sources when a single source was requested via workflow_dispatch.
-        # A comma-separated list runs exactly those sources in ONE run: the concurrency group keeps
-        # only one PENDING run, so per-slug dispatches cancel each other (seen 2026-09-24).
-        if: ${{ github.event.inputs.source == '' || contains(format(',{0},', github.event.inputs.source), format(',{0},', matrix.source)) }}
+        # No per-source `if:` here any more: `plan` already put only the requested sources in the matrix.
+        # A comma-separated list still runs exactly those sources in ONE run (one per-list concurrency lane).
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
