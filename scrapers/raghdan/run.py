@@ -702,6 +702,35 @@ def _rendered_panel(body: str) -> dict[str, str]:
     return out
 
 
+# THE DEED BOUNDARIES BOX («الحدود», 🔧 2026-10-25): per side (الشمال / الجنوب / الشرق / الغرب) the deed's
+# «النوع» (قطعة / شارع / ارتداد …), «الطول» («تسعة متر و أربعون سنتيمتر», «4.20 + 1.40 + …») and «الوصف»
+# («إرتـداد وقطعـة 564», «ارتداد 1 ثم شارع عرض 10م»). Measured over all 401 live ads: 272 carry the box, 270 with
+# all four sides. Stored word for word in additional_info.boundaries as {side: {label: value}}, the page's own words
+# as keys. A value with no letter or digit is raghdan's empty cell («:» on 792 of 1,082 types) → left out.
+# PDPL: 3 of 1,082 «الوصف» cells are a NEIGHBOUR'S FULL NAME («<name> بن <name> <family>»), which the shared
+# redactor does not catch, so any cell carrying a patronymic is left out whole — the same call this file makes for
+# streetAddress: a street named after a person cannot be told from an owner, so neither is kept.
+# ponytail: patronymic-only name test; a neighbour written without «بن/ابن/بنت/آل» would pass — 0 of 1,082 today.
+_BOUNDS_BOX_RE = re.compile(r">الحدود</h2>(.*?)(?=<h2\b|$)", re.S)
+_BOUNDS_SIDE_RE = re.compile(r"<h3[^>]*>([^<]+)</h3>(.*?)(?=<h3\b|$)", re.S)
+_BOUNDS_ROW_RE = re.compile(r">([^<>]+?)<!-- -->:</span>\s*<span[^>]*>(.*?)</span></div>", re.S)
+_PATRONYMIC_RE = re.compile(r"(?<![ء-ي])(?:بن|ابن|بنت|آل)(?![ء-ي])")
+
+
+def _rendered_boundaries(body: str) -> dict[str, dict[str, str]]:
+    m = _BOUNDS_BOX_RE.search(body or "")
+    out: dict[str, dict[str, str]] = {}
+    for side, chunk in _BOUNDS_SIDE_RE.findall(m.group(1) if m else ""):
+        rows = {}
+        for label, raw in _BOUNDS_ROW_RE.findall(chunk):
+            val = _strip_tags(raw)
+            if re.search(r"\w", val) and not _PATRONYMIC_RE.search(val) and (val := redact_pii(val)):
+                rows[label.strip()] = val
+        if rows:
+            out[side.strip()] = rows
+    return out
+
+
 def _spec_int(v: Optional[str]) -> Optional[int]:
     """«عرض الشارع» and «رقم القطعة» print a literal 0 when the seller left them blank. Storing 0
     would claim a zero-metre street; 0 here means "not stated", so it must stay NULL."""
@@ -930,6 +959,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "published_at": sp.get("published_at"),
         "ld_description": _redact(description_raw),
         **_rendered_panel(body),
+        "boundaries": _rendered_boundaries(body) or None,
     })
     info = {k: v for k, v in info.items() if v not in (None, "", "—")}
 
