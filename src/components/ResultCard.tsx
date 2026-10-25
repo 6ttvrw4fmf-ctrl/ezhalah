@@ -14,6 +14,20 @@ import { whenNear } from '@/lib/nearViewport';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
 import { isStayLengthPriced, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
+import { advertisedMonthly } from '@/lib/rentPool';
+
+// «السعر المعلن 3,000 شهرياً» (owner 2026-10-25): a site that quotes PER MONTH pools as yearly at ×12, so the
+// price line reads «/سنوياً» — this line keeps the site's own figure and word under it. Only when the pool is
+// yearly and the source said monthly; short-stay sites and yearly-quoted sites print nothing here.
+function advertisedMonthlyLine(listing: Listing, t: (k: string, p?: Record<string, string | number>) => string) {
+  const monthly = advertisedMonthly(listing.rentPeriod as 'monthly' | 'annual' | null, listing.sourceRentPeriod, listing.priceAnnual);
+  if (monthly == null) return null;
+  return (
+    <Text style={card.pricePerMeter} numberOfLines={1} testID="card-advertised-monthly">
+      {t('Advertised price {a}/month', { a: `${t('SAR')} ${monthly.toLocaleString('en-US')}` })}
+    </Text>
+  );
+}
 import { afEvidence, AMENITY_COL, type ActiveAf } from '@/lib/afEvidence';
 import { typeImg } from '@/theme/propertyIcons';
 import { GoldShineButton, GoldSurface } from './CardReveal';
@@ -272,6 +286,7 @@ export function ResultCard({
           <View style={card.lpPriceRow}>
             <View style={card.lpPriceCol}>
               <Text style={stay ? card.stayNote : [card.price, card.lpPrice]} numberOfLines={stay ? 2 : 1}>{listingPrice(listing, locale)}</Text>
+              {advertisedMonthlyLine(listing, t)}
               {listing.discount ? (
                 <View style={card.discountRow} testID="card-discount">
                   <Text style={card.discountOld} numberOfLines={1}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
@@ -435,6 +450,7 @@ export function ResultCard({
           {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
         </Text>
         <Text style={isStayLengthPriced(listing.source) ? [card.stayNote, row && card.stayNoteRow] : [card.price, row && card.priceRow, tight && card.priceTight]} numberOfLines={isStayLengthPriced(listing.source) ? 2 : 1}>{listingPrice(listing, locale)}</Text>
+        {advertisedMonthlyLine(listing, t)}
         </View>
         {/* Source-published discount (owner 2026-10-19): the old price struck through + «خصم X٪»,
             under the final price. Rendered only when the source showed one — see listingDiscountFrom(). */}
