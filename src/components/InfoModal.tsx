@@ -63,7 +63,7 @@ const ABOUT_MAX_W = 760;
 const LEGAL_MAX_W = 640;
 const ABOUT_MAX_H = 700;
 
-const EAGLE = require('../../assets/images/logo-cloud-green-lit.svg'); // About/Terms always show the green-lit cloud eagle (owner 2026-10-24)
+const EAGLE = require('../../assets/images/logo-cloud-green-static.svg'); // About/Terms always show the green-lit cloud eagle (owner 2026-10-24)
 type Kind = 'support' | 'about' | 'legal';
 
 // In-app popup that hosts the Support / About / Terms & Privacy content as a centered dialog over a
@@ -629,7 +629,7 @@ const s = StyleSheet.create({
   // the ROW, not the text: `h`'s own paddingRight (still asserted by that barrier, untouched) is
   // cancelled back to 0 on this specific usage so the clearance is never reserved twice.
   legalLockup: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: CLOSE_CLEAR },
-  legalEagle: { width: 20, height: 20 },
+  legalEagle: { width: 44, height: 44 }, // big and sharp enough to read as our logo (owner 2026-10-25; was 20 px)
   legalTitle: { paddingRight: 0, flexShrink: 1 },
 
   // ——— «تواصل مع الدعم» form (owner 2026-09-02; spacing/inputs 2026-09-03) ———
@@ -709,7 +709,7 @@ function makeAbout(pal: Record<string, string>, dark: boolean, rtl = true) {
     head: { paddingBottom: 12, paddingRight: CLOSE_CLEAR }, // keeps «من نحن» clear of the top-right × (owner 2026-10-24)
     eyebrow: { fontSize: 12.5, lineHeight: 18, fontWeight: '700', color: pal.muted, marginBottom: 8 },
     lockup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    eagle: { width: 48, height: 48 }, // green-lit cloud eagle, big enough to read clearly on the sheet (owner 2026-10-24)
+    eagle: { width: 64, height: 64 }, // still dark-green eagle, lights on, big and sharp (owner 2026-10-25)
     wordmark: { fontSize: 34, lineHeight: 42, fontWeight: '800', color: pal.ink },
     readingColumn: { maxWidth: 640, width: '100%', alignSelf: 'center' },
     heroLine: { fontSize: 19, lineHeight: 31, fontWeight: '700', color: pal.ink, textAlign: start as any, marginTop: 8, marginBottom: 18 },

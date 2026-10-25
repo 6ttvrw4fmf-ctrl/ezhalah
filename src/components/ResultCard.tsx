@@ -1386,7 +1386,7 @@ function sourceHost(source: string): string {
   if (s.includes('الطابق الثامن') || s.includes('8floor') || s.includes('eightfloor')) return 'www.8floor.sa';
   if (s.includes('حلول') || s.includes('holoul')) return 'holoul.io';
   if (s.includes('السوق المفتوح') || s.includes('opensooq')) return 'sa.opensooq.com';
-  if (s.includes('معرض نافذة') || s.includes('nafithh')) return 'nafithh.sa';
+  if (s.includes('معرض نافذة') || s.includes('nafithh')) return 'nafithh.com';
   if (s.includes('مباشر') || s.includes('mobasher')) return 'mobasher.sa';
   if (s.includes('مؤاجرة') || s.includes('muajarh')) return 'muajarh.com';
   if (s.includes('دلّالي') || s.includes('dallali')) return 'dallali.com';

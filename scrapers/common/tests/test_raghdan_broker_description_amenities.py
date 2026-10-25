@@ -26,7 +26,7 @@ AD_9038628 = ('<div dir="rtl" class="rt-content ">' + "".join(_P.format(x) for x
 
 
 def _read(body):
-    return normalize.prose_amenities_yes(R._broker_text(body), skip=R._PROSE_SKIP), \
+    return normalize.prose_amenities(R._broker_text(body), skip=R._PROSE_SKIP), \
         normalize.baths_from_leading_count(R._broker_text(body))
 
 
@@ -46,9 +46,9 @@ def test_no_description_block_writes_nothing():
     assert _read("<div>المساحة 120 م²، عدد الغرف 4</div>") == ({}, None)
 
 
-def test_a_negated_lift_is_never_a_no():
+def test_a_negated_lift_is_a_stated_no():
     am, _ = _read('<div class="rt-content">' + _P.format("لا يوجد مصعد") + "</div>")
-    assert "elevator" not in am
+    assert am.get("elevator") is False      # owner 2026-10-24: an explicit negation is a stated no
 
 
 def test_mutation_the_generated_spec_line_alone_states_nothing():
@@ -82,7 +82,7 @@ RAGHDAN_COLUMNS = {"bathrooms", "elevator", "kitchen", "car_entrance", "air_cond
 
 def test_the_reader_only_emits_columns_raghdan_has():
     every_token = "<br>".join(t for toks in normalize._AMENITY_TOKENS.values() for t in toks)
-    am = normalize.prose_amenities_yes(R._broker_text(f'<div class="rt-content">{every_token}</div>'), skip=R._PROSE_SKIP)
+    am = normalize.prose_amenities(R._broker_text(f'<div class="rt-content">{every_token}</div>'), skip=R._PROSE_SKIP)
     assert am and set(am) <= RAGHDAN_COLUMNS, set(am) - RAGHDAN_COLUMNS
 
 

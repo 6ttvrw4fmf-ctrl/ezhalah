@@ -46,9 +46,22 @@ Matching Arabic keywords in a description tells you the ad *mentions a word*. It
 - "the source said no" from "the source said nothing".
 
 Therefore: **if the platform publishes the field structurally, prose must not be consulted for that
-field at all — not even as a fallback.** A structured `null` outranks any prose hit. Prose may only
-ever produce `true`/`NULL` for a field with no structured counterpart anywhere on the platform, and
-even that is a last resort that must be documented at the mapping site.
+field at all — not even as a fallback.** A structured `null` outranks any prose hit.
+
+**For a field with NO structured counterpart anywhere on the platform, prose may produce three values
+(owner, approved in chat 2026-10-24):**
+
+| The ad's own words | Stored |
+|---|---|
+| name it («مصعد», «مطبخ راكب», «مفروشة») | `true` |
+| an **explicit negation tied to the token** — before it («لا يوجد مصعد», «بدون مصعد», «غير مفروشة», «عدم وجود مصعد», «لا تأتي الشقة مفروشة») or as the answer to the token used as a label («مفروشة: لا», «مواقف السيارات: غير متوفرة») | `false` |
+| silence, prepared only («تأسيس مصعد»), not installed («مطبخ غير راكب», «المكيفات غير راكبة», «مصعد غير مركب» — anywhere in the ad, it outranks a plain mention; coordinator for the owner, 2026-10-25), nearby («قريب من …»), partly, «غير محدد», or two statements that disagree | `NULL` |
+
+These are the four outcomes of `normalize.amenities_from_text` (2026-09-20: yes / no / prepared /
+nearby, with prepared and nearby both stored as `NULL`), and the one reader every prose-only site uses
+is `normalize.prose_amenities(text, skip=<the site's structured columns>)`. A negation that is not tied to
+the token (a «لا» somewhere else in the sentence) is never a `false`. The reader is pinned by
+`scripts/verify-labelled-no-is-not-a-yes.ts`. Prose is still a last resort, documented at the mapping site.
 
 **Case law — aqar `parking` (2026-08-09).** `parking` was derived from the patterns «موقف سيارة» /
 «مواقف» for ~25,159 active rows. A later fix asserted "aqar publishes NO parking field at all" and

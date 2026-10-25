@@ -377,7 +377,7 @@ def af_answers(p: dict, specs: dict) -> dict[str, Any]:
     spaces = _int(specs.get("parkingSpaces"))
     if spaces and spaces > 0:
         out["parking"] = True
-    for col, val in normalize.prose_amenities_yes(p.get("description"), skip=("parking",)).items():
+    for col, val in normalize.prose_amenities(p.get("description"), skip=("parking",)).items():
         if col in _PROSE_COLS:
             out[col] = val
     return out

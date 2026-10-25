@@ -380,22 +380,25 @@ def _photo_urls(rec: dict) -> list[str]:
 
 def _amenities(rec: dict, description: Optional[str]) -> dict[str, Any]:
     """Prose < the site's named amenity/tag chips < its labelled fields."""
-    out: dict[str, Any] = dict(normalize.amenities_from_text(description))
+    prose = normalize.amenities_from_text(description)
     names = [a.get("name") for a in (rec.get("amenities") or []) + (rec.get("tags") or [])
              if isinstance(a, dict) and a.get("name")]
-    out.update(normalize.amenities_from_text("، ".join(names)))
+    chips = normalize.amenities_from_text("، ".join(names))
+    out: dict[str, Any] = {**prose, **chips}
     for col in ("maid_room", "driver_room"):
         if _pos(rec.get(col)):
             out[col] = True
     if _pos(rec.get("parking_space")):
         out["parking"] = True
-    if rec.get("furnishing_status") in _FURNISHED:
-        status, said = _FURNISHED[rec["furnishing_status"]], out.get("furnished")
-        # The site's furnishing_status agrees with the ad's own words on 1,326 active ads that state both and
-        # contradicts them on ~20 (measured 2026-10-25): «غير مفروشة» / «مفروشة: لا» under «furnished» (served as
-        # furnished = YES), «شقة مفروشة» under «unfurnished». Two source statements that disagree have not stated
-        # the fact: unknown — written authoritatively, because the upsert drops a plain None and a stale yes stays.
-        out["furnished"] = status if said is None or said == status else db.AUTHORITATIVE_NULL
+    # furnished has THREE source statements: the furnishing_status field, the tag chips («مفروش») and the ad's own
+    # words. They agree on 1,326 active ads and disagree on ~20 (measured 2026-10-25): «غير مفروشة» / «مفروشة: لا»
+    # under status «furnished» (served as YES), «شقة مفروشة» under «unfurnished» — and on 3 ads status + chip
+    # «مفروش» say yes while the text says «مفروشة: لا», where letting the chip outvote the words put the yes back.
+    # Any disagreement is unknown, written authoritatively (the upsert drops a plain None, so a stale yes stays).
+    stated = {v for v in (prose.get("furnished"), chips.get("furnished"),
+                          _FURNISHED.get(rec.get("furnishing_status"))) if v is not None}
+    if stated:
+        out["furnished"] = stated.pop() if len(stated) == 1 else db.AUTHORITATIVE_NULL
     for key in rec.get("utility_availability") or []:
         if key in _UTILITY:
             out[_UTILITY[key]] = True
