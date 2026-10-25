@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
 import { getLocale, rememberLocaleForSignIn } from '@/i18n';
+import { markEagleLightUp } from '@/lib/eagleLightUp';
 import type { AuthUser } from '@/store';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -140,6 +141,10 @@ export async function signInWithProvider(
     const queryParams = provider === 'google' ? { hl: getLocale() } : undefined;
     // The redirect is a fresh page load: carry the language on screen to the /auth landing (i18n.tsx).
     rememberLocaleForSignIn();
+    // The redirect reloads the page, where a restored session no longer looks like a fresh sign-in to the store:
+    // leave the sidebar eagle its one light-up now (lib/eagleLightUp.ts; Apple JS and One Tap sign in within the
+    // tab and are marked by the store's own listener).
+    markEagleLightUp();
     const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo, queryParams } });
     if (error) return { error: error.message };
     return { redirected: true };
