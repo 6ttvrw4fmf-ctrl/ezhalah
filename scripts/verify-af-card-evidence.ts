@@ -390,8 +390,13 @@ console.log('\n── T4. injection: one carrier, one prop, comparator, strip on
   assert(count(agent, 'afActive(m.result.query)') === 1, 'agent.tsx derives activeAf from m.result.query exactly once');
   assert(count(agent, 'activeAf={activeAf}') === 1, 'agent.tsx passes activeAf into the card map exactly once');
   assert(count(agent, 'afActive(') === 1, 'agent.tsx calls afActive on NOTHING else (not the store query, not afFacets, not guidedPills)');
-  const memo = agent.match(/const MemoResultCard = memo\(ResultCard,[\s\S]*?\);/)?.[0] ?? '';
+  // The memoised card + the memoised row around it live in ResultCardRow.tsx (typing-in-a-big-chat fix); BOTH comparators must carry activeAf.
+  const row = read('src/components/ResultCardRow.tsx');
+  const memo = row.match(/export const MemoResultCard = memo\(ResultCard,[\s\S]*?\);/)?.[0] ?? '';
   assert(memo.includes('prev.activeAf === next.activeAf'), 'the MemoResultCard comparator includes activeAf (otherwise the memo swallows the prop)');
+  const rowMemo = row.match(/export const ResultCardRow = memo\([\s\S]*$/)?.[0] ?? '';
+  assert(rowMemo.includes('prev.activeAf === next.activeAf'), 'the ResultCardRow comparator includes activeAf (otherwise the row swallows the prop)');
+  assert(/activeAf=\{activeAf\}/.test(rowMemo), 'ResultCardRow hands activeAf on to the card');
   assert(/import \{[^}]*\bafActive\b[^}]*\} from '@\/lib\/afEvidence'/.test(agent), 'agent.tsx imports afActive from @/lib/afEvidence');
 
   const card = read('src/components/ResultCard.tsx');
