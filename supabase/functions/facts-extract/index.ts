@@ -65,6 +65,28 @@ function sameSecret(a: string, b: string): boolean {
   return diff === 0;
 }
 
+// Is the caller's key a SERVICE-ROLE credential? Asked of the database itself, not by comparing bytes:
+// the Actions secret and this runtime's SUPABASE_SERVICE_ROLE_KEY can be two different valid service
+// keys (legacy JWT vs. the newer secret format), and the pilot's first call read 401 for exactly that
+// reason (2026-10-25). listing_facts_runs has RLS on, no policies, and anon/authenticated revoked, so
+// only a service-role key reads it (200); a publishable/anon key is refused by Postgres (401/403).
+// FAIL CLOSED: any error, timeout or non-2xx is "not service role".
+async function callerIsServiceRole(key: string): Promise<boolean> {
+  if (!key || !SUPABASE_URL) return false;
+  try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), GATE_TIMEOUT_MS);
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/listing_facts_runs?select=id&limit=1`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      signal: ac.signal,
+    }).finally(() => clearTimeout(timer));
+    await r.body?.cancel().catch(() => {});
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
 // FAIL CLOSED: any failure to reach or read the gate is a denial (an unreachable ceiling is unbounded).
 async function spendGate(): Promise<{ allow: boolean; reason?: string }> {
   if (!SUPABASE_URL || !SERVICE_KEY) return { allow: false, reason: "spend gate unreachable: no service credentials" };
@@ -91,7 +113,10 @@ type Ad = { id: string; text: string };
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
   const auth = req.headers.get("authorization") ?? "";
-  if (!sameSecret(auth, `Bearer ${SERVICE_KEY}`)) return json({ error: "unauthorized" }, 401);
+  const callerKey = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!sameSecret(callerKey, SERVICE_KEY) && !(await callerIsServiceRole(callerKey))) {
+    return json({ error: "unauthorized" }, 401);
+  }
   if (!DEEPSEEK_API_KEY) return json({ error: "model key not configured" }, 503);
 
   let ads: Ad[];
