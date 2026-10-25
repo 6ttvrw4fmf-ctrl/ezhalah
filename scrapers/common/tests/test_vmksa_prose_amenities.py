@@ -23,8 +23,8 @@ def test_villa_kitchen():
     assert R.prose_answers(d).get("kitchen") is True
 
 
-def test_negation_and_prepared_stay_unknown():
-    assert R.prose_answers("بدون مصعد").get("elevator") is None
+def test_negation_is_a_no_and_prepared_stays_unknown():
+    assert R.prose_answers("بدون مصعد").get("elevator") is False     # owner 2026-10-24
     assert R.prose_answers("تأسيس مصعد").get("elevator") is None
 
 
