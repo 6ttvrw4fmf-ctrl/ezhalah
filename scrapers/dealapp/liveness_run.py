@@ -162,8 +162,13 @@ def _collect_candidates(client, limit: int) -> list[dict]:
     # rows at 3-5 strikes (served_after_source_gone:dealapp) had no sweep reading for days, and
     # this sweep is the only reader whose fresh render can decide a dealapp page. Struck rows head
     # the list; the kill rule (decide(), 3 strikes, trust gate, held-alive) is unchanged.
+    # NEAR-KILL ROWS MUST FIT IN THE WINDOW (2026-10-25). Ordered by probe age alone, the window of
+    # `limit` struck rows was always the 1-strike ones: the crawl re-stamps every row at >= 2 strikes
+    # nightly, so on 10-25 the 10:47 run read 17 struck rows and none at >= 2, while 117 served ads sat
+    # at 3-11 strikes with no alive reading in 48 h (76 of them read gone twice that morning).
     struck = (_execute(client.table(TABLE).select(cols)
                        .eq("active", True).gt("missing_count", 0)
+                       .order("missing_count", desc=True)
                        .order("last_liveness_probe_at", desc=False, nullsfirst=True)
                        .limit(limit or 20000),
                        what="dealapp struck candidates").data or [])
@@ -186,6 +191,8 @@ def _probe_order(r: dict, sitemap) -> tuple:
 # 10-08 on — alive 3,508/day on 10-11 → 0 on 10-16, checked-in-time 96% → 56.5%. Struck rows still
 # lead, inside their share; any share they do not use goes to the rotation, and vice versa.
 STRUCK_SHARE = 0.25
+# One more DEAD reading kills a row at this many strikes (grace 3).
+NEAR_KILL = 2
 
 
 def _plan_worklist(cands: list[dict], limit: int) -> list[dict]:
@@ -199,6 +206,14 @@ def _plan_worklist(cands: list[dict], limit: int) -> list[dict]:
     k = min(len(struck), max(1, int(limit * STRUCK_SHARE)))
     take_rest = min(len(rest), limit - k)
     k = min(len(struck), limit - take_rest)
+    # Half the struck share goes to rows one DEAD reading from a kill (2026-10-25), oldest-probed
+    # first among them; the other half to 1-strike rows, and either side's unused half to the other.
+    near = sorted((r for r in struck if (r.get("missing_count") or 0) >= NEAR_KILL),
+                  key=lambda r: (r.get("last_liveness_probe_at") is not None,
+                                 r.get("last_liveness_probe_at") or ""))
+    far = [r for r in struck if (r.get("missing_count") or 0) < NEAR_KILL]
+    kn = min(len(near), max((k + 1) // 2, k - len(far)))
+    struck = near[:kn] + far[:k - kn]
     # INTERLEAVED, struck first (2026-10-23): a struck ad's own page is usually dealapp's no-listing
     # render, which counts only between two live-ad renders (bracketed_none). Read as one block, struck
     # rows had only each other as neighbours, so the bracket could almost never close around them.
