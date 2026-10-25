@@ -30,7 +30,7 @@ WHAT THIS SOURCE DOES NOT PUBLISH (persisted as NULL, never defaulted — SOURCE
     the detector shape killed on 2026-08-11 for producing confident wrong numbers.
   * AMENITIES / FURNISHED. `features` is [] on all 76, so the site has no amenity statement of its own
     except two: `garage` (a structured count, «1»/«2» on 4 of 74 on 2026-10-25) is parking, and the ad's
-    own description box, read yes-only for a built unit (see amenities() below, 🔬 backlog 854).
+    own description box, read through normalize.prose_amenities for a built unit (see amenities() below).
   * AGE. `year_built` on 8/76 only; kept raw in additional_info, no age column is written.
   * A PER-LISTING per-m² price. See PRICE below.
   * A PER-LISTING REGA advertisement licence on 68/76 (the 76/76 `fal_license` is the agency's
@@ -209,7 +209,8 @@ _NOT_A_UNIT = {"Residential Land", "Commercial Land", "Raw Land", "Agricultural 
 
 
 def amenities(o: dict, property_type: str) -> dict[str, bool]:
-    """Yes-only amenity answers (ADVANCED_FILTER_SOURCE_TRUTH §2; silence stays NULL, never «no»).
+    """Amenity answers: yes, an explicit no tied to the word, or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2,
+    owner 2026-10-24). Silence, «مؤسس» and «لاحق» stay NULL, never «no».
 
     PARKING is the structured `garage` count and ONLY that: a count above 0 is yes, anything else is silence
     (the CRM's «0» is its not-provided sentinel, see bedrooms below), and prose is never read for it.
@@ -224,7 +225,7 @@ def amenities(o: dict, property_type: str) -> dict[str, bool]:
         out["parking"] = True
     if property_type not in _NOT_A_UNIT and not o.get("features"):
         text = N.html_block_lines(_redact((o.get("description") or {}).get("ar")))
-        out.update(N.prose_amenities_yes(text, skip=("parking",)))
+        out.update(N.prose_amenities(text, skip=("parking",)))
     return out
 
 

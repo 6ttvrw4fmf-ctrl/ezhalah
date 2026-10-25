@@ -40,8 +40,17 @@ const CASES: [string, string, boolean | null][] = [
   ['حالة عدم المفروشات تتيح حرية كاملة في تصميم', 'furnished', false],
   ['غير مناسب لكبار السن لعدم وجود مصعد', 'elevator', false],
   ['قريب من عدم وجود مصعد', 'elevator', null],
-  // a label answered «unknown» settles the fact: the next spelling («المطبخ») must not read the «بدون» of «مكيفات»
+  // a negation belongs to the word it is TIED to: the next spelling («المطبخ») must not read the «بدون» of «مكيفات»
+  // (dwelleo 13130133), and the haraj shapes where «غير» / «بدون» owned the word before (stored ads, 2026-10-25)
   ['الدور: الثاني التكييف: بدون مكيفات المطبخ: غير راكب الإيجار: 42', 'kitchen', null],
+  ['حي المنار ✅ المكونات 🏠 (3) غرف وصاله 🏠 مطبخ غير راكب 🏠 مكيفات اسبلت راكبة', 'air_conditioner', true],
+  ['شركة 100 العقارية شقق غير مؤثثة مطبخ راكب مكيفات راكبه', 'kitchen', true],
+  ['غرفتين مطبخ دورتين مياه بدون صاله مكيفات راكبه', 'air_conditioner', true],
+  ['غير متوفر مصعد', 'elevator', false],
+  ['ملاحظة: العقار غير مجهز بالمكيفات', 'air_conditioner', false],
+  ['#لايوجد (مدخل سياره)', 'car_entrance', false],
+  ['مساحة خارجية (لا يوجد) موقف سيارات خاص (امام المبنى)', 'parking', true],
+  ['المطبخ غير راكب المكيفات غير راكبة', 'air_conditioner', null],
 ];
 const answers = (src?: string) =>
   (pyCall(ROOT, MOD, 'amenities_from_text', CASES.map(([p]) => [p]), src) as Record<string, boolean>[])
@@ -69,8 +78,8 @@ const m5 = mutant('(?:\\s+(?:ال|لل|ل)?(?:سيار|مركب)\\w*)?(?P<co>', 
 mustCatch('«موقف سيارات ومساحة خارجية: غير موضحة» read as parking = yes again', m5 !== null && !allRight(m5));
 const m6 = mutant('(?P<co>\\s+و\\w+(?:\\s+(?!ملاحظ)\\w+)?)?', '(?P<co>(?:\\s+\\w+){1,3})?');
 mustCatch('a label widened to any words («مطبخ ملاحظة: بدون مصعد» → no kitchen)', m6 !== null && !allRight(m6));
-const m7 = mutant('            if col in out or col in settled:', '            if col in out:');
-mustCatch('a settled «unknown» label overridden by the next spelling (kitchen = no from «بدون مكيفات»)', m7 !== null && !allRight(m7));
+const m7 = mutant('                negated = (_negated_before(before)', '                negated = (any(r.search(before) for r in _NEGATOR_RES)');
+mustCatch('a negator not tied to the token («مطبخ غير راكب 🏠 مكيفات راكبة» → AC = no)', m7 !== null && !allRight(m7));
 
 // dwelleo: the site's own furnishing_status vs the ad's own words. Agreement keeps the status; a contradiction is
 // unknown, written as the AUTHORITATIVE_NULL sentinel so the upsert clears a stale yes (dwelleo 13130631: status
@@ -97,6 +106,27 @@ const dwm = DW.includes(DW_FROM)
   : null;
 if (!dwm) check(`ANCHOR DRIFTED: ${DW_FROM}`, false);
 mustCatch('dwelleo\'s furnishing_status overriding the ad\'s own «مفروشة: لا» (served as yes)', dwm !== null && dwm.some((g, i) => g !== DW_CASES[i][2]));
+
+// The prose-only reader every yes-or-nothing site moved to (owner 2026-10-24): yes / an explicit no tied to the
+// token / unknown, and a column the site publishes structurally (skip) is never read from prose at all.
+const PROSE: [string, string[], Record<string, boolean>][] = [
+  ['لا يوجد مصعد', [], { elevator: false }],
+  ['يتوفر مصعد', [], { elevator: true }],
+  ['تأسيس مصعد', [], {}],
+  ['قريب من مواقف عامة', [], {}],
+  ['لا يوجد مصعد، شقة مفروشة', ['elevator', 'furnished'], {}],
+];
+const prose = (src?: string) =>
+  (pyCall(ROOT, MOD, 'prose_amenities', PROSE.map(([t, skip]) => [t, skip]), src) as Record<string, boolean>[]);
+const same = (a: Record<string, boolean>, b: Record<string, boolean>) => JSON.stringify(a, Object.keys(a).sort()) === JSON.stringify(b, Object.keys(b).sort());
+const pr = prose();
+PROSE.forEach(([t, skip, want], i) => check(`prose_amenities(«${t}», skip=[${skip}]) → ${JSON.stringify(want)}`, same(pr[i], want), JSON.stringify(pr[i])));
+const P_FROM = 'return {k: v for k, v in amenities_from_lines(raw).items() if k not in skip}';
+const pm1 = SRC.includes(P_FROM) ? prose(SRC.replace(P_FROM, 'return {k: True for k, v in amenities_from_lines(raw).items() if v is True and k not in skip}')) : null;
+const pm2 = SRC.includes(P_FROM) ? prose(SRC.replace(P_FROM, 'return dict(amenities_from_lines(raw))')) : null;
+if (!pm1) check(`ANCHOR DRIFTED: ${P_FROM}`, false);
+mustCatch('the yes-only reader back (a stated «لا يوجد مصعد» never stored as no)', pm1 !== null && pm1.some((g, i) => !same(g, PROSE[i][2])));
+mustCatch('prose reading a column the site publishes structurally (skip ignored)', pm2 !== null && pm2.some((g, i) => !same(g, PROSE[i][2])));
 
 if (failed) { console.error(`\n❌ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✅ a labelled «لا» is a NO');

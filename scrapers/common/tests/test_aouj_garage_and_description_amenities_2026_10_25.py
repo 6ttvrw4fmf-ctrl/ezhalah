@@ -3,7 +3,7 @@
 ops_af_score 2026-10-25: aouj 0 of 3 findable. 74 active ads stored NO amenity at all (parking 0, kitchen 0,
 elevator 0) while `garage` carries «1»/«2» on 4 ads and the descriptions name «مطبخ», «مكيفات راكبة»,
 «مؤثث بالكامل». `features` is [] on every ad, so the description is the site's only amenity statement:
-read yes-only (ADVANCED_FILTER_SOURCE_TRUTH §2), never for a plot, never for parking (structured `garage`).
+read as yes, an explicit no, or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2), never for a plot, never for parking (structured `garage`).
 The texts are verbatim from live ads 10283211, 10283218, 10283198, 10283200, 10283199 (🔬 2026-10-25).
 
 Run: python -m pytest scrapers/common/tests/test_aouj_garage_and_description_amenities_2026_10_25.py -q
@@ -80,8 +80,10 @@ def test_a_plot_answers_nothing_from_prose():
     assert row("ارض قريبة من الخدمات مطبخ مركزي مكيفات", type_="land") == {}
 
 
-def test_a_negation_stays_null_never_no():
-    assert row("الشقة غير مؤثثة") == {}
+def test_an_explicit_negation_is_no_and_silence_is_nothing():
+    # owner 2026-10-24 (PR 8674): an explicit «غير مؤثثة» tied to the word is a stated no.
+    assert row("الشقة غير مؤثثة") == {"furnished": False}
+    assert row("شقة للبيع بحي الحمراء") == {}
 
 
 def test_a_filled_features_list_stops_prose():
