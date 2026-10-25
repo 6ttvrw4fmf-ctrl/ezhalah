@@ -107,7 +107,9 @@ deals), air-conditioner removed from بيع forms (both types). Proof: the SAME 
 age ~100% / private_entrance ~83% / rent-side AC 84% on the same code path, and raw == index
 byte-for-byte — the payload is read; only those keys stopped arriving. These columns are
 structured-only by design (prose is NOT a source field), so the honest value is UNKNOWN and the
-correct backfill from published fields is ZERO rows. Old TRUE values (June bulk era, e.g. دور/بيع
+correct backfill from published fields is ZERO rows. (2026-10-25: under Rule B the ad's own quoted
+sentence now answers these at the search index — `listing_text_facts`, never the raw column; see
+docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md.) Old TRUE values (June bulk era, e.g. دور/بيع
 kitchen 43% all-time) predate the form change and stand as captured; they will decay out
 naturally and the affected chips gate out honestly. Acknowledged per (platform, field, segment)
 in `ops_amenity_capture_verified` (evidence in each row's note). Readiness check B is now
