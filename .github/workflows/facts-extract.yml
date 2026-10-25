@@ -38,6 +38,11 @@ concurrency:
   group: facts-extract
   cancel-in-progress: false
 
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): every workflow gives its jobs the gate secret so our own
+  # robots keep working once the database's back door closes; the python client reads it when it needs it.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   extract:
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}

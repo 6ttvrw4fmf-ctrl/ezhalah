@@ -269,7 +269,8 @@ def sample_table(table: str, n: int, rng: random.Random) -> list[dict[str, Any]]
     def q(select: str):
         return client.table(table).select(select).eq("active", True).not_.is_(tcol, "null").order("id")
 
-    total = client.table(table).select("id", count="exact", head=True).eq("active", True).not_.is_(tcol, "null").execute().count or 0
+    # count via a 1-row GET: a HEAD count reads 0 on the pinned client (scrapers/common/tests/test_head_count_reads_zero.py)
+    total = client.table(table).select("id", count="exact").eq("active", True).not_.is_(tcol, "null").limit(1).execute().count or 0
     page = 100
     rows: dict[str, dict[str, Any]] = {}
 
