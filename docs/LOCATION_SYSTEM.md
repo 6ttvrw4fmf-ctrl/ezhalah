@@ -379,7 +379,9 @@ dealapp 883 · sanadak 816 · aqarmonthly 753 · eaqartabuk 516 · aqargate 241 
 - Per-name and owner-approved only. A blanket «الجديد» fold is wrong: «منفوحة الجديدة» and «منفوحة» are two districts.
 - Seeded 10-25: مكة «الهجلة الجديد»→«الهجلة», «الشبيكة الجديد»→«الشبيكة»; حائل «السويفلة الجديد»→«السويفلة».
   Owner 10-25 (asked same or separate, answer: same): الدرعية «الدرعية الجديدة»→«الدرعية» (452 ads).
-  Still held: الدرعية «الطريف الجديدة» (13 ads).
+  **Permanent rule (owner 10-25, "don't ask again"):** «X الجديد / X الجديدة» is our district X, applied automatically
+  inside `loc_display_district_ar()` whenever X is in our list for that city and «X الجديد(ة)» is not itself a district in
+  our list. Stays separate: «منفوحة الجديدة» (الرياض), and official names with no base («الشامية الجديد», «الفلق الجديد»).
 - `verify-district-spelling-memory.ts` pins it.
 
 ### ⏳ Pending (optional, ready when wanted)

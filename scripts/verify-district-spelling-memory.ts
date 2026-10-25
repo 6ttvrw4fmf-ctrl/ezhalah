@@ -17,8 +17,9 @@ if (!file) { console.log('FAIL  migration *_district_spelling_memory_new_suffix.
 const sql = readFileSync(join(dir, file), 'utf8');
 
 // Names the owner has NOT approved as spellings of another district. They must never be seeded as an alias.
-// («الدرعية الجديدة» left this list on 2026-10-25: the owner answered "same".)
-const HELD = ['الطريف الجديدة', 'منفوحة الجديدة', 'الشامية الجديد', 'الفلق الجديد'];
+// («الدرعية الجديدة» and «الطريف الجديدة» left this list on 2026-10-25: the owner answered "same", then made
+// «X الجديد = X» a permanent rule. What stays held are the names our own list keeps as separate districts.)
+const HELD = ['منفوحة الجديدة', 'الشامية الجديد', 'الفلق الجديد'];
 
 function problems(s: string): string[] {
   const fail: string[] = [];
@@ -94,6 +95,42 @@ const fakeLater = "insert into public.loc_district_alias (city_id, from_norm, to
 mustCatch('a later migration folds a held name', seedProblems('fake', fakeLater).length > 0);
 mustCatch('a later migration skips the owner decision', seedProblems('fake', fakeLater.replace("'owner 2026-10-26: x'", "'same'").replace('منفوحة الجديدة', 'العزيزية الجديدة')).length > 0);
 mustCatch('a later migration overwrites a decision', seedProblems('fake', fakeLater.replace('on conflict (city_id, from_norm) do nothing;', 'on conflict (city_id, from_norm) do update set to_norm = excluded.to_norm;').replace('منفوحة الجديدة', 'العزيزية الجديدة')).length > 0);
+
+// The permanent rule (owner 2026-10-25): «X الجديد / X الجديدة» is X, but only when X is in our list for that city and
+// the "new" name is not itself a district in our list.
+const ruleFile = readdirSync(dir).filter((f) => /^\d{14}_district_new_suffix_permanent_rule\.sql$/.test(f)).sort().at(-1);
+function ruleProblems(s: string): string[] {
+  const fail: string[] = [];
+  const fn = s.match(/CREATE OR REPLACE FUNCTION public\.loc_display_district_ar\([\s\S]*?\$function\$;/)?.[0] ?? '';
+  if (!fn) { fail.push('the permanent rule does not redefine loc_display_district_ar'); return fail; }
+  if (!/select a\.to_norm from public\.loc_district_alias a\s+where a\.city_id = p_city_id and a\.from_norm = norm_district_tok\(p_raw\)/.test(fn)) fail.push('the spelling memory is no longer consulted first');
+  if (!/norm_district_tok\(p_raw\) ~ '\\s\+\(ال\)\?جديد\[ه\]\?\$'/.test(fn)) fail.push('the «الجديد / الجديدة» arm is gone');
+  if (!/from public\.loc_catalog_district b[\s\S]*?b\.city_id = p_city_id[\s\S]*?b\.district_norm = regexp_replace\(norm_district_tok\(p_raw\)/.test(fn)) fail.push('the base district is no longer required to be in our list for this city');
+  if (!/and not exists \(select 1 from public\.loc_catalog_district f\s+where f\.city_id = p_city_id and f\.district_norm = norm_district_tok\(p_raw\)\)/.test(fn)) fail.push('a "new" district that is its own district in our list would be folded («منفوحة الجديدة»)');
+  if (!/,\s*p_raw\)\s+from \(select norm_district_tok\(p_raw\) as own,/.test(fn)) fail.push('an unknown name is no longer shown as the source wrote it');
+  if (!/where t\.key <> t\.own and c\.city_id = p_city_id and c\.district_norm = t\.key/.test(fn)) fail.push('our list\'s own name may now replace names that were never folded');
+  if (!/منفوحة الجديدة folded although our list has it as its own district/.test(s)) fail.push('the apply-time proof for «منفوحة الجديدة» is gone');
+  if (!/الشامية الجديد changed although it is an official name/.test(s)) fail.push('the apply-time proof for official «… الجديد» names is gone');
+  return fail;
+}
+if (!ruleFile) { check('migration *_district_new_suffix_permanent_rule.sql exists', false); }
+else {
+  const rs = readFileSync(join(dir, ruleFile), 'utf8');
+  const lr = ruleProblems(rs);
+  check(`committed migration ${ruleFile} holds the permanent «الجديد» rule`, lr.length === 0, lr.join('; '));
+  const ruleMutants: Array<[string, (s: string) => string]> = [
+    ['separate «new» districts folded too', (s) => s.replace(/\n\s*and not exists \(select 1 from public\.loc_catalog_district f\s+where f\.city_id = p_city_id and f\.district_norm = norm_district_tok\(p_raw\)\)/, '')],
+    ['base no longer checked against our list', (s) => s.replace('from public.loc_catalog_district b', 'from public.loc_display_district_canon b')],
+    ['rule applied across cities', (s) => s.replace('and b.city_id = p_city_id', '')],
+    ['spelling memory dropped', (s) => s.replace(/\(select a\.to_norm from public\.loc_district_alias a\s+where a\.city_id = p_city_id and a\.from_norm = norm_district_tok\(p_raw\)\),/, '')],
+    ['«منفوحة الجديدة» proof removed', (s) => s.replace(/\n  if public\.loc_display_district_ar\(3, 'حي منفوحة الجديدة'\)[\s\S]*?end if;/, '')],
+    ['catalog name replaces names that were never folded', (s) => s.replace('where t.key <> t.own and c.city_id', 'where c.city_id')],
+  ];
+  for (const [label, mutate] of ruleMutants) {
+    const m = mutate(rs);
+    mustCatch(`rule: ${label}`, m !== rs && ruleProblems(m).length > 0, m === rs ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+  }
+}
 
 console.log(failed === 0 ? 'OK: one district has one search identity; only owner-approved spellings fold' : `${failed} check(s) failed`);
 process.exit(failed === 0 ? 0 : 1);
