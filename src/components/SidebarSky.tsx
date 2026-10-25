@@ -7,6 +7,18 @@ import { skyScene } from '@/theme/skyScene';
 import CloudWisp from './CloudWisp';
 
 const EAGLE = require('../../assets/images/eagle-mark.png');
+// Signed-in users see the cloud eagle lit with green string lights (owner 2026-10-24: «when user logs in signs up it
+// changes», «green light … like Christmas»). Two bulb sets twinkle in turns.
+const LIGHTS_A = require('../../assets/images/eagle-lights-a.png');
+const LIGHTS_B = require('../../assets/images/eagle-lights-b.png');
+const twinkle = (delayMs: number) => ({
+  animationName: { from: { opacity: 0.2 }, to: { opacity: 1 } },
+  animationDuration: 1300,
+  animationDelay: delayMs,
+  animationIterationCount: 'infinite',
+  animationDirection: 'alternate',
+  animationTimingFunction: 'ease-in-out',
+} as const);
 const eagleDrift = {
   from: { transform: [{ translateX: -skyScene.eagleDriftPx }] },
   to: { transform: [{ translateX: skyScene.eagleDriftPx }] },
@@ -50,8 +62,9 @@ export function SidebarClouds() {
   </View>;
 }
 
-/** Original eagle artwork, with a small cloud pass below its eye. The adjacent wordmark labels it. */
-export function SkyEagleMark() {
+/** The cloud-eagle logo on the sky tile, with a small cloud pass below its eye. `lit` = signed in: green string
+ *  lights twinkle along it. The adjacent wordmark labels it. */
+export function SkyEagleMark({ lit = false }: { lit?: boolean }) {
   const pal = useThemePalette();
   const reduced = useReducedMotion();
   return <View testID="sidebar-sky-eagle" pointerEvents="none" accessible={false}
@@ -59,6 +72,16 @@ export function SkyEagleMark() {
     style={[styles.eagleTile, { borderColor: pal.line }]}>
     <LinearGradient colors={[pal.skyTop, pal.skyBottom]} style={StyleSheet.absoluteFill} />
     <Image source={EAGLE} resizeMode="contain" accessible={false} style={styles.eagle} />
+    {lit ? (
+      <View testID="sidebar-sky-eagle-lights" style={styles.lights}>
+        <Animated.View style={[StyleSheet.absoluteFill, !reduced && twinkle(0)]}>
+          <Image source={LIGHTS_A} resizeMode="contain" accessible={false} style={styles.eagle} />
+        </Animated.View>
+        <Animated.View style={[StyleSheet.absoluteFill, !reduced && twinkle(650)]}>
+          <Image source={LIGHTS_B} resizeMode="contain" accessible={false} style={styles.eagle} />
+        </Animated.View>
+      </View>
+    ) : null}
     <Animated.View style={[StyleSheet.absoluteFill,
       !reduced && { ...motion, animationName: eagleDrift }]}>
       <CloudWisp width={65} height={24} opacity={0.62} style={styles.eagleCloud} />
@@ -71,7 +94,8 @@ const styles = StyleSheet.create({
   clip: { overflow: 'hidden' },
   eagleTile: { width: 44, height: 44, flexShrink: 0, borderRadius: 13, borderWidth: 1,
     overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
-  eagle: { width: 36, height: 35 },
+  eagle: { width: 38, height: 38 },
+  lights: { position: 'absolute', width: 38, height: 38 },
   eagleCloud: { bottom: -3, left: -12 },
   eagleTopCloud: { top: -6, right: -12 },
 });

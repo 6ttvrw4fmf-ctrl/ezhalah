@@ -62,7 +62,7 @@ const ABOUT_MAX_W = 760;
 const LEGAL_MAX_W = 640;
 const ABOUT_MAX_H = 700;
 
-const EAGLE = require('../../assets/images/eagle-mark.png');
+const EAGLE = require('../../assets/images/eagle-mark-lit.png'); // About/Terms always show the green-lit cloud eagle (owner 2026-10-24)
 type Kind = 'support' | 'about' | 'legal';
 
 // In-app popup that hosts the Support / About / Terms & Privacy content as a centered dialog over a
