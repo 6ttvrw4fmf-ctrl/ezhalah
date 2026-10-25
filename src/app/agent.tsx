@@ -101,6 +101,7 @@ import { SHARE_LINK, shareNative, shareLead, liveSiteCount } from '@/lib/share';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
+import { warmPlatformLogos } from '@/lib/warmPlatformLogos';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
 import { createSharedChat } from '@/lib/sharedChat';
 import { firstChildLeftRow, useDocumentRtl } from '@/lib/useDocumentRtl';
@@ -873,6 +874,8 @@ export default function Agent() {
   // COMPOSER_EASE). Same calm register as ModeSwitch's raised indicator: a state change you feel
   // more than notice.
   const [composerFocused, setComposerFocused] = useState(false);
+  // Touching the search box also starts the logo warm-up (free if the idle one already did): the visitor is about to press «بحث» (lib/warmPlatformLogos.ts).
+  useEffect(() => { if (composerFocused) warmPlatformLogos(); }, [composerFocused]);
   // Send button feel — the ModeSwitch/share spring constants, so the whole surface shares one
   // motion language. Hover (web) swells to 1.06; press dips to 0.9.
   const sendScale = useRef(new Animated.Value(1)).current;
