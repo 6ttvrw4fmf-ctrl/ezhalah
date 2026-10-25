@@ -372,6 +372,21 @@ dealapp 883 · sanadak 816 · aqarmonthly 753 · eaqartabuk 516 · aqargate 241 
   `verify-pin-district-fill-contract.ts` fails any migration that flips `applied` before then.
 - Undo = `applied = false` and delete the `basis = 'pin'` rows of `district_recovery` in one transaction.
 
+### 🛡 District guards — enforced by the database (owner 2026-10-25, migration `20261025203753`)
+- **Order (owner):** the site's own district always wins → Apple Maps (free) → Google Maps only when Apple has no
+  answer → otherwise city only. Every map answer is labelled «تقريبي».
+- **The list never loses a district:** `DELETE` and `TRUNCATE` on `loc_catalog_district` are refused
+  (`trg_zz_district_list_guard`, `trg_zz_district_list_no_truncate`), even when a district has 0 ads.
+- **No junk names:** a new or renamed list name can't be a number, a plan «مخطط», a base «قاعدة», a street «شارع»,
+  a road «طريق», villages «قرى» or one letter. The 15 such names already on the list stay; they are just never added again.
+- **No spelling twins:** a new or renamed name that `district_twin_check()` calls a `twin` of a name on that city's list is
+  refused. An owner-approved exception sets `ezhalah.district_guard_ok` for that one statement.
+- **A map answer never adds a name:** a `listing_pin_district` row must match a name already on that city's list (after
+  the spelling memory and the «الجديد» rule) and is stored in the list's own spelling (`trg_pin_district_on_list`).
+  A real new district goes onto the list first, through the guards above.
+- **Alarm:** `mon_detect_district_guards_missing()` (P1, rostered) fires if any of the three triggers is dropped or
+  disabled. Barrier: `scripts/verify-district-guards.ts`.
+
 ### ⏳ Pending (optional, ready when wanted)
 - **Grow the district map** — convert more of the ~33k English‑district listings to Arabic districts (same
   confident‑match method, run wider) so more listings carry an Arabic district.
