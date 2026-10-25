@@ -39,6 +39,28 @@ const ATTEMPTS = 3;                 // the speed check passes if any attempt doe
 let failed = 0;
 const check = (label, ok, detail = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail && !ok ? `\n        ${detail}` : ''}`); };
 
+// ── the verdicts, pure — so the robot can PROVE it would fail before it ever opens a browser ──────
+const restOk = (running) => running <= MAX_LIVE_AT_REST;
+const scrollingOk = (running) => running <= MAX_LIVE_WHILE_SCROLLING;
+const glintsBackOk = (running) => running >= MIN_LIVE_AFTER_STOP;
+const speedVerdict = (shipped, floor) => ({
+  ok50: shipped.p50 <= Math.max(MAX_P50_FLOOR_MS, MAX_P50_RATIO * floor.p50),
+  ok95: shipped.p95 <= Math.max(MAX_P95_FLOOR_MS, MAX_P95_RATIO * floor.p95),
+});
+// SELF-PROOF. A robot nobody has watched fail is a comment that runs. These are the numbers the OLD build produced on
+// 2026-10-24 (production build, Chromium 1440×900): each predicate must reject them, and accept the fixed build's.
+const mustCatch = (label, caught) => check(`MUTATION — ${label}`, caught);
+mustCatch('1,509 animations running on a 500-card list at rest (the old build) is rejected', !restOk(1509));
+mustCatch('1,509 animations still running mid-scroll (the old build) is rejected', !scrollingOk(1509));
+mustCatch('the glints never coming back after a scroll (a «fix» that deletes the shine) is rejected', !glintsBackOk(0));
+mustCatch('the old build\'s 500-card scroll (median 50 ms / p95 133 ms vs 17 / 35 with animations off) is rejected',
+  !speedVerdict({ p50: 50, p95: 133 }, { p50: 17, p95: 35 }).ok50 && !speedVerdict({ p50: 50, p95: 133 }, { p50: 17, p95: 35 }).ok95);
+mustCatch('the old build\'s 12-card scroll (median 35 ms / p95 101 ms vs 17 / 35) is rejected on its median', !speedVerdict({ p50: 35, p95: 101 }, { p50: 17, p95: 35 }).ok50);
+check('…and the fixed build\'s numbers are accepted (the predicates are not simply always-false)',
+  restOk(30) && scrollingOk(0) && glintsBackOk(36) && speedVerdict({ p50: 17, p95: 35 }, { p50: 17, p95: 35 }).ok50 && speedVerdict({ p50: 17, p95: 35 }, { p50: 17, p95: 35 }).ok95);
+check('…and a slow CI runner is accepted when BOTH runs slow down together (the ratio is what is judged)',
+  speedVerdict({ p50: 33, p95: 60 }, { p50: 33, p95: 55 }).ok50 && speedVerdict({ p50: 33, p95: 60 }, { p50: 33, p95: 55 }).ok95);
+
 if (!existsSync(join(DIST, 'index.html'))) { console.error(`FAIL  ${DIST}index.html missing — build first: npx expo export --platform web`); process.exit(1); }
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.webp': 'image/webp' };
 const server = createServer(async (req, res) => {
@@ -79,7 +101,14 @@ try {
   check('the Riyadh search landed (without cards there is nothing to measure — unknown is never a pass)', false, 'no result count after 90 s');
   await done(1);
 }
-await page.waitForTimeout(9000);
+// The cards themselves are the signal that the search beat is over — never a blind sleep.
+try {
+  await page.waitForFunction(() => { const g = document.querySelectorAll('[data-testid="result-card-grid"]'); return g.length > 0 && g[g.length - 1].children.length >= 6; }, null, { timeout: 90000 });
+} catch {
+  check('the result cards appeared', false, 'fewer than 6 cards 90 s after the count');
+  await done(1);
+}
+await page.waitForTimeout(2500);
 
 const gridCount = () => page.evaluate(() => { const g = document.querySelectorAll('[data-testid="result-card-grid"]'); return g.length ? g[g.length - 1].children.length : 0; });
 const scroller = `(() => [...document.querySelectorAll('div')].filter((d) => d.scrollHeight > d.clientHeight + 500 && /(auto|scroll)/.test(getComputedStyle(d).overflowY)).sort((a, b) => b.scrollHeight - a.scrollHeight)[0])()`;
@@ -120,14 +149,14 @@ async function structureAt(stage, cards) {
   await page.evaluate(`(() => { const s = ${scroller}; if (s) s.scrollTop = Math.min(2000, s.scrollHeight / 3); })()`);
   await page.waitForTimeout(1500);
   const rest = await live();
-  check(`${stage}: at rest, no more than ${MAX_LIVE_AT_REST} never-ending animations are running (${cards} cards)`, rest.running <= MAX_LIVE_AT_REST, `running ${rest.running}`);
+  check(`${stage}: at rest, no more than ${MAX_LIVE_AT_REST} never-ending animations are running (${cards} cards)`, restOk(rest.running), `running ${rest.running}`);
   await page.mouse.move(720, 450);
   for (let i = 0; i < 14; i++) { await page.mouse.wheel(0, 90); await page.waitForTimeout(14); }
   const during = await live();
-  check(`${stage}: while scrolling, the decoration does not run (≤ ${MAX_LIVE_WHILE_SCROLLING} running, the rest paused or removed)`, during.running <= MAX_LIVE_WHILE_SCROLLING, `running ${during.running}, paused ${during.paused}`);
+  check(`${stage}: while scrolling, the decoration does not run (≤ ${MAX_LIVE_WHILE_SCROLLING} running, the rest paused or removed)`, scrollingOk(during.running), `running ${during.running}, paused ${during.paused}`);
   await page.waitForTimeout(900);
   const after = await live();
-  check(`${stage}: once scrolling stops the glints are back (≥ ${MIN_LIVE_AFTER_STOP} running — the shine is a feature)`, after.running >= MIN_LIVE_AFTER_STOP, `running ${after.running}`);
+  check(`${stage}: once scrolling stops the glints are back (≥ ${MIN_LIVE_AFTER_STOP} running — the shine is a feature)`, glintsBackOk(after.running), `running ${after.running}`);
   console.log(`      ${stage}: at rest ${rest.running} · scrolling ${during.running} (+${during.paused} paused) · after stop ${after.running}`);
 }
 const page1 = await gridCount();
@@ -148,8 +177,7 @@ for (let attempt = 1; attempt <= ATTEMPTS && !(verdict && verdict.ok); attempt++
   await setFloor(false); const shipped = await measureScroll();
   await setFloor(true); const floor = await measureScroll();
   await setFloor(false);
-  const ok50 = shipped.p50 <= Math.max(MAX_P50_FLOOR_MS, MAX_P50_RATIO * floor.p50);
-  const ok95 = shipped.p95 <= Math.max(MAX_P95_FLOOR_MS, MAX_P95_RATIO * floor.p95);
+  const { ok50, ok95 } = speedVerdict(shipped, floor);
   verdict = { ok: ok50 && ok95, shipped, floor, ok50, ok95 };
   console.log(`      attempt ${attempt} (${cards} cards): as shipped p50 ${shipped.p50} ms · p95 ${shipped.p95} ms · >100 ms frames ${shipped.over100}   |   animations off p50 ${floor.p50} ms · p95 ${floor.p95} ms · >100 ms frames ${floor.over100}`);
 }
