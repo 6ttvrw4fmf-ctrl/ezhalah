@@ -139,7 +139,7 @@ def test_check_mark_bullets_are_separate_statements():
     d = "تفاصيل الشقة: ✔️ 3 غرف نوم ✔️ صالة ✔️ لا يوجد مصعد ✔️ مطبخ راكب"
     out = description_amenities(d)
     assert out.get("kitchen") is True
-    assert "elevator" not in out, "prose says yes or nothing — «لا يوجد مصعد» is never stored as no"
+    assert out.get("elevator") is False, "«لا يوجد مصعد» is a stated no (owner 2026-10-24), its own bullet"
 
 
 def test_neighbourhood_is_not_the_unit_and_silence_is_nothing():

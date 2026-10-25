@@ -174,7 +174,7 @@ def card_amenities(body: str) -> dict[str, bool]:
 def description_amenities(description: Optional[str]) -> dict[str, bool]:
     if not description:
         return {}
-    return N.prose_amenities_yes(_BULLETS.sub("\n", description))
+    return N.prose_amenities(_BULLETS.sub("\n", description))
 
 
 def _jsonld_listing(page: str) -> dict:

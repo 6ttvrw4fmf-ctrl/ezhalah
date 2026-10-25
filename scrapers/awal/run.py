@@ -612,8 +612,8 @@ _PROSE_COLS = ("elevator", "parking", "kitchen", "air_conditioner", "maid_room",
 
 
 def prose_answers(content_html: Optional[str]) -> dict[str, bool]:
-    yes = normalize.prose_amenities_yes(normalize.html_block_lines(content_html))
-    return {c: True for c in _PROSE_COLS if yes.get(c)}
+    said = normalize.prose_amenities(normalize.html_block_lines(content_html))
+    return {c: v for c, v in said.items() if c in _PROSE_COLS}
 
 
 def _pin_sold_inactive(table: str, ad_numbers: list[str],

@@ -279,7 +279,7 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
         "description": p["description"],
         # amenities the ad's own words state, yes-only (no structured amenity field on Haraj); the
         # licence's «خدمات العقار» list wins for the four services it carries.
-        **N.prose_amenities_yes(f"{title}\n{free_text}", skip=tuple(services)),
+        **N.prose_amenities(f"{title}\n{free_text}", skip=tuple(services)),
         **services,
         "property_type": ptype,
         "transaction_type": "Rent" if p["deal"] == "Rent" else "Buy",   # deal is validated above

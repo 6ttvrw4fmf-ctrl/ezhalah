@@ -218,7 +218,7 @@ def map_detail(d: dict[str, Any], today: Any = None) -> tuple[Optional[dict], st
         # The office publishes no amenity field: the ad's own description is the only statement of
         # kitchen / lift / parking / maid room — yes or nothing (🔬 AF engineer 2026-10-08: 29 of 122
         # descriptions named a kitchen, 0 stored; shomou 0 of 4 findable on ops_af_score).
-        **N.prose_amenities_yes(description),
+        **N.prose_amenities(description),
         "electricity": True if "كهرباء" in services else None,
         "water_supply": True if re.search(r"ماء|مياه", services) else None,
         "property_type": ptype,

@@ -35,10 +35,10 @@ def test_rawasidark_states_kitchen_yes():
     assert row["kitchen"] is True
 
 
-def test_rawasidark_silence_and_stated_no_stay_unknown():
+def test_rawasidark_silence_is_unknown_and_a_stated_no_is_no():
     row, _cat = map_object(_raw("عمارة على شارعين\nبدون مصعد"))
     assert "kitchen" not in row               # silence → NULL
-    assert "elevator" not in row              # prose never writes «no»
+    assert row["elevator"] is False           # «بدون مصعد» is a stated no (owner 2026-10-24)
 
 
 def _alkhaas_page(text: str) -> str:
