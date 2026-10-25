@@ -117,8 +117,9 @@ export function directionVariantsFrom(observed: Iterable<string>): Record<string
 
 /** The «Raw Land» filter token; matched against the index's unit_subtype_ar TAG, not type_ar. */
 export const RAW_LAND_TAG = 'أرض خام';
-/** Tables whose stored age 10 is the source's OPEN bucket «أكثر من 10 سنوات» (read live on aqar 2026-10-25). */
-export const AGE_OPEN_10_TABLES = ['aqar_residential_listings', 'aqar_commercial_listings'] as const;
+/** Platforms whose stored age 10 includes the source's OPEN bucket («أكثر من 10 سنوات», «10+ years», REGA
+ *  «Ten Year»), each read on its own published field 2026-10-25 (migrations 20261025065509, 20261025072931). */
+export const AGE_OPEN_10_PLATFORMS = ['aqar', 'aqarcity', 'haraj', 'muhaysini', 'reinvest', 'tuba', 'wasalt'] as const;
 
 export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string; unhandled: string[] } {
   const parts = ['production_ready=is.true'];
@@ -642,11 +643,11 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       case 'p_has_license': parts.push(v === true ? 'license_number=not.is.null' : 'license_number=is.null&license_number=not.is.null'); break;
       case 'p_furnished': parts.push(`furnished=is.${v}`); break;
       case 'p_age_min': parts.push(`property_age=gte.${v}`); break;
-      // An upper bound never admits an OPEN bucket. aqar renders «أكثر من 10 سنوات» for every age above
-      // 10 and we store its floor 10, so an aqar 10+ has no upper end (migration 20261025065509).
+      // An upper bound never admits an OPEN bucket: on these platforms «more than 10» is stored as its
+      // floor 10, so a 10 there has no upper end (AGE_OPEN_10_PLATFORMS).
       case 'p_age_max':
         parts.push(`property_age=lte.${v}`);
-        if (Number(v) >= 10) orGroups.push(`property_age.lt.10,source_table.not.in.(${AGE_OPEN_10_TABLES.join(',')})`);
+        if (Number(v) >= 10) orGroups.push(`property_age.lt.10,platform.not.in.(${AGE_OPEN_10_PLATFORMS.join(',')})`);
         break;
       case 'p_street_width_min': parts.push(`street_width_m=gte.${v}`); break;
       case 'p_street_width_max': parts.push(`street_width_m=lte.${v}`); break;
