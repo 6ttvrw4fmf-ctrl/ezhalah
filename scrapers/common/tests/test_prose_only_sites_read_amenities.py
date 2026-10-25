@@ -88,6 +88,20 @@ def test_sirdab_reads_its_ad_text(monkeypatch):
     assert "elevator" not in row                           # silence → NULL
 
 
+def test_sirdab_reads_a_stated_no(monkeypatch):
+    """«مفروشة: لا» is a NO on sirdab too (2026-10-25): a yes-only reader can never take a yes back, so 4 ads stayed
+    furnished = yes once the shared reader stopped calling the labelled «لا» a yes. Silence still stays NULL."""
+    from scrapers.sirdab import run as R
+    from scrapers.sirdab.run import map_ad
+    monkeypatch.setattr(R, "to_catalog", lambda c, region_hint=None: (None, None))
+    monkeypatch.setattr(R, "find_district_in_text", lambda t, cid: None)
+    out, _why = map_ad(_sirdab_ad("مستودع مع مواقف سيارات - مفروشة: لا"))
+    assert out is not None
+    row, _cat = out
+    assert row["furnished"] is False and row["parking"] is True
+    assert "elevator" not in row
+
+
 def test_remal_reads_its_post_text(monkeypatch):
     """remal's post has no meta / taxonomy for amenities; the post text is the only statement of them."""
     from scrapers.remal import run as RM
