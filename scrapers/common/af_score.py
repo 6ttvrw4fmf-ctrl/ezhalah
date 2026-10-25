@@ -655,6 +655,12 @@ def is_sanadak(url: str) -> bool:
     return "sanadak.sa" in url
 
 
+# The tag that makes the handshake visible (backlog 817, 2026-10-25). Supabase's API logs keep x-client-info but not
+# x-ezhalah-gate, and custom headers REPLACE supabase-py's defaults, so without it every gated call read as a bare-key
+# call (x_client_info = '') in the owner's edge_logs count. Same tag scripts/lib/gateFetch.mjs appends for node robots.
+GATE_TAG = {"X-Client-Info": "supabase-py ezhalah-gate"}
+
+
 def anon_client():
     """The customer's path: the public anon key, never the service key (trap 10)."""
     from supabase import create_client
@@ -670,7 +676,7 @@ def anon_client():
             from supabase.lib.client_options import SyncClientOptions as _Options
         except ImportError:  # older supabase-py
             from supabase.lib.client_options import ClientOptions as _Options
-        return create_client(url, key, options=_Options(headers={"x-ezhalah-gate": gate}))
+        return create_client(url, key, options=_Options(headers={"x-ezhalah-gate": gate} | GATE_TAG))
     return create_client(url, key)
 
 
