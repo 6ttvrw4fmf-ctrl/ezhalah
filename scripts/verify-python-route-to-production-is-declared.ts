@@ -127,6 +127,9 @@ const DECLARED: Record<string, Verdict> = {
   'verify-liveness-registry-describes-real-evidence.ts': 'offline-safe',
   'verify-liveness-registry-mirror.ts': 'offline-safe',
   'verify-mustqr-absence-cannot-deactivate.ts': 'offline-safe',
+  // 2026-10-25: normal=0, SUPABASE_URL blackholed=0. Its python harness imports only scrapers.haraj.parse (pure string
+  // parsing; scrapers.common.db is never loaded — checked via sys.modules) to run age_of on a fixed vocabulary.
+  'verify-open-age-bucket-never-answers-up-to.ts': 'offline-safe',
   'verify-prune-without-oracle-is-declared.ts': 'offline-safe',
   'verify-raghdan-absence-cannot-deactivate.ts': 'offline-safe',  // re-measured in a clean venv (first run was red on a broken interpreter)
   'verify-raghdan-description-is-the-brokers-text.ts': 'offline-safe',  // 2026-10-25: normal=0, SUPABASE_URL blackholed=0; pure map_listing over a page string, no client is ever built
