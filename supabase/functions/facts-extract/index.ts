@@ -70,9 +70,16 @@ function sameSecret(a: string, b: string): boolean {
 // keys (legacy JWT vs. the newer secret format), and the pilot's first call read 401 for exactly that
 // reason (2026-10-25). listing_facts_runs has RLS on, no policies, and anon/authenticated revoked, so
 // only a service-role key reads it (200); a publishable/anon key is refused by Postgres (401/403).
-// FAIL CLOSED: any error, timeout or non-2xx is "not service role".
-async function callerIsServiceRole(key: string): Promise<boolean> {
-  if (!key || !SUPABASE_URL) return false;
+// Three answers, never two: "yes" (200), "no" (the database refused: 401/403) and "unknown" (unreachable,
+// timeout, 5xx) — the first full run died at ad 3,776 when one PostgREST hiccup was read as "no" and
+// returned 401 (2026-10-25). "unknown" still never reaches the model (fail closed); it is reported as 503
+// so the caller retries instead of stopping. A "yes" is remembered for 10 minutes per key, in this
+// isolate's memory only, so one flaky read cannot refuse a caller the database just approved.
+const AUTH_OK_UNTIL = new Map<string, number>();
+const AUTH_CACHE_MS = 10 * 60_000;
+async function callerIsServiceRole(key: string): Promise<"yes" | "no" | "unknown"> {
+  if (!key || !SUPABASE_URL) return "no";
+  if ((AUTH_OK_UNTIL.get(key) ?? 0) > Date.now()) return "yes";
   try {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), GATE_TIMEOUT_MS);
@@ -81,9 +88,13 @@ async function callerIsServiceRole(key: string): Promise<boolean> {
       signal: ac.signal,
     }).finally(() => clearTimeout(timer));
     await r.body?.cancel().catch(() => {});
-    return r.ok;
+    if (r.ok) {
+      AUTH_OK_UNTIL.set(key, Date.now() + AUTH_CACHE_MS);
+      return "yes";
+    }
+    return r.status === 401 || r.status === 403 ? "no" : "unknown";
   } catch {
-    return false;
+    return "unknown";
   }
 }
 
@@ -114,8 +125,10 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
   const auth = req.headers.get("authorization") ?? "";
   const callerKey = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  if (!sameSecret(callerKey, SERVICE_KEY) && !(await callerIsServiceRole(callerKey))) {
-    return json({ error: "unauthorized" }, 401);
+  if (!sameSecret(callerKey, SERVICE_KEY)) {
+    const verdict = await callerIsServiceRole(callerKey);
+    if (verdict === "no") return json({ error: "unauthorized" }, 401);
+    if (verdict === "unknown") return json({ error: "auth check unavailable, retry" }, 503);
   }
   if (!DEEPSEEK_API_KEY) return json({ error: "model key not configured" }, 503);
 

@@ -364,6 +364,21 @@ def run(args: argparse.Namespace) -> int:
             print(f"  ! {table}: sampling failed: {str(e)[:200]}")
     rng.shuffle(sample)
     print(f"sampled {len(sample)} ads")
+    if args.skip_done:
+        # Resume a stopped run: every ad this run already read has a row (a fact or the `_none` marker).
+        done: set[tuple[str, str]] = set()
+        off = 0
+        while True:
+            page = client.table("listing_facts").select("platform,listing_key").eq("run_id", args.run_id) \
+                .order("id").range(off, off + 999).execute().data or []
+            done.update((r["platform"], r["listing_key"]) for r in page)
+            if len(page) < 1000:
+                break
+            off += 1000
+        before = len(sample)
+        sample = [r for r in sample if (r["_platform"], str(r["ad_number"])) not in done]
+        print(f"--skip-done: {len(done)} (platform, ad) pairs already read in {args.run_id}; "
+              f"{before - len(sample)} skipped, {len(sample)} to go")
 
     tot = Counter()
     usd_total = 0.0
@@ -409,17 +424,21 @@ def run(args: argparse.Namespace) -> int:
                 "cache_miss_tokens": usage.get("cache_miss_tokens"), "completion_tokens": usage.get("completion_tokens"),
                 "usd": round(cost, 8), "http_status": status, "latency_ms": int((time.time() - t0) * 1000),
                 "ads_by_platform": by_platform}
-        if status in (401, 400):
-            log_call({**base, "json_ok": False, "note": f"fatal {status}: {str(resp.get('error'))[:200]}"})
-            raise Stop(f"proxy refused ({status}): {resp.get('error')}")
-        if status == 503:
-            log_call({**base, "json_ok": False, "note": f"gate denied: {str(resp.get('reason') or resp.get('error'))[:200]}"})
-            raise Stop(f"spend gate denied — fail closed: {resp.get('reason') or resp.get('error')}")
+        err = str(resp.get("reason") or resp.get("error") or "")[:200]
+        if status == 400 or (status == 503 and "spend gate" in err):
+            log_call({**base, "json_ok": False, "note": f"fatal {status}: {err}"})
+            raise Stop(f"proxy refused ({status}) — fail closed: {err}")
         if status != 200:
-            log_call({**base, "json_ok": False, "note": f"http {status}: {str(resp.get('error'))[:200]}"})
+            # TRANSIENT, not fatal: the proxy's auth check reads the database with the caller's key and
+            # the spend gate reads it again, so a PostgREST hiccup (schema reload, timeout) surfaces here
+            # as 401/503/502. The first full run died at ad 3,776 on exactly one such 401 (2026-10-25).
+            # Back off 5 s → 20 s → 60 s; a 401 that survives two retries IS a refusal and stops the run.
+            log_call({**base, "json_ok": False, "note": f"http {status}: {err}"})
             tot["call_fail"] += 1
-            if depth == 0:
-                time.sleep(4)
+            if status == 401 and depth >= 2:
+                raise Stop(f"proxy refused (401) three times — stopping: {err}")
+            if depth < 3:
+                time.sleep((5, 20, 60)[depth])
                 return process(batch, depth + 1)
             tot["ads_lost"] += len(batch)
             return
@@ -469,7 +488,17 @@ def run(args: argparse.Namespace) -> int:
                              "model": resp.get("model"), "source_value": source_value(row["fact"], r), **row})
             if ad_id not in parsed:
                 tot["ads_missing_in_reply"] += 1
-        stored = store(rows)
+        # An ad the model read but that yielded no stored fact leaves a `_none` marker row (quote ''), so
+        # "ads seen" is exact per platform (coverage denominator) and --skip-done can resume a stopped run
+        # without re-reading it. The report filters fact <> '_none'.
+        seen_keys = {(r["platform"], r["listing_key"]) for r in rows}
+        for r in batch:
+            if (r["_platform"], str(r["ad_number"])) not in seen_keys:
+                rows.append({"run_id": args.run_id, "platform": r["_platform"], "table_name": r["_table"],
+                             "listing_key": str(r["ad_number"]), "listing_url": r.get("listing_url"),
+                             "model": resp.get("model"), "fact": "_none", "value_bool": True, "value_num": None,
+                             "value_text": None, "quote": "", "source_value": None})
+        stored = store(rows) - sum(1 for r in rows if r["fact"] == "_none")   # facts stored, markers excluded
         tot["ads"] += len(batch)
         tot["facts_returned"] += returned
         tot["stored"] += stored
@@ -580,6 +609,7 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=20261024)
     ap.add_argument("--max-calls", type=int, default=HARD_MAX_CALLS)
     ap.add_argument("--max-usd", type=float, default=HARD_MAX_USD)
+    ap.add_argument("--skip-done", action="store_true", help="resume: skip ads this run_id already read")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
     if args.selftest:
