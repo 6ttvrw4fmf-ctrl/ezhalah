@@ -1092,6 +1092,7 @@ def _inside_a_name(t: str, start: int, tok: str) -> bool:
 def _amenities_in_clause(raw: str) -> dict[str, bool]:
     t = _norm_ar(raw).lower()
     out: dict[str, bool] = {}
+    settled: set[str] = set()   # a label answered «unknown»: no other spelling of the fact may answer instead
     for col, tokens in _AMENITY_TOKENS.items():
         for tok in tokens:
             k = _norm_ar(tok).lower()
@@ -1120,6 +1121,7 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
                 if lab:
                     v = t[lab.end():]
                     if _LABEL_NO_DETAILS_RE.match(v):
+                        settled.add(col)
                         break      # «المطبخ: لا توجد تفاصيل» — no details is not «no kitchen»: NULL
                     if _LABEL_NO_RE.match(v):
                         out[col] = False
@@ -1127,12 +1129,17 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
                     if any(_norm_ar(x).lower() in v for x in tokens):
                         if (said := _amenities_in_clause(v).get(col)) is not None:
                             out[col] = said    # the value restates the fact: the restatement is the answer
+                        settled.add(col)
                         break
                     if (_LABEL_UNSPECIFIED_RE if lab.group("co") else _LABEL_UNSAID_RE).match(v):
-                        break      # «غير محدد» — the label was answered with nothing: NULL
+                        # «غير محدد» — the label was answered with nothing: NULL. SETTLED, or the next spelling
+                        # («المطبخ» after «مطبخ») starts 2 letters earlier and its 12-letter window reads the «بدون» of
+                        # «التكييف: بدون مكيفات المطبخ: غير راكب» as kitchen = no (dwelleo 13130133, 2026-10-25).
+                        settled.add(col)
+                        break
                 out[col] = not negated
                 break
-            if col in out:
+            if col in out or col in settled:
                 break
     return out
 

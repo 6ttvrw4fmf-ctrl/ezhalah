@@ -40,6 +40,8 @@ const CASES: [string, string, boolean | null][] = [
   ['حالة عدم المفروشات تتيح حرية كاملة في تصميم', 'furnished', false],
   ['غير مناسب لكبار السن لعدم وجود مصعد', 'elevator', false],
   ['قريب من عدم وجود مصعد', 'elevator', null],
+  // a label answered «unknown» settles the fact: the next spelling («المطبخ») must not read the «بدون» of «مكيفات»
+  ['الدور: الثاني التكييف: بدون مكيفات المطبخ: غير راكب الإيجار: 42', 'kitchen', null],
 ];
 const answers = (src?: string) =>
   (pyCall(ROOT, MOD, 'amenities_from_text', CASES.map(([p]) => [p]), src) as Record<string, boolean>[])
@@ -67,6 +69,8 @@ const m5 = mutant('(?:\\s+(?:ال|لل|ل)?(?:سيار|مركب)\\w*)?(?P<co>', 
 mustCatch('«موقف سيارات ومساحة خارجية: غير موضحة» read as parking = yes again', m5 !== null && !allRight(m5));
 const m6 = mutant('(?P<co>\\s+و\\w+(?:\\s+(?!ملاحظ)\\w+)?)?', '(?P<co>(?:\\s+\\w+){1,3})?');
 mustCatch('a label widened to any words («مطبخ ملاحظة: بدون مصعد» → no kitchen)', m6 !== null && !allRight(m6));
+const m7 = mutant('            if col in out or col in settled:', '            if col in out:');
+mustCatch('a settled «unknown» label overridden by the next spelling (kitchen = no from «بدون مكيفات»)', m7 !== null && !allRight(m7));
 
 if (failed) { console.error(`\n❌ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✅ a labelled «لا» is a NO');
