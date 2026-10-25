@@ -40,6 +40,8 @@ on:
       - 'package-lock.json'
       - 'scripts/verify-web-runtime-smoke.mjs'
       - 'scripts/verify-web-scroll-smooth.mjs'
+      - 'scripts/verify-web-chat-typing-smooth.mjs'
+      - 'scripts/lib/fakeSignedInSession.mjs'
   workflow_dispatch:
   # SCHEDULED 2026-09-04. This is the richest browser suite in the repo — journeys A-J0 over both
   # viewports, ~52 product assertions — and it had no schedule at all: it ran only on a PR or push
@@ -112,6 +114,14 @@ jobs:
       # header of the script and src/lib/scrollCalm.ts. One search + two taps of «عرض المزيد» (no extra network).
       - name: Scroll smoothness on a laptop (the live-animation budget, measured)
         run: node scripts/verify-web-scroll-smooth.mjs
+
+      # THE TYPING ROBOT (owner 2026-10-25: typing in a saved chat «sometimes takes time and shows a glitch» — «build a
+      # check for that»). Only a signed-in person has saved chats and no robot can sign in for real, so it gets a FAKE
+      # signed-in session (scripts/lib/fakeSignedInSession.mjs: no real account, a fake in-memory chat store), makes a real
+      # 500-card chat, reloads, reopens it from the sidebar and types: page-code time against an empty chat (best of 4),
+      # nothing dropped, no jump, and the reopened page knows its own height. Same build, same Chromium; one more search.
+      - name: Typing and reopening a big saved chat, signed in (measured)
+        run: node scripts/verify-web-chat-typing-smooth.mjs
 
       # Now that this runs unattended on a schedule, a red run has to reach a human. One open P1 per
       # workflow file, self-healing on the next green run. `always()` so a failing run still gets here.

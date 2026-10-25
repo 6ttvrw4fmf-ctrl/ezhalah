@@ -135,6 +135,9 @@ function anyGuidedEligible(q: SearchQuery): boolean {
 }
 
 const IS_WEB = Platform.OS === 'web';
+/** The height a not-yet-rendered card is assumed to have (content-visibility placeholder), per layout — see cardInMotion. */
+const STILL_CARD_HEIGHT = (cols: 2 | 3 | undefined, row: 'roomy' | 'tight' | undefined): number =>
+  cols === 3 ? 400 : cols === 2 ? 440 : row ? 148 : 370;
 // ChatGPT's own font list (system UI face), with the platform Arabic faces named so Arabic renders in
 // the system's modern Arabic type instead of a browser fallback. Native keeps the platform default.
 const CHAT_FONT = IS_WEB ? 'ui-sans-serif, -apple-system, system-ui, "Segoe UI", "SF Arabic", "Noto Sans Arabic", Helvetica, Arial, sans-serif' : undefined;
@@ -2014,8 +2017,12 @@ export default function Agent() {
   const liveTurnsRef = useRef(new Set<string>());
   const cardInMotion = (mid: string, i: number) => {
     const w = cascadeWindowRef.current[mid];
-    // A still card's placeholder height until it nears the screen: the median phone card / laptop row.
-    const still = { stillHeight: cardRow ? 140 : 340 };
+    // A still card's placeholder height until it nears the screen — the card's REAL height in the layout on screen, or the
+    // page believes a reopened 500-card chat is a third of its height and jumps as the cards fill in (owner 2026-10-25,
+    // saved chats; it was 140 for every laptop layout, written when laptop cards were rows — the photo cards three
+    // across are ~400). Measured medians (production build): phone 367 · laptop 3 across 396 · 2 across 414–463 · ad pane
+    // open (one tight row) 148. scripts/verify-web-chat-typing-smooth.mjs checks the reopened page's height against reality.
+    const still = { stillHeight: STILL_CARD_HEIGHT(cardCols, cardRow) };
     // A RESTORED turn (sidebar open, snapshot, replay) renders in its final state. Its cards used to replay
     // the mount-in all at once, each held at opacity 0 by an animation that could not start while hundreds
     // of cards mounted — switching chats went blank on the owner's iPhone (2026-10-10; measured locally:
