@@ -101,6 +101,7 @@ import { SHARE_LINK, shareNative, shareLead, liveSiteCount } from '@/lib/share';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
+import { warmPlatformLogos } from '@/lib/warmPlatformLogos';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
 import { createSharedChat } from '@/lib/sharedChat';
 import { firstChildLeftRow, useDocumentRtl } from '@/lib/useDocumentRtl';
@@ -5179,7 +5180,7 @@ export default function Agent() {
                 onContentSizeChange={(e: any) => setInputH(typed ? Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, e.nativeEvent.contentSize.height)) : COMPOSER_MIN_H)}
                 // Clicking/tapping into the composer counts as interaction — the rotating examples
                 // stop cleanly and the static placeholder takes over (owner brief §6).
-                onFocus={() => { setComposerFocused(true); setIntroInteracted(true); }}
+                onFocus={() => { setComposerFocused(true); setIntroInteracted(true); warmPlatformLogos(); }}
                 onBlur={() => setComposerFocused(false)}
                 // The language does NOT flip while typing a chat message — it switches only when the
                 // message is SENT: replies follow its language while the interface stays unchanged.

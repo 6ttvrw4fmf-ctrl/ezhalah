@@ -15,6 +15,7 @@ import { markAppSessionStarted } from '@/lib/appSession';
 import { usePromptInsets } from '@/lib/bottomPromptInset';
 import { useVisualViewportRoot } from '@/lib/visualViewportFrame';
 import { installTapDebug } from '@/lib/tapDebug';
+import { warmPlatformLogos } from '@/lib/warmPlatformLogos';
 import Head from 'expo-router/head';
 import { OG_IMAGE, SHARE_BLURB_AR, SHARE_CARD_DESC_AR, SHARE_LINK, SHARE_TITLE_AR } from '@/lib/share';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -95,6 +96,12 @@ function Shell() {
   useVisualViewportRoot();
   // ?debug=tap only: an on-screen log of what each touch hit (see lib/tapDebug.ts). No-op otherwise.
   useEffect(() => installTapDebug(), []);
+  // Quietly download the platform logos a few seconds after the page settles, so the search loader finds them cached (lib/warmPlatformLogos.ts).
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const t = setTimeout(warmPlatformLogos, 2500);
+    return () => clearTimeout(t);
+  }, []);
   const pathname = usePathname();
   const router = useRouter();
   // The AUTO-SHOWING centered popup (owner 2026-08-28) was RETIRED by the owner's 2026-08-29
