@@ -63,7 +63,7 @@ const ABOUT_MAX_W = 760;
 const LEGAL_MAX_W = 640;
 const ABOUT_MAX_H = 700;
 
-const EAGLE = require('../../assets/images/logo-cloud-lit.svg'); // About/Terms always show the green-lit cloud eagle (owner 2026-10-24)
+const EAGLE = require('../../assets/images/logo-cloud-green-lit.svg'); // About/Terms always show the green-lit cloud eagle (owner 2026-10-24)
 type Kind = 'support' | 'about' | 'legal';
 
 // In-app popup that hosts the Support / About / Terms & Privacy content as a centered dialog over a
@@ -487,7 +487,6 @@ function AboutBody({ t, reduced, gripRef, drag }: {
           <View style={a.lockup}>
             <XImage source={EAGLE} style={a.eagle} contentFit="contain" />
             <Text style={a.wordmark}>{t('Ezhalah')}</Text>
-            <View style={a.wordDot} />
           </View>
         </Reveal>
       </View>
@@ -710,9 +709,8 @@ function makeAbout(pal: Record<string, string>, dark: boolean, rtl = true) {
     head: { paddingBottom: 12, paddingRight: CLOSE_CLEAR }, // keeps «من نحن» clear of the top-right × (owner 2026-10-24)
     eyebrow: { fontSize: 12.5, lineHeight: 18, fontWeight: '700', color: pal.muted, marginBottom: 8 },
     lockup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    eagle: { width: 36, height: 36 }, // the cloud-eagle tile needs full opacity and a little more size to read (owner 2026-10-24)
+    eagle: { width: 48, height: 48 }, // green-lit cloud eagle, big enough to read clearly on the sheet (owner 2026-10-24)
     wordmark: { fontSize: 34, lineHeight: 42, fontWeight: '800', color: pal.ink },
-    wordDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: pal.accentLeaf ?? pal.primary, alignSelf: 'flex-end', marginBottom: 8 },
     readingColumn: { maxWidth: 640, width: '100%', alignSelf: 'center' },
     heroLine: { fontSize: 19, lineHeight: 31, fontWeight: '700', color: pal.ink, textAlign: start as any, marginTop: 8, marginBottom: 18 },
     paragraph: { fontSize: 15, lineHeight: 28, fontWeight: '400', color: pal.body, textAlign: start as any, marginBottom: 16 },

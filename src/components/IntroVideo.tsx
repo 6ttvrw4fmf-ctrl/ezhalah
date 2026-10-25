@@ -35,7 +35,7 @@ export const INTRO_ENABLED = INTRO_SOURCE != null;
 // the user into the app. Keep it a little above the clip length (~5s clip → 9s ceiling).
 const SAFETY_MS = 9000;
 
-const EAGLE_MARK = require('../../assets/images/logo-cloud-lit.svg');
+const EAGLE_MARK = require('../../assets/images/logo-cloud-green-lit.svg');
 
 export default function IntroVideo() {
   const { showIntro, dismissIntro } = useApp();
