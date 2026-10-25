@@ -1,0 +1,74 @@
+// One district, one search identity: a spelling sites use that IS one of our districts folds into it (owner 2026-10-25).
+//
+// THE DEFECT. Sites write «الهجلة الجديد», «الشبيكة الجديد», «السويفلة الجديد» for districts our list calls «الهجلة»,
+// «الشبيكة», «السويفلة». norm_district_tok keeps «الجديد», so each name lived as TWO districts in search: a user who
+// picked «الهجلة» never saw the 84 ads that said «الهجلة الجديد». A blanket «الجديد» fold is wrong, because some "new"
+// names are separate districts («منفوحة الجديدة» next to «منفوحة» in الرياض), so the fold is a per-name, owner-approved
+// spelling memory: public.loc_district_alias, applied inside loc_display_district_ar(). The served district_ar, its
+// stored token, the picker and the counts then agree; cards keep the source's own words (they read the raw tables).
+//
+//   node --experimental-strip-types scripts/verify-district-spelling-memory.ts   (discovered by `npm test`)
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+
+const dir = join(import.meta.dirname, '..', 'supabase', 'migrations');
+const file = readdirSync(dir).filter((f) => /^\d{14}_district_spelling_memory_new_suffix\.sql$/.test(f)).sort().at(-1);
+if (!file) { console.log('FAIL  migration *_district_spelling_memory_new_suffix.sql is missing'); process.exit(1); }
+const sql = readFileSync(join(dir, file), 'utf8');
+
+// Names the owner has NOT approved as spellings of another district. They must never be seeded as an alias.
+const HELD = ['الدرعية الجديدة', 'الطريف الجديدة', 'منفوحة الجديدة', 'الشامية الجديد', 'الفلق الجديد'];
+
+function problems(s: string): string[] {
+  const fail: string[] = [];
+  if (!/create table if not exists public\.loc_district_alias \(/.test(s)) fail.push('loc_district_alias is not created');
+  if (!/primary key \(city_id, from_norm\)/.test(s)) fail.push('a spelling can map to two districts in one city (no (city_id, from_norm) key)');
+  if (!/check \(from_norm <> to_norm\)/.test(s)) fail.push('an alias may point at itself');
+  if (!/alter table public\.loc_district_alias enable row level security;/.test(s)) fail.push('row level security is off');
+  if (!/revoke all on table public\.loc_district_alias from public, anon, authenticated;/.test(s)) fail.push('the alias table is readable by the public keys');
+
+  const seed = s.match(/insert into public\.loc_district_alias[\s\S]*?on conflict \(city_id, from_norm\) do nothing;/)?.[0] ?? '';
+  if (!seed) fail.push('the seed is missing or can overwrite an earlier decision');
+  if (!/public\.norm_district_tok\(v\.site_spelling\), public\.norm_district_tok\(v\.our_district\), v\.why, 'owner'/.test(seed)) fail.push('seed keys are not built with norm_district_tok or are not marked as owner decisions');
+  const rows = [...seed.matchAll(/\((\d+),\s*'([^']+)',\s*'([^']+)',\s*'([^']+)'\)/g)];
+  if (rows.length === 0) fail.push('the seed has no rows');
+  for (const [, , from, , why] of rows) {
+    if (!/^owner \d{4}-\d{2}-\d{2}:/.test(why)) fail.push(`«${from}» is seeded without an owner decision`);
+    for (const h of HELD) if (from.includes(h)) fail.push(`«${from}» is held (a possibly separate district) and must not be folded`);
+  }
+  if (!/where not exists \(select 1 from public\.loc_catalog_district d where d\.city_id = a\.city_id and d\.district_norm = a\.to_norm\);\s+if bad is not null then raise exception/.test(s)) fail.push('an alias may point at a district that is not in our list');
+
+  const fn = s.match(/CREATE OR REPLACE FUNCTION public\.loc_display_district_ar\([\s\S]*?\$function\$;/)?.[0] ?? '';
+  if (!fn) { fail.push('loc_display_district_ar is not redefined'); return fail; }
+  if (!/select a\.to_norm from public\.loc_district_alias a\s+where a\.city_id = p_city_id and a\.from_norm = norm_district_tok\(p_raw\)/.test(fn)) fail.push('the display does not consult the spelling memory in the same city');
+  if (!/coalesce\(\s*\(select a\.to_norm[\s\S]*?\),\s*norm_district_tok\(p_raw\)\)/.test(fn)) fail.push('a name without an alias no longer keeps its own token');
+  if (!/\), p_raw\)\s+end/.test(fn)) fail.push('an unknown name is no longer shown as the source wrote it');
+  if (!/منفوحة الجديدة changed although it has no alias/.test(s)) fail.push('the apply-time proof no longer checks that a real «الجديدة» district is untouched');
+  return fail;
+}
+
+let failed = 0;
+const check = (label: string, ok: boolean, why = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : ` — ${why}`}`); };
+const mustCatch = (label: string, caught: boolean, why = '') => check(`mutant caught: ${label}`, caught, why);
+
+const live = problems(sql);
+check(`committed migration ${file} holds every pin`, live.length === 0, live.join('; '));
+
+const mutants: Array<[string, (s: string) => string]> = [
+  ['a held «new» district folded', (s) => s.replace("on conflict (city_id, from_norm) do nothing;", '').replace(") as v(city_id, site_spelling, our_district, why)", ",\n  (3, 'حي منفوحة الجديدة', 'حي منفوحة', 'owner 2026-10-25: x')\n) as v(city_id, site_spelling, our_district, why)\non conflict (city_id, from_norm) do nothing;")],
+  ['a seed row without an owner decision', (s) => s.replace("'owner 2026-10-25: «الشبيكة الجديد» is «الشبيكة»'", "'looks the same'")],
+  ['alias target not checked against our list', (s) => s.replace(/if bad is not null then raise exception[^;]*;/, 'null;')],
+  ['display ignores the spelling memory', (s) => s.replace(/coalesce\(\s*\(select a\.to_norm from public\.loc_district_alias a\s+where a\.city_id = p_city_id and a\.from_norm = norm_district_tok\(p_raw\)\),\s*norm_district_tok\(p_raw\)\)/, 'norm_district_tok(p_raw)')],
+  ['alias applied across cities', (s) => s.replace('where a.city_id = p_city_id and a.from_norm', 'where a.from_norm')],
+  ['unknown names no longer shown as written', (s) => s.replace(/\), p_raw\)\s+end/, '), null)\n  end')],
+  ['public keys can read the table', (s) => s.replace('revoke all on table public.loc_district_alias from public, anon, authenticated;', '')],
+  ['a spelling can point at two districts', (s) => s.replace('primary key (city_id, from_norm),', '')],
+  ['real «new» district proof removed', (s) => s.replace(/\n  if public\.loc_display_district_ar\(3, 'حي منفوحة الجديدة'\)[\s\S]*?end if;/, '')],
+];
+for (const [label, mutate] of mutants) {
+  const m = mutate(sql);
+  mustCatch(label, m !== sql && problems(m).length > 0, m === sql ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+}
+
+console.log(failed === 0 ? 'OK: one district has one search identity; only owner-approved spellings fold' : `${failed} check(s) failed`);
+process.exit(failed === 0 ? 0 : 1);

@@ -372,6 +372,15 @@ dealapp 883 · sanadak 816 · aqarmonthly 753 · eaqartabuk 516 · aqargate 241 
   `verify-pin-district-fill-contract.ts` fails any migration that flips `applied` before then.
 - Undo = `applied = false` and delete the `basis = 'pin'` rows of `district_recovery` in one transaction.
 
+### 🔤 Spelling memory — one district, one search identity (owner 2026-10-25)
+- `loc_district_alias(city_id, from_norm, to_norm)`: a spelling sites use that IS one of our districts. Applied inside
+  `loc_display_district_ar()`, so the served `district_ar`, its stored token, the picker and the counts fold into one
+  district; cards keep the source's own words.
+- Per-name and owner-approved only. A blanket «الجديد» fold is wrong: «منفوحة الجديدة» and «منفوحة» are two districts.
+- Seeded 10-25: مكة «الهجلة الجديد»→«الهجلة», «الشبيكة الجديد»→«الشبيكة»; حائل «السويفلة الجديد»→«السويفلة».
+  Held for the owner: الدرعية «الدرعية الجديدة» (452 ads, Aqar lists it as its own district) and «الطريف الجديدة».
+- `verify-district-spelling-memory.ts` pins it.
+
 ### ⏳ Pending (optional, ready when wanted)
 - **Grow the district map** — convert more of the ~33k English‑district listings to Arabic districts (same
   confident‑match method, run wider) so more listings carry an Arabic district.
