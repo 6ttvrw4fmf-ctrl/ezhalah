@@ -127,6 +127,18 @@ TYPE_MAP = {
     8: "Room",        # غرفة
 }
 
+# SHORT STAYS (owner 2026-10-25: every type the site shows; they belong in the future «Short stays» rent
+# group). Built but OFF: ingested only when GATHERN_SHORT_STAYS=1, so nothing reaches search until the
+# owner says yes. Measured live 2026-10-25 (distinct units): Al Kharj 72 chalets + 11 rest houses + 6 camps
+# of 454; Abha 79 + 22 + 6 of 990. Not mapped: 4 مزرعة (a Farm is a COMMERCIAL type; this scraper writes
+# only the residential table) and 1 منتجع (no catalogue type) — owner questions, never guessed.
+SHORT_STAY_TYPE_MAP = {
+    2: "Chalet",      # شاليه
+    3: "Rest House",  # استراحة
+    5: "Camp",        # مخيم
+}
+SHORT_STAYS = os.environ.get("GATHERN_SHORT_STAYS", "").strip() == "1"
+
 # Gathern city label (English, from event_data.city_en / cities[].name_en) → canonical Ezhalah city.
 # Gathern's labels differ from Aqar's slugs, so we map the ones map_city() can't already resolve.
 CITY_EN_MAP = {
@@ -996,9 +1008,9 @@ def _is_monthly_available(it: dict) -> bool:
 def map_listing(it: dict) -> Optional[dict]:
     """Gathern monthly-mode item → gathern_residential row, or None if not an eligible monthly unit."""
     type_id = it.get("unit_type_id")
-    property_type = TYPE_MAP.get(type_id)
+    property_type = TYPE_MAP.get(type_id) or (SHORT_STAY_TYPE_MAP.get(type_id) if SHORT_STAYS else None)
     if not property_type:
-        return None  # leisure type (resort/chalet/istraha/farm/camp) → not residential
+        return None  # leisure type (resort/chalet/istraha/farm/camp) → not ingested unless SHORT_STAYS
 
     if not _is_monthly_available(it):
         return None  # the host doesn't offer this unit for a 30-day stay
@@ -1084,6 +1096,7 @@ def map_listing(it: dict) -> Optional[dict]:
         "district_ar": (ev.get("district_ar") or addr.get("area") or "").strip() or None,
         "unit_code": it.get("code"),
         "unit_type_ar": type_ar or None,
+        "short_stay": True if type_id in SHORT_STAY_TYPE_MAP else None,   # the future «Short stays» group
         "chalet_id": chalet_id,
         "monthly_price": monthly,
         "monthly_price_before_discount": _num(it.get("price_before_discount")) or _num(it.get("oldPrice")),
