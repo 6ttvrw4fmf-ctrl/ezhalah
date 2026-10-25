@@ -8,6 +8,8 @@ import { Spinner } from '@/components/ui';
 import { useApp, type AuthUser } from '@/store';
 import { useI18n, t } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useResolvedTheme, useThemePalette } from '@/lib/appearance';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { canDragAuthPopup } from '@/lib/authPopupBehavior';
@@ -154,6 +156,7 @@ function Sheet({ onClose, onSignedIn, note }: { onClose: () => void; onSignedIn:
             onPress={() => {}}
           >
             <Animated.View style={[s.pop, drag && s.popWide, cardStyle]}>
+              <AuthSky radius={24} />
               {/* Desktop grab strip — a designated header region (the logo band) that picks the
                   whole card up. It never overlaps the heading, the privacy link or the buttons, so
                   every interactive element stays plainly clickable; the cursor alone announces the
@@ -465,6 +468,15 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
   );
 }
 
+/** The sign-in card IS the sky (owner 2026-10-24: «change the entire white background, match it with blue — this
+ *  looks like a pasted image»): the cloud eagle lights up straight on it. Light: the logo's own blue; dark: the dusk sky. */
+export function AuthSky({ radius }: { radius: number }) {
+  const dark = useResolvedTheme() === 'dark';
+  const pal = useThemePalette();
+  return <LinearGradient pointerEvents="none" colors={dark ? [pal.skyTop, pal.skyBottom] : ['#8DC2E8', '#E6F3FB']}
+    style={[StyleSheet.absoluteFill, { borderRadius: radius }]} />;
+}
+
 // COMPACT overlays for the small SignInCard presentation (owner 2026-08-29: "full login,
 // shrunk"). Sizes only — colors/copy/logic are the shared form above. The phoneInput font size is
 // deliberately NOT overridden (16 on web — the iOS-zoom barrier's rule applies to the shared
@@ -505,7 +517,7 @@ const s = StyleSheet.create({
   // the heading so the text, the privacy link and the buttons never start a drag.
   grip: { position: 'absolute', top: 0, left: 0, right: 0, height: 120, zIndex: 4 },
   pop: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent', // AuthSky paints the card
     borderRadius: 24,
     paddingTop: 34,
     paddingBottom: 30,
