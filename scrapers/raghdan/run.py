@@ -28,9 +28,11 @@ PRICE SEMANTICS (re-verified 2026-07-26 against 227 live Firestore docs):
   deliberate follow-up rather than a silent fallback here (a fallback is exactly where the multiply
   would creep back).
 
-DESCRIPTION free-text carries structured specs (no agent contact):
+The JSON-LD DESCRIPTION is a line the site GENERATES from its fields (never shown on the page):
   "المساحة 148.62 م²، عدد الغرف 4، العمر: جديد، الواجهة: شرقية"
-  → area / rooms / age-text / facade. (numberOfRooms is also a top-level JSON-LD field.)
+  → area / rooms / age-text / facade (numberOfRooms is also a top-level JSON-LD field), kept verbatim in
+  additional_info.ld_description. The stored `description` is the BROKER'S OWN TEXT from the rendered page
+  (_broker_text); only a page with no broker block falls back to the generated line (map_listing, 2026-10-25).
 
 PDPL: the JSON-LD `broker` block exposes the brokerage NAME + address — we NEVER store the name.
 `address.streetAddress` is free-text that on this source is frequently a PERSON name (e.g.
@@ -71,6 +73,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.pii import redact_pii  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://raghdan.sa"
@@ -670,7 +673,33 @@ def _broker_text(body: str) -> str:
     if m:
         return normalize.html_block_lines(m.group(1))
     blocks = _PRE_WRAP_RE.findall(body or "")
-    return "\n".join(normalize.html_block_lines(b) for b in blocks if b.strip())
+    # the hydrated page renders the same text twice (phone + desktop copy); one copy, never the text doubled
+    return "\n".join(dict.fromkeys(normalize.html_block_lines(b) for b in blocks if b.strip()))
+
+
+# THE LEGAL / USE PANEL the page shows and nothing read (🔧 2026-10-25, owner 10-13 «store every extra info»).
+# Verbatim from 12 live ads: «هل يوجد قيود ؟ لا يوجد» · «هل يوجد رهن ؟ نعم» · «نوع منع التصرف: حظر تجاري» ·
+# «استخدام العقار: سكني / استعمال مختلط» · «المرافق: كهرباء - مياه - صرف صحي - هاتف - ألياف ضوئية - تصريف
+# الفيضانات» (the four utility COLUMNS keep reading _rendered_utilities; this keeps the whole list as printed).
+# Values are stored as the page's words, never turned into booleans. «إستخدام العقار» (hamza, the utilities
+# card's empty twin) and the footer's «والمرافق» never match: the label must sit right after a tag.
+_PANEL_TPL = r">{}\s*(?:<!-- -->:|؟)</span>\s*<span[^>]*>(.*?)</span></div>"
+_PANEL_FIELDS = {
+    "registry_restrictions_q": "هل يوجد قيود", "mortgage_q": "هل يوجد رهن", "waqf_q": "هل يوجد وقف",
+    "will_q": "هل توجد وصية", "disposal_ban_type": "نوع منع التصرف", "property_use": "استخدام العقار",
+    "utilities_listed": "المرافق",
+}
+_PANEL_RE = {k: re.compile(_PANEL_TPL.format(re.escape(v)), re.S) for k, v in _PANEL_FIELDS.items()}
+
+
+def _rendered_panel(body: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for key, rx in _PANEL_RE.items():
+        m = rx.search(body or "")
+        val = _strip_tags(m.group(1)) if m else ""
+        if val and val not in ("غير محدد", "-", "—"):
+            out[key] = val
+    return out
 
 
 def _spec_int(v: Optional[str]) -> Optional[int]:
@@ -835,7 +864,19 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
 
     # ── PDPL-safe text (broker.name is DROPPED entirely; phones redacted) ──
     title = _redact(_strip_tags(name))
-    description = _redact(description_raw)
+    # THE DESCRIPTION IS WHAT THE BROKER WROTE (🔧 2026-10-25). The JSON-LD `description` is a line the site
+    # GENERATES from its own fields («المساحة 224.08 م²، عدد الغرف 4، العمر: جديد») and never shows on the page;
+    # the text the customer reads is the broker's block (ad 8dOoxQ: «… شارع عرض 40 متر … 4 غرف نوم … 4 حمامات
+    # … ديوانية + مجلس رجال … مطبخ + كراج سيارة مستقل»). Until now that block fed only the amenity reader and
+    # `description` held the generated line on every row (facts test 2026-10-24: 4 of 30 raghdan ads gave any
+    # fact, fleet 85%). A REGA-sourced page with no broker block keeps the JSON-LD line, its only description;
+    # the generated line itself is kept in additional_info.ld_description either way.
+    # PDPL: the broker signs off with its own name (ad 521209826506: «🏢 مؤسسة <a person's full name> للتطوير
+    # العقاري») — the same name the JSON-LD `broker` block carries and this file never stores, so it is cut first.
+    broker = _broker_text(body)
+    broker_name = ((ld.get("broker") or {}).get("name") or "").strip() if isinstance(ld.get("broker"), dict) else ""
+    description = _redact(redact_pii(broker.replace(broker_name, " ") if broker_name else broker)) \
+        or _redact(description_raw)
 
     # ── property age (from "العمر: …" text) ──
     age_text = specs.get("age")
@@ -887,6 +928,8 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         # DD/MM/YYYY, and dropping that into a column other platforms fill in a different shape
         # would create a field nobody can parse without knowing the platform first.
         "published_at": sp.get("published_at"),
+        "ld_description": _redact(description_raw),
+        **_rendered_panel(body),
     })
     info = {k: v for k, v in info.items() if v not in (None, "", "—")}
 
@@ -926,7 +969,6 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         # utilities: listed ⇒ True, not listed ⇒ absent ⇒ NULL (never False)
         **_rendered_utilities(body),
     }
-    broker = _broker_text(body)
     row.update(normalize.prose_amenities_yes(broker, skip=_PROSE_SKIP))
     baths = normalize.baths_from_leading_count(broker)
     if baths is not None:
