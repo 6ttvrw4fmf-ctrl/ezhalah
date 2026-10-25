@@ -31,15 +31,15 @@ const check = (label: string, ok: boolean, detail = '') => {
 const ogDesc = (html: string) => html.match(/property="og:description" content="([^"]*)"/)?.[1] ?? null;
 const ogTitle = (html: string) => html.match(/property="og:title" content="([^"]*)"/)?.[1] ?? null;
 const FACTS = { sites: 148, listings: 390592, cities: 353 };
-const LINE_AR = '148 موقع · 390,592 إعلان · 353 مدينة';
-const LINE_EN = '148 sites · 390,592 listings · 353 cities';
+const LINE_AR = '390,592 إعلان · 353 مدينة بالمملكة';
+const LINE_EN = '390,592 listings · 353 cities in Saudi Arabia';
 const CARD = { q: { deal: 'Buy', category: 'Residential', location: 'الرياض' } as any, name: 'يوسف', locale: 'ar' as const };
 const INVITE = shareInviteNote(CARD.name, CARD.q, 'ar')!;
 
 console.log('\nThe shared-chat card carries the home link\'s live numbers line\n');
 
 // ── 1. the pure builder ─────────────────────────────────────────────────────────────────────────
-check('AR line is the home card\'s exact shape — three counts, middle dots, nothing after «مدينة»', shareCardFactsLine(FACTS, 'ar') === LINE_AR, shareCardFactsLine(FACTS, 'ar'));
+check('AR line is the home card\'s exact shape — listings · cities «بالمملكة», no site count (owner 2026-10-25)', shareCardFactsLine(FACTS, 'ar') === LINE_AR, shareCardFactsLine(FACTS, 'ar'));
 check('EN line is the same three counts in English', shareCardFactsLine(FACTS, 'en') === LINE_EN, shareCardFactsLine(FACTS, 'en'));
 check('a missing count → the plain tagline, never a zero', shareCardFactsLine({ sites: 148, listings: null, cities: 353 }, 'ar') === SHARE_CARD.ar.desc && !/0/.test(shareCardFactsLine({ sites: 148, listings: 0, cities: 353 }, 'ar')));
 check('no facts at all → the plain tagline', shareCardFactsLine(null, 'ar') === SHARE_CARD.ar.desc && shareCardFactsLine(undefined, 'en') === SHARE_CARD.en.desc);
@@ -128,7 +128,7 @@ const mutant = async (from: string, to: string) => {
   mustCatch('a missing count rendered as a number (a zero / «null» on the card, or a crash on it)', threw || out !== SHARE_CARD.ar.desc);
 }
 {
-  const m = await mutant("? `${n(f.sites)} موقع · ${n(f.listings)} إعلان · ${n(f.cities)} مدينة`", "? `${n(f.sites)} موقع و ${n(f.listings)} إعلان في ${n(f.cities)} مدينة`");
+  const m = await mutant("? `${n(f.listings)} إعلان · ${n(f.cities)} مدينة بالمملكة`", "? `${n(f.sites)} موقع · ${n(f.listings)} إعلان · ${n(f.cities)} مدينة`");
   mustCatch('the line drifting from the home card\'s approved shape (the «و» / «في» WhatsApp truncated)', m.shareCardFactsLine(FACTS, 'ar') !== LINE_AR);
 }
 {
