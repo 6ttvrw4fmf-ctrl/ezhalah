@@ -24,6 +24,9 @@ import {
 import { useSaveName } from '@/lib/useSaveName';
 
 const LOGO = require('../../assets/images/logo-cloud-green-lit.svg');
+// The sign-in popup's logo: the cloud eagle on the full blue sky; when the popup opens its green lights switch on
+// one by one, then twinkle (owner 2026-10-24). The animation lives inside the SVG.
+const LOGO_LIGHTUP = require('../../assets/images/logo-cloud-lightup.svg');
 type Step = 'main' | 'google' | 'apple' | 'appleface';
 
 // Open/close animation (owner spec, 2026-08-15): overlay fade ~200-250ms, popup fades in while
@@ -313,7 +316,7 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
                   />
                 </Pressable>
               )}
-              <XImage source={LOGO} style={[s.popEagle, cp && c.popEagle]} contentFit="contain" />
+              <XImage source={LOGO_LIGHTUP} style={[s.popEagle, cp && c.popEagle]} contentFit="contain" />
               {/* ── main ───────────────────────────────────────────────── */}
               {step === 'main' && (
                 <>
@@ -469,7 +472,7 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
 // backend those steps are never reached (real OAuth redirects take over).
 const c = StyleSheet.create({
   popClose: { top: 8, end: 8, width: 26, height: 26, borderRadius: 13 },
-  popEagle: { width: 52, height: 42, marginTop: 10, marginBottom: 6 },
+  popEagle: { width: 64, height: 64, marginTop: 10, marginBottom: 6 },
   formHead: { fontSize: 15.5, lineHeight: 22, marginBottom: 2 },
   formSub: { fontSize: 11.5, lineHeight: 16, marginBottom: 4 },
   agree: { fontSize: 10.5, lineHeight: 15, marginBottom: 12, paddingHorizontal: 0 },
@@ -524,7 +527,7 @@ const s = StyleSheet.create({
   // The bare dark-green eagle mark. No separate fly-in/bounce/wink — the whole card (including this)
   // fades+scales in together as ONE motion (owner 2026-08-15: "no bouncing, spinning, excessive
   // movement, or flashy animation" — a back-eased overshoot + blink sequence doesn't qualify).
-  popEagle: { alignSelf: 'center', width: 100, height: 80, marginBottom: 14 },
+  popEagle: { alignSelf: 'center', width: 112, height: 112, marginBottom: 14 },
 
   // Arabic typography: weights carry the hierarchy — no Latin letter-spacing on Arabic script.
   shareNote: {
