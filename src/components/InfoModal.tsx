@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, I18nManager, Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Image as XImage } from 'expo-image'; // SVG logo: a vector drawing, not a photo (owner 2026-10-24)
 import Animated, {
   Easing,
   interpolate,
@@ -62,7 +63,7 @@ const ABOUT_MAX_W = 760;
 const LEGAL_MAX_W = 640;
 const ABOUT_MAX_H = 700;
 
-const EAGLE = require('../../assets/images/eagle-mark-lit.png'); // About/Terms always show the green-lit cloud eagle (owner 2026-10-24)
+const EAGLE = require('../../assets/images/logo-cloud-lit.svg'); // About/Terms always show the green-lit cloud eagle (owner 2026-10-24)
 type Kind = 'support' | 'about' | 'legal';
 
 // In-app popup that hosts the Support / About / Terms & Privacy content as a centered dialog over a
@@ -484,7 +485,7 @@ function AboutBody({ t, reduced, gripRef, drag }: {
         <Reveal {...rev} delay={40}>
           <Text style={a.eyebrow}>{t('About Us')}</Text>
           <View style={a.lockup}>
-            <RNImage source={EAGLE} style={a.eagle} resizeMode="contain" />
+            <XImage source={EAGLE} style={a.eagle} contentFit="contain" />
             <Text style={a.wordmark}>{t('Ezhalah')}</Text>
             <View style={a.wordDot} />
           </View>
@@ -519,7 +520,7 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
     <View>
       <View style={s.head}>
         <View style={s.legalLockup}>
-          <RNImage source={EAGLE} style={s.legalEagle} resizeMode="contain" />
+          <XImage source={EAGLE} style={s.legalEagle} contentFit="contain" />
           <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr]}>{t('Terms & Privacy')}</Text>
         </View>
       </View>

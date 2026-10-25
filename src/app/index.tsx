@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image as XImage } from 'expo-image'; // SVG logo: a vector drawing, not a photo (owner 2026-10-24)
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -2336,7 +2337,7 @@ export default function Home() {
             <Pressable onPress={() => setSharedSearch(null)} hitSlop={10} style={[s.sharedClose, { right: 12 }]} accessibilityRole="button" accessibilityLabel={t('Close')}>
               <Ionicons name="close" size={20} color={colors.muted} />
             </Pressable>
-            <Image source={require('../../assets/images/eagle-mark-lit.png')} style={s.sharedEagle} resizeMode="contain" accessibilityIgnoresInvertColors />
+            <XImage source={require('../../assets/images/logo-cloud-lit.svg')} style={s.sharedEagle} contentFit="contain" />
             <Text style={[s.sharedTitle, { writingDirection: isRTL ? 'rtl' : 'ltr' }]}>
               {shareLandingTitle(sharedSearch.name, sharedSearch.q, locale === 'en' ? 'en' : 'ar')}
             </Text>

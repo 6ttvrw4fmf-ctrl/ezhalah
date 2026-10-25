@@ -1,24 +1,14 @@
-import { Image, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Image as XImage } from 'expo-image';
 import Animated from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useThemePalette } from '@/lib/appearance';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { skyScene } from '@/theme/skyScene';
 import CloudWisp from './CloudWisp';
 
-const EAGLE = require('../../assets/images/eagle-mark.png');
-// Signed-in users see the cloud eagle lit with green string lights (owner 2026-10-24: «when user logs in signs up it
-// changes», «green light … like Christmas»). Two bulb sets twinkle in turns.
-const LIGHTS_A = require('../../assets/images/eagle-lights-a.png');
-const LIGHTS_B = require('../../assets/images/eagle-lights-b.png');
-const twinkle = (delayMs: number) => ({
-  animationName: { from: { opacity: 0.2 }, to: { opacity: 1 } },
-  animationDuration: 1300,
-  animationDelay: delayMs,
-  animationIterationCount: 'infinite',
-  animationDirection: 'alternate',
-  animationTimingFunction: 'ease-in-out',
-} as const);
+// The logo is a vector drawing (SVG), never a photo (owner 2026-10-24). Signed-in users see it lit with green string
+// lights that twinkle in turns — the animation lives inside logo-cloud-lit.svg («when user logs in signs up it changes»).
+const EAGLE = require('../../assets/images/logo-cloud.svg');
+const EAGLE_LIT = require('../../assets/images/logo-cloud-lit.svg');
 const eagleDrift = {
   from: { transform: [{ translateX: -skyScene.eagleDriftPx }] },
   to: { transform: [{ translateX: skyScene.eagleDriftPx }] },
@@ -65,23 +55,11 @@ export function SidebarClouds() {
 /** The cloud-eagle logo on the sky tile, with a small cloud pass below its eye. `lit` = signed in: green string
  *  lights twinkle along it. The adjacent wordmark labels it. */
 export function SkyEagleMark({ lit = false }: { lit?: boolean }) {
-  const pal = useThemePalette();
   const reduced = useReducedMotion();
   return <View testID="sidebar-sky-eagle" pointerEvents="none" accessible={false}
     accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
-    style={[styles.eagleTile, { borderColor: pal.line }]}>
-    <LinearGradient colors={[pal.skyTop, pal.skyBottom]} style={StyleSheet.absoluteFill} />
-    <Image source={EAGLE} resizeMode="contain" accessible={false} style={styles.eagle} />
-    {lit ? (
-      <View testID="sidebar-sky-eagle-lights" style={styles.lights}>
-        <Animated.View style={[StyleSheet.absoluteFill, !reduced && twinkle(0)]}>
-          <Image source={LIGHTS_A} resizeMode="contain" accessible={false} style={styles.eagle} />
-        </Animated.View>
-        <Animated.View style={[StyleSheet.absoluteFill, !reduced && twinkle(650)]}>
-          <Image source={LIGHTS_B} resizeMode="contain" accessible={false} style={styles.eagle} />
-        </Animated.View>
-      </View>
-    ) : null}
+    style={styles.eagleTile}>
+    <XImage source={lit ? EAGLE_LIT : EAGLE} contentFit="contain" accessible={false} style={styles.eagle} />
     <Animated.View style={[StyleSheet.absoluteFill,
       !reduced && { ...motion, animationName: eagleDrift }]}>
       <CloudWisp width={65} height={24} opacity={0.62} style={styles.eagleCloud} />
@@ -92,10 +70,10 @@ export function SkyEagleMark({ lit = false }: { lit?: boolean }) {
 
 const styles = StyleSheet.create({
   clip: { overflow: 'hidden' },
-  eagleTile: { width: 44, height: 44, flexShrink: 0, borderRadius: 13, borderWidth: 1,
-    overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
-  eagle: { width: 38, height: 38 },
-  lights: { position: 'absolute', width: 38, height: 38 },
+  // No tile, no frame: the cloud eagle sits straight on the sidebar sky, blended with it (owner 2026-10-24:
+  // «I don't want it to look like a pasted photo, blend it with the background»).
+  eagleTile: { width: 46, height: 46, flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
+  eagle: { width: 46, height: 46 },
   eagleCloud: { bottom: -3, left: -12 },
   eagleTopCloud: { top: -6, right: -12 },
 });
