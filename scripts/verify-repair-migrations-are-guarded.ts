@@ -48,6 +48,13 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-10-25. haraj REGA «اكثر من عشر سنوات» NULL → 10 (the open 10+ bucket the AF clause already reads as open).
+  '20261025082809_haraj_rega_open_age_is_ten_plus_backfill.sql':
+    'watched by its companion 20261025083341_mon_detect_haraj_stated_age_not_stored.sql, which creates ' +
+    'mon_detect_haraj_stated_age_not_stored() (P2) over every ACTIVE haraj row whose stored REGA licence states an age while ' +
+    'property_age is NULL, splices it into the mon_run_all_detectors() roster (a planted NULL is caught at apply) and enrolls ' +
+    'the repair in ops_repair_guarantee_registry. The parser half (scrapers/haraj/parse.age_of) is executed by ' +
+    'verify-open-age-bucket-never-answers-up-to.ts on every CI run',
   // 2026-10-22. Pins the ads' own sources published, read at save time (owner: «fix all the bugs»).
   '20261022230940_pins_nine_sites.sql':
     'the re-save only lets the new per-table BEFORE trigger (tg_pin_from_source_link) read a pin the row already holds, ' +
