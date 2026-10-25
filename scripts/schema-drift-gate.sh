@@ -33,6 +33,8 @@ set -uo pipefail
 # provides EZ_GATE_SECRET, so they keep working once the bare public key is refused. Empty-safe under set -u.
 EZ_GATE_H=()
 if [ -n "${EZ_GATE_SECRET:-}" ]; then EZ_GATE_H=(-H "x-ezhalah-gate: ${EZ_GATE_SECRET}"); fi
+# Tag gated calls so edge_logs can tell our own gate from a bare-key script (⚡ 10-25, backlog 817).
+if [ -n "${EZ_GATE_SECRET:-}" ]; then EZ_GATE_H+=(-H "x-client-info: curl ezhalah-gate"); fi
 
 PHASE="${1:?usage: schema-drift-gate.sh <pre|post> <anon_key>}"
 ANON="${2:?usage: schema-drift-gate.sh <pre|post> <anon_key>}"
