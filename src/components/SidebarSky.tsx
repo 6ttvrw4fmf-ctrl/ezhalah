@@ -88,7 +88,7 @@ export function SkyEagleLightUp({ size }: { size: number }) {
   return <View pointerEvents="none" accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
     style={{ width: size, height: size, alignSelf: 'center', alignItems: 'center', justifyContent: 'center' }}>
     <XImage source={EAGLE_LIGHTUP} contentFit="contain" accessible={false} style={{ width: size, height: size }} />
-    <Animated.View style={[StyleSheet.absoluteFill, !reduced && { ...motion, animationName: eagleDrift }]}>
+    <Animated.View {...SKY_CALM_PROPS} style={[StyleSheet.absoluteFill, !reduced && { ...motion, animationName: eagleDrift }]}>
       <CloudWisp width={65 * k} height={24 * k} opacity={0.62} style={{ bottom: -3 * k, left: -12 * k }} />
       <CloudWisp variant={1} width={42 * k} height={13 * k} opacity={0.32} style={{ top: -6 * k, right: -12 * k }} />
     </Animated.View>
