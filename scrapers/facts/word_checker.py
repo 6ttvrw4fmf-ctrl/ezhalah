@@ -274,6 +274,13 @@ def _starts(word: str, stems: tuple[str, ...]) -> bool:
     return any(word.startswith(x) or w.startswith(x) for x in stems)
 
 
+def _bare(w: str) -> str:
+    """A context word without its proclitics: «بدورة» → «دوره», «لحمام» → «حمام», «وبخزان» → «خزان»."""
+    w = w[1:] if w.startswith("و") and len(w) > 3 else w
+    w = w[1:] if w[:1] in ("ب", "ل", "ف") and len(w) > 3 else w
+    return _strip_wa(w)
+
+
 def _strip_wa(w: str) -> str:
     for p in ("وال", "و", "ال"):
         if w.startswith(p) and len(w) > len(p) + 1:
@@ -361,7 +368,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     ex_before, ex_after = _EXCLUDE.get(fact, ((), ()))
     if fact in _METER_FACTS and "عداد" in t[ws:e]:
         ex_before = ()                               # «خزانات وعدادات مستقلة» names the meter itself
-    if any(_starts(_strip_wa(w), ex_before) or _starts(w, ex_before) for w in p2) or \
+    if any(_starts(_strip_wa(w), ex_before) or _starts(w, ex_before) or _starts(_bare(w), ex_before) for w in p2) or \
             any(_starts(w, ex_after) for w in n2) or any(x in " ".join(n2) for x in ex_after if " " in x):
         return None, s, e
     if fact in _NEEDS_CUE and not (any(_starts(w, _CUES) for w in gp[-3:] + gn[:1]) or n_words <= 3
@@ -735,6 +742,9 @@ def selftest() -> None:
         ("باركينج خاص لكل شقة", {"parking": True}, ()),
         ("دورة مياه مستقلة", {}, ("separate_water_meter", "water_supply")),
         ("خزان المياه مستقل", {"water_tank": True}, ("separate_water_meter",)),
+        # full run (facts-words-2026-10-25) hand check: a proclitic hid the bathroom — 900 rows repaired
+        ("غرفة نوم بدورة مياه مستقلة", {}, ("separate_water_meter", "water_supply")),
+        ("جناح بحمام ومغسلة, لدورة مياه مستقلة", {}, ("separate_water_meter",)),
         ("خزانات وعدادات مستقلة", {"separate_electricity_meter": True}, ()),
         ("2دورات مياة موقف خاص", {"parking": True}, ("water_supply",)),
         ("1مجلس 1غرفة طعام 1مطبخ", {"majlis": True, "kitchen": True}, ()),
