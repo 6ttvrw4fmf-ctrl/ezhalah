@@ -702,6 +702,7 @@ _AGE_VOCAB_AR = {
     "ثلاث سنوات": 3, "اربع سنوات": 4, "أربع سنوات": 4, "خمس سنوات": 5, "ست سنوات": 6,
     "سبع سنوات": 7, "ثمان سنوات": 8, "ثماني سنوات": 8, "تسع سنوات": 9, "عشر سنوات": 10,
     # Open-ended -> FLOOR (see fidelity rules above). Both the numeric and the spelled-out forms.
+    # A floored 10 has NO upper end: for aqar the AF clause keeps it out of every «up to N» (20261025065509).
     "اكثر من عشر سنوات": 10, "أكثر من عشر سنوات": 10,
     "اكثر من 10 سنوات": 10, "أكثر من 10 سنوات": 10,
 }
@@ -1047,6 +1048,17 @@ _CLAUSE_BREAK_RE = re.compile(r"[\n\r،,.;؛|•▫▪+]+|\s-\s")
 _NEGATOR_RES = tuple(re.compile(rf"(?<!\w){'(?:و|ال|وال)?' if re.match(r'[ء-ي]', n) else ''}{re.escape(n.strip())}(?=\W|$)")
                      for n in _NEGATORS)
 
+# «مفروشة: لا», «**مفروش:** لا», «مؤثثة: لا (غير مؤثثة)», «المفروشات: لا يوجد» — the token is a LABEL and the answer
+# is the value after the colon. The matcher only looked BEFORE a token, so every labelled «لا» read YES: muhaysini's
+# generated «أبرز ملامح العقار» list served ~1,060 active ads as furnished over «مفروشة: لا» (facts test 2026-10-24;
+# tuba prints the same template). A value opening with a negator is a stated NO; a value that names the fact again
+# («مفروشة: هذه الشقة غير مفروشة») is read from that restatement; «غير محدد» / «غير مذكور» / «لا توجد تفاصيل» answers
+# nothing (NULL).
+_LABEL_RE = re.compile(r"\w{0,4}[\s*]*[:：][\s*]*")
+_LABEL_NO_DETAILS_RE = re.compile(r"لا\s*[يت]وجد\s+(?:تفاصيل|معلومات|بيانات)")
+_LABEL_NO_RE = re.compile(r"(?:لا|لايوجد|لاتوجد|بدون|no|none|not)(?!\w)")
+_LABEL_UNSAID_RE = re.compile(r"غير(?!\w)")
+
 
 # A token can sit inside a PLACE NAME: «شرفة» is the tail of Jeddah's district «مشرفة», and every ad there read
 # balcony = yes (🔬 2026-10-20: muhaysini 110 and dwelleo 34 active rows, ~127 with no balcony word at all). Only the
@@ -1084,7 +1096,22 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
                 near = t[max(0, m.start() - 22):m.start()]
                 if any(_norm_ar(q) in near for q in _PROXIMITY):
                     break          # the NEIGHBOURHOOD has it, not this property — stay NULL
-                out[col] = not any(r.search(before) for r in _NEGATOR_RES)
+                negated = any(r.search(before) for r in _NEGATOR_RES)
+                lab = None if negated else _LABEL_RE.match(t, m.end())
+                if lab:
+                    v = t[lab.end():]
+                    if _LABEL_NO_DETAILS_RE.match(v):
+                        break      # «المطبخ: لا توجد تفاصيل» — no details is not «no kitchen»: NULL
+                    if _LABEL_NO_RE.match(v):
+                        out[col] = False
+                        break
+                    if any(_norm_ar(x).lower() in v for x in tokens):
+                        if (said := _amenities_in_clause(v).get(col)) is not None:
+                            out[col] = said    # the value restates the fact: the restatement is the answer
+                        break
+                    if _LABEL_UNSAID_RE.match(v):
+                        break      # «غير محدد» — the label was answered with nothing: NULL
+                out[col] = not negated
                 break
             if col in out:
                 break
