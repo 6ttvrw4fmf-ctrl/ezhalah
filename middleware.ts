@@ -49,7 +49,9 @@ export function homeCardDescription(f: HomeCardFacts | null | undefined): string
   if (!f || !ok(f.sites) || !ok(f.listings) || !ok(f.cities)) return HOME_CARD_FALLBACK_AR;
   // Owner 2026-10-19: no «و», no «في», no tail sentence — WhatsApp cut the line at «353 مدي…», so the
   // city count never showed. Three counts, middle dots, nothing after the last one.
-  return `${fmt(f.sites)} موقع · ${fmt(f.listings)} إعلان · ${fmt(f.cities)} مدينة`;
+  // Owner 2026-10-25: the share MESSAGE already says «ليش تدوّر في 148 موقع؟», so the card does not say 148 again,
+  // and it names the Kingdom. The site count is still read (a complete set or the fallback), just not printed.
+  return `${fmt(f.listings)} إعلان · ${fmt(f.cities)} مدينة بالمملكة`;
 }
 
 /** Read the counts out of the two RPC bodies as PostgREST returns them; null when a body is unusable. */
