@@ -360,21 +360,30 @@ dealapp 883 · sanadak 816 · aqarmonthly 753 · eaqartabuk 516 · aqargate 241 
 - Result ordering: region searches spread across their cities; relevance‑first with natural diversity.
 - Location‑search audit passed (Region→City→District, English handling, conditional field search, never‑invent).
 
-### 🗺 Pin districts — loaded, NOT served yet (owner 2026-10-24)
+### 🗺 Pin districts — batch 2 SERVED 2026-10-25 (owner 2026-10-24 / 10-25)
 - An ad with no district anywhere can get one from its own pin, **as a gap-filler only**: the table
   `listing_pin_district` holds OUR catalog spelling (the map provider is only the locator; its text is never stored).
   It reaches the index through the existing recovery path (`refresh_district_recovery_table()` → `district_recovery`
   → `listing_native_location_v2` → `sync_search_listings_ar()`); search itself is untouched.
 - The arm runs last and fills only where the native district, the neighborhood and the source district are all
-  blank, in the city the ad is served in. Its rows are `verbatim = false`, `basis = 'pin'` (never attestation; the app
-  labels them «تقريبي»).
-- Batch 1 = 209 ads, loaded with `applied = false`. Switch-on waits for the card label and the nightly alarm;
-  `verify-pin-district-fill-contract.ts` fails any migration that flips `applied` before then.
+  blank, in the city the ad is served in. Its rows are `verbatim = false`, `basis = 'pin'` (never attestation). There is
+  **no «تقريبي» label** (owner 2026-10-25: «I don't like تقريبي»): the district shows as the district.
+- Batch 1 = 209 ads, loaded with `applied = false`. Batch 2 (`20261025214308`) = 315 middle homes (176 of them from
+  batch 1). It was switched on by `20261025214336` on 2026-10-25. The 33 batch-1 edge/junk rows stay off.
+  `verify-pin-district-fill-contract.ts` fails any flip whose version is not in `FLIP_ALLOWED`.
 - Undo = `applied = false` and delete the `basis = 'pin'` rows of `district_recovery` in one transaction.
 
 ### 🛡 District guards — enforced by the database (owner 2026-10-25, migration `20261025203753`)
-- **Order (owner):** the site's own district always wins → Apple Maps (free) → Google Maps only when Apple has no
-  answer → otherwise city only. Every map answer is labelled «تقريبي».
+- **Order (owner, the main rule):**
+  1. The site's own district always wins.
+  2. Otherwise Apple Maps (free): same city, a name on our list, and the home in the **middle** of that district, meaning
+     Apple names the same district at 4 spots 150 m around the pin.
+  3. A home near an **edge** needs Google Maps to agree.
+  4. Otherwise Google Maps.
+  5. Otherwise the home is city only.
+
+  There is no «تقريبي» label. Exam on 1,000 homes with a known district: Apple matched 86.3% of middle homes and 73.1%
+  of edge homes. Full rule for engineers: `docs/ops/NEW_LISTINGS_ENGINEER.md` rule 8.
 - **The list never loses a district:** `DELETE` and `TRUNCATE` on `loc_catalog_district` are refused
   (`trg_zz_district_list_guard`, `trg_zz_district_list_no_truncate`), even when a district has 0 ads.
 - **No junk names:** a new or renamed list name can't be a number, a plan «مخطط», a base «قاعدة», a street «شارع»,
