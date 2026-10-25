@@ -8,7 +8,7 @@ import { MODELS_POPUP_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { cardShadow, colors, radius } from '@/theme/tokens';
 import { TAP44, TAP44_DOWN } from '@/theme/palette';
 
-const EZHALAH_LOGO = require('../../assets/images/logo-cloud-lit.svg'); // vector cloud eagle (owner 2026-10-24)
+const EZHALAH_LOGO = require('../../assets/images/logo-cloud-green-lit.svg'); // vector cloud eagle (owner 2026-10-24)
 
 const MODELS = [
   { id: 'shaheen', ar: 'شاهين', en: 'Shaheen', version: '2.2',

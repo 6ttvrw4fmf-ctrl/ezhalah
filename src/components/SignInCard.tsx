@@ -31,7 +31,7 @@ import { useApp } from '@/store';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { colors, radius } from '@/theme/tokens';
-import { AuthForm } from '@/components/AuthModal';
+import { AuthForm, AuthSky } from '@/components/AuthModal';
 import { attachCardDrag } from '@/lib/cardDrag';
 import {
   shouldShowSignInCard,
@@ -97,6 +97,7 @@ export default function SignInCard() {
         } as never),
       ]}
     >
+      <AuthSky radius={radius.card} />
       {/* The grab strip: the card's whole header row. AuthForm's close X (zIndex 5) floats above
           the strip's overlap, so closing never begins a drag — same layering as the modal. */}
       <View
@@ -120,7 +121,7 @@ const st = StyleSheet.create({
     left: 0,
     width: SIGNIN_CARD_W,
     zIndex: 40,
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent', // AuthSky paints the card (owner 2026-10-24)
     borderRadius: radius.card,
     borderWidth: 1,
     borderColor: colors.fieldLine,
