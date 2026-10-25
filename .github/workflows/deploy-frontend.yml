@@ -282,6 +282,27 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
 
+      # ── Post-deploy loader-logo gate (owner 2026-10-25: «make sure this never happens again») ────
+      # The owner's iPhone showed the search loader with names and EMPTY logo frames. Every repo-side
+      # check was green and a local build drew every logo: the failure was the served Cache-Control
+      # (max-age=0 on ~145 logos, re-downloaded during every search on mobile data) and a prefetch that
+      # never ran on Home. Both only exist on the live site, so a real phone-sized Chromium on throttled
+      # data opens Home twice — no searches — and fails the run if the logos are not prefetched,
+      # not immutable, or re-downloaded on the second visit.
+      - name: Post-deploy loader-logo gate (blocking)
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -o pipefail
+          npx playwright install chromium >/dev/null 2>&1 || true
+          node --experimental-strip-types scripts/verify-live-loader-logos.ts 2>&1 | tee /tmp/loader-logos.log
+          status=$?
+          {
+            echo "### Loader-logo gate"
+            if [ $status -eq 0 ]; then echo "✅ logos prefetched before the first search, cached for a year"; else
+              echo "🚨 **Phones on mobile data will see empty logo frames in the search loader.**"; grep -E "^FAIL" /tmp/loader-logos.log | head -5 | sed 's/^/- /'; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
       - name: Report
         if: always()
         # SAFETY DEFECT FIXED 2026-08-05: this step used to branch on `job.status` alone and print

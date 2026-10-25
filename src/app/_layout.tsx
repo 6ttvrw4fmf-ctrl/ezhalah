@@ -15,6 +15,9 @@ import { markAppSessionStarted } from '@/lib/appSession';
 import { usePromptInsets } from '@/lib/bottomPromptInset';
 import { useVisualViewportRoot } from '@/lib/visualViewportFrame';
 import { installTapDebug } from '@/lib/tapDebug';
+import { Image as ExpoImage } from 'expo-image';
+import { PLATFORM_META } from '@/data/loaderPlatforms';
+import { scheduleLogoPrefetch } from '@/lib/prefetchLoaderLogos';
 import Head from 'expo-router/head';
 import { OG_IMAGE, SHARE_BLURB_AR, SHARE_CARD_DESC_AR, SHARE_LINK, SHARE_TITLE_AR } from '@/lib/share';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -109,6 +112,13 @@ function Shell() {
   // search (appSession gate), and — since that left an empty AI chat — a reload now lands on the
   // Filter home like every other deep route. The decision lives in shouldSendRefreshHome() so
   // scripts/verify-refresh-restores-filter-search.ts can execute it rather than grep for it.
+  // The search loader's ~145 logos are fetched a moment after ANY page opens, so the loader never shows
+  // empty frames on a slow phone (owner 2026-10-25 screenshot). It lives HERE, in the root layout,
+  // because a route's module only runs once that route opens — in SearchLoader it never ran on Home.
+  // Web only: native ships its assets inside the app. scripts/verify-live-loader-logos.ts proves it live.
+  useEffect(() => {
+    if (Platform.OS === 'web') scheduleLogoPrefetch(PLATFORM_META.map((p) => p.logo), (uris) => ExpoImage.prefetch(uris));
+  }, []);
   const homedRef = useRef(false);
   useEffect(() => {
     if (homedRef.current) return;
