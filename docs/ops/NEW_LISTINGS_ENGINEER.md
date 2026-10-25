@@ -408,6 +408,32 @@ district».
    Then prove it: the district shows in `district_options_ar(p_city_id := …)` and a real search for it returns the listing.
    Put one line in your report: **«Districts: added N · twins refused N · waiting for the owner N»**. The Hofuf (الأحساء)
    «الضاحية الحي …» names wait for the owner's naming decision; never invent a spelling for them.
+7. **THE DATABASE NOW ENFORCES THE GUARDS (owner 2026-10-25, migration `20261025203753`).** `loc_catalog_district`
+   refuses a DELETE or TRUNCATE (districts are never deleted, even with 0 ads), a new or renamed name with a number,
+   «مخطط», «قاعدة», «شارع», «طريق», «قرى» or one letter, and a spelling twin. If your insert is refused, the
+   error tells you why. Never disable or drop the triggers (`verify-district-guards.ts` fails the PR, and the P1 alarm
+   `mon_detect_district_guards_missing` fires). An owner-approved exception sets `ezhalah.district_guard_ok` for that
+   one statement. Write the owner's approval in the PR.
+8. **A HOME WITH NO DISTRICT: THE MAIN RULE (owner 2026-10-25, permanent).**
+   1. The site's own district always wins, and is never overwritten.
+   2. If the site names none, use Apple Maps at the home's pin. It must be the same city and a district already on our
+      list, and the home must sit in the **middle** of it: Apple names the same district at 4 spots 150 m around the pin.
+      Then it is filled.
+   3. A home near an **edge** (the 4 spots disagree) is filled only if Google Maps names the same district.
+   4. If Apple has no answer, the wrong city, or a name not on our list, ask Google Maps. A name on our list → fill.
+      A real district not on our list → it may be added, through the guards above.
+   5. If nobody knows, the home stays city-only. It is still searchable in its city; never guess.
+   6. **No «تقريبي» label** (owner 2026-10-25: «I don't like تقريبي»). The district shows as the district.
+
+   Fills go into `listing_pin_district` (switched off), and a migration switches them on. That migration's version
+   goes in `FLIP_ALLOWED` in `verify-pin-district-fill-contract.ts` in the same PR. They reach search through the
+   recovery arm. The pin guard `trg_pin_district_on_list` refuses any name not on that city's list and stores the
+   list's spelling. Undo is `applied = false` for that `run_id` plus deleting the `basis = 'pin'` rows of
+   `district_recovery`, in one transaction.
+
+   Batch 2 (315 homes) was switched on 2026-10-25 by `20261025214336`. The 123 edge homes and the 430 Apple
+   couldn't answer are in the nightly Google Maps check: scheduled task `google-maps-district-check`, folder
+   `~/Documents/google-maps-key/daily-check/` on the owner's Mac.
 
 ## Your run, step by step
 1. **Log the start** in `ops_daily_engineer_run`.
