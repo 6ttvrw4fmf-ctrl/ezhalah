@@ -72,9 +72,12 @@ the PR need the owner merge (scripts/).
   Next step: log each profile's status code in the error before changing the solver.
 - Kept: 575/612 photo floors · 564 gathern redirects · 565 almuteb 503 · 613 wasalt 13746442.
 
-**NEW (10-23): `small-sources-sync` runs are effectively SERIAL — each dispatch is the full 143-job matrix (~28 min)
-and other engineers dispatch it too.** Count the queued runs before dispatching; a probe and a proof in the same
-night = ~1 h of queue. Never queue a probe ahead of a proof crawl.
+**CHANGED (10-25): a targeted `small-sources-sync` dispatch (`source=<slug>[,<slug>…]`) now creates ONLY those jobs**
+(a `plan` job filters the SMALL_SOURCES list; an unknown slug fails the plan; guard
+`scripts/verify-small-sources-targeted-dispatch-is-one-job.ts`). Before 10-25 every dispatch was the full 143-job matrix
+(~28 min) and five targeted runs jammed the runner queue for 3+ h. The nightly (blank input) is unchanged. Two
+dispatches of the SAME list still wait for each other (one concurrency lane per list), so still read
+`gh run list --workflow small-sources-sync.yml --status queued,in_progress` first and dispatch from `main` or a probe branch.
 
 **10-19 facts:** `rows_seen` on `fleet_liveness:*` / `cleanup:*` / `verify_deletions:*` / `aqar_liveness*` labels is
 rows PROBED (fresh rows are skipped), never inventory; judge a site's size by its crawl label. The detector sweep
@@ -673,6 +676,6 @@ says Sell (656's class, backlog 672) — a rule that decides a contradiction is 
   needs it (wasalt, souq24, eilmalriyada, sadin) is not provable while it is down, so it is not chosen (same lesson 🆕 learned
   on snam the same night).
 - 🔧 10-23 (third night of the queue lesson, so it is now a rule): COUNT the queued runs before you dispatch anything
-  (`gh run list --workflow small-sources-sync.yml --status queued,in_progress`): the matrix is one slot (~28 min a run), so
-  a probe queued ahead of a proof costs the proof its slot — dispatch the PROOF first, the probe after (⚡ 10-23 cancelled
+  (`gh run list --workflow small-sources-sync.yml --status queued,in_progress`): the matrix was one slot (~28 min a run; since
+  10-25 a targeted run is only its own jobs, but a same-list dispatch still waits its lane), so a probe queued ahead of a proof costs the proof its slot — dispatch the PROOF first, the probe after (⚡ 10-23 cancelled
   its own probe to land the tamyaz proof).
