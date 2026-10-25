@@ -55,7 +55,7 @@ field at all — not even as a fallback.** A structured `null` outranks any pros
 |---|---|
 | name it («مصعد», «مطبخ راكب», «مفروشة») | `true` |
 | an **explicit negation tied to the token** — before it («لا يوجد مصعد», «بدون مصعد», «غير مفروشة», «عدم وجود مصعد», «لا تأتي الشقة مفروشة») or as the answer to the token used as a label («مفروشة: لا», «مواقف السيارات: غير متوفرة») | `false` |
-| silence, prepared only («تأسيس مصعد»), nearby («قريب من …»), partly, «غير محدد», or two statements that disagree | `NULL` |
+| silence, prepared only («تأسيس مصعد»), not installed («مطبخ غير راكب», «المكيفات غير راكبة», «مصعد غير مركب» — anywhere in the ad, it outranks a plain mention; coordinator for the owner, 2026-10-25), nearby («قريب من …»), partly, «غير محدد», or two statements that disagree | `NULL` |
 
 These are the four outcomes of `normalize.amenities_from_text` (2026-09-20: yes / no / prepared /
 nearby, with prepared and nearby both stored as `NULL`), and the one reader every prose-only site uses

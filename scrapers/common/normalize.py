@@ -978,6 +978,7 @@ def amenities_from_text(raw: Optional[str]) -> dict[str, bool]:
     out = {col: vals.pop() for col, vals in seen.items() if len(vals) == 1}
     if _says_partly_furnished(raw):
         out.pop("furnished", None)
+    _veto_not_installed(raw, out)
     return out
 
 
@@ -1009,7 +1010,19 @@ def amenities_from_lines(raw: Optional[str]) -> dict[str, bool]:
     out = {col: next(iter(vals)) for col, vals in seen.items() if len(vals) == 1}
     if _says_partly_furnished(raw):
         out.pop("furnished", None)
+    _veto_not_installed(raw, out)
     return out
+
+
+def _veto_not_installed(raw: Optional[str], out: dict[str, bool]) -> None:
+    """«مطبخ مستقل … المطبخ غير راكب» (muhaysini 17578176): the not-installed statement is the more specific one, so a
+    plain mention elsewhere in the ad may not turn it back into a yes. A stated no («بدون مكيفات») stays."""
+    t = _norm_ar(str(raw or "")).lower()
+    for col in _NOT_INSTALLED_COLS:
+        if out.get(col) is True and any(_NOT_INSTALLED_RE.match(t, m.end(), m.end() + 40)
+                                        for tok in _AMENITY_TOKENS[col]
+                                        for m in re.finditer(re.escape(_norm_ar(tok).lower()), t)):
+            out.pop(col)
 
 
 def _says_partly_furnished(raw: Optional[str]) -> bool:
@@ -1065,11 +1078,26 @@ _NEGATOR_RES = tuple(re.compile(rf"(?<!\w){'(?:و|ال|وال)?' if re.match(r'[
 # «غير متوفر مصعد» / «غير موجود مصعد» is one negation (moftah emits its spec pairs that way, value first), so is
 # «غير مجهز بالمكيفات» (dwelleo 13138657); an OPENING mark may stand between («#لايوجد (مدخل سياره)», dealapp) but a
 # closing one ends the negation («مساحه خارجيه (لا يوجد) موقف سيارات خاص» — the parking is there, muhaysini).
-_TIED_FILLERS = r"اي|ايه|به|بها|فيه|فيها|له|لها|متوفر|متوفره|موجود|موجوده|متاح|متاحه|مجهز|مجهزه|مزود|مزوده"
+# A generated text can also break the word and restart it: «وغير مُ مؤثثة» (tuba 13261239), «غير الم furnished»
+# (muhaysini 17577122) — the stray «م» / «الم» is the same word's first letters, so the negation is still tied.
+_TIED_FILLERS = r"اي|ايه|به|بها|فيه|فيها|له|لها|متوفر|متوفره|موجود|موجوده|متاح|متاحه|مجهز|مجهزه|مزود|مزوده|م|الم"
 _TIED_TAIL_RE = re.compile(rf"^(?:[^\w)»\]]*(?:{_TIED_FILLERS})(?!\w))*[^\w)»\]]*(?:ال|لل|وال|بال)?$")
 # «المكيفات غير راكبه», «مصعد غير مركب» — the fixture is NOT installed: never a yes (wasalt's _NOT_INSTALLED rule, now
-# for every site). Measured 2026-10-25 on 7 dwelleo / muhaysini ads. Kitchen keeps its own «مطبخ غير راكب» reading.
-_NOT_INSTALLED_AFTER = ("غير راكب", "غير مركب")
+# for every site). Measured 2026-10-25 on 7 dwelleo / muhaysini ads. «مطبخ غير راكب» is the same: a kitchen ROOM whose
+# cabinets are not fitted is a prepared space, not a kitchen — unknown, like «مصعد مؤسس» (coordinator for the owner's
+# four outcomes, 2026-10-25; 101 active ads on dealapp, haraj, muhaysini, dwelleo, reinvest … were served as kitchen = yes).
+# «غير» must be its own word — «مطبخ صغير راكب» is a small FITTED kitchen (dealapp 18171902, therc 12405530). Up to two
+# describing words or an opening bracket may stand between («مطبخ كبير مغلق غير راكب», «مطبخ ( الدولاب غير راكب )»,
+# «مكيفات اسبلت غير راكبة»), or a «و»-joined co-subject that shares the verdict («المكيفات والمطبخ: غير راكبة», «مصعد
+# ولكن غير راكب»); a comma list does not («مطبخ، مكيفات غير راكبة» — the kitchen is there), and neither does another
+# fixture's word without «و» / «او» — that verdict is the other fixture's: «متوفر مصعد تكيفات شباك غير راكبه» (the lift is
+# there, dealapp 18563443), «راكب مكيفات شباك مطبخ غير راكب» (the ACs are, muhaysini 17578178), «بدون مكيفات مطبخ غير
+# راكب» (no ACs stays no, muhaysini 17434418), «المطبخ واكب المكيفات غير راكبة» (muhaysini 17578179).
+_FIXTURE_WORD = "|".join(sorted({re.escape(_norm_ar(t).lower()) for toks in _AMENITY_TOKENS.values() for t in toks if not t.isascii()}
+                                | {"تكيف", "مكف", "راكب", "مركب"}, key=len, reverse=True))
+_NOT_INSTALLED_RE = re.compile(rf"\w*(?:(?:[^\S\n]|\()+(?:(?:او\s+|و\s*)\w+|(?!(?:ال)?(?:{_FIXTURE_WORD}))\w+)){{0,2}}"
+                               r"[^\w\n]+غير\s+(?:راكب|مركب)")
+_NOT_INSTALLED_COLS = ("air_conditioner", "elevator", "kitchen")
 
 
 def _negated_before(before: str) -> bool:
@@ -1135,7 +1163,7 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
                 if (any(_norm_ar(q).lower() in after for q in _LATER_AFTER)
                         or any(_norm_ar(q).lower() in t[max(0, m.start() - 22):m.start()] for q in _LATER_BEFORE)):
                     break          # can be added later — not there now: NULL
-                if col in ("air_conditioner", "elevator") and any(q in after for q in _NOT_INSTALLED_AFTER):
+                if col in _NOT_INSTALLED_COLS and _NOT_INSTALLED_RE.match(t, m.end(), m.end() + 40):
                     break          # not installed — unknown, never a yes
                 if col == "furnished" and (
                         any(_norm_ar(q).lower() in after for q in _PARTIAL_ONLY + _FLOOR_COVERING)
