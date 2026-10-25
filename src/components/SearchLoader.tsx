@@ -20,6 +20,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { PlatformLogo } from './platform-logo';
+import { Image as ExpoImage } from 'expo-image';
+import { scheduleLogoPrefetch } from '@/lib/prefetchLoaderLogos';
 import CloudWisp from './CloudWisp';
 import { cloudVariant } from '@/theme/skyScene';
 import { useThemePalette } from '@/lib/appearance';
@@ -45,6 +47,7 @@ import {
   bumpRotation,
   currentRotation,
   pickLoaderPlatforms,
+  PLATFORM_META,
   type LoaderPlatform,
 } from '@/data/loaderPlatforms';
 import { hiddenPlatformNames, loadHiddenPlatformNames } from '@/data/loaderActivePlatforms';
@@ -65,6 +68,9 @@ if (!IS_WEB || typeof window !== 'undefined') void loadHiddenPlatformNames();
 // src/data/siteCount.ts. The strip still hides dormant logos; the sentence no longer counts them —
 // until the count has been read it falls back to the logos on screen.
 if (!IS_WEB || typeof window !== 'undefined') void loadSiteCount();
+// The logos are fetched a moment after the app opens, so the loader never shows empty frames on a slow
+// phone (owner 2026-10-25 screenshot). Web only: native ships its assets inside the app.
+if (IS_WEB && typeof window !== 'undefined') scheduleLogoPrefetch(PLATFORM_META.map((p) => p.logo), (uris) => ExpoImage.prefetch(uris));
 const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1);
 
 // Rotating searching headlines (owner-approved copy, v4 set — short, alive, smooth cross-fades).
