@@ -13,6 +13,7 @@ import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { whenNear } from '@/lib/nearViewport';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
+import { districtWithLabel } from '@/lib/pinDistrictApprox';
 import { isStayLengthPriced, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
 import { afEvidence, AMENITY_COL, type ActiveAf } from '@/lib/afEvidence';
 import { typeImg } from '@/theme/propertyIcons';
@@ -135,6 +136,8 @@ export function ResultCard({
   // arabicOrPlaceholder is a no-op for an empty locale-'en' t(listing.city) (place() still
   // transliterates it below), and a no-op for any already-Arabic value.
   const cityAr = arabicOrPlaceholder(t(listing.city), locale, LOCATION_UNRESOLVED_AR);
+  // A district read from the ad's map pin is a gap-filler: say so beside it (owner 2026-10-25; lib/pinDistrictApprox.ts).
+  const districtShown = districtWithLabel(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)), listing.districtApprox, t('approx.'));
   // Region (e.g. "north Riyadh") extracted from the Aqar listing URL — shown as a small chip so the
   // user sees which part of the city the property is in. (user request.)
   const region = regionFromUrl(listing.source_url);
@@ -306,7 +309,7 @@ export function ResultCard({
           ) : null}
 
           <Text style={[card.title, card.lpTitle, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
-            {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
+            {(districtShown || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
           </Text>
 
           {ratingVal != null ? (
@@ -432,7 +435,7 @@ export function ResultCard({
             non-bug case and is untouched. */}
         <View style={card.headline}>
         <Text style={[card.title, tight && card.titleTight, { textAlign: txtAlign, writingDirection: wDir }]}>
-          {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
+          {(districtShown || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
         </Text>
         <Text style={isStayLengthPriced(listing.source) ? [card.stayNote, row && card.stayNoteRow] : [card.price, row && card.priceRow, tight && card.priceTight]} numberOfLines={isStayLengthPriced(listing.source) ? 2 : 1}>{listingPrice(listing, locale)}</Text>
         </View>

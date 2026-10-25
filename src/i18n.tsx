@@ -856,6 +856,8 @@ const AR: Record<string, string> = {
   // thing will be a rotation of messages»): «type … and Ezhalah», with the word property in it, the name last, before the dots.
   // The «بحث» chip is gone by then, so the line shows whole in both languages. At the very start the box keeps the older sentence
   // below (and the rotating examples) until the owner's new rotation of start messages is written.
+  // Beside a district that was read from the ad's map pin, not from the ad's own words (owner 2026-10-25).
+  'approx.': 'تقريبي',
   "Type your property and Ezhalah...": 'اكتب عقارك وإزهله...',
   "Type the property you're looking for in Saudi Arabia...": 'اكتب العقار اللي تبحث عنه في السعودية...',
   // Stable composer accessibility label (owner brief 2026-08-23 §11) — the ONE sentence a screen

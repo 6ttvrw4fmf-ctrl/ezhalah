@@ -113,6 +113,9 @@ export type Listing = {
   // amlakalahsa land listings in "حي هجر الخامس" answered "no results in this district"). '' when
   // the index has no confident district match, same convention as `district`.
   districtCanonical?: string;
+  // The district shown on the card was read from the ad's map pin (a gap-filler), not from the source's own words: the card and the
+  // ad page print «تقريبي» beside it (lib/pinDistrictApprox.ts; owner 2026-10-25). Display-only; matching never reads this.
+  districtApprox?: boolean;
   // Wasalt-only "Additional Information" panel — label/value pairs rendered on the card.
   // Aqar rows leave this null and skip the panel. (user: rich Wasalt facts on the card.)
   additional_info?: { key: string; label: string; value: string }[] | null;

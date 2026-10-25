@@ -15,6 +15,7 @@ import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SourceBadge, FEATURE_META, arAttrValue } from '@/components/ResultCard';
 import { MOJ_SOURCE_URL, PRICE_MAX, PRICE_MIN, dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojDeals, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojDeal, type MojFacts, districtEmbedUrl, districtPlace, type DistrictPlace, fetchSimilarListings, type SimilarCard } from '@/data/adPageData';
 import { listingOpenUrl } from '@/lib/openListing';
+import { districtWithLabel } from '@/lib/pinDistrictApprox';
 import { safeHttpUrl } from '@/lib/safeUrl';
 import type { Listing } from '@/data/listings';
 
@@ -238,6 +239,8 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
       if (!alive) return;
       setGeo(pin);
       if (!pin) setArea(districtPlace(row, listingOpenUrl(l)));
+      // A district read from the ad's map pin is only approximate (owner 2026-10-25): no per-district prices, deals or similar ads are built on it.
+      if (l.districtApprox) return;
       // Aqar sale ads only for now (owner update 22): nothing is even fetched for the rest.
       if (!pricesBlockEligible(row)) return;
       const price = Number(row?.price_total), area = Number(row?.area_m2);
@@ -399,7 +402,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
   const city = place(arabicOrPlaceholder(t(l.city), locale, LOCATION_UNRESOLVED_AR));
   const district = place(arabicOrPlaceholder(t(l.district), locale, LOCATION_UNRESOLVED_AR));
   const sep = locale === 'ar' ? '، ' : ', ';
-  const location = (district || city || LOCATION_UNRESOLVED_AR) + (l.district ? `${sep}${city || LOCATION_UNRESOLVED_AR}` : '');
+  const location = (districtWithLabel(district, l.districtApprox, t('approx.')) || city || LOCATION_UNRESOLVED_AR) + (l.district ? `${sep}${city || LOCATION_UNRESOLVED_AR}` : '');
   const street = hideArabicProseInEnglish(String(l.street_name ?? '').trim() || null, locale) ?? '';
   const address = [street, location].filter(Boolean).join(sep);
   const typeLabel = arabicOrPlaceholder(/[ء-ي]/.test(l.type || '') ? l.type : t(l.cleanType ?? l.type), locale, TYPE_UNRESOLVED_AR);
