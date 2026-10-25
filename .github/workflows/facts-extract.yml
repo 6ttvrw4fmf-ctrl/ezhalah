@@ -1,0 +1,65 @@
+# Facts extraction TEST (owner, 2026-10-24) — scrapers/facts/extract.py.
+#
+# An LLM reads each sampled ad's own title + description and lists the facts it NAMES, each with the
+# ad's exact words as proof; rows land in public.listing_facts (service-role only, nothing serves it)
+# so accuracy can be judged before the reader runs over all ~404k ads. Dispatch-only, never scheduled.
+#
+# Spend is fail-closed three times over: the proxy (supabase/functions/facts-extract) asks
+# public.ai_spend_gate() before every paid call, the script stops at its own hard caps (10,500 calls,
+# $5 per run — an input may lower them, never raise them), and at 500 ads it stops itself if the
+# quotes don't verify (>5%), the cost per ad is too high (>$0.001) or the JSON fails (>2%).
+# Costs go to public.listing_facts_runs, NOT ai_usage, so the live product's breaker never sees it.
+name: Facts extraction test
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Run id, e.g. facts-test-2026-10-24 (letters, digits, . _ -)"
+        required: true
+        type: string
+      limit:
+        description: "Ads to process (the 10,000-ad plan is scaled down proportionally)"
+        required: false
+        default: "10000"
+        type: string
+      platforms:
+        description: "Only these platform prefixes, comma-separated (empty = the whole plan)"
+        required: false
+        default: ""
+        type: string
+      max_usd:
+        description: "USD cap for this run (hard ceiling 5.0 in the script)"
+        required: false
+        default: "5.0"
+        type: string
+
+concurrency:
+  group: facts-extract
+  cancel-in-progress: false
+
+jobs:
+  extract:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Self-check the pure logic (no network)
+        run: exec python -m scrapers.facts.extract --selftest
+      - name: Extract facts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RUN_ID: ${{ inputs.run_id }}
+          LIMIT: ${{ inputs.limit }}
+          PLATFORMS: ${{ inputs.platforms }}
+          MAX_USD: ${{ inputs.max_usd }}
+        run: |
+          exec python -m scrapers.facts.extract --run-id "$RUN_ID" --limit "$LIMIT" --platforms "$PLATFORMS" --max-usd "$MAX_USD"
