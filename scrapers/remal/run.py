@@ -383,7 +383,7 @@ def map_listing(p: dict, images: Optional[dict[int, list[str]]] = None) -> tuple
         # The post carries no meta and no taxonomy for amenities (see SOURCE SHAPE), so the ad's own words are
         # the only statement of kitchen / lift / parking / rooms: YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH
         # §2). 34 of 82 active ads named one and stored NULL (🔬 2026-10-12).
-        **normalize.prose_amenities_yes(body),
+        **normalize.prose_amenities(body),
         "photo_urls": (images or {}).get(p.get("id"), []),
         "additional_info": {k: v for k, v in info.items() if v not in (None, "", [], {})},
     }
