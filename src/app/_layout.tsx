@@ -115,7 +115,7 @@ function Shell() {
   // The search loader's ~145 logos are fetched a moment after ANY page opens, so the loader never shows
   // empty frames on a slow phone (owner 2026-10-25 screenshot). It lives HERE, in the root layout,
   // because a route's module only runs once that route opens — in SearchLoader it never ran on Home.
-  // Web only: native ships its assets inside the app. scripts/verify-live-loader-logos.mjs proves it live.
+  // Web only: native ships its assets inside the app. scripts/verify-live-loader-logos.ts proves it live.
   useEffect(() => {
     if (Platform.OS === 'web') scheduleLogoPrefetch(PLATFORM_META.map((p) => p.logo), (uris) => ExpoImage.prefetch(uris));
   }, []);

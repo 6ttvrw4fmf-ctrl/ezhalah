@@ -294,7 +294,7 @@ jobs:
         run: |
           set -o pipefail
           npx playwright install chromium >/dev/null 2>&1 || true
-          node scripts/verify-live-loader-logos.mjs 2>&1 | tee /tmp/loader-logos.log
+          node --experimental-strip-types scripts/verify-live-loader-logos.ts 2>&1 | tee /tmp/loader-logos.log
           status=$?
           {
             echo "### Loader-logo gate"

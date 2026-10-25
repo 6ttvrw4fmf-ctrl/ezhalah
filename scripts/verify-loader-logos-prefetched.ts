@@ -11,7 +11,7 @@
 //      the catch-all `max-age=0` rule no longer matches /assets/.
 //   2. src/lib/prefetchLoaderLogos.ts runs against fake logos/navigator/timer: it fetches every web logo
 //      URL once, after its delay, skips native ids and Save-Data; the ROOT LAYOUT wires it on web.
-//   3. The post-deploy live gate (verify-live-loader-logos.mjs, run by deploy-frontend.yml) — its shared
+//   3. The post-deploy live gate (verify-live-loader-logos.ts, run by deploy-frontend.yml) — its shared
 //      verdict is mutation-proved here, and its home is asserted by execution.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -75,13 +75,13 @@ check('the ROOT LAYOUT schedules the prefetch on web with every catalog logo (ru
 const loader = readFileSync(join(root, 'src/components/SearchLoader.tsx'), 'utf8');
 check('it is not (only) in a route-level module, where it never ran on Home', !/scheduleLogoPrefetch/.test(loader));
 
-// The live post-deploy gate's verdict — the SAME predicate verify-live-loader-logos.mjs uses.
+// The live post-deploy gate's verdict — the SAME predicate verify-live-loader-logos.ts uses.
 const IMM = 'public, max-age=31536000, immutable';
 const logo = (i: number, cc = IMM, status = 200) => ({ url: `https://x/assets/assets/images/platform-logos/p${i}.abc.png`, status, cacheControl: cc });
 const healthy = Array.from({ length: 140 }, (_, i) => logo(i));
 const kept = healthy.map((r) => ({ url: r.url, status: 200, fromCache: true }));
 check('live verdict: 140 prefetched, immutable, kept on a second visit → clean', logoDeliveryProblems(healthy, kept).length === 0, logoDeliveryProblems(healthy, kept).join('; '));
-const homing = liveHalfProblems('verify-live-loader-logos.mjs', loadRegistry(root),
+const homing = liveHalfProblems('verify-live-loader-logos.ts', loadRegistry(root),
   (n) => existsSync(join(root, 'scripts', n)), (p) => { try { return readFileSync(join(root, p), 'utf8'); } catch { return null; } });
 check('the live gate is homed in the deploy workflow and really invoked there', homing.length === 0, homing.join('; '));
 
@@ -105,7 +105,7 @@ mustCatch('live: a short max-age that only claims immutable', logoDeliveryProble
 mustCatch('live: a logo that 404s', logoDeliveryProblems([...healthy, logo(999, IMM, 404)], kept).some((p) => /did not load/.test(p)));
 mustCatch('live: a second visit re-downloads a logo', logoDeliveryProblems(healthy, [...kept, { url: healthy[0].url, status: 304, fromCache: false }]).some((p) => /second visit/.test(p)));
 mustCatch(`live: one logo short of the ${MIN_PREFETCHED_LOGOS} floor`, logoDeliveryProblems(healthy.slice(0, MIN_PREFETCHED_LOGOS - 1), kept).length > 0);
-mustCatch('the live gate unhomed from the deploy workflow', liveHalfProblems('verify-live-loader-logos.mjs', { excluded: [] }, () => true, () => '').length > 0);
+mustCatch('the live gate unhomed from the deploy workflow', liveHalfProblems('verify-live-loader-logos.ts', { excluded: [] }, () => true, () => '').length > 0);
 
 if (fail || mutFail) { console.error(`\n❌ loader-logos-prefetched: ${fail} check(s), ${mutFail} mutation(s) failed`); process.exit(1); }
 console.log('\n✅ loader-logos-prefetched: logos cached for a year and fetched before the loader appears.');

@@ -1,5 +1,5 @@
 // The verdict for «do the search loader's logos reach a phone in time?» — ONE predicate, shared by the
-// live post-deploy gate (scripts/verify-live-loader-logos.mjs) and its offline mutation proof
+// live post-deploy gate (scripts/verify-live-loader-logos.ts) and its offline mutation proof
 // (scripts/verify-loader-logos-prefetched.ts), so the proof is about the code that decides production.
 //
 // Earned 2026-10-25: the owner's iPhone showed every loader tile as a name and an empty frame. The logos

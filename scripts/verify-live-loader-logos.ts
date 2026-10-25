@@ -10,10 +10,21 @@
 //   • a second visit asks the network for any logo again.
 // It opens the home page only, twice, in one browser — no searches, so it adds no search load.
 //
-//   node scripts/verify-live-loader-logos.mjs [url]      (default: https://ezhalah-app.vercel.app)
+//   node --experimental-strip-types scripts/verify-live-loader-logos.ts [url]      (default: https://ezhalah-app.vercel.app)
 import './lib/robotPass.mjs';
 import { chromium } from 'playwright';
 import { LOGO_PATH, MIN_PREFETCHED_LOGOS, logoDeliveryProblems } from './lib/loaderLogoDelivery.mjs';
+import { gotoLive } from './lib/liveNav.ts';
+
+// Self-proof before touching production: the verdict must still fail on the defect it exists for, so a
+// green run below cannot come from a predicate that went blind.
+const mustCatch = (label: string, caught: boolean) => {
+  if (!caught) { console.error(`FAIL  verdict is BLIND to: ${label}`); process.exit(1); }
+};
+const IMM = 'public, max-age=31536000, immutable';
+const fake = Array.from({ length: 140 }, (_, i) => ({ url: `https://x/assets/platform-logos/p${i}.png`, status: 200, cacheControl: IMM }));
+mustCatch('2026-10-25 production: max-age=0 logos, no prefetch',
+  logoDeliveryProblems(fake.slice(0, 11).map((r) => ({ ...r, cacheControl: 'public, max-age=0, must-revalidate' })), []).length >= 2);
 
 const URL = process.argv[2] || process.env.LOADER_LOGOS_CHECK_URL || 'https://ezhalah-app.vercel.app';
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
@@ -24,21 +35,22 @@ await cdp.send('Network.enable');
 // Slow mobile data, like the owner's phone: ~1.6 Mbit/s down, 150 ms latency.
 await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 150, downloadThroughput: 200_000, uploadThroughput: 90_000 });
 
-let sink = [];
+type Seen = { url: string; status: number; cacheControl: string; fromCache: boolean };
+let sink: Seen[] = [];
 // A memory-cache hit reports requestServedFromCache first; remember it so the response counts as kept.
-const servedFromCache = new Set();
-cdp.on('Network.requestServedFromCache', (e) => servedFromCache.add(e.requestId));
-cdp.on('Network.responseReceived', (e) => {
+const servedFromCache = new Set<string>();
+cdp.on('Network.requestServedFromCache', (e: { requestId: string }) => servedFromCache.add(e.requestId));
+cdp.on('Network.responseReceived', (e: any) => {
   if (!LOGO_PATH.test(e.response.url)) return;
-  const h = Object.fromEntries(Object.entries(e.response.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
+  const h = Object.fromEntries(Object.entries(e.response.headers || {}).map(([k, v]) => [k.toLowerCase(), String(v)]));
   sink.push({ url: e.response.url, status: e.response.status, cacheControl: h['cache-control'] || '',
     fromCache: servedFromCache.has(e.requestId) || !!(e.response.fromDiskCache || e.response.fromMemoryCache || e.response.fromPrefetchCache) });
 });
 
 console.log(`\nPost-deploy loader-logo gate → ${URL} (390px phone, slow mobile data)\n`);
-let first = [], repeat = [];
+let first: Seen[] = [], repeat: Seen[] = [];
 try {
-  await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+  await gotoLive(page, URL, { timeout: 90_000 });
   // The prefetch starts 2.5 s after load; wait until the logos have arrived (or 90 s on slow data).
   const deadline = Date.now() + 90_000;
   let last = -1, stableSince = Date.now();
@@ -50,10 +62,12 @@ try {
   }
   first = sink; sink = [];
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 90_000 });
-  await page.waitForTimeout(8000);
+  // Long enough for the 2.5 s prefetch to fire again and ask for every logo (from cache, if kept).
+  await page.waitForLoadState('networkidle', { timeout: 60_000 }).catch(() => {});
+  await page.waitForTimeout(5000);
   repeat = sink;
 } catch (e) {
-  console.error(`FAIL  could not load ${URL}: ${e.message}`);
+  console.error(`FAIL  could not load ${URL}: ${(e as Error).message}`);
   process.exitCode = 1;
 }
 await browser.close();
