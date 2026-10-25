@@ -63,7 +63,11 @@ IMPERSONATE = "chrome"
 
 _TYPE_AR = {"ApartmentsForSale": "شقة", "ApartmentsForRent": "شقة", "VillasAndPalacesForSale": "فيلا",
             "VillasAndPalacesForRent": "فيلا", "WholeBuildingForSale": "عمارة", "WholeBuildingForRent": "عمارة",
-            "property_rent_commercial_Offices": "مكتب", "RE_HotelApartments": "شقة"}
+            "property_rent_commercial_Offices": "مكتب", "RE_HotelApartments": "شقة",
+            # 2026-10-25 (owner: every type the site shows): measured live, each skipped as type_unmapped
+            # until now — 288899568 (warehouse, yearly), 288830702 (house «HomesForSale»), 288551466 (rooms, monthly).
+            # Shops are NOT mapped: all 3 filed there are a car-wash business sale (×2) or a whole building.
+            "property_rent_commercial_Warehouses": "مستودع", "HomesForSale": "بيت", "RE_RoomsForRent": "غرفة"}
 _MULTI_USE = "الاستخدام المتعدد"
 # owner 2026-09-27: multi-use land is BOTH residential and commercial land — it maps to residential here
 # and commercial_twin() lists the same ad as Commercial Land too, so it answers both searches
@@ -256,7 +260,7 @@ _PROSE_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "ai
 
 
 def prose_answers(text: Optional[str]) -> dict[str, bool]:
-    return {c: v for c, v in normalize.prose_amenities_yes(text, skip=("furnished",)).items() if c in _PROSE_COLS}
+    return {c: v for c, v in normalize.prose_amenities(text, skip=("furnished",)).items() if c in _PROSE_COLS}
 
 
 RES_TABLE, COM_TABLE = "opensooq_residential_listings", "opensooq_commercial_listings"

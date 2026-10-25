@@ -424,6 +424,12 @@ def map_listing(post: dict) -> tuple[Optional[dict], str]:
 
     features = tax.get("property-feature", [])
     feature_cols = {col: True for name, col in _FEATURE_COLUMNS.items() if name in features}
+    # RealHomes' garage count is the site's own parking field (shatri reads fave_property_garage the same
+    # way). A count above 0 is yes; empty or «0» is silence, never «no» (ADVANCED_FILTER_SOURCE_TRUTH §2).
+    # 11 of 16 active ads carry «1» and parking was stored on none (ops_af_score 2026-10-25, parking we_miss 3).
+    garage = _to_int(pm.get("REAL_HOMES_property_garage"))
+    if garage and garage > 0:
+        feature_cols["parking"] = True
 
     category = "Residential" if normalize.category_for_type(property_type) == "Residential" else "Commercial"
 

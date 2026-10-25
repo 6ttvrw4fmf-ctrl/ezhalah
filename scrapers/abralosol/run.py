@@ -737,7 +737,7 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
     # 2,803 stored NULL (🔬 2026-10-10, ops_af_score abralosol kitchen we_miss). Land and farms are
     # skipped: «شرقا مواقف سيارات» on a plot describes a neighbour, not the property.
     if not property_type.endswith("Land") and property_type != "Farm":
-        row.update(N.prose_amenities_yes(detail.get("description"), skip=_PROSE_SKIP))
+        row.update(N.prose_amenities(detail.get("description"), skip=_PROSE_SKIP))
     return row, N.category_for_type(property_type).lower()
 
 

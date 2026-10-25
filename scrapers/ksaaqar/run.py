@@ -790,7 +790,7 @@ def stated_rate(page_html: str, price: Optional[int]) -> Optional[int]:
 
 def parse_description_amenities(page_html: str) -> dict[str, bool]:
     text = _description_text(page_html)
-    return normalize.prose_amenities_yes(text, skip=_PROSE_SKIP) if text is not None else {}
+    return normalize.prose_amenities(text, skip=_PROSE_SKIP) if text is not None else {}
 
 
 def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Optional[dict], str, str]:
