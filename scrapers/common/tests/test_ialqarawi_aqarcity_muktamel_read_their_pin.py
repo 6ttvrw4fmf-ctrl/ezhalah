@@ -59,3 +59,12 @@ def test_ialqarawi_follows_a_short_link_when_the_page_has_no_pair(monkeypatch):
     page = ('<dd class="col-sm-3"><strong>رقم العقار</strong></dd><dd class="col-sm-9">3360</dd>'
             '<p>الموقع https://maps.app.goo.gl/AbCdEf123</p>')
     assert IQ.parse_detail(page)["pin"] == {"latitude": 26.3301, "longitude": 43.9712}
+
+
+def test_a_space_after_q_is_still_the_pin():
+    # 2026-10-25 (#837, re-read 40074411510): an ialqarawi embed «place?q= 24.49…,43.97…» (a space after «q=»)
+    # left the ad pin-less; «%20» and «+» are the same space URL-encoded.
+    from scrapers.common.page_pin import pin_from_html
+    for q in (" 24.491234,43.971234", "%2024.491234,43.971234", "+24.491234,43.971234"):
+        got = pin_from_html(f'<iframe src="https://www.google.com/maps/embed/v1/place?q={q}&key=AIza"></iframe>')
+        assert got == {"latitude": 24.491234, "longitude": 43.971234}, q

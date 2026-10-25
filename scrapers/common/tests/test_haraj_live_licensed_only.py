@@ -122,7 +122,7 @@ def test_licence_location_arabic_fallback_and_corner_facade():
     row, cat, skip, _ = mapped("عمارة على شارع تجاري في حي الخالدية للبيع", NO_DEED, city="المدينة")
     assert skip == "" and row["city_id"] == 14 and row["district_ar"] == "الخالدية"
     assert row["direction"] is None and row["additional_info"]["facade_printed"] == "جنوبية - شرقية"
-    assert row["property_age"] is None                                  # «اكثر من عشر سنوات» is an open bound
+    assert row["property_age"] == 10    # «اكثر من عشر سنوات» = REGA's open «10+»; the AF clause reads it as ≥ 10 (2026-10-25)
     assert row["optical_fibers"] is True
     assert row["additional_info"]["other_obligations"] == "مرهونه لصالح صندوق التنميه"
     assert row["license_number"] == "7201131815"
