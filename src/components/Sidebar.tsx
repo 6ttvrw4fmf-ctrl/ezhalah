@@ -665,7 +665,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                 reveals the field below. While search is open the header icon steps aside so
                 there is exactly ONE search affordance on screen at a time. */}
             <View style={s.brandRow}>
-              <SkyEagleMark />
+              <SkyEagleMark lit={!!user} />
               <Text ref={noTranslateRef} style={[s.word, !isRTL && s.wordLatin, dark && dks.word]}>{t('EZHALAH')}</Text>
               {!searching && (
                 <Pressable
@@ -892,7 +892,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
           // the sign-up CTA pinned to the bottom on tall screens. (user request 2026-06-22.)
           <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
             <View style={s.brandRow}>
-              <SkyEagleMark />
+              <SkyEagleMark lit={!!user} />
               <Text ref={noTranslateRef} style={[s.word, !isRTL && s.wordLatin, dark && dks.word]}>{t('EZHALAH')}</Text>
             </View>
 
