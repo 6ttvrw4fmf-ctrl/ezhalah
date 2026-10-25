@@ -76,20 +76,25 @@ mustCatch('a settled «unknown» label overridden by the next spelling (kitchen 
 // unknown, written as the AUTHORITATIVE_NULL sentinel so the upsert clears a stale yes (dwelleo 13130631: status
 // «furnished», text «مفروشة: لا»).
 const DW = readFileSync(join(ROOT, 'scrapers/dwelleo/run.py'), 'utf8');
-const DW_CASES: [Record<string, string>, string, unknown][] = [
+const DW_CASES: [Record<string, unknown>, string, unknown][] = [
   [{ furnishing_status: 'furnished' }, 'غرف النوم: 3 دورات المياه: 3 مفروشة: لا مميزات إضافية', 'AUTHORITATIVE_NULL'],
   [{ furnishing_status: 'unfurnished' }, 'شقة مفروشة غرفتين وصالة للإيجار', 'AUTHORITATIVE_NULL'],
   [{ furnishing_status: 'furnished' }, 'شقة مفروشة بالكامل', true],
   [{ furnishing_status: 'unfurnished' }, 'العقار غير مفروش', false],
   [{ furnishing_status: 'furnished' }, 'شقة واسعة', true],
+  // dwelleo 18970: status + tag chip «مفروش» say yes, the ad's own words say «مفروشة: لا» — the chip must not outvote them
+  [{ furnishing_status: 'furnished', amenities: [{ name: 'مصعد' }, { name: 'مفروش' }] } as any, 'المساحة: 120 م² مفروشة: لا', 'AUTHORITATIVE_NULL'],
+  [{ amenities: [{ name: 'مفروش' }] } as any, 'شقة مفروشة', true],
 ];
 const dwelleo = (src?: string) =>
   (pyCall(ROOT, 'scrapers.dwelleo.run', '_amenities', DW_CASES.map(([r, d]) => [r, d]), src) as Record<string, unknown>[])
     .map((o) => o.furnished);
 const dw = dwelleo();
 DW_CASES.forEach(([r, d, want], i) => check(`dwelleo ${r.furnishing_status} + «${d}» → ${want}`, dw[i] === want, `got ${dw[i]}`));
-const DW_FROM = 'out["furnished"] = status if said is None or said == status else db.AUTHORITATIVE_NULL';
-const dwm = DW.includes(DW_FROM) ? dwelleo(DW.replace(DW_FROM, 'out["furnished"] = status')) : null;
+const DW_FROM = 'out["furnished"] = stated.pop() if len(stated) == 1 else db.AUTHORITATIVE_NULL';
+const dwm = DW.includes(DW_FROM)
+  ? dwelleo(DW.replace(DW_FROM, 'out["furnished"] = _FURNISHED.get(rec.get("furnishing_status"), chips.get("furnished", prose.get("furnished")))'))
+  : null;
 if (!dwm) check(`ANCHOR DRIFTED: ${DW_FROM}`, false);
 mustCatch('dwelleo\'s furnishing_status overriding the ad\'s own «مفروشة: لا» (served as yes)', dwm !== null && dwm.some((g, i) => g !== DW_CASES[i][2]));
 
