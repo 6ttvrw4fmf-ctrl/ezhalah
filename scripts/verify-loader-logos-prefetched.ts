@@ -10,10 +10,16 @@
 //   1. vercel.json: /assets/* (every name carries a content hash — Expo's export) is `immutable`, and
 //      the catch-all `max-age=0` rule no longer matches /assets/.
 //   2. src/lib/prefetchLoaderLogos.ts runs against fake logos/navigator/timer: it fetches every web logo
-//      URL once, after its delay, skips native ids and Save-Data; SearchLoader wires it on web.
+//      URL once, after its delay, skips native ids and Save-Data; the ROOT LAYOUT wires it on web.
+//   3. The post-deploy live gate (verify-live-loader-logos.mjs, run by deploy-frontend.yml) — its shared
+//      verdict is mutation-proved here, and its home is asserted by execution.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { logoUris, scheduleLogoPrefetch, LOGO_PREFETCH_DELAY_MS } from '../src/lib/prefetchLoaderLogos.ts';
+import { logoDeliveryProblems, MIN_PREFETCHED_LOGOS } from './lib/loaderLogoDelivery.mjs';
+import { loadRegistry } from './lib/testRegistry.ts';
+import { liveHalfProblems } from './lib/liveHalf.ts';
 
 const root = join(import.meta.dirname, '..');
 let fail = 0;
@@ -60,9 +66,24 @@ check('no web logos (native) → nothing scheduled', scheduleLogoPrefetch([1, 2,
   let threw = false; try { (fire as (() => void) | null)?.(); } catch { threw = true; }
   check('a failing prefetch never throws into the app', !threw);
 }
+// WHERE it is wired matters: a route's module only runs once that route opens, so in SearchLoader the
+// prefetch never ran on Home (measured 2026-10-25: 11 logos before a search). The root layout runs on
+// every page.
+const layout = readFileSync(join(root, 'src/app/_layout.tsx'), 'utf8');
+const LAYOUT_WIRE = /useEffect\(\(\) => \{\s*if \(Platform\.OS === 'web'\) scheduleLogoPrefetch\(PLATFORM_META\.map\(\(p\) => p\.logo\), \(uris\) => ExpoImage\.prefetch\(uris\)\);\s*\}, \[\]\);/;
+check('the ROOT LAYOUT schedules the prefetch on web with every catalog logo (runs on every page)', LAYOUT_WIRE.test(layout));
 const loader = readFileSync(join(root, 'src/components/SearchLoader.tsx'), 'utf8');
-check('SearchLoader schedules the prefetch on web with every catalog logo',
-  /if \(IS_WEB && typeof window !== 'undefined'\) scheduleLogoPrefetch\(PLATFORM_META\.map\(\(p\) => p\.logo\), \(uris\) => ExpoImage\.prefetch\(uris\)\);/.test(loader));
+check('it is not (only) in a route-level module, where it never ran on Home', !/scheduleLogoPrefetch/.test(loader));
+
+// The live post-deploy gate's verdict — the SAME predicate verify-live-loader-logos.mjs uses.
+const IMM = 'public, max-age=31536000, immutable';
+const logo = (i: number, cc = IMM, status = 200) => ({ url: `https://x/assets/assets/images/platform-logos/p${i}.abc.png`, status, cacheControl: cc });
+const healthy = Array.from({ length: 140 }, (_, i) => logo(i));
+const kept = healthy.map((r) => ({ url: r.url, status: 200, fromCache: true }));
+check('live verdict: 140 prefetched, immutable, kept on a second visit → clean', logoDeliveryProblems(healthy, kept).length === 0, logoDeliveryProblems(healthy, kept).join('; '));
+const homing = liveHalfProblems('verify-live-loader-logos.mjs', loadRegistry(root),
+  (n) => existsSync(join(root, 'scripts', n)), (p) => { try { return readFileSync(join(root, p), 'utf8'); } catch { return null; } });
+check('the live gate is homed in the deploy workflow and really invoked there', homing.length === 0, homing.join('; '));
 
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
 console.log('\n  mutation proof\n');
@@ -76,7 +97,15 @@ const noAssetsRule = rules.filter((r) => r.source !== '/assets/(.*)');
 mustCatch('the /assets/ immutable rule removed', !assetsImmutable(noAssetsRule));
 const catchAllBack = rules.map((r) => r.source === '/((?!_expo/|assets/).*)' ? { ...r, source: '/((?!_expo/).*)' } : r);
 mustCatch('the catch-all max-age=0 rule matching /assets/ again (and overriding it)', !assetsImmutable([...catchAllBack.filter((r) => r.source !== '/assets/(.*)'), ...catchAllBack.filter((r) => r.source === '/assets/(.*)')].reverse()));
-mustCatch('the wiring removed from SearchLoader', !/scheduleLogoPrefetch\(PLATFORM_META/.test(loader.replace(/scheduleLogoPrefetch\(PLATFORM_META[^\n]*\n/, '\n')));
+
+mustCatch('the wiring moved back into a route module (layout no longer has it)', !LAYOUT_WIRE.test(layout.replace(LAYOUT_WIRE, '')));
+mustCatch('live: today\'s production — no prefetch (11 logos before a search)', logoDeliveryProblems(healthy.slice(0, 11), []).some((p) => /prefetch did not run/.test(p)));
+mustCatch('live: logos served max-age=0, must-revalidate', logoDeliveryProblems(healthy.map((r, i) => i === 5 ? { ...r, cacheControl: 'public, max-age=0, must-revalidate' } : r), kept).some((p) => /not cached long-term/.test(p)));
+mustCatch('live: a short max-age that only claims immutable', logoDeliveryProblems(healthy.map((r) => ({ ...r, cacheControl: 'max-age=60, immutable' })), kept).length > 0);
+mustCatch('live: a logo that 404s', logoDeliveryProblems([...healthy, logo(999, IMM, 404)], kept).some((p) => /did not load/.test(p)));
+mustCatch('live: a second visit re-downloads a logo', logoDeliveryProblems(healthy, [...kept, { url: healthy[0].url, status: 304, fromCache: false }]).some((p) => /second visit/.test(p)));
+mustCatch(`live: one logo short of the ${MIN_PREFETCHED_LOGOS} floor`, logoDeliveryProblems(healthy.slice(0, MIN_PREFETCHED_LOGOS - 1), kept).length > 0);
+mustCatch('the live gate unhomed from the deploy workflow', liveHalfProblems('verify-live-loader-logos.mjs', { excluded: [] }, () => true, () => '').length > 0);
 
 if (fail || mutFail) { console.error(`\n❌ loader-logos-prefetched: ${fail} check(s), ${mutFail} mutation(s) failed`); process.exit(1); }
 console.log('\n✅ loader-logos-prefetched: logos cached for a year and fetched before the loader appears.');
