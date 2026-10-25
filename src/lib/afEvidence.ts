@@ -130,8 +130,9 @@ function ageOk(key: string, v: number): boolean {
   const hi = m[2] == null ? null : Number(m[2]);
   return (lo == null || v >= lo) && (hi == null || v <= hi);
 }
-// Owner decision 5: canonical 10 is exact for aqar but the «10+» bucket for wasalt — «١٠ سنوات فأكثر»
-// is the one rendering truthful under both codings.
+// Owner decision 5: a stored 10 renders «١٠ سنوات فأكثر». (Its old premise «canonical 10 is exact for aqar»
+// was disproved 2026-10-25: aqar, wasalt, muhaysini, haraj, tuba, aqarcity and reinvest all store an open
+// «more than 10» as 10 — migrations 20261025065509 / 20261025072931 — so a 10 means «10 or more».)
 function ageText(v: number, t: T): string {
   if (v === 0) return t('New construction');
   if (v === 1) return t('Age: one year');

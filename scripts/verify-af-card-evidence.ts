@@ -151,7 +151,7 @@ const HAND: Record<string, { row: AfCanon; text: string; not: AfCanon }> = {
   'property_age:1_2': { row: { property_age: 2 }, text: 'عمر سنتين', not: { property_age: 5 } },
   'property_age:3_5': { row: { property_age: 4 }, text: 'عمر 4 سنوات', not: { property_age: 6 } },
   'property_age:6_9': { row: { property_age: 7 }, text: 'عمر 7 سنوات', not: { property_age: 10 } },
-  // owner decision 5: canonical 10 is exact for aqar but the «10+» bucket for wasalt → «١٠ سنوات فأكثر»
+  // owner decision 5: a stored 10 is «10 or more» on seven sites (aqar's «exact» premise disproved 2026-10-25) → «١٠ سنوات فأكثر»
   'property_age:10p': { row: { property_age: 10 }, text: '١٠ سنوات فأكثر', not: { property_age: 9 } },
   // The one-tap «up to» ladder (owner 2026-10-05): the chip still prints the LISTING's own age (R12A.2).
   'property_age:upto2': { row: { property_age: 2 }, text: 'عمر سنتين', not: { property_age: 3 } },

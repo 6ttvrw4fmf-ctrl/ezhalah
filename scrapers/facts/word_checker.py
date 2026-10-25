@@ -97,7 +97,7 @@ FACT_TOKENS: dict[str, list[Any]] = {
     "elevator": ["^اصانصير", "^اسانسير", "^اصنصير", "^اسنسير"],
     "kitchen": ["^مطابخ"],                                      # «المطابخ: 1» (sakan/tuba count label)
     "air_conditioner": ["^تكيف$"],
-    "parking": [],
+    "parking": ["^باركينج", "^باركنج"],                      # transliterations (bench-v1: «باركينج خاص»)
     "maid_room": ["غرفة عاملة", "غرفة للعاملة", "غرفة العاملة", "غرفة للخادمة", "غرفة الخادمة", "غرف خادمات",
                   "غرفة للشغالة", "غرفة الشغالة", "غرفة خدامة"],
     "driver_room": ["غرفة سواق", "غرفة سايق", "غرفة للسائق", "غرفة السائق", "غرفة للسواق", "غرفة السواق",
@@ -130,10 +130,10 @@ FACT_TOKENS: dict[str, list[Any]] = {
     "pool": ["^مسبح", "^مسابح", "re:(?:ال)?حوض (?:ال)?سباحه", "swimming pool", "re:pools?"],
     "gym": ["re:(?:ال)?نادي (?:ال)?(?:رياضي|صحي|رجالي|نسائي)", "re:(?:ال)?صاله (?:ال)?(?:رياضيه|العاب رياضيه)",
             "re:(?:ال)?(?:انديه|نوادي) (?:ال)?رياضيه", "^جيم$", "^gym", "^fitness", "health club"],
-    "garden": ["^حديق", "^حدائق", "re:gardens?"],
+    "garden": ["^حديق", "re:gardens?"],                     # plural «حدائق» = the district's parks (bench-v1)
     "majlis": ["^مجلس", "^مجالس", "^majlis"],
     "roof": ["^سطح$", "^سطحين$", "^سطحان$", "^سطوح$", "^روف$", "^roof"],
-    "warranty": ["^ضمان", "^warrant"],
+    "warranty": ["^ضمان", "^صمانات", "^ظمانات", "^warrant"],  # common misspellings; never bare «صمان» (وادي الصمان)
     "water_tank": ["^خزان$", "^خزانات$", "^خزانين$", "^خزانان$", "water tank"],
     "well": ["^بئر$", "^بير$", "^ابار$", "^بئرين$", "^بيرين$", "^ارتوازي"],
     "annex": ["^ملحق$", "^ملاحق$", "^ملحقين$", "^annex"],
@@ -185,6 +185,8 @@ _NEG2 = frozenset(_n(w) for w in ("لا يوجد", "لا توجد", "لا يتو
 _POST_NOT = tuple(_n(w) for w in ("متوفر", "موجود", "متاح", "مشمول", "شامل"))
 _POST_NOT_FACT = {"kitchen": ("راكب", "مركب"), "air_conditioner": ("راكب", "مركب"), "furnished": ("مفروش", "مؤثث")}
 
+_BEARINGS = ("شمال", "جنوب", "شرق", "غرب", "الشمال", "الجنوب", "الشرق", "الغرب", "وجه", "الوجه", "واجه", "الواجه", "يحد",
+             "حدود")
 # Per-fact context words: (excluded if one of the 2 words BEFORE starts with…, excluded if one of the 2 AFTER…)
 _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "electricity": (("غرف", "عداد", "ضمان", "تمديد", "لوح", "فاتور", "فواتير", "مولد", "سباك", "اعمال", "كيبل",
@@ -200,14 +202,24 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
                                                  "الامن", "الشيوخ", "النواب", "الامناء")),
     "warranty": (("يقبل", "نقبل", "قبول", "مقبول", "مستفيد", "مستفيدي"),
                  ("الاجتماعي", "اجتماعي", "بنكي", "البنكي", "مالي", "الجديه", "جديه", "حقوق", "الحقوق", "السكني",
-                  "الدفع", "دفع", "المستاجر", "التامين")),
+                  "الدفع", "دفع", "المستاجر", "التامين",
+                  # bench-v1: a rental / income / comfort promise is not a building warranty
+                  "توفير", "تاجير", "التاجير", "مستاجر", "دخل", "الدخل", "عائد", "العائد", "ايجار", "الايجار",
+                  "الخصوصيه", "خصوصيه", "سير", "راحه", "الراحه")),
     "roof": (("مستوي", "مستوى"), ("المطبخ", "مطبخ", "رخام", "جرانيت", "عمل", "الارض", "البحر", "الطاوله")),
     "water_tank": ((), ("ملابس", "مطبخ", "المطبخ", "حائط", "جداري", "دولاب", "خشب", "حائطيه", "ملابس")),
     "well": ((), ("السلم", "سلم", "الدرج", "درج", "المصعد", "مصعد", "عثمان", "سلوي")),
     "annex": (("حمام", "دوره", "دورات", "مطبخ", "غرف", "غرفه"),
               ("به", "بها", "بالغرفه", "بالصاله", "بالمطبخ", "بالمجلس", "بغرفه", "بالمبني", "بالفيلا")),
-    "storage": ((), ("للايجار", "للبيع", "تجاري", "صناعي", "تجاريه", "صناعيه", "مبرد", "مبرده", "للتاجير")),
-    "garden": ((), ("عامه", "عام", "الحي", "العامه")),
+    "storage": (("خلف", "بجوار", "مقابل", "صناعي", "صناعيه"),     # «خلف مخازن …» is an address, «أرض صناعية ومستودعات» the type
+                ("للايجار", "للبيع", "تجاري", "صناعي", "تجاريه", "صناعيه", "مبرد", "مبرده", "للتاجير")),
+    "garden": (_BEARINGS + ("مناسب", "مثالي", "خلف", "مقابل"),   # «الوجهة: غرب حديقة» is a boundary; «مناسب للحديقة» a maybe
+               ("عامه", "عام", "الحي", "العامه")),
+    "parking": (_BEARINGS, ()),                                  # «جنوب: مواقف ثم شارع» is a boundary
+    # «خزان المياه مستقل» is a tank, «دورة مياه مستقلة» a bathroom — not a meter (checked only on the
+    # «مياه مستقل» / «كهرباء مستقلة» shapes; «خزانات وعدادات مستقلة» names the meter itself)
+    "separate_water_meter": (("خزان", "دور", "حمام", "مغسل", "سخان", "تحلي", "فلتر", "مضخ", "بئر", "بير"), ()),
+    "separate_electricity_meter": (("غرف", "لوح", "مولد", "تمديد", "خزان"), ()),
     "laundry_room": ((), ("سيار", "السيار")),
     "kitchen": (("ادوات", "سطح"), ()),
     "pool": (("ادوات", "مستلزمات"), ()),
@@ -217,18 +229,30 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 # «خدمات العقار: كهرباء، مياه»; never a bare «مياه» inside a sentence (it is a bathroom, a well, a sea …).
 _CUES = tuple(_n(w) for w in ("واصل", "واصله", "موصل", "موصله", "خدمات", "الخدمات", "المرافق", "مرافق", "يوجد",
                               "توجد", "موجود", "متوفر", "متوفره", "يتوفر", "تتوفر", "توفر", "شامل", "شامله", "مع",
-                              "services", "utilities"))
+                              "services", "utilities", "has", "have", "connected", "connection", "connections",
+                              "included", "includes", "including", "supply"))
 _NEEDS_CUE = frozenset({"electricity", "water_supply"})
+# A utility word that carries a list on into the next clause: «خدمات العقار: Electricity, Waters الضمانات …» —
+# the comma ends the clause, so «Waters» has no cue of its own (bench-v1: ~340 water/electricity misses).
+_UTILITY = tuple(_n(w) for w in ("كهرب", "مياه", "ماء", "مويه", "صرف", "هاتف", "الياف", "electricity", "water",
+                                 "sanitation", "fibre", "fiber", "telephone", "phone"))
+# Public amenities a neighbourhood also has: «مسجد وحديقة قريبة من العمارة», «حديقة … مقابل العمارة»,
+# and the items of a «خدمات قريبة: مسجد - حديقة» list — the nearby word may come AFTER, or a clause before.
+_PUBLIC_FACTS = frozenset({"garden", "pool", "gym", "parking"})
+_NEAR_AFTER = tuple(_n(w) for w in ("قريب", "بالقرب", "مجاور", "بجوار", "مقابل"))
+_METER_FACTS = frozenset({"separate_water_meter", "separate_electricity_meter"})
+_DIGITS = "0123456789"
 
 
 def _compile(spec: str) -> re.Pattern[str]:
     if spec.startswith("re:"):
-        return re.compile(rf"(?:(?<= )|^){_PROCLITIC}(?:{spec[3:]})(?!\w)")
+        return re.compile(rf"(?:(?<= )|^|(?<=\d)){_PROCLITIC}(?:{spec[3:]})(?!\w)")
     if spec.isascii() and len(spec) <= 4 and not spec.startswith("^"):
         spec = f"^{spec}$"                          # «a/c», «lift»: folded to «a c», a loose hit fires inside «a car»
     start, end = spec.startswith("^"), spec.endswith("$")
     core = re.escape(_n(spec.strip("^$")))
-    return re.compile((rf"(?:(?<= )|^){_PROCLITIC}" if start else "") + core + (r"(?!\w)" if end else ""))
+    # a word may start right after a glued digit: «2مجلس», «1مطبخ» (bench-v1)
+    return re.compile((rf"(?:(?<= )|^|(?<=\d)){_PROCLITIC}" if start else "") + core + (r"(?!\w)" if end else ""))
 
 
 _PATTERNS: dict[str, list[tuple[re.Pattern[str], Optional[bool]]]] = {
@@ -289,29 +313,53 @@ def _negated_after(nxt: list[str], fact: str) -> int:
     return 0
 
 
-def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: int) -> tuple[Optional[bool], int, int]:
-    """The outcome of ONE token hit: (True|False|None, quote start, quote end) in the normalised clause."""
+def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: int,
+           cue_in: bool = False, near_in: bool = False) -> tuple[Optional[bool], int, int]:
+    """The outcome of ONE token hit: (True|False|None, quote start, quote end) in the normalised clause.
+    cue_in / near_in: the clause before carried a utility list / a «nearby» heading on into this one."""
     ws, we = _word_bounds(t, s, e)
     prev = t[:ws].split()
     nxt = t[we:].split()
     head = t[ws:s]                                   # the glued part of the word before a loose hit
     if fact == "balcony" and N._inside_a_name(t, s, t[s:e]):
         return None, s, e
-    p2, n2 = prev[-2:], nxt[:2]
+    if fact == "warranty":
+        word = t[ws:we]
+        if word in ("لضمان", "ولضمان"):              # «لضمان الخصوصية» = "to ensure", not a warranty
+            return None, s, e
+        lab = 2 if nxt[:2] == ["و", "مدتها"] else 1 if nxt[:1] == ["ومدتها"] else 0
+        if lab:                                      # the REGA form LABEL «الضمانات ومدتها: …» — only its value speaks
+            v = nxt[lab:]
+            if v[:1] and v[0] in ("لا", "لايوجد", "لاتوجد", "no", "none"):
+                n = lab + (2 if v[0] == "لا" and v[1:2] in (["يوجد"], ["توجد"]) else 1)
+                return False, ws, we + len(" ".join([""] + nxt[:n]))
+            return None, s, e                        # «-», empty, or a value whose own words say what it is
+    # guards read words without a glued count: «2دورات مياه» is still a bathroom (offsets keep `prev`)
+    gp = [w.lstrip(_DIGITS) or w for w in prev]
+    gn = [w.lstrip(_DIGITS) or w for w in nxt]
+    p2, n2 = gp[-2:], gn[:2]
     if any(_starts(w, _PREPARED) for w in p2 + n2) or "prepared for" in " ".join(n2):
         return None, s, e
     if fact in _PLACE_FACTS and any(_starts(w, _PREPARED_PLACE) for w in p2):
         return None, s, e
     if fact == "furnished" and (any(_starts(w, _PARTIAL) for w in n2) or any(_starts(w, _PARTIAL_BEFORE) for w in prev[-1:])):
         return None, s, e
-    p5 = prev[-5:]
+    p5 = gp[-5:]
     if any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in p5) or any(p in " ".join(p5) for p in _NEAR_PHRASES):
         return None, s, e
+    n3 = gn[:3]                                      # English puts it AFTER: «car park nearby», «pool and gym nearby»
+    if "nearby" in n3 or "close by" in " ".join(n3):
+        return None, s, e
+    if fact in _PUBLIC_FACTS and (any(_starts(w, _NEAR_AFTER) for w in gn[:4]) or (near_in and n_words <= 3)):
+        return None, s, e
     ex_before, ex_after = _EXCLUDE.get(fact, ((), ()))
+    if fact in _METER_FACTS and "عداد" in t[ws:e]:
+        ex_before = ()                               # «خزانات وعدادات مستقلة» names the meter itself
     if any(_starts(_strip_wa(w), ex_before) or _starts(w, ex_before) for w in p2) or \
             any(_starts(w, ex_after) for w in n2) or any(x in " ".join(n2) for x in ex_after if " " in x):
         return None, s, e
-    if fact in _NEEDS_CUE and not (any(_starts(w, _CUES) for w in prev[-3:] + nxt[:1]) or n_words <= 3):
+    if fact in _NEEDS_CUE and not (any(_starts(w, _CUES) for w in gp[-3:] + gn[:1]) or n_words <= 3
+                                   or (cue_in and not prev)):
         return None, s, e
     if forced is not None:
         return forced, ws, we
@@ -331,11 +379,13 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
 # ── numbers ───────────────────────────────────────────────────────────────────────────────────────────────
 _BEARING = r"(?:ال)?(?:شمال|جنوب|شرق|غرب)(?:ي|يه|ا)?"
 _UNIT = r"(?:م|متر|مترا|ميتر|m)"
+_SH = r"(?:ب|ال|بال|و|وال)?شارع"
 _STREET_RES = (
     re.compile(rf"عرض (?:ال)?شارع ?(\d{{1,3}})(?: ?{_UNIT})?(?!\w)"),
-    re.compile(rf"(?:(?<= )|^)(?:ال)?شارع (?:بعرض ?|عرض ?|عرضه ?)?(\d{{1,3}}) ?{_UNIT}(?!\w)(?: ({_BEARING})(?!\w))?"),
-    re.compile(rf"(?:(?<= )|^)(?:ال)?شارع (?:بعرض ?|عرض ?)?(\d{{1,3}}) ({_BEARING})(?!\w)"),
-    re.compile(rf"(?:(?<= )|^)(?:ال)?شارع (?:بعرض|عرض) ?(\d{{1,3}})(?!\w)"),
+    re.compile(rf"(?:(?<= )|^){_SH} (?:بعرض ?|عرض ?|عرضه ?)?(\d{{1,3}}) ?{_UNIT}(?!\w)(?: ({_BEARING})(?!\w))?"),
+    re.compile(rf"(?:(?<= )|^){_SH} (?:بعرض ?|عرض ?)?(\d{{1,3}}) ({_BEARING})(?!\w)"),
+    re.compile(rf"(?:(?<= )|^){_SH} (?:بعرض|عرض) ?(\d{{1,3}})(?!\w)"),
+    re.compile(rf"(?:(?<= )|^){_SH} ({_BEARING}) (?:بعرض ?|عرض ?)?(\d{{1,3}})(?: ?{_UNIT})?(?!\w)"),
     re.compile(rf"(?:(?<= )|^)({_BEARING}) (?:بعرض|عرض) ?(\d{{1,3}}) ?{_UNIT}(?!\w)"),
     re.compile(r"(\d{1,3}) ?m (?:wide |width )?street|street width (?:of )?(\d{1,3})"),
 )
@@ -353,10 +403,10 @@ _EN_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seve
 _NUMW = r"(ثلاث|ثلاثه|اربع|اربعه|خمس|خمسه|ست|سته|سبع|سبعه|ثمان|ثماني|ثمانيه|تسع|تسعه|عشر|عشره)"
 _COUNT_RES: dict[str, tuple[re.Pattern[str], ...]] = {
     "floors": (
-        re.compile(r"عدد (?:ال)?(?:ادوار|طوابق) ?(\d{1,2})(?!\w)"),
-        re.compile(r"عدد (?:ال)?(?:ادوار|طوابق) (دور|دورين|دوران|ثلاث|ثلاثه|اربع|اربعه|خمس|خمسه)(?!\w)"),
-        re.compile(r"(?:(?<= )|^)(\d{1,2}) ?(?:ادوار|طوابق)(?!\w)"),
-        re.compile(rf"(?:(?<= )|^){_NUMW} (?:ادوار|طوابق)(?!\w)"),
+        re.compile(r"عدد (?:ال)?(?:ادوار|ادور|طوابق) ?(\d{1,2})(?!\w)"),
+        re.compile(r"عدد (?:ال)?(?:ادوار|ادور|طوابق) (دور|دورين|دوران|ثلاث|ثلاثه|اربع|اربعه|خمس|خمسه)(?!\w)"),
+        re.compile(r"(?:(?<= )|^)(\d{1,2}) ?(?:ادوار|ادور|طوابق)(?!\w)"),
+        re.compile(rf"(?:(?<= )|^){_NUMW} (?:ادوار|ادور|طوابق)(?!\w)"),
         re.compile(r"(?:(?<= )|^)(?:ال|و|وال|ب)?(دورين|دوران|طابقين)(?!\w)"),
         re.compile(r"(?:(?<= )|^)(?:من )?دور (واحد)(?!\w)"),
     ),
@@ -364,6 +414,7 @@ _COUNT_RES: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r"عدد (?:ال)?(?:شقق|وحدات)(?: (?:ال)?سكنيه)? ?(\d{1,3})(?!\w)"),
         re.compile(r"(?:(?<= )|^)(\d{1,3}) ?شقق(?!\w)"),
         re.compile(r"(?:(?<= )|^)(\d{2,3}) ?شقه(?!\w)"),
+        re.compile(rf"(?:(?<= )|^){_NUMW} شقق(?!\w)"),
         re.compile(r"(?:مكون|مكونه|تتكون|يتكون|تضم|يضم|تحتوي|يحتوي)(?: من)? (\d{1,3}) ?(?:شقق|شقه|وحدات|وحده)(?!\w)"),
         re.compile(r"(?:مكون|مكونه|تتكون|يتكون|تضم|يضم|تحتوي|يحتوي)(?: من)? (شقتين|شقتان)(?!\w)"),
     ),
@@ -378,8 +429,8 @@ _COUNT_RES: dict[str, tuple[re.Pattern[str], ...]] = {
 _COUNT_RANGE = {"floors": (1, 60), "apartments_count": (2, 500), "shops_count": (1, 300)}
 # a per-floor count or an availability count is not the building's count
 _COUNT_SKIP_AFTER = ("كل دور", "بكل دور", "لكل دور", "في الدور", "بالدور", "متاح", "متوفر", "للايجار", "للبيع",
-                     "شاغر")
-_AGE_EXTRA = re.compile(r"(?:(?<= )|^)(?:عمره|عمرها|عمر العماره|عمر الفيلا|عمر الفله|عمر البيت|عمر المنزل) ?(\d{1,2}) "
+                     "شاغر", "مؤجر", "ماجر", "مستاجر", "ونصف")
+_AGE_EXTRA = re.compile(r"(?:(?<= )|^)و?(?:عمره|عمرها|عمر (?:ال)?(?:عقار|عماره|فيلا|فله|بيت|منزل|مبني|بناء|شقه)) ?(\d{1,2}) ?"
                         r"(?:سنه|سنوات|سنين|عام|اعوام)(?!\w)")
 _AGE_EN = re.compile(r"(?:العمر|عمر (?:ال)?عقار) (one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|"
                      r"fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty) ?years?(?!\w)")
@@ -437,16 +488,24 @@ def check(text: str) -> list[dict[str, Any]]:
     clauses = [(off, c) + norm_map(c) for off, c in _clauses(raw)]
     bool_hits: dict[str, dict[bool, tuple[int, int, int]]] = {}
     num_hits: dict[str, list[Hit]] = {}
+    cue_in = near_in = False
     for ci, (_off, _c, t, _idx) in enumerate(clauses):
         if not t:
             continue
-        n_words = t.count(" ") + 1
+        words = t.split()
+        n_words = len(words)
         for fact, pats in _PATTERNS.items():
             for rx, forced in pats:
                 for m in rx.finditer(t):
-                    v, qs, qe = _judge(fact, t, m.start(), m.end(), forced, n_words)
+                    v, qs, qe = _judge(fact, t, m.start(), m.end(), forced, n_words, cue_in, near_in)
                     if v is not None:
                         bool_hits.setdefault(fact, {}).setdefault(v, (ci, qs, qe))
+        # what this clause hands to the next one: a cue (or a cued utility list going on), a «nearby» heading
+        # (a cue alone does not carry: «لا يوجد مصعد, مياه …» must not cue the next clause)
+        cue_in = (any(_starts(w, _CUES) for w in words) and any(_starts(_strip_wa(w), _UTILITY) for w in words)) \
+            or (cue_in and _starts(_strip_wa(words[0]), _UTILITY))
+        # a heading ENDS with the nearby word: «خدمات قريبة:», «بالقرب من:», «Nearby:»
+        near_in = any(_strip_wa(w) in _NEAR_WORDS or w in _NEAR_WORDS for w in words[-2:]) or (near_in and n_words <= 3)
         for fact in _COUNT_RES:
             num_hits.setdefault(fact, []).extend(_num_hits(fact, t, ci))
         # street width — collected, judged across the whole ad below
@@ -624,6 +683,43 @@ def selftest() -> None:
         ("مواقف بدروم خاصة", {"basement": True, "parking": True}, ()),
         ("نادي رياضي رجالي ونسائي", {"gym": True}, ()),
         ("بالقرب من نادي رياضي", {}, ("gym",)),
+        ("car park nearby", {}, ("parking",)),
+        ("Pool and gym nearby", {}, ("pool", "gym")),
+        ("swimming pool close by", {}, ("pool",)),
+        ("private parking, gym nearby", {"parking": True}, ("gym",)),
+        # bench-v1 (facts-words-bench-v1) false-yes classes and obvious misses, each a real ad's words
+        ("الضمانات ومدتها: - الالتزامات الآخرى على العقار: لا", {}, ("warranty",)),   # a form LABEL, no value
+        ("الضمانات و مدتها: لايوجد وصف موقع العقار", {"warranty": False}, ()),
+        ("لضمان الخصوصية والأمان", {}, ("warranty",)),
+        ("ضمان توفير مستأجر لمدة 5 سنوات", {}, ("warranty",)),
+        ("الصمانات تصل الي 25سنه", {"warranty": True}, ()),
+        ("شقة في شارع وادي الصمان", {}, ("warranty",)),
+        ("مسجد وحديقة قريبه من العمارة", {}, ("garden",)),
+        ("يوجد حديقة مع العاب اطفال مقابل العمارة", {}, ("garden",)),
+        ("الوجهه :غرب حديقة", {}, ("garden",)),
+        ("مخطط يحتوي على حدائق وشوارع", {}, ("garden",)),
+        ("*خدمات قريبة* مسجد - حديقة - مدارس", {}, ("garden",)),
+        ("جنوب: مواقف ثم شارع", {}, ("parking",)),
+        ("باركينج خاص لكل شقة", {"parking": True}, ()),
+        ("دورة مياه مستقلة", {}, ("separate_water_meter", "water_supply")),
+        ("خزان المياه مستقل", {"water_tank": True}, ("separate_water_meter",)),
+        ("خزانات وعدادات مستقلة", {"separate_electricity_meter": True}, ()),
+        ("2دورات مياة موقف خاص", {"parking": True}, ("water_supply",)),
+        ("1مجلس 1غرفة طعام 1مطبخ", {"majlis": True, "kitchen": True}, ()),
+        ("خلف مخازن العناية", {}, ("storage",)),
+        ("خدمات العقار: Electricity, Waters الضمانات ومدتها: لا يوجد",
+         {"electricity": True, "water_supply": True, "warranty": False}, ()),
+        ("لا يوجد مصعد, مياه حلوة", {"elevator": False}, ("water_supply",)),
+        ("Floor has electricity and water Connections", {"electricity": True, "water_supply": True}, ()),
+        ("شارع شرقي 15 الأطوال", {"street_width_m": 15.0}, ()),
+        ("بشارع عرض 15 متر", {"street_width_m": 15.0}, ()),
+        ("زاوية شارع شمالي 20 شرقي 15", {}, ("street_width_m",)),
+        ("تتكون من اربع ادور", {"floors": 4.0}, ()),
+        ("ثلاث ادور ونصف", {}, ("floors",)),
+        ("عماره زاويه اربع شقق", {"apartments_count": 4.0}, ()),
+        ("حاليا ثلاث شقق ماجره", {}, ("apartments_count",)),
+        ("عمر العقار/ 5 سنين", {"property_age_years": 5.0}, ()),
+        ("عمرها ٦سنوات", {"property_age_years": 6.0}, ()),
         ("الدفع شهري", {"payment_monthly": True}, ()),
         ("لا نقبل الدفع الشهري", {"payment_monthly": False}, ()),
         ("مسبح خاص", {"pool": True}, ()),
