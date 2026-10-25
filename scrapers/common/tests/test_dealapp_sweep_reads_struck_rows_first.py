@@ -81,3 +81,42 @@ def test_struck_rows_are_read_between_rotation_rows():
     head = [r["missing_count"] > 0 for r in plan[:300]]
     assert all(head[i] != head[i + 1] for i in range(len(head) - 1)), "struck and rotation alternate"
     assert sum(r["missing_count"] > 0 for r in plan) == 150 and plan[0]["missing_count"] > 0
+
+
+def test_near_kill_rows_get_half_the_struck_share():
+    """2026-10-25: 636 rows at >= 2 strikes, freshly stamped by the crawl, lost every window to 2,194
+    one-strike rows; the 10:47 run read none of them while 117 served ads sat at 3-11 strikes."""
+    near = [{"id": i, "listing_url": f"u/ad-details/{i}", "missing_count": 2 + i % 3,
+             "last_liveness_probe_at": "2026-10-25T05:00"} for i in range(636)]
+    far = [{"id": 5000 + i, "listing_url": f"u/ad-details/{5000 + i}", "missing_count": 1,
+            "last_liveness_probe_at": "2026-10-20"} for i in range(2194)]
+    plan = L._plan_worklist(far + near + _rows(20000, False, 100_000), 600)
+    got_near = sum(r["missing_count"] >= 2 for r in plan)
+    got_far = sum(r["missing_count"] == 1 for r in plan)
+    assert got_near == 75 and got_far == 75, (got_near, got_far)
+    # a side with too few rows gives its half to the other
+    plan = L._plan_worklist(near[:10] + far + _rows(20000, False, 100_000), 600)
+    assert sum(r["missing_count"] >= 2 for r in plan) == 10
+    assert sum(r["missing_count"] == 1 for r in plan) == 140
+
+
+def test_struck_window_is_ordered_nearest_to_a_kill_first(monkeypatch):
+    orders = []
+
+    class _Q2(_Q):
+        def __getattr__(self, name):
+            def f(*a, **k):
+                if name == "gt":
+                    self.struck = True
+                if name == "order" and self.struck:
+                    orders.append((a[0], k.get("desc")))
+                return self
+            return f
+
+    class _Client:
+        def table(self, _t):
+            return _Q2([])
+
+    monkeypatch.setattr(L, "_execute", lambda q, what="": type("R", (), {"data": []})())
+    L._collect_candidates(_Client(), 600)
+    assert orders and orders[0] == ("missing_count", True), orders
