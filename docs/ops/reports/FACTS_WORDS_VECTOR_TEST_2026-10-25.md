@@ -4,6 +4,8 @@
 
 **Nothing is wired into the filter.** This report is for the owner to read first.
 
+> **Update, same day (owner: «We trust the sellers sentence»):** Rule B below is now wired into the Advanced Filter — the 20 amenity columns only, through an overlay (`listing_text_facts`) the search index merges, with a kill switch. Law: `docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md` «The seller's sentence — Rule B»; migrations 20261025203351 / 20261025205008 / 20261025205450.
+
 ## Headline
 
 - **Full run:** 404,981 active ads on 149 platforms read; 394,737 had text; **322,242 ads got at least one fact (81.6 %)**; **1,209,515 facts** stored (1,045,701 yes · 41,879 no · 121,935 numbers/text), each with the ad's own words as proof.

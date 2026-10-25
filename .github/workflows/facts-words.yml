@@ -4,29 +4,36 @@
 # proof, into public.listing_facts (model word-checker-v1, its own run_id). A FREE multilingual model
 # (intfloat/multilingual-e5-small, pinned revision) embeds the same PDPL-sanitised text on this runner's CPU
 # into public.listing_embeddings, and a finder loop lists the words the checker does not know yet, for owner
-# review. ZERO paid AI calls, no API keys: Actions minutes only. Dispatch-only, never scheduled.
+# review. ZERO paid AI calls, no API keys: Actions minutes only.
+#   incremental = THE NIGHTLY RUN (owner Rule B, 2026-10-25). pg_cron job `gh-facts-words-nightly` (07:05 UTC,
+#                 after the 04:22 crawl) dispatches this file with NO inputs, so every default below is the
+#                 nightly one. It reads only active ads never read or whose text changed (the DB decides:
+#                 text_facts_todo) and replaces their row in listing_text_facts — the overlay the hourly
+#                 index sync merges under Rule B. No embeddings; the light install. The first fill is the
+#                 same phase with shards=8 on an empty listing_text_facts.
 #   benchmark = exactly the ads of the LLM run facts-test-2026-10-24 (one shard)
 #   full      = every active ad, split into `shards` id-range slices (max 8 at once; reads are paged + paused)
-# Writes ONLY listing_facts and listing_embeddings. No *_listings table, RPC, scraper or edge function.
+# Writes ONLY listing_facts, listing_text_facts and listing_embeddings. No *_listings table, scraper or edge function.
 name: Facts words + vectors
 
 on:
   workflow_dispatch:
     inputs:
       phase:
-        description: "benchmark (the LLM test's ads) or full (every active ad)"
-        required: true
-        default: benchmark
+        description: "incremental (nightly: new/changed ads → overlay), benchmark (the LLM test's ads) or full (every active ad)"
+        required: false
+        default: incremental
         type: choice
-        options: [benchmark, full]
+        options: [incremental, benchmark, full]
       run_id:
-        description: "Run id, must start with facts-words (letters, digits, . _ -)"
-        required: true
+        description: "Run id, must start with facts-words (empty = facts-words-nightly-<UTC date>)"
+        required: false
+        default: ""
         type: string
       shards:
-        description: "Parallel id-range slices for phase=full (1-9; benchmark always 1)"
+        description: "Parallel slices for full / incremental (1-9; benchmark always 1; nightly 1)"
         required: false
-        default: "8"
+        default: "1"
         type: string
       limit:
         description: "Max ads per table per shard (0 = all)"
@@ -52,7 +59,7 @@ on:
         options: [e5-small, minilm-l12]
 
 concurrency:
-  group: facts-words-${{ inputs.run_id }}
+  group: facts-words-${{ inputs.run_id || 'nightly' }}
   cancel-in-progress: false
 
 env:
@@ -69,11 +76,11 @@ jobs:
     steps:
       - id: m
         env:
-          PHASE: ${{ inputs.phase }}
-          SHARDS: ${{ inputs.shards }}
+          PHASE: ${{ inputs.phase || 'incremental' }}
+          SHARDS: ${{ inputs.shards || '1' }}
         run: |
           n=1
-          if [ "$PHASE" = "full" ]; then n="$SHARDS"; fi
+          if [ "$PHASE" != "benchmark" ]; then n="$SHARDS"; fi
           case "$n" in [1-9]) ;; *) echo "shards must be 1-9"; exit 1;; esac
           echo "n=$n" >> "$GITHUB_OUTPUT"
           echo "shards=$(python3 -c "import json,sys; print(json.dumps(list(range(int(sys.argv[1])))))" "$n")" >> "$GITHUB_OUTPUT"
@@ -95,8 +102,13 @@ jobs:
           cache: "pip"
           cache-dependency-path: scrapers/facts/requirements-words.txt
       - name: Install (pinned; CPU-only torch)
+        if: (inputs.phase || 'incremental') != 'incremental'
         run: pip install -r scrapers/facts/requirements-words.txt
+      - name: Install (incremental — the word checker needs no model)
+        if: (inputs.phase || 'incremental') == 'incremental'
+        run: pip install supabase==2.10.0 python-dotenv==1.0.1 numpy==2.2.3
       - name: Cache the embedding model (official Hugging Face repo, pinned revision)
+        if: (inputs.phase || 'incremental') != 'incremental'
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
@@ -107,7 +119,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          PHASE: ${{ inputs.phase }}
+          PHASE: ${{ inputs.phase || 'incremental' }}
           RUN_ID: ${{ inputs.run_id }}
           LIMIT: ${{ inputs.limit }}
           PLATFORMS: ${{ inputs.platforms }}
@@ -116,13 +128,14 @@ jobs:
           SHARD: ${{ matrix.shard }}
           N: ${{ needs.plan.outputs.n }}
         run: |
+          if [ -z "$RUN_ID" ]; then RUN_ID="facts-words-nightly-$(date -u +%F)"; fi
           exec python -m scrapers.facts.words --phase "$PHASE" --run-id "$RUN_ID" --limit "$LIMIT" --platforms "$PLATFORMS" \
             --model "$MODEL" --shard "$SHARD/$N" --out facts-words-out $([ "$EMBED" = "true" ] || echo --no-embed)
       - name: Keep the per-shard summary (counts + new-words list; no ad text)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: facts-words-${{ inputs.run_id }}-${{ matrix.shard }}
+          name: facts-words-${{ inputs.run_id || 'nightly' }}-${{ matrix.shard }}
           path: facts-words-out/
           retention-days: 14
           if-no-files-found: ignore
