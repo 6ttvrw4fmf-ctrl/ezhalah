@@ -7,8 +7,10 @@ import CloudWisp from './CloudWisp';
 
 // The logo is a vector drawing (SVG), never a photo (owner 2026-10-24). Signed-in users see it lit with green string
 // lights that twinkle in turns — the animation lives inside logo-cloud-lit.svg («when user logs in signs up it changes»).
-const EAGLE = require('../../assets/images/logo-cloud.svg');
-const EAGLE_LIT = require('../../assets/images/logo-cloud-lit.svg');
+// On its own blue sky so the white cloud eagle is clearly visible on the light sidebar (owner 2026-10-24: signed out
+// «it just shows this» — the approved share-picture look). Signed in: the same, lit with the twinkling green lights.
+const EAGLE = require('../../assets/images/logo-cloud-sky.svg');
+const EAGLE_LIT = require('../../assets/images/logo-cloud-lit-sky.svg');
 const eagleDrift = {
   from: { transform: [{ translateX: -skyScene.eagleDriftPx }] },
   to: { transform: [{ translateX: skyScene.eagleDriftPx }] },
