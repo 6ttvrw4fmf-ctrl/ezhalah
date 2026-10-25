@@ -86,7 +86,8 @@ SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 # licensed offers only go live) with its CANDIDATE_PLUS_DIRECT entry below.
 # moj (2026-10-10) is not a listing platform at all: it reads the Ministry of Justice's district sales
 # aggregates into moj_district_sales (scrapers/moj/sales.py) and writes no listing.
-NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "propertyfinder", "moj"})
+# "facts" is not a platform: scrapers/facts/ is the facts-extraction test reader (2026-10-24), like "common".
+NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "propertyfinder", "moj", "facts"})
 
 
 class _P(dict):
