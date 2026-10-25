@@ -13,7 +13,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-sys.modules.setdefault("scrapers.common.db", types.ModuleType("scrapers.common.db"))
+_supabase = types.ModuleType("supabase")
+_supabase.Client = type("Client", (), {})
+_supabase.create_client = lambda url, key: None
+sys.modules.setdefault("supabase", _supabase)
+_dotenv = types.ModuleType("dotenv")
+_dotenv.load_dotenv = lambda *a, **k: None
+sys.modules.setdefault("dotenv", _dotenv)
 
 from scrapers.alta.run import map_listing  # noqa: E402
 
