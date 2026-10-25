@@ -47,7 +47,12 @@ def clean_text(title: Optional[str], description: Optional[str]) -> str:
         desc = N.html_block_lines(desc)
     lines = [title or ""] + re.split(r"[\r\n]+", desc)
     out = "\n".join(s for ln in lines if ln.strip() and (s := sanitize(None, ln)))
-    return unicodedata.normalize("NFKC", out)[:MAX_TEXT]
+    return _COLON_NO.sub(r"\1،", unicodedata.normalize("NFKC", out))[:MAX_TEXT]
+
+
+# A form value «لا» ends its clause: «مفروشة: لا يُعرف حي الأمل …», «مؤثثة: لا تتضمن …», «مفروش: لا **المرافق:**»
+# (muhaysini; full run 458 furnished rows read as yes). «… : لا يوجد» stays one negation.
+_COLON_NO = re.compile(r"(:[\s*]*لا)(?=\s+(?!(?:يوجد|توجد|يتوفر|تتوفر|غير)(?!\w))\S)")
 
 
 def norm_map(raw: str) -> tuple[str, list[int]]:
@@ -744,6 +749,8 @@ def selftest() -> None:
         ("خزان المياه مستقل", {"water_tank": True}, ("separate_water_meter",)),
         # full run (facts-words-2026-10-25) hand check: a proclitic hid the bathroom — 900 rows repaired
         ("غرفة نوم بدورة مياه مستقلة", {}, ("separate_water_meter", "water_supply")),
+        ("- مفروشة: لا يُعرف حي الأمل بأجوائه الهادئة", {"furnished": False}, ()),
+        ("- **مفروش**: لا **المرافق:** - الكهرباء", {"furnished": False}, ()),
         ("جناح بحمام ومغسلة, لدورة مياه مستقلة", {}, ("separate_water_meter",)),
         ("خزانات وعدادات مستقلة", {"separate_electricity_meter": True}, ()),
         ("2دورات مياة موقف خاص", {"parking": True}, ("water_supply",)),
