@@ -194,10 +194,12 @@ def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
         if p.get(flag) is True:
             row[col] = True
     # The API has no kitchen / parking / AC / entrance field (its property object: ramps, licences, has_water,
-    # has_sewage, has_electricity, security_cameras …), so the ad's own words are the only statement of them:
-    # YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2). 115 of 566 active ads named one and all stored NULL,
-    # so the Advanced Filter never found them (🔬 2026-10-12). A structured utility above always wins.
-    for col, val in normalize.prose_amenities_yes(desc).items():
+    # has_sewage, has_electricity, security_cameras …), so the ad's own words are the only statement of them.
+    # 115 of 566 active ads named one and all stored NULL, so the Advanced Filter never found them (🔬 2026-10-12).
+    # A stated NO is read too (owner, 2026-10-25: explicit «لا» / «غير مؤثثة» = false): the yes-only reader left
+    # 4 ads furnished = yes over «مفروشة: لا» once the shared reader stopped calling that a yes, because a reader
+    # that can only say yes can never take a yes back. A structured utility above always wins.
+    for col, val in normalize.amenities_from_lines(desc).items():
         row.setdefault(col, val)
     stored = row.get("price_total") if deal == "Buy" else row.get("price_annual")
     stored = None if stored is db.AUTHORITATIVE_NULL else stored
