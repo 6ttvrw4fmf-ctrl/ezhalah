@@ -11,10 +11,10 @@ export const SHARE_LINK = 'https://ezhalah-app.vercel.app';
 // favicon store sprang on 2026-09-05, where correct new bytes at an unchanged path stayed invisible
 // for months. Replacing the bytes of og-image.jpg would leave everyone who has ever shared the link
 // on the old picture. RENAME THE FILE when the artwork changes; never overwrite it in place.
-// v6 = 192×192 (owner 2026-10-18: «look how big … keep it small»). WhatsApp draws a BIG banner for an
+// v7 = the cloud-eagle logo, 192×192 (owner 2026-10-24: «this is the final logo … replace it everywhere»). v6 = 192×192 (owner 2026-10-18: «look how big … keep it small»). WhatsApp draws a BIG banner for an
 // og:image ≥ ~300px wide and a small side thumbnail below that — the same 192px card the search-share
 // links (/s/…) already get. Keep it under 300px.
-export const OG_IMAGE = `${SHARE_LINK}/og-image-v6.png`;
+export const OG_IMAGE = `${SHARE_LINK}/og-image-v7.png`;
 // Owner-approved original wording, without the AI sentence or dashes (2026-10-11), shared by metadata and every share target.
 // No emoji (owner 2026-10-18: «remove the emoji … make it professional»).
 export const SHARE_BLURB_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى للبحث على العقار في المملكة.';
