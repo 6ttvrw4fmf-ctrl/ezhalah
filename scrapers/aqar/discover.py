@@ -40,6 +40,10 @@ CATEGORIES = {
     # (2026-09-28; test_aqar_sweep_requests_only_pages_aqar_serves.py).
     ("camp",       "rent"): "مخيم-للإيجار",
     ("land",       "buy"):  "أراضي-للبيع",
+    # 2026-10-25 (owner: every side the site shows): aqar serves «أراضي-للإيجار» — 2,044 ads nationally,
+    # 0 ever held. Land usage still comes from aqar's own «نوع العقار» (enrich_residential.py). Not added,
+    # measured the same day: «غرف-للبيع» (1 ad nationally) and any camp-for-sale page (404).
+    ("land",       "rent"): "أراضي-للإيجار",
     # ── Commercial categories (verified against Aqar's own menu). Written to the
     #    aqar_commercial_listings table by run_commercial.py. Slugs are Aqar's exact spelling. ──
     ("shop",                "rent"): "محلات-للإيجار",
