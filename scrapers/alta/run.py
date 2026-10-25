@@ -333,6 +333,11 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
         "price_published": bool(price),
     }
     row["additional_info"] = {k: v for k, v in info.items() if v not in (None, "", [], {})}
+    # The site's own feature checklist (property_features: «مصعد», «غرفة خادمة», «مدخل سيارة» …) is its
+    # amenity statement. It was kept in additional_info and never reached a column, so elevator and maid room
+    # read NULL on the one ad that ticks them (🔬 2026-10-25, ops_af_score alta 0 of 3). A ticked term is yes;
+    # an unticked one is silence, never «no». One term per line, so a term never borrows a neighbour's word.
+    row.update(normalize.prose_amenities("\n".join(terms("property_features"))))
     return row, category
 
 
