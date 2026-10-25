@@ -19,12 +19,14 @@
 
 /** How long after the last scroll event the page counts as «at rest». */
 export const SCROLL_QUIET_MS = 180;
-/** A card glints at rest while it is within this margin of the scroller's viewport (one screen above and below). */
-export const GLINT_WINDOW_MARGIN = '50% 0px';
+/** A card glints at rest while it is within this many screens of the scroller's viewport, above and below. */
+export const GLINT_WINDOW_SCREENS = 0.5;
 
 let installed = false;
+const restListeners = new Set<() => void>();
 
-/** Mark <html data-scrolling> while ANY element scrolls; clear it SCROLL_QUIET_MS after the last scroll event.
+/** Mark <html data-scrolling> while ANY element scrolls; clear it SCROLL_QUIET_MS after the last scroll event, and tell
+ *  the watchers the page is at rest just BEFORE clearing it (so the glint window is right the moment glints return).
  *  Scroll events do not bubble, so one capture listener on the document hears every inner scroller. Idempotent. */
 export function installScrollCalm(doc: Document | undefined = typeof document === 'undefined' ? undefined : document): void {
   if (installed || !doc) return;
@@ -34,7 +36,7 @@ export function installScrollCalm(doc: Document | undefined = typeof document ==
   doc.addEventListener('scroll', () => {
     if (!root.hasAttribute('data-scrolling')) root.setAttribute('data-scrolling', '');
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => root.removeAttribute('data-scrolling'), SCROLL_QUIET_MS);
+    timer = setTimeout(() => { restListeners.forEach((f) => f()); root.removeAttribute('data-scrolling'); }, SCROLL_QUIET_MS);
   }, { capture: true, passive: true });
 }
 
@@ -47,25 +49,32 @@ export function nearestScroller(el: HTMLElement): HTMLElement | null {
   return null;
 }
 
-/** Keep `data-near` on exactly the grid's cells that are within GLINT_WINDOW_MARGIN of the scroller's viewport,
- *  including cells added later («عرض المزيد»). The attribute is set straight on the DOM node — no React state, no
- *  re-render. Without IntersectionObserver every cell counts as near (no windowing, nothing hidden). */
+/** Keep `data-near` on exactly the grid's cells within GLINT_WINDOW_SCREENS of the scroller's viewport — computed when
+ *  the page COMES TO REST, when the list grows («عرض المزيد»), and when the window is resized; never per frame. (An
+ *  IntersectionObserver over 500 cells did this for free on paper, and cost ~3 ms of every frame — measured, 498 runs
+ *  while typing in a saved chat — so the answer is read once, from the cells' rectangles: all reads first, then all
+ *  writes, so it is one layout and no thrash.) The attribute is set on the DOM node — no React state, no re-render. */
 export function watchGlintCells(grid: HTMLElement): () => void {
-  if (typeof IntersectionObserver === 'undefined') {
-    Array.from(grid.children).forEach((c) => c.setAttribute('data-near', ''));
-    return () => {};
-  }
-  const io = new IntersectionObserver((entries) => {
-    for (const e of entries) e.target.toggleAttribute('data-near', e.isIntersecting);
-  }, { root: nearestScroller(grid), rootMargin: GLINT_WINDOW_MARGIN });
-  const seen = new WeakSet<Element>();
-  const sync = () => {
-    for (const c of Array.from(grid.children)) if (!seen.has(c)) { seen.add(c); io.observe(c); }
+  const scroller = nearestScroller(grid);
+  const mark = () => {
+    const box = scroller ? scroller.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+    const margin = (box.bottom - box.top) * GLINT_WINDOW_SCREENS;
+    const lo = box.top - margin, hi = box.bottom + margin;
+    const cells = Array.from(grid.children);
+    const near = cells.map((c) => { const r = c.getBoundingClientRect(); return r.bottom > lo && r.top < hi; });
+    cells.forEach((c, i) => { if (c.hasAttribute('data-near') !== near[i]) c.toggleAttribute('data-near', near[i]); });
   };
-  sync();
-  const mo = typeof MutationObserver === 'function' ? new MutationObserver(sync) : null;
+  let frame = 0;
+  const soon = () => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; mark(); }); };
+  restListeners.add(mark);
+  const mo = typeof MutationObserver === 'function' ? new MutationObserver(soon) : null;
   mo?.observe(grid, { childList: true });
-  return () => { io.disconnect(); mo?.disconnect(); };
+  window.addEventListener('resize', soon);
+  soon();
+  return () => {
+    restListeners.delete(mark); mo?.disconnect(); window.removeEventListener('resize', soon);
+    if (frame) cancelAnimationFrame(frame);
+  };
 }
 
 /** Web-only attributes that opt an element into the budget. Spread onto a View: `<View {...GLINT_PROPS}>`. Typed `object`

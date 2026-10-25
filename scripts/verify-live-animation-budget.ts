@@ -23,7 +23,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './lib/stripComments.ts';
 import {
-  BUDGET_CSS, SCROLL_QUIET_MS, GLINT_WINDOW_MARGIN, installScrollCalm, watchGlintCells,
+  BUDGET_CSS, SCROLL_QUIET_MS, GLINT_WINDOW_SCREENS, installScrollCalm, watchGlintCells,
   GLINT_PROPS, GLINT_CELL_PROPS, SKY_CALM_PROPS,
 } from '../src/lib/scrollCalm.ts';
 
@@ -82,8 +82,9 @@ function problems(files: Record<string, string>, css: string): string[] {
     const marked = count(src, /\{\.\.\.SKY_CALM_PROPS\}/g);
     if (marked < animated) out.push(`${path}: ${animated} drifting layer(s) but ${marked} SKY_CALM_PROPS — an unpaused drift competes with every scroll`);
   }
+  const row = stripComments(files['src/components/ResultCardRow.tsx'] ?? '');
+  if (!/\{\.\.\.GLINT_CELL_PROPS\}/.test(row)) out.push('ResultCardRow does not carry GLINT_CELL_PROPS — no card would ever be marked near, so no card would glint');
   const grid = stripComments(files['src/components/ResultCardGrid.tsx'] ?? '');
-  if (!/GLINT_CELL_PROPS/.test(grid)) out.push('ResultCardGrid cells do not carry GLINT_CELL_PROPS — every card would glint at once');
   if (!/watchGlintCells\(/.test(grid)) out.push('ResultCardGrid does not call watchGlintCells — no card would ever be marked near, so no card would glint');
   if (!/installScrollCalm\(/.test(grid)) out.push('ResultCardGrid does not call installScrollCalm — nothing would calm the page while scrolling');
   const html = stripComments(files['src/app/+html.tsx'] ?? '');
@@ -105,7 +106,7 @@ check('the markers are the names the rules key on',
   JSON.stringify(GLINT_PROPS) === '{"dataSet":{"glint":"1"}}' && JSON.stringify(GLINT_CELL_PROPS) === '{"dataSet":{"glintCell":"1"}}'
   && JSON.stringify(SKY_CALM_PROPS) === '{"dataSet":{"skyCalm":"1"}}');
 check('«at rest» means 100–400 ms of quiet (long enough not to flicker, short enough to feel instant)', SCROLL_QUIET_MS >= 100 && SCROLL_QUIET_MS <= 400);
-check('the glint window is at most one screen either side (a wide window is the 1,500-layer problem again)', /^(\d{1,3})% 0px$/.test(GLINT_WINDOW_MARGIN) && Number(GLINT_WINDOW_MARGIN.split('%')[0]) <= 100);
+check('the glint window is at most one screen either side (a wide window is the 1,500-layer problem again)', GLINT_WINDOW_SCREENS > 0 && GLINT_WINDOW_SCREENS <= 1);
 
 // ── mutations: break each part on purpose ───────────────────────────────────────────────────────
 const mutate = (path: string, from: string | RegExp, to: string): Record<string, string> => {
@@ -116,6 +117,7 @@ const mutate = (path: string, from: string | RegExp, to: string): Record<string,
 };
 mustCatch('the glint losing its marker is caught', problems(mutate('src/components/CardReveal.tsx', '{...GLINT_PROPS}', ''), BUDGET_CSS).length > 0);
 mustCatch('a sky layer losing its marker is caught', problems(mutate('src/components/HeroBackground.tsx', '{...SKY_CALM_PROPS}', ''), BUDGET_CSS).length > 0);
+mustCatch('a card row losing the cell marker is caught', problems(mutate('src/components/ResultCardRow.tsx', '{...GLINT_CELL_PROPS}', ''), BUDGET_CSS).length > 0);
 mustCatch('the card grid forgetting the observer is caught', problems(mutate('src/components/ResultCardGrid.tsx', 'watchGlintCells(', 'noop('), BUDGET_CSS).length > 0);
 mustCatch('the card grid forgetting the scroll calm is caught', problems(mutate('src/components/ResultCardGrid.tsx', 'installScrollCalm(', 'noop('), BUDGET_CSS).length > 0);
 mustCatch('the page forgetting to inject the rules is caught', problems(mutate('src/app/+html.tsx', /__html:\s*BUDGET_CSS/, '__html: ""'), BUDGET_CSS).length > 0);
@@ -154,39 +156,55 @@ check('a burst of scroll events leaves exactly ONE pending «stop» timer, not o
 runTimers();
 check('after the quiet time the page is at rest again', !root1.hasAttribute('data-scrolling'));
 
-// watchGlintCells with a fake IntersectionObserver / MutationObserver
-class FakeCell extends Attrs { name: string; constructor(name: string) { super(); this.name = name; } }
-const ioInstances: { cb: (e: { target: FakeCell; isIntersecting: boolean }[]) => void; opts: { root: unknown; rootMargin: string }; observed: FakeCell[]; disconnected: boolean }[] = [];
+// watchGlintCells against fake geometry: a 700 px scroller, a half-screen (350 px) window above and below it.
+type Box = { top: number; bottom: number };
+const ops: string[] = [];
+class FakeCell extends Attrs {
+  name: string; box: Box;
+  constructor(name: string, top: number, bottom: number) { super(); this.name = name; this.box = { top, bottom }; }
+  getBoundingClientRect() { ops.push('read'); return this.box; }
+  toggleAttribute(k: string, on?: boolean) { ops.push('write'); return super.toggleAttribute(k, on); }
+}
+const rafQueue: (() => void)[] = []; let rafId = 0;
+g.requestAnimationFrame = ((f: () => void) => { rafQueue.push(f); return ++rafId; }) as never;
+g.cancelAnimationFrame = (() => { rafQueue.length = 0; }) as never;
+const runFrames = () => { const q = rafQueue.splice(0); q.forEach((f) => f()); };
 const moInstances: { cb: () => void; disconnected: boolean }[] = [];
-g.IntersectionObserver = class { inst: (typeof ioInstances)[number];
-  constructor(cb: (typeof ioInstances)[number]['cb'], opts: (typeof ioInstances)[number]['opts']) { this.inst = { cb, opts, observed: [], disconnected: false }; ioInstances.push(this.inst); }
-  observe(c: FakeCell) { this.inst.observed.push(c); } disconnect() { this.inst.disconnected = true; } } as never;
 g.MutationObserver = class { inst: (typeof moInstances)[number]; constructor(cb: () => void) { this.inst = { cb, disconnected: false }; moInstances.push(this.inst); }
   observe() {} disconnect() { this.inst.disconnected = true; } } as never;
-const scroller = { overflowY: 'auto', scrollHeight: 5000, clientHeight: 700, parentElement: null };
+const winListeners: { type: string; fn: () => void }[] = [];
+g.window = { innerHeight: 700, addEventListener: (type: string, fn: () => void) => winListeners.push({ type, fn }), removeEventListener: (type: string, fn: () => void) => { const i = winListeners.findIndex((l) => l.type === type && l.fn === fn); if (i >= 0) winListeners.splice(i, 1); } } as never;
+const scrollerBox: Box = { top: 0, bottom: 700 };
+const scroller = { overflowY: 'auto', scrollHeight: 5000, clientHeight: 700, parentElement: null, getBoundingClientRect: () => scrollerBox };
 g.getComputedStyle = ((n: { overflowY: string }) => ({ overflowY: n.overflowY })) as never;
-const cells = [new FakeCell('a'), new FakeCell('b'), new FakeCell('c')];
+const cell = (name: string, top: number) => new FakeCell(name, top, top + 200);
+const cells = [cell('a', -600), cell('b', -300), cell('c', 100), cell('d', 900), cell('e', 1300)];
 const grid = { children: cells as unknown as HTMLCollection, parentElement: { overflowY: 'visible', scrollHeight: 1, clientHeight: 1, parentElement: scroller } };
+const nearNames = () => cells.filter((c) => c.hasAttribute('data-near')).map((c) => c.name).join('');
 const stop = watchGlintCells(grid as unknown as HTMLElement);
-const io = ioInstances[0];
-check('the observer is rooted on the chat\'s own scroller with the one-screen margin (the viewport cannot see past a scroller)',
-  io.opts.root === scroller && io.opts.rootMargin === GLINT_WINDOW_MARGIN);
-check('every cell is observed', io.observed.length === 3);
-io.cb([{ target: cells[0], isIntersecting: true }, { target: cells[1], isIntersecting: false }]);
-check('a cell inside the window is marked near, one outside is not', cells[0].hasAttribute('data-near') && !cells[1].hasAttribute('data-near'));
-io.cb([{ target: cells[0], isIntersecting: false }, { target: cells[1], isIntersecting: true }]);
-check('scrolling past a cell un-marks it and marks the next', !cells[0].hasAttribute('data-near') && cells[1].hasAttribute('data-near'));
-const late = new FakeCell('d'); (grid.children as unknown as FakeCell[]).push(late);
-moInstances[0].cb(); moInstances[0].cb();
-check('a card added later («عرض المزيد») is observed once, never twice', io.observed.filter((c) => c === late).length === 1 && io.observed.length === 4);
+check('before the first frame nothing is marked (no work at mount)', nearNames() === '');
+runFrames();
+check('the first frame marks the cells within half a screen of the scroller: b (above), c (in view), d (below)', nearNames() === 'bcd', nearNames());
+const firstPass = ops.join('');
+check('every rectangle is read BEFORE any attribute is written (one layout, no thrash)', /^(read){5}(write)+$/.test(firstPass), firstPass);
+// the user scrolls 1000 px down: the cells move up, and the page comes to rest
+cells.forEach((c) => { c.box = { top: c.box.top - 1000, bottom: c.box.bottom - 1000 }; });
+check('while scrolling nothing is recomputed (the glints are off anyway — no work per frame)', nearNames() === 'bcd');
+scrollL[0].fn(); runTimers();
+check('at rest the window follows the scroll: d (now in view) and e (just below) are near, and the page is no longer «scrolling»', nearNames() === 'de' && !root1.hasAttribute('data-scrolling'), nearNames());
+const late = cell('f', -400); late.box = { top: 200, bottom: 400 }; (grid.children as unknown as FakeCell[]).push(late);
+moInstances[0].cb(); moInstances[0].cb(); check('a card added later schedules ONE frame of work, however many mutations arrive', rafQueue.length === 1);
+runFrames();
+check('…and is marked when it lands inside the window', cells.filter((c) => c.hasAttribute('data-near')).map((c) => c.name).join('') === 'def');
+winListeners.forEach((l) => l.type === 'resize' && l.fn()); check('a window resize also schedules a re-check', rafQueue.length === 1); runFrames();
 stop();
-check('cleanup disconnects both observers', io.disconnected && moInstances[0].disconnected);
+check('cleanup disconnects the mutation watcher and the resize listener', moInstances[0].disconnected && !winListeners.some((l) => l.type === 'resize'));
+const before = nearNames(); cells.forEach((c) => { c.box = { top: 5000, bottom: 5200 }; }); scrollL[0].fn(); runTimers();
+check('after cleanup a scroll rest no longer touches the cells', nearNames() === before);
+mustCatch('a window that marks every cell would keep every glint alive (the 1,509-layer failure)', !(() => {
+  const all = [cell('x', -9000), cell('y', 9000)]; all.forEach((c) => c.toggleAttribute('data-near', true));
+  return !all.every((c) => c.hasAttribute('data-near')); })());
 
-// no IntersectionObserver (an old browser): nothing may be hidden
-delete (g as Record<string, unknown>).IntersectionObserver;
-const lone = [new FakeCell('z')];
-watchGlintCells({ children: lone as unknown as HTMLCollection, parentElement: null } as unknown as HTMLElement);
-check('without IntersectionObserver every cell counts as near (no windowing, nothing hidden)', lone[0].hasAttribute('data-near'));
 g.setTimeout = savedTimeout; g.clearTimeout = savedClear;
 
 if (failures) { console.error(`\n✗ ${failures} check(s) failed`); process.exit(1); }

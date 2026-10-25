@@ -36,7 +36,7 @@ import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
 import { livePickerNames, loadLivePickerNames, pickerMayOffer } from '@/data/pickerLivePlatforms';
 import { hiddenPlatformNames } from '@/data/loaderActivePlatforms';
 import { useReducedMotion } from '@/lib/useReducedMotion';
-import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
+import { buildResultsReadAloudSegments, buildResultsReadAloudSegmentsCached } from '@/lib/readAloudScript';
 import { initialReveal as initialRevealPure, CASCADE_MAX } from '@/lib/initialReveal';
 import { glyphCount, revealPrefix } from '@/lib/typedReveal';
 import { createRevealHandoff } from '@/lib/revealHandoff';
@@ -47,16 +47,6 @@ import FeedbackRow from '@/components/FeedbackRow';
 import ReadAloudPlayer from '@/components/ReadAloudPlayer';
 import { CardIn, LoadingDots, GoldPulse, GoldShineButton } from '@/components/CardReveal';
 
-// Memoized card: during the reveal cascade the list re-renders every ~55ms — already-revealed cards
-// must skip reconciliation or 200+ cards stutter the very animation the cascade exists for (review
-// perf fix 2026-07-09). onOpen is deliberately excluded from the comparison: it's re-created each
-// render but behaves identically for the same listing.
-const MemoResultCard = memo(ResultCard, (prev, next) =>
-  prev.listing === next.listing && prev.rank === next.rank && prev.variant === next.variant
-  && prev.row === next.row
-  // activeAf is one frozen reference per results turn (afActive memoises on m.result.query), so
-  // identity is the right comparison; without this term the card would swallow the prop.
-  && prev.activeAf === next.activeAf);
 import HeroBackground from '@/components/HeroBackground';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
@@ -64,7 +54,7 @@ import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard } from '@/components/ResultCard';
 import type { Listing } from '@/data/listings';
 import { ResultCardGrid } from '@/components/ResultCardGrid';
-import { DeadCardShade } from '@/components/DeadCardShade';
+import { ResultCardRow } from '@/components/ResultCardRow';
 import { cardKey, fetchGoneKeys } from '@/lib/deadCards';
 import { parseQuery, respond } from '@/data/agent';
 import { fetchListingsForQuery } from '@/data/remote';
@@ -4730,18 +4720,16 @@ export default function Agent() {
                           // CardIn = soft mount-in (fade + slight rise). Keyed by source:id (ids are
                           // only unique per source table — matches the de-dup identity), so cards
                           // already on screen NEVER re-animate — only newly-revealed ones enter softly.
-                          <CardIn key={`${l.source}:${l.id}`} {...cardInMotion(m.id, i)}>
-                            <DeadCardShade dead={goneKeys.has(cardKey(l) ?? '')}>
-                            <MemoResultCard
-                              listing={l}
-                              variant="compact"
-                              rank={i + 1}
-                              row={cardRow}
-                              activeAf={activeAf}
-                              onOpen={() => { trackOpen(l); openAd(l); }}
-                            />
-                            </DeadCardShade>
-                          </CardIn>
+                          <ResultCardRow
+                            key={`${l.source}:${l.id}`}
+                            listing={l}
+                            rank={i + 1}
+                            row={cardRow}
+                            activeAf={activeAf}
+                            dead={goneKeys.has(cardKey(l) ?? '')}
+                            motion={cardInMotion(m.id, i)}
+                            onOpen={() => { trackOpen(l); openAd(l); }}
+                          />
                         ))}
                       </ResultCardGrid>
                       </LocaleScope>
@@ -4930,7 +4918,7 @@ export default function Agent() {
                             ? replyT('You can tap {a} or {b}.', { a: spokenActionLabels[0], b: spokenActionLabels[1] })
                             : replyT('You can tap {a}.', { a: spokenActionLabels[0] });
                         const readAloudClosingNote = [moreNoteText, spokenActionsNote].filter(Boolean).join(' ');
-                        const readAloudSegments = buildResultsReadAloudSegments(introText, m.result.listings.slice(0, shown), readAloudClosingNote, locale);
+                        const readAloudSegments = buildResultsReadAloudSegmentsCached(introText, m.result.listings, shown, readAloudClosingNote, locale);
                         return (
                           <>
                             <View style={{ gap: 8, marginTop: 14, alignSelf: 'stretch' }}>
