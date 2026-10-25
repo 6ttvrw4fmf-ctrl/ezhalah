@@ -2,6 +2,7 @@ import { ScrollViewStyleReset } from 'expo-router/html';
 import { type PropsWithChildren } from 'react';
 import { buildThemeCss } from '../theme/palette';
 import { THEME_KEY } from '../theme/themeMode';
+import { BUDGET_CSS } from '../lib/scrollCalm';
 
 // Customizes the static root HTML for every web page during static rendering (runs in Node, where
 // `document` doesn't exist — so this is the ONLY place the initial <html> attributes are set).
@@ -75,6 +76,15 @@ export default function Root({ children }: PropsWithChildren) {
         />
         {/* Disable body scrolling on web so the root ScrollView matches native behavior. */}
         <ScrollViewStyleReset />
+        {/* THE LIVE-ANIMATION BUDGET (owner 2026-10-24, laptop scrolling): no decorative animation competes with a
+            scroll, and only cards near the screen glint. The mechanism, the measurements and the pinning barrier
+            are in src/lib/scrollCalm.ts. */}
+        <style dangerouslySetInnerHTML={{ __html: BUDGET_CSS }} />
+        {/* NO PULL-TO-REFRESH (owner 2026-10-24, phone: «when I scroll quick a refresh opens»). The chat scrolls inside
+            its own box with the page pinned behind it, so a fast flick to the top has nowhere to go and chains out to the
+            page — where the browser reads it as «pull down to reload» and the conversation reloads. `none` on the page
+            itself ends the chaining and the gesture; the chat's own scrolling is untouched. */}
+        <style dangerouslySetInnerHTML={{ __html: 'html,body{overscroll-behavior-y:none}' }} />
         {/* Desktop UI scale — REVERTED to 1:1 (owner, 2026-08-14 23:47). A zoom layer (1.1/1.2/1.3
             tiered by viewport) shipped earlier today for the "small and zoomed out" report, but on
             a MacBook it rendered the app "too zoomed in" (owner, with screenshot). Current owner

@@ -39,6 +39,7 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'scripts/verify-web-runtime-smoke.mjs'
+      - 'scripts/verify-web-scroll-smooth.mjs'
   workflow_dispatch:
   # SCHEDULED 2026-09-04. This is the richest browser suite in the repo — journeys A-J0 over both
   # viewports, ~52 product assertions — and it had no schedule at all: it ran only on a PR or push
@@ -104,6 +105,13 @@ jobs:
 
       - name: Drive the built app in a real browser
         run: node scripts/verify-web-runtime-smoke.mjs
+
+      # THE SCROLL ROBOT (owner 2026-10-24: laptop scrolling was slow — «let's make a robot that checks this»). Same
+      # build, same Chromium, a laptop-size screen: counts the never-ending animations at rest / mid-scroll (page one
+      # and a 500-card list) and times a real wheel-scroll against the same page with its animations off. See the
+      # header of the script and src/lib/scrollCalm.ts. One search + two taps of «عرض المزيد» (no extra network).
+      - name: Scroll smoothness on a laptop (the live-animation budget, measured)
+        run: node scripts/verify-web-scroll-smooth.mjs
 
       # Now that this runs unattended on a schedule, a red run has to reach a human. One open P1 per
       # workflow file, self-healing on the next green run. `always()` so a failing run still gets here.

@@ -360,6 +360,18 @@ dealapp 883 · sanadak 816 · aqarmonthly 753 · eaqartabuk 516 · aqargate 241 
 - Result ordering: region searches spread across their cities; relevance‑first with natural diversity.
 - Location‑search audit passed (Region→City→District, English handling, conditional field search, never‑invent).
 
+### 🗺 Pin districts — loaded, NOT served yet (owner 2026-10-24)
+- An ad with no district anywhere can get one from its own pin, **as a gap-filler only**: the table
+  `listing_pin_district` holds OUR catalog spelling (the map provider is only the locator; its text is never stored).
+  It reaches the index through the existing recovery path (`refresh_district_recovery_table()` → `district_recovery`
+  → `listing_native_location_v2` → `sync_search_listings_ar()`); search itself is untouched.
+- The arm runs last and fills only where the native district, the neighborhood and the source district are all
+  blank, in the city the ad is served in. Its rows are `verbatim = false`, `basis = 'pin'` (never attestation; the app
+  labels them «تقريبي»).
+- Batch 1 = 209 ads, loaded with `applied = false`. Switch-on waits for the card label and the nightly alarm;
+  `verify-pin-district-fill-contract.ts` fails any migration that flips `applied` before then.
+- Undo = `applied = false` and delete the `basis = 'pin'` rows of `district_recovery` in one transaction.
+
 ### ⏳ Pending (optional, ready when wanted)
 - **Grow the district map** — convert more of the ~33k English‑district listings to Arabic districts (same
   confident‑match method, run wider) so more listings carry an Arabic district.
