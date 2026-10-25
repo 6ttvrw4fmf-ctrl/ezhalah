@@ -33,6 +33,11 @@ on:
         required: false
         default: "5.0"
         type: string
+      skip_done:
+        description: "true = resume: skip ads this run_id already read (facts or _none markers)"
+        required: false
+        default: "false"
+        type: string
 
 concurrency:
   group: facts-extract
@@ -66,5 +71,7 @@ jobs:
           LIMIT: ${{ inputs.limit }}
           PLATFORMS: ${{ inputs.platforms }}
           MAX_USD: ${{ inputs.max_usd }}
+          SKIP_DONE: ${{ inputs.skip_done }}
         run: |
-          exec python -m scrapers.facts.extract --run-id "$RUN_ID" --limit "$LIMIT" --platforms "$PLATFORMS" --max-usd "$MAX_USD"
+          exec python -m scrapers.facts.extract --run-id "$RUN_ID" --limit "$LIMIT" --platforms "$PLATFORMS" --max-usd "$MAX_USD" \
+            $([ "$SKIP_DONE" = "true" ] && echo --skip-done)
