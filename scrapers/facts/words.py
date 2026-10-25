@@ -493,14 +493,14 @@ def selftest() -> None:
     W.selftest()
     # the overlay row: AF columns only, each with its quote; silence and non-AF facts never reach it; a
     # too-short text still yields a row (the memory that this text was read).
-    row, found = overlay_row("aqar_residential_listings", {"id": 7, "ad_number": "A7", "src_hash": "0" * 32,
-                             "title": "شقة للايجار", "body": "يوجد مصعد ولا يوجد مسبح، مجلس كبير"}, "facts-words-t")
+    row, found = overlay_row("aqar_residential_listings", dict(id=7, ad_number="A7", src_hash="0" * 32,
+                             title="شقة للايجار", body="يوجد مصعد ولا يوجد مسبح، مجلس كبير"), "facts-words-t")
     assert row["facts"].get("elevator", {}).get("v") is True and row["facts"]["elevator"]["q"], row
     assert row["facts"].get("pool", {}).get("v") is False, row
     assert "majlis" not in row["facts"] and any(f["fact"] == "majlis" for f in found), (row, found)
     assert set(row["facts"]) <= set(AF_COLUMNS) and row["stale_at"] is None and row["listing_id"] == 7
-    short, _ = overlay_row("aqar_residential_listings", {"id": 8, "ad_number": "A8", "src_hash": "0" * 32,
-                           "title": "", "body": "مصعد"}, "facts-words-t")
+    short, _ = overlay_row("aqar_residential_listings", dict(id=8, ad_number="A8", src_hash="0" * 32,
+                           title="", body="مصعد"), "facts-words-t")
     assert short["facts"] == {}, short
     assert vec_literal([0.12345, -1.0]) == "[0.1235,-1.0000]"
     assert all_tables({"aqar"}) == ["aqar_residential_listings", "aqar_commercial_listings"]
