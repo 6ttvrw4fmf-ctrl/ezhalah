@@ -256,7 +256,7 @@ _PROSE_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "ai
 
 
 def prose_answers(text: Optional[str]) -> dict[str, bool]:
-    return {c: v for c, v in normalize.prose_amenities_yes(text, skip=("furnished",)).items() if c in _PROSE_COLS}
+    return {c: v for c, v in normalize.prose_amenities(text, skip=("furnished",)).items() if c in _PROSE_COLS}
 
 
 RES_TABLE, COM_TABLE = "opensooq_residential_listings", "opensooq_commercial_listings"
