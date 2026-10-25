@@ -1359,15 +1359,10 @@ export default function Home() {
       { scale: Platform.OS === 'web' ? 1 : entrance.interpolate({ inputRange: [0, 1], outputRange: [0.965, 1] }) },
     ],
   };
-  const heroOpacity = heroAnim.interpolate({
-    inputRange: [0, 1],
-    // Idle → search: the dunes fade away while the sky remains continuous.
-    outputRange: [1, 0],
-  });
-
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      <HeroBackground landscape imageOpacity={heroOpacity} />
+      {/* Filter: the sky only, no desert landscape below (owner 2026-10-24). */}
+      <HeroBackground />
 
       <ScrollView
         ref={scrollRef}
