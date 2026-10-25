@@ -1058,9 +1058,14 @@ _NEGATOR_RES = tuple(re.compile(rf"(?<!\w){'(?:و|ال|وال)?' if re.match(r'[
 # owns the negation — measured on stored haraj ads 2026-10-25: «مطبخ غير راكب 🏠 مكيفات اسبلت راكبة» (AC is
 # installed), «شقق غير مؤثثة مطبخ راكب» (the kitchen is there), «بدون صاله مكيفات راكبه» (the ACs are there). The
 # yes-only readers hid those false NOs; storing a stated no would have published them.
-# «غير متوفر مصعد» / «غير موجود مصعد» is one negation (moftah emits its spec pairs that way, value first).
-_TIED_TAIL_RE = re.compile(r"^(?:\s*[^\w\s]*\s*(?:اي|ايه|به|بها|فيه|فيها|له|لها|متوفر|متوفره|موجود|موجوده|متاح|متاحه)(?!\w))*"
-                           r"\s*(?:ال|لل|وال|بال)?$")
+# «غير متوفر مصعد» / «غير موجود مصعد» is one negation (moftah emits its spec pairs that way, value first), so is
+# «غير مجهز بالمكيفات» (dwelleo 13138657); an OPENING mark may stand between («#لايوجد (مدخل سياره)», dealapp) but a
+# closing one ends the negation («مساحه خارجيه (لا يوجد) موقف سيارات خاص» — the parking is there, muhaysini).
+_TIED_FILLERS = r"اي|ايه|به|بها|فيه|فيها|له|لها|متوفر|متوفره|موجود|موجوده|متاح|متاحه|مجهز|مجهزه|مزود|مزوده"
+_TIED_TAIL_RE = re.compile(rf"^(?:[^\w)»\]]*(?:{_TIED_FILLERS})(?!\w))*[^\w)»\]]*(?:ال|لل|وال|بال)?$")
+# «المكيفات غير راكبه», «مصعد غير مركب» — the fixture is NOT installed: never a yes (wasalt's _NOT_INSTALLED rule, now
+# for every site). Measured 2026-10-25 on 7 dwelleo / muhaysini ads. Kitchen keeps its own «مطبخ غير راكب» reading.
+_NOT_INSTALLED_AFTER = ("غير راكب", "غير مركب")
 
 
 def _negated_before(before: str) -> bool:
@@ -1123,6 +1128,8 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
                 # «* تأسيس مصعد» was served as elevator = yes). Same 12-char window as the negators.
                 if any(_norm_ar(q).lower() in before for q in _PREPARED_ONLY):
                     break
+                if col in ("air_conditioner", "elevator") and any(q in after for q in _NOT_INSTALLED_AFTER):
+                    break          # not installed — unknown, never a yes
                 if col == "furnished" and (
                         any(_norm_ar(q).lower() in after for q in _PARTIAL_ONLY + _FLOOR_COVERING)
                         or any(_norm_ar(q).lower() in before[-6:] for q in _PARTIAL_BEFORE)):

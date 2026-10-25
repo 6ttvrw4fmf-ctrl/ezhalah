@@ -47,6 +47,10 @@ const CASES: [string, string, boolean | null][] = [
   ['شركة 100 العقارية شقق غير مؤثثة مطبخ راكب مكيفات راكبه', 'kitchen', true],
   ['غرفتين مطبخ دورتين مياه بدون صاله مكيفات راكبه', 'air_conditioner', true],
   ['غير متوفر مصعد', 'elevator', false],
+  ['ملاحظة: العقار غير مجهز بالمكيفات', 'air_conditioner', false],
+  ['#لايوجد (مدخل سياره)', 'car_entrance', false],
+  ['مساحة خارجية (لا يوجد) موقف سيارات خاص (امام المبنى)', 'parking', true],
+  ['المطبخ غير راكب المكيفات غير راكبة', 'air_conditioner', null],
 ];
 const answers = (src?: string) =>
   (pyCall(ROOT, MOD, 'amenities_from_text', CASES.map(([p]) => [p]), src) as Record<string, boolean>[])
