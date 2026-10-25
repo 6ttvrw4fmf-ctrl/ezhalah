@@ -54,7 +54,7 @@ mustCatch('an unbounded warm-up (everything at once)', (() => { let p = 0, f = 0
 const strip = (f: string) => readFileSync(join(root, f), 'utf8').replace(/\/\*[\s\S]*?\*\/|(^|[^:])\/\/.*$/gm, '$1');
 const layout = strip('src/app/_layout.tsx'), agent = strip('src/app/agent.tsx'), lib = strip('src/lib/warmPlatformLogos.ts');
 check('the root layout starts the warm-up a moment after load (web only)', /setTimeout\(warmPlatformLogos, 2500\)/.test(layout) && /Platform\.OS !== 'web'\) return;[\s\S]{0,80}setTimeout\(warmPlatformLogos/.test(layout));
-check('touching the search box warms them too (free if already started)', /onFocus=\{\(\) => \{ setComposerFocused\(true\); setIntroInteracted\(true\); warmPlatformLogos\(\); \}\}/.test(agent));
+check('touching the search box warms them too (free if already started), without touching the focus handler the intro barrier pins', /useEffect\(\(\) => \{ if \(composerFocused\) warmPlatformLogos\(\); \}, \[composerFocused\]\);/.test(agent) && /onFocus=\{\(\) => \{ setComposerFocused\(true\); setIntroInteracted\(true\); \}\}/.test(agent));
 check('the warm-up runs once per page load and only on web', /if \(started \|\| Platform\.OS !== 'web'/.test(lib) && /started = true;/.test(lib));
 check('the loader roster is warmed first', /\[\.\.\.PLATFORM_META\.map\(\(p\) => p\.logo\), \.\.\.Object\.values\(PLATFORM_PICKER_PROFILES\)/.test(lib));
 

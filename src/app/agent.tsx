@@ -874,6 +874,8 @@ export default function Agent() {
   // COMPOSER_EASE). Same calm register as ModeSwitch's raised indicator: a state change you feel
   // more than notice.
   const [composerFocused, setComposerFocused] = useState(false);
+  // Touching the search box also starts the logo warm-up (free if the idle one already did): the visitor is about to press «بحث» (lib/warmPlatformLogos.ts).
+  useEffect(() => { if (composerFocused) warmPlatformLogos(); }, [composerFocused]);
   // Send button feel — the ModeSwitch/share spring constants, so the whole surface shares one
   // motion language. Hover (web) swells to 1.06; press dips to 0.9.
   const sendScale = useRef(new Animated.Value(1)).current;
@@ -5180,7 +5182,7 @@ export default function Agent() {
                 onContentSizeChange={(e: any) => setInputH(typed ? Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, e.nativeEvent.contentSize.height)) : COMPOSER_MIN_H)}
                 // Clicking/tapping into the composer counts as interaction — the rotating examples
                 // stop cleanly and the static placeholder takes over (owner brief §6).
-                onFocus={() => { setComposerFocused(true); setIntroInteracted(true); warmPlatformLogos(); }}
+                onFocus={() => { setComposerFocused(true); setIntroInteracted(true); }}
                 onBlur={() => setComposerFocused(false)}
                 // The language does NOT flip while typing a chat message — it switches only when the
                 // message is SENT: replies follow its language while the interface stays unchanged.
