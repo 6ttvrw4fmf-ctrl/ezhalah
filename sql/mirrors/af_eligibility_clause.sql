@@ -1,4 +1,14 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-10-25 (migration 20261025065509_aqar_open_age_bucket_never_answers_up_to):
+--   CHANGED — the age-range arm gains one condition: with p_age_max set, a row of
+--   aqar_residential_listings / aqar_commercial_listings stored at 10 or more is excluded. aqar's own
+--   field dictionary renders «أكثر من 10 سنوات» for every raw age above 10 and the scraper floors it to 10,
+--   so the stored 10 has no upper end (16 of 20 live stored-10 pages read «أكثر من 10 سنوات»). Rebuilt by
+--   rebuild_af_filter_rpcs(); unchanged surfaces asserted identical; «up to 15» buy 179,932 → 168,662.
+--   Body below = the previous body plus exactly that edit, and the rendering's own spacing
+--   («$function$ select E'» / «'::text $function$»), PROVEN against production:
+--   Recorded md5 of pg_get_functiondef: 3379f3308b6790c0d8f3b1a70cf5ac11
+--   (length 11,295; the previous text hashed 0e7153e98f68fa6aa26b7a00fb6e4334, 10,998.)
 -- Re-verified 2026-10-17 (migration 20261017103017_af_rail_catches_up_to_district_fold): UNCHANGED.
 --   That migration only CALLS af_eligibility_clause() inside rebuild_af_filter_rpcs(); production's
 --   md5(pg_get_functiondef) read 0e7153e98f68fa6aa26b7a00fb6e4334 after it, the md5 recorded below.
@@ -215,7 +225,7 @@ CREATE OR REPLACE FUNCTION public.af_eligibility_clause()
  RETURNS text
  LANGUAGE sql
  IMMUTABLE
-AS $function$select E'
+AS $function$ select E'
     where (s.production_ready or ((p_cities is null or cardinality(p_cities) = 0) and (p_districts is null or cardinality(p_districts) = 0) and p_region_ids is null and not public.search_row_price_gated(s.deal_ar, s.price_total) and (s.region_id is null or s.city_id is null)))
       -- read-side defense-in-depth (2026-08): block only Ezhalah-side impossible/invalid states;
       -- never hides a source price (no magnitude check; 0 legal); production_ready must have a location.
@@ -289,7 +299,10 @@ AS $function$select E'
       and (p_furnished  is null or s.furnished = p_furnished)
       and ((p_age_min is null and p_age_max is null)
            or (s.property_age is not null
-               and s.property_age >= coalesce(p_age_min, 0) and s.property_age <= coalesce(p_age_max, 32767)))
+               and s.property_age >= coalesce(p_age_min, 0) and s.property_age <= coalesce(p_age_max, 32767)
+               -- aqar «أكثر من 10 سنوات» is stored as its floor 10: no upper end, so it never answers «up to N» (2026-10-25)
+               and (p_age_max is null or s.property_age < 10
+                    or s.source_table not in (''aqar_residential_listings'', ''aqar_commercial_listings''))))
       and (p_age_unknown is null or (s.property_age is null) = p_age_unknown)
       and (p_is_new_construction is null or (s.property_age = 0) = p_is_new_construction)
       and (p_tenant     is null or s.tenant_ar = p_tenant)
@@ -341,4 +354,4 @@ AS $function$select E'
             (''9.5'' = any(p_rating_buckets) and s.rating >= 9.5)
          or (''9.0'' = any(p_rating_buckets) and s.rating >= 9.0)
          or (''9.0_rc10'' = any(p_rating_buckets) and s.rating >= 9.0 and s.reviews_count >= 10))))
-'::text$function$
+'::text $function$
