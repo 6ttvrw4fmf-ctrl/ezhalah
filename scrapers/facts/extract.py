@@ -313,17 +313,63 @@ def sample_table(table: str, n: int, rng: random.Random) -> list[dict[str, Any]]
     return good[:n]
 
 
-def build_plan(limit: int, platforms: Optional[set[str]]) -> dict[str, int]:
-    plan = {t: n for t, n in PLAN.items() if not platforms or platform_of(t) in platforms}
+def scale_plan(plan: dict[str, int], limit: int) -> dict[str, int]:
+    """Scale a table→ads plan down to `limit` proportionally (every table keeps ≥ 1 ad)."""
     total = sum(plan.values())
     if limit >= total:
-        return plan
+        return dict(plan)
     scaled = {t: max(1, round(n * limit / total)) for t, n in plan.items()}
     # trim rounding overshoot from the biggest entries
     while sum(scaled.values()) > limit:
         t = max(scaled, key=scaled.get)
         scaled[t] -= 1
     return scaled
+
+
+def build_plan(limit: int, platforms: Optional[set[str]]) -> dict[str, int]:
+    return scale_plan({t: n for t, n in PLAN.items() if not platforms or platform_of(t) in platforms}, limit)
+
+
+# ── --silent: the ads the free word reader found NOTHING in (owner 2026-10-26, the teacher pass) ──────
+# public.ops_text_facts_silent is a frozen snapshot of those ads (migration «ai teacher pass on the silent ads»);
+# facts_silent_plan() gives the per-table counts and facts_silent_ids(table, n, seed) a seeded shuffle of one
+# table's ids. The rows themselves are then read exactly as sample_table reads them (same columns, same
+# ground-truth snapshot, same PDPL sanitising), so everything downstream is unchanged.
+def silent_plan(limit: int, platforms: Optional[set[str]], counts: dict[str, int]) -> dict[str, int]:
+    return scale_plan({t: n for t, n in counts.items() if n > 0 and (not platforms or platform_of(t) in platforms)}, limit)
+
+
+def sample_silent(table: str, n: int, seed: int) -> list[dict[str, Any]]:
+    from scrapers.common.db import sb
+    client = sb()
+    tcol = _text_col(table)
+    base_cols = ["id", "ad_number", "listing_url", "title", f"text:{tcol}"]
+    cols = base_cols + list(GT_COLUMNS)
+    ids = [int(r["id"]) for r in (client.rpc("facts_silent_ids", {"p_table": table, "p_limit": min(5000, int(n * 1.3) + 20),
+                                                                    "p_seed": str(seed)}).execute().data or [])]
+    rows: list[dict[str, Any]] = []
+    for i in range(0, len(ids), 100):
+        chunk = ids[i:i + 100]
+        for _ in range(len(GT_COLUMNS) + 1):
+            try:
+                rows += client.table(table).select(",".join(cols)).eq("active", True).in_("id", chunk).execute().data or []
+                break
+            except Exception as e:
+                m = re.search(r"column \w+\.(\w+) does not exist", str(e))
+                if not m or m.group(1) not in cols or m.group(1) in base_cols:
+                    raise
+                cols.remove(m.group(1))
+                print(f"  ! {table}: no column {m.group(1)} — sampling without it")
+    good = []
+    for r in rows:
+        text = sanitize(r.get("title"), r.get("text"))
+        if len(text) >= MIN_TEXT_CHARS and r.get("ad_number"):
+            r["_text"] = text
+            r["_table"] = table
+            r["_platform"] = platform_of(table)
+            good.append(r)
+    print(f"  {table}: silent ids {len(ids)} → eligible {len(good)} → taking {min(n, len(good))}")
+    return good[:n]
 
 
 # ── the proxy call ────────────────────────────────────────────────────────────────────────────────
@@ -354,12 +400,17 @@ def run(args: argparse.Namespace) -> int:
     from scrapers.common.db import sb
     client = sb()
     rng = random.Random(args.seed)
-    plan = build_plan(args.limit, set(args.platforms.split(",")) - {""} if args.platforms else None)
-    print(f"run {args.run_id}: plan {sum(plan.values())} ads over {len(plan)} tables; caps calls≤{args.max_calls} usd≤${args.max_usd}")
+    platforms = set(args.platforms.split(",")) - {""} if args.platforms else None
+    if args.silent:
+        counts = {r["source_table"]: int(r["n"]) for r in (client.rpc("facts_silent_plan", {}).execute().data or [])}
+        plan = silent_plan(args.limit, platforms, counts)
+    else:
+        plan = build_plan(args.limit, platforms)
+    print(f"run {args.run_id}: plan {sum(plan.values())} ads over {len(plan)} tables{' (silent ads only)' if args.silent else ''}; caps calls≤{args.max_calls} usd≤${args.max_usd}")
     sample: list[dict[str, Any]] = []
     for table, n in plan.items():
         try:
-            sample.extend(sample_table(table, n, rng))
+            sample.extend(sample_silent(table, n, args.seed) if args.silent else sample_table(table, n, rng))
         except Exception as e:
             print(f"  ! {table}: sampling failed: {str(e)[:200]}")
     rng.shuffle(sample)
@@ -554,6 +605,14 @@ def run(args: argparse.Namespace) -> int:
 
 # ── self-check: the pure logic, no network ────────────────────────────────────────────────────────
 def selftest() -> None:
+    # --silent plans from the live counts, proportionally, every table ≥ 1, never over the limit; a platform
+    # filter and an empty table are honoured. build_plan still scales the fixed PLAN the same way.
+    assert silent_plan(100, None, {"a_residential_listings": 700, "b_residential_listings": 300, "c_residential_listings": 0}) \
+        == {"a_residential_listings": 70, "b_residential_listings": 30}
+    sp = silent_plan(10, None, {"a_residential_listings": 9000, "b_residential_listings": 5})
+    assert sp["b_residential_listings"] == 1 and sum(sp.values()) == 10, sp
+    assert silent_plan(50, {"b"}, {"a_residential_listings": 100, "b_residential_listings": 100}) == {"b_residential_listings": 50}
+    assert sum(build_plan(10_000, None).values()) == 10_000 and sum(build_plan(500, None).values()) == 500
     assert norm("مَسْبَحٌ، وحديقة") == norm("مسبح وحديقه") == "مسبح وحديقه"
     assert norm("شارع ١٥ م") == "شارع 15 م"
     assert norm("مُؤَسَّس") == "مؤسس"
@@ -610,6 +669,7 @@ def main() -> int:
     ap.add_argument("--max-calls", type=int, default=HARD_MAX_CALLS)
     ap.add_argument("--max-usd", type=float, default=HARD_MAX_USD)
     ap.add_argument("--skip-done", action="store_true", help="resume: skip ads this run_id already read")
+    ap.add_argument("--silent", action="store_true", help="only the ads the free word reader found nothing in (ops_text_facts_silent)")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
     if args.selftest:
