@@ -1,4 +1,11 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-10-25 (migration 20261025072931_six_sites_open_age_bucket_never_answers_up_to):
+--   CHANGED — the open-bucket condition moves from the two aqar tables to seven platforms (aqar, aqarcity,
+--   haraj, muhaysini, reinvest, tuba, wasalt), each proven on its own published age field to store an
+--   open «more than 10» as 10. Rebuilt by rebuild_af_filter_rpcs(); «up to 15» buy 168,663 → 163,374.
+--   Body below = the previous body plus exactly that edit, PROVEN against production:
+--   Recorded md5 of pg_get_functiondef: 34abb6adfc2654cdbd83fb255c0be7b3
+--   (length 11,448; the previous text hashed 3379f3308b6790c0d8f3b1a70cf5ac11, 11,295.)
 -- Re-verified 2026-10-25 (migration 20261025065509_aqar_open_age_bucket_never_answers_up_to):
 --   CHANGED — the age-range arm gains one condition: with p_age_max set, a row of
 --   aqar_residential_listings / aqar_commercial_listings stored at 10 or more is excluded. aqar's own
@@ -300,9 +307,10 @@ AS $function$ select E'
       and ((p_age_min is null and p_age_max is null)
            or (s.property_age is not null
                and s.property_age >= coalesce(p_age_min, 0) and s.property_age <= coalesce(p_age_max, 32767)
-               -- aqar «أكثر من 10 سنوات» is stored as its floor 10: no upper end, so it never answers «up to N» (2026-10-25)
+               -- an OPEN top bucket stored as its floor 10 («أكثر من 10 سنوات», «اكثر من عشر سنوات», «10+ years», REGA «Ten Year»)
+               -- has no upper end, so on these platforms it never answers «up to N» (aqar + six proven siblings, 2026-10-25)
                and (p_age_max is null or s.property_age < 10
-                    or s.source_table not in (''aqar_residential_listings'', ''aqar_commercial_listings''))))
+                    or s.platform not in (''aqar'', ''aqarcity'', ''haraj'', ''muhaysini'', ''reinvest'', ''tuba'', ''wasalt''))))
       and (p_age_unknown is null or (s.property_age is null) = p_age_unknown)
       and (p_is_new_construction is null or (s.property_age = 0) = p_is_new_construction)
       and (p_tenant     is null or s.tenant_ar = p_tenant)
