@@ -621,6 +621,17 @@ def masculine_ordinal(name: str) -> str:
     return _FEM_ORDINAL.sub(lambda m: " " + (m.group(1) or "") + _MASC[m.group(2)], name.strip())
 
 
+# «الضاحية الحي الثالث» (4 ads) is the catalog's «الضاحية الثالث»: unknown_named_districts_checked
+# reads it as a TWIN (2026-10-25), so it is a spelling, mapped here and never added (contract G, the
+# twin guard). Only the catalog's own name resolves; «الضاحية الحي الثامن» has no catalog row and stays
+# without a district (its naming waits on the owner, #319).
+_DAHIYA_HAYY = re.compile(r"^(?:حي\s+)?الضاحية\s+الحي\s+")
+
+
+def dahiya_without_hayy(name: str) -> str:
+    return _DAHIYA_HAYY.sub("الضاحية ", name.strip())
+
+
 def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason). row is None exactly when skip_reason is set."""
     title_text = " ".join(ix["title_lines"])
@@ -654,6 +665,8 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
     district_ar = find_district_in_text(district_raw, city_id) if district_raw else None
     if not district_ar and district_raw and _FEM_ORDINAL.search(district_raw):
         district_ar = find_district_in_text(masculine_ordinal(district_raw), city_id)
+    if not district_ar and district_raw and _DAHIYA_HAYY.search(district_raw):
+        district_ar = find_district_in_text(masculine_ordinal(dahiya_without_hayy(district_raw)), city_id)
 
     p = ix["price"]
     basis, basis_from = p["basis"], ("index_label" if p["basis"] else None)

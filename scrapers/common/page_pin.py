@@ -34,7 +34,9 @@ from scrapers.common.source_pin import pin_dict
 _NUM = r"(-?\d{1,2}\.\d{3,})"
 _JSONLD_GEO = re.compile(r'"geo"\s*:\s*\{[^{}]*?"latitude"\s*:\s*"?' + _NUM + r'"?[^{}]*?"longitude"\s*:\s*"?' + _NUM + r'"?', re.S)
 _MAPS_LINK = re.compile(
-    r"(?:maps/place/|maps/search/|maps\?q=|[?&]q=|[?&]query=|[?&]ll=|maps/@|/@)" + _NUM + r"\s*(?:,|%2C)\s*" + _NUM)
+    # «q= 24.49,43.97»: ialqarawi writes a space (or its %20 / «+») after «q=» on some ads (re-read 40074411510).
+    r"(?:maps/place/|maps/search/|maps\?q=|[?&]q=|[?&]query=|[?&]ll=|maps/@|/@)(?:\s|%20|\+)*" + _NUM
+    + r"\s*(?:,|%2C)\s*" + _NUM)
 _LATLNG_CTOR = re.compile(r"google\.maps\.LatLng\(\s*" + _NUM + r"\s*,\s*" + _NUM + r"\s*\)")
 _EXACT_ON = re.compile(r"show_exact_location\s*=\s*true")
 _SHORT_LINK = re.compile(r"https://(?:maps\.app\.goo\.gl|goo\.gl/maps)/[A-Za-z0-9_-]+")
