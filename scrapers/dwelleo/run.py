@@ -390,7 +390,12 @@ def _amenities(rec: dict, description: Optional[str]) -> dict[str, Any]:
     if _pos(rec.get("parking_space")):
         out["parking"] = True
     if rec.get("furnishing_status") in _FURNISHED:
-        out["furnished"] = _FURNISHED[rec["furnishing_status"]]
+        status, said = _FURNISHED[rec["furnishing_status"]], out.get("furnished")
+        # The site's furnishing_status agrees with the ad's own words on 1,326 active ads that state both and
+        # contradicts them on ~20 (measured 2026-10-25): «غير مفروشة» / «مفروشة: لا» under «furnished» (served as
+        # furnished = YES), «شقة مفروشة» under «unfurnished». Two source statements that disagree have not stated
+        # the fact: unknown — written authoritatively, because the upsert drops a plain None and a stale yes stays.
+        out["furnished"] = status if said is None or said == status else db.AUTHORITATIVE_NULL
     for key in rec.get("utility_availability") or []:
         if key in _UTILITY:
             out[_UTILITY[key]] = True
