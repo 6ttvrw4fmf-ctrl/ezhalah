@@ -123,8 +123,8 @@ def _extract(pdv: dict) -> tuple[dict, Optional[str], Optional[str]]:
 # (ops_af_score 10-16: wasalt 0 of 5 findable).
 #
 # ADVANCED_FILTER_SOURCE_TRUTH §2 allows prose for exactly this case (no structured counterpart anywhere on
-# the platform), and only ever YES or nothing: «لا يوجد مصعد», «تأسيس مصعد», «قريب من …» and a contradiction
-# all stay NULL — never False. The fields wasalt DOES publish structurally (furnishingType, the
+# the platform): yes, NO only on an explicit negation tied to the word («لا يوجد مصعد»; owner 2026-10-24), or
+# nothing — «تأسيس مصعد», «قريب من …» and a contradiction stay NULL. The fields wasalt DOES publish structurally (furnishingType, the
 # featureAmenities vocabulary run.py reads: parking, kitchen, maid, driver, laundry, balcony) are never
 # read from prose here: PROSE_ONLY is the whole list.
 PROSE_ONLY = ("elevator", "air_conditioner", "private_entrance")
@@ -156,7 +156,8 @@ def _statement_lines(text: str) -> str:
 
 
 def prose_amenities(d: Any) -> dict[str, bool]:
-    """{column: True} for the PROSE_ONLY amenities this ad's own description states; {} otherwise."""
+    """{column: True|False} for the PROSE_ONLY amenities this ad's own description states — yes, or no only on an
+    explicit negation tied to the word («لا يوجد مصعد»); silence / prepared / nearby leave the column out."""
     if not isinstance(d, dict) or "_err" in d:
         return {}
     desc = (d.get("propertyInfo") or {}).get("description")
@@ -165,13 +166,13 @@ def prose_amenities(d: Any) -> dict[str, bool]:
     # Imported here, not at module top: the enrich barriers stub `scrapers.common` with only `db`.
     from scrapers.common import normalize
     lines = _statement_lines(normalize.html_block_lines(desc.replace(_LITERAL_NL, "\n")))
-    found = normalize.prose_amenities_yes(lines)
+    found = normalize.prose_amenities(lines)
     # An ad that ANYWHERE calls the fixture prepared-only or not installed has not stated YES, whatever another
     # line implies («مدخل مرورا بالمصعد» beside «مؤسس مصعد», 526753): unknown, never YES.
     for col, rx in _NOT_INSTALLED.items():
-        if found.get(col) and rx.search(lines):
+        if found.get(col) is True and rx.search(lines):
             found.pop(col)
-    return {k: True for k in PROSE_ONLY if found.get(k) is True}
+    return {k: found[k] for k in PROSE_ONLY if k in found}
 
 
 # The rows enriched BEFORE prose_amenities existed are never fetched again (ar_fetched stays true), so
@@ -184,7 +185,8 @@ _DESC = "ar_data->propertyInfo->>description"
 
 
 def prose_backfill(c: Any, table: str, page: int = 500, cap: int = 20000) -> dict[str, int]:
-    """Write the YES answers the stored descriptions state into still-NULL columns. Returns per-column counts."""
+    """Write the answers (yes, or an explicit no) the stored descriptions state into still-NULL columns, then
+    re-judge every answer an earlier reader wrote. Returns per-column counts."""
     out: dict[str, int] = {}
     for col, words in _PROSE_SCAN.items():
         written, last, read = 0, 0, 0
@@ -197,25 +199,29 @@ def prose_backfill(c: Any, table: str, page: int = 500, cap: int = 20000) -> dic
             read += len(rows)
             last = rows[-1]["id"]
             for r in rows:
-                if prose_amenities({"propertyInfo": {"description": r.get("desc")}}).get(col):
+                said = prose_amenities({"propertyInfo": {"description": r.get("desc")}}).get(col)
+                if said is not None:
                     # .is_(col, null) again: never overwrite a value another writer set meanwhile.
-                    c.table(table).update({col: True}).eq("id", r["id"]).is_(col, "null").execute()
+                    c.table(table).update({col: said}).eq("id", r["id"]).is_(col, "null").execute()
                     written += 1
         out[col] = written
-        # RE-CHECK what an earlier reader wrote: a YES whose own description no longer reads YES under the
-        # current reader goes back to unknown. Only this module writes these three wasalt columns (run.py maps
-        # none of them), so a YES here is always one of ours to re-judge.
-        unset, last = 0, 0
-        while True:
-            rows = (c.table(table).select(f"id,desc:{_DESC}").eq("active", True).eq(col, True)
-                    .gt("id", last).order("id").limit(page).execute().data or [])
-            if not rows:
-                break
-            last = rows[-1]["id"]
-            for r in rows:
-                if not prose_amenities({"propertyInfo": {"description": r.get("desc")}}).get(col):
-                    c.table(table).update({col: None}).eq("id", r["id"]).eq(col, True).execute()
-                    unset += 1
+        # RE-CHECK what an earlier reader wrote: an answer its own description no longer gives under the current
+        # reader moves to what it gives now (a stated no, or unknown). Only this module writes these three wasalt
+        # columns (run.py maps none of them), so a value here is always one of ours to re-judge.
+        unset = 0
+        for was in (True, False):
+            last = 0
+            while True:
+                rows = (c.table(table).select(f"id,desc:{_DESC}").eq("active", True).eq(col, was)
+                        .gt("id", last).order("id").limit(page).execute().data or [])
+                if not rows:
+                    break
+                last = rows[-1]["id"]
+                for r in rows:
+                    now = prose_amenities({"propertyInfo": {"description": r.get("desc")}}).get(col)
+                    if now is not was:
+                        c.table(table).update({col: now}).eq("id", r["id"]).eq(col, was).execute()
+                        unset += 1
         out[f"{col}_unset"] = unset
     return out
 
@@ -647,7 +653,7 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
         if "_err" in d:
             d = bump_err(d, row.get("ar_data"))
         upd: dict[str, Any] = {"ar_fetched": True, "ar_fetched_at": _now_iso(), "ar_data": d}
-        upd.update(prose_amenities(d))   # YES-only: a silent description writes nothing, never False
+        upd.update(prose_amenities(d))   # yes / an explicit no; a silent description writes nothing
         if city_ar:
             upd["city_ar"] = city_ar
         if dist_ar:

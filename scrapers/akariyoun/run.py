@@ -448,7 +448,7 @@ def parse_description_amenities(page_html: str) -> dict[str, bool]:
     m = _DESC_PANEL.search(page_html or "")
     if not m:
         return {}
-    return normalize.prose_amenities_yes(normalize.html_block_lines(m.group(1)), skip=_PROSE_SKIP)
+    return normalize.prose_amenities(normalize.html_block_lines(m.group(1)), skip=_PROSE_SKIP)
 
 
 def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], str, Optional[str]]:

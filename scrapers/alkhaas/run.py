@@ -453,7 +453,7 @@ def map_listing(adid: int, body: str) -> tuple[Optional[dict], str]:
         # مطبخ», «وراكب التكييف مكيفات شباك»). Prose is lawful there, YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH
         # §2). 93 of 187 active ads named one and all were NULL, so the Advanced Filter never found them
         # (🔬 2026-10-12). The table has no furnished column, so that key is never written.
-        **{k: v for k, v in normalize.prose_amenities_yes(description).items() if k != "furnished"},
+        **{k: v for k, v in normalize.prose_amenities(description).items() if k != "furnished"},
     }
     if rega_license:
         row["additional_info"]["rega_ad_license_number"] = rega_license

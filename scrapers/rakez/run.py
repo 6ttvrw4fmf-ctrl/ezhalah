@@ -579,20 +579,20 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
     }
     # rakez publishes NO structured amenity field per unit, but its own description lists them («مطبخ»,
     # «موقف خاص», «يسار المصعد»): 1,660 / 385 / 85 of 3,535 active units on 2026-10-17 while every amenity
-    # column was NULL. Prose says YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2), never False.
+    # column was NULL. Prose says yes, an explicit no, or nothing (owner 2026-10-24; ADVANCED_FILTER_SOURCE_TRUTH §2).
     row.update(prose_answers(acf.get("description_ar")))
     for col, yes in project_answers(features).items():
         row.setdefault(col, yes)
     return row, category.lower()
 
 
-# The amenity columns search reads (listing_extra_attrs); prose may answer only these, YES-only.
+# The amenity columns search reads (listing_extra_attrs); prose may answer only these.
 _PROSE_COLS = ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "private_entrance")
 
 
 def prose_answers(description: Optional[str]) -> dict[str, bool]:
-    yes = normalize.prose_amenities_yes(normalize.html_block_lines(description))
-    return {c: True for c in _PROSE_COLS if yes.get(c)}
+    said = normalize.prose_amenities(normalize.html_block_lines(description))
+    return {c: v for c, v in said.items() if c in _PROSE_COLS}
 
 
 # The project's `feature` terms are its build spec, shared by every unit (195 of 195 projects carry one list,
@@ -609,8 +609,8 @@ _COMMON_AREA = re.compile(r"ممرات|ممر |لوبي|ردهة|ردهات|ال
 
 def project_answers(features: list[str]) -> dict[str, bool]:
     unit_terms = [f for f in (features or []) if not _COMMON_AREA.search(f)]
-    yes = normalize.prose_amenities_yes("\n".join(unit_terms))
-    return {c: True for c in _PROJECT_COLS if yes.get(c)}
+    said = normalize.prose_amenities("\n".join(unit_terms))
+    return {c: v for c, v in said.items() if c in _PROJECT_COLS}
 
 
 def _page_gone(path: str) -> tuple[bool, str]:
