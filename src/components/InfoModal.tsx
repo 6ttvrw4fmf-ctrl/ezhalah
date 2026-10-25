@@ -487,7 +487,6 @@ function AboutBody({ t, reduced, gripRef, drag }: {
           <View style={a.lockup}>
             <XImage source={EAGLE} style={a.eagle} contentFit="contain" />
             <Text style={a.wordmark}>{t('Ezhalah')}</Text>
-            <View style={a.wordDot} />
           </View>
         </Reveal>
       </View>
@@ -712,7 +711,6 @@ function makeAbout(pal: Record<string, string>, dark: boolean, rtl = true) {
     lockup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     eagle: { width: 48, height: 48 }, // green-lit cloud eagle, big enough to read clearly on the sheet (owner 2026-10-24)
     wordmark: { fontSize: 34, lineHeight: 42, fontWeight: '800', color: pal.ink },
-    wordDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: pal.accentLeaf ?? pal.primary, alignSelf: 'flex-end', marginBottom: 8 },
     readingColumn: { maxWidth: 640, width: '100%', alignSelf: 'center' },
     heroLine: { fontSize: 19, lineHeight: 31, fontWeight: '700', color: pal.ink, textAlign: start as any, marginTop: 8, marginBottom: 18 },
     paragraph: { fontSize: 15, lineHeight: 28, fontWeight: '400', color: pal.body, textAlign: start as any, marginBottom: 16 },
