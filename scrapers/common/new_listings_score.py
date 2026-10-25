@@ -672,6 +672,35 @@ def muktamel_room_lines(url: str, fetch=None) -> list[str]:
     return out
 
 
+def dwelleo_room_lines(url: str, fetch=None) -> list[str]:
+    """dwelleo's own bedroom count, from the API record its page is rendered from (backlog #838, 2026-10-25).
+
+    We store the record's structured `bedrooms` for a dwelling (scrapers/dwelleo/run.py), and a structured field
+    beats prose (ADVANCED_FILTER_SOURCE_TRUTH). The page the reader sees carries the title prose, so the 10-24 score
+    called 20013764 wrong (record 5, title «فيلا 4 غرف») and missed 20019678's «غرفة نوم واحدة» = stored 1: dwelleo
+    94.7%, a cap from two ads we store right (re-read 40078610599). A Building's count is its room stock and we
+    store none, so no line is given for it. [] when the record cannot be read (unknown, never wrong)."""
+    from urllib.parse import unquote, urlparse
+    slug = unquote(urlparse(url or "").path.rstrip("/").rsplit("/", 1)[-1])
+    if "dwelleo.sa" not in (url or "") or not slug:
+        return []
+    try:
+        from scrapers.dwelleo import run as dwelleo
+        from scrapers.common import normalize
+        rec = fetch(slug) if fetch is not None else dwelleo.fetch_detail(dwelleo.session(), slug)
+        if not isinstance(rec, dict):
+            return []
+        type_ar = ((rec.get("property_type") or {}).get("name") or "").strip()
+        if normalize.map_type_exact(type_ar, overrides=dwelleo._TYPE_OVERRIDES) not in dwelleo._DWELLINGS:
+            return []
+    except Exception:  # noqa: BLE001
+        return []
+    v = rec.get("bedrooms")
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+        return [f"عدد غرف النوم {int(v)}"]
+    return []
+
+
 def nufouth_page(url: str, ad_number: str | None, fetch=None) -> dict | None:
     """A nufouth ad read from its own record (backlog #683, 2026-10-23). The share link
     («/latest-offers?ads-N4175=1») opens the ad in a JS modal filled from get_property_data; the static HTML is
@@ -823,7 +852,7 @@ def tuba_rega_lines(url: str, fetch=None) -> list[str]:
 
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
                pace: float = PACE_S, probe=None, wasalt=None, sanadak=None, muktamel=None, tuba=None,
-               nufouth=None, dallali=None) -> dict:
+               nufouth=None, dallali=None, dwelleo=None) -> dict:
     if probe is None:
         # Imported here, not at module level: af_score and its hermetic check load this module with
         # source_reread stubbed, and they always pass their own probe.
@@ -887,6 +916,9 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
         if "tuba.com.sa" in url:
             extra = (tuba or tuba_rega_lines)(url)
+            page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
+        if "dwelleo.sa" in url:
+            extra = (dwelleo or dwelleo_room_lines)(url)
             page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
         fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
                                        prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)
