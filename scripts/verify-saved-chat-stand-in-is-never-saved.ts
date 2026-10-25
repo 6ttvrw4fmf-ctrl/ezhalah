@@ -77,11 +77,11 @@ const mutants: [string, string][] = [
   ['the guard never raised at all', mut(/hydratingIdRef\.current = entryId;/, '')],
 ];
 let blind = 0;
-for (const [label, src] of mutants) {
-  const caught = judge(src).some((r) => !r.ok);
+const mustCatch = (label: string, caught: boolean) => {
   console.log(`  ${caught ? 'PASS  catches' : 'FAIL  BLIND to'}: ${label}`);
   if (!caught) blind++;
-}
+};
+for (const [label, src] of mutants) mustCatch(label, judge(src).some((r) => !r.ok));
 
 if (blind) { console.error(`\n✗ ${blind} mutation(s) not caught\n`); process.exit(1); }
 if (failed) { console.error(`\n✗ ${failed} check(s) FAILED — a half-loaded saved chat can be saved over the real one\n`); process.exit(1); }
