@@ -1,3 +1,4 @@
+import { markEagleLightUp } from '@/lib/eagleLightUp';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useI18n, LOCALE_KEY, getLocale, getLocaleRevision, detectLocale, setLocalePersistence, type Locale } from '@/i18n';
@@ -341,6 +342,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Adoption enables the stored preference; a COMPLETED signed-in→signed-out transition (incl.
   // external revocation observed via onAuthStateChange) resets to Light and clears the stored
   // preference. Boot-as-guest is NOT a transition — nothing to clear, the gate already gives Light.
+  const signedInNowRef = useRef(false);
+  useEffect(() => { signedInNowRef.current = !!user; }, [user]);
   const themeWasSignedInRef = useRef(false);
   useEffect(() => {
     if (!authChecked) return;
@@ -831,7 +834,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       onChecked: () => setAuthChecked(true),
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       const su = session?.user;
       if (su) {
         // Apple stays Apple; everything else (Google, and the two internal email test accounts) reads as
@@ -839,6 +842,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const method = su.app_metadata?.provider === 'apple' ? 'apple' : 'google';
         // A re-map (token refresh, tab focus) must not drop spellings this tab already has for the SAME name
         // before they are stored — that drop flipped «Yusuf» back to «يوسف» on an English screen.
+        // A real log-in / sign-up (signed out → signed in here, not a token refresh or a restored session):
+        // the sidebar eagle lights up once (lib/eagleLightUp.ts, owner 2026-10-24).
+        if (event === 'SIGNED_IN' && !signedInNowRef.current) markEagleLightUp();
         setUser((prev) => keepSpellings(prev, mapSupabaseUser(su, method)));
       } else {
         setUser(null);

@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { takeEagleLightUp } from '@/lib/eagleLightUp';
 import { Image as XImage } from 'expo-image';
 import Animated from 'react-native-reanimated';
 import { useReducedMotion } from '@/lib/useReducedMotion';
@@ -11,6 +13,8 @@ import CloudWisp from './CloudWisp';
 // «it just shows this» — the approved share-picture look). Signed in: the same, lit with the twinkling green lights.
 const EAGLE = require('../../assets/images/logo-cloud-sky.svg');
 const EAGLE_LIT = require('../../assets/images/logo-cloud-lit-sky.svg');
+// Played once right after a log-in / sign-up: white → the green lights switch on → glow (lib/eagleLightUp.ts).
+const EAGLE_LIGHTUP = require('../../assets/images/logo-cloud-lightup-sky.svg');
 const eagleDrift = {
   from: { transform: [{ translateX: -skyScene.eagleDriftPx }] },
   to: { transform: [{ translateX: skyScene.eagleDriftPx }] },
@@ -58,10 +62,14 @@ export function SidebarClouds() {
  *  lights twinkle along it. The adjacent wordmark labels it. */
 export function SkyEagleMark({ lit = false }: { lit?: boolean }) {
   const reduced = useReducedMotion();
+  // Mounted already signed in (the phone's burger menu opening) → take the mark now; signed in while mounted (the
+  // laptop's docked sidebar) → take it on the change. Either way this mount keeps playing the light-up.
+  const [lightUp, setLightUp] = useState(() => lit && takeEagleLightUp());
+  useEffect(() => { if (lit && !lightUp && takeEagleLightUp()) setLightUp(true); }, [lit]); // eslint-disable-line react-hooks/exhaustive-deps
   return <View testID="sidebar-sky-eagle" pointerEvents="none" accessible={false}
     accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
     style={styles.eagleTile}>
-    <XImage source={lit ? EAGLE_LIT : EAGLE} contentFit="contain" accessible={false} style={styles.eagle} />
+    <XImage source={!lit ? EAGLE : lightUp ? EAGLE_LIGHTUP : EAGLE_LIT} contentFit="contain" accessible={false} style={styles.eagle} />
     <Animated.View style={[StyleSheet.absoluteFill,
       !reduced && { ...motion, animationName: eagleDrift }]}>
       <CloudWisp width={65} height={24} opacity={0.62} style={styles.eagleCloud} />
