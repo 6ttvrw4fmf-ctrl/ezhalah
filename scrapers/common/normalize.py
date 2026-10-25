@@ -924,7 +924,8 @@ _AMENITY_TOKENS: dict[str, tuple[str, ...]] = {
 }
 
 # «غير مؤثثة» / «بدون مصعد» / «لا يوجد مصعد» — the negator sits BEFORE the token.
-_NEGATORS = ("غير", "بدون", "لا يوجد", "لايوجد", "un", "no ")
+# «لا يتوفر موقف خاص للشقة» (aqar, stored 2026-10-25) is «لا يوجد» in other words.
+_NEGATORS = ("غير", "بدون", "لا يوجد", "لايوجد", "لا يتوفر", "لا تتوفر", "un", "no ")
 
 # …and some qualifiers sit AFTER it and mean the thing is NOT there. «مصعد مؤسس» is an elevator
 # SHAFT that has been prepared — there is no elevator (seen on fahadalshahri, 2026-09-20). Reading
@@ -1055,10 +1056,26 @@ _NEGATOR_RES = tuple(re.compile(rf"(?<!\w){'(?:و|ال|وال)?' if re.match(r'[
 # tuba prints the same template). A value opening with a negator is a stated NO; a value that names the fact again
 # («مفروشة: هذه الشقة غير مفروشة») is read from that restatement; «غير محدد» / «غير مذكور» / «لا توجد تفاصيل» answers
 # nothing (NULL).
-_LABEL_RE = re.compile(r"\w{0,4}[\s*]*[:：][\s*]*")
+#
+# A label may also carry the vehicle qualifier («موقف السيارات:», «مواقف سيارات:», «موقف للسيارات:») or ONE
+# «و»-joined co-subject («موقف سيارات ومساحة خارجية: غير موضحة», «مكيفات والمطبخ: غير راكبة»). Any OTHER word before
+# the colon starts a new label whose value is not this fact's answer — measured on stored rows 2026-10-25: «مطبخ
+# ملاحظة: بدون مصعد», «موقف خاص الحقوق: لا يوجد», «غسيل عمولة نقل الملكية: لا يوجد», «موقف خاص: لا تفوت». A co-subject
+# label is weaker, so only an explicit «not specified» answers it as unknown («مطبخ وسطح ملاحظة : غير شامل» stays yes).
+# «غير متوفرة» / «غير موجود» is a stated NO (dwelleo «مواقف السيارات: غير متوفرة», aqar «تكييف: غير متوفر»).
+_LABEL_RE = re.compile(r"\w{0,4}(?:\s+(?:ال|لل|ل)?(?:سيار|مركب)\w*)?(?P<co>\s+و\w+(?:\s+(?!ملاحظ)\w+)?)?[\s*]*[:：][\s*]*")
 _LABEL_NO_DETAILS_RE = re.compile(r"لا\s*[يت]وجد\s+(?:تفاصيل|معلومات|بيانات)")
-_LABEL_NO_RE = re.compile(r"(?:لا|لايوجد|لاتوجد|بدون|no|none|not)(?!\w)")
+_LABEL_NO_RE = re.compile(r"(?:لا|لايوجد|لاتوجد|بدون|no|none|not|غير\s+(?:متوفر|موجود)\w{0,2})(?!\w)")
 _LABEL_UNSAID_RE = re.compile(r"غير(?!\w)")
+_LABEL_UNSPECIFIED_RE = re.compile(r"غير\s+(?:محدد|مذكور|موضح|معروف|مطبق|مرفق)\w{0,2}(?!\w)")
+
+# A stated NO the 12-character negator window cannot see, both verified on stored ads 2026-10-25:
+#   «عدم وجود مصعد», «لعدم توفر مصعد», «حالة عدم المفروشات», «غياب المفروشات» (aqar, gathern, muhaysini, tuba: 20 ads)
+#   «لا تأتي هذه الشقة مفروشة», «لا يأتي هذا الشقة مفروشة», «لا تأتي مفروشة» (muhaysini: 7 ads)
+# Anchored to the token (≤ 3 words between), on the normalised text («تأتي» → «تاتي»).
+_ABSENT_BEFORE_RE = re.compile(
+    r"(?:(?<!\w)(?:و|ل|ول)?(?:عدم|غياب)\s+(?:(?:وجود|توفر|توافر)\s+)?"
+    r"|(?<!\w)لا\s+[تي]اتي(?:\s+[^\s،,.]+){0,3}\s+)(?:ال)?$")
 
 
 # A token can sit inside a PLACE NAME: «شرفة» is the tail of Jeddah's district «مشرفة», and every ad there read
@@ -1097,7 +1114,8 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
                 near = t[max(0, m.start() - 22):m.start()]
                 if any(_norm_ar(q) in near for q in _PROXIMITY):
                     break          # the NEIGHBOURHOOD has it, not this property — stay NULL
-                negated = any(r.search(before) for r in _NEGATOR_RES)
+                negated = (any(r.search(before) for r in _NEGATOR_RES)
+                           or bool(_ABSENT_BEFORE_RE.search(t[max(0, m.start() - 40):m.start()])))
                 lab = None if negated else _LABEL_RE.match(t, m.end())
                 if lab:
                     v = t[lab.end():]
@@ -1110,7 +1128,7 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
                         if (said := _amenities_in_clause(v).get(col)) is not None:
                             out[col] = said    # the value restates the fact: the restatement is the answer
                         break
-                    if _LABEL_UNSAID_RE.match(v):
+                    if (_LABEL_UNSPECIFIED_RE if lab.group("co") else _LABEL_UNSAID_RE).match(v):
                         break      # «غير محدد» — the label was answered with nothing: NULL
                 out[col] = not negated
                 break

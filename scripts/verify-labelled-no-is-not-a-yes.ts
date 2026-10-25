@@ -14,40 +14,59 @@ const SRC = readFileSync(join(ROOT, 'scrapers/common/normalize.py'), 'utf8');
 let failed = 0;
 const check = (name: string, ok: boolean, detail = '') => { console.log(`  ${ok ? '✓' : '❌'} ${name}${!ok && detail ? ` — ${detail}` : ''}`); if (!ok) failed++; };
 const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
-console.log('\nA labelled «لا» is a NO\n');
+console.log('\nA labelled «لا» is a NO, and so is «لا تأتي … مفروشة»\n');
 
-// [phrase, expected furnished] — true / false / null (null = the ad did not answer: NULL, never a guess)
-const CASES: [string, boolean | null][] = [
-  ['- عدد الحمامات: 5 - مفروشة: لا - للا بيع: نعم', false],
-  ['- **مفروش:** لا **المرافق:** - الكهرباء', false],
-  ['- المفروشات: غير مفروش - السعر: 3,500,000 ريال سعودي', false],
-  ['- الحمامات: 0 - مؤثثة: غير مؤثثة - السعر: 58,000 ريال سعودي سنويًا', false],
-  ['مفروشة: لا (غير مفروشة)', false],
-  ['- **مفروشة**: هذه الشقة غير مفروشة، مما يتيح لك المرونة', false],
-  ['مفروشة: نعم', true],
-  ['شقة مفروشة بالكامل', true],
-  ['مفروش: غير مذكور', null],
+// [phrase, column, expected] — true / false / null (null = the ad did not answer: NULL, never a guess). Every
+// phrase is verbatim (or a verbatim fragment) from a stored ad, 2026-10-24/25.
+const CASES: [string, string, boolean | null][] = [
+  ['- عدد الحمامات: 5 - مفروشة: لا - للا بيع: نعم', 'furnished', false],
+  ['- **مفروش:** لا **المرافق:** - الكهرباء', 'furnished', false],
+  ['- المفروشات: غير مفروش - السعر: 3,500,000 ريال سعودي', 'furnished', false],
+  ['- الحمامات: 0 - مؤثثة: غير مؤثثة - السعر: 58,000 ريال سعودي سنويًا', 'furnished', false],
+  ['مفروشة: لا (غير مفروشة)', 'furnished', false],
+  ['- **مفروشة**: هذه الشقة غير مفروشة، مما يتيح لك المرونة', 'furnished', false],
+  ['مفروشة: نعم', 'furnished', true],
+  ['شقة مفروشة بالكامل', 'furnished', true],
+  ['مفروش: غير مذكور', 'furnished', null],
+  // multi-word labels: the vehicle qualifier or one «و» co-subject, never any other word (2026-10-25)
+  ['- موقف سيارات ومساحة خارجية: غير موضحة في البيانات', 'parking', null],
+  ['مواقف السيارات: غير متوفرة المياه: متوفرة', 'parking', false],
+  ['موقف السيارات: غير محدد', 'parking', null],
+  ['مطبخ ملاحظة: بدون مصعد', 'kitchen', true],
+  ['موقف خاص الحقوق: لا يوجد', 'parking', true],
+  ['موقف خاص: لا تفوت', 'parking', true],
+  // free-sentence negatives (muhaysini, tuba, aqar, gathern), and the «nearby» outcome still unknown
+  ['لا تأتي هذه الشقة مفروشة، مما يمنحك الحرية في تصميمها', 'furnished', false],
+  ['حالة عدم المفروشات تتيح حرية كاملة في تصميم', 'furnished', false],
+  ['غير مناسب لكبار السن لعدم وجود مصعد', 'elevator', false],
+  ['قريب من عدم وجود مصعد', 'elevator', null],
 ];
-const furnished = (src?: string) =>
+const answers = (src?: string) =>
   (pyCall(ROOT, MOD, 'amenities_from_text', CASES.map(([p]) => [p]), src) as Record<string, boolean>[])
-    .map((d) => (d.furnished === undefined ? null : d.furnished));
-const allRight = (got: (boolean | null)[]) => got.every((g, i) => g === CASES[i][1]);
+    .map((d, i) => (d[CASES[i][1]] === undefined ? null : d[CASES[i][1]]));
+const allRight = (got: (boolean | null)[]) => got.every((g, i) => g === CASES[i][2]);
 
-const real = furnished();
-CASES.forEach(([p, want], i) => check(`«${p}» → ${want}`, real[i] === want, `got ${real[i]}`));
+const real = answers();
+CASES.forEach(([p, col, want], i) => check(`«${p}» → ${col} = ${want}`, real[i] === want, `got ${real[i]}`));
 
 // Each mutant must apply (an anchor that drifted is a red, not a silent pass) and must be caught.
 const mutant = (from: string, to: string) => {
   const m = SRC.replace(from, to);
   if (m === SRC) { check(`ANCHOR DRIFTED: ${from}`, false); return null; }
-  return furnished(m);
+  return answers(m);
 };
 const m1 = mutant('lab = None if negated else _LABEL_RE.match(t, m.end())', 'lab = None');
 mustCatch('the reader ignoring the value after the label (the 2026-10-24 defect)', m1 !== null && !allRight(m1));
-const m2 = mutant('r"(?:لا|لايوجد|لاتوجد|بدون|no|none|not)(?!\\w)"', 'r"(?:لايوجد|لاتوجد|بدون|no|none|not)(?!\\w)"');
+const m2 = mutant('r"(?:لا|لايوجد|لاتوجد|بدون|no|none|not|', 'r"(?:لايوجد|لاتوجد|بدون|no|none|not|');
 mustCatch('a bare «لا» no longer counting as the answer', m2 !== null && !allRight(m2));
 const m3 = mutant('if (said := _amenities_in_clause(v).get(col)) is not None:', 'if (said := True) is not None:');
 mustCatch('«مفروشة: هذه الشقة غير مفروشة» read from the label instead of the restatement', m3 !== null && !allRight(m3));
+const m4 = mutant('or bool(_ABSENT_BEFORE_RE.search(t[max(0, m.start() - 40):m.start()])))', 'or False)');
+mustCatch('«لا تأتي … مفروشة» / «عدم وجود مصعد» read as yes again', m4 !== null && !allRight(m4));
+const m5 = mutant('(?:\\s+(?:ال|لل|ل)?(?:سيار|مركب)\\w*)?(?P<co>', '(?P<co>');
+mustCatch('«موقف سيارات ومساحة خارجية: غير موضحة» read as parking = yes again', m5 !== null && !allRight(m5));
+const m6 = mutant('(?P<co>\\s+و\\w+(?:\\s+(?!ملاحظ)\\w+)?)?', '(?P<co>(?:\\s+\\w+){1,3})?');
+mustCatch('a label widened to any words («مطبخ ملاحظة: بدون مصعد» → no kitchen)', m6 !== null && !allRight(m6));
 
 if (failed) { console.error(`\n❌ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✅ a labelled «لا» is a NO');
