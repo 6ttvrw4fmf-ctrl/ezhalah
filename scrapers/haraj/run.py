@@ -524,7 +524,7 @@ def candidate_ids(files: int, skip_hours: int) -> tuple[list[str], dict]:
 
 
 def crawl(files: int, skip_hours: int, limit: int = 0, today: Any = None, only: Optional[list[str]] = None,
-          licensed_only: bool = False, meta: Optional[dict] = None):
+          meta: Optional[dict] = None):
     if meta is None:
         ids, meta = (only, {"files": ["--ids"], "prefiltered": {}}) if only else candidate_ids(files, skip_hours)
     else:
@@ -545,9 +545,6 @@ def crawl(files: int, skip_hours: int, limit: int = 0, today: Any = None, only: 
             continue
         if DELETED_MARK in h:               # gone, even when the page still carries its JSON-LD (below)
             c["deleted_at_source"] += 1
-            continue
-        if licensed_only and P.LICENCE_HEAD not in h:
-            c["skip_unlicensed_catchup"] += 1
             continue
         if not _has_tag(h):
             continue
@@ -673,13 +670,17 @@ def _notes(c: Counter, unresolved: Counter, head: Optional[dict] = None) -> str:
     return json.dumps({**(head or {}), **dict(c), "district_unresolved_top": top}, ensure_ascii=False)[:1900]
 
 
-# ── licensed catch-up (owner 2026-10-17: «start with the ones with a licence») ───────────────────
+# ── catch-up (owner 2026-10-17: «start with the ones with a licence»; 2026-10-25: every offer) ────────
 # Every scheduled run, after the live hours, walks the OLDER hourly files Haraj still lists (~3 months),
-# newest first, for a time budget: sharper title gate, licensed offers only, the same map_post and own-page
-# gone banner. The cursor is the oldest finished file, kept in the run's own notes («catchup_before»); a
-# failed run never advances it, so the next one redoes those files (upserts are idempotent).
+# newest first, for a time budget: sharper title gate, the same map_post (licensed AND unlicensed offers,
+# owner rule 10-17) and own-page gone banner. The cursor is the oldest finished file, kept in the run's
+# own notes; a failed run never advances it, so the next one redoes those files (upserts are idempotent).
+# 2026-10-25: the licensed-only walk finished at «catchup_before» 2026-07-20-00, having read every
+# unlicensed offer and thrown it away. A NEW key restarts the walk from the live window for all offers;
+# the old key is no longer read.
 _STAMP = re.compile(r"sitemap-(\d{4}-\d{2}-\d{2}-\d{2})\.txt")
-_CURSOR = re.compile(r'"catchup_before": "(\d{4}-\d{2}-\d{2}-\d{2})"')
+_CURSOR_KEY = "catchup_all_before"
+_CURSOR = re.compile(r'"%s": "(\d{4}-\d{2}-\d{2}-\d{2})"' % _CURSOR_KEY)
 
 
 def _stamp(u: str) -> str:
@@ -713,7 +714,7 @@ def catchup(locs: list[str], live_files: list[str], budget_s: float, cursor: Opt
             c["catchup_file_error"] += 1
             print(f"  catch-up stopped: {e}", flush=True)
             break
-        r, m, cc_, un, _ = crawl(0, 0, today=today, only=ids, licensed_only=True,
+        r, m, cc_, un, _ = crawl(0, 0, today=today, only=ids,
                                  meta={"files": [u], "prefiltered": dict(pre)})
         res += r
         com += m
@@ -725,7 +726,7 @@ def catchup(locs: list[str], live_files: list[str], budget_s: float, cursor: Opt
         if time.time() - t0 > budget_s:   # checked after a file: every run moves the cursor at least one file
             break
     left = sum(1 for u in older if _stamp(u) < done)
-    return res, com, c, unresolved, {"catchup_before": done, "catchup_files_left": left,
+    return res, com, c, unresolved, {_CURSOR_KEY: done, "catchup_files_left": left,
                                      "catchup_stored": len(res) + len(com)}
 
 
@@ -736,7 +737,7 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--ids", default="", help="re-read exactly these post ids (comma list) instead of the sitemap — a parser repair")
     ap.add_argument("--catchup-minutes", type=float, default=0,
-                    help="after the live hours, walk older hour files for licensed offers this long (0 = off)")
+                    help="after the live hours, walk older hour files for offers this long (0 = off)")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     run_id = None if a.dry_run else db.begin_run(SLUG)
@@ -774,7 +775,7 @@ def main() -> int:
         healthy = db.end_run(run_id, ok=True, rows_seen=c["fetched"], rows_upserted=len(res) + len(com),
                              notes=_notes(c, unresolved, head),
                              check_tables=["haraj_residential_listings", "haraj_commercial_listings"])
-        print(f"✓ {SOURCE}: {len(res)} residential + {len(com)} commercial licensed offers upserted", flush=True)
+        print(f"✓ {SOURCE}: {len(res)} residential + {len(com)} commercial offers upserted", flush=True)
         return 0 if healthy else 1
     except Exception as e:  # noqa: BLE001
         if run_id:
