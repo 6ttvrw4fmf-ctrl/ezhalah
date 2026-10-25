@@ -17,6 +17,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useReducedMotion } from '@/lib/useReducedMotion';
+import { GLINT_PROPS } from '@/lib/scrollCalm';
 import { useThemePalette } from '@/lib/appearance';
 
 const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1);
@@ -148,7 +149,7 @@ export function CssShine() {
   const reduced = useReducedMotion();
   if (reduced || Platform.OS !== 'web') return null;
   return (
-    <View pointerEvents="none" style={[s.shineBand, s.shineCss]}>
+    <View pointerEvents="none" {...GLINT_PROPS} style={[s.shineBand, s.shineCss]}>
       <LinearGradient
         colors={['rgba(255,255,255,0)', 'rgba(255,255,255,0.7)', 'rgba(255,255,255,0)']}
         start={{ x: 0, y: 0 }}

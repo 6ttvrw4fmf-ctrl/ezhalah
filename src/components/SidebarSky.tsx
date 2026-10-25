@@ -4,6 +4,7 @@ import { takeEagleLightUp } from '@/lib/eagleLightUp';
 import { Image as XImage } from 'expo-image';
 import Animated from 'react-native-reanimated';
 import { useReducedMotion } from '@/lib/useReducedMotion';
+import { SKY_CALM_PROPS } from '@/lib/scrollCalm';
 import { skyScene } from '@/theme/skyScene';
 import CloudWisp from './CloudWisp';
 
@@ -50,7 +51,7 @@ export function SidebarClouds() {
     style={[StyleSheet.absoluteFill, styles.clip]}>
     <View testID="sidebar-cloud-drift" style={StyleSheet.absoluteFill}>
       {SIDEBAR_CLOUDS.map((c, i) => (
-        <Animated.View key={i} style={[StyleSheet.absoluteFill, !reduced && cloudDrift(i)]}>
+        <Animated.View key={i} {...SKY_CALM_PROPS} style={[StyleSheet.absoluteFill, !reduced && cloudDrift(i)]}>
           <CloudWisp variant={c.variant} width={c.width} height={c.height} opacity={c.opacity} style={c.style} />
         </Animated.View>
       ))}
@@ -70,7 +71,7 @@ export function SkyEagleMark({ lit = false }: { lit?: boolean }) {
     accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
     style={styles.eagleTile}>
     <XImage source={!lit ? EAGLE : lightUp ? EAGLE_LIGHTUP : EAGLE_LIT} contentFit="contain" accessible={false} style={styles.eagle} />
-    <Animated.View style={[StyleSheet.absoluteFill,
+    <Animated.View {...SKY_CALM_PROPS} style={[StyleSheet.absoluteFill,
       !reduced && { ...motion, animationName: eagleDrift }]}>
       <CloudWisp width={65} height={24} opacity={0.62} style={styles.eagleCloud} />
       <CloudWisp variant={1} width={42} height={13} opacity={0.32} style={styles.eagleTopCloud} />
