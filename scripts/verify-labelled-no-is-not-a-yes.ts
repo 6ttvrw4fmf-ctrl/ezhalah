@@ -51,6 +51,29 @@ const CASES: [string, string, boolean | null][] = [
   ['#لايوجد (مدخل سياره)', 'car_entrance', false],
   ['مساحة خارجية (لا يوجد) موقف سيارات خاص (امام المبنى)', 'parking', true],
   ['المطبخ غير راكب المكيفات غير راكبة', 'air_conditioner', null],
+  // «غير راكب / مركب» after the fixture = NOT installed: unknown, never a yes — the kitchen too («prepared only», like
+  // «مصعد مؤسس»; coordinator for the owner, 2026-10-25). «صغير راكب» is a small FITTED kitchen. Stored ads, 2026-10-25:
+  // haraj 18897950, dealapp 9111947 / 16156580 / 16156677 / 18172220 / 18171902, abaad 13214802 / 13214808, therc 12405530.
+  ['حي المنار ✅ المكونات 🏠 (3) غرف وصاله 🏠 مطبخ غير راكب 🏠 مكيفات اسبلت راكبة', 'kitchen', null],
+  ['والاكهرباء مستقله مطبخ غير راكب مكيفات راكبه', 'kitchen', null],
+  ['والاكهرباء مستقله مطبخ غير راكب مكيفات راكبه', 'air_conditioner', true],
+  ['صالة - مطبخ مقفل غير راكب غرفة غسيل', 'kitchen', null],
+  ['3 غرف نوم صالة واسعة مطبخ (غير راكب) دورتا مياه', 'kitchen', null],
+  ['يوجد مصعد 📍المطبخ والمكيفات غير راكبة 📍', 'kitchen', null],
+  ['السخانات: مخفية بالكامل. المكيفات والمطبخ: غير راكبة 💡 الخدمات', 'air_conditioner', null],
+  ['وتعمل بشكل ممتاز مصمم مصعد ولكن غير راكب السعر', 'elevator', null],
+  ['- غرفة كبيرة 6x4 . - مطبخ صغير راكب . - غرفة 3', 'kitchen', true],
+  ['• غرفتين نوم • دواليب مطبخ صغير راكب • ⁠مكيفات راكبة', 'kitchen', true],
+  ['شقة مكونة من : -غرفتين -صالة -مطبخ ( الدولاب غير راكب ) -دورتي مياه', 'kitchen', null],
+  ['-صاله . -مطبخ كبير مغلق غير راكب. -غرفتين نوم', 'kitchen', null],
+  ['غرفة سائق مطبخ ( يوجد مطبخ صغير راكب ) صالتين مجلس', 'kitchen', true],
+  // a plain mention elsewhere may not turn «غير راكب» back into a yes (muhaysini 17578176, 17578177)
+  ['صالة - مطبخ مستقل - دورتين مياه المطبخ غير راكب - المكيفات غير راكبة', 'kitchen', null],
+  ['بخ+3دوره مياة (المكيفات راكبه+المطبخ غير راكب)', 'air_conditioner', true],
+  // another fixture's word is not a describing word: its «غير راكب» is its own (dealapp 18563443, muhaysini 17578178 / 17434418)
+  ['دورتين مياة مطبخ دور رابع متوفر مصعد تكيفات شباك غير راكبه عداد كهرباء', 'elevator', true],
+  ['دورتين مياه حاليا راكب مكيفات شباك مطبخ غير راكب مدخلين', 'air_conditioner', true],
+  ['مطبخ ودورتين مياه بدون مكيفات مطبخ غير راكب مدخلين', 'air_conditioner', false],
 ];
 const answers = (src?: string) =>
   (pyCall(ROOT, MOD, 'amenities_from_text', CASES.map(([p]) => [p]), src) as Record<string, boolean>[])
@@ -80,6 +103,16 @@ const m6 = mutant('(?P<co>\\s+و\\w+(?:\\s+(?!ملاحظ)\\w+)?)?', '(?P<co>(?:\
 mustCatch('a label widened to any words («مطبخ ملاحظة: بدون مصعد» → no kitchen)', m6 !== null && !allRight(m6));
 const m7 = mutant('                negated = (_negated_before(before)', '                negated = (any(r.search(before) for r in _NEGATOR_RES)');
 mustCatch('a negator not tied to the token («مطبخ غير راكب 🏠 مكيفات راكبة» → AC = no)', m7 !== null && !allRight(m7));
+const m8 = mutant('_NOT_INSTALLED_COLS = ("air_conditioner", "elevator", "kitchen")', '_NOT_INSTALLED_COLS = ("air_conditioner", "elevator")');
+mustCatch('«مطبخ غير راكب» served as kitchen = yes again', m8 !== null && !allRight(m8));
+const m9 = mutant('[^\\w\\n]+غير\\s+', '.*?غير\\s+');
+mustCatch('«مطبخ صغير راكب» (a small fitted kitchen) read as not installed', m9 !== null && !allRight(m9));
+const m10 = mutant('\\w+)){{0,2}}', '\\w+)){{0}}');
+mustCatch('a co-subject or describing word dropped («المكيفات والمطبخ: غير راكبة» → AC = yes)', m10 !== null && !allRight(m10));
+const m11 = mutant('    t = _norm_ar(str(raw or "")).lower()\n    for col in _NOT_INSTALLED_COLS:', '    return\n    for col in _NOT_INSTALLED_COLS:');
+mustCatch('«مطبخ مستقل … المطبخ غير راكب» served as yes (a plain mention outvoting «not installed»)', m11 !== null && !allRight(m11));
+const m12 = mutant('|(?!(?:ال)?(?:{_FIXTURE_WORD}))\\w+', '|\\w+');
+mustCatch('another fixture\'s word read as a describing word («متوفر مصعد تكيفات شباك غير راكبه» → no lift)', m12 !== null && !allRight(m12));
 
 // dwelleo: the site's own furnishing_status vs the ad's own words. Agreement keeps the status; a contradiction is
 // unknown, written as the AUTHORITATIVE_NULL sentinel so the upsert clears a stale yes (dwelleo 13130631: status

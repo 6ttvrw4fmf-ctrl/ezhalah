@@ -47,7 +47,12 @@ def clean_text(title: Optional[str], description: Optional[str]) -> str:
         desc = N.html_block_lines(desc)
     lines = [title or ""] + re.split(r"[\r\n]+", desc)
     out = "\n".join(s for ln in lines if ln.strip() and (s := sanitize(None, ln)))
-    return unicodedata.normalize("NFKC", out)[:MAX_TEXT]
+    return _COLON_NO.sub(r"\1،", unicodedata.normalize("NFKC", out))[:MAX_TEXT]
+
+
+# A form value «لا» ends its clause: «مفروشة: لا يُعرف حي الأمل …», «مؤثثة: لا تتضمن …», «مفروش: لا **المرافق:**»
+# (muhaysini; full run 458 furnished rows read as yes). «… : لا يوجد» stays one negation.
+_COLON_NO = re.compile(r"(:[\s*]*لا)(?=\s+(?!(?:يوجد|توجد|يتوفر|تتوفر|غير)(?!\w))\S)")
 
 
 def norm_map(raw: str) -> tuple[str, list[int]]:
@@ -274,6 +279,13 @@ def _starts(word: str, stems: tuple[str, ...]) -> bool:
     return any(word.startswith(x) or w.startswith(x) for x in stems)
 
 
+def _bare(w: str) -> str:
+    """A context word without its proclitics: «بدورة» → «دوره», «لحمام» → «حمام», «وبخزان» → «خزان»."""
+    w = w[1:] if w.startswith("و") and len(w) > 3 else w
+    w = w[1:] if w[:1] in ("ب", "ل", "ف") and len(w) > 3 else w
+    return _strip_wa(w)
+
+
 def _strip_wa(w: str) -> str:
     for p in ("وال", "و", "ال"):
         if w.startswith(p) and len(w) > len(p) + 1:
@@ -361,7 +373,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     ex_before, ex_after = _EXCLUDE.get(fact, ((), ()))
     if fact in _METER_FACTS and "عداد" in t[ws:e]:
         ex_before = ()                               # «خزانات وعدادات مستقلة» names the meter itself
-    if any(_starts(_strip_wa(w), ex_before) or _starts(w, ex_before) for w in p2) or \
+    if any(_starts(_strip_wa(w), ex_before) or _starts(w, ex_before) or _starts(_bare(w), ex_before) for w in p2) or \
             any(_starts(w, ex_after) for w in n2) or any(x in " ".join(n2) for x in ex_after if " " in x):
         return None, s, e
     if fact in _NEEDS_CUE and not (any(_starts(w, _CUES) for w in gp[-3:] + gn[:1]) or n_words <= 3
@@ -735,6 +747,11 @@ def selftest() -> None:
         ("باركينج خاص لكل شقة", {"parking": True}, ()),
         ("دورة مياه مستقلة", {}, ("separate_water_meter", "water_supply")),
         ("خزان المياه مستقل", {"water_tank": True}, ("separate_water_meter",)),
+        # full run (facts-words-2026-10-25) hand check: a proclitic hid the bathroom — 900 rows repaired
+        ("غرفة نوم بدورة مياه مستقلة", {}, ("separate_water_meter", "water_supply")),
+        ("- مفروشة: لا يُعرف حي الأمل بأجوائه الهادئة", {"furnished": False}, ()),
+        ("- **مفروش**: لا **المرافق:** - الكهرباء", {"furnished": False}, ()),
+        ("جناح بحمام ومغسلة, لدورة مياه مستقلة", {}, ("separate_water_meter",)),
         ("خزانات وعدادات مستقلة", {"separate_electricity_meter": True}, ()),
         ("2دورات مياة موقف خاص", {"parking": True}, ("water_supply",)),
         ("1مجلس 1غرفة طعام 1مطبخ", {"majlis": True, "kitchen": True}, ()),
