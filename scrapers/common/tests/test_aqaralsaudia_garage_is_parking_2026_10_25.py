@@ -12,13 +12,25 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-sys.modules.setdefault("scrapers.common.db", types.ModuleType("scrapers.common.db"))
-import scrapers.common.arabic_location as _al  # noqa: E402
-_al.to_catalog = lambda city_ar: (None, None)
+_supabase = types.ModuleType("supabase")
+_supabase.Client = type("Client", (), {})
+_supabase.create_client = lambda url, key: None
+sys.modules.setdefault("supabase", _supabase)
+_dotenv = types.ModuleType("dotenv")
+_dotenv.load_dotenv = lambda *a, **k: None
+sys.modules.setdefault("dotenv", _dotenv)
+
+import pytest  # noqa: E402
 
 from scrapers.aqaralsaudia import run  # noqa: E402
 
-run.deal_from_page = lambda url: None
+
+@pytest.fixture(autouse=True)
+def _offline(monkeypatch):
+    # Only THIS module's names, and only for the test: patching arabic_location.to_catalog itself leaked into
+    # every later test in the session (sukna's 125 tests read «city_not_in_catalog», PR 8650 CI 10-25).
+    monkeypatch.setattr(run, "to_catalog", lambda city_ar: (None, None))
+    monkeypatch.setattr(run, "deal_from_page", lambda url: None)
 
 
 def _row(garage):
