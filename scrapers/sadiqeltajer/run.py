@@ -625,12 +625,15 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
     }
     row["additional_info"] = {**own_pin(page_html), **{k: v for k, v in extra.items() if v is not None}}
     # The kitchen / maid room / laundry the ad's OWN room list names («المكونات : … مطبخ . دورة مياة»).
-    # The site has no amenity field at all; this labelled list is its statement. Yes or nothing, never
-    # no (ADVANCED_FILTER_SOURCE_TRUTH §2). Kitchen was 0 of 1,512 active while 272 lists name one
+    # The site has no amenity field at all; this labelled list is its statement: yes, an explicit no, or nothing
+    # (owner 2026-10-24; ADVANCED_FILTER_SOURCE_TRUTH §2). Kitchen was 0 of 1,512 active while 272 lists name one
     # (🔬 AF engineer 2026-10-09; ops_af_score kitchen we_miss 3/3).
-    row.update(normalize.prose_amenities_yes(extra["components"], skip=_NO_COLUMN))
+    said = normalize.prose_amenities(extra["components"], skip=_NO_COLUMN)
     # …and the description box's own clauses, for a built unit only (backlog 794, see unit_description_text).
-    row.update(normalize.prose_amenities_yes(unit_description_text(page_html, property_type), skip=_NO_COLUMN))
+    # The list and the box disagreeing is no answer: unknown, written so a stale value is cleared.
+    for col, v in normalize.prose_amenities(unit_description_text(page_html, property_type), skip=_NO_COLUMN).items():
+        said[col] = v if said.get(col, v) == v else db.AUTHORITATIVE_NULL
+    row.update(said)
     return row, category, ""
 
 

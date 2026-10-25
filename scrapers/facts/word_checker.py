@@ -47,7 +47,12 @@ def clean_text(title: Optional[str], description: Optional[str]) -> str:
         desc = N.html_block_lines(desc)
     lines = [title or ""] + re.split(r"[\r\n]+", desc)
     out = "\n".join(s for ln in lines if ln.strip() and (s := sanitize(None, ln)))
-    return unicodedata.normalize("NFKC", out)[:MAX_TEXT]
+    return _COLON_NO.sub(r"\1،", unicodedata.normalize("NFKC", out))[:MAX_TEXT]
+
+
+# A form value «لا» ends its clause: «مفروشة: لا يُعرف حي الأمل …», «مؤثثة: لا تتضمن …», «مفروش: لا **المرافق:**»
+# (muhaysini; full run 458 furnished rows read as yes). «… : لا يوجد» stays one negation.
+_COLON_NO = re.compile(r"(:[\s*]*لا)(?=\s+(?!(?:يوجد|توجد|يتوفر|تتوفر|غير)(?!\w))\S)")
 
 
 def norm_map(raw: str) -> tuple[str, list[int]]:
@@ -189,7 +194,7 @@ _BEARINGS = ("شمال", "جنوب", "شرق", "غرب", "الشمال", "الج
              "حدود")
 # Per-fact context words: (excluded if one of the 2 words BEFORE starts with…, excluded if one of the 2 AFTER…)
 _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
-    "electricity": (("غرف", "عداد", "ضمان", "تمديد", "لوح", "فاتور", "فواتير", "مولد", "سباك", "اعمال", "كيبل",
+    "electricity": (("غرف", "عداد", "ضمان", "تمديد", "لوح", "نظام", "انظمه", "فاتور", "فواتير", "مولد", "سباك", "اعمال", "كيبل",
                      "كابل", "مفاتيح", "افياش", "شرك", "محط", "برج", "ابراج", "خط", "خطوط", "تاسيس", "مصعد",
                      "اسلاك", "توصيل", "رسوم"),
                     ("مستقل", "منفصل", "مشترك", "علي حساب", "غير مشمول")),
@@ -223,6 +228,8 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "laundry_room": ((), ("سيار", "السيار")),
     "kitchen": (("ادوات", "سطح"), ()),
     "pool": (("ادوات", "مستلزمات"), ()),
+    # bench-v2: «مدخل مكيّف», «مداخل مكيفة», «ممرات مكيفة» — the building's lobby, not the unit's AC
+    "air_conditioner": (("مدخل", "مداخل", "ممر", "لوبي", "ردهه", "بهو", "مصلي"), ()),
     "furnished": (("محل", "معرض", "مستودع", "محلات", "معارض"), ()),
 }
 # Facts that only count with a context word near them (or as a bare list item) — «واصل كهرباء»,
@@ -270,6 +277,13 @@ def _word_bounds(t: str, s: int, e: int) -> tuple[int, int]:
 def _starts(word: str, stems: tuple[str, ...]) -> bool:
     w = word[1:] if word.startswith("و") and len(word) > 3 else word
     return any(word.startswith(x) or w.startswith(x) for x in stems)
+
+
+def _bare(w: str) -> str:
+    """A context word without its proclitics: «بدورة» → «دوره», «لحمام» → «حمام», «وبخزان» → «خزان»."""
+    w = w[1:] if w.startswith("و") and len(w) > 3 else w
+    w = w[1:] if w[:1] in ("ب", "ل", "ف") and len(w) > 3 else w
+    return _strip_wa(w)
 
 
 def _strip_wa(w: str) -> str:
@@ -342,6 +356,10 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e
     if fact in _PLACE_FACTS and any(_starts(w, _PREPARED_PLACE) for w in p2):
         return None, s, e
+    g5 = " ".join(gp[-5:])                           # «توجد رخصة بناء تسوير وملاحق»: allowed to build ≠ built
+    if any(_strip_wa(w) in ("رخصه", "تصريح", "يسمح", "مسموح") for w in gp[-5:]) and "اعلان" not in g5 and "فال" not in g5 \
+            or "نظام البناء" in g5:
+        return None, s, e
     if fact == "furnished" and (any(_starts(w, _PARTIAL) for w in n2) or any(_starts(w, _PARTIAL_BEFORE) for w in prev[-1:])):
         return None, s, e
     p5 = gp[-5:]
@@ -355,7 +373,7 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     ex_before, ex_after = _EXCLUDE.get(fact, ((), ()))
     if fact in _METER_FACTS and "عداد" in t[ws:e]:
         ex_before = ()                               # «خزانات وعدادات مستقلة» names the meter itself
-    if any(_starts(_strip_wa(w), ex_before) or _starts(w, ex_before) for w in p2) or \
+    if any(_starts(_strip_wa(w), ex_before) or _starts(w, ex_before) or _starts(_bare(w), ex_before) for w in p2) or \
             any(_starts(w, ex_after) for w in n2) or any(x in " ".join(n2) for x in ex_after if " " in x):
         return None, s, e
     if fact in _NEEDS_CUE and not (any(_starts(w, _CUES) for w in gp[-3:] + gn[:1]) or n_words <= 3
@@ -440,6 +458,27 @@ _BOUNDARY_LABEL = re.compile(r"(?:ال)?(?:اطوال|ابعاد|اضلاع|مق
 _BOUND_SIDE = re.compile(rf"({_BEARING}) [^ ]*(?: [^ ]+){{0,5}}? بطول ?(\d{{1,4}})")
 
 
+# PDPL: a person's name in a quote or a value («ملك فلان بن فلان» in a boundaries cell) drops the WHOLE row —
+# the sanitizer strips phones and kunyas, not «بن / ابن / بنت / آل» names (raghdan boundaries, 2026-10-25).
+# A street, mosque or school named after a person keeps its row: «شارع … بن …» within four words.
+_NAME_MARKS = frozenset({"بن", "ابن", "بنت", "ال"})       # «آل» folds to «ال»; the article never stands alone
+_NAMED_PLACES = tuple(_n(w) for w in ("شارع", "طريق", "ميدان", "دوار", "جسر", "مسجد", "جامع", "مدرسة", "مستشفى",
+                                       "حي", "مخطط", "مجمع", "مركز", "جامعة", "كلية", "برج"))
+
+
+def names_a_person(text: str) -> bool:
+    w = norm(text).split()
+    return any(x in _NAME_MARKS and i + 1 < len(w)
+               and not any(_strip_wa(p).startswith(_NAMED_PLACES) or p.startswith(_NAMED_PLACES)
+                           for p in w[max(0, i - 4):i])
+               for i, x in enumerate(w))
+
+
+# «… مثل المياه وتكييف الهواء ومواقف السيارات، حيث لم يتم ذكرها في العرض» (muhaysini, 89 of 19,816 ads):
+# the ad says these were NOT stated — that clause and the list right before it are silent (bench-v3).
+_NOT_STATED = tuple(_n(w) for w in ("لم يتم ذكر", "لم يذكر", "لم تذكر", "غير مذكور", "not mentioned", "not stated"))
+
+
 class Hit:
     __slots__ = ("fact", "value", "s", "e", "clause")
 
@@ -473,6 +512,8 @@ def _num_hits(fact: str, t: str, ci: int) -> list[Hit]:
                 continue
             if any(w in _NEAR_WORDS for w in before):
                 continue
+            if any(_strip_wa(w).startswith(x) for w in before for x in ("نظام", "رخص", "تصريح", "يسمح", "مسموح", "حتي")):
+                continue                      # «نظام البناء 3 ادوار», «تصريح حتى 12 دور»: what may be built, not what is
             if fact == "floors" and ("ارضي" in t[max(0, m.start() - 12):m.end() + 12] or after.lstrip().startswith("مي")):
                 continue                      # «دورين مياه» is a typo for two bathrooms                      # «ارضي + دورين» — ground floor + two? ambiguous: no row
             hits.append(Hit(fact, v, m.start(), m.end(), ci))
@@ -489,8 +530,9 @@ def check(text: str) -> list[dict[str, Any]]:
     bool_hits: dict[str, dict[bool, tuple[int, int, int]]] = {}
     num_hits: dict[str, list[Hit]] = {}
     cue_in = near_in = False
+    void = {j for ci, (_o, _c, t, _i) in enumerate(clauses) if any(p in t for p in _NOT_STATED) for j in (ci - 1, ci)}
     for ci, (_off, _c, t, _idx) in enumerate(clauses):
-        if not t:
+        if not t or ci in void:
             continue
         words = t.split()
         n_words = len(words)
@@ -544,6 +586,8 @@ def check(text: str) -> list[dict[str, Any]]:
         nq = norm(q)
         if not nq or nq not in full_norm:          # PROOF OR DROP — the same check the LLM run passed
             return
+        if names_a_person(q) or (isinstance(value, str) and names_a_person(value)):
+            return                                 # PDPL: never store a person's name, drop the whole row
         row = {"fact": fact, "value_bool": None, "value_num": None, "value_text": None, "quote": q[:300]}
         row["value_bool" if isinstance(value, bool) else "value_text" if isinstance(value, str) else "value_num"] = value
         out.append(row)
@@ -703,6 +747,11 @@ def selftest() -> None:
         ("باركينج خاص لكل شقة", {"parking": True}, ()),
         ("دورة مياه مستقلة", {}, ("separate_water_meter", "water_supply")),
         ("خزان المياه مستقل", {"water_tank": True}, ("separate_water_meter",)),
+        # full run (facts-words-2026-10-25) hand check: a proclitic hid the bathroom — 900 rows repaired
+        ("غرفة نوم بدورة مياه مستقلة", {}, ("separate_water_meter", "water_supply")),
+        ("- مفروشة: لا يُعرف حي الأمل بأجوائه الهادئة", {"furnished": False}, ()),
+        ("- **مفروش**: لا **المرافق:** - الكهرباء", {"furnished": False}, ()),
+        ("جناح بحمام ومغسلة, لدورة مياه مستقلة", {}, ("separate_water_meter",)),
         ("خزانات وعدادات مستقلة", {"separate_electricity_meter": True}, ()),
         ("2دورات مياة موقف خاص", {"parking": True}, ("water_supply",)),
         ("1مجلس 1غرفة طعام 1مطبخ", {"majlis": True, "kitchen": True}, ()),
@@ -720,6 +769,18 @@ def selftest() -> None:
         ("حاليا ثلاث شقق ماجره", {}, ("apartments_count",)),
         ("عمر العقار/ 5 سنين", {"property_age_years": 5.0}, ()),
         ("عمرها ٦سنوات", {"property_age_years": 6.0}, ()),
+        # bench-v2 hand check (facts-words-bench-v2): the lobby, a permit, the wiring brand, the zoning
+        ("*مدخل مكيّف* *مصعدين*", {"elevator": True}, ("air_conditioner",)),
+        ("توجد رخصة بناء تسوير وملاحق", {}, ("annex",)),
+        ("رقم رخصة فال: 1200 مجلس", {"majlis": True}, ()),
+        ("• نظام الكهرباء: الفنار • السباكة", {}, ("electricity",)),
+        ("خدمات أخرى مثل المياه وتكييف الهواء ومواقف السيارات، حيث لم يتم ذكرها في العرض. مطبخ راكب",
+         {"kitchen": True}, ("parking", "air_conditioner", "water_supply")),
+        ("نظام البناء: سكني 3 ادوار", {}, ("floors",)),
+        # PDPL: a neighbour's name in a boundaries cell drops the whole row; a street named after a person does not
+        ("شمالاً: ملك فلان بن فلان بطول 20م، جنوباً: شارع بعرض 15م بطول 20م", {}, ("boundaries",)),
+        ("الحدود: شمالا آل فلان بطول 20 جنوبا شارع بطول 20", {}, ("boundaries",)),
+        ("الاطوال 20 × 30 على طريق الملك فلان بن فلان", {"boundaries": "الاطوال 20 × 30"}, ()),
         ("الدفع شهري", {"payment_monthly": True}, ()),
         ("لا نقبل الدفع الشهري", {"payment_monthly": False}, ()),
         ("مسبح خاص", {"pool": True}, ()),
@@ -746,6 +807,8 @@ def selftest() -> None:
     # PDPL: the sanitizer runs per line — contact data never reaches a quote
     t = clean_text(None, "مسبح للتواصل 0501234567\nواتساب 966501234567\nمجلس")
     assert "050" not in t and "966" not in t and facts_of(t).get("majlis") is True, t
+    assert names_a_person("ملك فلان بنت فلان") and names_a_person("آل فلان") and not names_a_person("مسجد فلان بن فلان")
+    assert not names_a_person("بن") and not names_a_person("شارع 15 م")
     print(f"word_checker selftest ok ({len(cases)} phrases)")
 
 

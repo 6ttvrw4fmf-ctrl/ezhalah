@@ -9,6 +9,7 @@ import { useApp, type AuthUser } from '@/store';
 import { useI18n, t } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { LinearGradient } from 'expo-linear-gradient';
+import { SkyEagleLightUp } from '@/components/SidebarSky';
 import { useResolvedTheme, useThemePalette } from '@/lib/appearance';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { DOCK_BREAKPOINT } from '@/lib/responsive';
@@ -26,9 +27,6 @@ import {
 import { useSaveName } from '@/lib/useSaveName';
 
 const LOGO = require('../../assets/images/logo-cloud-green-lit.svg');
-// The sign-in popup's logo: the cloud eagle on the full blue sky; when the popup opens its green lights switch on
-// one by one, then twinkle (owner 2026-10-24). The animation lives inside the SVG.
-const LOGO_LIGHTUP = require('../../assets/images/logo-cloud-lightup.svg');
 type Step = 'main' | 'google' | 'apple' | 'appleface';
 
 // Open/close animation (owner spec, 2026-08-15): overlay fade ~200-250ms, popup fades in while
@@ -319,7 +317,7 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
                   />
                 </Pressable>
               )}
-              <XImage source={LOGO_LIGHTUP} style={[s.popEagle, cp && c.popEagle]} contentFit="contain" />
+              <View style={[s.popEagle, cp && c.popEagle]}><SkyEagleLightUp size={cp ? 64 : 112} /></View>
               {/* ── main ───────────────────────────────────────────────── */}
               {step === 'main' && (
                 <>
