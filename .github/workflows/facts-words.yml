@@ -1,0 +1,128 @@
+# Facts WORDS + VECTORS (owner's VECTOR COMBO, 2026-10-24) — scrapers/facts/words.py.
+#
+# A FREE word checker reads each ad's own text and decides yes / no / nothing per fact, with the ad's words as
+# proof, into public.listing_facts (model word-checker-v1, its own run_id). A FREE multilingual model
+# (intfloat/multilingual-e5-small, pinned revision) embeds the same PDPL-sanitised text on this runner's CPU
+# into public.listing_embeddings, and a finder loop lists the words the checker does not know yet, for owner
+# review. ZERO paid AI calls, no API keys: Actions minutes only. Dispatch-only, never scheduled.
+#   benchmark = exactly the ads of the LLM run facts-test-2026-10-24 (one shard)
+#   full      = every active ad, split into `shards` id-range slices (max 8 at once; reads are paged + paused)
+# Writes ONLY listing_facts and listing_embeddings. No *_listings table, RPC, scraper or edge function.
+name: Facts words + vectors
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: "benchmark (the LLM test's ads) or full (every active ad)"
+        required: true
+        default: benchmark
+        type: choice
+        options: [benchmark, full]
+      run_id:
+        description: "Run id, must start with facts-words (letters, digits, . _ -)"
+        required: true
+        type: string
+      shards:
+        description: "Parallel id-range slices for phase=full (1-9; benchmark always 1)"
+        required: false
+        default: "8"
+        type: string
+      limit:
+        description: "Max ads per table per shard (0 = all)"
+        required: false
+        default: "0"
+        type: string
+      platforms:
+        description: "Only these platform prefixes, comma-separated (empty = all)"
+        required: false
+        default: ""
+        type: string
+      embed:
+        description: "true = also embed + run the finder loop"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+      model:
+        description: "Embedding model"
+        required: false
+        default: e5-small
+        type: choice
+        options: [e5-small, minilm-l12]
+
+concurrency:
+  group: facts-words-${{ inputs.run_id }}
+  cancel-in-progress: false
+
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): every workflow gives its jobs the gate secret so our own
+  # robots keep working once the database's back door closes; the python client reads it when it needs it.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.m.outputs.shards }}
+      n: ${{ steps.m.outputs.n }}
+    steps:
+      - id: m
+        env:
+          PHASE: ${{ inputs.phase }}
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          n=1
+          if [ "$PHASE" = "full" ]; then n="$SHARDS"; fi
+          case "$n" in [1-9]) ;; *) echo "shards must be 1-9"; exit 1;; esac
+          echo "n=$n" >> "$GITHUB_OUTPUT"
+          echo "shards=$(python3 -c "import json,sys; print(json.dumps(list(range(int(sys.argv[1])))))" "$n")" >> "$GITHUB_OUTPUT"
+
+  run:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: scrapers/facts/requirements-words.txt
+      - name: Install (pinned; CPU-only torch)
+        run: pip install -r scrapers/facts/requirements-words.txt
+      - name: Cache the embedding model (official Hugging Face repo, pinned revision)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ inputs.model }}-614241f-e8f8c21
+      - name: Self-check the pure logic (no network)
+        run: exec python -m scrapers.facts.words --selftest
+      - name: Words + vectors
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PHASE: ${{ inputs.phase }}
+          RUN_ID: ${{ inputs.run_id }}
+          LIMIT: ${{ inputs.limit }}
+          PLATFORMS: ${{ inputs.platforms }}
+          EMBED: ${{ inputs.embed }}
+          MODEL: ${{ inputs.model }}
+          SHARD: ${{ matrix.shard }}
+          N: ${{ needs.plan.outputs.n }}
+        run: |
+          exec python -m scrapers.facts.words --phase "$PHASE" --run-id "$RUN_ID" --limit "$LIMIT" --platforms "$PLATFORMS" \
+            --model "$MODEL" --shard "$SHARD/$N" --out facts-words-out $([ "$EMBED" = "true" ] || echo --no-embed)
+      - name: Keep the per-shard summary (counts + new-words list; no ad text)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: facts-words-${{ inputs.run_id }}-${{ matrix.shard }}
+          path: facts-words-out/
+          retention-days: 14
+          if-no-files-found: ignore
