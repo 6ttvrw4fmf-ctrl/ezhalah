@@ -520,7 +520,9 @@ const writerProblems = (f: Record<string, string>) => {
 // with the flagged block removed. A change to either must update this pin on purpose.
 // Re-pinned 2026-10-24 on purpose: signInWithProvider now hands the language on screen to the /auth landing
 // (rememberLocaleForSignIn, verify-language-survives-sign-in.ts) before the SAME redirect call — unchanged.
-const PIN_PROVIDER = '96027308a636611ebb4b45c26adb47e9e23c213607521e48ac89a389ea2a0bd5';
+// Re-pinned 2026-10-24 (2) on purpose: signInWithProvider marks the sidebar eagle's one light-up (markEagleLightUp,
+// verify-eagle-lights-up-once.ts) before the SAME redirect call — unchanged.
+const PIN_PROVIDER = '5d3168c99c4635cb1668ebaea68be9d85acf1f14efdd27f7dc8127b7dc3f0b45';
 const PIN_APPLE = 'b92d8266e4122734558bf9687519eb3c8380a55c799c37f12ebe50d2f497f1e6';
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const between = (src: string, head: string, end: string) => {
