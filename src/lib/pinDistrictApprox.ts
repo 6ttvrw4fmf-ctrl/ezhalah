@@ -8,7 +8,6 @@
 //     failed or timed out) → we cannot tell, so the district is HIDDEN, never shown unlabelled.
 // Display-only: matching still reads districtCanonical, so a failed lookup never changes which ads a search returns.
 
-export type PinProbe = { key: string; table: string; id: number };
 export type PinVerdict = 'approx' | 'source' | 'unknown';
 
 export const pinKey = (table: string, id: number | string): string => `${table}:${Number(id)}`;

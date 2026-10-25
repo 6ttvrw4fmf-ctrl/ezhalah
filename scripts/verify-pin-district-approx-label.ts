@@ -35,8 +35,10 @@ const card = read('src/components/ResultCard.tsx');
 const prev = read('src/components/ListingPreview.tsx');
 const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
 check('the results path asks pin_district_approx_ar through the in-file bounded()', /bounded<[\s\S]{0,120}?>\(\s*supabase\.rpc\('pin_district_approx_ar'/.test(remote));
-check('the results path applies the verdict to each listing', /applyPinVerdict\(l, pinVerdict\(pinKey\(c\.source_table, c\.listing_id\), pinAnswer\)\)/.test(remote));
-check('a failed lookup becomes null (→ unknown), never an empty set', /pinAnswer = pinErr \|\| !pinRows \? null/.test(remote) && /catch \{ pinAnswer = null; \}/.test(remote));
+check('the results path applies the verdict to each listing', /applyPinVerdict\(l, pinUnknown\.has\(pk\) \? 'unknown' : pinVerdict\(pk, pinApprox\)\)/.test(remote));
+check('a chunk that still fails after one retry marks its ads UNKNOWN (district hidden), never "source"', /for \(let attempt = 0; attempt < 2 && !ok; attempt\+\+\)[\s\S]{0,700}if \(!ok\) for \(const k of chunk\) pinUnknown\.add/.test(remote));
+check('no Supabase client at all also means unknown, not "source"', /else if \(pinKeys\.length\) \{ for \(const k of pinKeys\) pinUnknown\.add/.test(remote));
+check('the lookup is chunked (500 keys, under the database cap of 1000) and asks only about blank-own-district ads', /at \+= 500\) \{/.test(remote) && /needsPinProbe\(l0\.district,/.test(remote));
 check('both card layouts print the label (one shared districtShown)', (card.match(/districtShown \|\| place\(cityAr\)/g) ?? []).length === 2 && /districtWithLabel\(/.test(card));
 check('the ad page header prints the label', /districtWithLabel\(district, l\.districtApprox, t\('approx\.'\)\)/.test(prev));
 check('the ad page builds no district prices, deals or similar ads on an approximate district', /if \(l\.districtApprox\) return;[\s\S]{0,260}pricesBlockEligible\(row\)/.test(prev));
@@ -44,7 +46,8 @@ check('«approx.» has its Arabic', /'approx\.': 'تقريبي'/.test(i18n));
 check('the Listing type carries districtApprox', /districtApprox\?: boolean/.test(read('src/data/listings.ts')));
 
 // ── mutations: the barrier fails on the regressions it exists for ───────────────────────────────
-mustCatch('a failed lookup treated as "nobody is approximate" (unlabelled pin district)', !/pinAnswer = pinErr \|\| !pinRows \? null/.test(remote.replace('pinAnswer = pinErr || !pinRows ? null', 'pinAnswer = pinErr || !pinRows ? new Set()')));
+mustCatch('a failed chunk treated as "nobody is approximate" (unlabelled pin district)', !/if \(!ok\) for \(const k of chunk\) pinUnknown\.add/.test(remote.replace('if (!ok) for (const k of chunk) pinUnknown.add(pinKey(k[0], k[1]));', '')));
+mustCatch('asking in one call for a whole search (past the database cap)', !/at \+= 500\) \{/.test(remote.replace('at += 500) {', 'at += 5000) {')));
 mustCatch('a card layout that forgot the label', (card.replace('districtShown || place(cityAr)', 'place(cityAr)').match(/districtShown \|\| place\(cityAr\)/g) ?? []).length !== 2);
 mustCatch('the ad page pricing an approximate district', !/if \(l\.districtApprox\) return;[\s\S]{0,260}pricesBlockEligible\(row\)/.test(prev.replace('if (l.districtApprox) return;', '')));
 mustCatch('asking about every ad (a whole page of Aqar)', ((_raw: string, idx: string) => !!idx)('Al Malqa', 'حي الملقا') === true);

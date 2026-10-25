@@ -19,7 +19,7 @@ import { listingDiscountFrom } from '@/lib/listingDisplay';
 import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import { rotationSeed } from '@/lib/rotationSeed';
 import { truncateGlyphs } from '@/lib/typedReveal';
-import { needsPinProbe, pinKey, pinVerdict, applyPinVerdict, type PinProbe } from '@/lib/pinDistrictApprox';
+import { needsPinProbe, pinKey, pinVerdict, applyPinVerdict } from '@/lib/pinDistrictApprox';
 import saLocations from './sa-locations.json';
 
 // Maps proximity.ts Relationship values to the relationship_group stored in listing_location_relations.
@@ -1819,24 +1819,31 @@ export async function fetchListingsForQuery(
   // 4) Rebuild in newest-first order (dropping rows the raw filters / index↔raw drift removed), attach
   //    each row's city + region, then DIVERSIFY by geography according to the search scope so broad
   //    searches show the whole market, not 25 cards from one city/platform. (user: adaptive ordering.)
-  // PIN DISTRICTS (owner 2026-10-25): a district read from an ad's map pin fills a gap and is labelled «تقريبي». Only an ad whose OWN
-  // district field is blank but whose index district is set can be one, so only those are asked about (usually none, never a whole page
-  // of Aqar). Bounded; if the lookup fails we cannot tell, so those few cards show no district at all, never an unlabelled one.
-  const pinProbes: PinProbe[] = [];
+  // PIN DISTRICTS (owner 2026-10-25): a district read from an ad's map pin fills a gap and is labelled «تقريبي». Only an ad whose OWN district
+  // field is blank but whose index district is set can be one (a search can hold 1,500 cards; usually a few dozen qualify), so only those are
+  // asked about, 500 keys at a time, one retry each. If a chunk still fails we cannot tell which of its ads are pin districts, so THOSE cards
+  // show no district at all, never an unlabelled one (display only: matching reads districtCanonical).
+  const pinKeys: Array<[string, number]> = [];
   for (const c of cleanCands) {
-    const l = map.get(`${c.source_table}:${c.listing_id}`);
-    if (l && needsPinProbe(l.district, arLoc.get(`${c.source_table}:${c.listing_id}`)?.district)) {
-      pinProbes.push({ key: pinKey(c.source_table, c.listing_id), table: c.source_table, id: Number(c.listing_id) });
+    const l0 = map.get(`${c.source_table}:${c.listing_id}`);
+    if (l0 && needsPinProbe(l0.district, arLoc.get(`${c.source_table}:${Number(c.listing_id)}`)?.district)) pinKeys.push([c.source_table, Number(c.listing_id)]);
+  }
+  const pinApprox = new Set<string>();
+  const pinUnknown = new Set<string>();
+  if (pinKeys.length && supabase) {
+    for (let at = 0; at < pinKeys.length; at += 500) {
+      const chunk = pinKeys.slice(at, at + 500);
+      let ok = false;
+      for (let attempt = 0; attempt < 2 && !ok; attempt++) {
+        try {
+          const { data: pinRows, error: pinErr } = await bounded<Array<{ source_table: string; listing_id: number }>>(
+            supabase.rpc('pin_district_approx_ar', { p_source_tables: chunk.map((k) => k[0]), p_listing_ids: chunk.map((k) => k[1]) }), RPC_TIMEOUT_MS, signal);
+          if (!pinErr && pinRows) { for (const r of pinRows) pinApprox.add(pinKey(r.source_table, r.listing_id)); ok = true; }
+        } catch { /* retry once */ }
+      }
+      if (!ok) for (const k of chunk) pinUnknown.add(pinKey(k[0], k[1]));
     }
-  }
-  let pinAnswer: Set<string> | null = new Set();
-  if (pinProbes.length && supabase) {
-    try {
-      const { data: pinRows, error: pinErr } = await bounded<Array<{ source_table: string; listing_id: number }>>(
-        supabase.rpc('pin_district_approx_ar', { p_source_tables: pinProbes.map((p) => p.table), p_listing_ids: pinProbes.map((p) => p.id) }), RPC_TIMEOUT_MS, signal);
-      pinAnswer = pinErr || !pinRows ? null : new Set(pinRows.map((r) => pinKey(r.source_table, r.listing_id)));
-    } catch { pinAnswer = null; }
-  }
+  } else if (pinKeys.length) { for (const k of pinKeys) pinUnknown.add(pinKey(k[0], k[1])); }
   const ranked: Ranked[] = [];
   for (const c of cleanCands) {
     const l = map.get(`${c.source_table}:${c.listing_id}`);
@@ -1870,7 +1877,7 @@ export async function fetchListingsForQuery(
     // text, so the strict district filter (listingInDistricts) has a value it can trust regardless
     // of how the source spelled its own free-text neighborhood. See the field's own doc comment.
     l.districtCanonical = canonDistrict;
-    if (pinProbes.length && needsPinProbe(rawDistrict, ar?.district)) applyPinVerdict(l, pinVerdict(pinKey(c.source_table, c.listing_id), pinAnswer));
+    if (needsPinProbe(rawDistrict, ar?.district)) { const pk = pinKey(c.source_table, c.listing_id); applyPinVerdict(l, pinUnknown.has(pk) ? 'unknown' : pinVerdict(pk, pinApprox)); }
     l.regionAr = (ar?.region) || l.regionAr || '';
     // §12A: the AF-canonical row travels with the listing so ResultCard can prove, per card, that
     // this row really satisfies each active predicate — read from the SAME row the filter ran on,
