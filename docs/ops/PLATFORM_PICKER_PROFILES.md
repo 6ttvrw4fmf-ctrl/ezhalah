@@ -160,7 +160,7 @@ The original PNG bytes stay unchanged. Regenerate layout measurements with `pyth
 | الطابق الثامن | https://www.8floor.sa | عقارات سكنية في الرياض. | 2 in cohort; 1 cities; 1 regions |
 | حلول | https://holoul.io | عقارات سكنية في الرياض. | 30 in cohort; 1 cities; 1 regions |
 | السوق المفتوح | https://sa.opensooq.com | عقارات سكنية بالدرجة الأولى في مختلف مناطق المملكة. | 87 in cohort; 14 cities; 10 regions |
-| معرض نافذة | https://nafithh.sa | بيانات نطاق العقارات غير متاحة حالياً. | No usable city breakdown; no coverage claim |
+| معرض نافذة | https://nafithh.com | بيانات نطاق العقارات غير متاحة حالياً. | No usable city breakdown; no coverage claim |
 | مباشر | https://mobasher.sa | عقارات سكنية بالدرجة الأولى في مختلف مناطق المملكة. | 28 in cohort; 13 cities; 6 regions |
 | مؤاجرة | https://muajarh.com | عقارات سكنية في الرياض. | 11 in cohort; 1 cities; 1 regions |
 | دلّالي | https://dallali.com | عقارات سكنية بالدرجة الأولى، أغلبها في منطقة مكة المكرمة. | 9 in cohort; 3 cities; 2 regions |
