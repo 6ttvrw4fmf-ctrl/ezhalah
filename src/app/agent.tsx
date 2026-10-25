@@ -2399,6 +2399,12 @@ export default function Agent() {
   // turn is in flight (busy) so a half-rendered turn is never what a return restores; content-keyed
   // (lastCapturedRef) so re-renders and restores never rewrite an unchanged transcript.
   const lastCapturedRef = useRef('');
+  // THE SAVED CHAT BEING DOWNLOADED RIGHT NOW (owner 2026-10-23: «when i click on the side … English
+  // shows only my message»). While openSaved() waits for the server copy it paints a stand-in (just the
+  // user's question, a snapshot or a stale local copy). Saving that stand-in wrote a "question only"
+  // transcript over the full chat, and every later open showed only the question. Nothing is saved for
+  // this chat id until its real copy has landed.
+  const hydratingIdRef = useRef<string | null>(null);
   // The debounced capture that has not fired yet. WITHOUT this, the effect cleanup's clearTimeout
   // silently dropped the newest settled state whenever the user left the chat inside the 600ms
   // window (tapping another chat while the new turn's cards were still cascading was enough) — and
@@ -2416,6 +2422,7 @@ export default function Agent() {
   useEffect(() => {
     const id = chatIdRef.current;
     if (!id) return;
+    if (hydratingIdRef.current === id) return; // a stand-in is on screen, never the chat itself
     const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow });
     if (!t) return;
     const j = JSON.stringify(t);
@@ -3769,6 +3776,7 @@ export default function Agent() {
     // below replaces it when it lands. lastCapturedRef is set to the painted copy, so nothing is
     // written back until the hydrated one has taken its place.
     if (!t && entryId) {
+      hydratingIdRef.current = entryId; // the stand-in painted below must never be saved
       const early = local ? restoreChat(local) : null;
       if (early) {
         setMsgs(early.msgs as unknown as ChatMsg[]);
@@ -3785,6 +3793,7 @@ export default function Agent() {
         setMsgs([{ id: replayMsgIds(entryId, uid).userId, role: 'user', text: bubble }]);
       }
       t = await hydrateTranscript(entryId).catch(() => null);
+      if (hydratingIdRef.current === entryId) hydratingIdRef.current = null;
       // A failed hydrate keeps the pre-existing fallback below (snapshot/replay) on purpose: adopting the
       // stale copy as THE transcript would let the next turn write it over the server's longer one.
     }

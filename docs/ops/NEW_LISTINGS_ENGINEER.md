@@ -288,10 +288,13 @@ catch it the same day, before wrong data piles up across the whole catalog.
    website shows it (verify it at the source, then keep it).
 2. **Silent means unknown.** If the source doesn't say it, store `NULL` and show it blank. Never
    "no", never 0, never a default. Unknown is never counted as "no" in any filter.
-3. **Prose is not a source field.** If the website publishes a field structurally, never read it
-   from the description, not even as a fallback. Prose may only ever say yes or unknown for a field
-   with no structured version anywhere on that website, it has four outcomes (named, negated,
-   merely prepared, the neighbourhood's), and that exception is documented at the mapping.
+3. **The scraper writes the box; the seller's sentence is merged at the index (Rule B, owner
+   2026-10-25).** A scraper never writes prose into a field the website publishes structurally — the
+   `*_listings` column must stay the site's own answer. The ad's text is read by the nightly word checker
+   into `listing_text_facts` and merged into the search index under Rule B
+   (`docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md`, «The seller's sentence»). For a field with no structured
+   version anywhere on that website the scraper may still read prose, with four outcomes (named,
+   negated, merely prepared, the neighbourhood's), documented at the mapping.
 4. **Rent period only from the ad's own words, tied to its price.** Never from the platform's name,
    never defaulted to yearly. A rental that states no period stays out of both rent searches, with no
    extra label.

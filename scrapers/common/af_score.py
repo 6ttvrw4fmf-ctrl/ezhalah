@@ -69,6 +69,10 @@ CHROME = re.compile(r"^(?:\S+\s){0,3}(?:للايجار|للبيع)$")
 # 37600467768): aqar's 5/10 and tuba's 5/6 findability «misses» were prose («موقف سيارات» in the ad body)
 # against aqar's extended_details.special_parking / flat amenity keys and tuba's `garages` count, which
 # those ads leave unfilled — our NULL is the source's answer, not a trapped value.
+# RULE B (owner 2026-10-25, «We trust the sellers sentence»): these fields are still judged from the page's
+# structured data, but merged with the ad's own QUOTED sentence exactly as the index merges it (rule_b,
+# text_says: the overlay's fact counts only while its quote is still on the page). Prose the overlay did not
+# quote is still never read for them.
 STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     "aqar": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room",
              "private_entrance", "furnished"),
@@ -192,6 +196,27 @@ def structured_says(page: dict, field: str) -> bool | None:
     return said[0] if said else None
 
 
+def rule_b(box: bool | None, text: bool | None) -> bool | None:
+    """Mirror of public.af_rule_b (owner 2026-10-25, «We trust the sellers sentence»): the seller's quoted
+    sentence beside the site's own field. text silent → box; no box → text; box no + text yes → yes;
+    box yes + text explicitly no → None (a conflict is unknown, never judged)."""
+    if text is None:
+        return box
+    if box is None or box == text:
+        return text
+    return True if text else None
+
+
+def text_says(text: dict | None, col: str, page: dict) -> bool | None:
+    """The overlay's answer for one column (listing_text_facts.facts), believed only while its quote is still
+    printed on the live page — a quote the page no longer carries is the stale text the index must not serve."""
+    t = (text or {}).get(col) or {}
+    q = norm(t.get("q") or "")
+    if not q or not isinstance(t.get("v"), bool):
+        return None
+    return t["v"] if q in " ".join(page_lines(page)) else None
+
+
 def structured_result(stored, says: bool | None) -> str:
     if says is None:
         return PAGE_SILENT
@@ -216,14 +241,16 @@ def labelled_number(stored, lines: list[str], label: str) -> str:
     return WE_MISS if states else PAGE_SILENT
 
 
-def structured_only(platform: str, results: dict[str, str], stored: dict, page: dict) -> dict[str, str]:
+def structured_only(platform: str, results: dict[str, str], stored: dict, page: dict,
+                    text: dict | None = None) -> dict[str, str]:
     out = dict(results)
     for (site, f), label in STRUCTURED_LABEL.items():
         if site == platform and f in out and out[f] != UNREADABLE:
             out[f] = labelled_number(stored.get(COL[f]), page_lines(page), label)
     for f in STRUCTURED_ONLY.get(platform, ()):
         if f in out and out[f] != UNREADABLE:
-            out[f] = structured_result(stored.get(COL[f]), structured_says(page, f))
+            # Rule B (2026-10-25): the box is the page's structured data, the sentence is the overlay's quoted fact.
+            out[f] = structured_result(stored.get(COL[f]), rule_b(structured_says(page, f), text_says(text, COL[f], page)))
     for f in PROJECT_PAGE_UNIT_TRAITS.get(platform, ()):
         if f in out and out[f] != UNREADABLE:
             out[f] = PAGE_SILENT
@@ -293,22 +320,23 @@ def page_says_yes(lines: list[str], field: str) -> bool:
     return bool(hit) and not all(re.search(NEG + "(?:" + kw + ")", x) for x in hit)
 
 
-def says_yes(lines: list[str], field: str, platform: str = "", page: dict | None = None) -> bool:
-    """The ad states YES. For a field the website publishes structurally, only its structured data can
-    say so (law §2) — the same reading structured_only() scored it by, so a request is never built
-    from prose the score itself refused to believe."""
+def says_yes(lines: list[str], field: str, platform: str = "", page: dict | None = None,
+             text: dict | None = None) -> bool:
+    """The ad states YES. For a field the website publishes structurally, its structured data merged with the
+    overlay's quoted sentence under Rule B — the same reading structured_only() scored it by, so a request is
+    never built from prose the score itself refused to believe."""
     if field in STRUCTURED_ONLY.get(platform, ()):
-        return structured_says(page or {}, field) is True
+        return rule_b(structured_says(page or {}, field), text_says(text, COL[field], page or {})) is True
     return page_says_yes(lines, field)
 
 
 def customer_answers(lines: list[str], results: dict[str, str], platform: str = "",
-                     page: dict | None = None) -> list[str]:
+                     page: dict | None = None, text: dict | None = None) -> list[str]:
     """Advanced Filter answers the ad really states as YES: the ones a customer would ask for. Both a stored
     true (does the filter find it) and a stored NULL (the trapping failure) qualify; a stored false never
     does, the customer asking for it would be excluding the ad correctly or the ad disagrees (precision)."""
     cols = [c for c in (*AMENITY_SLUG, FURNISHED)
-            if results.get(c) in (MATCH, WE_MISS) and says_yes(lines, c, platform, page)]
+            if results.get(c) in (MATCH, WE_MISS) and says_yes(lines, c, platform, page, text)]
     return cols[:MAX_ANSWERS]
 
 
@@ -756,9 +784,14 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
     row = new_row(night, platform)
     last = 0.0
     read: list[tuple[str, int, dict, dict]] = []
+    texts: dict[tuple[str, int], dict] = {}
     for table, rid in picks:
         stored = (client.table("search_listings_ar").select(STORED).eq("source_table", table)
                   .eq("listing_id", rid).limit(1).execute().data or [{}])[0]
+        # The Rule B overlay row (owner 2026-10-25): the ad's quoted facts the index merges; stale text never counts.
+        tf = (client.table("listing_text_facts").select("facts,stale_at").eq("source_table", table)
+              .eq("listing_id", rid).limit(1).execute().data or [{}])[0]
+        texts[(table, rid)] = {} if tf.get("stale_at") else (tf.get("facts") or {})
         url = (client.table(table).select("listing_url").eq("id", rid).limit(1).execute().data or [{}])[0].get("listing_url")
         if not url:
             row["sampled"] += 1
@@ -806,10 +839,11 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
     for table, rid, stored, page in read:
         key = f"{table}:{rid}"
         results = compare_listing(stored, page, skip_price=False)
-        af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page)
+        af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page,
+                                  texts.get((table, rid)))
         fold(row, key, af_only, stored)
         ad_lines = [x for x in page_lines(page) if x not in chrome]
-        answers = offered(customer_answers(ad_lines, af_only, platform, page), stored)
+        answers = offered(customer_answers(ad_lines, af_only, platform, page, texts.get((table, rid))), stored)
         params = rpc_params(stored, answers) if anon is not None and answers else None
         if params:
             verdict = findable(ask(anon, params), table, rid)
