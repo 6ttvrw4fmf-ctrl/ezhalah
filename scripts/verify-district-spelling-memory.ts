@@ -17,7 +17,8 @@ if (!file) { console.log('FAIL  migration *_district_spelling_memory_new_suffix.
 const sql = readFileSync(join(dir, file), 'utf8');
 
 // Names the owner has NOT approved as spellings of another district. They must never be seeded as an alias.
-const HELD = ['الدرعية الجديدة', 'الطريف الجديدة', 'منفوحة الجديدة', 'الشامية الجديد', 'الفلق الجديد'];
+// («الدرعية الجديدة» left this list on 2026-10-25: the owner answered "same".)
+const HELD = ['الطريف الجديدة', 'منفوحة الجديدة', 'الشامية الجديد', 'الفلق الجديد'];
 
 function problems(s: string): string[] {
   const fail: string[] = [];
@@ -69,6 +70,30 @@ for (const [label, mutate] of mutants) {
   const m = mutate(sql);
   mustCatch(label, m !== sql && problems(m).length > 0, m === sql ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 }
+
+// Every later migration that adds a spelling is held to the same rules: an owner decision, never a held name,
+// never an overwrite, and the target checked against our list.
+function seedProblems(name: string, s: string): string[] {
+  const fail: string[] = [];
+  const seeds = [...s.matchAll(/insert into public\.loc_district_alias[\s\S]*?;/g)].map((m) => m[0]);
+  for (const seed of seeds) {
+    if (!/on conflict \(city_id, from_norm\) do nothing;$/.test(seed)) fail.push(`${name}: a seed can overwrite an earlier decision`);
+    if (!/'owner'\s*\nfrom \(values/.test(seed) && !/v\.why, 'owner'/.test(seed)) fail.push(`${name}: a seed is not marked as an owner decision`);
+    for (const [, , from, , why] of seed.matchAll(/\((\d+),\s*'([^']+)',\s*'([^']+)',\s*'([^']+)'\)/g)) {
+      if (!/^owner \d{4}-\d{2}-\d{2}:/.test(why)) fail.push(`${name}: «${from}» is seeded without an owner decision`);
+      for (const h of HELD) if (from.includes(h)) fail.push(`${name}: «${from}» is held and must not be folded`);
+    }
+  }
+  if (seeds.length > 0 && !/if bad is not null then raise exception 'alias target not in loc_catalog_district/.test(s)) fail.push(`${name}: the alias targets are not checked against our list`);
+  return fail;
+}
+const later = readdirSync(dir).filter((f) => f.endsWith('.sql') && f > file);
+const laterFails = later.flatMap((f) => seedProblems(f, readFileSync(join(dir, f), 'utf8')));
+check('every later spelling migration holds the same rules', laterFails.length === 0, laterFails.join('; '));
+const fakeLater = "insert into public.loc_district_alias (city_id, from_norm, to_norm, why, decided_by)\nselect v.city_id, public.norm_district_tok(v.site_spelling), public.norm_district_tok(v.our_district), v.why, 'owner'\nfrom (values\n  (3, 'حي منفوحة الجديدة', 'حي منفوحة', 'owner 2026-10-26: x')\n) as v(city_id, site_spelling, our_district, why)\non conflict (city_id, from_norm) do nothing;\nif bad is not null then raise exception 'alias target not in loc_catalog_district: %', bad; end if;";
+mustCatch('a later migration folds a held name', seedProblems('fake', fakeLater).length > 0);
+mustCatch('a later migration skips the owner decision', seedProblems('fake', fakeLater.replace("'owner 2026-10-26: x'", "'same'").replace('منفوحة الجديدة', 'العزيزية الجديدة')).length > 0);
+mustCatch('a later migration overwrites a decision', seedProblems('fake', fakeLater.replace('on conflict (city_id, from_norm) do nothing;', 'on conflict (city_id, from_norm) do update set to_norm = excluded.to_norm;').replace('منفوحة الجديدة', 'العزيزية الجديدة')).length > 0);
 
 console.log(failed === 0 ? 'OK: one district has one search identity; only owner-approved spellings fold' : `${failed} check(s) failed`);
 process.exit(failed === 0 ? 0 : 1);

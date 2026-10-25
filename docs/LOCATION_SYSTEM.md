@@ -378,7 +378,8 @@ dealapp 883 · sanadak 816 · aqarmonthly 753 · eaqartabuk 516 · aqargate 241 
   district; cards keep the source's own words.
 - Per-name and owner-approved only. A blanket «الجديد» fold is wrong: «منفوحة الجديدة» and «منفوحة» are two districts.
 - Seeded 10-25: مكة «الهجلة الجديد»→«الهجلة», «الشبيكة الجديد»→«الشبيكة»; حائل «السويفلة الجديد»→«السويفلة».
-  Held for the owner: الدرعية «الدرعية الجديدة» (452 ads, Aqar lists it as its own district) and «الطريف الجديدة».
+  Owner 10-25 (asked same or separate, answer: same): الدرعية «الدرعية الجديدة»→«الدرعية» (452 ads).
+  Still held: الدرعية «الطريف الجديدة» (13 ads).
 - `verify-district-spelling-memory.ts` pins it.
 
 ### ⏳ Pending (optional, ready when wanted)
