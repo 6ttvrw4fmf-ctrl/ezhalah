@@ -193,7 +193,7 @@ _PROSE_SKIP = ("optical_fibers",)
 
 
 def prose_answers(description: Optional[str]) -> dict[str, bool]:
-    return normalize.prose_amenities_yes(description, skip=_PROSE_SKIP)
+    return normalize.prose_amenities(description, skip=_PROSE_SKIP)
 
 # Ready units only. Ad 813 (2026-09-26) is an apartment block «( تحت الإنشاء )».
 _OFFPLAN_RE = re.compile(r"تحت\s*ال[إا]نشاء|قيد\s*ال[إا]نشاء|على\s*الخارطة|على\s*المخطط")
