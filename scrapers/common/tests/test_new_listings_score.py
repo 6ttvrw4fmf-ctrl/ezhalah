@@ -578,6 +578,23 @@ def test_muktamel_rooms_come_from_its_offer_record():
     assert muktamel_room_lines("https://example.test/x", fetch=lambda i: got) == []
 
 
+def test_dwelleo_bedrooms_come_from_its_api_record_not_the_title():
+    from scrapers.common.new_listings_score import dwelleo_room_lines
+    villa = {"id": 1, "bedrooms": 5, "property_type": {"name": "فيلا"}}
+    url = "https://www.dwelleo.sa/ar/properties/for-sale/villa/riyadh/x/villa-slug"
+    lines = dwelleo_room_lines(url, fetch=lambda slug: villa if slug == "villa-slug" else None)
+    assert lines == ["عدد غرف النوم 5"]
+    # 20013764 (2026-10-24, re-read 40078610599): record 5 bedrooms, title prose «فيلا 4 غرف».
+    p = page(*lines, "فيلا 4 غرف للبيع")
+    assert compare_listing({"bedrooms": 5}, p)["bedrooms"] == MATCH
+    assert compare_listing({"bedrooms": 3}, p)["bedrooms"] == MISMATCH
+    # A Building's count is its room stock: we store none, so the record says nothing to compare.
+    bld = {"id": 2, "bedrooms": 30, "property_type": {"name": "مبني"}}
+    assert dwelleo_room_lines(url, fetch=lambda slug: bld) == []
+    assert dwelleo_room_lines(url, fetch=lambda slug: None) == []
+    assert dwelleo_room_lines("https://example.test/x", fetch=lambda slug: villa) == []
+
+
 def test_wasalt_structured_rows_are_read_as_labelled_lines():
     # 17926766 (2026-10-16, re-read 38925580390): builtUpArea «96» = ours, while the REGA deed text names a land share.
     from scrapers.common.af_score import wasalt_page
