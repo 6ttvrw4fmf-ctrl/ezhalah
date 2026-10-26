@@ -173,3 +173,29 @@ def senan2():
     for p in ("/data/projects.json", "/assets/data.json", "/projects.json", "/data.json", "/assets/projects.json"):
         r, i = get(base + p)
         print(f"SENAN2 {p} {i} :: {(r.text[:300] if r is not None else '')}", flush=True)
+
+
+def sakani2():
+    import json as _j
+    from scrapers.sakani import run as S
+    s = S.session()
+    shown = 0
+    for pg in range(1, 40):
+        got = S.fetch_json(s, S.SEARCH, {"filter[marketplace_purpose]": "sale", "page[size]": 20, "page[number]": pg})
+        if not got:
+            print("SAKANI2 unread", pg, flush=True)
+            continue
+        b = got[1] or {}
+        data = b.get("data") or []
+        rich = {r.get("id"): r for r in ((b.get("meta") or {}).get("first_page") or {}).get("data") or []}
+        for d in data:
+            a = d.get("attributes") or {}
+            if a.get("resource_type") == "market_units" and shown < 2:
+                r = rich.get(d.get("id")) or {}
+                print(f"SAKANI2 pg={pg} search:", _j.dumps(a, ensure_ascii=False)[:1500], flush=True)
+                print(f"SAKANI2 pg={pg} rich type={r.get('type')} keys={sorted((r.get('attributes') or {}).keys())}", flush=True)
+                print("SAKANI2 rich:", _j.dumps(r.get("attributes"), ensure_ascii=False)[:2500], flush=True)
+                shown += 1
+        if shown >= 2:
+            break
+        time.sleep(1.5)
