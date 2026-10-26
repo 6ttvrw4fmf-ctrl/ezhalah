@@ -1452,19 +1452,17 @@ export default function Home() {
           <View style={s.hero}>
             <CloudWisp variant={1} width={100} height={34} opacity={0.38} style={{ left: -40, top: 12 }} />
             <CloudWisp variant={2} width={90} height={28} opacity={0.32} style={{ right: -35, bottom: 18 }} />
-            {/* The falconer (owner 2026-10-26) sits at the END of the title like an emoji — inline, right after the last
-                word, in both languages («leave him like an emoji at the end of every text»), so the title keeps its full
-                width and never squeezes. On a laptop the title runs a little wider than the form column. Guests only;
-                in Arabic the drawing is flipped so he points back at the words. */}
+            {/* The falconer (owner 2026-10-26): ONE FIXED SPOT, centred above the title, whatever the line says — the title
+                rotates between sentences of different lengths, and following its last word made him jump around («make it
+                fixed»). Guests only; in Arabic the drawing is flipped. His falcon takes off on every open and refresh. */}
+            {authChecked && !user ? (
+              <View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, s.heroFalconerAbove]}>
+                <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} />
+              </View>
+            ) : null}
             <View style={heroWide ? s.heroTitleBlockWide : s.heroTitleBlock}>
               <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
-                <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}
-                  {authChecked && !user ? (
-                    <View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, s.heroFalconerInline]}>
-                      <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} />
-                    </View>
-                  ) : null}
-                </RNAnimated.Text>
+                <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
               </Pressable>
             </View>
             <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
@@ -2400,8 +2398,8 @@ const s = StyleSheet.create({
   heroTitleBlockWide: { alignSelf: 'stretch', marginHorizontal: -60 },
   heroFalconer: { width: 50, height: 58 },
   heroFalconerWide: { width: 62, height: 72 },
-  // inline at the end of the title: a little gap after the last word, centred on the line
-  heroFalconerInline: { marginStart: 8, verticalAlign: 'middle', top: -4 } as any,
+  // centred above the title, a small gap before it
+  heroFalconerAbove: { alignSelf: 'center', marginBottom: 4 },
   sharedBackdrop: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60,
     backgroundColor: 'rgba(18, 37, 27, 0.35)', alignItems: 'center', justifyContent: 'center', padding: 20,
