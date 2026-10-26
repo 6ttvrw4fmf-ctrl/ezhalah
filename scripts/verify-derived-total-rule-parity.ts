@@ -107,7 +107,7 @@ check('card renders an explicit calculated-total note',
 const remote = readFileSync(new URL('../src/data/remote.ts', import.meta.url), 'utf8');
 check('remote.ts passes per-metre + area into the price string',
   // (2026-10-25: the period argument is the POOL, `pool`, from src/lib/rentPool.ts — the per-metre + area args are unchanged)
-  /listingPriceString\(deal, pool, r\.price_annual, r\.price_total,\s*\n?\s*r\.price_per_meter, r\.area_m2\)/.test(remote));
+  /listingPriceString\(deal, pool, servedAnnual, r\.price_total,\s*\n?\s*r\.price_per_meter, r\.area_m2\)/.test(remote));
 check('remote.ts marks the row as derived for the card',
   remote.includes('priceIsDerived'));
 
