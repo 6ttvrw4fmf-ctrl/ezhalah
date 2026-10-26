@@ -1,4 +1,5 @@
 import { markEagleLightUp } from '@/lib/eagleLightUp';
+import { rememberLastChat } from '@/lib/lastChat';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useI18n, LOCALE_KEY, getLocale, getLocaleRevision, detectLocale, setLocalePersistence, type Locale } from '@/i18n';
@@ -329,6 +330,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const historyRef = useRef<HistoryItem[]>([]);
   useEffect(() => { historyRef.current = history; }, [history]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  // «Show the last thing he did» (owner 2026-10-26): the chat open now is remembered per account (lib/lastChat).
+  useEffect(() => { if (activeChatId) rememberLastChat(user?.sub, activeChatId); }, [activeChatId, user?.sub]);
   const [modal, setModal] = useState<'support' | 'about' | 'legal' | 'privacy' | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [authNote, setAuthNote] = useState<string | null>(null);
