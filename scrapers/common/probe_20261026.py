@@ -84,3 +84,40 @@ def holoul():
 if __name__ == "__main__":
     senan()
     holoul()
+
+
+def sakani():
+    import json as _j
+    from scrapers.sakani import run as S
+    s = S.session()
+    for size, pg in ((20, 1), (1000, 1), (1000, 2), (1000, 3), (1000, 4)):
+        t = time.time()
+        got = S.fetch_json(s, S.SEARCH, {"filter[marketplace_purpose]": "sale", "page[size]": size, "page[number]": pg})
+        if not got:
+            print(f"SAKANI sale size={size} pg={pg}: unread", flush=True)
+            continue
+        st, b = got
+        data = (b or {}).get("data") or []
+        rich = (((b or {}).get("meta") or {}).get("first_page") or {}).get("data") or []
+        kinds = {}
+        for d in data:
+            a = d.get("attributes") or {}
+            k = f"{a.get('resource_type')}:{','.join(a.get('unit_types') or []) if isinstance(a.get('unit_types'), list) else a.get('unit_types')}"
+            kinds[k] = kinds.get(k, 0) + 1
+        print(f"SAKANI sale size={size} pg={pg}: HTTP {st} data={len(data)} rich={len(rich)} {time.time()-t:.1f}s meta_keys={list(((b or {}).get('meta') or {}).keys())}", flush=True)
+        print("SAKANI kinds:", sorted(kinds.items(), key=lambda x: -x[1])[:25], flush=True)
+        if size == 20:
+            mu = [d for d in data if (d.get("attributes") or {}).get("resource_type") == "market_units"][:2]
+            print("SAKANI search row:", _j.dumps(mu[:1], ensure_ascii=False)[:2500], flush=True)
+            ids = {d.get("id") for d in mu}
+            rr = [r for r in rich if r.get("id") in ids]
+            print("SAKANI rich types:", sorted({r.get('type') for r in rich}), flush=True)
+            print("SAKANI rich row:", _j.dumps(rr[:1], ensure_ascii=False)[:3500], flush=True)
+            pr = [d for d in data if (d.get("attributes") or {}).get("resource_type") != "market_units"][:1]
+            print("SAKANI project row:", _j.dumps(pr, ensure_ascii=False)[:1200], flush=True)
+        time.sleep(2)
+    for uid in ("22147", "24798"):
+        st, d = S.fetch_detail(s, uid)
+        print(f"SAKANI detail {uid}: {st}", _j.dumps({k: (d or {}).get(k) for k in ("status", "publish", "unit_type", "unit_price", "unit_area", "district_id", "land_type", "description", "rega_ad_license", "city_id", "marketplace_purpose", "price", "selling_price")}, ensure_ascii=False)[:2500], flush=True)
+        print(f"SAKANI detail {uid} keys:", sorted((d or {}).keys()), flush=True)
+        time.sleep(2)
