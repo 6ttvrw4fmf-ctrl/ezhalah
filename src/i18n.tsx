@@ -171,6 +171,8 @@ const AR: Record<string, string> = {
   'Short stays or yearly': 'إقامات قصيرة وسنوي',
   'Short stays: stays shorter than a year, priced by length of stay.': 'إقامات قصيرة: إقامات أقل من سنة، وأسعارها حسب مدة الإقامة.',
   'Advertised price {a}/month': 'السعر المعلن {a} شهرياً',
+  // The computed monthly under a yearly-quoted price (owner 2026-10-26): ÷12, marked ≈ like every derived figure.
+  '≈ {a}/month': '≈ {a} شهرياً',
   'Yearly': 'سنوي',
   'Both': 'كلاهما',
   // Tiny info note shown under the Monthly/Yearly toggle so the user knows what each period means.
@@ -763,7 +765,6 @@ const AR: Record<string, string> = {
   'Annual Equivalent': 'المعادل السنوي',
   'Calculated from price per m² × area — not published by the source': 'محتسب من سعر المتر × المساحة — غير معلن من المصدر',
   'Price Per m²': 'سعر المتر',
-  'Tap to see prices by length of stay': 'اضغط للاطلاع على الأسعار حسب مدة الإقامة', // Gathern + Aqar Monthly, owner 2026-10-02
   // Unit suffix for the source-published «سعر المتر» rate. It is printed NEXT TO the number so the
   // card reads «سعر المتر 750 ريال/م²» — a per-square-metre RATE, never mistakable for a total.
   // (owner 2026-08-09: "display it clearly as ريال/م²".)
@@ -1473,6 +1474,8 @@ const AR: Record<string, string> = {
   'Account': 'الحساب',
   'Sign out': 'تسجيل الخروج',
   'Add your name': 'أضف اسمك',
+  // The temporary name of an account with none (Apple sign-up that pressed «تخطي», owner 2026-10-26).
+  'Ezhalah Guest': 'ضيف إزهله',
   'What should we call you?': 'وش نناديك؟',
   'Later': 'لاحقاً',
   'Type your name': 'اكتب اسمك',

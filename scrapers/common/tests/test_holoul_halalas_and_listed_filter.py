@@ -67,3 +67,46 @@ def test_a_source_that_fails_every_route_still_writes_a_failed_run_naming_the_er
     assert calls[0] == ("begin", "holoul")
     end = calls[-1]
     assert end[0] == "end" and end[1] == 42 and end[2]["ok"] is False and "504" in end[2]["notes"]
+
+
+class _Resp:
+    def __init__(self, code, body=None):
+        self.status_code, self._b = code, body
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise Exception(f"HTTP Error {self.status_code}: ")
+
+    def json(self):
+        return self._b
+
+
+def test_the_walk_reads_small_pages_and_outlasts_a_gateway_timeout(monkeypatch):
+    """10-21 → 10-25 the nightly read «HTTP Error 504»; on 10-26 the per_page=100 page took 8.2 s and every
+    10-row page ~1 s. The walk now asks for small pages and retries a 504 instead of dying on it."""
+    monkeypatch.setattr(R.time, "sleep", lambda s: None)
+    asked, failed_once = [], set()
+
+    class S:
+        def get(self, url, **kw):
+            asked.append(url)
+            page = int(url.split("page=")[1].split("&")[0])
+            if page == 1 and page not in failed_once:
+                failed_once.add(page)
+                return _Resp(504)
+            return _Resp(200, {"pages": 3, "total": 45, "result": [{"id": f"p{page}-{i}"} for i in range(15)]})
+
+    rows, total = R.walk(S())
+    assert len(rows) == 45 and total == 45
+    assert all(f"per_page={R.PER_PAGE}" in u for u in asked) and R.PER_PAGE <= 20
+
+
+def test_a_page_that_never_answers_names_itself_in_the_failure(monkeypatch):
+    monkeypatch.setattr(R.time, "sleep", lambda s: None)
+
+    class S:
+        def get(self, url, **kw):
+            return _Resp(504)
+
+    with pytest.raises(RuntimeError, match=r"units page 0 .*504"):
+        R.walk(S())

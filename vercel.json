@@ -7,6 +7,17 @@
   "trailingSlash": false,
   "redirects": [
     {
+      "source": "/:path((?!sb/|api/).*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "ezhalah-app.vercel.app"
+        }
+      ],
+      "destination": "https://ezhalah.com/:path",
+      "permanent": false
+    },
+    {
       "source": "/agent",
       "destination": "/",
       "permanent": false
@@ -35,6 +46,10 @@
         {
           "key": "Permissions-Policy",
           "value": "camera=(), geolocation=(), microphone=(self)"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
         }
       ]
     },

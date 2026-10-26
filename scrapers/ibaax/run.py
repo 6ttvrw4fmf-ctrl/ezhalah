@@ -282,6 +282,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://api.ibaax.sa/api"
 API = f"{BASE}/advertisements"
@@ -603,7 +604,13 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "amenity_words": utility_words or None,
         "channels": _clean(_feat(rec, "Channels")),
     }
-    row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v is not None})
+    # The AD's own pin: the API publishes top-level `latitude`/`longitude` on every row (the REGA
+    # "Latitude"/"Longitude" features repeat it; the poster's office pin sits under `user` and is never
+    # read). Border-ads run 40176694485 (2026-10-25) drew 5 ibaax ads as a border while the source
+    # published a pin — 0 of 151 served ads carried one (🔧 2026-10-26). pin_dict refuses 0,0 / abroad.
+    row["additional_info"] = {**pin_dict(rec.get("latitude") or _feat(rec, "Latitude"),
+                                         rec.get("longitude") or _feat(rec, "Longitude")),
+                              **strip_pii_fields({k: v for k, v in info.items() if v is not None})}
     # The capture is PRIVATE but "private" is not "may accumulate contact details" — see trap 4.
     # Built from the two ALLOWLISTS (`_CAPTURE_KEYS`, `_FEATURE_ALLOW`); free-text values are scrubbed
     # HERE rather than leaning on db.redact_capture(): a barrier after the row has left the mapper is

@@ -42,6 +42,8 @@ const KNOWN: Record<string, { n: number; kind: 'glint' | 'sky' | 'exempt'; why?:
   'src/components/CardReveal.tsx': { n: 1, kind: 'glint' },
   'src/components/HeroBackground.tsx': { n: 1, kind: 'sky' },
   'src/components/SidebarSky.tsx': { n: 2, kind: 'sky' },
+  // the two cloud wisps drifting in front of the home falconer (owner 2026-10-26), one drift() helper, SKY_CALM_PROPS
+  'src/components/HeroFalconer.tsx': { n: 1, kind: 'sky' },
   'src/components/ListingPreview.tsx': { n: 3, kind: 'exempt', why: 'the ad sheet: one gold buzzer and two accents on ONE open ad, never repeated per card, never in a list' },
 };
 const INFINITE = /animationIterationCount\s*:\s*['"]infinite['"]/g;

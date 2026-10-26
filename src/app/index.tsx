@@ -9,6 +9,7 @@ import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
+import HeroFalconer from '@/components/HeroFalconer';
 import CloudWisp from '@/components/CloudWisp';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { HERO_TAGLINE_KEYS, nextHeroTaglineIndex } from '@/data/heroTaglineRotation';
@@ -1451,9 +1452,19 @@ export default function Home() {
           <View style={s.hero}>
             <CloudWisp variant={1} width={100} height={34} opacity={0.38} style={{ left: -40, top: 12 }} />
             <CloudWisp variant={2} width={90} height={28} opacity={0.32} style={{ right: -35, bottom: 18 }} />
-            <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
-              <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
-            </Pressable>
+            {/* The falconer (owner 2026-10-26): beside the big title, among the clouds, for visitors who are not signed in.
+                He stands at the END of the sentence and points back at it (owner 2026-10-26): Arabic ends on the left, so
+                he is on the left and flipped; English ends on the right, so he is on the right as drawn. Signed-in users never see him. */}
+            <View style={[s.heroTitleRow, locale === 'ar' && s.heroTitleRowAr]} {...({ dir: 'ltr' } as any)}>
+              <Pressable style={s.heroTitleBox} disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
+                <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
+              </Pressable>
+              {authChecked && !user ? (
+                <RNAnimated.View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, reveal(titleAnim, 20)]}>
+                  <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} />
+                </RNAnimated.View>
+              ) : null}
+            </View>
             <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
             <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>
           </View>
@@ -2382,6 +2393,11 @@ const SHARED_PENDING_TTL_MS = 30 * 60 * 1000;
 const SHARED_IMPORTED_KEY = 'ezhalah:sharedChat:imported';
 
 const s = StyleSheet.create({
+  heroTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, maxWidth: '100%' },
+  heroTitleBox: { flexShrink: 1 },
+  heroTitleRowAr: { flexDirection: 'row-reverse' },
+  heroFalconer: { width: 40, height: 46, flexShrink: 0 },
+  heroFalconerWide: { width: 52, height: 60, flexShrink: 0 },
   sharedBackdrop: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60,
     backgroundColor: 'rgba(18, 37, 27, 0.35)', alignItems: 'center', justifyContent: 'center', padding: 20,
