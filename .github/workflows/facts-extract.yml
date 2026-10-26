@@ -38,6 +38,11 @@ on:
         required: false
         default: "false"
         type: string
+      silent:
+        description: "true = only the ads the free word reader found nothing in (ops_text_facts_silent) — the teacher pass"
+        required: false
+        default: "false"
+        type: string
 
 concurrency:
   group: facts-extract
@@ -72,6 +77,7 @@ jobs:
           PLATFORMS: ${{ inputs.platforms }}
           MAX_USD: ${{ inputs.max_usd }}
           SKIP_DONE: ${{ inputs.skip_done }}
+          SILENT: ${{ inputs.silent }}
         run: |
           exec python -m scrapers.facts.extract --run-id "$RUN_ID" --limit "$LIMIT" --platforms "$PLATFORMS" --max-usd "$MAX_USD" \
-            $([ "$SKIP_DONE" = "true" ] && echo --skip-done)
+            $([ "$SKIP_DONE" = "true" ] && echo --skip-done) $([ "$SILENT" = "true" ] && echo --silent)
