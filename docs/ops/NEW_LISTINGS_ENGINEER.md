@@ -411,6 +411,53 @@ district».
    Then prove it: the district shows in `district_options_ar(p_city_id := …)` and a real search for it returns the listing.
    Put one line in your report: **«Districts: added N · twins refused N · waiting for the owner N»**. The Hofuf (الأحساء)
    «الضاحية الحي …» names wait for the owner's naming decision; never invent a spelling for them.
+7. **THE DATABASE NOW ENFORCES THE GUARDS (owner 2026-10-25, migration `20261025203753`).** `loc_catalog_district`
+   refuses a DELETE or TRUNCATE (districts are never deleted, even with 0 ads), a new or renamed name with a number,
+   «مخطط», «قاعدة», «شارع», «طريق», «قرى» or one letter, and a spelling twin. If your insert is refused, the
+   error tells you why. Never disable or drop the triggers (`verify-district-guards.ts` fails the PR, and the P1 alarm
+   `mon_detect_district_guards_missing` fires). An owner-approved exception sets `ezhalah.district_guard_ok` for that
+   one statement. Write the owner's approval in the PR.
+8. **A HOME WITH NO DISTRICT: THE MAIN RULE (owner 2026-10-25, permanent).**
+   1. The site's own district always wins, and is never overwritten.
+   2. If the site names none, use Apple Maps at the home's pin. It must be the same city and a district already on our
+      list, and the home must sit in the **middle** of it: Apple names the same district at 4 spots 150 m around the pin.
+      Then it is filled.
+   3. A home near an **edge** (the 4 spots disagree) is filled only if Google Maps names the same district.
+   4. If Apple has no answer, the wrong city, or a name not on our list, ask Google Maps. A name on our list → fill.
+      A real district not on our list → it may be added, through the guards above.
+   5. If nobody knows, the home stays city-only. It is still searchable in its city; never guess.
+   6. **No «تقريبي» label** (owner 2026-10-25: «I don't like تقريبي»). The district shows as the district.
+
+   Fills go into `listing_pin_district` (switched off), and a migration switches them on. That migration's version
+   goes in `FLIP_ALLOWED` in `verify-pin-district-fill-contract.ts` in the same PR. They reach search through the
+   recovery arm. The pin guard `trg_pin_district_on_list` refuses any name not on that city's list and stores the
+   list's spelling. Undo is `applied = false` for that `run_id` plus deleting the `basis = 'pin'` rows of
+   `district_recovery`, in one transaction.
+
+   Batch 2 (315 homes) was switched on 2026-10-25 by `20261025214336`. The 123 edge homes and the 430 Apple
+   couldn't answer are in the nightly Google Maps check: scheduled task `google-maps-district-check`, folder
+   `~/Documents/google-maps-key/daily-check/` on the owner's Mac.
+9. **NEVER DUPLICATES, FOR EVERY LISTING (owner 2026-10-25, permanent).** Two things are now automatic, and you must
+   never work around them:
+   - **The list:** besides rule 7, a name is refused when its LETTERS equal a listed name in that city (spaces, punctuation
+     and a final ا/ه ignored; a final hamza and a one-letter sequel tail kept), equal it without «ال», equal it with the
+     town's name stuck on, or are one letter away. If the guard refuses your name, the error tells you which listed name
+     it is a copy of: use THAT name. A real district that is one letter from another («الريحان» / «الريان») needs the
+     owner, who names it: `set ezhalah.district_guard_ok = '<name>'` in the same statement.
+   - **Search:** `loc_display_district_ar()` folds a site's copy spelling onto the list name at every sync (same letters /
+     without «ال» / town stuck on). So a copy can only show as a second district when the real name is NOT on the list.
+     The alarm `district_copies_unlisted` (P2) lists those pairs with ad counts: your job is to add the real district name,
+     ONE spelling, through the guards (rule 6: 3+ ads, Apple confirms); the fold joins the copies at the next sync.
+     Never add the second spelling. `district_near_twins_served` (P2) pairs are the OWNER's, not yours: report them.
+     Hofuf «ضاحية هجر …» names stay with the owner.
+10. **ONE NAME, ONE LIST (owner 2026-10-25, permanent).** A place with districts under it is a CITY; a place without
+    is a DISTRICT of the city next to it. The database refuses: a new city that is already a city within 40 km (or in the
+    region, when its distance is unknown) or a district of such a city; a new district named like its own city or like a
+    nearby city that has districts; and any delete of a city or a district. If a site names a place you cannot find in
+    either list, decide with the rule, then add it to ONE list; if the guard refuses, read the error: it names the row that
+    already holds the name. A real town that shares a district's name needs the owner: `set ezhalah.city_guard_ok =
+    '<name>'` in the same statement. The alarm `place_list_leaks` (P2) lists the old leaks: those are the owner's merges,
+    never yours — never delete, never remap a city yourself.
 
 ## Your run, step by step
 1. **Log the start** in `ops_daily_engineer_run`.
