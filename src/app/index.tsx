@@ -11,6 +11,7 @@ import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
+import HeroFalconer from '@/components/HeroFalconer';
 import CloudWisp from '@/components/CloudWisp';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { HERO_TAGLINE_KEYS, nextHeroTaglineIndex } from '@/data/heroTaglineRotation';
@@ -1466,15 +1467,15 @@ export default function Home() {
             <CloudWisp variant={1} width={100} height={34} opacity={0.38} style={{ left: -40, top: 12 }} />
             <CloudWisp variant={2} width={90} height={28} opacity={0.32} style={{ right: -35, bottom: 18 }} />
             {/* The falconer (owner 2026-10-26): beside the big title, among the clouds, for visitors who are not signed in.
-                Always on the title's right, pointing at it, in both languages. Signed-in users never see him. */}
-            <View style={s.heroTitleRow} {...({ dir: 'ltr' } as any)}>
+                He stands at the END of the sentence and points back at it (owner 2026-10-26): Arabic ends on the left, so
+                he is on the left and flipped; English ends on the right, so he is on the right as drawn. Signed-in users never see him. */}
+            <View style={[s.heroTitleRow, locale === 'ar' && s.heroTitleRowAr]} {...({ dir: 'ltr' } as any)}>
               <Pressable style={s.heroTitleBox} disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
                 <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
               </Pressable>
               {authChecked && !user ? (
                 <RNAnimated.View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, reveal(titleAnim, 20)]}>
-                  <CloudWisp variant={0} width={heroWide ? 70 : 54} height={heroWide ? 22 : 17} opacity={0.5} style={{ bottom: -4, left: -14 }} />
-                  <XImage source={require('../../assets/icons/insight-falconer-original.png')} contentFit="contain" accessible={false} style={StyleSheet.absoluteFill} />
+                  <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} />
                 </RNAnimated.View>
               ) : null}
             </View>
@@ -2408,6 +2409,7 @@ const SHARED_IMPORTED_KEY = 'ezhalah:sharedChat:imported';
 const s = StyleSheet.create({
   heroTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, maxWidth: '100%' },
   heroTitleBox: { flexShrink: 1 },
+  heroTitleRowAr: { flexDirection: 'row-reverse' },
   heroFalconer: { width: 40, height: 46, flexShrink: 0 },
   heroFalconerWide: { width: 52, height: 60, flexShrink: 0 },
   sharedBackdrop: {
