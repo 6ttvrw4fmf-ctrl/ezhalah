@@ -1987,7 +1987,7 @@ const LIST_SELECT = [
   'property_age', 'direction', 'street_name', 'residence_type', 'project_name',
   'parking', 'elevator', 'kitchen', 'maid_room', 'driver_room',
   'air_conditioner', 'water_supply', 'electricity', 'sanitation',
-  'private_entrance', 'optical_fibers', 'laundry_room', 'balcony_terrace', 'majlis',
+  'private_entrance', 'optical_fibers', 'laundry_room', 'balcony_terrace',
   'photo_urls',
   'date_added',
   'rent_now_pay_later', 'rent_now_pay_later_monthly',
@@ -2147,7 +2147,10 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
         sanitation: !!r.sanitation,
         private_entrance: !!r.private_entrance,
         optical_fibers: !!r.optical_fibers,
-        majlis: !!r.majlis,
+        // The card's own majlis chip comes from the site's majlis COUNT (the source tables have no `majlis`
+        // column — LIST_SELECT reads source tables, not search_listings_ar). The AF proof chip for a majlis
+        // search comes from af_canon (afEvidence), which carries the Rule B value incl. the seller's words.
+        majlis: r.reception_rooms_majlis != null ? Number(r.reception_rooms_majlis) > 0 : undefined,
         laundry_room: !!r.laundry_room,
         balcony_terrace: !!r.balcony_terrace,
       },
