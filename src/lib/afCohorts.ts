@@ -330,6 +330,10 @@ const RESIDENTIAL_AMENITY_BASE = [
   // supabase/migrations/20260831205347_af_amenity_tokens_residential_rich_set.sql for the RPC side.
   'gym', 'pool', 'garden', 'balcony', 'laundry_room', 'optical_fibers',
   'separate_electricity_meter', 'separate_water_meter',
+  // majlis (owner 2026-10-26, handoff decision #3): the first filter question born from the stored text facts.
+  // search_listings_ar.majlis = af_rule_b(the site's majlis count > 0 — aqar/wasalt, 7,328 ads — , the ad's own
+  // quoted «مجلس» — 91k ads). Migration «majlis_advanced_filter_amenity»; positive-only IS TRUE token.
+  'majlis',
 ] as const;
 // aqar villa ads carry مدخل سيارة / صرف صحي checkboxes the apartment forms do not (2026-08-16).
 const VILLA_ONLY_AMENITIES = ['car_entrance', 'sanitation'] as const;

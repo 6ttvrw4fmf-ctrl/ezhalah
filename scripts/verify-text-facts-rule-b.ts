@@ -45,7 +45,17 @@ const same = (a: string[], b: string[]) => a.length === b.length && [...a].sort(
 // The filter's amenity columns: what the result card can prove (afEvidence) and what the oracle can filter.
 const AF = [...new Set(Object.values(AMENITY_COL))];
 const ORACLE = new Set(Object.values(AMENITY_TOKEN_COL));
-const SQL_COLS = sqlAfColumns(STORE);
+// The allow-list, the view and the batched flip are read from the LATEST migration that defines each one (a later
+// amenity — majlis, 2026-10-26 — redefines them; the version is minted at apply time, so no filename is pinned).
+const latestFile = (needle: string): string => {
+  const files = readdirSync(MIG).filter((f) => f.endsWith('.sql')).sort()
+    .filter((f) => readFileSync(join(MIG, f), 'utf8').includes(needle));
+  return files.length ? readFileSync(join(MIG, files[files.length - 1]), 'utf8') : '';
+};
+const COLS_SRC = latestFile('function public.text_facts_af_columns()') || STORE;
+const VIEW_SRC = latestFile('create or replace view public.listing_text_facts_af as') || STORE;
+const SLICE_SRC = latestFile('function public.text_facts_apply_slice(') || MERGE;
+const SQL_COLS = sqlAfColumns(COLS_SRC);
 const PY_COLS = pyAfColumns(WORDS);
 
 // ── coverage ──────────────────────────────────────────────────────────────────────────────────────────
@@ -72,18 +82,19 @@ export function sliceMerged(sql: string): Set<string> {
 /** Columns the overlay view exposes, each only through text_fact_bool (quote required). */
 export function viewColumns(sql: string): Set<string> {
   const v = /create or replace view public\.listing_text_facts_af as([\s\S]*?)from public\.listing_text_facts f/.exec(sql);
-  return new Set(v ? [...v[1].matchAll(/text_fact_bool\(f\.facts, '([a-z_]+)'\)\s+as\s+([a-z_]+)/g)].filter((m) => m[1] === m[2]).map((m) => m[1]) : []);
+  // a column behind its own switch reads `case when <switch>() then text_fact_bool(...) end as <col>` (majlis, 2026-10-26)
+  return new Set(v ? [...v[1].matchAll(/text_fact_bool\(f\.facts, '([a-z_]+)'\)(?: end)?\s+as\s+([a-z_]+)/g)].filter((m) => m[1] === m[2]).map((m) => m[1]) : []);
 }
 
 console.log('\nRule B reaches every Advanced Filter amenity column, and only those\n');
-check('the DB allow-list (text_facts_af_columns) = the filter\'s 20 amenity columns (afEvidence AMENITY_COL)',
+check(`the DB allow-list (text_facts_af_columns) = the filter's ${AF.length} amenity columns (afEvidence AMENITY_COL)`,
   same(SQL_COLS, AF), `sql ${SQL_COLS.join(',')} vs af ${AF.join(',')}`);
 check('the nightly reader writes exactly the same columns (words.py AF_COLUMNS)', same(PY_COLS, SQL_COLS),
   `py ${PY_COLS.join(',')}`);
 check('the independent oracle can filter every one of them', SQL_COLS.every((c) => ORACLE.has(c)),
   SQL_COLS.filter((c) => !ORACLE.has(c)).join(','));
-const view = viewColumns(STORE);
-check('the overlay view exposes all 20, each through text_fact_bool (no quote → no value)', SQL_COLS.every((c) => view.has(c)),
+const view = viewColumns(VIEW_SRC);
+check('the overlay view exposes every boolean column, each through text_fact_bool (no quote → no value)', SQL_COLS.every((c) => view.has(c)),
   SQL_COLS.filter((c) => !view.has(c)).join(','));
 const { written, compared } = syncMerged(MERGE);
 check('sync_search_listings_ar WRITES af_rule_b for its 8 columns', GROUP1.every((c) => written.has(c)),
@@ -92,8 +103,8 @@ check('sync_search_listings_ar COMPARES af_rule_b for the same 8 (no hourly flip
   GROUP1.every((c) => compared.has(c)), GROUP1.filter((c) => !compared.has(c)).join(','));
 check('sync_listing_rich_attrs merges every text_facts_af_columns() column it has, in the diff and the write',
   /a\.attname = any \(public\.text_facts_af_columns\(\)\)/.test(MERGE) && /\$f\$, merged_list, p_source_table, diff_list\);/.test(MERGE));
-const slice = sliceMerged(MERGE);
-check('the batched switch flip (text_facts_apply_slice) merges all 20', SQL_COLS.every((c) => slice.has(c)),
+const slice = sliceMerged(SLICE_SRC);
+check('the batched switch flip (text_facts_apply_slice) merges every boolean column', SQL_COLS.every((c) => slice.has(c)),
   SQL_COLS.filter((c) => !slice.has(c)).join(','));
 check('both live bodies are md5-guarded in the same step as the edit', (MERGE.match(/moved since this migration was written/g) ?? []).length === 2);
 check('the stale-text stamp runs first in every sync pass', MERGE.includes('perform public.text_facts_mark_stale();'));
