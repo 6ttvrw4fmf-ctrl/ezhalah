@@ -23,18 +23,19 @@ export const SHARE_BLURB_AR = 'تدور على عقار وتبي تشوف الم
 // number-free form is the static fallback. Pinned equal to HOME_CARD_FALLBACK_AR.
 export const SHARE_CARD_DESC_AR = 'كل مواقع العقار في السعودية في مكان واحد.';
 export const SHARE_BLURB_EN = 'Looking for a property and want to see everything on offer in one place? Ezhalah, the smarter way to find properties in the Kingdom.';
-// THE SENT MESSAGE (owner 2026-10-20, replacing the long sentence above in the share message only):
+// THE SENT MESSAGE (owner 2026-10-26: names Saudi Arabia so the card need not repeat 148, no harakat, «إزهله، خل إزهله»;
+// first set 2026-10-20, replacing the long sentence above in the share message only):
 // «ليش تدوّر في 148 موقع؟ إزهله يدوّر عنك». The number is LIVE — the same count the app shows
 // («148»: the platform catalog minus the sites the registry marks dormant, src/data/loaderPlatforms.ts
 // + loaderActivePlatforms.ts), never typed; while that count is unknown the sentence says «كل المواقع».
 // SHARE_BLURB_* above stay the page's SEO description and the in-app preview text.
-export const SHARE_LEAD_AR_TEMPLATE = 'ليش تدوّر في {count} موقع؟ إزهله يدوّر عنك';
-export const SHARE_LEAD_AR_NO_COUNT = 'ليش تدوّر في كل المواقع؟ إزهله يدوّر عنك';
+export const SHARE_LEAD_AR_TEMPLATE = 'ليش تدور في {count} موقع عقاري بالسعودية؟ إزهله، خل إزهله يدور عنك';
+export const SHARE_LEAD_AR_NO_COUNT = 'ليش تدور في كل مواقع العقار بالسعودية؟ إزهله، خل إزهله يدور عنك';
 // English (owner 2026-10-22, replacing 2026-10-20's «AI meta search engine… one search»): the Arabic line
 // translated, longer, and saying what Ezhalah is — «Why search 148 sites one by one? Ezhalah, the AI real
 // estate search engine, searches them all for you, in one place.»
-export const SHARE_LEAD_EN_TEMPLATE = 'Why search {count} sites one by one? Ezhalah, the AI real estate search engine, searches them all for you, in one place.';
-export const SHARE_LEAD_EN_NO_COUNT = 'Why search every site one by one? Ezhalah, the AI real estate search engine, searches them all for you, in one place.';
+export const SHARE_LEAD_EN_TEMPLATE = 'Why search {count} real estate sites across Saudi Arabia? Ezhalah, the AI real estate search engine, searches them all for you.';
+export const SHARE_LEAD_EN_NO_COUNT = 'Why search every real estate site across Saudi Arabia? Ezhalah, the AI real estate search engine, searches them all for you.';
 /**
  * The live site count — THE SAME number the WhatsApp card shows (src/data/siteCount.ts: sites with
  * searchable listings, one per platform), or null while it has not been read yet. Owner 2026-10-20:
