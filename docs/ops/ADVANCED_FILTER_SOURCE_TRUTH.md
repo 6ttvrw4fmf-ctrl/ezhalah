@@ -68,6 +68,18 @@ search-index writers (`sync_search_listings_ar`, `sync_listing_rich_attrs`) serv
 next pass). Migrations 20261025203351 / 20261025205008 / 20261025205450; the run behind it:
 `docs/ops/reports/FACTS_WORDS_VECTOR_TEST_2026-10-25.md`.
 
+**Rule B for numbers (owner, 2026-10-25, handoff decision #1: «yes for street width»).** A number the
+seller wrote fills a **blank** box only; a number the site published is never replaced, and two different
+numbers are listed for Quality & Repair (`ops_text_facts_width_differs`), never served. Today the one
+numeric key is `street_width_m` (`public.text_facts_af_num_columns()`): the overlay stores it as a JSON
+number 4..150 with its quote, `listing_text_facts_af.street_width_m` serves it behind its own kill switch
+`ops_feature_flags.af_text_facts_street_width`, and `sync_search_listings_ar` writes
+`af_rule_b_num(box, text) = coalesce(box, text)`. The reader already refuses a corner plot, «يحدها 2 شارع»,
+two widths or two bearings, so one ad hands over at most one width. Building age is **not** in: the owner
+asked for a 500-ad sample first (the text is often «جديد» / «شبه جديد», not a number). Measured at the
+switch: 73,662 quoted widths, 28,787 blank boxes filled, 3,528 differ from the box (listed). Barrier:
+`scripts/verify-text-facts-rule-b.ts` «Rule B for numbers».
+
 **Why the August case law below no longer forbids this.** The 2026-08-09 rule («if the platform publishes
 the field structurally, prose must not be consulted at all — a structured `null` outranks any prose hit»)
 was written against a *keyword matcher*: «موقف سيارة» / «مواقف» → `true`, which could not tell «مصعد» from

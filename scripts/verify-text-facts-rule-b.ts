@@ -13,7 +13,7 @@
 //
 //   node --experimental-strip-types scripts/verify-text-facts-rule-b.ts      (auto-discovered by `npm test`)
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AMENITY_COL } from '../src/lib/afEvidence.ts';
 import { AMENITY_TOKEN_COL } from './lib/afOracleFilter.ts';
@@ -109,6 +109,82 @@ const lostW = syncMerged(MERGE.replace('public.af_rule_b(v.kitchen, tf.kitchen),
 mustCatch('a sync that compares the merge but writes the box is caught', !GROUP1.every((c) => lostW.written.has(c)));
 mustCatch('a flip that forgets a column is caught',
   !SQL_COLS.every((c) => sliceMerged(MERGE.replace('public.af_rule_b(r.gym, tf.gym)', 'r.gym')).has(c)));
+
+// ── RULE B FOR NUMBERS (owner 2026-10-25, handoff decision #1): street width fills a BLANK box ─────────────
+// The numeric keys ride the same overlay. The migration that added them is found by what it DEFINES (its version
+// is minted at apply time, so no filename is pinned); a later migration redefining the same objects wins.
+const latestDefining = (needle: string): string => {
+  const files = readdirSync(MIG).filter((f) => f.endsWith('.sql')).sort()
+    .filter((f) => readFileSync(join(MIG, f), 'utf8').includes(needle));
+  return files.length ? readFileSync(join(MIG, files[files.length - 1]), 'utf8') : '';
+};
+export function sqlAfNumColumns(sql: string): string[] {
+  const m = /function public\.text_facts_af_num_columns\(\)[\s\S]*?array\[([\s\S]*?)\]::text\[\]/.exec(sql);
+  return m ? [...m[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]) : [];
+}
+export function pyAfNumColumns(py: string): string[] {
+  const m = /^AF_NUM_COLUMNS = \(([\s\S]*?)\)\n/m.exec(py);
+  return m ? [...m[1].matchAll(/"([a-z_]+)"/g)].map((x) => x[1]) : [];
+}
+/** Numeric columns the overlay view exposes, each only through text_fact_num (quote required) and behind the width switch. */
+export function numViewColumns(sql: string): Set<string> {
+  const v = /create or replace view public\.listing_text_facts_af as([\s\S]*?)from public\.listing_text_facts f/.exec(sql);
+  return new Set(v ? [...v[1].matchAll(/text_facts_street_width_on\(\)\s*then public\.text_fact_num\(f\.facts, '([a-z_]+)'\)::smallint end as ([a-z_]+)/g)]
+    .filter((m) => m[1] === m[2]).map((m) => m[1]) : []);
+}
+/** Numeric columns sync_search_listings_ar merges in the value written AND in the change detection. */
+export function numSyncMerged(sql: string): { written: Set<string>; compared: Set<string> } {
+  const written = new Set<string>(), compared = new Set<string>();
+  for (const m of sql.matchAll(/or s3\.([a-z_]+) is distinct from public\.af_rule_b_num\(v\.\1, tf\.\1\)/g)) compared.add(m[1]);
+  for (const m of sql.matchAll(/public\.af_rule_b_num\(v\.([a-z_]+), tf\.\1\), v\.floor_number,/g)) written.add(m[1]);
+  return { written, compared };
+}
+/** af_rule_b_num must be «fill a blank box only»: the box first, the text only where the box is NULL. */
+export function numRuleFillsBlankOnly(sql: string): boolean {
+  const m = /function public\.af_rule_b_num\(p_box smallint, p_text numeric\)[\s\S]*?select ([^\n]*)\n/.exec(sql);
+  return !!m && /^coalesce\(p_box, round\(p_text\)::smallint\)\s*$/.test(m[1].trim());
+}
+
+const STREET = latestDefining('function public.text_facts_af_num_columns()');
+const NUM_SQL = sqlAfNumColumns(STREET);
+const NUM_PY = pyAfNumColumns(WORDS);
+console.log('\nRule B for numbers: street width fills a blank box, through the same overlay\n');
+check('a migration defines the numeric allow-list (text_facts_af_num_columns) and it holds street_width_m', NUM_SQL.includes('street_width_m'));
+check('the nightly reader writes exactly the same numeric keys (words.py AF_NUM_COLUMNS)', same(NUM_PY, NUM_SQL), `py ${NUM_PY.join(',')} vs sql ${NUM_SQL.join(',')}`);
+check('the reader stores the number with its quote (value_num, quote) for exactly those keys',
+  /f\["fact"\] in AF_NUM_COLUMNS and f\["value_num"\] is not None and \(f\["quote"\] or ""\)\.strip\(\)/.test(WORDS));
+const numView = numViewColumns(STREET);
+check('the overlay view exposes each numeric key through text_fact_num, behind the street-width switch', NUM_SQL.every((c) => numView.has(c)),
+  NUM_SQL.filter((c) => !numView.has(c)).join(','));
+check('the CHECK admits a numeric key only as a JSON number with its quote (text_facts_all_quoted redefined)',
+  /text_facts_af_num_columns\(\)\)\s*and coalesce\(jsonb_typeof\(e\.value -> 'v'\), ''\) = 'number'/.test(STREET));
+const numSync = numSyncMerged(STREET);
+check('sync_search_listings_ar WRITES af_rule_b_num for each numeric key', NUM_SQL.every((c) => numSync.written.has(c)),
+  NUM_SQL.filter((c) => !numSync.written.has(c)).join(','));
+check('sync_search_listings_ar COMPARES af_rule_b_num for the same keys (no hourly flip, no missed change)',
+  NUM_SQL.every((c) => numSync.compared.has(c)), NUM_SQL.filter((c) => !numSync.compared.has(c)).join(','));
+check('af_rule_b_num fills a BLANK box only — a published number is never replaced', numRuleFillsBlankOnly(STREET));
+check('the nightly reader re-reads, once, every ad read before the switch whose history holds a width (text_facts_todo backlog)',
+  /not \(f\.facts \? ''street_width_m''\)[\s\S]*?f\.read_at < \(select kf\.changed_at from public\.ops_feature_flags kf where kf\.name = ''af_text_facts_street_width''\)[\s\S]*?l2\.fact = ''street_width_m'' and l2\.value_num is not null/.test(STREET));
+check('the watcher views keep booleans and numbers apart (ops_text_facts_vs_index filters to the boolean keys)',
+  /create or replace view public\.ops_text_facts_vs_index as[\s\S]*?where e\.key = any \(public\.text_facts_af_columns\(\)\);/.test(STREET)
+  && /create or replace view public\.ops_text_facts_num_vs_index as[\s\S]*?where e\.key = any \(public\.text_facts_af_num_columns\(\)\);/.test(STREET));
+check('the detector gains text_facts_width_not_applied and the selftest proves af_rule_b_num + the CHECK',
+  /mon_raise\('P1', 'text_facts_width_not_applied'/.test(STREET) && /af_rule_b_num\(15::smallint, 20::numeric\) = 15/.test(STREET)
+  && /text_facts_all_quoted\('\{"street_width_m": \{"v": "20"/.test(STREET) && /select public\.mon_selftest_text_facts\(\);/.test(STREET));
+check('every live body the migration edits is md5-guarded in the same step (6 bodies: the CHECK, the sync, the todo, the detector, the selftest, the status)',
+  (STREET.match(/'[0-9a-f]{32}'/g) ?? []).length >= 6);
+
+mustCatch('a numeric key the reader drops is caught', !same(NUM_PY.slice(1), NUM_SQL));
+mustCatch('a numeric key the SQL list gains without the reader is caught', !same(NUM_PY, [...NUM_SQL, 'property_age_years']));
+mustCatch('a view column served without text_fact_num / outside the switch is caught',
+  !numViewColumns(STREET.replace("then public.text_fact_num(f.facts, 'street_width_m')::smallint end as street_width_m", "then (f.facts->'street_width_m'->>'v')::smallint end as street_width_m")).has('street_width_m'));
+mustCatch('a sync that writes the merge but compares the box is caught',
+  !numSyncMerged(STREET.replace('or s3.street_width_m is distinct from public.af_rule_b_num(v.street_width_m, tf.street_width_m)', 'or s3.street_width_m is distinct from v.street_width_m')).compared.has('street_width_m'));
+mustCatch('a sync that compares the merge but writes the box is caught',
+  !numSyncMerged(STREET.replace('    public.af_rule_b_num(v.street_width_m, tf.street_width_m), v.floor_number,', '    v.street_width_m, v.floor_number,')).written.has('street_width_m'));
+mustCatch('the text REPLACING a published number (coalesce swapped) is caught',
+  !numRuleFillsBlankOnly(STREET.replace('select coalesce(p_box, round(p_text)::smallint)', 'select coalesce(round(p_text)::smallint, p_box)')));
 
 if (failures) {
   console.error(`\n✗ verify-text-facts-rule-b: ${failures} failure(s)`);
