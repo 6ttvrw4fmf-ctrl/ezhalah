@@ -97,7 +97,7 @@ import { pickResultsFoundSentence } from '@/data/resultsFoundRotation';
 import { pickNoResultsSentence } from '@/data/noResultsRotation';
 import { pickName } from '@/lib/nameSync';
 import { encodeSharePayload, encodeInvitePayload, shareLink, shareMessage, SHARE_INVITE_LINE } from '@/lib/shareSearch';
-import { SHARE_LINK, shareNative, shareLead, liveSiteCount } from '@/lib/share';
+import { shareNative, shareLead, liveSiteCount, shareOrigin } from '@/lib/share';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
@@ -707,7 +707,7 @@ export default function Agent() {
     if (sharedCopyRef.current?.j === j) return sharedCopyRef.current.url;
     const code = await createSharedChat(name, loc, q, t);
     if (!code) return null;
-    const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;
+    const origin = shareOrigin();
     const url = shareLink(origin, code);
     sharedCopyRef.current = { j, url };
     return url;
@@ -724,7 +724,7 @@ export default function Agent() {
     const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
     const text = shareLead(loc, liveSiteCount());
     const payload = user ? encodeInvitePayload(pickName(user, loc), loc) : null;
-    const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;
+    const origin = shareOrigin();
     return { shareUrl: payload ? shareLink(origin, payload) : origin, shareText: text };
   };
   const shareFor = (q: SearchQuery | undefined): { shareUrl?: string; shareText?: string; prepareShare?: () => Promise<string | null> } => {
@@ -734,7 +734,7 @@ export default function Agent() {
     const payload = encodeSharePayload(q, name, loc);
     const text = shareMessage(name, q, loc);
     if (!payload || !text) return {};
-    const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;
+    const origin = shareOrigin();
     // THE WHOLE CHAT (owner 2026-10-17: «sharing it means I share the chat history»): pressing Share saves
     // a COPY of this conversation (public.shared_chat) and shares its short /s/<code> link; the search
     // link above is only the fallback when that save fails. One copy per unchanged conversation.
