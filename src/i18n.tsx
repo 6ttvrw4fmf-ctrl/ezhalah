@@ -1472,6 +1472,8 @@ const AR: Record<string, string> = {
   'Account': 'الحساب',
   'Sign out': 'تسجيل الخروج',
   'Add your name': 'أضف اسمك',
+  // The temporary name of an account with none (Apple sign-up that pressed «تخطي», owner 2026-10-26).
+  'Ezhalah Guest': 'ضيف إزهله',
   'What should we call you?': 'وش نناديك؟',
   'Later': 'لاحقاً',
   'Type your name': 'اكتب اسمك',

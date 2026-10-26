@@ -164,7 +164,9 @@ export async function signInWithProvider(
 // reaches this code and Apple sign-in is today's redirect, byte for byte.
 // Any failure (script blocked, popup blocked, Apple config error, token refused) → { fallback } →
 // the caller runs the redirect. Closing Apple's window is the user's choice → { cancelled }.
-export const APPLE_JS_SIGNIN = process.env.EXPO_PUBLIC_APPLE_JS_SIGNIN === '1';
+// ON since 2026-10-26: the Services ID lists ezhalah-app.vercel.app + /auth (Apple accepted the Return URL that
+// day). EXPO_PUBLIC_APPLE_JS_SIGNIN=0 turns it back off; every failure still falls back to the redirect.
+export const APPLE_JS_SIGNIN = process.env.EXPO_PUBLIC_APPLE_JS_SIGNIN !== '0';
 const APPLE_JS_SRC = 'https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js';
 const APPLE_SERVICES_ID = 'com.ezhalah.web';
 // The ONE Return URL registered with Apple for the popup. Any other origin (previews, localhost)

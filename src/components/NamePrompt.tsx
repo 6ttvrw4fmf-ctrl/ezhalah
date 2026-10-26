@@ -36,8 +36,16 @@ import { ensureNameBoxCss, startNameParty } from '@/lib/nameParty';
 // switch on that name's script); an Apple sign-up's is empty. «حفظ» → the box shrinks away, the home
 // headline's sign-in welcome (+ a shine), and a 5-second confetti party (lib/nameParty.ts). «لاحقاً»: no
 // party, and Google's name stays as it is. The motion is the demo's CSS (data-ezh-* + lib/nameParty.ts).
+// OWNER 2026-10-26: no box when the sign-up already HAS a name (Google always, Apple when it shares it): that
+// name is kept and the party plays by itself (shouldPartyOnSignUp). The box is only for a nameless sign-up,
+// and its «تخطي» leaves the account showing «ضيف إزهله» until the user adds a name.
 export function shouldAskName(user: AuthUser | null, authChecked: boolean, authOpen: boolean, now: number): boolean {
-  return isBackendLive && authChecked && !authOpen && !!user && !user.namePromptSeen && isFreshSignUp(user.createdAt, user.lastSignInAt, now);
+  return isBackendLive && authChecked && !authOpen && !!user && !user.namePromptSeen && !(user.name ?? '').trim() && isFreshSignUp(user.createdAt, user.lastSignInAt, now);
+}
+
+/** A sign-up that arrived WITH a name: no box, the party once (owner 2026-10-26). */
+export function shouldPartyOnSignUp(user: AuthUser | null, authChecked: boolean, authOpen: boolean, now: number): boolean {
+  return isBackendLive && authChecked && !authOpen && !!user && !user.namePromptSeen && !!(user.name ?? '').trim() && isFreshSignUp(user.createdAt, user.lastSignInAt, now);
 }
 
 /** After «حفظ»: fire the sign-in welcome ONCE (and the party with it), the moment the saved name `v` AND
@@ -99,6 +107,8 @@ export default function NamePrompt() {
   const [segW, setSegW] = useState(0);
   const field = useRef<TextInput>(null);
   const ask = shouldAskName(user, authChecked, authOpen, Date.now()) && !closed;
+  const party = shouldPartyOnSignUp(user, authChecked, authOpen, Date.now());
+  const partied = useRef<string | null>(null);
   useEffect(() => { ensureNameBoxCss(); }, []);
   useEffect(() => {
     const o = () => { setName(''); setLang(locale); setReopened(true); };
@@ -158,6 +168,15 @@ export default function NamePrompt() {
     close();
     welcomeOnceSaved(v, () => startNameParty(reduced));
   };
+  // A sign-up that arrived WITH a name (owner 2026-10-26): no box. Record «seen», then the very same welcome and
+  // party «حفظ» gives, once, when that write is in the session (welcomeOnceSaved).
+  useEffect(() => {
+    if (!party || !user || partied.current === user?.sub) return;
+    partied.current = user?.sub ?? null;
+    const given = user.name.trim();
+    markNamePromptSeen();
+    welcomeOnceSaved(given, () => startNameParty(reduced));
+  }, [party, user?.sub]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (phase === 'off') return null;
   const thumbW = segW > 8 ? (segW - 8) / 2 : 0;
@@ -211,7 +230,7 @@ export default function NamePrompt() {
         </View>
         {!chip && <Text style={s.hint} testID="name-prompt-hint">{tr(lang === 'ar' ? "We'll write it in English for you" : "We'll write it in Arabic for you")}</Text>}
         <Pressable testID="name-prompt-later" style={s.later} onPress={close} hitSlop={8}>
-          <Text style={s.laterText}>{tr('Later')}</Text>
+          <Text style={s.laterText}>{tr('Skip')}</Text>
         </Pressable>
         <Pressable testID="name-prompt-save" style={[s.save, !name.trim() && s.saveOff]} onPress={save} {...ds({ ezhSave: '1' })}>
           <Text style={s.saveText}>{tr('Save')}</Text>
