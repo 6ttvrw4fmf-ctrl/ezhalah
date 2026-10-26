@@ -35,6 +35,10 @@
         {
           "key": "Permissions-Policy",
           "value": "camera=(), geolocation=(), microphone=(self)"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
         }
       ]
     },
