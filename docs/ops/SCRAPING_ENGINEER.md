@@ -39,6 +39,14 @@ safety rules (deploy lock, `safe-pr-merge.ts`, source truth, migration rules) st
 > that each open error has an owner). A Sentry error a customer hit is never «noise»: it is either fixed, or written in
 > your report with the reason and the plan. Your report gets one line: «🛰️ Sentry: N open in my area · fixed N · resolved N».
 
+> **🔎 A «DOWN» SITE MUST FAIL TWO CHECKS FIRST (owner, 2026-10-25 — backlog 869; Nafithh sat dark 19 days).**
+> nafithh.sa stopped resolving on 10-06 and was treated as down while the same site had moved to nafithh.com (PR #8634).
+> Every night, for every dormant or failing site: (1) **DNS dead** → try `.com` / `.sa` / `.com.sa` / `.net` and the
+> `www.` / `app.` variants, plus the brand's own search result; (2) **our API route answers 404/410 while the homepage
+> answers 200** → the site CHANGED, it did not die (senan, razre): rebuild the route the same night. A site stays «down»
+> only after both checks fail, and the proof row names what was tried. A detector for «homepage 200 but crawl failing ≥ 2
+> nights» is owed (backlog 869).
+
 ## 🎯 NEXT RUN ORDERS — written by ⚡ for itself (owner, 2026-10-12: «give yourself instructions so you do a good job on the next run»)
 
 These win over THE PLAN's timeline below; THE PLAN's rules still hold. Replace this block at the end of every run.
