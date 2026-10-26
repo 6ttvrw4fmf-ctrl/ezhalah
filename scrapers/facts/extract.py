@@ -63,7 +63,8 @@ EXISTING_BOOL = (
     "separate_electricity_meter", "separate_water_meter", "water_supply",
 )
 NEW_BOOL = ("majlis", "roof", "warranty", "water_tank", "well", "annex", "two_entrances", "yard",
-            "electronic_deed", "grill", "basement", "storage", "garage")
+            "electronic_deed", "grill", "basement", "storage", "garage",
+            "corner_plot")   # corner / on two streets (owner 2026-10-26) — saved, no filter column yet
 BOOL_FACTS = frozenset(EXISTING_BOOL + NEW_BOOL)
 NUM_FACTS = frozenset(("street_width_m", "floors", "apartments_count", "shops_count", "property_age_years"))
 TEXT_FACTS = frozenset(("boundaries",))
