@@ -504,7 +504,8 @@ def selftest() -> None:
                              title="شقة للايجار", body="يوجد مصعد ولا يوجد مسبح، مجلس كبير، شارع عرض 20م"), "facts-words-t")
     assert row["facts"].get("elevator", {}).get("v") is True and row["facts"]["elevator"]["q"], row
     assert row["facts"].get("pool", {}).get("v") is False, row
-    assert "majlis" not in row["facts"] and any(f["fact"] == "majlis" for f in found), (row, found)
+    # majlis is an AF column since 2026-10-26 (decision #3): it rides the overlay row like the other 20.
+    assert row["facts"].get("majlis", {}).get("v") is True and any(f["fact"] == "majlis" for f in found), (row, found)
     # Rule B for numbers: the one quoted width rides along as a JSON number; a corner plot hands over none.
     assert row["facts"].get("street_width_m") == {"v": 20.0, "q": "شارع عرض 20م"}, row
     assert set(row["facts"]) <= set(AF_COLUMNS) | set(AF_NUM_COLUMNS) and row["stale_at"] is None and row["listing_id"] == 7
