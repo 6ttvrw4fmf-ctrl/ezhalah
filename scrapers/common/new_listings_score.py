@@ -624,6 +624,26 @@ def new_listings(client, hours: int) -> dict[str, list[tuple[str, int]]]:
     return dict(out)
 
 
+def explicit_picks(tokens: list[str]) -> list[tuple[str, int]]:
+    """«table:id» tokens given through --sites: exactly those ads, whatever their age (backlog #583,
+    2026-10-26 — a scorer fix could only be proven on ads that happened to arrive again that night)."""
+    out: list[tuple[str, int]] = []
+    for t in tokens:
+        table, sep, rid = t.partition(":")
+        if sep and table and rid.isdigit():
+            out.append((table, int(rid)))
+    return out
+
+
+def picks_by_platform(client, picks: list[tuple[str, int]]) -> dict[str, list[tuple[str, int]]]:
+    out: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    for table, rid in picks:
+        r = (client.table("search_listings_ar").select("platform").eq("source_table", table)
+             .eq("listing_id", rid).limit(1).execute().data or [{}])[0]
+        out[r.get("platform") or table.split("_")[0]].append((table, rid))
+    return dict(out)
+
+
 def sample_size(n_new: int, per_site: int | None) -> int:
     if per_site:
         return min(per_site, n_new)
@@ -982,8 +1002,14 @@ def main() -> int:
     client = sb()
     rng = random.Random(a.seed)
     night = datetime.now(timezone.utc).date().isoformat()
-    arrivals = new_listings(client, a.hours)
-    sites = a.sites or sorted(arrivals)
+    explicit = explicit_picks(a.sites or [])
+    if explicit:
+        # Re-scoring named ads (a proof that a reader fix decides them right) is never the night's score.
+        a.dry_run = True
+        arrivals = picks_by_platform(client, explicit)
+    else:
+        arrivals = new_listings(client, a.hours)
+    sites = sorted(arrivals) if explicit else (a.sites or sorted(arrivals))
     rows: list[dict] = []
     for p in sites:
         picks = arrivals.get(p) or []
