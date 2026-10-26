@@ -1,4 +1,12 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-10-26 (migration 20261026011638_majlis_advanced_filter_amenity):
+--   CHANGED — the amenity whitelist gains ''majlis'' and the predicate arm `and (not (''majlis'' = any(p_amenities)) or s.majlis)`
+--   (owner decision #3: the first filter question born from the stored text facts; search_listings_ar.majlis =
+--   af_rule_b(the site''s majlis count > 0, the ad''s own quoted «مجلس»)). Rebuilt by rebuild_af_filter_rpcs(); parity 0;
+--   chip == referee == direct at apply time. Body below = the previous body plus exactly those two edits, applied to
+--   this file with the same replace the migration ran on production, and PROVEN equal to production:
+--   Recorded md5 of pg_get_functiondef: 62539dd9f79949bfbb7842182e72e4f7
+--   (length 11,546; the previous text hashed 34abb6adfc2654cdbd83fb255c0be7b3, 11,448.)
 -- Re-verified 2026-10-25 (migration 20261025072931_six_sites_open_age_bucket_never_answers_up_to):
 --   CHANGED — the open-bucket condition moves from the two aqar tables to seven platforms (aqar, aqarcity,
 --   haraj, muhaysini, reinvest, tuba, wasalt), each proven on its own published age field to store an
@@ -318,7 +326,7 @@ AS $function$ select E'
       and (p_has_license is null or (p_has_license and s.license_number is not null))
       and (p_amenities is null or (
                not exists (select 1 from unnest(p_amenities) tok
-                           where tok not in (''elevator'',''parking'',''kitchen'',''ac'',''maid_room'',''driver_room'',''private_entrance'',''car_entrance'',''sanitation'',''electricity'',''water_supply'',''gym'',''pool'',''garden'',''balcony'',''laundry_room'',''optical_fibers'',''separate_electricity_meter'',''separate_water_meter'',''furnished'',''rnpl'',''rent_now_pay_later''))
+                           where tok not in (''elevator'',''parking'',''kitchen'',''ac'',''maid_room'',''driver_room'',''private_entrance'',''car_entrance'',''sanitation'',''electricity'',''water_supply'',''gym'',''pool'',''garden'',''balcony'',''laundry_room'',''optical_fibers'',''separate_electricity_meter'',''separate_water_meter'',''majlis'',''furnished'',''rnpl'',''rent_now_pay_later''))
            and (not (''elevator''         = any(p_amenities)) or s.elevator)
            and (not (''parking''          = any(p_amenities)) or s.parking)
            and (not (''kitchen''          = any(p_amenities)) or s.kitchen)
@@ -338,6 +346,7 @@ AS $function$ select E'
            and (not (''optical_fibers''                = any(p_amenities)) or s.optical_fibers)
            and (not (''separate_electricity_meter''    = any(p_amenities)) or s.separate_electricity_meter)
            and (not (''separate_water_meter''          = any(p_amenities)) or s.separate_water_meter)
+           and (not (''majlis''                       = any(p_amenities)) or s.majlis)
            and (not (''furnished''        = any(p_amenities)) or s.furnished)
            and (not (''rnpl''             = any(p_amenities) or ''rent_now_pay_later'' = any(p_amenities)) or s.rent_now_pay_later)))
       and ((p_street_width_min is null and p_street_width_max is null)

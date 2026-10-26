@@ -870,6 +870,7 @@ export type GuidedCounts = {
   // chips, so they need counts. Same template row, same committed scope (migration 20260902220000).
   cnt_gym: number; cnt_pool: number; cnt_garden: number; cnt_balcony: number; cnt_laundry_room: number;
   cnt_optical_fibers: number; cnt_separate_electricity_meter: number; cnt_separate_water_meter: number;
+  cnt_majlis: number;
   cnt_selected: number;
   // Monthly (2026-08-18): Gathern rating thresholds + unit-subtype chips. Data-derived cuts on the
   // source-declared 1-10 scale — the only ones that split the distribution (<=8.0 keeps ~94%).
@@ -2153,6 +2154,10 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
         sanitation: !!r.sanitation,
         private_entrance: !!r.private_entrance,
         optical_fibers: !!r.optical_fibers,
+        // The card's own majlis chip comes from the site's majlis COUNT (the source tables have no `majlis`
+        // column — LIST_SELECT reads source tables, not search_listings_ar). The AF proof chip for a majlis
+        // search comes from af_canon (afEvidence), which carries the Rule B value incl. the seller's words.
+        majlis: r.reception_rooms_majlis != null ? Number(r.reception_rooms_majlis) > 0 : undefined,
         laundry_room: !!r.laundry_room,
         balcony_terrace: !!r.balcony_terrace,
       },
