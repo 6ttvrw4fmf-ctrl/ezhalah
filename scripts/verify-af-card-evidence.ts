@@ -473,7 +473,7 @@ console.log('\n── T4. injection: one carrier, one prop, comparator, strip on
   console.log('\n── T6. af_canon ⇄ afEvidence: one contract, both directions ─────────────────────────────');
   const mirror = readFileSync(join(ROOT, 'sql/mirrors/af_canon_select.sql'), 'utf8');
   const packed = new Set([...mirror.matchAll(/'([a-z_]+)',\s*s\.[a-z_]+/g)].map((m) => m[1]));
-  assert(packed.size === 28, `the mirror packs 28 canonical columns (found ${packed.size})`);
+  assert(packed.size === 29, `the mirror packs 29 canonical columns (found ${packed.size})`); // +majlis 2026-10-26
 
   // (a) every column any def declares it reads must be packed
   const q = emptyQuery() as any;

@@ -76,7 +76,9 @@ for (const [label, mutate] of mutants) {
 // never an overwrite, and the target checked against our list.
 function seedProblems(name: string, s: string): string[] {
   const fail: string[] = [];
-  const seeds = [...s.matchAll(/insert into public\.loc_district_alias[\s\S]*?;/g)].map((m) => m[0]);
+  // A seed runs to its ON CONFLICT clause: a «;» inside a why text (an owner's sentence) must not cut the statement short,
+  // or the overwrite check below would judge half a statement (caught 2026-10-25 on batch_1).
+  const seeds = [...s.matchAll(/insert into public\.loc_district_alias[\s\S]*?on conflict \(city_id, from_norm\) do (?:nothing|update[^;]*);/g)].map((m) => m[0]);
   for (const seed of seeds) {
     if (!/on conflict \(city_id, from_norm\) do nothing;$/.test(seed)) fail.push(`${name}: a seed can overwrite an earlier decision`);
     if (!/'owner'\s*\nfrom \(values/.test(seed) && !/v\.why, 'owner'/.test(seed)) fail.push(`${name}: a seed is not marked as an owner decision`);

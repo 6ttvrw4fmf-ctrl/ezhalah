@@ -500,6 +500,7 @@ const AR: Record<string, string> = {
   'Balcony': 'بلكونة',
   'Laundry room': 'غرفة غسيل',
   'Optical fibers': 'ألياف بصرية',
+  'Majlis room': 'مجلس',
   'Separate electricity meter': 'عداد كهرباء مستقل',
   'Separate water meter': 'عداد ماء مستقل',
   // 'Furnished' key lives in the shared amenities block below (identical value 'مفروش') — not redeclared here.
