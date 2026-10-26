@@ -109,10 +109,11 @@ const CASES: Case[] = [
 // The rent-period rule, expressed as PostgREST filters (the product rule, not our SQL):
 //   annual  = source says annual, OR a monthly-priced row that is an RNPL instalment plan
 //   monthly = a real monthly rental that is NOT an RNPL instalment plan
-// Price on request (price_annual NULL) is in EVERY period (owner 2026-09-28): no figure to misstate.
+// Price on request (price_annual NULL) is in سنوي / كلاهما (owner 2026-09-28: no figure to misstate) — and under
+// شهري («إقامات قصيرة») ONLY for the two stay-length platforms (owner 2026-10-26, migration 20261026071543).
 const periodRest = (p?: string) =>
   p === 'سنوي'  ? '&or=(rent_period_ar.eq.سنوي,and(rent_period_ar.eq.شهري,rent_now_pay_later.is.true),price_annual.is.null)'
-  : p === 'شهري' ? '&or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),price_annual.is.null)'
+  : p === 'شهري' ? '&or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))'
   : '';
 
 async function restCount(c: Case, extra: string): Promise<number | null> {
