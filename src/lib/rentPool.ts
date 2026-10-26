@@ -26,6 +26,26 @@ export function rentPool(sourceTable: string, sourceRentPeriod: string | null | 
   return null;
 }
 
+// A «YEARLY» RENT UNDER 8,000 SAR ON A HOME OR BUSINESS UNIT IS A PER-MONTH PRICE (owner 2026-10-26: «investigate
+// the monthly prices kept in yearly and put a very very strong guard … make sure we show yearly always»).
+// Measured 2026-10-26 over the live index: «سنوي» apartments price 8,410 below 8,000 SAR, 194 between 8,000 and
+// 12,000, then 2,202 at 12,000–20,000 and 56,282 above — nothing rents a flat for 3,000 a YEAR; the sites' own ad
+// text says «شهري» on 3,269 of Aqar's 5,272 cheap «yearly» ads, and Wasalt's own data labels 3,300 as yearly with
+// no monthly figure beside it. The source's word stays the source's word in the source tables; the POOL and the
+// PRICE WE SERVE read such a figure as monthly ×12, and the card says so: «السعر المعلن 3,300 شهرياً».
+// Rooms, land, rest houses, chalets, camps and farms are OUT (a room at 6,000 a year is real). Mirrored in SQL by
+// public.rent_price_annual_ar(); the same list and threshold, pinned by scripts/verify-cheap-yearly-is-monthly.ts.
+export const CHEAP_YEARLY_BELOW = 8000;                         // SAR per year, exclusive
+export const CHEAP_YEARLY_TYPES_EN = ['Apartment', 'Villa', 'Floor', 'Duplex', 'Studio', 'House', 'Building',
+  'Residential Building', 'Office', 'Shop', 'Warehouse', 'Showroom', 'Commercial Building'] as const;
+export function cheapYearlyIsMonthly(sourceTableOrSource: string, sourceRentPeriod: string | null | undefined,
+  priceAnnual: unknown, cleanType: string | null | undefined): boolean {
+  if (isShortStayTable(sourceTableOrSource)) return false;
+  if (String(sourceRentPeriod ?? '').trim().toLowerCase() !== 'annual') return false;
+  if (typeof priceAnnual !== 'number' || !Number.isFinite(priceAnnual) || priceAnnual <= 0 || priceAnnual >= CHEAP_YEARLY_BELOW) return false;
+  return (CHEAP_YEARLY_TYPES_EN as readonly string[]).includes(String(cleanType ?? ''));
+}
+
 // The per-month figure the SITE advertised, for the card's «السعر المعلن {a} شهرياً» line: only when the pool is
 // yearly, the site priced per month, and a figure exists. price_annual is stored as monthly×12, so /12 is exact.
 export function advertisedMonthly(pool: RentPool, sourceRentPeriod: string | null | undefined, priceAnnual: unknown): number | null {
