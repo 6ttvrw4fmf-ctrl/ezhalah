@@ -1,4 +1,4 @@
-// THE MAIN LINK'S SHARE MESSAGE IS «ليش تدوّر في 148 موقع؟ إزهله يدوّر عنك» (owner, 2026-10-20).
+// THE MAIN LINK'S SHARE MESSAGE IS «ليش تدور في 148 موقع عقاري بالسعودية؟ إزهله، خل إزهله يدور عنك» (owner, 2026-10-20).
 //
 // The owner looked at a WhatsApp share of the home link — the eagle card on top, then the long typed
 // sentence («تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى …»)
@@ -27,7 +27,7 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.error(`  FAIL  ${label}${detail ? `\n        ${detail}` : ''}`);
 };
 
-const OWNER_AR = 'ليش تدوّر في 148 موقع؟ إزهله يدوّر عنك';
+const OWNER_AR = 'ليش تدور في 148 موقع عقاري بالسعودية؟ إزهله، خل إزهله يدور عنك';
 const LINK = 'https://ezhalah-app.vercel.app';
 type Lib = {
   liveSiteCount: () => number | null;
@@ -55,18 +55,18 @@ import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 const writeTemp = (src: string) => { const f = join(mkdtempSync(join(tmpdir(), 'share-lead-')), 'share.ts'); writeFileSync(f, src); return f; };
 
-console.log('\nThe main link\'s share message says «ليش تدوّر في 148 موقع؟ إزهله يدوّر عنك», with a live 148\n');
+console.log('\nThe main link\'s share message says «ليش تدور في 148 موقع عقاري بالسعودية؟ إزهله، خل إزهله يدور عنك», with a live 148\n');
 const real = await load(shareSrc);
 
 check('liveSiteCount() is the shared site count (148, the card\'s number)', real.liveSiteCount() === 148, String(real.liveSiteCount()));
 check('the Arabic sentence is the owner\'s exact words with that live number', real.shareLead('ar', real.liveSiteCount()) === OWNER_AR, real.shareLead('ar', real.liveSiteCount()));
 check('the message = that sentence, a newline, the link — nothing else', real.shareMessage('ar', 148) === `${OWNER_AR}\n${LINK}`);
-const OWNER_EN = 'Why search 148 sites one by one? Ezhalah, the AI real estate search engine, searches them all for you, in one place.';
+const OWNER_EN = 'Why search 148 real estate sites across Saudi Arabia? Ezhalah, the AI real estate search engine, searches them all for you.';
 check('the English sentence is the owner\'s exact words (2026-10-22) with the same live number', real.shareLead('en', 148) === OWNER_EN, real.shareLead('en', 148));
-check('the English unknown-count form keeps the owner\'s shape with no number', real.shareLead('en', null) === 'Why search every site one by one? Ezhalah, the AI real estate search engine, searches them all for you, in one place.');
+check('the English unknown-count form keeps the owner\'s shape with no number', real.shareLead('en', null) === 'Why search every real estate site across Saudi Arabia? Ezhalah, the AI real estate search engine, searches them all for you.');
 g.__siteCount = null;
 check('count not read yet → unknown (null), never 0', real.liveSiteCount() === null, String(real.liveSiteCount()));
-check('unknown count → «كل المواقع», never a zero or a typed number', real.shareLead('ar', null) === 'ليش تدوّر في كل المواقع؟ إزهله يدوّر عنك' && !/\d/.test(real.shareLead('ar', null)) && !/\d/.test(real.shareLead('en', null)));
+check('unknown count → «كل المواقع», never a zero or a typed number', real.shareLead('ar', null) === 'ليش تدور في كل مواقع العقار بالسعودية؟ إزهله، خل إزهله يدور عنك' && !/\d/.test(real.shareLead('ar', null)) && !/\d/.test(real.shareLead('en', null)));
 check('a zero or a bad count is treated as unknown', real.shareLead('ar', 0) === real.shareLead('ar', null) && real.shareLead('ar', 2.5) === real.shareLead('ar', null));
 g.__siteCount = 148;
 check('the old long sentence is gone from the sent message (it stays only as the page\'s SEO description)',
@@ -135,11 +135,11 @@ const mutant = (from: string, to: string) => {
   return load(shareSrc.replace(from, to));
 };
 {
-  const m = await mutant("'ليش تدوّر في {count} موقع؟ إزهله يدوّر عنك'", "'ليش تدوّر في {count} موقع؟ إزهله يدوّر لك'");
+  const m = await mutant("'ليش تدور في {count} موقع عقاري بالسعودية؟ إزهله، خل إزهله يدور عنك'", "'ليش تدور في {count} موقع عقاري بالسعودية؟ إزهله، خل إزهله يدور لك'");
   mustCatch('the owner\'s wording drifting by one word', m.shareLead('ar', 148) !== OWNER_AR);
 }
 {
-  const m = await mutant("'Why search {count} sites one by one? Ezhalah, the AI real estate search engine, searches them all for you, in one place.'", "'Ezhalah, the AI meta search engine. {count} sites, one search.'");
+  const m = await mutant("'Why search {count} real estate sites across Saudi Arabia? Ezhalah, the AI real estate search engine, searches them all for you.'", "'Ezhalah, the AI meta search engine. {count} sites, one search.'");
   mustCatch('the English wording drifting back to the old sentence', m.shareLead('en', 148) !== OWNER_EN);
 }
 {
