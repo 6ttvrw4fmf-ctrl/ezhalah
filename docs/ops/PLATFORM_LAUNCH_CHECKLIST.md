@@ -23,6 +23,7 @@ live check, never passes silently. The barriers are the lock; this list is the k
 | 7 | **Image coverage declared** | an entry in `scripts/image-coverage-baseline.json` (a real `floor_pct`, or `imageless_at_source` with a reason) | `verify-image-coverage-ratchet.ts` (+ live half) |
 | 8 | **AF attribute views cover it** | present in both Advanced-Filter attribute views | `verify-af-attribute-views-cover-every-platform.ts` (+ live half) |
 | 9 | **Loader roster** | appears in `loader_active_platforms_ar()` so the SearchLoader advertises it | `verify-loader-platforms-match-active.ts` |
+| 10 | **Every side the source shows** | take every side the source lists — sale AND rent — or record why not, with proof: a row in `ops_platform_one_sided` (side + a proof URL showing the source itself has no other side). Sakani sat rent-only for a month while its source sold >2,000 units (backlog #865) | `mon_detect_one_sided_platforms()` daily 04:47 UTC: P2 `one_sided_platform` for any one-sided site not in that table, P2 `platform_side_halved` when a site's sale or rent count halves in a day |
 
 ## Why boxes 6 and 7 are separate
 
