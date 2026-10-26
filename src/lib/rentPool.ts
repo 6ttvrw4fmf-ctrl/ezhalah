@@ -35,6 +35,10 @@ export function rentPool(sourceTable: string, sourceRentPeriod: string | null | 
 // PRICE WE SERVE read such a figure as monthly ×12, and the card says so: «السعر المعلن 3,300 شهرياً».
 // Rooms, land, rest houses, chalets, camps and farms are OUT (a room at 6,000 a year is real). Mirrored in SQL by
 // public.rent_price_annual_ar(); the same list and threshold, pinned by scripts/verify-cheap-yearly-is-monthly.ts.
+// THE BAND is [300, 8000): measured on the rule's first live hour (2026-10-26), 118 «yearly» figures sit UNDER
+// 300 SAR (1, 12, 35, 100 …) — placeholders, not monthly rents; ×12 would print «السعر المعلن 35 شهرياً». They
+// stay as published and the price-magnitude guards own them.
+export const CHEAP_YEARLY_FROM = 300;                           // SAR per year, inclusive
 export const CHEAP_YEARLY_BELOW = 8000;                         // SAR per year, exclusive
 export const CHEAP_YEARLY_TYPES_EN = ['Apartment', 'Villa', 'Floor', 'Duplex', 'Studio', 'House', 'Building',
   'Residential Building', 'Office', 'Shop', 'Warehouse', 'Showroom', 'Commercial Building'] as const;
@@ -42,7 +46,7 @@ export function cheapYearlyIsMonthly(sourceTableOrSource: string, sourceRentPeri
   priceAnnual: unknown, cleanType: string | null | undefined): boolean {
   if (isShortStayTable(sourceTableOrSource)) return false;
   if (String(sourceRentPeriod ?? '').trim().toLowerCase() !== 'annual') return false;
-  if (typeof priceAnnual !== 'number' || !Number.isFinite(priceAnnual) || priceAnnual <= 0 || priceAnnual >= CHEAP_YEARLY_BELOW) return false;
+  if (typeof priceAnnual !== 'number' || !Number.isFinite(priceAnnual) || priceAnnual < CHEAP_YEARLY_FROM || priceAnnual >= CHEAP_YEARLY_BELOW) return false;
   return (CHEAP_YEARLY_TYPES_EN as readonly string[]).includes(String(cleanType ?? ''));
 }
 
