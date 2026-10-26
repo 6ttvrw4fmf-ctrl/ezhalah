@@ -1330,3 +1330,25 @@ not wait for the owner to say continue.
 **Philosophy: Source decides truth. Barriers protect truth. Engineer fixes normal bugs
 automatically. Production verification decides whether the fix is actually done. The owner gets
 one report at the end, not 20 requests for approval.**
+
+## 💰 RENT PRICE RULES EVERY ENGINEER MUST KNOW (owner, 2026-10-25/26 — permanent; canonical text in `docs/ARCHITECTURE.md` §20)
+
+1. **«إقامات قصيرة» (the old «شهري» pool) = Gathern + Aqar Monthly ONLY.** Every other site's rent listing
+   with a published period is YEARLY: a per-month figure pools under «سنوي» at ×12 (`price_annual` is
+   already monthly×12), the card reads «/سنوياً» and keeps the site's word: «السعر المعلن 3,000 شهرياً».
+   A price-on-request row from any other site shows under «سنوي»/«كلاهما» only. Pool = `rent_pool_ar()`.
+2. **A «yearly» rent under 8,000 SAR on a home/business unit is a per-month price** (Apartment, Villa,
+   Floor, Duplex, Studio, House, Building, Residential Building, Office, Shop, Warehouse, Showroom,
+   Commercial Building; rooms/land/rest houses/chalets/camps/farms are OUT). The index SERVES it ×12
+   through `rent_price_annual_ar()`; the card does the same (`src/lib/rentPool.ts::cheapYearlyIsMonthly`).
+   The SOURCE TABLES ARE UNTOUCHED — keep storing the site's figure and the site's word (PRICE = SOURCE,
+   PERIOD = SOURCE). Never «fix» a scraper to ×12 a cheap yearly figure: that would double-apply the rule.
+3. **Stay-length cards (Gathern / Aqar Monthly) print NO price line at all**; every yearly card carries a
+   monthly line («السعر المعلن N شهرياً» or «≈ N شهرياً»).
+4. **Off switches:** `ops_feature_flags.short_stays_pool`, `ops_feature_flags.cheap_yearly_is_monthly`
+   (off = the pre-rule behaviour on the next hourly sync). **Guards:** `mon_detect_short_stays_pool_drift()`,
+   `mon_detect_cheap_yearly_rent_served()` (both P1, twice an hour), `verify-short-stays-pool.ts`,
+   `verify-cheap-yearly-is-monthly.ts`, `verify-stay-length-platforms-show-a-note-not-a-price.ts`.
+   An open alert from either detector is YOURS to adjudicate first: read the sample rows, confirm the
+   sync still calls the function, never clear it by widening a pool, raising the threshold or shrinking
+   the type list.

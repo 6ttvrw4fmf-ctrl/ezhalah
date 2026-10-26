@@ -72,6 +72,21 @@ figure misstates them. They are the whole of the «إقامات قصيرة» poo
   owner's approval.
 - Guarded by `scripts/verify-stay-length-platforms-show-a-note-not-a-price.ts`.
 
+# RENT POOLS AND THE CHEAP-«YEARLY» RULE (owner, 2026-10-25/26 — permanent; full text `docs/ARCHITECTURE.md` §20)
+
+**«إقامات قصيرة» (the old «شهري» pool) is Gathern + Aqar Monthly ONLY. Every other site's rent listing is
+YEARLY: a per-month figure pools under «سنوي» at ×12 and the card keeps the site's word — «السعر المعلن
+3,000 شهرياً». A «yearly» rent under 8,000 SAR on a home or business unit (Apartment, Villa, Floor, Duplex,
+Studio, House, Building, Residential Building, Office, Shop, Warehouse, Showroom, Commercial Building) is a
+per-month price and is SERVED ×12; rooms, land, rest houses, chalets, camps and farms are out.** The
+SOURCE TABLES ARE UNTOUCHED (PRICE = SOURCE, PERIOD = SOURCE still hold there) — the index serves through
+`rent_pool_ar()` / `rent_price_annual_ar()` and the card through `src/lib/rentPool.ts`. Never "fix" a
+scraper to ×12 a cheap yearly figure (that double-applies the rule), never add a third platform to the
+short-stays pool, never clear `mon_detect_short_stays_pool_drift` / `mon_detect_cheap_yearly_rent_served`
+by widening a pool, raising the threshold or shrinking the type list. Off switches:
+`ops_feature_flags.short_stays_pool`, `ops_feature_flags.cheap_yearly_is_monthly`. Guards:
+`verify-short-stays-pool.ts`, `verify-cheap-yearly-is-monthly.ts`.
+
 # Read this first — canonical rules + token efficiency (owner rule, 2026-08-10, confirmed permanent)
 
 **Reading order before any research task: `AGENTS.md` (this file) → `docs/ARCHITECTURE.md` →
