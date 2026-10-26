@@ -2,7 +2,7 @@ import { selectSourceTables } from '@/lib/agentSourceSelection';
 import { supabase } from '@/lib/supabase';
 import { PROBE_FAILED, isProbeFailure, type ProbeFailed } from '@/lib/afProbe';
 import { listingPriceString, isDerivedTotal, type Listing } from './listings';
-import { rentPool, cardFetchPeriodOr } from '@/lib/rentPool';
+import { rentPool, cardFetchPeriodOr, cheapYearlyIsMonthly } from '@/lib/rentPool';
 import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
@@ -2035,7 +2035,13 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     // so its card prints «/سنوياً» — and `sourceRentPeriod` below keeps the site's own word for the
     // «السعر المعلن 3,000 شهرياً» line. An unpublished period still pools as null, never 'annual'.
     const pool = deal === 'Rent' ? rentPool(r.source ?? '', r.rent_period) : null;
-    const priceStr = listingPriceString(deal, pool, r.price_annual, r.price_total,
+    // A «yearly» rent under 8,000 SAR on a home/business unit is a per-month price (owner 2026-10-26,
+    // src/lib/rentPool.ts::cheapYearlyIsMonthly; the index serves it ×12 through rent_price_annual_ar()):
+    // served ×12 here too, and the site's word becomes 'monthly' so the card says «السعر المعلن 3,300 شهرياً».
+    const cheapYearly = deal === 'Rent' && cheapYearlyIsMonthly(r.source ?? '', r.rent_period, r.price_annual, norm.clean);
+    const servedAnnual: unknown = cheapYearly ? (r.price_annual as number) * 12 : r.price_annual;
+    const servedSourcePeriod = cheapYearly ? 'monthly' : (r.rent_period ?? null);
+    const priceStr = listingPriceString(deal, pool, servedAnnual, r.price_total,
                                         r.price_per_meter, r.area_m2);
     const priceIsDerived = isDerivedTotal(deal, r.price_total, r.price_annual, r.price_per_meter, r.area_m2);
     // Aqar (both residential & commercial) scrapes its own "no photo" placeholder graphic
@@ -2093,7 +2099,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       source: r.source ?? 'Aqar',
       // Same rule as priceStr above: an unpublished period stays NULL, it never becomes 'annual'.
       rentPeriod: pool,
-      sourceRentPeriod: deal === 'Rent' ? (r.rent_period ?? null) : null,
+      sourceRentPeriod: deal === 'Rent' ? servedSourcePeriod : null,
       // THE NUMBER THE SERVER FILTERED ON, carried rather than reconstructed (2026-09-06, regression
       // hunter). `price` prints a source-MONTHLY rent at Math.round(price_annual / 12), so ×12-ing
       // the printed figure recovers price_annual only when it divides by 12 — it is short by up to
@@ -2102,7 +2108,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // 12,583/mo, reconstructs to 150,996, and vanished from a search with a 151,000 yearly floor
       // the RPC had matched it against. Carrying the real figure removes the rounding step from
       // every price comparison at once. VERBATIM, like pricePerMeter above.
-      priceAnnual: deal === 'Rent' && typeof r.price_annual === 'number' ? r.price_annual : null,
+      priceAnnual: deal === 'Rent' && typeof servedAnnual === 'number' ? servedAnnual : null,
       // UNKNOWN IS NOT «مؤخراً» (P2, 107,254 active listings — 54.3% of inventory). This used to be
       // `?? 'recently'`, manufacturing a positive FRESHNESS CLAIM out of a date the source never
       // published, one layer above any display guard that could have caught it: ResultCard already
