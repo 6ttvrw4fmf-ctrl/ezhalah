@@ -213,7 +213,7 @@ jobs:
             #   default) keeps >=2x at 2 s; re-size from the first dispatched run's duration.
             - { source: aqalemhajer,    cmd: "python -m scrapers.aqalemhajer.run --type all", tmo: 90, proxy: true, browser: true }
             #   sakani: 15 API pages + 282 detail records at 1.5 s (measured 740 s dry run).
-            - { source: sakani,         cmd: "python -m scrapers.sakani.run --type all", tmo: 45, proxy: true }
+            - { source: sakani,         cmd: "python -m scrapers.sakani.run --type all", tmo: 150, proxy: true }  # sale side (2,963 rows, ~70 min of details at 1.5 s) joins the rent walk: backlog 864, owner 2026-10-25
             #   API / REST sources whose whole catalogue is one page or a handful of calls:
             #   shatri: `proxy: true` (2026-10-02, Scraping Engineer) — WP REST answered 403 to the runner IP;
             #   the scraper probes 3 profiles DIRECT first, so the proxy is spent only when refused.
