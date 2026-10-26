@@ -157,7 +157,7 @@ export default function Home() {
     if (!c) return;
     setQuery(() => sanitizeForFilterRestore(c.query));
     setActiveChat(c.id);
-    router.replace({ pathname: '/agent', params: { filter: JSON.stringify(c.query), replay: '0', hid: c.id } });
+    router.push({ pathname: '/agent', params: { filter: JSON.stringify(c.query), replay: '0', hid: c.id } });
   }, [user?.sub, history.length]); // eslint-disable-line react-hooks/exhaustive-deps
   // A SHARED SEARCH LANDS HERE (owner 2026-10-17). `/?share=<payload>` (src/lib/shareSearch.ts) shows a
   // card «عقارات من {name} لك على إزهله» with «اضغط وشوف العقارات». The TAP is what runs the search

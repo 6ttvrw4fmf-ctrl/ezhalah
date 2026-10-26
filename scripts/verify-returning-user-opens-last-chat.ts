@@ -48,7 +48,7 @@ check('the store remembers every chat the user opens', /useEffect\(\(\) => \{ if
 check('the home page stamps its first view and reopens through the sidebar\'s own open path',
   /useEffect\(\(\) => \{ markFirstHomeView\(\); \}, \[\]\);/.test(home)
   && /const id = takeLastChatToResume\(user\.sub, history\.map\(\(h\) => h\.id\)\);/.test(home)
-  && /router\.replace\(\{ pathname: '\/agent', params: \{ filter: JSON\.stringify\(c\.query\), replay: '0', hid: c\.id \} \}\);/.test(home));
+  && /router\.push\(\{ pathname: '\/agent', params: \{ filter: JSON\.stringify\(c\.query\), replay: '0', hid: c\.id \} \}\);/.test(home));
 
 if (fail) { console.error(`\n❌ ${fail} check(s) failed`); process.exit(1); }
 console.log('\n✅ returning-user-opens-last-chat: once per tab, first seconds only, own account, still in history');
