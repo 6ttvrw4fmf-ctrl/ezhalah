@@ -1458,8 +1458,7 @@ export default function Home() {
                 in Arabic the drawing is flipped so he points back at the words. */}
             <View style={heroWide ? s.heroTitleBlockWide : s.heroTitleBlock}>
               <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
-                <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>
-                  {welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}
+                <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}
                   {authChecked && !user ? (
                     <View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, s.heroFalconerInline]}>
                       <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} />
