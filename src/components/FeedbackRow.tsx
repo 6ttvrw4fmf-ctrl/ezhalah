@@ -16,6 +16,7 @@ import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { getListingFeedback, setListingFeedback, type FeedbackRating } from '@/lib/listingFeedback';
 import { openWhatsAppCompose, isTouchDevice } from '@/lib/shareToWhatsApp';
+import { SHARE_LINK } from '@/lib/share';
 import { speakReadAloud, stopReadAloud, subscribeReadAloud, readAloudRefusal, hasSpeakableContent,
          type ReadAloudSegment } from '@/lib/readAloud';
 import { readAloudRefusalMessageKey, type ReadAloudRefusal } from '@/lib/readAloudVoice';
@@ -105,7 +106,7 @@ export default function FeedbackRow({
   // (the share icon briefly becomes a check). Never throws
   // to the user (cancel = no-op).
   const onShare = async () => {
-    let url = shareUrl || 'https://ezhalah-app.vercel.app';
+    let url = shareUrl || SHARE_LINK;
     if (prepareShare) { try { url = (await prepareShare()) || url; } catch { /* the search link still works */ } }
     const withText = shareText ? `${shareText}\n${url}` : url;
     try {
