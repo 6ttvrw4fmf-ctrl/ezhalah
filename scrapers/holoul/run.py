@@ -50,21 +50,29 @@ _NEVER_STORE = {"nhc_advertiser_name", "nhc_advertiser_phone", "nhc_advertiser_i
                 "nhc_location_desc_on_moj_deed", "nhc_borders", "nhc_rer_boarders", "agency"}
 
 
+PER_PAGE = 20     # 2026-10-26: per_page=100 page 1 was 658 KB / 8.2 s against ~1 s for a 10-row page; the
+                  # nightly read «HTTP Error 504» 10-21 → 10-25 while every page answered when asked smaller
+RETRY_WAITS = (5, 15, 30)
+
+
 def walk(s: cc.Session) -> tuple[list[dict], int]:
+    """Every unit record, in small pages. A 5xx/transport error on a page is retried with a growing wait,
+    and the error that finally escapes names the page, so a failed run says WHERE it failed."""
     rows: list[dict] = []
     total = 0
-    for page in range(0, 50):
-        for attempt in range(3):
+    for page in range(0, 500):
+        for attempt in range(len(RETRY_WAITS) + 1):
             try:
-                r = s.get(f"{API}?page={page}&per_page=100", timeout=40,
+                r = s.get(f"{API}?page={page}&per_page={PER_PAGE}", timeout=60,
                           headers={"Accept-Language": "ar"})
                 r.raise_for_status()
                 d = r.json()
                 break
-            except Exception:  # noqa: BLE001
-                if attempt == 2:
-                    raise
-                time.sleep(2 + attempt * 3)
+            except Exception as e:  # noqa: BLE001
+                if attempt == len(RETRY_WAITS):
+                    raise RuntimeError(f"units page {page} (per_page={PER_PAGE}) failed "
+                                       f"{attempt + 1}x: {e}") from e
+                time.sleep(RETRY_WAITS[attempt])
         total = int(d.get("total") or 0)
         rows += d.get("result") or []
         if page + 1 >= int(d.get("pages") or 1):
