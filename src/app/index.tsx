@@ -11,6 +11,7 @@ import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
+import HeroFalconer from '@/components/HeroFalconer';
 import CloudWisp from '@/components/CloudWisp';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { HERO_TAGLINE_KEYS, nextHeroTaglineIndex } from '@/data/heroTaglineRotation';
@@ -1474,8 +1475,7 @@ export default function Home() {
               </Pressable>
               {authChecked && !user ? (
                 <RNAnimated.View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, reveal(titleAnim, 20)]}>
-                  <CloudWisp variant={0} width={heroWide ? 70 : 54} height={heroWide ? 22 : 17} opacity={0.5} style={{ bottom: -4, left: -14 }} />
-                  <XImage source={require('../../assets/icons/insight-falconer-original.png')} contentFit="contain" accessible={false} style={[StyleSheet.absoluteFill, locale === 'ar' && s.flipX]} />
+                  <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} />
                 </RNAnimated.View>
               ) : null}
             </View>
@@ -2410,7 +2410,6 @@ const s = StyleSheet.create({
   heroTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, maxWidth: '100%' },
   heroTitleBox: { flexShrink: 1 },
   heroTitleRowAr: { flexDirection: 'row-reverse' },
-  flipX: { transform: [{ scaleX: -1 }] },
   heroFalconer: { width: 40, height: 46, flexShrink: 0 },
   heroFalconerWide: { width: 52, height: 60, flexShrink: 0 },
   sharedBackdrop: {
