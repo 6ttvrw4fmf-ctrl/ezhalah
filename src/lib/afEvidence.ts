@@ -79,7 +79,7 @@ export const AMENITY_LABEL: Record<string, string> = {
   car_entrance: 'Car entrance', sanitation: 'Sewage connection', electricity: 'Electricity',
   water_supply: 'Water supply', furnished: 'Furnished',
   gym: 'Gym', pool: 'Pool', garden: 'Garden', balcony: 'Balcony',
-  laundry_room: 'Laundry room', optical_fibers: 'Optical fibers', majlis: 'Majlis',
+  laundry_room: 'Laundry room', optical_fibers: 'Optical fibers', majlis: 'Majlis room',
   separate_electricity_meter: 'Separate electricity meter',
   separate_water_meter: 'Separate water meter',
 };

@@ -23,7 +23,7 @@
 export const AMEN_UNKNOWN_COLUMNS = [
   'kitchen', 'parking', 'elevator', 'air_conditioner', 'private_entrance', 'maid_room', 'driver_room',
   'car_entrance', 'sanitation', 'electricity', 'water_supply', 'gym', 'pool', 'garden', 'balcony',
-  'laundry_room', 'optical_fibers', 'separate_electricity_meter', 'separate_water_meter', 'majlis', 'furnished',
+  'laundry_room', 'optical_fibers', 'separate_electricity_meter', 'separate_water_meter', 'furnished',
 ] as const;
 
 const AGE = new Set(['new', '1_2', '3_5', '6_9', '10p', 'upto2', 'upto5', 'upto9']);

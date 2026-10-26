@@ -38,7 +38,7 @@ export const FEATURE_META: Array<{ key: keyof NonNullable<Listing['features']>; 
   { key: 'private_entrance', icon: 'walk-outline',          label: 'Private Entrance' },
   { key: 'air_conditioner',  icon: 'snow-outline',          label: 'Air Conditioning' },
   { key: 'optical_fibers',   icon: 'wifi-outline',          label: 'Fiber Internet' },
-  { key: 'majlis',           icon: 'people-outline',        label: 'Majlis' },
+  { key: 'majlis',           icon: 'people-outline',        label: 'Majlis room' },
   { key: 'water_supply',     icon: 'water-outline',         label: 'Water Supply' },
   { key: 'electricity',      icon: 'flash-outline',         label: 'Electricity' },
   { key: 'sanitation',       icon: 'shield-checkmark-outline', label: 'Sanitation' },
