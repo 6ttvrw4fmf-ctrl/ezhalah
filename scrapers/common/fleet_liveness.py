@@ -175,16 +175,29 @@ def struck(client, site: str) -> int:
 
 
 def _rows(client, table: str, cols: str, *, order: list[tuple[str, bool]], limit: int, since=None) -> list[dict]:
+    # Offset pages are only a partition of the table when the order is TOTAL. Every row one run
+    # touches gets the SAME last_liveness_probe_at, so on that key alone Postgres may order a tie
+    # differently on each page request: rows were read twice while others never were (2026-10-26:
+    # haraj 1,755 of 13,037 active not read for 2+ days, rakez 191, tuba 163, each run «covered 100%»).
+    # `id` breaks every tie, and a row is kept once even if a concurrent write moves it across pages.
+    order = list(order) + ([] if any(c == "id" for c, _ in order) else [("id", False)])
     out: list[dict] = []
-    while len(out) < limit:
+    seen: set = set()
+    offset = 0
+    while offset < limit:
         q = client.table(table).select(cols).eq("active", True)
         if since:
             q = q.gte("last_seen_at", since)
         for col, desc in order:
             q = q.order(col, desc=desc, nullsfirst=not desc)
-        n = min(PAGE, limit - len(out))
-        page = _execute(q.range(len(out), len(out) + n - 1), what=f"{table}.read").data or []
-        out += [dict(r, _table=table) for r in page if r.get("ad_number")]
+        n = min(PAGE, limit - offset)
+        page = _execute(q.range(offset, offset + n - 1), what=f"{table}.read").data or []
+        offset += len(page)
+        for r in page:
+            key = r.get("id", id(r))
+            if r.get("ad_number") and key not in seen:
+                seen.add(key)
+                out.append(dict(r, _table=table))
         if len(page) < n:
             break
     return out
