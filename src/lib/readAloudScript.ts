@@ -23,7 +23,8 @@ const PAUSE_MS = 450; // short, natural — long enough to read as a beat, not a
 // discount/RNPL panels, "recently added" — matches the owner's "keep it concise" instruction.
 function cardSpeech(listing: Listing, locale: 'ar' | 'en' = 'ar'): string {
   if (locale === 'en') {
-    const facts = [`${listingTypeEn(listing)} in ${listingLocationEn(listing)}`, listingPrice(listing, 'en')];
+    // A stay-length platform has no price line (owner 2026-10-26): listingPrice() is '' and nothing is spoken for it.
+    const facts = [`${listingTypeEn(listing)} in ${listingLocationEn(listing)}`, listingPrice(listing, 'en')].filter(Boolean);
     if (listing.beds > 0) facts.push(`${listing.beds} ${translate('en', listing.beds === 1 ? 'Bed' : 'Beds')}`);
     if ((listing.bathrooms ?? 0) > 0) facts.push(`${listing.bathrooms} ${translate('en', listing.bathrooms === 1 ? 'Bath' : 'Baths')}`);
     if (listing.area > 0) facts.push(`${translate('en', 'Area')} ${listing.area} ${translate('en', 'm²')}`);
@@ -36,7 +37,7 @@ function cardSpeech(listing: Listing, locale: 'ar' | 'en' = 'ar'): string {
   if (listing.beds > 0) stats.push(`${listing.beds} ${translate('ar', listing.beds === 1 ? 'Bed' : 'Beds')}`);
   if ((listing.bathrooms ?? 0) > 0) stats.push(`${listing.bathrooms} ${translate('ar', listing.bathrooms === 1 ? 'Bath' : 'Baths')}`);
   if (listing.area > 0) stats.push(`${translate('ar', 'Area')} ${listing.area} ${translate('ar', 'm²')}`);
-  const sentences = [headline, price];
+  const sentences = [headline, price].filter(Boolean);
   if (stats.length) sentences.push(stats.join('، '));
   sentences.push(listingPlatformAr(listing));
   return sentences.join('. ');
