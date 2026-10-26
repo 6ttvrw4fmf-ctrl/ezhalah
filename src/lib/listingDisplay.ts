@@ -6,6 +6,7 @@ import type { Listing, ListingDiscount } from '@/data/listings';
 import { englishCatalogText, translate, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, type Locale } from '@/i18n';
 import { arabicOrPlaceholder } from './arabicText';
 import { translitPlace } from './translitPlace';
+import { advertisedMonthly } from './rentPool';
 
 // #1 (source-accurate, mirrors ResultCard.tsx): the RAW scraped type when it's already Arabic, else
 // the clean-type mapping translated to Arabic — never leaks a raw English type string.
@@ -39,6 +40,15 @@ export function listingPrice(listing: Listing, loc: Locale): string {
 }
 export function listingPriceAr(listing: Listing): string {
   return listingPrice(listing, 'ar');
+}
+
+// «السعر المعلن 3,000 شهرياً» (owner 2026-10-25, src/lib/rentPool.ts): a site that quotes PER MONTH pools as
+// yearly at ×12, so listingPrice() reads «/سنوياً» — this line keeps the site's own figure and word under it.
+// Only when the pool is yearly and the source said monthly; short-stay and yearly-quoted sites get null.
+export function advertisedMonthlyText(listing: Listing, loc: Locale): string | null {
+  const monthly = advertisedMonthly(listing.rentPeriod as 'monthly' | 'annual' | null, listing.sourceRentPeriod, listing.priceAnnual);
+  if (monthly == null) return null;
+  return translate(loc, 'Advertised price {a}/month', { a: `${translate(loc, 'SAR')} ${monthly.toLocaleString('en-US')}` });
 }
 
 // A DISCOUNT IS SHOWN ONLY WHEN THE SOURCE PUBLISHED ONE, AND ONLY NEXT TO THE FINAL PRICE
