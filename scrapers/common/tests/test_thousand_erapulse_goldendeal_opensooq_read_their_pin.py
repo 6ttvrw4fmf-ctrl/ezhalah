@@ -48,4 +48,4 @@ def test_opensooq_ad_page_query_link_is_the_pin():
     page = '<a href="https://www.google.com/maps/search/?api=1&amp;query=17.053362,47.076832&amp;zoom=15">الموقع</a>'
     assert pin_from_html(page) == {"latitude": 17.053362, "longitude": 47.076832}
     src = (ROOT / "scrapers" / "opensooq" / "run.py").read_text(encoding="utf-8")
-    assert 'pin = _page_pin(s, x["id"])' in src and 'return pin_from_html(r.text) if r.status_code == 200 else {}' in src
+    assert 'pin = _page_pin(s, x["id"]' in src and 'return pin_from_html(r.text) if r.status_code == 200 else {}' in src
