@@ -112,7 +112,13 @@ FACT_TOKENS: dict[str, list[Any]] = {
     "private_entrance": ["مداخل خاصة", "مداخل مستقلة", ("re:مدخل (?:ال)?مشترك", False)],
     "car_entrance": ["مدخل للسيارة", "مدخل للسيارات", "مدخل سيارتين"],
     "optical_fibers": ["re:(?:ال)?الياف (?:ال)?(?:ضوئيه|بصريه)", "fibreoptic", "^fiber", "^fibre"],
-    "furnished": ["^موثث", ("re:(?:بدون|بلا|من غير) (?:ال)?اثاث", False), "re:(?:مع|شامل|شامله) (?:ال)?اثاث"],
+    # Silent-ads teacher pass (facts-silent-2026-10-26): short-stay sellers (gathern, aqarmonthly) write the furniture
+    # itself — «بأثاث مودرن / فاخر / مريح / عصري / راقي / أنيق», «بتأثيث فندقي», «متكاملة الأثاث», «مجهزة بالكامل» — 118 of
+    # 124 AI furnished rows were this shape and the reader had none of them. A described piece of furniture is the
+    # seller naming it; «بدون تأثيث» / «غير مؤثث» stay an explicit no.
+    "furnished": ["^موثث", ("re:(?:بدون|بلا|من غير|غير) (?:ال)?(?:اثاث|تاثيث|موثث)", False), "re:(?:مع|شامل|شامله) (?:ال)?اثاث",
+                  "re:(?:ب|و|وب)?(?:ال)?اثاث (?:مودرن|فاخر|مريح|عصري|راقي|انيق|هادي|كامل|جديد|حديث|فندقي)",
+                  "re:(?:ب|و|وب)?تاثيث (?:فندقي|كامل|فاخر|مودرن|عصري|راقي)", "re:متكامل(?:ه)? (?:ال)?اثاث"],
     "electricity": ["^كهرباء", "^كهربا$", "^electricity"],
     "water_supply": ["^مياه", "^ماء$", "^مويه$", "re:waters?"],
     "sanitation": ["re:(?:ال)?صرف (?:ال)?صحي", "^sanitation", "^sewage", "^sewer"],
@@ -664,6 +670,14 @@ def selftest() -> None:
         ("لا يوجد مصعد", {"elevator": False}, ()),
         ("ولا يوجد مصعد في المبنى", {"elevator": False}, ()),
         ("مفروشة: لا", {"furnished": False}, ()),
+        # silent-ads teacher pass 2026-10-26: the furniture named by its kind
+        ("شقة بأثاث مودرن ومريح", {"furnished": True}, ()),
+        ("استديو مريح بتأثيث فندقي للإيجار اليومي", {"furnished": True}, ()),
+        ("ومتكاملة الاثاث والادوات الكهربائية", {"furnished": True}, ()),
+        ("مطبخ مجهز بالكامل", {}, ("furnished",)),
+        ("شقة بدون تأثيث", {"furnished": False}, ()),
+        ("شقة غير مؤثثة بصالة واسعة", {"furnished": False}, ()),
+        ("شقة بصالة انيقة وغرفة نوم", {}, ("furnished",)),
         ("مفروش: لا (غير مفروش)", {"furnished": False}, ()),
         ("مطبخ غير راكب", {"kitchen": False}, ()),
         ("مطبخ (SPLIT) (غير راكب)", {"kitchen": False}, ()),
