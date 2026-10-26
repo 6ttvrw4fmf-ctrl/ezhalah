@@ -20,7 +20,9 @@ export const FRONT_DOOR = process.env.EXPO_PUBLIC_FRONT_DOOR !== '0';
 // ONLY on the real site. The door (/sb) and both guards exist only there, and Cloudflare Turnstile answers any other
 // host with error 110200 (measured 2026-10-21: CI's local build threw «Uncaught TurnstileError 110200» and its search
 // journey failed). Local, CI and preview builds keep talking to the database directly, exactly as before.
-export const FRONT_DOOR_HOSTS = ['ezhalah-app.vercel.app'];
+// ezhalah.com (owner 2026-10-26: the domain is moving to Vercel): its visitors must use the door too, or the
+// back-door lock would refuse them. Turnstile must list it as well (Cloudflare dashboard), else no human pass there.
+export const FRONT_DOOR_HOSTS = ['ezhalah-app.vercel.app', 'ezhalah.com', 'www.ezhalah.com'];
 export function frontDoorHost(hostname: string): boolean { return FRONT_DOOR_HOSTS.includes(hostname); }
 const webFront = typeof window !== 'undefined' && typeof window.fetch === 'function' && FRONT_DOOR && !!url
   && frontDoorHost(window.location?.hostname ?? '');
