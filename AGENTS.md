@@ -509,6 +509,12 @@ Two rules that exist specifically to stop autonomy becoming recklessness:
 
 # Production target (P0, non-negotiable — 2026-07-21)
 
+**UPDATED 2026-10-26 (owner): the production address is now https://ezhalah.com — the final domain.** The same
+Vercel project `ezhalah-app` serves it; `ezhalah-app.vercel.app` forwards every page to ezhalah.com (vercel.json,
+except `/sb/` and `/api/` so open tabs keep working), and `DTG_CANONICAL_URL` (scripts/deploy-target-guard.sh)
+is ezhalah.com, so every deploy proves ezhalah.com serves the new bundle. Everything below still applies with
+ezhalah.com in place of the old URL; `www` forwards to the apex.
+
 **The production frontend lives at ONE URL only: `https://ezhalah-app.vercel.app`.** When the owner
 says "deploy" / "test deploy" / "push it live," it means THIS URL — never a preview URL, never a
 different Vercel project, never a different alias. This applies to every path that could put the
