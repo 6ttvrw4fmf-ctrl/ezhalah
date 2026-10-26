@@ -719,10 +719,10 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                             <Image
                               source={h.gov
                                 ? require('../../assets/icons/ministry-of-justice.webp')
-                                : require('../../assets/icons/falconer-property.png')}
+                                : require('../../assets/images/logo-cloud-sky.svg')}
                               contentFit="contain"
                               accessible={false}
-                              testID={h.gov ? 'actual-sales-ministry-logo' : 'listed-now-falconer-logo'}
+                              testID={h.gov ? 'actual-sales-ministry-logo' : 'listed-now-ezhalah-logo'}
                               style={s.halfLogo}
                             />
                             <Text numberOfLines={1} style={[s.halfTitle, { flexShrink: 1 }, tx]}>{h.title}</Text>

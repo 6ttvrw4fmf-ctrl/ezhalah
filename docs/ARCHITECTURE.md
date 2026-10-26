@@ -430,8 +430,8 @@ use `t(sourceName(listing.source))`, matching the result card. Arabic prose is h
 like ResultCard. No photos means no gallery box. The preview and iframe host lists are disjoint.
 
 **Listed-now identity (owner, 2026-10-19):** the Aqar sale price comparison's
-«المعروض الآن» / “Listed now” heading carries the approved transparent Saudi falconer holding
-a falcon, with a house integrated into the silhouette (`assets/icons/falconer-property.png`).
+«المعروض الآن» / “Listed now” heading carries the Ezhalah cloud-eagle logo (`assets/images/logo-cloud-sky.svg`;
+owner 2026-10-26 removed the falconer-holding-a-falcon-over-a-house drawing that stood here since 2026-10-19).
 Use a compact 30 px image beside the heading, mirrored placement for Arabic; the Ministry's
 actual-sales heading uses the Ministry's official green-and-gold logo in the same 30 px frame
 (`assets/icons/ministry-of-justice.webp`, copied unchanged from the official homepage's
