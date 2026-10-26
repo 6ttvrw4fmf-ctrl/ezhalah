@@ -99,7 +99,8 @@ const finalizeSrc = REMOTE.slice(REMOTE.indexOf('function finalize('));
 const { rentPool, cardFetchPeriodOr } = await import('../src/lib/rentPool.ts');
 check('finalize() delegates the price line to listingPriceString()',
   /const pool = deal === 'Rent' \? rentPool\(r\.source \?\? '', r\.rent_period\) : null;/.test(finalizeSrc)
-  && /const priceStr = listingPriceString\(deal, pool, r\.price_annual, r\.price_total\s*(?:,[\s\S]{0,80}?)?\)/
+  // (2026-10-26: `servedAnnual` = r.price_annual, or ×12 for a cheap «yearly» home/business rent — one owner still)
+  && /const priceStr = listingPriceString\(deal, pool, servedAnnual, r\.price_total\s*(?:,[\s\S]{0,80}?)?\)/
     .test(finalizeSrc),
   'finalize() no longer calls listingPriceString — the formatting rule has a second owner again, '
   + 'and the behavioural checks above no longer cover what the card actually renders');

@@ -59,6 +59,7 @@ const isJunkLocationToken = () => false;
 const listingPriceString = () => '';
 // The rent POOL (2026-10-25, src/lib/rentPool.ts) is built in finalize() but is not a date; stubbed like the price.
 const rentPool = () => null;
+const cheapYearlyIsMonthly = () => false;
 `;
 
 const load = async (source: string) => {
