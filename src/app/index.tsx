@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { sanitizeForFilterRestore } from '@/lib/searchDefaults';
-import { markFirstHomeView, takeLastChatToResume } from '@/lib/lastChat';
 import { AppState, Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Image as XImage } from 'expo-image'; // SVG logo: a vector drawing, not a photo (owner 2026-10-24)
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -147,19 +145,7 @@ export default function Home() {
   const districtLabel = (cityId: number, ar: string) => (locale === 'en' ? districtNameEn(cityId, ar) : ar);
   // A «حي X · City» row in the city box (owner decision 2026-10-19, backlog 522/566) names the district AND its city.
   const cityRowLabel = (o: CityOption) => (o.districtAr ? `${districtLabel(o.cityId, o.districtAr)} · ${cityLabel(o)}` : cityLabel(o));
-  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history, importSharedChat, authChecked, setActiveChat } = useApp();
-  // «Show the last thing he did» (owner 2026-10-26): the tab's first home view sends a signed-in user back into
-  // the chat they had open last — the same open path as a sidebar row. Once per tab, only in the first seconds.
-  useEffect(() => { markFirstHomeView(); }, []);
-  useEffect(() => {
-    if (!user || !history.length) return;
-    const id = takeLastChatToResume(user.sub, history.map((h) => h.id));
-    const c = id ? history.find((h) => h.id === id) : undefined;
-    if (!c) return;
-    setQuery(() => sanitizeForFilterRestore(c.query));
-    setActiveChat(c.id);
-    router.push({ pathname: '/agent', params: { filter: JSON.stringify(c.query), replay: '0', hid: c.id } });
-  }, [user?.sub, history.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history, importSharedChat, authChecked } = useApp();
   // A SHARED SEARCH LANDS HERE (owner 2026-10-17). `/?share=<payload>` (src/lib/shareSearch.ts) shows a
   // card «عقارات من {name} لك على إزهله» with «اضغط وشوف العقارات». The TAP is what runs the search
   // (a pasted link never runs one by itself — appSession gate). Owner: the recipient signs in to open a
