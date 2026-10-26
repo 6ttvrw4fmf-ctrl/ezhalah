@@ -175,4 +175,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from scrapers.common import probe_20261026 as P
+    getattr(P, "senan")()
+    raise SystemExit(1)
