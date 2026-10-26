@@ -5,7 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, font, lightColors, radius } from '@/theme/tokens';
 import { BUZZER_GOLD, TAP44 } from '@/theme/palette';
 import { useI18n, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
-import { listingPrice, listingDiscountOldPrice, sourceName, advertisedMonthlyText } from '@/lib/listingDisplay';
+import { listingPrice, listingDiscountOldPrice, sourceName, monthlyLineText } from '@/lib/listingDisplay';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, attrDisplayLabel, hideArabicProseInEnglish, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { translitPlace } from '@/lib/translitPlace';
 import { DIRECTION_LABEL } from '@/lib/afEvidence';
@@ -569,14 +569,18 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             host badge on the end side: the site's logo big, «مستضاف على {site}», a tap to the real ad */}
         <View style={s.head} onLayout={measure('head')}>
           <View style={s.headMain}>
-            <Text testID="listing-preview-price" numberOfLines={1} style={[s.price, tx]}>
-              {priceRuns(listingPrice(l, locale)).map((r, i) => <Text key={i} style={r.num ? s.priceNum : s.priceUnit}>{r.text}</Text>)}
-            </Text>
-            {/* «السعر المعلن 3,000 شهرياً» (owner 2026-10-25): the site quoted per month; the pool is yearly at ×12. */}
+            {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
+            {listingPrice(l, locale) ? (
+              <Text testID="listing-preview-price" numberOfLines={1} style={[s.price, tx]}>
+                {priceRuns(listingPrice(l, locale)).map((r, i) => <Text key={i} style={r.num ? s.priceNum : s.priceUnit}>{r.text}</Text>)}
+              </Text>
+            ) : null}
+            {/* The monthly line under every yearly price (owner 2026-10-26): «السعر المعلن … شهرياً» when the site quoted
+                per month, «≈ … شهرياً» (÷12) when it quoted per year. */}
             {(() => {
-              const text = advertisedMonthlyText(l, locale);
+              const text = monthlyLineText(l, locale);
               return text == null ? null : (
-                <Text testID="listing-preview-advertised-monthly" numberOfLines={1} style={[s.priceUnit, tx]}>{text}</Text>
+                <Text testID="listing-preview-monthly-line" numberOfLines={1} style={[s.priceUnit, tx]}>{text}</Text>
               );
             })()}
             {/* Source-published discount (owner 2026-10-19): the old price struck + «خصم X٪» under the
