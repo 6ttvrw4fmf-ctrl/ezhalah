@@ -13,6 +13,10 @@ const FALCONER = require('../../assets/icons/insight-falconer-original.png');
 const EAGLE = require('../../assets/images/falcon-takeoff.svg');
 const ART_W = 167, ART_H = 192;
 const CANVAS = { x: -140, y: -170, w: 310, h: 290 };
+// The falcon is drawn a little larger than life against him so its take-off reads at a glance (owner 2026-10-26:
+// «make the falcon a bit bigger»), scaled about the spot where it stands on his hand so it still lands there.
+const FALCON_SCALE = 1.2;
+const PERCH = { x: 24, y: 92 };
 
 // The falconer beside the home title (owner 2026-10-26): standing in the sky, partly covered by soft clouds that
 // drift slowly across him («cover him with clouds a bit … let the clouds move»). `flip` mirrors the drawing (and the
@@ -48,7 +52,10 @@ export default function HeroFalconer({ size, flip }: { size: { width: number; he
         <XImage source={FALCONER} contentFit="contain" accessible={false} style={StyleSheet.absoluteFill} />
         {takeoff ? (
           <XImage testID="hero-eagle-takeoff" source={EAGLE} contentFit="fill" accessible={false}
-            style={{ position: 'absolute', left: ox + CANVAS.x * k, top: oy + CANVAS.y * k, width: CANVAS.w * k, height: CANVAS.h * k }} />
+            style={{ position: 'absolute',
+              left: ox + PERCH.x * k + (CANVAS.x - PERCH.x) * k * FALCON_SCALE,
+              top: oy + PERCH.y * k + (CANVAS.y - PERCH.y) * k * FALCON_SCALE,
+              width: CANVAS.w * k * FALCON_SCALE, height: CANVAS.h * k * FALCON_SCALE }} />
         ) : null}
       </View>
       {/* In FRONT of him: a low bank over his chest and a thin wisp across his shoulder, each on its own slow clock. */}
