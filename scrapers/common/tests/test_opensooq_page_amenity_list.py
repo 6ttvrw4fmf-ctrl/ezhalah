@@ -59,3 +59,14 @@ def test_one_get_files_the_pin_and_the_answers(monkeypatch):
     failed: dict = {}
     R._page_pin(_S(_Resp(503, LIVE)), 1, failed)
     assert failed == {}                                  # a failed read is no statement: the prose fallback stays
+
+
+def test_the_score_reads_the_same_list_and_never_another_ads_card():
+    """🔬 10-26: 13872036 was asked elevator from a related ad's card («شقة للايجار فاخرة مصعد راكب») on the page."""
+    from scrapers.common import af_score as A
+    card = "شقة للايجار فاخرة مصعد راكب وموقع قريب من جميع الخدمات"
+    no_lift = {"jsonld": [{"additionalProperty": A.opensooq_props(LIVE.replace('\\"مصعد\\"]', ']'))}]}
+    assert A.structured_says(no_lift, "elevator") is None and A.structured_says(no_lift, "parking") is True
+    assert not A.says_yes([card], "elevator", "opensooq", no_lift)
+    lift = {"jsonld": [{"additionalProperty": A.opensooq_props(LIVE)}]}
+    assert A.says_yes([], "elevator", "opensooq", lift)
