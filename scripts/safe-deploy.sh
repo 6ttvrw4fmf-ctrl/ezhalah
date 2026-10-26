@@ -14,6 +14,8 @@ set -euo pipefail
 # provides EZ_GATE_SECRET, so they keep working once the bare public key is refused. Empty-safe under set -u.
 EZ_GATE_H=()
 if [ -n "${EZ_GATE_SECRET:-}" ]; then EZ_GATE_H=(-H "x-ezhalah-gate: ${EZ_GATE_SECRET}"); fi
+# Tag gated calls so edge_logs can tell our own gate from a bare-key script (⚡ 10-25, backlog 817).
+if [ -n "${EZ_GATE_SECRET:-}" ]; then EZ_GATE_H+=(-H "x-client-info: curl ezhalah-gate"); fi
 cd "$(git rev-parse --show-toplevel)"
 
 # Single source of truth for the production-target lock (constants + pure predicates). The exact
@@ -168,7 +170,7 @@ scripts/schema-drift-gate.sh pre "$PRE_DRIFT_ANON_KEY" || {
   exit 1
 }
 
-PRE_BUNDLE="$(curl -s -H 'Cache-Control: no-cache' "https://ezhalah-app.vercel.app/?_=$(date +%s%N)" | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
+PRE_BUNDLE="$(curl -s -H 'Cache-Control: no-cache' "$DTG_CANONICAL_URL/?_=$(date +%s%N)" | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
 
 # Capture the unique deployment URL vercel prints, and — the load-bearing one — the artifact THIS
 # BUILD EMITTED. Expo prints it in the build log ("› web bundles (1): _expo/.../entry-<md5>.js"), so
@@ -258,6 +260,14 @@ if [ "${EZ_ROLLING_RELEASE:-}" = "1" ]; then
   CANARY_JAR="$(mktemp)"
   echo ""
   echo "Rolling release: this build is serving 10% of traffic; verifying the CANARY first, then the gate decides."
+  # AFTER AN ABORT VERCEL NO LONGER STARTS THE NEXT RELEASE BY ITSELF (team events, 2026-10-24): an abort is
+  # an instant rollback, and the deployments that followed one (05:37, 05:46, 06:05, 08:03, 08:20 UTC) came
+  # up STAGED with no traffic — each waited out the 5-minute alias read below and refused, until a person
+  # started the release by hand (06:18, 07:49, 08:32). `start` is idempotent (Vercel: «returns the current
+  # state if auto-assignment already started the release»), so it always runs; if it fails, the alias read
+  # below still refuses a build that is not serving.
+  npx vercel rolling-release start --dpl "${DEPLOYED_URL:-}" --non-interactive \
+    || echo "   (rolling-release start failed — the alias read below decides whether the canary is serving)"
 fi
 curl_jar() { if [ -n "$CANARY_JAR" ]; then curl -b "$CANARY_JAR" -c "$CANARY_JAR" "$@"; else curl "$@"; fi; }
 echo ""
@@ -286,7 +296,7 @@ while [ "$SECONDS" -lt "$POLL_DEADLINE" ]; do
     NEW_BUNDLE="$(grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' "$NEW_BODY" 2>/dev/null | head -1 || true)"
   fi
   EXPECTED_BUNDLE="${EMITTED_BUNDLE:-$NEW_BUNDLE}"
-  ALIAS_HTTP="$(curl_jar -s -o "$ALIAS_BODY" -w '%{http_code}' -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "https://ezhalah-app.vercel.app/?_=$(date +%s%N)${CANARY_Q}" || echo 000)"
+  ALIAS_HTTP="$(curl_jar -s -o "$ALIAS_BODY" -w '%{http_code}' -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "$DTG_CANONICAL_URL/?_=$(date +%s%N)${CANARY_Q}" || echo 000)"
   ALIAS_BUNDLE="$(grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' "$ALIAS_BODY" 2>/dev/null | head -1 || true)"
   MATCHED=0
   # dtg_alias_serves: succeeds ONLY when the canonical alias serves the exact bundle this run built
@@ -299,7 +309,7 @@ while [ "$SECONDS" -lt "$POLL_DEADLINE" ]; do
   if [ "$MATCHED" = 1 ]; then
     # Accept-Encoding: identity — md5 must be taken over the artifact's own bytes, not a re-encoding.
     curl_jar -s -o "$BUNDLE_BODY" -H 'Accept-Encoding: identity' -H 'Cache-Control: no-cache' \
-      "https://ezhalah-app.vercel.app/$ALIAS_BUNDLE?_=$(date +%s%N)${CANARY_Q}" || true
+      "$DTG_CANONICAL_URL/$ALIAS_BUNDLE?_=$(date +%s%N)${CANARY_Q}" || true
     if ! dtg_bundle_is_authentic "$BUNDLE_BODY" "$ALIAS_BUNDLE"; then
       AUTH_FAIL="md5($(wc -c < "$BUNDLE_BODY" 2>/dev/null || echo 0) bytes)=$(dtg_md5 "$BUNDLE_BODY" 2>/dev/null || echo '<none>')"
     elif ! grep -q "supabase.co" "$BUNDLE_BODY"; then
@@ -316,7 +326,7 @@ NEW_BYTES="$(wc -c < "$NEW_BODY" 2>/dev/null || echo 0)"
 ALIAS_HEAD="$(head -c 200 "$ALIAS_BODY" 2>/dev/null | tr -d '\n' || true)"
 rm -f "$ALIAS_BODY" "$NEW_BODY" "$BUNDLE_BODY"
 if [ "$BUNDLE_OK" = 1 ]; then
-  echo "OK: https://ezhalah-app.vercel.app serves $ALIAS_BUNDLE — the entry this run emitted; md5(bytes) matches its filename, and it references supabase.co."
+  echo "OK: $DTG_CANONICAL_URL serves $ALIAS_BUNDLE — the entry this run emitted; md5(bytes) matches its filename, and it references supabase.co."
 else
   echo ""
   echo "❌ REFUSING TO ADVANCE THE BASELINE: the canonical alias never proved it serves the bundle"
@@ -422,7 +432,7 @@ if [ "${EZ_ROLLING_RELEASE:-}" = "1" ]; then
   FULL_DEADLINE=$(( SECONDS + 180 ))
   FULL_BODY="$(mktemp)"
   while [ "$SECONDS" -lt "$FULL_DEADLINE" ]; do
-    curl -s -o "$FULL_BODY" -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "https://ezhalah-app.vercel.app/?_=$(date +%s%N)" || true
+    curl -s -o "$FULL_BODY" -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "$DTG_CANONICAL_URL/?_=$(date +%s%N)" || true
     FULL_BUNDLE="$(grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' "$FULL_BODY" 2>/dev/null | head -1 || true)"
     if dtg_alias_serves "$EXPECTED_BUNDLE" "$FULL_BUNDLE"; then FULL_OK=1; break; fi
     sleep 5

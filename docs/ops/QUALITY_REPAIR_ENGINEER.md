@@ -167,6 +167,53 @@ and this standing list:
 Each repair is measured: the count before and after, written in the report. A repair that made anything worse is undone the
 same run.
 
+## Welcome facts — you OWN them (owner, 2026-10-24)
+
+The home headline's «تدري إن…» facts (welcome_template → build_welcome_insights → welcome_insight → welcome_insights_pick)
+are the base of the owner's future revenue (data for investors), so they must be EXACT. Every morning, before your 3 jobs:
+
+1. **Freshness.** The latest build is from today and newer than the last sync; a failed build is a P1.
+2. **Numbers = the ads.** Read welcome_insight_check / the facts detector. Any fact whose stored number differs from a
+   fresh recompute over search_listings_ar (same filters as its kind) is a P1 job tonight: fix the build, not the row.
+3. **Words = the math.** A sentence may only say «متوسط»/"average" when the number is a true mean; a median is said
+   plainly («نص … أقل من …» / "half … are under …"). "This week" = the rolling 7 days at build time. Any wording that
+   promises more than the filter delivers (e.g. "apartments" when holiday rentals are excluded) is a P2 to report.
+4. **The name.** Arabic spelling in Arabic lines, English spelling in English lines, never the other script.
+5. **Proof.** One fact per morning, re-checked by hand against production (open the headline, compare to SQL): a PASS
+   proof row. Report it as one line in your final report: «📊 Facts: built HH:MM · checked N kinds · M wrong → fixed».
+
+## Text facts — you OWN the conflict list (owner, 2026-10-25, Rule B)
+
+The Advanced Filter serves the seller's own quoted sentence beside the site's box
+(docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md, «The seller's sentence — Rule B»). Each morning read
+`select public.ops_text_facts_status();` (≈ 10 s, one call — never hand-run the detector or the sync):
+
+1. **Freshness.** `last_read_at` is from today (the nightly reader, 07:05 UTC) and `ads_read_last_36h` > 0. Older = P1
+   (the `text_facts_reader_stale` alert says the same).
+2. **Conflicts.** `conflicts` = ads whose box is ticked while their own words say no; they are served as unknown. Read
+   `select * from ops_text_facts_conflicts order by read_at desc limit 20`: open the ad, and if the box is a scraper
+   misread, fix the reader (a backlog row); if the seller really wrote both, nothing to do — unknown is the honest answer.
+   Never edit `listing_text_facts` or a `*_listings` column by hand to "resolve" one.
+3. **Overlay coverage.** `served_from_text` (values the index serves that the ad's sentence answered) should not fall
+   between nights; `open_alerts` must be empty (`text_facts_not_applied`, `text_facts_stale_applied`,
+   `text_facts_unquoted`, `text_facts_switch_ignored`: each P1, all from `mon_detect_text_facts`, 11:52 UTC).
+4. **The switch is the owner's.** `switch.on` false is only ever the owner's (or an incident commander's) decision.
+   Report it; never turn it back on yourself. The same goes for `af_text_facts_street_width`.
+5. **Street width (Rule B for numbers, 2026-10-25).** `street_width_differs` = ads where the site published one
+   width and the seller wrote another (`select * from ops_text_facts_width_differs order by read_at desc limit 20`);
+   the box is served. Open the ad: a box that is a scraper misread (aqar's «20» beside «شارع 16 شمالي» is the common
+   shape) is a backlog row for ⚡; a seller who wrote both is nothing to do. The alert for this lane is
+   `text_facts_width_not_applied` (a quoted width beside a BLANK index width for 4 h = the merge stopped).
+
+6. **The AI reader's lesson (2026-10-26, `docs/ops/AI_FACTS_READER.md`).** Weekly: `select * from ops_ai_facts_reader_gaps;`
+   lists, per fact, what the paid AI found on ads where the free reader wrote nothing, with 8 sample quotes. Read the
+   quotes; a genuine phrasing the reader lacks becomes a word-list entry + selftest phrase in `word_checker.py`
+   (the furniture words of 2026-10-26 are the worked example); a teacher mistake («على شارعين» as two entrances) is
+   nothing to do. Never copy an AI row into the filter. Budget line: `select public.facts_ai_budget(0);` — 30 USD a
+   month, the owner's number; report `spent_month` and never raise the cap yourself.
+
+Report it as one line: «📊 Text facts: read HH:MM · N conflicts (±d) · M values from ad text · W widths differ · AI $spent/30 · alerts none».
+
 ## Powers and limits
 - **Yours to do (AGENTS.md: ops DB objects, monitors, detectors, cron, scraper fixes, evidence-backed repairs):** repair
   functions and backfills, catalog aliases with evidence, parsers and mappers, your own run log and backlog. Database changes

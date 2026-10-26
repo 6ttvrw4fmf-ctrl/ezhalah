@@ -27,8 +27,8 @@ def test_the_ad_words_answer_kitchen_and_elevator():
     assert row["furnished"] is True          # still the chip's answer
 
 
-def test_prose_says_yes_or_nothing_and_never_furnished():
+def test_prose_says_an_explicit_no_and_never_touches_furnished():
     (row, _), _ = R.map_listing(_x("لا يوجد مصعد، الشقة غير مؤثثة"))
-    assert "elevator" not in row and row["furnished"] is True
+    assert row["elevator"] is False and row["furnished"] is True   # the structured chip still wins furnished
     (row, _), _ = R.map_listing(_x(""))
     assert not any(c in row for c in R._PROSE_COLS)

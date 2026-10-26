@@ -79,6 +79,9 @@ function readStoredSession(): StoredSession {
       const names = { name: base, nameAr: spelled ? m.nameAr : undefined, nameEn: spelled ? m.nameEn : undefined };
       // A fresh sign-up whose «وش نناديك؟» box is still open: its welcome waits for «حفظ» (NamePrompt fires it).
       const awaitingName = isFreshSignUp(u?.created_at, u?.last_sign_in_at, Date.now()) && m.name_prompt_seen !== true;
+      // No name, and «وش نناديك؟» was answered with «تخطي»: the account is «ضيف إزهله» / Ezhalah Guest, so it is still
+      // greeted and still gets its facts by that name (owner 2026-10-26). The same words the sidebar shows (i18n).
+      if (!base && m.name_prompt_seen === true) return { present: true, nameAr: 'ضيف إزهله', nameEn: 'Ezhalah Guest', uid: String(u?.id ?? ''), awaitingName: false };
       return { present: true, nameAr: sentenceName(names, 'ar'), nameEn: sentenceName(names, 'en'), uid: String(u?.id ?? ''), awaitingName };
     }
   } catch { /* fall through */ }

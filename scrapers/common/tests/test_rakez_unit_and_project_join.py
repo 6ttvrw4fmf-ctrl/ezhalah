@@ -475,6 +475,6 @@ def test_amenities_the_description_states_are_captured(desc, want):
     assert {c for c in R._PROSE_COLS if row.get(c) is True} == want
 
 
-def test_a_denied_amenity_is_never_stored_as_no():
+def test_a_denied_amenity_is_stored_as_no():
     row, _ = _map(_unit(desc="لا يوجد مصعد"))
-    assert "elevator" not in row
+    assert row["elevator"] is False          # owner 2026-10-24: an explicit negation is a stated no

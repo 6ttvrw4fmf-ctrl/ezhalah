@@ -272,8 +272,8 @@ check('library pins projectId = prj_CLp9BxNzT4RmWL9Is1KjHoQlSAlX',
   lib.includes('DTG_EXPECT_PROJECT_ID="prj_CLp9BxNzT4RmWL9Is1KjHoQlSAlX"'));
 check('library pins projectName = ezhalah-app',
   lib.includes('DTG_EXPECT_PROJECT_NAME="ezhalah-app"'));
-check('library pins canonical URL = https://ezhalah-app.vercel.app',
-  lib.includes('DTG_CANONICAL_URL="https://ezhalah-app.vercel.app"'));
+check('library pins canonical URL = https://ezhalah.com (owner 2026-10-26)',
+  lib.includes('DTG_CANONICAL_URL="https://ezhalah.com"'));
 
 for (const d of tmpDirs) { try { rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ } }
 

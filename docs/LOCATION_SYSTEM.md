@@ -360,6 +360,83 @@ dealapp 883 · sanadak 816 · aqarmonthly 753 · eaqartabuk 516 · aqargate 241 
 - Result ordering: region searches spread across their cities; relevance‑first with natural diversity.
 - Location‑search audit passed (Region→City→District, English handling, conditional field search, never‑invent).
 
+### 🗺 Pin districts — batch 2 SERVED 2026-10-25 (owner 2026-10-24 / 10-25)
+- An ad with no district anywhere can get one from its own pin, **as a gap-filler only**: the table
+  `listing_pin_district` holds OUR catalog spelling (the map provider is only the locator; its text is never stored).
+  It reaches the index through the existing recovery path (`refresh_district_recovery_table()` → `district_recovery`
+  → `listing_native_location_v2` → `sync_search_listings_ar()`); search itself is untouched.
+- The arm runs last and fills only where the native district, the neighborhood and the source district are all
+  blank, in the city the ad is served in. Its rows are `verbatim = false`, `basis = 'pin'` (never attestation). There is
+  **no «تقريبي» label** (owner 2026-10-25: «I don't like تقريبي»): the district shows as the district.
+- Batch 1 = 209 ads, loaded with `applied = false`. Batch 2 (`20261025214308`) = 315 middle homes (176 of them from
+  batch 1). It was switched on by `20261025214336` on 2026-10-25. The 33 batch-1 edge/junk rows stay off.
+  `verify-pin-district-fill-contract.ts` fails any flip whose version is not in `FLIP_ALLOWED`.
+- Undo = `applied = false` and delete the `basis = 'pin'` rows of `district_recovery` in one transaction.
+
+### 🛡 District guards — enforced by the database (owner 2026-10-25, migration `20261025203753`)
+- **Order (owner, the main rule):**
+  1. The site's own district always wins.
+  2. Otherwise Apple Maps (free): same city, a name on our list, and the home in the **middle** of that district, meaning
+     Apple names the same district at 4 spots 150 m around the pin.
+  3. A home near an **edge** needs Google Maps to agree.
+  4. Otherwise Google Maps.
+  5. Otherwise the home is city only.
+
+  There is no «تقريبي» label. Exam on 1,000 homes with a known district: Apple matched 86.3% of middle homes and 73.1%
+  of edge homes. Full rule for engineers: `docs/ops/NEW_LISTINGS_ENGINEER.md` rule 8.
+- **The list never loses a district:** `DELETE` and `TRUNCATE` on `loc_catalog_district` are refused
+  (`trg_zz_district_list_guard`, `trg_zz_district_list_no_truncate`), even when a district has 0 ads.
+- **No junk names:** a new or renamed list name can't be a number, a plan «مخطط», a base «قاعدة», a street «شارع»,
+  a road «طريق», villages «قرى» or one letter. The 15 such names already on the list stay; they are just never added again.
+- **No spelling twins:** a new or renamed name that `district_twin_check()` calls a `twin` of a name on that city's list is
+  refused. An owner-approved exception sets `ezhalah.district_guard_ok` for that one statement.
+- **A map answer never adds a name:** a `listing_pin_district` row must match a name already on that city's list (after
+  the spelling memory and the «الجديد» rule) and is stored in the list's own spelling (`trg_pin_district_on_list`).
+  A real new district goes onto the list first, through the guards above.
+- **Alarm:** `mon_detect_district_guards_missing()` (P1, rostered) fires if any of the three triggers is dropped or
+  disabled. Barrier: `scripts/verify-district-guards.ts`.
+- **The strong twin rule (owner 2026-10-25, «never duplicates», migrations `20261025223135` + `20261025225540`):** a new or
+  renamed name is also refused when its LETTERS equal a listed name in that city — `district_key_letters()`: spaces and
+  punctuation ignored, a final ا/ه run is one marker («غبيرا» = «غبيرة», «الملقا» = «الملقاه»), a final hamza is kept
+  («الزهراء» ≠ «الزهرة»), a one-letter sequel tail is kept («الجابرية أ» ≠ «الجابرية») — or equal it without «ال», or
+  equal it with the town's name stuck on («حي أشبيلية - بقيق»), or are ONE letter away («البغددية» ~ «البغدادية»).
+  The owner exception must NAME the district: `set ezhalah.district_guard_ok = '<name>'`; it never unlocks a delete.
+- **For every listing (owner 2026-10-25, migrations `20261025224235` + `20261025224627`):** `loc_display_district_ar()`
+  now folds a site's spelling onto the list name when the letters match (same letters, without «ال», or with the town
+  stuck on) — `district_copy_of()`, 0.03 ms per row — so a copy spelling never becomes a second district in search, for
+  old listings at the next hourly sync and for every new arrival. A name ONE letter away is never folded by itself: two
+  real districts can differ by one letter («الريحان» / «الريان»), so the owner decides through `loc_district_alias`.
+- **Alarm for every listing:** `mon_detect_district_served_twins()` (rostered): P1 `district_copies_served` when two
+  served names in one city are copies and one is on the list but the fold did not join them (a gap in the rule); P2
+  `district_copies_unlisted` when neither is on the list (the engineer adds the real name through the guards); P2
+  `district_near_twins_served` with examples when two served names are one letter apart (owner decides).
+- **Near twins are decided by PLACE, not letters (owner 2026-10-25):** the homes' centers under both spellings and Apple
+  Maps (Google when Apple cannot) at both centers; under 1.5 km and the same map name = ONE → `loc_district_alias`;
+  farther or different names = SEPARATE. First batch `20261025232153`: 9 ONE (e.g. «المعيزيلة» → «حي المعيزلة»),
+  14 SEPARATE (e.g. «البوادر» / «البوادي», 56 km apart in جدة), 7 UNSURE queued for Google by name.
+- **One name, one list (owner 2026-10-25, migration `*_place_list_lock_one_name_one_list`):** a place with districts
+  under it is a CITY; a place without is a DISTRICT of the city next to it. `loc_city_center` holds every city's homes
+  center (median pin; refreshed by the alarm daily). The city list refuses a new or renamed name that is already a city
+  within 40 km (or in the same region when no distance is known) or a district of such a city; cities are never deleted
+  (duplicates are MERGED by the owner); the owner exception names the city: `ezhalah.city_guard_ok`. The district list
+  refuses a name that is its own city or a nearby city that has districts. `mon_detect_place_list_leaks()` (P2, rostered)
+  lists the existing leaks — measured 2026-10-25: 12 duplicate cities («بيش» ×2, 100 m), 40 districts registered as
+  cities («الثقبة» of الخبر), 53 cities/towns registered as districts («المبرز» in الهفوف, «حي الدرعية» in الدرعية) —
+  until the owner merges or moves each one. `mon_detect_district_guards_missing()` watches the city triggers too.
+  Barrier: `scripts/verify-district-guards.ts`.
+
+### 🔤 Spelling memory — one district, one search identity (owner 2026-10-25)
+- `loc_district_alias(city_id, from_norm, to_norm)`: a spelling sites use that IS one of our districts. Applied inside
+  `loc_display_district_ar()`, so the served `district_ar`, its stored token, the picker and the counts fold into one
+  district; cards keep the source's own words.
+- Per-name and owner-approved only. A blanket «الجديد» fold is wrong: «منفوحة الجديدة» and «منفوحة» are two districts.
+- Seeded 10-25: مكة «الهجلة الجديد»→«الهجلة», «الشبيكة الجديد»→«الشبيكة»; حائل «السويفلة الجديد»→«السويفلة».
+  Owner 10-25 (asked same or separate, answer: same): الدرعية «الدرعية الجديدة»→«الدرعية» (452 ads).
+  **Permanent rule (owner 10-25, "don't ask again"):** «X الجديد / X الجديدة» is our district X, applied automatically
+  inside `loc_display_district_ar()` whenever X is in our list for that city and «X الجديد(ة)» is not itself a district in
+  our list. Stays separate: «منفوحة الجديدة» (الرياض), and official names with no base («الشامية الجديد», «الفلق الجديد»).
+- `verify-district-spelling-memory.ts` pins it.
+
 ### ⏳ Pending (optional, ready when wanted)
 - **Grow the district map** — convert more of the ~33k English‑district listings to Arabic districts (same
   confident‑match method, run wider) so more listings carry an Arabic district.

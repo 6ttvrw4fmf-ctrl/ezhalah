@@ -36,6 +36,7 @@ PDPL: the item names the member / shop and carries a masked phone number — non
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import re
 import sys
@@ -63,7 +64,11 @@ IMPERSONATE = "chrome"
 
 _TYPE_AR = {"ApartmentsForSale": "شقة", "ApartmentsForRent": "شقة", "VillasAndPalacesForSale": "فيلا",
             "VillasAndPalacesForRent": "فيلا", "WholeBuildingForSale": "عمارة", "WholeBuildingForRent": "عمارة",
-            "property_rent_commercial_Offices": "مكتب", "RE_HotelApartments": "شقة"}
+            "property_rent_commercial_Offices": "مكتب", "RE_HotelApartments": "شقة",
+            # 2026-10-25 (owner: every type the site shows): measured live, each skipped as type_unmapped
+            # until now — 288899568 (warehouse, yearly), 288830702 (house «HomesForSale»), 288551466 (rooms, monthly).
+            # Shops are NOT mapped: all 3 filed there are a car-wash business sale (×2) or a whole building.
+            "property_rent_commercial_Warehouses": "مستودع", "HomesForSale": "بيت", "RE_RoomsForRent": "غرفة"}
 _MULTI_USE = "الاستخدام المتعدد"
 # owner 2026-09-27: multi-use land is BOTH residential and commercial land — it maps to residential here
 # and commercial_twin() lists the same ad as Commercial Land too, so it answers both searches
@@ -150,10 +155,13 @@ def commercial_twin(x: dict, row: dict) -> Optional[dict]:
     return None
 
 
-def _page_pin(s: cc.Session, ad_id: Any) -> dict:
+def _page_pin(s: cc.Session, ad_id: Any, said: Optional[dict] = None) -> dict:
+    """The ad page's pin; when `said` is given and the page carries its amenity section, said["answers"] is set (one GET)."""
     try:
         r = s.get(f"{BASE}/ar/search/{ad_id}", timeout=20)
         time.sleep(0.3)
+        if said is not None and r.status_code == 200 and (got := page_amenities(r.text)) is not None:
+            said["answers"] = got
         return pin_from_html(r.text) if r.status_code == 200 else {}
     except Exception:  # noqa: BLE001 — a failed page read is "no pin this fetch"
         return {}
@@ -247,16 +255,37 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
     return (row, category), ""
 
 
-# Amenities have NO structured field on opensooq: the card chips carry rooms, baths, furnished, area, floor, age and
-# period only, and the ad page prints no amenity list (CI source-reread 38544519028: 13605230's own text says
-# «مطبخ مجهز بالأجهزة الكهربائية … مصعد خاص من داخل الشقة», stored NULL; 0 of 62 active ads had any amenity
-# answer). So the ad's own words are the statement (law §2), yes-or-nothing (🔬 AF engineer, 2026-10-14).
+# The SERP card has no amenity field (its chips carry rooms, baths, furnished, area, floor, age and period), and its
+# masked_description is cut at ~125 characters («… ووغرفة مط»). The AD PAGE does publish one (corrected 2026-10-26,
+# CI source-reread 40301252058: 14174571's page ticks «موقف سيارات» and «مصعد» under «وسائل الراحة» → «إضافية (2)»,
+# stored NULL — the 10-14 note «the ad page prints no amenity list» was wrong). page_amenities() reads that list; when
+# the page answers, it replaces the snippet prose. The prose stays only for an ad whose page could not be read.
 # furnished stays chip-only.
 _PROSE_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance")
 
 
 def prose_answers(text: Optional[str]) -> dict[str, bool]:
-    return {c: v for c, v in normalize.prose_amenities_yes(text, skip=("furnished",)).items() if c in _PROSE_COLS}
+    return {c: v for c, v in normalize.prose_amenities(text, skip=("furnished",)).items() if c in _PROSE_COLS}
+
+
+# The page's Next.js flight data carries the section as (escaped) JSON:
+#   "dynamicTabsSection":[{"title":"وسائل الراحة","tabs":[{"title":"إضافية (2)","items":["موقف سيارات","مصعد"]},
+#                                                       {"title":"المناطق المجاورة (5)","items":["سوبر ماركت","مسجد",…]}]}]
+# «المناطق المجاورة» is what is NEAR the building (a mosque, a school), never the unit's own: it is never read.
+_TABS = re.compile(r'"dynamicTabsSection":\[\{"title":"وسائل الراحة".*?"tabs":\[(.*?\]\})\]\}\]', re.S)
+_TAB = re.compile(r'\{"title":"([^"]*)"[^{}]*?"items":\[([^\]]*)\]')
+_NEARBY = "المناطق المجاورة"
+
+
+def page_amenities(body: Optional[str]) -> Optional[dict[str, bool]]:
+    """The ad's own ticked amenities from its page; None when the page carries no «وسائل الراحة» section."""
+    flat = re.sub(r'\\+"', '"', html.unescape(body or ""))
+    m = _TABS.search(flat)
+    if not m:
+        return None
+    items = [i for title, raw in _TAB.findall(m.group(1)) if not title.startswith(_NEARBY)
+             for i in re.findall(r'"([^"]+)"', raw)]
+    return {c: v for c, v in normalize.amenities_from_text("\n".join(items)).items() if c in _PROSE_COLS and v}
 
 
 RES_TABLE, COM_TABLE = "opensooq_residential_listings", "opensooq_commercial_listings"
@@ -342,7 +371,13 @@ def main() -> int:
             # Owner 2026-10-20: the SERP JSON carries no coordinates, the ad's own page does
             # («google.com/maps/search/?api=1&query=LAT,LNG», 5/5 sampled). One GET per kept ad; a page
             # that does not answer leaves the row as it was (no pin → the district border).
-            pin = _page_pin(s, x["id"])
+            said: dict = {}
+            pin = _page_pin(s, x["id"], said)
+            if "answers" in said:
+                # the ad page's own ticked list is the structured statement: it replaces the snippet prose (law §2)
+                for c in _PROSE_COLS:
+                    row.pop(c, None)
+                row.update(said["answers"])
             if pin:
                 row["additional_info"] = {**(row.get("additional_info") or {}), **pin}
             (com if cat == "commercial" else res).append(row)

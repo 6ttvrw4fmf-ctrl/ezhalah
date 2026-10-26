@@ -173,7 +173,7 @@ const AMENITY_COL: Record<string, string> = {
 };
 // The eight residential tokens the CHAT may map (certifiedAmenityKeys) that have a clause predicate
 // but NO chip on the card: predicate-only cases — the click set must still be exact.
-const RICH_TOKENS = ['gym', 'pool', 'garden', 'balcony', 'laundry_room', 'optical_fibers', 'separate_electricity_meter', 'separate_water_meter'];
+const RICH_TOKENS = ['gym', 'pool', 'garden', 'balcony', 'laundry_room', 'optical_fibers', 'separate_electricity_meter', 'separate_water_meter', 'majlis'];
 const amenity = (key: string): Opt => ({ key: `amenities:${key}`, col: `cnt_${key}`, countRpc: 'guided', params: { p_amenities: [key] }, pred: { kind: 'true', col: AMENITY_COL[key] } });
 const DIR_COL: Record<string, string> = { 'شمال': 'cnt_dir_n', 'جنوب': 'cnt_dir_s', 'شرق': 'cnt_dir_e', 'غرب': 'cnt_dir_w', 'شمال شرق': 'cnt_dir_ne', 'شمال غرب': 'cnt_dir_nw', 'جنوب شرق': 'cnt_dir_se', 'جنوب غرب': 'cnt_dir_sw' };
 

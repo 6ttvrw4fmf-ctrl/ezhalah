@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, I18nManager, Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Image as XImage } from 'expo-image'; // SVG logo: a vector drawing, not a photo (owner 2026-10-24)
 import Animated, {
   Easing,
   interpolate,
@@ -62,7 +63,7 @@ const ABOUT_MAX_W = 760;
 const LEGAL_MAX_W = 640;
 const ABOUT_MAX_H = 700;
 
-const EAGLE = require('../../assets/images/eagle-mark.png');
+const EAGLE = require('../../assets/images/logo-cloud-green-static.svg'); // About/Terms always show the green-lit cloud eagle (owner 2026-10-24)
 type Kind = 'support' | 'about' | 'legal';
 
 // In-app popup that hosts the Support / About / Terms & Privacy content as a centered dialog over a
@@ -82,13 +83,13 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
   // which would fold our own cards back in (ops_incident #163). Zero unless something is docked.
   const promptInsets = useForeignPromptInsets();
   const { width, height } = useWindowDimensions();
-  const { t, isRTL: closeOnLeft } = useI18n();
+  const { t } = useI18n();
   const reduced = useReducedMotion();
   const about = kind === 'about';
   // «من نحن» has NO close button (owner 2026-09-03): the backdrop closes it, and its header is the
   // drag grip. Support and the legal reader keep the × — they are forms and long reads.
   // EVERY info popup carries the × (owner 2026-10-23: «all those information popups must show x» — reverses
-  // 2026-09-03's About-without-×). It sits at the reading END: right in English, LEFT in Arabic.
+  // 2026-09-03's About-without-×). It sits top-RIGHT in both languages, never mirrored (owner 2026-10-24).
   const hasClose = true;
 
   const progress = useSharedValue(0);
@@ -191,10 +192,10 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
               testID="info-modal-close"
               accessibilityRole="button"
               accessibilityLabel={t('Close')}
-              style={({ hovered, pressed }: any) => [s.xBtn, closeOnLeft ? s.xBtnLeft : s.xBtnRight, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
+              style={({ hovered, pressed }: any) => [s.xBtn, s.xBtnRight, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
             >
               {({ hovered, pressed }: any) => (
-                <Ionicons name="close" size={20} color={hovered || pressed ? colors.ink : colors.muted} />
+                <Ionicons name="close" size={20} color={colors.ink} />
               )}
             </Pressable>
           )}
@@ -220,7 +221,7 @@ function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => stri
       {/* Style `h` keeps its CLOSE_CLEAR physical-right padding so the title can never slide under
           the floating × (verify-info-modal-header-clearance pins that arithmetic). */}
       <View style={s.head}>
-        <Text style={[s.h, !isRTL && s.textLtr, isRTL && s.hClearLeft]}>{t('Support')}</Text>
+        <Text style={[s.h, !isRTL && s.textLtr]}>{t('Support')}</Text>
       </View>
 
       <View style={s.bodyPad}>
@@ -484,9 +485,8 @@ function AboutBody({ t, reduced, gripRef, drag }: {
         <Reveal {...rev} delay={40}>
           <Text style={a.eyebrow}>{t('About Us')}</Text>
           <View style={a.lockup}>
-            <RNImage source={EAGLE} style={a.eagle} resizeMode="contain" />
+            <XImage source={EAGLE} style={a.eagle} contentFit="contain" />
             <Text style={a.wordmark}>{t('Ezhalah')}</Text>
-            <View style={a.wordDot} />
           </View>
         </Reveal>
       </View>
@@ -519,8 +519,8 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
     <View>
       <View style={s.head}>
         <View style={s.legalLockup}>
-          <RNImage source={EAGLE} style={s.legalEagle} resizeMode="contain" />
-          <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr, isRTL && s.hClearLeft]}>{t('Terms & Privacy')}</Text>
+          <XImage source={EAGLE} style={s.legalEagle} contentFit="contain" />
+          <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr]}>{t('Terms & Privacy')}</Text>
         </View>
       </View>
       <View style={s.bodyPad}>
@@ -603,10 +603,8 @@ const s = StyleSheet.create({
   // Close, pinned to the PHYSICAL top-right (RN `right` is physical — RTL never flips it): a
   // quiet neutral glyph at rest, a soft fill on hover, hitSlop widening the target to ≥ 44.
   xBtn: {
-    // Physical top-right under BOTH directions: RTL (forced app-wide for Arabic) flips `right:` to
-    // the physical left, so the physical right is spelled `left:` there. (owner 2026-08-29)
-    // The side is set per language below (xBtnSide): right in English, LEFT in Arabic (owner 2026-10-23).
-    position: 'absolute', top: CLOSE_INSET, zIndex: 5,
+    // Top-RIGHT in both languages (owner 2026-10-24), on a soft circle so it reads clearly, apart from the words.
+    position: 'absolute', top: CLOSE_INSET, zIndex: 5, backgroundColor: colors.surface2,
     width: CLOSE_SIZE, height: CLOSE_SIZE, borderRadius: CLOSE_SIZE / 2,
     alignItems: 'center', justifyContent: 'center',
     ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
@@ -614,8 +612,6 @@ const s = StyleSheet.create({
   // Measured 2026-10-23: on the web physical sides are NOT mirrored under Arabic, so the × side is chosen by
   // language. Both sides spelled so a merge never leaves the other one set.
   xBtnRight: { right: CLOSE_INSET, left: 'auto' as any },
-  xBtnLeft: { left: CLOSE_INSET, right: 'auto' as any },
-  hClearLeft: { paddingRight: 0, paddingLeft: CLOSE_CLEAR },
   xBtnHover: { backgroundColor: colors.surface2 },
   scroll: { paddingTop: 0, paddingBottom: 0 },
   bodyPad: { paddingHorizontal: BODY_PAD, paddingTop: 4, paddingBottom: BODY_PAD },
@@ -633,7 +629,7 @@ const s = StyleSheet.create({
   // the ROW, not the text: `h`'s own paddingRight (still asserted by that barrier, untouched) is
   // cancelled back to 0 on this specific usage so the clearance is never reserved twice.
   legalLockup: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: CLOSE_CLEAR },
-  legalEagle: { width: 20, height: 20 },
+  legalEagle: { width: 44, height: 44 }, // big and sharp enough to read as our logo (owner 2026-10-25; was 20 px)
   legalTitle: { paddingRight: 0, flexShrink: 1 },
 
   // ——— «تواصل مع الدعم» form (owner 2026-09-02; spacing/inputs 2026-09-03) ———
@@ -666,14 +662,14 @@ const s = StyleSheet.create({
   // Send: full width, the brand green, the same radius as the inputs, spaced from the email field.
   sendBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: colors.primary, borderRadius: 12, height: 50, marginTop: 6,
+    backgroundColor: colors.selFill, borderRadius: 12, height: 50, marginTop: 6,
     ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
   },
   sendBtnHover: { backgroundColor: colors.dark },
   sendBtnBusy: { opacity: 0.75 },
   sendTx: { fontSize: 15, fontWeight: '800', color: colors.onFill },
   sentCard: { alignItems: 'center', paddingVertical: 28, paddingHorizontal: 18 },
-  sentIc: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  sentIc: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   sentH: { fontSize: 17, fontWeight: '800', color: colors.ink, textAlign: 'center' },
   sentTx: { fontSize: 13.5, color: colors.body, textAlign: 'center', marginTop: 6, lineHeight: 20 },
   againBtn: { marginTop: 16, paddingVertical: 8, paddingHorizontal: 14, ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}) },
@@ -710,12 +706,11 @@ function makeAbout(pal: Record<string, string>, dark: boolean, rtl = true) {
   void dark;
   return StyleSheet.create({
     body: { paddingHorizontal: BODY_PAD + 4, paddingTop: BODY_PAD, paddingBottom: BODY_PAD },
-    head: { paddingBottom: 12 },
+    head: { paddingBottom: 12, paddingRight: CLOSE_CLEAR }, // keeps «من نحن» clear of the top-right × (owner 2026-10-24)
     eyebrow: { fontSize: 12.5, lineHeight: 18, fontWeight: '700', color: pal.muted, marginBottom: 8 },
     lockup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    eagle: { width: 30, height: 30, opacity: 0.9 },
+    eagle: { width: 64, height: 64 }, // still dark-green eagle, lights on, big and sharp (owner 2026-10-25)
     wordmark: { fontSize: 34, lineHeight: 42, fontWeight: '800', color: pal.ink },
-    wordDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: pal.accentLeaf ?? pal.primary, alignSelf: 'flex-end', marginBottom: 8 },
     readingColumn: { maxWidth: 640, width: '100%', alignSelf: 'center' },
     heroLine: { fontSize: 19, lineHeight: 31, fontWeight: '700', color: pal.ink, textAlign: start as any, marginTop: 8, marginBottom: 18 },
     paragraph: { fontSize: 15, lineHeight: 28, fontWeight: '400', color: pal.body, textAlign: start as any, marginBottom: 16 },

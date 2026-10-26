@@ -165,8 +165,10 @@ DETAIL, MEASURED
     electricity/water/sanitation is absent, so no column is set False from it; the phrase is
     preserved in additional_info and raised as an open question.
   · Not published anywhere: build_space, floors, height, width, street_width (0/405 each).
-    `latitude`/`longitude` are present on all 405 but the listing tables carry no coordinate
-    columns, so they are not stored.
+    `latitude`/`longitude` are present on all 405 and ARE the ad's pin: stored in additional_info through
+    source_pin.pin_dict (owner 2026-10-24, #819 — a pin outside Saudi Arabia or at 0,0 is refused there, and
+    the fleet's shared-default / far-from-city robots strip a wrong one). Until 2026-10-24 they were dropped
+    because the listing tables have no coordinate COLUMNS; additional_info is where every site's pin lives.
 """
 from __future__ import annotations
 
@@ -186,6 +188,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://app.abaadapp.sa"
 API = f"{BASE}/api/v1/estate/get-estate/all"
@@ -547,7 +550,8 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "source_status": _clean(rec.get("status")),
         "video_filename": _clean(rec.get("video_url")),    # no base resolves it; column stays NULL
     }
-    row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v is not None})
+    row["additional_info"] = {**pin_dict(rec.get("latitude"), rec.get("longitude")),
+                              **strip_pii_fields({k: v for k, v in info.items() if v is not None})}
     # The capture is PRIVATE but "private" is not "may accumulate contact details" — the advertisers
     # write their own phone and WhatsApp link into the prose (id 968: «… : 0555754441» +
     # «wa.me/966…»). Redact the free-text keys HERE rather than leaning on db.redact_capture(): a

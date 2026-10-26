@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
-import { getLocale } from '@/i18n';
+import { getLocale, rememberLocaleForSignIn } from '@/i18n';
+import { markEagleLightUp } from '@/lib/eagleLightUp';
 import type { AuthUser } from '@/store';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,6 +139,12 @@ export async function signInWithProvider(
     // One Tap prompt, so both Google entry points speak Ezhalah's current language consistently.
     // Apple has no equivalent knob here, so it's a no-op for that provider.
     const queryParams = provider === 'google' ? { hl: getLocale() } : undefined;
+    // The redirect is a fresh page load: carry the language on screen to the /auth landing (i18n.tsx).
+    rememberLocaleForSignIn();
+    // The redirect reloads the page, where a restored session no longer looks like a fresh sign-in to the store:
+    // leave the sidebar eagle its one light-up now (lib/eagleLightUp.ts; Apple JS and One Tap sign in within the
+    // tab and are marked by the store's own listener).
+    markEagleLightUp();
     const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo, queryParams } });
     if (error) return { error: error.message };
     return { redirected: true };
@@ -157,7 +164,9 @@ export async function signInWithProvider(
 // reaches this code and Apple sign-in is today's redirect, byte for byte.
 // Any failure (script blocked, popup blocked, Apple config error, token refused) → { fallback } →
 // the caller runs the redirect. Closing Apple's window is the user's choice → { cancelled }.
-export const APPLE_JS_SIGNIN = process.env.EXPO_PUBLIC_APPLE_JS_SIGNIN === '1';
+// ON since 2026-10-26: the Services ID lists ezhalah-app.vercel.app + /auth (Apple accepted the Return URL that
+// day). EXPO_PUBLIC_APPLE_JS_SIGNIN=0 turns it back off; every failure still falls back to the redirect.
+export const APPLE_JS_SIGNIN = process.env.EXPO_PUBLIC_APPLE_JS_SIGNIN !== '0';
 const APPLE_JS_SRC = 'https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js';
 const APPLE_SERVICES_ID = 'com.ezhalah.web';
 // The ONE Return URL registered with Apple for the popup. Any other origin (previews, localhost)

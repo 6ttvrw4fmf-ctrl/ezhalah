@@ -8,7 +8,7 @@ import { MODELS_POPUP_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { cardShadow, colors, radius } from '@/theme/tokens';
 import { TAP44, TAP44_DOWN } from '@/theme/palette';
 
-const EZHALAH_LOGO = require('../../assets/images/ezhalah-logo.png');
+const EZHALAH_LOGO = require('../../assets/images/logo-cloud-green-lit.svg'); // vector cloud eagle (owner 2026-10-24)
 
 const MODELS = [
   { id: 'shaheen', ar: 'شاهين', en: 'Shaheen', version: '2.2',
@@ -127,7 +127,7 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
           {/* Bigger in the middle on a laptop, with the Ezhalah logo by the title (owner 2026-10-23). The card
               opens only after a tap, so reading the window width here never meets the static export. */}
           <View testID="agent-models-story" style={[styles.storyCard, wide && styles.storyCardWide, { width: Math.min(wide ? 540 : 380, width - 32) }]} accessibilityViewIsModal>
-            <View style={[styles.storyHead, { flexDirection: 'row' }]}>
+            <View style={[styles.storyHead, { flexDirection: arabic ? 'row-reverse' : 'row' }, arabic && { justifyContent: 'flex-end', gap: 8 }]}>
               <View style={[styles.storyTitleRow, { flexDirection: arabic ? 'row-reverse' : 'row' }]}>
                 <Image source={EZHALAH_LOGO} style={wide ? styles.storyLogoWide : styles.storyLogo} contentFit="contain" accessible={false} />
                 <Text style={[styles.storyTitle, wide && styles.storyTitleWide, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? 'نماذج إزهله' : "Ezhalah's models"}</Text>

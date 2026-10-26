@@ -75,3 +75,19 @@ def test_a_deed_boundary_is_not_an_amenity():
     line = "الوحدة العقارية رقم 1 وتمام الحد بهو الدرج والدرج وتمام الحد المصعد وتمام الحد المنور"
     assert not A.page_says_yes([line], "elevator")
     assert A.page_says_yes(["العمارة فيها مصعد"], "elevator")
+
+
+def test_a_labelled_boundary_row_is_not_an_amenity():
+    """🔬 10-24: fursaghyr 4367079 was asked elevator from its «وصف الحد الغربي» detail row (run 40076306911)."""
+    body = ('<li><strong>عدد الغرف:</strong> <span>5</span></li>'
+            '<li><strong>وصف الحد الغربي:</strong> <span>الوحدة رقم 4 / أ والمنور رقم 2 وبيت الدرج والمصعد</span></li>'
+            '<li><strong>وصف الحد الجنوبي:</strong> <span>شارع</span></li>')
+    page = {"evidence_lines": ["عدد الغرف: 5", "الوحدة رقم 4 / أ والمنور رقم 2 وبيت الدرج والمصعد",
+                               "العمارة فيها مصعد", "شارع واسع"], "text_head": ""}
+    assert A.page_says_yes(A.page_lines(page), "elevator")
+    kept = A.strip_boundary(page, body)["evidence_lines"]
+    assert "الوحدة رقم 4 / أ والمنور رقم 2 وبيت الدرج والمصعد" not in kept
+    assert "عدد الغرف: 5" in kept and "العمارة فيها مصعد" in kept and "شارع واسع" in kept
+    only_boundary = {**page, "evidence_lines": page["evidence_lines"][:2]}
+    assert A.page_says_yes(A.page_lines(only_boundary), "elevator")
+    assert not A.page_says_yes(A.page_lines(A.strip_boundary(only_boundary, body)), "elevator")

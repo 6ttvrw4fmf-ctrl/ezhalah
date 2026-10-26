@@ -214,8 +214,8 @@ export const SHARE_CARD = {
 // SMALL, under 300 px (owner 2026-10-18, twice: «look how big … keep it small», «the image is very big
 // still»). Measured on the owner's own WhatsApp: the 512 px logo renders as a BIG banner over the card
 // (11:42 PM screenshot, /s/lLzdSNTR); the 192 px one rendered as the small square beside the text (2:57 PM,
-// /s/bkTsnLiQ). Same 192 px file as the main link's card (middleware.ts, og-image-v6.png).
-export const SHARE_CARD_IMAGE_PATH = '/og-image-v6.png';
+// /s/bkTsnLiQ). Same 192 px file as the main link's card (middleware.ts, og-image-v7.png).
+export const SHARE_CARD_IMAGE_PATH = '/og-image-v7.png';
 // A SHARED LINK's card (owner 2026-10-22, approved mockup): the title is the SAME invite the visitor then sees
 // on the sign-in popup — «يوسف شاركك: شقق للإيجار في حي النرجس» (shareInviteNote) — and the line under it says
 // what Ezhalah is. The live counts stay on the plain home-link card (middleware.ts) and a broken link's card.
@@ -234,16 +234,16 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 export type ShareCardFacts = { sites?: number | null; listings?: number | null; cities?: number | null };
 const factOk = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0;
 /**
- * The card's bottom line (owner 2026-10-20): the SAME marketing line as the home link — three live
- * counts, nothing about the search itself — in the card's language. Any missing count → the plain
+ * The card's bottom line (owner 2026-10-20): the SAME marketing line as the home link — live
+ * listing and city counts in the Kingdom (owner 2026-10-25: never the site count twice), nothing about the search itself — in the card's language. Any missing count → the plain
  * tagline, never a zero.
  */
 export function shareCardFactsLine(f: ShareCardFacts | null | undefined, loc: 'ar' | 'en'): string {
   if (!f || !factOk(f.sites) || !factOk(f.listings) || !factOk(f.cities)) return SHARE_CARD[loc].desc;
   const n = (v: number) => v.toLocaleString('en-US');
   return loc === 'ar'
-    ? `${n(f.sites)} موقع · ${n(f.listings)} إعلان · ${n(f.cities)} مدينة`
-    : `${n(f.sites)} sites · ${n(f.listings)} listings · ${n(f.cities)} cities`;
+    ? `${n(f.listings)} إعلان · ${n(f.cities)} مدينة بالمملكة`
+    : `${n(f.listings)} listings · ${n(f.cities)} cities in Saudi Arabia`;
 }
 
 export function shareCardHtml(origin: string, rawPayload: string | null | undefined, chatCard?: SharedChatCard | null, facts?: ShareCardFacts | null): string {

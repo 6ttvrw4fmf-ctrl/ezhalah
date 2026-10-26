@@ -17,7 +17,8 @@ def test_structured_facade_and_parking_and_kitchen_from_the_words():
 
 def test_silence_stays_unknown():
     assert R.af_answers({"description": None}, {"direction": None, "parkingSpaces": None}) == {}
-    assert R.af_answers({"description": "لا يوجد مطبخ"}, {"parkingSpaces": 0}) == {}
+    # an explicit «لا يوجد مطبخ» is a stated no (owner 2026-10-24); parking 0 is still not an answer
+    assert R.af_answers({"description": "لا يوجد مطبخ"}, {"parkingSpaces": 0}) == {"kitchen": False}
 
 
 def test_a_compound_or_unknown_facade_is_not_a_facade():

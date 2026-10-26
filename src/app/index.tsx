@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image as XImage } from 'expo-image'; // SVG logo: a vector drawing, not a photo (owner 2026-10-24)
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -8,6 +9,9 @@ import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
+import HeroFalconer from '@/components/HeroFalconer';
+import CloudWisp from '@/components/CloudWisp';
+import { useReducedMotion } from '@/lib/useReducedMotion';
 import { HERO_TAGLINE_KEYS, nextHeroTaglineIndex } from '@/data/heroTaglineRotation';
 import { OptionBox, FieldLabel, Tappable, Reveal, DropdownReveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -303,6 +307,7 @@ export default function Home() {
     () => reconcileCommittedAf(storeQuery, AF_ALL_QUESTIONS),
     [storeQuery],
   );
+  const reducedSceneMotion = useReducedMotion();
   const docked = useDocked(); // website: sidebar is a permanent column, so hide the menu button
   // CITY-ONLY FIELD (owner spec 2026-07-17): citySuggestions holds either the Top-6-by-listings
   // (focus, empty text) or the Arabic-matched typed results — never a mix, and never a
@@ -1150,7 +1155,7 @@ export default function Home() {
     runAfterAnimation(
       (onFinished) => RNAnimated.timing(heroAnim, {
         toValue: 1,
-        duration: 300,
+        duration: reducedSceneMotion ? 0 : 300,
         easing: RNEasing.out(RNEasing.cubic),
         useNativeDriver: true,
       }).start(onFinished),
@@ -1355,22 +1360,10 @@ export default function Home() {
       { scale: Platform.OS === 'web' ? 1 : entrance.interpolate({ inputRange: [0, 1], outputRange: [0.965, 1] }) },
     ],
   };
-  const heroOpacity = heroAnim.interpolate({
-    inputRange: [0, 1],
-    // idle → searching. Web idles a bit darker; both lighten to the same soft level on Search.
-    outputRange: [Platform.OS === 'web' ? 0.92 : 0.82, 0.3],
-  });
-
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      {/* Hand-drawn Saudi landmarks sketch — soft full-bleed backdrop. On phones it shows in full
-          ('contain'); on wide web it fills ('cover'). It dims when idle and lightens while searching. */}
-      <HeroBackground
-        imageOpacity={heroOpacity}
-        resizeMode={Platform.OS === 'web' ? 'cover' : 'contain'}
-        fadeStart={0.8}
-        fadeEnd={1}
-      />
+      {/* Filter: the sky only, no desert landscape below (owner 2026-10-24). */}
+      <HeroBackground />
 
       <ScrollView
         ref={scrollRef}
@@ -1378,7 +1371,8 @@ export default function Home() {
         contentContainerStyle={[s.scroll, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}
         keyboardShouldPersistTaps="handled"
       >
-        <RNAnimated.View style={[s.col, entranceStyle]}>
+        <RNAnimated.View style={[s.page, entranceStyle]}>
+          <View style={s.col}>
           {/* Top bar is pinned LTR (see s.top) so the menu always sits on the physical LEFT — it does
               NOT mirror to the right under Arabic. Matches the docked side menu, which is left in both
               languages per product decision. */}
@@ -1449,12 +1443,28 @@ export default function Home() {
             </View>
           </View>
 
-          {/* Hero — title then subtitle rise in, staggered (user request). */}
+          </View>
+
+          {/* Logos use the available page width; the form keeps its readable column. */}
           <HomeWebsiteStrip />
+          <View style={s.col}>
+          {/* Hero — title then subtitle rise in, staggered (user request). */}
           <View style={s.hero}>
-            <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
-              <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
-            </Pressable>
+            <CloudWisp variant={1} width={100} height={34} opacity={0.38} style={{ left: -40, top: 12 }} />
+            <CloudWisp variant={2} width={90} height={28} opacity={0.32} style={{ right: -35, bottom: 18 }} />
+            {/* The falconer (owner 2026-10-26): beside the big title, among the clouds, for visitors who are not signed in.
+                He stands at the END of the sentence and points back at it (owner 2026-10-26): Arabic ends on the left, so
+                he is on the left and flipped; English ends on the right, so he is on the right as drawn. Signed-in users never see him. */}
+            <View style={[s.heroTitleRow, locale === 'ar' && s.heroTitleRowAr]} {...({ dir: 'ltr' } as any)}>
+              <Pressable style={s.heroTitleBox} disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
+                <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
+              </Pressable>
+              {authChecked && !user ? (
+                <RNAnimated.View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, reveal(titleAnim, 20)]}>
+                  <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} />
+                </RNAnimated.View>
+              ) : null}
+            </View>
             <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
             <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>
           </View>
@@ -1547,7 +1557,7 @@ export default function Home() {
                   {(['annual', 'monthly'] as const).map((which) => (
                     <OptionBox compact
                       key={which}
-                      label={t(which === 'monthly' ? 'Monthly' : 'Yearly')}
+                      label={t(which === 'monthly' ? 'Short stays' : 'Yearly')}
                       img={PERIOD_IMG[which === 'monthly' ? 'Monthly' : 'Yearly']}
                       selected={which === 'monthly' ? rentPeriod === 'monthly' || rentPeriod === 'both'
                                                      : rentPeriod === 'annual' || rentPeriod === 'both'}
@@ -1569,7 +1579,7 @@ export default function Home() {
                   ))}
                 </View>
                 <Text style={s.rentHint}>
-                  {t(rentPeriod === 'monthly' ? 'Monthly: the displayed price is the monthly price.'
+                  {t(rentPeriod === 'monthly' ? 'Short stays: stays shorter than a year, priced by length of stay.'
                     // Owner feedback (2026-08-22): drop the "this means you want both, so you get
                     // both" framing — selecting both buttons is already self-explanatory. Keep only
                     // the one genuinely non-obvious fact: mixed results show mixed price units.
@@ -2318,6 +2328,7 @@ export default function Home() {
               behind — `git revert` of that commit restores the whole block. The styles (onbWrap/
               onbHeading/onbDesc/suggGrid/chip*) are deliberately KEPT so a restore needs no re-authoring.
               The AI Agent page still shows its own version of this block to guests. */}
+          </View>
         </RNAnimated.View>
       </ScrollView>
 
@@ -2329,10 +2340,10 @@ export default function Home() {
       {sharedSearch && user && !sharedSearch.code && (
         <View style={s.sharedBackdrop} accessibilityViewIsModal>
           <View style={s.sharedCard}>
-            <Pressable onPress={() => setSharedSearch(null)} hitSlop={10} style={[s.sharedClose, isRTL ? { left: 12 } : { right: 12 }]} accessibilityRole="button" accessibilityLabel={t('Close')}>
+            <Pressable onPress={() => setSharedSearch(null)} hitSlop={10} style={[s.sharedClose, { right: 12 }]} accessibilityRole="button" accessibilityLabel={t('Close')}>
               <Ionicons name="close" size={20} color={colors.muted} />
             </Pressable>
-            <Image source={require('../../assets/images/eagle-mark.png')} style={s.sharedEagle} resizeMode="contain" accessibilityIgnoresInvertColors />
+            <XImage source={require('../../assets/images/logo-cloud-green-lit.svg')} style={s.sharedEagle} contentFit="contain" />
             <Text style={[s.sharedTitle, { writingDirection: isRTL ? 'rtl' : 'ltr' }]}>
               {shareLandingTitle(sharedSearch.name, sharedSearch.q, locale === 'en' ? 'en' : 'ar')}
             </Text>
@@ -2382,6 +2393,11 @@ const SHARED_PENDING_TTL_MS = 30 * 60 * 1000;
 const SHARED_IMPORTED_KEY = 'ezhalah:sharedChat:imported';
 
 const s = StyleSheet.create({
+  heroTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, maxWidth: '100%' },
+  heroTitleBox: { flexShrink: 1 },
+  heroTitleRowAr: { flexDirection: 'row-reverse' },
+  heroFalconer: { width: 40, height: 46, flexShrink: 0 },
+  heroFalconerWide: { width: 52, height: 60, flexShrink: 0 },
   sharedBackdrop: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60,
     backgroundColor: 'rgba(18, 37, 27, 0.35)', alignItems: 'center', justifyContent: 'center', padding: 20,
@@ -2394,12 +2410,13 @@ const s = StyleSheet.create({
   sharedEagle: { width: 36, height: 36, marginBottom: 10 },
   sharedTitle: { fontSize: 16, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 24 },
   sharedButton: {
-    marginTop: 20, alignSelf: 'stretch', backgroundColor: colors.primary, borderRadius: 14,
+    marginTop: 20, alignSelf: 'stretch', backgroundColor: colors.selFill, borderRadius: 14,
     paddingVertical: 14, alignItems: 'center',
   },
   sharedButtonText: { color: colors.onFill, fontSize: 16, fontWeight: '700' },
 
   scroll: { paddingHorizontal: space.screenSide, alignItems: 'center' },
+  page: { width: '100%', alignItems: 'center' },
   col: { width: '100%', maxWidth: MAX_W },
 
   // Force LTR for the top bar so it never mirrors under Arabic: the hamburger stays pinned to the
@@ -2408,12 +2425,12 @@ const s = StyleSheet.create({
   top: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 4 },
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   // Note #4 — mobile brand text next to the hamburger.
-  topBrand: { fontSize: 18, fontWeight: '800', color: colors.dark, letterSpacing: -0.4 },
+  topBrand: { fontSize: 18, fontWeight: '800', color: colors.ink },
   // AI Agent badge + Share icon, grouped and pushed to the far-right edge (marginStart:auto) so they
   // sit together in the top-right corner in BOTH languages. (user request.)
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginStart: 'auto' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  word: { fontSize: 12, fontWeight: '700', letterSpacing: 1.2, color: colors.ink },
+  word: { fontSize: 12, fontWeight: '700', color: colors.ink },
   // The bar is forced LTR (see s.top), so `marginStart: 'auto'` pushes the badge away from the
   // left-pinned hamburger toward the share button on the right.
   // Redesigned to match the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius,
@@ -2452,8 +2469,11 @@ const s = StyleSheet.create({
   hero: { alignItems: 'center', marginTop: 8, marginHorizontal: 4 },
   // The Filter / AI Agent control, centered in the hero flow between the tagline and the card.
   modeWrap: { alignSelf: 'center', marginTop: 8 },
-  heroTitle: { fontSize: 24, fontWeight: '700', color: colors.primary, letterSpacing: -0.6, textAlign: 'center', lineHeight: 28 },
-  heroSub: { fontSize: 12, fontWeight: '600', color: colors.dark, textAlign: 'center', marginTop: 4, lineHeight: 17 },
+  // NO letter-spacing on Arabic: it breaks joining and ligatures («الله» lost its ligature in the welcome
+  // headline, owner 2026-10-24). Latin tracking lives in the English-only layer E. Guard:
+  // scripts/verify-no-letter-spacing-on-arabic.ts
+  heroTitle: { fontSize: 24, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 28 },
+  heroSub: { fontSize: 12, fontWeight: '600', color: colors.ink, textAlign: 'center', marginTop: 4, lineHeight: 17 },
   heroTagline: { fontSize: 12.5, fontWeight: '700', color: colors.primary, textAlign: 'center', marginTop: 8, fontStyle: 'italic' },
   // Small inline hint under the Rent Monthly/Yearly toggle — explains the period the user picked.
   rentHint: { fontSize: 11.5, color: colors.muted, marginTop: 6, paddingHorizontal: 4, lineHeight: 16 },
@@ -2521,7 +2541,7 @@ const s = StyleSheet.create({
     borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10,
   },
   // flexShrink so the NAME truncates at narrow widths — the fixed 14px art and the ✕ never overflow.
-  districtChipText: { fontSize: 12.5, fontWeight: '700', color: colors.dark, flexShrink: 1 },
+  districtChipText: { fontSize: 12.5, fontWeight: '700', color: colors.ink, flexShrink: 1 },
   districtChipIcon: { width: 14, height: 14, resizeMode: 'contain' },
   suggIconEmpty: { opacity: 0.5 },
   suggCityEmpty: { color: colors.muted, fontWeight: '500' },

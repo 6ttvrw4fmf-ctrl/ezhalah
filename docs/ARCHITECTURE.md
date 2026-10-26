@@ -75,7 +75,7 @@ STOP → restore → fix → continue. Checklist: `ezhalah-app/docs/DEPLOY_REGRE
 
 The empty English chat subtitle is “Describe it and Ezhalah” without punctuation; English model descriptions use ordinary sentence punctuation rather than long dashes (owner, 2026-10-14).
 
-The header and sidebar Ezhalah name uses dark green. Assistant replies and result slogans keep the same green sparkle stars as the thinking state (owner, 2026-10-07).
+The header and sidebar Ezhalah name uses the theme ink, and assistant sparkle stars use the theme accent (sky/dusk redesign, owner 2026-10-24). Source artwork retains its original colors.
 
 The AI Agent’s empty composer hint aligns left in English and right in Arabic (owner, 2026-10-07). Typed messages keep their own language direction. The entire user bubble sits on the left for English and on the right for Arabic, determined per message (owner clarification, 2026-10-13).
 
@@ -110,6 +110,8 @@ only, shown once).
 ---
 
 ## 4. Frontend — the Filter Search screen (`src/app/index.tsx`)
+
+**Website logo strip width (owner, 2026-10-24):** on web, the rotating website logos span the available main-content width beside the sidebar, with the existing page gutters. The Filter form and headline retain their centered 560 px column. The shared strip also fills the AI Agent landing's available width. Mount only enough logos to cover the measured width plus one entering slot, updating when the container resizes. Logo size, spacing, speed, clock phase, and reduced-motion behavior remain unchanged; phone layouts continue to fit the viewport.
 
 The single search state is `query` (a `SearchQuery` in the store). Every control mutates it via
 `setQuery`. **Selecting an upstream step cascade-resets all downstream fields.**
@@ -428,8 +430,10 @@ use `t(sourceName(listing.source))`, matching the result card. Arabic prose is h
 like ResultCard. No photos means no gallery box. The preview and iframe host lists are disjoint.
 
 **Listed-now identity (owner, 2026-10-19):** the Aqar sale price comparison's
-«المعروض الآن» / “Listed now” heading carries the approved transparent Saudi falconer holding
-a falcon, with a house integrated into the silhouette (`assets/icons/falconer-property.png`).
+«المعروض الآن» / “Listed now” heading has NO picture for now (owner 2026-10-26 deleted the falconer-holding-a-
+falcon-over-a-house drawing that stood here since 2026-10-19; leave it blank until the owner picks one).
+The FILE `assets/icons/falconer-property.png` stays in the repo, referenced by nothing: preflight-verify.sh refuses any
+deploy that deletes a shipped asset present in the approved baseline, and an unreferenced asset is not bundled.
 Use a compact 30 px image beside the heading, mirrored placement for Arabic; the Ministry's
 actual-sales heading uses the Ministry's official green-and-gold logo in the same 30 px frame
 (`assets/icons/ministry-of-justice.webp`, copied unchanged from the official homepage's
@@ -517,10 +521,31 @@ overwrite it (`canAutoRetitle`). Title is deliberately NOT coupled to `sameQuery
 
 
 **Design tokens (`src/theme/tokens.ts`) — never hard-code hex/sizes in components:**
-- primary `#2f7247`, dark `#1d4a37`, tint `#eef6f0`, ink `#15201b`, body `#34403a`, muted `#7b8a82`,
-  paper `#fbfbfa`, surface `#ffffff`, whatsApp `#25d366`, accentLeaf `#2fb672`.
-- radius chip 12 / card 16 / field 13 / sheet 22 / pill 999. space base 8 / screenTop 56 / screenSide 18.
-- Font **Poppins** (400/500/600/700). Soft green-tinted `cardShadow`. Per-platform brand colors.
+- Values live in `src/theme/palette.ts`: light charcoal text (`#24232B`), plum controls
+  (`#493953`), white solid cards, pale blue sky; dusk blue sky, charcoal-plum cards (`#25232D`),
+  warm ivory copy (`#F5F2ED`) and soft lavender accents. Semantic warning colors, original
+  source logos/photos, WhatsApp green, and featured gold/silver treatment are unchanged.
+- Radius chip 12 / card 16 / field 13 / sheet 22 / pill 999. Space base 8 / screenTop 56 / screenSide 18.
+- Existing Arabic and English typography stays unchanged. All controls and dialogs use the shared palette.
+
+**Sky and desert theme (owner approved 2026-10-24):** `HeroBackground` renders a continuous light-blue
+sky (muted blue-hour dusk in dark mode), with sparse realistic transparent clouds. The landing foreground
+has pale dunes, one palm and one small Bedouin tent; a separate dusk asset preserves readable sand and a
+warm tent light. Only this foreground fades when search starts; results and the search loader retain the
+sky, with solid readable cards. The header/wordmark shares the sky. The sidebar has its own sparse,
+column-sized clouds behind its header and chat list, clipped at the seam rather than duplicating the
+page's cloud clusters. `SidebarSky` adds the original green eagle on a small sky tile with thin clouds
+passing below its eye. Both signed-in and guest headers, docked and mobile drawers, use this treatment
+in either language and theme. Cloud transforms drift over 18 seconds per direction with eased turns;
+reduced motion makes them static. They never intercept taps or obscure the wordmark and controls.
+Assets contain no UI or text. Headline cloud wisps touch the outer edges and never
+mask the copy. `CloudWisp` is decorative, pointer-transparent, and hidden from assistive technology.
+Source logos keep their measured frames and original colors, with small varied wisps touching their edges.
+The website strip moves each logo and cloud together at **12 px/s** (one 108px slot per **9 seconds**),
+retains the shared wall-clock phase and the iOS-safe bounded window, and becomes static with reduced
+motion. This supersedes the earlier 45 px/s setting. Search-loader roster, ten-second cycle, eligibility,
+and result ordering are unchanged. Ground fade is 300ms (instant with reduced motion); animation never
+owns or delays search readiness. These rules supersede earlier green UI/sketched-building descriptions.
 
 **Desktop UI scale — 1:1, by owner decision (2026-08-14, PR #617):** the app is a mobile-first px
 design (body 13–15, titles 18–26, 560px content column) rendered 1:1 at every viewport. A tiered
@@ -596,7 +621,8 @@ runQuery(q):  normalize (Room=1) ─► resolveLocation()/ensureLocationIndex() 
 - **Sources:** Aqar (res + com; deep page-range batching), Wasalt (res + com; Saudi residential proxy for
   cloud, enrichment via home IP), **Gathern (rent-only monthly furnished ~16k)**, **aqarmonthly** (Aqar
   DailyRenting GraphQL ~3.8k monthly furnished), Muktamel (weekly), and ~30 small sources via one matrix
-  workflow `small-sources-sync.yml` (add a platform = one matrix line).
+  workflow `small-sources-sync.yml` (add a platform = one line in its SMALL_SOURCES list; a `source=` dispatch
+  creates only the named jobs — 2026-10-25).
 - **Retired platforms:** **toor** — retired 2026-07-06 (owner-approved). Host `www.toor.ooo` IP-blocks
   datacenter IPs *and* the Saudi residential proxy (every fetch `exc:Timeout`, 0 rows for weeks).
   Removed from the `small-sources-sync.yml` matrix (PR #33) → no longer scheduled/dispatched.
@@ -1009,7 +1035,10 @@ migration-drift-guard rule in `AGENTS.md`).
 **Share preview (owner, 2026-10-11):** use the existing green eagle and rooftops on white, identical to `public/icon-512.png`, for both the in-app share preview and external link artwork. Keep the owner’s original conversational Arabic message and approved English translation in `src/lib/share.ts`, without an AI sentence or dashes; every share target uses the constants for the selected language. Version the image URL when artwork changes.
 
 - **Share a search (owner 2026-10-17):** a signed-in user's «مشاركة» under a result sends THAT search; a guest's Share stays the plain homepage link. One personal title is used everywhere — message (+ 👇), WhatsApp card and landing card: «{type plural} {للإيجار/للبيع} في {place} من {first name} على إزهله» (e.g. «شقق للإيجار في حي النرجس من يوسف على إزهله»; 2–3 districts named, 4+ as «النرجس و3 أحياء ثانية»; no type → «عقارات»; no place → omitted). Card line: «كل مواقع العقار في مكان واحد»; image = the Ezhalah logo; no eagle emoji; the wording never says "sign in". Language = the SENDER's app language setting. The link is `/s/<payload>` (`api/share-card.ts` serves the Open Graph card from the request's own domain, then redirects to `/?share=`); it never opens `/agent` (appSession gate). Home shows the title + «اضغط وشوف العقارات»; the tap opens the search through the Filter's normal path, saved to the recipient's list. Owner decision: opening a shared search requires signing in with Google/Apple; ordinary «بحث» stays free (`verify-search-is-free.ts`). **Whole chat (owner 2026-10-17, «sharing it means I share the chat history»):** pressing Share saves a COPY of the conversation in `public.shared_chat` (migration `20261018031834`; RLS on, no policies — only `create_shared_chat` [authenticated, 3 MB cap, 60/h], `get_shared_chat` [authenticated], `shared_chat_card` [anon: name/locale/query]) and shares `/s/<8-char code>`. The recipient signs in, the chat is copied into THEIR history (`importSharedChat`, synced like any chat) and opens there; they can keep typing; nothing is live-synced between the two. The same link reopens the same copy on that device. If the save fails the search link above is shared instead; if the copy cannot be read the shared search opens. Client: `src/lib/sharedChat.ts`. Guard: `scripts/verify-share-search-link.ts`.
+- **Short-term facts mean the SITE'S OWN POSTING DATE (owner 2026-10-26, «short term we are referring to new date posted in those websites … make a rule»).** Every time-window claim Ezhalah makes — «أمس», «اليوم», «آخر 7 أيام» / «هذا الأسبوع», week-over-week, «آخر 30 يوم», «جديد/جديدة» in a dated window — counts a listing by the date the SOURCE WEBSITE says it was posted (`date_added`, read by `public.source_posted_at()`), NEVER by when our scrapers first saw it (`first_seen_at` / `scraped_at`). A listing posted a year ago that we found yesterday is not «new yesterday». No readable source date → the listing is in NO window (SOURCE IS TRUTH: unknown is never «new»), so these counts are lower bounds and the sentence says «ما لا يقل عن» / «على الأقل» / "at least". Comparisons (this week vs last) use only sites that publish dates. The fact builder and its independent checker apply the same rule (migration `20261026122758`: `build_welcome_insights()` replaces a recent ad's `first_seen_at` with its posting date before any window is cut; `audit_welcome_insights()` recounts the same way). Measured the day the rule was made: of 3,034 ads first seen «yesterday», 880 were posted that day per their sites, 1,011 earlier and 1,143 carried no date — the old line overstated ~3.4×. A sentence that means «added to Ezhalah» must say so in words («على إزهله»), e.g. «{n} إعلان جديد اليوم على إزهله».
 - **Read Aloud language (owner 2026-10-14):** English responses and visible card facts are read in English using an explicitly matched English device voice; Arabic retains its Saudi-preferred Arabic voice. Speak the displayed summary/closing note unchanged, keep the same visible card order and free device-only speech, and refuse gracefully if the matching voice is unavailable.
+- **«إقامات قصيرة» is the rent pool for Gathern + Aqar Monthly ONLY; every other per-month rent is yearly at ×12 (owner 2026-10-25).** In Saudi Arabia every normal rent contract is yearly. The rent-period button «شهري» became «إقامات قصيرة» (EN «Short stays»): stays shorter than a year, priced by length of stay — the two stay-length platforms and nothing else. A per-month figure on any other site is a YEARLY listing: it pools under «سنوي» at ×12 (`price_annual` is already stored as monthly×12 by every scraper), its card reads «/سنوياً», and the card keeps the site's own words under it: «السعر المعلن 3,000 شهرياً». The source tables and their `rent_period` are untouched (PERIOD = SOURCE still holds for the SITE'S WORD); what changed is the POOL — `search_listings_ar.rent_period_ar` — which is written by `public.rent_pool_ar(platform, rent_period)` and mirrored in the app by `src/lib/rentPool.ts` (the card line, the card-fetch clause). An unpublished period still pools as NULL, never «سنوي». Off switch: `ops_feature_flags.short_stays_pool` (off = the pre-2026-10-25 mapping, restored by the next hourly sync). Guards: `scripts/verify-short-stays-pool.ts` (executes both halves' truth table), `mon_detect_short_stays_pool_drift()` (P1, twice an hour, while the flag is on). **Price-on-request rows (owner 2026-10-26, «shift those to annual rent»):** a rent row with no price from any OTHER site is admitted under «سنوي» and «كلاهما» only, never under «إقامات قصيرة» — the 2026-09-28 "no price passes every period" clause now applies to the two stay-length platforms alone (`af_eligibility_clause` + the six RPCs that inline it, kept in step by `mon_af_predicate_parity`). Guards: `scripts/verify-short-stays-pool.ts` (executes both halves' truth table), `mon_detect_short_stays_pool_drift()` (P1, twice an hour, while the flag is on). **Card price lines (owner 2026-10-26):** a stay-length card (Gathern / Aqar Monthly) prints NO price line at all — the 2026-10-02 «tap to see prices by length of stay» note is gone («remove the إقامات قصيرة price, no need for it»); `listingPrice()` returns `''` and every surface prints nothing. Every yearly rent card carries a monthly line under the big yearly price: «السعر المعلن 3,000 شهرياً» when the site quoted per month (its exact figure), «≈ 3,000 شهرياً» (÷12, rounded, marked ≈ like every derived figure) when it quoted per year — `monthlyLineText()` in `src/lib/listingDisplay.ts`, guarded by `scripts/verify-stay-length-platforms-show-a-note-not-a-price.ts` (executed with mutation proofs). Still open: the ~9,700 ads labelled «سنوي» whose price is really per month (the "fake-cheap yearly" problem) — a separate, owner-gated step.
+- **A «yearly» rent under 8,000 SAR on a home or business unit is a per-month price (owner 2026-10-26, «investigate the monthly prices kept in yearly and put a very very strong guard … make sure we show yearly always»).** Measured that day over the live index: «سنوي» apartments price 8,410 below 8,000 SAR, 194 between 8,000 and 12,000, then 2,202 at 12,000–20,000 and 56,282 above; the sites' own ad text says «شهري» on 3,269 of Aqar's 5,272 cheap «yearly» ads; Wasalt's own payload labels e.g. 3,300 as `rentFreq.yearly` with no monthly figure beside it. The source's word stays the source's word in the source tables (PRICE = SOURCE, PERIOD = SOURCE untouched); what we SERVE reads such a figure as monthly ×12 — the index's `price_annual` through `public.rent_price_annual_ar(platform, rent_period, price_annual, property_type)`, the card through `src/lib/rentPool.ts::cheapYearlyIsMonthly` in `finalize()` — so the yearly search, the budget filters and the card agree, and the card says «السعر المعلن 3,300 شهرياً» under the yearly price. Threshold 8,000 (exclusive) and the type list (Apartment, Villa, Floor, Duplex, Studio, House, Building, Residential Building, Office, Shop, Warehouse, Showroom, Commercial Building) live in ONE place each side and are pinned equal by `scripts/verify-cheap-yearly-is-monthly.ts`; rooms, land, rest houses, chalets, camps and farms are out (a room at 6,000 a year is real). Off switch: `ops_feature_flags.cheap_yearly_is_monthly` (off = the published figure, restored by the next hourly sync). Guard: `mon_detect_cheap_yearly_rent_served()` (P1, twice an hour, while the flag is on). This supersedes, for this one class, the 2026-09-03 "rent period = source, never derived" rule — by the owner's explicit decision.
 - **Response feedback (owner 2026-10-01):** selecting either thumb moves both visible thumbs together until they touch, then fades the unselected thumb, leaving one selected thumb; tapping it again restores both choices. Keep share/read-aloud stationary, mirror the layout for Arabic/English, and skip motion when reduced motion is enabled. Keep the existing top-of-chat confirmation popup. Feedback storage and response scope remain unchanged.
 
 **Website picker profiles (owner, 2026-10-08, clarified):** Arabic-first website selection supports one or more searchable websites. A brief single sentence describes the site's listing locations and residential/commercial focus from measured inventory; never infer location from its office address or invent a specialty. `src/data/platformPickerCoverage.json` records the public production cohort measurements and observed source examples; `scripts/generate-platform-picker-coverage.ts` refreshes bounded, paced reads and refuses to overwrite evidence on failure. `src/lib/platformCoverageSentence.ts` derives the copy. Use a compact bottom sheet with a full-width scrollable list, nationwide first then regional headers. Choices apply immediately and slide the sheet down; reopen to add more websites, with no «تم» confirmation button. Use the collected original logos with uniform 96×48 slots with visible artwork fitting 88×40, and measured positioning (`platformPickerLogoLayout.json`); original brand colors remain unchanged; pale/white artwork uses a small dark green backing for contrast, and Deal uses the original yellow listing-card asset; selected rows stay plain, with only a dark green checkmark; no filled highlight, border or logo recoloring (owner clarification, 2026-10-08). The control displays selected logos, reopening retains checked choices, and the all-sites mark is the eagle magnifier. `pickerSourceSlugs()` maps display names to canonical source slugs, including Aqar's monthly vertical; the selected sources constrain every actual search/refinement. Closing has smooth motion with reduced-motion support. An explicit all-sites choice clears inherited source restrictions before parsing and refinement; untouched picker state accepts free-text source requests. The complete selection resets with a new conversation.
@@ -1306,15 +1335,17 @@ migration-drift-guard rule in `AGENTS.md`).
   region; volume = new for-sale ads, this week vs last (steady-crawl sites only), asking price this month
   vs last (shown only when it moved ≥3%). Counts say «إعلانات», with exact cross-site copies removed (same
   district, deal, type, price, area on a different site; pins within ~200 m when both carry one). An ad is
-  "new" only once we have read its site for 7 days. Built nightly by `build_welcome_insights()`, recounted
+  "new" only once we have read its site for 7 days. Every dated window counts by the SITE'S own posting date, never first-seen (§20 «Short-term facts», 2026-10-26). Built nightly by `build_welcome_insights()`, recounted
   independently by `audit_welcome_insights()` on the same snapshot (mismatch ⇒ fact removed + alarm
   `mon_detect_welcome_insights_audit`), places checked in the Filter by `verify_welcome_insights()`.
   Big and medium cities (≥300 ads) only until 3 clean checker nights. The line ends with its greeting's
   emoji (☀️ 🌙 🕌 🌴 👋), changes every hour, two lines in three about the user's searched city, city
   picked before fact, never the same city or kind twice in a row; tapping it opens «كيف تشتغل؟».
-  The sheet heading uses the owner's simple green falconer with ghutra, agal and raised glove,
-  without a face circle, in place of the magnifying-glass emoji in both languages (owner 2026-10-23).
-  Artwork: `assets/icons/insight-falconer.png`; explanatory copy and dismissal stay the same.
+  The sheet heading shows two green falconer logos side by side in both languages (owner 2026-10-23):
+  the final version with ghutra, agal, raised glove, gold-trimmed Saudi bisht and a neat beard and
+  moustache (`assets/icons/insight-falconer.png`), alongside the original simple outline without
+  bisht or beard (`assets/icons/insight-falconer-original.png`). Neither has a face circle.
+  These replace the magnifying-glass emoji; explanatory copy and dismissal stay the same.
   Guards: `scripts/verify-insight-welcome.ts`, `scripts/verify-filter-welcome.ts`.
 
 ---

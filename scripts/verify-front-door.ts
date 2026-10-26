@@ -102,7 +102,7 @@ const hostMod = await liftSymbols(join(root, 'src/lib/supabase.ts'),
   [{ header: 'export const FRONT_DOOR_HOSTS', endsWith: /;$/ }, { header: 'export function frontDoorHost(', endsWith: /\}$/ }], ['frontDoorHost']);
 const onHost = hostMod.frontDoorHost as (h: string) => boolean;
 check('the front door runs on the real site only, never on localhost, CI or previews',
-  onHost('ezhalah-app.vercel.app') && !onHost('localhost') && !onHost('127.0.0.1') && !onHost('ezhalah-app-git-x.vercel.app')
+  onHost('ezhalah-app.vercel.app') && onHost('ezhalah.com') && onHost('www.ezhalah.com') && !onHost('evil-ezhalah.com') && !onHost('localhost') && !onHost('127.0.0.1') && !onHost('ezhalah-app-git-x.vercel.app')
   && /&& frontDoorHost\(window\.location\?\.hostname \?\? ''\);/.test(client));
 check('a Turnstile failure can never become an uncaught page error', /'error-callback': \(\) => true/.test(client));
 mustCatch('the host gate removed from the switch', !/&& frontDoorHost\(window\.location\?\.hostname \?\? ''\);/.test(client.replace("\n  && frontDoorHost(window.location?.hostname ?? '');", ';')));

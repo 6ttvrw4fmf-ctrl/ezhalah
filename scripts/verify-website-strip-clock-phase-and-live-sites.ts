@@ -47,15 +47,15 @@ const problems = (phase: Phase): string[] => {
     const p = phase(t, CYCLE);
     if (!(p >= 0 && p < CYCLE)) out.push(`phase ${p} is outside one cycle at t=${t}`);
   }
-  const advance = ((phase(T + 2400, CYCLE) - phase(T, CYCLE)) % CYCLE + CYCLE) % CYCLE;
-  if (Math.abs(advance - 108) > 1e-6) out.push(`2.4 s on the clock moved the strip ${advance.toFixed(3)}px, not one 108px slot (45 px/s)`);
-  if (Math.floor(phase(T, CYCLE) / 108) === Math.floor(phase(T + 2400, CYCLE) / 108)) out.push('two loads 2.4 s apart open on the same logo');
+  const advance = ((phase(T + 9000, CYCLE) - phase(T, CYCLE)) % CYCLE + CYCLE) % CYCLE;
+  if (Math.abs(advance - 108) > 1e-6) out.push(`9 s on the clock moved the strip ${advance.toFixed(3)}px, not one 108px slot (12 px/s)`);
+  if (Math.floor(phase(T, CYCLE) / 108) === Math.floor(phase(T + 9000, CYCLE) / 108)) out.push('two loads 9 s apart open on the same logo');
   if (phase(T, 0) !== 0) out.push('an empty site list breaks the phase (NaN)');
   return out;
 };
 
 const real = problems(await lift(SHARED));
-check('the strip phase is the wall clock at 45 px/s: same instant ⇒ same place, 2.4 s ⇒ one slot', real.length === 0, real.join('\n      '));
+check('the strip phase is the wall clock at 12 px/s: same instant ⇒ same place, 9 s ⇒ one slot', real.length === 0, real.join('\n      '));
 
 const filtered = (src: string) =>
   /ALL_NAMES\.filter\(\(name\) => pickerMayOffer\(name, liveNames, downNames\)\)/.test(src)
@@ -65,18 +65,26 @@ check('the strip re-filters when the live list lands', /void loadLivePickerNames
 check('the web strip takes its names and its every-frame position from the shared clock contract',
   /useStripNames\(\)/.test(WEB) && /stripWindow\(stripPhase\(Date\.now\(\), cycleWidth\), n\)/.test(WEB));
 // SMALL WINDOW (owner iPhone screenshot 2026-10-22: lower half of Home painted white). The track must mount
-// only STRIP_WINDOW logos, never every logo twice (a ~32,000 px will-change layer iOS Safari drops tiles for).
+// only the visible window plus one logo, never every logo twice (a ~32,000 px layer iOS Safari drops tiles for).
 // EXECUTED: the window's start × slot + offset must equal the clock phase, so the strip is where the clock says.
 {
   const lifted = await liftSymbols(join(ROOT, 'src/components/HomeWebsiteStrip.web.tsx'),
-    [{ header: 'export function stripWindow(' }], ['stripWindow'], 'const STRIP_SLOT = 108;');
+    [{ header: 'export function stripWindow(' }, { header: 'export function stripWindowSize(' }], ['stripWindow', 'stripWindowSize'], 'const STRIP_SLOT = 108;');
   const win = lifted.stripWindow as (p: number, n: number) => { start: number; offset: number };
   const n = 149, cyc = n * 108;
   const places = [0, 1, 107.9, 108, 5000.5, cyc - 0.5].every((p) => { const w = win(p, n); return Math.abs(w.start * 108 + w.offset - p) < 1e-6 && w.offset >= 0 && w.offset < 108 && w.start < n; });
   check('the window sits exactly where the clock phase says (start × slot + offset = phase)', places);
   check('a missing list is a still, empty strip — never NaN', JSON.stringify(win(NaN, n)) === '{"start":0,"offset":0}' && JSON.stringify(win(500, 0)) === '{"start":0,"offset":0}');
-  const smallTrack = (src: string) => /Array\.from\(\{ length: STRIP_WINDOW \}/.test(src) && !/\[0, 1\]\.map\(copy =>/.test(src);
-  check('the web track mounts only STRIP_WINDOW logos, not the whole loop twice', smallTrack(WEB));
+  const size = lifted.stripWindowSize as (width: number) => number;
+  const coversViewport = (getSize: typeof size) => [320, 390, 560, 1080, 1440, 1920, 2560].every(width => {
+    const pixels = getSize(width) * 108;
+    return pixels >= width + 108 && pixels < width + 216;
+  });
+  check('phone through wide desktop: mounted logos cover the width with only one entering slot', coversViewport(size));
+  check('(mutation) catches the old seven-logo cap leaving desktop space empty', !coversViewport(() => 7));
+  check('(mutation) catches mounting the whole roster', !coversViewport(() => 149));
+  const smallTrack = (src: string) => /Array\.from\(\{ length: windowSize \}/.test(src) && /setWindowSize\(stripWindowSize\(strip\.clientWidth\)\)/.test(src) && /new ResizeObserver\(measure\)/.test(src) && !/\[0, 1\]\.map\(copy =>/.test(src);
+  check('the web track follows its container width, not the whole loop twice', smallTrack(WEB));
   check('(mutation) catches the 32,000 px two-copy track coming back', !smallTrack(`${WEB}\n{[0, 1].map(copy => names.map(...))}`));
 }
 check('the web strip stays invisible until the client knows the phase (no first-logos flash on a static page)', /opacity: phase === null \? 0 : 1/.test(WEB));

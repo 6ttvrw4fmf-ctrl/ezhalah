@@ -366,7 +366,7 @@ export default function AccountMenu({
                 {({ hovered, pressed }: any) => { const on = !!(hovered || pressed); return (<>
                   <View style={s.avatar}><Text style={s.avatarText}>{initialsOf(pickName(user, locale))}</Text></View>
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={[s.profileName, !pickName(user, locale) && s.addName, on && s.rowOn]} numberOfLines={1}>{pickName(user, locale) || t('Add your name')}{pickName(user, locale) ? '' : ' ✏️'}</Text>
+                    <Text style={[s.profileName, !pickName(user, locale) && s.addName, on && s.rowOn]} numberOfLines={1}>{pickName(user, locale) || t('Ezhalah Guest')}{pickName(user, locale) ? '' : ' ✏️'}</Text>
                     {!!user.sub && <Text style={[s.profileSub, on && s.rowSubOn]} numberOfLines={1}>{user.sub}</Text>}
                   </View>
                   <Ionicons name="create-outline" size={15} color={on ? C.onFill : C.muted} />
@@ -444,7 +444,7 @@ export default function AccountMenu({
                 hitSlop={8}
                 style={({ hovered }: any) => [s.centerClose, hovered && s.quietHover]}
               >
-                <Ionicons name="close" size={18} color={C.muted} />
+                <Ionicons name="close" size={18} color={C.ink} />
               </Pressable>
           {view === 'account' && (
             <ScrollView style={{ maxHeight: winH * 0.72 }} showsVerticalScrollIndicator={false}>
@@ -570,7 +570,7 @@ export default function AccountMenu({
                               <Text style={s.deviceNote}>{t('Signs out within an hour at most')}</Text>
                             ) : (
                               <Text style={s.deviceActive} numberOfLines={1}>
-                                {lastActiveLabel(s0.refreshed_at, Date.now())}
+                                {lastActiveLabel(s0.refreshed_at, Date.now(), locale === 'en')}
                               </Text>
                             )}
                             {revokeErrSid === s0.session_id ? (
@@ -797,11 +797,10 @@ function makeStyles(C: Record<string, string>, dark: boolean, rtl = true) {
     // (i18n.tsx: documentElement.dir + I18nManager.forceRTL), which makes RN flip `right:` to the
     // physical LEFT — so under RTL the physical right is spelled `left:`. Direction-aware so a
     // future LTR locale keeps the × on the same physical corner.
-    // × at the reading END (owner 2026-10-23): English right, Arabic left.
-    // × at the reading END (owner 2026-10-23): English right, Arabic left — by language (web never mirrors sides).
-    centerClose: { position: 'absolute', top: 12, ...(rtl ? { left: 12 } : { right: 12 }), zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+    // × top-RIGHT in both languages, never mirrored (owner 2026-10-24, supersedes 10-23 «Arabic left»).
+    centerClose: { position: 'absolute', top: 12, right: 12, zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: dark ? C.surface2 : C.tint }, // a soft circle so the × reads clearly, apart from the words (owner 2026-10-24)
     // Room for the × on its side (owner 2026-10-23: the × sat on top of «Manage account»).
-    centerTitle: { fontSize: 19, lineHeight: 26, fontWeight: '800', color: C.ink, textAlign: start as any, writingDirection: 'auto' as any, paddingTop: 4, paddingBottom: 14, paddingHorizontal: 8, ...(rtl ? { paddingLeft: 44 } : { paddingRight: 44 }) },
+    centerTitle: { fontSize: 19, lineHeight: 26, fontWeight: '800', color: C.ink, textAlign: start as any, writingDirection: 'auto' as any, paddingTop: 4, paddingBottom: 14, paddingHorizontal: 8, paddingRight: 44 }, // the × is top-right in both languages (owner 2026-10-24)
     // Identity fields live in ONE inset group (iOS grouped-list idiom, 2026-08-30 refresh): the
     // group surface owns the boundary, an inset hairline separates the rows, and the fields keep
     // their exact structures — the wrapper is the only new element.

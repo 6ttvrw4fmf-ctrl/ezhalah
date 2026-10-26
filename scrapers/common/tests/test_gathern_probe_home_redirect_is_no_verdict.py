@@ -131,10 +131,11 @@ def test_home_on_view_but_named_on_ar_view_is_alive(monkeypatch):
     assert gl.probe(s, UNIT) == 200
 
 
-def test_ar_view_that_is_not_found_or_home_or_unnamed_stays_no_verdict(monkeypatch):
+def test_ar_view_that_is_home_or_unnamed_or_a_soft_not_found_stays_no_verdict(monkeypatch):
     _no_wait(monkeypatch)
-    for alt in ((404, AR, "الصفحة غير موجودة 276709"), (200, AR, "الصفحة غير موجودة 276709"),
-                (200, HOME, "home 276709"), (200, AR, "a page that names nothing")):
+    for alt in ((200, AR, "الصفحة غير موجودة 276709"), (404, HOME, "الصفحة غير موجودة"),
+                (200, HOME, "home 276709"), (200, AR, "a page that names nothing"),
+                (403, AR, "الصفحة غير موجودة"), (500, AR, "")):
         assert gl.probe(_Route({UNIT: (200, HOME, "home"), AR: alt}), UNIT) == 0
         assert gl.probe(_Route({UNIT: (200, HOME, "home"), AR: alt}), UNIT,
                         home_status=gl.HOME_LANDED) == gl.HOME_LANDED
@@ -144,3 +145,58 @@ def test_ar_view_can_never_turn_a_unit_dead(monkeypatch):
     _no_wait(monkeypatch)
     s = _Route({UNIT: (200, HOME, "home"), AR: (404, AR, "")})
     assert not gl.looks_dead(gl.probe(s, UNIT))
+
+
+# ── 2026-10-24 (backlog 800): the unit's own /ar/view/ 404 «الصفحة غير موجودة» is a reading ──────
+def test_home_on_view_and_own_not_found_on_ar_view_is_a_404_reading(monkeypatch):
+    """6 served units read «transient» every hour for 2 days while /ar/view/ answered gathern's own
+    not-found page from CI and the cloud alike, so their 3rd strike never came. The sweep now takes
+    that 404; the canary still only skips a home lander, never counts it."""
+    _no_wait(monkeypatch)
+    s = _Route({UNIT: (200, HOME, "home"), AR: (404, AR, "<h1>الصفحة غير موجودة</h1>")})
+    assert gl.probe(s, UNIT) == 404 and gl.looks_dead(gl.probe(s, UNIT))
+    assert gl.probe(s, UNIT, home_status=gl.HOME_LANDED) == gl.HOME_LANDED
+
+
+def test_held_strikes_does_not_read_a_home_landing_as_live(monkeypatch):
+    """10987196 was hidden on three own-page 404s (10-23 17:02) and revived by the 04:56 crawl,
+    because held_strikes read its /view/ home landing (200) as the unit answering live."""
+    import types
+    stored = [{"ad_number": "GTH276709", "missing_count": 3, "active": False}]
+
+    class _Q:
+        def __getattr__(self, _n):
+            return lambda *a, **k: self
+
+        def execute(self):
+            return types.SimpleNamespace(data=stored)
+    monkeypatch.setattr(gr.db, "sb", lambda: types.SimpleNamespace(table=lambda _n: _Q()))
+    monkeypatch.setattr(gr._probe, "fetch", lambda url: (200, "<html>home</html>", True))
+    monkeypatch.setattr(gr, "_oracle_session", lambda: _Route({AR: (404, AR, "الصفحة غير موجودة")}))
+    _no_wait(monkeypatch)
+    rows = [{"ad_number": "GTH276709", "listing_url": UNIT}]
+    assert gr.held_strikes(rows) == {"GTH276709": (3, False)}
+    # ... and a unit that lands home on /view/ but opens named on /ar/view/ is released
+    monkeypatch.setattr(gr, "_oracle_session", lambda: _Route({AR: (200, AR, "unit 276709")}))
+    assert gr.held_strikes(rows) == {}
+
+
+def test_crawl_canary_does_not_count_a_home_landing_as_a_live_control(monkeypatch):
+    monkeypatch.setattr(gr._probe, "fetch", lambda url: (200, "<html>home</html>", True))
+    monkeypatch.setattr(gr, "_oracle_url_for", lambda ad: UNIT)
+    gr.arm_liveness_canaries(["GTH276709", "GTH2", "GTH3"])
+    ok, why = gr._canary()
+    assert not ok, why
+
+
+def test_proxy_fallback_only_rereads_no_verdict_and_only_takes_a_200(monkeypatch):
+    """2026-10-24: the datacenter egress landed on gathern's home page for 15 served units for 1-3
+    days; the proxy read 11 alive. The fallback may say ALIVE, never DEAD (its 404 is unguarded)."""
+    _no_wait(monkeypatch)
+    live = _Route({UNIT: (200, UNIT, "unit 276709")})
+    gone = _Route({UNIT: (404, UNIT, "الصفحة غير موجودة")})
+    assert gl.fallback_read(0, live, UNIT) == 200
+    assert gl.fallback_read(0, gone, UNIT) == 0, "a proxy 404 is never a strike"
+    assert gl.fallback_read(404, live, UNIT) == 404, "a direct verdict is never second-guessed"
+    assert gl.fallback_read(200, gone, UNIT) == 200
+    assert gl.fallback_read(0, None, UNIT) == 0, "no --proxy-fallback, no proxy read"

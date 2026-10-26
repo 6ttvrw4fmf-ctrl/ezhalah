@@ -137,6 +137,15 @@ export function populatedDistrictRows(query: string, rows: readonly LiveDistrict
   }
   return [...groups.values()].sort((a, b) => b.n - a.n).slice(0, limit).map(({ top: _t, ...r }) => r);
 }
+/** A typed CITY wins over the districts that merely start with its name (owner 2026-10-24: «مكة» offered «حي مكة · الجبيل»
+ *  and address text like «مكة المكرمة السعودية» above nothing useful). The district rows exist for a name that is a
+ *  district with listings and a city without (البديعة, الراكة); when a matching city carries at least as many listings
+ *  as the biggest district row, the user is typing that city and the district rows are dropped. */
+export function cityOutweighsDistricts(matchingCityCounts: readonly number[], districtRows: readonly { n: number }[]): boolean {
+  if (!districtRows.length) return false;
+  const city = Math.max(0, ...matchingCityCounts);
+  return city > 0 && city >= Math.max(...districtRows.map((r) => r.n));
+}
 /** Order of the city box: pool cities with listings (or an unmeasured count) → the populated district rows → the pool's
  *  0-served cities → the catalog extras. With no district rows the list is exactly `[...pool, ...extras]` (today's order). */
 export function orderCityBoxRows<T extends { listingCount: number; scopeKnown?: boolean }>(pool: readonly T[], districtRows: readonly T[], extras: readonly T[]): T[] {

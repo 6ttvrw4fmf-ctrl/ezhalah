@@ -413,6 +413,32 @@ def parse_rooms(area_cell_text: str, property_type: Optional[str]) -> tuple[Opti
     return (beds if beds and beds > 0 else None), baths
 
 
+_WORD_ALT = "|".join(sorted(_WORD_NUM, key=len, reverse=True))
+# «3 غرف نوم» / «ثلاث غرف نوم»: the ad names its BEDROOMS. «٣ غرف وحده منهم ماستر»: rooms one of which is a
+# master (bedroom) — a bedroom count too, within two words of «ماستر».
+_STATED_BEDS = re.compile(r"(\d+|" + _WORD_ALT + r")\s*غرف\s*(?:ال)?نوم")
+_STATED_BEDS_MASTER = re.compile(r"(\d+|" + _WORD_ALT + r")\s*غرف(?:\s+\S+){0,2}\s+ماستر")
+
+
+def stated_bedrooms(text: Optional[str]) -> Optional[int]:
+    """The bedroom count the ad states in its OWN prose, or None when it states none.
+
+    The index room cell counts every room — «أربع غرف الدور الثاني» is 4 rooms including the majlis and
+    the hall — and parse_rooms read it as 4 bedrooms on 12589871 while the same ad wrote «3 غرف نوم»
+    (12590024: cell «أربع غرف», specs «تتكون من ٣ غرف وحده منهم ماستر»; 🆕 2026-10-26, repair 903).
+    An explicit «N غرف نوم» wins over the cell count. A multi-unit / multi-floor description states a
+    part, so it stays with parse_rooms' NULL; only a dwelling has bedrooms (the caller checks)."""
+    txt = re.sub(r"\s+", " ", (text or "")).translate(N._TRANS)
+    if not txt or _MULTI_UNIT.search(txt):
+        return None
+    m = _STATED_BEDS.search(txt) or _STATED_BEDS_MASTER.search(txt)
+    if not m:
+        return None
+    tok = m.group(1)
+    n = int(tok) if tok.isdigit() else _WORD_NUM.get(tok)
+    return n if n and n > 0 else None
+
+
 def index_rows(page_html: str) -> list[dict]:
     """[{nid, cells}] for every Views row on the index. Keyed by machine name, never position."""
     rows, seen = [], set()
@@ -608,6 +634,30 @@ def _period_text(amount: Optional[int], blocks: list[str]) -> str:
     return " ".join(out)
 
 
+# The office writes the catalog's numbered districts in the feminine — «الفيصلية الثانية» (4 ads),
+# «الفيصلية الاولى» — where the catalog says «حي الفيصلية الثاني» / «حي الفيصلية الأول»
+# (unknown_named_districts, 2026-10-24). Same place, so it is a spelling, mapped here and never added
+# to the catalog (contract G). Only a trailing ordinal is folded; the bare «الفيصلية» names neither
+# half and stays without a district.
+_FEM_ORDINAL = re.compile(r"\s(ال)?(اولى|أولى|ثانية|ثالثة|رابعة|خامسة)$")
+_MASC = {"اولى": "اول", "أولى": "أول", "ثانية": "ثاني", "ثالثة": "ثالث", "رابعة": "رابع", "خامسة": "خامس"}
+
+
+def masculine_ordinal(name: str) -> str:
+    return _FEM_ORDINAL.sub(lambda m: " " + (m.group(1) or "") + _MASC[m.group(2)], name.strip())
+
+
+# «الضاحية الحي الثالث» (4 ads) is the catalog's «الضاحية الثالث»: unknown_named_districts_checked
+# reads it as a TWIN (2026-10-25), so it is a spelling, mapped here and never added (contract G, the
+# twin guard). Only the catalog's own name resolves; «الضاحية الحي الثامن» has no catalog row and stays
+# without a district (its naming waits on the owner, #319).
+_DAHIYA_HAYY = re.compile(r"^(?:حي\s+)?الضاحية\s+الحي\s+")
+
+
+def dahiya_without_hayy(name: str) -> str:
+    return _DAHIYA_HAYY.sub("الضاحية ", name.strip())
+
+
 def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason). row is None exactly when skip_reason is set."""
     title_text = " ".join(ix["title_lines"])
@@ -639,6 +689,10 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         return None, category, "city_not_in_catalog"
     district_raw = (ix["district"] or "").strip() or None
     district_ar = find_district_in_text(district_raw, city_id) if district_raw else None
+    if not district_ar and district_raw and _FEM_ORDINAL.search(district_raw):
+        district_ar = find_district_in_text(masculine_ordinal(district_raw), city_id)
+    if not district_ar and district_raw and _DAHIYA_HAYY.search(district_raw):
+        district_ar = find_district_in_text(masculine_ordinal(dahiya_without_hayy(district_raw)), city_id)
 
     p = ix["price"]
     basis, basis_from = p["basis"], ("index_label" if p["basis"] else None)
@@ -687,6 +741,11 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
     pieces = [_INDEX_FIELDS.sub(" ", ix["rooms_text"] or "").strip(),
               detail.get("description") or ""]
     description = _clean(" ".join(dict.fromkeys(p for p in pieces if p))) or None
+    if property_type in _DWELLINGS:
+        # The ad's own «N غرف نوم» beats the cell's all-rooms count (stated_bedrooms' docstring).
+        stated = stated_bedrooms(description)
+        if stated is not None:
+            bedrooms = stated
 
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{ix['nid']}",

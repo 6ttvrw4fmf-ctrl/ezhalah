@@ -3,7 +3,7 @@
 // name on the FIRST authorization only, so a later sign-up arrives with none. mapSupabaseUser then
 // fell back to the email's local part — for Apple's private relay that is random («66s7zmj7t9») — and
 // the translit backfill rendered that "name" in Arabic letters. The fix: no provider name → '' → the
-// sidebar and account menu show «أضف اسمك» (Add your name) and the user types it.
+// sidebar and account menu show the temporary «ضيف إزهله» (Ezhalah Guest, owner 2026-10-26) until the user types one.
 //
 // Offline, text-level: the property is "which expression builds the name", a property of the files.
 //   node --experimental-strip-types scripts/verify-display-name-never-from-email.ts
@@ -34,11 +34,11 @@ export function nameProblems(f: Record<string, string>): string[] {
   if (!baseLine) out.push(`${WELCOME}: the cached-session name line is gone (guard cannot read it)`);
   if (/email|split\(\s*'@'/.test(baseLine)) out.push(`${WELCOME}: the greeting name falls back to the email`);
   for (const p of [SIDEBAR, MENU]) {
-    if (!/pickName\(user, locale\) \|\| t\('Add your name'\)/.test(f[p] ?? '')) {
-      out.push(`${p}: an empty name no longer shows «أضف اسمك» (Add your name)`);
+    if (!/pickName\(user, locale\) \|\| t\('Ezhalah Guest'\)/.test(f[p] ?? '')) {
+      out.push(`${p}: an empty name no longer shows «ضيف إزهله» (Ezhalah Guest)`);
     }
   }
-  if (!/'Add your name':\s*'أضف اسمك'/.test(f[I18N] ?? '')) out.push(`${I18N}: «Add your name» has no Arabic`);
+  if (!/'Ezhalah Guest':\s*'ضيف إزهله'/.test(f[I18N] ?? '')) out.push(`${I18N}: «Ezhalah Guest» has no Arabic`);
   return out;
 }
 
@@ -61,9 +61,9 @@ mustCatch('…or to a fixed word like \'User\' (shown, then transliterated, as i
 mustCatch('the cached-session greeting falling back to the email',
   nameProblems(mutate(WELCOME, "m.nameAr || '')", "m.nameAr || (u?.email ? String(u.email).split('@')[0] : ''))")).length > 0);
 mustCatch('the sidebar showing an empty name instead of «أضف اسمك»',
-  nameProblems(mutate(SIDEBAR, " || t('Add your name')", '')).length > 0);
+  nameProblems(mutate(SIDEBAR, " || t('Ezhalah Guest')", '')).length > 0);
 mustCatch('the account menu showing an empty name instead of «أضف اسمك»',
-  nameProblems(mutate(MENU, " || t('Add your name')", '')).length > 0);
+  nameProblems(mutate(MENU, " || t('Ezhalah Guest')", '')).length > 0);
 mustCatch('a COMMENT mentioning the email is prose, not the name expression (the predicate is not over-broad)',
   nameProblems(mutate(AUTH, '  const name: string =', "  // was: meta.full_name || u?.email?.split('@')[0]\n  const name: string =")).length === 0);
 mustCatch('…and so is a TRAILING comment that names the email after the real expression',

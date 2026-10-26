@@ -667,7 +667,7 @@ export function searchSummary(q: SearchQuery, loc: Locale = getLocale()): string
   // For Rent, append the Monthly / Yearly period the user picked so the summary reflects the toggle. (owner UI request 2026-07-18.)
   // dealCombined's Rent side has no period selector (accepts both) so no period suffix applies there.
   const period = q.deal === 'Rent' && !q.dealCombined && q.rentPeriod
-    ? ` (${t(q.rentPeriod === 'monthly' ? 'Monthly' : q.rentPeriod === 'both' ? 'Both' : 'Yearly')})` : '';
+    ? ` (${t(q.rentPeriod === 'monthly' ? 'Short stays' : q.rentPeriod === 'both' ? 'Both' : 'Yearly')})` : '';
   lines.push(`• ${t('Transaction Type')}: ${(q.bothDeals || q.dealCombined) ? t('Rent or Buy') : t(q.deal === 'Rent' ? 'For Rent' : 'For Sale')}${period}`);
   // Platform filter line — when the user restricted to specific platforms ("Aqar only"), show which,
   // so the filter is visibly confirmed. (user: "when I type alkhaas it must be al khaas, not aqar".)

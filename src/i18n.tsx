@@ -81,7 +81,37 @@ export function persistLocale(l: Locale): void {
   }
 }
 
-let _locale: Locale = readSavedLocale();
+// THE LANGUAGE SURVIVES THE SIGN-IN ROUND TRIP (2026-10-24: a visitor who picked English and signed in
+// with Google or Apple landed back in Arabic). The OAuth redirect leaves the page and comes back on a
+// FRESH load, where a guest's choice is never read (guests start in Arabic — pinned by
+// scripts/verify-chat-language-is-not-interface-language.ts). So the choice is handed across that ONE
+// trip: written just before the redirect (lib/auth.ts signInWithProvider), read once by the /auth
+// landing and removed there, and only while fresh. Once signed in, the store saves it like any
+// signed-in choice. Any other page ignores it, so an abandoned sign-in never turns a guest's next
+// visit English. Guard: scripts/verify-language-survives-sign-in.ts
+export const SIGN_IN_LOCALE_KEY = 'ezhalah:signInLocale:v1';
+export const SIGN_IN_LOCALE_MAX_MS = 10 * 60 * 1000;
+type KeyStore = { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void };
+/** The language to start the /auth landing in, taken (read + removed) from the store; null anywhere else. */
+export function takeSignInLocale(store: KeyStore | null | undefined, path: string, now: number): Locale | null {
+  if (!store || !/^\/auth(\.html)?\/?$/.test(path)) return null;
+  try {
+    const raw = store.getItem(SIGN_IN_LOCALE_KEY);
+    store.removeItem(SIGN_IN_LOCALE_KEY);
+    const v = JSON.parse(raw ?? 'null');
+    const age = now - Number(v?.at);
+    return (v?.locale === 'en' || v?.locale === 'ar') && age >= 0 && age < SIGN_IN_LOCALE_MAX_MS ? v.locale : null;
+  } catch { return null; }
+}
+/** Called right before an OAuth redirect: carry the language on screen to the /auth landing. */
+export function rememberLocaleForSignIn(): void {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  try { window.localStorage?.setItem(SIGN_IN_LOCALE_KEY, JSON.stringify({ locale: _locale, at: Date.now() })); } catch {}
+}
+const signInLandingLocale = (): Locale | null =>
+  Platform.OS === 'web' && typeof window !== 'undefined' ? takeSignInLocale(window.localStorage, window.location?.pathname ?? '', Date.now()) : null;
+
+let _locale: Locale = signInLandingLocale() ?? readSavedLocale();
 let _localeRevision = 0;
 export const getLocaleRevision = (): number => _localeRevision;
 export const getLocale = (): Locale => _locale;
@@ -135,6 +165,14 @@ const AR: Record<string, string> = {
   'Monthly Rent Budget': 'الميزانية الشهرية للإيجار',
   'Purchase Budget': 'ميزانية الشراء',
   'Monthly': 'شهري',
+  // The rent-period button (owner 2026-10-25): «شهري» became «إقامات قصيرة» — Gathern + Aqar Monthly only, stays
+  // shorter than a year. Every other site's per-month figure is a YEARLY listing at ×12 (src/lib/rentPool.ts).
+  'Short stays': 'إقامات قصيرة',
+  'Short stays or yearly': 'إقامات قصيرة وسنوي',
+  'Short stays: stays shorter than a year, priced by length of stay.': 'إقامات قصيرة: إقامات أقل من سنة، وأسعارها حسب مدة الإقامة.',
+  'Advertised price {a}/month': 'السعر المعلن {a} شهرياً',
+  // The computed monthly under a yearly-quoted price (owner 2026-10-26): ÷12, marked ≈ like every derived figure.
+  '≈ {a}/month': '≈ {a} شهرياً',
   'Yearly': 'سنوي',
   'Both': 'كلاهما',
   // Tiny info note shown under the Monthly/Yearly toggle so the user knows what each period means.
@@ -144,7 +182,7 @@ const AR: Record<string, string> = {
   'Annual: 12-month lease, price/year.': 'سنوي: السعر المعروض سنوي.',
   // Owner 2026-08-18: the Monthly note says ONLY that prices are displayed per month — never any
   // claim about contract length (the old «من شهر إلى 11 شهر» wording is banned; a guard pins it out).
-  'Monthly: the displayed price is the monthly price.': 'الأسعار معروضة بالشهر',
+  'Monthly: includes short stays, priced by length of stay.': 'شهري: يشمل الإقامات القصيرة، وأسعارها حسب مدة الإقامة.',
   'Yearly: the displayed price is the yearly price.': 'سنوي: السعر المعروض سنوي.',
   // Owner feedback (2026-08-22): trimmed — the old wording ("Both: we show monthly and yearly
   // together") re-explained what selecting both buttons already makes obvious. Kept only the one
@@ -464,6 +502,7 @@ const AR: Record<string, string> = {
   'Balcony': 'بلكونة',
   'Laundry room': 'غرفة غسيل',
   'Optical fibers': 'ألياف بصرية',
+  'Majlis room': 'مجلس',
   'Separate electricity meter': 'عداد كهرباء مستقل',
   'Separate water meter': 'عداد ماء مستقل',
   // 'Furnished' key lives in the shared amenities block below (identical value 'مفروش') — not redeclared here.
@@ -726,7 +765,6 @@ const AR: Record<string, string> = {
   'Annual Equivalent': 'المعادل السنوي',
   'Calculated from price per m² × area — not published by the source': 'محتسب من سعر المتر × المساحة — غير معلن من المصدر',
   'Price Per m²': 'سعر المتر',
-  'Tap to see prices by length of stay': 'اضغط للاطلاع على الأسعار حسب مدة الإقامة', // Gathern + Aqar Monthly, owner 2026-10-02
   // Unit suffix for the source-published «سعر المتر» rate. It is printed NEXT TO the number so the
   // card reads «سعر المتر 750 ريال/م²» — a per-square-metre RATE, never mistakable for a total.
   // (owner 2026-08-09: "display it clearly as ريال/م²".)
@@ -1436,6 +1474,8 @@ const AR: Record<string, string> = {
   'Account': 'الحساب',
   'Sign out': 'تسجيل الخروج',
   'Add your name': 'أضف اسمك',
+  // The temporary name of an account with none (Apple sign-up that pressed «تخطي», owner 2026-10-26).
+  'Ezhalah Guest': 'ضيف إزهله',
   'What should we call you?': 'وش نناديك؟',
   'Later': 'لاحقاً',
   'Type your name': 'اكتب اسمك',
@@ -1752,6 +1792,61 @@ const EN: Record<string, string> = {
   'Any count': 'Any', // «أي عدد»
   'SAR currency': 'SAR', // «ريال»
   'ads': 'listings', // «إعلان», after a count
+  // Source-published Arabic deed/licence labels and closed values (owner 2026-10-24: the English card showed Arabic labels).
+  'المنفعة وثيقة نوع / الملكية وثيقة نوع': 'Ownership / usufruct document type',
+  'مصدر ترخيص الاعلان': 'Ad license source',
+  'تاريخ ترخيص الاعلان': 'Ad license date',
+  'تاريخ انتهاء الصلاحية': 'Expiry date',
+  'قنوات العقار': 'Advertising channels',
+  'رقم البناية': 'Building number',
+  'الإلتزامات على العقار': 'Obligations on the property',
+  'الضمانات ومدتها': 'Guarantees and their term',
+  'سعر بيع المتر': 'Price per meter',
+  'اجمالي سعر بيع الارض': 'Total land sale price',
+  'اجمالي الايجار السنوي للأرض': 'Total annual land rent',
+  'مطابقة كود البناء السعودي': 'Complies with the Saudi Building Code',
+  'مفروشة': 'Furnished',
+  'وجود قيد ؟': 'Any restriction?',
+  'وجود رهن ؟': 'Any mortgage?',
+  'بركة سباحة': 'Swimming pool',
+  'عدد البلوكات': 'Number of blocks',
+  'متوفر': 'Available',
+  'صك إلكتروني': 'Electronic deed',
+  'صك السجل العقاري': 'Real estate registry deed',
+  'عقد ايجار الكتروني': 'Electronic lease contract',
+  'لأيوجد': 'None',
+  'لاتوجد': 'None',
+  'مرهون': 'Mortgaged',
+  'رهن': 'Mortgage',
+  'منصة مرخصة': 'Licensed platform',
+  'منصات التواصل الإجتماعي': 'Social media',
+  'الإذاعة': 'Radio',
+  'أخرى': 'Other',
+  'قطعة': 'Plot',
+  'شارع': 'Street',
+  'ارتداد': 'Setback',
+  'جزء من': 'Part of',
+  'إضاءة إضافية': 'Extra lighting',
+  'بروجكتر': 'Projector',
+  'تلفزيون': 'TV',
+  'صالة طعام': 'Dining area',
+  'قسمين': 'Two sections',
+  'دخول ذاتي': 'Self check-in',
+  'ماستر': 'Master bedroom',
+  'هاتف': 'Phone',
+  'ألياف ضوئية': 'Fiber optic',
+  'نوع الحد الشمالي': 'North boundary type',
+  'وصف الحد الشمالي': 'North boundary description',
+  'طول الحد الشمالي': 'North boundary length',
+  'نوع الحد الجنوبي': 'South boundary type',
+  'وصف الحد الجنوبي': 'South boundary description',
+  'طول الحد الجنوبي': 'South boundary length',
+  'نوع الحد الشرقي': 'East boundary type',
+  'وصف الحد الشرقي': 'East boundary description',
+  'طول الحد الشرقي': 'East boundary length',
+  'نوع الحد الغربي': 'West boundary type',
+  'وصف الحد الغربي': 'West boundary description',
+  'طول الحد الغربي': 'West boundary length',
 };
 
 // Pure translate for an explicit locale — no dependence on module state. The React provider binds

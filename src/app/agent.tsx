@@ -97,7 +97,7 @@ import { pickResultsFoundSentence } from '@/data/resultsFoundRotation';
 import { pickNoResultsSentence } from '@/data/noResultsRotation';
 import { pickName } from '@/lib/nameSync';
 import { encodeSharePayload, encodeInvitePayload, shareLink, shareMessage, SHARE_INVITE_LINE } from '@/lib/shareSearch';
-import { SHARE_LINK, shareNative, shareLead, liveSiteCount } from '@/lib/share';
+import { shareNative, shareLead, liveSiteCount, shareOrigin } from '@/lib/share';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
@@ -707,7 +707,7 @@ export default function Agent() {
     if (sharedCopyRef.current?.j === j) return sharedCopyRef.current.url;
     const code = await createSharedChat(name, loc, q, t);
     if (!code) return null;
-    const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;
+    const origin = shareOrigin();
     const url = shareLink(origin, code);
     sharedCopyRef.current = { j, url };
     return url;
@@ -724,7 +724,7 @@ export default function Agent() {
     const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
     const text = shareLead(loc, liveSiteCount());
     const payload = user ? encodeInvitePayload(pickName(user, loc), loc) : null;
-    const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;
+    const origin = shareOrigin();
     return { shareUrl: payload ? shareLink(origin, payload) : origin, shareText: text };
   };
   const shareFor = (q: SearchQuery | undefined): { shareUrl?: string; shareText?: string; prepareShare?: () => Promise<string | null> } => {
@@ -734,7 +734,7 @@ export default function Agent() {
     const payload = encodeSharePayload(q, name, loc);
     const text = shareMessage(name, q, loc);
     if (!payload || !text) return {};
-    const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;
+    const origin = shareOrigin();
     // THE WHOLE CHAT (owner 2026-10-17: «sharing it means I share the chat history»): pressing Share saves
     // a COPY of this conversation (public.shared_chat) and shares its short /s/<code> link; the search
     // link above is only the fallback when that save fails. One copy per unchanged conversation.
@@ -2399,6 +2399,12 @@ export default function Agent() {
   // turn is in flight (busy) so a half-rendered turn is never what a return restores; content-keyed
   // (lastCapturedRef) so re-renders and restores never rewrite an unchanged transcript.
   const lastCapturedRef = useRef('');
+  // THE SAVED CHAT BEING DOWNLOADED RIGHT NOW (owner 2026-10-23: «when i click on the side … English
+  // shows only my message»). While openSaved() waits for the server copy it paints a stand-in (just the
+  // user's question, a snapshot or a stale local copy). Saving that stand-in wrote a "question only"
+  // transcript over the full chat, and every later open showed only the question. Nothing is saved for
+  // this chat id until its real copy has landed.
+  const hydratingIdRef = useRef<string | null>(null);
   // The debounced capture that has not fired yet. WITHOUT this, the effect cleanup's clearTimeout
   // silently dropped the newest settled state whenever the user left the chat inside the 600ms
   // window (tapping another chat while the new turn's cards were still cascading was enough) — and
@@ -2416,6 +2422,7 @@ export default function Agent() {
   useEffect(() => {
     const id = chatIdRef.current;
     if (!id) return;
+    if (hydratingIdRef.current === id) return; // a stand-in is on screen, never the chat itself
     const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow });
     if (!t) return;
     const j = JSON.stringify(t);
@@ -3298,7 +3305,7 @@ export default function Agent() {
             if (i >= 12 && !referenced) return [];
             const locationLabel = l.district && l.city ? `${l.district}, ${l.city}`
               : (l.district || l.city || LOCATION_UNRESOLVED_AR);
-            return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel} — ${listingPrice(l, 'en')}` +
+            return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel}${listingPrice(l, 'en') ? ` — ${listingPrice(l, 'en')}` : ''}` +
               `${l.area ? `, ${l.area} m²` : ''}${l.beds ? `, ${l.beds} bed` : ''}, on ${l.source}`;
           });
           const text = cards.length ? `${m.text}\n${cards.join('\n')}` : m.text;
@@ -3769,6 +3776,7 @@ export default function Agent() {
     // below replaces it when it lands. lastCapturedRef is set to the painted copy, so nothing is
     // written back until the hydrated one has taken its place.
     if (!t && entryId) {
+      hydratingIdRef.current = entryId; // the stand-in painted below must never be saved
       const early = local ? restoreChat(local) : null;
       if (early) {
         setMsgs(early.msgs as unknown as ChatMsg[]);
@@ -3785,6 +3793,7 @@ export default function Agent() {
         setMsgs([{ id: replayMsgIds(entryId, uid).userId, role: 'user', text: bubble }]);
       }
       t = await hydrateTranscript(entryId).catch(() => null);
+      if (hydratingIdRef.current === entryId) hydratingIdRef.current = null;
       // A failed hydrate keeps the pre-existing fallback below (snapshot/replay) on purpose: adopting the
       // stale copy as THE transcript would let the next turn write it over the server's longer one.
     }
@@ -4232,11 +4241,8 @@ export default function Agent() {
     <View style={{ flex: 1, flexDirection: firstChildLeftRow(docRtl), backgroundColor: colors.paper }}>
     {/* The results column. A row so the in-app ad viewer can sit BESIDE it, full height (split). */}
     <View style={{ flex: 1 }}>
-      {/* Sketch backdrop behind the chat. The bottom fade is pushed all the way down (0.8→1, same as
-          Home) so the landmarks fill the whole frame — including the center, which used to wash out
-          to plain white during "Ezhalah is searching…". A light opacity + paper scrim keep it faint
-          enough that message text stays readable: the user sees the same sketch, just light. */}
-      <HeroBackground imageOpacity={0.55} scrim={0.2} fadeStart={0.8} fadeEnd={1} />
+      {/* The landing foreground fades when searching; results retain the calm sky. */}
+      <HeroBackground landscape={introLanding && !busy} />
       {/* Header */}
       <View ref={setLtr} style={[s.topBar, { paddingTop: insets.top + 8 }]}>
         {/* Mobile only: a plain hamburger that opens the existing sidebar — same clean style as the
@@ -4355,7 +4361,7 @@ export default function Agent() {
             ]}
           >
             {pickerSheet ? <View style={s.platformPickerGrabber} /> : null}
-            <View style={s.platformPickerHeader}>
+            <View style={[s.platformPickerHeader, locale === 'ar' && { flexDirection: 'row-reverse' }]}>
               <View style={s.platformPickerHeading}>
                 <Text style={s.platformPickerTitle}>{t('Deep search across websites')}</Text>
                 <Text style={s.platformPickerSubtitle}>{t('Focus your search on one or more specific websites. We show only their listings.')}</Text>
@@ -5513,7 +5519,7 @@ const s = StyleSheet.create({
   fbToastText: { fontSize: 12.5, fontWeight: '600', color: colors.ink },
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
-  title: { fontSize: 22, fontWeight: '800', color: colors.dark },
+  title: { fontSize: 22, fontWeight: '800', color: colors.ink },
   // Note #5 — share icon sits beside the Filter pill in the agent header.
   // Matches the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius, soft lift) so
   // the pill + share read as one cluster across both screens (owner redesign 2026-07-24 r2).
@@ -5563,14 +5569,14 @@ const s = StyleSheet.create({
   aiex: { marginTop: 12, gap: 11 },
   greet: { marginBottom: 6 },
   greetTag: { fontSize: 20, fontWeight: '800', color: colors.primary },
-  greetBody: { fontSize: 14, color: colors.dark, fontWeight: '600', marginTop: 6, lineHeight: 21 },
+  greetBody: { fontSize: 14, color: colors.ink, fontWeight: '600', marginTop: 6, lineHeight: 21 },
   startHead: { flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 4 },
-  startT: { fontSize: 18, fontWeight: '700', color: colors.dark },
-  startS: { fontSize: 12, color: colors.dark, fontWeight: '600', marginTop: 1 },
+  startT: { fontSize: 18, fontWeight: '700', color: colors.ink },
+  startS: { fontSize: 12, color: colors.ink, fontWeight: '600', marginTop: 1 },
   // On the website the chips are deliberately BIG — tall blocks with large text that fill the screen
   // and pop in one by one; on phone they stay the snug original size. (user request.)
   suggest: { gap: IS_WEB ? 14 : 10, marginTop: IS_WEB ? 18 : 14 },
-  suggestLead: { fontSize: IS_WEB ? 15 : 13.5, fontWeight: '700', color: colors.dark, marginBottom: IS_WEB ? 4 : 1 },
+  suggestLead: { fontSize: IS_WEB ? 15 : 13.5, fontWeight: '700', color: colors.ink, marginBottom: IS_WEB ? 4 : 1 },
   // Centered onboarding header above the example cards — icon, bold heading, lighter description.
   onbWrap: { alignItems: 'center', gap: 7, marginBottom: IS_WEB ? 14 : 10, paddingHorizontal: 12 },
   onbHeading: { fontSize: IS_WEB ? 19 : 16.5, fontWeight: '700', color: colors.ink, textAlign: 'center' },
@@ -5658,7 +5664,7 @@ const s = StyleSheet.create({
   replyText: { fontFamily: CHAT_FONT, minWidth: 0, fontSize: IS_WEB ? 16 : 15.5, lineHeight: IS_WEB ? 28 : 26, color: colors.ink },
   introScroll: { flexGrow: 1, justifyContent: 'center' },
   greeting: { width: '100%', alignItems: 'center', gap: 8, paddingVertical: 24 },
-  greetingText: { fontSize: 24, lineHeight: 36, fontWeight: '600', color: colors.dark, textAlign: 'center', writingDirection: 'rtl' as any },
+  greetingText: { fontSize: 24, lineHeight: 36, fontWeight: '600', color: colors.ink, textAlign: 'center', writingDirection: 'rtl' as any },
   greetingSubtitle: { fontSize: 16, lineHeight: 26, color: colors.body, textAlign: 'center', writingDirection: 'rtl' as any },
   // Rotating composer examples (owner brief 2026-08-23): the absolute overlay fills the input's own
   // clipped wrapper (inputGrow), so it is structurally unable to move the mic/Send or overflow; the

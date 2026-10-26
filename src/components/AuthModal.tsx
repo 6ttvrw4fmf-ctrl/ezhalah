@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image as XImage } from 'expo-image'; // SVG logo: a vector drawing, not a photo (owner 2026-10-24)
 import Animated, { Easing, interpolate, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, cardShadow } from '@/theme/tokens';
@@ -7,6 +8,9 @@ import { Spinner } from '@/components/ui';
 import { useApp, type AuthUser } from '@/store';
 import { useI18n, t } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
+import { LinearGradient } from 'expo-linear-gradient';
+import { SkyEagleLightUp } from '@/components/SidebarSky';
+import { useResolvedTheme, useThemePalette } from '@/lib/appearance';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { canDragAuthPopup } from '@/lib/authPopupBehavior';
@@ -22,7 +26,7 @@ import {
 } from '@/lib/auth';
 import { useSaveName } from '@/lib/useSaveName';
 
-const LOGO = require('../../assets/images/ezhalah-logo.png');
+const LOGO = require('../../assets/images/logo-cloud-green-lit.svg');
 type Step = 'main' | 'google' | 'apple' | 'appleface';
 
 // Open/close animation (owner spec, 2026-08-15): overlay fade ~200-250ms, popup fades in while
@@ -150,6 +154,7 @@ function Sheet({ onClose, onSignedIn, note }: { onClose: () => void; onSignedIn:
             onPress={() => {}}
           >
             <Animated.View style={[s.pop, drag && s.popWide, cardStyle]}>
+              <AuthSky radius={24} />
               {/* Desktop grab strip — a designated header region (the logo band) that picks the
                   whole card up. It never overlaps the heading, the privacy link or the buttons, so
                   every interactive element stays plainly clickable; the cursor alone announces the
@@ -312,7 +317,7 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
                   />
                 </Pressable>
               )}
-              <RNImage source={LOGO} style={[s.popEagle, cp && c.popEagle]} resizeMode="contain" />
+              <View style={[s.popEagle, cp && c.popEagle]}><SkyEagleLightUp size={cp ? 64 : 112} /></View>
               {/* ── main ───────────────────────────────────────────────── */}
               {step === 'main' && (
                 <>
@@ -378,7 +383,7 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
                     <Text style={s.gauthBarText}>{t('Sign in with Google')}</Text>
                   </View>
                   <View style={s.gauthApp}>
-                    <RNImage source={LOGO} style={s.gauthAppLogo} resizeMode="cover" />
+                    <XImage source={LOGO} style={s.gauthAppLogo} contentFit="contain" />
                     <Text style={s.gauthTitle}>{t('Choose an account')}</Text>
                     <Text style={s.gauthSub}>
                       {t('to continue to')} <Text style={{ fontWeight: '600', color: '#202124' }}>{t('Ezhalah')}</Text>
@@ -461,6 +466,15 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
   );
 }
 
+/** The sign-in card IS the sky (owner 2026-10-24: «change the entire white background, match it with blue — this
+ *  looks like a pasted image»): the cloud eagle lights up straight on it. Light: the logo's own blue; dark: the dusk sky. */
+export function AuthSky({ radius }: { radius: number }) {
+  const dark = useResolvedTheme() === 'dark';
+  const pal = useThemePalette();
+  return <LinearGradient pointerEvents="none" colors={dark ? [pal.skyTop, pal.skyBottom] : ['#8DC2E8', '#E6F3FB']}
+    style={[StyleSheet.absoluteFill, { borderRadius: radius }]} />;
+}
+
 // COMPACT overlays for the small SignInCard presentation (owner 2026-08-29: "full login,
 // shrunk"). Sizes only — colors/copy/logic are the shared form above. The phoneInput font size is
 // deliberately NOT overridden (16 on web — the iOS-zoom barrier's rule applies to the shared
@@ -468,7 +482,7 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }:
 // backend those steps are never reached (real OAuth redirects take over).
 const c = StyleSheet.create({
   popClose: { top: 8, end: 8, width: 26, height: 26, borderRadius: 13 },
-  popEagle: { width: 52, height: 42, marginTop: 10, marginBottom: 6 },
+  popEagle: { width: 64, height: 64, marginTop: 10, marginBottom: 6 },
   formHead: { fontSize: 15.5, lineHeight: 22, marginBottom: 2 },
   formSub: { fontSize: 11.5, lineHeight: 16, marginBottom: 4 },
   agree: { fontSize: 10.5, lineHeight: 15, marginBottom: 12, paddingHorizontal: 0 },
@@ -501,7 +515,7 @@ const s = StyleSheet.create({
   // the heading so the text, the privacy link and the buttons never start a drag.
   grip: { position: 'absolute', top: 0, left: 0, right: 0, height: 120, zIndex: 4 },
   pop: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent', // AuthSky paints the card
     borderRadius: 24,
     paddingTop: 34,
     paddingBottom: 30,
@@ -523,7 +537,7 @@ const s = StyleSheet.create({
   // The bare dark-green eagle mark. No separate fly-in/bounce/wink — the whole card (including this)
   // fades+scales in together as ONE motion (owner 2026-08-15: "no bouncing, spinning, excessive
   // movement, or flashy animation" — a back-eased overshoot + blink sequence doesn't qualify).
-  popEagle: { alignSelf: 'center', width: 100, height: 80, marginBottom: 14 },
+  popEagle: { alignSelf: 'center', width: 112, height: 112, marginBottom: 14 },
 
   // Arabic typography: weights carry the hierarchy — no Latin letter-spacing on Arabic script.
   shareNote: {
@@ -563,7 +577,7 @@ const s = StyleSheet.create({
   gauthBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 18, borderBottomWidth: 1, borderBottomColor: '#ececec' },
   gauthBarText: { fontSize: 14, fontWeight: '500', color: '#3c4043' },
   gauthApp: { alignItems: 'center', paddingVertical: 22 },
-  gauthAppLogo: { width: 46, height: 46, borderRadius: 23, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  gauthAppLogo: { width: 46, height: 46, borderRadius: 23, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   gauthTitle: { fontSize: 22, fontWeight: '400', color: '#202124' },
   gauthSub: { fontSize: 14, color: '#5f6368', marginTop: 4 },
   gauthList: { paddingVertical: 4 },
@@ -591,7 +605,7 @@ const s = StyleSheet.create({
   appleEmailT: { fontSize: 14, fontWeight: '600', color: colors.ink },
   appleEmailS: { fontSize: 12, color: colors.muted },
   toggle: { width: 44, height: 26, borderRadius: 13, backgroundColor: '#d3d6d4', justifyContent: 'center' },
-  toggleOn: { backgroundColor: colors.primary },
+  toggleOn: { backgroundColor: colors.selFill },
   knob: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff', marginLeft: 3, ...cardShadow },
   knobOn: { marginLeft: 21 },
   appleContinue: { backgroundColor: '#000', height: 50, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginTop: 18 },
@@ -600,7 +614,7 @@ const s = StyleSheet.create({
   // Face ID
   faceWrap: { alignItems: 'center', justifyContent: 'center', minHeight: 360, gap: 14 },
   faceIc: { width: 86, height: 86, borderRadius: 24, backgroundColor: colors.dark, alignItems: 'center', justifyContent: 'center' },
-  faceIcDone: { backgroundColor: colors.primary },
+  faceIcDone: { backgroundColor: colors.selFill },
   faceT: { fontSize: 18, fontWeight: '700', color: colors.ink, marginTop: 4 },
   faceS: { fontSize: 13.5, color: colors.muted },
 

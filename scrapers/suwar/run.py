@@ -373,7 +373,7 @@ def map_listing(post: dict, detail: Optional[dict]) -> tuple[Optional[dict], str
 
     features = _terms(post)
     feature_cols = {col: True for name, col in _FEATURE_COLUMNS.items() if name in features}
-    prose_cols = normalize.prose_amenities_yes(
+    prose_cols = normalize.prose_amenities(
         normalize.html_block_lines((post.get("content") or {}).get("rendered", "")), skip=_STRUCTURED_COLS)
     feature_cols = {**prose_cols, **feature_cols}
     if "elevator" not in feature_cols and any(f in _SHAFT_ONLY for f in features):

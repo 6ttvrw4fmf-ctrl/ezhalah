@@ -19,6 +19,6 @@ def test_amenities_the_ad_states_are_captured(content, want):
     assert {c for c in R._PROSE_COLS if row.get(c) is True} == want
 
 
-def test_a_denied_amenity_is_never_stored_as_no():
+def test_a_denied_amenity_is_stored_as_no():
     row, _, _ = R.map_listing(_post("<p>لا يوجد مطبخ</p>"), "")
-    assert "kitchen" not in row
+    assert row["kitchen"] is False          # owner 2026-10-24: an explicit negation is a stated no

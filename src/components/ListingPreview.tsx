@@ -5,7 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, font, lightColors, radius } from '@/theme/tokens';
 import { BUZZER_GOLD, TAP44 } from '@/theme/palette';
 import { useI18n, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
-import { listingPrice, listingDiscountOldPrice, sourceName } from '@/lib/listingDisplay';
+import { listingPrice, listingDiscountOldPrice, sourceName, monthlyLineText } from '@/lib/listingDisplay';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, attrDisplayLabel, hideArabicProseInEnglish, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { translitPlace } from '@/lib/translitPlace';
 import { DIRECTION_LABEL } from '@/lib/afEvidence';
@@ -569,9 +569,20 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             host badge on the end side: the site's logo big, «مستضاف على {site}», a tap to the real ad */}
         <View style={s.head} onLayout={measure('head')}>
           <View style={s.headMain}>
-            <Text testID="listing-preview-price" numberOfLines={1} style={[s.price, tx]}>
-              {priceRuns(listingPrice(l, locale)).map((r, i) => <Text key={i} style={r.num ? s.priceNum : s.priceUnit}>{r.text}</Text>)}
-            </Text>
+            {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
+            {listingPrice(l, locale) ? (
+              <Text testID="listing-preview-price" numberOfLines={1} style={[s.price, tx]}>
+                {priceRuns(listingPrice(l, locale)).map((r, i) => <Text key={i} style={r.num ? s.priceNum : s.priceUnit}>{r.text}</Text>)}
+              </Text>
+            ) : null}
+            {/* The monthly line under every yearly price (owner 2026-10-26): «السعر المعلن … شهرياً» when the site quoted
+                per month, «≈ … شهرياً» (÷12) when it quoted per year. */}
+            {(() => {
+              const text = monthlyLineText(l, locale);
+              return text == null ? null : (
+                <Text testID="listing-preview-monthly-line" numberOfLines={1} style={[s.priceUnit, tx]}>{text}</Text>
+              );
+            })()}
             {/* Source-published discount (owner 2026-10-19): the old price struck + «خصم X٪» under the
                 final price — the same line the result card shows, only when the source showed one. */}
             {l.discount ? (
@@ -709,15 +720,16 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                       {halves.map((h) => (
                         <View key={h.key} style={[s.half, h.gov && s.halfGov]}>
                           <View style={[s.halfHeading, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                            <Image
-                              source={h.gov
-                                ? require('../../assets/icons/ministry-of-justice.webp')
-                                : require('../../assets/icons/falconer-property.png')}
-                              contentFit="contain"
-                              accessible={false}
-                              testID={h.gov ? 'actual-sales-ministry-logo' : 'listed-now-falconer-logo'}
-                              style={s.halfLogo}
-                            />
+                            {/* «المعروض الآن» has no picture for now (owner 2026-10-26 removed the falconer-with-falcon logo). */}
+                            {h.gov ? (
+                              <Image
+                                source={require('../../assets/icons/ministry-of-justice.webp')}
+                                contentFit="contain"
+                                accessible={false}
+                                testID="actual-sales-ministry-logo"
+                                style={s.halfLogo}
+                              />
+                            ) : null}
                             <Text numberOfLines={1} style={[s.halfTitle, { flexShrink: 1 }, tx]}>{h.title}</Text>
                           </View>
                           <Text numberOfLines={1} style={[s.halfSub, tx]}>{h.sub}</Text>
@@ -928,7 +940,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
               onPress={closeMap}
               accessibilityRole="button"
               accessibilityLabel={t('Close')}
-              style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
+              style={({ hovered }: any) => [s.mapClose, { right: 12 }, hovered && s.hover]}
               // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
               dataSet={{ ...TAP44 }}
             >
@@ -945,7 +957,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             onPress={closeMap}
             accessibilityRole="button"
             accessibilityLabel={t('Back')}
-            style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
+            style={({ hovered }: any) => [s.mapClose, { right: 12 }, hovered && s.hover]}
             // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
             dataSet={{ ...TAP44 }}
           >
@@ -991,7 +1003,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             onPress={closeSimilar}
             accessibilityRole="button"
             accessibilityLabel={t('Back')}
-            style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
+            style={({ hovered }: any) => [s.mapClose, { right: 12 }, hovered && s.hover]}
             // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
             dataSet={{ ...TAP44 }}
           >
@@ -1040,7 +1052,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             onPress={closeDeals}
             accessibilityRole="button"
             accessibilityLabel={t('Back')}
-            style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
+            style={({ hovered }: any) => [s.mapClose, { right: 12 }, hovered && s.hover]}
             // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
             dataSet={{ ...TAP44 }}
           >
@@ -1090,7 +1102,7 @@ const s = StyleSheet.create({
   // price + key line + host badge
   head: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 10 },
   headMain: { flexGrow: 1, flexShrink: 1, minWidth: 0, gap: 4 },
-  price: { fontSize: 28, lineHeight: 36, color: colors.dark },
+  price: { fontSize: 28, lineHeight: 36, color: colors.ink },
   priceNum: { fontFamily: NUM_FONT, fontWeight: '600', fontVariant: ['tabular-nums'] },
   priceUnit: { fontSize: 15, color: colors.muted, fontWeight: '500' },
   discountRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
@@ -1140,14 +1152,14 @@ const s = StyleSheet.create({
   dealsSub: { fontSize: 12, lineHeight: 17, color: colors.muted },
   dealRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
   dealHeadRow: { marginTop: 10, backgroundColor: colors.surface2 },
-  dealCell: { flex: 1, minWidth: 0, fontSize: 12.5, color: colors.dark, textAlign: 'center', fontVariant: ['tabular-nums'] },
+  dealCell: { flex: 1, minWidth: 0, fontSize: 12.5, color: colors.ink, textAlign: 'center', fontVariant: ['tabular-nums'] },
   dealCellHead: { fontSize: 11, fontWeight: '600', color: colors.muted },
   dealRef: { color: colors.muted },
   // the similar-listings sheet: one tappable row per ad (logo · price · m², m² price, bedrooms · site)
   simRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: colors.line },
   simLogo: { width: 48, height: 24, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   simMain: { flex: 1, minWidth: 0, gap: 1 },
-  simPrice: { fontSize: 14.5, fontWeight: '700', color: colors.dark, fontVariant: ['tabular-nums'] },
+  simPrice: { fontSize: 14.5, fontWeight: '700', color: colors.ink, fontVariant: ['tabular-nums'] },
   simMeta: { fontSize: 12, color: colors.ink },
   simSite: { fontSize: 11, color: colors.muted },
   mapClose: {
@@ -1181,7 +1193,7 @@ const s = StyleSheet.create({
   cell2: { gap: 1 },
   cellK2: { fontSize: 11.5, color: colors.muted },
   // The value does NOT stretch (alignSelf start): it sits under its label at the RTL start, numerals LTR inside.
-  cellV2: { alignSelf: 'flex-start', fontSize: 14.5, fontWeight: '700', color: colors.dark, fontVariant: ['tabular-nums'] },
+  cellV2: { alignSelf: 'flex-start', fontSize: 14.5, fontWeight: '700', color: colors.ink, fontVariant: ['tabular-nums'] },
   halfFoot: { fontSize: 11, lineHeight: 15, color: colors.muted, marginTop: 2 },
   // the ministry source: a real link (new tab), underlined and in the brand colour so it reads as one
   srcLink: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 4, marginTop: 2 },
@@ -1195,18 +1207,18 @@ const s = StyleSheet.create({
   siteCardHover: { borderColor: colors.primary },
   siteLogo: { width: 48, height: 24, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   siteName: { fontSize: 12, color: colors.muted },
-  sitePrice: { fontSize: 13.5, fontWeight: '700', color: colors.dark, fontFamily: NUM_FONT },
+  sitePrice: { fontSize: 13.5, fontWeight: '700', color: colors.ink, fontFamily: NUM_FONT },
   siteHint: { fontSize: 11, color: colors.muted },
   siteHintMe: { color: colors.primary, fontWeight: '600' },
   houses: { flexDirection: 'row', gap: 4, marginVertical: 4 },
   house: { flex: 1, aspectRatio: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  houseUp: { backgroundColor: colors.primary },
+  houseUp: { backgroundColor: colors.selFill },
   houseDn: { backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
   tiles: { flexDirection: 'row', gap: 6, marginTop: 4 },
   tile: { flex: 1, minWidth: 0, borderWidth: 1, borderColor: colors.line, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 6, alignItems: 'center', gap: 2 },
   tileMe: { backgroundColor: colors.tint, borderColor: colors.tintLine },
   tileK: { fontSize: 11, color: colors.muted, textAlign: 'center' },
-  tileV: { fontSize: 14, fontWeight: '700', color: colors.dark, fontFamily: NUM_FONT },
+  tileV: { fontSize: 14, fontWeight: '700', color: colors.ink, fontFamily: NUM_FONT },
   tileSmall: { fontSize: 10.5, color: colors.muted, textAlign: 'center' },
   mojSrc: { marginTop: 4, fontSize: 11.5, color: colors.muted },
   pricesFinal: { fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 2 },
@@ -1227,14 +1239,14 @@ const s = StyleSheet.create({
   hazard: { backgroundColor: colors.hazardBg, borderWidth: 1, borderColor: colors.hazardLine, borderRadius: 12, paddingVertical: 7, paddingHorizontal: 10 },
   hazardTx: { fontSize: 12.5, lineHeight: 18, color: colors.hazardInk },
   ctaFloat: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 10, gap: 8, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.line },
-  // A 68px bar that invites the tap: a three-stop green gradient (CSS, so the theme's var() tokens
-  // resolve inside it; the lightest stop is a tint OF the primary token), an inset top highlight and a
+  // A 68px bar that invites the tap: a three-stop plum gradient (CSS, so the theme's var() tokens
+  // resolve inside it; the lightest stop is a tint of the filled-control token), an inset top highlight and a
   // deeper shadow. The copy on the start side, the pointing hand, the gold buzzer on the end side.
   cta: {
     flexDirection: 'row', alignItems: 'center', gap: 6, height: 68, paddingStart: 16, paddingEnd: 8, borderRadius: 20,
-    backgroundColor: colors.primary,
-    ...(IS_WEB ? { backgroundImage: `linear-gradient(135deg, color-mix(in srgb, ${colors.primary} 82%, white), ${colors.primary} 48%, ${colors.dark})` } as any : {}),
-    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 10px 26px rgba(29,74,55,0.34)',
+    backgroundColor: colors.selFill,
+    ...(IS_WEB ? { backgroundImage: `linear-gradient(135deg, color-mix(in srgb, ${colors.selFill} 96%, white), ${colors.selFill} 48%, ${colors.dark})` } as any : {}),
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 10px 26px rgba(49,39,59,0.34)',
   },
   ctaLines: { flexShrink: 1, flexGrow: 1, minWidth: 0, gap: 3 },
   ctaTx: { color: colors.onFill, fontSize: 17, lineHeight: 22, fontWeight: '800' },

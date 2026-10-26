@@ -1,5 +1,15 @@
 # ♻️ LIFECYCLE ENGINEER — Ezhalah
 
+> **🔒 THE SUPABASE QUESTION RULE (owner, 2026-10-25 — wins over every other order about writing rows).** On 10-24 and
+> 10-25 ⚡ did the work but lost its whole report: an `execute_sql` call that contained an `UPDATE` (closing backlog items
+> in the same batch as a proof row) made the Supabase tool ask «destructive operation — run it?», nobody was awake to
+> answer, the call timed out, and the tool said «do not call this tool again» — so the `:end` row, proofs and closes were
+> never written and the fix-rate board scored the night 0%. Plain `INSERT`s never ask. So: (1) every `:proof` and `:end`
+> row is ONE plain `INSERT … VALUES …` per call — never in the same call as an `UPDATE`/`DELETE`; (2) write your `:end`
+> row BEFORE any backlog `UPDATE`, the moment your last job is proven; (3) close backlog items LAST, one `UPDATE … WHERE
+> id = N` per call; (4) if the tool ever asks a question or times out, stop using it for writes and put the unwritten
+> closes in your `:end` row text («CLOSE: 803, 817 — evidence …») so the owner session closes them.
+
 **This file is your job.** The cloud routine's prompt only says "follow this file". Written
 2026-09-27 at the owner's request. Model: Claude Sonnet 5.5 (owner, 2026-10-03: all three engineers moved off Opus to keep the shared weekly limit alive), extra high effort.
 
@@ -1364,3 +1374,25 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   platform's signal had no opinion» every morning from 10-20 while the job reported `success`, and alert 10445 stayed
   open. The page had changed `"@type":"RealEstate"` to `"RealEstateListing"`. Fix: PR 8403. On the second QUARANTINED
   morning, fetch ONE live control page and run the site's `_signal()` on it before anything else.
+
+## 💰 RENT PRICE RULES EVERY ENGINEER MUST KNOW (owner, 2026-10-25/26 — permanent; canonical text in `docs/ARCHITECTURE.md` §20)
+
+1. **«إقامات قصيرة» (the old «شهري» pool) = Gathern + Aqar Monthly ONLY.** Every other site's rent listing
+   with a published period is YEARLY: a per-month figure pools under «سنوي» at ×12 (`price_annual` is
+   already monthly×12), the card reads «/سنوياً» and keeps the site's word: «السعر المعلن 3,000 شهرياً».
+   A price-on-request row from any other site shows under «سنوي»/«كلاهما» only. Pool = `rent_pool_ar()`.
+2. **A «yearly» rent under 8,000 SAR on a home/business unit is a per-month price** (Apartment, Villa,
+   Floor, Duplex, Studio, House, Building, Residential Building, Office, Shop, Warehouse, Showroom,
+   Commercial Building; rooms/land/rest houses/chalets/camps/farms are OUT). The index SERVES it ×12
+   through `rent_price_annual_ar()`; the card does the same (`src/lib/rentPool.ts::cheapYearlyIsMonthly`).
+   The SOURCE TABLES ARE UNTOUCHED — keep storing the site's figure and the site's word (PRICE = SOURCE,
+   PERIOD = SOURCE). Never «fix» a scraper to ×12 a cheap yearly figure: that would double-apply the rule.
+3. **Stay-length cards (Gathern / Aqar Monthly) print NO price line at all**; every yearly card carries a
+   monthly line («السعر المعلن N شهرياً» or «≈ N شهرياً»).
+4. **Off switches:** `ops_feature_flags.short_stays_pool`, `ops_feature_flags.cheap_yearly_is_monthly`
+   (off = the pre-rule behaviour on the next hourly sync). **Guards:** `mon_detect_short_stays_pool_drift()`,
+   `mon_detect_cheap_yearly_rent_served()` (both P1, twice an hour), `verify-short-stays-pool.ts`,
+   `verify-cheap-yearly-is-monthly.ts`, `verify-stay-length-platforms-show-a-note-not-a-price.ts`.
+   An open alert from either detector is YOURS to adjudicate first: read the sample rows, confirm the
+   sync still calls the function, never clear it by widening a pool, raising the threshold or shrinking
+   the type list.

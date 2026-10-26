@@ -624,6 +624,26 @@ def new_listings(client, hours: int) -> dict[str, list[tuple[str, int]]]:
     return dict(out)
 
 
+def explicit_picks(tokens: list[str]) -> list[tuple[str, int]]:
+    """«table:id» tokens given through --sites: exactly those ads, whatever their age (backlog #583,
+    2026-10-26 — a scorer fix could only be proven on ads that happened to arrive again that night)."""
+    out: list[tuple[str, int]] = []
+    for t in tokens:
+        table, sep, rid = t.partition(":")
+        if sep and table and rid.isdigit():
+            out.append((table, int(rid)))
+    return out
+
+
+def picks_by_platform(client, picks: list[tuple[str, int]]) -> dict[str, list[tuple[str, int]]]:
+    out: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    for table, rid in picks:
+        r = (client.table("search_listings_ar").select("platform").eq("source_table", table)
+             .eq("listing_id", rid).limit(1).execute().data or [{}])[0]
+        out[r.get("platform") or table.split("_")[0]].append((table, rid))
+    return dict(out)
+
+
 def sample_size(n_new: int, per_site: int | None) -> int:
     if per_site:
         return min(per_site, n_new)
@@ -668,6 +688,42 @@ def muktamel_room_lines(url: str, fetch=None) -> list[str]:
     for label, key in (("عدد غرف النوم", "bedRoomsCount"), ("عدد دورات المياه", "bathroomsCount")):
         v = offer.get(key)
         if isinstance(v, (int, float)) and not isinstance(v, bool):
+            out.append(f"{label} {int(v)}")
+    return out
+
+
+def dwelleo_room_lines(url: str, fetch=None) -> list[str]:
+    """dwelleo's own bedroom count, from the API record its page is rendered from (backlog #838, 2026-10-25).
+
+    We store the record's structured `bedrooms` for a dwelling (scrapers/dwelleo/run.py), and a structured field
+    beats prose (ADVANCED_FILTER_SOURCE_TRUTH). The page the reader sees carries the title prose, so the 10-24 score
+    called 20013764 wrong (record 5, title «فيلا 4 غرف») and missed 20019678's «غرفة نوم واحدة» = stored 1: dwelleo
+    94.7%, a cap from two ads we store right (re-read 40078610599). A Building's count is its room stock and we
+    store none, so no line is given for it. [] when the record cannot be read (unknown, never wrong)."""
+    from urllib.parse import unquote, urlparse
+    slug = unquote(urlparse(url or "").path.rstrip("/").rsplit("/", 1)[-1])
+    if "dwelleo.sa" not in (url or "") or not slug:
+        return []
+    try:
+        from scrapers.dwelleo import run as dwelleo
+        from scrapers.common import normalize
+        rec = fetch(slug) if fetch is not None else dwelleo.fetch_detail(dwelleo.session(), slug)
+        if not isinstance(rec, dict):
+            return []
+        type_ar = ((rec.get("property_type") or {}).get("name") or "").strip()
+        if normalize.map_type_exact(type_ar, overrides=dwelleo._TYPE_OVERRIDES) not in dwelleo._DWELLINGS:
+            return []
+    except Exception:  # noqa: BLE001
+        return []
+    # The record's other structured rooms are read the same way (backlog #890, 2026-10-26, dry re-score run
+    # 40288432059): prose «ست غرف نوم وخمس حمامات» scored stored bathrooms 5 wrong (19471735), and «صالة مع
+    # بلكونة … شارع 30» scored stored living_rooms 1 wrong (19471811); the record says bathrooms 5 and livings 1.
+    # floor_number is NOT restated: the page never shows it, and its 0 is ambiguous (19534092: record 0, prose
+    # «في الطابق ٣»), so the score keeps reading the page there.
+    out = []
+    for key, label in (("bedrooms", "عدد غرف النوم"), ("bathrooms", "عدد الحمامات"), ("livings", "عدد الصالات")):
+        v = rec.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
             out.append(f"{label} {int(v)}")
     return out
 
@@ -823,7 +879,7 @@ def tuba_rega_lines(url: str, fetch=None) -> list[str]:
 
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
                pace: float = PACE_S, probe=None, wasalt=None, sanadak=None, muktamel=None, tuba=None,
-               nufouth=None, dallali=None) -> dict:
+               nufouth=None, dallali=None, dwelleo=None) -> dict:
     if probe is None:
         # Imported here, not at module level: af_score and its hermetic check load this module with
         # source_reread stubbed, and they always pass their own probe.
@@ -888,8 +944,18 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         if "tuba.com.sa" in url:
             extra = (tuba or tuba_rega_lines)(url)
             page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
-        fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
-                                       prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)
+        if "dwelleo.sa" in url:
+            extra = (dwelleo or dwelleo_room_lines)(url)
+            page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
+        results = compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
+                                  prose_only_district=platform in PROSE_ONLY_DISTRICT)
+        # Which ad and which stored value: a site line says «furnished: mismatch=1» but not on which of the
+        # sampled ads, so every AF cap had to be re-derived by hand (dwelleo #890, 2026-10-26).
+        for name, verdict in results.items():
+            if verdict == MISMATCH:
+                col = next(c for n, _, c, _ in FIELDS if n == name)
+                print(f"    mismatch {key} {name}: stored={stored.get(col)!r}", flush=True)
+        fold(row, key, results, stored)
     if row["unreadable_pages"]:
         row["note"] = f"{row['unreadable_pages']} page(s) unreadable (never counted as wrong)"
     return row
@@ -950,8 +1016,14 @@ def main() -> int:
     client = sb()
     rng = random.Random(a.seed)
     night = datetime.now(timezone.utc).date().isoformat()
-    arrivals = new_listings(client, a.hours)
-    sites = a.sites or sorted(arrivals)
+    explicit = explicit_picks(a.sites or [])
+    if explicit:
+        # Re-scoring named ads (a proof that a reader fix decides them right) is never the night's score.
+        a.dry_run = True
+        arrivals = picks_by_platform(client, explicit)
+    else:
+        arrivals = new_listings(client, a.hours)
+    sites = sorted(arrivals) if explicit else (a.sites or sorted(arrivals))
     rows: list[dict] = []
     for p in sites:
         picks = arrivals.get(p) or []

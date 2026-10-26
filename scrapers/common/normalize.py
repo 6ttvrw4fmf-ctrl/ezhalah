@@ -702,6 +702,8 @@ _AGE_VOCAB_AR = {
     "ثلاث سنوات": 3, "اربع سنوات": 4, "أربع سنوات": 4, "خمس سنوات": 5, "ست سنوات": 6,
     "سبع سنوات": 7, "ثمان سنوات": 8, "ثماني سنوات": 8, "تسع سنوات": 9, "عشر سنوات": 10,
     # Open-ended -> FLOOR (see fidelity rules above). Both the numeric and the spelled-out forms.
+    # A floored 10 has NO upper end: on the 7 platforms storing it the AF clause keeps it out of every «up to N»
+    # (20261025065509 aqar, 20261025072931 aqarcity/haraj/muhaysini/reinvest/tuba/wasalt).
     "اكثر من عشر سنوات": 10, "أكثر من عشر سنوات": 10,
     "اكثر من 10 سنوات": 10, "أكثر من 10 سنوات": 10,
 }
@@ -922,13 +924,19 @@ _AMENITY_TOKENS: dict[str, tuple[str, ...]] = {
 }
 
 # «غير مؤثثة» / «بدون مصعد» / «لا يوجد مصعد» — the negator sits BEFORE the token.
-_NEGATORS = ("غير", "بدون", "لا يوجد", "لايوجد", "un", "no ")
+# «لا يتوفر موقف خاص للشقة» (aqar) and «لا توجد أية مفروشات داخل المنزل» (dwelleo 13129552), both stored 2026-10-25,
+# are «لا يوجد» in other words.
+_NEGATORS = ("غير", "بدون", "لا يوجد", "لايوجد", "لا توجد", "لاتوجد", "لا يتوفر", "لا تتوفر", "un", "no ")
 
 # …and some qualifiers sit AFTER it and mean the thing is NOT there. «مصعد مؤسس» is an elevator
 # SHAFT that has been prepared — there is no elevator (seen on fahadalshahri, 2026-09-20). Reading
 # that as elevator=True publishes a fixture the listing does not have, so these suppress the token
 # entirely: the source has not said yes and has not said no, so the column stays NULL.
 _PREPARED_ONLY = ("مؤسس", "مؤسسة", "مهيأ", "مهيا", "تأسيس", "prepared for", "roughed")
+# …and a fixture that can be added LATER is not there now either: «تصميم يستوعب … إضافة مصعد لاحقًا» (aouj
+# 10283198, 🔬 2026-10-25) read elevator = yes. «لاحق» after the token, «إمكانية» before it: NULL.
+_LATER_AFTER = ("لاحق", "مستقبلا", "later")
+_LATER_BEFORE = ("امكانية", "إمكانية", "امكانيه", "possibility")
 
 # …and a third case that is neither yes nor no: the amenity belongs to the NEIGHBOURHOOD, not to
 # the property. Listing prose is full of «قريب من مستشفى السرطان», «مقابل كمباوند معهد الإدارة»,
@@ -970,6 +978,7 @@ def amenities_from_text(raw: Optional[str]) -> dict[str, bool]:
     out = {col: vals.pop() for col, vals in seen.items() if len(vals) == 1}
     if _says_partly_furnished(raw):
         out.pop("furnished", None)
+    _veto_not_installed(raw, out)
     return out
 
 
@@ -1001,7 +1010,19 @@ def amenities_from_lines(raw: Optional[str]) -> dict[str, bool]:
     out = {col: next(iter(vals)) for col, vals in seen.items() if len(vals) == 1}
     if _says_partly_furnished(raw):
         out.pop("furnished", None)
+    _veto_not_installed(raw, out)
     return out
+
+
+def _veto_not_installed(raw: Optional[str], out: dict[str, bool]) -> None:
+    """«مطبخ مستقل … المطبخ غير راكب» (muhaysini 17578176): the not-installed statement is the more specific one, so a
+    plain mention elsewhere in the ad may not turn it back into a yes. A stated no («بدون مكيفات») stays."""
+    t = _norm_ar(str(raw or "")).lower()
+    for col in _NOT_INSTALLED_COLS:
+        if out.get(col) is True and any(_NOT_INSTALLED_RE.match(t, m.end(), m.end() + 40)
+                                        for tok in _AMENITY_TOKENS[col]
+                                        for m in re.finditer(re.escape(_norm_ar(tok).lower()), t)):
+            out.pop(col)
 
 
 def _says_partly_furnished(raw: Optional[str]) -> bool:
@@ -1019,11 +1040,13 @@ def _says_partly_furnished(raw: Optional[str]) -> bool:
     return False
 
 
-def prose_amenities_yes(raw: Optional[str], skip: tuple[str, ...] = ()) -> dict[str, bool]:
-    """Amenities an ad's own PROSE states, for a site with NO structured field for them. Prose only ever
-    says YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2): «لا يوجد مصعد» and a contradiction both stay
-    NULL here, never False. `skip` = columns the site publishes structurally (never read from prose)."""
-    return {k: True for k, v in amenities_from_lines(raw).items() if v is True and k not in skip}
+def prose_amenities(raw: Optional[str], skip: tuple[str, ...] = ()) -> dict[str, bool]:
+    """Amenities an ad's own PROSE states, for a site with NO structured field for them: YES, NO only on an
+    explicit negation tied to the token («لا يوجد مصعد», «مفروشة: لا»), or nothing — silence, «تأسيس»/prepared,
+    «قريب من»/nearby, partly and a contradiction all stay NULL (owner 2026-10-24; the 2026-09-20 four outcomes of
+    amenities_from_text; ADVANCED_FILTER_SOURCE_TRUTH §2). It replaced the yes-only reader, which could never take
+    a yes back. `skip` = columns the site publishes structurally: prose never touches those, not even as a fallback."""
+    return {k: v for k, v in amenities_from_lines(raw).items() if k not in skip}
 
 
 def html_block_lines(fragment: Optional[str]) -> str:
@@ -1046,6 +1069,66 @@ _CLAUSE_BREAK_RE = re.compile(r"[\n\r،,.;؛|•▫▪+]+|\s-\s")
 # «الغير مفروش» is «غير» with the article attached (eaqartabuk 598341 read furnished = YES, 🔬 2026-10-16).
 _NEGATOR_RES = tuple(re.compile(rf"(?<!\w){'(?:و|ال|وال)?' if re.match(r'[ء-ي]', n) else ''}{re.escape(n.strip())}(?=\W|$)")
                      for n in _NEGATORS)
+
+# …and the negator must be TIED to the token (owner 2026-10-24: «an explicit negation tied to the token»): only a
+# filler word («أي», «به», «فيها» …) or the token's own article may stand between them. Another word between them
+# owns the negation — measured on stored haraj ads 2026-10-25: «مطبخ غير راكب 🏠 مكيفات اسبلت راكبة» (AC is
+# installed), «شقق غير مؤثثة مطبخ راكب» (the kitchen is there), «بدون صاله مكيفات راكبه» (the ACs are there). The
+# yes-only readers hid those false NOs; storing a stated no would have published them.
+# «غير متوفر مصعد» / «غير موجود مصعد» is one negation (moftah emits its spec pairs that way, value first), so is
+# «غير مجهز بالمكيفات» (dwelleo 13138657); an OPENING mark may stand between («#لايوجد (مدخل سياره)», dealapp) but a
+# closing one ends the negation («مساحه خارجيه (لا يوجد) موقف سيارات خاص» — the parking is there, muhaysini).
+# A generated text can also break the word and restart it: «وغير مُ مؤثثة» (tuba 13261239), «غير الم furnished»
+# (muhaysini 17577122) — the stray «م» / «الم» is the same word's first letters, so the negation is still tied.
+_TIED_FILLERS = r"اي|ايه|به|بها|فيه|فيها|له|لها|متوفر|متوفره|موجود|موجوده|متاح|متاحه|مجهز|مجهزه|مزود|مزوده|م|الم"
+_TIED_TAIL_RE = re.compile(rf"^(?:[^\w)»\]]*(?:{_TIED_FILLERS})(?!\w))*[^\w)»\]]*(?:ال|لل|وال|بال)?$")
+# «المكيفات غير راكبه», «مصعد غير مركب» — the fixture is NOT installed: never a yes (wasalt's _NOT_INSTALLED rule, now
+# for every site). Measured 2026-10-25 on 7 dwelleo / muhaysini ads. «مطبخ غير راكب» is the same: a kitchen ROOM whose
+# cabinets are not fitted is a prepared space, not a kitchen — unknown, like «مصعد مؤسس» (coordinator for the owner's
+# four outcomes, 2026-10-25; 101 active ads on dealapp, haraj, muhaysini, dwelleo, reinvest … were served as kitchen = yes).
+# «غير» must be its own word — «مطبخ صغير راكب» is a small FITTED kitchen (dealapp 18171902, therc 12405530). Up to two
+# describing words or an opening bracket may stand between («مطبخ كبير مغلق غير راكب», «مطبخ ( الدولاب غير راكب )»,
+# «مكيفات اسبلت غير راكبة»), or a «و»-joined co-subject that shares the verdict («المكيفات والمطبخ: غير راكبة», «مصعد
+# ولكن غير راكب»); a comma list does not («مطبخ، مكيفات غير راكبة» — the kitchen is there), and neither does another
+# fixture's word without «و» / «او» — that verdict is the other fixture's: «متوفر مصعد تكيفات شباك غير راكبه» (the lift is
+# there, dealapp 18563443), «راكب مكيفات شباك مطبخ غير راكب» (the ACs are, muhaysini 17578178), «بدون مكيفات مطبخ غير
+# راكب» (no ACs stays no, muhaysini 17434418), «المطبخ واكب المكيفات غير راكبة» (muhaysini 17578179).
+_FIXTURE_WORD = "|".join(sorted({re.escape(_norm_ar(t).lower()) for toks in _AMENITY_TOKENS.values() for t in toks if not t.isascii()}
+                                | {"تكيف", "مكف", "راكب", "مركب"}, key=len, reverse=True))
+_NOT_INSTALLED_RE = re.compile(rf"\w*(?:(?:[^\S\n]|\()+(?:(?:او\s+|و\s*)\w+|(?!(?:ال)?(?:{_FIXTURE_WORD}))\w+)){{0,2}}"
+                               r"[^\w\n]+غير\s+(?:راكب|مركب)")
+_NOT_INSTALLED_COLS = ("air_conditioner", "elevator", "kitchen")
+
+
+def _negated_before(before: str) -> bool:
+    return any(_TIED_TAIL_RE.match(before[m.end():]) for r in _NEGATOR_RES for m in r.finditer(before))
+
+# «مفروشة: لا», «**مفروش:** لا», «مؤثثة: لا (غير مؤثثة)», «المفروشات: لا يوجد» — the token is a LABEL and the answer
+# is the value after the colon. The matcher only looked BEFORE a token, so every labelled «لا» read YES: muhaysini's
+# generated «أبرز ملامح العقار» list served ~1,060 active ads as furnished over «مفروشة: لا» (facts test 2026-10-24;
+# tuba prints the same template). A value opening with a negator is a stated NO; a value that names the fact again
+# («مفروشة: هذه الشقة غير مفروشة») is read from that restatement; «غير محدد» / «غير مذكور» / «لا توجد تفاصيل» answers
+# nothing (NULL).
+#
+# A label may also carry the vehicle qualifier («موقف السيارات:», «مواقف سيارات:», «موقف للسيارات:») or ONE
+# «و»-joined co-subject («موقف سيارات ومساحة خارجية: غير موضحة», «مكيفات والمطبخ: غير راكبة»). Any OTHER word before
+# the colon starts a new label whose value is not this fact's answer — measured on stored rows 2026-10-25: «مطبخ
+# ملاحظة: بدون مصعد», «موقف خاص الحقوق: لا يوجد», «غسيل عمولة نقل الملكية: لا يوجد», «موقف خاص: لا تفوت». A co-subject
+# label is weaker, so only an explicit «not specified» answers it as unknown («مطبخ وسطح ملاحظة : غير شامل» stays yes).
+# «غير متوفرة» / «غير موجود» is a stated NO (dwelleo «مواقف السيارات: غير متوفرة», aqar «تكييف: غير متوفر»).
+_LABEL_RE = re.compile(r"\w{0,4}(?:\s+(?:ال|لل|ل)?(?:سيار|مركب)\w*)?(?P<co>\s+و\w+(?:\s+(?!ملاحظ)\w+)?)?[\s*]*[:：][\s*]*")
+_LABEL_NO_DETAILS_RE = re.compile(r"لا\s*[يت]وجد\s+(?:تفاصيل|معلومات|بيانات)")
+_LABEL_NO_RE = re.compile(r"(?:لا|لايوجد|لاتوجد|بدون|no|none|not|غير\s+(?:متوفر|موجود)\w{0,2})(?!\w)")
+_LABEL_UNSAID_RE = re.compile(r"غير(?!\w)")
+_LABEL_UNSPECIFIED_RE = re.compile(r"غير\s+(?:محدد|مذكور|موضح|معروف|مطبق|مرفق)\w{0,2}(?!\w)")
+
+# A stated NO the 12-character negator window cannot see, both verified on stored ads 2026-10-25:
+#   «عدم وجود مصعد», «لعدم توفر مصعد», «حالة عدم المفروشات», «غياب المفروشات» (aqar, gathern, muhaysini, tuba: 20 ads)
+#   «لا تأتي هذه الشقة مفروشة», «لا يأتي هذا الشقة مفروشة», «لا تأتي مفروشة» (muhaysini: 7 ads), «ولا تأتي مفروشة» (dwelleo)
+# Anchored to the token (≤ 3 words between), on the normalised text («تأتي» → «تاتي»).
+_ABSENT_BEFORE_RE = re.compile(
+    r"(?:(?<!\w)(?:و|ل|ول)?(?:عدم|غياب)\s+(?:(?:وجود|توفر|توافر)\s+)?"
+    r"|(?<!\w)و?لا\s+[تي]اتي(?:\s+[^\s،,.]+){0,3}\s+)(?:ال)?$")
 
 
 # A token can sit inside a PLACE NAME: «شرفة» is the tail of Jeddah's district «مشرفة», and every ad there read
@@ -1077,6 +1160,11 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
                 # «* تأسيس مصعد» was served as elevator = yes). Same 12-char window as the negators.
                 if any(_norm_ar(q).lower() in before for q in _PREPARED_ONLY):
                     break
+                if (any(_norm_ar(q).lower() in after for q in _LATER_AFTER)
+                        or any(_norm_ar(q).lower() in t[max(0, m.start() - 22):m.start()] for q in _LATER_BEFORE)):
+                    break          # can be added later — not there now: NULL
+                if col in _NOT_INSTALLED_COLS and _NOT_INSTALLED_RE.match(t, m.end(), m.end() + 40):
+                    break          # not installed — unknown, never a yes
                 if col == "furnished" and (
                         any(_norm_ar(q).lower() in after for q in _PARTIAL_ONLY + _FLOOR_COVERING)
                         or any(_norm_ar(q).lower() in before[-6:] for q in _PARTIAL_BEFORE)):
@@ -1084,7 +1172,23 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
                 near = t[max(0, m.start() - 22):m.start()]
                 if any(_norm_ar(q) in near for q in _PROXIMITY):
                     break          # the NEIGHBOURHOOD has it, not this property — stay NULL
-                out[col] = not any(r.search(before) for r in _NEGATOR_RES)
+                negated = (_negated_before(before)
+                           or bool(_ABSENT_BEFORE_RE.search(t[max(0, m.start() - 40):m.start()])))
+                lab = None if negated else _LABEL_RE.match(t, m.end())
+                if lab:
+                    v = t[lab.end():]
+                    if _LABEL_NO_DETAILS_RE.match(v):
+                        break      # «المطبخ: لا توجد تفاصيل» — no details is not «no kitchen»: NULL
+                    if _LABEL_NO_RE.match(v):
+                        out[col] = False
+                        break
+                    if any(_norm_ar(x).lower() in v for x in tokens):
+                        if (said := _amenities_in_clause(v).get(col)) is not None:
+                            out[col] = said    # the value restates the fact: the restatement is the answer
+                        break
+                    if (_LABEL_UNSPECIFIED_RE if lab.group("co") else _LABEL_UNSAID_RE).match(v):
+                        break      # «غير محدد» — the label was answered with nothing: NULL
+                out[col] = not negated
                 break
             if col in out:
                 break

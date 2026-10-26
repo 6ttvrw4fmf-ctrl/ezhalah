@@ -14,6 +14,16 @@ import { whenNear } from '@/lib/nearViewport';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
 import { isStayLengthPriced, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
+import { monthlyLineText } from '@/lib/listingDisplay';
+
+// THE MONTHLY LINE UNDER EVERY YEARLY PRICE (owner 2026-10-26): «السعر المعلن 3,000 شهرياً» when the site quoted
+// per month (pool yearly at ×12), «≈ 3,000 شهرياً» (÷12) when it quoted per year. The text comes from the shared
+// price contract (listingDisplay.ts), so every surface prints the same words.
+function monthlyLine(listing: Listing, locale: 'ar' | 'en') {
+  const text = monthlyLineText(listing, locale);
+  if (text == null) return null;
+  return <Text style={card.pricePerMeter} numberOfLines={1} testID="card-monthly-line">{text}</Text>;
+}
 import { afEvidence, AMENITY_COL, type ActiveAf } from '@/lib/afEvidence';
 import { typeImg } from '@/theme/propertyIcons';
 import { GoldShineButton, GoldSurface } from './CardReveal';
@@ -38,6 +48,7 @@ export const FEATURE_META: Array<{ key: keyof NonNullable<Listing['features']>; 
   { key: 'private_entrance', icon: 'walk-outline',          label: 'Private Entrance' },
   { key: 'air_conditioner',  icon: 'snow-outline',          label: 'Air Conditioning' },
   { key: 'optical_fibers',   icon: 'wifi-outline',          label: 'Fiber Internet' },
+  { key: 'majlis',           icon: 'people-outline',        label: 'Majlis room' },
   { key: 'water_supply',     icon: 'water-outline',         label: 'Water Supply' },
   { key: 'electricity',      icon: 'flash-outline',         label: 'Electricity' },
   { key: 'sanitation',       icon: 'shield-checkmark-outline', label: 'Sanitation' },
@@ -271,7 +282,9 @@ export function ResultCard({
         <View style={card.lpBody}>
           <View style={card.lpPriceRow}>
             <View style={card.lpPriceCol}>
-              <Text style={stay ? card.stayNote : [card.price, card.lpPrice]} numberOfLines={stay ? 2 : 1}>{listingPrice(listing, locale)}</Text>
+              {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
+              {stay ? null : <Text style={[card.price, card.lpPrice]} numberOfLines={1}>{listingPrice(listing, locale)}</Text>}
+              {monthlyLine(listing, locale)}
               {listing.discount ? (
                 <View style={card.discountRow} testID="card-discount">
                   <Text style={card.discountOld} numberOfLines={1}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
@@ -434,7 +447,9 @@ export function ResultCard({
         <Text style={[card.title, tight && card.titleTight, { textAlign: txtAlign, writingDirection: wDir }]}>
           {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
         </Text>
-        <Text style={isStayLengthPriced(listing.source) ? [card.stayNote, row && card.stayNoteRow] : [card.price, row && card.priceRow, tight && card.priceTight]} numberOfLines={isStayLengthPriced(listing.source) ? 2 : 1}>{listingPrice(listing, locale)}</Text>
+        {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
+        {isStayLengthPriced(listing.source) ? null : <Text style={[card.price, row && card.priceRow, tight && card.priceTight]} numberOfLines={1}>{listingPrice(listing, locale)}</Text>}
+        {monthlyLine(listing, locale)}
         </View>
         {/* Source-published discount (owner 2026-10-19): the old price struck through + «خصم X٪»,
             under the final price. Rendered only when the source showed one — see listingDiscountFrom(). */}
@@ -708,11 +723,13 @@ export function arAttrValue(label: string, value: string, locale: string): strin
       const years = /^(أكثر من )?(\d+) (?:سنوات|سنة)$/.exec(v);
       if (years) return `${years[1] ? 'Over ' : ''}${years[2]} years`;
     }
-    if (ll === 'amenities' || ll === 'property services') {
-      const aliases: Record<string, string> = { موقف: 'Parking', الكهرباء: 'Electricity', المياه: 'Water Supply', الماء: 'Water Supply', 'الصرف الصحي': 'Sanitation' };
+    if (ll === 'amenities' || ll === 'property services' || ll === 'قنوات العقار' || ll === 'خدمات العقار' || ll === 'الإلتزامات على العقار' || ll === 'الضمانات ومدتها') {
+      const aliases: Record<string, string> = { موقف: 'Parking', الكهرباء: 'Electricity', المياه: 'Water Supply', الماء: 'Water Supply', 'الصرف الصحي': 'Sanitation', مياه: 'Water Supply', كهرباء: 'Electricity', 'صرف صحي': 'Sanitation' };
       return v.split(/[،,]/).map(item => aliases[item.trim()] ?? englishCatalogText(item.trim())).join(', ');
     }
     if (['street', 'address', 'city', 'district', 'deed location'].includes(ll)) return translitPlace(v);
+    // therc's «32,000 ر.س / yearly»: the Arabic currency mark is the only Arabic in it.
+    if (/ر\.س/.test(v)) return v.replace(/\s*ر\.س\s*/g, ' SAR ').replace(/\s+/g, ' ').trim();
     return englishCatalogText(v);
   }
   if (AR_YESNO[lv]) return AR_YESNO[lv];                                   // Electricity/Water/booleans
@@ -1381,7 +1398,7 @@ function sourceHost(source: string): string {
   if (s.includes('الطابق الثامن') || s.includes('8floor') || s.includes('eightfloor')) return 'www.8floor.sa';
   if (s.includes('حلول') || s.includes('holoul')) return 'holoul.io';
   if (s.includes('السوق المفتوح') || s.includes('opensooq')) return 'sa.opensooq.com';
-  if (s.includes('معرض نافذة') || s.includes('nafithh')) return 'nafithh.sa';
+  if (s.includes('معرض نافذة') || s.includes('nafithh')) return 'nafithh.com';
   if (s.includes('مباشر') || s.includes('mobasher')) return 'mobasher.sa';
   if (s.includes('مؤاجرة') || s.includes('muajarh')) return 'muajarh.com';
   if (s.includes('دلّالي') || s.includes('dallali')) return 'dallali.com';
@@ -1558,7 +1575,7 @@ const card = StyleSheet.create({
   headline: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', columnGap: 8, rowGap: 2 },
   typeRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   typeLabel: { fontSize: 10.5, color: colors.muted, fontWeight: '500', flexShrink: 1 },
-  title: { fontSize: 15, fontWeight: '700', color: colors.ink, letterSpacing: -0.3, flexShrink: 1 },
+  title: { fontSize: 15, fontWeight: '700', color: colors.ink, flexShrink: 1 }, // no tracking: titles are Arabic (joining + ligatures)
   // Owner 2026-10-01: omit the bio from compact cards; details remain on the source page.
   desc: { display: 'none' },
   locRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },

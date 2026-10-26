@@ -69,6 +69,10 @@ CHROME = re.compile(r"^(?:\S+\s){0,3}(?:للايجار|للبيع)$")
 # 37600467768): aqar's 5/10 and tuba's 5/6 findability «misses» were prose («موقف سيارات» in the ad body)
 # against aqar's extended_details.special_parking / flat amenity keys and tuba's `garages` count, which
 # those ads leave unfilled — our NULL is the source's answer, not a trapped value.
+# RULE B (owner 2026-10-25, «We trust the sellers sentence»): these fields are still judged from the page's
+# structured data, but merged with the ad's own QUOTED sentence exactly as the index merges it (rule_b,
+# text_says: the overlay's fact counts only while its quote is still on the page). Prose the overlay did not
+# quote is still never read for them.
 STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     "aqar": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room",
              "private_entrance", "furnished"),
@@ -98,6 +102,10 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # _FEATURE_COLS). Its 10-13 misses (13602723, 13602726, CI re-read 38384423613) were description prose
     # («يوجد مصعد في العمارة», «غرفة خادمة مع دورة مياة») on ads whose chip list names neither (🔬, backlog 515).
     "squares": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room"),
+    # reinvest publishes parking as a COUNT, `info_fields.parking_count` (scrapers/reinvest/run.py: «parking» is
+    # count_flag(parking_count) and wins over prose). Its 10-24 misses (6 of 7, af-score run 40076306911) all asked
+    # parking from description prose («موقف») on ads whose count is blank; our NULL is the source's answer (law §2).
+    "reinvest": ("parking",),
     # eastabha (WordPress «WP Residence») prints its WHOLE feature taxonomy as a checklist: a ticked item is
     # `<div class="listing_detail col-md-4 …"><i class="fas fa-check"></i>مطبخ مجهز</div>`, an unticked one the
     # same with `not_present` and an ✗ (CI source-reread 39020724177, 595393 and 595406). The scraper reads
@@ -140,6 +148,11 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # elevator from description prose («ومصعدين» in the building) on ads whose chips name none. The other fields
     # have no structured home there, so their prose stays a statement (backlog 790). Read by maqrat_props().
     "maqrat": ("elevator",),
+    # opensooq's ad page ticks its own amenities under «وسائل الراحة» (flight data `dynamicTabsSection`, read by the
+    # scraper's page_amenities() since 2026-10-26, CI source-reread 40301252058). Its 0-of-5 nights asked «elevator»
+    # from the site menu and from OTHER ads' cards printed on the page («شقة … مصعد راكب», 13872036). Read by
+    # opensooq_props(). furnished stays the card chip, scored as before.
+    "opensooq": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "private_entrance"),
 }
 # A rakez listing's page is its PROJECT's page: one shared feature list and every unit's price · rooms · area. A UNIT
 # trait the project list names («غرفة خادمة», «غرفة سائق», «مواقف خاصة», «مطبخ») describes some of the project's units,
@@ -188,6 +201,27 @@ def structured_says(page: dict, field: str) -> bool | None:
     return said[0] if said else None
 
 
+def rule_b(box: bool | None, text: bool | None) -> bool | None:
+    """Mirror of public.af_rule_b (owner 2026-10-25, «We trust the sellers sentence»): the seller's quoted
+    sentence beside the site's own field. text silent → box; no box → text; box no + text yes → yes;
+    box yes + text explicitly no → None (a conflict is unknown, never judged)."""
+    if text is None:
+        return box
+    if box is None or box == text:
+        return text
+    return True if text else None
+
+
+def text_says(text: dict | None, col: str, page: dict) -> bool | None:
+    """The overlay's answer for one column (listing_text_facts.facts), believed only while its quote is still
+    printed on the live page — a quote the page no longer carries is the stale text the index must not serve."""
+    t = (text or {}).get(col) or {}
+    q = norm(t.get("q") or "")
+    if not q or not isinstance(t.get("v"), bool):
+        return None
+    return t["v"] if q in " ".join(page_lines(page)) else None
+
+
 def structured_result(stored, says: bool | None) -> str:
     if says is None:
         return PAGE_SILENT
@@ -212,14 +246,16 @@ def labelled_number(stored, lines: list[str], label: str) -> str:
     return WE_MISS if states else PAGE_SILENT
 
 
-def structured_only(platform: str, results: dict[str, str], stored: dict, page: dict) -> dict[str, str]:
+def structured_only(platform: str, results: dict[str, str], stored: dict, page: dict,
+                    text: dict | None = None) -> dict[str, str]:
     out = dict(results)
     for (site, f), label in STRUCTURED_LABEL.items():
         if site == platform and f in out and out[f] != UNREADABLE:
             out[f] = labelled_number(stored.get(COL[f]), page_lines(page), label)
     for f in STRUCTURED_ONLY.get(platform, ()):
         if f in out and out[f] != UNREADABLE:
-            out[f] = structured_result(stored.get(COL[f]), structured_says(page, f))
+            # Rule B (2026-10-25): the box is the page's structured data, the sentence is the overlay's quoted fact.
+            out[f] = structured_result(stored.get(COL[f]), rule_b(structured_says(page, f), text_says(text, COL[f], page)))
     for f in PROJECT_PAGE_UNIT_TRAITS.get(platform, ()):
         if f in out and out[f] != UNREADABLE:
             out[f] = PAGE_SILENT
@@ -258,6 +294,29 @@ def template_lines(pages: list[list[str]]) -> set[str]:
 DEED_BOUNDARY = re.compile(r"تمام\s*الحد|يحده|الحد\s*(?:الشمالي|الجنوبي|الشرقي|الغربي)")
 
 
+# The same boundary text printed as a labelled detail row («وصف الحد الغربي: الوحدة رقم 4 / أ والمنور رقم 2 وبيت الدرج
+# والمصعد», the Houzez detail list on fursaghyr): the evidence line keeps the VALUE and loses its label, so
+# DEED_BOUNDARY cannot see it. fursaghyr 4367079 was asked elevator from exactly that row on 10-24 (run 40076306911)
+# while its «خدمات العقار» names none. Every value printed under a «… الحد …» label is dropped before the page is read.
+_BOUNDARY_ROW = re.compile(r"<strong>\s*(?:وصف|نوع|طول)\s+(?:ال)?حد[^<:]{0,20}:?\s*</strong>\s*<span[^>]*>([^<]{1,300})</span>")
+
+
+def strip_boundary(page: dict, body: str) -> dict:
+    rows = {norm(html.unescape(v)) for v in _BOUNDARY_ROW.findall(body or "") if v.strip()}
+    rows.discard("")
+    if not rows:
+        return page
+
+    def keep_line(x: str) -> bool:
+        nx = norm(x)
+        # a short value («شارع») is matched whole, so it cannot take an unrelated line with it
+        return not any(nx == r or (len(r) >= 12 and r in nx) for r in rows)
+
+    keep = [x for x in (page.get("evidence_lines") or []) if keep_line(x)]
+    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if keep_line(x))
+    return {**page, "evidence_lines": keep, "text_head": head}
+
+
 def page_says_yes(lines: list[str], field: str) -> bool:
     """The ad itself names the amenity and does not negate it («مصعد» yes, «لا يوجد مصعد» no)."""
     kw = BOOL_KW[field]
@@ -266,22 +325,23 @@ def page_says_yes(lines: list[str], field: str) -> bool:
     return bool(hit) and not all(re.search(NEG + "(?:" + kw + ")", x) for x in hit)
 
 
-def says_yes(lines: list[str], field: str, platform: str = "", page: dict | None = None) -> bool:
-    """The ad states YES. For a field the website publishes structurally, only its structured data can
-    say so (law §2) — the same reading structured_only() scored it by, so a request is never built
-    from prose the score itself refused to believe."""
+def says_yes(lines: list[str], field: str, platform: str = "", page: dict | None = None,
+             text: dict | None = None) -> bool:
+    """The ad states YES. For a field the website publishes structurally, its structured data merged with the
+    overlay's quoted sentence under Rule B — the same reading structured_only() scored it by, so a request is
+    never built from prose the score itself refused to believe."""
     if field in STRUCTURED_ONLY.get(platform, ()):
-        return structured_says(page or {}, field) is True
+        return rule_b(structured_says(page or {}, field), text_says(text, COL[field], page or {})) is True
     return page_says_yes(lines, field)
 
 
 def customer_answers(lines: list[str], results: dict[str, str], platform: str = "",
-                     page: dict | None = None) -> list[str]:
+                     page: dict | None = None, text: dict | None = None) -> list[str]:
     """Advanced Filter answers the ad really states as YES: the ones a customer would ask for. Both a stored
     true (does the filter find it) and a stored NULL (the trapping failure) qualify; a stored false never
     does, the customer asking for it would be excluding the ad correctly or the ad disagrees (precision)."""
     cols = [c for c in (*AMENITY_SLUG, FURNISHED)
-            if results.get(c) in (MATCH, WE_MISS) and says_yes(lines, c, platform, page)]
+            if results.get(c) in (MATCH, WE_MISS) and says_yes(lines, c, platform, page, text)]
     return cols[:MAX_ANSWERS]
 
 
@@ -613,7 +673,15 @@ def maqrat_props(body: str) -> list[dict]:
     return [{"name": _PROP_NAME["elevator"], "value": "نعم"}] if "مصعد" in chips else []
 
 
-SITE_PROPS = {"superoffice": superoffice_props, "erapulse": erapulse_props, "maqrat": maqrat_props}
+def opensooq_props(body: str) -> list[dict]:
+    """opensooq's own ticked list, read by the scraper's own reader (one reader, never a copy)."""
+    from scrapers.opensooq.run import page_amenities
+    got = page_amenities(body) or {}
+    return [{"name": _PROP_NAME[f], "value": "نعم"} for f in _PROP_NAME if got.get(f)]
+
+
+SITE_PROPS = {"superoffice": superoffice_props, "erapulse": erapulse_props, "maqrat": maqrat_props,
+              "opensooq": opensooq_props}
 
 
 def is_muktamel(url: str) -> bool:
@@ -626,6 +694,12 @@ def is_gathern(url: str) -> bool:
 
 def is_sanadak(url: str) -> bool:
     return "sanadak.sa" in url
+
+
+# The tag that makes the handshake visible (backlog 817, 2026-10-25). Supabase's API logs keep x-client-info but not
+# x-ezhalah-gate, and custom headers REPLACE supabase-py's defaults, so without it every gated call read as a bare-key
+# call (x_client_info = '') in the owner's edge_logs count. Same tag scripts/lib/gateFetch.mjs appends for node robots.
+GATE_TAG = {"X-Client-Info": "supabase-py ezhalah-gate"}
 
 
 def anon_client():
@@ -643,7 +717,7 @@ def anon_client():
             from supabase.lib.client_options import SyncClientOptions as _Options
         except ImportError:  # older supabase-py
             from supabase.lib.client_options import ClientOptions as _Options
-        return create_client(url, key, options=_Options(headers={"x-ezhalah-gate": gate}))
+        return create_client(url, key, options=_Options(headers={"x-ezhalah-gate": gate} | GATE_TAG))
     return create_client(url, key)
 
 
@@ -723,9 +797,14 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
     row = new_row(night, platform)
     last = 0.0
     read: list[tuple[str, int, dict, dict]] = []
+    texts: dict[tuple[str, int], dict] = {}
     for table, rid in picks:
         stored = (client.table("search_listings_ar").select(STORED).eq("source_table", table)
                   .eq("listing_id", rid).limit(1).execute().data or [{}])[0]
+        # The Rule B overlay row (owner 2026-10-25): the ad's quoted facts the index merges; stale text never counts.
+        tf = (client.table("listing_text_facts").select("facts,stale_at").eq("source_table", table)
+              .eq("listing_id", rid).limit(1).execute().data or [{}])[0]
+        texts[(table, rid)] = {} if tf.get("stale_at") else (tf.get("facts") or {})
         url = (client.table(table).select("listing_url").eq("id", rid).limit(1).execute().data or [{}])[0].get("listing_url")
         if not url:
             row["sampled"] += 1
@@ -747,6 +826,8 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
             except Exception:  # noqa: BLE001
                 status, body = None, ""
             page = page_evidence(body) if status == 200 and body else None
+            if page is not None:
+                page = strip_boundary(page, body)
             if page is not None and platform in NAV_LINK_SITES:
                 page = strip_nav(page, body)
             if page is not None and platform in WARRANTY_SITES:
@@ -771,10 +852,11 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
     for table, rid, stored, page in read:
         key = f"{table}:{rid}"
         results = compare_listing(stored, page, skip_price=False)
-        af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page)
+        af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page,
+                                  texts.get((table, rid)))
         fold(row, key, af_only, stored)
         ad_lines = [x for x in page_lines(page) if x not in chrome]
-        answers = offered(customer_answers(ad_lines, af_only, platform, page), stored)
+        answers = offered(customer_answers(ad_lines, af_only, platform, page, texts.get((table, rid))), stored)
         params = rpc_params(stored, answers) if anon is not None and answers else None
         if params:
             verdict = findable(ask(anon, params), table, rid)

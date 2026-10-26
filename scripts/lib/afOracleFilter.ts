@@ -64,6 +64,7 @@ export const AMENITY_TOKEN_COL: Record<string, string> = {
   balcony: 'balcony',
   laundry_room: 'laundry_room',
   optical_fibers: 'optical_fibers',
+  majlis: 'majlis',
   separate_electricity_meter: 'separate_electricity_meter',
   separate_water_meter: 'separate_water_meter',
   furnished: 'furnished',
@@ -117,6 +118,9 @@ export function directionVariantsFrom(observed: Iterable<string>): Record<string
 
 /** The «Raw Land» filter token; matched against the index's unit_subtype_ar TAG, not type_ar. */
 export const RAW_LAND_TAG = 'أرض خام';
+/** Platforms whose stored age 10 includes the source's OPEN bucket («أكثر من 10 سنوات», «10+ years», REGA
+ *  «Ten Year»), each read on its own published field 2026-10-25 (migrations 20261025065509, 20261025072931). */
+export const AGE_OPEN_10_PLATFORMS = ['aqar', 'aqarcity', 'haraj', 'muhaysini', 'reinvest', 'tuba', 'wasalt'] as const;
 
 export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string; unhandled: string[] } {
   const parts = ['production_ready=is.true'];
@@ -605,10 +609,12 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
         // wrongly filter Buy rows by a rent column. The app never sends a period without
         // p_deal='إيجار' (rentPeriodParam returns null otherwise), so this is refused, not modelled.
         if (reqBody.p_deal !== 'إيجار') { unhandled.push(`p_rent_period=${v} with p_deal=${JSON.stringify(reqBody.p_deal ?? null)} (the clause only applies a period to Rent rows)`); break; }
-        // Every period arm also admits price on request (price_annual NULL) — the one line the clause
-        // gained 2026-09-28 (owner: «سعر عند الطلب … both monthly and yearly»).
+        // The سنوي and كلاهما arms also admit price on request (price_annual NULL) — the line the clause
+        // gained 2026-09-28 (owner: «سعر عند الطلب … both monthly and yearly»). Under شهري («إقامات قصيرة»)
+        // an unpriced row is admitted ONLY from the two stay-length platforms (owner 2026-10-26, migration
+        // 20261026071543: «shift those to annual rent»).
         if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`);
-        else if (v === 'شهري') parts.push(`or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),price_annual.is.null)`);
+        else if (v === 'شهري') parts.push(`or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))`);
         // BOTH periods (rentPeriod 'both' → 'كلاهما'), translated VERBATIM from the clause (2026-09-02):
         //   p_rent_period = 'كلاهما' and (s.payment_monthly = true
         //                                 or s.rent_period_ar = 'سنوي'
@@ -640,7 +646,12 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       case 'p_has_license': parts.push(v === true ? 'license_number=not.is.null' : 'license_number=is.null&license_number=not.is.null'); break;
       case 'p_furnished': parts.push(`furnished=is.${v}`); break;
       case 'p_age_min': parts.push(`property_age=gte.${v}`); break;
-      case 'p_age_max': parts.push(`property_age=lte.${v}`); break;
+      // An upper bound never admits an OPEN bucket: on these platforms «more than 10» is stored as its
+      // floor 10, so a 10 there has no upper end (AGE_OPEN_10_PLATFORMS).
+      case 'p_age_max':
+        parts.push(`property_age=lte.${v}`);
+        if (Number(v) >= 10) orGroups.push(`property_age.lt.10,platform.not.in.(${AGE_OPEN_10_PLATFORMS.join(',')})`);
+        break;
       case 'p_street_width_min': parts.push(`street_width_m=gte.${v}`); break;
       case 'p_street_width_max': parts.push(`street_width_m=lte.${v}`); break;
       // DIRECTIONS ARE NOT STORED CANONICALLY (found 2026-09-02, full-surface sweep). The clause

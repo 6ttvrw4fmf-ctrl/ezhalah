@@ -29,7 +29,7 @@
 // executes everything here.
 // NO imports: middleware.ts runs this at Vercel's edge, and ./share pulls in react-native. The two values
 // below are pinned to src/lib/share.ts (OG_IMAGE's file, SHARE_TITLE_AR) by the verify script.
-export const HOME_CARD_IMAGE_PATH = '/og-image-v6.png';
+export const HOME_CARD_IMAGE_PATH = '/og-image-v7.png';
 export const HOME_CARD_TITLE_AR = 'إزهله';
 // The card's BOLD title (owner 2026-10-18: «the message doesn't show fully»). WhatsApp's small card shows
 // ~2 lines under the title, so the approved sentence is split: what Ezhalah is goes in the title, the
@@ -49,7 +49,9 @@ export function homeCardDescription(f: HomeCardFacts | null | undefined): string
   if (!f || !ok(f.sites) || !ok(f.listings) || !ok(f.cities)) return HOME_CARD_FALLBACK_AR;
   // Owner 2026-10-19: no «و», no «في», no tail sentence — WhatsApp cut the line at «353 مدي…», so the
   // city count never showed. Three counts, middle dots, nothing after the last one.
-  return `${fmt(f.sites)} موقع · ${fmt(f.listings)} إعلان · ${fmt(f.cities)} مدينة`;
+  // Owner 2026-10-25: the share MESSAGE already says «ليش تدوّر في 148 موقع؟», so the card does not say 148 again,
+  // and it names the Kingdom. The site count is still read (a complete set or the fallback), just not printed.
+  return `${fmt(f.listings)} إعلان · ${fmt(f.cities)} مدينة بالمملكة`;
 }
 
 /** Read the counts out of the two RPC bodies as PostgREST returns them; null when a body is unusable. */

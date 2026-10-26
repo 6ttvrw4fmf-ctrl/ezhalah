@@ -45,6 +45,9 @@
 -- Re-verified 2026-10-21 (migration 20261021003001_internal_views_are_not_a_public_api): UNCHANGED. That migration
 --   only REVOKES anon/authenticated SELECT on this view (security Phase 1.3); md5(live pg_get_viewdef) ==
 --   ea8174b63953cfc25aef4a39af032f0a == body below.
+-- Re-verified 2026-10-25 (migration 20261025035403_pin_district_fill_table_and_recovery_arm): UNCHANGED. That migration
+--   only READS this view (the new pin arm of refresh_district_recovery_table joins it); md5(live pg_get_viewdef) ==
+--   ea8174b63953cfc25aef4a39af032f0a == body below.
  WITH native AS (
          SELECT 'alhoshan'::text AS platform,
             'alhoshan_residential_listings'::text AS source_table,
