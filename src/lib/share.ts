@@ -2,8 +2,18 @@ import { Platform, Share } from 'react-native';
 import { getLocale } from '@/i18n';
 import { loadSiteCount, siteCountNow } from '@/data/siteCount';
 
-// The real, resolvable share target (the deployed app).
-export const SHARE_LINK = 'https://ezhalah-app.vercel.app';
+// The real, resolvable share target. ezhalah.com is the final address (owner 2026-10-26); the old
+// ezhalah-app.vercel.app still serves the same deployment, so links shared before today keep working.
+export const SHARE_LINK = 'https://ezhalah.com';
+// The hosts that ARE the live site. A share made on any of them says ezhalah.com; a preview or local build
+// keeps its own address so a test share opens the build that made it.
+export const LIVE_SITE_HOSTS = ['ezhalah.com', 'www.ezhalah.com', 'ezhalah-app.vercel.app'];
+/** The address a share link starts with: ezhalah.com on the live site and in the native app, else this page's own. */
+export function shareOrigin(): string {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return SHARE_LINK;
+  const host = window.location?.hostname ?? '';
+  return LIVE_SITE_HOSTS.includes(host) ? SHARE_LINK : window.location.origin;
+}
 // Owner-approved share artwork (2026-10-11): the existing green eagle on white,
 // identical to the app icon. The in-app preview uses the same image as external cards.
 // THE FILENAME CARRIES A VERSION, AND THAT IS LOAD-BEARING. WhatsApp, Facebook and LinkedIn cache a
