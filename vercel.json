@@ -7,6 +7,17 @@
   "trailingSlash": false,
   "redirects": [
     {
+      "source": "/:path((?!sb/|api/).*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "ezhalah-app.vercel.app"
+        }
+      ],
+      "destination": "https://ezhalah.com/:path",
+      "permanent": false
+    },
+    {
       "source": "/agent",
       "destination": "/",
       "permanent": false

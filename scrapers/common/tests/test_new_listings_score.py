@@ -706,3 +706,20 @@ def test_a_price_written_in_thousands_is_the_same_figure():
     assert compare_listing({"price_annual": 150000}, page)["price"] == MATCH
     assert compare_listing({"price_annual": 160000}, page)["price"] != MATCH         # another figure is not ours
     assert compare_listing({"price_total": 1500000}, page)["price"] != MATCH         # 150 الف is not 1.5 million
+
+
+def test_dwelleo_bathrooms_and_livings_come_from_its_api_record_not_the_prose():
+    # backlog #890 (2026-10-26, dry re-score 40288432059): 19471735 «ست غرف نوم وخمس حمامات» (record bathrooms 5)
+    # and 19471811 «صالة مع بلكونة … شارع 30» (record livings 1) were scored as wrong.
+    from scrapers.common.new_listings_score import dwelleo_room_lines
+    apt = {"id": 3, "bedrooms": 6, "bathrooms": 5, "livings": 1, "floor_number": 0, "property_type": {"name": "شقة"}}
+    url = "https://dwelleo.sa/ar/properties/6-bedroom-apartment"
+    lines = dwelleo_room_lines(url, fetch=lambda slug: apt)
+    assert lines == ["عدد غرف النوم 6", "عدد الحمامات 5", "عدد الصالات 1"]
+    p = page(*lines, "وتضم ست غرف نوم وخمس حمامات", "صالة مع بلكونة واجهة شرقية على شارع 30")
+    assert compare_listing({"bathrooms": 5}, p)["bathrooms"] == MATCH
+    assert compare_listing({"bathrooms": 3}, p)["bathrooms"] == MISMATCH
+    assert compare_listing({"living_rooms": 1}, p)["living_rooms"] == MATCH
+    assert compare_listing({"living_rooms": 4}, p)["living_rooms"] == MISMATCH
+    # The floor is never restated: the page does not show it and the record's 0 is ambiguous.
+    assert not any("الطابق" in x or "الدور" in x for x in lines)
