@@ -48,6 +48,14 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-10-25. Pin districts batch 2 switched on (owner): `applied = true` on listing_pin_district rows, no listing value edited.
+  '20261025214336_pin_district_batch_2_switch_on.sql':
+    'not a listing-field repair: it flips listing_pin_district.applied, the switch the recovery arm reads; a re-scrape ' +
+    'cannot undo it, and the served result IS watched by two rostered detectors that predate it: ' +
+    'mon_detect_pin_district_unvouched (20261025095716, P2: a served basis=pin district no switched-on row vouches for) ' +
+    'and mon_detect_district_guards_missing (20261025203753, P1: the list/pin guard triggers dropped or disabled). ' +
+    'verify-pin-district-fill-contract.ts pins the flip version in FLIP_ALLOWED; the applied file cannot be edited ' +
+    'to name the detectors (content parity).',
   // 2026-10-25. haraj REGA «اكثر من عشر سنوات» NULL → 10 (the open 10+ bucket the AF clause already reads as open).
   '20261025082809_haraj_rega_open_age_is_ten_plus_backfill.sql':
     'watched by its companion 20261025083341_mon_detect_haraj_stated_age_not_stored.sql, which creates ' +
