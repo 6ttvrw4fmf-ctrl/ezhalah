@@ -716,15 +716,16 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                       {halves.map((h) => (
                         <View key={h.key} style={[s.half, h.gov && s.halfGov]}>
                           <View style={[s.halfHeading, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                            <Image
-                              source={h.gov
-                                ? require('../../assets/icons/ministry-of-justice.webp')
-                                : require('../../assets/images/logo-cloud-sky.svg')}
-                              contentFit="contain"
-                              accessible={false}
-                              testID={h.gov ? 'actual-sales-ministry-logo' : 'listed-now-ezhalah-logo'}
-                              style={s.halfLogo}
-                            />
+                            {/* «المعروض الآن» has no picture for now (owner 2026-10-26 removed the falconer-with-falcon logo). */}
+                            {h.gov ? (
+                              <Image
+                                source={require('../../assets/icons/ministry-of-justice.webp')}
+                                contentFit="contain"
+                                accessible={false}
+                                testID="actual-sales-ministry-logo"
+                                style={s.halfLogo}
+                              />
+                            ) : null}
                             <Text numberOfLines={1} style={[s.halfTitle, { flexShrink: 1 }, tx]}>{h.title}</Text>
                           </View>
                           <Text numberOfLines={1} style={[s.halfSub, tx]}>{h.sub}</Text>
