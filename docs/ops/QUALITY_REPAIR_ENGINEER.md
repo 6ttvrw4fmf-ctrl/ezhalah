@@ -198,9 +198,14 @@ The Advanced Filter serves the seller's own quoted sentence beside the site's bo
    between nights; `open_alerts` must be empty (`text_facts_not_applied`, `text_facts_stale_applied`,
    `text_facts_unquoted`, `text_facts_switch_ignored`: each P1, all from `mon_detect_text_facts`, 11:52 UTC).
 4. **The switch is the owner's.** `switch.on` false is only ever the owner's (or an incident commander's) decision.
-   Report it; never turn it back on yourself.
+   Report it; never turn it back on yourself. The same goes for `af_text_facts_street_width`.
+5. **Street width (Rule B for numbers, 2026-10-25).** `street_width_differs` = ads where the site published one
+   width and the seller wrote another (`select * from ops_text_facts_width_differs order by read_at desc limit 20`);
+   the box is served. Open the ad: a box that is a scraper misread (aqar's «20» beside «شارع 16 شمالي» is the common
+   shape) is a backlog row for ⚡; a seller who wrote both is nothing to do. The alert for this lane is
+   `text_facts_width_not_applied` (a quoted width beside a BLANK index width for 4 h = the merge stopped).
 
-Report it as one line: «📊 Text facts: read HH:MM · N conflicts (±d) · M values from ad text · alerts none».
+Report it as one line: «📊 Text facts: read HH:MM · N conflicts (±d) · M values from ad text · W widths differ · alerts none».
 
 ## Powers and limits
 - **Yours to do (AGENTS.md: ops DB objects, monitors, detectors, cron, scraper fixes, evidence-backed repairs):** repair
