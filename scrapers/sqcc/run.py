@@ -128,6 +128,24 @@ def walk_categories(s: cc.Session) -> tuple[dict[str, set[str]], dict[str, str]]
     return members, where
 
 
+# The unit's own room lists sit OUTSIDE the listing block: a duplex prints one «<h2>دور ارضي</h2>» section per floor,
+# each a `shape_data_list` of bare <b> items («مجلس رجال», «مطبخ», «غرفه خادمة»), and a `shape_notice` line
+# («يتكون من  كراج - حوش»). CI source-reread 40299894589 (13707675, 2026-10-26): the ad states a kitchen, a maid's
+# room and a garage there and all three were stored NULL, because only the icon+<p> spec list above was read.
+_FEATURE_LIST = re.compile(r'<ul class="shape_data_list">(.*?)</ul>', re.S)
+_FEATURE_ITEM = re.compile(r"<li>\s*<div>\s*<b>(.*?)</b>", re.S)
+_NOTICE = re.compile(r'<div class="shape_notice[^"]*">(.*?)</div>', re.S)
+
+
+def features(page: str) -> list[str]:
+    """The ad's own per-floor room items and notice lines, in page order; the footer is never read."""
+    foot = page.find("foot_phone")
+    body = page if foot < 0 else page[:foot]
+    items = [clean(b) for ul in _FEATURE_LIST.findall(body) for b in _FEATURE_ITEM.findall(ul)]
+    items += [clean(n) for n in _NOTICE.findall(body)]
+    return [x for x in dict.fromkeys(items) if x]
+
+
 def parse_page(page: str) -> dict[str, Any]:
     box = page[page.find('id="postin"'):page.find('<div id="data">')]   # the listing block only
     pid = re.search(r"\?p=(\d+)['\"]", page)
@@ -145,6 +163,7 @@ def parse_page(page: str) -> dict[str, Any]:
         "price_text": clean(price.group(1)) if price else "",
         "serv": {k: clean(v) for k, v in re.findall(r'<span class="(icons\d+)">(.*?)</span>', serv, re.S) if clean(v)},
         "specs": [clean(p) for p in re.findall(r'<span class="icons\d+"></span>\s*<p>(.*?)</p>', box, re.S) if clean(p)],
+        "features": features(page),
         "lat": geo.group(1) if geo else None,
         "lng": geo.group(2) if geo else None,
         "photos": [u for u in dict.fromkeys(thumb + gallery) if not _NOT_A_PHOTO.search(u)],
@@ -189,6 +208,7 @@ def map_listing(url: str, d: dict[str, Any], cats: dict[str, set[str]],
     if not d.get("id"):
         return None, "no_stable_id"
     title, specs, pt = d["title"], d["specs"], d["price_text"]
+    feats = d.get("features") or []
     own = " ".join([title, pt, *specs])
     in_cats = sorted(c for c, urls in cats.items() if url in urls)
     deals = {_DEAL_CAT[c] for c in in_cats if c in _DEAL_CAT}
@@ -246,7 +266,7 @@ def map_listing(url: str, d: dict[str, Any], cats: dict[str, set[str]],
         "source": SOURCE,
         "active": True,
         "title": redact_pii(title) or None,
-        "description": redact_pii("\n".join(specs)[:4000]) or None,
+        "description": redact_pii("\n".join([*specs, *feats])[:4000]) or None,
         "property_type": ptype,
         "transaction_type": "Rent" if deal == "Rent" else "Buy",   # deal is validated above
         "city": normalize.map_city(city_ar) if city_ar else None,
@@ -261,7 +281,7 @@ def map_listing(url: str, d: dict[str, Any], cats: dict[str, set[str]],
         "property_age": ages.pop() if len(ages) == 1 else None,
         "photo_urls": list(d["photos"]),
         **row_price,
-        **normalize.amenities_from_text("\n".join(specs)),
+        **normalize.amenities_from_text("\n".join([*specs, *feats])),
     }
     stored = row.get("price_per_meter") or (row.get("price_total") if deal == "Buy" else row.get("price_annual"))
     row["price_evidence"] = normalize.price_evidence(
