@@ -113,7 +113,22 @@ async function spendGate(): Promise<{ allow: boolean; reason?: string }> {
     if (!r.ok) return { allow: false, reason: `spend gate http ${r.status}` };
     const g = await r.json();
     if (!g || typeof g.allow !== "boolean") return { allow: false, reason: "spend gate returned no verdict" };
-    return { allow: g.allow, reason: g.reason };
+    if (!g.allow) return { allow: false, reason: g.reason };
+    // THE MONTHLY FACTS BUDGET (owner 2026-10-26: 30 USD/month for the AI facts reader). public.facts_ai_budget reads
+    // this calendar month's listing_facts_runs; the script asks it too, but the paid call is HERE, so the gate is here.
+    const ac2 = new AbortController();
+    const timer2 = setTimeout(() => ac2.abort(), GATE_TIMEOUT_MS);
+    const r2 = await fetch(`${SUPABASE_URL}/rest/v1/rpc/facts_ai_budget`, {
+      method: "POST",
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({ p_estimate_usd: 0.01 }),
+      signal: ac2.signal,
+    }).finally(() => clearTimeout(timer2));
+    if (!r2.ok) return { allow: false, reason: `facts budget gate http ${r2.status}` };
+    const b = await r2.json();
+    if (!b || typeof b.allow !== "boolean") return { allow: false, reason: "facts budget gate returned no verdict" };
+    if (!b.allow) return { allow: false, reason: `monthly AI facts budget reached: $${b.spent_month} of $${b.cap}` };
+    return { allow: true };
   } catch (e) {
     return { allow: false, reason: `spend gate error: ${String((e as Error)?.message ?? e)}` };
   }
