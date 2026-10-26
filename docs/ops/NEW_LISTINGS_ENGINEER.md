@@ -450,6 +450,14 @@ district».
      ONE spelling, through the guards (rule 6: 3+ ads, Apple confirms); the fold joins the copies at the next sync.
      Never add the second spelling. `district_near_twins_served` (P2) pairs are the OWNER's, not yours: report them.
      Hofuf «ضاحية هجر …» names stay with the owner.
+10. **ONE NAME, ONE LIST (owner 2026-10-25, permanent).** A place with districts under it is a CITY; a place without
+    is a DISTRICT of the city next to it. The database refuses: a new city that is already a city within 40 km (or in the
+    region, when its distance is unknown) or a district of such a city; a new district named like its own city or like a
+    nearby city that has districts; and any delete of a city or a district. If a site names a place you cannot find in
+    either list, decide with the rule, then add it to ONE list; if the guard refuses, read the error: it names the row that
+    already holds the name. A real town that shares a district's name needs the owner: `set ezhalah.city_guard_ok =
+    '<name>'` in the same statement. The alarm `place_list_leaks` (P2) lists the old leaks: those are the owner's merges,
+    never yours — never delete, never remap a city yourself.
 
 ## Your run, step by step
 1. **Log the start** in `ops_daily_engineer_run`.
