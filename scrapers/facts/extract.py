@@ -340,14 +340,21 @@ def silent_plan(limit: int, platforms: Optional[set[str]], counts: dict[str, int
     return scale_plan({t: n for t, n in counts.items() if n > 0 and (not platforms or platform_of(t) in platforms)}, limit)
 
 
-def sample_silent(table: str, n: int, seed: int) -> list[dict[str, Any]]:
+def sample_silent(table: str, n: int, seed: int, mode: str = "silent") -> list[dict[str, Any]]:
+    """Rows picked by id from a DB picker, then read exactly like sample_table (same columns, ground truth, PDPL).
+    mode 'silent' = ops_text_facts_silent (facts_silent_ids); 'new' / 'backlog' = facts_ai_todo_ids — the ads the AI
+    has never read, 'new' only those first seen in the last 3 days (owner 2026-10-26: the AI reads every new ad)."""
     from scrapers.common.db import sb
     client = sb()
     tcol = _text_col(table)
     base_cols = ["id", "ad_number", "listing_url", "title", f"text:{tcol}"]
     cols = base_cols + list(GT_COLUMNS)
-    ids = [int(r["id"]) for r in (client.rpc("facts_silent_ids", {"p_table": table, "p_limit": min(5000, int(n * 1.3) + 20),
-                                                                    "p_seed": str(seed)}).execute().data or [])]
+    want = min(5000, int(n * 1.3) + 20)
+    if mode == "silent":
+        picked = client.rpc("facts_silent_ids", {"p_table": table, "p_limit": want, "p_seed": str(seed)}).execute().data
+    else:
+        picked = client.rpc("facts_ai_todo_ids", {"p_table": table, "p_limit": want, "p_mode": mode, "p_seed": str(seed)}).execute().data
+    ids = [int(r["id"]) for r in (picked or [])]
     rows: list[dict[str, Any]] = []
     for i in range(0, len(ids), 100):
         chunk = ids[i:i + 100]
@@ -402,16 +409,26 @@ def run(args: argparse.Namespace) -> int:
     client = sb()
     rng = random.Random(args.seed)
     platforms = set(args.platforms.split(",")) - {""} if args.platforms else None
-    if args.silent:
+    # THE MONTHLY CAP (owner 2026-10-26: 30 USD): public.facts_ai_budget() reads this month's cost log; a refusal ends
+    # the run before any paid call, and the proxy asks the same function before every call (belt and braces).
+    budget = client.rpc("facts_ai_budget", {"p_estimate_usd": round(args.limit * 0.0001, 4)}).execute().data or {}
+    print(f"budget {budget.get('month')}: spent ${budget.get('spent_month')} of ${budget.get('cap')} (remaining ${budget.get('remaining')})")
+    if not budget.get("allow"):
+        print("STOP: the monthly AI facts budget would be exceeded — nothing read, nothing paid")
+        return 0
+    if args.mode == "silent":
         counts = {r["source_table"]: int(r["n"]) for r in (client.rpc("facts_silent_plan", {}).execute().data or [])}
+        plan = silent_plan(args.limit, platforms, counts)
+    elif args.mode in ("new", "backlog"):
+        counts = {r["source_table"]: int(r["n"]) for r in (client.rpc("facts_ai_plan", {"p_mode": args.mode}).execute().data or [])}
         plan = silent_plan(args.limit, platforms, counts)
     else:
         plan = build_plan(args.limit, platforms)
-    print(f"run {args.run_id}: plan {sum(plan.values())} ads over {len(plan)} tables{' (silent ads only)' if args.silent else ''}; caps calls≤{args.max_calls} usd≤${args.max_usd}")
+    print(f"run {args.run_id}: mode {args.mode}; plan {sum(plan.values())} ads over {len(plan)} tables; caps calls≤{args.max_calls} usd≤${args.max_usd}")
     sample: list[dict[str, Any]] = []
     for table, n in plan.items():
         try:
-            sample.extend(sample_silent(table, n, args.seed) if args.silent else sample_table(table, n, rng))
+            sample.extend(sample_table(table, n, rng) if args.mode == "sample" else sample_silent(table, n, args.seed, args.mode))
         except Exception as e:
             print(f"  ! {table}: sampling failed: {str(e)[:200]}")
     rng.shuffle(sample)
@@ -462,6 +479,10 @@ def run(args: argparse.Namespace) -> int:
             raise Stop(f"call cap {args.max_calls} reached")
         if usd_total >= args.max_usd:
             raise Stop(f"usd cap ${args.max_usd} reached (${usd_total:.4f})")
+        if calls and calls % 25 == 0:   # re-ask the monthly cap every 25 calls (≈ 400 ads); the proxy asks on every call
+            b = client.rpc("facts_ai_budget", {"p_estimate_usd": 0}).execute().data or {}
+            if not b.get("allow"):
+                raise Stop(f"monthly AI facts budget reached: spent ${b.get('spent_month')} of ${b.get('cap')}")
         calls += 1
         ads = [{"id": f"{r['_platform']}:{r['ad_number']}", "text": r["_text"]} for r in batch]
         by_platform = dict(Counter(r["_platform"] for r in batch))
@@ -670,12 +691,19 @@ def main() -> int:
     ap.add_argument("--max-calls", type=int, default=HARD_MAX_CALLS)
     ap.add_argument("--max-usd", type=float, default=HARD_MAX_USD)
     ap.add_argument("--skip-done", action="store_true", help="resume: skip ads this run_id already read")
-    ap.add_argument("--silent", action="store_true", help="only the ads the free word reader found nothing in (ops_text_facts_silent)")
+    ap.add_argument("--silent", action="store_true", help="alias of --mode silent")
+    ap.add_argument("--mode", choices=("sample", "silent", "new", "backlog"), default="sample",
+                    help="sample = the fixed 10k plan; silent = ads the reader found nothing in; new = ads first seen ≤ 3 days the AI "
+                         "never read (the nightly run); backlog = any active ad the AI never read")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
     if args.selftest:
         selftest()
         return 0
+    if args.silent:
+        args.mode = "silent"
+    if not args.run_id and args.mode in ("new", "backlog"):
+        args.run_id = f"facts-ai-{args.mode}-{datetime.now(timezone.utc):%Y-%m-%d}"
     if not args.run_id or not re.fullmatch(r"[A-Za-z0-9._-]{3,64}", args.run_id):
         ap.error("--run-id is required (letters, digits, . _ -)")
     args.max_calls = min(args.max_calls, HARD_MAX_CALLS)
