@@ -185,6 +185,8 @@ const AMENITY_MENTION_RE: Record<string, RegExp> = {
   balcony: /شرفة|بلكونة|تراس|\bbalcony\b|\bterrace\b/i,
   laundry_room: /غرفة\s*غسيل|\blaundry\b/i,
   optical_fibers: /ألياف\s*بصرية|فايبر|\bfib(?:er|re)\b/i,
+  majlis: /مجلس|مجالس|\bmajlis\b/i,   // the 21st amenity (owner 2026-10-26, decision #3); search_listings_ar.majlis
+
   separate_electricity_meter: /عداد\s*(?:كهرباء)?\s*(?:منفصل|مستقل)|(?:separate|own|independent)\s*electric\w*\s*meter/i,
   separate_water_meter: /عداد\s*(?:ماء|مياه)\s*(?:منفصل|مستقل)|(?:separate|own|independent)\s*water\s*meter/i,
 };
