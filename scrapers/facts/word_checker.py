@@ -143,6 +143,11 @@ FACT_TOKENS: dict[str, list[Any]] = {
             "re:(?:ال)?(?:انديه|نوادي) (?:ال)?رياضيه", "^جيم$", "^gym", "^fitness", "health club"],
     "garden": ["^حديق", "re:gardens?"],                     # plural «حدائق» = the district's parks (bench-v1)
     "majlis": ["^مجلس", "^مجالس", "^majlis"],
+    # Corner / on two (or more) streets (owner 2026-10-26, silent-ads teacher pass): the AI labelled «على شارعين» as
+    # two_entrances — wrong label, real fact. Saved as its own fact (no filter column yet), the same words the street-width
+    # reader already uses to refuse a width. A corner lot is a property fact, not an entrance.
+    "corner_plot": ["^زاويه$", "^زاوية$", "^ركنيه$", "^ركني$", "re:(?:علي|على|ع) شارعين", "^شارعين$", "^شارعان$",
+                    "re:(?:ثلاث|ثلاثه|اربع|اربعه|[2-4]) شوارع", "^corner"],
     "roof": ["^سطح$", "^سطحين$", "^سطحان$", "^سطوح$", "^روف$", "^roof"],
     "warranty": ["^ضمان", "^صمانات", "^ظمانات", "^warrant"],  # common misspellings; never bare «صمان» (وادي الصمان)
     "water_tank": ["^خزان$", "^خزانات$", "^خزانين$", "^خزانان$", "water tank"],
@@ -712,6 +717,11 @@ def selftest() -> None:
         ("خزان علوي وسفلي مستقل", {"water_tank": True}, ()),
         ("بير السلم", {}, ("well",)),
         ("مجلس كبير", {"majlis": True}, ("well",)),
+        # corner / two streets is saved as its own fact, never as two entrances, and still refuses a street width
+        ("أرض زاوية على شارعين 20م و15م", {"corner_plot": True}, ("two_entrances", "street_width_m")),
+        ("فلة زاويه على شارعين", {"corner_plot": True}, ("two_entrances",)),
+        ("ارض على ثلاث شوارع", {"corner_plot": True}, ("two_entrances",)),
+        ("شقة بمدخلين", {"two_entrances": True}, ("corner_plot",)),
         ("بئر ارتوازي", {"well": True}, ()),
         ("مسطح البناء 300", {}, ("roof",)),
         ("سطح خاص", {"roof": True}, ()),
