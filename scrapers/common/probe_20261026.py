@@ -121,3 +121,25 @@ def sakani():
         print(f"SAKANI detail {uid}: {st}", _j.dumps({k: (d or {}).get(k) for k in ("status", "publish", "unit_type", "unit_price", "unit_area", "district_id", "land_type", "description", "rega_ad_license", "city_id", "marketplace_purpose", "price", "selling_price")}, ensure_ascii=False)[:2500], flush=True)
         print(f"SAKANI detail {uid} keys:", sorted((d or {}).keys()), flush=True)
         time.sleep(2)
+
+
+def holoul_pages():
+    api = "https://app.holoul.io/customer/api/v1/units/"
+    h = {"Accept-Language": "ar"}
+    for size, n in ((100, 3), (10, 24)):
+        for pg in range(n):
+            r, info = get(f"{api}?page={pg}&per_page={size}", None, "chrome124", headers=h, timeout=90)
+            ids = ""
+            if r is not None and r.status_code == 200:
+                try:
+                    ids = [u.get("id")[:8] for u in r.json().get("result") or []][:12]
+                except Exception as e:  # noqa: BLE001
+                    ids = f"json {e}"
+            else:
+                ids = (r.text[:200] if r is not None else "")
+            print(f"HOLOULPG size={size} pg={pg} -> {info} {ids}", flush=True)
+    for pg in range(10, 24):
+        for sub in range(10):
+            r, info = get(f"{api}?page={pg*10+sub}&per_page=1", None, "chrome124", headers=h, timeout=60)
+            if r is None or r.status_code != 200:
+                print(f"HOLOUL1 bad page={pg*10+sub} -> {info}", flush=True)
