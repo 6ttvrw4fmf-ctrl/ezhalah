@@ -29,6 +29,12 @@ mustCatch('2026-10-25 production: max-age=0 logos, no prefetch',
 const URL = process.argv[2] || process.env.LOADER_LOGOS_CHECK_URL || 'https://ezhalah-app.vercel.app';
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+// The robot pass (robotPass.mjs) hooks this context's database requests with context.route(), and ANY route
+// makes Playwright switch the browser's HTTP cache OFF — so every second visit re-downloaded every logo and
+// this gate failed on a correct build (deploy run 1019, 2026-10-26: logos served `immutable`, 131 refetched).
+// A phone has no such hook. The logos and their prefetch need no database, so this one context drops the
+// hooks and measures the cache the way a phone has it. scripts/verify-loader-logos-prefetched.ts pins this.
+await context.unrouteAll({ behavior: 'ignoreErrors' });
 const page = await context.newPage();
 const cdp = await context.newCDPSession(page);
 await cdp.send('Network.enable');
