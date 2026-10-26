@@ -30,7 +30,7 @@ const drift = (ms: number, px: number) => ({
 export default function HeroFalconer({ size, flip }: { size: { width: number; height: number }; flip: boolean }) {
   const reduced = useReducedMotion();
   const { width: w, height: h } = size;
-  // Once per session, occasionally (lib/eagleTakeoff); unmounted when the 2.6 s flight is over.
+  // Once per session, occasionally (lib/eagleTakeoff); unmounted when the 2.8 s flight is over.
   const [takeoff, setTakeoff] = useState(false);
   useEffect(() => {
     if (reduced || !takeEagleTakeoff()) return;

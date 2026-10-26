@@ -33,7 +33,7 @@ const T0 = 1_000_000_000;
 }
 check('no storage → never plays, never throws', takeEagleTakeoff(T0, null, null) === false);
 check('the gap is hours, not seconds (occasional)', TAKEOFF_GAP_MS >= 60 * 60 * 1000);
-check('the flight is unmounted after the 2.6 s animation, within 3 s', TAKEOFF_MS >= 2600 && TAKEOFF_MS <= 3000);
+check('the flight is unmounted after the 2.8 s animation, within 3.2 s', TAKEOFF_MS >= 2800 && TAKEOFF_MS <= 3200);
 
 const comp = readFileSync(join(root, 'src/components/HeroFalconer.tsx'), 'utf8');
 const svg = readFileSync(join(root, 'assets/images/falcon-takeoff.svg'), 'utf8');

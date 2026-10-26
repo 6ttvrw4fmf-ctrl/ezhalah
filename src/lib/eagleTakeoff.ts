@@ -5,8 +5,8 @@ const SESSION_KEY = 'ez:eagleTakeoff:session:v1';
 const LAST_KEY = 'ez:eagleTakeoff:last:v1';
 /** At most one take-off per this long, however many sessions are opened. */
 export const TAKEOFF_GAP_MS = 6 * 60 * 60 * 1000;
-/** The animation's own length (assets/images/falcon-takeoff.svg runs 2.6 s), plus a little room. */
-export const TAKEOFF_MS = 2800;
+/** The animation's own length (assets/images/falcon-takeoff.svg runs 2.8 s), plus a little room. */
+export const TAKEOFF_MS = 3000;
 
 type Store = { getItem(k: string): string | null; setItem(k: string, v: string): void };
 const local = (): Store | null => { try { return typeof window !== 'undefined' ? window.localStorage : null; } catch { return null; } };
