@@ -132,6 +132,7 @@ export type Listing = {
     sanitation?: boolean;
     private_entrance?: boolean;
     optical_fibers?: boolean;
+    majlis?: boolean;
     laundry_room?: boolean;
     balcony_terrace?: boolean;
   };

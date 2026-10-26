@@ -869,6 +869,7 @@ export type GuidedCounts = {
   // chips, so they need counts. Same template row, same committed scope (migration 20260902220000).
   cnt_gym: number; cnt_pool: number; cnt_garden: number; cnt_balcony: number; cnt_laundry_room: number;
   cnt_optical_fibers: number; cnt_separate_electricity_meter: number; cnt_separate_water_meter: number;
+  cnt_majlis: number;
   cnt_selected: number;
   // Monthly (2026-08-18): Gathern rating thresholds + unit-subtype chips. Data-derived cuts on the
   // source-declared 1-10 scale — the only ones that split the distribution (<=8.0 keeps ~94%).
@@ -1986,7 +1987,7 @@ const LIST_SELECT = [
   'property_age', 'direction', 'street_name', 'residence_type', 'project_name',
   'parking', 'elevator', 'kitchen', 'maid_room', 'driver_room',
   'air_conditioner', 'water_supply', 'electricity', 'sanitation',
-  'private_entrance', 'optical_fibers', 'laundry_room', 'balcony_terrace',
+  'private_entrance', 'optical_fibers', 'laundry_room', 'balcony_terrace', 'majlis',
   'photo_urls',
   'date_added',
   'rent_now_pay_later', 'rent_now_pay_later_monthly',
@@ -2146,6 +2147,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
         sanitation: !!r.sanitation,
         private_entrance: !!r.private_entrance,
         optical_fibers: !!r.optical_fibers,
+        majlis: !!r.majlis,
         laundry_room: !!r.laundry_room,
         balcony_terrace: !!r.balcony_terrace,
       },

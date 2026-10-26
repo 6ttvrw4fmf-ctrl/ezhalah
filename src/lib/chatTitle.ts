@@ -78,6 +78,7 @@ const AMENITY_AR: Record<string, string> = {
   electricity: 'كهرباء', water_supply: 'ماء', sanitation: 'صرف صحي',
   pool: 'مسبح', gym: 'نادي', garden: 'حديقة', balcony: 'شرفة', laundry_room: 'غرفة غسيل',
   separate_electricity_meter: 'عداد كهرباء مستقل', separate_water_meter: 'عداد مياه مستقل',
+  majlis: 'مجلس',
 };
 const AMENITY_EN: Record<string, string> = {
   elevator: 'Elevator', parking: 'Parking', kitchen: 'Kitchen', air_conditioner: 'A/C',

@@ -268,6 +268,8 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
       { key: 'optical_fibers',             labelKey: 'Optical fibers',             count: (c) => c.cnt_optical_fibers },
       { key: 'separate_electricity_meter', labelKey: 'Separate electricity meter', count: (c) => c.cnt_separate_electricity_meter },
       { key: 'separate_water_meter',       labelKey: 'Separate water meter',       count: (c) => c.cnt_separate_water_meter },
+      // majlis (owner 2026-10-26): cnt_majlis lives in the same scoped CTE (migration «majlis_advanced_filter_amenity»).
+      { key: 'majlis',                     labelKey: 'Majlis',                     count: (c) => c.cnt_majlis },
     ];
     // Villa-form chips (2026-08-16): aqar villa ads carry مدخل سيارة and صرف صحي checkboxes the
     // apartment forms don't — both near-perfect two-sided splits (buy car entrance 5,594/5,943,
