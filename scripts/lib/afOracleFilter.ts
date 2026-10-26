@@ -609,10 +609,12 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
         // wrongly filter Buy rows by a rent column. The app never sends a period without
         // p_deal='إيجار' (rentPeriodParam returns null otherwise), so this is refused, not modelled.
         if (reqBody.p_deal !== 'إيجار') { unhandled.push(`p_rent_period=${v} with p_deal=${JSON.stringify(reqBody.p_deal ?? null)} (the clause only applies a period to Rent rows)`); break; }
-        // Every period arm also admits price on request (price_annual NULL) — the one line the clause
-        // gained 2026-09-28 (owner: «سعر عند الطلب … both monthly and yearly»).
+        // The سنوي and كلاهما arms also admit price on request (price_annual NULL) — the line the clause
+        // gained 2026-09-28 (owner: «سعر عند الطلب … both monthly and yearly»). Under شهري («إقامات قصيرة»)
+        // an unpriced row is admitted ONLY from the two stay-length platforms (owner 2026-10-26, migration
+        // 20261026071543: «shift those to annual rent»).
         if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`);
-        else if (v === 'شهري') parts.push(`or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),price_annual.is.null)`);
+        else if (v === 'شهري') parts.push(`or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))`);
         // BOTH periods (rentPeriod 'both' → 'كلاهما'), translated VERBATIM from the clause (2026-09-02):
         //   p_rent_period = 'كلاهما' and (s.payment_monthly = true
         //                                 or s.rent_period_ar = 'سنوي'
