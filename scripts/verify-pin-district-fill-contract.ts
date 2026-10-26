@@ -28,8 +28,10 @@ const fileData = find(/^\d{14}_pin_district_fill_batch_1_inert\.sql$/, '*_pin_di
 const sqlArm = readFileSync(join(dir, fileArm), 'utf8');
 const sqlData = readFileSync(join(dir, fileData), 'utf8');
 
-// Versions of migrations that are allowed to switch rows on. Empty until the label + alarm ship.
-const FLIP_ALLOWED: string[] = [];
+// Versions of migrations that are allowed to switch rows on. The alarm (mon_detect_pin_district_unvouched) and the DB guards
+// (20261025203753) shipped; the owner then decided on 2026-10-25 there is NO «تقريبي» label (the district Apple Maps names
+// is shown as the district), so the label is no longer a precondition. Batch 2, the middle homes, was switched on that day.
+const FLIP_ALLOWED: string[] = ['20261025214336'];
 
 function armProblems(s: string): string[] {
   const fail: string[] = [];
