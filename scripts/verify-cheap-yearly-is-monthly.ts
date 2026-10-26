@@ -6,7 +6,7 @@
 // mon_detect_cheap_yearly_rent_served().
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { cheapYearlyIsMonthly, CHEAP_YEARLY_BELOW, CHEAP_YEARLY_TYPES_EN } from '../src/lib/rentPool.ts';
+import { cheapYearlyIsMonthly, CHEAP_YEARLY_FROM, CHEAP_YEARLY_BELOW, CHEAP_YEARLY_TYPES_EN } from '../src/lib/rentPool.ts';
 
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 let failed = 0;
@@ -25,7 +25,10 @@ check("a per-month-labelled figure is the pool's job, not this rule's", !cheapYe
 check('an unpublished period is never guessed', !cheapYearlyIsMonthly('aqar', null, 3000, 'Apartment') && !cheapYearlyIsMonthly('aqar', '', 3000, 'Apartment'));
 check('stay-length platforms untouched', !cheapYearlyIsMonthly('gathern_residential_listings', 'annual', 3000, 'Apartment') && !cheapYearlyIsMonthly('Aqar Monthly', 'annual', 3000, 'Apartment'));
 check('no figure / zero / NaN → untouched', !cheapYearlyIsMonthly('aqar', 'annual', null, 'Apartment') && !cheapYearlyIsMonthly('aqar', 'annual', 0, 'Apartment') && !cheapYearlyIsMonthly('aqar', 'annual', Number.NaN, 'Apartment'));
-check('the threshold constant is 8,000', CHEAP_YEARLY_BELOW === 8000);
+check('a placeholder under 300 (1, 35, 200) is NOT a monthly rent — untouched; 300 is the first per-month figure',
+  !cheapYearlyIsMonthly('aqar', 'annual', 1, 'Apartment') && !cheapYearlyIsMonthly('aqar', 'annual', 200, 'Apartment') && cheapYearlyIsMonthly('aqar', 'annual', 300, 'Apartment'));
+check('the band constants are [300, 8000)', CHEAP_YEARLY_FROM === 300 && CHEAP_YEARLY_BELOW === 8000);
+mutantCaught('a rule without the floor (×12 on a 35 SAR placeholder)', !cheapYearlyIsMonthly('aqar', 'annual', 35, 'Apartment'));
 
 // ── mutation proofs ────────────────────────────────────────────────────────────────────────────────────────────
 mutantCaught('a rule that also flips rooms', ((t: string) => t === 'Room')('Room') && !cheapYearlyIsMonthly('aqar', 'annual', 6000, 'Room'));
@@ -46,12 +49,13 @@ mutantCaught('finalize() back on the raw figure', !/listingPriceString\(deal, po
 
 // ── the DB half names the same types and threshold ─────────────────────────────────────────────────────────────
 const migDir = join(root, 'supabase/migrations');
-const migs = readdirSync(migDir).filter((f) => /cheap_yearly_is_monthly/.test(f));
+const migs = readdirSync(migDir).filter((f) => /cheap_yearly/.test(f)).sort(); // the LATEST definition wins
 const sql = migs.map((f) => readFileSync(join(migDir, f), 'utf8')).join('\n');
-const fn = /create or replace function public\.rent_price_annual_ar[\s\S]*?\$\$;/.exec(sql)?.[0] ?? '';
+const fnAll = [...sql.matchAll(/create or replace function public\.rent_price_annual_ar[\s\S]*?\$\$;/g)].map((m) => m[0]);
+const fn = fnAll[fnAll.length - 1] ?? ''; // the latest migration's definition is what production runs
 const sqlTypesEn = (/when p_type in \(([^)]*)\)/.exec(fn)?.[1] ?? '').split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean).sort();
 check('public.rent_price_annual_ar (SQL) lists exactly the TS types', migs.length >= 1 && sqlTypesEn.join('|') === [...CHEAP_YEARLY_TYPES_EN].sort().join('|'), `sql: [${sqlTypesEn.join(', ')}]`);
-check('the SQL threshold is the TS threshold (exclusive)', new RegExp(`p_price_annual <= 0 or p_price_annual >= ${CHEAP_YEARLY_BELOW} then p_price_annual`).test(fn));
+check('the SQL band is the TS band [300, 8000)', new RegExp(`p_price_annual < ${CHEAP_YEARLY_FROM} or p_price_annual >= ${CHEAP_YEARLY_BELOW} then p_price_annual`).test(fn));
 check('the SQL half is behind the cheap_yearly_is_monthly flag and skips stay-length platforms and non-annual words',
   /ops_feature_flags k where k\.name = 'cheap_yearly_is_monthly' and k\.enabled/.test(fn) && /p_platform in \('gathern','aqarmonthly'\) then p_price_annual/.test(fn) && /p_rent_period is distinct from 'annual' then p_price_annual/.test(fn));
 check('the migration rosters mon_detect_cheap_yearly_rent_served and re-points the sync', /mon_detect_cheap_yearly_rent_served/.test(sql) && /mon_run_all_detectors/.test(sql) && /public\.rent_price_annual_ar\(v\.platform, v\.rent_period, v\.price_annual, v\.property_type\)/.test(sql));
