@@ -264,7 +264,7 @@ mustCatch('a final ا/ه deleted instead of marked («السلام» = «الس�
 mustCatch('a sequel tail lost («الجابرية أ» = «الجابرية»)', everyListingProblems(mutTree(keyFile, "'|' || tl", "''")));
 mustCatch('a listed name folded onto another', everyListingProblems(mutTree(copyFile, 'if exists (select 1 from public.loc_catalog_district f where f.city_id = p_city_id and f.district_norm = n) then return null; end if;', '')));
 mustCatch('one-letter names folded by themselves', everyListingProblems(mutTree(copyFile, 'return v;\nend $function$;', 'return coalesce(v, (select b.district_norm from public.loc_catalog_district b where public.district_edit_distance(public.district_key_letters(b.district_ar), k1) <= 1 limit 1));\nend $function$;')));
-mustCatch('the fold removed from loc_display_district_ar', everyListingProblems(mutTree(latestDef(tree, DISPLAY_RE).n, 'public.district_copy_of(p_city_id, p_raw),\n                     norm_district_tok(p_raw)) as key', 'norm_district_tok(p_raw)) as key')));
+mustCatch('the fold removed from loc_display_district_ar', everyListingProblems(mutTree(latestDef(tree, DISPLAY_RE).n, /public\.district_copy_of\(p_city_id, p_raw\),\s+norm_district_tok\(p_raw\)\) as key/, 'norm_district_tok(p_raw)) as key')));
 mustCatch('the served-twins alarm not rostered', everyListingProblems(tree.map((f) => ({ n: f.n, s: f.s.replace("'''mon_detect_district_served_twins'', ' || anchor", "anchor") }))));
 
 check('one name, one list: the city guard and the district guard refuse the other list\'s names', cityGuardProblems(tree));
