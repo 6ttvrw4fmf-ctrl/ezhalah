@@ -64,6 +64,7 @@ export const AMENITY_TOKEN_COL: Record<string, string> = {
   balcony: 'balcony',
   laundry_room: 'laundry_room',
   optical_fibers: 'optical_fibers',
+  majlis: 'majlis',
   separate_electricity_meter: 'separate_electricity_meter',
   separate_water_meter: 'separate_water_meter',
   furnished: 'furnished',

@@ -209,7 +209,7 @@ const AMENITY_COL: Record<string, string> = {
   kitchen: 'kitchen', parking: 'parking', elevator: 'elevator', ac: 'air_conditioner', private_entrance: 'private_entrance',
   maid_room: 'maid_room', driver_room: 'driver_room', car_entrance: 'car_entrance', sanitation: 'sanitation',
   electricity: 'electricity', water_supply: 'water_supply', furnished: 'furnished', gym: 'gym', pool: 'pool',
-  garden: 'garden', balcony: 'balcony', laundry_room: 'laundry_room', optical_fibers: 'optical_fibers',
+  garden: 'garden', balcony: 'balcony', laundry_room: 'laundry_room', optical_fibers: 'optical_fibers', majlis: 'majlis',
   separate_electricity_meter: 'separate_electricity_meter', separate_water_meter: 'separate_water_meter',
   rnpl: 'rent_now_pay_later',
 };

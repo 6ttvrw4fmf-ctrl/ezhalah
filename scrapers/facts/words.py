@@ -410,7 +410,7 @@ def run(args: argparse.Namespace) -> int:
 AF_COLUMNS = ("furnished", "elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room",
               "private_entrance", "separate_electricity_meter", "separate_water_meter", "electricity",
               "water_supply", "sanitation", "balcony", "laundry_room", "pool", "gym", "garden", "car_entrance",
-              "optical_fibers")
+              "optical_fibers", "majlis")   # majlis: the 21st AF amenity (owner 2026-10-26, decision #3)
 # The NUMERIC index columns an ad's text may fill — public.text_facts_af_num_columns(), same order. Rule B for
 # numbers (owner 2026-10-25, handoff decision #1): the number fills a BLANK box only, the site's own number is never
 # replaced. The DB CHECK admits a JSON number 4..150 with its quote; the checker already refuses a corner plot,
