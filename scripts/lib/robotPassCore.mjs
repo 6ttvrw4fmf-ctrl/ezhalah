@@ -3,7 +3,7 @@
 // on it and adds the automatic hook for standalone robot scripts.
 import { gateHeaders } from './gateFetch.mjs';
 
-export const ROBOT_PASS_HOSTS = ['ezhalah-app.vercel.app'];
+export const ROBOT_PASS_HOSTS = ['ezhalah-app.vercel.app', 'ezhalah.com', 'www.ezhalah.com'];
 export const ROBOT_PASS_PATH = /\/sb\/rest\/v1\//;
 
 /** The headers a robot request should carry: the original ones, plus the pass only for our own front door. */
