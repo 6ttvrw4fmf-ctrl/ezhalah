@@ -149,7 +149,7 @@ const modalProblems = (f: Record<string, string>) => {
   const flagOk = (a: string) => /namePromptSeen: meta\.name_prompt_seen === true/.test(a) && /data: \{ name_prompt_seen: true \}/.test(a);
   check('§3 the seen flag lives in user_metadata (follows the account across devices)', flagOk(files[AUTH]));
   mustCatch('the flag not read back from user_metadata', !flagOk(files[AUTH].replace('namePromptSeen: meta.name_prompt_seen === true', 'namePromptSeen: false')));
-  const closeOk = (src: string) => /const close = \(\) => \{ setClosed\(true\); setReopened\(false\); markNamePromptSeen\(\); setPhase\('leave'\);/.test(src) && /onPress=\{close\}/.test(src);
+  const closeOk = (src: string) => /const close = \(\) => \{ setClosed\(true\); setReopened\(false\); markNamePromptSeen\(\); setPhase\('leave'\);/.test(src) && /onPress=\{skip\}/.test(src) && /const skip = \(\) => \{\n[^}]*\n\s*close\(\);/.test(src);
   check('§3 «لاحقاً» and Save both mark it seen', closeOk(files[PROMPT]) && /saveName\(v\);\n\s*close\(\);/.test(files[PROMPT]));
   mustCatch('«لاحقاً» not recording that it was shown', !closeOk(files[PROMPT].replace(' markNamePromptSeen();', '')));
   check('§3 the prompt is mounted at the root', /<NamePrompt \/>/.test(files[LAYOUT]));
@@ -216,13 +216,16 @@ const modalProblems = (f: Record<string, string>) => {
   const welcomeProblems = (p: string, w: string) => {
     const out: string[] = [];
     const code = p.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-    if (!/import \{ markJustSignedIn, isFreshSignUp \} from '@\/lib\/loginWelcome';/.test(code) || !/markJustSignedIn\(\);/.test(code)) out.push('not the sign-in welcome Google uses (markJustSignedIn)');
+    if (!/import \{ markJustSignedIn, isFreshSignUp \} from '@\/lib\/loginWelcome';/.test(code) || (code.match(/markJustSignedIn\(\);/g) ?? []).length !== 2) out.push('not the sign-in welcome Google uses (markJustSignedIn) — in BOTH the «حفظ» and the «تخطي» welcome');
     if (!/markJustSignedIn\(\);/.test(AUTHPAGE) || !/markJustSignedIn\(\)/.test(ONETAP)) out.push('the Google paths no longer use markJustSignedIn');
     // the party: only after a NON-EMPTY «حفظ» (an empty one shakes and returns), never from «لاحقاً»
     if (!/if \(!v\) \{ setShakeN\(\(n\) => n \+ 1\); field\.current\?\.focus\(\); return; \}\n\s*saveName\(v\);\n\s*close\(\);\n\s*welcomeOnceSaved\(v, \(\) => startNameParty\(reduced\)\);/.test(code)) out.push('the welcome + party do not follow a non-empty «حفظ»');
     // Owner 2026-10-26: the party starts from exactly two places — a non-empty «حفظ», and a sign-up that arrived WITH
     // a name (no box): «seen» first, then the same welcomeOnceSaved, gated by shouldPartyOnSignUp, once per account.
-    if ((code.match(/welcomeOnceSaved\(v, /g) ?? []).length !== 1 || (code.match(/startNameParty\(/g) ?? []).length !== 2) out.push('the welcome or the party is started from somewhere other than «حفظ» and the named sign-up');
+    if ((code.match(/welcomeOnceSaved\(v, /g) ?? []).length !== 1 || (code.match(/startNameParty\(/g) ?? []).length !== 3) out.push('the welcome or the party is started from somewhere other than «حفظ», the named sign-up and «تخطي»');
+    // «تخطي» on the SIGN-UP box of a nameless account (owner 2026-10-26: «with party it's fine»): welcomed as «ضيف إزهله»
+    // once «seen» lands; never from the menu's reopen, and close() itself still fires nothing.
+    if (!/const skip = \(\) => \{\n\s*const signUpBox = !reopened && !\(user\?\.name \?\? ''\)\.trim\(\);\n\s*close\(\);\n\s*if \(signUpBox\) welcomeOnceSkipped\(\(\) => startNameParty\(reduced\)\);/.test(code)) out.push('«تخطي» is not close() + the guest welcome on the sign-up box only');
     if (!/const party = shouldPartyOnSignUp\(user, authChecked, authOpen, Date\.now\(\)\);/.test(code)
       || !/if \(!party \|\| !user \|\| partied\.current === user\?\.sub\) return;\n\s*partied\.current = user\?\.sub \?\? null;\n\s*const given = user\.name\.trim\(\);\n\s*markNamePromptSeen\(\);\n\s*welcomeOnceSaved\(given, \(\) => startNameParty\(reduced\)\);/.test(code)) out.push('the named sign-up party is not «seen» + welcomeOnceSaved, once per account');
     const close = /const close = \(\) => \{[^\n]*\};/.exec(code)?.[0] ?? '';
@@ -235,10 +238,16 @@ const modalProblems = (f: Record<string, string>) => {
     return out;
   };
   const wp = welcomeProblems(files[PROMPT], WELCOME);
-  check('§6 after «حفظ»: the Google sign-in welcome (markJustSignedIn), once; never «لاحقاً»; no celebration card', wp.length === 0, wp.join('; '));
+  check('§6 after «حفظ» (and «تخطي» on the sign-up box): the Google sign-in welcome (markJustSignedIn), once; close() alone fires nothing; no celebration card', wp.length === 0, wp.join('; '));
+  // A nameless account that pressed «تخطي» is «ضيف إزهله» in its greeting and facts (owner 2026-10-26) — only once the
+  // box was answered (seen), so a sign-up whose box is still open is never greeted by the guest name.
+  const guestOk = (w: string) => /if \(!base && m\.name_prompt_seen === true\) return \{ present: true, nameAr: 'ضيف إزهله', nameEn: 'Ezhalah Guest',/.test(w);
+  check('§6 a skipped, nameless account is greeted and gets its facts as «ضيف إزهله» / Ezhalah Guest', guestOk(WELCOME));
+  mustCatch('the guest name used before the box is answered', !guestOk(WELCOME.replace('if (!base && m.name_prompt_seen === true)', 'if (!base)')));
   mustCatch('the celebration card coming back', welcomeProblems(files[PROMPT].replace('<View style={s.prev}>', '<View testID="name-celebration" />\n              <View style={s.prev}>'), WELCOME).length > 0);
   mustCatch('a named sign-up partying on every render (no once-per-account guard)', welcomeProblems(files[PROMPT].replace('if (!party || !user || partied.current === user?.sub) return;', 'if (!party || !user) return;'), WELCOME).length > 0);
   mustCatch('a named sign-up party without recording «seen» (the home would wait forever)', welcomeProblems(files[PROMPT].replace('    const given = user.name.trim();\n    markNamePromptSeen();\n', '    const given = user.name.trim();\n'), WELCOME).length > 0);
+  mustCatch('«تخطي» welcoming from the menu\'s reopen too (no sign-up-box guard)', welcomeProblems(files[PROMPT].replace("if (signUpBox) welcomeOnceSkipped", "welcomeOnceSkipped"), WELCOME).length > 0);
   mustCatch('a save with no welcome / party', welcomeProblems(files[PROMPT].replace('    welcomeOnceSaved(v, () => startNameParty(reduced));\n', ''), WELCOME).length > 0);
   mustCatch('a party after an EMPTY «حفظ»', welcomeProblems(files[PROMPT].replace("if (!v) { setShakeN((n) => n + 1); field.current?.focus(); return; }", "if (!v) { setShakeN((n) => n + 1); startNameParty(reduced); return; }"), WELCOME).length > 0);
   mustCatch('«لاحقاً» throwing the party', welcomeProblems(files[PROMPT].replace("markNamePromptSeen(); setPhase('leave');", "markNamePromptSeen(); startNameParty(reduced); setPhase('leave');"), WELCOME).length > 0);
@@ -490,7 +499,7 @@ const modalProblems = (f: Record<string, string>) => {
     if ((p.match(/markNamePromptSeen\(\)/g) ?? []).length !== 2 || !/const close = \(\) => \{ setClosed\(true\); setReopened\(false\); markNamePromptSeen\(\);/.test(p)
       || !/if \(!party \|\| !user \|\| partied\.current === user\?\.sub\) return;\n\s*partied\.current = user\?\.sub \?\? null;\n\s*const given = user\.name\.trim\(\);\n\s*markNamePromptSeen\(\);/.test(p)) out.push('the seen write is not only in close() and the named sign-up');
     const closeUses = (p.match(/\bclose\b(?!\s*=)/g) ?? []).length;
-    if (!/testID="name-prompt-later" style=\{s\.later\} onPress=\{close\}/.test(p) || !/\n\s*close\(\);\n\s*welcomeOnceSaved/.test(p) || closeUses !== 2) out.push(`close() is reachable from something other than «لاحقاً» / «حفظ» (${closeUses} uses)`);
+    if (!/testID="name-prompt-later" style=\{s\.later\} onPress=\{skip\}/.test(p) || !/\n\s*close\(\);\n\s*welcomeOnceSaved/.test(p) || closeUses !== 2) out.push(`close() is reachable from something other than «لاحقاً» / «حفظ» (${closeUses} uses)`);
     return out;
   };
   const walkSrc = (): Record<string, string> => {
