@@ -81,6 +81,14 @@ const logo = (i: number, cc = IMM, status = 200) => ({ url: `https://x/assets/as
 const healthy = Array.from({ length: 140 }, (_, i) => logo(i));
 const kept = healthy.map((r) => ({ url: r.url, status: 200, fromCache: true }));
 check('live verdict: 140 prefetched, immutable, kept on a second visit → clean', logoDeliveryProblems(healthy, kept).length === 0, logoDeliveryProblems(healthy, kept).join('; '));
+// Any context.route() — the robot pass adds two — switches Playwright's HTTP cache OFF, so the second-visit
+// half could only ever read «re-downloaded». Deploy run 1019 (2026-10-26) failed a correct build that way.
+const liveSrc = readFileSync(join(root, 'scripts/verify-live-loader-logos.ts'), 'utf8');
+const dropsRoutesFirst = (src: string) => {
+  const u = src.indexOf('await context.unrouteAll('); const p = src.indexOf('await context.newPage()');
+  return u > -1 && p > -1 && u < p;
+};
+check('the live gate drops the robot-pass routes before opening its page (a routed context has no HTTP cache)', dropsRoutesFirst(liveSrc));
 const homing = liveHalfProblems('verify-live-loader-logos.ts', loadRegistry(root),
   (n) => existsSync(join(root, 'scripts', n)), (p) => { try { return readFileSync(join(root, p), 'utf8'); } catch { return null; } });
 check('the live gate is homed in the deploy workflow and really invoked there', homing.length === 0, homing.join('; '));
@@ -105,6 +113,7 @@ mustCatch('live: a short max-age that only claims immutable', logoDeliveryProble
 mustCatch('live: a logo that 404s', logoDeliveryProblems([...healthy, logo(999, IMM, 404)], kept).some((p) => /did not load/.test(p)));
 mustCatch('live: a second visit re-downloads a logo', logoDeliveryProblems(healthy, [...kept, { url: healthy[0].url, status: 304, fromCache: false }]).some((p) => /second visit/.test(p)));
 mustCatch(`live: one logo short of the ${MIN_PREFETCHED_LOGOS} floor`, logoDeliveryProblems(healthy.slice(0, MIN_PREFETCHED_LOGOS - 1), kept).length > 0);
+mustCatch('the live gate keeping the robot-pass routes (cache off → a correct build fails)', !dropsRoutesFirst(liveSrc.replace(/await context\.unrouteAll\([^)]*\);/, '')));
 mustCatch('the live gate unhomed from the deploy workflow', liveHalfProblems('verify-live-loader-logos.ts', { excluded: [] }, () => true, () => '').length > 0);
 
 if (fail || mutFail) { console.error(`\n❌ loader-logos-prefetched: ${fail} check(s), ${mutFail} mutation(s) failed`); process.exit(1); }
