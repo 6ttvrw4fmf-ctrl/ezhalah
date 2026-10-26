@@ -411,6 +411,11 @@ AF_COLUMNS = ("furnished", "elevator", "parking", "kitchen", "air_conditioner", 
               "private_entrance", "separate_electricity_meter", "separate_water_meter", "electricity",
               "water_supply", "sanitation", "balcony", "laundry_room", "pool", "gym", "garden", "car_entrance",
               "optical_fibers")
+# The NUMERIC index columns an ad's text may fill — public.text_facts_af_num_columns(), same order. Rule B for
+# numbers (owner 2026-10-25, handoff decision #1): the number fills a BLANK box only, the site's own number is never
+# replaced. The DB CHECK admits a JSON number 4..150 with its quote; the checker already refuses a corner plot,
+# «يحدها 2 شارع», two widths or two bearings, so one ad hands over at most one width.
+AF_NUM_COLUMNS = ("street_width_m",)
 
 
 def overlay_row(table: str, r: dict[str, Any], run_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -422,6 +427,8 @@ def overlay_row(table: str, r: dict[str, Any], run_id: str) -> tuple[dict[str, A
     found = W.check(text) if len(norm(text)) >= MIN_NORM_CHARS else []
     facts = {f["fact"]: {"v": f["value_bool"], "q": f["quote"]}
              for f in found if f["fact"] in AF_COLUMNS and f["value_bool"] is not None and (f["quote"] or "").strip()}
+    facts.update({f["fact"]: {"v": f["value_num"], "q": f["quote"]}
+                  for f in found if f["fact"] in AF_NUM_COLUMNS and f["value_num"] is not None and (f["quote"] or "").strip()})
     row = {"source_table": table, "listing_id": int(r["id"]), "platform": platform_of(table),
            "listing_key": str(r["ad_number"]), "src_hash": r["src_hash"], "facts": facts, "run_id": run_id,
            "read_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "stale_at": None}
@@ -494,11 +501,16 @@ def selftest() -> None:
     # the overlay row: AF columns only, each with its quote; silence and non-AF facts never reach it; a
     # too-short text still yields a row (the memory that this text was read).
     row, found = overlay_row("aqar_residential_listings", dict(id=7, ad_number="A7", src_hash="0" * 32,
-                             title="شقة للايجار", body="يوجد مصعد ولا يوجد مسبح، مجلس كبير"), "facts-words-t")
+                             title="شقة للايجار", body="يوجد مصعد ولا يوجد مسبح، مجلس كبير، شارع عرض 20م"), "facts-words-t")
     assert row["facts"].get("elevator", {}).get("v") is True and row["facts"]["elevator"]["q"], row
     assert row["facts"].get("pool", {}).get("v") is False, row
     assert "majlis" not in row["facts"] and any(f["fact"] == "majlis" for f in found), (row, found)
-    assert set(row["facts"]) <= set(AF_COLUMNS) and row["stale_at"] is None and row["listing_id"] == 7
+    # Rule B for numbers: the one quoted width rides along as a JSON number; a corner plot hands over none.
+    assert row["facts"].get("street_width_m") == {"v": 20.0, "q": "شارع عرض 20م"}, row
+    assert set(row["facts"]) <= set(AF_COLUMNS) | set(AF_NUM_COLUMNS) and row["stale_at"] is None and row["listing_id"] == 7
+    corner, _ = overlay_row("aqar_residential_listings", dict(id=9, ad_number="A9", src_hash="0" * 32,
+                            title="أرض للبيع", body="أرض زاوية على شارع 20م شرقي وشارع 15م شمالي"), "facts-words-t")
+    assert "street_width_m" not in corner["facts"], corner
     short, _ = overlay_row("aqar_residential_listings", dict(id=8, ad_number="A8", src_hash="0" * 32,
                            title="", body="مصعد"), "facts-words-t")
     assert short["facts"] == {}, short
