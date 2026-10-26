@@ -66,6 +66,18 @@ hours), and never over someone else's pending run. **A line-anchored pin** (`scr
 haraj `asking_price` line) moves whenever `scrapers/haraj/run.py` grows above it: re-pin in the same PR, and it makes
 the PR need the owner merge (scripts/).
 
+**Owed → first thing next run (10-26):**
+- **Sakani sale side (864), the plan from tonight's measurements.** The sale walk `filter[marketplace_purpose]=sale` returns
+  2,963 rows: about 1,790 `market_units` and 1,170 `projects` (page[size]=1000 gives 1000/1000/963, then 0). The rich row
+  (`meta.first_page`, type `marketplaces`, still 20 per page) carries marketplace_price, city{name_ar}, district (a NAME),
+  description, photos, min/max area, bedrooms and bathrooms. The REGA licence is in the detail only
+  (`rega_ad_license.advertisement_type = "sale"`, e.g. 22147 → 7200886639). At 1.5 s a detail, about 1,790 details take
+  ~70 min, which is over the 45-min matrix cap. Two ways out: a `sakani-sale` matrix entry with its own tmo (a .github edit,
+  so it needs the owner merge), or a nightly detail budget with rotation. The sale oracle must read «sale» as live (the rent
+  oracle reads it as gone). Projects go to a hidden table plus a DB trigger (supabase/, owner session).
+- **Holoul (868) fixed in PR #8796** (20-row pages, 5xx retry). Check that tonight's main nightly holoul row is ok=true.
+- **Senan (867) adjudicated:** an unpriced 9-project brochure site, so dormant is correct. Re-probe weekly for priced units.
+
 **Owed → first thing next run (10-23):**
 - **razre 792 — the site was REBUILT, it is not a Wix auth change.** www.razre.sa is now a custom static site
   («راز الماسية العقارية»): pages `/projects/<slug>/`, `/districts/<slug>/`, sitemap `/sitemap.xml`, robots
