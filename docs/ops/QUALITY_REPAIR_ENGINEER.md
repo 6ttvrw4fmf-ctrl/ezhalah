@@ -205,7 +205,14 @@ The Advanced Filter serves the seller's own quoted sentence beside the site's bo
    shape) is a backlog row for ⚡; a seller who wrote both is nothing to do. The alert for this lane is
    `text_facts_width_not_applied` (a quoted width beside a BLANK index width for 4 h = the merge stopped).
 
-Report it as one line: «📊 Text facts: read HH:MM · N conflicts (±d) · M values from ad text · W widths differ · alerts none».
+6. **The AI reader's lesson (2026-10-26, `docs/ops/AI_FACTS_READER.md`).** Weekly: `select * from ops_ai_facts_reader_gaps;`
+   lists, per fact, what the paid AI found on ads where the free reader wrote nothing, with 8 sample quotes. Read the
+   quotes; a genuine phrasing the reader lacks becomes a word-list entry + selftest phrase in `word_checker.py`
+   (the furniture words of 2026-10-26 are the worked example); a teacher mistake («على شارعين» as two entrances) is
+   nothing to do. Never copy an AI row into the filter. Budget line: `select public.facts_ai_budget(0);` — 30 USD a
+   month, the owner's number; report `spent_month` and never raise the cap yourself.
+
+Report it as one line: «📊 Text facts: read HH:MM · N conflicts (±d) · M values from ad text · W widths differ · AI $spent/30 · alerts none».
 
 ## Powers and limits
 - **Yours to do (AGENTS.md: ops DB objects, monitors, detectors, cron, scraper fixes, evidence-backed repairs):** repair
