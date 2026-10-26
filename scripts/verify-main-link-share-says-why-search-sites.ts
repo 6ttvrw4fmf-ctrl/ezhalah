@@ -28,7 +28,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 };
 
 const OWNER_AR = 'ليش تدور في 148 موقع عقاري بالسعودية؟ إزهله، خل إزهله يدور عنك';
-const LINK = 'https://ezhalah-app.vercel.app';
+const LINK = 'https://ezhalah.com'; // the final address (owner 2026-10-26)
 type Lib = {
   liveSiteCount: () => number | null;
   shareLead: (loc: 'ar' | 'en', count: number | null) => string;

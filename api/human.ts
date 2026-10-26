@@ -44,7 +44,7 @@ export async function GET(request: Request): Promise<Response> {
   const html = '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
     + '<title>Ezhalah human check</title><body style="font:20px/1.5 system-ui;text-align:center;padding:40px 16px">'
     + (ok ? '<div style="font-size:64px">✅</div><b>Cloudflare: real person</b><br>إزهله يشوفك شخص حقيقي'
-          : '<div style="font-size:64px">⏳</div><b>No pass yet</b><br>Open ezhalah-app.vercel.app, wait 10 seconds, then open this page again.'
+          : '<div style="font-size:64px">⏳</div><b>No pass yet</b><br>Open ezhalah.com, wait 10 seconds, then open this page again.'
             + '<br>افتح إزهله وانتظر ١٠ ثواني ثم افتح هذه الصفحة مرة ثانية')
     + '</body>';
   return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
