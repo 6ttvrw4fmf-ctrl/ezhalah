@@ -15,9 +15,22 @@ on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: "Run id, e.g. facts-test-2026-10-24 (letters, digits, . _ -)"
-        required: true
+        description: "Run id (letters, digits, . _ -); empty = facts-ai-<mode>-<UTC date> for mode new / backlog"
+        required: false
+        default: ""
         type: string
+      mode:
+        description: "new (nightly: ads first seen ≤ 3 days the AI never read) · backlog (any unread active ad) · silent · sample"
+        required: false
+        default: new
+        type: choice
+        options: [new, backlog, silent, sample]
+      category:
+        description: "new / backlog only: residential (default, owner 2026-10-26) · commercial · all"
+        required: false
+        default: residential
+        type: choice
+        options: [residential, commercial, all]
       limit:
         description: "Ads to process (the 10,000-ad plan is scaled down proportionally)"
         required: false
@@ -78,6 +91,8 @@ jobs:
           MAX_USD: ${{ inputs.max_usd }}
           SKIP_DONE: ${{ inputs.skip_done }}
           SILENT: ${{ inputs.silent }}
+          MODE: ${{ inputs.mode || 'new' }}
+          CATEGORY: ${{ inputs.category || 'residential' }}
         run: |
-          exec python -m scrapers.facts.extract --run-id "$RUN_ID" --limit "$LIMIT" --platforms "$PLATFORMS" --max-usd "$MAX_USD" \
+          exec python -m scrapers.facts.extract --run-id "$RUN_ID" --mode "$MODE" --category "$CATEGORY" --limit "${LIMIT:-10000}" --platforms "$PLATFORMS" --max-usd "${MAX_USD:-1.5}" \
             $([ "$SKIP_DONE" = "true" ] && echo --skip-done) $([ "$SILENT" = "true" ] && echo --silent)
