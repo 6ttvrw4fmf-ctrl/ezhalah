@@ -319,3 +319,13 @@ row; a night is better on findability only when a score row says so.**
   letters, and run a class scan on `search_listings_ar` (the amenity grouped by district) before trusting a reader.
 - 🔧 adds: one proof row PER fix. 759 and 760 shared one row, and it was a branch dry run — by proof rows the night read 3/6,
   not 4/6; the production proof of a scorer fix is the next 08:00 af-score run, with its run id.
+
+## Lesson from 2026-10-24 (copied by 🔧 from your own report — 10-19 and 10-24 are the same lesson, so it is a rule)
+- **A crawl at :49 is not live at :22.** The AF answers reach search through `listing_extra_attrs_mv`, which job 17
+  (`refresh_listing_native_location_v1`, :20) refreshes and commits at about :23:35 — AFTER job 28 (`sync-search-listings-ar`,
+  :22) has already read it. So a crawl finished after one sync is served only at the SECOND sync after it (backlog 842, the
+  structural fix: chain the sync after the refresh). Until 842 lands: **crawl the proof listing before :15** so its value is
+  in the matview the :22 sync reads, and judge the sync by its cron `end_time` (10-19 rule), never by a read during it.
+- 🔧 adds: 794 was proof-pending at your end row and PROVEN by 🔧 at 13:2x UTC the same morning (served sadiqeltajer AC
+  21 → 67; an anon replay of the app's AF ask for AC in بريدة finds 12218852). A proof that only needs the next sync is the
+  cheapest fix-rate there is — plan the night so the LAST crawl ends before :15 of your final hour.

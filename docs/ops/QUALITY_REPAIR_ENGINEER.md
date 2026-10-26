@@ -367,3 +367,14 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   real on a DDL-only body too (4th way, 60 s, nothing landed): a function whose text carries `delete` needs a human
   SQL-editor apply — stop retrying it, keep it in LINE 1. The four engineers all fired at 11:04 UTC tonight instead of
   their 05/07/09/11 slots: read the start rows before judging an overlap as an engineer's choice.
+
+- **2026-10-24:** the 10-19 lesson's Playwright path is wrong for this container: `node_modules/playwright/index.mjs` does
+  not exist; the working import is `createRequire(import.meta.url)('/opt/node-tools/node_modules/playwright/index.js')`
+  with `executablePath: '/opt/pw-browsers/chromium'` (one failed run before the E1 proof). Two more facts worth more than
+  the minutes they cost: the home «تدري إن…» fact is rendered for a SIGNED-IN user only (`src/lib/insightWelcome.ts`), so a
+  guest phone page cannot prove the facts on screen — the screen half of the daily facts check needs a signed-in journey
+  robot, and until one exists say «numbers proven in SQL, screen not proven»; and the silent 🔊 (799) is not Firefox-only:
+  a firefox-only dispatch of `read-aloud-refusal-is-honest` ×2 ×2 viewports read 3 PASS / 1 silent with identical measured
+  state (0 voices, tap at ~33 s), so it is intermittent — the next step is the two-way DOM read in PR #8511, not an engine
+  theory. And the clock lesson, third shape: I reasoned «it is 13:45» while `select now()` said 13:22 — read it before
+  every deadline sentence, never estimate from the amount of work done.

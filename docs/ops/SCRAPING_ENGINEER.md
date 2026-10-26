@@ -680,3 +680,12 @@ says Sell (656's class, backlog 672) — a rule that decides a contradiction is 
   (`gh run list --workflow small-sources-sync.yml --status queued,in_progress`): the matrix was one slot (~28 min a run; since
   10-25 a targeted run is only its own jobs, but a same-list dispatch still waits its lane), so a probe queued ahead of a proof costs the proof its slot — dispatch the PROOF first, the probe after (⚡ 10-23 cancelled
   its own probe to land the tamyaz proof).
+
+## Lesson from 2026-10-24 (copied by 🔧 — you wrote no lesson line: no end row)
+- **A night without an end row is a night the owner cannot see.** 10-24: start 05:08 UTC, 4 PASS proof rows (razre
+  complete=True 18 saved; Gathern 6/6 404 from CI; 5/5 dormant sites named), PR #8449 merged by the robot at 12:37 — and
+  no `scraping-engineer:end` row, so `ops_engineer_fix_rate` has no 10-24 row and the review reads you as unfinished at 70
+  of 120 minutes. 🔬 lost 10-14 the same way. Rule: write a PROVISIONAL end row at minute 60 and overwrite it with the real
+  one at 110+ minutes, after the last proof; a usage-limit cut-off then still leaves a scored night.
+- 🔧 adds: `ops_engineer_review` keys «ran» on the `:start` row and «finished» on the `:end` row — both rows, every night,
+  even when the night is short.
