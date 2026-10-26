@@ -83,7 +83,7 @@ const AMENITY_AR: Record<string, string> = {
 const AMENITY_EN: Record<string, string> = {
   elevator: 'Elevator', parking: 'Parking', kitchen: 'Kitchen', air_conditioner: 'A/C',
   maid_room: 'Maid room', driver_room: 'Driver room', private_entrance: 'Private entrance',
-  rnpl: 'Instalments', car_entrance: 'Car entrance', optical_fibers: 'Fiber',
+  rnpl: 'Instalments', car_entrance: 'Car entrance', optical_fibers: 'Fiber', majlis: 'Majlis',
   electricity: 'Electricity', water_supply: 'Water', sanitation: 'Sanitation',
   pool: 'Pool', gym: 'Gym', garden: 'Garden', balcony: 'Balcony', laundry_room: 'Laundry',
   separate_electricity_meter: 'Own electricity meter', separate_water_meter: 'Own water meter',
