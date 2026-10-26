@@ -410,6 +410,20 @@ dealapp 883 · sanadak 816 · aqarmonthly 753 · eaqartabuk 516 · aqargate 241 
   served names in one city are copies and one is on the list but the fold did not join them (a gap in the rule); P2
   `district_copies_unlisted` when neither is on the list (the engineer adds the real name through the guards); P2
   `district_near_twins_served` with examples when two served names are one letter apart (owner decides).
+- **Near twins are decided by PLACE, not letters (owner 2026-10-25):** the homes' centers under both spellings and Apple
+  Maps (Google when Apple cannot) at both centers; under 1.5 km and the same map name = ONE → `loc_district_alias`;
+  farther or different names = SEPARATE. First batch `20261025232153`: 9 ONE (e.g. «المعيزيلة» → «حي المعيزلة»),
+  14 SEPARATE (e.g. «البوادر» / «البوادي», 56 km apart in جدة), 7 UNSURE queued for Google by name.
+- **One name, one list (owner 2026-10-25, migration `*_place_list_lock_one_name_one_list`):** a place with districts
+  under it is a CITY; a place without is a DISTRICT of the city next to it. `loc_city_center` holds every city's homes
+  center (median pin; refreshed by the alarm daily). The city list refuses a new or renamed name that is already a city
+  within 40 km (or in the same region when no distance is known) or a district of such a city; cities are never deleted
+  (duplicates are MERGED by the owner); the owner exception names the city: `ezhalah.city_guard_ok`. The district list
+  refuses a name that is its own city or a nearby city that has districts. `mon_detect_place_list_leaks()` (P2, rostered)
+  lists the existing leaks — measured 2026-10-25: 12 duplicate cities («بيش» ×2, 100 m), 40 districts registered as
+  cities («الثقبة» of الخبر), 53 cities/towns registered as districts («المبرز» in الهفوف, «حي الدرعية» in الدرعية) —
+  until the owner merges or moves each one. `mon_detect_district_guards_missing()` watches the city triggers too.
+  Barrier: `scripts/verify-district-guards.ts`.
 
 ### 🔤 Spelling memory — one district, one search identity (owner 2026-10-25)
 - `loc_district_alias(city_id, from_norm, to_norm)`: a spelling sites use that IS one of our districts. Applied inside

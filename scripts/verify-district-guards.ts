@@ -53,6 +53,32 @@ function listFnProblems(list: string): string[] {
   if (!/district_twin_strong\(new\.city_id, new\.district_ar/.test(list)) fail.push('the strong twin rule is not consulted (letters / «ال» / town name / one letter away)');
   if (!/if v_strong\.twin_ar is not null then\s+raise exception 'district list guard: «%» is the same district as «%»/.test(list)) fail.push('a strong twin is not refused');
   if (!/v_ok is not null and public\.norm_district_tok\(v_ok\) = v_norm/.test(list)) fail.push('the owner exception does not have to name the district (any value unlocks everything)');
+  if (!/is the name of its own city/.test(list) || !/public\.district_key_letters\(c\.city_ar\) from public\.loc_catalog_city c where c\.city_id = new\.city_id/.test(list)) fail.push('a district may carry the name of its own city');
+  if (!/exists \(select 1 from public\.loc_catalog_district d where d\.city_id = c\.city_id\)\s+and public\.place_same_area\(c\.city_id, new\.city_id\)/.test(list)) fail.push('a nearby city (with districts) may be added as a district');
+  return fail;
+}
+
+// ONE NAME, ONE LIST (owner 2026-10-25): the city list guard, pinned on its latest definition.
+const CITY_RE = /create or replace function public\.trg_city_list_guard\(\)[\s\S]*?\$function\$;/;
+function cityGuardProblems(files: { n: string; s: string }[]): string[] {
+  const fail: string[] = [];
+  const fn = latestDef(files, CITY_RE).fn;
+  if (!fn) return ['trg_city_list_guard() is not defined'];
+  if (!/if tg_op in \('DELETE', 'TRUNCATE'\) then\s+raise exception 'city list guard: cities are never deleted/.test(fn)) fail.push('a city can be deleted');
+  if (!/is already the city % in the same area/.test(fn) || !/coalesce\(public\.place_km\(c\.city_id, new\.city_id\) < 40, c\.region_id = new\.region_id\)/.test(fn)) fail.push('a second copy of a city in the same area can be added');
+  if (!/is the district % — a district is not a city/.test(fn) || !/from public\.loc_catalog_district d join public\.loc_catalog_city c on c\.city_id = d\.city_id/.test(fn)) fail.push('a district can be added as a city');
+  if (!/v_ok is not null and public\.district_key_letters\(v_ok\) = k then return new/.test(fn)) fail.push('the owner exception does not have to name the city');
+  if (/v_ok is not null[^;]*then return new;[\s\S]*if tg_op in \('DELETE'/.test(fn)) fail.push('the owner exception also unlocks deleting a city');
+  const lockFile = files.filter(({ s }) => CITY_RE.test(s)).at(-1);
+  if (!lockFile) fail.push('no migration creates the city guard');
+  else {
+    if (!/create trigger trg_zz_city_list_guard\s+before insert or update of city_ar, region_id or delete on public\.loc_catalog_city/.test(lockFile.s)) fail.push('the city guard trigger is not on insert / rename / delete');
+    if (!/create trigger trg_zz_city_list_no_truncate\s+before truncate on public\.loc_catalog_city/.test(lockFile.s)) fail.push('the city list can be truncated');
+    for (const p of ['PROOF: a district became a city', 'PROOF: a duplicate city was accepted', 'PROOF: a city delete was not refused', 'PROOF: own city name became a district', 'PROOF: a nearby city with districts became a district']) if (!lockFile.s.includes(p)) fail.push(`the apply-time proof lost: ${p}`);
+  }
+  const mon = latestDef(files, /create or replace function public\.mon_detect_district_guards_missing\(\)[\s\S]*?\$function\$;/).fn;
+  if (!mon.includes("'trg_zz_city_list_guard'") || !mon.includes("'trg_zz_city_list_no_truncate'")) fail.push('the guards alarm does not watch the city triggers');
+  if (!files.some(({ s }) => /'''mon_detect_place_list_leaks'', ' \|\| anchor/.test(s))) fail.push('the place-list-leaks alarm is not rostered');
   return fail;
 }
 
@@ -226,6 +252,12 @@ mustCatch('a later migration disabling all triggers', laterProblems([{ n: '99999
 check('a later migration that re-creates the trigger is fine', laterProblems([{ n: '99999999999999_x.sql', s: 'drop trigger if exists trg_pin_district_on_list on x;\ncreate trigger trg_pin_district_on_list before insert on x;' }]));
 
 check('every listing: copy spellings fold to the list name, key v2, served-twins alarm', everyListingProblems(tree));
+check('one name, one list: the city guard and the district guard refuse the other list\'s names', cityGuardProblems(tree));
+const cityFile = latestDef(tree, CITY_RE).n;
+mustCatch('a city deleted', cityGuardProblems(mutTree(cityFile, "if tg_op in ('DELETE', 'TRUNCATE') then\n    raise exception 'city list guard: cities are never deleted", "if false then\n    raise exception 'city list guard: cities are never deleted")));
+mustCatch('a duplicate city allowed', cityGuardProblems(mutTree(cityFile, "coalesce(public.place_km(c.city_id, new.city_id) < 40, c.region_id = new.region_id)\n   limit 1;\n  if v_hit is not null then\n    raise exception 'city list guard: «%» is already the city", "false\n   limit 1;\n  if v_hit is not null then\n    raise exception 'city list guard: «%» is already the city")));
+mustCatch('the city exception unlocking any name', cityGuardProblems(mutTree(cityFile, 'v_ok is not null and public.district_key_letters(v_ok) = k then return new', 'v_ok is not null then return new')));
+mustCatch('own city name allowed as a district', listFnProblems(mutFn("raise exception 'district list guard: «%» is the name of its own city — a city is not a district', new.district_ar;", "null;").replace('is the name of its own city', 'x')));
 const keyFile = latestDef(tree, KEY_RE).n, copyFile = latestDef(tree, COPY_RE).n, finishFile = latestDef(tree, FINISH_RE).n;
 const mutTree = (file: string, from: string | RegExp, to: string) => tree.map((f) => {
   if (f.n !== file) return f;
