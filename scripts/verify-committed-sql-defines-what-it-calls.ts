@@ -80,7 +80,9 @@ export type SqlFile = { file: string; sql: string };
 const DEFINES_FUNCTION = /create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+(?:"?public"?\.)?"?([a-zA-Z0-9_]+)"?\s*\(/gi;
 const DEFINES_RELATION =
   /create\s+(?:or\s+replace\s+)?(?:unlogged\s+)?(?:materialized\s+)?(?:table|view|sequence)\s+(?:if\s+not\s+exists\s+)?(?:"?public"?\.)?"?([a-zA-Z0-9_]+)"?/gi;
-const REFERENCES = /\bpublic\.([a-zA-Z0-9_]+)\s*\(/gi;
+// `references public.t (col)` (a foreign key) and `on public.t (col)` (an index) name a TABLE, not a call: without the
+// lookbehinds a table created before the strict era read as a production-only function (2026-10-26, loc_catalog_city).
+const REFERENCES = /(?<!\breferences\s)(?<!\bon\s)\bpublic\.([a-zA-Z0-9_]+)\s*\(/gi;
 
 const namesIn = (sql: string, re: RegExp): string[] =>
   [...sql.matchAll(new RegExp(re.source, re.flags))].map((m) => m[1].toLowerCase());
