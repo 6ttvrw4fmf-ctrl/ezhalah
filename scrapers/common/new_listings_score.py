@@ -715,10 +715,17 @@ def dwelleo_room_lines(url: str, fetch=None) -> list[str]:
             return []
     except Exception:  # noqa: BLE001
         return []
-    v = rec.get("bedrooms")
-    if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
-        return [f"عدد غرف النوم {int(v)}"]
-    return []
+    # The record's other structured rooms are read the same way (backlog #890, 2026-10-26, dry re-score run
+    # 40288432059): prose «ست غرف نوم وخمس حمامات» scored stored bathrooms 5 wrong (19471735), and «صالة مع
+    # بلكونة … شارع 30» scored stored living_rooms 1 wrong (19471811); the record says bathrooms 5 and livings 1.
+    # floor_number is NOT restated: the page never shows it, and its 0 is ambiguous (19534092: record 0, prose
+    # «في الطابق ٣»), so the score keeps reading the page there.
+    out = []
+    for key, label in (("bedrooms", "عدد غرف النوم"), ("bathrooms", "عدد الحمامات"), ("livings", "عدد الصالات")):
+        v = rec.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+            out.append(f"{label} {int(v)}")
+    return out
 
 
 def nufouth_page(url: str, ad_number: str | None, fetch=None) -> dict | None:
