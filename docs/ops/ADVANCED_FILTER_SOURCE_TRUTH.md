@@ -80,6 +80,17 @@ asked for a 500-ad sample first (the text is often «جديد» / «شبه جد�
 switch: 73,662 quoted widths, 28,787 blank boxes filled, 3,528 differ from the box (listed). Barrier:
 `scripts/verify-text-facts-rule-b.ts` «Rule B for numbers».
 
+**Majlis — the first filter question born from the stored text facts (owner, 2026-10-26, handoff decision #3).**
+`search_listings_ar.majlis` is the 21st amenity token (`p_amenities` `majlis`, chip «مجلس» / labelKey
+«Majlis room», `cnt_majlis` in the guided counts, `amenity:majlis` in the sweep and the truth table,
+`af_field_registry` row). Its box is the site's own majlis COUNT (`listing_rich_attrs.majlis` =
+`majlis_rooms > 0`, aqar/wasalt `reception_rooms_majlis`, 7,328 ads, never 0 — a positive-only box); the
+text side is the reader's `majlis` fact (91k ads) through the same overlay (`text_facts_af_columns()`
+now 21 keys), behind its own switch `ops_feature_flags.af_text_facts_majlis`. Served = `af_rule_b(box, text)`.
+Migrations 20261026011638 / 20261026012051 / 20261026013134; the clause mirror digest is 62539dd9….
+Related facts the reader SAVES but does not serve (no column yet): roof, warranty, storage, annex, boundaries,
+`corner_plot` (a corner / on two streets — never two_entrances; 2026-10-26).
+
 **Why the August case law below no longer forbids this.** The 2026-08-09 rule («if the platform publishes
 the field structurally, prose must not be consulted at all — a structured `null` outranks any prose hit»)
 was written against a *keyword matcher*: «موقف سيارة» / «مواقف» → `true`, which could not tell «مصعد» from
