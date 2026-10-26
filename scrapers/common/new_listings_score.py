@@ -940,8 +940,15 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         if "dwelleo.sa" in url:
             extra = (dwelleo or dwelleo_room_lines)(url)
             page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
-        fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
-                                       prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)
+        results = compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
+                                  prose_only_district=platform in PROSE_ONLY_DISTRICT)
+        # Which ad and which stored value: a site line says «furnished: mismatch=1» but not on which of the
+        # sampled ads, so every AF cap had to be re-derived by hand (dwelleo #890, 2026-10-26).
+        for name, verdict in results.items():
+            if verdict == MISMATCH:
+                col = next(c for n, _, c, _ in FIELDS if n == name)
+                print(f"    mismatch {key} {name}: stored={stored.get(col)!r}", flush=True)
+        fold(row, key, results, stored)
     if row["unreadable_pages"]:
         row["note"] = f"{row['unreadable_pages']} page(s) unreadable (never counted as wrong)"
     return row
