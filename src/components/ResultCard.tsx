@@ -14,15 +14,15 @@ import { whenNear } from '@/lib/nearViewport';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
 import { isStayLengthPriced, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
-import { advertisedMonthlyText } from '@/lib/listingDisplay';
+import { monthlyLineText } from '@/lib/listingDisplay';
 
-// «السعر المعلن 3,000 شهرياً» (owner 2026-10-25): a site that quotes PER MONTH pools as yearly at ×12, so the
-// price line reads «/سنوياً» — this line keeps the site's own figure and word under it. The text comes from the
-// shared price contract (listingDisplay.ts), so every surface prints the same words.
-function advertisedMonthlyLine(listing: Listing, locale: 'ar' | 'en') {
-  const text = advertisedMonthlyText(listing, locale);
+// THE MONTHLY LINE UNDER EVERY YEARLY PRICE (owner 2026-10-26): «السعر المعلن 3,000 شهرياً» when the site quoted
+// per month (pool yearly at ×12), «≈ 3,000 شهرياً» (÷12) when it quoted per year. The text comes from the shared
+// price contract (listingDisplay.ts), so every surface prints the same words.
+function monthlyLine(listing: Listing, locale: 'ar' | 'en') {
+  const text = monthlyLineText(listing, locale);
   if (text == null) return null;
-  return <Text style={card.pricePerMeter} numberOfLines={1} testID="card-advertised-monthly">{text}</Text>;
+  return <Text style={card.pricePerMeter} numberOfLines={1} testID="card-monthly-line">{text}</Text>;
 }
 import { afEvidence, AMENITY_COL, type ActiveAf } from '@/lib/afEvidence';
 import { typeImg } from '@/theme/propertyIcons';
@@ -282,8 +282,9 @@ export function ResultCard({
         <View style={card.lpBody}>
           <View style={card.lpPriceRow}>
             <View style={card.lpPriceCol}>
-              <Text style={stay ? card.stayNote : [card.price, card.lpPrice]} numberOfLines={stay ? 2 : 1}>{listingPrice(listing, locale)}</Text>
-              {advertisedMonthlyLine(listing, locale)}
+              {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
+              {stay ? null : <Text style={[card.price, card.lpPrice]} numberOfLines={1}>{listingPrice(listing, locale)}</Text>}
+              {monthlyLine(listing, locale)}
               {listing.discount ? (
                 <View style={card.discountRow} testID="card-discount">
                   <Text style={card.discountOld} numberOfLines={1}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
@@ -446,8 +447,9 @@ export function ResultCard({
         <Text style={[card.title, tight && card.titleTight, { textAlign: txtAlign, writingDirection: wDir }]}>
           {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
         </Text>
-        <Text style={isStayLengthPriced(listing.source) ? [card.stayNote, row && card.stayNoteRow] : [card.price, row && card.priceRow, tight && card.priceTight]} numberOfLines={isStayLengthPriced(listing.source) ? 2 : 1}>{listingPrice(listing, locale)}</Text>
-        {advertisedMonthlyLine(listing, locale)}
+        {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
+        {isStayLengthPriced(listing.source) ? null : <Text style={[card.price, row && card.priceRow, tight && card.priceTight]} numberOfLines={1}>{listingPrice(listing, locale)}</Text>}
+        {monthlyLine(listing, locale)}
         </View>
         {/* Source-published discount (owner 2026-10-19): the old price struck through + «خصم X٪»,
             under the final price. Rendered only when the source showed one — see listingDiscountFrom(). */}

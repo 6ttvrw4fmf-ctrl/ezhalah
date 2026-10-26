@@ -3305,7 +3305,7 @@ export default function Agent() {
             if (i >= 12 && !referenced) return [];
             const locationLabel = l.district && l.city ? `${l.district}, ${l.city}`
               : (l.district || l.city || LOCATION_UNRESOLVED_AR);
-            return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel} — ${listingPrice(l, 'en')}` +
+            return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel}${listingPrice(l, 'en') ? ` — ${listingPrice(l, 'en')}` : ''}` +
               `${l.area ? `, ${l.area} m²` : ''}${l.beds ? `, ${l.beds} bed` : ''}, on ${l.source}`;
           });
           const text = cards.length ? `${m.text}\n${cards.join('\n')}` : m.text;
