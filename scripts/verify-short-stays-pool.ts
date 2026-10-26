@@ -32,7 +32,7 @@ check('the TS platform list is exactly gathern + aqarmonthly', [...SHORT_STAY_PL
 // ── the card's «السعر المعلن» line ───────────────────────────────────────────────────────────────────────────────
 check('yearly pool + source monthly + price_annual 36,000 → advertised 3,000/month', advertisedMonthly('annual', 'monthly', 36000) === 3000);
 check('yearly pool + source yearly → no line', advertisedMonthly('annual', 'annual', 36000) === null);
-check('short-stay pool → no line (they show the stay-length note instead)', advertisedMonthly('monthly', 'monthly', 36000) === null);
+check('short-stay pool → no line (they show no price line)', advertisedMonthly('monthly', 'monthly', 36000) === null);
 check('no price / bad price → no line', advertisedMonthly('annual', 'monthly', null) === null && advertisedMonthly('annual', 'monthly', 0) === null && advertisedMonthly('annual', 'monthly', 'x') === null);
 
 // ── the card-fetch clause per pool and table ───────────────────────────────────────────────────────────────────
@@ -64,9 +64,9 @@ check('finalize() pools the row with rentPool(r.source, r.rent_period) and price
   //  'monthly'; scripts/verify-cheap-yearly-is-monthly.ts executes that rule.)
   && /listingPriceString\(deal, pool, servedAnnual/.test(remote) && /rentPeriod: pool,/.test(remote) && /sourceRentPeriod: deal === 'Rent' \? servedSourcePeriod : null,/.test(remote));
 check('the card fetch applies cardFetchPeriodOr for monthly / annual / both', /const clause = cardFetchPeriodOr\(q\.rentPeriod, tbl\);/.test(remote));
-check('both card layouts and the ad page print the advertised-monthly line',
-  (card.match(/\{advertisedMonthlyLine\(listing, locale\)\}/g) || []).length === 2 && /advertisedMonthlyText\(l, locale\)/.test(preview)
-  && /listing-preview-advertised-monthly/.test(preview));
+check('both card layouts and the ad page print the monthly line',
+  (card.match(/\{monthlyLine\(listing, locale\)\}/g) || []).length === 2 && /monthlyLineText\(l, locale\)/.test(preview)
+  && /listing-preview-monthly-line/.test(preview));
 check('the button and its hint say «إقامات قصيرة» / Short stays; the Arabic copy never claims a contract length',
   /label=\{t\(which === 'monthly' \? 'Short stays' : 'Yearly'\)\}/.test(index) && /'Short stays': 'إقامات قصيرة'/.test(i18n)
   && /'Advertised price \{a\}\/month': 'السعر المعلن \{a\} شهرياً'/.test(i18n)
