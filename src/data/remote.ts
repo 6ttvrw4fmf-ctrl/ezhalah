@@ -2,6 +2,7 @@ import { selectSourceTables } from '@/lib/agentSourceSelection';
 import { supabase } from '@/lib/supabase';
 import { PROBE_FAILED, isProbeFailure, type ProbeFailed } from '@/lib/afProbe';
 import { listingPriceString, isDerivedTotal, type Listing } from './listings';
+import { rentPool, cardFetchPeriodOr } from '@/lib/rentPool';
 import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
@@ -1516,12 +1517,12 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
   //    period branch — it has no figure a period could misstate, and the card prints «سعر عند الطلب»
   //    with no period suffix. Mirrors the one line af_eligibility_clause() gained, so the rows the
   //    results RPC returns are never dropped here. A PRICED null-period row is still in neither.
-  if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'monthly') {
-    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.or('rent_period.eq.monthly,price_annual.is.null');
-  } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'annual') {
-    req = req.or('rent_period.eq.annual,price_annual.is.null');
-  } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'both') {
-    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.or('rent_period.in.(monthly,annual),price_annual.is.null');
+  //  • «إقامات قصيرة» POOL (owner 2026-10-25): the clause per pool lives in src/lib/rentPool.ts — Short stays =
+  //    Gathern + Aqar Monthly only; a per-month figure on any other site is a YEARLY listing (×12), so the
+  //    yearly branch accepts it. Executed with mutation proofs by scripts/verify-short-stays-pool.ts.
+  if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && (q.rentPeriod === 'monthly' || q.rentPeriod === 'annual' || q.rentPeriod === 'both')) {
+    const clause = cardFetchPeriodOr(q.rentPeriod, tbl);
+    if (clause) req = req.or(clause);
   }
   return req;
 }
@@ -2028,7 +2029,12 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     // listing can never match a budget the card then fails to show. It renders with a '≈' and
     // the card adds an explicit «محتسب من سعر المتر» note; the source per-metre figure is kept
     // untouched in pricePerMeter below. (owner rule 2026-09-03)
-    const priceStr = listingPriceString(deal, r.rent_period, r.price_annual, r.price_total,
+    // THE POOL, not the site's word (owner 2026-10-25, src/lib/rentPool.ts): Gathern + Aqar Monthly are
+    // «إقامات قصيرة»; any other site's per-month figure is a YEARLY listing at ×12 (price_annual already is),
+    // so its card prints «/سنوياً» — and `sourceRentPeriod` below keeps the site's own word for the
+    // «السعر المعلن 3,000 شهرياً» line. An unpublished period still pools as null, never 'annual'.
+    const pool = deal === 'Rent' ? rentPool(r.source ?? '', r.rent_period) : null;
+    const priceStr = listingPriceString(deal, pool, r.price_annual, r.price_total,
                                         r.price_per_meter, r.area_m2);
     const priceIsDerived = isDerivedTotal(deal, r.price_total, r.price_annual, r.price_per_meter, r.area_m2);
     // Aqar (both residential & commercial) scrapes its own "no photo" placeholder graphic
@@ -2085,7 +2091,8 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // and click-through hostname all derive from it. Wasalt rows have source='Wasalt'.
       source: r.source ?? 'Aqar',
       // Same rule as priceStr above: an unpublished period stays NULL, it never becomes 'annual'.
-      rentPeriod: deal === 'Rent' ? (r.rent_period ?? null) : null,
+      rentPeriod: pool,
+      sourceRentPeriod: deal === 'Rent' ? (r.rent_period ?? null) : null,
       // THE NUMBER THE SERVER FILTERED ON, carried rather than reconstructed (2026-09-06, regression
       // hunter). `price` prints a source-MONTHLY rent at Math.round(price_annual / 12), so ×12-ing
       // the printed figure recovers price_annual only when it divides by 12 — it is short by up to
