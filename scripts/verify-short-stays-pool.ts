@@ -60,7 +60,9 @@ const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
 const index = readFileSync(join(root, 'src/app/index.tsx'), 'utf8');
 check('finalize() pools the row with rentPool(r.source, r.rent_period) and prices with the POOL',
   /const pool = deal === 'Rent' \? rentPool\(r\.source \?\? '', r\.rent_period\) : null;/.test(remote)
-  && /listingPriceString\(deal, pool, r\.price_annual/.test(remote) && /rentPeriod: pool,/.test(remote) && /sourceRentPeriod: deal === 'Rent' \? \(r\.rent_period \?\? null\) : null,/.test(remote));
+  // (2026-10-26: the figure and the site word are the SERVED ones — a cheap «yearly» home/business rent is ×12 and
+  //  'monthly'; scripts/verify-cheap-yearly-is-monthly.ts executes that rule.)
+  && /listingPriceString\(deal, pool, servedAnnual/.test(remote) && /rentPeriod: pool,/.test(remote) && /sourceRentPeriod: deal === 'Rent' \? servedSourcePeriod : null,/.test(remote));
 check('the card fetch applies cardFetchPeriodOr for monthly / annual / both', /const clause = cardFetchPeriodOr\(q\.rentPeriod, tbl\);/.test(remote));
 check('both card layouts and the ad page print the monthly line',
   (card.match(/\{monthlyLine\(listing, locale\)\}/g) || []).length === 2 && /monthlyLineText\(l, locale\)/.test(preview)
