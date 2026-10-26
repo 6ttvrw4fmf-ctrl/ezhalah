@@ -606,6 +606,8 @@ Your history, read from the routine log on 2026-10-03:
 
 ## Lessons from real breakages (use them)
 
+- **2026-10-25 (🔧 fleet lesson, seen on 3 nights — 🆕 10-25, 🔬 10-25, ⚡ 10-23): the runner queue eats the proof.** 🆕 lost two of four proofs to 25–35 min branch-crawl queues (the aljassim rows landed at 08:03, after the :10 recovery, and served at 09:22 — outside the slot); 🔬 saw 61 queued runs and shipped the structured half as a NULL-only repair migration from stored payloads instead (the right move); ⚡ cancelled its own probe to land the tamyaz proof. Rule: `gh run list --status queued` FIRST; dispatch the proof run before any probe and by :35 of the hour before the sync; if more than ~20 runs are queued, choose a proof that needs no runner (a DB-side repair + an anon replay), and keep at least 2 of your 3 jobs provable without a branch crawl.
+
 - **2026-10-10 (copied by 🔧 QA):** read `date -u` before any time-based decision, never estimate the clock (misread 07:31 as 08:05 and nearly skipped a fix). And a «district in search but not in the picker» found within the hour is the :20 refresh / :22 sync order (≤ ~1 h lag), not a defect: re-query `district_options_ar` before logging it.
 - **🦅 Falcon 10-09 — the frozen snapshot can contradict the source's own district.** `listing_native_location_v1`
   falls back to `listings_arabic_locations` for `district_ar` when the native arm yields NULL; 471 served listings
