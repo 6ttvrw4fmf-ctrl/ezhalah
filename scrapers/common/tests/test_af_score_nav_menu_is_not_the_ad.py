@@ -21,7 +21,10 @@ def test_menu_links_are_dropped_and_the_ad_words_stay():
     lines = A.page_lines(A.strip_nav(_page(), BODY))
     assert not any("مطبخ" in x or "مكيف" in x for x in lines)
     assert any("مصعد" in x for x in lines)
-    assert not A.says_yes(lines, "kitchen", "opensooq") and A.says_yes(lines, "elevator", "opensooq")
+    assert not A.says_yes(lines, "kitchen") and A.says_yes(lines, "elevator")
+    # 2026-10-26: opensooq publishes its amenities structurally on the ad page (opensooq_props), so on opensooq the
+    # page's prose is silent for them (law §2); the menu stays dropped either way.
+    assert not A.says_yes(lines, "kitchen", "opensooq") and not A.says_yes(lines, "elevator", "opensooq")
 
 
 def test_without_links_the_page_is_unchanged():
