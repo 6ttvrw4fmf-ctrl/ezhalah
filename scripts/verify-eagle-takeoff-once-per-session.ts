@@ -40,15 +40,15 @@ const svg = readFileSync(join(root, 'assets/images/falcon-takeoff.svg'), 'utf8')
 const compOk = (c: string) => /if \(reduced \|\| !takeEagleTakeoff\(\)\) return;/.test(c)
   && /const id = setTimeout\(\(\) => setTakeoff\(false\), TAKEOFF_MS\);/.test(c)
   && /\{takeoff \? \(/.test(c);
-const svgOk = (v: string) => !/infinite/.test(v) && (v.match(/2\.6s/g) ?? []).length >= 5 && /prefers-reduced-motion:reduce/.test(v);
+const svgOk = (v: string) => !/infinite/.test(v) && (v.match(/2\.8s/g) ?? []).length >= 5 && /prefers-reduced-motion:reduce/.test(v);
 check('HeroFalconer plays the eagle only through the session decision, and unmounts it after the flight', compOk(comp));
-check('the eagle animation never loops, runs 2.6 s, and respects reduced motion', svgOk(svg));
+check('the eagle animation never loops, runs 2.8 s, and respects reduced motion', svgOk(svg));
 check('the falconer drawing itself is not animated (no animation style on his image)',
   /<XImage source=\{FALCONER\} contentFit="contain" accessible=\{false\} style=\{StyleSheet\.absoluteFill\} \/>/.test(comp));
 
 mustCatch('the eagle playing under reduced motion', !compOk(comp.replace('if (reduced || !takeEagleTakeoff()) return;', 'if (!takeEagleTakeoff()) return;')));
 mustCatch('the eagle playing on every mount (no session decision)', !compOk(comp.replace('if (reduced || !takeEagleTakeoff()) return;', 'if (reduced) return;')));
-mustCatch('a looping eagle', !svgOk(svg.replace('animation:fly 2.6s', 'animation:fly 2.6s infinite')));
+mustCatch('a looping eagle', !svgOk(svg.replace('animation:path 2.8s', 'animation:path 2.8s infinite')));
 {
   const local = mem();
   const forgetful = { getItem: () => null, setItem: () => {} }; // a "session" that never remembers → every refresh plays
