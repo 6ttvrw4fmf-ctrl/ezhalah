@@ -336,8 +336,12 @@ def build_plan(limit: int, platforms: Optional[set[str]]) -> dict[str, int]:
 # facts_silent_plan() gives the per-table counts and facts_silent_ids(table, n, seed) a seeded shuffle of one
 # table's ids. The rows themselves are then read exactly as sample_table reads them (same columns, same
 # ground-truth snapshot, same PDPL sanitising), so everything downstream is unchanged.
-def silent_plan(limit: int, platforms: Optional[set[str]], counts: dict[str, int]) -> dict[str, int]:
-    return scale_plan({t: n for t, n in counts.items() if n > 0 and (not platforms or platform_of(t) in platforms)}, limit)
+def silent_plan(limit: int, platforms: Optional[set[str]], counts: dict[str, int], category: str = "all") -> dict[str, int]:
+    """category (owner 2026-10-26: «residential only, later commercial»): 'residential' keeps *_residential_listings,
+    'commercial' keeps *_commercial_listings, 'all' keeps both."""
+    keep = {t: n for t, n in counts.items() if n > 0 and (not platforms or platform_of(t) in platforms)
+            and (category == "all" or t.endswith(f"_{category}_listings"))}
+    return scale_plan(keep, limit)
 
 
 def sample_silent(table: str, n: int, seed: int, mode: str = "silent") -> list[dict[str, Any]]:
@@ -421,7 +425,7 @@ def run(args: argparse.Namespace) -> int:
         plan = silent_plan(args.limit, platforms, counts)
     elif args.mode in ("new", "backlog"):
         counts = {r["source_table"]: int(r["n"]) for r in (client.rpc("facts_ai_plan", {"p_mode": args.mode}).execute().data or [])}
-        plan = silent_plan(args.limit, platforms, counts)
+        plan = silent_plan(args.limit, platforms, counts, args.category)
     else:
         plan = build_plan(args.limit, platforms)
     print(f"run {args.run_id}: mode {args.mode}; plan {sum(plan.values())} ads over {len(plan)} tables; caps calls≤{args.max_calls} usd≤${args.max_usd}")
@@ -634,6 +638,10 @@ def selftest() -> None:
     sp = silent_plan(10, None, {"a_residential_listings": 9000, "b_residential_listings": 5})
     assert sp["b_residential_listings"] == 1 and sum(sp.values()) == 10, sp
     assert silent_plan(50, {"b"}, {"a_residential_listings": 100, "b_residential_listings": 100}) == {"b_residential_listings": 50}
+    # category keeps one family of tables (residential first, commercial later — owner 2026-10-26)
+    assert silent_plan(100, None, {"a_residential_listings": 100, "a_commercial_listings": 100}, "residential") == {"a_residential_listings": 100}
+    assert silent_plan(100, None, {"a_residential_listings": 100, "a_commercial_listings": 100}, "commercial") == {"a_commercial_listings": 100}
+    assert sum(silent_plan(100, None, {"a_residential_listings": 100, "a_commercial_listings": 100}, "all").values()) == 100
     assert sum(build_plan(10_000, None).values()) == 10_000 and sum(build_plan(500, None).values()) == 500
     assert norm("مَسْبَحٌ، وحديقة") == norm("مسبح وحديقه") == "مسبح وحديقه"
     assert norm("شارع ١٥ م") == "شارع 15 م"
@@ -695,6 +703,8 @@ def main() -> int:
     ap.add_argument("--mode", choices=("sample", "silent", "new", "backlog"), default="sample",
                     help="sample = the fixed 10k plan; silent = ads the reader found nothing in; new = ads first seen ≤ 3 days the AI "
                          "never read (the nightly run); backlog = any active ad the AI never read")
+    ap.add_argument("--category", choices=("residential", "commercial", "all"), default="residential",
+                    help="modes new/backlog only: which source tables (owner 2026-10-26: residential first, commercial later)")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
     if args.selftest:
