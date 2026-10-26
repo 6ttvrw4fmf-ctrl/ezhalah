@@ -156,8 +156,8 @@ export function titleDetails(q: SearchQuery, loc = 'ar'): string[] {
   const push = (s?: string | null) => { if (s && !out.includes(s)) out.push(s); };
 
   if (q.deal === 'Rent' && !q.bothDeals) {
-    if (q.rentPeriod === 'monthly') push(A ? 'شهري' : 'Monthly');
-    else if (q.rentPeriod === 'both') push(A ? 'شهري وسنوي' : 'Monthly or yearly');
+    if (q.rentPeriod === 'monthly') push(A ? 'إقامات قصيرة' : 'Short stays');
+    else if (q.rentPeriod === 'both') push(A ? 'إقامات قصيرة وسنوي' : 'Short stays or yearly');
   }
   if (q.districts && q.districts.length > 1) {
     push(A ? `${q.districts.length} أحياء` : `${q.districts.length} districts`);

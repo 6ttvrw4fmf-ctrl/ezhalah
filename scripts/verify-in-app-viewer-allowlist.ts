@@ -559,7 +559,7 @@ const renderPreview = (src: string, source: string, locale: string, photos: stri
     'expo-image': { Image: 'Image' }, '@expo/vector-icons/Ionicons': { default: 'Ionicons' },
     '@/theme/tokens': { colors: {}, radius: {}, font: { family: {} }, lightColors: {} }, '@/theme/palette': { TAP44: {}, BUZZER_GOLD: {} },
     '@/i18n': { useI18n: () => ({ locale, isRTL: locale === 'ar', t: (key: string, vars?: Record<string, string | number>) => translate(locale, key, vars) }) },
-    '@/lib/listingDisplay': { ...display, listingPrice: () => 'shared-price' },
+    '@/lib/listingDisplay': { ...display, listingPrice: () => 'shared-price', advertisedMonthlyText: () => null },
     '@/lib/arabicText': arabicText,
     '@/lib/translitPlace': { translitPlace: (x: string) => x }, '@/lib/afEvidence': { DIRECTION_LABEL: {} },
     '@/lib/useAtLeast': { useAtLeast: () => false }, '@/lib/responsive': { PICKER_SHEET_BREAKPOINT: 768 }, '@/lib/useReducedMotion': { useReducedMotion: () => true },
