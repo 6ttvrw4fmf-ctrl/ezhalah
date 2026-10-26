@@ -44,11 +44,27 @@ const T0 = 1_000_000;
 }
 const store = readFileSync(join(root, 'src/store.tsx'), 'utf8');
 const home = readFileSync(join(root, 'src/app/index.tsx'), 'utf8');
-check('the store remembers every chat the user opens', /useEffect\(\(\) => \{ if \(activeChatId\) rememberLastChat\(user\?\.sub, activeChatId\); \}, \[activeChatId, user\?\.sub\]\);/.test(store));
-check('the home page stamps its first view and reopens through the sidebar\'s own open path',
-  /useEffect\(\(\) => \{ markFirstHomeView\(\); \}, \[\]\);/.test(home)
-  && /const id = takeLastChatToResume\(user\.sub, history\.map\(\(h\) => h\.id\)\);/.test(home)
-  && /router\.push\(\{ pathname: '\/agent', params: \{ filter: JSON\.stringify\(c\.query\), replay: '0', hid: c\.id \} \}\);/.test(home));
+const storeOk = (s: string) => /useEffect\(\(\) => \{ if \(activeChatId\) rememberLastChat\(user\?\.sub, activeChatId\); \}, \[activeChatId, user\?\.sub\]\);/.test(s);
+const homeOk = (h: string) => /useEffect\(\(\) => \{ markFirstHomeView\(\); \}, \[\]\);/.test(h)
+  && /const id = takeLastChatToResume\(user\.sub, history\.map\(\(h\) => h\.id\)\);/.test(h)
+  && /router\.push\(\{ pathname: '\/agent', params: \{ filter: JSON\.stringify\(c\.query\), replay: '0', hid: c\.id \} \}\);/.test(h);
+check('the store remembers every chat the user opens', storeOk(store));
+check('the home page stamps its first view and reopens through the sidebar\'s own open path', homeOk(home));
+
+// Each guard must FAIL on its own defect.
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
+mustCatch('the store never remembering the chat', !storeOk(store.replace('rememberLastChat(user?.sub, activeChatId)', 'void 0')));
+mustCatch('the home page never stamping its first view (no window → never resumes)', !homeOk(home.replace('useEffect(() => { markFirstHomeView(); }, []);', '')));
+mustCatch('the resume replacing history (Back would skip home)', !homeOk(home.replace("router.push({ pathname: '/agent', params: { filter: JSON.stringify(c.query), replay: '0', hid: c.id } });", "router.replace({ pathname: '/agent', params: { filter: JSON.stringify(c.query), replay: '0', hid: c.id } });")));
+{
+  // the once-per-tab rule, executed: a tab store that forgets the «resumed» mark must be caught by the second check above
+  const local = mem(), tab = mem();
+  const forgetful = { ...tab, setItem: (k: string, v: string) => { if (!k.includes('Resumed')) tab.setItem(k, v); } };
+  rememberLastChat('a@b.c', 'h1', local);
+  markFirstHomeView(T0, forgetful);
+  takeLastChatToResume('a@b.c', ['h1'], T0 + 100, local, forgetful);
+  mustCatch('a tab that forgets it already resumed (home would bounce back every time)', takeLastChatToResume('a@b.c', ['h1'], T0 + 200, local, forgetful) !== null);
+}
 
 if (fail) { console.error(`\n❌ ${fail} check(s) failed`); process.exit(1); }
 console.log('\n✅ returning-user-opens-last-chat: once per tab, first seconds only, own account, still in history');
