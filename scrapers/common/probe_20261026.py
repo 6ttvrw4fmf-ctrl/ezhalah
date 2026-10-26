@@ -143,3 +143,33 @@ def holoul_pages():
             r, info = get(f"{api}?page={pg*10+sub}&per_page=1", None, "chrome124", headers=h, timeout=60)
             if r is None or r.status_code != 200:
                 print(f"HOLOUL1 bad page={pg*10+sub} -> {info}", flush=True)
+
+
+def senan2():
+    import re as _re
+    base = "https://senanrealestate.sa"
+    r, i = get(base + "/sitemap.xml")
+    locs = _re.findall(r"<loc>([^<]+)</loc>", r.text if r is not None else "")
+    print("SENAN2 sitemap", i, len(locs), locs, flush=True)
+    r, i = get(base + "/assets/site.js")
+    js = r.text if r is not None else ""
+    print("SENAN2 site.js", i, flush=True)
+    print("SENAN2 JS head 3000:", js[:3000], flush=True)
+    for m in _re.finditer(r"(fetch\(|\.json|data/|price|سعر)", js):
+        print("SENAN2 JS ctx:", js[max(0, m.start()-150):m.start()+200].replace("\n", " "), flush=True)
+    r, i = get(base + "/projects")
+    t = r.text if r is not None else ""
+    body = t[t.find("<body"):]
+    print("SENAN2 /projects body:", i, _re.sub(r"\s+", " ", body)[:6000], flush=True)
+    pages = [u for u in locs if "project" in u or "unit" in u or "propert" in u][:3]
+    for u in pages:
+        r, i = get(u)
+        t = r.text if r is not None else ""
+        print(f"SENAN2 PAGE {u} {i}", flush=True)
+        for ld in _re.findall(r'<script type="application/ld\+json">(.*?)</script>', t, _re.S)[:4]:
+            print("SENAN2 LD:", _re.sub(r"\s+", " ", ld)[:2500], flush=True)
+        b = t[t.find("<body"):]
+        print("SENAN2 BODY:", _re.sub(r"\s+", " ", b)[:7000], flush=True)
+    for p in ("/data/projects.json", "/assets/data.json", "/projects.json", "/data.json", "/assets/projects.json"):
+        r, i = get(base + p)
+        print(f"SENAN2 {p} {i} :: {(r.text[:300] if r is not None else '')}", flush=True)
