@@ -165,6 +165,12 @@ const AR: Record<string, string> = {
   'Monthly Rent Budget': 'الميزانية الشهرية للإيجار',
   'Purchase Budget': 'ميزانية الشراء',
   'Monthly': 'شهري',
+  // The rent-period button (owner 2026-10-25): «شهري» became «إقامات قصيرة» — Gathern + Aqar Monthly only, stays
+  // shorter than a year. Every other site's per-month figure is a YEARLY listing at ×12 (src/lib/rentPool.ts).
+  'Short stays': 'إقامات قصيرة',
+  'Short stays or yearly': 'إقامات قصيرة وسنوي',
+  'Short stays: stays shorter than a year, priced by length of stay.': 'إقامات قصيرة: إقامات أقل من سنة، وأسعارها حسب مدة الإقامة.',
+  'Advertised price {a}/month': 'السعر المعلن {a} شهرياً',
   'Yearly': 'سنوي',
   'Both': 'كلاهما',
   // Tiny info note shown under the Monthly/Yearly toggle so the user knows what each period means.
@@ -494,6 +500,7 @@ const AR: Record<string, string> = {
   'Balcony': 'بلكونة',
   'Laundry room': 'غرفة غسيل',
   'Optical fibers': 'ألياف بصرية',
+  'Majlis room': 'مجلس',
   'Separate electricity meter': 'عداد كهرباء مستقل',
   'Separate water meter': 'عداد ماء مستقل',
   // 'Furnished' key lives in the shared amenities block below (identical value 'مفروش') — not redeclared here.
@@ -1466,6 +1473,8 @@ const AR: Record<string, string> = {
   'Account': 'الحساب',
   'Sign out': 'تسجيل الخروج',
   'Add your name': 'أضف اسمك',
+  // The temporary name of an account with none (Apple sign-up that pressed «تخطي», owner 2026-10-26).
+  'Ezhalah Guest': 'ضيف إزهله',
   'What should we call you?': 'وش نناديك؟',
   'Later': 'لاحقاً',
   'Type your name': 'اكتب اسمك',

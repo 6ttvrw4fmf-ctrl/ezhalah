@@ -410,7 +410,7 @@ def run(args: argparse.Namespace) -> int:
 AF_COLUMNS = ("furnished", "elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room",
               "private_entrance", "separate_electricity_meter", "separate_water_meter", "electricity",
               "water_supply", "sanitation", "balcony", "laundry_room", "pool", "gym", "garden", "car_entrance",
-              "optical_fibers")
+              "optical_fibers", "majlis")   # majlis: the 21st AF amenity (owner 2026-10-26, decision #3)
 # The NUMERIC index columns an ad's text may fill — public.text_facts_af_num_columns(), same order. Rule B for
 # numbers (owner 2026-10-25, handoff decision #1): the number fills a BLANK box only, the site's own number is never
 # replaced. The DB CHECK admits a JSON number 4..150 with its quote; the checker already refuses a corner plot,
@@ -504,7 +504,8 @@ def selftest() -> None:
                              title="شقة للايجار", body="يوجد مصعد ولا يوجد مسبح، مجلس كبير، شارع عرض 20م"), "facts-words-t")
     assert row["facts"].get("elevator", {}).get("v") is True and row["facts"]["elevator"]["q"], row
     assert row["facts"].get("pool", {}).get("v") is False, row
-    assert "majlis" not in row["facts"] and any(f["fact"] == "majlis" for f in found), (row, found)
+    # majlis is an AF column since 2026-10-26 (decision #3): it rides the overlay row like the other 20.
+    assert row["facts"].get("majlis", {}).get("v") is True and any(f["fact"] == "majlis" for f in found), (row, found)
     # Rule B for numbers: the one quoted width rides along as a JSON number; a corner plot hands over none.
     assert row["facts"].get("street_width_m") == {"v": 20.0, "q": "شارع عرض 20م"}, row
     assert set(row["facts"]) <= set(AF_COLUMNS) | set(AF_NUM_COLUMNS) and row["stale_at"] is None and row["listing_id"] == 7

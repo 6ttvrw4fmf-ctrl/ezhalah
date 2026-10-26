@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { sanitizeForFilterRestore } from '@/lib/searchDefaults';
+import { markFirstHomeView, takeLastChatToResume } from '@/lib/lastChat';
 import { AppState, Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Image as XImage } from 'expo-image'; // SVG logo: a vector drawing, not a photo (owner 2026-10-24)
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -144,7 +146,19 @@ export default function Home() {
   const districtLabel = (cityId: number, ar: string) => (locale === 'en' ? districtNameEn(cityId, ar) : ar);
   // A «حي X · City» row in the city box (owner decision 2026-10-19, backlog 522/566) names the district AND its city.
   const cityRowLabel = (o: CityOption) => (o.districtAr ? `${districtLabel(o.cityId, o.districtAr)} · ${cityLabel(o)}` : cityLabel(o));
-  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history, importSharedChat, authChecked } = useApp();
+  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history, importSharedChat, authChecked, setActiveChat } = useApp();
+  // «Show the last thing he did» (owner 2026-10-26): the tab's first home view sends a signed-in user back into
+  // the chat they had open last — the same open path as a sidebar row. Once per tab, only in the first seconds.
+  useEffect(() => { markFirstHomeView(); }, []);
+  useEffect(() => {
+    if (!user || !history.length) return;
+    const id = takeLastChatToResume(user.sub, history.map((h) => h.id));
+    const c = id ? history.find((h) => h.id === id) : undefined;
+    if (!c) return;
+    setQuery(() => sanitizeForFilterRestore(c.query));
+    setActiveChat(c.id);
+    router.push({ pathname: '/agent', params: { filter: JSON.stringify(c.query), replay: '0', hid: c.id } });
+  }, [user?.sub, history.length]); // eslint-disable-line react-hooks/exhaustive-deps
   // A SHARED SEARCH LANDS HERE (owner 2026-10-17). `/?share=<payload>` (src/lib/shareSearch.ts) shows a
   // card «عقارات من {name} لك على إزهله» with «اضغط وشوف العقارات». The TAP is what runs the search
   // (a pasted link never runs one by itself — appSession gate). Owner: the recipient signs in to open a
@@ -1451,9 +1465,19 @@ export default function Home() {
           <View style={s.hero}>
             <CloudWisp variant={1} width={100} height={34} opacity={0.38} style={{ left: -40, top: 12 }} />
             <CloudWisp variant={2} width={90} height={28} opacity={0.32} style={{ right: -35, bottom: 18 }} />
-            <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
-              <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
-            </Pressable>
+            {/* The falconer (owner 2026-10-26): beside the big title, among the clouds, for visitors who are not signed in.
+                Always on the title's right, pointing at it, in both languages. Signed-in users never see him. */}
+            <View style={s.heroTitleRow} {...({ dir: 'ltr' } as any)}>
+              <Pressable style={s.heroTitleBox} disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
+                <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
+              </Pressable>
+              {authChecked && !user ? (
+                <RNAnimated.View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, reveal(titleAnim, 20)]}>
+                  <CloudWisp variant={0} width={heroWide ? 70 : 54} height={heroWide ? 22 : 17} opacity={0.5} style={{ bottom: -4, left: -14 }} />
+                  <XImage source={require('../../assets/icons/insight-falconer-original.png')} contentFit="contain" accessible={false} style={StyleSheet.absoluteFill} />
+                </RNAnimated.View>
+              ) : null}
+            </View>
             <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
             <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>
           </View>
@@ -1546,7 +1570,7 @@ export default function Home() {
                   {(['annual', 'monthly'] as const).map((which) => (
                     <OptionBox compact
                       key={which}
-                      label={t(which === 'monthly' ? 'Monthly' : 'Yearly')}
+                      label={t(which === 'monthly' ? 'Short stays' : 'Yearly')}
                       img={PERIOD_IMG[which === 'monthly' ? 'Monthly' : 'Yearly']}
                       selected={which === 'monthly' ? rentPeriod === 'monthly' || rentPeriod === 'both'
                                                      : rentPeriod === 'annual' || rentPeriod === 'both'}
@@ -1568,7 +1592,7 @@ export default function Home() {
                   ))}
                 </View>
                 <Text style={s.rentHint}>
-                  {t(rentPeriod === 'monthly' ? 'Monthly: includes short stays, priced by length of stay.'
+                  {t(rentPeriod === 'monthly' ? 'Short stays: stays shorter than a year, priced by length of stay.'
                     // Owner feedback (2026-08-22): drop the "this means you want both, so you get
                     // both" framing — selecting both buttons is already self-explanatory. Keep only
                     // the one genuinely non-obvious fact: mixed results show mixed price units.
@@ -2382,6 +2406,10 @@ const SHARED_PENDING_TTL_MS = 30 * 60 * 1000;
 const SHARED_IMPORTED_KEY = 'ezhalah:sharedChat:imported';
 
 const s = StyleSheet.create({
+  heroTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, maxWidth: '100%' },
+  heroTitleBox: { flexShrink: 1 },
+  heroFalconer: { width: 40, height: 46, flexShrink: 0 },
+  heroFalconerWide: { width: 52, height: 60, flexShrink: 0 },
   sharedBackdrop: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60,
     backgroundColor: 'rgba(18, 37, 27, 0.35)', alignItems: 'center', justifyContent: 'center', padding: 20,

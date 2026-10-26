@@ -5,7 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, font, lightColors, radius } from '@/theme/tokens';
 import { BUZZER_GOLD, TAP44 } from '@/theme/palette';
 import { useI18n, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
-import { listingPrice, listingDiscountOldPrice, sourceName } from '@/lib/listingDisplay';
+import { listingPrice, listingDiscountOldPrice, sourceName, advertisedMonthlyText } from '@/lib/listingDisplay';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, attrDisplayLabel, hideArabicProseInEnglish, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { translitPlace } from '@/lib/translitPlace';
 import { DIRECTION_LABEL } from '@/lib/afEvidence';
@@ -572,6 +572,13 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             <Text testID="listing-preview-price" numberOfLines={1} style={[s.price, tx]}>
               {priceRuns(listingPrice(l, locale)).map((r, i) => <Text key={i} style={r.num ? s.priceNum : s.priceUnit}>{r.text}</Text>)}
             </Text>
+            {/* «السعر المعلن 3,000 شهرياً» (owner 2026-10-25): the site quoted per month; the pool is yearly at ×12. */}
+            {(() => {
+              const text = advertisedMonthlyText(l, locale);
+              return text == null ? null : (
+                <Text testID="listing-preview-advertised-monthly" numberOfLines={1} style={[s.priceUnit, tx]}>{text}</Text>
+              );
+            })()}
             {/* Source-published discount (owner 2026-10-19): the old price struck + «خصم X٪» under the
                 final price — the same line the result card shows, only when the source showed one. */}
             {l.discount ? (
@@ -709,15 +716,16 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                       {halves.map((h) => (
                         <View key={h.key} style={[s.half, h.gov && s.halfGov]}>
                           <View style={[s.halfHeading, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                            <Image
-                              source={h.gov
-                                ? require('../../assets/icons/ministry-of-justice.webp')
-                                : require('../../assets/icons/falconer-property.png')}
-                              contentFit="contain"
-                              accessible={false}
-                              testID={h.gov ? 'actual-sales-ministry-logo' : 'listed-now-falconer-logo'}
-                              style={s.halfLogo}
-                            />
+                            {/* «المعروض الآن» has no picture for now (owner 2026-10-26 removed the falconer-with-falcon logo). */}
+                            {h.gov ? (
+                              <Image
+                                source={require('../../assets/icons/ministry-of-justice.webp')}
+                                contentFit="contain"
+                                accessible={false}
+                                testID="actual-sales-ministry-logo"
+                                style={s.halfLogo}
+                              />
+                            ) : null}
                             <Text numberOfLines={1} style={[s.halfTitle, { flexShrink: 1 }, tx]}>{h.title}</Text>
                           </View>
                           <Text numberOfLines={1} style={[s.halfSub, tx]}>{h.sub}</Text>

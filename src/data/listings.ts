@@ -45,6 +45,10 @@ export type Listing = {
   // figure; when 'annual', the yearly one. Drives the per-month filter + the /mo vs /yr label.
   // NEVER defaulted — an unpublished period stays null. See listingPriceString().
   rentPeriod?: string | null;
+  // The period the SITE published, verbatim ('monthly' | 'annual' | null). `rentPeriod` above is the POOL
+  // (src/lib/rentPool.ts): a per-month figure on a non-short-stay site pools as 'annual' at ×12, and the card
+  // prints the site's own words from this field («السعر المعلن 3,000 شهرياً»). (owner 2026-10-25)
+  sourceRentPeriod?: string | null;
   // price_annual EXACTLY as the row carries it — the number the RPC's rent budget was compared
   // against (location_search_candidates_ar filters rent rows on price_annual). Set on real fetched
   // Rent rows; null/undefined on Buy and on the bundled mock catalog. It exists because `price` is
@@ -132,6 +136,7 @@ export type Listing = {
     sanitation?: boolean;
     private_entrance?: boolean;
     optical_fibers?: boolean;
+    majlis?: boolean;
     laundry_room?: boolean;
     balcony_terrace?: boolean;
   };

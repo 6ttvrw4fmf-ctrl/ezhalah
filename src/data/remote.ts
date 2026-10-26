@@ -2,6 +2,7 @@ import { selectSourceTables } from '@/lib/agentSourceSelection';
 import { supabase } from '@/lib/supabase';
 import { PROBE_FAILED, isProbeFailure, type ProbeFailed } from '@/lib/afProbe';
 import { listingPriceString, isDerivedTotal, type Listing } from './listings';
+import { rentPool, cardFetchPeriodOr, cheapYearlyIsMonthly } from '@/lib/rentPool';
 import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
@@ -869,6 +870,7 @@ export type GuidedCounts = {
   // chips, so they need counts. Same template row, same committed scope (migration 20260902220000).
   cnt_gym: number; cnt_pool: number; cnt_garden: number; cnt_balcony: number; cnt_laundry_room: number;
   cnt_optical_fibers: number; cnt_separate_electricity_meter: number; cnt_separate_water_meter: number;
+  cnt_majlis: number;
   cnt_selected: number;
   // Monthly (2026-08-18): Gathern rating thresholds + unit-subtype chips. Data-derived cuts on the
   // source-declared 1-10 scale — the only ones that split the distribution (<=8.0 keeps ~94%).
@@ -1516,12 +1518,12 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
   //    period branch — it has no figure a period could misstate, and the card prints «سعر عند الطلب»
   //    with no period suffix. Mirrors the one line af_eligibility_clause() gained, so the rows the
   //    results RPC returns are never dropped here. A PRICED null-period row is still in neither.
-  if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'monthly') {
-    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.or('rent_period.eq.monthly,price_annual.is.null');
-  } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'annual') {
-    req = req.or('rent_period.eq.annual,price_annual.is.null');
-  } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'both') {
-    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.or('rent_period.in.(monthly,annual),price_annual.is.null');
+  //  • «إقامات قصيرة» POOL (owner 2026-10-25): the clause per pool lives in src/lib/rentPool.ts — Short stays =
+  //    Gathern + Aqar Monthly only; a per-month figure on any other site is a YEARLY listing (×12), so the
+  //    yearly branch accepts it. Executed with mutation proofs by scripts/verify-short-stays-pool.ts.
+  if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && (q.rentPeriod === 'monthly' || q.rentPeriod === 'annual' || q.rentPeriod === 'both')) {
+    const clause = cardFetchPeriodOr(q.rentPeriod, tbl);
+    if (clause) req = req.or(clause);
   }
   return req;
 }
@@ -2028,7 +2030,18 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     // listing can never match a budget the card then fails to show. It renders with a '≈' and
     // the card adds an explicit «محتسب من سعر المتر» note; the source per-metre figure is kept
     // untouched in pricePerMeter below. (owner rule 2026-09-03)
-    const priceStr = listingPriceString(deal, r.rent_period, r.price_annual, r.price_total,
+    // THE POOL, not the site's word (owner 2026-10-25, src/lib/rentPool.ts): Gathern + Aqar Monthly are
+    // «إقامات قصيرة»; any other site's per-month figure is a YEARLY listing at ×12 (price_annual already is),
+    // so its card prints «/سنوياً» — and `sourceRentPeriod` below keeps the site's own word for the
+    // «السعر المعلن 3,000 شهرياً» line. An unpublished period still pools as null, never 'annual'.
+    const pool = deal === 'Rent' ? rentPool(r.source ?? '', r.rent_period) : null;
+    // A «yearly» rent under 8,000 SAR on a home/business unit is a per-month price (owner 2026-10-26,
+    // src/lib/rentPool.ts::cheapYearlyIsMonthly; the index serves it ×12 through rent_price_annual_ar()):
+    // served ×12 here too, and the site's word becomes 'monthly' so the card says «السعر المعلن 3,300 شهرياً».
+    const cheapYearly = deal === 'Rent' && cheapYearlyIsMonthly(r.source ?? '', r.rent_period, r.price_annual, norm.clean);
+    const servedAnnual: unknown = cheapYearly ? (r.price_annual as number) * 12 : r.price_annual;
+    const servedSourcePeriod = cheapYearly ? 'monthly' : (r.rent_period ?? null);
+    const priceStr = listingPriceString(deal, pool, servedAnnual, r.price_total,
                                         r.price_per_meter, r.area_m2);
     const priceIsDerived = isDerivedTotal(deal, r.price_total, r.price_annual, r.price_per_meter, r.area_m2);
     // Aqar (both residential & commercial) scrapes its own "no photo" placeholder graphic
@@ -2085,7 +2098,8 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // and click-through hostname all derive from it. Wasalt rows have source='Wasalt'.
       source: r.source ?? 'Aqar',
       // Same rule as priceStr above: an unpublished period stays NULL, it never becomes 'annual'.
-      rentPeriod: deal === 'Rent' ? (r.rent_period ?? null) : null,
+      rentPeriod: pool,
+      sourceRentPeriod: deal === 'Rent' ? servedSourcePeriod : null,
       // THE NUMBER THE SERVER FILTERED ON, carried rather than reconstructed (2026-09-06, regression
       // hunter). `price` prints a source-MONTHLY rent at Math.round(price_annual / 12), so ×12-ing
       // the printed figure recovers price_annual only when it divides by 12 — it is short by up to
@@ -2094,7 +2108,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // 12,583/mo, reconstructs to 150,996, and vanished from a search with a 151,000 yearly floor
       // the RPC had matched it against. Carrying the real figure removes the rounding step from
       // every price comparison at once. VERBATIM, like pricePerMeter above.
-      priceAnnual: deal === 'Rent' && typeof r.price_annual === 'number' ? r.price_annual : null,
+      priceAnnual: deal === 'Rent' && typeof servedAnnual === 'number' ? servedAnnual : null,
       // UNKNOWN IS NOT «مؤخراً» (P2, 107,254 active listings — 54.3% of inventory). This used to be
       // `?? 'recently'`, manufacturing a positive FRESHNESS CLAIM out of a date the source never
       // published, one layer above any display guard that could have caught it: ResultCard already
@@ -2146,6 +2160,10 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
         sanitation: !!r.sanitation,
         private_entrance: !!r.private_entrance,
         optical_fibers: !!r.optical_fibers,
+        // The card's own majlis chip comes from the site's majlis COUNT (the source tables have no `majlis`
+        // column — LIST_SELECT reads source tables, not search_listings_ar). The AF proof chip for a majlis
+        // search comes from af_canon (afEvidence), which carries the Rule B value incl. the seller's words.
+        majlis: r.reception_rooms_majlis != null ? Number(r.reception_rooms_majlis) > 0 : undefined,
         laundry_room: !!r.laundry_room,
         balcony_terrace: !!r.balcony_terrace,
       },

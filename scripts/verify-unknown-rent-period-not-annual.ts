@@ -94,8 +94,13 @@ const finalizeSrc = REMOTE.slice(REMOTE.indexOf('function finalize('));
 // than format it itself, so the period rule keeps exactly one owner. Only the argument list moved,
 // so the pattern now allows the extra source fields (and a line break) without allowing a
 // re-inlined formatter — the two checks below still forbid that.
+// 2026-10-25 («إقامات قصيرة» pool, owner): the period handed to listingPriceString is the POOL from
+// src/lib/rentPool.ts, computed once as `pool` — still one owner, still null when the source published nothing.
+const { rentPool, cardFetchPeriodOr } = await import('../src/lib/rentPool.ts');
 check('finalize() delegates the price line to listingPriceString()',
-  /const priceStr = listingPriceString\(deal, r\.rent_period, r\.price_annual, r\.price_total\s*(?:,[\s\S]{0,80}?)?\)/
+  /const pool = deal === 'Rent' \? rentPool\(r\.source \?\? '', r\.rent_period\) : null;/.test(finalizeSrc)
+  // (2026-10-26: `servedAnnual` = r.price_annual, or ×12 for a cheap «yearly» home/business rent — one owner still)
+  && /const priceStr = listingPriceString\(deal, pool, servedAnnual, r\.price_total\s*(?:,[\s\S]{0,80}?)?\)/
     .test(finalizeSrc),
   'finalize() no longer calls listingPriceString — the formatting rule has a second owner again, '
   + 'and the behavioural checks above no longer cover what the card actually renders');
@@ -104,7 +109,8 @@ check('finalize() does not re-inline the old "not monthly ⇒ /yr" expression',
   'the pre-fix expression `isMonthlyRent ? \'/mo\' : \'/yr\'` is back in src/data/remote.ts — it '
   + 'stamps «/سنوياً» on every rent row whose source published no period');
 check('finalize() does not default Listing.rentPeriod to annual either',
-  /rentPeriod: deal === 'Rent' \? \(r\.rent_period \?\? null\) : null/.test(finalizeSrc)
+  /rentPeriod: pool,/.test(finalizeSrc)
+  && rentPool('aqar_residential_listings', null) === null && rentPool('Aqar', '') === null && rentPool('Aqar', undefined) === null
   && !/r\.rent_period \?\? 'annual'/.test(REMOTE),
   'Listing.rentPeriod is being defaulted to \'annual\' when the source published no period');
 
@@ -113,8 +119,12 @@ check('finalize() does not default Listing.rentPeriod to annual either',
 // not by the source. Pin the strict equality. The one exception is a row with NO price (owner
 // 2026-09-28: price on request shows under every period) — it renders «Price on request» with no
 // suffix, so there is nothing for the filter to label.
-check('keptFiltersReq still filters ANNUAL searches to an explicit rent_period=\'annual\' (or no price at all)',
-  /q\.rentPeriod === 'annual'\)\s*\{\s*\n\s*req = req\.or\('rent_period\.eq\.annual,price_annual\.is\.null'\);/.test(REMOTE),
+// 2026-10-25: the yearly branch now also admits a source-MONTHLY row (it pools as yearly at ×12, owner rule) —
+// but still only a PUBLISHED period or no price at all. The clause is executed, not read.
+check('keptFiltersReq still filters ANNUAL searches to a PUBLISHED rent_period (or no price at all)',
+  cardFetchPeriodOr('annual', 'aqar_residential_listings') === 'rent_period.in.(monthly,annual),price_annual.is.null'
+  && cardFetchPeriodOr('annual', 'gathern_residential_listings') === 'rent_period.eq.annual,price_annual.is.null'
+  && /const clause = cardFetchPeriodOr\(q\.rentPeriod, tbl\);\s*\n\s*if \(clause\) req = req\.or\(clause\);/.test(REMOTE),
   'the annual branch no longer requires an explicit annual rent_period — priced NULL-period rows would be '
   + 'swept into an annual-only result set');
 check('a price-on-request rental renders no period suffix under any period',

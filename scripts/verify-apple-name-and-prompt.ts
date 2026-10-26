@@ -125,7 +125,7 @@ const modalProblems = (f: Record<string, string>) => {
     namePromptSeen: o.seen, createdAt: at(o.created ?? 30_000), lastSignInAt: at(o.last ?? (o.created ?? 30_000) - 1_000) });
   const askTable = (ask: (u: any, c: boolean, o: boolean, n: number) => boolean): [string, boolean][] => [
     ['an Apple SIGN-UP (created now, first sign-in, no name) → ASK', ask(u({}), true, false, NOW) === true],
-    ['a Google SIGN-UP with Google\'s name → ASK (prefilled)', ask(u({ name: 'Yusuf AlNashwan' }), true, false, NOW) === true],
+    ['a Google SIGN-UP with Google\'s name → NO box (owner 2026-10-26: the name is kept, the party plays)', ask(u({ name: 'Yusuf AlNashwan' }), true, false, NOW) === false],
     ['a returning Google/Apple LOG-IN (account 2 days old) → never', ask(u({ name: 'Sara', created: 2 * 86_400_000, last: 5_000 }), true, false, NOW) === false],
     ['a SECOND sign-in 5 min after sign-up → never (not the first session)', ask(u({ created: 5 * 60_000, last: 10_000 }), true, false, NOW) === false],
     ['a first session restored 2 days later → never (not a fresh sign-up)', ask(u({ created: 2 * 86_400_000, last: 2 * 86_400_000 - 1_000 }), true, false, NOW) === false],
@@ -141,6 +141,7 @@ const modalProblems = (f: Record<string, string>) => {
   mustCatch('the box on every log-in (no sign-up test)', await failsTable(files[PROMPT].replace(' && isFreshSignUp(user.createdAt, user.lastSignInAt, now)', ''), LW));
   mustCatch('a sign-up test without the first-session rule (a second sign-in is asked again)', await failsTable(files[PROMPT], LW.replace(' && Math.abs(l - c) <= 60_000', '')));
   mustCatch('a sign-up window of days, not minutes', await failsTable(files[PROMPT], LW.replace('SIGN_UP_WINDOW_MS = 10 * 60 * 1000', 'SIGN_UP_WINDOW_MS = 10 * 86_400_000')));
+  mustCatch('a named sign-up asked anyway (owner 2026-10-26: only a nameless one gets the box)', await failsTable(files[PROMPT].replace(" && !(user.name ?? '').trim()", ''), LW));
   mustCatch('the seen flag ignored (asked again after an answer)', await failsTable(files[PROMPT].replace(' && !user.namePromptSeen', ''), LW));
   const mapOk = (a: string) => /createdAt: u\?\.created_at, lastSignInAt: u\?\.last_sign_in_at/.test(a);
   check('§3 the account\'s created_at / last_sign_in_at reach the user (mapSupabaseUser)', mapOk(files[AUTH]));
@@ -155,9 +156,9 @@ const modalProblems = (f: Record<string, string>) => {
   // Owner 2026-10-23: the box speaks the UI's language — «وش نناديك؟» / «اكتب اسمك» / «حفظ» / «لاحقاً».
   const i18n = read('src/i18n.tsx');
   const wordsOk = (p: string, i: string) => /tr\('What should we call you\?'\)/.test(p) && /placeholder=\{translate\(lang, 'Type your name'\)\}/.test(p)
-    && /tr\('Save'\)/.test(p) && /tr\('Later'\)/.test(p)
+    && /tr\('Save'\)/.test(p) && /tr\('Skip'\)/.test(p)
     && /'What should we call you\?': 'وش نناديك؟'/.test(i) && /'Type your name': 'اكتب اسمك'/.test(i)
-    && /'Save': 'حفظ'/.test(i) && /'Later': 'لاحقاً'/.test(i);
+    && /'Save': 'حفظ'/.test(i) && /'Skip': 'تخطي'/.test(i);
   check('§3 the owner\'s words, in both languages', wordsOk(files[PROMPT], i18n));
   mustCatch('a placeholder other than «اكتب اسمك»', !wordsOk(files[PROMPT].replace("translate(lang, 'Type your name')", "translate(lang, 'Display Name')"), i18n));
   mustCatch('the Arabic title drifting', !wordsOk(files[PROMPT], i18n.replace("'وش نناديك؟'", "'ما اسمك؟'")));
@@ -219,7 +220,11 @@ const modalProblems = (f: Record<string, string>) => {
     if (!/markJustSignedIn\(\);/.test(AUTHPAGE) || !/markJustSignedIn\(\)/.test(ONETAP)) out.push('the Google paths no longer use markJustSignedIn');
     // the party: only after a NON-EMPTY «حفظ» (an empty one shakes and returns), never from «لاحقاً»
     if (!/if \(!v\) \{ setShakeN\(\(n\) => n \+ 1\); field\.current\?\.focus\(\); return; \}\n\s*saveName\(v\);\n\s*close\(\);\n\s*welcomeOnceSaved\(v, \(\) => startNameParty\(reduced\)\);/.test(code)) out.push('the welcome + party do not follow a non-empty «حفظ»');
-    if ((code.match(/welcomeOnceSaved\(v, /g) ?? []).length !== 1 || (code.match(/startNameParty\(/g) ?? []).length !== 1) out.push('the welcome or the party is started from somewhere other than «حفظ»');
+    // Owner 2026-10-26: the party starts from exactly two places — a non-empty «حفظ», and a sign-up that arrived WITH
+    // a name (no box): «seen» first, then the same welcomeOnceSaved, gated by shouldPartyOnSignUp, once per account.
+    if ((code.match(/welcomeOnceSaved\(v, /g) ?? []).length !== 1 || (code.match(/startNameParty\(/g) ?? []).length !== 2) out.push('the welcome or the party is started from somewhere other than «حفظ» and the named sign-up');
+    if (!/const party = shouldPartyOnSignUp\(user, authChecked, authOpen, Date\.now\(\)\);/.test(code)
+      || !/if \(!party \|\| !user \|\| partied\.current === user\?\.sub\) return;\n\s*partied\.current = user\?\.sub \?\? null;\n\s*const given = user\.name\.trim\(\);\n\s*markNamePromptSeen\(\);\n\s*welcomeOnceSaved\(given, \(\) => startNameParty\(reduced\)\);/.test(code)) out.push('the named sign-up party is not «seen» + welcomeOnceSaved, once per account');
     const close = /const close = \(\) => \{[^\n]*\};/.exec(code)?.[0] ?? '';
     if (!close || /markJustSignedIn|welcomeOnceSaved|startNameParty/.test(close)) out.push('«لاحقاً» (close) can fire the welcome or the party');
     if (/name-celebration|ConfettiOverlay|partyConfetti\(|Welcome, \{name\}/.test(code)) out.push('a separate celebration card is back');
@@ -232,6 +237,8 @@ const modalProblems = (f: Record<string, string>) => {
   const wp = welcomeProblems(files[PROMPT], WELCOME);
   check('§6 after «حفظ»: the Google sign-in welcome (markJustSignedIn), once; never «لاحقاً»; no celebration card', wp.length === 0, wp.join('; '));
   mustCatch('the celebration card coming back', welcomeProblems(files[PROMPT].replace('<View style={s.prev}>', '<View testID="name-celebration" />\n              <View style={s.prev}>'), WELCOME).length > 0);
+  mustCatch('a named sign-up partying on every render (no once-per-account guard)', welcomeProblems(files[PROMPT].replace('if (!party || !user || partied.current === user?.sub) return;', 'if (!party || !user) return;'), WELCOME).length > 0);
+  mustCatch('a named sign-up party without recording «seen» (the home would wait forever)', welcomeProblems(files[PROMPT].replace('    const given = user.name.trim();\n    markNamePromptSeen();\n', '    const given = user.name.trim();\n'), WELCOME).length > 0);
   mustCatch('a save with no welcome / party', welcomeProblems(files[PROMPT].replace('    welcomeOnceSaved(v, () => startNameParty(reduced));\n', ''), WELCOME).length > 0);
   mustCatch('a party after an EMPTY «حفظ»', welcomeProblems(files[PROMPT].replace("if (!v) { setShakeN((n) => n + 1); field.current?.focus(); return; }", "if (!v) { setShakeN((n) => n + 1); startNameParty(reduced); return; }"), WELCOME).length > 0);
   mustCatch('«لاحقاً» throwing the party', welcomeProblems(files[PROMPT].replace("markNamePromptSeen(); setPhase('leave');", "markNamePromptSeen(); startNameParty(reduced); setPhase('leave');"), WELCOME).length > 0);
@@ -366,7 +373,8 @@ const modalProblems = (f: Record<string, string>) => {
   mustCatch('rain that never stops', (await play(SRC.replace('if (Date.now() < end) requestAnimationFrame(rain);', 'requestAnimationFrame(rain);'), false)).lastRain > 5250);
   mustCatch('disco lights that outlive the party', (await play(SRC.replace("setTimeout(() => { disco.setAttribute('data-ezh-disco', 'off'); setTimeout(() => disco.remove(), 600); }, PARTY_MS);", "setTimeout(() => { disco.setAttribute('data-ezh-disco', 'off'); setTimeout(() => disco.remove(), 600); }, 9000);"), false)).discoOff !== 5000);
   mustCatch('confetti under reduced motion', (await play(SRC.replace('if (reduced || ', 'if ('), true)).loads > 0);
-  const passOk = (p: string, css: string) => /const reduced = useReducedMotion\(\);/.test(p) && /startNameParty\(reduced\)/.test(p)
+  const passOk = (p: string, css: string) => /const reduced = useReducedMotion\(\);/.test(p)
+    && (p.match(/startNameParty\(/g) ?? []).length > 0 && (p.match(/startNameParty\(/g) ?? []).length === (p.match(/startNameParty\(reduced\)/g) ?? []).length
     && /@media \(prefers-reduced-motion:reduce\)\{\[data-ezh-scrim\],\[data-ezh-scrim\] \*,\[data-ezh-shine\],\[data-ezh-disco\],\[data-ezh-disco\] \*\{animation:none!important;transition:none!important\}\}/.test(css);
   check('§8 the box hands the real reduced-motion flag to the party, and the CSS stills every motion', passOk(files[PROMPT], SRC));
   mustCatch('the party told motion is fine regardless', !passOk(files[PROMPT].replace('startNameParty(reduced)', 'startNameParty(false)'), SRC));
@@ -477,7 +485,10 @@ const modalProblems = (f: Record<string, string>) => {
       if (file !== PROMPT && file !== AUTH && /markNamePromptSeen\(/.test(code)) out.push(`${file} marks the box seen`);
     }
     const p = f[PROMPT].split('\n').filter((l) => !/^\s*(\/\/|\{\/\*)/.test(l)).join('\n');
-    if ((p.match(/markNamePromptSeen\(\)/g) ?? []).length !== 1 || !/const close = \(\) => \{ setClosed\(true\); setReopened\(false\); markNamePromptSeen\(\);/.test(p)) out.push('the seen write is not only in close()');
+    // Two writers only: close() (Save / Skip), and the sign-up that arrived WITH a name and so never gets the box
+    // (owner 2026-10-26), gated by shouldPartyOnSignUp. Any third write (e.g. inside the box's prefill) is RED.
+    if ((p.match(/markNamePromptSeen\(\)/g) ?? []).length !== 2 || !/const close = \(\) => \{ setClosed\(true\); setReopened\(false\); markNamePromptSeen\(\);/.test(p)
+      || !/if \(!party \|\| !user \|\| partied\.current === user\?\.sub\) return;\n\s*partied\.current = user\?\.sub \?\? null;\n\s*const given = user\.name\.trim\(\);\n\s*markNamePromptSeen\(\);/.test(p)) out.push('the seen write is not only in close() and the named sign-up');
     const closeUses = (p.match(/\bclose\b(?!\s*=)/g) ?? []).length;
     if (!/testID="name-prompt-later" style=\{s\.later\} onPress=\{close\}/.test(p) || !/\n\s*close\(\);\n\s*welcomeOnceSaved/.test(p) || closeUses !== 2) out.push(`close() is reachable from something other than «لاحقاً» / «حفظ» (${closeUses} uses)`);
     return out;
@@ -489,7 +500,7 @@ const modalProblems = (f: Record<string, string>) => {
     return out;
   };
   const sp9 = seenProblems(files);
-  check('§9 the «seen» flag is written ONLY by «حفظ» or «لاحقاً» (no tap-outside, no automatic path)', sp9.length === 0, sp9.join('; '));
+  check('§9 the «seen» flag is written ONLY by «حفظ» / «تخطي», or by a sign-up that already has a name (no tap-outside, no other path)', sp9.length === 0, sp9.join('; '));
   mustCatch('a tap outside the box marking it seen (the Google sign-up P1)', seenProblems({ ...files, [PROMPT]: files[PROMPT].replace('<View style={[s.card,', '<Pressable style={StyleSheet.absoluteFill} onPress={close} />\n      <View style={[s.card,') }).length > 0);
   mustCatch('a "has a name → mark seen" shortcut', seenProblems({ ...files, [PROMPT]: files[PROMPT].replace('    setName(given);\n', '    setName(given);\n    if (given) markNamePromptSeen();\n') }).length > 0);
   mustCatch('another file writing the flag (e.g. the /auth landing)', seenProblems(files, { 'src/app/auth.tsx': read('src/app/auth.tsx').replace('markJustSignedIn();', 'markJustSignedIn(); supabase.auth.updateUser({ data: { name_prompt_seen: true } });') }).length > 0);
@@ -537,7 +548,7 @@ const flagProblems = (f: Record<string, string>) => {
   const out: string[] = [];
   if (sha(providerText(f[AUTH])) !== PIN_PROVIDER) out.push('signInWithProvider changed');
   if (sha(appleText(f[MODAL])) !== PIN_APPLE) out.push('onAppleContinue (outside the flagged block) changed');
-  if (!/export const APPLE_JS_SIGNIN = process\.env\.EXPO_PUBLIC_APPLE_JS_SIGNIN === '1';/.test(f[AUTH])) out.push('the flag is not strictly opt-in');
+  if (!/export const APPLE_JS_SIGNIN = process\.env\.EXPO_PUBLIC_APPLE_JS_SIGNIN !== '0';/.test(f[AUTH])) out.push('the flag is not on-by-default with a "0" off switch (owner 2026-10-26)');
   if (!/if \(APPLE_JS_SIGNIN && isBackendLive && Platform\.OS === 'web'\) void prepareAppleJs\(\);/.test(f[MODAL])) out.push('Apple\'s script loads with the flag off');
   const outside = f[MODAL].replace(appleBlock(f[MODAL]), '');
   if (/signInWithAppleJs\(/.test(outside)) out.push('signInWithAppleJs is reachable outside the flagged block');
@@ -545,10 +556,10 @@ const flagProblems = (f: Record<string, string>) => {
 };
 {
   const p = flagProblems(files);
-  check('§5 flag off → Apple sign-in is today\'s redirect, byte for byte', p.length === 0, p.join('; '));
+  check('§5 the Apple popup is on (owner 2026-10-26), the redirect is unchanged and still the fallback', p.length === 0, p.join('; '));
   mustCatch('the redirect itself edited', flagProblems({ ...files, [AUTH]: files[AUTH].replace("options: { redirectTo, queryParams }", "options: { redirectTo, queryParams, skipBrowserRedirect: true }") }).length > 0);
   mustCatch('the Apple JS path made unconditional', flagProblems({ ...files, [MODAL]: files[MODAL].replace('        if (APPLE_JS_SIGNIN) {', '        if (true) {') }).length > 0);
-  mustCatch('the flag defaulting ON', flagProblems({ ...files, [AUTH]: files[AUTH].replace("=== '1';", "!== '0';") }).length > 0);
+  mustCatch('the flag back to off-by-default (Apple names lost again)', flagProblems({ ...files, [AUTH]: files[AUTH].replace("!== '0';", "=== '1';") }).length > 0);
   mustCatch('Apple\'s script preloaded for everyone', flagProblems({ ...files, [MODAL]: files[MODAL].replace('if (APPLE_JS_SIGNIN && isBackendLive', 'if (isBackendLive') }).length > 0);
   mustCatch('the fallback redirect removed after a JS failure', flagProblems({ ...files, [MODAL]: files[MODAL].replace("        const r = await signInWithProvider('apple');", "        return;") }).length > 0);
 }
