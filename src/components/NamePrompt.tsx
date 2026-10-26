@@ -66,6 +66,22 @@ export function welcomeOnceSaved(v: string, onWelcome: () => void): void {
   timer = setTimeout(stop, 20000);
 }
 
+/** After «تخطي» on a nameless sign-up (owner 2026-10-26): the same welcome and party «حفظ» gives, greeting «ضيف إزهله»,
+ *  once the «seen» write is in the stored session (that is what lets the home greet the guest name). 20 s cap. */
+export function welcomeOnceSkipped(onWelcome: () => void): void {
+  if (!supabase) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const { data } = supabase.auth.onAuthStateChange((event, session) => {
+    const m = session?.user?.user_metadata ?? {};
+    if (event !== 'USER_UPDATED' || m.name_prompt_seen !== true || String(m.full_name || m.name || '').trim()) return;
+    stop();
+    markJustSignedIn();
+    onWelcome();
+  });
+  const stop = () => { if (timer) clearTimeout(timer); data.subscription.unsubscribe(); };
+  timer = setTimeout(stop, 20000);
+}
+
 /** The circle's letter: the typed name's first character, live ('' → the person icon). */
 export function letterOf(typed: string): string {
   return (typed ?? '').trim().charAt(0).toUpperCase();
@@ -160,6 +176,13 @@ export default function NamePrompt() {
   }, [ask]);
 
   const close = () => { setClosed(true); setReopened(false); markNamePromptSeen(); setPhase('leave'); setTimeout(() => setPhase((p) => (p === 'leave' ? 'off' : p)), LEAVE_MS); };
+  // «تخطي»: the box closes; on the sign-up box (not the menu's reopen) a nameless account is then welcomed as
+  // «ضيف إزهله» with the party (owner 2026-10-26: «with party it's fine»).
+  const skip = () => {
+    const signUpBox = !reopened && !(user?.name ?? '').trim();
+    close();
+    if (signUpBox) welcomeOnceSkipped(() => startNameParty(reduced));
+  };
   const save = () => {
     const v = name.trim();
     // An empty «حفظ» is not disabled: the field gives a small shake and takes the focus.
@@ -229,7 +252,7 @@ export default function NamePrompt() {
           </View>
         </View>
         {!chip && <Text style={s.hint} testID="name-prompt-hint">{tr(lang === 'ar' ? "We'll write it in English for you" : "We'll write it in Arabic for you")}</Text>}
-        <Pressable testID="name-prompt-later" style={s.later} onPress={close} hitSlop={8}>
+        <Pressable testID="name-prompt-later" style={s.later} onPress={skip} hitSlop={8}>
           <Text style={s.laterText}>{tr('Skip')}</Text>
         </Pressable>
         <Pressable testID="name-prompt-save" style={[s.save, !name.trim() && s.saveOff]} onPress={save} {...ds({ ezhSave: '1' })}>
