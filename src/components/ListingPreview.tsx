@@ -5,8 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, font, lightColors, radius } from '@/theme/tokens';
 import { BUZZER_GOLD, TAP44 } from '@/theme/palette';
 import { useI18n, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
-import { listingPrice, listingDiscountOldPrice, sourceName } from '@/lib/listingDisplay';
-import { advertisedMonthly } from '@/lib/rentPool';
+import { listingPrice, listingDiscountOldPrice, sourceName, advertisedMonthlyText } from '@/lib/listingDisplay';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, attrDisplayLabel, hideArabicProseInEnglish, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { translitPlace } from '@/lib/translitPlace';
 import { DIRECTION_LABEL } from '@/lib/afEvidence';
@@ -575,11 +574,9 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             </Text>
             {/* «السعر المعلن 3,000 شهرياً» (owner 2026-10-25): the site quoted per month; the pool is yearly at ×12. */}
             {(() => {
-              const monthly = advertisedMonthly(l.rentPeriod as 'monthly' | 'annual' | null, l.sourceRentPeriod, l.priceAnnual);
-              return monthly == null ? null : (
-                <Text testID="listing-preview-advertised-monthly" numberOfLines={1} style={[s.priceUnit, tx]}>
-                  {t('Advertised price {a}/month', { a: `${t('SAR')} ${monthly.toLocaleString('en-US')}` })}
-                </Text>
+              const text = advertisedMonthlyText(l, locale);
+              return text == null ? null : (
+                <Text testID="listing-preview-advertised-monthly" numberOfLines={1} style={[s.priceUnit, tx]}>{text}</Text>
               );
             })()}
             {/* Source-published discount (owner 2026-10-19): the old price struck + «خصم X٪» under the

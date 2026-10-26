@@ -63,7 +63,8 @@ check('finalize() pools the row with rentPool(r.source, r.rent_period) and price
   && /listingPriceString\(deal, pool, r\.price_annual/.test(remote) && /rentPeriod: pool,/.test(remote) && /sourceRentPeriod: deal === 'Rent' \? \(r\.rent_period \?\? null\) : null,/.test(remote));
 check('the card fetch applies cardFetchPeriodOr for monthly / annual / both', /const clause = cardFetchPeriodOr\(q\.rentPeriod, tbl\);/.test(remote));
 check('both card layouts and the ad page print the advertised-monthly line',
-  (card.match(/\{advertisedMonthlyLine\(listing, t\)\}/g) || []).length === 2 && /listing-preview-advertised-monthly/.test(preview));
+  (card.match(/\{advertisedMonthlyLine\(listing, locale\)\}/g) || []).length === 2 && /advertisedMonthlyText\(l, locale\)/.test(preview)
+  && /listing-preview-advertised-monthly/.test(preview));
 check('the button and its hint say «إقامات قصيرة» / Short stays; the Arabic copy never claims a contract length',
   /label=\{t\(which === 'monthly' \? 'Short stays' : 'Yearly'\)\}/.test(index) && /'Short stays': 'إقامات قصيرة'/.test(i18n)
   && /'Advertised price \{a\}\/month': 'السعر المعلن \{a\} شهرياً'/.test(i18n)
