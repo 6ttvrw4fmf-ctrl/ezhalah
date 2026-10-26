@@ -252,12 +252,6 @@ mustCatch('a later migration disabling all triggers', laterProblems([{ n: '99999
 check('a later migration that re-creates the trigger is fine', laterProblems([{ n: '99999999999999_x.sql', s: 'drop trigger if exists trg_pin_district_on_list on x;\ncreate trigger trg_pin_district_on_list before insert on x;' }]));
 
 check('every listing: copy spellings fold to the list name, key v2, served-twins alarm', everyListingProblems(tree));
-check('one name, one list: the city guard and the district guard refuse the other list\'s names', cityGuardProblems(tree));
-const cityFile = latestDef(tree, CITY_RE).n;
-mustCatch('a city deleted', cityGuardProblems(mutTree(cityFile, "if tg_op in ('DELETE', 'TRUNCATE') then\n    raise exception 'city list guard: cities are never deleted", "if false then\n    raise exception 'city list guard: cities are never deleted")));
-mustCatch('a duplicate city allowed', cityGuardProblems(mutTree(cityFile, "coalesce(public.place_km(c.city_id, new.city_id) < 40, c.region_id = new.region_id)\n   limit 1;\n  if v_hit is not null then\n    raise exception 'city list guard: «%» is already the city", "false\n   limit 1;\n  if v_hit is not null then\n    raise exception 'city list guard: «%» is already the city")));
-mustCatch('the city exception unlocking any name', cityGuardProblems(mutTree(cityFile, 'v_ok is not null and public.district_key_letters(v_ok) = k then return new', 'v_ok is not null then return new')));
-mustCatch('own city name allowed as a district', listFnProblems(mutFn("raise exception 'district list guard: «%» is the name of its own city — a city is not a district', new.district_ar;", "null;").replace('is the name of its own city', 'x')));
 const keyFile = latestDef(tree, KEY_RE).n, copyFile = latestDef(tree, COPY_RE).n, finishFile = latestDef(tree, FINISH_RE).n;
 const mutTree = (file: string, from: string | RegExp, to: string) => tree.map((f) => {
   if (f.n !== file) return f;
@@ -272,6 +266,13 @@ mustCatch('a listed name folded onto another', everyListingProblems(mutTree(copy
 mustCatch('one-letter names folded by themselves', everyListingProblems(mutTree(copyFile, 'return v;\nend $function$;', 'return coalesce(v, (select b.district_norm from public.loc_catalog_district b where public.district_edit_distance(public.district_key_letters(b.district_ar), k1) <= 1 limit 1));\nend $function$;')));
 mustCatch('the fold removed from loc_display_district_ar', everyListingProblems(mutTree(latestDef(tree, DISPLAY_RE).n, 'public.district_copy_of(p_city_id, p_raw),\n                     norm_district_tok(p_raw)) as key', 'norm_district_tok(p_raw)) as key')));
 mustCatch('the served-twins alarm not rostered', everyListingProblems(tree.map((f) => ({ n: f.n, s: f.s.replace("'''mon_detect_district_served_twins'', ' || anchor", "anchor") }))));
+
+check('one name, one list: the city guard and the district guard refuse the other list\'s names', cityGuardProblems(tree));
+const cityFile = latestDef(tree, CITY_RE).n;
+mustCatch('a city deleted', cityGuardProblems(mutTree(cityFile, "if tg_op in ('DELETE', 'TRUNCATE') then\n    raise exception 'city list guard: cities are never deleted", "if false then\n    raise exception 'city list guard: cities are never deleted")));
+mustCatch('a duplicate city allowed', cityGuardProblems(mutTree(cityFile, "coalesce(public.place_km(c.city_id, new.city_id) < 40, c.region_id = new.region_id)\n   limit 1;\n  if v_hit is not null then\n    raise exception 'city list guard: «%» is already the city", "false\n   limit 1;\n  if v_hit is not null then\n    raise exception 'city list guard: «%» is already the city")));
+mustCatch('the city exception unlocking any name', cityGuardProblems(mutTree(cityFile, 'v_ok is not null and public.district_key_letters(v_ok) = k then return new', 'v_ok is not null then return new')));
+mustCatch('own city name allowed as a district', listFnProblems(mutFn("raise exception 'district list guard: «%» is the name of its own city — a city is not a district', new.district_ar;", "null;").replace('is the name of its own city', 'x')));
 
 if (failed) { console.log(`\ndistrict guards: ${failed} problem(s)`); process.exit(1); }
 console.log('\ndistrict guards: all checks passed');
