@@ -374,3 +374,22 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   real on a DDL-only body too (4th way, 60 s, nothing landed): a function whose text carries `delete` needs a human
   SQL-editor apply — stop retrying it, keep it in LINE 1. The four engineers all fired at 11:04 UTC tonight instead of
   their 05/07/09/11 slots: read the start rows before judging an overlap as an engineer's choice.
+
+## Lessons from 2026-10-26 (🔧 fleet contract K — verified against the database and the run timelines)
+
+- **Dispatch the branch proof FIRST, before any probe, by minute 20.** The runner queue and a shared
+  concurrency group eat the proof: ⚡ 10-23 cancelled its own probe to land the tamyaz proof; 🆕 10-25 lost a
+  district fix to the :10 cut-off behind a 30-min queue; ♻️ 10-26 found fleet-liveness and its recheck share one
+  concurrency group, so a branch proof queued behind a long site waited for it and a second dispatch cancelled
+  the first. Three nights, three engineers: count the queued runs, dispatch the proof, then probe.
+- **Before attributing a recovery to your fix, read the check's own log and ask whether the UNFIXED code also
+  succeeds in the same window.** ⚡ 10-26: the old-code nightly holoul job succeeded 40 min after the branch
+  proof, so PR #8796 is hardening, not the proven root-cause fix. 🆕 10-26: the live AF-oracle check went red on
+  every PR at 07:16 after another session's migration; the fix was already landing (#8820) and merging main was
+  all that was needed.
+- **A run that reports success / «covered 100%» is not coverage.** ♻️ 10-26: offset paging on a tied order
+  skipped 1,755 haraj / 191 rakez / 163 tuba rows while every run said covered 100% — count DISTINCT rows, give
+  the page a unique tie-breaker. 🔧 10-18: engineer-automerge reported «success» three times while a green PR sat
+  BEHIND; 🔧 10-26: the same workflow read «not a mirror» for 24 h on three mirror PRs whose diff was EMPTY
+  (the file had reached main through another PR). Read the run LIST, the detector's open_alerts and the PR's
+  file list, never the conclusion word.
