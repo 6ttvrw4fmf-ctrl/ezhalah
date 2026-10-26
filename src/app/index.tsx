@@ -1546,7 +1546,7 @@ export default function Home() {
                   {(['annual', 'monthly'] as const).map((which) => (
                     <OptionBox compact
                       key={which}
-                      label={t(which === 'monthly' ? 'Monthly' : 'Yearly')}
+                      label={t(which === 'monthly' ? 'Short stays' : 'Yearly')}
                       img={PERIOD_IMG[which === 'monthly' ? 'Monthly' : 'Yearly']}
                       selected={which === 'monthly' ? rentPeriod === 'monthly' || rentPeriod === 'both'
                                                      : rentPeriod === 'annual' || rentPeriod === 'both'}
@@ -1568,7 +1568,7 @@ export default function Home() {
                   ))}
                 </View>
                 <Text style={s.rentHint}>
-                  {t(rentPeriod === 'monthly' ? 'Monthly: includes short stays, priced by length of stay.'
+                  {t(rentPeriod === 'monthly' ? 'Short stays: stays shorter than a year, priced by length of stay.'
                     // Owner feedback (2026-08-22): drop the "this means you want both, so you get
                     // both" framing — selecting both buttons is already self-explanatory. Keep only
                     // the one genuinely non-obvious fact: mixed results show mixed price units.

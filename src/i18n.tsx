@@ -165,6 +165,12 @@ const AR: Record<string, string> = {
   'Monthly Rent Budget': 'الميزانية الشهرية للإيجار',
   'Purchase Budget': 'ميزانية الشراء',
   'Monthly': 'شهري',
+  // The rent-period button (owner 2026-10-25): «شهري» became «إقامات قصيرة» — Gathern + Aqar Monthly only, stays
+  // shorter than a year. Every other site's per-month figure is a YEARLY listing at ×12 (src/lib/rentPool.ts).
+  'Short stays': 'إقامات قصيرة',
+  'Short stays or yearly': 'إقامات قصيرة وسنوي',
+  'Short stays: stays shorter than a year, priced by length of stay.': 'إقامات قصيرة: إقامات أقل من سنة، وأسعارها حسب مدة الإقامة.',
+  'Advertised price {a}/month': 'السعر المعلن {a} شهرياً',
   'Yearly': 'سنوي',
   'Both': 'كلاهما',
   // Tiny info note shown under the Monthly/Yearly toggle so the user knows what each period means.
