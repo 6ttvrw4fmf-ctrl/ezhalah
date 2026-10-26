@@ -4,7 +4,7 @@ import { Image as XImage } from 'expo-image';
 import Animated from 'react-native-reanimated';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SKY_CALM_PROPS } from '@/lib/scrollCalm';
-import { takeEagleTakeoff, TAKEOFF_MS } from '@/lib/eagleTakeoff';
+import { TAKEOFF_MS } from '@/lib/eagleTakeoff';
 import CloudWisp from './CloudWisp';
 
 const FALCONER = require('../../assets/icons/insight-falconer-original.png');
@@ -34,10 +34,11 @@ const drift = (ms: number, px: number) => ({
 export default function HeroFalconer({ size, flip }: { size: { width: number; height: number }; flip: boolean }) {
   const reduced = useReducedMotion();
   const { width: w, height: h } = size;
-  // Once per session, occasionally (lib/eagleTakeoff); unmounted when the 2.8 s flight is over.
+  // On EVERY open and refresh (owner 2026-10-26: «make it whenever the user refresh»); unmounted when the 2.8 s
+  // flight is over. Reduced motion: never.
   const [takeoff, setTakeoff] = useState(false);
   useEffect(() => {
-    if (reduced || !takeEagleTakeoff()) return;
+    if (reduced) return;
     setTakeoff(true);
     const id = setTimeout(() => setTakeoff(false), TAKEOFF_MS);
     return () => clearTimeout(id);
