@@ -257,6 +257,27 @@ def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[st
     return None                          # a category label is not proof of life; hold at UNKNOWN
 
 
+def detail_proves_live(pid: Any, status: Optional[int], page: str) -> bool:
+    """True only when the crawl's OWN fetch of this listing's page (2026-10-27) is a direct live read.
+
+    The crawl already fetches every ad's own page each run (parse_detail), so recording that read
+    costs zero requests (db.mark_direct_alive). Measured 2026-10-27: a live page carries the body
+    class `postid-<its REST id>` and only category/promo ribbons; the rented ad /estate_property/2845/
+    carries `postid-35661` plus the «تأجرت» ribbon, the sold /6024/ the «تم البيع» ribbon; a made-up
+    slug answers 404. So: HTTP 200 AND the page names THIS post id AND none of its OWN ribbons is a
+    GONE_STATUS_AR word. Anything else (a failed fetch, a redirect onto another post, a removal
+    ribbon) proves nothing and stamps nothing."""
+    if status != 200 or not page or not pid:
+        return False
+    if not re.search(rf"\bpostid-{re.escape(str(pid))}\b", page):
+        return False
+    own = [s.strip() for s in _OWN_STATUS_RE.findall(page)]
+    return not any(s in GONE_STATUS_AR for s in own)
+
+
+DIRECT_ALIVE_ORACLE = "eastabha.detail_fetch.postid_and_own_ribbon"
+
+
 _probe = http_liveness.LivenessProbe(
     platform="eastabha",
     signal=_signal,
@@ -891,6 +912,11 @@ def main() -> int:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
+            if row.get("active") is True and detail_proves_live(
+                    pid, getattr(r, "status_code", None) if r else None, getattr(r, "text", "") if r else ""):
+                # The page this crawl just read IS this listing and shows no removal ribbon: a
+                # DIRECT live read, recorded (db._wasalt_batch drops it if the row ends inactive).
+                db.mark_direct_alive(row, oracle=DIRECT_ALIVE_ORACLE)
             (com if cat == "commercial" else res).append(row)
             if gone:
                 gone_ct += 1

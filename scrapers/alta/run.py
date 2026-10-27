@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import html as ihtml
 import re
@@ -45,10 +46,12 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 BASE = "https://alta.com.sa"
 REST = f"{BASE}/wp-json/wp/v2"
 SOURCE = "Alta"
 LAST_FETCH_NOTE = ""
+LAST_FETCH_TOTAL: Optional[int] = None
 PREFIX = "ALT"
 
 TAXONOMIES = ("property_category", "property_action_category", "property_city",
@@ -205,8 +208,9 @@ def fetch_listings(s: cc.Session) -> list[dict]:
     # Records WHY enumeration stopped. A timeout, a 403 and a genuinely empty source are three
     # different incidents; collapsing them into "no listings" sent the first CI run chasing a
     # dead source that was actually fine (2026-09-05).
-    global LAST_FETCH_NOTE
+    global LAST_FETCH_NOTE, LAST_FETCH_TOTAL
     LAST_FETCH_NOTE = "no pages attempted"
+    LAST_FETCH_TOTAL = None
     for page in range(1, 30):
         try:
             r = s.get(f"{REST}/estate_property?per_page=100&page={page}", timeout=40)
@@ -216,6 +220,13 @@ def fetch_listings(s: cc.Session) -> list[dict]:
         if r.status_code != 200:
             LAST_FETCH_NOTE = f"page {page} returned HTTP {r.status_code}"
             break
+        if page == 1:
+            # The source's own count (x-wp-total: 17 on 2026-10-27). The absence prune runs only
+            # when the walk read exactly that many posts; a missing header is not a count.
+            try:
+                LAST_FETCH_TOTAL = int((getattr(r, "headers", None) or {}).get("x-wp-total"))
+            except (TypeError, ValueError):
+                LAST_FETCH_TOTAL = None
         try:
             batch = r.json()
         except Exception:
@@ -297,7 +308,7 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
     title = _clean((p.get("title") or {}).get("rendered", ""))
 
     row: dict[str, Any] = {
-        "ad_number": f"{PREFIX}{int(hashlib.md5((p.get('slug') or str(p.get('id'))).encode()).hexdigest()[:12], 16)}",
+        "ad_number": _ad_number(p),
         "listing_url": link,
         "source": SOURCE,
         "active": not gone,
@@ -339,6 +350,92 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
     # an unticked one is silence, never «no». One term per line, so a term never borrows a neighbour's word.
     row.update(normalize.prose_amenities("\n".join(terms("property_features"))))
     return row, category
+
+
+def _ad_number(p: dict) -> str:
+    """The row id, derived from the post's own slug (its id when it has none)."""
+    return f"{PREFIX}{int(hashlib.md5((p.get('slug') or str(p.get('id'))).encode()).hexdigest()[:12], 16)}"
+
+
+# ── LIVENESS: the post's OWN REST record (measured 2026-10-27) ───────────────────────────────────
+# GET /wp-json/wp/v2/estate_property/<wp_id>:
+#   live post   → 200 JSON, id = wp_id, status «publish», property_status names no GONE status
+#   deleted id  → 404 {"code": "rest_post_invalid_id"}                      → GONE
+#   this post now carries تم البيع / تم التأجير / غير متاح, or left «publish» → GONE (the source's own
+#                 status field — the same one the crawl pins sold rows on)
+#   a status id the run's taxonomy map cannot name, another post (slug → a different ad_number),
+#   401/403/429/5xx, a timeout, an HTML page → UNKNOWN
+# The ad_number is an md5 of the slug, so the wp_id comes from the row's own additional_info.wp_id.
+def _signal_for(wp_id: int, ad_number: str, tax: dict[str, dict[int, str]]):
+    names = tax.get("property_status") or {}
+
+    def _signal(status, body, _moved):
+        try:
+            j = json.loads(body)
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(j, dict):
+            return None
+        if status == 404 and j.get("code") == "rest_post_invalid_id":
+            return "gone"
+        if status != 200 or j.get("id") != wp_id or _ad_number(j) != ad_number:
+            return None
+        if (j.get("status") or "").lower() != "publish":
+            return "gone"
+        ids = j.get("property_status") or []
+        if any(i not in names for i in ids):
+            return None                       # a status nobody could read is no answer
+        if any(g in names[i] for i in ids for g in GONE_STATUSES):
+            return "gone"
+        return "live"
+    return _signal
+
+
+def _wp_id_from_db(ad_number: str) -> Optional[int]:
+    for tbl in ("alta_residential_listings", "alta_commercial_listings"):
+        try:
+            data = db._execute(db.sb().table(tbl).select("additional_info").eq("ad_number", ad_number)
+                               .limit(1), what=tbl + ".wp_id").data or []
+        except Exception:  # noqa: BLE001 — a failed lookup is UNKNOWN, never a kill
+            return None
+        if data:
+            wid = (data[0].get("additional_info") or {}).get("wp_id")
+            return wid if isinstance(wid, int) else None
+    return None
+
+
+def _make_verify_gone(session_fn, tax: dict[str, dict[int, str]], wp_id_by_ad: dict[str, int],
+                      control_ad: Optional[str], wp_id_lookup=_wp_id_from_db):
+    """verify_gone(ad_number) for prune_unseen and stamp_seen_alive. A removal is withheld unless
+    `control_ad` (an active post THIS crawl just read) reads live through the same oracle."""
+    state: dict[str, tuple[bool, str]] = {}
+
+    def one(ad_number: str):
+        wp_id = wp_id_by_ad.get(ad_number)
+        if wp_id is None:
+            wp_id = wp_id_lookup(ad_number)
+        if not isinstance(wp_id, int):
+            return "unknown", f"{ad_number!r} has no stored wp_id to read"
+        return LivenessProbe(platform="alta", signal=_signal_for(wp_id, ad_number, tax), session=session_fn,
+                             url_for=lambda _ad: f"{REST}/estate_property/{wp_id}").verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if "v" not in state:
+            if not control_ad:
+                state["v"] = (False, "no active post from this crawl to use as a live control")
+            else:
+                verdict, why = one(control_ad)
+                state["v"] = (verdict == "live", f"control {control_ad}: {verdict} ({why})")
+        return state["v"]
+
+    def verify_gone(ad_number: str):
+        verdict, why = one(ad_number)
+        if verdict == "gone":
+            ok, cwhy = canary()
+            if not ok:
+                return "unknown", f"removal withheld — {cwhy} (would have been: {why})"
+        return verdict, why
+    return verify_gone
 
 
 def _pin_sold_inactive(table: str, ad_numbers: list[str],
@@ -443,6 +540,31 @@ def main() -> int:
                       f"{str(r['property_type']):10s} {str(r['city']):14s} "
                       f"{str(r['area_m2']):>7}m² price={r['price_total']}")
         else:
+            # DIRECT liveness (2026-10-27). Until today nothing here ever removed a post that left the
+            # REST list, and no active row had ever been verified (0 of 7). Now:
+            #  • an active row the list no longer serves is a CANDIDATE; prune_unseen re-reads its own
+            #    record at grace (3 complete walks) and only the record's own 404/status can hide it;
+            #  • every active row the list DID serve has its own record read, and only 'live' writes.
+            wp_ids = {r["ad_number"]: r["additional_info"].get("wp_id") for r in res + com
+                      if isinstance(r["additional_info"].get("wp_id"), int)}
+            live_seen = sorted(r["ad_number"] for r in res + com if r["active"])
+            verify_gone = _make_verify_gone(lambda: s, tax, wp_ids, live_seen[0] if live_seen else None)
+            complete = args.type == "all" and LAST_FETCH_TOTAL is not None and LAST_FETCH_TOTAL == len(posts)
+            pruned = 0
+            for tbl, rows in (("alta_residential_listings", res), ("alta_commercial_listings", com)):
+                seen_tbl = {r["ad_number"] for r in rows}
+                if complete and seen_tbl:
+                    k = db.prune_unseen(tbl, seen_tbl, source=SOURCE, verify_gone=verify_gone)
+                    if k < 0:
+                        print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
+                    else:
+                        pruned += k
+                live_tbl = {r["ad_number"] for r in rows if r["active"]}
+                if live_tbl:
+                    db.stamp_seen_alive(tbl, live_tbl, verify_gone, source=SOURCE)
+            if not complete:
+                print(f"  NOT pruning: walk read {len(posts)} of x-wp-total {LAST_FETCH_TOTAL}", flush=True)
+            print(f"  pruned {pruned}", flush=True)
             n = len(res) + len(com)
             # end_run returns the EFFECTIVE ok it actually wrote: its RC-B guard can demote a run
             # that looks successful but wrote nothing real. Fail CI on a demotion rather than

@@ -1396,6 +1396,74 @@ def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=No
                         min_active_guard=min_active_guard, grace=grace)
 
 
+SEEN_ALIVE_MAX_READS = 1000   # own-page reads per table per run by stamp_seen_alive (small sites only)
+
+
+def stamp_seen_alive(table: str, seen_ads, verify_gone, *, source: Optional[str] = None,
+                     max_reads: int = SEEN_ALIVE_MAX_READS, pace_s: float = 0.5) -> dict[str, int]:
+    """Read each SEEN active row's OWN page through the site's own oracle; record a LIVE answer.
+
+    WHY (owner, 2026-10-26: «the amount of listings we keep should also reflect on the amount of
+    listings we check»). A site whose crawl re-reads its whole list every night never lets a row
+    reach grace, so prune_unseen's verify_gone — the only DIRECT read such a site had — was never
+    asked about a single listing. Measured 2026-10-27: 11 CANDIDATE_PLUS_DIRECT sites (eastabha,
+    mizlaj, alsidra, alqasem, nowaisiry, alrifai, aqaralsaudia, fkralemar, aalbarrak, eydah, masar)
+    with healthy daily crawls and ZERO rows ever verified, because nothing ever went missing. This
+    asks the same oracle about the rows the crawl DID see, every run.
+
+    WHAT IT MAY WRITE. Exactly one thing: on a 'live' answer — a direct read of the listing's own
+    URL that the site's own measured oracle called live — the contract's stamp
+    (direct_alive_patch) plus `last_liveness_probe_at`. Nothing else, ever:
+      • 'gone' on a row the crawl just SAW is a conflict between the list and the page. It is
+        counted and printed, never acted on here: removal stays prune_unseen's (grace, collapse cap,
+        evidence row) and the source's list, never a second path.
+      • anything else (unknown, a raising oracle, a budget spent) is UNKNOWN and writes nothing.
+    So this function cannot hide a listing, by construction — it has no code path that writes
+    `active`, `missing_count` or `deactivated_at`.
+
+    Returns counts {'read', 'live', 'gone_conflict', 'unknown'}."""
+    seen = {str(a) for a in seen_ads if a}
+    out = {"read": 0, "live": 0, "gone_conflict": 0, "unknown": 0}
+    if not seen or verify_gone is None:
+        return out          # nothing seen this run: no control, nothing to ask
+    c = sb()
+    q = c.table(table).select("ad_number").eq("active", True)
+    if source:
+        q = q.eq("source", source)
+    rows = _execute(q, what=table + ".stamp_seen_select").data or []
+    ads = sorted({r["ad_number"] for r in rows if r.get("ad_number") in seen})[:max(0, max_reads)]
+    live: list[str] = []
+    for i, ad in enumerate(ads):
+        if i and pace_s > 0:
+            time.sleep(pace_s)
+        out["read"] += 1
+        try:
+            got = verify_gone(ad)
+            verdict = (got[0] if isinstance(got, (tuple, list)) else got) or "unknown"
+        except Exception as e:  # noqa: BLE001 — an oracle that throws is UNKNOWN, never evidence
+            print(f"{table}: verify_gone({ad}) raised {type(e).__name__}: {e} → unknown", flush=True)
+            verdict = "unknown"
+        verdict = str(verdict).lower()
+        if verdict == "live":
+            live.append(ad)
+        elif verdict == "gone":
+            out["gone_conflict"] += 1
+            print(f"{table}: {ad} was served by this crawl but its own page read gone — left to "
+                  f"prune_unseen and the list; not acted on here", flush=True)
+        else:
+            out["unknown"] += 1
+    out["live"] = len(live)
+    if live:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        patch = {"last_liveness_probe_at": now_iso, **direct_alive_patch(now_iso=now_iso)}
+        for i in range(0, len(live), 200):
+            _execute(c.table(table).update(patch).eq("active", True).in_("ad_number", live[i:i + 200]),
+                     what=table + ".stamp_seen_alive")
+    print(f"{table}: own-page check of {out['read']} seen ad(s) → {out['live']} live (stamped), "
+          f"{out['gone_conflict']} gone-on-page (not acted on), {out['unknown']} unknown", flush=True)
+    return out
+
+
 def own_page_status_oracle(c, table: str, seen, *, session=None):
     """verify_gone for a prune_unseen caller that supplied none (see the call site).
 

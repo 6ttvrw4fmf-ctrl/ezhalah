@@ -383,6 +383,93 @@ def af_answers(p: dict, specs: dict) -> dict[str, Any]:
     return out
 
 
+# ── LIVENESS (measured 2026-10-27) ────────────────────────────────────────────────────────────────
+# Owner 2026-10-26: every ad we show gets a direct dead-ad check. The crawl reads only the SEARCH list
+# (POST …/properties/search), which is not any ad's own record, so each ad is re-read at its OWN record:
+#   GET https://www.alhoshan.sa/api/alhoshan/properties/{id GUID}
+# MEASURED 2026-10-27 from a browser UA: a live ad's GUID (AH1041, 3bd3eaa7-…) answers 200
+# {"success":true,"data":{"publicId":1041,"isPublished":true,"moderationStatus":"approved",
+# "listingExpiresAt":null,…}}; a GUID the API does not hold answers HTTP 404 with the JSON body {};
+# the publicId form (/properties/1041) answers 400 «The value '1041' is not valid» (a malformed ask,
+# never a removal). The HTML page /properties/<id> 308-redirects to a slug and timed out from here,
+# so it is not used. isPublished=false on the record itself is the same retirement source_status()
+# already refuses to upsert. Anything else (400/403/5xx, an HTML 404, a record for another publicId,
+# an unmeasured moderation/expiry state) is no opinion → UNKNOWN.
+RECORD = BASE + "/api/alhoshan/properties/{guid}"
+
+
+def _json(body: str) -> Optional[dict]:
+    try:
+        import json
+        j = json.loads(body or "")
+        return j if isinstance(j, dict) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _make_signal(ad_number: str):
+    def _signal(status, body, _moved):
+        j = _json(body)
+        if j is None:
+            return None                               # an HTML / Cloudflare page is not the API's answer
+        if status in (404, 410):
+            return "gone"                             # the API's own JSON 404 for a record it no longer holds
+        if status != 200:
+            return None
+        d = j.get("data") if isinstance(j.get("data"), dict) else None
+        if not d or f"AH{d.get('publicId')}" != ad_number:
+            return None                               # not provably THIS record
+        if d.get("isPublished") is False:
+            return "gone"
+        if (d.get("isPublished") is True and d.get("moderationStatus") == "approved"
+                and d.get("listingExpiresAt") is None):
+            return "live"
+        return None
+    return _signal
+
+
+def _stored_guid(ad_number: str) -> Optional[str]:
+    """The record's internal GUID, from the row's own stored source_capture (the API item). A failed
+    lookup is None → UNKNOWN, never a kill."""
+    for tbl in ("alhoshan_residential_listings", "alhoshan_commercial_listings"):
+        try:
+            r = db.sb().table(tbl).select("source_capture").eq("ad_number", ad_number).limit(1).execute()
+        except Exception:  # noqa: BLE001
+            return None
+        if r.data:
+            cap = r.data[0].get("source_capture") or {}
+            g = cap.get("id") if isinstance(cap, dict) else None
+            return g if isinstance(g, str) and g else None
+    return None
+
+
+def _make_verify_gone(s, control_ad: Optional[str], guid_by_ad: dict[str, str]):
+    """verify_gone: read the ad's OWN API record under the shared law. Removals are gated on an ad
+    THIS crawl just listed still answering live through the same probe (fails closed)."""
+    from scrapers.common.http_liveness import LivenessProbe
+
+    def probe(ad_number: str, canary=None):
+        guid = guid_by_ad.get(ad_number) or _stored_guid(ad_number)
+        if not guid:
+            return "unknown", f"{ad_number!r}: no stored record GUID to probe"
+        url = RECORD.format(guid=guid)
+        return LivenessProbe(platform="alhoshan", signal=_make_signal(ad_number), session=lambda: s,
+                             url_for=lambda _ad: url, canary=canary).verify_gone(ad_number)
+
+    state: dict[str, tuple[bool, str]] = {}
+
+    def canary() -> tuple[bool, str]:
+        if "v" not in state:
+            if not control_ad:
+                state["v"] = (False, "no row from this run to use as a positive control")
+            else:
+                verdict, why = probe(control_ad)
+                state["v"] = (verdict == "live", f"positive control {control_ad}: {why}")
+        return state["v"]
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -450,12 +537,19 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
+        guid_by_ad = {r["ad_number"]: (r.get("source_capture") or {}).get("id")
+                      for r in res + com if (r.get("source_capture") or {}).get("id")}
+        verify_gone = _make_verify_gone(s, next(iter(sorted(guid_by_ad)), None), guid_by_ad)
         for tbl, rows_seen in (("alhoshan_residential_listings", res), ("alhoshan_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Alhoshan")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Alhoshan",
+                                verify_gone=verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
                 pruned += n
+            # The list is not any ad's own record: ask each listed ad's OWN record too, and record
+            # only a 'live' answer (db.stamp_seen_alive cannot hide anything).
+            db.stamp_seen_alive(tbl, {r["ad_number"] for r in rows_seen}, verify_gone, source="Alhoshan")
         print(f"✓ Al Hoshan: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned} unpublished_skipped={status.get('unpublished', 0)} status_unmeasured={status.get('unmeasured', 0)}", check_tables=["alhoshan_residential_listings", "alhoshan_commercial_listings"])
         if not healthy:

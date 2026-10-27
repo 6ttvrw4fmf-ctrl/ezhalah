@@ -85,6 +85,10 @@ def _alt_main(monkeypatch, routes: dict) -> dict:
             {r["additional_info"]["wp_id"]: r["active"] for r in rows}))
     monkeypatch.setattr(ALT.sold_pin, "pin_source_confirmed_gone",
                         lambda table, ads, **kw: calls["pins"].append(list(ads)))
+    # 2026-10-27: a complete walk now prunes through the post's own REST record and stamps the seen
+    # posts' own records; both are exercised in test_alta_seen_alive_2026_10_27.py, not here.
+    monkeypatch.setattr(ALT.db, "prune_unseen", lambda *a, **k: 0)
+    monkeypatch.setattr(ALT.db, "stamp_seen_alive", lambda *a, **k: {})
     calls["rc"] = ALT.main()
     return calls
 

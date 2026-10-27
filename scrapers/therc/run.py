@@ -391,11 +391,81 @@ def crawl(limit: int = 0) -> tuple[list[dict], list[dict], int]:
         if not mapped:
             continue
         row, cat = mapped
+        if page_reads_live(page, row["ad_number"]):
+            # Built from a DIRECT 200 read of its OWN page that printed its own reference code and
+            # no non-InStock availability — the strongest evidence this crawl gathers, recorded.
+            db.mark_direct_alive(row, oracle="therc.detail_fetch.reference_code")
         (com if cat == "commercial" else res).append(row)
         seen += 1
         if limit and seen >= limit:
             break
     return res, com, seen
+
+
+# ── LIVENESS (measured 2026-10-27) ────────────────────────────────────────────────────────────────
+# Owner 2026-10-26: every ad we show gets a direct dead-ad check. This crawl already opens EVERY ad's
+# own page every night (sitemap → detail), so that read IS the check — zero extra requests.
+# MEASURED 2026-10-27 from a browser UA: a live ad (AQ410257) answers 200 printing
+# «رقم المرجع: AQ410257» with JSON-LD offers.availability https://schema.org/InStock; a slug the
+# platform does not serve answers HTTP 404 (<title>404 - الصفحة غير موجودة). No sold/rented badge
+# exists on the site; an availability other than InStock is UNMEASURED → no opinion, never live.
+_INSTOCK = ("", "https://schema.org/InStock", "http://schema.org/InStock", "InStock")
+
+
+def page_reads_live(page: str, ad_number: str) -> bool:
+    """True only when this page is THIS listing (its own «رقم المرجع», read above the
+    similar-properties strip) and its JSON-LD does not call it anything but InStock."""
+    if not page or not ad_number:
+        return False
+    body = page.split(_SIMILAR)[0]
+    ref = _REF.search(body)
+    if not ref or ref.group(1) != ad_number:
+        return False
+    avail = str((_jsonld_listing(body).get("offers") or {}).get("availability") or "")
+    return avail in _INSTOCK
+
+
+def _make_signal(ad_number: str):
+    def _signal(status, body, path_changed):
+        if status in (404, 410) and not path_changed:
+            return "gone"                     # the platform's own 404 for a slug it no longer serves
+        if status == 200 and page_reads_live(body, ad_number):   # its own ref proves the page
+            return "live"
+        return None                           # anything else: no opinion → UNKNOWN
+    return _signal
+
+
+def _stored_url(ad_number: str) -> Optional[str]:
+    from scrapers.common.http_liveness import stored_listing_url
+    return stored_listing_url(("therc_residential_listings", "therc_commercial_listings"))(ad_number)
+
+
+def _make_verify_gone(control_ad: Optional[str], url_by_ad: dict[str, str]):
+    """verify_gone for prune_unseen. The URL comes from THIS run's rows or the row's own stored
+    listing_url (the slug is a transliteration — never rebuilt from the ad_number). Every removal
+    is gated on a positive control: an ad this crawl just read must still answer live."""
+    from scrapers.common.http_liveness import LivenessProbe
+    sess = _session()
+
+    def probe(ad_number: str, canary=None):
+        url = url_by_ad.get(ad_number) or _stored_url(ad_number)
+        if not url:
+            return "unknown", f"{ad_number!r}: no stored listing_url to probe"
+        return LivenessProbe(platform="therc", signal=_make_signal(ad_number), session=lambda: sess,
+                             url_for=lambda _ad: url, canary=canary).verify_gone(ad_number)
+
+    state: dict[str, tuple[bool, str]] = {}
+
+    def canary() -> tuple[bool, str]:
+        if "v" not in state:
+            if not control_ad:
+                state["v"] = (False, "no row from this run to use as a positive control")
+            else:
+                verdict, why = probe(control_ad)
+                state["v"] = (verdict == "live", f"positive control {control_ad}: {why}")
+        return state["v"]
+
+    return lambda ad_number: probe(ad_number, canary=canary)
 
 
 def main() -> int:
@@ -447,9 +517,12 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
+        url_by_ad = {r["ad_number"]: r["listing_url"] for r in res + com}
+        verify_gone = _make_verify_gone(next(iter(sorted(url_by_ad)), None), url_by_ad)
         for tbl, rows_seen in (("therc_residential_listings", res),
                                ("therc_commercial_listings", com)):
-            nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE)
+            nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE,
+                                 verify_gone=verify_gone)
             if nn < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
