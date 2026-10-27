@@ -613,9 +613,15 @@ def check(text: str) -> list[dict[str, Any]]:
                 num_hits.setdefault("property_age_years", []).append(Hit("property_age_years", v, m.start(), m.end(), ci))
     # AI teacher pass 2026-10-27: «عداد كهرباء مستقل» / «الكهرباء مستقل» is a connected supply as well as a meter —
     # the supply fact inherits the meter's yes (never its no: «عداد مشترك» says nothing about the supply)
-    for meter, supply in (("separate_electricity_meter", "electricity"), ("separate_water_meter", "water_supply")):
+    # …but only when the meter's own words NAME the utility: «عدادات مستقلة» alone is a meter, not proof of power
+    # (benchmark facts-words-bench-v4: 112 electricity rows quoted a bare «عدادات مستقلة»)
+    for meter, supply, word in (("separate_electricity_meter", "electricity", "كهرب"),
+                                ("separate_water_meter", "water_supply", ("مياه", "ماء", "مويه", "موي"))):
         if True in bool_hits.get(meter, {}) and supply not in bool_hits:
-            bool_hits[supply] = {True: bool_hits[meter][True]}
+            ci, qs, qe = bool_hits[meter][True]
+            span = clauses[ci][2][qs:qe]
+            if any(w in span for w in ((word,) if isinstance(word, str) else word)):
+                bool_hits[supply] = {True: bool_hits[meter][True]}
     out: list[dict[str, Any]] = []
 
     def quote_of(ci: int, s: int, e: int) -> str:
@@ -861,6 +867,7 @@ def selftest() -> None:
         ("عدد 2 عداد كهرباء", {"separate_electricity_meter": True}, ()),
         ("عداد كهرباء لكل دور", {"separate_electricity_meter": True}, ()),
         ("عداد كهربائي مستقل", {"separate_electricity_meter": True}, ()),
+        ("عدادات مستقلة لكل شقة", {"separate_electricity_meter": True}, ("electricity",)),
         ("الضمانات ومدتها: متوفرة الضمانات", {"warranty": True}, ()),
         ("الضمانات ومدتها: 10 سنوات التعاونيه للتامين", {"warranty": True}, ()),
         ("الضمانات ومدتها: لا يوجد", {"warranty": False}, ()),
