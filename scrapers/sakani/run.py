@@ -186,6 +186,7 @@ PAUSE = 1.5            # seconds between requests — the pace that drew no chal
 DETAIL_WALL_AFTER = 3
 MAX_RENEGOTIATIONS = 2
 
+_COMMERCIAL_WORD = re.compile(r"تجار[يةه]")
 _CHALLENGE = re.compile(r"Just a moment|cf-chl|challenge-platform|cf_chl", re.I)
 
 # The site's English unit_type keys that the shared TYPE_MAP_EN does not spell this way.
@@ -471,6 +472,12 @@ def map_listing(idx: dict, rich: dict, detail: Optional[dict],
     property_type = normalize.map_type_en(type_key, overrides=_TYPE_OVERRIDES)
     land_type = str(d.get("land_type") or rich.get("land_type") or "").lower()
     if property_type == "Residential Land" and "commercial" in land_type:
+        property_type = "Commercial Land"
+    elif sale and property_type == "Residential Land" and _COMMERCIAL_WORD.search(
+            str(d.get("description") or rich.get("description") or "")):
+        # land_type «residential» is the form's default, not a statement (see TYPES). A sale land whose
+        # own text names commercial use («ارض تجاري سكني», 22147) is Commercial: the owner's mixed-use
+        # rule (backlog 864; haraj applies the same rule to «سكني تجاري»).
         property_type = "Commercial Land"
     if not property_type:
         return None, "residential", "type_unmapped"
