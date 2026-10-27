@@ -56,6 +56,12 @@ on:
         required: false
         default: "false"
         type: string
+      provider:
+        description: "empty = the proxy's default key · openrouter = the OpenRouter READER key (pilot / after the switch) · deepseek"
+        required: false
+        default: ""
+        type: choice
+        options: ["", openrouter, deepseek]
 
 concurrency:
   group: facts-extract
@@ -93,6 +99,7 @@ jobs:
           SILENT: ${{ inputs.silent }}
           MODE: ${{ inputs.mode || 'new' }}
           CATEGORY: ${{ inputs.category || 'residential' }}
+          PROVIDER: ${{ inputs.provider }}
         run: |
-          exec python -m scrapers.facts.extract --run-id "$RUN_ID" --mode "$MODE" --category "$CATEGORY" --limit "${LIMIT:-10000}" --platforms "$PLATFORMS" --max-usd "${MAX_USD:-1.5}" \
+          exec python -m scrapers.facts.extract --run-id "$RUN_ID" --mode "$MODE" --category "$CATEGORY" --provider "$PROVIDER" --limit "${LIMIT:-10000}" --platforms "$PLATFORMS" --max-usd "${MAX_USD:-1.5}" \
             $([ "$SKIP_DONE" = "true" ] && echo --skip-done) $([ "$SILENT" = "true" ] && echo --silent)
