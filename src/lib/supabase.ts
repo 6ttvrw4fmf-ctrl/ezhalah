@@ -54,15 +54,31 @@ function frontDoorFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
     headers.set('x-client-info', `${headers.get('x-client-info') ?? ''} ${fallbackLabel(why)}`.trim());
     return window.fetch(input, { ...init, headers });
   };
-  return window.fetch(front, init).then((r) => {
-    if (!frontDoorAnswered(r.status, r.headers.has('x-ezhalah-bot'))) return direct(String(r.status));
+  // THE DOOR GETS A SECOND TRY FIRST (2026-10-27, before the back-door lock). The practice notebook showed real visitors
+  // (a phone on campus Wi-Fi, a home connection) taking the direct retry after one «net» blip. Once the back door
+  // locks, that direct retry is refused, so a blip or a gateway hiccup (502/503/504) retries THE DOOR once, 400 ms
+  // later; only if that also fails does the old direct retry run (harmless while open, refused once locked).
+  const viaDoor = () => window.fetch(front, init);
+  const pause = () => new Promise<void>((done) => setTimeout(done, 400));
+  const settle = (r: Response, retried: boolean): Response | Promise<Response> => {
+    if (!frontDoorAnswered(r.status, r.headers.has('x-ezhalah-bot'))) {
+      if (!retried && doorHiccup(r.status)) return pause().then(viaDoor).then((again) => settle(again, true), () => direct('net'));
+      return direct(String(r.status));
+    }
     // VPN / Tor / server network refused by the network guard (20261021224031): tell the visitor why, once,
     // instead of letting it read as an empty or broken search (components/NetworkBlockedNotice.tsx).
     if (r.status === 403) {
       r.clone().json().then((b) => { if (isNetworkBlocked(r.status, b)) window.dispatchEvent(new Event(NETWORK_BLOCKED_EVENT)); }, () => {});
     }
     return r;
-  }, () => direct('net'));
+  };
+  return viaDoor().then((r) => settle(r, false),
+    () => pause().then(viaDoor).then((again) => settle(again, true), () => direct('net')));
+}
+
+/** A gateway hiccup worth one more try at the door (not a refusal, not a missing door). */
+export function doorHiccup(status: number): boolean {
+  return status === 502 || status === 503 || status === 504;
 }
 
 /** «ezhalah-fallback=<why>»: the log marker a direct retry carries. */
