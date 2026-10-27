@@ -305,6 +305,74 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str],
     )
 
 
+# ── Per-ad API oracle (2026-10-27) ──────────────────────────────────────────────────────────────
+# A removed ad's page answers 200 «غير موجود», so the 404-only fallback read it live and stale ads
+# (AD202509210002, AD202608180003, AD202610200001) stayed on screen while prune_unseen refused (-1).
+# The site's own API answers per ad: no row (while this run's catalogue was non-empty) or «مباع» → gone.
+def read_api(s, ad_number: str, catalogue_n: int) -> tuple[str, str]:
+    """One ad asked of the API: empty (catalogue non-empty) or «مباع» → gone, «متاح» → live, else unknown."""
+    if not ad_number:
+        return "unknown", "no ad number"
+    _throttle()
+    try:
+        r = s.get(API, params={"select": "ad_number,status", "ad_number": f"eq.{ad_number}"}, timeout=30)
+    except Exception as e:  # noqa: BLE001 — a failed fetch is UNKNOWN
+        return "unknown", f"fetch failed: {type(e).__name__}"
+    if r.status_code != 200:
+        return "unknown", f"HTTP {r.status_code}"
+    try:
+        data = r.json()
+    except Exception:  # noqa: BLE001
+        return "unknown", "API answer is not JSON"
+    if not isinstance(data, list):
+        return "unknown", "API answer is not a list"
+    if not data:
+        if catalogue_n > 0:
+            return "gone", f"API has no row for {ad_number} (catalogue this run: {catalogue_n})"
+        return "unknown", "API has no row, but this run's catalogue was empty too"
+    status = (data[0].get("status") or "").strip() if isinstance(data[0], dict) else ""
+    if status in SOLD_STATUSES:
+        return "gone", f"API status «{status}»"
+    if status in ACTIVE_STATUSES:
+        return "live", f"API status «{status}»"
+    return "unknown", f"API status {status!r}"
+
+
+def make_verify_gone(s, control_ads, catalogue_n: int) -> Any:
+    """verify_gone for strike_read_gone: "gone" only after an ad this run saw as «متاح» reads live."""
+    controls = sorted(control_ads)[:3]
+    memo: list[tuple[bool, str]] = []
+
+    def control() -> tuple[bool, str]:
+        if not memo:
+            res = (False, "no available ad seen this run to use as control")
+            for ad in controls:
+                v, why = read_api(s, ad, catalogue_n)
+                if v == "live":
+                    res = (True, f"control {ad} reads live")
+                    break
+                res = (False, f"control {ad}: {v} ({why})")
+            memo.append(res)
+        return memo[0]
+
+    def verify_gone(ad_number: str) -> tuple[str, str]:
+        v, why = read_api(s, ad_number, catalogue_n)
+        if v != "gone":
+            return v, why
+        ok, cwhy = control()
+        return ("gone", f"{why}; {cwhy}") if ok else ("unknown", f"{why}, but {cwhy}")
+    return verify_gone
+
+
+def prune_table(tbl: str, seen: set, verify_gone) -> int:
+    """The absence prune; when its guard refuses (-1), strike only ads the API reads gone."""
+    n = db.prune_unseen(tbl, seen, source="Azdad")
+    if n < 0:
+        print(f"⚠ {tbl}: prune guard tripped — asking the API about each unseen ad")
+        n = db.strike_read_gone(tbl, seen, "Azdad", verify_gone=verify_gone)
+    return n
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--limit-test", type=int, default=0,
@@ -361,11 +429,12 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
+        available = [L.get("ad_number") for L in listings
+                     if L.get("ad_number") and (L.get("status") or "") in ACTIVE_STATUSES]
+        verify_gone = make_verify_gone(s, available, len(listings))
         for tbl, seen_ads in (("azdad_residential_listings", seen_res), ("azdad_commercial_listings", seen_com)):
-            n = db.prune_unseen(tbl, set(seen_ads), source="Azdad")
-            if n < 0:
-                print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
-            else:
+            n = prune_table(tbl, set(seen_ads), verify_gone)
+            if n > 0:
                 pruned += n
         print(f"✓ Azdad: {len(res_rows)} residential + {len(com_rows)} commercial upserted, {pruned} stale pruned")
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res_rows) + len(com_rows),
