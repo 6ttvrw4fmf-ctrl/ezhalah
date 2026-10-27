@@ -19,7 +19,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { PLATFORM_META } from '@/data/loaderPlatforms';
 import { scheduleLogoPrefetch } from '@/lib/prefetchLoaderLogos';
 import Head from 'expo-router/head';
-import { OG_IMAGE, SHARE_BLURB_AR, SHARE_CARD_DESC_AR, SHARE_LINK, SHARE_TITLE_AR } from '@/lib/share';
+import { OG_IMAGE, PAGE_TITLE_AR, PAGE_TITLE_EN, SHARE_BLURB_AR, SHARE_CARD_DESC_AR, SHARE_LINK, SHARE_TITLE_AR } from '@/lib/share';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import NetworkBlockedNotice from '@/components/NetworkBlockedNotice';
 import InfoModal from '@/components/InfoModal';
@@ -208,9 +208,11 @@ function Shell() {
 // og:image must be ABSOLUTE (a crawler has no origin to resolve a relative path against), and it is
 // a crop of the eagle artwork already in the repo — see lib/share.ts.
 function ShareMeta() {
+  // The tab title follows the UI language (Arabic-first on a fresh load, so crawlers and first paint get Arabic).
+  const { locale } = useI18n();
   return (
     <Head>
-      <title>{SHARE_TITLE_AR}</title>
+      <title>{locale === 'en' ? PAGE_TITLE_EN : PAGE_TITLE_AR}</title>
       <meta name="description" content={SHARE_BLURB_AR} />
       <meta property="og:type" content="website" />
       <meta property="og:site_name" content={SHARE_TITLE_AR} />
