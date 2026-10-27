@@ -96,15 +96,18 @@ _INHERITED = {   # catalogue key → normalize._AMENITY_TOKENS key (balcony_terr
 }
 _METER = r"(?:مستقل|مستقله|منفصل|منفصله|خاص|خاصه)"
 _WATER = r"(?:ال)?(?:مياه|ماء|مويه)"
-_POWER = r"(?:ال)?(?:كهرباء|كهربا|كهرب)"
+_POWER = r"(?:ال)?(?:كهرباء|كهربائي|كهربا|كهربه|كهرب)"
 
 FACT_TOKENS: dict[str, list[Any]] = {
     "elevator": ["^اصانصير", "^اسانسير", "^اصنصير", "^اسنسير"],
     "kitchen": ["^مطابخ"],                                      # «المطابخ: 1» (sakan/tuba count label)
     "air_conditioner": ["^تكيف$"],
-    "parking": ["^باركينج", "^باركنج"],                      # transliterations (bench-v1: «باركينج خاص»)
+    "parking": ["^باركينج", "^باركنج", "^براكنق", "^براكنج", "^باركين", "^باركنق", "^بركنج"],  # transliterations
     "maid_room": ["غرفة عاملة", "غرفة للعاملة", "غرفة العاملة", "غرفة للخادمة", "غرفة الخادمة", "غرف خادمات",
-                  "غرفة للشغالة", "غرفة الشغالة", "غرفة خدامة"],
+                  "غرفة للشغالة", "غرفة الشغالة", "غرفة خدامة",
+                  # AI teacher pass 2026-10-27: «جناح خادمة», «غرفة نوم للخادمة», «قسم للشغاله», «ملحق خاص بالعاملة»,
+                  # «غرفة خاصة بالخادمة», the typos «حادمه» / «عرفة خادمة»
+                  r"re:(?:غرفه|عرفه|جناح|قسم|ملحق|غرفه نوم) (?:خاص(?:ه)? )?(?:لل|بال|ال|ب)?(?:خادمه|خدامه|حادمه|شغاله|عامله)"],
     "driver_room": ["غرفة سواق", "غرفة سايق", "غرفة للسائق", "غرفة السائق", "غرفة للسواق", "غرفة السواق",
                     "re:غرف (?:لل|ال)?سائقين", "غرفة سائقين"],
     "laundry_room": [],
@@ -118,12 +121,21 @@ FACT_TOKENS: dict[str, list[Any]] = {
     # seller naming it; «بدون تأثيث» / «غير مؤثث» stay an explicit no.
     "furnished": ["^موثث", ("re:(?:بدون|بلا|من غير|غير) (?:ال)?(?:اثاث|تاثيث|موثث)", False), "re:(?:مع|شامل|شامله) (?:ال)?اثاث",
                   "re:(?:ب|و|وب)?(?:ال)?اثاث (?:مودرن|فاخر|مريح|عصري|راقي|انيق|هادي|كامل|جديد|حديث|فندقي)",
-                  "re:(?:ب|و|وب)?تاثيث (?:فندقي|كامل|فاخر|مودرن|عصري|راقي)", "re:متكامل(?:ه)? (?:ال)?اثاث"],
-    "electricity": ["^كهرباء", "^كهربا$", "^electricity"],
-    "water_supply": ["^مياه", "^ماء$", "^مويه$", "re:waters?"],
+                  "re:(?:ب|و|وب)?تاثيث (?:فندقي|كامل|فاخر|مودرن|عصري|راقي)", "re:متكامل(?:ه)? (?:ال)?اثاث",
+                  # AI teacher pass 2026-10-27: «بأثاثها العصري», «أثاث فخم», «فرش راقٍ / فاخر / كامل»
+                  "re:(?:ب|و|وب)?(?:ال)?اثاثها (?:ال)?(?:عصري|مودرن|فاخر|راقي|انيق|كامل|فخم)",
+                  "re:(?:ب|و|وب)?(?:ال)?اثاث (?:فخم|كامل)", "re:فرش (?:راقي|راق|فاخر|كامل|فندقي|جديد|فخم)"],
+    # AI teacher pass 2026-10-27 (ops_ai_facts_reader_gaps, 5,123 electricity rows the reader had no row for): the
+    # dialect word «كهرب» («شامل كهرب ومويه», «ماء وكهرب راكب») and the typo «كهربه».
+    "electricity": ["^كهرباء", "^كهربا$", "^كهرب$", "^كهربه$", "^electricity"],
+    "water_supply": ["^مياه", "^ماء$", "^مويه$", "^مويا$", "re:waters?"],
     "sanitation": ["re:(?:ال)?صرف (?:ال)?صحي", "^sanitation", "^sewage", "^sewer"],
     "separate_electricity_meter": [
-        rf"re:عداد(?:ات)? {_POWER}(?: و{_WATER})? {_METER}",
+        rf"re:عداد(?:ات|ت)? {_POWER}(?: و{_WATER})? {_METER}",
+        # AI teacher pass 2026-10-27: two or more meters ARE separate meters — «عدادين كهرباء», «3 عدادات كهرباء»,
+        # «عدد 2 عداد كهرباء», «عداد كهرباء لكل دور / لكل شقه», «عدادات وخزانات مستقلة»
+        rf"re:عداد(?:ين|ان) {_POWER}", rf"re:(?:[2-9]|[1-9]\d) عداد(?:ات)? {_POWER}", rf"re:عدد \d+ عداد(?:ات)? {_POWER}",
+        rf"re:عداد(?:ات)? {_POWER} لكل", r"re:عدادات و ?خزانات (?:مستقل|مستقله|منفصل|منفصله)",
         rf"re:عداد(?:ات)? {_METER}",
         rf"re:{_POWER} (?:مستقل|مستقله|منفصل|منفصله)",
         rf"re:عداد(?:ات)? {_WATER} و{_POWER} {_METER}",
@@ -149,7 +161,11 @@ FACT_TOKENS: dict[str, list[Any]] = {
     "corner_plot": ["^زاويه$", "^زاوية$", "^ركنيه$", "^ركني$", "re:(?:علي|على|ع) شارعين", "^شارعين$", "^شارعان$",
                     "re:(?:ثلاث|ثلاثه|اربع|اربعه|[2-4]) شوارع", "^corner"],
     "roof": ["^سطح$", "^سطحين$", "^سطحان$", "^سطوح$", "^روف$", "^roof"],
-    "warranty": ["^ضمان", "^صمانات", "^ظمانات", "^warrant"],  # common misspellings; never bare «صمان» (وادي الصمان)
+    "warranty": ["^ضمان", "^صمانات", "^ظمانات", "^warrant",
+                 # AI teacher pass 2026-10-27: the hidden-defects INSURANCE developers sell as the building warranty —
+                 # «تأمين ضد العيوب الخفية», «تأمين 10 سنوات», «تأمين التعاونية / ملاذ عشر سنوات»
+                 r"re:تامين (?:ضد )?(?:ال)?عيوب", r"re:ضد (?:ال)?عيوب (?:ال)?خفيه", r"re:تامين (?:ال)?(?:تعاونيه|ملاذ)",
+                 r"re:تامين \d+ (?:سنوات|سنه|سنين)"],  # common misspellings; never bare «صمان» (وادي الصمان)
     "water_tank": ["^خزان$", "^خزانات$", "^خزانين$", "^خزانان$", "water tank"],
     "well": ["^بئر$", "^بير$", "^ابار$", "^بئرين$", "^بيرين$", "^ارتوازي"],
     "annex": ["^ملحق$", "^ملاحق$", "^ملحقين$", "^annex"],
@@ -205,11 +221,11 @@ _BEARINGS = ("شمال", "جنوب", "شرق", "غرب", "الشمال", "الج
              "حدود")
 # Per-fact context words: (excluded if one of the 2 words BEFORE starts with…, excluded if one of the 2 AFTER…)
 _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
-    "electricity": (("غرف", "عداد", "ضمان", "تمديد", "لوح", "نظام", "انظمه", "فاتور", "فواتير", "مولد", "سباك", "اعمال", "كيبل",
+    "electricity": (("غرف", "ضمان", "تمديد", "لوح", "نظام", "انظمه", "فاتور", "فواتير", "مولد", "سباك", "اعمال", "كيبل",
                      "كابل", "مفاتيح", "افياش", "شرك", "محط", "برج", "ابراج", "خط", "خطوط", "تاسيس", "مصعد",
                      "اسلاك", "توصيل", "رسوم"),
                     ("مستقل", "منفصل", "مشترك", "علي حساب", "غير مشمول")),
-    "water_supply": (("دور", "حمام", "خزان", "عداد", "سخان", "تصريف", "مضخ", "بئر", "بير", "ابار", "تسريب", "ضمان",
+    "water_supply": (("دور", "حمام", "خزان", "سخان", "تصريف", "مضخ", "بئر", "بير", "ابار", "تسريب", "ضمان",
                       "سباك", "تحلي", "فلتر", "شرب", "نافور", "شلال", "تمديد", "فاتور", "فواتير", "دورات",
                       "مسبح", "احواض", "توصيل", "رسوم", "صرف", "عين"),
                      ("مستقل", "منفصل", "مشترك", "حلوه", "البحر", "الامطار", "امطار", "جوفي", "الشرب")),
@@ -248,7 +264,10 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 _CUES = tuple(_n(w) for w in ("واصل", "واصله", "موصل", "موصله", "خدمات", "الخدمات", "المرافق", "مرافق", "يوجد",
                               "توجد", "موجود", "متوفر", "متوفره", "يتوفر", "تتوفر", "توفر", "شامل", "شامله", "مع",
                               "services", "utilities", "has", "have", "connected", "connection", "connections",
-                              "included", "includes", "including", "supply"))
+                              "included", "includes", "including", "supply",
+                              # AI teacher pass 2026-10-27 (muhaysini / dealapp generated prose, rent-inclusive stays):
+                              "امداد", "موثوق", "توفير", "توفر", "توافر", "متاح", "وصول", "مزود", "مجهز", "متصل",
+                              "شبكه", "يشمل", "تشمل", "مشمول", "راكب", "راكبه", "واصلين", "واصلات", "مفصول", "عداد"))
 _NEEDS_CUE = frozenset({"electricity", "water_supply"})
 # A utility word that carries a list on into the next clause: «خدمات العقار: Electricity, Waters الضمانات …» —
 # the comma ends the clause, so «Waters» has no cue of its own (bench-v1: ~340 water/electricity misses).
@@ -358,6 +377,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
             if v[:1] and v[0] in ("لا", "لايوجد", "لاتوجد", "no", "none"):
                 n = lab + (2 if v[0] == "لا" and v[1:2] in (["يوجد"], ["توجد"]) else 1)
                 return False, ws, we + len(" ".join([""] + nxt[:n]))
+            if v[:1] and (v[0][:1].isdigit() or _starts(v[0], ("متوفر", "يوجد", "توجد", "موجود", "متاح", "ضمان", "yes"))):
+                return True, ws, we + len(" ".join([""] + nxt[:lab + 1]))   # AI teacher pass 2026-10-27
             return None, s, e                        # «-», empty, or a value whose own words say what it is
     # guards read words without a glued count: «2دورات مياه» is still a bathroom (offsets keep `prev`)
     gp = [w.lstrip(_DIGITS) or w for w in prev]
@@ -384,6 +405,13 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     ex_before, ex_after = _EXCLUDE.get(fact, ((), ()))
     if fact in _METER_FACTS and "عداد" in t[ws:e]:
         ex_before = ()                               # «خزانات وعدادات مستقلة» names the meter itself
+    if fact in _NEEDS_CUE and p2 and _starts(p2[-1], _CUES):
+        ex_before, ex0 = (), ex_before               # «3 غرف واصل كهرباء»: the cue sits between (AI teacher pass 2026-10-27)
+        if _starts(p2[-1], ("عداد",)):
+            if _negated_before(prev[:-1]) is not None or head in ("غير",):
+                return None, s, e                    # «لا يوجد عداد ماء»: a missing meter is not «no water»
+            if any(_starts(_strip_wa(w), ex0) or _starts(w, ex0) for w in p2[:-1]):
+                return None, s, e                    # «رسوم / تأسيس / توصيل عداد كهرباء»: a fee or a set-up, not a supply
     if any(_starts(_strip_wa(w), ex_before) or _starts(w, ex_before) or _starts(_bare(w), ex_before) for w in p2) or \
             any(_starts(w, ex_after) for w in n2) or any(x in " ".join(n2) for x in ex_after if " " in x):
         return None, s, e
@@ -583,6 +611,11 @@ def check(text: str) -> list[dict[str, Any]]:
                 g = m.group(1)
                 v = int(g) if g.isdigit() else _EN_NUM[g]
                 num_hits.setdefault("property_age_years", []).append(Hit("property_age_years", v, m.start(), m.end(), ci))
+    # AI teacher pass 2026-10-27: «عداد كهرباء مستقل» / «الكهرباء مستقل» is a connected supply as well as a meter —
+    # the supply fact inherits the meter's yes (never its no: «عداد مشترك» says nothing about the supply)
+    for meter, supply in (("separate_electricity_meter", "electricity"), ("separate_water_meter", "water_supply")):
+        if True in bool_hits.get(meter, {}) and supply not in bool_hits:
+            bool_hits[supply] = {True: bool_hits[meter][True]}
     out: list[dict[str, Any]] = []
 
     def quote_of(ci: int, s: int, e: int) -> str:
@@ -701,7 +734,7 @@ def selftest() -> None:
         ("واصل كهرباء\nواصل مياه", {"electricity": True, "water_supply": True}, ()),
         ("خدمات العقار: كهرباء، مياه، صرف صحي", {"electricity": True, "water_supply": True, "sanitation": True}, ()),
         ("دورة مياه للضيوف", {}, ("water_supply",)),
-        ("عداد كهرباء مستقل", {"separate_electricity_meter": True}, ("electricity",)),
+        ("عداد كهرباء مستقل", {"separate_electricity_meter": True, "electricity": True}, ()),   # 2026-10-27: a meter is a supply
         ("عداد كهرباء ومياه مستقل", {"separate_electricity_meter": True, "separate_water_meter": True}, ()),
         ("لا يوجد عداد ماء", {}, ("water_supply",)),
         ("عداد الماء مشترك", {"separate_water_meter": False}, ()),
@@ -809,6 +842,37 @@ def selftest() -> None:
         ("لا نقبل الدفع الشهري", {"payment_monthly": False}, ()),
         ("مسبح خاص", {"pool": True}, ()),
         ("حوض سباحه", {"pool": True}, ()),
+        # AI teacher pass 2026-10-27 — the phrasings the paid reader found on ads the word reader had no row for
+        ("مكونة من: 3 غرف واصل كهرباء واصل مياه", {"electricity": True, "water_supply": True}, ()),
+        ("ماء وكهرب راكب", {"electricity": True, "water_supply": True}, ()),
+        ("المرافق: - الكهرباء: إمدادات كهربائية موثوقة - إمدادات المياه: وصول مستمر إلى المياه",
+         {"electricity": True, "water_supply": True}, ()),
+        ("تشمل المرافق: - إمدادات الكهرباء لضمان الطاقة الموثوقة - إمدادات المياه للاحتياجات اليومية",
+         {"electricity": True, "water_supply": True}, ("warranty",)),
+        ("الإيجار يشمل الكهرباء والماء", {"electricity": True, "water_supply": True}, ()),
+        ("شامل كهرب ومويه", {"electricity": True, "water_supply": True}, ()),
+        ("موقف خاص عداد كهرباء المساحة 116متر", {"electricity": True, "parking": True}, ()),
+        ("الكهرباء مستقل", {"separate_electricity_meter": True, "electricity": True}, ()),
+        ("عداد كهرباء مشترك", {"separate_electricity_meter": False}, ("electricity",)),
+        ("رسوم عداد كهرباء على المشتري", {}, ("electricity",)),
+        ("تأسيس عداد الكهرباء", {}, ("electricity",)),
+        ("مجدد فيها الكهرباء والسباكة", {}, ("electricity",)),
+        ("عدادين كهرباء", {"separate_electricity_meter": True, "electricity": True}, ()),
+        ("عدد 2 عداد كهرباء", {"separate_electricity_meter": True}, ()),
+        ("عداد كهرباء لكل دور", {"separate_electricity_meter": True}, ()),
+        ("عداد كهربائي مستقل", {"separate_electricity_meter": True}, ()),
+        ("الضمانات ومدتها: متوفرة الضمانات", {"warranty": True}, ()),
+        ("الضمانات ومدتها: 10 سنوات التعاونيه للتامين", {"warranty": True}, ()),
+        ("الضمانات ومدتها: لا يوجد", {"warranty": False}, ()),
+        ("تأمين ضد العيوب الخفية", {"warranty": True}, ()),
+        ("تأمين التعاونية عشر سنوات", {"warranty": True}, ()),
+        ("براكنق خاص بالدور الثاني", {"parking": True}, ()),
+        ("جناح خادمة مع غرفة غسيل", {"maid_room": True}, ()),
+        ("غرفة نوم للخادمة", {"maid_room": True}, ()),
+        ("قسم للشغاله غرفه وحمام", {"maid_room": True}, ()),
+        ("بأثاثها العصري والأنيق", {"furnished": True}, ()),
+        ("تشطيب فاخر وفرش راقٍ جدًا", {"furnished": True}, ()),
+        ("يوجد بعض الاثاث", {}, ("furnished",)),
         ("مكيف سبليت", {"air_conditioner": True}, ()),
         ("غرفة خادمة مع دورة مياه", {"maid_room": True}, ("water_supply",)),
         ("حي المشرفة", {}, ("balcony",)),
