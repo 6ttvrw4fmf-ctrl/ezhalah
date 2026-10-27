@@ -119,7 +119,26 @@ export function mapSupabaseUser(u: any, method: AuthUser['method']): AuthUser {
   const spelled = !!name && String(meta.name_spellings_for ?? '') === name;
   const nameAr = spelled && typeof meta.nameAr === 'string' && meta.nameAr.trim() ? meta.nameAr.trim() : undefined;
   const nameEn = spelled && typeof meta.nameEn === 'string' && meta.nameEn.trim() ? meta.nameEn.trim() : undefined;
-  return { method, name, ...(nameAr ? { nameAr } : {}), ...(nameEn ? { nameEn } : {}), initials: initialsFrom(name, sub), sub, namePromptSeen: meta.name_prompt_seen === true, createdAt: u?.created_at, lastSignInAt: u?.last_sign_in_at };
+  const uiLocale = meta.ui_locale === 'en' || meta.ui_locale === 'ar' ? meta.ui_locale : undefined;
+  return { method, name, ...(nameAr ? { nameAr } : {}), ...(nameEn ? { nameEn } : {}), initials: initialsFrom(name, sub), sub, namePromptSeen: meta.name_prompt_seen === true, createdAt: u?.created_at, lastSignInAt: u?.last_sign_in_at, ...(uiLocale ? { uiLocale } : {}) };
+}
+
+// THE INTERFACE LANGUAGE FOLLOWS THE ACCOUNT (owner 2026-10-27: «the phone and laptop same account … same things»).
+// Written to user_metadata.ui_locale, so English picked on the laptop is English on the phone. Same serialized
+// queue as the name writes; a newer choice supersedes a queued one. Guard: scripts/verify-signed-in-language-is-kept.ts
+let latestIntendedLocale: 'ar' | 'en' | null = null;
+export function persistUiLocale(l: 'ar' | 'en'): void {
+  if (!supabase) return;
+  latestIntendedLocale = l;
+  nameWriteQueue = nameWriteQueue
+    .then(() => {
+      if (latestIntendedLocale !== l) return;   // superseded before it got its turn
+      return Promise.race([
+        supabase!.auth.updateUser({ data: { ui_locale: l } }),
+        new Promise((r) => setTimeout(r, NAME_WRITE_TIMEOUT_MS)),
+      ]);
+    })
+    .catch(() => {});
 }
 
 // ── OAuth (Google / Apple) ───────────────────────────────────────────────────

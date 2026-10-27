@@ -193,8 +193,11 @@ findRestore(ast); assert(restoreEffect && setLocaleCallback);
 const persistenceCode = `
 let _persistEnabled=false, _locale='ar', _localeRevision=0;
 const LOCALE_KEY='locale'; const getLocale=()=>_locale; const getLocaleRevision=()=>_localeRevision;
-${['readSavedLocale','setLocalePersistence','persistLocale'].map(n=>functions.get(n)).join('\n')}
+${['readSavedLocale','setLocalePersistence','persistLocale','languageOnAuth'].map(n=>functions.get(n)).join('\n')}
 const setLocaleState=()=>{}; const setLocale=${setLocaleCallback};
+// No sign-in stored in this sandbox: a signed-out user is a genuine guest (the slow-sign-in wait is covered by
+// scripts/verify-signed-in-language-is-kept.ts). Account writes are a no-op here.
+const hasStoredAuthSession=()=>false; const persistUiLocale=()=>{}; const localeRestoredRef={current:false};
 const authChecked=true; let user:any={sub:'test'}; const localeInitRef={current:null};
 const restore=${restoreEffect};
 return {setLocale,setLocalePersistence,readSavedLocale,restore,getLocale,logout:()=>{user=null;}};
