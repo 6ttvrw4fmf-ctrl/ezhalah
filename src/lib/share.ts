@@ -24,15 +24,21 @@ export function shareOrigin(): string {
 // v7 = the cloud-eagle logo, 192×192 (owner 2026-10-24: «this is the final logo … replace it everywhere»). v6 = 192×192 (owner 2026-10-18: «look how big … keep it small»). WhatsApp draws a BIG banner for an
 // og:image ≥ ~300px wide and a small side thumbnail below that — the same 192px card the search-share
 // links (/s/…) already get. Keep it under 300px.
-export const OG_IMAGE = `${SHARE_LINK}/og-image-v7.png`;
-// Owner-approved original wording, without the AI sentence or dashes (2026-10-11), shared by metadata and every share target.
+export const OG_IMAGE = `${SHARE_LINK}/og-image-v9.png`;
+// THE PAGE DESCRIPTION — the sentence under Ezhalah's title in a Google result (owner 2026-10-27, built with the owner from
+// phone-width previews): a free AI property search engine in Saudi Arabia, then three «from … to …» pairs — big
+// platforms to small brokerage offices, Riyadh to Haql (a far, uncommon city with real listings), villas to raw
+// land — then buy / rent / short stays and «إزهله. خله يدور عنك.» — the name standing alone
+// (its Saudi meaning «leave it to me / count on me»), then «let it search for you» (the owner's exact words). English mirrors it: «Ezhalah. Let it search for you.» It opens without «إزهله»: the title
+// above already says it and the ending repeats it. Shows uncut at phone width; no numbers, no harakat.
+// It replaces the 2026-10-11 question-form wording.
 // No emoji (owner 2026-10-18: «remove the emoji … make it professional»).
-export const SHARE_BLURB_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى للبحث على العقار في المملكة.';
+export const SHARE_BLURB_AR = 'محرك بحث عقاري مجاني بالذكاء الاصطناعي في السعودية: من المنصات الكبيرة لمكاتب الوساطة، من الرياض لحقل، من الفلل للأراضي الخام. بيع وإيجار وإقامات قصيرة. إزهله. خله يدور عنك.';
 // The preview CARD's own line (owner 2026-10-18: the card repeated the sent message and was cut off).
 // middleware.ts serves link-preview bots the same line WITH live numbers (src/lib/homeCard.ts); this
 // number-free form is the static fallback. Pinned equal to HOME_CARD_FALLBACK_AR.
 export const SHARE_CARD_DESC_AR = 'كل مواقع العقار في السعودية في مكان واحد.';
-export const SHARE_BLURB_EN = 'Looking for a property and want to see everything on offer in one place? Ezhalah, the smarter way to find properties in the Kingdom.';
+export const SHARE_BLURB_EN = 'Free AI property search in Saudi Arabia: big platforms to small offices, Riyadh to Haql, villas to raw land. Buy, rent or short stays. Ezhalah. Let it search for you.';
 // THE SENT MESSAGE (owner 2026-10-26: names Saudi Arabia so the card need not repeat 148, no harakat, «إزهله، خل إزهله»;
 // first set 2026-10-20, replacing the long sentence above in the share message only):
 // «ليش تدوّر في 148 موقع؟ إزهله يدوّر عنك». The number is LIVE — the same count the app shows
@@ -68,6 +74,11 @@ export function shareMessage(loc: 'ar' | 'en', count: number | null): string {
   return `${shareLead(loc, count)}\n${SHARE_LINK}`;
 }
 export const SHARE_TITLE_AR = 'إزهله';
+// The browser tab / history / suggestion / Google title (owner 2026-10-27, picked from phone-width previews: the
+// Kingdom wording). Both are checked to FIT uncut — the owner's longer English «…at once in the Kingdom» was cut off,
+// so the English is «All Saudi properties in one place» (matches the Arabic, fits). The share card keeps the plain name.
+export const PAGE_TITLE_AR = 'إزهله | ابحث في كل عقارات المملكة بمكان واحد';
+export const PAGE_TITLE_EN = 'Ezhalah | All Saudi properties in one place';
 const SHARE = {
   en: { title: 'Ezhalah' },
   ar: { title: SHARE_TITLE_AR },

@@ -15,7 +15,7 @@
         }
       ],
       "destination": "https://ezhalah.com/:path",
-      "permanent": false
+      "permanent": true
     },
     {
       "source": "/agent",

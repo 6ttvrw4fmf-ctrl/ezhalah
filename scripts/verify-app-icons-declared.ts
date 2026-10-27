@@ -14,6 +14,7 @@
  * logo. This pins the fix so neither cause can come back quietly.
  */
 import { existsSync, readFileSync } from 'node:fs';
+import { inflateSync } from 'node:zlib';
 
 const HTML = 'src/app/+html.tsx';
 
@@ -117,8 +118,58 @@ if (existsSync(APPLE)) {
     `${buf.readUInt32BE(16)}x${buf.readUInt32BE(20)}`);
 }
 
+// ── every icon PNG draws a PICTURE, not noise (2026-10-27) ───────────────────────────────────────
+// A header can be right while the pixels are garbage: re-saving the icons «opaque» once scrambled every pixel
+// row (right size, wrong bytes), so every browser drew stripes — and the colour-type rule above passed it,
+// because it only reads the header. This DECODES each file (inflate + un-filter) and measures how much
+// neighbouring pixels jump: measured that day, the striped files read 45–48 and the real icons 1–13.
+const BPP: Record<number, number> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
+export const ROUGH_MAX = 25;
+type Pixels = { w: number; h: number; bpp: number; data: Buffer };
+export function decodePng(buf: Buffer): Pixels | string {
+  if (buf.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') return 'not a PNG';
+  const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20), depth = buf[24], type = buf[25], interlace = buf[28];
+  if (depth !== 8 || !(type in BPP) || interlace !== 0) return `unsupported layout (depth ${depth}, type ${type}, interlace ${interlace})`;
+  const bpp = BPP[type], stride = w * bpp, idat: Buffer[] = [];
+  for (let o = 8; o + 8 <= buf.length;) { const len = buf.readUInt32BE(o);
+    if (buf.subarray(o + 4, o + 8).toString('latin1') === 'IDAT') idat.push(buf.subarray(o + 8, o + 8 + len)); o += 12 + len; }
+  let raw: Buffer; try { raw = inflateSync(Buffer.concat(idat)); } catch { return 'image data does not inflate'; }
+  if (raw.length !== h * (stride + 1)) return `image data is ${raw.length} bytes, the header promises ${h * (stride + 1)}`;
+  const data = Buffer.alloc(h * stride);
+  for (let y = 0; y < h; y++) { const f = raw[y * (stride + 1)], row = y * (stride + 1) + 1;
+    if (f > 4) return `row ${y} has an unknown filter (${f})`;
+    for (let x = 0; x < stride; x++) { const a = x >= bpp ? data[y * stride + x - bpp] : 0, b = y ? data[(y - 1) * stride + x] : 0, c = x >= bpp && y ? data[(y - 1) * stride + x - bpp] : 0;
+      const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c), paeth = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      data[y * stride + x] = (raw[row + x] + [0, a, b, (a + b) >> 1, paeth][f]) & 255; } }
+  return { w, h, bpp, data };
+}
+/** Mean jump between horizontally neighbouring pixels: low for a picture, high for noise or stripes. */
+export function roughness({ w, h, bpp, data }: Pixels): number {
+  let s = 0, n = 0;
+  for (let y = 0; y < h; y++) for (let x = 1; x < w; x++) for (let k = 0; k < Math.min(3, bpp); k++) { s += Math.abs(data[(y * w + x) * bpp + k] - data[(y * w + x - 1) * bpp + k]); n++; }
+  return n ? s / n : 0;
+}
+const ICON_PNGS = ['public/icon-32.png', 'public/icon-192.png', 'public/icon-512.png', 'public/apple-touch-icon.png',
+].filter((f) => existsSync(f));
+for (const f of ICON_PNGS) {
+  const px = decodePng(readFileSync(f));
+  check(`${f} decodes to a picture, not noise`, typeof px !== 'string' && roughness(px) <= ROUGH_MAX,
+    typeof px === 'string' ? px : `roughness ${roughness(px).toFixed(1)} > ${ROUGH_MAX}`);
+}
+if (existsSync('public/apple-touch-icon.png')) {
+  const px = decodePng(readFileSync('public/apple-touch-icon.png'));
+  if (typeof px !== 'string') {
+    // the stripes bug, recreated: every row's bytes shifted by one, so each «pixel» mixes two channels
+    const scrambled = { ...px, data: Buffer.concat([px.data.subarray(1), px.data.subarray(0, 1)]) };
+    for (let i = 0; i < scrambled.data.length; i += 7) scrambled.data[i] = 255 - scrambled.data[i];
+    check('(mutation) catches scrambled pixels under a valid header (the stripes bug)', roughness(scrambled) > ROUGH_MAX);
+  }
+  const lie = Buffer.from(readFileSync('public/apple-touch-icon.png')); lie[25] = lie[25] === 2 ? 6 : 2;
+  check('(mutation) catches a header that does not match its data', typeof decodePng(lie) === 'string');
+}
+
 if (failed) {
   console.error(`\n${failed} check(s) FAILED — a browser would fall back to a stale or missing icon`);
   process.exit(1);
 }
-console.log(`\nOK — ${links.length} icon link(s) declared, versioned, present on disk; 6 mutations caught.`);
+console.log(`\nOK — ${links.length} icon link(s) declared, versioned, present on disk, every PNG decodes to a picture; 8 mutations caught.`);
