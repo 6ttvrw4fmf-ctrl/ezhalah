@@ -400,8 +400,8 @@ const modalProblems = (f: Record<string, string>) => {
   const noExternal = (code: string) => !/createElement\(['"]script['"]\)|https?:\/\/|data-ezh-disco|data-ezh-rain/i.test(code.replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, ''));
   check('§8 no external script, no disco lights, no leftover rain layer in the module', noExternal(SRC));
   mustCatch('confetti that is never removed', (await run(SRC.replace('setTimeout(() => layer.remove(), PARTY_MS);', ''), [{ at: 0, reduced: false }])).shots[0].removeAt === null);
-  mustCatch('a party cut short (2.6 s like the rain)', !((m: number) => m >= 4000 && m <= 5000)((await run(SRC.replace('export const PARTY_MS = 5000;', 'export const PARTY_MS = 2600;'), [])).P.PARTY_MS));
-  mustCatch('pieces still falling when the layer goes', !(await run(SRC.replace('const dur = 2000 +', 'const dur = 4000 +'), [{ at: 0, reduced: false }])).shots[0].drops.every((d) => d.delay + d.dur <= 5000));
+  mustCatch('a party cut short (2.6 s like the rain)', !((m: number) => m >= 4000 && m <= 5000)((await run(SRC.replace('export const PARTY_MS = 4000;', 'export const PARTY_MS = 2600;'), [])).P.PARTY_MS));
+  mustCatch('pieces still falling when the layer goes', !(await run(SRC.replace('const dur = 1800 +', 'const dur = 3500 +'), [{ at: 0, reduced: false }])).shots[0].drops.every((d) => d.delay + d.dur <= 4000));
   mustCatch('a thin sprinkle instead of a party', (await run(SRC.replace('export const CONFETTI_PIECES = 360;', 'export const CONFETTI_PIECES = 140;'), [{ at: 0, reduced: false }])).shots[0].drops.length < 250);
   mustCatch('a layer that is not full screen', !fullScreen(SRC.replace('[data-ezh-party]{position:fixed;inset:0;', '[data-ezh-party]{position:absolute;top:0;height:40vh;')));
   mustCatch('confetti under reduced motion', (await run(SRC.replace('if (reduced || ', 'if ('), [{ at: 0, reduced: true }])).shots[0].drew);
