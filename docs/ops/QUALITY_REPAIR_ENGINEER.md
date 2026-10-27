@@ -374,6 +374,13 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   real on a DDL-only body too (4th way, 60 s, nothing landed): a function whose text carries `delete` needs a human
   SQL-editor apply — stop retrying it, keep it in LINE 1. The four engineers all fired at 11:04 UTC tonight instead of
   their 05/07/09/11 slots: read the start rows before judging an overlap as an engineer's choice.
+- **2026-10-27:** a measuring stick must walk the product's whole path. The 914 «welcome facts gap» (8073 vs 8109)
+  was my own recompute skipping the build's cross-site dedup; through `w_b` + the dedup it matched to the unit. And
+  the connector holds a `cron.schedule()` whose command TEXT carries `drop table` (60 s, nothing landed): raise the
+  NOTICE with `do $$ raise notice $$` instead. Mechanism of 913, measured with one-off jobs: a multi-statement cron
+  command whose first results get flushed by a NOTICE makes the launcher block in `PQgetResult` until the whole
+  command ends — every job at that minute «ends» at the build's end second and the next minute's jobs start late.
+  Open with `set client_min_messages to warning` (job 38's shape) or make it one statement.
 
 ## Lessons from 2026-10-26 (🔧 fleet contract K — verified against the database and the run timelines)
 
@@ -393,3 +400,21 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   BEHIND; 🔧 10-26: the same workflow read «not a mirror» for 24 h on three mirror PRs whose diff was EMPTY
   (the file had reached main through another PR). Read the run LIST, the detector's open_alerts and the PR's
   file list, never the conclusion word.
+
+## Lessons from 2026-10-27 (🔧 fleet contract K — verified against the database and the PR timelines)
+
+- **Ship a scrapers-only fix in ONE commit, after `git fetch origin main && git merge origin/main`, and only then
+  push.** The auto-merge (`engineer-automerge.yml`) merges the FIRST green push; a second push restarts the required
+  checks, and a branch behind main either conflicts or fails «Tests keep their assertions» on main's newer
+  assertions. Seen on two nights: 🆕 10-25 (BEHIND branch failed the assertions check) and ⚡ 10-27 (its own lesson);
+  measured 10-27 by 🔧: PR #8984 sat CONFLICTING for 5 h because main had taken #8982/#8990 into the same test file.
+- **A status word is not a result.** ♻️ 10-27: a liveness sweep that died mid-run kept its 2 h lock, so the NEXT
+  sweep skipped and 2,959 freshly crawled units went unread — read the last run's exit before trusting a «lock
+  held» skip, and release a dead holder's lock at once. ♻️ 10-26: «covered 100%» while offset paging skipped
+  2,109 rows. 🆕 10-26: a red check that was another session's. Read the run's exit, the DISTINCT row count and the
+  check's own log.
+- **When a rule changes what the index serves, re-check every robot that reads the index — through the SAME path,
+  against the SOURCE table.** 🆕 10-27: the yearly-pool rule changed the rent figure the index serves and the
+  scorer read 8 correct ads as wrong. 🔧 10-27: the «welcome facts gap» (backlog 914, 8073 vs 8109) was a hand
+  recompute over raw rows that skipped the build's own cross-site dedup (owner 10-22); through the build's path
+  the stored numbers were exact. A hand recompute that skips a step of the product's path is a false alarm, not a bug.
