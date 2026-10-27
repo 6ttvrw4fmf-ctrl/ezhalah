@@ -23,7 +23,13 @@ export const FRONT_DOOR = process.env.EXPO_PUBLIC_FRONT_DOOR !== '0';
 // ezhalah.com (owner 2026-10-26: the domain is moving to Vercel): its visitors must use the door too, or the
 // back-door lock would refuse them. Turnstile must list it as well (Cloudflare dashboard), else no human pass there.
 export const FRONT_DOOR_HOSTS = ['ezhalah-app.vercel.app', 'ezhalah.com', 'www.ezhalah.com'];
-export function frontDoorHost(hostname: string): boolean { return FRONT_DOOR_HOSTS.includes(hostname); }
+// OUR OWN TEST COPIES (2026-10-27, before the back-door lock): every deployment of the project, i.e. the deploy
+// robot's canary (ezhalah-<id>-enzalah.vercel.app) and PR previews (ezhalah-app-git-<branch>-enzalah.vercel.app),
+// is the same app with the same /sb door. Without this they talk to the database directly and the lock would
+// refuse them (the canary gate would then fail every deploy). Only the team «enzalah» can create these hosts.
+// Turnstile does not list them: its error-callback keeps the page quiet there (no pass, enforcement is off).
+export const FRONT_DOOR_DEPLOYMENT_HOST = /^ezhalah-(?:[a-z0-9]{9}|app-git-[a-z0-9-]+)-enzalah\.vercel\.app$/;
+export function frontDoorHost(hostname: string): boolean { return FRONT_DOOR_HOSTS.includes(hostname) || FRONT_DOOR_DEPLOYMENT_HOST.test(hostname); }
 const webFront = typeof window !== 'undefined' && typeof window.fetch === 'function' && FRONT_DOOR && !!url
   && frontDoorHost(window.location?.hostname ?? '');
 
