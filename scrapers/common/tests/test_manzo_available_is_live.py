@@ -32,3 +32,14 @@ def test_other_statuses_are_skipped():
     for st in ("rented", "paused", "sold", None, ""):
         got, why = R.map_property(_d(display_status=st))
         assert got is None and why.startswith("status_")
+
+
+def test_the_published_district_is_stored(monkeypatch):
+    monkeypatch.setattr(R, "find_district_in_text", lambda raw, cid: "حي " + raw if raw else None)
+    (row, _), why = R.map_property(_d(district={"id": "4137", "name_ar": "البوادي"}))
+    assert row["neighborhood"] == "البوادي" and row["district_ar"] == "حي البوادي"
+
+
+def test_no_district_stays_empty():
+    (row, _), _ = R.map_property(_d())
+    assert row["neighborhood"] is None and row["district_ar"] is None

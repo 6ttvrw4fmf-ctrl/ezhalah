@@ -30,7 +30,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
-from scrapers.common.arabic_location import to_catalog  # noqa: E402
+from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 
@@ -121,6 +121,10 @@ def map_property(d: dict) -> tuple[Optional[tuple[dict, str]], str]:
 
     city_ar = d.get("city")
     city_id, region_id = to_catalog(city_ar) if city_ar else (None, None)
+    # The source publishes the district as district.name_ar (2026-10-27: 701 of 702 rows had none because this
+    # was never read). Matched to our catalogue the same way holoul does; the raw name is kept either way.
+    district_raw = ((d.get("district") or {}).get("name_ar") or "").strip() or None
+    district_ar = find_district_in_text(district_raw, city_id) if (city_id and district_raw) else None
     lng, lat = ((d.get("coordinates") or {}).get("coordinates") or [None, None])[:2]
     apt = d.get("apartment") or {}
     photos = list(dict.fromkeys(d.get("property_images") or ([d["main_image_url"]] if d.get("main_image_url") else [])))
@@ -136,6 +140,8 @@ def map_property(d: dict) -> tuple[Optional[tuple[dict, str]], str]:
         "city_ar": city_ar,
         "city_id": city_id,
         "region_id": region_id,
+        "district_ar": district_ar,
+        "neighborhood": district_raw,
         "area_m2": _f(d.get("area")),
         "bedrooms": apt.get("bedrooms") or None,
         "bathrooms": apt.get("bathrooms") or None,
