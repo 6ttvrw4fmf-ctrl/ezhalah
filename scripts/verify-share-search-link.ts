@@ -76,7 +76,7 @@ check('the invite line names Ezhalah, AI and Saudi Arabia (it travels as the mes
   /السعودية/.test(SHARE_INVITE_LINE.ar) && /Saudi Arabia/.test(SHARE_INVITE_LINE.en));
 mustCatch('a card title that drifts from the popup\'s invite', shareTitle('يوسف', Q, 'ar') !== shareInviteNote('يوسف', Q, 'ar'));
 check('every card URL follows the REQUEST\'S domain (a domain change needs no code change)',
-  meta('og:image') === 'https://new-domain.example/og-image-v7.png' && meta('og:url') === `https://new-domain.example/s/${fullPayload}`
+  meta('og:image') === 'https://new-domain.example/og-image-v9.png' && meta('og:url') === `https://new-domain.example/s/${fullPayload}`
   && !/vercel\.app/.test(html));
 check('the page sends a person to Home + ?share= (never /agent)',
   html.includes(`content="0;url=/?share=${fullPayload}"`) && html.includes(`location.replace("/?share=${fullPayload}")`) && !/\/agent/.test(html));
@@ -139,7 +139,7 @@ const imgW = Number(/og:image:width" content="(\d+)"/.exec(html)?.[1] ?? 0);
 const imgH = Number(/og:image:height" content="(\d+)"/.exec(html)?.[1] ?? 0);
 const smallSquare = (w: number, h: number) => w > 0 && w === h && w < 300;
 check('the card logo is a small square under 300 px (WhatsApp side thumbnail, not a big banner)',
-  smallSquare(imgW, imgH) && meta('og:image') === 'https://new-domain.example/og-image-v7.png');
+  smallSquare(imgW, imgH) && meta('og:image') === 'https://new-domain.example/og-image-v9.png');
 mustCatch('the 512 px logo that WhatsApp draws as a big banner', !smallSquare(512, 512));
 {
   // Owner 2026-10-20: the top «مشاركة» pill is the NORMAL share (the Ezhalah link + home sentence,
