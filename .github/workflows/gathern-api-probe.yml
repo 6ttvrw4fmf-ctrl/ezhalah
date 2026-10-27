@@ -9,6 +9,10 @@
 # blocks msapi.gathern.co and api.gathern.co, while the GitHub Actions runner reaches them daily
 # (12/12 ok gathern crawls straight through the 09-01..09-03 web-host block).
 #
+# EXCEPTION, mode=short-stays-dry only (2026-10-27): the crawl maps locations through
+# scrapers/common/arabic_location.py, which READS loc_catalog_* via the service client, so that step
+# gets SUPABASE_URL + key. It runs run.py --dry-run, which returns before begin_run() and every write.
+#
 # Do NOT add a schedule. Dispatch-only, on demand, like wasalt-proxy-diagnostic.yml.
 
 name: Gathern per-unit API probe
@@ -48,14 +52,19 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
+      - name: Short-stays dry run (reads the location catalogue, writes nothing)
+        if: github.event.inputs.mode == 'short-stays-dry'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GATHERN_SHORT_STAYS: "1"
+          GATHERN_DRY_SHOW: "40"
+        run: exec python -m scrapers.gathern.run --dry-run --shard 1/12 --max-pages 4
       - name: Probe (read-only, no DB credentials in scope)
+        if: github.event.inputs.mode != 'short-stays-dry'
         env:
           PROBE_UNITS: ${{ github.event.inputs.units }}
         run: |
-          if [ "${{ github.event.inputs.mode }}" = "short-stays-dry" ]; then
-            # Owner 2026-10-27: try Gathern chalets/rest houses/camps. Dry run: no DB keys here, so it can only print.
-            GATHERN_SHORT_STAYS=1 GATHERN_DRY_SHOW=40 exec python -m scrapers.gathern.run --dry-run --shard 1/12 --max-pages 4
-          fi
           if [ "${{ github.event.inputs.mode }}" = "app-link" ]; then
             exec python -m scrapers.gathern.probe_app_only_link
           fi
