@@ -19,7 +19,7 @@ const comp = read('src/components/HeroFalconer.tsx');
 const home = read('src/app/index.tsx');
 const svg = read('assets/images/falcon-takeoff.svg');
 
-console.log('\nThe falconer sits above the title; his falcon takes off on every visit\n');
+console.log('\nThe falconer closes the headline; his falcon takes off on every visit\n');
 
 // ── the falcon ───────────────────────────────────────────────────────────────────────────────────────────────
 // (a signed-in user's falcon is already on his hand, so the guest take-off is skipped for them — `|| signedIn`)
@@ -36,18 +36,24 @@ check('the falcon is drawn a little larger, about its perch on his hand',
 check('the falconer drawing itself is never animated',
   /<XImage source=\{FALCONER\} contentFit="contain" accessible=\{false\} style=\{StyleSheet\.absoluteFill\} \/>/.test(comp));
 
-// ── the falconer's fixed spot ────────────────────────────────────────────────────────────────────────────────
-const fixedAbove = (h: string) => {
-  const at = h.indexOf('testID="hero-falconer"');
+// ── the falconer closes the headline (owner 2026-10-27: «in the end of the sentence we include this falcon guy … let
+//     the falconer look smooth»; replaces 2026-10-26's fixed spot above the title) ─────────────────────────────────
+const atEnd = (h: string) => {
   const title = h.indexOf('testID="hero-insight"');
-  return at > 0 && title > at                                      // he comes BEFORE the title …
-    && !/HERO_TAGLINE_KEYS\[heroTagline\]\)\}\s*\{authChecked/.test(h) // … not inline after its rotating words
-    && /heroFalconerAbove: \{ alignSelf: 'center'/.test(h);          // … centred
+  const at = h.indexOf('testID="hero-falconer"');
+  return title > 0 && at > title                                                     // he comes AFTER the title opens …
+    && h.includes("{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}{authChecked ? (\n                  <>{' '}<View testID=\"hero-falconer\"") // … right after its last word
+    && h.includes(') : null}</RNAnimated.Text>')                                   // … inside the headline text
+    && h.includes("heroFalconerInline: { display: 'inline-flex', verticalAlign: 'middle'"); // … on the text line
 };
-check('the falconer sits at one fixed spot, centred above the title', fixedAbove(home));
-check('…once auth is known, for guests AND signed-in users (who get the sign-in falconer)', /\{authChecked \? \(\n\s*<View testID="hero-falconer"/.test(home));
-check('…flipped in Arabic, told who is signed in and when a welcome was taken',
-  /<HeroFalconer size=\{heroWide \? s\.heroFalconerWide : s\.heroFalconer\} flip=\{locale === 'ar'\} signedIn=\{!!user\} celebrate=\{welcomeCelebrate\} \/>/.test(home));
+check('the falconer sits at the end of the headline, on the text line', atEnd(home));
+const small = (h: string) => { const m = h.match(/heroFalconer: \{ width: (\d+), height: (\d+) \}/); const w = h.match(/heroFalconerWide: \{ width: (\d+), height: (\d+) \}/);
+  return !!m && !!w && +m[2] <= 50 && +w[2] <= 64 && +m[2] >= 34; };
+check('…small, about two lines of the headline tall', small(home));
+check('…once auth is known, for guests AND signed-in users (who get the sign-in falconer)', home.includes("{authChecked ? (\n                  <>{' '}<View testID=\"hero-falconer\""));
+check('…flipped in Arabic, told who is signed in and when a welcome was taken, with no clouds over the words',
+  home.includes("<HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} signedIn={!!user} celebrate={welcomeCelebrate} inline />")
+  && comp.includes('{inline ? null : <CloudWisp variant={0}') && comp.includes('{inline ? null : (<>'));
 
 // ── the signed-in falconer (owner-approved 2026-10-26): the story plays ONCE per sign-in welcome, then the still ──
 const signin = read('assets/images/falconer-signin.svg');
@@ -82,11 +88,9 @@ mustCatch('motion left in the settled still', !isStill(still.replace('</svg>', '
 mustCatch('the bulb drawn outside his head', !bulbInside(signin.replace(/<g clip-path="url\(#headInside\)">/g, '<g>')));
 mustCatch('every play sharing one finished timeline', !fresh(comp.replace("play=${play}", '')));
 mustCatch('a looping flight', !svgOk(svg.replace('animation:path 2.8s', 'animation:path 2.8s infinite')));
-mustCatch('the falconer moved back inline after the rotating title', !fixedAbove(home.replace(
-  "{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>",
-  "{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}{authChecked ? <View testID=\"hero-falconer\" /> : null}</RNAnimated.Text>")
-  .replace('            {authChecked ? (\n              <View testID="hero-falconer"', '            {false ? (\n              <View testID="x"')));
-mustCatch('the falconer no longer centred', !fixedAbove(home.replace("heroFalconerAbove: { alignSelf: 'center'", "heroFalconerAbove: { alignSelf: 'flex-start'")));
+mustCatch('the falconer moved back above the title', !atEnd(home.replace("{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}{authChecked ? (", "{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}{false ? (")));
+mustCatch('the falconer as a block under the words (not on the text line)', !atEnd(home.replace("heroFalconerInline: { display: 'inline-flex'", "heroFalconerInline: { display: 'flex'")));
+mustCatch('a big falconer again', !small(home.replace('heroFalconer: { width: 40, height: 46 }', 'heroFalconer: { width: 62, height: 72 }')));
 
 if (fail) { console.error(`\n❌ ${fail} check(s) failed`); process.exit(1); }
-console.log('\n✅ eagle-takes-off-every-visit: fixed above the title, the falcon flies on every open, never looping');
+console.log('\n✅ eagle-takes-off-every-visit: at the end of the headline, the falcon flies on every open, never looping');
