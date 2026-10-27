@@ -633,6 +633,45 @@ def verify_gone_for(tenant: Tenant, canary: Callable[[], tuple[bool, str]],
     return _verify
 
 
+def delisted_or_api_gone(api_verify: Callable[[str], Any], own_page: Callable[[str], Any]):
+    """For an ad MISSING FROM A COMPLETE ENUMERATION only (2026-10-27): the API's own verdict first;
+    when the API still says live, the ad's OWN web page decides. yameen: 4 land ads left the public
+    list on 10-25 and their www.yameen.sa/properties/<id> pages answer 404 (a seen control 200), but
+    the API detail record still says «available» — Nuzul does not update the detail when an ad is
+    delisted, so the API-only oracle could never retire them and they stayed on screen. own_page is
+    db.own_page_status_oracle: 404/410 counts only while a page this crawl saw answers live."""
+    def _verify(ad_number: str) -> tuple[str, str]:
+        api = api_verify(ad_number)
+        api_v = str((api[0] if isinstance(api, (tuple, list)) else api) or "unknown").lower()
+        if api_v == "gone":
+            return api if isinstance(api, tuple) else ("gone", "api")
+        page = own_page(ad_number)
+        page_v = str((page[0] if isinstance(page, (tuple, list)) else page) or "unknown").lower()
+        if page_v == "gone":
+            why = page[1] if isinstance(page, (tuple, list)) and len(page) > 1 else "own page gone"
+            return "gone", f"absent from the complete list; own page: {why}; api said {api_v}"
+        return api if isinstance(api, tuple) else (api_v, "api")
+    return _verify
+
+
+def prune_complete_crawl(table: str, rows: list[dict], source: str, verify: Callable[[str], Any]) -> int:
+    """The tenant crawls' prune for a COMPLETE enumeration (len(items) == api total).
+    prune_unseen first (its collapse/coverage guards unchanged). When it refuses (-1) — a small
+    catalogue where 4 of 10 delisted at once trips the 30% cap, as yameen on 10-25 — the unseen ads'
+    own pages are still read through delisted_or_api_gone, at most the collapse cap's worth per run,
+    with the usual 3-strike grace. Returns prune_unseen's result (-1 still marks the run degraded)."""
+    seen = {r["ad_number"] for r in rows}
+    pruned = db.prune_unseen(table, seen, source, verify_gone=verify)
+    if pruned < 0 and seen:
+        try:
+            oracle = delisted_or_api_gone(verify, db.own_page_status_oracle(db.sb(), table, seen))
+            struck = db.strike_read_gone(table, seen, source, verify_gone=oracle, _from_refused_prune=True)
+            print(f"  {table}: own-page reading after the refused prune struck {struck}", flush=True)
+        except Exception as e:  # noqa: BLE001 — a failed reading is UNKNOWN; the refused prune stands
+            print(f"  {table}: own-page reading failed ({type(e).__name__}: {e})", flush=True)
+    return pruned
+
+
 def make_verify_gone(tenant: Tenant, session_factory: Optional[Callable[[], Any]] = None):
     """The one-argument oracle the daily direct check calls (fleet_liveness.SITES `_make_verify_gone()`):
     the crawl's own verify_gone_for + make_canary, with the caller's control row as the canary. The
@@ -703,8 +742,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             control = next((int(r["ad_number"][len(PREFIX):]) for r in res + com), None)
             verify = verify_gone_for(TENANT, make_canary(TENANT, control))
             for table, rows in ((RES_TABLE, res), (COM_TABLE, com)):
-                pruned = db.prune_unseen(table, {r["ad_number"] for r in rows}, SOURCE,
-                                         verify_gone=verify)
+                pruned = prune_complete_crawl(table, rows, SOURCE, verify)
                 degraded = degraded or pruned < 0
                 print(f"  {table}: pruned {pruned}")
         healthy = db.end_run(run_id, ok=True, rows_seen=len(items),

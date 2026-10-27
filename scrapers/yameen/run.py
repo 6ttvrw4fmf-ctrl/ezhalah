@@ -55,7 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db  # noqa: E402
 from scrapers.goldendeal.run import (  # noqa: E402
     Tenant, crawl, make_canary, map_listing as _map_listing, print_dry, session as _session,
-    make_verify_gone, tally_str, verify_gone_for)
+    make_verify_gone, prune_complete_crawl, tally_str, verify_gone_for)
 
 TENANT = Tenant("yameen", "يمين العقارية", "YMN", "https://www.yameen.sa", "meteen.nzl-backend.com")
 BASE = TENANT.base
@@ -126,8 +126,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             control = next((int(r["ad_number"][len(PREFIX):]) for r in res + com), None)
             verify = verify_gone_for(TENANT, make_canary(TENANT, control))
             for table, rows in ((RES_TABLE, res), (COM_TABLE, com)):
-                pruned = db.prune_unseen(table, {r["ad_number"] for r in rows}, SOURCE,
-                                         verify_gone=verify)
+                pruned = prune_complete_crawl(table, rows, SOURCE, verify)
                 degraded = degraded or pruned < 0
                 print(f"  {table}: pruned {pruned}")
         healthy = db.end_run(run_id, ok=True, rows_seen=len(items),
