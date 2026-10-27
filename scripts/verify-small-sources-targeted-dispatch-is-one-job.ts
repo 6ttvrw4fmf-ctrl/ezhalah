@@ -22,9 +22,12 @@ const SOURCE_PASS = 'SOURCE: ${{ github.event.inputs.source }}';
 const PLAN_RUN = 'run: python scripts/small_sources_matrix.py "$SOURCE" >> "$GITHUB_OUTPUT"';
 const SYNC_MATRIX = 'matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}';
 
-const ENTRY = /^\s*-\s*\{(.+)\}\s*$/;   // the planner's and duplicateMatrixEntries' line shape
+// Every line that LOOKS like a source entry, judged independently of the planner's own regex (2026-10-27):
+// the old count used the planner's `\}\s*$` shape, so a line ending in «# comment» was invisible to BOTH and
+// sakani left the nightly matrix with this barrier green.
+const LOOKS_LIKE_ENTRY = /^\s*-\s*\{\s*source\s*:/;
 const entryLines = (t: string) =>
-  t.split('\n').filter((l) => ENTRY.test(l) && !l.trimStart().startsWith('#') && /\bsource\s*:/.test(l));
+  t.split('\n').filter((l) => LOOKS_LIKE_ENTRY.test(l) && !l.trimStart().startsWith('#'));
 
 // The SMALL_SOURCES literal block exactly as YAML bounds it: the lines after `SMALL_SOURCES: |` that are blank
 // or indented deeper than the key.
@@ -108,6 +111,11 @@ mustCatch('a planner that ignores the input (a targeted dispatch expands to the 
 const silentUnknown = join(dir, 'silent_unknown.py');
 writeFileSync(silentUnknown, readFileSync(PLANNER, 'utf8').replace('if unknown:', 'if False:'));
 mustCatch('an unknown name planning an empty run instead of failing', problems(WF, silentUnknown).length > 0);
+const oldAnchor = join(dir, 'old_anchor.py');
+writeFileSync(oldAnchor, readFileSync(PLANNER, 'utf8').replace(String.raw`\}\s*(?:#.*)?$")`, String.raw`\}\s*$")`));
+const commented = mutated('- { source: aldarim,', '- { source: aldarim,').replace(/^(\s*- \{ source: aldarim,.*\})\s*$/m, '$1  # a note');
+mustCatch('a planner that drops an entry carrying a trailing «# comment» (sakani, #8877)',
+  readFileSync(oldAnchor, 'utf8') !== readFileSync(PLANNER, 'utf8') && problems(commented, oldAnchor).length > 0);
 
 if (failed) { console.error(`\n❌ verify-small-sources-targeted-dispatch-is-one-job: ${failed} check(s) failed.`); process.exit(1); }
 console.log(`\n✅ verify-small-sources-targeted-dispatch-is-one-job: a targeted dispatch creates only the jobs it names; the nightly keeps all ${n}.`);

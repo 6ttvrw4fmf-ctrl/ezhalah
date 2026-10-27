@@ -16,7 +16,10 @@ import os
 import re
 import sys
 
-_ENTRY = re.compile(r"^\s*-\s*\{(.+)\}\s*$")
+# A trailing «# comment» after the closing brace is part of the line's shape (2026-10-27): #8877 wrote
+# `- { source: sakani, … }  # sale side …` and the old `\}\s*$` anchor dropped sakani from every nightly
+# matrix without a word (142 of 143 planned). Lazy body, so a «}» inside the comment cannot widen it.
+_ENTRY = re.compile(r"^\s*-\s*\{(.+?)\}\s*(?:#.*)?$")
 _FIELD = re.compile(r"""([A-Za-z_][\w-]*)\s*:\s*(?:"([^"]*)"|'([^']*)'|([^,}]*))""")
 
 
