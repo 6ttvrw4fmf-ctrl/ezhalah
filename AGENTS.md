@@ -24,6 +24,17 @@ it and then do the four steps, or say plainly that you have not. Back-end-only w
 column, a sync) is not exempt: it is live when its effect shows on a real card. How to drive the
 browser from an agent session: `docs/ops/VERIFYING_PRODUCTION.md`.
 
+# ALWAYS FAST (owner, 2026-10-27 — permanent)
+
+**In the owner's words: «always keep it fast».** Measured that day on ezhalah.com: the home page downloaded 13.7 MB of
+logos (stored at up to 1,417 px for ~96×48 px frames) and a 1,208 KB (brotli) entry bundle carrying the unused native Sentry
+SDK. Both were cut (logos → 1.7 MB, bundle → ~972 KB) and are now guarded on every PR:
+
+- **Logos:** each ≤ 60 KB, pack ≤ 2.5 MB — `scripts/verify-logo-weight-budget.ts`. Add a logo shrunk (≤ 320 px, palette PNG with alpha).
+- **First download:** web entry ≤ 1,100 KB brotli — `scripts/web-bundle-budget.mjs`, run by `web-runtime-smoke.yml` after the build.
+  A new heavy library loads LATER (lazy) or not at all; raising the budget is a reviewed decision, never a way to go green.
+- **Web-only bundle hygiene:** `metro.config.js` keeps native-only packages out of the web build (`verify-web-bundle-skips-native-sentry.ts`).
+
 # OUR OWN ROBOTS MUST NOT TAKE PRODUCTION DOWN (2026-10-09 — permanent)
 
 Production has no separate test database: every live check, sweep, smoke and agent browser runs on the
