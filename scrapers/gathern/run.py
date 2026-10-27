@@ -128,8 +128,8 @@ TYPE_MAP = {
 }
 
 # SHORT STAYS (owner 2026-10-25: every type the site shows; they belong in the future «Short stays» rent
-# group). Built but OFF: ingested only when GATHERN_SHORT_STAYS=1, so nothing reaches search until the
-# owner says yes. Measured live 2026-10-25 (distinct units): Al Kharj 72 chalets + 11 rest houses + 6 camps
+# group). Ingested only when GATHERN_SHORT_STAYS=1; the owner said yes 2026-10-27 and gathern-sync.yml
+# sets it. Measured live 2026-10-25 (distinct units): Al Kharj 72 chalets + 11 rest houses + 6 camps
 # of 454; Abha 79 + 22 + 6 of 990. Not mapped: 4 مزرعة (a Farm is a COMMERCIAL type; this scraper writes
 # only the residential table) and 1 منتجع (no catalogue type) — owner questions, never guessed.
 SHORT_STAY_TYPE_MAP = {
@@ -1437,7 +1437,14 @@ def main() -> int:
     # ── dry-run: print, no DB ──
     if args.dry_run:
         print(f"\nDRY RUN — scanned {scanned} cards → {len(rows)} unique monthly residential units")
-        for r in rows[:10]:
+        by_type: dict[str, int] = {}
+        for r in rows:
+            by_type[r.get("property_type") or "?"] = by_type.get(r.get("property_type") or "?", 0) + 1
+        print("   by type:", dict(sorted(by_type.items(), key=lambda kv: -kv[1])))
+        # With short stays on, show the short-stay units first: they are what a dry run is checking.
+        short = set(SHORT_STAY_TYPE_MAP.values())
+        shown = sorted(rows, key=lambda r: r.get("property_type") not in short)
+        for r in shown[:int(os.environ.get("GATHERN_DRY_SHOW", "10") or 10)]:
             print("  ", {k: r.get(k) for k in (
                 "ad_number", "property_type", "city", "region", "neighborhood",
                 "area_m2", "bedrooms", "price_annual", "rent_period")},
