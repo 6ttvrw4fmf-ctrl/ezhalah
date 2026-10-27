@@ -611,7 +611,12 @@ const DOORS = [
   // correct in front of it — a false alarm on a deliberate product decision. The open-signal and the
   // close step are per-door now: a door with no closer is asserted on its CONTENT and its close
   // mechanism is left uncovered rather than guessed at.
-  { path: '/about', must: ['من نحن', 'الثقة والشفافية', 'إخلاء المسؤولية'], form: false, closer: null },
+  // Its copy is the owner's About redesign (InfoModal.tsx AboutBody): the «الثقة والشفافية» /
+  // «إخلاء المسؤولية» headings no longer exist, so asserting them failed on every build, stable and
+  // canary alike, and the canary gate could not see a real /about break. These are the lines it
+  // renders today: the hero line and the "search platform only" disclaimer line.
+  // scripts/verify-guardian-door-copy-is-rendered.ts fails if a door asserts copy the app no longer renders.
+  { path: '/about', must: ['من نحن', 'بحث عقاري أذكى، يجمع السوق السعودي في مكان واحد.', 'إزهله منصة بحث فقط.'], form: false, closer: null },
 ];
 
 const G7 = {
@@ -622,7 +627,7 @@ const G7 = {
     'Navigate to https://ezhalah-app.vercel.app/support — assert the info modal opens on the home URL.',
     'Assert the support screen renders its heading, its Subject/Message/Email fields and the response-time panel. Do NOT press «إرسال».',
     'Press the modal close control and assert the modal is gone and the app is still rendered.',
-    'Repeat for /about, asserting «من نحن», «الثقة والشفافية» and «إخلاء المسؤولية». /about has no × by design, so it is proven open by its own copy and its close mechanism is recorded as NOT COVERED.',
+    'Repeat for /about, asserting «من نحن», its hero line and its «إزهله منصة بحث فقط» disclaimer line. /about has no × by design, so it is proven open by its own copy and its close mechanism is recorded as NOT COVERED.',
   ],
   async run(page, ctx) {
     const bad = [];
