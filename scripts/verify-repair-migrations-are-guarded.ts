@@ -63,6 +63,11 @@ const WAIVED: Record<string, string> = {
     'property_age is NULL, splices it into the mon_run_all_detectors() roster (a planted NULL is caught at apply) and enrolls ' +
     'the repair in ops_repair_guarantee_registry. The parser half (scrapers/haraj/parse.age_of) is executed by ' +
     'verify-open-age-bucket-never-answers-up-to.ts on every CI run',
+  // 2026-10-27. Owner-approved one-off retirement («do that please fix everything»).
+  '20261027025056_razre_retire_wix_era_rows.sql':
+    'a one-off owner decision on a fixed set of 94 rows from razre.sa before its rebuild (Wix /onepro-1/ URLs that now ' +
+    'redirect); every row is registered in ops_adjudicated_retraction, which auto_recover_false_inactive() and the ' +
+    'deliberate-deactivation barrier already watch, and the new site cannot produce /onepro-1/ rows, so the class cannot recur.',
   // 2026-10-22. Pins the ads' own sources published, read at save time (owner: «fix all the bugs»).
   '20261022230940_pins_nine_sites.sql':
     'the re-save only lets the new per-table BEFORE trigger (tg_pin_from_source_link) read a pin the row already holds, ' +
