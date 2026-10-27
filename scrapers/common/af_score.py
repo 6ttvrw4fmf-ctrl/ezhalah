@@ -349,9 +349,18 @@ def offered(answers: list[str], stored: dict) -> list[str]:
     """Only answers a customer can actually give in this listing's scope. The Advanced Filter never asks
     «furnished» on a Monthly search (src/lib/afCohorts.ts: no RentMonthly cohort lists it), so a request
     carrying it is not a customer's request and its miss is not a customer's miss."""
+    if is_land(stored.get("type_ar")):
+        return []
     if stored.get("rent_period_ar") == MONTHLY:
         return [a for a in answers if a != FURNISHED]
     return answers
+
+
+def is_land(type_ar) -> bool:
+    """Every land cohort (أرض سكنية / تجارية / صناعية / خام / أرض, src/lib/afCohorts.ts) asks only street width and
+    facade, and COHORT_CHIPS gives no land a building chip. On 10-27 the score asked «kitchen» of 6 lands (abaad 3,
+    jurash 2, opensooq 1: the word sat in the site's template, not the ad) and counted 6 of its 29 misses there."""
+    return isinstance(type_ar, str) and type_ar.startswith("أرض")
 
 
 def rpc_params(stored: dict, answers: list[str]) -> dict | None:
