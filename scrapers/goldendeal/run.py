@@ -633,6 +633,33 @@ def verify_gone_for(tenant: Tenant, canary: Callable[[], tuple[bool, str]],
     return _verify
 
 
+_RETIRED = {"status_sold", "status_rented", "status_unavailable"}
+
+
+def strike_feed_retired(table: str, rows: list, items: list, tenant: Tenant, verify) -> int:
+    """Remove the stored ads THIS run's own feed marked sold / rented / unavailable (trap 1), before
+    the absence prune runs (2026-10-27, backlog 923). yameen: 4 of 10 active rows turned «rented» in
+    the feed, the crawl skipped them, prune_unseen's collapse guard read «re-saw 6 of 10», refused the
+    prune and demoted every run for three days (P0 silent_scraper_death) while the four stayed on
+    screen. Owner 2026-10-20 «once we see it, remove it» (aldarim): an ad the feed retired AND whose
+    own API record reads gone through the canaried oracle is struck at grace 1. Any other unseen ad
+    answers unknown here and is left to the ordinary prune; the collapse cap is never raised."""
+    retired = {f"{tenant.prefix}{L.get('id')}" for L in items if _withdrawn(L) in _RETIRED}
+    if not retired:
+        return 0
+
+    def only_feed_retired(ad_number: str):
+        if ad_number not in retired:
+            return "unknown", "not marked retired by this run's feed"
+        return verify(ad_number)
+    try:
+        return db.strike_read_gone(table, {r["ad_number"] for r in rows}, tenant.source,
+                                   verify_gone=only_feed_retired, grace=1)
+    except Exception as e:  # noqa: BLE001 — a failed reading is UNKNOWN; the prune guard still stands
+        print(f"  {table}: feed-retired strike failed ({type(e).__name__}: {e})", flush=True)
+        return 0
+
+
 def make_verify_gone(tenant: Tenant, session_factory: Optional[Callable[[], Any]] = None):
     """The one-argument oracle the daily direct check calls (fleet_liveness.SITES `_make_verify_gone()`):
     the crawl's own verify_gone_for + make_canary, with the caller's control row as the canary. The
@@ -703,6 +730,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             control = next((int(r["ad_number"][len(PREFIX):]) for r in res + com), None)
             verify = verify_gone_for(TENANT, make_canary(TENANT, control))
             for table, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                strike_feed_retired(table, rows, items, TENANT, verify)
                 pruned = db.prune_unseen(table, {r["ad_number"] for r in rows}, SOURCE,
                                          verify_gone=verify)
                 degraded = degraded or pruned < 0
