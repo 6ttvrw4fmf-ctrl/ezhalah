@@ -59,8 +59,11 @@ def _sakani_stubs(monkeypatch, n_units: int, detail):
     monkeypatch.setattr(SKN, "_oracle_sess", None)
     units = [({"resource_id": 1000 + i}, {"resource_id": 1000 + i}) for i in range(n_units)]
     monkeypatch.setattr(SKN, "enumerate_rent", lambda s: list(units))
+    # the sale walk (backlog 864): one off-plan project, which reads no detail record
+    monkeypatch.setattr(SKN, "enumerate_sale", lambda s: [({"resource_id": 9, "resource_type": "projects"},
+                                                         {"resource_id": 9, "resource_type": "projects"})])
     monkeypatch.setattr(SKN, "fetch_detail", detail)
-    monkeypatch.setattr(SKN, "map_listing", lambda idx, rich, d, dr: (None, "", "stub"))
+    monkeypatch.setattr(SKN, "map_listing", lambda idx, rich, d, dr, purpose="rent": (None, "", "stub"))
     monkeypatch.setattr(SKN, "_controls_live", lambda ads: False)
     monkeypatch.setattr(sys, "argv", ["run.py"])
     return calls
