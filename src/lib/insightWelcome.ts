@@ -22,10 +22,17 @@ export const GREETING_SLOT = '⟦g⟧';
 const NAME = '⟦n⟧'; // same token as filterWelcome.ts NAME_SLOT
 
 export type Greeting = { ar: string; en: string; when: 'morning' | 'evening' | 'friday' | 'weekend' | 'any' };
-/** The line ends with its greeting's emoji (owner 2026-10-22: «good morning ☀️ should be the emoji, last sentence»). */
+/** The greeting's emoji (owner 2026-10-22). Since 2026-10-27 it sits RIGHT AFTER THE NAME («هلا فيك يوسف 👋، تدري إن…»)
+ *  and the falconer drawing closes the line on screen instead (owner: «the emoji … right after … in the end of the
+ *  sentence we include this falcon guy»). */
 export const GREETING_EMOJI: Record<Greeting['when'], string> = { morning: '☀️', evening: '🌙', friday: '🕌', weekend: '🌴', any: '👋' };
-/** «… اكتشفها مع إزهله.» → «… اكتشفها مع إزهله ☀️»: the closing full stop gives way to the emoji. */
-export const endWithEmoji = (text: string, emoji: string): string => `${text.trimEnd().replace(/[.。]$/, '')} ${emoji}`;
+/** «⟦g⟧ ⟦n⟧، تدري إن … مع إزهله.» → «⟦g⟧ ⟦n⟧ ☀️، تدري إن … مع إزهله»: the emoji right after the name (after the greeting
+ *  when a line has no name), and the closing full stop dropped — the falconer ends the line. */
+export const emojiAfterName = (text: string, emoji: string): string => {
+  const t = text.trimEnd().replace(/[.。]$/, '');
+  const at = t.includes(NAME) ? t.indexOf(NAME) + NAME.length : t.indexOf(GREETING_SLOT) + GREETING_SLOT.length;
+  return `${t.slice(0, at)} ${emoji}${t.slice(at)}`;
+};
 // Owner-approved 2026-10-22 (occasions and afternoon wordings removed by the owner).
 export const GREETINGS: readonly Greeting[] = [
   { when: 'morning', ar: 'صباح الخير', en: 'Good morning' },
@@ -82,7 +89,7 @@ export function fillGreeting(text: string | null, greetingIndex: number | null, 
   if (!text.includes(GREETING_SLOT)) return text;
   const g = greetingIndex != null ? GREETINGS[greetingIndex] : undefined;
   if (!g) return null;
-  return endWithEmoji(text.split(GREETING_SLOT).join(locale === 'ar' ? g.ar : g.en), GREETING_EMOJI[g.when]);
+  return emojiAfterName(text, GREETING_EMOJI[g.when]).split(GREETING_SLOT).join(locale === 'ar' ? g.ar : g.en);
 }
 
 // ── the facts ──────────────────────────────────────────────────────────────────────────────────────────
