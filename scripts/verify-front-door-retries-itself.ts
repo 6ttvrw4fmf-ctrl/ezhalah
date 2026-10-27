@@ -7,6 +7,7 @@
 //   node --experimental-strip-types scripts/verify-front-door-retries-itself.ts   (discovered by `npm test`)
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { liftSymbols } from './lib/liftSymbols.ts';
 
 const root = join(import.meta.dirname, '..');
@@ -27,7 +28,7 @@ const setTimeout = (f) => f();`;
 
 type Outcome = 'net' | number;
 async function run(src: string, script: Outcome[]): Promise<{ trail: string; status: number | 'threw' }> {
-  const file = join(root, 'scripts/.tmp-front-door-retry.ts');
+  const file = join(tmpdir(), `ezhalah-front-door-retry-${process.pid}.ts`); // never inside the repo (verify-in-place-mutators-restore-on-signal)
   (await import('node:fs')).writeFileSync(file, src);
   const trail: string[] = [];
   (globalThis as any).__fakeWindow = {
