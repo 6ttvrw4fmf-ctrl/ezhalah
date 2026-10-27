@@ -131,8 +131,8 @@ const morning = GREETINGS.findIndex((g) => g.ar === 'صباح الخير');
 const vis = (s: string) => s.replace(/[\u2068\u2069]/g, '');
 const shownAr = vis(fillName(fillGreeting(r1.ar, morning, 'ar'), 'يوسف', 'ar')!);
 const shownEn = vis(fillName(fillGreeting(r1.en, morning, 'en'), 'Yusuf', 'en')!);
-check('Arabic shows «صباح الخير يوسف، تدري إن …»', shownAr.startsWith('صباح الخير يوسف، تدري إن'), shownAr);
-check('English shows the SAME line translated, with «Good morning Yusuf»', shownEn.startsWith('Good morning Yusuf, did you know'), shownEn);
+check('Arabic shows «صباح الخير يوسف ☀️، تدري إن …»', shownAr.startsWith('صباح الخير يوسف ☀️، تدري إن'), shownAr);
+check('English shows the SAME line translated, with «Good morning Yusuf»', shownEn.startsWith('Good morning Yusuf ☀️, did you know'), shownEn);
 check('an Arabic line never shows the Latin name', fillName(fillGreeting(r1.ar, morning, 'ar'), 'Yusuf', 'ar') === null);
 check('a line without a greeting slot (older lines) is left as it is', fillGreeting('هلا ⟦n⟧', null, 'ar') === 'هلا ⟦n⟧');
 // seen live 2026-10-22: «حي الرحاب بـالطائف», «بـجدة» — the «بـ» joins the place
@@ -174,23 +174,28 @@ const mine: InsightPack = { day: '2026-10-22', templates, insights: [
 const p5 = chooseInsightLine(mine, {}, now, en, { district: 'النخيل', rand: () => 0.1 });
 check('a user who searched a district gets a line about it (personal pick)', !!p5 && templates.find((t) => t.id === p5.templateId)!.personal && p5.ar.includes('حي النخيل'), p5?.ar);
 
-// ── 6. the line ends with its greeting's emoji (owner 2026-10-22: «good morning ☀️ … last sentence») ──
+// ── 6. the greeting's emoji sits RIGHT AFTER THE NAME and the line ends without a full stop — the falconer closes it
+//     on screen (owner 2026-10-27, replacing 2026-10-22's emoji-at-the-end) ──
 {
   const line = renderInsight(templates.find((t) => t.kind === 'land_ppm_city')!, { id: 1, kind: 'land_ppm_city', ...base }, en)!;
   const want: Record<string, string> = { morning: '☀️', evening: '🌙', friday: '🕌', weekend: '🌴', any: '👋' };
-  let allEnds = true; const bad: string[] = [];
+  let allOk = true; const bad: string[] = [];
   GREETINGS.forEach((g, i) => {
     for (const loc of ['ar', 'en'] as const) {
-      const s = fillGreeting(loc === 'ar' ? line.ar : line.en, i, loc)!;
-      if (!s.endsWith(` ${want[g.when]}`)) { allEnds = false; bad.push(`${g.ar}/${loc}: ${s.slice(-24)}`); }
-      if (/\.\s+\S+$/.test(s)) { allEnds = false; bad.push(`full stop kept: ${s.slice(-24)}`); }
+      const s = vis(fillName(fillGreeting(loc === 'ar' ? line.ar : line.en, i, loc), loc === 'ar' ? 'يوسف' : 'Yusuf', loc)!);
+      const name = loc === 'ar' ? 'يوسف' : 'Yusuf';
+      if (!s.startsWith(`${loc === 'ar' ? g.ar : g.en} ${name} ${want[g.when]}`)) { allOk = false; bad.push(`${g.ar}/${loc}: ${s.slice(0, 30)}`); }
+      if (s.split(want[g.when]).length !== 2) { allOk = false; bad.push(`emoji not exactly once: ${s}`); }
+      if (/[.。]\s*$/.test(s) || s.trimEnd().endsWith(want[g.when])) { allOk = false; bad.push(`bad ending: ${s.slice(-24)}`); }
     }
   });
-  check('every line ends with its greeting\'s emoji (☀️ morning, 🌙 evening, 🕌 Friday, 🌴 weekend, 👋 any time), the full stop dropped', allEnds, bad.join(' | '));
+  check('every line puts its greeting\'s emoji right after the name (☀️ morning, 🌙 evening, 🕌 Friday, 🌴 weekend, 👋 any time), once, and ends with no full stop', allOk, bad.join(' | '));
   check('the emoji table is exactly the owner\'s', JSON.stringify(GREETING_EMOJI) === JSON.stringify(want));
   const morning = GREETINGS.findIndex((g) => g.ar === 'صباح الخير');
   const shown = vis(fillName(fillGreeting(line.ar, morning, 'ar'), 'يوسف', 'ar')!);
-  check('Arabic reads «صباح الخير يوسف، تدري إن … اكتشف أراضيها مع إزهله ☀️»', shown.startsWith('صباح الخير يوسف، تدري إن') && shown.endsWith('مع إزهله ☀️'), shown);
+  check('Arabic reads «صباح الخير يوسف ☀️، تدري إن … اكتشف أراضيها مع إزهله»', shown.startsWith('صباح الخير يوسف ☀️، تدري إن') && shown.endsWith('مع إزهله'), shown);
+  // a line with no name slot still gets the emoji right after the greeting
+  check('a line without a name puts the emoji after the greeting', fillGreeting(`${GREETING_SLOT}، تدري إن …`, morning, 'ar') === 'صباح الخير ☀️، تدري إن …');
 }
 
 // ── 7. not Riyadh, Riyadh, Riyadh: city first, the user's city two lines in three, never twice in a row ──
