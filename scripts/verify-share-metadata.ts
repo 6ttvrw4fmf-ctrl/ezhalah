@@ -49,7 +49,7 @@ const REQUIRED_EN = 'Ezhalah is a free AI property search engine for Saudi Arabi
 // wording says «عقارات السعودية», not «في السعودية».
 const NAMES_COUNTRY = /المملكة|السعودية/;
 const PAGE_TITLE_AR_OWNER = 'إزهله | ابحث في كل عقارات المملكة بمكان واحد';
-const PAGE_TITLE_EN_OWNER = 'Ezhalah | Search all Saudi properties';
+const PAGE_TITLE_EN_OWNER = 'Ezhalah | All Saudi properties in one place';
 const TITLE_FITS = 44;
 
 // JSX comments are stripped: this file's own prose quotes the tags it is checking for.

@@ -74,9 +74,9 @@ export function shareMessage(loc: 'ar' | 'en', count: number | null): string {
 export const SHARE_TITLE_AR = 'إزهله';
 // The browser tab / history / suggestion / Google title (owner 2026-10-27, picked from phone-width previews: the
 // Kingdom wording). Both are checked to FIT uncut — the owner's longer English «…at once in the Kingdom» was cut off,
-// so the English is the shorter «Search all Saudi properties». The share card keeps the plain name.
+// so the English is «All Saudi properties in one place» (matches the Arabic, fits). The share card keeps the plain name.
 export const PAGE_TITLE_AR = 'إزهله | ابحث في كل عقارات المملكة بمكان واحد';
-export const PAGE_TITLE_EN = 'Ezhalah | Search all Saudi properties';
+export const PAGE_TITLE_EN = 'Ezhalah | All Saudi properties in one place';
 const SHARE = {
   en: { title: 'Ezhalah' },
   ar: { title: SHARE_TITLE_AR },
