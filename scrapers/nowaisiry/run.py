@@ -203,6 +203,38 @@ _probe = http_liveness.LivenessProbe(
 )
 
 
+# ── The SEEN rows' own-page check (2026-10-27) ──────────────────────────────────────────────────
+# The crawl reads only the REST list, and a full list every night means no row ever reaches grace,
+# so the oracle above was never asked about a single listing (0 of 20 ever verified). This reader
+# adds the LIVE limb the probe above deliberately lacks, by knowing which post it expects:
+#   MEASURED 2026-10-27: the live NW3016 page answers 200 with body class `postid-3016` (and
+#   shortlink ?p=3016); the deleted NW3529 page answers 404 with WordPress's `error404` template; a
+#   made-up slug answers 404. The source states no sold/reserved word (map_listing's audit).
+# GONE is byte-identical to _signal (404/410 on its own path) — this adds a live answer, it does not
+# widen what counts as gone. A 200 that does not name THIS post id is no opinion. It is used ONLY by
+# db.stamp_seen_alive, which can stamp a live answer and can never hide anything.
+def _seen_signal_for(pid: str):
+    marker = re.compile(rf"\bpostid-{re.escape(pid)}\b")
+
+    def _sig(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
+        gone = _signal(status, body, path_changed)
+        if gone:
+            return gone
+        if path_changed or status != 200:
+            return None
+        return "live" if marker.search(body or "") else None
+    return _sig
+
+
+def verify_seen(ad_number: str):
+    pid = str(ad_number or "")[2:]
+    if not str(ad_number or "").startswith("NW") or not pid.isdigit():
+        return "unknown", f"{ad_number!r} is not an NW<post id> ad number"
+    return http_liveness.LivenessProbe(
+        platform="nowaisiry", signal=_seen_signal_for(pid), session=_oracle_session,
+        url_for=_probe.url_for).verify_gone(ad_number)
+
+
 
 def _clean(s: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", ihtml.unescape(s or ""))).strip()
@@ -524,6 +556,8 @@ def main() -> int:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
                 pruned += n
+            # Every ad the list served gets a direct read of its own page; only 'live' is recorded.
+            db.stamp_seen_alive(tbl, {r["ad_number"] for r in rows_seen}, verify_seen, source=SOURCE)
         print(f"✓ Al Nowaisiry: {len(res)} residential + {len(com)} commercial upserted, "
               f"{pruned} stale pruned")
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["nowaisiry_residential_listings", "nowaisiry_commercial_listings"])

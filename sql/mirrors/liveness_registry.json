@@ -61,7 +61,7 @@
   },
   {
     "platform": "alhoshan",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -133,7 +133,7 @@
   },
   {
     "platform": "alta",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -427,7 +427,7 @@
   },
   {
     "platform": "holoul",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -781,7 +781,7 @@
   },
   {
     "platform": "sqcc",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -835,7 +835,7 @@
   },
   {
     "platform": "therc",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },

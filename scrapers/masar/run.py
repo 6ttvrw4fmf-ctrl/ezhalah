@@ -655,6 +655,11 @@ def main() -> int:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
                 else:
                     pruned += n
+                # The rows this crawl SAW get the same direct read of their own REST record
+                # (2026-10-27). The list is re-read in full every night, so no row ever reached
+                # grace and _verify_gone had never been asked: 0 rows ever verified. stamp_seen_alive
+                # records only its LIVE answer; it can never strike or hide (UNKNOWN writes nothing).
+                db.stamp_seen_alive(tbl, {r["ad_number"] for r in rows}, _verify_gone, source=SOURCE)
         # The skip tally goes into the run row: this source skips MOST of its catalogue for one
         # stated reason (no city in the ad), so an almost-empty run has to say why in the database
         # rather than looking like a broken crawl.

@@ -204,6 +204,25 @@ def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[st
     return None
 
 
+DIRECT_ALIVE_ORACLE = "mizlaj.detail_fetch.inertia_listing_available_flags"
+
+
+def detail_proves_live(row: Optional[dict], listing: Optional[dict]) -> bool:
+    """True only when the crawl's OWN read of this listing's page is a direct live read (2026-10-27).
+
+    The crawl fetches every /guest/listings/<slug> page each run and writes a row only when that page
+    states the measured available triple (held_reason is None: is_sold False, is_reserved False,
+    deleted_at null). Recording it costs zero requests (db.mark_direct_alive). The one check added:
+    the page's own props.listing.id is THIS row's id (ad_number MZ<id>) — measured 2026-10-27, the
+    live page shk-1765m2-llbyaa-altayf-lmirqyh6 carries id 62 = MZ62; a removed listing
+    (aakar-42659m2-llaygar-alryad-BeHUFnTO) and a made-up slug answer 404 and never reach a row."""
+    if not isinstance(row, dict) or not isinstance(listing, dict) or row.get("active") is not True:
+        return False
+    if held_reason(listing) is not None or listing.get("id") in (None, ""):
+        return False
+    return row.get("ad_number") == f"MZ{listing['id']}"
+
+
 _probe = http_liveness.LivenessProbe(
     platform="mizlaj",
     signal=_signal,
@@ -651,6 +670,8 @@ def main() -> int:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
+            if detail_proves_live(row, listing):
+                db.mark_direct_alive(row, oracle=DIRECT_ALIVE_ORACLE)
             (com if cat == "commercial" else res).append(row)
             seen += 1
 

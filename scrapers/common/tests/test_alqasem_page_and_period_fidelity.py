@@ -178,7 +178,7 @@ def _db(calls):
     return types.SimpleNamespace(
         begin_run=lambda slug: calls.setdefault("begin", slug) or 9,
         _wasalt_batch=lambda table, rows: calls.setdefault("batches", []).append((table, [r["ad_number"] for r in rows])),
-        retire_superseded_siblings=lambda **kw: calls.setdefault("retire", kw) and 0,
+        mark_direct_alive=lambda row, oracle=None: row, retire_superseded_siblings=lambda **kw: calls.setdefault("retire", kw) and 0,
         prune_unseen=lambda table, seen, source=None, verify_gone=None: calls.setdefault("prune", []).append((table, sorted(seen), verify_gone is not None)) or 0,
         end_run=lambda run_id, **kw: calls.setdefault("end", kw) or True,
     )
