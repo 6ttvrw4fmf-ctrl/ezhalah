@@ -31,5 +31,16 @@ if (typeof resolve === 'function') {
   check('web: any other module is untouched', other?.type !== 'empty');
 }
 
+// MUTATION PROOF: the same predicate must reject a resolver that forgets the rule, and one that applies it to phones too.
+const mustCatch = (label: string, caught: boolean) => { console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${label}`); if (!caught) failed++; };
+type R = (c: unknown, m: string, p: string | null) => { type?: string };
+const ctx2 = { resolveRequest: (_c: unknown, m: string) => ({ type: 'sourceFile', filePath: `/stub/${m}` }) };
+const holds = (r: R) => r(ctx2, '@sentry/react-native', 'web')?.type === 'empty'
+  && r(ctx2, '@sentry/react-native', 'ios')?.type !== 'empty' && r(ctx2, '@sentry/browser', 'web')?.type !== 'empty';
+check('the predicate holds for the real resolver', typeof resolve === 'function' && holds(resolve as R));
+mustCatch('a resolver without the web rule (native SDK back in the web bundle)', !holds((c, m, p) => ctx2.resolveRequest(c, m)));
+mustCatch('a rule applied to every platform (phones lose crash reports)', !holds((c, m) => (m === '@sentry/react-native' ? { type: 'empty' } : ctx2.resolveRequest(c, m))));
+mustCatch('a rule that empties the web SDK too (web loses crash reports)', !holds((c, m, p) => (p === 'web' && m.startsWith('@sentry/') ? { type: 'empty' } : ctx2.resolveRequest(c, m))));
+
 if (failed) { console.error(`\n❌ verify-web-bundle-skips-native-sentry: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-web-bundle-skips-native-sentry: the web bundle leaves out the native Sentry SDK; native builds keep it.');
