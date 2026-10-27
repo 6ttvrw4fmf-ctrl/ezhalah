@@ -4,7 +4,7 @@
 // sentence («تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى …»)
 // — and replaced that sentence with the one above. The card itself (title, eagle, «148 موقع · … إعلان
 // · … مدينة») is untouched. The page's SEO description (SHARE_BLURB_AR) is its own sentence — since 2026-10-27
-// «إزهله محرك بحث عقاري مجاني بالذكاء الاصطناعي…» — and never the sent message.
+// «محرك بحث عقاري مجاني بالذكاء الاصطناعي في السعودية…» — and never the sent message.
 //
 // The 148 is LIVE, never typed, and it is THE CARD'S number (owner 2026-10-20: «the message says 146
 // but when I send it says 148 — confusing»): src/data/siteCount.ts reads loader_active_platforms_ar()
@@ -71,7 +71,7 @@ check('unknown count → «كل المواقع», never a zero or a typed number
 check('a zero or a bad count is treated as unknown', real.shareLead('ar', 0) === real.shareLead('ar', null) && real.shareLead('ar', 2.5) === real.shareLead('ar', null));
 g.__siteCount = 148;
 check('the old long sentence is gone from the sent message, and the SEO description is its own AI-engine sentence',
-  !real.shareMessage('ar', 148).includes('الطريقة الأذكى') && /SHARE_BLURB_AR = 'إزهله محرك بحث عقاري مجاني بالذكاء الاصطناعي/.test(shareSrc)
+  !real.shareMessage('ar', 148).includes('الطريقة الأذكى') && /SHARE_BLURB_AR = 'محرك بحث عقاري مجاني بالذكاء الاصطناعي في السعودية/.test(shareSrc)
   && !real.shareMessage('ar', 148).includes('محرك بحث عقاري'));
 
 // ── ONE NUMBER: the sentence's count and the card's count are the same fold over the same RPC ───
