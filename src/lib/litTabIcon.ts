@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
+import { useReducedMotion } from '@/lib/useReducedMotion';
 
 // THE LIT TAB ICON (owner 2026-10-27: «can we make it light up … like the one we have … can u do that swap»).
 // A browser shows a still picture in the tab, so «lighting up» is a swap: while someone is signed in, every
@@ -31,10 +32,56 @@ export function applyTabIcon(links: IconLink[], signedIn: boolean): void {
   }
 }
 
-/** Web only: keep the tab icon lit for as long as someone is signed in. */
-export function useLitTabIcon(signedIn: boolean): void {
+// THE FADE (owner 2026-10-27: «let it feel smooth»). A browser cannot fade a tab icon by itself, so the change is
+// drawn: FADE_FRAMES in-between pictures (the regular eagle dissolving into the lit one, eased) are painted on a
+// 32 px canvas and handed to the icon links one after another over FADE_MS, then the real lit file takes over.
+// Only a REAL sign-in / sign-out fades: the session restore on a refresh is applied at once (no fade on every
+// load), and so is everything under reduced motion. If anything fails to load, the plain swap still happens.
+export const FADE_MS = 560;
+export const FADE_FRAMES = 12;
+
+/** The blend amount for each in-between frame: eased in and out, strictly between 0 and 1. */
+export function fadeAlphas(frames: number = FADE_FRAMES): number[] {
+  return Array.from({ length: frames }, (_, i) => { const t = (i + 1) / (frames + 1); return t * t * (3 - 2 * t); });
+}
+
+/** Should this change fade? Only after the session is known (not the restore on a refresh) and with motion allowed. */
+export function shouldFade(settledBefore: boolean, reduced: boolean): boolean {
+  return settledBefore && !reduced;
+}
+
+/** Web only: keep the tab icon lit for as long as someone is signed in, fading on a real sign-in or sign-out. */
+export function useLitTabIcon(signedIn: boolean, authChecked: boolean): void {
+  const reduced = useReducedMotion();
+  const settled = useRef(false);
   useEffect(() => {
-    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
-    applyTabIcon(Array.from(document.querySelectorAll('link[rel="icon"]')), signedIn);
-  }, [signedIn]);
+    if (Platform.OS !== 'web' || typeof document === 'undefined' || !authChecked) return;
+    const links = Array.from(document.querySelectorAll('link[rel="icon"]'));
+    const fade = shouldFade(settled.current, reduced);
+    settled.current = true;
+    if (!fade) { applyTabIcon(links, signedIn); return; }
+    const small = links.find((l) => l.getAttribute('sizes') === '32x32');
+    const regular = small?.getAttribute(ORIGINAL) ?? small?.getAttribute('href');
+    if (!regular) { applyTabIcon(links, signedIn); return; }
+    const [fromSrc, toSrc] = signedIn ? [regular, LIT_ICON_32] : [LIT_ICON_32, regular];
+    let cancelled = false;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const load = (src: string) => new Promise<HTMLImageElement>((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = no; im.src = src; });
+    Promise.all([load(fromSrc), load(toSrc)]).then(([from, to]) => {
+      if (cancelled) return;
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 32;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { applyTabIcon(links, signedIn); return; }
+      // remember the declared hrefs before the frames overwrite them, so the final swap restores exactly
+      applyTabIcon(links, !signedIn);
+      fadeAlphas().forEach((a, i, all) => timers.push(setTimeout(() => {
+        ctx.globalAlpha = 1; ctx.drawImage(from, 0, 0, 32, 32);
+        ctx.globalAlpha = a; ctx.drawImage(to, 0, 0, 32, 32);
+        const frame = canvas.toDataURL('image/png');
+        for (const el of links) el.setAttribute('href', frame);
+      }, Math.round((FADE_MS * i) / all.length))));
+      timers.push(setTimeout(() => applyTabIcon(links, signedIn), FADE_MS));
+    }).catch(() => { if (!cancelled) applyTabIcon(links, signedIn); });
+    return () => { cancelled = true; timers.forEach(clearTimeout); applyTabIcon(links, signedIn); };
+  }, [signedIn, authChecked, reduced]);
 }
