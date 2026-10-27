@@ -49,7 +49,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.goldendeal.run import (  # noqa: E402
     Tenant, crawl, make_canary, map_listing as _map_listing, print_dry, session as _session,
-    make_verify_gone, prune_complete_crawl, tally_str, verify_gone_for)
+    make_verify_gone, prune_complete_crawl, strike_feed_retired, tally_str, verify_gone_for)
 
 TENANT = Tenant("maqam", "شركة مقام للتطوير العقاري", "MQM", "https://property.maqamco.sa",
                 "maqamco.nzl-backend.com")
@@ -135,6 +135,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             control = next((int(r["ad_number"][len(PREFIX):]) for r in res + com), None)
             verify = verify_gone_for(TENANT, make_canary(TENANT, control))
             for table, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                strike_feed_retired(table, rows, items, TENANT, verify)
                 pruned = prune_complete_crawl(table, rows, SOURCE, verify)
                 degraded = degraded or pruned < 0
                 print(f"  {table}: pruned {pruned}")
