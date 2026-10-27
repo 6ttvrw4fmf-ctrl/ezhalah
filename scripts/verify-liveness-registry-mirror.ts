@@ -244,6 +244,15 @@ if (seedFile) {
 // already produced real direct verdicts through prune_unseen — 267 LIVE on rakez alone.)
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 const STAMPERS = ['direct_alive_patch', 'verification_patch'];
+// A Nuzul tenant (yameen, maqam) prunes through goldendeal's shared prune_complete_crawl(), which
+// hands verify_gone= to prune_unseen itself (2026-10-27). Counted only while that helper's own body
+// still does so: read from goldendeal/run.py, never assumed from the import.
+const NUZUL_HELPER_WIRES = (() => {
+  let src = '';
+  try { src = readFileSync(join(ROOT, 'scrapers', 'goldendeal', 'run.py'), 'utf8'); } catch { return false; }
+  const m = src.match(/\ndef prune_complete_crawl\([\s\S]*?(?=\ndef |\n[A-Za-z_])/);
+  return !!m && /prune_unseen\([^)]*verify_gone=/.test(m[0]);
+})();
 
 // The shared path, asserted ONCE and by EXECUTION of the rule below rather than by trusting a
 // comment: prune_unseen's self-heal — the branch reached only after an oracle read the listing's
@@ -303,7 +312,8 @@ for (const r of fromJson.filter((x) => x.strategy !== 'CRAWL_PRESENCE_ONLY' && x
 
   let runPy = '';
   try { runPy = readFileSync(join(ROOT, 'scrapers', r.platform, 'run.py'), 'utf8'); } catch { /* none */ }
-  const wiresSharedOracle = runPy.includes('verify_gone=') && runPy.includes('prune_unseen');
+  const wiresSharedOracle = (runPy.includes('verify_gone=') && runPy.includes('prune_unseen'))
+    || (/\bprune_complete_crawl\(/.test(runPy) && NUZUL_HELPER_WIRES);
 
   check(`${r.platform} cashes its ${r.strategy} claim in code`,
     ownModuleStamps || (wiresSharedOracle && sharedPathStamps) || sweptByAnother(r.platform),
