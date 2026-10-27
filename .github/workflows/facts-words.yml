@@ -120,7 +120,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: hf-${{ inputs.model }}-614241f-e8f8c21
+          key: hf-${{ inputs.model || 'e5-small' }}-614241f-e8f8c21
       - name: Self-check the pure logic (no network)
         run: exec python -m scrapers.facts.words --selftest
       - name: Words + vectors
@@ -129,10 +129,10 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           PHASE: ${{ inputs.phase || 'incremental' }}
           RUN_ID: ${{ inputs.run_id }}
-          LIMIT: ${{ inputs.limit }}
+          LIMIT: ${{ inputs.limit || '0' }}
           PLATFORMS: ${{ inputs.platforms }}
-          EMBED: ${{ inputs.embed }}
-          MODEL: ${{ inputs.model }}
+          EMBED: ${{ inputs.embed || 'false' }}
+          MODEL: ${{ inputs.model || 'e5-small' }}
           SHARD: ${{ matrix.shard }}
           N: ${{ needs.plan.outputs.n }}
           EVENT: ${{ github.event_name }}

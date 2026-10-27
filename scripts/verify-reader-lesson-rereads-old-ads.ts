@@ -41,7 +41,10 @@ export const workflowRereadsOnLesson = (yml: string): boolean => {
   if (!push) return false;
   const paths = push[1];
   return paths.includes('scrapers/facts/word_checker.py') && paths.includes('scrapers/common/normalize.py') &&
-    /SHARDS: \$\{\{ inputs\.shards \|\| \(github\.event_name == 'push' && '8'\) \|\| '1' \}\}/.test(yml);
+    /SHARDS: \$\{\{ inputs\.shards \|\| \(github\.event_name == 'push' && '8'\) \|\| '1' \}\}/.test(yml) &&
+    // a push carries NO inputs: every input the run step parses needs a default, or the reader refuses it (run
+    // 40510213117: «argument --limit: invalid int value: ''» on all 8 shards)
+    /LIMIT: \$\{\{ inputs\.limit \|\| '0' \}\}/.test(yml) && /MODEL: \$\{\{ inputs\.model \|\| 'e5-small' \}\}/.test(yml);
 };
 
 const PY = readFileSync(join(root, 'scrapers', 'facts', 'words.py'), 'utf8');
@@ -67,6 +70,9 @@ mustCatch('the push trigger losing the reader path',
   !workflowRereadsOnLesson(WF.replace('      - scrapers/facts/word_checker.py\n', '')));
 mustCatch('the push re-read falling back to one shard',
   !workflowRereadsOnLesson(WF.replace("(github.event_name == 'push' && '8')", "(github.event_name == 'push' && '1')")));
+
+mustCatch('a push run with an empty --limit (no default)',
+  !workflowRereadsOnLesson(WF.replace("inputs.limit || '0'", "inputs.limit")));
 
 if (failed) { console.error(`\n❌ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✓ a reader lesson reaches the ads read before it, and the lag has an alarm');
