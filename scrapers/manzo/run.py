@@ -151,7 +151,7 @@ def map_property(d: dict) -> tuple[Optional[tuple[dict, str]], str]:
         "bathrooms": apt.get("bathrooms") or None,
         "property_age": normalize.age_from_completion_year(d.get("property_age"), this_year=dt.date.today().year),
         "license_number": d.get("ad_licence_number"),
-        "photo_urls": photos or None,
+        "photo_urls": photos,  # [] (never None): the upsert skips None, so an ad that lost its photos kept the old ones (2026-10-27)
         **row_price,
     }
     for flag, col in (("electricity_access", "electricity"), ("water_access", "water_supply"), ("sewage_system", "sanitation")):
