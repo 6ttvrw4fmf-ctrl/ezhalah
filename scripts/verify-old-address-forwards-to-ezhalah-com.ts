@@ -4,6 +4,10 @@
 // front door (/sb/...) and the API (/api/...): a tab opened before the switch keeps loading data instead of
 // having its database calls bounced to another host. The deploy guard checks ezhalah.com for the same reason
 // (scripts/deploy-target-guard.sh). EXECUTES the redirect's own pattern against real paths; mutations prove it.
+//
+// PERMANENT since 2026-10-27 (owner: «this vercel thing must not show at all»). It started as a 307 («for now,
+// instantly reversible»); a temporary forward is never remembered, so phones kept suggesting and recording the old
+// address. A 308 is remembered: browsers go straight to ezhalah.com and the old entries fade from their history.
 //   node --experimental-strip-types scripts/verify-old-address-forwards-to-ezhalah-com.ts   (discovered by `npm test`)
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -31,6 +35,9 @@ const fwd = findForward(cfg.redirects);
 check('every page of the old address forwards to the same path on ezhalah.com; /sb/ and /api/ stay put', good(fwd), JSON.stringify(fwd));
 check('the forward is listed FIRST, before any other redirect can answer the old host', cfg.redirects?.[0] === fwd);
 check('the deploy guard proves ezhalah.com serves the new bundle', /DTG_CANONICAL_URL="https:\/\/ezhalah\.com"/.test(guard));
+const remembered = (r: Redirect | undefined) => r?.permanent === true;
+check('the forward is PERMANENT (308), so browsers remember it and the old address stops showing', remembered(fwd));
+mustCatch('the forward going back to temporary (phones keep showing the vercel address)', !remembered({ ...fwd!, permanent: false }));
 
 mustCatch('a forward that swallows the front door (open tabs lose their data)', !good({ ...fwd!, source: '/:path(.*)' }));
 mustCatch('a forward to the wrong place', !good({ ...fwd!, destination: 'https://ezhalah.com/' }));
