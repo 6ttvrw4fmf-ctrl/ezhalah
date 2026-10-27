@@ -1422,8 +1422,21 @@ def stamp_seen_alive(table: str, seen_ads, verify_gone, *, source: Optional[str]
     `active`, `missing_count` or `deactivated_at`.
 
     Returns counts {'read', 'live', 'gone_conflict', 'unknown'}."""
-    seen = {str(a) for a in seen_ads if a}
     out = {"read": 0, "live": 0, "gone_conflict": 0, "unknown": 0}
+    # Monitoring must never be able to fail ingestion: the crawl has already written its rows, so a
+    # failure here (DB unreachable, a broken oracle factory) is printed and the run carries on.
+    try:
+        return _stamp_seen_alive(table, seen_ads, verify_gone, source=source,
+                                 max_reads=max_reads, pace_s=pace_s, out=out)
+    except Exception as e:  # noqa: BLE001
+        print(f"{table}: own-page check of seen ads failed ({type(e).__name__}: {e}) — nothing stamped",
+              flush=True)
+        return out
+
+
+def _stamp_seen_alive(table: str, seen_ads, verify_gone, *, source: Optional[str], max_reads: int,
+                      pace_s: float, out: dict[str, int]) -> dict[str, int]:
+    seen = {str(a) for a in seen_ads if a}
     if not seen or verify_gone is None:
         return out          # nothing seen this run: no control, nothing to ask
     c = sb()

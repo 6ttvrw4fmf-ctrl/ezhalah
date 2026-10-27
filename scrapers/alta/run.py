@@ -545,7 +545,15 @@ def main() -> int:
             #  • an active row the list no longer serves is a CANDIDATE; prune_unseen re-reads its own
             #    record at grace (3 complete walks) and only the record's own 404/status can hide it;
             #  • every active row the list DID serve has its own record read, and only 'live' writes.
-            wp_ids = {r["ad_number"]: r["additional_info"].get("wp_id") for r in res + com
+            # A post whose category flipped this run is superseded in the table it LEFT, BEFORE the
+            # prune: its URL still answers live (in the sibling table), so prune would keep it forever.
+            superseded = db.retire_superseded_siblings(
+                res_table="alta_residential_listings", com_table="alta_commercial_listings",
+                res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+                source=SOURCE)
+            if superseded:
+                print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
+            wp_ids ={r["ad_number"]: r["additional_info"].get("wp_id") for r in res + com
                       if isinstance(r["additional_info"].get("wp_id"), int)}
             live_seen = sorted(r["ad_number"] for r in res + com if r["active"])
             verify_gone = _make_verify_gone(lambda: s, tax, wp_ids, live_seen[0] if live_seen else None)

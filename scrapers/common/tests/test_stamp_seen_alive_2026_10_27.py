@@ -108,8 +108,7 @@ def test_nothing_seen_or_no_oracle_reads_nothing(wired):
 
 def test_the_update_is_gated_on_active_and_the_function_never_writes_active():
     import inspect
-    src = inspect.getsource(db.stamp_seen_alive)
-    code = src.split('"""')[2]                     # the body after the docstring
+    code = inspect.getsource(db.stamp_seen_alive).split('"""')[2] + inspect.getsource(db._stamp_seen_alive)
     for col in ('"active":', '"missing_count"', '"deactivated_at"'):
         assert col not in code, f"stamp_seen_alive must not write {col}"
     assert '.eq("active", True)' in code
@@ -119,3 +118,11 @@ def test_read_budget_is_respected(wired):
     wired["rows"] = _rows(*[f"A{i}" for i in range(10)])
     out = db.stamp_seen_alive("t", {f"A{i}" for i in range(10)}, lambda ad: "live", max_reads=3, pace_s=0)
     assert out["read"] == 3 and out["live"] == 3
+
+
+def test_a_failure_inside_never_fails_the_crawl(monkeypatch):
+    def broken():
+        raise KeyError("SUPABASE_URL")
+    monkeypatch.setattr(db, "sb", broken)
+    out = db.stamp_seen_alive("t", {"A1"}, lambda ad: "live", pace_s=0)
+    assert out == {"read": 0, "live": 0, "gone_conflict": 0, "unknown": 0}
