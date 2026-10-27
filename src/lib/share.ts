@@ -24,7 +24,7 @@ export function shareOrigin(): string {
 // v7 = the cloud-eagle logo, 192×192 (owner 2026-10-24: «this is the final logo … replace it everywhere»). v6 = 192×192 (owner 2026-10-18: «look how big … keep it small»). WhatsApp draws a BIG banner for an
 // og:image ≥ ~300px wide and a small side thumbnail below that — the same 192px card the search-share
 // links (/s/…) already get. Keep it under 300px.
-export const OG_IMAGE = `${SHARE_LINK}/og-image-v7.png`;
+export const OG_IMAGE = `${SHARE_LINK}/og-image-v8.png`;
 // Owner-approved original wording, without the AI sentence or dashes (2026-10-11), shared by metadata and every share target.
 // No emoji (owner 2026-10-18: «remove the emoji … make it professional»).
 export const SHARE_BLURB_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى للبحث على العقار في المملكة.';
@@ -68,6 +68,10 @@ export function shareMessage(loc: 'ar' | 'en', count: number | null): string {
   return `${shareLead(loc, count)}\n${SHARE_LINK}`;
 }
 export const SHARE_TITLE_AR = 'إزهله';
+// The browser tab / history / suggestion title (owner 2026-10-27, picked from a phone-width preview: «option 3» for
+// Arabic, «D» for English). Both are checked to FIT a phone's suggestion row uncut; the share card keeps the plain name.
+export const PAGE_TITLE_AR = 'إزهله | ابحث في كل مواقع العقار بمكان واحد';
+export const PAGE_TITLE_EN = 'Ezhalah | Search all property sites at once';
 const SHARE = {
   en: { title: 'Ezhalah' },
   ar: { title: SHARE_TITLE_AR },

@@ -40,12 +40,15 @@ const check = (label: string, ok: boolean, detail = '') => {
 
 const LAYOUT = 'src/app/_layout.tsx';
 const SHARE = 'src/lib/share.ts';
-const OG_FILE = 'public/og-image-v7.png';
+const OG_FILE = 'public/og-image-v8.png';
 const REQUIRED_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى للبحث على العقار في المملكة.';
 const REQUIRED_EN = 'Looking for a property and want to see everything on offer in one place? Ezhalah, the smarter way to find properties in the Kingdom.';
 // Either word, anywhere in the line, names the country — «في» is not required: the 2026-09-25
 // wording says «عقارات السعودية», not «في السعودية».
 const NAMES_COUNTRY = /المملكة|السعودية/;
+const PAGE_TITLE_AR_OWNER = 'إزهله | ابحث في كل مواقع العقار بمكان واحد';
+const PAGE_TITLE_EN_OWNER = 'Ezhalah | Search all property sites at once';
+const TITLE_FITS = 44;
 
 // JSX comments are stripped: this file's own prose quotes the tags it is checking for.
 const code = (s: string) => s.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -56,8 +59,18 @@ export function auditShareMeta(layout: string, share: string, exists: (p: string
   const bad: string[] = [];
 
   if (!/<Head>/.test(l)) bad.push('no <Head> — nothing reaches the document head');
-  if (!/<title>\{SHARE_TITLE_AR\}<\/title>/.test(l))
-    bad.push('the title is not set through <Head>; helmet emits its own empty <title> FIRST and wins');
+  if (!/<title>\{locale === 'en' \? PAGE_TITLE_EN : PAGE_TITLE_AR\}<\/title>/.test(l))
+    bad.push('the title is not set through <Head> (per UI language); helmet emits its own empty <title> FIRST and wins');
+  // The tab / history / suggestion title (owner 2026-10-27, picked from a phone-width preview): the owner's exact
+  // words, the name first, and short enough to show UNCUT in a phone's suggestion row — measured at 430 px, the
+  // 48–49-character candidates were cut and the 40–43-character ones fit, so the ceiling is 44.
+  const titleAr = s.match(/export const PAGE_TITLE_AR = '([^']+)'/)?.[1];
+  const titleEn = s.match(/export const PAGE_TITLE_EN = '([^']+)'/)?.[1];
+  if (titleAr !== PAGE_TITLE_AR_OWNER) bad.push(`the Arabic tab title is not the owner's choice: ${titleAr ?? '(missing)'}`);
+  if (titleEn !== PAGE_TITLE_EN_OWNER) bad.push(`the English tab title is not the owner's choice: ${titleEn ?? '(missing)'}`);
+  for (const [lang, t] of [['Arabic', titleAr], ['English', titleEn]] as const) {
+    if (t && [...t].length > TITLE_FITS) bad.push(`the ${lang} tab title is ${[...t].length} characters — a phone cuts it off past ${TITLE_FITS}`);
+  }
   for (const [name, re] of [
     ['og:title', /property="og:title"[^/]*content=\{SHARE_TITLE_AR\}/],
     ['og:description', /property="og:description"[^/]*content=\{SHARE_CARD_DESC_AR\}/],
@@ -96,7 +109,13 @@ mustCatch('og:image tag deleted (preview loses the eagle)',
 mustCatch('og:title deleted', auditShareMeta(L.replace(/<meta property="og:title"[^\n]*\n/, ''), S, yes));
 mustCatch('og:description deleted', auditShareMeta(L.replace(/<meta property="og:description"[^\n]*\n/, ''), S, yes));
 mustCatch('the title stops going through <Head> (empty tab returns)',
-  auditShareMeta(L.replace('<title>{SHARE_TITLE_AR}</title>', ''), S, yes));
+  auditShareMeta(L.replace("<title>{locale === 'en' ? PAGE_TITLE_EN : PAGE_TITLE_AR}</title>", ''), S, yes));
+mustCatch('the title stuck on one language (English UI shows the Arabic title)',
+  auditShareMeta(L.replace("<title>{locale === 'en' ? PAGE_TITLE_EN : PAGE_TITLE_AR}</title>", '<title>{PAGE_TITLE_AR}</title>'), S, yes));
+mustCatch('the tab title reworded away from the owner\'s choice',
+  auditShareMeta(L, S.replace(PAGE_TITLE_AR_OWNER, 'إزهله'), yes));
+mustCatch('a title too long for a phone (the cut-off "A" candidate)',
+  auditShareMeta(L, S.replace(PAGE_TITLE_EN_OWNER, 'Ezhalah | Search every property site in one place'), yes).filter((p) => /cuts it off/.test(p)));
 mustCatch('og:image made relative (crawler cannot resolve it)',
   auditShareMeta(L, S.replace(/export const OG_IMAGE = `\$\{SHARE_LINK\}\/og-image-v\d+\.png`;/, "export const OG_IMAGE = '/og-image.jpg';"), yes));
 mustCatch('the share image loses its version suffix (new art, stale cached previews everywhere)',
@@ -131,7 +150,7 @@ if (existsSync(OG_FILE)) {
   check('the share artwork matches the owner-selected icon exactly', buf.equals(readFileSync('public/icon-192.png')));
   check('metadata dimensions match the actual image', L.includes('property="og:image:width" content="192"') && L.includes('property="og:image:height" content="192"'));
   const sheet = readFileSync('src/components/ShareSheet.tsx', 'utf8');
-  check('the in-app preview uses the same approved artwork', sheet.includes("require('../../public/og-image-v7.png')"));
+  check('the in-app preview uses the same approved artwork', sheet.includes("require('../../public/og-image-v8.png')"));
   const kb = Math.round(buf.length / 1024);
   check(`the share image is under 300KB so crawlers fetch it (${kb}KB)`, kb <= 300);
 }
@@ -140,4 +159,4 @@ if (failed) {
   console.error(`\n${failed} check(s) FAILED — a shared Ezhalah link would arrive without its preview`);
   process.exit(1);
 }
-console.log('\nOK — title, og:title, og:description, og:image and twitter tags all declared; 9 mutations caught.');
+console.log('\nOK — title, og:title, og:description, og:image and twitter tags all declared; 12 mutations caught.');

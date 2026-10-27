@@ -29,7 +29,7 @@
 // executes everything here.
 // NO imports: middleware.ts runs this at Vercel's edge, and ./share pulls in react-native. The two values
 // below are pinned to src/lib/share.ts (OG_IMAGE's file, SHARE_TITLE_AR) by the verify script.
-export const HOME_CARD_IMAGE_PATH = '/og-image-v7.png';
+export const HOME_CARD_IMAGE_PATH = '/og-image-v8.png';
 export const HOME_CARD_TITLE_AR = 'إزهله';
 // The card's BOLD title (owner 2026-10-18: «the message doesn't show fully»). WhatsApp's small card shows
 // ~2 lines under the title, so the approved sentence is split: what Ezhalah is goes in the title, the
