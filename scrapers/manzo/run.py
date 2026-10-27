@@ -128,6 +128,10 @@ def map_property(d: dict) -> tuple[Optional[tuple[dict, str]], str]:
     lng, lat = ((d.get("coordinates") or {}).get("coordinates") or [None, None])[:2]
     apt = d.get("apartment") or {}
     photos = list(dict.fromkeys(d.get("property_images") or ([d["main_image_url"]] if d.get("main_image_url") else [])))
+    # Manzo serves a stock «Contact Lister for Photos» image (/property_media/placeholders/no_photos.jpg) for ads
+    # with no photos; 266 of 716 ads carried only that on 2026-10-27. It is not a photo of the property, so it is
+    # never stored: the card then shows Ezhalah's own «لا توجد صورة» like every other photo-less ad.
+    photos = [u for u in photos if u and "/placeholders/" not in u]
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{d.get('property_id') or d['slug']}",
         "listing_url": SITE + d["slug"],

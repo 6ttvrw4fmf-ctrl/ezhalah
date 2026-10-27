@@ -43,3 +43,12 @@ def test_the_published_district_is_stored(monkeypatch):
 def test_no_district_stays_empty():
     (row, _), _ = R.map_property(_d())
     assert row["neighborhood"] is None and row["district_ar"] is None
+
+
+def test_the_no_photos_placeholder_is_never_a_photo():
+    ph = "https://media.manzo.com.sa/property_media/placeholders/no_photos.jpg"
+    (row, _), _ = R.map_property(_d(property_images=[ph]))
+    assert row["photo_urls"] is None
+    real = "https://media.manzo.com.sa/property_media/x/1.jpg"
+    (row, _), _ = R.map_property(_d(property_images=[ph, real]))
+    assert row["photo_urls"] == [real]
