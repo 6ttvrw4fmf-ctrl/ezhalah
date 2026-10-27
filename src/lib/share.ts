@@ -25,15 +25,16 @@ export function shareOrigin(): string {
 // og:image ≥ ~300px wide and a small side thumbnail below that — the same 192px card the search-share
 // links (/s/…) already get. Keep it under 300px.
 export const OG_IMAGE = `${SHARE_LINK}/og-image-v8.png`;
-// THE PAGE DESCRIPTION — the sentence under Ezhalah's title in a Google result (owner 2026-10-27: «AI search engine …
-// helps you find properties», simple, no numbers, «بالمملكة»). It replaces the 2026-10-11 question-form wording.
+// THE PAGE DESCRIPTION — the sentence under Ezhalah's title in a Google result (owner 2026-10-27: Perplexity-style — what
+// it is, that it is free, then the owner's own words «ابحث عن كل مواقع العقار بمكان واحد في المملكة»; no numbers).
+// It replaces the 2026-10-11 question-form wording.
 // No emoji (owner 2026-10-18: «remove the emoji … make it professional»).
-export const SHARE_BLURB_AR = 'إزهله، محرك بحث عقاري بالذكاء الاصطناعي يساعدك تلقى عقارك بالمملكة بسهولة.';
+export const SHARE_BLURB_AR = 'إزهله محرك بحث عقاري مجاني بالذكاء الاصطناعي، ابحث عن كل مواقع العقار بمكان واحد في المملكة.';
 // The preview CARD's own line (owner 2026-10-18: the card repeated the sent message and was cut off).
 // middleware.ts serves link-preview bots the same line WITH live numbers (src/lib/homeCard.ts); this
 // number-free form is the static fallback. Pinned equal to HOME_CARD_FALLBACK_AR.
 export const SHARE_CARD_DESC_AR = 'كل مواقع العقار في السعودية في مكان واحد.';
-export const SHARE_BLURB_EN = 'Ezhalah is an AI property search engine that helps you find your property in Saudi Arabia, easily.';
+export const SHARE_BLURB_EN = 'Ezhalah is a free AI-powered property search engine. Search every property site in the Kingdom, in one place.';
 // THE SENT MESSAGE (owner 2026-10-26: names Saudi Arabia so the card need not repeat 148, no harakat, «إزهله، خل إزهله»;
 // first set 2026-10-20, replacing the long sentence above in the share message only):
 // «ليش تدوّر في 148 موقع؟ إزهله يدوّر عنك». The number is LIVE — the same count the app shows

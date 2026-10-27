@@ -41,10 +41,10 @@ const check = (label: string, ok: boolean, detail = '') => {
 const LAYOUT = 'src/app/_layout.tsx';
 const SHARE = 'src/lib/share.ts';
 const OG_FILE = 'public/og-image-v8.png';
-// The page description = the sentence under the title in a Google result (owner 2026-10-27: «AI search engine …
-// helps you find properties», simple, no numbers, «بالمملكة»).
-const REQUIRED_AR = 'إزهله، محرك بحث عقاري بالذكاء الاصطناعي يساعدك تلقى عقارك بالمملكة بسهولة.';
-const REQUIRED_EN = 'Ezhalah is an AI property search engine that helps you find your property in Saudi Arabia, easily.';
+// The page description = the sentence under the title in a Google result (owner 2026-10-27: Perplexity-style,
+// ending in the owner's words «ابحث عن كل مواقع العقار بمكان واحد في المملكة»; no numbers).
+const REQUIRED_AR = 'إزهله محرك بحث عقاري مجاني بالذكاء الاصطناعي، ابحث عن كل مواقع العقار بمكان واحد في المملكة.';
+const REQUIRED_EN = 'Ezhalah is a free AI-powered property search engine. Search every property site in the Kingdom, in one place.';
 // Either word, anywhere in the line, names the country — «في» is not required: the 2026-09-25
 // wording says «عقارات السعودية», not «في السعودية».
 const NAMES_COUNTRY = /المملكة|السعودية/;
