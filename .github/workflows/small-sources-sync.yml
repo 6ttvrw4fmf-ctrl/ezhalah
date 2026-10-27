@@ -218,7 +218,7 @@ jobs:
             #   shatri: `proxy: true` (2026-10-02, Scraping Engineer) — WP REST answered 403 to the runner IP;
             #   the scraper probes 3 profiles DIRECT first, so the proxy is spent only when refused.
             - { source: shatri,         cmd: "python -m scrapers.shatri.run --type all", tmo: 20, proxy: true }
-            - { source: almuteb,        cmd: "python -m scrapers.almuteb.run --type all", tmo: 20 }
+            - { source: almuteb,        cmd: "python -m scrapers.almuteb.probe_domains", tmo: 20 }
             - { source: aalbarrak,      cmd: "python -m scrapers.aalbarrak.run --type all", tmo: 20 }
             - { source: aqaralriyadh,   cmd: "python -m scrapers.aqaralriyadh.run --type all", tmo: 20 }
             - { source: snam,           cmd: "python -m scrapers.snam.run --type all", tmo: 20 }
