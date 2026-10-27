@@ -103,6 +103,10 @@ jobs:
           export EXPO_PUBLIC_SUPABASE_KEY="${SECRET_KEY:-$PUBLIC_KEY}"
           npx expo export --platform web
 
+      # ALWAYS FAST (owner 2026-10-27): the first download stays under its size budget. scripts/web-bundle-budget.mjs
+      - name: Web bundle size budget
+        run: node scripts/web-bundle-budget.mjs dist
+
       - name: Drive the built app in a real browser
         run: node scripts/verify-web-runtime-smoke.mjs
 
