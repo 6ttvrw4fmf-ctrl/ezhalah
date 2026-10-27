@@ -185,13 +185,18 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
         if name == "price":
             if skip_price:
                 continue
-            stored_v = stored.get("price_total") or stored.get("price_annual") or stored.get("price_per_meter")
+            # PRICE = SOURCE: the source table's own price_annual and period when score_site read them. Since
+            # the owner's yearly-pool rule (2026-10-25/26) the index serves a per-month rent under «سنوي», and a
+            # cheap «yearly» figure ×12 (rent_price_annual_ar), so the index alone no longer says how the
+            # site quoted it: ashab 20927683 (10-27) page «9,000» monthly, index سنوي 108,000 → scored wrong.
+            annual = stored.get("source_price_annual") or stored.get("price_annual")
+            stored_v = stored.get("price_total") or annual or stored.get("price_per_meter")
             # The fleet stores a MONTHLY rent ×12 in price_annual (normalize.rent_period_from_ad) and the
             # card shows it ÷12; the page prints the monthly figure. Compare what the page prints
             # (superoffice 15485140, 2026-10-05: page «6288.40 ريال / شهر», stored 75456 = 6288×12).
-            if (not stored.get("price_total") and stored.get("price_annual")
-                    and stored.get("rent_period_ar") == "شهري"):
-                stored_v = float(stored["price_annual"]) / 12
+            if (not stored.get("price_total") and annual
+                    and (stored.get("rent_period_ar") == "شهري" or stored.get("source_rent_period") == "monthly")):
+                stored_v = float(annual) / 12
                 if stored_v == int(stored_v):
                     stored_v = int(stored_v)
             out[name] = _cmp_number(stored_v, lines, whole, kw)
@@ -898,8 +903,14 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
     for table, rid in picks:
         stored = (client.table("search_listings_ar").select(STORED).eq("source_table", table)
                   .eq("listing_id", rid).limit(1).execute().data or [{}])[0]
-        raw = (client.table(table).select("listing_url").eq("id", rid).limit(1).execute().data or [{}])[0]
+        try:
+            raw = (client.table(table).select("listing_url,price_annual,rent_period").eq("id", rid).limit(1)
+                   .execute().data or [{}])[0]
+        except Exception:  # noqa: BLE001 — a table without those columns still gives its URL
+            raw = (client.table(table).select("listing_url").eq("id", rid).limit(1).execute().data or [{}])[0]
         url = raw.get("listing_url")
+        if raw.get("rent_period") is not None:
+            stored = {**stored, "source_rent_period": raw["rent_period"], "source_price_annual": raw.get("price_annual")}
         key = f"{table}:{rid}"
         if not url:
             row["sampled"] += 1
