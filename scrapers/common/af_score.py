@@ -148,6 +148,11 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # elevator from description prose («ومصعدين» in the building) on ads whose chips name none. The other fields
     # have no structured home there, so their prose stays a statement (backlog 790). Read by maqrat_props().
     "maqrat": ("elevator",),
+    # opensooq's ad page ticks its own amenities under «وسائل الراحة» (flight data `dynamicTabsSection`, read by the
+    # scraper's page_amenities() since 2026-10-26, CI source-reread 40301252058). Its 0-of-5 nights asked «elevator»
+    # from the site menu and from OTHER ads' cards printed on the page («شقة … مصعد راكب», 13872036). Read by
+    # opensooq_props(). furnished stays the card chip, scored as before.
+    "opensooq": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "private_entrance"),
 }
 # A rakez listing's page is its PROJECT's page: one shared feature list and every unit's price · rooms · area. A UNIT
 # trait the project list names («غرفة خادمة», «غرفة سائق», «مواقف خاصة», «مطبخ») describes some of the project's units,
@@ -344,9 +349,18 @@ def offered(answers: list[str], stored: dict) -> list[str]:
     """Only answers a customer can actually give in this listing's scope. The Advanced Filter never asks
     «furnished» on a Monthly search (src/lib/afCohorts.ts: no RentMonthly cohort lists it), so a request
     carrying it is not a customer's request and its miss is not a customer's miss."""
+    if is_land(stored.get("type_ar")):
+        return []
     if stored.get("rent_period_ar") == MONTHLY:
         return [a for a in answers if a != FURNISHED]
     return answers
+
+
+def is_land(type_ar) -> bool:
+    """Every land cohort (أرض سكنية / تجارية / صناعية / خام / أرض, src/lib/afCohorts.ts) asks only street width and
+    facade, and COHORT_CHIPS gives no land a building chip. On 10-27 the score asked «kitchen» of 6 lands (abaad 3,
+    jurash 2, opensooq 1: the word sat in the site's template, not the ad) and counted 6 of its 29 misses there."""
+    return isinstance(type_ar, str) and type_ar.startswith("أرض")
 
 
 def rpc_params(stored: dict, answers: list[str]) -> dict | None:
@@ -668,7 +682,15 @@ def maqrat_props(body: str) -> list[dict]:
     return [{"name": _PROP_NAME["elevator"], "value": "نعم"}] if "مصعد" in chips else []
 
 
-SITE_PROPS = {"superoffice": superoffice_props, "erapulse": erapulse_props, "maqrat": maqrat_props}
+def opensooq_props(body: str) -> list[dict]:
+    """opensooq's own ticked list, read by the scraper's own reader (one reader, never a copy)."""
+    from scrapers.opensooq.run import page_amenities
+    got = page_amenities(body) or {}
+    return [{"name": _PROP_NAME[f], "value": "نعم"} for f in _PROP_NAME if got.get(f)]
+
+
+SITE_PROPS = {"superoffice": superoffice_props, "erapulse": erapulse_props, "maqrat": maqrat_props,
+              "opensooq": opensooq_props}
 
 
 def is_muktamel(url: str) -> bool:

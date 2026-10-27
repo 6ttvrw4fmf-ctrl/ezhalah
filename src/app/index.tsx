@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { sanitizeForFilterRestore } from '@/lib/searchDefaults';
-import { markFirstHomeView, takeLastChatToResume } from '@/lib/lastChat';
 import { AppState, Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Image as XImage } from 'expo-image'; // SVG logo: a vector drawing, not a photo (owner 2026-10-24)
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -147,19 +145,7 @@ export default function Home() {
   const districtLabel = (cityId: number, ar: string) => (locale === 'en' ? districtNameEn(cityId, ar) : ar);
   // A «حي X · City» row in the city box (owner decision 2026-10-19, backlog 522/566) names the district AND its city.
   const cityRowLabel = (o: CityOption) => (o.districtAr ? `${districtLabel(o.cityId, o.districtAr)} · ${cityLabel(o)}` : cityLabel(o));
-  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history, importSharedChat, authChecked, setActiveChat } = useApp();
-  // «Show the last thing he did» (owner 2026-10-26): the tab's first home view sends a signed-in user back into
-  // the chat they had open last — the same open path as a sidebar row. Once per tab, only in the first seconds.
-  useEffect(() => { markFirstHomeView(); }, []);
-  useEffect(() => {
-    if (!user || !history.length) return;
-    const id = takeLastChatToResume(user.sub, history.map((h) => h.id));
-    const c = id ? history.find((h) => h.id === id) : undefined;
-    if (!c) return;
-    setQuery(() => sanitizeForFilterRestore(c.query));
-    setActiveChat(c.id);
-    router.push({ pathname: '/agent', params: { filter: JSON.stringify(c.query), replay: '0', hid: c.id } });
-  }, [user?.sub, history.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history, importSharedChat, authChecked } = useApp();
   // A SHARED SEARCH LANDS HERE (owner 2026-10-17). `/?share=<payload>` (src/lib/shareSearch.ts) shows a
   // card «عقارات من {name} لك على إزهله» with «اضغط وشوف العقارات». The TAP is what runs the search
   // (a pasted link never runs one by itself — appSession gate). Owner: the recipient signs in to open a
@@ -282,7 +268,7 @@ export default function Home() {
   // signed in, until the line's numbers are in — then it rises once and is final for this load.
   // «كيف تشتغل؟» opens when the user taps a market fact in the headline (owner 2026-10-22).
   const [howOpen, setHowOpen] = useState(false);
-  const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey, isInsight: welcomeIsInsight } = useFilterWelcome(!!user, sentenceName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
+  const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey, isInsight: welcomeIsInsight, celebrate: welcomeCelebrate } = useFilterWelcome(!!user, sentenceName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
   // «حفظ» in the «وش نناديك؟» box: while its party plays, the welcome headline shines (2 passes, owner-approved demo).
   const [heroShine, setHeroShine] = useState(false);
   useEffect(() => {
@@ -1466,18 +1452,19 @@ export default function Home() {
           <View style={s.hero}>
             <CloudWisp variant={1} width={100} height={34} opacity={0.38} style={{ left: -40, top: 12 }} />
             <CloudWisp variant={2} width={90} height={28} opacity={0.32} style={{ right: -35, bottom: 18 }} />
-            {/* The falconer (owner 2026-10-26): beside the big title, among the clouds, for visitors who are not signed in.
-                He stands at the END of the sentence and points back at it (owner 2026-10-26): Arabic ends on the left, so
-                he is on the left and flipped; English ends on the right, so he is on the right as drawn. Signed-in users never see him. */}
-            <View style={[s.heroTitleRow, locale === 'ar' && s.heroTitleRowAr]} {...({ dir: 'ltr' } as any)}>
-              <Pressable style={s.heroTitleBox} disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
+            {/* The falconer (owner 2026-10-26): ONE FIXED SPOT, centred above the title, whatever the line says («make it
+                fixed»). A guest sees the plain falconer whose falcon takes off on every open; a signed-in user sees the
+                green bearded falconer with his hooded gold falcon and a golden bulb lit inside his head, and the moment they
+                sign in the whole story plays once (HeroFalconer). In Arabic the drawing is flipped. */}
+            {authChecked ? (
+              <View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, s.heroFalconerAbove]}>
+                <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} signedIn={!!user} celebrate={welcomeCelebrate} />
+              </View>
+            ) : null}
+            <View style={heroWide ? s.heroTitleBlockWide : s.heroTitleBlock}>
+              <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
                 <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
               </Pressable>
-              {authChecked && !user ? (
-                <RNAnimated.View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, reveal(titleAnim, 20)]}>
-                  <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} />
-                </RNAnimated.View>
-              ) : null}
             </View>
             <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
             <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>
@@ -2407,11 +2394,13 @@ const SHARED_PENDING_TTL_MS = 30 * 60 * 1000;
 const SHARED_IMPORTED_KEY = 'ezhalah:sharedChat:imported';
 
 const s = StyleSheet.create({
-  heroTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, maxWidth: '100%' },
-  heroTitleBox: { flexShrink: 1 },
-  heroTitleRowAr: { flexDirection: 'row-reverse' },
-  heroFalconer: { width: 40, height: 46, flexShrink: 0 },
-  heroFalconerWide: { width: 52, height: 60, flexShrink: 0 },
+  heroTitleBlock: { width: '100%' },
+  // a laptop title runs a little wider than the 560 px form column (owner 2026-10-26: «make the text wide a bit»)
+  heroTitleBlockWide: { alignSelf: 'stretch', marginHorizontal: -60 },
+  heroFalconer: { width: 50, height: 58 },
+  heroFalconerWide: { width: 62, height: 72 },
+  // centred above the title, a small gap before it
+  heroFalconerAbove: { alignSelf: 'center', marginBottom: 4 },
   sharedBackdrop: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60,
     backgroundColor: 'rgba(18, 37, 27, 0.35)', alignItems: 'center', justifyContent: 'center', padding: 20,

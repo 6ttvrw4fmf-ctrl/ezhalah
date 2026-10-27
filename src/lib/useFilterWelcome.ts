@@ -102,10 +102,13 @@ const UNSETTLED: Shown = { settled: false, id: null, ar: null, en: null, nameAr:
 export function useFilterWelcome(
   signedIn: boolean, name: string, locale: 'ar' | 'en',
   lastLocation: string | null | undefined, lastDistrict?: string | null,
-): { line: string | null; settled: boolean; swapKey: number; isInsight: boolean } {
+): { line: string | null; settled: boolean; swapKey: number; isInsight: boolean; celebrate: number } {
   const [shown, setShown] = useState<Shown>(UNSETTLED);
   // Bumped when the sign-in welcome hands over to a market insight, so the screen can show the change.
   const [swapKey, setSwapKey] = useState(0);
+  // Bumped the moment a sign-in welcome is taken (this load, or a sign-in that lands while the home is up): the
+  // falconer plays his sign-in animation on it (owner 2026-10-26). 0 = no sign-in this page load.
+  const [celebrate, setCelebrate] = useState(0);
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
 
@@ -114,6 +117,8 @@ export function useFilterWelcome(
   // already prepared for this device, or one picked now from the day's facts; the welcome stays if none can
   // be had (a failed read is not an empty answer). It then becomes the shown line for its 2 hours.
   const welcomeThenInsight = () => {
+    // every sign-in welcome comes through here (both paths), so the falconer's celebration is counted here too
+    setCelebrate((c) => c + 1);
     const start = Date.now();
     const pick = (async () => {
       const pend = readKey(NEXT_KEY);
@@ -222,7 +227,7 @@ export function useFilterWelcome(
     return () => globalThis.removeEventListener?.(SIGNED_IN_EVENT, onSignedIn);
   }, [signedIn]);
 
-  return useMemo(() => {
+  const out = useMemo(() => {
     // The restore may finish after the instant decision; a signed-out restore still never swaps the
     // text (owner rule) — the line simply stays for this load. Guests (no session stored) get null.
     void signedIn;
@@ -236,4 +241,5 @@ export function useFilterWelcome(
     // A market fact (not the sign-in welcome or an older line) can be tapped for «كيف تشتغل؟».
     return { line: text, settled: shown.settled, swapKey, isInsight: shown.id != null && isInsightLineId(shown.id) };
   }, [shown, locale, signedIn, name, swapKey]);
+  return { ...out, celebrate };
 }

@@ -181,6 +181,71 @@ def map_page(d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
     return (row, normalize.category_for_type(ptype).lower()), ""
 
 
+# ── Own-page oracle (2026-10-27) ────────────────────────────────────────────────────────────────
+# A booked office still answers 200, its first button «محجوز». The crawl skips it, but when more than
+# 30% of the table is unseen prune_unseen refuses (-1) and the 404-only fallback reads it live, so 13
+# booked offices stayed on screen. This reads the office's own status button instead.
+def read_own_page(s, ad_number: str) -> tuple[str, str]:
+    """One office's own page: «محجوز» or 404/410 → gone, «احجز» → live, anything else → unknown."""
+    if not ad_number.startswith(PREFIX):
+        return "unknown", f"{ad_number!r} is not a {PREFIX}<slug> ad number"
+    url = f"{BASE}/ar/office-details/{ad_number[len(PREFIX):]}"
+    try:
+        r = s.get(url, timeout=40)
+    except Exception as e:  # noqa: BLE001 — a failed fetch is UNKNOWN
+        return "unknown", f"fetch failed: {type(e).__name__}"
+    if r.status_code in (404, 410):
+        return "gone", f"HTTP {r.status_code}"
+    if r.status_code != 200:
+        return "unknown", f"HTTP {r.status_code}"
+    page = r.text or ""
+    # the office's own block only, read the same way parse_page reads it
+    b = _grab(r'<div class="content-one">(.*?)<h3 class="service_title"', page) or _grab(
+        r'<div class="content-one">(.*)', page)
+    m = re.search(r'<div class="actions_div">\s*<a[^>]*>(.*?)</a>', b, re.S)
+    status = _text(m.group(1)) if m else ""
+    if status == "محجوز":
+        return "gone", "status button «محجوز» (booked)"
+    if status == "احجز":
+        return "live", "status button «احجز»"
+    return "unknown", f"status button {status!r}" if status else "no status button"
+
+
+def make_verify_gone(s, control_ads) -> Any:
+    """verify_gone for strike_read_gone: "gone" only after an office this run saw reads live."""
+    controls = sorted(control_ads)[:3]
+    memo: list[tuple[bool, str]] = []
+
+    def control() -> tuple[bool, str]:
+        if not memo:
+            res = (False, "no office seen this run to use as control")
+            for ad in controls:
+                v, why = read_own_page(s, ad)
+                if v == "live":
+                    res = (True, f"control {ad} reads live")
+                    break
+                res = (False, f"control {ad}: {v} ({why})")
+            memo.append(res)
+        return memo[0]
+
+    def verify_gone(ad_number: str) -> tuple[str, str]:
+        v, why = read_own_page(s, ad_number)
+        if v != "gone":
+            return v, why
+        ok, cwhy = control()
+        return ("gone", f"{why}; {cwhy}") if ok else ("unknown", f"{why}, but {cwhy}")
+    return verify_gone
+
+
+def prune_table(tbl: str, seen: set, verify_gone) -> int:
+    """The absence prune; when its guard refuses (-1), strike only ads whose own page reads gone."""
+    n = db.prune_unseen(tbl, seen, source=SOURCE)
+    if n < 0:
+        print(f"  ⚠ {tbl}: prune guard tripped — reading the unseen offices' own pages", flush=True)
+        n = db.strike_read_gone(tbl, seen, SOURCE, verify_gone=verify_gone)
+    return n
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", default="all")
@@ -236,12 +301,11 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
         complete = unreadable == 0 and len(urls) > 0
+        verify_gone = make_verify_gone(s, {r["ad_number"] for r in res + com})
         for tbl, rr in (("superoffice_residential_listings", res), ("superoffice_commercial_listings", com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
-                if n < 0:
-                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
-                elif n:
+                n = prune_table(tbl, {r["ad_number"] for r in rr}, verify_gone)
+                if n > 0:
                     print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
             print(f"  NOT pruning: {unreadable} of {len(urls)} page(s) unreadable", flush=True)

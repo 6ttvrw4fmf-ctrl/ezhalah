@@ -99,10 +99,11 @@ mustCatch('a 404 from a build with no front door treated as an answer', blind(40
 // 7. The door and both guards run ONLY on the real site: Turnstile throws error 110200 on any other host, and that
 //    uncaught error broke CI's built-app search journey on 2026-10-21. Local/CI/preview builds stay direct.
 const hostMod = await liftSymbols(join(root, 'src/lib/supabase.ts'),
-  [{ header: 'export const FRONT_DOOR_HOSTS', endsWith: /;$/ }, { header: 'export function frontDoorHost(', endsWith: /\}$/ }], ['frontDoorHost']);
+  [{ header: 'export const FRONT_DOOR_HOSTS', endsWith: /;$/ }, { header: 'export const FRONT_DOOR_DEPLOYMENT_HOST', endsWith: /;$/ },
+    { header: 'export function frontDoorHost(', endsWith: /\}$/ }], ['frontDoorHost']);
 const onHost = hostMod.frontDoorHost as (h: string) => boolean;
 check('the front door runs on the real site only, never on localhost, CI or previews',
-  onHost('ezhalah-app.vercel.app') && onHost('ezhalah.com') && onHost('www.ezhalah.com') && !onHost('evil-ezhalah.com') && !onHost('localhost') && !onHost('127.0.0.1') && !onHost('ezhalah-app-git-x.vercel.app')
+  onHost('ezhalah-app.vercel.app') && onHost('ezhalah.com') && onHost('www.ezhalah.com') && !onHost('evil-ezhalah.com') && !onHost('localhost') && !onHost('127.0.0.1') && onHost('ezhalah-a71gaft2d-enzalah.vercel.app') && onHost('ezhalah-app-git-fix-x-enzalah.vercel.app') && !onHost('ezhalah-a71gaft2d-evil.vercel.app') && !onHost('evil-ezhalah-a71gaft2d-enzalah.vercel.app') && !onHost('ezhalah-a71gaft2d-enzalah.vercel.app.evil.com')
   && /&& frontDoorHost\(window\.location\?\.hostname \?\? ''\);/.test(client));
 check('a Turnstile failure can never become an uncaught page error', /'error-callback': \(\) => true/.test(client));
 mustCatch('the host gate removed from the switch', !/&& frontDoorHost\(window\.location\?\.hostname \?\? ''\);/.test(client.replace("\n  && frontDoorHost(window.location?.hostname ?? '');", ';')));

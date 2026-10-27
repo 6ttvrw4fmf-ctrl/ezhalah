@@ -502,6 +502,10 @@ def _stub_db(monkeypatch):
     monkeypatch.setattr(R.time, "sleep", lambda *_: None)
     monkeypatch.setattr(R, "session", lambda: object())
     monkeypatch.setattr(R, "_oracle_sess", None)
+    # The sale walk (backlog 864) answers one off-plan project here: it is read, never written.
+    monkeypatch.setattr(R, "enumerate_sale", lambda s: [(
+        {"resource_id": 900, "resource_type": "projects"},
+        {"resource_id": 900, "resource_type": "projects", "publish": True})])
     return calls
 
 
@@ -530,9 +534,9 @@ def test_main_tallies_every_skip_into_end_run_and_prunes_only_behind_the_control
     assert calls["prune"] == []                              # control failed → nothing pruned
     run_id, kw = calls["end_run"][0]
     assert run_id == 77 and kw["ok"] is True
-    assert kw["rows_seen"] == 5 and kw["rows_upserted"] == 2
-    assert kw["degraded"] is True                            # 2 of 5 rows index-only (> 20 %)
-    for tally in ("purpose_salex1", "city_not_in_catalogx1", "detail_missx2", "detail_not_foundx1", "pruned=0"):
+    assert kw["rows_seen"] == 6 and kw["rows_upserted"] == 2
+    assert kw["degraded"] is True                            # 2 of 6 rows index-only (> 20 %)
+    for tally in ("sale_project_offplanx1", "purpose_salex1", "city_not_in_catalogx1", "detail_missx2", "detail_not_foundx1", "pruned=0"):
         assert tally in kw["notes"], (tally, kw["notes"])
     assert kw["check_tables"] == ["sakani_residential_listings", "sakani_commercial_listings"]
 

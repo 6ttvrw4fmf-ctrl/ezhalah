@@ -1,4 +1,22 @@
-"""سكني — sakani.sa, the government housing marketplace, RENT purpose only. Onboarding 2026-09-23.
+"""سكني — sakani.sa, the government housing marketplace: RENT market units (2026-09-23) and SALE market units
+(owner 2026-10-25, backlog 864). Off-plan PROJECTS are never listings here (see SALE SIDE below).
+
+SALE SIDE (2026-10-27; shape read from CI probe job 121422794705, 2026-10-26)
+  The same search route with filter[marketplace_purpose]=sale answers ~2,963 rows: resource_type
+  "market_units" (~1,790, one unit, one price, a REGA ad licence) and "projects" (~1,170, off-plan
+  developer projects). Only market_units become rows; a project skips as `project_offplan` and is
+  never written (owner 10-25: off-plan is stored hidden in its own table, never in search — that
+  table is a separate, owner-merged change). The rich side is type "marketplaces": price
+  `marketplace_price` (the card's figure), `hide_price_from_user`, city {name_ar}, district (the
+  site's Arabic name), description, unit_types [key], min_/max_area, min_/max_bed_room,
+  min_/max_bathroom (a single unit publishes min == max; a range is not one unit's fact → NULL),
+  media_images, interior_photos, location, land_type, publish, availability, tags. The DETAIL route
+  is the same /marketUnitsApi/v6/market_units/<id> (licence advertisement_type "sale", unit_price,
+  unit_area). Sale rows carry the ad number SKS<id> (rent keeps SKI<id>), so the liveness oracle
+  reads the purpose from the ad number: a SKI row whose record now says sale is a gone RENTAL, and a
+  SKS row whose record says rent is a gone SALE — the purpose guard holds in both directions.
+  A sale price that the rich row and the detail state differently is not one fact: price NULL,
+  both figures kept in additional_info (never pick one).
 
 SOURCE SHAPE (probed live before any code; every count below is one I measured, not the manifest's)
 ==================================================================================================
@@ -150,7 +168,9 @@ from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
 
 BASE = "https://sakani.sa"
 SOURCE = "سكني"
-PREFIX = "SKI"
+PREFIX = "SKI"          # rent rows
+SALE_PREFIX = "SKS"     # sale rows (same unit-id space; the prefix carries the purpose)
+_PREFIX_FOR = {"rent": PREFIX, "sale": SALE_PREFIX}
 SEARCH = f"{BASE}/marketplaceApi/search/v2/location"
 DETAIL = f"{BASE}/marketUnitsApi/v6/market_units/"
 DISTRICTS = f"{BASE}/marketplaceApi/search/v1/districts"
@@ -166,6 +186,7 @@ PAUSE = 1.5            # seconds between requests — the pace that drew no chal
 DETAIL_WALL_AFTER = 3
 MAX_RENEGOTIATIONS = 2
 
+_COMMERCIAL_WORD = re.compile(r"تجار[يةه]")
 _CHALLENGE = re.compile(r"Just a moment|cf-chl|challenge-platform|cf_chl", re.I)
 
 # The site's English unit_type keys that the shared TYPE_MAP_EN does not spell this way.
@@ -248,17 +269,25 @@ def fetch_json(s: cc.Session, url: str, params: Optional[dict] = None, *,
 
 
 def enumerate_rent(s: cc.Session) -> list[tuple[dict, dict]]:
-    """Every (search_row, rich_row) attribute pair of the rent marketplace, in catalogue order.
+    return enumerate_catalogue(s, "rent")
+
+
+def enumerate_sale(s: cc.Session) -> list[tuple[dict, dict]]:
+    return enumerate_catalogue(s, "sale")
+
+
+def enumerate_catalogue(s: cc.Session, purpose: str) -> list[tuple[dict, dict]]:
+    """Every (search_row, rich_row) attribute pair of one marketplace purpose, in catalogue order.
     Raises on a blocked walk or a changed shape — a blocked transport must never read as an empty
     catalogue (that would be the prune-everything shape)."""
     out: list[tuple[dict, dict]] = []
     seen: set[str] = set()
     page = 1
     while True:
-        got = fetch_json(s, SEARCH, {"filter[marketplace_purpose]": "rent",
+        got = fetch_json(s, SEARCH, {"filter[marketplace_purpose]": purpose,
                                      "page[size]": PAGE_SIZE, "page[number]": page})
         if not got or got[0] != 200 or not isinstance(got[1], dict):
-            raise RuntimeError(f"catalogue page {page} unreadable "
+            raise RuntimeError(f"{purpose} catalogue page {page} unreadable "
                                f"({'HTTP %s' % got[0] if got else 'challenge/transport'}) — walk aborted")
         data = got[1].get("data") or []
         rich = {d.get("id"): (d.get("attributes") or {})
@@ -329,8 +358,8 @@ def _photos(rich: dict, d: dict) -> list[str]:
         u = (m or {}).get("image_url")
         if u and u.startswith("http") and u not in urls:
             urls.append(u)
-    for key in ("exterior_photos", "interior_photos"):
-        for p in d.get(key) or []:
+    for key, src in (("exterior_photos", d), ("interior_photos", d), ("interior_photos", rich)):
+        for p in src.get(key) or []:
             u = ((p or {}).get("file_url") or "").split("?")[0]
             if u.startswith("http") and u not in urls:
                 urls.append(u)
@@ -377,15 +406,49 @@ def _age(d: dict, lic: dict) -> Optional[int]:
                                               this_year=datetime.now(timezone.utc).year)
 
 
+def _one(rich: dict, lo: str, hi: str) -> Any:
+    """A sale rich row publishes ranges (min_/max_); one unit states min == max. A real range is
+    not this unit's fact → None."""
+    a, b = rich.get(lo), rich.get(hi)
+    return a if a not in (None, "") and a == b else None
+
+
+def _sale_price(rich: dict, d: dict) -> tuple[Any, Any, Optional[str]]:
+    """(price|None, raw, conflict-note). The card's figure is `marketplace_price`; the detail's
+    unit_price repeats it. Hidden or absent → None; the two stating different figures → None."""
+    if rich.get("hide_price_from_user") is True:
+        return None, None, "hidden_by_source"
+    p = rich.get("marketplace_price")
+    if isinstance(p, bool) or not isinstance(p, (int, float)) or p <= 0:
+        return None, None, None
+    raw = d.get("unit_price") if d.get("unit_price") not in (None, "") else p
+    try:
+        # 0.5 SAR: the rich row is a float32 rendering of the source's decimal (22169: 1150042.125 is
+        # the detail's "1150042.14"), the same figure, not a second statement.
+        if abs(float(raw) - float(p)) >= 0.5:
+            return None, raw, f"marketplace_price {p} != detail unit_price {raw}"
+    except (TypeError, ValueError):
+        return None, raw, f"unparseable detail unit_price {raw!r}"
+    return (int(p) if float(p).is_integer() else p), raw, None
+
+
 def map_listing(idx: dict, rich: dict, detail: Optional[dict],
-                district_raw: Optional[str] = None) -> tuple[Optional[dict], str, str]:
+                district_raw: Optional[str] = None,
+                purpose: str = "rent") -> tuple[Optional[dict], str, str]:
     """One catalogue unit → a row. `detail` is None when its own record could not be read this run
-    (index-only row). Returns (row|None, category, skip_reason)."""
+    (index-only row). `purpose` is the catalogue it was walked from. Returns (row|None, category,
+    skip_reason)."""
+    sale = purpose == "sale"
     uid = rich.get("resource_id") or idx.get("resource_id")
     if not uid:
         return None, "residential", "no_id"
     uid = str(uid)
-    if (rich.get("status") or "") != "published" or rich.get("publish") is not True:
+    if sale and (rich.get("resource_type") or idx.get("resource_type")) != "market_units":
+        return None, "residential", "project_offplan"
+    if sale:
+        if rich.get("publish") is not True or rich.get("availability") is False:
+            return None, "residential", "status_unpublished"
+    elif (rich.get("status") or "") != "published" or rich.get("publish") is not True:
         return None, "residential", f"status_{rich.get('status') or 'blank'}"
     tags = rich.get("tags") or {}
     if str(idx.get("auction_status") or "").strip():
@@ -400,21 +463,40 @@ def map_listing(idx: dict, rich: dict, detail: Optional[dict],
     if detail is not None and ((d.get("status") or "") != "published" or d.get("publish") is not True):
         return None, "residential", f"detail_status_{d.get('status') or 'blank'}"
     adv = str(lic.get("advertisement_type") or "").strip().lower()
-    if adv and adv != "rent":
+    if adv and adv != purpose:
         return None, "residential", f"purpose_{adv}"
 
-    type_key = str(rich.get("unit_type") or "").strip().lower()
+    if sale:
+        types_ = rich.get("unit_types") or []
+        type_key = str(types_[0]).strip().lower() if len(types_) == 1 else ""
+    else:
+        type_key = str(rich.get("unit_type") or "").strip().lower()
     property_type = normalize.map_type_en(type_key, overrides=_TYPE_OVERRIDES)
-    if property_type == "Residential Land" and str(d.get("land_type") or "").lower() == "commercial":
+    land_type = str(d.get("land_type") or rich.get("land_type") or "").lower()
+    if property_type == "Residential Land" and "commercial" in land_type:
+        property_type = "Commercial Land"
+    elif sale and property_type == "Residential Land" and _COMMERCIAL_WORD.search(
+            str(d.get("description") or rich.get("description") or "")):
+        # land_type «residential» is the form's default, not a statement (see TYPES). A sale land whose
+        # own text names commercial use («ارض تجاري سكني», 22147) is Commercial: the owner's mixed-use
+        # rule (backlog 864; haraj applies the same rule to «سكني تجاري»).
         property_type = "Commercial Land"
     if not property_type:
         return None, "residential", "type_unmapped"
     category = normalize.category_for_type(property_type).lower()
 
-    city_ar = str(rich.get("city_text") or "").strip() or None
+    if sale:
+        city_obj = rich.get("city") if isinstance(rich.get("city"), dict) else {}
+        city_ar = str(city_obj.get("name_ar") or "").strip() or None
+        reg = rich.get("region")
+        region_ar = str((reg.get("name_ar") if isinstance(reg, dict) else reg) or "").strip() or None
+        district_raw = district_raw or (str(rich.get("district") or "").strip() or None)
+    else:
+        city_ar = str(rich.get("city_text") or "").strip() or None
+        region_ar = str(rich.get("region_text") or "").strip() or None
     if not city_ar:
         return None, category, "no_city"
-    city_id, region_id = to_catalog(city_ar, str(rich.get("region_text") or "").strip() or None)
+    city_id, region_id = to_catalog(city_ar, region_ar)
     if not city_id:
         return None, category, "city_not_in_catalog"
     district_raw = (district_raw or "").strip() or None
@@ -422,10 +504,16 @@ def map_listing(idx: dict, rich: dict, detail: Optional[dict],
 
     # PRICE = SOURCE: the card's «SAR N / كل سنة» figure, unchanged, with the period read from the
     # source's own key (see _annual_price). 0/absent is "no price", never a number.
-    period, price = _annual_price(rich)
-    price_raw = d.get("unit_price") if d.get("unit_price") not in (None, "") else rich.get("annual_unit_price")
+    price_note = None
+    if sale:
+        period = None
+        price, price_raw, price_note = _sale_price(rich, d)
+    else:
+        period, price = _annual_price(rich)
+        price_raw = d.get("unit_price") if d.get("unit_price") not in (None, "") else rich.get("annual_unit_price")
 
-    area_raw = d.get("unit_area") if d.get("unit_area") not in (None, "") else rich.get("area")
+    area_raw = d.get("unit_area") if d.get("unit_area") not in (None, "") else (
+        _one(rich, "min_area", "max_area") if sale else rich.get("area"))
     try:
         area_f = float(area_raw)
     except (TypeError, ValueError):
@@ -435,10 +523,13 @@ def map_listing(idx: dict, rich: dict, detail: Optional[dict],
     face = ((rich.get("main_building_face") or [None])[0] or d.get("main_building_face") or "")
     face = str(face).strip().lower()
     dwelling = type_key in _DWELLINGS
-    description = redact_pii(str(d.get("description") or "").strip()) or None
+    description = redact_pii(str(d.get("description") or (rich.get("description") if sale else "")
+                                 or "").strip()) or None
+    beds = _one(rich, "min_bed_room", "max_bed_room") if sale else rich.get("bedrooms")
+    baths = _one(rich, "min_bathroom", "max_bathroom") if sale else rich.get("bathrooms")
 
     row: dict[str, Any] = {
-        "ad_number": f"{PREFIX}{uid}",
+        "ad_number": f"{_PREFIX_FOR[purpose]}{uid}",
         "listing_url": f"{BASE}/app/market-unit/{uid}",
         "source": SOURCE,
         "active": True,
@@ -446,7 +537,7 @@ def map_listing(idx: dict, rich: dict, detail: Optional[dict],
         "title": " - ".join(x for x in (_TYPE_AR.get(type_key, type_key), city_ar, district_raw) if x),
         "description": description,
         "property_type": property_type,
-        "transaction_type": "Rent",
+        "transaction_type": "Buy" if sale else "Rent",
         "city": normalize.map_city(city_ar),
         "city_ar": city_ar,
         "city_id": city_id,
@@ -454,8 +545,8 @@ def map_listing(idx: dict, rich: dict, detail: Optional[dict],
         "district_ar": district_ar,
         "neighborhood": district_raw,
         "area_m2": area,
-        "bedrooms": _pos(rich.get("bedrooms")) if dwelling else None,
-        "bathrooms": _pos(rich.get("bathrooms")) if dwelling else None,
+        "bedrooms": _pos(beds) if dwelling else None,
+        "bathrooms": _pos(baths) if dwelling else None,
         "halls": _pos(d.get("number_of_living_rooms")),
         "reception_rooms_majlis": _pos(d.get("number_of_reception_rooms")),
         "floor_number": normalize.to_int(d.get("floor_number")) if d.get("floor_number") not in (None, "") else None,
@@ -464,26 +555,36 @@ def map_listing(idx: dict, rich: dict, detail: Optional[dict],
         "property_age": _age(d, lic),
         "license_number": str(lic.get("ad_license_number") or "").strip() or None,   # the AD licence
         "photo_urls": _photos(rich, d) or None,
-        "price_annual": price,
-        "rent_period": period,        # from the source's own key — see _annual_price
         **_amenities(d),
-        "price_evidence": normalize.price_evidence(
-            field="marketing_rentals.annual_unit_price", raw=price_raw, stored=price,
-            kind="annual", unit="total", origin="api"),
     }
+    if sale:
+        row["price_total"] = price
+        row["price_evidence"] = normalize.price_evidence(
+            field="marketplaces.marketplace_price", raw=price_raw, stored=price,
+            kind="total", unit="total", origin="api")
+    else:
+        row["price_annual"] = price
+        row["rent_period"] = period       # from the source's own key — see _annual_price
+        row["price_evidence"] = normalize.price_evidence(
+            field="marketing_rentals.annual_unit_price", raw=price_raw, stored=price,
+            kind="annual", unit="total", origin="api")
     loc = rich.get("location") or {}
     am = d.get("amenities") or {}
     row["additional_info"] = {
         "source_id": uid,
         "site_ad_number": d.get("ad_number"),
         "unit_type": type_key,
-        "region_ar": rich.get("region_text") or None,
+        "region_ar": region_ar,
         "src_city_id": rich.get("city_id"),
         "src_district_id": d.get("district_id") or None,
         "lat": loc.get("lat"),
         "lng": loc.get("lon"),
         "price_exact": price_raw,
-        "period_source": "annual_unit_price / «كل سنة»",
+        "period_source": None if sale else "annual_unit_price / «كل سنة»",
+        "purpose": purpose,
+        "price_note": price_note,
+        "market_unit_status": rich.get("market_unit_status") if sale else None,
+        "discount_enabled": rich.get("discount_enabled") if sale else None,
         "area_exact": area_raw,
         "main_building_face": face or None,
         "main_street_width": d.get("main_street_width") or None,
@@ -508,7 +609,7 @@ def map_listing(idx: dict, rich: dict, detail: Optional[dict],
         "detail_captured": detail is not None,
     }
     row["source_capture"] = {
-        "schema": "sakani.market_units_v6.v1",
+        "schema": "sakani.market_units_v6.sale.v1" if sale else "sakani.market_units_v6.v1",
         # _public drops identity/contact KEYS; redact_capture then scrubs any prose value
         # (a phone typed into the description) and keeps numbers, ids and URLs byte-identical.
         "index": redact_capture(_public(rich)),
@@ -518,7 +619,8 @@ def map_listing(idx: dict, rich: dict, detail: Optional[dict],
 
 
 # ── LIVENESS ────────────────────────────────────────────────────────────────────────────────────
-_AD_RE = re.compile(rf"^{PREFIX}(\d+)$")
+_AD_RE = re.compile(rf"^({PREFIX}|{SALE_PREFIX})(\d+)$")
+_PURPOSE_OF = {PREFIX: "rent", SALE_PREFIX: "sale"}
 _oracle_sess: Any = None
 
 
@@ -535,7 +637,7 @@ def _oracle_session() -> cc.Session:
     return _oracle_sess
 
 
-def _signal(status, body, _moved):
+def _signal(status, body, _moved, purpose: str = "rent"):
     """The measured death/life shapes of the DETAIL route (see docstring). Any other read → None."""
     try:
         j = json.loads(body) if body else None
@@ -547,10 +649,10 @@ def _signal(status, body, _moved):
         return "gone" if "not found" in str(j.get("message", "")).lower() else None
     if status != 200:
         return None
-    return _attrs_verdict((j.get("data") or {}).get("attributes") or {})
+    return _attrs_verdict((j.get("data") or {}).get("attributes") or {}, purpose)
 
 
-def _attrs_verdict(a: dict) -> Optional[str]:
+def _attrs_verdict(a: dict, purpose: str = "rent") -> Optional[str]:
     """A DETAIL record's own attributes → 'live' | 'gone' | None. One rule for the oracle and the
     crawl's direct-alive stamp."""
     if not a:
@@ -558,17 +660,20 @@ def _attrs_verdict(a: dict) -> Optional[str]:
     if (a.get("status") or "") != "published" or a.get("publish") is not True:
         return "gone"
     adv = str((a.get("rega_ad_license") or {}).get("advertisement_type") or "").lower()
-    if adv and adv != "rent":
-        return "gone"                        # the unit lives on, the RENTAL listing does not
+    if adv and adv != purpose:
+        return "gone"                        # the unit lives on, THIS purpose's listing does not
     return "live"
 
 
 def _verify_gone(ad_number: str) -> tuple[str, str]:
     m = _AD_RE.match(ad_number)
     if not m:
-        return "unknown", f"{ad_number!r} is not a {PREFIX}<id> ad number"
-    return LivenessProbe(platform="sakani", signal=_signal, session=_oracle_session,
-                         url_for=lambda _a: f"{DETAIL}{m.group(1)}").verify_gone(ad_number)
+        return "unknown", f"{ad_number!r} is not a {PREFIX}/{SALE_PREFIX}<id> ad number"
+    purpose = _PURPOSE_OF[m.group(1)]
+    return LivenessProbe(platform="sakani",
+                         signal=lambda st, b, mv: _signal(st, b, mv, purpose),
+                         session=_oracle_session,
+                         url_for=lambda _a: f"{DETAIL}{m.group(2)}").verify_gone(ad_number)
 
 
 def _controls_live(ad_numbers: list[str]) -> bool:
@@ -590,7 +695,14 @@ def main() -> int:
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--deal", choices=["rent", "sale", "all"], default="all")
+    # A bounded WRITING run (a proof or a catch-up): only the named ids plus the first N units of
+    # each walked catalogue. It never prunes — a partial walk can testify to nobody's absence.
+    ap.add_argument("--max-units", type=int, default=0)
+    ap.add_argument("--ids", default="", help="comma list of unit ids to include (no prune)")
     args = ap.parse_args()
+    want_ids = {x.strip() for x in args.ids.split(",") if x.strip()}
+    partial = bool(args.max_units or want_ids) or args.deal != "all"
 
     global _oracle_sess
     _oracle_sess = s = session()     # the walk warms it; the oracle reuses it (never a cold probe)
@@ -601,20 +713,40 @@ def main() -> int:
     skipped: dict[str, int] = {}
     seen = 0
     try:
-        units = enumerate_rent(s)
-        if not units:
-            raise RuntimeError("the rent catalogue answered 0 units — treated as blocked, not empty")
-        if args.limit:
-            units = units[:args.limit]
-        print(f"{SOURCE}: {len(units)} rent units in the catalogue", flush=True)
+        units: list[tuple[str, dict, dict]] = []
+        for purpose in ("rent", "sale"):
+            if args.deal not in ("all", purpose):
+                continue
+            got = (enumerate_rent if purpose == "rent" else enumerate_sale)(s)
+            if not got:
+                raise RuntimeError(f"the {purpose} catalogue answered 0 units — treated as blocked, not empty")
+            if purpose == "sale":
+                kinds: dict[str, int] = {}
+                for i, r in got:
+                    k = str(r.get("resource_type") or i.get("resource_type") or "blank")
+                    kinds[k] = kinds.get(k, 0) + 1
+                print(f"{SOURCE}: sale catalogue {len(got)} rows {kinds}", flush=True)
+            if want_ids or args.max_units:
+                named = [u for u in got
+                         if str(u[1].get("resource_id") or u[0].get("resource_id")) in want_ids]
+                rest = [u for u in got if u not in named
+                        and (purpose == "rent" or (u[1].get("resource_type") or u[0].get("resource_type"))
+                             == "market_units")][:args.max_units]
+                got = named + rest
+            if args.limit:
+                got = got[:args.limit]
+            units += [(purpose, i, r) for i, r in got]
+            print(f"{SOURCE}: {len(got)} {purpose} units to read", flush=True)
 
         districts: dict = {}
         walled_run = 0          # consecutive details that drew no answer at all
         renegotiated = 0
-        for idx, rich in units:
+        for purpose, idx, rich in units:
             seen += 1
             uid = str(rich.get("resource_id") or idx.get("resource_id") or "")
             detail: Optional[dict] = None
+            if purpose == "sale" and (rich.get("resource_type") or idx.get("resource_type")) != "market_units":
+                uid = ""                    # an off-plan project: no unit record to read, it skips below
             if uid:
                 time.sleep(PAUSE)
                 state, detail = fetch_detail(s, uid)
@@ -641,14 +773,15 @@ def main() -> int:
             district_raw = None
             if detail and detail.get("district_id") and rich.get("city_id"):
                 district_raw = district_names(s, rich["city_id"], districts).get(str(detail["district_id"]))
-            row, cat, why = map_listing(idx, rich, detail, district_raw)
+            row, cat, why = map_listing(idx, rich, detail, district_raw, purpose)
             if not row:
-                skipped[why] = skipped.get(why, 0) + 1
+                key = why if purpose == "rent" else f"sale_{why}"
+                skipped[key] = skipped.get(key, 0) + 1
                 continue
-            if detail and _attrs_verdict(detail) == "live":
-                # This unit's own DETAIL record, id-matched, published for rent: the same read the
-                # oracle makes, so the daily direct check need not open it again (zero new requests).
-                db.mark_direct_alive(row, oracle="sakani.detail_api.published_rent")
+            if detail and _attrs_verdict(detail, purpose) == "live":
+                # This unit's own DETAIL record, id-matched, published for this purpose: the same
+                # read the oracle makes, so the daily direct check need not open it again.
+                db.mark_direct_alive(row, oracle=f"sakani.detail_api.published_{purpose}")
             if args.type != "all" and cat != args.type:
                 continue
             (com if cat == "commercial" else res).append(row)
@@ -681,7 +814,9 @@ def main() -> int:
         # positive control has passed. prune_unseen's own breakers sit on top.
         pruned = 0
         detail_misses = skipped.get("detail_miss", 0)
-        if args.type == "all" and _controls_live([r["ad_number"] for r in res + com]):
+        if partial:
+            print("  partial run (--deal/--max-units/--ids): no prune", flush=True)
+        if args.type == "all" and not partial and _controls_live([r["ad_number"] for r in res + com]):
             for tbl, rows in (("sakani_residential_listings", res),
                               ("sakani_commercial_listings", com)):
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,

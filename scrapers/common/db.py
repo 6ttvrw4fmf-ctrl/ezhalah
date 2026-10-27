@@ -1307,6 +1307,10 @@ READ_GONE_MAX_READS = 60   # own-page reads per table per run when a prune is gu
 # Tables whose refused prune already read the unseen ads' own pages this process (see below), so a
 # caller that also calls strike_read_gone() after the -1 (manzo) does not strike the same ad twice.
 _READ_GONE_DONE: set[str] = set()
+# The ads that refused-prune reading struck, per table. A caller that then reads again with its OWN
+# oracle (a soft-404 site: superoffice, azdad, albukaeri, 2026-10-27) skips these, so no ad is
+# struck twice in one run and the collapse cap holds across both readings.
+_READ_GONE_STRUCK: dict[str, set[str]] = {}
 
 
 def _read_gone_after_refused_prune(table, seen, source, verify_gone, shards, n_active,
@@ -1348,8 +1352,9 @@ def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=No
     needs a seen page to answer live first). UNKNOWN and live rows are counted as seen (kept, shown);
     only read-gone rows take a strike, at most the collapse cap's worth (oldest-seen first; the cap
     is respected, never raised). prune_unseen then runs with its grace and its at-grace re-read."""
-    if table in _READ_GONE_DONE and not _from_refused_prune:
-        return 0       # prune_unseen already read these unseen ads when it refused the prune
+    if table in _READ_GONE_DONE and not _from_refused_prune and verify_gone is None:
+        return 0       # prune_unseen already read these unseen ads with the same default oracle
+    struck_before = set() if _from_refused_prune else set(_READ_GONE_STRUCK.get(table, ()))
     seen = {str(a) for a in seen_ads if a}
     if not seen:
         return 0       # nothing seen this run: the source may be down — no control, no reading
@@ -1357,11 +1362,14 @@ def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=No
     q = c.table(table).select("ad_number,last_seen_at").eq("active", True)
     if source:
         q = q.eq("source", source)
-    rows = [r for r in (_execute(q.range(0, 999), what=table + ".read_gone_slice").data or [])
-            if r.get("ad_number")]
+    # THE WHOLE ACTIVE SET, not a 1,000-row slice (2026-10-27). The slice made prune_unseen below compare
+    # 1,000 «seen» against every active row: haraj (13,702 active) read «re-saw 999 of 13702», tripped the
+    # collapse guard every run since 10-18 and never struck the one ad whose own page read gone. The read
+    # count is still capped by max_reads (oldest-seen first) and the strike by the collapse cap.
+    rows = [r for r in (_execute(q, what=table + ".read_gone_set").data or []) if r.get("ad_number")]
     if verify_gone is None:
         verify_gone = own_page_status_oracle(c, table, seen)
-    unseen = sorted((r for r in rows if r["ad_number"] not in seen),
+    unseen = sorted((r for r in rows if r["ad_number"] not in seen and r["ad_number"] not in struck_before),
                     key=lambda r: str(r.get("last_seen_at") or ""))[:max_reads]
     gone: list[str] = []
     for r in unseen:
@@ -1374,7 +1382,9 @@ def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=No
         if str(verdict).lower() == "gone":
             gone.append(r["ad_number"])
     if len(rows) >= min_active_guard:
-        gone = gone[:int(max_prune_frac * len(rows))]
+        gone = gone[:max(0, int(max_prune_frac * len(rows)) - len(struck_before))]
+    if _from_refused_prune:
+        _READ_GONE_STRUCK[table] = set(gone)
     if not gone:
         print(f"{table}: no unseen ad read gone on its own page — nothing struck", flush=True)
         return 0

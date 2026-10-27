@@ -620,17 +620,85 @@ def make_canary(tenant: Tenant, control_pid: Optional[int],
     return canary
 
 
+def _web_status(tenant: Tenant, pid: int, session_factory: Callable[[], Any]) -> Optional[int]:
+    """HTTP status of the listing's OWN page (the card's link), None when it could not be read or
+    the request landed on a different path."""
+    url = f"{tenant.base}/properties/{pid}"
+    try:
+        r = session_factory().get(url, timeout=30, allow_redirects=True)
+    except Exception:  # noqa: BLE001 — unreadable is no opinion
+        return None
+    return r.status_code if str(getattr(r, "url", url)).rstrip("/") == url else None
+
+
 def verify_gone_for(tenant: Tenant, canary: Callable[[], tuple[bool, str]],
-                    session_factory: Callable[[], Any] = session):
+                    session_factory: Callable[[], Any] = session, web_control: Optional[int] = None):
+    """The API record's verdict, then — for a record the API still calls live — the listing's OWN
+    page (2026-10-27, backlog 923). yameen 45194/45197/45960/52439: the office edited them 10-25,
+    the list feed dropped them and www.yameen.sa/properties/<id> answers HTTP 404, while the detail
+    API still says available / published_on_website 1 — so the oracle read «live», reset their
+    missing_count every night and a customer tapping the card landed on a 404. A 404 on the own
+    page counts only while `web_control` (an id THIS run mapped) answers 200 on its own page; any
+    other answer keeps the API's verdict. The kill still waits for prune_unseen's full grace."""
+    web_ok: dict[str, bool] = {}
+
+    def _web_control_ok() -> bool:
+        if "v" not in web_ok:
+            web_ok["v"] = bool(web_control) and _web_status(tenant, int(web_control), session_factory) == 200
+        return web_ok["v"]
+
     def _verify(ad_number: str) -> tuple[str, str]:
         pid = ad_number[len(tenant.prefix):]
         if not ad_number.startswith(tenant.prefix) or not pid.isdigit():
             return "unknown", f"{ad_number!r} is not a {tenant.prefix}<id> ad number"
-        return LivenessProbe(platform=tenant.platform, signal=_signal_for(int(pid)),
-                             session=session_factory,
-                             url_for=lambda _ad: api_url(tenant, int(pid)),
-                             canary=canary).verify_gone(ad_number)
+        verdict, why = LivenessProbe(platform=tenant.platform, signal=_signal_for(int(pid)),
+                                     session=session_factory,
+                                     url_for=lambda _ad: api_url(tenant, int(pid)),
+                                     canary=canary).verify_gone(ad_number)
+        if verdict == "live" and web_control and _web_control_ok() \
+                and _web_status(tenant, int(pid), session_factory) == 404:
+            return "gone", f"API says live but the listing's own page answers HTTP 404 ({why})"
+        return verdict, why
     return _verify
+
+
+_RETIRED = {"status_sold", "status_rented", "status_unavailable"}
+
+
+def read_unseen_after_refused_prune(table: str, rows: list, tenant: Tenant, verify) -> int:
+    """The absence prune was refused (collapse/coverage guard): read the unseen rows' own records
+    and pages through `verify` so a row that is gone takes its strike anyway (db.strike_read_gone:
+    full grace, the collapse cap respected, never raised). 2026-10-27: yameen's 4 dropped lands were
+    never struck because the refused prune threw the reading away every night."""
+    try:
+        return db.strike_read_gone(table, {r["ad_number"] for r in rows}, tenant.source, verify_gone=verify)
+    except Exception as e:  # noqa: BLE001 — a failed reading is UNKNOWN; the refused prune stands
+        print(f"  {table}: reading after a refused prune failed ({type(e).__name__}: {e})", flush=True)
+        return 0
+
+
+def strike_feed_retired(table: str, rows: list, items: list, tenant: Tenant, verify) -> int:
+    """Remove the stored ads THIS run's own feed marked sold / rented / unavailable (trap 1), before
+    the absence prune runs (2026-10-27, backlog 923). yameen: 4 of 10 active rows turned «rented» in
+    the feed, the crawl skipped them, prune_unseen's collapse guard read «re-saw 6 of 10», refused the
+    prune and demoted every run for three days (P0 silent_scraper_death) while the four stayed on
+    screen. Owner 2026-10-20 «once we see it, remove it» (aldarim): an ad the feed retired AND whose
+    own API record reads gone through the canaried oracle is struck at grace 1. Any other unseen ad
+    answers unknown here and is left to the ordinary prune; the collapse cap is never raised."""
+    retired = {f"{tenant.prefix}{L.get('id')}" for L in items if _withdrawn(L) in _RETIRED}
+    if not retired:
+        return 0
+
+    def only_feed_retired(ad_number: str):
+        if ad_number not in retired:
+            return "unknown", "not marked retired by this run's feed"
+        return verify(ad_number)
+    try:
+        return db.strike_read_gone(table, {r["ad_number"] for r in rows}, tenant.source,
+                                   verify_gone=only_feed_retired, grace=1)
+    except Exception as e:  # noqa: BLE001 — a failed reading is UNKNOWN; the prune guard still stands
+        print(f"  {table}: feed-retired strike failed ({type(e).__name__}: {e})", flush=True)
+        return 0
 
 
 def make_verify_gone(tenant: Tenant, session_factory: Optional[Callable[[], Any]] = None):
@@ -644,7 +712,8 @@ def make_verify_gone(tenant: Tenant, session_factory: Optional[Callable[[], Any]
         ad = str((control or {}).get("ad_number") or "")
         pid = ad[len(tenant.prefix):]
         pid_ok = ad.startswith(tenant.prefix) and pid.isdigit()
-        return verify_gone_for(tenant, make_canary(tenant, int(pid) if pid_ok else None, sf), sf)
+        return verify_gone_for(tenant, make_canary(tenant, int(pid) if pid_ok else None, sf), sf,
+                               web_control=int(pid) if pid_ok else None)
     return factory
 
 
@@ -701,10 +770,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         degraded = False
         if args.type == "all" and complete:
             control = next((int(r["ad_number"][len(PREFIX):]) for r in res + com), None)
-            verify = verify_gone_for(TENANT, make_canary(TENANT, control))
+            verify = verify_gone_for(TENANT, make_canary(TENANT, control), web_control=control)
             for table, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                strike_feed_retired(table, rows, items, TENANT, verify)
                 pruned = db.prune_unseen(table, {r["ad_number"] for r in rows}, SOURCE,
                                          verify_gone=verify)
+                if pruned < 0:
+                    read_unseen_after_refused_prune(table, rows, TENANT, verify)
                 degraded = degraded or pruned < 0
                 print(f"  {table}: pruned {pruned}")
         healthy = db.end_run(run_id, ok=True, rows_seen=len(items),

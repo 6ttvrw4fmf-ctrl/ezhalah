@@ -74,5 +74,21 @@ check('the log query is per caller per hour and the run uses the catch-up window
 check('the hour reads back as an exact time', hourIso('2026-10-22T21:00:00', end) === '2026-10-22T21:00:00.000Z' && hourIso('2026-10-22 21:00:00', end) === '2026-10-22T21:00:00.000Z');
 mustCatch('the window shrunk back to one hour', !/const start = catchUpStart\(lastOk, end\);/.test(script.replace('const start = catchUpStart(lastOk, end);', 'const start = new Date(end.getTime() - 3600000);')));
 
+// PER-VISITOR (2026-10-27): front-door callers are judged by a scrambled visitor code, not Vercel's shared address.
+// The door (api/sb.ts visitorCode), this alarm (visitorKey) and the database (guard.visitor_code) must agree byte for
+// byte, or a block written by the alarm would never reach the visitor. Reference value computed by Postgres
+// extensions.hmac('1.2.3.4','k','sha256') on production, 2026-10-27.
+const { visitorKey, knownCallerKeys } = await import('./lib/scrapeAlarm.ts');
+const { liftSymbols } = await import('./lib/liftSymbols.ts');
+const door = await liftSymbols(join(root, 'api/sb.ts'), [{ header: 'export async function visitorCode(', endsWith: /^}$/ }], ['visitorCode']);
+const doorCode = await (door.visitorCode as (ip: string, s: string) => Promise<string>)('1.2.3.4', 'k');
+check('door, alarm and database scramble a visitor identically', visitorKey('1.2.3.4', 'k') === 'vid:f89b701661c175bf' && doorCode === 'f89b701661c175bf', `${visitorKey('1.2.3.4', 'k')} / ${doorCode}`);
+check('the owner is known behind the front door too', knownCallerKeys([' 1.2.3.4 ', ''], 'k').join(',') === '1.2.3.4,vid:f89b701661c175bf');
+const lastVid = /arrayElement\(extractAll\([^)]*'vid=\(\[0-9a-f\]\{16\}\)'\), -1\)/;
+check('front-door callers are keyed by the LAST vid= (the door appends after the client), our robots are not judged',
+  lastVid.test(lib) && /'robot=\(\[01\]\)'\), -1\) = '1'/.test(lib));
+mustCatch('a key that trusts the FIRST vid= (a client could frame someone)', !lastVid.test(lib.replaceAll("'vid=([0-9a-f]{16})'), -1)", "'vid=([0-9a-f]{16})'), 1)")));
+mustCatch('an alarm that forgets the owner behind the door', !knownCallerKeys(['1.2.3.4'], '').includes('vid:f89b701661c175bf'));
+
 if (failed) { console.error(`\n❌ verify-scrape-alarm: ${failed} check(s) failed.`); process.exit(1); }
 console.log('\n✅ verify-scrape-alarm: the hourly scrape alarm flags bulk downloads and fails loud when blind.');
