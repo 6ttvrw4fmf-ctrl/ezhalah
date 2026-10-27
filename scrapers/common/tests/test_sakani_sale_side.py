@@ -115,3 +115,12 @@ def test_verify_gone_reads_the_purpose_from_the_ad_number(monkeypatch):
     assert R._verify_gone("SKS24798")[0] == "live" and got["url"].endswith("/market_units/24798")
     assert R._verify_gone("SKI24798")[0] == "gone"
     assert R._verify_gone("SKX1")[0] == "unknown"
+
+
+def test_a_sale_land_whose_own_text_names_commercial_use_is_commercial_land():
+    land = {**RICH_20970, "resource_id": 22147, "unit_types": ["land"], "land_type": "residential",
+            "description": "ارض تجاري سكني"}
+    row, cat, _ = R.map_listing({}, land, None, None, "sale")
+    assert (row["property_type"], cat) == ("Commercial Land", "commercial")
+    row, cat, _ = R.map_listing({}, {**land, "description": "ارض سكنية"}, None, None, "sale")
+    assert (row["property_type"], cat) == ("Residential Land", "residential")
