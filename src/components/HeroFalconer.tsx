@@ -54,8 +54,10 @@ const drift = (ms: number, px: number) => ({
   animationTimingFunction: 'ease-in-out',
 } as const);
 
-export default function HeroFalconer({ size, flip, signedIn = false, celebrate = 0 }: {
+export default function HeroFalconer({ size, flip, signedIn = false, celebrate = 0, inline = false }: {
   size: { width: number; height: number }; flip: boolean; signedIn?: boolean; celebrate?: number;
+  /** At the end of the headline (owner 2026-10-27): no clouds, so nothing drifts over the words. */
+  inline?: boolean;
 }) {
   const reduced = useReducedMotion();
   const { width: w, height: h } = size;
@@ -101,7 +103,7 @@ export default function HeroFalconer({ size, flip, signedIn = false, celebrate =
 
   return (
     <View pointerEvents="none" accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: w, height: h }}>
-      <CloudWisp variant={0} width={w * 1.35} height={h * 0.3} opacity={0.5} style={{ bottom: -h * 0.07, left: -w * 0.27 }} />
+      {inline ? null : <CloudWisp variant={0} width={w * 1.35} height={h * 0.3} opacity={0.5} style={{ bottom: -h * 0.07, left: -w * 0.27 }} />}
       <View style={[StyleSheet.absoluteFill, flip && s.flip]}>
         {!signedIn ? (
           <>
@@ -116,6 +118,7 @@ export default function HeroFalconer({ size, flip, signedIn = false, celebrate =
           <XImage testID="hero-falconer-final" source={SIGNED_IN_STILL} contentFit="fill" accessible={false} style={signinBox} />
         )}
       </View>
+      {inline ? null : (<>
       {/* In FRONT of him: a low bank over his chest and a thin wisp across his shoulder, each on its own slow clock. */}
       <Animated.View testID="hero-falconer-clouds" {...SKY_CALM_PROPS} style={[StyleSheet.absoluteFill, !reduced && drift(5200, DRIFT_PX)]}>
         <CloudWisp variant={2} width={w * 1.25} height={h * 0.36} opacity={0.82} style={{ bottom: h * 0.02, left: -w * 0.15 }} />
@@ -123,6 +126,7 @@ export default function HeroFalconer({ size, flip, signedIn = false, celebrate =
       <Animated.View {...SKY_CALM_PROPS} style={[StyleSheet.absoluteFill, !reduced && drift(7400, DRIFT_PX + 3)]}>
         <CloudWisp variant={1} width={w * 0.95} height={h * 0.22} opacity={0.6} style={{ top: h * 0.38, right: -w * 0.3 }} />
       </Animated.View>
+      </>)}
     </View>
   );
 }
