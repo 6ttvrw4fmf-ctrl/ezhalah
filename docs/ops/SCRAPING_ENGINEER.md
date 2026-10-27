@@ -1,5 +1,15 @@
 # ⚡ SCRAPING ENGINEER — Ezhalah
 
+> **🔢 THE SITE COUNT MOVES BY ITSELF (owner, 2026-10-27 — «a new website goes up, the number changes»).** The
+> «نبحث في N منصة» number and the logo strip both come from ONE list, `loader_active_platforms_ar()`: a site
+> counts and shows its logo only while it is active in `platform_registry` AND has at least one
+> `production_ready` ad a user can see (Aqar Monthly folds into Aqar, so 145 sites read «144» on 2026-10-27).
+> So: a NEW site you bring live raises the number and adds its logo the moment its first ad is searchable; a
+> site that goes down (dormant), is retired, or has no visible ads drops out and its logo hides; it comes
+> back on its own. **Never type a site number anywhere** (copy, share text, docs meant for users) and never
+> keep a logo for a site with no visible ads. Give a new platform its logo and its `SOURCE_TOKENS` entry in
+> `src/data/loaderPlatforms.ts` so it is counted under the right name. Rule: `docs/ARCHITECTURE.md` §20.
+
 > **🔒 THE SUPABASE QUESTION RULE (owner, 2026-10-25 — wins over every other order about writing rows).** On 10-24 and
 > 10-25 ⚡ did the work but lost its whole report: an `execute_sql` call that contained an `UPDATE` (closing backlog items
 > in the same batch as a proof row) made the Supabase tool ask «destructive operation — run it?», nobody was awake to
