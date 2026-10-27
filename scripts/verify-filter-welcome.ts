@@ -347,17 +347,25 @@ mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a U
 // appears», five wordings so users see different ones, approved word for word) ──
 {
   const APPROVED_AR = [
-    'حياك {n}، إزهله طريقتك الجديدة لتلاقي عقارك في السعودية. 🥳',
-    'أهلاً {n}، مع إزهله صار البحث عن عقارك في السعودية أسهل. 🥳',
-    'حياك {n}، إزهله يدور لك على عقارك في كل السعودية. 🥳',
-    'هلا {n}، عقارك في السعودية صار أقرب مع إزهله. 🥳',
-    'مرحباً {n}، إزهله بدايتك الجديدة للبحث عن عقارك في السعودية. 🥳',
+    'حياك {n}، إزهله طريقتك الجديدة لتلاقي عقارك في السعودية.',
+    'أهلاً {n}، مع إزهله صار البحث عن عقارك في السعودية أسهل.',
+    'حياك {n}، إزهله يدور لك على عقارك في كل السعودية.',
+    'هلا {n}، عقارك في السعودية صار أقرب مع إزهله.',
+    'مرحباً {n}، إزهله بدايتك الجديدة للبحث عن عقارك في السعودية.',
   ];
   check('the five sign-in lines are the owner\'s approved Arabic, word for word, in order',
     GREET_LINES.length === 5 && GREET_LINES.every((l, i) => l.ar === APPROVED_AR[i]));
   check('every sign-in line has its English, with the name and the untranslated brand «Ezhalah»',
     GREET_LINES.every((l) => l.en.includes('{n}') && l.en.includes('Ezhalah') && !/[؀-ۿ]/.test(l.en)));
   check('no sign-in line uses the word «حيك» (owner rule 2026-10-17)', GREET_LINES.every((l) => !/(^|\s)حيك(\s|،|$)/.test(l.ar)));
+  // owner 2026-10-27: «remove this party pop 🥳» — the confetti is the party; the facts come only after it
+  const noPop = (lines: readonly { ar: string; en: string }[]) => lines.every((l) => !l.ar.includes('🥳') && !l.en.includes('🥳'));
+  check('no sign-in line carries 🥳 (the confetti is the party)', noPop(GREET_LINES));
+  mustCatch('a 🥳 back on a sign-in line', !noPop([{ ar: 'حياك {n} 🥳', en: 'Welcome {n}' }]));
+  const afterParty = (src: string) => /export const WELCOME_TO_INSIGHT_MS = RAIN_AT_MS \+ PARTY_MS;/.test(src)
+    && /import \{ PARTY_MS \} from '@\/lib\/nameParty';/.test(src) && /import \{ RAIN_AT_MS \} from '@\/components\/HeroFalconer';/.test(src);
+  check('the welcome changes to the facts only once the confetti party is over (eagle lands → confetti → facts)', afterParty(hookSrc));
+  mustCatch('the facts arriving before the confetti (a fixed 5 s)', !afterParty(hookSrc.replace('export const WELCOME_TO_INSIGHT_MS = RAIN_AT_MS + PARTY_MS;', 'export const WELCOME_TO_INSIGHT_MS = 5000;')));
   check('the normal rotation never picks a sign-in line',
     !WELCOME_LINES.some((l) => GREET_LINES.some((g) => g.id === l.id)) && !FACTLESS_ANYTIME_IDS.some((id) => id >= 101));
   const uids = Array.from({ length: 60 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);

@@ -1454,21 +1454,21 @@ export default function Home() {
             <CloudWisp variant={2} width={90} height={28} opacity={0.32} style={{ right: -35, bottom: 18 }} />
             <View style={heroWide ? s.heroTitleBlockWide : s.heroTitleBlock}>
               <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
-                {/* The falconer CLOSES THE HEADLINE (owner 2026-10-27: «the emoji … right after [the name] … in the end of the
-                    sentence we include this falcon guy … let the falconer look smooth»): small, inline after the last word,
-                    sitting on the text line, no clouds over the words. Replaces 2026-10-26's fixed spot above the title.
-                    A guest sees the plain falconer whose falcon takes off on every open; a signed-in user sees the green
-                    bearded falconer with his hooded gold falcon and a golden bulb lit inside his head, and the moment they
-                    sign in the whole story plays once (HeroFalconer). In Arabic the drawing is flipped. */}
-                <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}{authChecked ? (
-                  <>{' '}<View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, s.heroFalconerInline]}>
-                    <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} signedIn={!!user} celebrate={welcomeCelebrate} inline />
-                  </View></>
-                ) : null}</RNAnimated.Text>
+                <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
               </Pressable>
             </View>
             <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
-            <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>
+            {/* The falconer ENDS THE EZHALAH LINE, ONE FIXED SPOT (owner 2026-10-27: «for the falconer sign in sign out I want
+                them to always be in the same position … without changing its location»). This line is the same words for
+                everyone, so he stands in the same place signed in or out, whatever the headline says (he moved with the
+                headline's words when he ended it). Small, inline after the last word, on the text line, no clouds over
+                the words. His box is held from the first frame (an empty box until sign-in is known), so the line never
+                re-wraps when he appears. A guest sees the plain falconer whose falcon takes off on every open; a signed-in
+                user sees the green bearded falconer with his hooded gold falcon and a golden bulb lit inside his head, and
+                the moment they sign in the whole story plays once (HeroFalconer). In Arabic the drawing is flipped. */}
+            <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}{' '}<View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, s.heroFalconerInline]}>
+              {authChecked ? <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} signedIn={!!user} celebrate={welcomeCelebrate} inline /> : null}
+            </View></RNAnimated.Text>
           </View>
 
           {/* Filter / AI Agent — the hero's focal choice: centered between the headline and the search

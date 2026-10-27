@@ -25,6 +25,8 @@ import {
 import { fetchWelcomeInsights } from '@/data/welcomeInsights';
 import { cityNameEnOfficial, districtNameEnOfficial } from '@/data/locations';
 import { hasJustSignedIn, takeJustSignedIn, SIGNED_IN_EVENT, isFreshSignUp } from '@/lib/loginWelcome';
+import { PARTY_MS } from '@/lib/nameParty';
+import { RAIN_AT_MS } from '@/components/HeroFalconer';
 
 // v2: remembered lines hold NAME_SLOT, not a name. v1 entries had the name baked in (a Latin name
 // inside the Arabic line, owner 2026-10-17) and are ignored.
@@ -53,8 +55,10 @@ const readSeen = (now: number): Seen => {
   } catch { return {}; }
 };
 const writeSeen = (s: Seen) => { try { globalThis.localStorage?.setItem(SEEN_KEY, JSON.stringify(s)); } catch { /* per-device nicety only */ } };
-/** How long the sign-in welcome stays before the market insight takes its place. */
-export const WELCOME_TO_INSIGHT_MS = 5000;
+/** How long the sign-in welcome stays before the market insight takes its place: until the confetti party is over
+ *  (owner 2026-10-27: «the eagle lands … confetti party, then that's it, the message changes, then the facts»). The
+ *  falconer's sign-in story starts with the welcome; the confetti starts at RAIN_AT_MS and lasts PARTY_MS. */
+export const WELCOME_TO_INSIGHT_MS = RAIN_AT_MS + PARTY_MS;
 const readCache = () => readKey(CACHE_KEY);
 const writeCache = (c: WelcomeCache) => writeKey(CACHE_KEY, c);
 
@@ -112,8 +116,8 @@ export function useFilterWelcome(
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
 
-  // AFTER THE SIGN-IN WELCOME, ON THE SPOT, A MARKET INSIGHT (owner 2026-10-22: «show the first message with
-  // 🥳, then change it to a market insight» — so the user sees the line change). The insight is the one
+  // AFTER THE SIGN-IN WELCOME, ON THE SPOT, A MARKET INSIGHT (owner 2026-10-22: «show the first message, then
+  // change it to a market insight»; 🥳 removed 2026-10-27, and the change waits for the confetti to end — so the user sees the line change). The insight is the one
   // already prepared for this device, or one picked now from the day's facts; the welcome stays if none can
   // be had (a failed read is not an empty answer). It then becomes the shown line for its 2 hours.
   const welcomeThenInsight = () => {
