@@ -9,7 +9,9 @@ dropping the call from main() or the feed filter turns this red.
 """
 from __future__ import annotations
 
+import json
 import sys
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -66,3 +68,51 @@ def test_main_strikes_the_feed_retired_before_the_absence_prune(monkeypatch):
     assert R.main([]) == 0
     assert order == [("strike", R.RES_TABLE), ("prune", R.RES_TABLE),
                      ("strike", R.COM_TABLE), ("prune", R.COM_TABLE)]
+
+
+# ── the listing's OWN page (yameen 45194: API «available», www.yameen.sa/properties/45194 → 404) ──
+class _R:
+    def __init__(self, status, url, body=None):
+        self.status_code, self.url = status, url
+        self.text = json.dumps(body) if body is not None else '{"message": "No query results"}'
+        self.headers = {"content-type": "application/json"}
+
+    def json(self):
+        return json.loads(self.text)
+
+
+def _sf(web: dict[int, int]):
+    def get(url, timeout=None, allow_redirects=True, **_):
+        pid = int(url.rstrip("/").rsplit("/", 1)[1])
+        if url.startswith(R.TENANT.base):
+            return _R(web.get(pid, 200), url)
+        return _R(200, url, {"data": {"id": pid, "availability_status": "available", "published_on_website": 1}})
+    return lambda: types.SimpleNamespace(get=get)
+
+
+def test_an_api_live_listing_whose_own_page_is_404_reads_gone_only_behind_a_live_web_control():
+    sf = _sf({45194: 404})
+    canary = lambda: (True, "control ok")
+    verify = ENGINE.verify_gone_for(R.TENANT, canary, sf, web_control=54413)
+    assert verify("YMN45194")[0] == "gone"
+    assert verify("YMN54413")[0] == "live"
+    # no web control → the API verdict stands (pre-fix behaviour, never a kill from the page alone)
+    assert ENGINE.verify_gone_for(R.TENANT, canary, sf)("YMN45194")[0] == "live"
+    # the control's own page not answering 200 → the page is not trusted
+    dark = _sf({45194: 404, 54413: 503})
+    assert ENGINE.verify_gone_for(R.TENANT, canary, dark, web_control=54413)("YMN45194")[0] == "live"
+
+
+def test_a_refused_prune_still_reads_the_unseen_rows(monkeypatch):
+    calls = []
+    monkeypatch.setattr(R, "crawl", lambda s, tenant, limit=0, mapper=None: (
+        [_item(3, "available")], 1, [{"ad_number": "YMN3"}], [], {}))
+    monkeypatch.setattr(R, "session", lambda: object())
+    monkeypatch.setattr(R.db, "begin_run", lambda platform: 5)
+    monkeypatch.setattr(R.db, "_wasalt_batch", lambda table, rows: None)
+    monkeypatch.setattr(R.db, "retire_superseded_siblings", lambda **kw: 0)
+    monkeypatch.setattr(R.db, "prune_unseen", lambda table, seen, source, **kw: -1)
+    monkeypatch.setattr(R, "read_unseen_after_refused_prune", lambda table, rows, tenant, verify: calls.append(table) or 0)
+    monkeypatch.setattr(R.db, "end_run", lambda run_id, **kw: True)
+    assert R.main([]) == 0
+    assert calls == [R.RES_TABLE, R.COM_TABLE]

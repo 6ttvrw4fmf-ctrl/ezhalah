@@ -96,7 +96,8 @@ def test_nuzul_oracle_reads_live_gone_and_withholds_without_its_control():
     assert verify(f"{p}1")[0] == "live"
     assert verify(f"{p}2")[0] == "gone"                 # the record's own 404, control 9 echoed
     assert verify(f"{p}3")[0] == "gone"                 # retired in place («sold»)
-    assert all(G.TENANT.api_host in u for u in seen)
+    # the API record, plus (since 2026-10-27, backlog 923) the listing's own page for an API-live id
+    assert all(G.TENANT.api_host in u or u.startswith(f"{G.TENANT.base}/properties/") for u in seen)
     # no control row: a live answer still stands, but no removal can be testified
     blind = G.make_verify_gone(G.TENANT, sf)(None)
     assert blind(f"{p}1")[0] == "live" and blind(f"{p}2")[0] == "unknown"
