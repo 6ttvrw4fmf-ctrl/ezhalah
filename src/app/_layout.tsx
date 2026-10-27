@@ -4,7 +4,7 @@ import { Stack, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { AppProvider } from '@/store';
+import { AppProvider, useApp } from '@/store';
 import { classifyRejection, initObservability, reportError } from '@/lib/observability';
 import { LocaleProvider, useI18n } from '@/i18n';
 import { firstChildLeftRow, useDocumentRtl } from '@/lib/useDocumentRtl';
@@ -15,6 +15,7 @@ import { markAppSessionStarted } from '@/lib/appSession';
 import { usePromptInsets } from '@/lib/bottomPromptInset';
 import { useVisualViewportRoot } from '@/lib/visualViewportFrame';
 import { installTapDebug } from '@/lib/tapDebug';
+import { useLitTabIcon } from '@/lib/litTabIcon';
 import { Image as ExpoImage } from 'expo-image';
 import { PLATFORM_META } from '@/data/loaderPlatforms';
 import { scheduleLogoPrefetch } from '@/lib/prefetchLoaderLogos';
@@ -98,6 +99,9 @@ function Shell() {
   useVisualViewportRoot();
   // ?debug=tap only: an on-screen log of what each touch hit (see lib/tapDebug.ts). No-op otherwise.
   useEffect(() => installTapDebug(), []);
+  // Signed in → the tab icon lights up (the lit eagle); signed out → the regular one (lib/litTabIcon.ts).
+  const { user: tabUser } = useApp();
+  useLitTabIcon(!!tabUser);
   const pathname = usePathname();
   const router = useRouter();
   // The AUTO-SHOWING centered popup (owner 2026-08-28) was RETIRED by the owner's 2026-08-29
