@@ -662,6 +662,15 @@ def prune_complete_crawl(table: str, rows: list[dict], source: str, verify: Call
     with the usual 3-strike grace. Returns prune_unseen's result (-1 still marks the run degraded)."""
     seen = {r["ad_number"] for r in rows}
     pruned = db.prune_unseen(table, seen, source, verify_gone=verify)
+    return read_after_refused_prune(table, rows, source, verify, pruned)
+
+
+def read_after_refused_prune(table: str, rows: list[dict], source: str, verify: Callable[[str], Any],
+                             pruned: int) -> int:
+    """Second half of prune_complete_crawl, for tenants that call db.prune_unseen(verify_gone=) in their
+    own run.py: when that prune refused (-1), read the unseen ads' own pages through
+    delisted_or_api_gone. Returns pruned unchanged."""
+    seen = {r["ad_number"] for r in rows}
     if pruned < 0 and seen:
         try:
             oracle = delisted_or_api_gone(verify, db.own_page_status_oracle(db.sb(), table, seen))
