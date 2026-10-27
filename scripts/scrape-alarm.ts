@@ -8,7 +8,7 @@
 // alarms if that stamp goes stale.
 //
 // A FAILED LOG QUERY IS NOT "NOBODY IS SCRAPING" (AGENTS.md): any failure exits 1 without stamping the heartbeat.
-import { CALLER_SQL, catchUpStart, findSuspects, hourIso, type CallerHour } from './lib/scrapeAlarm.ts';
+import { CALLER_SQL, catchUpStart, findSuspects, hourIso, knownCallerKeys, type CallerHour } from './lib/scrapeAlarm.ts';
 
 const REF = 'aannarbkwcymrotzwdbo';
 const TOKEN = process.env.SUPABASE_ACCESS_TOKEN ?? '';
@@ -37,7 +37,8 @@ const rows: CallerHour[] = (body.result as Record<string, unknown>[]).map((r) =>
   user_agent: String(r.user_agent ?? ''), listing_rows: Number(r.listing_rows ?? 0), requests: Number(r.requests ?? 0),
   top_paths: Array.isArray(r.top_paths) ? (r.top_paths as string[]) : [],
 }));
-const knownIps = (process.env.SCRAPE_ALARM_KNOWN_IPS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+// The owner's machines are known by address AND by their front-door visitor code (same HMAC as api/sb.ts).
+const knownIps = knownCallerKeys((process.env.SCRAPE_ALARM_KNOWN_IPS ?? '').split(','), process.env.EZ_GATE_SECRET ?? '');
 const suspects = findSuspects(rows, knownIps);
 
 const rest = (path: string, init: RequestInit) => fetch(`${URL_BASE}/rest/v1/${path}`, {

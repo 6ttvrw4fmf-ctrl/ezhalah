@@ -1,4 +1,5 @@
 // SECURITY PHASE 4.1: the scrape alarm's decision, kept pure so verify-scrape-alarm.ts can execute it.
+import { createHmac } from 'node:crypto';
 // One row per caller (address) for the past hour, aggregated from the API gateway logs by CALLER_SQL below.
 
 export type CallerHour = {
@@ -27,16 +28,20 @@ export function findSuspects(rows: CallerHour[], knownIps: string[] = []): Calle
     .sort((a, b) => b.listing_rows - a.listing_rows);
 }
 
-// Front-door traffic (api/sb.ts, from Vercel on Amazon's network, x-client-info "ezhalah-front-door") is every visitor
-// summed under a few server addresses, so it is NOT judged here: blocking those addresses would block everyone. The
-// front door forwards each visitor's real address to robot_gate instead (20261021120255). STATED GAP until a per-visitor
-// count exists for front-door traffic: a scraper using the front door is caught by BotID, not by this alarm.
+// Front-door traffic (api/sb.ts, from Vercel's few server addresses) is judged PER VISITOR (2026-10-27): the door stamps
+// «vid=<16 hex>», a scrambled code of the visitor's address (HMAC with the front-door secret, never the address), and the
+// caller key becomes 'vid:<code>'. A block on 'vid:<code>' reaches that visitor through robot_gate
+// (guard.visitor_code). The LAST vid= / robot= in x-client-info is the door's own (it appends after the client's), so a
+// client cannot frame another code or pass as our robot. Front-door rows with no code (an older door) or robot=1 (our
+// own browser robots) are not judged.
 // ONE ROW PER CALLER PER HOUR, over every hour since the last successful run (2026-10-23: GitHub runs this "hourly"
 // schedule only every 3-5 hours, so a one-hour window left gaps a copier could use). The bar stays per hour.
 // Rows per response come from content-range ("0-999/*" is 1000 rows). Listing paths only: the location catalogue
 // (location_index_live, ~14k rows) is loaded whole by every visitor and is not inventory.
 export const CALLER_SQL = `
-select log_attributes['request.headers.cf_connecting_ip'] as ip,
+select if(log_attributes['request.headers.x_client_info'] like '%ezhalah-front-door%',
+    concat('vid:', arrayElement(extractAll(log_attributes['request.headers.x_client_info'], 'vid=([0-9a-f]{16})'), -1)),
+    log_attributes['request.headers.cf_connecting_ip']) as ip,
   toStartOfHour(timestamp) as hour,
   any(log_attributes['request.cf.country']) as country,
   any(log_attributes['request.cf.city']) as city,
@@ -50,11 +55,24 @@ select log_attributes['request.headers.cf_connecting_ip'] as ip,
 from logs
 where source = 'edge_logs'
   and (log_attributes['request.path'] like '/rest/v1/%listings%' or log_attributes['request.path'] like '/rest/v1/rpc/location_search%')
-  and not (log_attributes['request.headers.x_client_info'] like '%ezhalah-front-door%' and log_attributes['request.cf.asOrganization'] ilike '%amazon%')
+  and not (log_attributes['request.headers.x_client_info'] like '%ezhalah-front-door%'
+    and (arrayElement(extractAll(log_attributes['request.headers.x_client_info'], 'vid=([0-9a-f]{16})'), -1) = ''
+      or arrayElement(extractAll(log_attributes['request.headers.x_client_info'], 'robot=([01])'), -1) = '1'))
 group by ip, hour
 having listing_rows >= 5000 or requests >= 1000
 order by listing_rows desc
 limit 200`;
+
+/** A front-door visitor's caller key: 'vid:' + the first 16 hex of HMAC-SHA256(secret, address) — byte-identical to
+ *  api/sb.ts visitorCode() and guard.visitor_code(). '' without both. */
+export function visitorKey(ip: string, secret: string): string {
+  return ip && secret ? `vid:${createHmac('sha256', secret).update(ip).digest('hex').slice(0, 16)}` : '';
+}
+/** Known callers: each address, plus its front-door code when the secret is present. */
+export function knownCallerKeys(ips: string[], secret: string): string[] {
+  const clean = ips.map((s) => s.trim()).filter(Boolean);
+  return [...clean, ...clean.map((ip) => visitorKey(ip, secret)).filter(Boolean)];
+}
 
 /** Where a run's window starts: the hour of the last successful run, between 1 and 24 hours back (the log API's limit).
  *  An unreadable last run means the full 24 hours, never a smaller window. */

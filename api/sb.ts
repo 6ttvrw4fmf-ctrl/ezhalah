@@ -42,6 +42,15 @@ export function doorLabels(bot: string, human: string, robot: boolean, ua = '', 
   return `bot=${bot} ts=${human} robot=${robot ? 1 : 0} dev=${deviceClass(ua)} cc=${cc}`;
 }
 
+/** A visitor's scrambled code: the first 16 hex of HMAC-SHA256(secret, address). Not reversible without the secret;
+ *  the database computes the same value (extensions.hmac) to honour a block. '' without an address or a secret. */
+export async function visitorCode(ip: string, secret: string): Promise<string> {
+  if (!ip || !secret) return '';
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(ip)));
+  return Array.from(sig.slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 /** headless (an automated browser), iphone, android, desktop, or other. */
 export function deviceClass(ua: string): string {
   if (/HeadlessChrome|Headless|PhantomJS|puppeteer|playwright|bot\b|crawler|spider/i.test(ua)) return 'headless';
@@ -88,8 +97,12 @@ async function handle(request: Request): Promise<Response> {
   for (const k of PASS_REQUEST) { const v = request.headers.get(k); if (v) headers.set(k, v); }
   // The labels ride in x-client-info because it is one of the few request headers Supabase keeps in its API logs: they
   // are how we MEASURE what share of real traffic BotID and Turnstile pass before either is allowed to refuse anyone.
-  headers.set('x-client-info', `${headers.get('x-client-info') ?? ''} ezhalah-front-door ${doorLabels(bot, human, robot, request.headers.get('user-agent') ?? '', request.headers.get('x-vercel-ip-country') ?? '')}`.trim());
+  // PER-VISITOR COUNT (2026-10-27): «vid=<code>» lets the hourly scrape alarm count EACH visitor behind the door (before,
+  // every visitor was summed under Vercel's few addresses — a stated gap). The code is scrambled with the secret, never
+  // the address; robot_gate recomputes it to honour a block (guard.visitor_is_blocked).
   const ip = visitorIp(request.headers);
+  const vid = await visitorCode(ip, GATE);
+  headers.set('x-client-info', `${headers.get('x-client-info') ?? ''} ezhalah-front-door ${doorLabels(bot, human, robot, request.headers.get('user-agent') ?? '', request.headers.get('x-vercel-ip-country') ?? '')}${vid ? ` vid=${vid}` : ''}`.trim());
   if (GATE && ip) { headers.set('x-ezhalah-gate', GATE); headers.set('x-ezhalah-client-ip', ip); }
   // ROBOT PASS (20261021224031): our own browser robots run from server networks (GitHub, Google Cloud) that the network
   // guard refuses. They send x-ezhalah-robot = the gate secret; only then does the database hear «robot: 1» (vouched
