@@ -326,6 +326,14 @@ def test_score_site_reads_the_source_tables_period():
     assert row["fields"]["price"][MATCH] == 1 and row["fields"]["price"].get(MISMATCH, 0) == 0
 
 
+def test_latin_k_after_the_figure_is_thousands():
+    # tuba 21078156 (2026-10-27): page «SAR 990k», we store 990000
+    assert compare_listing({"price_total": 990000}, page("السعر :", "SAR 990k"))["price"] == MATCH
+    assert compare_listing({"price_total": 990000}, page("السعر :", "SAR 980k"))["price"] != MATCH
+    # a «k» that starts a word, or «km», is not thousands
+    assert compare_listing({"price_total": 990000}, page("السعر :", "990 km من المطار"))["price"] != MATCH
+
+
 def test_the_sites_category_menu_is_not_a_deal_claim():
     # ashab 21084822 (2026-10-27): footer «بيع / إيجار / استثمار», the ad itself states no deal word
     menu = ("الحد 230000 ر.س", "بيع", "إيجار", "استثمار")

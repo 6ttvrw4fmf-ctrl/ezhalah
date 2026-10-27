@@ -268,7 +268,7 @@ export default function Home() {
   // signed in, until the line's numbers are in — then it rises once and is final for this load.
   // «كيف تشتغل؟» opens when the user taps a market fact in the headline (owner 2026-10-22).
   const [howOpen, setHowOpen] = useState(false);
-  const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey, isInsight: welcomeIsInsight } = useFilterWelcome(!!user, sentenceName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
+  const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey, isInsight: welcomeIsInsight, celebrate: welcomeCelebrate } = useFilterWelcome(!!user, sentenceName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
   // «حفظ» in the «وش نناديك؟» box: while its party plays, the welcome headline shines (2 passes, owner-approved demo).
   const [heroShine, setHeroShine] = useState(false);
   useEffect(() => {
@@ -1452,17 +1452,19 @@ export default function Home() {
           <View style={s.hero}>
             <CloudWisp variant={1} width={100} height={34} opacity={0.38} style={{ left: -40, top: 12 }} />
             <CloudWisp variant={2} width={90} height={28} opacity={0.32} style={{ right: -35, bottom: 18 }} />
-            {/* The falconer (owner 2026-10-26): ONE FIXED SPOT, centred above the title, whatever the line says — the title
-                rotates between sentences of different lengths, and following its last word made him jump around («make it
-                fixed»). Guests only; in Arabic the drawing is flipped. His falcon takes off on every open and refresh. */}
-            {authChecked && !user ? (
-              <View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, s.heroFalconerAbove]}>
-                <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} />
-              </View>
-            ) : null}
             <View style={heroWide ? s.heroTitleBlockWide : s.heroTitleBlock}>
               <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
-                <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
+                {/* The falconer CLOSES THE HEADLINE (owner 2026-10-27: «the emoji … right after [the name] … in the end of the
+                    sentence we include this falcon guy … let the falconer look smooth»): small, inline after the last word,
+                    sitting on the text line, no clouds over the words. Replaces 2026-10-26's fixed spot above the title.
+                    A guest sees the plain falconer whose falcon takes off on every open; a signed-in user sees the green
+                    bearded falconer with his hooded gold falcon and a golden bulb lit inside his head, and the moment they
+                    sign in the whole story plays once (HeroFalconer). In Arabic the drawing is flipped. */}
+                <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}{authChecked ? (
+                  <>{' '}<View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, s.heroFalconerInline]}>
+                    <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} signedIn={!!user} celebrate={welcomeCelebrate} inline />
+                  </View></>
+                ) : null}</RNAnimated.Text>
               </Pressable>
             </View>
             <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
@@ -2396,10 +2398,10 @@ const s = StyleSheet.create({
   heroTitleBlock: { width: '100%' },
   // a laptop title runs a little wider than the 560 px form column (owner 2026-10-26: «make the text wide a bit»)
   heroTitleBlockWide: { alignSelf: 'stretch', marginHorizontal: -60 },
-  heroFalconer: { width: 50, height: 58 },
-  heroFalconerWide: { width: 62, height: 72 },
-  // centred above the title, a small gap before it
-  heroFalconerAbove: { alignSelf: 'center', marginBottom: 4 },
+  heroFalconer: { width: 40, height: 46 },
+  heroFalconerWide: { width: 50, height: 58 },
+  // web: an inline box on the text line, its feet a little under the baseline so he stands with the words
+  heroFalconerInline: { display: 'inline-flex', verticalAlign: 'middle', marginBottom: -4, overflow: 'visible' } as any,
   sharedBackdrop: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60,
     backgroundColor: 'rgba(18, 37, 27, 0.35)', alignItems: 'center', justifyContent: 'center', padding: 20,

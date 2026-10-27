@@ -17,6 +17,14 @@
 name: Facts words + vectors
 
 on:
+  # A READER LESSON RE-READS THE OLD ADS (2026-10-27, migration 20261027111648): a merge that changes what the reader
+  # finds runs the incremental phase on 8 shards at once; text_facts_todo hands it every ad an older reader_version read.
+  push:
+    branches: [main]
+    paths:
+      - scrapers/facts/word_checker.py
+      - scrapers/common/normalize.py
+      - scrapers/facts/words.py
   workflow_dispatch:
     inputs:
       phase:
@@ -77,7 +85,7 @@ jobs:
       - id: m
         env:
           PHASE: ${{ inputs.phase || 'incremental' }}
-          SHARDS: ${{ inputs.shards || '1' }}
+          SHARDS: ${{ inputs.shards || (github.event_name == 'push' && '8') || '1' }}
         run: |
           n=1
           if [ "$PHASE" != "benchmark" ]; then n="$SHARDS"; fi
@@ -112,7 +120,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: hf-${{ inputs.model }}-614241f-e8f8c21
+          key: hf-${{ inputs.model || 'e5-small' }}-614241f-e8f8c21
       - name: Self-check the pure logic (no network)
         run: exec python -m scrapers.facts.words --selftest
       - name: Words + vectors
@@ -121,13 +129,15 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           PHASE: ${{ inputs.phase || 'incremental' }}
           RUN_ID: ${{ inputs.run_id }}
-          LIMIT: ${{ inputs.limit }}
+          LIMIT: ${{ inputs.limit || '0' }}
           PLATFORMS: ${{ inputs.platforms }}
-          EMBED: ${{ inputs.embed }}
-          MODEL: ${{ inputs.model }}
+          EMBED: ${{ inputs.embed || 'false' }}
+          MODEL: ${{ inputs.model || 'e5-small' }}
           SHARD: ${{ matrix.shard }}
           N: ${{ needs.plan.outputs.n }}
+          EVENT: ${{ github.event_name }}
         run: |
+          if [ -z "$RUN_ID" ] && [ "$EVENT" = "push" ]; then RUN_ID="facts-words-reread-$(date -u +%F-%H%M)"; fi
           if [ -z "$RUN_ID" ]; then RUN_ID="facts-words-nightly-$(date -u +%F)"; fi
           exec python -m scrapers.facts.words --phase "$PHASE" --run-id "$RUN_ID" --limit "$LIMIT" --platforms "$PLATFORMS" \
             --model "$MODEL" --shard "$SHARD/$N" --out facts-words-out $([ "$EMBED" = "true" ] || echo --no-embed)

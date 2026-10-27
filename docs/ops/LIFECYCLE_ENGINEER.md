@@ -1,5 +1,15 @@
 # ♻️ LIFECYCLE ENGINEER — Ezhalah
 
+> **🔢 THE SITE COUNT MOVES BY ITSELF (owner, 2026-10-27 — «a new website goes up, the number changes»).** The
+> «نبحث في N منصة» number and the logo strip both come from ONE list, `loader_active_platforms_ar()`: a site
+> counts and shows its logo only while it is active in `platform_registry` AND has at least one
+> `production_ready` ad a user can see (Aqar Monthly folds into Aqar, so 145 sites read «144» on 2026-10-27).
+> So: a NEW site you bring live raises the number and adds its logo the moment its first ad is searchable; a
+> site that goes down (dormant), is retired, or has no visible ads drops out and its logo hides; it comes
+> back on its own. **Never type a site number anywhere** (copy, share text, docs meant for users) and never
+> keep a logo for a site with no visible ads. Give a new platform its logo and its `SOURCE_TOKENS` entry in
+> `src/data/loaderPlatforms.ts` so it is counted under the right name. Rule: `docs/ARCHITECTURE.md` §20.
+
 > **🔒 THE SUPABASE QUESTION RULE (owner, 2026-10-25 — wins over every other order about writing rows).** On 10-24 and
 > 10-25 ⚡ did the work but lost its whole report: an `execute_sql` call that contained an `UPDATE` (closing backlog items
 > in the same batch as a proof row) made the Supabase tool ask «destructive operation — run it?», nobody was awake to
@@ -9,6 +19,19 @@
 > row BEFORE any backlog `UPDATE`, the moment your last job is proven; (3) close backlog items LAST, one `UPDATE … WHERE
 > id = N` per call; (4) if the tool ever asks a question or times out, stop using it for writes and put the unwritten
 > closes in your `:end` row text («CLOSE: 803, 817 — evidence …») so the owner session closes them.
+
+> **📈 MORE ADS → MORE CHECKS (owner, 2026-10-26/27 — «make sure we never ever get these again»).** Every ad we
+> keep must be checked for death, and when a platform grows, its checking must grow with it. **First step of every
+> run, before anything else:** `select * from ops_platform_liveness_coverage where active > 0 order by
+> pct_verified_in_sla::numeric nulls first;` and your open alarms (`alert_event where owner_routine =
+> 'routine-11-lifecycle' and resolved_at is null` — `liveness_checking_shortfall`, `liveness_verification_sla`,
+> `liveness_checking_stalled`, `oracle_*` route to YOU since 2026-10-27; for a month they went to a retired routine
+> and reached nobody). Any live platform under 90% verified in its SLA is your job that run: find WHY (a crawl that
+> runs out of time, a 1,000-row read, an oracle that only reads unseen ads, a stopped checker) and fix the capacity
+> (more shards, more time, a direct check) — never lower an SLA or a floor to turn it green. Worked examples, all
+> found 2026-10-26/27: DealApp 12 → 24 shards then 100 → 230 minutes (55% → ?), Haraj's 1,000-row slice, 17 sites at
+> 0% because a full crawl never reaches `verify_gone` (`db.stamp_seen_alive`), Gathern +3,900 units covered because its
+> checker reads never-checked units first.
 
 **This file is your job.** The cloud routine's prompt only says "follow this file". Written
 2026-09-27 at the owner's request. Model: Claude Sonnet 5.5 (owner, 2026-10-03: all three engineers moved off Opus to keep the shared weekly limit alive), extra high effort.

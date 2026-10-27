@@ -39,7 +39,11 @@ check('loader_active_platforms_ar() reads the platform index (skip scan), proved
 
 const last = migs.filter(({ s }) => DEF.test(s)).at(-1)!;
 const swap = (s: string) => migs.map((m) => (m.f === last.f ? { f: m.f, s } : m));
-mustCatch('the old full-table DISTINCT back', problems(swap(last.s.replace(/with recursive[\s\S]*?from p;/, "select coalesce(array_agg(distinct platform order by platform), '{}'::text[]) from public.search_listings_ar where platform <> '';"))).length > 0);
+// Swaps the WHOLE function body (up to the closing $function$), so the mutant applies whatever the body
+// ends with — 20261027201642 added `where … exists …` after `from p`, which a `from p;` anchor never reached.
+const fullScanMutant = last.s.replace(/with recursive[\s\S]*?(?=\$function\$)/, "select coalesce(array_agg(distinct platform order by platform), '{}'::text[]) from public.search_listings_ar where platform <> '';\n");
+check('the full-scan mutant really changed the migration (the swap is not a no-op)', fullScanMutant !== last.s);
+mustCatch('the old full-table DISTINCT back', problems(swap(fullScanMutant)).length > 0);
 mustCatch('a later migration dropping idx_slar_platform', problems([...migs, { f: '29990101000000_x.sql', s: 'drop index if exists public.idx_slar_platform;' }]).length > 0);
 mustCatch('a later full-scan redefinition', problems([...migs, { f: '29990101000001_y.sql', s: "create or replace function public.loader_active_platforms_ar() returns text[] language sql as $function$ select array_agg(distinct platform) from public.search_listings_ar $function$;" }]).length > 0);
 mustCatch('no apply-time proof', problems(swap(last.s.replace('the skip scan disagrees with the full scan', 'x'))).length > 0);

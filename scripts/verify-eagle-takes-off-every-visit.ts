@@ -1,5 +1,5 @@
 // The falconer above the home title, and his falcon that takes off on EVERY open and refresh (owner 2026-10-26:
-// «make it whenever the user refresh … make it fixed»). Replaces verify-eagle-takeoff-once-per-session.ts.
+// «make it whenever the user refresh … make it fixed»), and the signed-in falconer's once-per-sign-in story.
 // Reads the real sources: the falcon plays on mount (never under reduced motion), unmounts after its flight,
 // never loops; the falconer sits at ONE fixed spot above the title — not inline after the rotating words — guests only.
 import { readFileSync } from 'node:fs';
@@ -19,13 +19,14 @@ const comp = read('src/components/HeroFalconer.tsx');
 const home = read('src/app/index.tsx');
 const svg = read('assets/images/falcon-takeoff.svg');
 
-console.log('\nThe falconer sits above the title; his falcon takes off on every visit\n');
+console.log('\nThe falconer closes the headline; his falcon takes off on every visit\n');
 
 // ── the falcon ───────────────────────────────────────────────────────────────────────────────────────────────
-const playsEveryMount = (c: string) => /useEffect\(\(\) => \{\n\s*if \(reduced\) return;\n\s*setTakeoff\(true\);\n\s*const id = setTimeout\(\(\) => setTakeoff\(false\), TAKEOFF_MS\);/.test(c)
+// (a signed-in user's falcon is already on his hand, so the guest take-off is skipped for them — `|| signedIn`)
+const playsEveryMount = (c: string) => /useEffect\(\(\) => \{\n\s*if \(reduced \|\| signedIn\) return;\n\s*setTakeoff\(true\);\n\s*const id = setTimeout\(\(\) => setTakeoff\(false\), TAKEOFF_MS\);/.test(c)
   && !/takeEagleTakeoff|sessionStorage|localStorage/.test(c);
 check('the falcon takes off on every open and refresh (no session or time gate)', playsEveryMount(comp));
-check('…and never under reduced motion', /if \(reduced\) return;/.test(comp));
+check('…and never under reduced motion', /if \(reduced \|\| signedIn\) return;/.test(comp));
 check('it is unmounted once its flight is over', /\{takeoff \? \(/.test(comp) && /setTakeoff\(false\), TAKEOFF_MS/.test(comp));
 check('the unmount waits for the whole 2.8 s flight, within 3.2 s', TAKEOFF_MS >= 2800 && TAKEOFF_MS <= 3200);
 const svgOk = (v: string) => !/infinite/.test(v) && (v.match(/2\.8s/g) ?? []).length >= 5 && /prefers-reduced-motion:reduce/.test(v);
@@ -35,27 +36,61 @@ check('the falcon is drawn a little larger, about its perch on his hand',
 check('the falconer drawing itself is never animated',
   /<XImage source=\{FALCONER\} contentFit="contain" accessible=\{false\} style=\{StyleSheet\.absoluteFill\} \/>/.test(comp));
 
-// ── the falconer's fixed spot ────────────────────────────────────────────────────────────────────────────────
-const fixedAbove = (h: string) => {
-  const at = h.indexOf('testID="hero-falconer"');
+// ── the falconer closes the headline (owner 2026-10-27: «in the end of the sentence we include this falcon guy … let
+//     the falconer look smooth»; replaces 2026-10-26's fixed spot above the title) ─────────────────────────────────
+const atEnd = (h: string) => {
   const title = h.indexOf('testID="hero-insight"');
-  return at > 0 && title > at                                      // he comes BEFORE the title …
-    && !/HERO_TAGLINE_KEYS\[heroTagline\]\)\}\s*\{authChecked/.test(h) // … not inline after its rotating words
-    && /heroFalconerAbove: \{ alignSelf: 'center'/.test(h);          // … centred
+  const at = h.indexOf('testID="hero-falconer"');
+  return title > 0 && at > title                                                     // he comes AFTER the title opens …
+    && h.includes("{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}{authChecked ? (\n                  <>{' '}<View testID=\"hero-falconer\"") // … right after its last word
+    && h.includes(') : null}</RNAnimated.Text>')                                   // … inside the headline text
+    && h.includes("heroFalconerInline: { display: 'inline-flex', verticalAlign: 'middle'"); // … on the text line
 };
-check('the falconer sits at one fixed spot, centred above the title', fixedAbove(home));
-check('…for guests only', /\{authChecked && !user \? \(\n\s*<View testID="hero-falconer"/.test(home));
-check('…flipped in Arabic', /<HeroFalconer size=\{heroWide \? s\.heroFalconerWide : s\.heroFalconer\} flip=\{locale === 'ar'\} \/>/.test(home));
+check('the falconer sits at the end of the headline, on the text line', atEnd(home));
+const small = (h: string) => { const m = h.match(/heroFalconer: \{ width: (\d+), height: (\d+) \}/); const w = h.match(/heroFalconerWide: \{ width: (\d+), height: (\d+) \}/);
+  return !!m && !!w && +m[2] <= 50 && +w[2] <= 64 && +m[2] >= 34; };
+check('…small, about two lines of the headline tall', small(home));
+check('…once auth is known, for guests AND signed-in users (who get the sign-in falconer)', home.includes("{authChecked ? (\n                  <>{' '}<View testID=\"hero-falconer\""));
+check('…flipped in Arabic, told who is signed in and when a welcome was taken, with no clouds over the words',
+  home.includes("<HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} signedIn={!!user} celebrate={welcomeCelebrate} inline />")
+  && comp.includes('{inline ? null : <CloudWisp variant={0}') && comp.includes('{inline ? null : (<>'));
+
+// ── the signed-in falconer (owner-approved 2026-10-26): the story plays ONCE per sign-in welcome, then the still ──
+const signin = read('assets/images/falconer-signin.svg');
+const still = read('assets/images/falconer-final.svg');
+const playGate = (c: string) => /const playing = signedIn && !reduced && celebrate > 0 && celebrate !== done;/.test(c)
+  && /\) : playing \? \(\n\s*<XImage testID="hero-falconer-signin" source=\{freshSource\(SIGNIN, celebrate\)/.test(c)
+  && /<XImage testID="hero-falconer-final" source=\{SIGNED_IN_STILL\}/.test(c);
+check('signed in: the animation plays only on a sign-in welcome and never under reduced motion; otherwise the still', playGate(comp));
+const timing = (c: string) => {
+  const seq = Number((c.match(/export const SIGNIN_SEQUENCE_MS = (\d+);/) ?? [])[1]);
+  const rain = Number((c.match(/export const RAIN_AT_MS = (\d+);/) ?? [])[1]);
+  return seq >= 6000 && seq <= 10000 && rain > 0 && rain < seq
+    && /setTimeout\(\(\) => startNameParty\(reduced\), RAIN_AT_MS\)/.test(c) && /setTimeout\(\(\) => setDone\(celebrate\), SIGNIN_SEQUENCE_MS\)/.test(c);
+};
+check('…the green rain celebration starts with the idea, inside the sequence, and the still takes over at its end', timing(comp));
+const playsOnce = (v: string) => !/infinite|indefinite/.test(v) && /<animate/.test(v);
+check('the sign-in animation plays once (nothing loops)', playsOnce(signin));
+const isStill = (v: string) => !/<animate|<set |animation:|@keyframes/.test(v);
+check('the settled falconer is a true still (no motion at all)', isStill(still));
+const bulbInside = (v: string) => /<g clip-path="url\(#headInside\)">/.test(v) && /<clipPath id="headInside">/.test(v);
+check('…and the bulb sits INSIDE his head, clipped to it, in both', bulbInside(signin) && bulbInside(still));
+const fresh = (c: string) => /\$\{uri\}\$\{uri\.includes\('\?'\) \? '&' : '\?'\}play=\$\{play\}/.test(c);
+check('a second sign-in in the same tab gets a fresh animation timeline', fresh(comp));
 
 // ── mutation proofs ──────────────────────────────────────────────────────────────────────────────────────────
-mustCatch('the falcon playing under reduced motion', !playsEveryMount(comp.replace('    if (reduced) return;\n', '')));
-mustCatch('a once-per-session gate coming back', !playsEveryMount(comp.replace('if (reduced) return;', 'if (reduced || sessionStorage.getItem(\'x\')) return;')));
+mustCatch('the falcon playing under reduced motion', !playsEveryMount(comp.replace('    if (reduced || signedIn) return;\n', '')));
+mustCatch('a once-per-session gate coming back', !playsEveryMount(comp.replace('if (reduced || signedIn) return;', 'if (reduced || signedIn || sessionStorage.getItem(\'x\')) return;')));
+mustCatch('the sign-in animation playing under reduced motion', !playGate(comp.replace('signedIn && !reduced && celebrate > 0', 'signedIn && celebrate > 0')));
+mustCatch('the rain starting after the sequence has ended', !timing(comp.replace('export const RAIN_AT_MS = 7400;', 'export const RAIN_AT_MS = 9900;')));
+mustCatch('a looping sign-in animation', !playsOnce(signin.replace('<animate ', '<animate repeatCount="indefinite" ')));
+mustCatch('motion left in the settled still', !isStill(still.replace('</svg>', '<animate attributeName="opacity" values="0;1" dur="1s"/></svg>')));
+mustCatch('the bulb drawn outside his head', !bulbInside(signin.replace(/<g clip-path="url\(#headInside\)">/g, '<g>')));
+mustCatch('every play sharing one finished timeline', !fresh(comp.replace("play=${play}", '')));
 mustCatch('a looping flight', !svgOk(svg.replace('animation:path 2.8s', 'animation:path 2.8s infinite')));
-mustCatch('the falconer moved back inline after the rotating title', !fixedAbove(home.replace(
-  "{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>",
-  "{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}{authChecked && !user ? <View testID=\"hero-falconer\" /> : null}</RNAnimated.Text>")
-  .replace('            {authChecked && !user ? (\n              <View testID="hero-falconer"', '            {false ? (\n              <View testID="x"')));
-mustCatch('the falconer no longer centred', !fixedAbove(home.replace("heroFalconerAbove: { alignSelf: 'center'", "heroFalconerAbove: { alignSelf: 'flex-start'")));
+mustCatch('the falconer moved back above the title', !atEnd(home.replace("{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}{authChecked ? (", "{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}{false ? (")));
+mustCatch('the falconer as a block under the words (not on the text line)', !atEnd(home.replace("heroFalconerInline: { display: 'inline-flex'", "heroFalconerInline: { display: 'flex'")));
+mustCatch('a big falconer again', !small(home.replace('heroFalconer: { width: 40, height: 46 }', 'heroFalconer: { width: 62, height: 72 }')));
 
 if (fail) { console.error(`\n❌ ${fail} check(s) failed`); process.exit(1); }
-console.log('\n✅ eagle-takes-off-every-visit: fixed above the title, the falcon flies on every open, never looping');
+console.log('\n✅ eagle-takes-off-every-visit: at the end of the headline, the falcon flies on every open, never looping');

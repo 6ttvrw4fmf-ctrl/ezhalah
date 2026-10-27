@@ -500,6 +500,17 @@ export const HIDDEN_STATUSES: ReadonlySet<string> = new Set(['dormant']);
 // active, and both are Deal App; 'aqarmonthly' is Aqar. Hiding per slug would take Deal App's logo
 // off the strip today, and Aqar's the day aqarmonthly went down. A slug that maps to nothing hides
 // nothing.
+// THE ONE RULE (owner 2026-10-27): «we hide their listings → we hide their logos, and the wording changes».
+// A logo shows only while at least one platform behind it has ads a user can see — the same list the site
+// count reads (loader_active_platforms_ar(): active in the registry AND a production_ready row). Down
+// (dormant), retired (toor) and logo-only brands (Maskanre, Wetheaddress) have no visible ads, so their logos
+// leave every strip and the count drops with them; a site that comes back returns on its own.
+export function hiddenFromVisibleSlugs(slugs: ReadonlyArray<string>): Set<string> {
+  const up = new Set<string>();
+  for (const s of slugs) { const n = normalizeSource(s); if (n) up.add(n); }
+  return new Set(PLATFORM_META.map((p) => p.name).filter((n) => !up.has(n)));
+}
+
 export function hiddenLoaderNames(rows: ReadonlyArray<{ platform: string; status: string }>): Set<string> {
   const down = new Set<string>();
   const up = new Set<string>();
