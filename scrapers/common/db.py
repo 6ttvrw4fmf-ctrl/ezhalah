@@ -1357,8 +1357,11 @@ def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=No
     q = c.table(table).select("ad_number,last_seen_at").eq("active", True)
     if source:
         q = q.eq("source", source)
-    rows = [r for r in (_execute(q.range(0, 999), what=table + ".read_gone_slice").data or [])
-            if r.get("ad_number")]
+    # THE WHOLE ACTIVE SET, not a 1,000-row slice (2026-10-27). The slice made prune_unseen below compare
+    # 1,000 «seen» against every active row: haraj (13,702 active) read «re-saw 999 of 13702», tripped the
+    # collapse guard every run since 10-18 and never struck the one ad whose own page read gone. The read
+    # count is still capped by max_reads (oldest-seen first) and the strike by the collapse cap.
+    rows = [r for r in (_execute(q, what=table + ".read_gone_set").data or []) if r.get("ad_number")]
     if verify_gone is None:
         verify_gone = own_page_status_oracle(c, table, seen)
     unseen = sorted((r for r in rows if r["ad_number"] not in seen),
