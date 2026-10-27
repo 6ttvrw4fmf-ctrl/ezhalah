@@ -326,6 +326,14 @@ def test_score_site_reads_the_source_tables_period():
     assert row["fields"]["price"][MATCH] == 1 and row["fields"]["price"].get(MISMATCH, 0) == 0
 
 
+def test_latin_k_after_the_figure_is_thousands():
+    # tuba 21078156 (2026-10-27): page «SAR 990k», we store 990000
+    assert compare_listing({"price_total": 990000}, page("السعر :", "SAR 990k"))["price"] == MATCH
+    assert compare_listing({"price_total": 990000}, page("السعر :", "SAR 980k"))["price"] != MATCH
+    # a «k» that starts a word, or «km», is not thousands
+    assert compare_listing({"price_total": 990000}, page("السعر :", "990 km من المطار"))["price"] != MATCH
+
+
 def test_annual_rent_is_compared_as_stored():
     stored = {"price_annual": 75456, "rent_period_ar": "سنوي"}
     assert compare_listing(stored, page("75,456 ريال سنوياً"))["price"] == MATCH

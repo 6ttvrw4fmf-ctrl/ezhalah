@@ -214,7 +214,9 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             # different price. Thousands («الف/ألف») and millions («مليون») only, the figure exact.
             if out[name] != MATCH and stored_v:
                 v = float(stored_v)
-                for unit, words in ((1_000_000, r"مليون"), (1_000, r"الف|ألف|آلاف|الاف")):
+                # tuba 21078156 (2026-10-27, re-read run 40470538881) prints «SAR 990k» for our 990,000: a Latin
+                # «k» right after the figure is thousands too (never «km», never a letter that starts a word).
+                for unit, words in ((1_000_000, r"مليون"), (1_000, r"الف|ألف|آلاف|الاف|[kK](?![A-Za-z])")):
                     k = v / unit
                     if v >= unit and k == int(k) and re.search(
                             r"(?<![\d.,])" + str(int(k)) + r"\s*(?:" + words + r")(?!\S*\s*مليون)", whole):
