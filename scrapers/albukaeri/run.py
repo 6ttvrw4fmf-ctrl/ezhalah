@@ -252,6 +252,74 @@ def map_page(d: dict[str, Any], type_ar: Optional[str]) -> tuple[Optional[tuple[
     return (row, category), ""
 
 
+# ── Own-page oracle (2026-10-27) ────────────────────────────────────────────────────────────────
+# A removed ad's page answers 200 as an empty shell: <title> is just «  | البكيري» and there is no
+# property block. The 404-only fallback read that live, so stale ads stayed on screen while
+# prune_unseen refused (-1).
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
+_SHELL_TITLE_RE = re.compile(r"^\s*\|\s*البكيري\s*$")
+
+
+def read_own_page(s, ad_number: str) -> tuple[str, str]:
+    """One ad's own page: empty shell or 404/410 → gone, real title + property block → live, else unknown."""
+    pid = ad_number[len(PREFIX):] if ad_number.startswith(PREFIX) else ""
+    if not re.fullmatch(r"[0-9a-f]{24}", pid):
+        return "unknown", f"{ad_number!r} is not a {PREFIX}<24-hex id> ad number"
+    try:
+        r = s.get(f"{BASE}/property/{pid}", timeout=40)
+    except Exception as e:  # noqa: BLE001 — a failed fetch is UNKNOWN
+        return "unknown", f"fetch failed: {type(e).__name__}"
+    if r.status_code in (404, 410):
+        return "gone", f"HTTP {r.status_code}"
+    if r.status_code != 200:
+        return "unknown", f"HTTP {r.status_code}"
+    page = r.text or ""
+    t = _TITLE_RE.search(page)
+    title = ihtml.unescape(t.group(1)) if t else None
+    h1 = re.search(r'<h1 class="prop-hero-title">(.*?)</h1>', page, re.S)
+    block = bool(h1 and _clean(h1.group(1)))
+    if title is not None and _SHELL_TITLE_RE.match(title) and not block:
+        return "gone", f"empty shell page (title {title.strip()!r}, no property block, {len(page)} bytes)"
+    if title and not _SHELL_TITLE_RE.match(title) and block:
+        return "live", "real title and property block"
+    return "unknown", f"title {title!r}, property block {'present' if block else 'missing'}"
+
+
+def make_verify_gone(s, control_ads) -> Any:
+    """verify_gone for strike_read_gone: "gone" only after an ad this run saw reads live."""
+    controls = sorted(control_ads)[:3]
+    memo: list[tuple[bool, str]] = []
+
+    def control() -> tuple[bool, str]:
+        if not memo:
+            res = (False, "no ad seen this run to use as control")
+            for ad in controls:
+                v, why = read_own_page(s, ad)
+                if v == "live":
+                    res = (True, f"control {ad} reads live")
+                    break
+                res = (False, f"control {ad}: {v} ({why})")
+            memo.append(res)
+        return memo[0]
+
+    def verify_gone(ad_number: str) -> tuple[str, str]:
+        v, why = read_own_page(s, ad_number)
+        if v != "gone":
+            return v, why
+        ok, cwhy = control()
+        return ("gone", f"{why}; {cwhy}") if ok else ("unknown", f"{why}, but {cwhy}")
+    return verify_gone
+
+
+def prune_table(tbl: str, seen: set, verify_gone) -> int:
+    """The absence prune; when its guard refuses (-1), strike only ads whose own page reads gone."""
+    n = db.prune_unseen(tbl, seen, source=SOURCE)
+    if n < 0:
+        print(f"  ⚠ {tbl}: prune guard tripped — reading the unseen ads' own pages", flush=True)
+        n = db.strike_read_gone(tbl, seen, SOURCE, verify_gone=verify_gone)
+    return n
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", default="all")
@@ -306,12 +374,11 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
         complete = unreadable == 0 and declared is not None and len(ids) >= declared > 0
+        verify_gone = make_verify_gone(s, {r["ad_number"] for r in res + com})
         for tbl, rr in (("albukaeri_residential_listings", res), ("albukaeri_commercial_listings", com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
-                if n < 0:
-                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
-                elif n:
+                n = prune_table(tbl, {r["ad_number"] for r in rr}, verify_gone)
+                if n > 0:
                     print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
             print(f"  NOT pruning: walked {len(ids)} of a declared {declared}, {unreadable} unreadable", flush=True)
