@@ -335,9 +335,9 @@ const modalProblems = (f: Record<string, string>) => {
   mustCatch('a static circle instead of the live letter', v4Problems({ ...files, [PROMPT]: files[PROMPT].replace('const letter = letterOf(name);', "const letter = '';") }, NS).length > 0);
 }
 
-// ── §8 the celebration is GREEN RAIN (owner 2026-10-26: «remove the existing confetti … small green raindrop-like
-//     particles … subtle, elegant and quick … once it finishes, remove all the particles»): brief, Ezhalah greens only,
-//     gone at PARTY_MS, never two stacked, no external script; reduced motion → nothing (EXECUTED) ──────────────────
+// ── §8 the celebration is a CONFETTI PARTY (owner 2026-10-27: «change the rain to confetti party … laptop full screen,
+//     phone full screen … let it last 4 seconds 5»): full-screen fixed layer, party colours, 4–5 s, gone at PARTY_MS,
+//     never two stacked, no external script; reduced motion → nothing (EXECUTED) ──────────────────────────────────
 {
   const PARTY = 'src/lib/nameParty.ts';
   const PRE8 = [
@@ -355,14 +355,14 @@ const modalProblems = (f: Record<string, string>) => {
     writeFileSync(tmp, code);
     return (await liftSymbols(tmp, [
       { header: 'export const PARTY_MS', endsWith: /;$/ },
-      { header: 'export const RAIN_MS', endsWith: /;$/ },
-      { header: 'export const RAIN_DROPS', endsWith: /;$/ },
-      { header: 'export const RAIN_GREENS', endsWith: /;$/ },
+      { header: 'export const BURST_MS', endsWith: /;$/ },
+      { header: 'export const CONFETTI_PIECES', endsWith: /;$/ },
+      { header: 'export const CONFETTI_COLORS', endsWith: /;$/ },
       { header: 'export const PARTY_GAP_MS', endsWith: /;$/ },
       { header: 'export const NAME_PARTY_EVENT', endsWith: /;$/ },
       { header: 'let lastParty', endsWith: /;$/ },
       { header: 'export function startNameParty(' },
-    ], ['startNameParty', 'PARTY_MS', 'RAIN_DROPS', 'RAIN_GREENS', 'PARTY_GAP_MS'], PRE8)) as { startNameParty: (r: boolean) => void; PARTY_MS: number; RAIN_DROPS: number; RAIN_GREENS: string[]; PARTY_GAP_MS: number };
+    ], ['startNameParty', 'PARTY_MS', 'CONFETTI_PIECES', 'CONFETTI_COLORS', 'PARTY_GAP_MS'], PRE8)) as { startNameParty: (r: boolean) => void; PARTY_MS: number; CONFETTI_PIECES: number; CONFETTI_COLORS: string[]; PARTY_GAP_MS: number };
   };
   // one module instance, parties started at the given clock times; returns what each start drew
   const run = async (code: string, starts: { at: number; reduced: boolean }[]) => {
@@ -372,9 +372,9 @@ const modalProblems = (f: Record<string, string>) => {
     const shots = starts.map(({ at, reduced }) => {
       const before = g.__appended.length; g.__timers = []; g.__now = at;
       P.startNameParty(reduced);
-      const layer = g.__appended.slice(before).find((el: any) => 'data-ezh-rain' in el.attrs) ?? null;
+      const layer = g.__appended.slice(before).find((el: any) => 'data-ezh-party' in el.attrs) ?? null;
       const removeAt = layer ? (g.__timers.find((t: any) => { const was = layer.removed; t.f(); const did = layer.removed && !was; layer.removed = was; return did; })?.ms ?? null) : null;
-      const drops = layer ? [...String(layer.innerHTML).matchAll(/<i style="([^"]*)"><\/i>/g)].map((m) => {
+      const drops = layer ? [...String(layer.innerHTML).matchAll(/<i style="([^"]*)"><b style="[^"]*"><\/b><\/i>/g)].map((m) => {
         const st = m[1]; const num = (k: string) => Number((st.match(new RegExp(k + ':(\\d+)ms')) ?? [])[1]);
         return { color: (st.match(/background:(#[0-9a-f]{6})/i) ?? [])[1], delay: num('animation-delay'), dur: num('animation-duration') };
       }) : [];
@@ -385,27 +385,32 @@ const modalProblems = (f: Record<string, string>) => {
   const SRC = read(PARTY);
   const one = (await run(SRC, [{ at: 0, reduced: false }])).shots[0];
   const P8 = (await run(SRC, [])).P;
-  check('§8 a celebration draws one rain layer of RAIN_DROPS drops', !!one.layer && one.drops.length === P8.RAIN_DROPS && P8.RAIN_DROPS >= 60, `drops=${one.drops.length}`);
-  check('§8 …in Ezhalah greens only (no confetti colours)', one.drops.length > 0 && one.drops.every((d) => P8.RAIN_GREENS.includes(d.color)) && P8.RAIN_GREENS.every((c) => /^#[0-9a-f]{6}$/i.test(c) && parseInt(c.slice(3, 5), 16) >= parseInt(c.slice(1, 3), 16)));
-  check('§8 every drop lands before the layer goes, and the layer is removed at PARTY_MS',
+  check('§8 a celebration draws one confetti layer of CONFETTI_PIECES pieces (a lot)', !!one.layer && one.drops.length === P8.CONFETTI_PIECES && P8.CONFETTI_PIECES >= 250, `pieces=${one.drops.length}`);
+  check('§8 …in party colours (several hues, Ezhalah green and gold among them)', one.drops.length > 0 && one.drops.every((d) => P8.CONFETTI_COLORS.includes(d.color)) && new Set(one.drops.map((d) => d.color)).size >= 6 && P8.CONFETTI_COLORS.includes('#2f7247') && P8.CONFETTI_COLORS.includes('#d8b14a'));
+  check('§8 every piece lands before the layer goes, and the layer is removed at PARTY_MS',
     one.removeAt === P8.PARTY_MS && one.drops.every((d) => d.delay + d.dur <= P8.PARTY_MS), JSON.stringify({ removeAt: one.removeAt, ms: P8.PARTY_MS }));
-  check('§8 it is brief (≤ 3 s)', P8.PARTY_MS > 0 && P8.PARTY_MS <= 3000, `PARTY_MS=${P8.PARTY_MS}`);
+  check('§8 the party lasts 4–5 s', P8.PARTY_MS >= 4000 && P8.PARTY_MS <= 5000, `PARTY_MS=${P8.PARTY_MS}`);
+  const fullScreen = (code: string) => /\[data-ezh-party\]\{position:fixed;inset:0;/.test(code) && code.includes('calc(100vh + 40px)');
+  check('§8 it covers the whole screen on any device (fixed, inset 0, falls a full viewport height)', fullScreen(SRC));
   const still = (await run(SRC, [{ at: 0, reduced: true }])).shots[0];
   check('§8 reduced motion → nothing is drawn at all', !still.drew && !still.layer);
   const twice = (await run(SRC, [{ at: 0, reduced: false }, { at: 1000, reduced: false }, { at: 20000, reduced: false }])).shots;
   check('§8 a second celebration within PARTY_GAP_MS is skipped (sign-up box and sign-in never stack), a later one plays', twice[0].drew && !twice[1].drew && twice[2].drew);
-  // judged on CODE, not prose: comments may still say what the rain replaced
-  const noExternal = (code: string) => !/createElement\(['"]script['"]\)|https?:\/\/|confetti|data-ezh-disco/i.test(code.replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, ''));
-  check('§8 no external script, no confetti, no disco lights left in the module', noExternal(SRC));
-  mustCatch('rain that is never removed', (await run(SRC.replace('setTimeout(() => layer.remove(), PARTY_MS);', ''), [{ at: 0, reduced: false }])).shots[0].removeAt === null);
-  mustCatch('a confetti colour back in the rain', !(await run(SRC.replace("export const RAIN_GREENS = ['#01361c',", "export const RAIN_GREENS = ['#e9739a', '#01361c',"), [{ at: 0, reduced: false }])).shots[0].drops.every((d) => ['#01361c', '#2f7247', '#3f8f5a', '#5fae7c', '#8fd0a4'].includes(d.color)));
-  mustCatch('rain under reduced motion', (await run(SRC.replace('if (reduced || ', 'if ('), [{ at: 0, reduced: true }])).shots[0].drew);
+  // judged on CODE, not prose
+  const noExternal = (code: string) => !/createElement\(['"]script['"]\)|https?:\/\/|data-ezh-disco|data-ezh-rain/i.test(code.replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, ''));
+  check('§8 no external script, no disco lights, no leftover rain layer in the module', noExternal(SRC));
+  mustCatch('confetti that is never removed', (await run(SRC.replace('setTimeout(() => layer.remove(), PARTY_MS);', ''), [{ at: 0, reduced: false }])).shots[0].removeAt === null);
+  mustCatch('a party cut short (2.6 s like the rain)', !((m: number) => m >= 4000 && m <= 5000)((await run(SRC.replace('export const PARTY_MS = 5000;', 'export const PARTY_MS = 2600;'), [])).P.PARTY_MS));
+  mustCatch('pieces still falling when the layer goes', !(await run(SRC.replace('const dur = 2000 +', 'const dur = 4000 +'), [{ at: 0, reduced: false }])).shots[0].drops.every((d) => d.delay + d.dur <= 5000));
+  mustCatch('a thin sprinkle instead of a party', (await run(SRC.replace('export const CONFETTI_PIECES = 360;', 'export const CONFETTI_PIECES = 140;'), [{ at: 0, reduced: false }])).shots[0].drops.length < 250);
+  mustCatch('a layer that is not full screen', !fullScreen(SRC.replace('[data-ezh-party]{position:fixed;inset:0;', '[data-ezh-party]{position:absolute;top:0;height:40vh;')));
+  mustCatch('confetti under reduced motion', (await run(SRC.replace('if (reduced || ', 'if ('), [{ at: 0, reduced: true }])).shots[0].drew);
   mustCatch('two celebrations stacking', (await run(SRC.replace('if (now - lastParty < PARTY_GAP_MS) return;', ''), [{ at: 0, reduced: false }, { at: 1000, reduced: false }])).shots[1].drew);
-  mustCatch('the disco lights coming back', !noExternal(SRC.replace('[data-ezh-rain]{position:fixed', '[data-ezh-disco]{opacity:1}\n[data-ezh-rain]{position:fixed')));
+  mustCatch('the disco lights coming back', !noExternal(SRC.replace('[data-ezh-party]{position:fixed', '[data-ezh-disco]{opacity:1}\n[data-ezh-party]{position:fixed')));
   const passOk = (p: string, css: string) => /const reduced = useReducedMotion\(\);/.test(p)
     && (p.match(/startNameParty\(/g) ?? []).length > 0 && (p.match(/startNameParty\(/g) ?? []).length === (p.match(/startNameParty\(reduced\)/g) ?? []).length
-    && css.includes('@media (prefers-reduced-motion:reduce){[data-ezh-scrim],[data-ezh-scrim] *,[data-ezh-shine]{animation:none!important;transition:none!important}[data-ezh-rain]{display:none}}');
-  check('§8 the box hands the real reduced-motion flag to the party, and the CSS stills every motion (rain hidden)', passOk(files[PROMPT], SRC));
+    && css.includes('@media (prefers-reduced-motion:reduce){[data-ezh-scrim],[data-ezh-scrim] *,[data-ezh-shine]{animation:none!important;transition:none!important}[data-ezh-party]{display:none}}');
+  check('§8 the box hands the real reduced-motion flag to the party, and the CSS stills every motion (confetti hidden)', passOk(files[PROMPT], SRC));
   mustCatch('the party told motion is fine regardless', !passOk(files[PROMPT].replace('startNameParty(reduced)', 'startNameParty(false)'), SRC));
 }
 
