@@ -41,15 +41,15 @@ const check = (label: string, ok: boolean, detail = '') => {
 const LAYOUT = 'src/app/_layout.tsx';
 const SHARE = 'src/lib/share.ts';
 const OG_FILE = 'public/og-image-v8.png';
-// The page description = the sentence under the title in a Google result (owner 2026-10-27: Perplexity-style,
-// ending in the owner's words «ابحث عن كل مواقع العقار بمكان واحد في المملكة»; no numbers).
-const REQUIRED_AR = 'إزهله محرك بحث عقاري مجاني بالذكاء الاصطناعي، ابحث عن كل مواقع العقار بمكان واحد في المملكة.';
-const REQUIRED_EN = 'Ezhalah is a free AI-powered property search engine. Search every property site in the Kingdom, in one place.';
+// The page description = the sentence under the title in a Google result (owner 2026-10-27): a free AI
+// property search engine for Saudi Arabia only — all sites, market trends, Ministry of Justice prices — «جربه الآن».
+const REQUIRED_AR = 'إزهله محرك بحث عقاري مجاني بالذكاء الاصطناعي داخل السعودية: كل مواقع العقار بمكان واحد، مع ترندات السوق وأسعار البيع الحقيقية من وزارة العدل. جربه الآن.';
+const REQUIRED_EN = 'Ezhalah is a free AI property search engine for Saudi Arabia: every property site in one place, market trends and real Ministry of Justice prices. Try it now.';
 // Either word, anywhere in the line, names the country — «في» is not required: the 2026-09-25
 // wording says «عقارات السعودية», not «في السعودية».
 const NAMES_COUNTRY = /المملكة|السعودية/;
-const PAGE_TITLE_AR_OWNER = 'إزهله | ابحث في كل مواقع العقار بمكان واحد';
-const PAGE_TITLE_EN_OWNER = 'Ezhalah | Search all property sites at once';
+const PAGE_TITLE_AR_OWNER = 'إزهله | ابحث في كل عقارات المملكة بمكان واحد';
+const PAGE_TITLE_EN_OWNER = 'Ezhalah | Search all Saudi properties';
 const TITLE_FITS = 44;
 
 // JSX comments are stripped: this file's own prose quotes the tags it is checking for.

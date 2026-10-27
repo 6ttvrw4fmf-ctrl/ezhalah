@@ -25,16 +25,18 @@ export function shareOrigin(): string {
 // og:image ≥ ~300px wide and a small side thumbnail below that — the same 192px card the search-share
 // links (/s/…) already get. Keep it under 300px.
 export const OG_IMAGE = `${SHARE_LINK}/og-image-v8.png`;
-// THE PAGE DESCRIPTION — the sentence under Ezhalah's title in a Google result (owner 2026-10-27: Perplexity-style — what
-// it is, that it is free, then the owner's own words «ابحث عن كل مواقع العقار بمكان واحد في المملكة»; no numbers).
+// THE PAGE DESCRIPTION — the sentence under Ezhalah's title in a Google result (owner 2026-10-27, rated and approved after
+// phone-width previews): what it is (a free AI property search engine), that it is ONLY for Saudi Arabia, what it
+// gives (every property site in one place, market trends, real Ministry of Justice sale prices), and «جربه الآن»
+// (no harakat). Every claim is a real feature; no numbers (Google keeps the sentence for weeks).
 // It replaces the 2026-10-11 question-form wording.
 // No emoji (owner 2026-10-18: «remove the emoji … make it professional»).
-export const SHARE_BLURB_AR = 'إزهله محرك بحث عقاري مجاني بالذكاء الاصطناعي، ابحث عن كل مواقع العقار بمكان واحد في المملكة.';
+export const SHARE_BLURB_AR = 'إزهله محرك بحث عقاري مجاني بالذكاء الاصطناعي داخل السعودية: كل مواقع العقار بمكان واحد، مع ترندات السوق وأسعار البيع الحقيقية من وزارة العدل. جربه الآن.';
 // The preview CARD's own line (owner 2026-10-18: the card repeated the sent message and was cut off).
 // middleware.ts serves link-preview bots the same line WITH live numbers (src/lib/homeCard.ts); this
 // number-free form is the static fallback. Pinned equal to HOME_CARD_FALLBACK_AR.
 export const SHARE_CARD_DESC_AR = 'كل مواقع العقار في السعودية في مكان واحد.';
-export const SHARE_BLURB_EN = 'Ezhalah is a free AI-powered property search engine. Search every property site in the Kingdom, in one place.';
+export const SHARE_BLURB_EN = 'Ezhalah is a free AI property search engine for Saudi Arabia: every property site in one place, market trends and real Ministry of Justice prices. Try it now.';
 // THE SENT MESSAGE (owner 2026-10-26: names Saudi Arabia so the card need not repeat 148, no harakat, «إزهله، خل إزهله»;
 // first set 2026-10-20, replacing the long sentence above in the share message only):
 // «ليش تدوّر في 148 موقع؟ إزهله يدوّر عنك». The number is LIVE — the same count the app shows
@@ -70,10 +72,11 @@ export function shareMessage(loc: 'ar' | 'en', count: number | null): string {
   return `${shareLead(loc, count)}\n${SHARE_LINK}`;
 }
 export const SHARE_TITLE_AR = 'إزهله';
-// The browser tab / history / suggestion title (owner 2026-10-27, picked from a phone-width preview: «option 3» for
-// Arabic, «D» for English). Both are checked to FIT a phone's suggestion row uncut; the share card keeps the plain name.
-export const PAGE_TITLE_AR = 'إزهله | ابحث في كل مواقع العقار بمكان واحد';
-export const PAGE_TITLE_EN = 'Ezhalah | Search all property sites at once';
+// The browser tab / history / suggestion / Google title (owner 2026-10-27, picked from phone-width previews: the
+// Kingdom wording). Both are checked to FIT uncut — the owner's longer English «…at once in the Kingdom» was cut off,
+// so the English is the shorter «Search all Saudi properties». The share card keeps the plain name.
+export const PAGE_TITLE_AR = 'إزهله | ابحث في كل عقارات المملكة بمكان واحد';
+export const PAGE_TITLE_EN = 'Ezhalah | Search all Saudi properties';
 const SHARE = {
   en: { title: 'Ezhalah' },
   ar: { title: SHARE_TITLE_AR },
