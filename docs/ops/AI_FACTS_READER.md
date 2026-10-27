@@ -46,16 +46,26 @@ Raising the cap is the owner's decision: `update public.ai_facts_budget set mont
    boilerplate, «كهرب», a meter is a supply, the REGA warranty label's yes-values, hidden-defects insurance, more maid
    room / parking / furnished shapes).
 
-**So every lesson ships as two acts:** the words (PR, selftest green, benchmark run `facts-words.yml`
-`phase=benchmark` compared to the AI on the same ads), then the re-read —
+**A lesson ships as words, and the re-read is AUTOMATIC (since 2026-10-27, migration `20261027111648`).** The
+words: a PR with a selftest phrase each, then a benchmark (`facts-words.yml` `phase=benchmark`) compared to the AI on
+the same ads, merged only if agreement does not drop and the new rows survive a hand check. The re-read needs no
+hand: every overlay row carries the `reader_version` that read it (a hash of `word_checker.py` + `normalize.py`),
+`text_facts_todo(…, p_reader_version)` hands back every row an older version read, and a merge that touches the
+reader runs `facts-words.yml` on 8 shards by itself. The hourly index sync then merges the overlay under Rule B.
+Do NOT set `stale_at` by hand for a lesson any more.
 
-```sql
-update public.listing_text_facts set stale_at = now() where stale_at is null;   -- every overlay row
-```
+- **The alarm:** `mon_detect_text_facts` check 7 raises P2 `text_facts_reader_version_lag` when indexed ads are
+  still read by an older version 36 h after the current one appeared. `select * from ops_text_facts_reader_lag();`
+  is the standing answer.
+- **The barrier:** `scripts/verify-reader-lesson-rereads-old-ads.ts` (in `npm test`, 8 mutation proofs).
+- **First run, 2026-10-27:** 393k ads re-read in ~4 h on 8 shards, 0 behind. Yes-rows gained: electricity +29,769 ·
+  water +10,857 · separate electricity meter +1,791 · majlis +1,215 · furnished +977 · maid room +966 · parking
+  +594. Every new value was served by the index (`ops_text_facts_vs_index` not-applied = 0). Live check: Riyadh ·
+  حي الزهرة · villa · buy, the chip «عداد كهرباء مستقل» read 39 in the UI = 39 in `search_listings_ar`. Aqar ad
+  6928102 (1,090,000 SAR, 400 m², source text «عدادين كهرباء») is result #6, tagged «مطابق لطلبك».
 
-followed by `facts-words.yml` `phase=incremental` with `shards=8` (the first fill was the same). The hourly index
-sync then merges the overlay under Rule B. Measure before/after with `ops_ai_facts_reader_gaps` and the Advanced
-Filter counts in the real UI; the teacher's finds reach users only after the re-read, never on merge.
+Measure before/after with `ops_ai_facts_reader_gaps` and the Advanced Filter counts in the real UI. The teacher's
+finds reach users only after the re-read and the next index sync, never on merge alone.
 
 ## Backlog window and the OpenRouter reader key (owner, 2026-10-27)
 
