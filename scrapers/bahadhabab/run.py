@@ -55,6 +55,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.pii import redact_pii
 from scrapers.common.source_pin import pin_dict
 
 # PDPL: never store advertiser contact/identity. The rest of the API item is kept.
@@ -395,6 +396,9 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "city": normalize.map_city(OWNER_CITY_AR),
         "neighborhood": district_ar,
         "title": L.get("name_en") or L.get("name_ar"),
+        # The ad's own text (🔬 AF 2026-10-27): the Rule B word checker reads only `description`, and this Nuzul
+        # tenant left it NULL, so «ومتاح مصعد» in description_ar never reached the Advanced Filter (0 text facts).
+        "description": redact_pii(L.get("description_ar") or L.get("description_en")) or None,
         "photo_urls": _photos(L),
         "property_age": None if property_type in AGELESS_TYPES
                         else _age_from_year_built(L.get("year_built")),
