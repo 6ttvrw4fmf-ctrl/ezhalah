@@ -685,6 +685,36 @@ def _collect_killed(client, limit: int) -> list[dict]:
                            .order("deactivated_at", desc=True).order("id", desc=False)), limit)
 
 
+# ── Alive stamps survive a statement timeout (2026-10-27) ──────────────────────────────────────
+# The 09:37 UTC sweep of 2026-10-27 read for 24 minutes, then ONE 200-row alive update hit
+# PostgREST's statement_timeout (57014) and the exception killed the run: every reading it had
+# not yet written was lost, its scrape_runs row never closed, and its apply lock (2 h TTL) made the
+# 10:37 sweep skip — ~2,959 units the 08:44 crawl had just added went unread for 3 hours. An alive
+# stamp is idempotent, so a timed-out chunk is split in half and retried down to one row (the
+# cleanup engine's _delete_chunk shape). A single row that still fails is left exactly as it was
+# — UNKNOWN, re-read next hour — and the sweep carries on. Never fatal, never a write of anything
+# other than the stamp it was already going to write.
+ALIVE_WRITE_CHUNK = 50
+
+
+def _stamp_alive_chunk(client, ids: list, patch: dict) -> int:
+    """Write `patch` to `ids`; returns how many rows committed. Splits on 57014, never raises it."""
+    if not ids:
+        return 0
+    try:
+        client.table(TABLE).update(patch).in_("id", ids).execute()
+        return len(ids)
+    except Exception as exc:  # noqa: BLE001 — postgrest APIError
+        if "57014" not in str(exc):
+            raise
+        if len(ids) == 1:
+            print(f"⚠ alive stamp timed out for id {ids[0]} — left unstamped (UNKNOWN), "
+                  f"re-read next sweep", flush=True)
+            return 0
+        mid = len(ids) // 2
+        return _stamp_alive_chunk(client, ids[:mid], patch) + _stamp_alive_chunk(client, ids[mid:], patch)
+
+
 # ── Cross-session write lock (2026-07-27) ────────────────────────────────────────────────────────
 # Reuses the repo's existing deploy-lock RPCs (supabase/migrations/20260716_deploy_lock.sql) under a
 # DISTINCT lock_name so a liveness --apply never blocks (or is blocked by) a frontend deploy.
@@ -1013,11 +1043,10 @@ def main() -> int:
 
     def _flush_alive() -> None:
         if args.apply and alive_ids:
-            for i in range(0, len(alive_ids), 200):
-                client.table(TABLE).update({"last_seen_at": now_iso, "missing_count": 0,
-                                            "last_liveness_probe_at": now_iso,
-                                            **direct_alive_patch(now_iso=now_iso)}) \
-                    .in_("id", alive_ids[i:i + 200]).execute()
+            patch = {"last_seen_at": now_iso, "missing_count": 0,
+                     "last_liveness_probe_at": now_iso, **direct_alive_patch(now_iso=now_iso)}
+            for i in range(0, len(alive_ids), ALIVE_WRITE_CHUNK):
+                _stamp_alive_chunk(client, alive_ids[i:i + ALIVE_WRITE_CHUNK], patch)
         alive_ids.clear()
 
     try:
