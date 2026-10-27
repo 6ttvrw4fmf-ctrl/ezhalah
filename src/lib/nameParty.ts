@@ -5,14 +5,15 @@ import { Platform } from 'react-native';
 // data-ezh-* attributes (react-native-web `dataSet`) and this one stylesheet animates them; native
 // renders the same box without motion. prefers-reduced-motion: no motion, and startNameParty draws nothing.
 
-/** THE CELEBRATION IS GREEN RAIN (owner 2026-10-26: «remove the existing confetti … small green raindrop-like particles
- *  falling from clouds at the top of the screen … subtle, elegant and quick … once it finishes, remove all the particles»).
- *  Drops start over RAIN_MS from the top edge, spread across the whole width; the layer is gone at PARTY_MS. */
-export const PARTY_MS = 2600;
-export const RAIN_MS = 1400;
-export const RAIN_DROPS = 140;
-/** Ezhalah's greens only. */
-export const RAIN_GREENS = ['#01361c', '#2f7247', '#3f8f5a', '#5fae7c', '#8fd0a4'];
+/** THE CELEBRATION IS A CONFETTI PARTY (owner 2026-10-27: «change the rain to confetti party … on a laptop full screen,
+ *  phone full screen … let it last 4 seconds 5», after the moving preview; it replaces the 2026-10-26 green rain).
+ *  CONFETTI_PIECES pieces burst from just under the clouds over BURST_MS, flutter down the WHOLE screen (fixed layer,
+ *  every viewport width), and the layer is gone at PARTY_MS. Self-contained CSS/DOM: no external script. */
+export const PARTY_MS = 5000;
+export const BURST_MS = 2200;
+export const CONFETTI_PIECES = 360;
+/** Party colours: Ezhalah greens and gold plus pink, blue, violet and white. */
+export const CONFETTI_COLORS = ['#2f7247', '#5fae7c', '#d8b14a', '#f2c14e', '#e9739a', '#4f8fe0', '#ffffff', '#a77ee8'];
 /** A second celebration this soon after one is skipped: the sign-up box and the sign-in welcome never stack. */
 export const PARTY_GAP_MS = 6000;
 /** The home headline listens for this to shine (2 passes) while the party plays. */
@@ -45,10 +46,12 @@ const CSS = `
 @keyframes ezhShakeB{0%{transform:translateX(0)}33%{transform:translateX(-6px)}66%{transform:translateX(6px)}100%{transform:translateX(0)}}
 [data-ezh-shine="on"]{background-image:linear-gradient(100deg,#2f7247 30%,#5fae7c 45%,#d8b14a 50%,#5fae7c 55%,#2f7247 70%)!important;background-size:250% 100%!important;-webkit-background-clip:text!important;background-clip:text!important;-webkit-text-fill-color:transparent;color:transparent!important;animation:ezhShine 2.4s ease-in-out 2}
 @keyframes ezhShine{from{background-position:110% 0}to{background-position:-10% 0}}
-[data-ezh-rain]{position:fixed;inset:0;pointer-events:none;z-index:2147483001;overflow:hidden}
-[data-ezh-rain] i{position:absolute;top:-20px;width:3px;border-radius:3px;opacity:0;animation-name:ezhDrop;animation-timing-function:cubic-bezier(.45,0,.9,.6);animation-fill-mode:both}
-@keyframes ezhDrop{0%{transform:translateY(0);opacity:0}12%{opacity:.85}82%{opacity:.8}100%{transform:translateY(104vh);opacity:0}}
-@media (prefers-reduced-motion:reduce){[data-ezh-scrim],[data-ezh-scrim] *,[data-ezh-shine]{animation:none!important;transition:none!important}[data-ezh-rain]{display:none}}
+[data-ezh-party]{position:fixed;inset:0;pointer-events:none;z-index:2147483001;overflow:hidden}
+[data-ezh-party] i{position:absolute;opacity:0;animation-name:ezhFall;animation-timing-function:cubic-bezier(.25,.4,.55,1);animation-fill-mode:both;will-change:transform}
+[data-ezh-party] i b{display:block;width:100%;height:100%;border-radius:inherit;background:inherit;animation:ezhFlip linear infinite}
+@keyframes ezhFall{0%{transform:translate(0,0) rotate(0);opacity:0}6%{opacity:1}88%{opacity:1}100%{transform:translate(var(--dx),calc(100vh + 40px)) rotate(var(--rot));opacity:0}}
+@keyframes ezhFlip{0%{transform:rotateX(0) rotateY(0)}50%{transform:rotateX(180deg) rotateY(90deg)}100%{transform:rotateX(360deg) rotateY(180deg)}}
+@media (prefers-reduced-motion:reduce){[data-ezh-scrim],[data-ezh-scrim] *,[data-ezh-shine]{animation:none!important;transition:none!important}[data-ezh-party]{display:none}}
 `;
 
 export function ensureNameBoxCss(): void {
@@ -61,8 +64,8 @@ export function ensureNameBoxCss(): void {
 
 let lastParty = -Infinity;
 
-/** The green rain after a sign-in / sign-up. Decoration only: pointer-events:none, and the whole layer removes itself at
- *  PARTY_MS. No external script. Reduced motion → nothing at all. */
+/** The confetti party after a sign-in / sign-up. Decoration only: pointer-events:none, and the whole layer removes itself
+ *  at PARTY_MS. No external script. Reduced motion → nothing at all. */
 export function startNameParty(reduced: boolean): void {
   if (reduced || Platform.OS !== 'web' || typeof document === 'undefined') return;
   const now = Date.now();
@@ -72,15 +75,21 @@ export function startNameParty(reduced: boolean): void {
   try { globalThis.dispatchEvent?.(new Event(NAME_PARTY_EVENT)); } catch { /* not a browser */ }
 
   const layer = document.createElement('div');
-  layer.setAttribute('data-ezh-rain', '');
+  layer.setAttribute('data-ezh-party', '');
   let html = '';
-  for (let i = 0; i < RAIN_DROPS; i++) {
+  for (let i = 0; i < CONFETTI_PIECES; i++) {
     const left = (Math.random() * 100).toFixed(2);
-    const delay = Math.round(Math.random() * RAIN_MS * 0.8);
-    const dur = 700 + Math.round(Math.random() * 400);           // delay + dur stays inside PARTY_MS
-    const len = 9 + Math.round(Math.random() * 9);
-    const color = RAIN_GREENS[i % RAIN_GREENS.length];
-    html += `<i style="left:${left}%;height:${len}px;background:${color};animation-delay:${delay}ms;animation-duration:${dur}ms"></i>`;
+    const top = 50 + Math.round(Math.random() * 30);                // just under the clouds
+    const delay = Math.round(Math.random() * BURST_MS);
+    const dur = 2000 + Math.round(Math.random() * 700);             // delay + dur stays inside PARTY_MS
+    const w = 5 + Math.random() * 6;
+    const h = Math.random() < 0.35 ? w : w * (1.6 + Math.random());
+    const round = Math.random() < 0.25 ? '50%' : '2px';
+    const dx = Math.round((Math.random() - 0.5) * 160);
+    const rot = Math.round((Math.random() - 0.5) * 1080);
+    const flip = 500 + Math.round(Math.random() * 700);
+    const color = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
+    html += `<i style="left:${left}%;top:${top}px;width:${w.toFixed(1)}px;height:${h.toFixed(1)}px;border-radius:${round};background:${color};animation-delay:${delay}ms;animation-duration:${dur}ms;--dx:${dx}px;--rot:${rot}deg"><b style="animation-duration:${flip}ms"></b></i>`;
   }
   layer.innerHTML = html;
   document.body.appendChild(layer);
