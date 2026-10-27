@@ -1,7 +1,3 @@
--- NEEDS APPLY BEFORE MERGE (2026-10-27, PR fix/liveness-17-sites). Not applied by the authoring session.
--- Apply with apply_migration while the database is quiet, then rename this file to the minted version
--- (byte-exact), then merge.
---
 -- Registry reseed from sql/mirrors/liveness_registry.json (150 platforms). The only change vs the
 -- previous seed: therc, alhoshan, sqcc, holoul and alta move CRAWL_PRESENCE_ONLY -> CANDIDATE_PLUS_DIRECT
 -- (sla 168, grace 3 unchanged). Each scraper now hands prune_unseen a measured own-page/record oracle and
