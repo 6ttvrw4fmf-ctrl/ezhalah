@@ -223,7 +223,7 @@ jobs:
             - { source: aqaralriyadh,   cmd: "python -m scrapers.aqaralriyadh.run --type all", tmo: 20 }
             - { source: snam,           cmd: "python -m scrapers.snam.run --type all", tmo: 20 }
             - { source: goldendeal,     cmd: "python -m scrapers.goldendeal.run --type all", tmo: 30, browser: true }
-            - { source: yameen,         cmd: "python -m scrapers.yameen.run --type all", tmo: 20 }
+            - { source: yameen,         cmd: "python -m scrapers.yameen.probe_feed", tmo: 20 }
             - { source: tamyaz,         cmd: "python -m scrapers.tamyaz.run --type all", tmo: 20 }
             - { source: hazim,          cmd: "python -m scrapers.hazim.run --type all", tmo: 20, browser: true }
             #   jawher / m3tmd / senan: one API engine (scrapers/jawher/run.py), 145 / 46 / 82 detail
