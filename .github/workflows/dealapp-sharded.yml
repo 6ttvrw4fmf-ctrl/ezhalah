@@ -58,7 +58,7 @@ jobs:
   crawl:
     name: Deal App shard ${{ matrix.shard }}/24
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
-    timeout-minutes: 120
+    timeout-minutes: 250
     strategy:
       fail-fast: false   # one blocked shard must never cancel the others
       max-parallel: 12
@@ -92,5 +92,10 @@ jobs:
           # slice and trims new ids only, because that slice is exactly what prune measures
           # coverage against.
           DEALAPP_MAX_LISTINGS: "1200"
+          # 230-minute budget (2026-10-27). Measured on the first 24-shard run: each shard re-saw ~800 of its
+          # ~1,450-1,900 held ads in 100 minutes (~8.5 renders/min per IP) and ran out of time, so the prune guard
+          # still refused (re-saw <70%). Held ads are read FIRST (enumerate_ids), so 230 minutes covers the largest
+          # slice. Concurrency is unchanged (max-parallel 12): the login-wall is a burst limit, not a duration one.
+          DEALAPP_TIME_BUDGET_MIN: "230"
           DEALAPP_WORKERS: "3"   # dealapp's origin trips a login-wall above ~3 workers (no proxy)
         run: exec python -m scrapers.dealapp.run --type all --shards 24 --shard ${{ matrix.shard }}
