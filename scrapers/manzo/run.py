@@ -91,8 +91,15 @@ def listed_ad_number(d: dict, p: dict) -> str:
     return f"{PREFIX}{d.get('property_id') or d.get('slug') or p.get('slug')}"
 
 
+# A live, listable ad. Manzo renamed «active» to «available» around 2026-10-13: measured 2026-10-27, all 766
+# listed records read «available», 40/40 sampled carry an active REGA ad licence and their pages answer 200.
+# Owner 2026-10-27: take them «if they are live and are part of our rules». Anything else (rented, paused…)
+# is still skipped.
+LIVE_STATUSES = {"active", "available"}
+
+
 def map_property(d: dict) -> tuple[Optional[tuple[dict, str]], str]:
-    if d.get("display_status") != "active":
+    if d.get("display_status") not in LIVE_STATUSES:
         return None, f"status_{d.get('display_status')}"
     deal = _DEAL.get(d.get("property_type") or "")
     if not deal:
