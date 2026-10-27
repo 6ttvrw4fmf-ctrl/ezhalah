@@ -1139,13 +1139,39 @@ POLICIES: dict[str, _P] = {
         "An oracle is possible — /ar/search/<id> for a removed post — but it is not written yet, so "
         "this does not claim a direct check."),
     "holoul": _P(
-        _pol("holoul", 3, 168), CRAWL_PRESENCE_ONLY,
-        "the crawl's OWN seen-set over app.holoul.io/customer/api/v1/units/ (per_page=100, `pages`) "
-        "checked against the API's own `total` (238 when measured — the feed ignores every filter, "
-        "so listed/licensed/Sale is applied here). run.py suppresses prune_unseen unless the walk "
-        "reached that total.",
-        "An oracle is possible — /customer/api/v1/units/<uuid> answers 404 unit__not_found for a "
-        "removed unit — but it is not written yet, so this does not claim a direct check."),
+        _pol("holoul", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the unit's own API record GET app.holoul.io/customer/api/v1/units/<uuid> (no trailing "
+        "slash): 404 JSON {\"error\":[\"unit__not_found\"]} or a 200 for this uuid whose unit or "
+        "project status left «listed» is GONE (canary-gated on a unit this crawl served reading "
+        "live); a 200 for this uuid, both «listed», licensed is LIVE; the HTML route-miss 404, "
+        "401/403/429/5xx, timeouts, another id and an unlicensed record are UNKNOWN. nhc_end_at is "
+        "never read (owner 2026-10-02). Absence-prune only when the walk reached the API's total.",
+        "Promoted 2026-10-27 (owner rule 2026-10-26: every ad we keep gets a direct dead-ad check): every unit the crawl serves has its own record read each run (db.stamp_seen_alive), and that record is the removal oracle handed to prune_unseen."),
+    "therc": _P(
+        _pol("therc", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the listing's own /properties/<slug> page: HTTP 404/410 (the platform's «404 - الصفحة غير "
+        "موجودة») is GONE; a 200 printing this ad's own «رقم المرجع» with JSON-LD availability "
+        "InStock (or none) is LIVE; any other 200, a redirect onto a 404, 401/403/429/5xx and a "
+        "timeout are UNKNOWN. Removals are canary-gated on an ad this crawl just read answering live.",
+        "Promoted 2026-10-27 (owner rule 2026-10-26: every ad we keep gets a direct dead-ad check): the crawl already opens every ad's own page, so that read is stamped through db.mark_direct_alive (zero extra requests); the same page is the removal oracle handed to prune_unseen."),
+    "alhoshan": _P(
+        _pol("alhoshan", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the record's own API route GET /api/alhoshan/properties/<GUID> (GUID from the stored "
+        "source_capture.id): HTTP 404 carrying the API's JSON body, or a 200 whose record says "
+        "isPublished=false, is GONE; a 200 for this publicId with isPublished=true, "
+        "moderationStatus=approved and no listingExpiresAt is LIVE; an HTML 404, "
+        "400/401/403/429/5xx, another publicId, an unmeasured moderation/expiry state and a timeout "
+        "are UNKNOWN. Removals are canary-gated on an ad this crawl just listed.",
+        "Promoted 2026-10-27 (owner rule 2026-10-26: every ad we keep gets a direct dead-ad check): every listed ad's own record is read each run (db.stamp_seen_alive), and that record is the removal oracle handed to prune_unseen."),
+    "alta": _P(
+        _pol("alta", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the post's own REST record GET /wp-json/wp/v2/estate_property/<wp_id> (wp_id from the row's "
+        "additional_info): 404 rest_post_invalid_id, status left publish, or its own property_status "
+        "naming تم البيع / تم التأجير / غير متاح is GONE (canary-gated on a post this crawl read live; "
+        "absence-prune only on a walk equal to x-wp-total); a 200 for this id whose slug maps to this "
+        "ad_number with a readable non-gone status is LIVE; an unnamed status id, 401/403/429/5xx, "
+        "timeouts and HTML are UNKNOWN. The crawl's sold pin on property_status is unchanged.",
+        "Promoted 2026-10-27 (owner rule 2026-10-26: every ad we keep gets a direct dead-ad check): every post the list serves has its own REST record read each run (db.stamp_seen_alive), and that record is the removal oracle handed to prune_unseen."),
     "eightfloor": _P(
         _pol("eightfloor", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the Nuzul public API www.8floor.sa/api/public/v2/properties "
@@ -1191,10 +1217,13 @@ POLICIES: dict[str, _P] = {
         "run.py suppresses prune_unseen unless every detail page was readable.",
         "No oracle is written yet, so this does not claim a direct check."),
     "sqcc": _P(
-        _pol("sqcc", 3, 168), CRAWL_PRESENCE_ONLY,
-        "the crawl's OWN seen-set over the realestate sitemap (33). "
-        "run.py suppresses prune_unseen unless every detail page was readable.",
-        "No oracle is written yet, so this does not claim a direct check."),
+        _pol("sqcc", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the post's own /realestate/<slug>/ page: HTTP 404/410 («الصفحة غير موجودة») is GONE, and so "
+        "is a 200 for this post whose own title/price/spec list says تم البيع / مباع / محجوز / مزاد; a "
+        "200 carrying this post's own shortlink ?p=<id> with none of those words (and no "
+        "deal-dependent «مؤجر») is LIVE; another post's page, 401/403/429/5xx and a timeout are "
+        "UNKNOWN. Removals are canary-gated on a post this crawl just read answering live.",
+        "Promoted 2026-10-27 (owner rule 2026-10-26: every ad we keep gets a direct dead-ad check): the crawl already opens every post's own page, so that read is stamped through db.mark_direct_alive (zero extra requests); the same page is the removal oracle handed to prune_unseen."),
     "daraa": _P(
         _pol("daraa", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over /projects?page=N (33 projects). "
@@ -1383,11 +1412,11 @@ POLICIES: dict[str, _P] = {
               "each run, so absence is a strong (but still non-authoritative) hint. Rows here are "
               "reported as unverified, never as verified-alive.")
         for p in (
-            "abralosol", "abwbna", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "amlakalahsa", "aouj", "aqaratikom",
+            "abralosol", "abwbna", "alkhaas", "alobid", "amaall", "amlakalahsa", "aouj", "aqaratikom",
             "arkaan", "awal", "azdad", "bahadhabab", "erapulse",
             "jurash",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
-            "shmoualshmal", "therc",
+            "shmoualshmal",
         )
     },
 }
