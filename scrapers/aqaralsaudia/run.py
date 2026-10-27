@@ -534,6 +534,12 @@ def main() -> int:
                 print(f"⚠ {tbl}: prune guard tripped — kept existing active")
             else:
                 pruned += n
+            # The rows this crawl SAW get the same direct read of their own REST record
+            # (2026-10-27): the list is re-read in full every run, so no row ever reached grace and
+            # _verify_gone had never been asked — 16 active rows, 0 ever verified. stamp_seen_alive
+            # records only its LIVE answer (HTTP 200, this id, status=publish); it can never strike
+            # or hide, and an UNKNOWN read writes nothing.
+            db.stamp_seen_alive(tbl, {r["ad_number"] for r in rows}, _verify_gone, source="AqarAlSaudia")
 
         print(f"✓ AqarAlSaudia: {len(res_rows)} residential + {len(com_rows)} commercial upserted, "
               f"{pruned} stale pruned, {superseded} superseded sibling(s) retired")

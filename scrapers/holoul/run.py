@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -36,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
 
@@ -173,6 +175,79 @@ def map_unit(u: dict) -> tuple[Optional[tuple[dict, str]], str]:
     return (row, category), ""
 
 
+# ── LIVENESS: the unit's OWN API record (measured 2026-10-27) ───────────────────────────────────
+# GET https://app.holoul.io/customer/api/v1/units/<uuid>  (NO trailing slash — with one, every id,
+# live or not, answers Django's generic HTML «Not Found» page, which is a ROUTE miss, not an answer):
+#   live unit   → 200 JSON whose `id` is this uuid, status «listed», project.status «listed»
+#   unknown id  → 404 JSON {"error": ["unit__not_found"]}            → GONE (the source's own words)
+#   a 200 for this uuid whose unit or project is no longer «listed»   → GONE (the source unlisted it;
+#                 the crawl skips exactly these as not_listed_*)
+#   anything else (the HTML route 404, 403/429/5xx, timeout, another id, no licence) → UNKNOWN
+# nhc_end_at is NOT read (owner decision 2026-10-02, lifecycle-gaps.txt: every kept row carries a past
+# nhc_end_at and the site does not act on it).
+UNIT_API = API   # .../units/  + <uuid>
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def _signal_for(uid: str):
+    def _signal(status, body, _moved):
+        try:
+            j = json.loads(body)
+        except (ValueError, TypeError):
+            return None                       # an HTML page (the route-miss 404) is no answer
+        if not isinstance(j, dict):
+            return None
+        if status == 404 and "unit__not_found" in (j.get("error") or []):
+            return "gone"
+        if status != 200 or j.get("id") != uid:
+            return None
+        proj = j.get("project") if isinstance(j.get("project"), dict) else {}
+        if j.get("status") is None or proj.get("status") is None:
+            return None                       # a record without its status fields says nothing
+        if j.get("status") != "listed" or proj.get("status") != "listed":
+            return "gone"
+        if not j.get("nhc_ad_license_number"):
+            return None                       # unlicensed: not inventory we would show, not a removal
+        return "live"
+    return _signal
+
+
+def _uid(ad_number: str) -> Optional[str]:
+    uid = ad_number[len(PREFIX):] if ad_number.startswith(PREFIX) else ""
+    return uid if _UUID_RE.match(uid) else None
+
+
+def _make_verify_gone(session_fn, control_ad: Optional[str]):
+    """verify_gone(ad_number) for prune_unseen and stamp_seen_alive. A removal is withheld unless
+    `control_ad` (a unit THIS crawl just served) reads live through the same oracle (fails CLOSED)."""
+    state: dict[str, tuple[bool, str]] = {}
+
+    def one(ad_number: str):
+        uid = _uid(ad_number)
+        if not uid:
+            return "unknown", f"{ad_number!r} is not an {PREFIX}<uuid> ad number"
+        return LivenessProbe(platform=SLUG, signal=_signal_for(uid), session=session_fn,
+                             url_for=lambda _ad: UNIT_API + uid).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if "v" not in state:
+            if not control_ad:
+                state["v"] = (False, "no unit from this crawl to use as a live control")
+            else:
+                verdict, why = one(control_ad)
+                state["v"] = (verdict == "live", f"control {control_ad}: {verdict} ({why})")
+        return state["v"]
+
+    def verify_gone(ad_number: str):
+        verdict, why = one(ad_number)
+        if verdict == "gone":
+            ok, cwhy = canary()
+            if not ok:
+                return "unknown", f"removal withheld — {cwhy} (would have been: {why})"
+        return verdict, why
+    return verify_gone
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", default="all")
@@ -221,13 +296,21 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
         complete = len(units) >= declared > 0
+        seen_all = sorted(r["ad_number"] for r in res + com)
+        verify_gone = _make_verify_gone(lambda: s, seen_all[0] if seen_all else None)
         for tbl, rr in (("holoul_residential_listings", res), ("holoul_commercial_listings", com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE,
+                                    verify_gone=verify_gone)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
+            if rr:
+                # Every unit this crawl served gets its OWN record read (2026-10-27): the list is
+                # re-read in full nightly, so no row ever reached grace and none was ever verified.
+                # Only a 'live' answer writes (the contract's stamp); nothing here can hide a unit.
+                db.stamp_seen_alive(tbl, {r["ad_number"] for r in rr}, verify_gone, source=SOURCE)
         if not complete:
             print("  NOT pruning: the walk fell short of the declared total", flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(units), rows_upserted=len(res) + len(com),

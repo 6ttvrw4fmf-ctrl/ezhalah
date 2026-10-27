@@ -85,7 +85,7 @@ def test_fkralemar_main_writes_only_readable_live_cards_and_names_the_rest(monke
     monkeypatch.setattr(F, "db", types.SimpleNamespace(
         begin_run=lambda slug: 3,
         _wasalt_batch=lambda table, rows: calls["batches"].append((table, {r["ad_number"]: r["title"] for r in rows})),
-        retire_superseded_siblings=lambda **kw: 0,
+        mark_direct_alive=lambda row, oracle=None: row, retire_superseded_siblings=lambda **kw: 0,
         prune_unseen=lambda table, seen, source=None, verify_gone=None: 0,
         end_run=lambda run_id, **kw: calls.update(end=kw) or True))
     monkeypatch.setattr(sys, "argv", ["run"])
@@ -113,7 +113,7 @@ def test_fkralemar_main_aborts_red_when_no_card_has_a_readable_ribbon(monkeypatc
     monkeypatch.setattr(F, "db", types.SimpleNamespace(
         begin_run=lambda slug: 3,
         _wasalt_batch=lambda table, rows: calls["batches"].append(table),
-        retire_superseded_siblings=lambda **kw: 0,
+        mark_direct_alive=lambda row, oracle=None: row, retire_superseded_siblings=lambda **kw: 0,
         prune_unseen=lambda table, seen, source=None, verify_gone=None: calls["prunes"].append(table) or 0,
         end_run=lambda run_id, **kw: calls.update(end=kw) or True))
     monkeypatch.setattr(sys, "argv", ["run"])
