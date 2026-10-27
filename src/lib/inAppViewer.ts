@@ -192,6 +192,19 @@ export const IN_APP_PREVIEW_HOSTS = [
   'hazim.sa',
   'eydah.com',
   '8floor.sa',
+  // 2026-10-27: the ten hosts #7836 missed (it covered the district-border set only). They refuse framing
+  // (or are login-walled / removed at source) and were opening the source in a new tab, so the card never
+  // reached Ezhalah's ad page. Owner rule 2026-10-20: every listing opens Ezhalah's ad page.
+  'haraj.com.sa',
+  'manzo.com.sa',
+  'albdah.sa',
+  'alhoshan.sa',
+  'aqaralsaudia.com',
+  'fursaghyr.com',
+  'nafithh.com',
+  'nawait.sa',
+  'just.sa',
+  'sadin.com.sa',
 ] as const;
 export function inAppPreviewHost(url: string | null | undefined): string | null {
   if (!url) return null;
