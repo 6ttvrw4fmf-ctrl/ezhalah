@@ -115,7 +115,7 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
           {/* Link-preview look (owner 2026-10-18: «smaller … professional»): a small framed logo, the
               name, a two-line description, and the bare domain in small muted type — not a big link. */}
           <View style={s.logoFrame}>
-            <RNImage source={require('../../public/og-image-v7.png')} style={s.logo} resizeMode="contain" />
+            <RNImage source={require('../../public/og-image-v8.png')} style={s.logo} resizeMode="contain" />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.pvT}>{t('Ezhalah')}</Text>
