@@ -30,6 +30,7 @@ import time
 from collections import Counter, defaultdict
 from typing import Any, Optional
 
+from scrapers.common import normalize as N
 from scrapers.facts import word_checker as W
 from scrapers.facts.extract import GT_COLUMNS, _text_col, norm, platform_of, source_value
 
@@ -40,6 +41,18 @@ MODELS = {   # name → (HF repo, pinned revision, text prefix)
                    "e8f8c211226b894fcb81acc59f3b34ba3efd5f42", ""),
 }
 PAGE = 500
+# THE READER'S VERSION (2026-10-27, migration 20261027111648): a hash of the two files that decide what the reader finds.
+# Every overlay row carries it, and text_facts_todo re-reads any row an OTHER version read — so a lesson (new words in
+# word_checker.py) reaches the ~415k ads read before it, instead of only the ads that arrive after it.
+def _reader_version() -> str:
+    h = hashlib.sha1()
+    for path in (W.__file__, N.__file__):
+        with open(path, "rb") as fh:
+            h.update(fh.read())
+    return h.hexdigest()[:16]
+
+
+READER_VERSION = _reader_version()
 PAUSE_S = 0.15
 MIN_NORM_CHARS = 20
 
@@ -431,7 +444,8 @@ def overlay_row(table: str, r: dict[str, Any], run_id: str) -> tuple[dict[str, A
                   for f in found if f["fact"] in AF_NUM_COLUMNS and f["value_num"] is not None and (f["quote"] or "").strip()})
     row = {"source_table": table, "listing_id": int(r["id"]), "platform": platform_of(table),
            "listing_key": str(r["ad_number"]), "src_hash": r["src_hash"], "facts": facts, "run_id": run_id,
-           "read_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "stale_at": None}
+           "read_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "stale_at": None,
+           "reader_version": READER_VERSION}
     return row, found
 
 
@@ -446,6 +460,8 @@ def run_incremental(args: argparse.Namespace) -> int:
     platforms = set(args.platforms.split(",")) - {""} if args.platforms else None
     t_start = time.time()
     stats: Counter = Counter()
+    client.rpc("text_facts_reader_version_seen", {"p_version": READER_VERSION}).execute()
+    print(f"reader version {READER_VERSION}: ads read by any other version are re-read")
 
     def write(tbl: str, rows: list[dict[str, Any]], conflict: str, ignore: bool) -> None:
         for i in range(0, len(rows), 500):
@@ -463,7 +479,8 @@ def run_incremental(args: argparse.Namespace) -> int:
         after, got = 0, 0
         while not args.limit or got < args.limit:
             page = client.rpc("text_facts_todo", {"p_table": table, "p_after": after, "p_limit": PAGE,
-                                                 "p_shard": shard, "p_shards": shards}).execute().data or []
+                                                 "p_shard": shard, "p_shards": shards,
+                                                 "p_reader_version": READER_VERSION}).execute().data or []
             if not page:
                 break
             after = int(page[-1]["id"])
@@ -509,6 +526,7 @@ def selftest() -> None:
     # Rule B for numbers: the one quoted width rides along as a JSON number; a corner plot hands over none.
     assert row["facts"].get("street_width_m") == {"v": 20.0, "q": "شارع عرض 20م"}, row
     assert set(row["facts"]) <= set(AF_COLUMNS) | set(AF_NUM_COLUMNS) and row["stale_at"] is None and row["listing_id"] == 7
+    assert row["reader_version"] == READER_VERSION and re.fullmatch(r"[0-9a-f]{16}", READER_VERSION), row
     corner, _ = overlay_row("aqar_residential_listings", dict(id=9, ad_number="A9", src_hash="0" * 32,
                             title="أرض للبيع", body="أرض زاوية على شارع 20م شرقي وشارع 15م شمالي"), "facts-words-t")
     assert "street_width_m" not in corner["facts"], corner
