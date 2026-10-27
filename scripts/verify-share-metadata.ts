@@ -43,7 +43,7 @@ const SHARE = 'src/lib/share.ts';
 const OG_FILE = 'public/og-image-v9.png';
 // The page description = the sentence under the title in a Google result (owner 2026-10-27): a free AI
 // property search engine for Saudi Arabia only — all sites, market trends, Ministry of Justice prices — «جربه الآن».
-const REQUIRED_AR = 'محرك بحث عقاري مجاني بالذكاء الاصطناعي في السعودية: من المنصات الكبيرة لمكاتب الوساطة، من الرياض لحقل، من الفلل للأراضي الخام. بيع وإيجار وإقامات قصيرة. إزهله وخله يدور عنك.';
+const REQUIRED_AR = 'محرك بحث عقاري مجاني بالذكاء الاصطناعي في السعودية: من المنصات الكبيرة لمكاتب الوساطة، من الرياض لحقل، من الفلل للأراضي الخام. بيع وإيجار وإقامات قصيرة. إزهله. خله يلقاه لك.';
 const REQUIRED_EN = 'Free AI property search in Saudi Arabia: big platforms to small offices, Riyadh to Haql, villas to raw land. Buy, rent or short stays. Let Ezhalah search for you.';
 // Either word, anywhere in the line, names the country — «في» is not required: the 2026-09-25
 // wording says «عقارات السعودية», not «في السعودية».
