@@ -268,7 +268,7 @@ export default function Home() {
   // signed in, until the line's numbers are in — then it rises once and is final for this load.
   // «كيف تشتغل؟» opens when the user taps a market fact in the headline (owner 2026-10-22).
   const [howOpen, setHowOpen] = useState(false);
-  const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey, isInsight: welcomeIsInsight } = useFilterWelcome(!!user, sentenceName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
+  const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey, isInsight: welcomeIsInsight, celebrate: welcomeCelebrate } = useFilterWelcome(!!user, sentenceName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
   // «حفظ» in the «وش نناديك؟» box: while its party plays, the welcome headline shines (2 passes, owner-approved demo).
   const [heroShine, setHeroShine] = useState(false);
   useEffect(() => {
@@ -1452,12 +1452,13 @@ export default function Home() {
           <View style={s.hero}>
             <CloudWisp variant={1} width={100} height={34} opacity={0.38} style={{ left: -40, top: 12 }} />
             <CloudWisp variant={2} width={90} height={28} opacity={0.32} style={{ right: -35, bottom: 18 }} />
-            {/* The falconer (owner 2026-10-26): ONE FIXED SPOT, centred above the title, whatever the line says — the title
-                rotates between sentences of different lengths, and following its last word made him jump around («make it
-                fixed»). Guests only; in Arabic the drawing is flipped. His falcon takes off on every open and refresh. */}
-            {authChecked && !user ? (
+            {/* The falconer (owner 2026-10-26): ONE FIXED SPOT, centred above the title, whatever the line says («make it
+                fixed»). A guest sees the plain falconer whose falcon takes off on every open; a signed-in user sees the
+                green bearded falconer with his hooded gold falcon and a golden bulb lit inside his head, and the moment they
+                sign in the whole story plays once (HeroFalconer). In Arabic the drawing is flipped. */}
+            {authChecked ? (
               <View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, s.heroFalconerAbove]}>
-                <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} />
+                <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} signedIn={!!user} celebrate={welcomeCelebrate} />
               </View>
             ) : null}
             <View style={heroWide ? s.heroTitleBlockWide : s.heroTitleBlock}>

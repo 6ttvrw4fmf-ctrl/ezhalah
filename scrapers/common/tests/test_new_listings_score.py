@@ -334,6 +334,15 @@ def test_latin_k_after_the_figure_is_thousands():
     assert compare_listing({"price_total": 990000}, page("السعر :", "990 km من المطار"))["price"] != MATCH
 
 
+def test_the_sites_category_menu_is_not_a_deal_claim():
+    # ashab 21084822 (2026-10-27): footer «بيع / إيجار / استثمار», the ad itself states no deal word
+    menu = ("الحد 230000 ر.س", "بيع", "إيجار", "استثمار")
+    assert compare_listing({"deal_ar": "بيع"}, page(*menu))["deal"] != MISMATCH
+    # a rent ad whose own line says «للإيجار» is still read, menu or not
+    assert compare_listing({"deal_ar": "بيع"}, page("أرض للإيجار", *menu))["deal"] == MISMATCH
+    assert compare_listing({"deal_ar": "إيجار"}, page("شقة للإيجار", *menu))["deal"] == MATCH
+
+
 def test_annual_rent_is_compared_as_stored():
     stored = {"price_annual": 75456, "rent_period_ar": "سنوي"}
     assert compare_listing(stored, page("75,456 ريال سنوياً"))["price"] == MATCH

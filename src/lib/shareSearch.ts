@@ -214,8 +214,8 @@ export const SHARE_CARD = {
 // SMALL, under 300 px (owner 2026-10-18, twice: «look how big … keep it small», «the image is very big
 // still»). Measured on the owner's own WhatsApp: the 512 px logo renders as a BIG banner over the card
 // (11:42 PM screenshot, /s/lLzdSNTR); the 192 px one rendered as the small square beside the text (2:57 PM,
-// /s/bkTsnLiQ). Same 192 px file as the main link's card (middleware.ts, og-image-v7.png).
-export const SHARE_CARD_IMAGE_PATH = '/og-image-v7.png';
+// /s/bkTsnLiQ). Same 192 px file as the main link's card (middleware.ts, og-image-v9.png).
+export const SHARE_CARD_IMAGE_PATH = '/og-image-v9.png';
 // A SHARED LINK's card (owner 2026-10-22, approved mockup): the title is the SAME invite the visitor then sees
 // on the sign-in popup — «يوسف شاركك: شقق للإيجار في حي النرجس» (shareInviteNote) — and the line under it says
 // what Ezhalah is. The live counts stay on the plain home-link card (middleware.ts) and a broken link's card.
