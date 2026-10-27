@@ -12,7 +12,7 @@ import { Platform } from 'react-native';
  *  every viewport width), and the layer is gone at PARTY_MS. Self-contained CSS/DOM: no external script. */
 export const PARTY_MS = 4000;
 export const BURST_MS = 1500;
-export const CONFETTI_PIECES = 360;
+export const CONFETTI_PIECES = 500;
 /** Party colours: Ezhalah greens and gold plus pink, blue, violet and white. */
 export const CONFETTI_COLORS = ['#2f7247', '#5fae7c', '#d8b14a', '#f2c14e', '#e9739a', '#4f8fe0', '#ffffff', '#a77ee8'];
 /** A second celebration this soon after one is skipped: the sign-up box and the sign-in welcome never stack. */
