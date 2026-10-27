@@ -148,6 +148,10 @@ DISTRICT_ON_PAGE = re.compile(r"(?<![^\s|،,(:\-–ب])حي\s+\S+")
 # never the ad: aqalemhajer prints «الأحساء, الهفوف, حي الملك فهد, هاتف:…» under every ad (2026-10-12).
 CONTACT_LINE = re.compile(r"هاتف|جوال|واتس|س\.ت|السجل التجاري|tel:|<num>|\d{9,}", re.I)
 DEAL_KW = {"بيع": r"للبيع|شراء", "ايجار": r"للايجار|ايجار"}
+# The site's own category menu is not the ad: ashab 21084822 (2026-10-27, re-read run 40470543056), a land
+# plot for sale whose page states no deal word, carries the footer links «بيع / إيجار / استثمار» on three
+# consecutive lines, and the bare «إيجار» scored a rent claim. Only that exact consecutive run is dropped.
+SITE_DEAL_MENU = re.compile(r"(?m)^بيع\nايجار\nاستثمار$")
 
 
 def _num_pattern(v) -> re.Pattern:
@@ -227,7 +231,7 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
         elif kind == "district":
             out[name] = PAGE_SILENT if prose_only_district else _cmp_district(stored.get(col), whole_loc)
         elif kind == "deal":
-            out[name] = _cmp_valued(stored.get(col), whole, DEAL_KW)
+            out[name] = _cmp_valued(stored.get(col), SITE_DEAL_MENU.sub("", whole), DEAL_KW)
         else:
             out[name] = _cmp_word(stored.get(col), whole, kw)
     return out
