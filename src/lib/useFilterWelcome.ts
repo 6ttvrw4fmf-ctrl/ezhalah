@@ -102,10 +102,13 @@ const UNSETTLED: Shown = { settled: false, id: null, ar: null, en: null, nameAr:
 export function useFilterWelcome(
   signedIn: boolean, name: string, locale: 'ar' | 'en',
   lastLocation: string | null | undefined, lastDistrict?: string | null,
-): { line: string | null; settled: boolean; swapKey: number; isInsight: boolean } {
+): { line: string | null; settled: boolean; swapKey: number; isInsight: boolean; celebrate: number } {
   const [shown, setShown] = useState<Shown>(UNSETTLED);
   // Bumped when the sign-in welcome hands over to a market insight, so the screen can show the change.
   const [swapKey, setSwapKey] = useState(0);
+  // Bumped the moment a sign-in welcome is taken (this load, or a sign-in that lands while the home is up): the
+  // falconer plays his sign-in animation on it (owner 2026-10-26). 0 = no sign-in this page load.
+  const [celebrate, setCelebrate] = useState(0);
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
 
@@ -156,7 +159,7 @@ export function useFilterWelcome(
     const greetIdx = pickGreeting(now);
     setShown(inst ? { settled: true, id: inst.id, ar: inst.ar, en: inst.en, nameAr, nameEn, greet: greetIdx } : { settled: true, id: null, ar: null, en: null, nameAr, nameEn, greet: greetIdx });
     if (!session.present) return;
-    if (greet) welcomeThenInsight();
+    if (greet) { welcomeThenInsight(); setCelebrate((c) => c + 1); }
     // What is on screen now is the SHOWN line, and its 2 hours start now when it is new to this device
     // (a prepared line seen for the first time, or the no-numbers line used when nothing was ready).
     if (inst && (!inst.fromCache || inst.promoted)) {
@@ -212,6 +215,7 @@ export function useFilterWelcome(
       const session = readStoredSession();
       const g = takeGreeting(session, now);
       if (!g) return;
+      setCelebrate((c) => c + 1);
       writeCache({ id: g.id, at: now, ar: g.ar, en: g.en });
       setShown({ settled: true, id: g.id, ar: g.ar, en: g.en, nameAr: session.nameAr, nameEn: session.nameEn });
       welcomeThenInsight();
@@ -234,6 +238,6 @@ export function useFilterWelcome(
       ? fillName(fillGreeting(shown.ar, shown.greet ?? null, 'ar'), live || shown.nameAr, 'ar')
       : fillName(fillGreeting(shown.en, shown.greet ?? null, 'en'), live || shown.nameEn, 'en');
     // A market fact (not the sign-in welcome or an older line) can be tapped for «كيف تشتغل؟».
-    return { line: text, settled: shown.settled, swapKey, isInsight: shown.id != null && isInsightLineId(shown.id) };
-  }, [shown, locale, signedIn, name, swapKey]);
+    return { line: text, settled: shown.settled, swapKey, isInsight: shown.id != null && isInsightLineId(shown.id), celebrate };
+  }, [shown, locale, signedIn, name, swapKey, celebrate]);
 }
