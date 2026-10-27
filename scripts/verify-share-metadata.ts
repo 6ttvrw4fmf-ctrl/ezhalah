@@ -40,7 +40,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 
 const LAYOUT = 'src/app/_layout.tsx';
 const SHARE = 'src/lib/share.ts';
-const OG_FILE = 'public/og-image-v8.png';
+const OG_FILE = 'public/og-image-v9.png';
 // The page description = the sentence under the title in a Google result (owner 2026-10-27): a free AI
 // property search engine for Saudi Arabia only — all sites, market trends, Ministry of Justice prices — «جربه الآن».
 const REQUIRED_AR = 'محرك بحث عقاري مجاني بالذكاء الاصطناعي في السعودية: من المنصات الكبيرة لمكاتب الوساطة، من الرياض لحقل، من الفلل للأراضي الخام. بيع وإيجار وإقامات قصيرة. خل إزهله يدور عنك.';
@@ -152,7 +152,7 @@ if (existsSync(OG_FILE)) {
   check('the share artwork matches the owner-selected icon exactly', buf.equals(readFileSync('public/icon-192.png')));
   check('metadata dimensions match the actual image', L.includes('property="og:image:width" content="192"') && L.includes('property="og:image:height" content="192"'));
   const sheet = readFileSync('src/components/ShareSheet.tsx', 'utf8');
-  check('the in-app preview uses the same approved artwork', sheet.includes("require('../../public/og-image-v8.png')"));
+  check('the in-app preview uses the same approved artwork', sheet.includes("require('../../public/og-image-v9.png')"));
   const kb = Math.round(buf.length / 1024);
   check(`the share image is under 300KB so crawlers fetch it (${kb}KB)`, kb <= 300);
 }

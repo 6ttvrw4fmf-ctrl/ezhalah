@@ -24,7 +24,7 @@ export function shareOrigin(): string {
 // v7 = the cloud-eagle logo, 192×192 (owner 2026-10-24: «this is the final logo … replace it everywhere»). v6 = 192×192 (owner 2026-10-18: «look how big … keep it small»). WhatsApp draws a BIG banner for an
 // og:image ≥ ~300px wide and a small side thumbnail below that — the same 192px card the search-share
 // links (/s/…) already get. Keep it under 300px.
-export const OG_IMAGE = `${SHARE_LINK}/og-image-v8.png`;
+export const OG_IMAGE = `${SHARE_LINK}/og-image-v9.png`;
 // THE PAGE DESCRIPTION — the sentence under Ezhalah's title in a Google result (owner 2026-10-27, built with the owner from
 // phone-width previews): a free AI property search engine in Saudi Arabia, then three «from … to …» pairs — big
 // platforms to small brokerage offices, Riyadh to Haql (a far, uncommon city with real listings), villas to raw

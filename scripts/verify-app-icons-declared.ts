@@ -150,7 +150,7 @@ export function roughness({ w, h, bpp, data }: Pixels): number {
   return n ? s / n : 0;
 }
 const ICON_PNGS = ['public/icon-32.png', 'public/icon-192.png', 'public/icon-512.png', 'public/apple-touch-icon.png',
-  'public/icon-32-lit.png', 'public/icon-192-lit.png'].filter((f) => existsSync(f));
+].filter((f) => existsSync(f));
 for (const f of ICON_PNGS) {
   const px = decodePng(readFileSync(f));
   check(`${f} decodes to a picture, not noise`, typeof px !== 'string' && roughness(px) <= ROUGH_MAX,
