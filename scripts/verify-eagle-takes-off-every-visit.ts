@@ -19,7 +19,7 @@ const comp = read('src/components/HeroFalconer.tsx');
 const home = read('src/app/index.tsx');
 const svg = read('assets/images/falcon-takeoff.svg');
 
-console.log('\nThe falconer closes the headline; his falcon takes off on every visit\n');
+console.log('\nThe falconer ends the Ezhalah line (one fixed spot); his falcon takes off on every visit\n');
 
 // ── the falcon ───────────────────────────────────────────────────────────────────────────────────────────────
 // (a signed-in user's falcon is already on his hand, so the guest take-off is skipped for them — `|| signedIn`)
@@ -36,21 +36,20 @@ check('the falcon is drawn a little larger, about its perch on his hand',
 check('the falconer drawing itself is never animated',
   /<XImage source=\{FALCONER\} contentFit="contain" accessible=\{false\} style=\{StyleSheet\.absoluteFill\} \/>/.test(comp));
 
-// ── the falconer closes the headline (owner 2026-10-27: «in the end of the sentence we include this falcon guy … let
-//     the falconer look smooth»; replaces 2026-10-26's fixed spot above the title) ─────────────────────────────────
-const atEnd = (h: string) => {
-  const title = h.indexOf('testID="hero-insight"');
-  const at = h.indexOf('testID="hero-falconer"');
-  return title > 0 && at > title                                                     // he comes AFTER the title opens …
-    && h.includes("{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}{authChecked ? (\n                  <>{' '}<View testID=\"hero-falconer\"") // … right after its last word
-    && h.includes(') : null}</RNAnimated.Text>')                                   // … inside the headline text
-    && h.includes("heroFalconerInline: { display: 'inline-flex', verticalAlign: 'middle'"); // … on the text line
-};
-check('the falconer sits at the end of the headline, on the text line', atEnd(home));
+// ── the falconer ends the Ezhalah line, ONE FIXED SPOT signed in or out (owner 2026-10-27: «I want them to always be
+//     in the same position … without changing its location»; he moved with the headline's words when he ended it) ──
+const SUB = "{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}{' '}<View testID=\"hero-falconer\"";
+const atEnd = (h: string) => h.includes(SUB)                                        // right after the Ezhalah line's last word …
+  && h.indexOf('testID="hero-falconer"') > h.indexOf('{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>') // … not in the changing headline
+  && (h.match(/testID="hero-falconer"/g) ?? []).length === 1                         // … in one place only
+  && h.includes("heroFalconerInline: { display: 'inline-flex', verticalAlign: 'middle'"); // … on the text line
+check('the falconer stands at one fixed spot: the end of the Ezhalah line (same words for everyone), never in the headline', atEnd(home));
 const small = (h: string) => { const m = h.match(/heroFalconer: \{ width: (\d+), height: (\d+) \}/); const w = h.match(/heroFalconerWide: \{ width: (\d+), height: (\d+) \}/);
   return !!m && !!w && +m[2] <= 50 && +w[2] <= 64 && +m[2] >= 34; };
-check('…small, about two lines of the headline tall', small(home));
-check('…once auth is known, for guests AND signed-in users (who get the sign-in falconer)', home.includes("{authChecked ? (\n                  <>{' '}<View testID=\"hero-falconer\""));
+check('…small', small(home));
+// his box is there from the first frame; only what is inside waits for sign-in to be known, so the line never re-wraps
+const heldBox = (h: string) => h.includes(SUB) && /<View testID="hero-falconer"[^>]*>\n\s*\{authChecked \? <HeroFalconer /.test(h);
+check('…his box is held from the first frame, the drawing fills it once sign-in is known, for guests AND signed-in users', heldBox(home));
 check('…flipped in Arabic, told who is signed in and when a welcome was taken, with no clouds over the words',
   home.includes("<HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} signedIn={!!user} celebrate={welcomeCelebrate} inline />")
   && comp.includes('{inline ? null : <CloudWisp variant={0}') && comp.includes('{inline ? null : (<>'));
@@ -88,9 +87,10 @@ mustCatch('motion left in the settled still', !isStill(still.replace('</svg>', '
 mustCatch('the bulb drawn outside his head', !bulbInside(signin.replace(/<g clip-path="url\(#headInside\)">/g, '<g>')));
 mustCatch('every play sharing one finished timeline', !fresh(comp.replace("play=${play}", '')));
 mustCatch('a looping flight', !svgOk(svg.replace('animation:path 2.8s', 'animation:path 2.8s infinite')));
-mustCatch('the falconer moved back above the title', !atEnd(home.replace("{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}{authChecked ? (", "{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}{false ? (")));
+mustCatch('the falconer moved back into the changing headline', !atEnd(home.replace("{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>", "{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}<View testID=\"hero-falconer\" /></RNAnimated.Text>")));
+mustCatch('his box appearing only once sign-in is known (the line re-wraps)', !heldBox(home.replace(/<View testID="hero-falconer"([^>]*)>\n(\s*)\{authChecked \? <HeroFalconer /, '<View testID="hero-falconer"$1>\n$2{true ? <HeroFalconer ')));
 mustCatch('the falconer as a block under the words (not on the text line)', !atEnd(home.replace("heroFalconerInline: { display: 'inline-flex'", "heroFalconerInline: { display: 'flex'")));
 mustCatch('a big falconer again', !small(home.replace('heroFalconer: { width: 40, height: 46 }', 'heroFalconer: { width: 62, height: 72 }')));
 
 if (fail) { console.error(`\n❌ ${fail} check(s) failed`); process.exit(1); }
-console.log('\n✅ eagle-takes-off-every-visit: at the end of the headline, the falcon flies on every open, never looping');
+console.log('\n✅ eagle-takes-off-every-visit: one fixed spot at the end of the Ezhalah line, the falcon flies on every open, never looping');
