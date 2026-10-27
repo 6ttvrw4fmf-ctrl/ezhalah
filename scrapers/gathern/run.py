@@ -128,8 +128,8 @@ TYPE_MAP = {
 }
 
 # SHORT STAYS (owner 2026-10-25: every type the site shows; they belong in the future «Short stays» rent
-# group). Built but OFF: ingested only when GATHERN_SHORT_STAYS=1, so nothing reaches search until the
-# owner says yes. Measured live 2026-10-25 (distinct units): Al Kharj 72 chalets + 11 rest houses + 6 camps
+# group). Ingested only when GATHERN_SHORT_STAYS=1; the owner said yes 2026-10-27 and gathern-sync.yml
+# sets it. Measured live 2026-10-25 (distinct units): Al Kharj 72 chalets + 11 rest houses + 6 camps
 # of 454; Abha 79 + 22 + 6 of 990. Not mapped: 4 مزرعة (a Farm is a COMMERCIAL type; this scraper writes
 # only the residential table) and 1 منتجع (no catalogue type) — owner questions, never guessed.
 SHORT_STAY_TYPE_MAP = {
