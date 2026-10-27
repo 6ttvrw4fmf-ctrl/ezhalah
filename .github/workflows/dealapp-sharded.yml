@@ -27,7 +27,14 @@
 # own GitHub runner with its own IP and its own throttle, which is precisely what makes parallelism
 # help here rather than hurt.
 #
-# SAFETY. Shard membership is `int(ad_number) % 12` (scrapers/common/db.py::_ad_shard) — a total
+# 24 SHARDS, 12 AT A TIME (2026-10-27). Measured 2026-10-26: each of the 12 shards owned ~3,000 ids
+# (held + new) against dealapp's ~9 origin renders/min per IP, so 6-8 shards ran out their 100-minute
+# budget every night (not_reached_time_budget 726-2,181), re-saw < 70% of their slice, and the prune
+# guard (correctly) withheld every prune — while ~23k sitemap ids (about 40%) were never fetched.
+# 24 shards halves each slice; max-parallel stays 12, so dealapp never sees more concurrent
+# runners than before (the login-wall is a burst limit) — the night simply runs two waves.
+#
+# SAFETY. Shard membership is `int(ad_number) % N` (scrapers/common/db.py::_ad_shard) — a total
 # function, so every listing is owned by exactly one shard, no listing by two, and the union is the
 # whole id space. `prune_unseen` filters the active set by that same key, so a shard can only ever
 # age out ids it owns, and a blocked 0-row shard still prunes nothing at all. Proven by
@@ -49,14 +56,14 @@ env:
 
 jobs:
   crawl:
-    name: Deal App shard ${{ matrix.shard }}/12
+    name: Deal App shard ${{ matrix.shard }}/24
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 120
     strategy:
-      fail-fast: false   # one blocked shard must never cancel the other eleven
+      fail-fast: false   # one blocked shard must never cancel the others
       max-parallel: 12
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
     steps:
       - uses: actions/checkout@v4
 
@@ -73,9 +80,9 @@ jobs:
       # login-wall is triggered by concurrent burst, not by total volume. 12 shards x 20s = at most
       # ~4 minutes of skew, negligible against an ~84 minute worst-case shard.
       - name: Stagger shard start
-        run: sleep $(( ${{ matrix.shard }} * 20 ))
+        run: sleep $(( (${{ matrix.shard }} % 12) * 20 ))   # each wave of 12 staggers the same way
 
-      - name: Crawl shard ${{ matrix.shard }} of 12
+      - name: Crawl shard ${{ matrix.shard }} of 24
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -86,4 +93,4 @@ jobs:
           # coverage against.
           DEALAPP_MAX_LISTINGS: "1200"
           DEALAPP_WORKERS: "3"   # dealapp's origin trips a login-wall above ~3 workers (no proxy)
-        run: exec python -m scrapers.dealapp.run --type all --shards 12 --shard ${{ matrix.shard }}
+        run: exec python -m scrapers.dealapp.run --type all --shards 24 --shard ${{ matrix.shard }}
