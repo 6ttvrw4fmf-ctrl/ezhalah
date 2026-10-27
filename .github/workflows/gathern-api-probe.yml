@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "unit-api (per-unit endpoint discriminator) | app-link (does any web link open an app-only unit? 2026-10-06)"
+        description: "unit-api (per-unit endpoint discriminator) | app-link (does any web link open an app-only unit? 2026-10-06) | short-stays-dry (chalets/rest houses/camps, mapped and printed, nothing written; 2026-10-27)"
         required: false
         default: "unit-api"
       units:
@@ -38,7 +38,7 @@ jobs:
   probe:
     name: Does a per-unit endpoint exist, and does it discriminate?
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -52,6 +52,10 @@ jobs:
         env:
           PROBE_UNITS: ${{ github.event.inputs.units }}
         run: |
+          if [ "${{ github.event.inputs.mode }}" = "short-stays-dry" ]; then
+            # Owner 2026-10-27: try Gathern chalets/rest houses/camps. Dry run: no DB keys here, so it can only print.
+            GATHERN_SHORT_STAYS=1 GATHERN_DRY_SHOW=40 exec python -m scrapers.gathern.run --dry-run --shard 1/12 --max-pages 4
+          fi
           if [ "${{ github.event.inputs.mode }}" = "app-link" ]; then
             exec python -m scrapers.gathern.probe_app_only_link
           fi
