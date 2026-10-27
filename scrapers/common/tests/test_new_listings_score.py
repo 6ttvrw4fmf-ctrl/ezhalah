@@ -291,6 +291,41 @@ def test_monthly_rent_compares_the_monthly_figure():
     assert compare_listing(stored, page("7000 ريال / شهر"))["price"] == MISMATCH
 
 
+# ── The yearly pool serves a per-month rent under «سنوي» (owner 2026-10-25/26); the SOURCE period decides ──
+# ashab 20927683 (2026-10-27 score): source rent_period monthly, price_annual 108000; index سنوي 108000.
+
+def test_source_monthly_rent_served_yearly_compares_the_monthly_figure():
+    stored = {"price_annual": 108000, "rent_period_ar": "سنوي",
+              "source_rent_period": "monthly", "source_price_annual": 108000}
+    assert compare_listing(stored, page("السعر 9,000 ريال شهري"))["price"] == MATCH
+    assert compare_listing(stored, page("السعر 8,000 ريال شهري"))["price"] == MISMATCH
+    # without the source period the same row reads as a yearly figure, as before
+    assert compare_listing({"price_annual": 108000, "rent_period_ar": "سنوي"},
+                           page("السعر 9,000 ريال شهري"))["price"] == MISMATCH
+
+
+def test_cheap_yearly_served_x12_compares_the_sources_own_figure():
+    # rent_price_annual_ar serves a «yearly» 3,000 on an apartment as 36,000; the source says annual 3000
+    stored = {"price_annual": 36000, "rent_period_ar": "سنوي",
+              "source_rent_period": "annual", "source_price_annual": 3000}
+    assert compare_listing(stored, page("السعر 3,000 ريال سنوي"))["price"] == MATCH
+    assert compare_listing(stored, page("السعر 36,000 ريال سنوي"))["price"] == MISMATCH
+
+
+def test_score_site_reads_the_source_tables_period():
+    stored = {"source_table": "fake_residential_listings", "listing_id": 8, "platform": "fakesite",
+              "deal_ar": "إيجار", "rent_period_ar": "سنوي", "type_ar": "شقة", "price_annual": 108000}
+    client = FakeClient({
+        "search_listings_ar": [stored],
+        "fake_residential_listings": [{"id": 8, "listing_url": "https://example.test/8",
+                                       "rent_period": "monthly", "price_annual": 108000}],
+    })
+    html = "<html><body><p>شقة للإيجار</p><p>السعر 9,000 ريال شهري</p></body></html>"
+    row = score_site(client, "fakesite", [("fake_residential_listings", 8)],
+                     night="2026-10-27", pace=0, probe=lambda url: (200, html))
+    assert row["fields"]["price"][MATCH] == 1 and row["fields"]["price"].get(MISMATCH, 0) == 0
+
+
 def test_annual_rent_is_compared_as_stored():
     stored = {"price_annual": 75456, "rent_period_ar": "سنوي"}
     assert compare_listing(stored, page("75,456 ريال سنوياً"))["price"] == MATCH
