@@ -1,6 +1,13 @@
 """Manzo «available» is a live status (2026-10-27): the source renamed «active» → «available» ~10-13 and the
 crawl skipped every record since. Owner: take them if live and within our rules. Other statuses stay out."""
+import pytest
+
 from scrapers.manzo import run as R
+
+
+@pytest.fixture(autouse=True)
+def _catalog(monkeypatch):
+    monkeypatch.setattr(R, "to_catalog", lambda c, region_hint=None: (1, 1) if c else (None, None))
 
 
 def _d(**kw):
