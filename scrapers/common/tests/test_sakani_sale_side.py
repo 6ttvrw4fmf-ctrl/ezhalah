@@ -124,3 +124,10 @@ def test_a_sale_land_whose_own_text_names_commercial_use_is_commercial_land():
     assert (row["property_type"], cat) == ("Commercial Land", "commercial")
     row, cat, _ = R.map_listing({}, {**land, "description": "ارض سكنية"}, None, None, "sale")
     assert (row["property_type"], cat) == ("Residential Land", "residential")
+
+
+def test_a_float32_rendering_of_the_same_figure_is_not_a_price_conflict():
+    rich = {**RICH_20970, "marketplace_price": 1150042.125}
+    row, _, _ = R.map_listing({}, rich, {**DETAIL_20970, "unit_price": "1150042.14"}, None, "sale")
+    assert row["price_total"] == 1150042.125 and row["additional_info"]["price_note"] is None
+    assert row["additional_info"]["price_exact"] == "1150042.14"

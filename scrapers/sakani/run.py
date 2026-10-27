@@ -423,7 +423,9 @@ def _sale_price(rich: dict, d: dict) -> tuple[Any, Any, Optional[str]]:
         return None, None, None
     raw = d.get("unit_price") if d.get("unit_price") not in (None, "") else p
     try:
-        if float(raw) != float(p):
+        # 0.5 SAR: the rich row is a float32 rendering of the source's decimal (22169: 1150042.125 is
+        # the detail's "1150042.14"), the same figure, not a second statement.
+        if abs(float(raw) - float(p)) >= 0.5:
             return None, raw, f"marketplace_price {p} != detail unit_price {raw}"
     except (TypeError, ValueError):
         return None, raw, f"unparseable detail unit_price {raw!r}"
