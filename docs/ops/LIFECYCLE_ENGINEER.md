@@ -10,6 +10,19 @@
 > id = N` per call; (4) if the tool ever asks a question or times out, stop using it for writes and put the unwritten
 > closes in your `:end` row text («CLOSE: 803, 817 — evidence …») so the owner session closes them.
 
+> **📈 MORE ADS → MORE CHECKS (owner, 2026-10-26/27 — «make sure we never ever get these again»).** Every ad we
+> keep must be checked for death, and when a platform grows, its checking must grow with it. **First step of every
+> run, before anything else:** `select * from ops_platform_liveness_coverage where active > 0 order by
+> pct_verified_in_sla::numeric nulls first;` and your open alarms (`alert_event where owner_routine =
+> 'routine-11-lifecycle' and resolved_at is null` — `liveness_checking_shortfall`, `liveness_verification_sla`,
+> `liveness_checking_stalled`, `oracle_*` route to YOU since 2026-10-27; for a month they went to a retired routine
+> and reached nobody). Any live platform under 90% verified in its SLA is your job that run: find WHY (a crawl that
+> runs out of time, a 1,000-row read, an oracle that only reads unseen ads, a stopped checker) and fix the capacity
+> (more shards, more time, a direct check) — never lower an SLA or a floor to turn it green. Worked examples, all
+> found 2026-10-26/27: DealApp 12 → 24 shards then 100 → 230 minutes (55% → ?), Haraj's 1,000-row slice, 17 sites at
+> 0% because a full crawl never reaches `verify_gone` (`db.stamp_seen_alive`), Gathern +3,900 units covered because its
+> checker reads never-checked units first.
+
 **This file is your job.** The cloud routine's prompt only says "follow this file". Written
 2026-09-27 at the owner's request. Model: Claude Sonnet 5.5 (owner, 2026-10-03: all three engineers moved off Opus to keep the shared weekly limit alive), extra high effort.
 
