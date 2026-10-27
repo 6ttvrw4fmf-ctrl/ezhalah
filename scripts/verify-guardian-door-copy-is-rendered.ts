@@ -53,15 +53,18 @@ const components = srcFiles(join(ROOT, 'src')).filter((p) => p !== i18nPath).map
 // component does render must not, so the check can neither stay silent nor cry wolf. («إخلاء المسؤولية»
 // is not used here: the legal reader still prints it, so this whole-app check cannot tell it is gone
 // from /about. The check is app-wide, not per-door; the live journey is the per-door proof.)
-const ghost = unrendered(['الثقة والشفافية'], i18n, components);
-if (ghost.length !== 1) {
-  console.error(`✗ guardian door copy: mutation proof failed, the removed About headings read as rendered (${JSON.stringify(ghost)})`);
-  process.exit(1);
+function mustCatch(label: string, caught: boolean): void {
+  if (!caught) {
+    console.error(`✗ guardian door copy: mutation proof failed: ${label}`);
+    process.exit(1);
+  }
 }
-if (unrendered(['من نحن'], i18n, components).length) {
-  console.error('✗ guardian door copy: mutation proof failed, «من نحن» (rendered by InfoModal) reads as unrendered');
-  process.exit(1);
-}
+mustCatch('the removed About heading «الثقة والشفافية» reads as unrendered',
+  unrendered(['الثقة والشفافية'], i18n, components).length === 1);
+mustCatch('a DOORS block asserting the removed heading is caught end to end',
+  unrendered(doorStrings("const DOORS = [\n  { path: '/about', must: ['من نحن', 'الثقة والشفافية'] },\n];"), i18n, components).length === 1);
+mustCatch('«من نحن» (rendered by InfoModal) does not read as unrendered',
+  unrendered(['من نحن'], i18n, components).length === 0);
 
 const strings = doorStrings(journeys);
 if (strings.length < 4) {
