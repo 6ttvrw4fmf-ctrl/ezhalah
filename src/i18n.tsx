@@ -35,6 +35,23 @@ function hasAuthSession(): boolean {
   return false;
 }
 
+/** A sign-in is stored on this device (web) — the session may still be loading, but this is NOT a guest. */
+export const hasStoredAuthSession = hasAuthSession;
+
+// WHAT HAPPENS TO THE INTERFACE LANGUAGE WHEN SIGN-IN SETTLES (owner 2026-10-27: «I kept English, when I refresh it
+// goes back to Arabic»). The refresh bug: session restore gives up after 6 s on a slow connection, the app read that
+// as «guest», ERASED the saved language and switched to Arabic — and the real session arriving a moment later found
+// nothing left to restore. Now:
+//   signed in            → restore: the ACCOUNT's language first (same on every device), else this device's;
+//   not yet, but a sign-in is stored on this device → wait (never erase, never force Arabic);
+//   genuinely signed out (nothing stored) → guest: Arabic-first, nothing remembered.
+// Executed by scripts/verify-signed-in-language-is-kept.ts.
+export type LanguageOnAuth = { action: 'restore'; locale: Locale | null } | { action: 'wait' } | { action: 'guest' };
+export function languageOnAuth(s: { signedIn: boolean; storedSession: boolean; accountLocale?: Locale | null; deviceLocale?: Locale | null }): LanguageOnAuth {
+  if (s.signedIn) return { action: 'restore', locale: s.accountLocale ?? s.deviceLocale ?? null };
+  return s.storedSession ? { action: 'wait' } : { action: 'guest' };
+}
+
 // Read the saved language SYNCHRONOUSLY at module load (web) so the very first paint is already in
 // the right language + direction. A SIGNED-IN user's saved language loads with no flash; a GUEST is
 // ALWAYS Arabic-first (we ignore any leftover saved value), and a refresh/return keeps them Arabic.
