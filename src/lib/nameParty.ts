@@ -6,12 +6,13 @@ import { Platform } from 'react-native';
 // renders the same box without motion. prefers-reduced-motion: no motion, and startNameParty draws nothing.
 
 /** THE CELEBRATION IS A CONFETTI PARTY (owner 2026-10-27: «change the rain to confetti party … on a laptop full screen,
- *  phone full screen … let it last 4 seconds 5», after the moving preview; it replaces the 2026-10-26 green rain).
+ *  phone full screen … let it last 4 seconds 5», after the moving preview; it replaces the 2026-10-26 green rain). 4 s since the owner's
+ *  «it feels slow» (same day): the low end of the 4–5 s they asked for.
  *  CONFETTI_PIECES pieces burst from just under the clouds over BURST_MS, flutter down the WHOLE screen (fixed layer,
  *  every viewport width), and the layer is gone at PARTY_MS. Self-contained CSS/DOM: no external script. */
-export const PARTY_MS = 5000;
-export const BURST_MS = 2200;
-export const CONFETTI_PIECES = 360;
+export const PARTY_MS = 4000;
+export const BURST_MS = 1500;
+export const CONFETTI_PIECES = 500;
 /** Party colours: Ezhalah greens and gold plus pink, blue, violet and white. */
 export const CONFETTI_COLORS = ['#2f7247', '#5fae7c', '#d8b14a', '#f2c14e', '#e9739a', '#4f8fe0', '#ffffff', '#a77ee8'];
 /** A second celebration this soon after one is skipped: the sign-up box and the sign-in welcome never stack. */
@@ -81,7 +82,7 @@ export function startNameParty(reduced: boolean): void {
     const left = (Math.random() * 100).toFixed(2);
     const top = 50 + Math.round(Math.random() * 30);                // just under the clouds
     const delay = Math.round(Math.random() * BURST_MS);
-    const dur = 2000 + Math.round(Math.random() * 700);             // delay + dur stays inside PARTY_MS
+    const dur = 1800 + Math.round(Math.random() * 650);             // delay + dur stays inside PARTY_MS
     const w = 5 + Math.random() * 6;
     const h = Math.random() < 0.35 ? w : w * (1.6 + Math.random());
     const round = Math.random() < 0.25 ? '50%' : '2px';
