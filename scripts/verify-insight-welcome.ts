@@ -60,12 +60,18 @@ check('the greetings are exactly the owner-approved list (no occasions, no after
 // later rows replacing earlier ones (the seed 20261022081647, then the wording fix 20261022162032, …).
 const MIG_DIR = new URL('../supabase/migrations/', import.meta.url);
 const migs = readdirSync(MIG_DIR).filter((f) => f.endsWith('.sql')).sort()
-  .map((f) => readFileSync(new URL(f, MIG_DIR), 'utf8')).filter((s) => s.includes('insert into public.welcome_template'));
+  .map((f) => readFileSync(new URL(f, MIG_DIR), 'utf8')).filter((s) => s.includes('insert into public.welcome_template') || /update public\.welcome_template set\s+ar = /.test(s));
 check('the migrations that seed the sentences are in the tree', migs.length >= 2);
 const byId = new Map<number, InsightTemplate>();
+// in version order, each migration's inserts and then its whole-line updates (e.g. 20261028213037, the short lines'
+// Arabic fix), so a later migration always wins
 for (const sql of migs) {
   for (const m of sql.matchAll(/^\s*\((\d+),\s*'([^']+)',\s*(true|false),\s*'((?:[^']|'')*)',\s*'((?:[^']|'')*)'\)/gm)) {
     byId.set(Number(m[1]), { id: Number(m[1]), kind: m[2], personal: m[3] === 'true', ar: m[4].replace(/''/g, "'"), en: m[5].replace(/''/g, "'") });
+  }
+  for (const m of sql.matchAll(/update public\.welcome_template set\s+ar = '((?:[^']|'')*)'(?:,\s*en = '((?:[^']|'')*)')?\s+where id = (\d+);/g)) {
+    const t = byId.get(Number(m[3]));
+    if (t) byId.set(t.id, { ...t, ar: m[1].replace(/''/g, "'"), en: m[2] != null ? m[2].replace(/''/g, "'") : t.en });
   }
 }
 // a retired line (owner 2026-10-22: «pointless», «don't talk region») is switched off, never shown
@@ -83,7 +89,7 @@ check('the retired lines are gone (pool, websites, maid, one-ad towns, lowest re
 // 2026-10-24 (owner: «we can get sued»): a price line is a MEDIAN and says so plainly — «نص … أو أقل» — of what is
 // ON OFFER («المعروض…» / «انعرضت»; "listed" / "ask"), never «متوسط» / "average" (scripts/verify-welcome-wording-matches-math.ts).
 check('every price line says the ASKING price («المعروض» / "listed", "ask") as a median («نص … أو أقل»), never «متوسط»',
-  templates.filter((t) => /(سعر|إيجار|مساحت)/.test(t.ar) && /نص/.test(t.ar)).length >= 12
+  templates.filter((t) => /(سعر|إيجار|مساحت|مترها)/.test(t.ar) && /نص/.test(t.ar)).length >= 12
   && templates.filter((t) => /نص/.test(t.ar)).every((t) => /(المعروض|انعرضت)/.test(t.ar) && /أو أقل/.test(t.ar) && /\b(listed|ask|asks)\b/.test(t.en))
   && templates.every((t) => !/متوسط/.test(t.ar) && !/\baverage\b/i.test(t.en)),
   templates.filter((t) => /متوسط/.test(t.ar)).map((t) => t.id).join(','));
@@ -106,8 +112,9 @@ check('counts say listings («إعلانات»), never properties, for the volum
 // owner 2026-10-22: «a lot of mistakes in the Arabic wording» — the corrected wording holds
 check('no sentence puts a bare count before a singular noun («14 إعلان», «3 حي») or says «أضعاف», «الحين», «بس»',
   templates.every((t) => !/\{a\} (إعلان|حي|أرض|موقع)(?![ا-ي])/.test(t.ar) && !/أضعاف|الحين| بس[؟،. ]/.test(t.ar)), templates.filter((t) => /أضعاف|الحين| بس[؟،. ]|\{a\} (إعلان|حي)/.test(t.ar)).map((t) => t.id).join(','));
-check('a district line says «اكتشفه», a city/region line «اكتشفها» (gender)',
-  templates.filter((t) => t.kind === 'hot_district' && !t.personal).every((t) => t.ar.includes('اكتشفه مع')));
+// owner 2026-10-28: «remove it» — the short lines end at the question, no «اكتشفها مع إزهله» (and the name rule is lifted)
+check('no sentence carries the old ending «اكتشف… مع إزهله» / "Discover … with Ezhalah"', templates.every((t) => !/اكتشف/.test(t.ar) && !/Discover/i.test(t.en)),
+  templates.filter((t) => /اكتشف/.test(t.ar)).map((t) => t.id).join(','));
 const base = { region: 'منطقة حائل', city: 'بقعاء', city_id: 1, district: 'حي النخيل', district2: 'حي الروضة', type: 'أرض', a: 1234, b: 56 };
 const en = { city: () => 'Buqaa', district: (_c: number, d: string) => (d.includes('النخيل') ? 'Al Nakhil' : 'Al Rawdah') };
 let rendered = 0;
@@ -115,7 +122,7 @@ for (const t of templates) {
   const r = renderInsight(t, { id: t.id, kind: t.kind, ...base }, en);
   if (!r) { check(`sentence ${t.id} (${t.kind}) renders`, false); continue; }
   rendered++;
-  const ok = r.ar.includes('تدري إن') && !r.ar.includes('قارن') && r.ar.includes('إزهله') && r.en.includes('Ezhalah')
+  const ok = r.ar.includes('تدري إن') && !r.ar.includes('قارن')
     && !/\{\w+\}/.test(r.ar) && !/\{\w+\}/.test(r.en) && r.ar.includes(GREETING_SLOT) && r.en.includes(GREETING_SLOT)
     && r.ar.includes(NAME_SLOT) && r.en.includes(NAME_SLOT) && !/[؀-ۿ]/.test(r.en.replace(GREETING_SLOT, '').replace(NAME_SLOT, ''));
   if (!ok) check(`sentence ${t.id} (${t.kind}) is clean in both languages`, false, `${r.ar} | ${r.en}`);
@@ -193,7 +200,7 @@ check('a user who searched a district gets a line about it (personal pick)', !!p
   check('the emoji table is exactly the owner\'s', JSON.stringify(GREETING_EMOJI) === JSON.stringify(want));
   const morning = GREETINGS.findIndex((g) => g.ar === 'صباح الخير');
   const shown = vis(fillName(fillGreeting(line.ar, morning, 'ar'), 'يوسف', 'ar')!);
-  check('Arabic reads «صباح الخير يوسف ☀️، تدري إن … اكتشف أراضيها مع إزهله»', shown.startsWith('صباح الخير يوسف ☀️، تدري إن') && shown.endsWith('مع إزهله'), shown);
+  check('Arabic reads «صباح الخير يوسف ☀️، تدري إن … ريال أو أقل؟»', shown.startsWith('صباح الخير يوسف ☀️، تدري إن') && shown.endsWith('أو أقل؟'), shown);
   // a line with no name slot still gets the emoji right after the greeting
   check('a line without a name puts the emoji after the greeting', fillGreeting(`${GREETING_SLOT}، تدري إن …`, morning, 'ar') === 'صباح الخير ☀️، تدري إن …');
 }

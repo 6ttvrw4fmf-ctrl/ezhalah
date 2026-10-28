@@ -258,21 +258,21 @@ const neverRepeats = (pick: typeof chooseWelcomeLine) => {
   return true;
 };
 // HOLD (owner: «not every refresh … every now and then, hours» → 4 h, always personal).
-const holdsOneHour = (decide: typeof welcomeForNow) => {
+const holdsTwoHours = (decide: typeof welcomeForNow) => {
   const t0 = at('2026-10-14T13:00:00').getTime(); // Wednesday 13:00 — only any-time lines fit
   const held = { id: 20, at: t0 };
-  const kept1h = decide(new Date(t0 + 0.5 * 3600_000), held, () => 0.3);
-  const kept3h = decide(new Date(t0 + 0.95 * 3600_000), held, () => 0.7);
-  const after = decide(new Date(t0 + 1 * 3600_000 + 1), held, () => 0.3);
+  const kept1h = decide(new Date(t0 + 1 * 3600_000), held, () => 0.3);
+  const kept3h = decide(new Date(t0 + 1.95 * 3600_000), held, () => 0.7);
+  const after = decide(new Date(t0 + 2 * 3600_000 + 1), held, () => 0.3);
   return kept1h?.line.id === 20 && kept1h.keep && kept3h?.line.id === 20
     && !!after && !after.keep && after.line.id !== 20;
 };
-check('one line is held for 1 hour (owner 2026-10-22), then a different line takes over', holdsOneHour(welcomeForNow));
-check('HOLD_MS is 1 hour', HOLD_MS === 1 * 3600_000);
-mustCatch('a picker that changes on every refresh', !holdsOneHour((now, held, rand) => {
+check('one line is held for 2 hours (owner 2026-10-28), then a different line takes over', holdsTwoHours(welcomeForNow));
+check('HOLD_MS is 2 hours (owner 2026-10-28: «a new message every 2 hours»)', HOLD_MS === 2 * 3600_000);
+mustCatch('a picker that changes on every refresh', !holdsTwoHours((now, held, rand) => {
   const line = chooseWelcomeLine(now, held?.id ?? null, rand); return line ? { line, keep: false } : null;
 }));
-mustCatch('a picker that holds a line forever', !holdsOneHour((_now, held) => {
+mustCatch('a picker that holds a line forever', !holdsTwoHours((_now, held) => {
   const line = WELCOME_LINES.find((l) => l.id === held?.id)!; return { line, keep: true };
 }));
 const morningHeld = { id: 1, at: at('2026-10-14T11:30:00').getTime() };

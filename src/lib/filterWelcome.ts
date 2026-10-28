@@ -110,10 +110,11 @@ const REGION_AR = { riyadh: 'منطقة الرياض', makkah: 'منطقة مك�
 
 /**
  * How long one line stays before the next (owner 2026-10-17: «not every refresh … every now and then,
- * hours» → every 4 hours; owner 2026-10-20: «every 2 hours»; owner 2026-10-22: «1 hour» — a new fact every
- * hour, still calm, never on every refresh; a signed-in user always sees a personal line).
+ * hours» → every 4 hours; owner 2026-10-20: «every 2 hours»; owner 2026-10-22: «1 hour»; owner 2026-10-28: «every user should
+ * get a new message every 2 hours» — a new fact every 2 hours, never on every refresh; a signed-in user always sees a
+ * personal line).
  */
-export const HOLD_MS = 1 * 60 * 60 * 1000;
+export const HOLD_MS = 2 * 60 * 60 * 1000;
 /** A user with a searched district sees one of THEIR district's lines about this share of periods. */
 export const MY_DISTRICT_SHARE = 1 / 3;
 /** «من أنشط أحياء {city}» is said only when the district is within this rank in its city. */
