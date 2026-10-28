@@ -1,5 +1,5 @@
 import { agentResultRequest, resultQuantityChange } from '@/lib/agentResultRequest';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -1174,7 +1174,13 @@ export default function Agent() {
   // stale empty list REPLACED the first tab instead of appending the second (caught live in the v2
   // harness). The ref mirror makes every closure read the same current pane, whenever it was made.
   const adPaneRef = useRef<AdPane<AdTab<Listing>>>(EMPTY_AD_PANE);
-  const commitAdPane = (p: AdPane<AdTab<Listing>>) => { adPaneRef.current = p; setAdPane(p); };
+  // THE TAP IS INSTANT (owner 2026-10-27: «when I click on a listing that opens inside ezhalah it takes time, it
+  // doesn't feel smooth»). Measured on ezhalah.com: the tap froze the page for ~380 ms on a fast laptop (1-2 s on a
+  // phone) — opening the pane re-lays-out every card into the tight row in ONE blocking render. The pane update is a
+  // TRANSITION: the tap's own feedback (buzzer, confetti) paints first, and the pane + card re-layout render in small
+  // slices that never block input. The ref stays synchronous, so a second tap still sees the newest pane.
+  // Guard: scripts/verify-listing-tap-is-instant.ts
+  const commitAdPane = (p: AdPane<AdTab<Listing>>) => { adPaneRef.current = p; startTransition(() => setAdPane(p)); };
   const viewerSplit = useAtLeast(VIEWER_SPLIT_BREAKPOINT);
   // Laptop photo-first cards: 3 across on a wide screen with nothing open beside them, else 2 across.
   const cardsThreeAcross = useAtLeast(CARDS_THREE_ACROSS_BREAKPOINT);
