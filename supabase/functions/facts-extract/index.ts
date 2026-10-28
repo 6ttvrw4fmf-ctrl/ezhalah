@@ -27,15 +27,17 @@ const MODEL = "deepseek-chat";
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY") ?? "";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_MODEL = Deno.env.get("FACTS_OPENROUTER_MODEL") || "deepseek/deepseek-v3.2";
-const OPENROUTER_PROVIDERS = (Deno.env.get("FACTS_OPENROUTER_PROVIDERS") || "DeepSeek").split(",").map((s) => s.trim()).filter(Boolean);
+const OPENROUTER_PROVIDERS = (Deno.env.get("FACTS_OPENROUTER_PROVIDERS") || "DeepInfra,AtlasCloud,Baidu").split(",").map((s) => s.trim()).filter(Boolean);
 const DEFAULT_PROVIDER = Deno.env.get("FACTS_PROVIDER") === "openrouter" ? "openrouter" : "deepseek";
 // THE MODELS A RUN MAY PICK on the OpenRouter reader key (owner 2026-10-28: «let's try mistral small … and see how it
 // performs»). A closed list — every one non-thinking and cheap — each pinned to the provider named here (empty = any
 // provider of that exact model; fallbacks to OTHER models are always off). A model not listed is refused, so a caller
 // can never pick an expensive or reasoning model. Price per 100k ads at list price, ~1,000 in + 80 out tokens per ad.
 const OPENROUTER_MODELS: Record<string, string[]> = {
-  "deepseek/deepseek-v3.2": ["DeepSeek"],                    // ~$31 list, ~$10–15 with DeepSeek's prefix cache
-  "mistralai/mistral-small-3.2-24b-instruct": ["Mistral"],   // ~$9
+  // DeepSeek does NOT host its own model on OpenRouter (pilot 2026-10-28: pinning "DeepSeek" → openrouter 404 on all 44
+  // calls). Pin the cheap hosts measured that day; never the $3/M ones (Mara, SambaNova) or the $1/M Phala.
+  "deepseek/deepseek-v3.2": ["DeepInfra", "AtlasCloud", "Baidu"],       // $0.26–0.28 in / $0.38–0.42 out per M
+  "mistralai/mistral-small-3.2-24b-instruct": ["DeepInfra", "Mistral", "Venice"], // $0.07–0.10 in / $0.20–0.30 out
   "google/gemini-2.5-flash-lite": [],                        // ~$13
   "qwen/qwen3-235b-a22b-2507": [],                           // ~$13
 };
