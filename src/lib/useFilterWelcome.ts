@@ -13,7 +13,7 @@
 // export's server HTML (React #418 — see lib/responsive.ts); the decision lands in the mount effect.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  welcomeForNow, chooseWelcomeLine, renderWelcome, instantWelcome, fillName, NAME_SLOT, PREPARED_MAX_MS,
+  welcomeForNow, chooseWelcomeLine, renderWelcome, instantWelcome, fillName, NAME_SLOT, PREPARED_MAX_MS, sameRiyadhDay,
   WELCOME_LINES, lineFitsTime, greetingFor,
   type HeldWelcome, type WelcomeCache, type WelcomeLine, type WelcomeFacts,
 } from '@/lib/filterWelcome';
@@ -126,7 +126,7 @@ export function useFilterWelcome(
     const start = Date.now();
     const pick = (async () => {
       const pend = readKey(NEXT_KEY);
-      if (pend && isInsightLineId(pend.id) && start - pend.at < PREPARED_MAX_MS) return { line: pend, fromNext: true };
+      if (pend && isInsightLineId(pend.id) && start - pend.at < PREPARED_MAX_MS && sameRiyadhDay(pend.at, start)) return { line: pend, fromNext: true };
       const pack = await fetchWelcomeInsights(lastLocation, lastDistrict);
       if (!pack) return null;
       const seen = readSeen(start);
@@ -139,6 +139,7 @@ export function useFilterWelcome(
     Promise.all([pick, wait]).then(([r]) => {
       if (!alive.current || !r) return;
       const t = Date.now();
+      if (!sameRiyadhDay(r.line.at, t)) return; // midnight passed while waiting: that fact belongs to yesterday
       writeCache({ id: r.line.id, at: t, ar: r.line.ar, en: r.line.en });
       if (r.fromNext) writeKey(NEXT_KEY, null);
       setShown((s) => ({ ...s, settled: true, id: r.line.id, ar: r.line.ar, en: r.line.en, greet: pickGreeting(new Date(t)) }));
@@ -195,7 +196,7 @@ export function useFilterWelcome(
     //    in when it is shown. Kept as long as it is still usable (a day).
     const shownId = cache?.id ?? null;
     const pending = readKey(NEXT_KEY);
-    const pendingOk = !!pending && isInsightLineId(pending.id) && pending.id !== shownId && now.getTime() - pending.at < PREPARED_MAX_MS;
+    const pendingOk = !!pending && isInsightLineId(pending.id) && pending.id !== shownId && now.getTime() - pending.at < PREPARED_MAX_MS && sameRiyadhDay(pending.at, now.getTime());
     if (!pendingOk) {
       fetchWelcomeInsights(lastLocation, lastDistrict).then((pack) => {
         if (!live || !pack) return;
