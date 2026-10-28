@@ -4576,8 +4576,8 @@ export default function Agent() {
                   return <Text key={m.id} testID="chat-stop-note" style={[s.stopNote, { alignSelf: rtl ? 'flex-end' : 'flex-start', writingDirection: rtl ? 'rtl' : 'ltr' }]}>{txt}</Text>;
                 }
                 return (
-                  <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: IS_WEB ? '76%' : '88%' }}>
-                    <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row' }]}>
+                  <View key={m.id} testID="agent-reply" style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', width: '100%' }}>
+                    <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row', width: '100%' }]}>
                       <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
                       <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
                         {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
