@@ -65,6 +65,22 @@ export function ensureNameBoxCss(): void {
 
 let lastParty = -Infinity;
 
+/** ONE CONFETTI PER SIGN-IN (owner 2026-10-27: «it shows twice … the animation of the falconer first, then the confetti,
+ *  that's it»). While the home's falconer is on screen HE starts the confetti, when his sign-in story ends; the name
+ *  box's own trigger then stands down (it used to fire at once, before the story, and the falconer fired it again
+ *  after). Away from the home (no falconer) the box still gives the party. */
+let heroOwners = 0;
+/** The falconer claims the party while mounted; returns the release. */
+export function claimNameParty(): () => void {
+  heroOwners++;
+  return () => { heroOwners = Math.max(0, heroOwners - 1); };
+}
+/** The name box's trigger: nothing while the falconer owns the party. */
+export function startNamePartyFromBox(reduced: boolean): void {
+  if (heroOwners > 0) return;
+  startNameParty(reduced);
+}
+
 /** The confetti party after a sign-in / sign-up. Decoration only: pointer-events:none, and the whole layer removes itself
  *  at PARTY_MS. No external script. Reduced motion → nothing at all. */
 export function startNameParty(reduced: boolean): void {
