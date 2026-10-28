@@ -14,7 +14,10 @@ const dir = join(import.meta.dirname, '..', 'supabase', 'migrations');
 const files = readdirSync(dir).filter((f) => /^\d{14}_.*\.sql$/.test(f)).sort();
 const pick = (re: RegExp) => { const f = files.filter((x) => re.test(x)).at(-1); return f ? readFileSync(join(dir, f), 'utf8') : ''; };
 const math = pick(/_welcome_facts_exact_and_fresh\.sql$/);
-const words = pick(/_welcome_lines_say_what_the_number_is\.sql$/);
+// the original wording migration carries the trigger and the alarm; later ones (the short lines, 2026-10-28) rewrite lines
+const words = pick(/^\d{14}_welcome_lines_say_what_the_number_is\.sql$/);
+const shortLines = pick(/_short_welcome_lines_say_what_the_number_is\.sql$/);
+const shortFix = pick(/_short_welcome_lines_arabic_corrected\.sql$/);
 
 type Stat = { stat: string; window: string | null; plurality: boolean; steady: boolean; knownAge: boolean; scope: string | null };
 const q = (s: string) => (s === 'null' ? null : s.replace(/^'|'$/g, ''));
@@ -82,7 +85,13 @@ const check = (label: string, ok: boolean, detail = '') => { console.log(`${ok ?
 const mustCatch = (label: string, caught: boolean) => { console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${label}`); if (!caught) failed++; };
 
 const reg = registry(math);
-const ls = lines(words);
+const lsById = new Map(lines(words).map((l) => [l.id, l]));
+for (const l of lines(shortLines)) lsById.set(l.id, l);
+for (const m of shortFix.matchAll(/update public\.welcome_template set\s+ar = '((?:[^']|'')*)'(?:,\s*en = '((?:[^']|'')*)')?\s+where id = (\d+);/g)) {
+  const l = lsById.get(Number(m[3]));
+  if (l) lsById.set(l.id, { ...l, ar: m[1].replace(/''/g, "'"), en: m[2] != null ? m[2].replace(/''/g, "'") : l.en });
+}
+const ls = [...lsById.values()];
 check(`the registry declares every line's statistic (${reg.size} kinds)`, reg.size >= 29, `${reg.size}`);
 const mp = mathProblems(math);
 check('medians rounded up, each median claim tested, P1 on any disagreement, rebuilt every 3 hours', mp.length === 0, mp.join('; '));
@@ -92,11 +101,11 @@ check('every committed line says exactly what its number is (ar + en)', wp.lengt
 const villa = ls.find((l) => l.kind === 'villa_area');
 const hot = ls.find((l) => l.kind === 'hot_district');
 mustCatch('«متوسط» over a median (the live bug)', !!villa && problem(reg.get('villa_area'), villa.ar.replace('نص الفلل', 'متوسط مساحة الفلل'), villa.en) !== null);
-mustCatch('"average" over a median in English', !!villa && problem(reg.get('villa_area'), villa.ar, villa.en.replace('half of the villas', 'the average villa')) !== null);
+mustCatch('"average" over a median in English', !!villa && problem(reg.get('villa_area'), villa.ar, villa.en.replace('half the villas', 'the average villa')) !== null);
 mustCatch('«أقل من» without «أو أقل» (false for odd counts)', !!villa && problem(reg.get('villa_area'), villa.ar.replace('{a} م² أو أقل', 'أقل من {a} م²'), villa.en) !== null);
-mustCatch('«هذا الأسبوع» over a rolling 7 days', !!hot && problem(reg.get('hot_district'), hot.ar.replace('خلال آخر 7 أيام', 'هذا الأسبوع'), hot.en) !== null);
+mustCatch('«هذا الأسبوع» over a rolling 7 days', !!hot && problem(reg.get('hot_district'), hot.ar.replace('آخر 7 أيام', 'هذا الأسبوع'), hot.en) !== null);
 const land = ls.find((l) => l.kind === 'city_land');
-mustCatch('«أكثرها في» / "most of them" (reads as a majority; it is the district with the most)', !!land && problem(reg.get('city_land'), land.ar.replace('وأكثر حي فيه منها', 'أكثرها في'), land.en.replace('with the most in', 'most of them in')) !== null);
+mustCatch('«أكثرها في» / "most of them" (reads as a majority; it is the district with the most)', !!land && problem(reg.get('city_land'), land.ar.replace('وأكثر حي فيها', 'أكثرها في'), land.en.replace('the most in', 'most of them in')) !== null);
 mustCatch('a kind with no declared statistic', problem(undefined, 'x', 'y') !== null);
 mustCatch('nearest rounding back', mathProblems(math.replace('then ceil(p_v) else round(p_v)', 'then round(p_v) else round(p_v)')).length > 0);
 mustCatch('back to one nightly build', mathProblems(math.replace("schedule := '45 */3 * * *'", "schedule := '40 21 * * *'")).length > 0);
