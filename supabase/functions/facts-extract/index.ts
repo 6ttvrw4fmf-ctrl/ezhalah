@@ -18,6 +18,18 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 const MODEL = "deepseek-chat";
+// TWO PROVIDERS, ONE READER (owner 2026-10-27: «the first key — reading the descriptions»). The OpenRouter READER key
+// (OPENROUTER_API_KEY, its own credit limit on openrouter.ai) is a second door to the same DeepSeek model, pinned to
+// the DeepSeek provider there so the prefix cache and the answers stay identical. The default provider is
+// FACTS_PROVIDER (deepseek until the 500-ad pilot on openrouter is read and the owner says switch); a request may
+// name `provider` to pilot the other door without flipping the default. Both doors sit behind the same service-role
+// check, the same spend gate and the same monthly budget — and never behind the chat's key: each pot stops alone.
+const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY") ?? "";
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const OPENROUTER_MODEL = Deno.env.get("FACTS_OPENROUTER_MODEL") || "deepseek/deepseek-v3.2";
+const OPENROUTER_PROVIDERS = (Deno.env.get("FACTS_OPENROUTER_PROVIDERS") || "DeepSeek").split(",").map((s) => s.trim()).filter(Boolean);
+const DEFAULT_PROVIDER = Deno.env.get("FACTS_PROVIDER") === "openrouter" ? "openrouter" : "deepseek";
+type Provider = "deepseek" | "openrouter";
 const MAX_ADS = 20;
 const MAX_CHARS_PER_AD = 4000;
 const MAX_TOTAL_CHARS = 48000;
@@ -145,17 +157,20 @@ Deno.serve(async (req: Request) => {
     if (verdict === "no") return json({ error: "unauthorized" }, 401);
     if (verdict === "unknown") return json({ error: "auth check unavailable, retry" }, 503);
   }
-  if (!DEEPSEEK_API_KEY) return json({ error: "model key not configured" }, 503);
-
   let ads: Ad[];
   let runId = "";
+  let provider: Provider = DEFAULT_PROVIDER;
   try {
     const body = await req.json();
     runId = String(body?.run_id ?? "");
     ads = Array.isArray(body?.ads) ? body.ads : [];
+    if (body?.provider === "openrouter" || body?.provider === "deepseek") provider = body.provider;
   } catch {
     return json({ error: "bad json" }, 400);
   }
+  const apiKey = provider === "openrouter" ? OPENROUTER_API_KEY : DEEPSEEK_API_KEY;
+  if (!apiKey) return json({ error: `model key not configured (${provider})` }, 503);
+  const model = provider === "openrouter" ? OPENROUTER_MODEL : MODEL;
   if (!runId || ads.length === 0 || ads.length > MAX_ADS) return json({ error: `need run_id and 1..${MAX_ADS} ads` }, 400);
   let total = 0;
   for (const a of ads) {
@@ -172,7 +187,7 @@ Deno.serve(async (req: Request) => {
   // because a truncated JSON body costs the whole batch (the caller counts finish_reason=length).
   const maxTokens = Math.min(200 + ads.length * 220, 6000);
   const payload = JSON.stringify({
-    model: MODEL,
+    model,
     messages: [
       { role: "system", content: SYSTEM },
       { role: "user", content: JSON.stringify({ ads: ads.map((a) => ({ id: a.id, text: a.text })) }) },
@@ -180,6 +195,10 @@ Deno.serve(async (req: Request) => {
     temperature: 0,
     max_tokens: maxTokens,
     response_format: { type: "json_object" },
+    // OpenRouter only: bill-exact cost in the reply (usage.cost) and the DeepSeek provider pinned, no fallbacks
+    ...(provider === "openrouter"
+      ? { usage: { include: true }, provider: { order: OPENROUTER_PROVIDERS, allow_fallbacks: false } }
+      : {}),
   });
 
   const t0 = Date.now();
@@ -187,9 +206,13 @@ Deno.serve(async (req: Request) => {
   const timer = setTimeout(() => ac.abort(), MODEL_TIMEOUT_MS);
   let r: Response;
   try {
-    r = await fetch(DEEPSEEK_URL, {
+    r = await fetch(provider === "openrouter" ? OPENROUTER_URL : DEEPSEEK_URL, {
       method: "POST",
-      headers: { Authorization: `Bearer ${DEEPSEEK_API_KEY}`, "content-type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+        ...(provider === "openrouter" ? { "HTTP-Referer": "https://ezhalah-app.vercel.app", "X-Title": "Ezhalah facts reader" } : {}),
+      },
       body: payload,
       signal: ac.signal,
     });
@@ -201,20 +224,23 @@ Deno.serve(async (req: Request) => {
   const latency = Date.now() - t0;
   if (!r.ok) {
     const detail = (await r.text().catch(() => "")).slice(0, 300);
-    return json({ error: `deepseek ${r.status}`, http_status: r.status, detail, latency_ms: latency }, 502);
+    return json({ error: `${provider} ${r.status}`, http_status: r.status, detail, latency_ms: latency }, 502);
   }
   const data = await r.json();
   const choice = data?.choices?.[0];
+  const cost = Number(data?.usage?.cost);
   return json({
     run_id: runId,
     http_status: 200,
-    requested_model: MODEL,
+    provider,
+    requested_model: model,
     model: data?.model ?? null,
+    cost_usd: Number.isFinite(cost) && cost >= 0 ? cost : null,   // OpenRouter's own bill for this call; null = compute from tokens
     finish_reason: choice?.finish_reason ?? null,
     usage: {
       prompt_tokens: data?.usage?.prompt_tokens ?? null,
       completion_tokens: data?.usage?.completion_tokens ?? null,
-      cache_hit_tokens: data?.usage?.prompt_cache_hit_tokens ?? null,
+      cache_hit_tokens: data?.usage?.prompt_cache_hit_tokens ?? data?.usage?.prompt_tokens_details?.cached_tokens ?? null,
       cache_miss_tokens: data?.usage?.prompt_cache_miss_tokens ?? null,
       reasoning_tokens: data?.usage?.completion_tokens_details?.reasoning_tokens ?? null,
     },
