@@ -1,4 +1,10 @@
-# 🛟 Ezhalah auto-fixer (hourly cloud routine)
+# 🛟 Ezhalah auto-fixer (hourly cloud routine) — TURNED OFF
+
+**OWNER DECISION, 2026-10-27 (same day, verbatim): «No no I want it to be using GitHub robot leave it to our engineers in
+other account like scraping engineer».** The routine on this account (trig_01XS24iZMyzgDWVHV1LPqKoA) is disabled. Detection
+stays with the GitHub robots (scheduled workflows, their failure→alert bridges, alert-dispatch.yml issues); FIXING belongs
+to the engineers run from the owner's other account (e.g. the Scraping Engineer). Do not re-enable or recreate it here.
+The text below is kept as a reference for those engineers.
 
 **Owner decision, 2026-10-27 (verbatim):** «I want an automatic this so we fix it whenever something happens» and, asked
 how far it may go alone: **«Fix it then deploy and tell me it deployed that's it ok»**.
