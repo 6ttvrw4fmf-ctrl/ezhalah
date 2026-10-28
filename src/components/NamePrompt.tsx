@@ -10,7 +10,7 @@ import { otherSpelling, scriptOf } from '@/lib/nameSync';
 import { markJustSignedIn, isFreshSignUp } from '@/lib/loginWelcome';
 import { supabase } from '@/lib/supabase';
 import { useReducedMotion } from '@/lib/useReducedMotion';
-import { ensureNameBoxCss, startNameParty } from '@/lib/nameParty';
+import { ensureNameBoxCss, startNamePartyFromBox } from '@/lib/nameParty';
 
 // «وش نناديك؟» — asked ONCE per account when a sign-in arrives with no name (owner 2026-10-23).
 // Apple sends the name only on the first authorization and Google accounts can lack one; the name is
@@ -181,7 +181,7 @@ export default function NamePrompt() {
   const skip = () => {
     const signUpBox = !reopened && !(user?.name ?? '').trim();
     close();
-    if (signUpBox) welcomeOnceSkipped(() => startNameParty(reduced));
+    if (signUpBox) welcomeOnceSkipped(() => startNamePartyFromBox(reduced));
   };
   const save = () => {
     const v = name.trim();
@@ -189,7 +189,7 @@ export default function NamePrompt() {
     if (!v) { setShakeN((n) => n + 1); field.current?.focus(); return; }
     saveName(v);
     close();
-    welcomeOnceSaved(v, () => startNameParty(reduced));
+    welcomeOnceSaved(v, () => startNamePartyFromBox(reduced));
   };
   // A sign-up that arrived WITH a name (owner 2026-10-26): no box. Record «seen», then the very same welcome and
   // party «حفظ» gives, once, when that write is in the session (welcomeOnceSaved).
@@ -198,7 +198,7 @@ export default function NamePrompt() {
     partied.current = user?.sub ?? null;
     const given = user.name.trim();
     markNamePromptSeen();
-    welcomeOnceSaved(given, () => startNameParty(reduced));
+    welcomeOnceSaved(given, () => startNamePartyFromBox(reduced));
   }, [party, user?.sub]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (phase === 'off') return null;

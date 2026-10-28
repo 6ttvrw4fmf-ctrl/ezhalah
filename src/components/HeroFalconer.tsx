@@ -5,7 +5,7 @@ import Animated from 'react-native-reanimated';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SKY_CALM_PROPS } from '@/lib/scrollCalm';
 import { TAKEOFF_MS } from '@/lib/eagleTakeoff';
-import { startNameParty } from '@/lib/nameParty';
+import { startNameParty, claimNameParty } from '@/lib/nameParty';
 import CloudWisp from './CloudWisp';
 
 // The guest falconer (plain outline) — the owner's reference image (2026-10-26), 167x192.
@@ -78,6 +78,8 @@ export default function HeroFalconer({ size, flip, signedIn = false, celebrate =
   // Derived, not set in an effect, so the first frame of a sign-in already shows the animation's start (no flash of
   // the end). Reduced motion: the still final look at once, no rain.
   const [done, setDone] = useState(0);
+  // while he is on screen, the confetti is his alone (one party per sign-in, after his story)
+  useEffect(() => claimNameParty(), []);
   const playing = signedIn && !reduced && celebrate > 0 && celebrate !== done;
   useEffect(() => {
     if (!playing) return;
