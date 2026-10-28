@@ -1,0 +1,53 @@
+# Site speed watch (owner 2026-10-27: «I don't want my website to be slow or freeze … fix it if anything goes wrong
+# immediately»). Every 30 minutes and after each production deploy: one real visitor journey on a mid-range phone —
+# open ezhalah.com, search Riyadh, tap a golden listing — against per-step budgets. A red run raises an alert
+# (alert_event → GitHub issue via alert-dispatch.yml) for the engineers to fix. Read-only; uses the robot pass.
+# Logic: e2e/speed/site-speed-live.mjs (wiring pinned by scripts/verify-site-speed-watch-wired.ts).
+name: Site speed watch (live)
+
+on:
+  schedule:
+    - cron: '9,39 * * * *'
+  workflow_run:
+    workflows: ['Deploy frontend (production)']
+    types: [completed]
+  workflow_dispatch: {}
+
+concurrency:
+  group: site-speed-live
+  cancel-in-progress: false
+
+env:
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  speed:
+    name: Phone journey — open, search, tap within budget
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright + browser
+        run: |
+          npm i -D @playwright/test@^1.49
+          npx playwright install --with-deps chromium
+      - name: Open, search and tap on a mid-range phone
+        env:
+          BASE_URL: https://ezhalah.com
+        run: node e2e/speed/site-speed-live.mjs
+
+      # Unattended: a red run must reach a human. One open alert per workflow file; the next green run resolves it.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind journey_live_check_failed
+          --workflow site-speed-live.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
