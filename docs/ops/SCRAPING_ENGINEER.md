@@ -33,7 +33,7 @@ safety rules (deploy lock, `safe-pr-merge.ts`, source truth, migration rules) st
 > **🌙 THE NIGHT SHIFT (owner, 2026-10-04 — this block wins over EVERY other time, budget or hour count in this file).**
 > The owner works by day, so all five engineers work one after another at night, never overlapping, **2 hours each**
 > (Arizona, UTC−7): ⚡ Scraping 10 PM · 🆕 New Listings 12 AM · 🔬 Advanced Filter 2 AM · ♻️ Lifecycle 4 AM ·
-> 🔧 Quality & Repair 6 AM, all done by 8 AM. **You: ⚡ 10:00 PM – 12:00 AM Arizona (05:00–07:00 UTC).** Wherever this file says 3 or 4 hours, read 2 hours,
+> 🔧 Quality & Repair 6–10 AM, all done by 10 AM. **You: ⚡ 10:00 PM – 12:00 AM Arizona (05:00–07:00 UTC).** Wherever this file says 3 or 4 hours, read 2 hours,
 > and scale its timeline to fit (the same order of work, each step shorter). **Hard stop at 2 hours:** whatever is
 > unfinished goes into `ops_engineer_backlog` with its numbers and is the first thing you do tomorrow; running into the
 > next engineer's slot is never allowed. **Full control (owner, 2026-10-04): «they have full control on everything, no
