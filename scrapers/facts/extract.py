@@ -385,10 +385,13 @@ def sample_silent(table: str, n: int, seed: int, mode: str = "silent") -> list[d
 
 
 # ── the proxy call ────────────────────────────────────────────────────────────────────────────────
-def call_proxy(ads: list[dict[str, str]], run_id: str) -> tuple[int, dict[str, Any]]:
+def call_proxy(ads: list[dict[str, str]], run_id: str, provider: str = "") -> tuple[int, dict[str, Any]]:
     url = os.environ["SUPABASE_URL"].rstrip("/") + "/functions/v1/facts-extract"
     key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-    body = json.dumps({"run_id": run_id, "ads": ads}, ensure_ascii=False).encode("utf-8")
+    req_body: dict[str, Any] = {"run_id": run_id, "ads": ads}
+    if provider:                                   # owner 2026-10-27: pilot the OpenRouter reader key without flipping the default
+        req_body["provider"] = provider
+    body = json.dumps(req_body, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST", headers={
         "Authorization": f"Bearer {key}", "apikey": key, "content-type": "application/json"})
     try:
@@ -491,12 +494,14 @@ def run(args: argparse.Namespace) -> int:
         ads = [{"id": f"{r['_platform']}:{r['ad_number']}", "text": r["_text"]} for r in batch]
         by_platform = dict(Counter(r["_platform"] for r in batch))
         t0 = time.time()
-        status, resp = call_proxy(ads, args.run_id)
+        status, resp = call_proxy(ads, args.run_id, args.provider)
         at = datetime.now(timezone.utc)
         usage = resp.get("usage") or {}
-        cost = usd_of(usage, at) if status == 200 else 0.0
+        # the provider's own bill when it sends one (OpenRouter usage.cost), else the DeepSeek token formula
+        billed = resp.get("cost_usd")
+        cost = (float(billed) if isinstance(billed, (int, float)) and billed >= 0 else usd_of(usage, at)) if status == 200 else 0.0
         usd_total += cost
-        base = {"requested_model": REQUESTED_MODEL, "model": resp.get("model"), "ads": len(batch),
+        base = {"requested_model": resp.get("requested_model") or REQUESTED_MODEL, "model": resp.get("model"), "ads": len(batch),
                 "prompt_tokens": usage.get("prompt_tokens"), "cache_hit_tokens": usage.get("cache_hit_tokens"),
                 "cache_miss_tokens": usage.get("cache_miss_tokens"), "completion_tokens": usage.get("completion_tokens"),
                 "usd": round(cost, 8), "http_status": status, "latency_ms": int((time.time() - t0) * 1000),
@@ -703,6 +708,8 @@ def main() -> int:
     ap.add_argument("--mode", choices=("sample", "silent", "new", "backlog"), default="sample",
                     help="sample = the fixed 10k plan; silent = ads the reader found nothing in; new = ads first seen ≤ 3 days the AI "
                          "never read (the nightly run); backlog = any active ad the AI never read")
+    ap.add_argument("--provider", choices=("", "deepseek", "openrouter"), default="",
+                    help="which key the proxy spends: empty = the proxy's default (FACTS_PROVIDER), openrouter = the reader key pilot")
     ap.add_argument("--category", choices=("residential", "commercial", "all"), default="residential",
                     help="modes new/backlog only: which source tables (owner 2026-10-26: residential first, commercial later)")
     ap.add_argument("--selftest", action="store_true")
