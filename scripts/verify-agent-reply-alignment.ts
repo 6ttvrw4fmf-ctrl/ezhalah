@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { msgRTL } from '../src/lib/textDirection.ts';
 import { buildAfSummaryItems } from '../src/lib/afSummary.ts';
+import { glyphCount, revealPrefix } from '../src/lib/typedReveal.ts';
 
 assert.deepEqual(buildAfSummaryItems([{ id: 'property_age', keys: ['2'], labels: ['Up to 2 years'] }], 'en'), ['Age Up to 2 years 🏗️']);
 assert.deepEqual(buildAfSummaryItems([{ id: 'property_age', keys: ['2'], labels: ['سنتين'] }]), ['عمر سنتين 🏗️']);
@@ -66,3 +67,57 @@ const userMutant = source.replace("[s.userBubble, { alignSelf: 'flex-end' }]", "
 assert.notEqual(userMutant, source, 'user bubble mutation target exists');
 mustCatch(userMutant);
 console.log('PASS: user bubble right in both languages; Arabic replies/results/sparkles align right, English left; mutations rejected.');
+
+// Execute the real Typer JSX at every reveal step. Its invisible remainder must still participate
+// in layout: a prefix-only right-pinned bubble grows left, making English look typed backwards.
+function verifyTypingLayout(code: string) {
+  const ast = ts.createSourceFile('agent.tsx', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const typer = ast.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'Typer');
+  assert.ok(typer, 'the shipped Typer exists');
+  const userPath = code.slice(code.indexOf("if (m.role === 'user')"), code.indexOf("if (m.role === 'status')"));
+  const reserve = userPath.match(/<Typer\b[^>]*reserveSpace=\{([^}]+)\}/)?.[1];
+  assert.ok(reserve, 'the user reveal reserves layout');
+  const reserves = new Function('rtl', `return ${reserve};`);
+  const js = ts.transpileModule(typer.getText(ast), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React, jsxFactory: 'h' },
+    fileName: 'typer.tsx',
+  }).outputText;
+  type Node = string | number | boolean | null | undefined | { props: any; children: Node[] };
+  const h = (_type: unknown, props: any, ...children: Node[]) => ({ props, children });
+  function rendered(node: Node, visibleOnly: boolean): string {
+    if (node == null || typeof node === 'boolean') return '';
+    if (typeof node !== 'object') return String(node);
+    if (visibleOnly && node.props?.style?.opacity === 0) {
+      assert.equal(node.props['aria-hidden'], true, 'unrevealed text is hidden from assistive technology');
+      return '';
+    }
+    return node.children.map(child => rendered(child, visibleOnly)).join('');
+  }
+  for (const text of [
+    "Peace be upon you Ezhalah 🌿, I'm looking for residential property to rent or buy in Riyadh",
+    'Hi Ezhalah 👋, find me an apartment in حي النرجس with 3 bedrooms',
+    '🏡 Hello Ezhalah',
+    'هلا إزهله 👋، أبي شقة في الرياض',
+  ]) {
+    const reserveSpace = reserves(msgRTL(text));
+    assert.equal(reserveSpace, !msgRTL(text), 'reserve English without changing the Arabic reveal');
+    for (let n = 0; n <= glyphCount(text); n++) {
+      const render = new Function('h', 'Text', 'useState', 'useMemo', 'useRef', 'useEffect', 'createRevealHandoff', 'glyphCount', 'revealPrefix', js + '\nreturn Typer;')(
+        h, 'Text', () => [n, () => {}], (fn: () => unknown) => fn(), (value: unknown) => ({ current: value }), () => {}, () => ({}), glyphCount, revealPrefix,
+      );
+      const frame = render({ text, reserveSpace });
+      assert.equal(rendered(frame, true), revealPrefix(text, n), `frame ${n}: visible text advances normally`);
+      assert.equal(rendered(frame, false), reserveSpace ? text : revealPrefix(text, n), `frame ${n}: English layout stays complete`);
+    }
+  }
+}
+verifyTypingLayout(source);
+for (const mutant of [
+  source.replace('reserveSpace={!rtl}', 'reserveSpace={false}'),
+  source.replace(/return <Text>\{shown\}[^\n]+/, 'return <Text>{shown}</Text>;'),
+  source.replace('aria-hidden style={{ opacity: 0 }}', 'aria-hidden style={{ opacity: 1 }}'),
+]) {
+  assert.notEqual(mutant, source, 'typing mutation target exists');
+  assert.throws(() => verifyTypingLayout(mutant), assert.AssertionError);
+}
+console.log('PASS: English typing reserves the full layout at every frame; Arabic unchanged; moving-prefix and visible-tail mutations rejected.');
