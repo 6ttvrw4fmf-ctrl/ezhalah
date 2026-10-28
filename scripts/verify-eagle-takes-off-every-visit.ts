@@ -61,13 +61,21 @@ const playGate = (c: string) => /const playing = signedIn && !reduced && celebra
   && /\) : playing \? \(\n\s*<XImage testID="hero-falconer-signin" source=\{freshSource\(SIGNIN, celebrate\)/.test(c)
   && /<XImage testID="hero-falconer-final" source=\{SIGNED_IN_STILL\}/.test(c);
 check('signed in: the animation plays only on a sign-in welcome and never under reduced motion; otherwise the still', playGate(comp));
-const timing = (c: string) => {
+// owner 2026-10-27: «the animation must be clear, first the animation … it finished, then the confetti … it feels slow»
+// → the whole story fits in 5–7 s, its last motion ends by SIGNIN_SEQUENCE_MS, and the confetti starts only then.
+const svgEnd = (v: string) => Math.max(0, ...[...v.matchAll(/<(?:animate|animateTransform|animateMotion|set)\b[^>]*>/g)].map((m) => {
+  const b = Number((m[0].match(/\sbegin="(-?[\d.]+)s"/) ?? [])[1] ?? 0);
+  const d = Number((m[0].match(/\sdur="(-?[\d.]+)s"/) ?? [])[1] ?? 0);
+  return b + d;
+}));
+const timing = (c: string, v: string) => {
   const seq = Number((c.match(/export const SIGNIN_SEQUENCE_MS = (\d+);/) ?? [])[1]);
-  const rain = Number((c.match(/export const RAIN_AT_MS = (\d+);/) ?? [])[1]);
-  return seq >= 6000 && seq <= 10000 && rain > 0 && rain < seq
-    && /setTimeout\(\(\) => startNameParty\(reduced\), RAIN_AT_MS\)/.test(c) && /setTimeout\(\(\) => setDone\(celebrate\), SIGNIN_SEQUENCE_MS\)/.test(c);
+  return seq >= 5000 && seq <= 7000                                       // quick: 5–7 s
+    && svgEnd(v) * 1000 <= seq + 100                                        // the story is over by then …
+    && /export const RAIN_AT_MS = SIGNIN_SEQUENCE_MS;/.test(c)              // … and the confetti waits for it
+    && c.includes('setTimeout(() => startNameParty(reduced), RAIN_AT_MS)') && c.includes('setTimeout(() => setDone(celebrate), SIGNIN_SEQUENCE_MS)');
 };
-check('…the green rain celebration starts with the idea, inside the sequence, and the still takes over at its end', timing(comp));
+check('…the story is quick (5–7 s), finishes, and only then the confetti starts and the still takes over', timing(comp, signin), `end=${svgEnd(signin)}s`);
 const playsOnce = (v: string) => !/infinite|indefinite/.test(v) && /<animate/.test(v);
 check('the sign-in animation plays once (nothing loops)', playsOnce(signin));
 const isStill = (v: string) => !/<animate|<set |animation:|@keyframes/.test(v);
@@ -81,7 +89,9 @@ check('a second sign-in in the same tab gets a fresh animation timeline', fresh(
 mustCatch('the falcon playing under reduced motion', !playsEveryMount(comp.replace('    if (reduced || signedIn) return;\n', '')));
 mustCatch('a once-per-session gate coming back', !playsEveryMount(comp.replace('if (reduced || signedIn) return;', 'if (reduced || signedIn || sessionStorage.getItem(\'x\')) return;')));
 mustCatch('the sign-in animation playing under reduced motion', !playGate(comp.replace('signedIn && !reduced && celebrate > 0', 'signedIn && celebrate > 0')));
-mustCatch('the rain starting after the sequence has ended', !timing(comp.replace('export const RAIN_AT_MS = 7400;', 'export const RAIN_AT_MS = 9900;')));
+mustCatch('the confetti starting during the story (at the bulb)', !timing(comp.replace('export const RAIN_AT_MS = SIGNIN_SEQUENCE_MS;', 'export const RAIN_AT_MS = 5000;'), signin));
+mustCatch('the old slow story (8.8 s)', !timing(comp.replace('export const SIGNIN_SEQUENCE_MS = 6200;', 'export const SIGNIN_SEQUENCE_MS = 8800;'), signin));
+mustCatch('a story still moving after it is meant to be over', !timing(comp, signin.replace('begin="0s"', 'begin="3s"')));
 mustCatch('a looping sign-in animation', !playsOnce(signin.replace('<animate ', '<animate repeatCount="indefinite" ')));
 mustCatch('motion left in the settled still', !isStill(still.replace('</svg>', '<animate attributeName="opacity" values="0;1" dur="1s"/></svg>')));
 mustCatch('the bulb drawn outside his head', !bulbInside(signin.replace(/<g clip-path="url\(#headInside\)">/g, '<g>')));

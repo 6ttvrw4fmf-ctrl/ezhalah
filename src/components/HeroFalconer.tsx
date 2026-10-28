@@ -25,15 +25,18 @@ const PERCH = { x: 24, y: 92 };
 //   the gold eagle glides in and lands on his glove (his arm dips under its weight); he draws the hood from his vest
 //   with his teeth and seats it on the eagle; a green light runs from his mouth through his face, arm and body and the
 //   beard and bisht appear behind it; he pauses and thinks 🤔 (head tilts up, a small side-to-side, a hold); a golden
-//   bulb lights INSIDE his head and a soft green glow breathes through him — and the green rain celebration falls
-//   with it; he settles into the still final look a signed-in user keeps (falconer-final.svg).
+//   bulb lights INSIDE his head and a soft green glow breathes through him; he settles into the still final look a
+//   signed-in user keeps (falconer-final.svg) — and only THEN the confetti party starts.
+// FASTER, AND THE STORY FINISHES BEFORE THE CONFETTI (owner 2026-10-27: «the animation must be clear, first the
+// animation … it finished, then the confetti … it feels slow»): every time in the SVG was scaled to 0.7 (8.8 s → 6.2 s,
+// same steps in the same order), and the confetti now starts when the story ends instead of during the bulb.
 // Both SVGs share one canvas, viewBox -140 -170 310 385 in the drawing's own 167x192 coordinates.
 const SIGNIN = require('../../assets/images/falconer-signin.svg');
 const SIGNED_IN_STILL = require('../../assets/images/falconer-final.svg');
 const SIGNIN_CANVAS = { x: -140, y: -170, w: 310, h: 385 };
-export const SIGNIN_SEQUENCE_MS = 8800;
-// the bulb lights at ~7.15–7.6 s; the celebration rain starts with it
-export const RAIN_AT_MS = 7400;
+export const SIGNIN_SEQUENCE_MS = 6200;
+// the bulb lights at ~5.0–5.4 s and the glow fades by ~6.2 s; the confetti starts once the story is over
+export const RAIN_AT_MS = SIGNIN_SEQUENCE_MS;
 
 // A browser shares one animation timeline per SVG URL, so a second sign-in in the same tab would show the already-
 // finished animation. A per-play query string gives every play its own fresh timeline.
