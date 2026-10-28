@@ -42,7 +42,7 @@ try {
   await page.keyboard.type('الرياض');
   await page.getByText('الرياض', { exact: true }).first().click({ timeout: 20_000 });
   await page.getByText('بحث', { exact: true }).first().click({ timeout: 20_000 });
-  await page.getByText('اضغط هنا', { exact: false }).first().waitFor({ state: 'visible', timeout: 90_000 });
+  await page.getByText('اضغط هنا 👆', { exact: false }).first().waitFor({ state: 'visible', timeout: 90_000 });
   results.searchMs = Date.now() - t;
   say(results.searchMs <= BUDGET.searchMs, 'search: Riyadh until the first card is on screen', results.searchMs, BUDGET.searchMs);
 
@@ -52,7 +52,7 @@ try {
     new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__ezLong.push([e.startTime, e.duration]); }).observe({ type: 'longtask' });
     window.__ezTap = performance.now();
   });
-  await page.getByText('اضغط هنا', { exact: false }).first().click({ timeout: 20_000 });
+  await page.getByText('اضغط هنا 👆', { exact: false }).first().click({ timeout: 20_000 });
   await page.waitForTimeout(3_000);
   results.tapFreezeMs = Math.round(await page.evaluate(() => Math.max(0, ...window.__ezLong.filter(([s]) => s >= window.__ezTap - 50 && s <= window.__ezTap + 3_000).map(([, d]) => d))));
   say(results.tapFreezeMs <= BUDGET.tapFreezeMs, 'tap: longest freeze after pressing a golden listing', results.tapFreezeMs, BUDGET.tapFreezeMs);
