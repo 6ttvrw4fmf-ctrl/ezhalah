@@ -99,6 +99,10 @@ export const WELCOME_LINES: readonly WelcomeLine[] = [
 export const NEW_TODAY_MIN = 100;
 // Riyadh is UTC+3 all year (no DST): the calendar day "today" means in the line above.
 export const riyadhDay = (t: number): number => Math.floor((t + 3 * 3600_000) / 86_400_000);
+/** A daily fact is TRUE ONLY ON THE SAUDI DAY IT WAS BUILT FOR (owner 2026-10-27: «yesterday, 1 week should be based on
+ *  real fact … it goes a day, I am talking in days … we can go to jail»): «أمس» / «آخر 7 أيام» said after midnight would
+ *  be a day off. A fact line prepared or shown on one Saudi day is never shown on the next. */
+export const sameRiyadhDay = (a: number, b: number): boolean => riyadhDay(a) === riyadhDay(b);
 
 /** Saudi Arabia has 13 administrative regions; «كل المناطق» is said only when every one has listings. */
 export const SAUDI_REGION_COUNT = 13;
@@ -372,7 +376,7 @@ const cachedFits = (c: WelcomeCache, now: Date, maxAge: number): boolean => {
   const age = now.getTime() - c.at;
   // A daily-insight line (lib/insightWelcome.ts): its greeting is put in when shown, from Saudi time, so it
   // fits any hour; only its age counts.
-  if (isInsightLineId(c.id)) return age >= 0 && age < maxAge && !!c.ar && !!c.en;
+  if (isInsightLineId(c.id)) return age >= 0 && age < maxAge && sameRiyadhDay(c.at, now.getTime()) && !!c.ar && !!c.en;
   const greet = GREET_LINES.find((l) => l.id === c.id);
   if (greet) return age >= 0 && age < Math.min(maxAge, GREET_HOLD_MS) && !!c.ar && !!c.en;
   const line = WELCOME_LINES.find((l) => l.id === c.id);
