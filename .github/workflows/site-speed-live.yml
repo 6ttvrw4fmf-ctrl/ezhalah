@@ -9,7 +9,7 @@ on:
   schedule:
     - cron: '9,39 * * * *'
   workflow_run:
-    workflows: ['Deploy frontend (production)']
+    workflows: ['Ad viewer speed — live guard'] # after-deploy robots run in turn: Deploy → Guardian → Selector → Ad viewer → this
     types: [completed]
   workflow_dispatch: {}
 
@@ -25,6 +25,7 @@ jobs:
     name: Phone journey — open, search, tap within budget
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 15
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'workflow_run' && github.event.workflow_run.conclusion != 'skipped')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

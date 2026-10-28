@@ -13,9 +13,9 @@ let failed = 0;
 const check = (label: string, ok: boolean) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); if (!ok) failed++; };
 const mustCatch = (label: string, caught: boolean) => { console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${label}`); if (!caught) failed++; };
 
-const wired = (w: string) => /cron: '/.test(w) && /workflows: \['Deploy frontend \(production\)'\]/.test(w)
+const wired = (w: string) => /cron: '/.test(w) && /workflows: \['Ad viewer speed — live guard'\]/.test(w) /* after-deploy robots take turns; this runs last */
   && /node e2e\/speed\/site-speed-live\.mjs/.test(w) && /raise-workflow-alert\.mjs/.test(w) && /if: always\(\)/.test(w);
-check('runs every 30 min and after each deploy, and a red run raises an alert', wired(wf));
+check('runs every 30 min and after each deploy (in turn, after the ad-viewer robot), and a red run raises an alert', wired(wf));
 mustCatch('the journey step removed', !wired(wf.replace('node e2e/speed/site-speed-live.mjs', 'true')));
 mustCatch('the alert bridge removed', !wired(wf.replace('raise-workflow-alert.mjs', 'nothing.mjs')));
 
