@@ -342,6 +342,24 @@ check('a held «today» line never crosses midnight Riyadh (yesterday\'s count i
   && !instantWelcome({ hasSession: true, cache: ntCache, now: nextDay, name: 'يوسف', rand: () => 0 })?.fromCache);
 mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a UTC day)',
   Math.floor(lateNight.getTime() / 86_400_000) === Math.floor(nextDay.getTime() / 86_400_000) ? riyadhDay(lateNight.getTime()) !== riyadhDay(nextDay.getTime()) : false);
+// A DAILY FACT (an insight line: «نُشر أمس …», «خلال آخر 7 أيام …») IS TRUE ONLY ON THE SAUDI DAY IT WAS BUILT FOR (owner
+// 2026-10-27: «yesterday, 1 week should be based on real fact … it goes a day … we can go to jail»). Held or prepared at
+// 23:30, it must not be shown at 00:30 — «أمس» would then be two days ago. Executed through the real instantWelcome.
+{
+  const fact = { id: 2001, at: lateNight.getTime() + 20 * 60_000, // 23:50 Riyadh
+    ar: '⟦g⟧ ⟦n⟧، تدري إنه نُشر أمس ما لا يقل عن 900 إعلان جديد؟', en: '⟦g⟧ ⟦n⟧, did you know at least 900 new listings were posted yesterday?' };
+  const sameNight = instantWelcome({ hasSession: true, cache: fact, now: new Date(fact.at + 5 * 60_000), name: 'يوسف', rand: () => 0 });
+  const afterMidnightHeld = instantWelcome({ hasSession: true, cache: fact, now: nextDay, name: 'يوسف', rand: () => 0 });
+  const afterMidnightPrepared = instantWelcome({ hasSession: true, cache: null, next: fact, now: nextDay, name: 'يوسف', rand: () => 0 });
+  check('a fact line is reused the same Saudi day, but never after midnight (held OR prepared)',
+    sameNight?.id === 2001 && afterMidnightHeld?.id !== 2001 && afterMidnightPrepared?.id !== 2001);
+  // the case is real: 40 minutes old, inside both age limits, so only the day rule stops it
+  mustCatch('an age-only rule (40 min old passes the 1 h hold and the 24 h prepare limit)', nextDay.getTime() - fact.at < Math.min(HOLD_MS, PREPARED_MAX_MS));
+  const hookDays = (src: string) => (src.match(/sameRiyadhDay\(/g) ?? []).length >= 3
+    && /if \(!sameRiyadhDay\(r\.line\.at, t\)\) return;/.test(src);
+  check('…and the hook checks the day wherever it takes a prepared fact, and again when midnight passes while it waits', hookDays(hookSrc));
+  mustCatch('the hook taking a prepared fact by age alone', !hookDays(hookSrc.replace(' && sameRiyadhDay(pend.at, start)', '').replace(' && sameRiyadhDay(pending.at, now.getTime())', '')));
+}
 
 // ── 13. the sign-in welcome (owner 2026-10-22: «whenever the user logs in or signs up, this message
 // appears», five wordings so users see different ones, approved word for word) ──
