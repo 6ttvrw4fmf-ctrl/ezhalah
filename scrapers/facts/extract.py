@@ -530,7 +530,10 @@ def run(args: argparse.Namespace) -> int:
             log_call({**base, "json_ok": False, "note": "reasoning tokens billed — wrong tier, stopping"})
             raise Stop(f"model billed {usage.get('reasoning_tokens')} reasoning tokens — not the flash/non-reasoning tier")
         model = str(resp.get("model") or "")
-        if "flash" not in model and model != REQUESTED_MODEL:
+        # the billed model must be the one ASKED for: DeepSeek direct bills "deepseek-flash" for "deepseek-chat"; the OpenRouter
+        # reader key bills the exact allowed model the proxy pinned (resp.requested_model). Anything else stops the run.
+        asked = str(resp.get("requested_model") or REQUESTED_MODEL)
+        if "flash" not in model and model != REQUESTED_MODEL and not (model and (model == asked or model.startswith(asked))):
             log_call({**base, "json_ok": False, "note": f"unexpected model {model!r}, stopping"})
             raise Stop(f"unexpected billed model {model!r}")
         parsed = parse_reply(resp.get("content") or "")
