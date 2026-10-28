@@ -1,0 +1,55 @@
+# Auto-mirror (owner 2026-10-27: «fix this slow issue»). Every 15 minutes: a migration applied to production but missing
+# from git for 20+ minutes gets its byte-exact save PR (mirror/<version>), which engineer-automerge.yml merges once every
+# required check is green. Unmirrored migrations made the deploy drift gate refuse every deploy for hours at a time.
+# Logic: scripts/auto-mirror-migrations.mjs (executed by scripts/verify-auto-mirror-migrations.ts in npm test).
+# Never writes to the database. Uses BASELINE_PR_TOKEN so the PR's checks actually run (GITHUB_TOKEN-made PRs trigger none).
+name: Migration auto-mirror
+
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: migration-auto-mirror
+  cancel-in-progress: false
+
+env:
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  mirror:
+    name: Open save PRs for unmirrored migrations
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BASELINE_PR_TOKEN || github.token }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Mirror missing migrations
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GH_TOKEN: ${{ secrets.BASELINE_PR_TOKEN || github.token }}
+        run: node scripts/auto-mirror-migrations.mjs
+
+      # Unattended: a red run must reach a human. One open alert per workflow file; the next green run resolves it.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind ingestion_check_failed
+          --workflow migration-auto-mirror.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
