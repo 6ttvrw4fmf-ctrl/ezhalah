@@ -219,17 +219,17 @@ const modalProblems = (f: Record<string, string>) => {
     if (!/import \{ markJustSignedIn, isFreshSignUp \} from '@\/lib\/loginWelcome';/.test(code) || (code.match(/markJustSignedIn\(\);/g) ?? []).length !== 2) out.push('not the sign-in welcome Google uses (markJustSignedIn) — in BOTH the «حفظ» and the «تخطي» welcome');
     if (!/markJustSignedIn\(\);/.test(AUTHPAGE) || !/markJustSignedIn\(\)/.test(ONETAP)) out.push('the Google paths no longer use markJustSignedIn');
     // the party: only after a NON-EMPTY «حفظ» (an empty one shakes and returns), never from «لاحقاً»
-    if (!/if \(!v\) \{ setShakeN\(\(n\) => n \+ 1\); field\.current\?\.focus\(\); return; \}\n\s*saveName\(v\);\n\s*close\(\);\n\s*welcomeOnceSaved\(v, \(\) => startNameParty\(reduced\)\);/.test(code)) out.push('the welcome + party do not follow a non-empty «حفظ»');
+    if (!/if \(!v\) \{ setShakeN\(\(n\) => n \+ 1\); field\.current\?\.focus\(\); return; \}\n\s*saveName\(v\);\n\s*close\(\);\n\s*welcomeOnceSaved\(v, \(\) => startNamePartyFromBox\(reduced\)\);/.test(code)) out.push('the welcome + party do not follow a non-empty «حفظ»');
     // Owner 2026-10-26: the party starts from exactly two places — a non-empty «حفظ», and a sign-up that arrived WITH
     // a name (no box): «seen» first, then the same welcomeOnceSaved, gated by shouldPartyOnSignUp, once per account.
-    if ((code.match(/welcomeOnceSaved\(v, /g) ?? []).length !== 1 || (code.match(/startNameParty\(/g) ?? []).length !== 3) out.push('the welcome or the party is started from somewhere other than «حفظ», the named sign-up and «تخطي»');
+    if ((code.match(/welcomeOnceSaved\(v, /g) ?? []).length !== 1 || (code.match(/startNamePartyFromBox\(/g) ?? []).length !== 3) out.push('the welcome or the party is started from somewhere other than «حفظ», the named sign-up and «تخطي»');
     // «تخطي» on the SIGN-UP box of a nameless account (owner 2026-10-26: «with party it's fine»): welcomed as «ضيف إزهله»
     // once «seen» lands; never from the menu's reopen, and close() itself still fires nothing.
-    if (!/const skip = \(\) => \{\n\s*const signUpBox = !reopened && !\(user\?\.name \?\? ''\)\.trim\(\);\n\s*close\(\);\n\s*if \(signUpBox\) welcomeOnceSkipped\(\(\) => startNameParty\(reduced\)\);/.test(code)) out.push('«تخطي» is not close() + the guest welcome on the sign-up box only');
+    if (!/const skip = \(\) => \{\n\s*const signUpBox = !reopened && !\(user\?\.name \?\? ''\)\.trim\(\);\n\s*close\(\);\n\s*if \(signUpBox\) welcomeOnceSkipped\(\(\) => startNamePartyFromBox\(reduced\)\);/.test(code)) out.push('«تخطي» is not close() + the guest welcome on the sign-up box only');
     if (!/const party = shouldPartyOnSignUp\(user, authChecked, authOpen, Date\.now\(\)\);/.test(code)
-      || !/if \(!party \|\| !user \|\| partied\.current === user\?\.sub\) return;\n\s*partied\.current = user\?\.sub \?\? null;\n\s*const given = user\.name\.trim\(\);\n\s*markNamePromptSeen\(\);\n\s*welcomeOnceSaved\(given, \(\) => startNameParty\(reduced\)\);/.test(code)) out.push('the named sign-up party is not «seen» + welcomeOnceSaved, once per account');
+      || !/if \(!party \|\| !user \|\| partied\.current === user\?\.sub\) return;\n\s*partied\.current = user\?\.sub \?\? null;\n\s*const given = user\.name\.trim\(\);\n\s*markNamePromptSeen\(\);\n\s*welcomeOnceSaved\(given, \(\) => startNamePartyFromBox\(reduced\)\);/.test(code)) out.push('the named sign-up party is not «seen» + welcomeOnceSaved, once per account');
     const close = /const close = \(\) => \{[^\n]*\};/.exec(code)?.[0] ?? '';
-    if (!close || /markJustSignedIn|welcomeOnceSaved|startNameParty/.test(close)) out.push('«لاحقاً» (close) can fire the welcome or the party');
+    if (!close || /markJustSignedIn|welcomeOnceSaved|startNamePartyFromBox/.test(close)) out.push('«لاحقاً» (close) can fire the welcome or the party');
     if (/name-celebration|ConfettiOverlay|partyConfetti\(|Welcome, \{name\}/.test(code)) out.push('a separate celebration card is back');
     // a nameless sign-in gets NO greeting before the box (the home greets only a named session)
     if (!/if \(!session\.present \|\| session\.awaitingName \|\| !\(session\.nameAr \|\| session\.nameEn\) \|\| !hasJustSignedIn\(now\)\) return null;/.test(w)) out.push('the home could greet a nameless sign-in before the box');
@@ -248,9 +248,9 @@ const modalProblems = (f: Record<string, string>) => {
   mustCatch('a named sign-up partying on every render (no once-per-account guard)', welcomeProblems(files[PROMPT].replace('if (!party || !user || partied.current === user?.sub) return;', 'if (!party || !user) return;'), WELCOME).length > 0);
   mustCatch('a named sign-up party without recording «seen» (the home would wait forever)', welcomeProblems(files[PROMPT].replace('    const given = user.name.trim();\n    markNamePromptSeen();\n', '    const given = user.name.trim();\n'), WELCOME).length > 0);
   mustCatch('«تخطي» welcoming from the menu\'s reopen too (no sign-up-box guard)', welcomeProblems(files[PROMPT].replace("if (signUpBox) welcomeOnceSkipped", "welcomeOnceSkipped"), WELCOME).length > 0);
-  mustCatch('a save with no welcome / party', welcomeProblems(files[PROMPT].replace('    welcomeOnceSaved(v, () => startNameParty(reduced));\n', ''), WELCOME).length > 0);
-  mustCatch('a party after an EMPTY «حفظ»', welcomeProblems(files[PROMPT].replace("if (!v) { setShakeN((n) => n + 1); field.current?.focus(); return; }", "if (!v) { setShakeN((n) => n + 1); startNameParty(reduced); return; }"), WELCOME).length > 0);
-  mustCatch('«لاحقاً» throwing the party', welcomeProblems(files[PROMPT].replace("markNamePromptSeen(); setPhase('leave');", "markNamePromptSeen(); startNameParty(reduced); setPhase('leave');"), WELCOME).length > 0);
+  mustCatch('a save with no welcome / party', welcomeProblems(files[PROMPT].replace('    welcomeOnceSaved(v, () => startNamePartyFromBox(reduced));\n', ''), WELCOME).length > 0);
+  mustCatch('a party after an EMPTY «حفظ»', welcomeProblems(files[PROMPT].replace("if (!v) { setShakeN((n) => n + 1); field.current?.focus(); return; }", "if (!v) { setShakeN((n) => n + 1); startNamePartyFromBox(reduced); return; }"), WELCOME).length > 0);
+  mustCatch('«لاحقاً» throwing the party', welcomeProblems(files[PROMPT].replace("markNamePromptSeen(); setPhase('leave');", "markNamePromptSeen(); startNamePartyFromBox(reduced); setPhase('leave');"), WELCOME).length > 0);
   mustCatch('the home greeting a Google sign-up BEFORE its box (two welcomes)', welcomeProblems(files[PROMPT], WELCOME.replace('!session.present || session.awaitingName || ', '!session.present || ')).length > 0);
   mustCatch('a home-made welcome instead of Google\'s (an event without the mark)', welcomeProblems(files[PROMPT].replace('    markJustSignedIn();\n    onWelcome();', "    globalThis.dispatchEvent(new Event('ezhalah:signed-in'));\n    onWelcome();"), WELCOME).length > 0);
   mustCatch('the home greeting a nameless Apple sign-in (a welcome BEFORE the box)', welcomeProblems(files[PROMPT], WELCOME.replace('session.awaitingName || !(session.nameAr || session.nameEn) || ', 'session.awaitingName || ')).length > 0);
@@ -361,17 +361,22 @@ const modalProblems = (f: Record<string, string>) => {
       { header: 'export const PARTY_GAP_MS', endsWith: /;$/ },
       { header: 'export const NAME_PARTY_EVENT', endsWith: /;$/ },
       { header: 'let lastParty', endsWith: /;$/ },
+      { header: 'let heroOwners', endsWith: /;$/ },
+      { header: 'export function claimNameParty(' },
+      { header: 'export function startNamePartyFromBox(' },
       { header: 'export function startNameParty(' },
-    ], ['startNameParty', 'PARTY_MS', 'CONFETTI_PIECES', 'CONFETTI_COLORS', 'PARTY_GAP_MS'], PRE8)) as { startNameParty: (r: boolean) => void; PARTY_MS: number; CONFETTI_PIECES: number; CONFETTI_COLORS: string[]; PARTY_GAP_MS: number };
+    ], ['startNameParty', 'startNamePartyFromBox', 'claimNameParty', 'PARTY_MS', 'CONFETTI_PIECES', 'CONFETTI_COLORS', 'PARTY_GAP_MS'], PRE8)) as { startNameParty: (r: boolean) => void; startNamePartyFromBox: (r: boolean) => void; claimNameParty: () => () => void; PARTY_MS: number; CONFETTI_PIECES: number; CONFETTI_COLORS: string[]; PARTY_GAP_MS: number };
   };
   // one module instance, parties started at the given clock times; returns what each start drew
-  const run = async (code: string, starts: { at: number; reduced: boolean }[]) => {
+  const run = async (code: string, starts: { at: number; reduced: boolean; box?: boolean; heroOn?: boolean }[]) => {
     const g = globalThis as any;
     Object.assign(g, { __now: 0, __timers: [], __created: [], __appended: [] });
     const P = await liftParty(code);
-    const shots = starts.map(({ at, reduced }) => {
+    const shots = starts.map(({ at, reduced, box, heroOn }) => {
       const before = g.__appended.length; g.__timers = []; g.__now = at;
-      P.startNameParty(reduced);
+      const release = heroOn ? P.claimNameParty() : null;
+      if (box) P.startNamePartyFromBox(reduced); else P.startNameParty(reduced);
+      release?.();
       const layer = g.__appended.slice(before).find((el: any) => 'data-ezh-party' in el.attrs) ?? null;
       const removeAt = layer ? (g.__timers.find((t: any) => { const was = layer.removed; t.f(); const did = layer.removed && !was; layer.removed = was; return did; })?.ms ?? null) : null;
       const drops = layer ? [...String(layer.innerHTML).matchAll(/<i style="([^"]*)"><b style="[^"]*"><\/b><\/i>/g)].map((m) => {
@@ -408,10 +413,22 @@ const modalProblems = (f: Record<string, string>) => {
   mustCatch('two celebrations stacking', (await run(SRC.replace('if (now - lastParty < PARTY_GAP_MS) return;', ''), [{ at: 0, reduced: false }, { at: 1000, reduced: false }])).shots[1].drew);
   mustCatch('the disco lights coming back', !noExternal(SRC.replace('[data-ezh-party]{position:fixed', '[data-ezh-disco]{opacity:1}\n[data-ezh-party]{position:fixed')));
   const passOk = (p: string, css: string) => /const reduced = useReducedMotion\(\);/.test(p)
-    && (p.match(/startNameParty\(/g) ?? []).length > 0 && (p.match(/startNameParty\(/g) ?? []).length === (p.match(/startNameParty\(reduced\)/g) ?? []).length
+    && (p.match(/startNamePartyFromBox\(/g) ?? []).length > 0 && (p.match(/startNamePartyFromBox\(/g) ?? []).length === (p.match(/startNamePartyFromBox\(reduced\)/g) ?? []).length
+    && !/startNameParty\(/.test(p)
     && css.includes('@media (prefers-reduced-motion:reduce){[data-ezh-scrim],[data-ezh-scrim] *,[data-ezh-shine]{animation:none!important;transition:none!important}[data-ezh-party]{display:none}}');
   check('§8 the box hands the real reduced-motion flag to the party, and the CSS stills every motion (confetti hidden)', passOk(files[PROMPT], SRC));
-  mustCatch('the party told motion is fine regardless', !passOk(files[PROMPT].replace('startNameParty(reduced)', 'startNameParty(false)'), SRC));
+  mustCatch('the party told motion is fine regardless', !passOk(files[PROMPT].replace('startNamePartyFromBox(reduced)', 'startNamePartyFromBox(false)'), SRC));
+  // ONE confetti per sign-in (owner 2026-10-27: «it shows twice»): while the home's falconer is on screen the name box's
+  // trigger draws nothing (he starts it after his story); with no falconer the box still gives the party. EXECUTED.
+  const boxWithHero = (await run(SRC, [{ at: 0, reduced: false, box: true, heroOn: true }])).shots[0];
+  const boxAlone = (await run(SRC, [{ at: 0, reduced: false, box: true }])).shots[0];
+  check('§8 the name box draws no confetti while the falconer is on screen (his comes after his story); alone it still does', !boxWithHero.drew && boxAlone.drew);
+  mustCatch('the box firing its own confetti on top of the falconer\'s', (await run(SRC.replace('  if (heroOwners > 0) return;\n', ''), [{ at: 0, reduced: false, box: true, heroOn: true }])).shots[0].drew);
+  mustCatch('the box calling the raw party again', !passOk(files[PROMPT].replace('startNamePartyFromBox(reduced)', 'startNameParty(reduced)'), SRC));
+  const heroSrc = read('src/components/HeroFalconer.tsx');
+  const heroClaims = (c: string) => c.includes('useEffect(() => claimNameParty(), []);');
+  check('§8 the falconer claims the confetti while he is mounted', heroClaims(heroSrc));
+  mustCatch('a falconer that never claims it', !heroClaims(heroSrc.replace('useEffect(() => claimNameParty(), []);', '')));
 }
 
 // ── §9 owner P1s 2026-10-24: both spellings stored · never the other script in a sentence · the name
