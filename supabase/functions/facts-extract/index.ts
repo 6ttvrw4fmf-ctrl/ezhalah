@@ -27,8 +27,20 @@ const MODEL = "deepseek-chat";
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY") ?? "";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_MODEL = Deno.env.get("FACTS_OPENROUTER_MODEL") || "deepseek/deepseek-v3.2";
-const OPENROUTER_PROVIDERS = (Deno.env.get("FACTS_OPENROUTER_PROVIDERS") || "DeepSeek").split(",").map((s) => s.trim()).filter(Boolean);
+const OPENROUTER_PROVIDERS = (Deno.env.get("FACTS_OPENROUTER_PROVIDERS") || "DeepInfra,AtlasCloud,Baidu").split(",").map((s) => s.trim()).filter(Boolean);
 const DEFAULT_PROVIDER = Deno.env.get("FACTS_PROVIDER") === "openrouter" ? "openrouter" : "deepseek";
+// THE MODELS A RUN MAY PICK on the OpenRouter reader key (owner 2026-10-28: «let's try mistral small … and see how it
+// performs»). A closed list — every one non-thinking and cheap — each pinned to the provider named here (empty = any
+// provider of that exact model; fallbacks to OTHER models are always off). A model not listed is refused, so a caller
+// can never pick an expensive or reasoning model. Price per 100k ads at list price, ~1,000 in + 80 out tokens per ad.
+const OPENROUTER_MODELS: Record<string, string[]> = {
+  // DeepSeek does NOT host its own model on OpenRouter (pilot 2026-10-28: pinning "DeepSeek" → openrouter 404 on all 44
+  // calls). Pin the cheap hosts measured that day; never the $3/M ones (Mara, SambaNova) or the $1/M Phala.
+  "deepseek/deepseek-v3.2": ["DeepInfra", "AtlasCloud", "Baidu"],       // $0.26–0.28 in / $0.38–0.42 out per M
+  "mistralai/mistral-small-3.2-24b-instruct": ["DeepInfra", "Mistral", "Venice"], // $0.07–0.10 in / $0.20–0.30 out
+  "google/gemini-2.5-flash-lite": [],                        // ~$13
+  "qwen/qwen3-235b-a22b-2507": [],                           // ~$13
+};
 type Provider = "deepseek" | "openrouter";
 const MAX_ADS = 20;
 const MAX_CHARS_PER_AD = 4000;
@@ -160,17 +172,23 @@ Deno.serve(async (req: Request) => {
   let ads: Ad[];
   let runId = "";
   let provider: Provider = DEFAULT_PROVIDER;
+  let requestedModel = "";
   try {
     const body = await req.json();
     runId = String(body?.run_id ?? "");
     ads = Array.isArray(body?.ads) ? body.ads : [];
     if (body?.provider === "openrouter" || body?.provider === "deepseek") provider = body.provider;
+    if (typeof body?.model === "string" && body.model) {
+      if (provider !== "openrouter" || !(body.model in OPENROUTER_MODELS)) return json({ error: `model not allowed: ${body.model}` }, 400);
+      requestedModel = body.model;
+    }
   } catch {
     return json({ error: "bad json" }, 400);
   }
   const apiKey = provider === "openrouter" ? OPENROUTER_API_KEY : DEEPSEEK_API_KEY;
   if (!apiKey) return json({ error: `model key not configured (${provider})` }, 503);
-  const model = provider === "openrouter" ? OPENROUTER_MODEL : MODEL;
+  const model = provider === "openrouter" ? (requestedModel || OPENROUTER_MODEL) : MODEL;
+  const pinned = requestedModel ? OPENROUTER_MODELS[requestedModel] : OPENROUTER_PROVIDERS;
   if (!runId || ads.length === 0 || ads.length > MAX_ADS) return json({ error: `need run_id and 1..${MAX_ADS} ads` }, 400);
   let total = 0;
   for (const a of ads) {
@@ -197,7 +215,7 @@ Deno.serve(async (req: Request) => {
     response_format: { type: "json_object" },
     // OpenRouter only: bill-exact cost in the reply (usage.cost) and the DeepSeek provider pinned, no fallbacks
     ...(provider === "openrouter"
-      ? { usage: { include: true }, provider: { order: OPENROUTER_PROVIDERS, allow_fallbacks: false } }
+      ? { usage: { include: true }, ...(pinned.length ? { provider: { order: pinned, allow_fallbacks: false } } : {}) }
       : {}),
   });
 
