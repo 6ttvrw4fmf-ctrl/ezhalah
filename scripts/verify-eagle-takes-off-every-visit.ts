@@ -57,10 +57,17 @@ check('…flipped in Arabic, told who is signed in and when a welcome was taken,
 // ── the signed-in falconer (owner-approved 2026-10-26): the story plays ONCE per sign-in welcome, then the still ──
 const signin = read('assets/images/falconer-signin.svg');
 const still = read('assets/images/falconer-final.svg');
-const playGate = (c: string) => /const playing = signedIn && !reduced && celebrate > 0 && celebrate !== done;/.test(c)
-  && /\) : playing \? \(\n\s*<XImage testID="hero-falconer-signin" source=\{freshSource\(SIGNIN, celebrate\)/.test(c)
+const playGate = (c: string) => c.includes('const story = signedIn && !reduced && celebrate > 0;')
+  && c.includes('const playing = story && celebrate !== done;')
+  && /\) : story \? \(\n\s*<XImage testID="hero-falconer-signin" source=\{freshSource\(SIGNIN, celebrate\)/.test(c)
   && /<XImage testID="hero-falconer-final" source=\{SIGNED_IN_STILL\}/.test(c);
 check('signed in: the animation plays only on a sign-in welcome and never under reduced motion; otherwise the still', playGate(comp));
+// SMOOTH (owner 2026-10-27: «it doesn't look smooth»): the clock starts when the story's file is on screen, and after
+// it he keeps its last frame (no swap to another file, which flashed blank while it loaded)
+const smooth = (c: string) => c.includes('priority="high" onLoad={() => setLoadedFor(celebrate)}')
+  && /if \(!playing \|\| loadedFor !== celebrate\) return;\n\s*const timers = \[\n\s*setTimeout\(\(\) => startNameParty\(reduced\), RAIN_AT_MS\)/.test(c)
+  && /setTimeout\(\(\) => setLoadedFor\(celebrate\), LOAD_WAIT_MS\)/.test(c);
+check('…its clock starts when it is on screen (loaded), with a fallback, and it keeps its last frame after (no blank swap)', smooth(comp) && playGate(comp));
 // owner 2026-10-27: «the animation must be clear, first the animation … it finished, then the confetti … it feels slow»
 // → the whole story fits in 5–7 s, its last motion ends by SIGNIN_SEQUENCE_MS, and the confetti starts only then.
 const svgEnd = (v: string) => Math.max(0, ...[...v.matchAll(/<(?:animate|animateTransform|animateMotion|set)\b[^>]*>/g)].map((m) => {
@@ -89,6 +96,8 @@ check('a second sign-in in the same tab gets a fresh animation timeline', fresh(
 mustCatch('the falcon playing under reduced motion', !playsEveryMount(comp.replace('    if (reduced || signedIn) return;\n', '')));
 mustCatch('a once-per-session gate coming back', !playsEveryMount(comp.replace('if (reduced || signedIn) return;', 'if (reduced || signedIn || sessionStorage.getItem(\'x\')) return;')));
 mustCatch('the sign-in animation playing under reduced motion', !playGate(comp.replace('signedIn && !reduced && celebrate > 0', 'signedIn && celebrate > 0')));
+mustCatch('the clock starting before the story is on screen', !smooth(comp.replace('if (!playing || loadedFor !== celebrate) return;', 'if (!playing) return;')));
+mustCatch('a swap to the still file right after the story (blank flash)', !playGate(comp.replace(') : story ? (', ') : playing ? (')));
 mustCatch('the confetti starting during the story (at the bulb)', !timing(comp.replace('export const RAIN_AT_MS = SIGNIN_SEQUENCE_MS;', 'export const RAIN_AT_MS = 5000;'), signin));
 mustCatch('the old slow story (8.8 s)', !timing(comp.replace('export const SIGNIN_SEQUENCE_MS = 6200;', 'export const SIGNIN_SEQUENCE_MS = 8800;'), signin));
 mustCatch('a story still moving after it is meant to be over', !timing(comp, signin.replace('begin="0s"', 'begin="3s"')));

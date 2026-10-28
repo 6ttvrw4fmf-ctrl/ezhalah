@@ -5,7 +5,7 @@ import Animated from 'react-native-reanimated';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SKY_CALM_PROPS } from '@/lib/scrollCalm';
 import { TAKEOFF_MS } from '@/lib/eagleTakeoff';
-import { startNameParty } from '@/lib/nameParty';
+import { startNameParty, claimNameParty } from '@/lib/nameParty';
 import CloudWisp from './CloudWisp';
 
 // The guest falconer (plain outline) — the owner's reference image (2026-10-26), 167x192.
@@ -37,6 +37,8 @@ const SIGNIN_CANVAS = { x: -140, y: -170, w: 310, h: 385 };
 export const SIGNIN_SEQUENCE_MS = 6200;
 // the bulb lights at ~5.0–5.4 s and the glow fades by ~6.2 s; the confetti starts once the story is over
 export const RAIN_AT_MS = SIGNIN_SEQUENCE_MS;
+// how long the story waits for its file before its clock starts anyway
+const LOAD_WAIT_MS = 4000;
 
 // A browser shares one animation timeline per SVG URL, so a second sign-in in the same tab would show the already-
 // finished animation. A per-play query string gives every play its own fresh timeline.
@@ -78,15 +80,28 @@ export default function HeroFalconer({ size, flip, signedIn = false, celebrate =
   // Derived, not set in an effect, so the first frame of a sign-in already shows the animation's start (no flash of
   // the end). Reduced motion: the still final look at once, no rain.
   const [done, setDone] = useState(0);
-  const playing = signedIn && !reduced && celebrate > 0 && celebrate !== done;
+  // while he is on screen, the confetti is his alone (one party per sign-in, after his story)
+  useEffect(() => claimNameParty(), []);
+  // SMOOTH (owner 2026-10-27: «it doesn't look smooth»): the story's clock starts when its file is ON SCREEN (onLoad),
+  // not when it was asked for — the 240 KB SVG used to arrive after the timers had started, so the confetti could land
+  // mid-story and the end was cut. After the story he KEEPS its last frame (the same drawing as the still) instead of
+  // swapping to another file, which flashed blank while it loaded.
+  const [loadedFor, setLoadedFor] = useState(0);
+  const story = signedIn && !reduced && celebrate > 0;
+  const playing = story && celebrate !== done;
   useEffect(() => {
     if (!playing) return;
+    const fallback = setTimeout(() => setLoadedFor(celebrate), LOAD_WAIT_MS); // a load event that never comes
+    return () => clearTimeout(fallback);
+  }, [celebrate, signedIn]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!playing || loadedFor !== celebrate) return;
     const timers = [
       setTimeout(() => startNameParty(reduced), RAIN_AT_MS),
       setTimeout(() => setDone(celebrate), SIGNIN_SEQUENCE_MS),
     ];
     return () => timers.forEach(clearTimeout);
-  }, [celebrate, signedIn]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadedFor, celebrate, signedIn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // contentFit="contain": where the drawing really sits inside the box, so the falcon sits on his hand.
   const k = Math.min(w / ART_W, h / ART_H);
@@ -115,8 +130,8 @@ export default function HeroFalconer({ size, flip, signedIn = false, celebrate =
               <XImage testID="hero-eagle-takeoff" source={EAGLE_TAKEOFF} contentFit="fill" accessible={false} style={falconBox} />
             ) : null}
           </>
-        ) : playing ? (
-          <XImage testID="hero-falconer-signin" source={freshSource(SIGNIN, celebrate) as any} contentFit="fill" accessible={false} style={signinBox} />
+        ) : story ? (
+          <XImage testID="hero-falconer-signin" source={freshSource(SIGNIN, celebrate) as any} priority="high" onLoad={() => setLoadedFor(celebrate)} contentFit="fill" accessible={false} style={signinBox} />
         ) : (
           <XImage testID="hero-falconer-final" source={SIGNED_IN_STILL} contentFit="fill" accessible={false} style={signinBox} />
         )}
