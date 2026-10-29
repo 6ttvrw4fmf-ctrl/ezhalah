@@ -38,6 +38,14 @@ export const workflowOffersOnlyListed = (yml: string, models: string[] | null): 
   return opts.length > 0 && opts.every((o) => models.includes(o));
 };
 
+// THE BACKUP READER (owner 2026-10-28: «a strong model, not for all, only some, as backup»): it must be one of the
+// allowed cheap non-thinking models, and capped to a small share of each run.
+export const backupIsCapped = (py: string, models: string[] | null): boolean => {
+  const m = /^FALLBACK_MODEL = "([^"]+)"/m.exec(py), share = /^FALLBACK_SHARE = ([0-9.]+)/m.exec(py);
+  return !!m && !!share && !!models && models.includes(m[1]) && listIsCheap([m[1]]) && Number(share[1]) > 0 && Number(share[1]) <= 0.1 && /^FALLBACK_MONTH_USD = ([0-9.]+)/m.test(py) && Number(/^FALLBACK_MONTH_USD = ([0-9.]+)/m.exec(py)![1]) <= 5 &&
+    /if not fallback and args\.fallback_model:\n\s+fallback_queue\.extend\(batch\)/.test(py);
+};
+const PYX = readFileSync(join(root, "scrapers", "facts", "extract.py"), "utf8");
 const TS = readFileSync(join(root, 'supabase', 'functions', 'facts-extract', 'index.ts'), 'utf8');
 const WF = readFileSync(join(root, '.github', 'workflows', 'facts-extract.yml'), 'utf8');
 const models = allowedModels(TS);
@@ -47,6 +55,10 @@ check('the proxy refuses a model outside OPENROUTER_MODELS', proxyRefusesUnliste
 check(`the allowed list holds no reasoning or premium model (${(models ?? []).join(', ')})`, listIsCheap(models));
 check('facts-extract.yml offers only models from that list', workflowOffersOnlyListed(WF, models));
 
+check("the backup reader is an allowed cheap model, used for at most 10% of a run, only for ads the main model could not answer", backupIsCapped(PYX, models));
+mustCatch("the backup share raised to every ad", !backupIsCapped(PYX.replace(/^FALLBACK_SHARE = [0-9.]+/m, "FALLBACK_SHARE = 1.0"), models));
+mustCatch("the backup monthly cap raised past 5 USD", !backupIsCapped(PYX.replace(/^FALLBACK_MONTH_USD = [0-9.]+/m, "FALLBACK_MONTH_USD = 50.0"), models));
+mustCatch("a premium backup model", !backupIsCapped(PYX.replace(/^FALLBACK_MODEL = "[^"]+"/m, 'FALLBACK_MODEL = "anthropic/claude-sonnet-4.5"'), models));
 mustCatch('the refusal removed', !proxyRefusesUnlisted(TS.replace('|| !(body.model in OPENROUTER_MODELS)', '')));
 mustCatch('a reasoning model added to the list', !listIsCheap([...(models ?? []), 'deepseek/deepseek-r1']));
 mustCatch('a premium model added to the list', !listIsCheap([...(models ?? []), 'anthropic/claude-sonnet-4.5']));
