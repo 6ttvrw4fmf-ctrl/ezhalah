@@ -57,9 +57,9 @@ on:
         default: "false"
         type: string
       provider:
-        description: "empty = the proxy's default key · openrouter = the OpenRouter READER key (pilot / after the switch) · deepseek"
+        description: "openrouter (default since 2026-10-28: the OpenRouter READER key, DeepSeek V3.2) · deepseek = the old direct key · empty = the proxy default"
         required: false
-        default: ""
+        default: openrouter
         type: choice
         options: ["", openrouter, deepseek]
       batch:
@@ -110,7 +110,7 @@ jobs:
           SILENT: ${{ inputs.silent }}
           MODE: ${{ inputs.mode || 'new' }}
           CATEGORY: ${{ inputs.category || 'residential' }}
-          PROVIDER: ${{ inputs.provider }}
+          PROVIDER: ${{ inputs.provider || 'openrouter' }}
           MODEL: ${{ inputs.model }}
           BATCH: ${{ inputs.batch || '16' }}
         run: |
