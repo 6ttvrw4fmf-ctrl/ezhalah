@@ -56,7 +56,26 @@ FALLBACK_MONTH_USD = 3.0                   # owner 2026-10-28: the backup never 
 CHECKPOINT_ADS = 500
 CHECKPOINT_UNVERIFIED = 0.05
 CHECKPOINT_USD_PER_AD = 0.001
-CHECKPOINT_JSON_FAIL = 0.02
+# A broken reply is retried in halves and then sent to the backup reader, so what costs facts is an ad LOST after all
+# of that, not a broken call. Backlog batch 1 on OpenRouter (2026-10-29) stopped at 1 broken call of 34 (2.94 %) with
+# 0 ads lost. The checkpoint therefore stops on lost ads > 2 %, and on broken calls only past 10 % (a model that is
+# really failing). Both directions are in the selftest.
+CHECKPOINT_JSON_FAIL = 0.10
+CHECKPOINT_LOST = 0.02
+
+
+def checkpoint_problems(unv: float, cpa: float, jf: float, lost_share: float) -> list[str]:
+    """Why the 500-ad checkpoint must stop the run (empty = carry on)."""
+    bad = []
+    if unv > CHECKPOINT_UNVERIFIED:
+        bad.append(f"unverified {unv:.2%} > {CHECKPOINT_UNVERIFIED:.0%}")
+    if cpa > CHECKPOINT_USD_PER_AD:
+        bad.append(f"cost/ad ${cpa:.6f} > ${CHECKPOINT_USD_PER_AD}")
+    if jf > CHECKPOINT_JSON_FAIL:
+        bad.append(f"json failures {jf:.2%} > {CHECKPOINT_JSON_FAIL:.0%}")
+    if lost_share > CHECKPOINT_LOST:
+        bad.append(f"ads lost {lost_share:.2%} > {CHECKPOINT_LOST:.0%}")
+    return bad
 REQUESTED_MODEL = "deepseek-chat"          # the non-reasoning alias; DeepSeek reports it as deepseek-flash
 MAX_TEXT_CHARS = 3800                      # the proxy refuses > 4000
 MIN_TEXT_CHARS = 30
@@ -644,13 +663,7 @@ def run(args: argparse.Namespace) -> int:
               f"missing={tot['ads_missing_in_reply']} {int(time.time() - t_start)}s")
         if not final and not checkpointed and tot["ads"] >= CHECKPOINT_ADS:
             checkpointed = True
-            bad = []
-            if unv > CHECKPOINT_UNVERIFIED:
-                bad.append(f"unverified {unv:.2%} > {CHECKPOINT_UNVERIFIED:.0%}")
-            if cpa > CHECKPOINT_USD_PER_AD:
-                bad.append(f"cost/ad ${cpa:.6f} > ${CHECKPOINT_USD_PER_AD}")
-            if jf > CHECKPOINT_JSON_FAIL:
-                bad.append(f"json failures {jf:.2%} > {CHECKPOINT_JSON_FAIL:.0%}")
+            bad = checkpoint_problems(unv, cpa, jf, tot["ads_lost"] / max(tot["ads"] + tot["ads_lost"], 1))
             if bad:
                 raise Stop("CHECKPOINT FAILED at 500 ads — fix before continuing: " + "; ".join(bad))
 
@@ -713,6 +726,11 @@ def selftest() -> None:
             raise AssertionError(bad_lane)
         except ValueError:
             pass
+    # checkpoint: one rescued broken call of 34 with nothing lost carries on (backlog batch 1, 2026-10-29); lost ads, a
+    # model failing most calls, bad quotes or a costly model still stop the run
+    assert checkpoint_problems(0.0126, 0.000109, 1 / 34, 0.0) == []
+    assert checkpoint_problems(0.0126, 0.000109, 1 / 34, 0.03) and checkpoint_problems(0.01, 0.0001, 0.15, 0.0)
+    assert checkpoint_problems(0.06, 0.0001, 0.0, 0.0) and checkpoint_problems(0.01, 0.002, 0.0, 0.0)
     assert norm("مَسْبَحٌ، وحديقة") == norm("مسبح وحديقه") == "مسبح وحديقه"
     assert norm("شارع ١٥ م") == "شارع 15 م"
     assert norm("مُؤَسَّس") == "مؤسس"
