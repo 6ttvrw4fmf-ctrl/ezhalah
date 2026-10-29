@@ -129,6 +129,18 @@ function cityPoolScopeOf(query: SearchQuery) {
   return { effDeal, rentPeriodTok, effCategory, cohortTypes, af };
 }
 
+/** The headline's emoji (👋 🌙 ☀️ …) in its own span (owner 2026-10-28: «the emoji after the name doesn't show»). The
+ *  shine paints the text see-through over a gradient, and on iPhone an emoji painted see-through simply vanishes; the
+ *  nameParty CSS gives [data-ezh-emoji] its own fill, so the emoji stays visible through the shine. */
+const EMOJI_RE = /([☀-➿]️?|[\uD83C-\uD83E][\uDC00-\uDFFF]️?)/;
+function withVisibleEmoji(text: string) {
+  const parts = text.split(EMOJI_RE);
+  if (parts.length === 1) return text;
+  return parts.map((p, i) => (i % 2 === 1
+    ? <Text key={i} {...({ dataSet: { ezhEmoji: '' } } as any)}>{p}</Text>
+    : p));
+}
+
 export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -1454,7 +1466,7 @@ export default function Home() {
             <CloudWisp variant={2} width={90} height={28} opacity={0.32} style={{ right: -35, bottom: 18 }} />
             <View style={heroWide ? s.heroTitleBlockWide : s.heroTitleBlock}>
               <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
-                <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
+                <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{withVisibleEmoji(welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline]))}</RNAnimated.Text>
               </Pressable>
             </View>
             <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
