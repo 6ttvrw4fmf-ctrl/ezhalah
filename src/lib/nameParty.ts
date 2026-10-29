@@ -5,16 +5,30 @@ import { Platform } from 'react-native';
 // data-ezh-* attributes (react-native-web `dataSet`) and this one stylesheet animates them; native
 // renders the same box without motion. prefers-reduced-motion: no motion, and startNameParty draws nothing.
 
-/** THE CELEBRATION IS A CONFETTI PARTY (owner 2026-10-27: «change the rain to confetti party … on a laptop full screen,
- *  phone full screen … let it last 4 seconds 5», after the moving preview; it replaces the 2026-10-26 green rain). 4 s since the owner's
- *  «it feels slow» (same day): the low end of the 4–5 s they asked for.
- *  CONFETTI_PIECES pieces burst from just under the clouds over BURST_MS, flutter down the WHOLE screen (fixed layer,
- *  every viewport width), and the layer is gone at PARTY_MS. Self-contained CSS/DOM: no external script. */
-export const PARTY_MS = 4000;
-export const BURST_MS = 1500;
-export const CONFETTI_PIECES = 500;
-/** Party colours: Ezhalah greens and gold plus pink, blue, violet and white. */
-export const CONFETTI_COLORS = ['#2f7247', '#5fae7c', '#d8b14a', '#f2c14e', '#e9739a', '#4f8fe0', '#ffffff', '#a77ee8'];
+/** THE CELEBRATION IS FIREWORKS (owner 2026-10-28, from the moving preview: «make it like fireworks, exploding … I want a
+ *  lot and quick … keep sending»; it replaces the 2026-10-27 confetti). Rockets fire from the bottom of the screen, one
+ *  every ~LAUNCH_EVERY_MS for LAUNCH_FOR_MS, all over the width, and each explodes into a round shell of sparks and
+ *  confetti that falls and fades. The headline listens: at the FIRST pop it shows «نورت {name} 🥳…»
+ *  (PARTY_FIRST_POP_EVENT) and when the last spark is gone it changes to the fact (PARTY_END_EVENT). One fixed full-screen
+ *  canvas, removed at the end and in any case by PARTY_MS. Self-contained: no external script. */
+export const LAUNCH_FOR_MS = 3500;
+export const LAUNCH_EVERY_MS = 70;
+export const SPARKS_PER_BURST = 85;
+/** The layer is always gone by then (rise ≤ ~1 s and sparks ≤ ~1.6 s after the last launch). */
+export const PARTY_MS = 6500;
+/** Ezhalah green and gold first, then party colours. */
+export const FIREWORK_COLORS = ['#2f7247', '#5fae7c', '#d8b14a', '#f2c14e', '#e9739a', '#4f8fe0', '#a77ee8', '#ff8a3d'];
+export const PARTY_FIRST_POP_EVENT = 'ezhalah:party-first-pop';
+export const PARTY_END_EVENT = 'ezhalah:party-end';
+export type Rocket = { at: number; x: number; ty: number; c: string; c2: string };
+/** The launch plan: when each rocket leaves, where (fraction of the width) and how high it bursts (fraction of the height). */
+export function fireworksPlan(rand: () => number = Math.random): Rocket[] {
+  const out: Rocket[] = [];
+  for (let at = 0, i = 0; at < LAUNCH_FOR_MS; at += LAUNCH_EVERY_MS * (0.6 + 0.8 * rand()), i++) {
+    out.push({ at: Math.round(at), x: 0.06 + 0.88 * rand(), ty: 0.06 + 0.54 * rand(), c: FIREWORK_COLORS[i % FIREWORK_COLORS.length], c2: FIREWORK_COLORS[(i + 3) % FIREWORK_COLORS.length] });
+  }
+  return out;
+}
 /** A second celebration this soon after one is skipped: the sign-up box and the sign-in welcome never stack. */
 export const PARTY_GAP_MS = 6000;
 /** The home headline listens for this to shine (2 passes) while the party plays. */
@@ -49,10 +63,7 @@ const CSS = `
 @keyframes ezhShine{from{background-position:110% 0}to{background-position:-10% 0}}
 [data-ezh-shine="on"] [data-ezh-emoji]{-webkit-text-fill-color:initial!important;color:initial!important}
 [data-ezh-party]{position:fixed;inset:0;pointer-events:none;z-index:2147483001;overflow:hidden}
-[data-ezh-party] i{position:absolute;opacity:0;animation-name:ezhFall;animation-timing-function:cubic-bezier(.25,.4,.55,1);animation-fill-mode:both;will-change:transform}
-[data-ezh-party] i b{display:block;width:100%;height:100%;border-radius:inherit;background:inherit;animation:ezhFlip linear infinite}
-@keyframes ezhFall{0%{transform:translate(0,0) rotate(0);opacity:0}6%{opacity:1}88%{opacity:1}100%{transform:translate(var(--dx),calc(100vh + 40px)) rotate(var(--rot));opacity:0}}
-@keyframes ezhFlip{0%{transform:rotateX(0) rotateY(0)}50%{transform:rotateX(180deg) rotateY(90deg)}100%{transform:rotateX(360deg) rotateY(180deg)}}
+[data-ezh-party] canvas{position:absolute;inset:0;width:100%;height:100%}
 @media (prefers-reduced-motion:reduce){[data-ezh-scrim],[data-ezh-scrim] *,[data-ezh-shine]{animation:none!important;transition:none!important}[data-ezh-party]{display:none}}
 `;
 
@@ -82,34 +93,86 @@ export function startNamePartyFromBox(reduced: boolean): void {
   startNameParty(reduced);
 }
 
-/** The confetti party after a sign-in / sign-up. Decoration only: pointer-events:none, and the whole layer removes itself
- *  at PARTY_MS. No external script. Reduced motion → nothing at all. */
+/** The fireworks after a sign-in / sign-up. Decoration only: pointer-events:none, one canvas, and the whole layer removes
+ *  itself when the last spark is gone (and at PARTY_MS at the latest). No external script. Reduced motion → nothing. */
 export function startNameParty(reduced: boolean): void {
   if (reduced || Platform.OS !== 'web' || typeof document === 'undefined') return;
   const now = Date.now();
   if (now - lastParty < PARTY_GAP_MS) return;
   lastParty = now;
   ensureNameBoxCss();
-  try { globalThis.dispatchEvent?.(new Event(NAME_PARTY_EVENT)); } catch { /* not a browser */ }
+  const say = (name: string) => { try { globalThis.dispatchEvent?.(new Event(name)); } catch { /* not a browser */ } };
+  say(NAME_PARTY_EVENT);
 
   const layer = document.createElement('div');
   layer.setAttribute('data-ezh-party', '');
-  let html = '';
-  for (let i = 0; i < CONFETTI_PIECES; i++) {
-    const left = (Math.random() * 100).toFixed(2);
-    const top = 50 + Math.round(Math.random() * 30);                // just under the clouds
-    const delay = Math.round(Math.random() * BURST_MS);
-    const dur = 1800 + Math.round(Math.random() * 650);             // delay + dur stays inside PARTY_MS
-    const w = 5 + Math.random() * 6;
-    const h = Math.random() < 0.35 ? w : w * (1.6 + Math.random());
-    const round = Math.random() < 0.25 ? '50%' : '2px';
-    const dx = Math.round((Math.random() - 0.5) * 160);
-    const rot = Math.round((Math.random() - 0.5) * 1080);
-    const flip = 500 + Math.round(Math.random() * 700);
-    const color = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
-    html += `<i style="left:${left}%;top:${top}px;width:${w.toFixed(1)}px;height:${h.toFixed(1)}px;border-radius:${round};background:${color};animation-delay:${delay}ms;animation-duration:${dur}ms;--dx:${dx}px;--rot:${rot}deg"><b style="animation-duration:${flip}ms"></b></i>`;
-  }
-  layer.innerHTML = html;
+  const canvas = document.createElement('canvas') as HTMLCanvasElement;
+  (layer as any).appendChild?.(canvas);
   document.body.appendChild(layer);
-  setTimeout(() => layer.remove(), PARTY_MS);
+  let ended = false;
+  const finish = () => { if (ended) return; ended = true; layer.remove(); say(PARTY_END_EVENT); };
+  setTimeout(finish, PARTY_MS);
+  let popped = false;
+  const firstPop = () => { if (!popped) { popped = true; say(PARTY_FIRST_POP_EVENT); } };
+
+  const ctx = (canvas as any).getContext?.('2d') as CanvasRenderingContext2D | null | undefined;
+  const raf = (globalThis as any).requestAnimationFrame as ((f: (t: number) => void) => number) | undefined;
+  if (!ctx || !raf) { firstPop(); return; } // no canvas here: the headline still moves on; the timer clears the layer
+  const dpr = Math.min(2, (globalThis as any).devicePixelRatio || 1);
+  const W = (globalThis as any).innerWidth || 375, H = (globalThis as any).innerHeight || 812;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  (canvas as any).style.width = '100%'; (canvas as any).style.height = '100%';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+  const rockets = fireworksPlan().map((r) => ({ ...r, x: r.x * W, y: H + 10, ty: r.ty * H, vy: 0, done: false }));
+  type Spark = { x: number; y: number; px: number; py: number; vx: number; vy: number; life: number; max: number; c: string; kind: 0 | 1 | 2; w: number; h: number; rot: number; vr: number; flip: number };
+  const sparks: Spark[] = [];
+  const explode = (r: typeof rockets[number]) => {
+    firstPop();
+    const n = SPARKS_PER_BURST + ((Math.random() * 25) | 0), base = rnd(2.6, 3.8);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + rnd(-0.06, 0.06), sp = base * rnd(0.55, 1.05);
+      sparks.push({ x: r.x, y: r.y, px: r.x, py: r.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0, max: rnd(1100, 1600),
+        c: Math.random() < 0.5 ? r.c : r.c2, kind: Math.random() < 0.3 ? 1 : 0, w: rnd(3, 6), h: rnd(6, 10), rot: rnd(0, 6), vr: rnd(-0.3, 0.3), flip: rnd(0, 6) });
+    }
+    for (let i = 0; i < 10; i++) sparks.push({ x: r.x, y: r.y, px: r.x, py: r.y, vx: rnd(-0.6, 0.6), vy: rnd(-0.6, 0.6), life: 0, max: rnd(400, 700), c: '#fff6d8', kind: 2, w: 0, h: 0, rot: 0, vr: 0, flip: 0 });
+  };
+  let t0 = -1, last = 0;
+  const frame = (now: number) => {
+    if (ended) return;
+    if (t0 < 0) { t0 = now; last = now; }
+    const t = now - t0, dt = Math.min(32, now - last) / 16.7; last = now;
+    ctx.clearRect(0, 0, W, H);
+    let alive = 0;
+    for (const r of rockets) {
+      if (r.done) continue;
+      alive++;
+      if (t < r.at) continue;
+      if (!r.vy) r.vy = -Math.sqrt(2 * 0.22 * (r.y - r.ty)) * 1.02;
+      r.y += r.vy * dt; r.vy += 0.22 * dt;
+      ctx.globalAlpha = 1; ctx.strokeStyle = r.c; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(r.x, r.y); ctx.lineTo(r.x, r.y - r.vy * 3); ctx.stroke();
+      ctx.fillStyle = '#fff6d8'; ctx.beginPath(); ctx.arc(r.x, r.y, 2, 0, 7); ctx.fill();
+      if (r.vy >= -0.4) { r.done = true; explode(r); }
+    }
+    for (const s of sparks) {
+      s.life += 16.7 * dt; if (s.life > s.max) continue;
+      alive++;
+      const k = 1 - s.life / s.max;
+      s.px = s.x; s.py = s.y; s.vx *= Math.pow(0.965, dt); s.vy = s.vy * Math.pow(0.965, dt) + 0.045 * dt; s.x += s.vx * dt; s.y += s.vy * dt;
+      ctx.globalAlpha = Math.min(1, k * 1.4);
+      if (s.kind === 2) { ctx.fillStyle = s.c; ctx.beginPath(); ctx.arc(s.x, s.y, 3 * k + 1, 0, 7); ctx.fill(); continue; }
+      if (s.kind === 1) {
+        s.rot += s.vr * dt; s.flip += 0.14 * dt; s.x += Math.sin(s.flip) * 0.35;
+        ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.rot); ctx.scale(1, Math.cos(s.flip)); ctx.fillStyle = s.c; ctx.fillRect(-s.w / 2, -s.h / 2, s.w, s.h); ctx.restore();
+      } else {
+        ctx.strokeStyle = s.c; ctx.lineWidth = 2.2 * k + 0.6; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(s.px - s.vx * 2, s.py - s.vy * 2); ctx.lineTo(s.x, s.y); ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+    if (!alive) { finish(); return; }
+    raf(frame);
+  };
+  raf(frame);
 }
