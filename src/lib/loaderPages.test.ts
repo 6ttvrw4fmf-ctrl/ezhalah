@@ -18,12 +18,13 @@ for (const [width, height, wide] of [[358, 844, false], [288, 568, false], [1088
       previous = indices;
     }
     assert(seen.size === total, 'completion requires the entire roster');
-    assert(elapsed <= LOADER_CYCLE_MS + 0.001, 'small screens must not stretch the animation past ten seconds');
-    if (total - slots > 1) assert(Math.abs(elapsed - LOADER_CYCLE_MS) < 0.001, 'the whole cycle uses the ten-second budget');
+    assert(elapsed <= LOADER_CYCLE_MS + 0.001, 'small screens must not stretch the animation past the cycle budget');
+    if (total - slots > 1) assert(Math.abs(elapsed - LOADER_CYCLE_MS) < 0.001, 'the whole cycle uses the cycle budget');
   }
   assert(layout.pageSize >= 9, 'small phones keep a readable grid');
 }
-assert(LOADER_PAGE_MS === 1000);
+// 1,000 → 700 ms and a 10 s → 6 s cycle on 2026-10-28 (owner: «speed up … all logos must show … target 10-12 seconds»).
+assert(LOADER_PAGE_MS === 700 && LOADER_CYCLE_MS === 6000);
 console.log('Continuous loader coverage, full slots and single-tile progression passed.');
 
 // Regression: do not strand the unused fraction of a row above a guessed footer.

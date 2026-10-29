@@ -173,7 +173,7 @@ mustCatch('a deadline that forgets the wave still has to RISE and HOLD on the la
 
 // A roster that outgrows the reveal budget.
 mustCatch('a catalogue that outgrows the reveal budget',
-  !everyPlatformSeen(SEARCH_MAX_HOLD_MS, 200));
+  !everyPlatformSeen(SEARCH_MAX_HOLD_MS, MAX_ROSTER + 1)); // was a literal 200; one past the derived ceiling cannot go stale
 
 // THE CAP MUST BE REAL (owner 2026-10-17). The page-dwell gate used to wait for every logo page with no
 // upper bound — that is what pushed a live Filter search past 11 s on 2026-10-17. The gate must carry
