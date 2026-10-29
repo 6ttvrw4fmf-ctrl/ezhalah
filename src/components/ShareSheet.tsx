@@ -13,7 +13,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
-import { SHARE_LINK, liveSiteCount, shareLead, shareMessage } from '@/lib/share';
+import { SHARE_LINK, SHARE_LINK_EN, liveSiteCount, shareLead, shareMessage } from '@/lib/share';
 
 // Real, resolvable share link (the deployed app), not a placeholder.
 // The link, the sentence and the message all come from lib/share.ts. This file used to hold its own
@@ -92,7 +92,7 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
 
   const text = encodeURIComponent(msg);          // the sentence AND the link (no url= parameter)
   const textNoLink = encodeURIComponent(lead);   // the sentence alone (the target appends url=)
-  const link = encodeURIComponent(LINK);
+  const link = encodeURIComponent(locale === 'en' ? SHARE_LINK_EN : LINK);
   const subject = encodeURIComponent(t('Ezhalah'));
 
   // Note #3 — full multi-option share sheet, fully localized. WhatsApp / X / Telegram / Email / Copy

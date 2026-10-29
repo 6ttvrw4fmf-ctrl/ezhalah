@@ -14,6 +14,7 @@ import { liftSymbols } from './lib/liftSymbols.ts';
 import {
   homeCardDescription, homeCardFactsFrom, homeCardHtml, isPreviewBot, PREVIEW_BOT_UA,
   HOME_CARD_FALLBACK_AR, HOME_CARD_IMAGE_PATH, HOME_CARD_TITLE_AR, HOME_CARD_HEADLINE_AR,
+  HOME_CARD_HEADLINE_EN, HOME_CARD_FALLBACK_EN, cardLangOf,
 } from '../middleware.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -123,6 +124,22 @@ check('a person is passed straight through (no response, no database read)', (aw
 const botRes = await mw(req('WhatsApp/2.24'));
 const botHtml = botRes ? await botRes.text() : '';
 check('WhatsApp gets the card with live numbers', !!botRes && botHtml.includes(good), botHtml.slice(0, 200));
+// THE ENGLISH CARD (owner 2026-10-29): the English share link ezhalah.com/?lang=en gets the Arabic card translated
+const goodEn = homeCardDescription(homeCardFactsFrom(SITES, SCALE), 'en');
+check('English numbers line: «385,330 listings · 346 cities in Saudi Arabia» (a word joiner keeps «385,330» whole)',
+  goodEn === '385,⁠330 listings · 346 cities in Saudi Arabia', goodEn);
+check('English title', HOME_CARD_HEADLINE_EN === 'Ezhalah, the AI real estate search engine');
+check('English title and line fit the card', fits(HOME_CARD_HEADLINE_EN, homeCardDescription({ sites: 999, listings: 9_999_999, cities: 9_999 }, 'en')) && fits(HOME_CARD_HEADLINE_EN, HOME_CARD_FALLBACK_EN));
+check('English fallback has no digits, and a broken read gives it', !/\d/.test(HOME_CARD_FALLBACK_EN) && homeCardDescription(null, 'en') === HOME_CARD_FALLBACK_EN);
+check('only ?lang=en picks English; the plain link and anything else stay Arabic',
+  cardLangOf('https://ezhalah.com/?lang=en') === 'en' && cardLangOf('https://ezhalah.com/') === 'ar' && cardLangOf('https://ezhalah.com/?lang=fr') === 'ar' && cardLangOf('nonsense') === 'ar');
+const enRes = await mw(new Request('https://ezhalah.com/?lang=en', { headers: { 'user-agent': 'WhatsApp/2.24' } }));
+const enHtml = enRes ? await enRes.text() : '';
+check('WhatsApp on ?lang=en gets the ENGLISH card (title, live line, English page, its own url)',
+  enHtml.includes(`<meta property="og:title" content="${HOME_CARD_HEADLINE_EN}">`) && enHtml.includes(`content="${goodEn}"`)
+  && enHtml.includes('<html lang="en" dir="ltr">') && enHtml.includes('og:url" content="https://ezhalah.com/?lang=en"'), enHtml.slice(0, 300));
+check('…and the plain link still gets the Arabic card', botHtml.includes(`<meta property="og:title" content="${HOME_CARD_HEADLINE_AR}">`) && !botHtml.includes(HOME_CARD_HEADLINE_EN));
+mustCatch('an English link served the Arabic card', !(botHtml.includes(`content="${HOME_CARD_HEADLINE_EN}"`)));
 
 // A failing database: the card still answers, with the fallback (fresh module so nothing is kept).
 const mw2 = (await import('../middleware.ts?fail')).default as (r: Request) => Promise<Response | undefined>;
