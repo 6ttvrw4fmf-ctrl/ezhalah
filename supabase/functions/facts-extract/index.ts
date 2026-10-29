@@ -33,6 +33,8 @@ const DEFAULT_PROVIDER = Deno.env.get("FACTS_PROVIDER") === "openrouter" ? "open
 // performs»). A closed list — every one non-thinking and cheap — each pinned to the provider named here (empty = any
 // provider of that exact model; fallbacks to OTHER models are always off). A model not listed is refused, so a caller
 // can never pick an expensive or reasoning model. Price per 100k ads at list price, ~1,000 in + 80 out tokens per ad.
+// Routing: ONLY the listed hosts, the fastest of them first (2026-10-29: ~35–53 s per call through OpenRouter vs ~6 s
+// direct, so the backlog needs the quickest of the cheap hosts). Other models are never a fallback.
 const OPENROUTER_MODELS: Record<string, string[]> = {
   // DeepSeek does NOT host its own model on OpenRouter (pilot 2026-10-28: pinning "DeepSeek" → openrouter 404 on all 44
   // calls). Pin the cheap hosts measured that day; never the $3/M ones (Mara, SambaNova) or the $1/M Phala.
@@ -217,7 +219,7 @@ Deno.serve(async (req: Request) => {
     response_format: { type: "json_object" },
     // OpenRouter only: bill-exact cost in the reply (usage.cost) and the DeepSeek provider pinned, no fallbacks
     ...(provider === "openrouter"
-      ? { usage: { include: true }, ...(pinned.length ? { provider: { order: pinned, allow_fallbacks: false } } : {}) }
+      ? { usage: { include: true }, ...(pinned.length ? { provider: { only: pinned, sort: "throughput" } } : {}) }
       : {}),
   });
 
