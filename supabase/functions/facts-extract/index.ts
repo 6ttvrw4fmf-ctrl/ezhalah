@@ -40,6 +40,8 @@ const OPENROUTER_MODELS: Record<string, string[]> = {
   "mistralai/mistral-small-3.2-24b-instruct": ["DeepInfra", "Mistral", "Venice"], // $0.07–0.10 in / $0.20–0.30 out
   "google/gemini-2.5-flash-lite": [],                        // ~$13
   "qwen/qwen3-235b-a22b-2507": [],                           // ~$13
+  // THE BACKUP READER only (scrapers/facts/extract.py FALLBACK_MODEL, ≤ 5 % of a run): non-thinking, ~$53 per 100k ads
+  "openai/gpt-4.1-mini": ["OpenAI"],
 };
 type Provider = "deepseek" | "openrouter";
 const MAX_ADS = 20;
