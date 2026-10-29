@@ -40,7 +40,7 @@ check('the falconer drawing itself is never animated',
 //     in the same position … without changing its location»; he moved with the headline's words when he ended it) ──
 const SUB = "{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}{' '}<View testID=\"hero-falconer\"";
 const atEnd = (h: string) => h.includes(SUB)                                        // right after the Ezhalah line's last word …
-  && h.indexOf('testID="hero-falconer"') > h.indexOf('{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>') // … not in the changing headline
+  && h.indexOf('testID="hero-falconer"') > h.indexOf('{withVisibleEmoji(welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline]))}</RNAnimated.Text>') // … not in the changing headline
   && (h.match(/testID="hero-falconer"/g) ?? []).length === 1                         // … in one place only
   && h.includes("heroFalconerInline: { display: 'inline-flex', verticalAlign: 'middle'"); // … on the text line
 check('the falconer stands at one fixed spot: the end of the Ezhalah line (same words for everyone), never in the headline', atEnd(home));
@@ -106,7 +106,7 @@ mustCatch('motion left in the settled still', !isStill(still.replace('</svg>', '
 mustCatch('the bulb drawn outside his head', !bulbInside(signin.replace(/<g clip-path="url\(#headInside\)">/g, '<g>')));
 mustCatch('every play sharing one finished timeline', !fresh(comp.replace("play=${play}", '')));
 mustCatch('a looping flight', !svgOk(svg.replace('animation:path 2.8s', 'animation:path 2.8s infinite')));
-mustCatch('the falconer moved back into the changing headline', !atEnd(home.replace("{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>", "{welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])}<View testID=\"hero-falconer\" /></RNAnimated.Text>")));
+mustCatch('the falconer moved back into the changing headline', !atEnd(home.replace("{withVisibleEmoji(welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline]))}</RNAnimated.Text>", "{withVisibleEmoji(welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline]))}<View testID=\"hero-falconer\" /></RNAnimated.Text>")));
 mustCatch('his box appearing only once sign-in is known (the line re-wraps)', !heldBox(home.replace(/<View testID="hero-falconer"([^>]*)>\n(\s*)\{authChecked \? <HeroFalconer /, '<View testID="hero-falconer"$1>\n$2{true ? <HeroFalconer ')));
 mustCatch('the falconer as a block under the words (not on the text line)', !atEnd(home.replace("heroFalconerInline: { display: 'inline-flex'", "heroFalconerInline: { display: 'flex'")));
 mustCatch('a big falconer again', !small(home.replace('heroFalconer: { width: 40, height: 46 }', 'heroFalconer: { width: 62, height: 72 }')));
