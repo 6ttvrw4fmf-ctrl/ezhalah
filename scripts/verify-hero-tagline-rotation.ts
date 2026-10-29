@@ -103,7 +103,7 @@ check('the home screen is wired to the rotating pool, client-side, hydration-saf
 
 // ── MUTATION PROOFS (executable) ────────────────────────────────────────────────────────────────
 mustCatch('a fixed headline re-inlined into the hero',
-  heroWiringProblems(home.replace(/\{(?:welcomeLine \?\? )?t\(HERO_TAGLINE_KEYS\[heroTagline\]\)\}/,
+  heroWiringProblems(home.replace(/\{(?:withVisibleEmoji\()?(?:welcomeLine \?\? )?t\(HERO_TAGLINE_KEYS\[heroTagline\]\)\)?\}/,
     "{t('Looking for a property and want to see all available listings in one place? Ezhalah.')}")));
 mustCatch('the pick moved out of the mount effect (frozen into the pre-rendered HTML)',
   heroWiringProblems(home.replace(/useEffect\(\(\) => \{ setHeroTagline\(nextHeroTaglineIndex\(\)\); \}, \[\]\);/, '')));
