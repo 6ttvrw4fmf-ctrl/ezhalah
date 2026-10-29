@@ -77,6 +77,23 @@ credit limit, auto top-up off): the proxy pins one non-thinking model (`deepseek
 provider with fallbacks off, and logs OpenRouter`s own billed cost per call. A cheaper model is tried only after a
 500-ad pilot. The user-facing chat uses a different provider and key; the two budgets never share money.
 
+## The choice, 2026-10-28: DeepSeek V3.2 through OpenRouter (owner: «let's focus on deep … the deep seek final price idm»)
+
+Four cheap models read the same kind of unread residential ads through the OpenRouter reader key (500 asked each):
+
+| model | cost / ad | quotes not verbatim | ads skipped / lost | broken JSON | agrees with word reader |
+|---|---|---|---|---|---|
+| **deepseek/deepseek-v3.2** | $0.000110 | **0.6 %** | **0** | **0 %** | 99.8 % |
+| mistral-small-3.2, 20 ads/call | $0.000036 | 6.0 % | 54 | 0 % | 100 % |
+| mistral-small-3.2, 5 ads/call | $0.000067 | 3.1 % | 1 | 12.5 % | 98.8 % |
+| gemini-2.5-flash-lite | $0.000068 | 3.6 % | 23 | 4.2 % | 100 % |
+| qwen3-235b | — | — | — | — | too slow (> 1 h) |
+
+DeepSeek is the only one that passes every bar, so it is the default (`facts-extract.yml` provider `openrouter`, proxy
+model `deepseek/deepseek-v3.2`, hosts DeepInfra / AtlasCloud / Baidu). A Mistral-first, DeepSeek-fixes-it mix was
+weighed and refused: it saves ~$4/month, and Mistral's non-verbatim quotes are dropped silently rather than retried.
+Expected: ~170k new ads/month ≈ $19–20/month; one-time backlog ≈ $30.
+
 ## Expected numbers (measured 2026-10-26)
 
 ~5,700 new ads a day → ≈ $0.6/day, ≈ $17/month at the 10-24 rate (less at the silent-ads rate). The one-time backlog

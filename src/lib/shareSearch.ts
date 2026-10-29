@@ -241,9 +241,13 @@ const factOk = (n: unknown): n is number => typeof n === 'number' && Number.isIn
 export function shareCardFactsLine(f: ShareCardFacts | null | undefined, loc: 'ar' | 'en'): string {
   if (!f || !factOk(f.sites) || !factOk(f.listings) || !factOk(f.cities)) return SHARE_CARD[loc].desc;
   const n = (v: number) => v.toLocaleString('en-US');
+  // «٬» (U+066C) in the Arabic line: a narrow WhatsApp card broke «421,077» after the comma and showed «421,» (2026-10-29).
+  const a = (v: number) => n(v).replace(/,/g, '\u066C');
+  // English keeps «,» but glues it to the next digit with an invisible word joiner (U+2060), same reason.
+  const e = (v: number) => n(v).replace(/,/g, ',\u2060');
   return loc === 'ar'
-    ? `${n(f.listings)} إعلان · ${n(f.cities)} مدينة بالمملكة`
-    : `${n(f.listings)} listings · ${n(f.cities)} cities in Saudi Arabia`;
+    ? `${a(f.listings)} إعلان · ${a(f.cities)} مدينة بالمملكة`
+    : `${e(f.listings)} listings · ${e(f.cities)} cities in Saudi Arabia`;
 }
 
 export function shareCardHtml(origin: string, rawPayload: string | null | undefined, chatCard?: SharedChatCard | null, facts?: ShareCardFacts | null): string {

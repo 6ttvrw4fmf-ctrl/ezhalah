@@ -27,18 +27,18 @@ export function shareOrigin(): string {
 export const OG_IMAGE = `${SHARE_LINK}/og-image-v9.png`;
 // THE PAGE DESCRIPTION — the sentence under Ezhalah's title in a Google result (owner 2026-10-27, built with the owner from
 // phone-width previews): a free AI property search engine in Saudi Arabia, then three «from … to …» pairs — big
-// platforms to small brokerage offices, Riyadh to Haql (a far, uncommon city with real listings), villas to raw
+// platforms to small brokerage offices, Riyadh to Sharurah (a far, uncommon city with real listings; owner 2026-10-28 «شرورة not haql»), villas to raw
 // land — then buy / rent / short stays and «إزهله. خله يدور عنك.» — the name standing alone
 // (its Saudi meaning «leave it to me / count on me»), then «let it search for you» (the owner's exact words). English mirrors it: «Ezhalah. Let it search for you.» It opens without «إزهله»: the title
 // above already says it and the ending repeats it. Shows uncut at phone width; no numbers, no harakat.
 // It replaces the 2026-10-11 question-form wording.
 // No emoji (owner 2026-10-18: «remove the emoji … make it professional»).
-export const SHARE_BLURB_AR = 'محرك بحث عقاري مجاني بالذكاء الاصطناعي في السعودية: من المنصات الكبيرة لمكاتب الوساطة، من الرياض لحقل، من الفلل للأراضي الخام. بيع وإيجار وإقامات قصيرة. إزهله. خله يدور عنك.';
+export const SHARE_BLURB_AR = 'محرك بحث عقاري مجاني بالذكاء الاصطناعي في السعودية: من المنصات الكبيرة لمكاتب الوساطة، من الرياض لشرورة، من الفلل للأراضي الخام. بيع وإيجار وإقامات قصيرة. إزهله. خله يدور عنك.';
 // The preview CARD's own line (owner 2026-10-18: the card repeated the sent message and was cut off).
 // middleware.ts serves link-preview bots the same line WITH live numbers (src/lib/homeCard.ts); this
 // number-free form is the static fallback. Pinned equal to HOME_CARD_FALLBACK_AR.
 export const SHARE_CARD_DESC_AR = 'كل مواقع العقار في السعودية في مكان واحد.';
-export const SHARE_BLURB_EN = 'Free AI property search in Saudi Arabia: big platforms to small offices, Riyadh to Haql, villas to raw land. Buy, rent or short stays. Ezhalah. Let it search for you.';
+export const SHARE_BLURB_EN = 'Free AI property search in Saudi Arabia: big platforms to small offices, Riyadh to Sharurah, villas to raw land. Buy, rent or short stays. Ezhalah. Let it search for you.';
 // THE SENT MESSAGE (owner 2026-10-26: names Saudi Arabia so the card need not repeat 148, no harakat, «إزهله، خل إزهله»;
 // first set 2026-10-20, replacing the long sentence above in the share message only):
 // «ليش تدوّر في 148 موقع؟ إزهله يدوّر عنك». The number is LIVE — the same count the app shows

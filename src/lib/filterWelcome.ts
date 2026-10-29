@@ -99,6 +99,25 @@ export const WELCOME_LINES: readonly WelcomeLine[] = [
 export const NEW_TODAY_MIN = 100;
 // Riyadh is UTC+3 all year (no DST): the calendar day "today" means in the line above.
 export const riyadhDay = (t: number): number => Math.floor((t + 3 * 3600_000) / 86_400_000);
+/** A daily fact is TRUE ONLY ON THE SAUDI DAY IT WAS BUILT FOR (owner 2026-10-27: «yesterday, 1 week should be based on
+ *  real fact … it goes a day, I am talking in days … we can go to jail»): «أمس» / «آخر 7 أيام» said after midnight would
+ *  be a day off. A fact line prepared or shown on one Saudi day is never shown on the next. */
+export const sameRiyadhDay = (a: number, b: number): boolean => riyadhDay(a) === riyadhDay(b);
+
+/** A TAB KEEPS ITS LINE (owner 2026-10-28: «after 2 hours when I enter Ezhalah … I see the swap»). Safari shows a saved
+ *  picture of an old tab and then reloads it, so a line that changed while the tab slept visibly swaps. The line a tab
+ *  showed (and its greeting) is kept in that tab's sessionStorage, which survives Safari's reload, and is shown again in
+ *  the same tab for the rest of that Saudi day; a NEW visit (a new tab) still gets the next line after 2 hours. */
+export const TAB_KEY = 'ezhalah:filterWelcome:tab:v1';
+export type TabLine = { id: number; at: number; ar: string; en: string; greet: number | null };
+export function tabLine(raw: string | null | undefined, now: number): TabLine | null {
+  try {
+    const v = JSON.parse(raw ?? 'null');
+    if (!v || !Number.isFinite(v.id) || !Number.isFinite(v.at) || typeof v.ar !== 'string' || typeof v.en !== 'string' || !v.ar || !v.en) return null;
+    if (v.at > now || !sameRiyadhDay(v.at, now)) return null; // never yesterday's line
+    return { id: Number(v.id), at: Number(v.at), ar: v.ar, en: v.en, greet: Number.isInteger(v.greet) ? v.greet : null };
+  } catch { return null; }
+}
 
 /** Saudi Arabia has 13 administrative regions; «كل المناطق» is said only when every one has listings. */
 export const SAUDI_REGION_COUNT = 13;
@@ -106,10 +125,11 @@ const REGION_AR = { riyadh: 'منطقة الرياض', makkah: 'منطقة مك�
 
 /**
  * How long one line stays before the next (owner 2026-10-17: «not every refresh … every now and then,
- * hours» → every 4 hours; owner 2026-10-20: «every 2 hours»; owner 2026-10-22: «1 hour» — a new fact every
- * hour, still calm, never on every refresh; a signed-in user always sees a personal line).
+ * hours» → every 4 hours; owner 2026-10-20: «every 2 hours»; owner 2026-10-22: «1 hour»; owner 2026-10-28: «every user should
+ * get a new message every 2 hours» — a new fact every 2 hours, never on every refresh; a signed-in user always sees a
+ * personal line).
  */
-export const HOLD_MS = 1 * 60 * 60 * 1000;
+export const HOLD_MS = 2 * 60 * 60 * 1000;
 /** A user with a searched district sees one of THEIR district's lines about this share of periods. */
 export const MY_DISTRICT_SHARE = 1 / 3;
 /** «من أنشط أحياء {city}» is said only when the district is within this rank in its city. */
@@ -372,7 +392,7 @@ const cachedFits = (c: WelcomeCache, now: Date, maxAge: number): boolean => {
   const age = now.getTime() - c.at;
   // A daily-insight line (lib/insightWelcome.ts): its greeting is put in when shown, from Saudi time, so it
   // fits any hour; only its age counts.
-  if (isInsightLineId(c.id)) return age >= 0 && age < maxAge && !!c.ar && !!c.en;
+  if (isInsightLineId(c.id)) return age >= 0 && age < maxAge && sameRiyadhDay(c.at, now.getTime()) && !!c.ar && !!c.en;
   const greet = GREET_LINES.find((l) => l.id === c.id);
   if (greet) return age >= 0 && age < Math.min(maxAge, GREET_HOLD_MS) && !!c.ar && !!c.en;
   const line = WELCOME_LINES.find((l) => l.id === c.id);

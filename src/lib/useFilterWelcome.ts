@@ -13,7 +13,7 @@
 // export's server HTML (React #418 — see lib/responsive.ts); the decision lands in the mount effect.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  welcomeForNow, chooseWelcomeLine, renderWelcome, instantWelcome, fillName, NAME_SLOT, PREPARED_MAX_MS,
+  welcomeForNow, chooseWelcomeLine, renderWelcome, instantWelcome, fillName, NAME_SLOT, PREPARED_MAX_MS, sameRiyadhDay, tabLine, TAB_KEY,
   WELCOME_LINES, lineFitsTime, greetingFor,
   type HeldWelcome, type WelcomeCache, type WelcomeLine, type WelcomeFacts,
 } from '@/lib/filterWelcome';
@@ -21,7 +21,13 @@ import { loadWelcomeFacts } from '@/data/welcomeFacts';
 import { sentenceName } from '@/lib/nameSync';
 import {
   pickGreeting, fillGreeting, chooseInsightLine, isInsightLineId, INSIGHT_ID_BASE, SEEN_DAYS, type Seen,
+  GREETINGS, greetingFits,
 } from '@/lib/insightWelcome';
+// this tab's line (filterWelcome.ts tabLine): survives Safari's snapshot-and-reload, so a returning tab never swaps
+const readTab = (now: number) => { try { return tabLine(globalThis.sessionStorage?.getItem(TAB_KEY), now); } catch { return null; } };
+const writeTab = (l: { id: number | null; ar: string | null; en: string | null }, greet: number | null, at: number) => {
+  try { if (l.id != null && l.ar && l.en) globalThis.sessionStorage?.setItem(TAB_KEY, JSON.stringify({ id: l.id, at, ar: l.ar, en: l.en, greet })); } catch { /* per-tab nicety only */ }
+};
 import { fetchWelcomeInsights } from '@/data/welcomeInsights';
 import { cityNameEnOfficial, districtNameEnOfficial } from '@/data/locations';
 import { hasJustSignedIn, takeJustSignedIn, SIGNED_IN_EVENT, isFreshSignUp } from '@/lib/loginWelcome';
@@ -126,7 +132,7 @@ export function useFilterWelcome(
     const start = Date.now();
     const pick = (async () => {
       const pend = readKey(NEXT_KEY);
-      if (pend && isInsightLineId(pend.id) && start - pend.at < PREPARED_MAX_MS) return { line: pend, fromNext: true };
+      if (pend && isInsightLineId(pend.id) && start - pend.at < PREPARED_MAX_MS && sameRiyadhDay(pend.at, start)) return { line: pend, fromNext: true };
       const pack = await fetchWelcomeInsights(lastLocation, lastDistrict);
       if (!pack) return null;
       const seen = readSeen(start);
@@ -139,9 +145,12 @@ export function useFilterWelcome(
     Promise.all([pick, wait]).then(([r]) => {
       if (!alive.current || !r) return;
       const t = Date.now();
+      if (!sameRiyadhDay(r.line.at, t)) return; // midnight passed while waiting: that fact belongs to yesterday
       writeCache({ id: r.line.id, at: t, ar: r.line.ar, en: r.line.en });
       if (r.fromNext) writeKey(NEXT_KEY, null);
-      setShown((s) => ({ ...s, settled: true, id: r.line.id, ar: r.line.ar, en: r.line.en, greet: pickGreeting(new Date(t)) }));
+      const g = pickGreeting(new Date(t));
+      setShown((s) => ({ ...s, settled: true, id: r.line.id, ar: r.line.ar, en: r.line.en, greet: g }));
+      writeTab(r.line, g, t);
       setSwapKey((k) => k + 1);
     }).catch(() => {});
   };
@@ -159,11 +168,17 @@ export function useFilterWelcome(
     // Right after a sign-in or sign-up the welcome line takes the place of the rotation (owner
     // 2026-10-22); otherwise the rotation as before.
     const greet = (nameAr || nameEn) ? takeGreeting(session, now.getTime()) : null;
+    // A tab that already showed a line today shows it again — no swap when Safari reloads a sleeping tab (owner 2026-10-28).
+    const tab = !greet && session.present && (nameAr || nameEn) ? readTab(now.getTime()) : null;
     const inst = greet ? { ...greet, fromCache: false, promoted: false }
+      : tab ? { id: tab.id, ar: tab.ar, en: tab.en, fromCache: true, promoted: false }
       : (nameAr || nameEn) ? instantWelcome({ hasSession: session.present, cache, next, now, name: NAME_SLOT }) : null;
-    // The greeting is chosen NOW, from the user's own local time (lib/insightWelcome.ts), kept for this page load.
-    const greetIdx = pickGreeting(now);
+    // The greeting is chosen NOW, from the user's own local time (lib/insightWelcome.ts), kept for this page load —
+    // or the tab's own greeting while it still fits the hour.
+    const tabGreet = tab && tab.greet != null && GREETINGS[tab.greet] && greetingFits(GREETINGS[tab.greet], now) ? tab.greet : null;
+    const greetIdx = tabGreet ?? pickGreeting(now);
     setShown(inst ? { settled: true, id: inst.id, ar: inst.ar, en: inst.en, nameAr, nameEn, greet: greetIdx } : { settled: true, id: null, ar: null, en: null, nameAr, nameEn, greet: greetIdx });
+    if (inst && session.present && !greet) writeTab(inst, greetIdx, tab ? tab.at : now.getTime());
     if (!session.present) return;
     if (greet) welcomeThenInsight();
     // What is on screen now is the SHOWN line, and its 2 hours start now when it is new to this device
@@ -195,7 +210,7 @@ export function useFilterWelcome(
     //    in when it is shown. Kept as long as it is still usable (a day).
     const shownId = cache?.id ?? null;
     const pending = readKey(NEXT_KEY);
-    const pendingOk = !!pending && isInsightLineId(pending.id) && pending.id !== shownId && now.getTime() - pending.at < PREPARED_MAX_MS;
+    const pendingOk = !!pending && isInsightLineId(pending.id) && pending.id !== shownId && now.getTime() - pending.at < PREPARED_MAX_MS && sameRiyadhDay(pending.at, now.getTime());
     if (!pendingOk) {
       fetchWelcomeInsights(lastLocation, lastDistrict).then((pack) => {
         if (!live || !pack) return;

@@ -12,7 +12,7 @@
 //   7. rotation: one line held for 1 hour then a different one, always personal, time lines only at their time.
 import {
   WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, PREPARED_MAX_MS, FACTLESS_ANYTIME_IDS,
-  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, GREET_LINES, GREET_HOLD_MS, greetIndex, greetingFor, fillName, NAME_SLOT, NEW_TODAY_MIN, riyadhDay, type WelcomeFacts,
+  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, GREET_LINES, GREET_HOLD_MS, greetIndex, greetingFor, fillName, NAME_SLOT, NEW_TODAY_MIN, riyadhDay, tabLine, TAB_KEY, type WelcomeFacts,
 } from '../src/lib/filterWelcome.ts';
 
 let failed = 0;
@@ -258,21 +258,21 @@ const neverRepeats = (pick: typeof chooseWelcomeLine) => {
   return true;
 };
 // HOLD (owner: «not every refresh … every now and then, hours» → 4 h, always personal).
-const holdsOneHour = (decide: typeof welcomeForNow) => {
+const holdsTwoHours = (decide: typeof welcomeForNow) => {
   const t0 = at('2026-10-14T13:00:00').getTime(); // Wednesday 13:00 — only any-time lines fit
   const held = { id: 20, at: t0 };
-  const kept1h = decide(new Date(t0 + 0.5 * 3600_000), held, () => 0.3);
-  const kept3h = decide(new Date(t0 + 0.95 * 3600_000), held, () => 0.7);
-  const after = decide(new Date(t0 + 1 * 3600_000 + 1), held, () => 0.3);
+  const kept1h = decide(new Date(t0 + 1 * 3600_000), held, () => 0.3);
+  const kept3h = decide(new Date(t0 + 1.95 * 3600_000), held, () => 0.7);
+  const after = decide(new Date(t0 + 2 * 3600_000 + 1), held, () => 0.3);
   return kept1h?.line.id === 20 && kept1h.keep && kept3h?.line.id === 20
     && !!after && !after.keep && after.line.id !== 20;
 };
-check('one line is held for 1 hour (owner 2026-10-22), then a different line takes over', holdsOneHour(welcomeForNow));
-check('HOLD_MS is 1 hour', HOLD_MS === 1 * 3600_000);
-mustCatch('a picker that changes on every refresh', !holdsOneHour((now, held, rand) => {
+check('one line is held for 2 hours (owner 2026-10-28), then a different line takes over', holdsTwoHours(welcomeForNow));
+check('HOLD_MS is 2 hours (owner 2026-10-28: «a new message every 2 hours»)', HOLD_MS === 2 * 3600_000);
+mustCatch('a picker that changes on every refresh', !holdsTwoHours((now, held, rand) => {
   const line = chooseWelcomeLine(now, held?.id ?? null, rand); return line ? { line, keep: false } : null;
 }));
-mustCatch('a picker that holds a line forever', !holdsOneHour((_now, held) => {
+mustCatch('a picker that holds a line forever', !holdsTwoHours((_now, held) => {
   const line = WELCOME_LINES.find((l) => l.id === held?.id)!; return { line, keep: true };
 }));
 const morningHeld = { id: 1, at: at('2026-10-14T11:30:00').getTime() };
@@ -342,6 +342,24 @@ check('a held «today» line never crosses midnight Riyadh (yesterday\'s count i
   && !instantWelcome({ hasSession: true, cache: ntCache, now: nextDay, name: 'يوسف', rand: () => 0 })?.fromCache);
 mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a UTC day)',
   Math.floor(lateNight.getTime() / 86_400_000) === Math.floor(nextDay.getTime() / 86_400_000) ? riyadhDay(lateNight.getTime()) !== riyadhDay(nextDay.getTime()) : false);
+// A DAILY FACT (an insight line: «نُشر أمس …», «خلال آخر 7 أيام …») IS TRUE ONLY ON THE SAUDI DAY IT WAS BUILT FOR (owner
+// 2026-10-27: «yesterday, 1 week should be based on real fact … it goes a day … we can go to jail»). Held or prepared at
+// 23:30, it must not be shown at 00:30 — «أمس» would then be two days ago. Executed through the real instantWelcome.
+{
+  const fact = { id: 2001, at: lateNight.getTime() + 20 * 60_000, // 23:50 Riyadh
+    ar: '⟦g⟧ ⟦n⟧، تدري إنه نُشر أمس ما لا يقل عن 900 إعلان جديد؟', en: '⟦g⟧ ⟦n⟧, did you know at least 900 new listings were posted yesterday?' };
+  const sameNight = instantWelcome({ hasSession: true, cache: fact, now: new Date(fact.at + 5 * 60_000), name: 'يوسف', rand: () => 0 });
+  const afterMidnightHeld = instantWelcome({ hasSession: true, cache: fact, now: nextDay, name: 'يوسف', rand: () => 0 });
+  const afterMidnightPrepared = instantWelcome({ hasSession: true, cache: null, next: fact, now: nextDay, name: 'يوسف', rand: () => 0 });
+  check('a fact line is reused the same Saudi day, but never after midnight (held OR prepared)',
+    sameNight?.id === 2001 && afterMidnightHeld?.id !== 2001 && afterMidnightPrepared?.id !== 2001);
+  // the case is real: 40 minutes old, inside both age limits, so only the day rule stops it
+  mustCatch('an age-only rule (40 min old passes the 1 h hold and the 24 h prepare limit)', nextDay.getTime() - fact.at < Math.min(HOLD_MS, PREPARED_MAX_MS));
+  const hookDays = (src: string) => (src.match(/sameRiyadhDay\(/g) ?? []).length >= 3
+    && /if \(!sameRiyadhDay\(r\.line\.at, t\)\) return;/.test(src);
+  check('…and the hook checks the day wherever it takes a prepared fact, and again when midnight passes while it waits', hookDays(hookSrc));
+  mustCatch('the hook taking a prepared fact by age alone', !hookDays(hookSrc.replace(' && sameRiyadhDay(pend.at, start)', '').replace(' && sameRiyadhDay(pending.at, now.getTime())', '')));
+}
 
 // ── 13. the sign-in welcome (owner 2026-10-22: «whenever the user logs in or signs up, this message
 // appears», five wordings so users see different ones, approved word for word) ──
@@ -402,6 +420,46 @@ mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a U
   check('both sign-in paths mark the moment: the Google/Apple return route and Google One Tap',
     /markJustSignedIn\(\);/.test(authSrc) && /log\('signed in via One Tap'\), markJustSignedIn\(\);/.test(tapSrc));
   delete (globalThis as any).localStorage;
+}
+
+// ── A TAB KEEPS ITS LINE (owner 2026-10-28: «after 2 hours when I enter Ezhalah … I see the swap») ──
+// Safari shows a saved picture of a sleeping tab and then reloads it; the line that tab showed is kept in its
+// sessionStorage and shown again for the rest of that Saudi day. EXECUTED through the real tabLine.
+{
+  const t = new Date('2026-10-28T10:00:00Z').getTime();            // 13:00 Riyadh
+  const saved = JSON.stringify({ id: 2007, at: t, ar: '⟦g⟧ ⟦n⟧، تدري إن 66% من إعلانات رابغ أراضٍ؟', en: '⟦g⟧ ⟦n⟧, did you know 66% of Rabigh\'s listings are land?', greet: 3 });
+  const later = tabLine(saved, t + 5 * 3600_000);                    // 18:00 the same day, past the 2-hour hold
+  const nextDay = tabLine(saved, new Date('2026-10-28T21:30:00Z').getTime()); // 00:30 Riyadh, the next day
+  check('a returning tab gets ITS line back the same Saudi day, even after the 2-hour hold (no swap)', later?.id === 2007 && later.greet === 3);
+  check('…but never on the next Saudi day, never from the future, never from garbage',
+    nextDay === null && tabLine(saved, t - 1000) === null && tabLine('{bad', t) === null && tabLine(null, t) === null && tabLine(JSON.stringify({ id: 1, at: t, ar: '', en: 'x' }), t) === null);
+  // the day rule is real: drop it and yesterday's line comes back after midnight
+  const noDay = (raw: string, now: number) => { const v = JSON.parse(raw); return v.at <= now ? v : null; };
+  mustCatch('a tab line kept across midnight (yesterday\'s «أمس»)', noDay(saved, new Date('2026-10-28T21:30:00Z').getTime()) !== null && nextDay === null);
+  const hookTab = (src: string) => src.includes("const tab = !greet && session.present && (nameAr || nameEn) ? readTab(now.getTime()) : null;")
+    && /: tab \? \{ id: tab\.id, ar: tab\.ar, en: tab\.en, fromCache: true, promoted: false \}\n\s*: \(nameAr \|\| nameEn\) \? instantWelcome\(/.test(src)
+    && (src.match(/writeTab\(/g) ?? []).length >= 2 && src.includes('globalThis.sessionStorage?.getItem(TAB_KEY)');
+  check('the hook shows the tab\'s line BEFORE choosing a new one, and records every line it shows in the tab', hookTab(hookSrc));
+  mustCatch('a hook that ignores the tab (back to the swap)', !hookTab(hookSrc.replace('readTab(now.getTime())', 'null')));
+  check('the tab memory is sessionStorage (one tab), never localStorage (every tab would freeze)', TAB_KEY.startsWith('ezhalah:') && !/localStorage\?\.getItem\(TAB_KEY\)/.test(hookSrc));
+}
+
+// ── THE EMOJI STAYS VISIBLE THROUGH THE SHINE (owner 2026-10-28: «the emoji after the name doesn't show») ──
+{
+  const home = (await import('node:fs')).readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
+  const party = (await import('node:fs')).readFileSync(new URL('../src/lib/nameParty.ts', import.meta.url), 'utf8');
+  const reSrc = (home.match(/^const EMOJI_RE = (\/.*\/);$/m) ?? [])[1];
+  const re = reSrc ? new Function(`return ${reSrc}`)() as RegExp : null;
+  const emojis = ['👋', '☀️', '🌙', '🕌', '🌴', '🤍', '☕', '🌿', '😊', '🌤️', '🏡', '✨'];
+  const splits = (r: RegExp | null) => !!r && emojis.every((e) => `مساء الخير يوسف ${e}، تدري إن`.split(r).length === 3 && `مساء الخير يوسف ${e}، تدري إن`.split(r)[1] === e)
+    && 'تدري إن 66% من إعلانات رابغ أراضٍ؟'.split(r).length === 1;
+  check('every greeting emoji is cut into its own span (and a sentence without one is left whole)', splits(re));
+  mustCatch('a pattern that misses the moon 🌙', !splits(/([☀-➿]️?)/));
+  const wired = home.includes('{withVisibleEmoji(welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline]))}')
+    && home.includes("{...({ dataSet: { ezhEmoji: '' } } as any)}")
+    && party.includes('[data-ezh-shine="on"] [data-ezh-emoji]{-webkit-text-fill-color:initial!important;color:initial!important}');
+  check('the headline renders its emoji in that span, and the shine CSS gives the span its own fill', wired);
+  mustCatch('the shine CSS without the emoji rule (the emoji vanishes on iPhone)', !(party.replace('[data-ezh-shine="on"] [data-ezh-emoji]', '[x]').includes('[data-ezh-shine="on"] [data-ezh-emoji]')));
 }
 
 console.log(`\nExample (ar): ${renderWelcome(WELCOME_LINES[3], 'يوسف', FACTS, 'ar')}`);

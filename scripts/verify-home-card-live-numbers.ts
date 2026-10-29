@@ -43,7 +43,8 @@ const good = homeCardDescription(homeCardFactsFrom(SITES, SCALE));
   check('aqarmonthly folds into aqar: 150 raw slugs with both → 149 sites', homeCardFactsFrom([...SITES, 'aqar', 'aqarmonthly'].slice(1), SCALE).sites === 149);
   mustCatch('a card that counts raw slugs (149 where the app shows 148)', REAL_SLUGS.length !== cardCount);
 }
-check('the owner-approved numbers line, exact digits (2026-10-25: no site count — the message says it — and «بالمملكة»)', good === '385,330 إعلان · 346 مدينة بالمملكة', good);
+check('the owner-approved numbers line, exact digits (2026-10-25: no site count — the message says it — and «بالمملكة»)', good === '385\u066C330 إعلان · 346 مدينة بالمملكة', good);
+check('no «,» inside a number: a narrow WhatsApp card broke «421,077» after the comma and showed «421,» (2026-10-29)', !good.includes(','));
 mustCatch('the site count printed twice (message + card, owner 2026-10-25)', good !== '149 موقع · 385,330 إعلان · 346 مدينة');
 mustCatch('the «و…في…، كلها في مكان واحد.» line WhatsApp cut at the city count', good !== '149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.');
 check('the owner-approved title', HOME_CARD_HEADLINE_AR === 'إزهله، محرك بحث عقاري بالذكاء الاصطناعي');

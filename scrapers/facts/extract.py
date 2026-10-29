@@ -47,10 +47,35 @@ from scrapers.common.pii import redact_pii
 # ── caps (hard; a flag may lower them, never raise them) ───────────────────────────────────────────
 HARD_MAX_CALLS = 10_500
 HARD_MAX_USD = 5.0
+FALLBACK_MODEL = "openai/gpt-4.1-mini"     # the backup reader: stronger at strict JSON + verbatim quotes, non-thinking
+FALLBACK_SHARE = 0.05                      # never more than 5 % of a run's ads go to the backup
+FALLBACK_MIN = 20                          # …but a small run may still rescue up to 20
+FALLBACK_BATCH = 4
+FALLBACK_MONTH_USD = 3.0                   # owner 2026-10-28: the backup never spends more than 3 USD a calendar month
+                                           # (inside the one 30 USD monthly wall that every model shares)
 CHECKPOINT_ADS = 500
 CHECKPOINT_UNVERIFIED = 0.05
 CHECKPOINT_USD_PER_AD = 0.001
-CHECKPOINT_JSON_FAIL = 0.02
+# A broken reply is retried in halves and then sent to the backup reader, so what costs facts is an ad LOST after all
+# of that, not a broken call. Backlog batch 1 on OpenRouter (2026-10-29) stopped at 1 broken call of 34 (2.94 %) with
+# 0 ads lost. The checkpoint therefore stops on lost ads > 2 %, and on broken calls only past 10 % (a model that is
+# really failing). Both directions are in the selftest.
+CHECKPOINT_JSON_FAIL = 0.10
+CHECKPOINT_LOST = 0.02
+
+
+def checkpoint_problems(unv: float, cpa: float, jf: float, lost_share: float) -> list[str]:
+    """Why the 500-ad checkpoint must stop the run (empty = carry on)."""
+    bad = []
+    if unv > CHECKPOINT_UNVERIFIED:
+        bad.append(f"unverified {unv:.2%} > {CHECKPOINT_UNVERIFIED:.0%}")
+    if cpa > CHECKPOINT_USD_PER_AD:
+        bad.append(f"cost/ad ${cpa:.6f} > ${CHECKPOINT_USD_PER_AD}")
+    if jf > CHECKPOINT_JSON_FAIL:
+        bad.append(f"json failures {jf:.2%} > {CHECKPOINT_JSON_FAIL:.0%}")
+    if lost_share > CHECKPOINT_LOST:
+        bad.append(f"ads lost {lost_share:.2%} > {CHECKPOINT_LOST:.0%}")
+    return bad
 REQUESTED_MODEL = "deepseek-chat"          # the non-reasoning alias; DeepSeek reports it as deepseek-flash
 MAX_TEXT_CHARS = 3800                      # the proxy refuses > 4000
 MIN_TEXT_CHARS = 30
@@ -344,7 +369,15 @@ def silent_plan(limit: int, platforms: Optional[set[str]], counts: dict[str, int
     return scale_plan(keep, limit)
 
 
-def sample_silent(table: str, n: int, seed: int, mode: str = "silent") -> list[dict[str, Any]]:
+def lane_of(spec: str) -> tuple[int, int]:
+    """«k/n» → (k, n): this run is lane k of n parallel lanes (owner 2026-10-29: finish the backlog in about a day)."""
+    k, n = (int(x) for x in (spec or "0/1").split("/"))
+    if not (1 <= n <= 32 and 0 <= k < n):
+        raise ValueError(f"bad --shard {spec!r}")
+    return k, n
+
+
+def sample_silent(table: str, n: int, seed: int, mode: str = "silent", shard: tuple[int, int] = (0, 1)) -> list[dict[str, Any]]:
     """Rows picked by id from a DB picker, then read exactly like sample_table (same columns, ground truth, PDPL).
     mode 'silent' = ops_text_facts_silent (facts_silent_ids); 'new' / 'backlog' = facts_ai_todo_ids — the ads the AI
     has never read, 'new' only those first seen in the last 3 days (owner 2026-10-26: the AI reads every new ad)."""
@@ -357,7 +390,10 @@ def sample_silent(table: str, n: int, seed: int, mode: str = "silent") -> list[d
     if mode == "silent":
         picked = client.rpc("facts_silent_ids", {"p_table": table, "p_limit": want, "p_seed": str(seed)}).execute().data
     else:
-        picked = client.rpc("facts_ai_todo_ids", {"p_table": table, "p_limit": want, "p_mode": mode, "p_seed": str(seed)}).execute().data
+        params = {"p_table": table, "p_limit": want, "p_mode": mode, "p_seed": str(seed)}
+        if shard[1] > 1:                           # lane k of n reads only ids with id % n = k (migration: facts_ai_todo_ids)
+            params.update({"p_shard": shard[0], "p_shards": shard[1]})
+        picked = client.rpc("facts_ai_todo_ids", params).execute().data
     ids = [int(r["id"]) for r in (picked or [])]
     rows: list[dict[str, Any]] = []
     for i in range(0, len(ids), 100):
@@ -437,7 +473,7 @@ def run(args: argparse.Namespace) -> int:
     sample: list[dict[str, Any]] = []
     for table, n in plan.items():
         try:
-            sample.extend(sample_table(table, n, rng) if args.mode == "sample" else sample_silent(table, n, args.seed, args.mode))
+            sample.extend(sample_table(table, n, rng) if args.mode == "sample" else sample_silent(table, n, args.seed, args.mode, lane_of(args.shard)))
         except Exception as e:
             print(f"  ! {table}: sampling failed: {str(e)[:200]}")
     rng.shuffle(sample)
@@ -482,7 +518,14 @@ def run(args: argparse.Namespace) -> int:
                 print(f"  ! listing_facts upsert failed: {str(e)[:200]}")
         return stored
 
-    def process(batch: list[dict[str, Any]], depth: int = 0) -> None:
+    # THE BACKUP READER (owner 2026-10-28: «in case something is so complicated use a strong model, not for all, only some,
+    # as backup … in case DeepSeek can't understand»). An ad DeepSeek cannot answer — a reply it could not parse even
+    # alone, or an ad its reply left out — goes to args.fallback_model once, in batches of FALLBACK_BATCH, and never more
+    # than FALLBACK_SHARE of the ads this run read. HTTP failures are infrastructure, not understanding: they keep their
+    # own retries and never reach the backup. Same proxy, same spend gate, same monthly budget.
+    fallback_queue: list[dict[str, Any]] = []
+
+    def process(batch: list[dict[str, Any]], depth: int = 0, fallback: bool = False) -> None:
         nonlocal calls, usd_total
         if calls >= args.max_calls:
             raise Stop(f"call cap {args.max_calls} reached")
@@ -496,7 +539,8 @@ def run(args: argparse.Namespace) -> int:
         ads = [{"id": f"{r['_platform']}:{r['ad_number']}", "text": r["_text"]} for r in batch]
         by_platform = dict(Counter(r["_platform"] for r in batch))
         t0 = time.time()
-        status, resp = call_proxy(ads, args.run_id, args.provider, args.model)
+        status, resp = call_proxy(ads, args.run_id, "openrouter" if fallback else args.provider,
+                                  args.fallback_model if fallback else args.model)
         at = datetime.now(timezone.utc)
         usage = resp.get("usage") or {}
         # the provider's own bill when it sends one (OpenRouter usage.cost), else the DeepSeek token formula
@@ -523,14 +567,17 @@ def run(args: argparse.Namespace) -> int:
                 raise Stop(f"proxy refused (401) three times — stopping: {err}")
             if depth < 3:
                 time.sleep((5, 20, 60)[depth])
-                return process(batch, depth + 1)
+                return process(batch, depth + 1, fallback)
             tot["ads_lost"] += len(batch)
             return
         if (usage.get("reasoning_tokens") or 0) > 0:
             log_call({**base, "json_ok": False, "note": "reasoning tokens billed — wrong tier, stopping"})
             raise Stop(f"model billed {usage.get('reasoning_tokens')} reasoning tokens — not the flash/non-reasoning tier")
         model = str(resp.get("model") or "")
-        if "flash" not in model and model != REQUESTED_MODEL:
+        # the billed model must be the one ASKED for: DeepSeek direct bills "deepseek-flash" for "deepseek-chat"; the OpenRouter
+        # reader key bills the exact allowed model the proxy pinned (resp.requested_model). Anything else stops the run.
+        asked = str(resp.get("requested_model") or REQUESTED_MODEL)
+        if "flash" not in model and model != REQUESTED_MODEL and not (model and (model == asked or model.startswith(asked))):
             log_call({**base, "json_ok": False, "note": f"unexpected model {model!r}, stopping"})
             raise Stop(f"unexpected billed model {model!r}")
         parsed = parse_reply(resp.get("content") or "")
@@ -540,8 +587,11 @@ def run(args: argparse.Namespace) -> int:
                       "note": f"json {'truncated' if resp.get('finish_reason') == 'length' else 'unparseable'}"})
             if depth == 0 and len(batch) > 1:
                 half = len(batch) // 2
-                process(batch[:half], depth + 1)
-                process(batch[half:], depth + 1)
+                process(batch[:half], depth + 1, fallback)
+                process(batch[half:], depth + 1, fallback)
+                return
+            if not fallback and args.fallback_model:
+                fallback_queue.extend(batch)          # DeepSeek could not answer these even in a half batch
                 return
             tot["ads_lost"] += len(batch)
             return
@@ -572,18 +622,25 @@ def run(args: argparse.Namespace) -> int:
                              "model": resp.get("model"), "source_value": source_value(row["fact"], r), **row})
             if ad_id not in parsed:
                 tot["ads_missing_in_reply"] += 1
+                if not fallback and args.fallback_model:
+                    fallback_queue.append(r)
         # An ad the model read but that yielded no stored fact leaves a `_none` marker row (quote ''), so
         # "ads seen" is exact per platform (coverage denominator) and --skip-done can resume a stopped run
         # without re-reading it. The report filters fact <> '_none'.
         seen_keys = {(r["platform"], r["listing_key"]) for r in rows}
+        queued = {(r["_platform"], str(r["ad_number"])) for r in fallback_queue} if not fallback else set()
         for r in batch:
+            if (r["_platform"], str(r["ad_number"])) in queued:
+                continue                              # the backup reads it; no "_none" marker that would hide it
             if (r["_platform"], str(r["ad_number"])) not in seen_keys:
                 rows.append({"run_id": args.run_id, "platform": r["_platform"], "table_name": r["_table"],
                              "listing_key": str(r["ad_number"]), "listing_url": r.get("listing_url"),
                              "model": resp.get("model"), "fact": "_none", "value_bool": True, "value_num": None,
                              "value_text": None, "quote": "", "source_value": None})
         stored = store(rows) - sum(1 for r in rows if r["fact"] == "_none")   # facts stored, markers excluded
-        tot["ads"] += len(batch)
+        tot["ads"] += len(batch) - len([r for r in batch if (r["_platform"], str(r["ad_number"])) in queued])
+        if fallback:
+            tot["fallback_ads"] += len(batch)
         tot["facts_returned"] += returned
         tot["stored"] += stored
         tot["unverified"] += drops["unverified"]
@@ -606,13 +663,7 @@ def run(args: argparse.Namespace) -> int:
               f"missing={tot['ads_missing_in_reply']} {int(time.time() - t_start)}s")
         if not final and not checkpointed and tot["ads"] >= CHECKPOINT_ADS:
             checkpointed = True
-            bad = []
-            if unv > CHECKPOINT_UNVERIFIED:
-                bad.append(f"unverified {unv:.2%} > {CHECKPOINT_UNVERIFIED:.0%}")
-            if cpa > CHECKPOINT_USD_PER_AD:
-                bad.append(f"cost/ad ${cpa:.6f} > ${CHECKPOINT_USD_PER_AD}")
-            if jf > CHECKPOINT_JSON_FAIL:
-                bad.append(f"json failures {jf:.2%} > {CHECKPOINT_JSON_FAIL:.0%}")
+            bad = checkpoint_problems(unv, cpa, jf, tot["ads_lost"] / max(tot["ads"] + tot["ads_lost"], 1))
             if bad:
                 raise Stop("CHECKPOINT FAILED at 500 ads — fix before continuing: " + "; ".join(bad))
 
@@ -622,6 +673,24 @@ def run(args: argparse.Namespace) -> int:
             process(sample[i:i + args.batch])
             if (i // args.batch) % 5 == 4 or tot["ads"] >= CHECKPOINT_ADS and not checkpointed:
                 checkpoint()
+        if fallback_queue:
+            month0 = datetime.now(timezone.utc).strftime("%Y-%m-01")
+            spent = sum(float(r.get("usd") or 0) for r in (client.table("listing_facts_runs").select("usd")
+                        .eq("requested_model", args.fallback_model).gte("at", month0).limit(100000).execute().data or []))
+            if spent >= FALLBACK_MONTH_USD:
+                print(f"backup reader: {spent:.2f} USD spent this month of {FALLBACK_MONTH_USD:.0f} — {len(fallback_queue)} ads stay unread for next month")
+                fallback_queue.clear()
+        if fallback_queue:
+            cap = max(FALLBACK_MIN, int(FALLBACK_SHARE * (tot["ads"] + len(fallback_queue))))
+            todo, over = fallback_queue[:cap], fallback_queue[cap:]
+            usd_before_fallback = usd_total
+            print(f"backup reader {args.fallback_model}: {len(todo)} ads DeepSeek could not answer"
+                  + (f" ({len(over)} over the {FALLBACK_SHARE:.0%} cap stay unread for the next run)" if over else ""))
+            for i in range(0, len(todo), FALLBACK_BATCH):
+                if spent + (usd_total - usd_before_fallback) >= FALLBACK_MONTH_USD:
+                    print(f"backup reader: monthly {FALLBACK_MONTH_USD:.0f} USD cap reached mid-run — the rest stay unread")
+                    break
+                process(todo[i:i + FALLBACK_BATCH], 0, True)
     except Stop as e:
         print(f"STOP: {e}")
         rc = 3 if "CHECKPOINT" in str(e) else 2
@@ -650,6 +719,18 @@ def selftest() -> None:
     assert silent_plan(100, None, {"a_residential_listings": 100, "a_commercial_listings": 100}, "commercial") == {"a_commercial_listings": 100}
     assert sum(silent_plan(100, None, {"a_residential_listings": 100, "a_commercial_listings": 100}, "all").values()) == 100
     assert sum(build_plan(10_000, None).values()) == 10_000 and sum(build_plan(500, None).values()) == 500
+    assert lane_of("0/1") == (0, 1) and lane_of("3/8") == (3, 8)
+    for bad_lane in ("8/8", "0/0", "1/40"):
+        try:
+            lane_of(bad_lane)
+            raise AssertionError(bad_lane)
+        except ValueError:
+            pass
+    # checkpoint: one rescued broken call of 34 with nothing lost carries on (backlog batch 1, 2026-10-29); lost ads, a
+    # model failing most calls, bad quotes or a costly model still stop the run
+    assert checkpoint_problems(0.0126, 0.000109, 1 / 34, 0.0) == []
+    assert checkpoint_problems(0.0126, 0.000109, 1 / 34, 0.03) and checkpoint_problems(0.01, 0.0001, 0.15, 0.0)
+    assert checkpoint_problems(0.06, 0.0001, 0.0, 0.0) and checkpoint_problems(0.01, 0.002, 0.0, 0.0)
     assert norm("مَسْبَحٌ، وحديقة") == norm("مسبح وحديقه") == "مسبح وحديقه"
     assert norm("شارع ١٥ م") == "شارع 15 م"
     assert norm("مُؤَسَّس") == "مؤسس"
@@ -711,12 +792,17 @@ def main() -> int:
                     help="sample = the fixed 10k plan; silent = ads the reader found nothing in; new = ads first seen ≤ 3 days the AI "
                          "never read (the nightly run); backlog = any active ad the AI never read")
     ap.add_argument("--model", default="", help="OpenRouter only: one of the proxy's allowed cheap models (empty = its default)")
+    ap.add_argument("--shard", default="0/1", help="lane k/n: read only unread ads with id % n = k (new / backlog)")
+    ap.add_argument("--fallback-model", default=None,
+                    help="backup for ads the main model cannot answer (default: FALLBACK_MODEL on the OpenRouter key; '' = off)")
     ap.add_argument("--provider", choices=("", "deepseek", "openrouter"), default="",
                     help="which key the proxy spends: empty = the proxy's default (FACTS_PROVIDER), openrouter = the reader key pilot")
     ap.add_argument("--category", choices=("residential", "commercial", "all"), default="residential",
                     help="modes new/backlog only: which source tables (owner 2026-10-26: residential first, commercial later)")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
+    if args.fallback_model is None:
+        args.fallback_model = FALLBACK_MODEL if args.provider == "openrouter" else ""
     if args.selftest:
         selftest()
         return 0
