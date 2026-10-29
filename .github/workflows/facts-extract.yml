@@ -62,6 +62,11 @@ on:
         default: openrouter
         type: choice
         options: ["", openrouter, deepseek]
+      lanes:
+        description: "Parallel lanes (1-16): lane k reads only unread ads with id % lanes = k, so no ad is read twice"
+        required: false
+        default: "1"
+        type: string
       batch:
         description: "Ads per paid call (default 16; small models skip ads in big batches — Mistral pilot 2026-10-28)"
         required: false
@@ -84,9 +89,29 @@ env:
   EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
 
 jobs:
+  lanes:
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.m.outputs.list }}
+      n: ${{ steps.m.outputs.n }}
+    steps:
+      - id: m
+        env:
+          LANES: ${{ inputs.lanes || '1' }}
+        run: |
+          case "$LANES" in [1-9]|1[0-6]) ;; *) echo "lanes must be 1-16"; exit 1;; esac
+          echo "n=$LANES" >> "$GITHUB_OUTPUT"
+          echo "list=$(python3 -c "import json,sys; print(json.dumps(list(range(int(sys.argv[1])))))" "$LANES")" >> "$GITHUB_OUTPUT"
+
   extract:
+    needs: lanes
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        lane: ${{ fromJSON(needs.lanes.outputs.list) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -113,6 +138,7 @@ jobs:
           PROVIDER: ${{ inputs.provider || 'openrouter' }}
           MODEL: ${{ inputs.model }}
           BATCH: ${{ inputs.batch || '16' }}
+          SHARD: ${{ matrix.lane }}/${{ needs.lanes.outputs.n }}
         run: |
-          exec python -m scrapers.facts.extract --run-id "$RUN_ID" --mode "$MODE" --category "$CATEGORY" --provider "$PROVIDER" --model "$MODEL" --batch "${BATCH:-16}" --limit "${LIMIT:-10000}" --platforms "$PLATFORMS" --max-usd "${MAX_USD:-1.5}" \
+          exec python -m scrapers.facts.extract --run-id "$RUN_ID" --mode "$MODE" --category "$CATEGORY" --provider "$PROVIDER" --model "$MODEL" --batch "${BATCH:-16}" --shard "$SHARD" --limit "${LIMIT:-10000}" --platforms "$PLATFORMS" --max-usd "${MAX_USD:-1.5}" \
             $([ "$SKIP_DONE" = "true" ] && echo --skip-done) $([ "$SILENT" = "true" ] && echo --silent)

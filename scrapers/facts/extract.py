@@ -350,7 +350,15 @@ def silent_plan(limit: int, platforms: Optional[set[str]], counts: dict[str, int
     return scale_plan(keep, limit)
 
 
-def sample_silent(table: str, n: int, seed: int, mode: str = "silent") -> list[dict[str, Any]]:
+def lane_of(spec: str) -> tuple[int, int]:
+    """«k/n» → (k, n): this run is lane k of n parallel lanes (owner 2026-10-29: finish the backlog in about a day)."""
+    k, n = (int(x) for x in (spec or "0/1").split("/"))
+    if not (1 <= n <= 32 and 0 <= k < n):
+        raise ValueError(f"bad --shard {spec!r}")
+    return k, n
+
+
+def sample_silent(table: str, n: int, seed: int, mode: str = "silent", shard: tuple[int, int] = (0, 1)) -> list[dict[str, Any]]:
     """Rows picked by id from a DB picker, then read exactly like sample_table (same columns, ground truth, PDPL).
     mode 'silent' = ops_text_facts_silent (facts_silent_ids); 'new' / 'backlog' = facts_ai_todo_ids — the ads the AI
     has never read, 'new' only those first seen in the last 3 days (owner 2026-10-26: the AI reads every new ad)."""
@@ -363,7 +371,10 @@ def sample_silent(table: str, n: int, seed: int, mode: str = "silent") -> list[d
     if mode == "silent":
         picked = client.rpc("facts_silent_ids", {"p_table": table, "p_limit": want, "p_seed": str(seed)}).execute().data
     else:
-        picked = client.rpc("facts_ai_todo_ids", {"p_table": table, "p_limit": want, "p_mode": mode, "p_seed": str(seed)}).execute().data
+        params = {"p_table": table, "p_limit": want, "p_mode": mode, "p_seed": str(seed)}
+        if shard[1] > 1:                           # lane k of n reads only ids with id % n = k (migration: facts_ai_todo_ids)
+            params.update({"p_shard": shard[0], "p_shards": shard[1]})
+        picked = client.rpc("facts_ai_todo_ids", params).execute().data
     ids = [int(r["id"]) for r in (picked or [])]
     rows: list[dict[str, Any]] = []
     for i in range(0, len(ids), 100):
@@ -443,7 +454,7 @@ def run(args: argparse.Namespace) -> int:
     sample: list[dict[str, Any]] = []
     for table, n in plan.items():
         try:
-            sample.extend(sample_table(table, n, rng) if args.mode == "sample" else sample_silent(table, n, args.seed, args.mode))
+            sample.extend(sample_table(table, n, rng) if args.mode == "sample" else sample_silent(table, n, args.seed, args.mode, lane_of(args.shard)))
         except Exception as e:
             print(f"  ! {table}: sampling failed: {str(e)[:200]}")
     rng.shuffle(sample)
@@ -695,6 +706,13 @@ def selftest() -> None:
     assert silent_plan(100, None, {"a_residential_listings": 100, "a_commercial_listings": 100}, "commercial") == {"a_commercial_listings": 100}
     assert sum(silent_plan(100, None, {"a_residential_listings": 100, "a_commercial_listings": 100}, "all").values()) == 100
     assert sum(build_plan(10_000, None).values()) == 10_000 and sum(build_plan(500, None).values()) == 500
+    assert lane_of("0/1") == (0, 1) and lane_of("3/8") == (3, 8)
+    for bad_lane in ("8/8", "0/0", "1/40"):
+        try:
+            lane_of(bad_lane)
+            raise AssertionError(bad_lane)
+        except ValueError:
+            pass
     assert norm("مَسْبَحٌ، وحديقة") == norm("مسبح وحديقه") == "مسبح وحديقه"
     assert norm("شارع ١٥ م") == "شارع 15 م"
     assert norm("مُؤَسَّس") == "مؤسس"
@@ -756,6 +774,7 @@ def main() -> int:
                     help="sample = the fixed 10k plan; silent = ads the reader found nothing in; new = ads first seen ≤ 3 days the AI "
                          "never read (the nightly run); backlog = any active ad the AI never read")
     ap.add_argument("--model", default="", help="OpenRouter only: one of the proxy's allowed cheap models (empty = its default)")
+    ap.add_argument("--shard", default="0/1", help="lane k/n: read only unread ads with id % n = k (new / backlog)")
     ap.add_argument("--fallback-model", default=None,
                     help="backup for ads the main model cannot answer (default: FALLBACK_MODEL on the OpenRouter key; '' = off)")
     ap.add_argument("--provider", choices=("", "deepseek", "openrouter"), default="",
