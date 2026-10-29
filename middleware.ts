@@ -42,7 +42,9 @@ export type HomeCardFacts = { sites?: number | null; listings?: number | null; c
 export const HOME_CARD_FALLBACK_AR = 'كل مواقع العقار في السعودية في مكان واحد.';
 
 const ok = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0;
-const fmt = (n: number) => n.toLocaleString('en-US');
+// «٬» (U+066C, the Arabic thousands mark) instead of «,»: a narrow WhatsApp card broke «421,077» after the comma and
+// showed only «421,» (owner's two phones, 2026-10-29). Phones never break a line inside «421٬077».
+const fmt = (n: number) => n.toLocaleString('en-US').replace(/,/g, '\u066C');
 
 /** The owner-approved line with live numbers, or the fallback when any number is not a real count. */
 export function homeCardDescription(f: HomeCardFacts | null | undefined): string {

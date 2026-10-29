@@ -31,7 +31,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 const ogDesc = (html: string) => html.match(/property="og:description" content="([^"]*)"/)?.[1] ?? null;
 const ogTitle = (html: string) => html.match(/property="og:title" content="([^"]*)"/)?.[1] ?? null;
 const FACTS = { sites: 148, listings: 390592, cities: 353 };
-const LINE_AR = '390,592 إعلان · 353 مدينة بالمملكة';
+const LINE_AR = '390\u066C592 إعلان · 353 مدينة بالمملكة';
 const LINE_EN = '390,592 listings · 353 cities in Saudi Arabia';
 const CARD = { q: { deal: 'Buy', category: 'Residential', location: 'الرياض' } as any, name: 'يوسف', locale: 'ar' as const };
 const INVITE = shareInviteNote(CARD.name, CARD.q, 'ar')!;
@@ -128,7 +128,7 @@ const mutant = async (from: string, to: string) => {
   mustCatch('a missing count rendered as a number (a zero / «null» on the card, or a crash on it)', threw || out !== SHARE_CARD.ar.desc);
 }
 {
-  const m = await mutant("? `${n(f.listings)} إعلان · ${n(f.cities)} مدينة بالمملكة`", "? `${n(f.sites)} موقع · ${n(f.listings)} إعلان · ${n(f.cities)} مدينة`");
+  const m = await mutant("? `${a(f.listings)} إعلان · ${a(f.cities)} مدينة بالمملكة`", "? `${n(f.sites)} موقع · ${n(f.listings)} إعلان · ${n(f.cities)} مدينة`");
   mustCatch('the line drifting from the home card\'s approved shape (the «و» / «في» WhatsApp truncated)', m.shareCardFactsLine(FACTS, 'ar') !== LINE_AR);
 }
 {
