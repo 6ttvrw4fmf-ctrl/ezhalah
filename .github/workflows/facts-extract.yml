@@ -90,7 +90,7 @@ env:
 
 jobs:
   lanes:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     outputs:
       list: ${{ steps.m.outputs.list }}
       n: ${{ steps.m.outputs.n }}
