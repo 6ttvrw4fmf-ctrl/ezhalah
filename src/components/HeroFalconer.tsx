@@ -4,22 +4,22 @@ import { Image as XImage } from 'expo-image';
 import Animated from 'react-native-reanimated';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SKY_CALM_PROPS } from '@/lib/scrollCalm';
-import { TAKEOFF_MS } from '@/lib/eagleTakeoff';
 import { startNameParty, claimNameParty } from '@/lib/nameParty';
 import { hasJustSignedIn } from '@/lib/loginWelcome';
 import CloudWisp from './CloudWisp';
 
 // The guest falconer (plain outline) — the owner's reference image (2026-10-26), 167x192.
 const FALCONER = require('../../assets/icons/insight-falconer-original.png');
-// The falcon, drawn in the falconer drawing's own pixel coordinates (167x192) on a larger canvas (viewBox -140 -170
-// 310 290) so it can fly away from a guest's hand.
-const EAGLE_TAKEOFF = require('../../assets/images/falcon-takeoff.svg');
 const ART_W = 167, ART_H = 192;
-const CANVAS = { x: -140, y: -170, w: 310, h: 290 };
-// The falcon is drawn a little larger than life against him so it reads at a glance (owner 2026-10-26: «make the
-// falcon a bit bigger»), scaled about the spot where it stands on his hand so it still lands there.
-const FALCON_SCALE = 1.2;
-const PERCH = { x: 24, y: 92 };
+// THE GUEST FALCONER (owner 2026-10-28/29: «make it the same [falconer] for the first one, not signed up user … I want
+// him to remove his mask, throw it down, let it seem it's falling, then fly … a different colour mask», approved from
+// the preview, red hood). The SAME traced falconer as the sign-in story, plain (no beard, no bulb), his eagle in green
+// wearing a RED hood: the eagle bows, he takes the hood off with his mouth (the sign-in seating move in reverse), drops
+// it so it tumbles down, and the eagle takes off. ~4 s on EVERY open and refresh, never loops; he keeps the last frame
+// (his empty glove). Built by scripts/build-guest-falconer.mjs from falconer-signin.svg; same canvas as the sign-in SVG.
+const GUEST = require('../../assets/images/falconer-guest.svg');
+// every mount of the guest falconer gets its own fresh timeline (a browser shares one per SVG URL)
+let guestPlays = 0;
 
 // THE SIGN-IN ANIMATION (owner 2026-10-26, approved after review), one self-contained SVG traced from the owner's two
 // logos so the original drawing is kept exactly. It plays once, only when a sign-in welcome is taken:
@@ -70,14 +70,9 @@ export default function HeroFalconer({ size, flip, signedIn = false, celebrate =
   const reduced = useReducedMotion();
   const { width: w, height: h } = size;
 
-  // GUEST: the falcon takes off on EVERY open and refresh (owner 2026-10-26); unmounted after its flight.
-  const [takeoff, setTakeoff] = useState(false);
-  useEffect(() => {
-    if (reduced || signedIn) return;
-    setTakeoff(true);
-    const id = setTimeout(() => setTakeoff(false), TAKEOFF_MS);
-    return () => clearTimeout(id);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // GUEST: the hood comes off and the eagle flies on EVERY open and refresh (owner 2026-10-26 / 2026-10-29).
+  // Reduced motion: the plain still drawing, nothing moves.
+  const [guestPlay] = useState(() => ++guestPlays);
 
   // SIGNED IN: the sign-in animation, once per sign-in welcome (`celebrate` is bumped when it is taken).
   // Derived, not set in an effect, so the first frame of a sign-in already shows the animation's start (no flash of
@@ -117,12 +112,6 @@ export default function HeroFalconer({ size, flip, signedIn = false, celebrate =
   // contentFit="contain": where the drawing really sits inside the box, so the falcon sits on his hand.
   const k = Math.min(w / ART_W, h / ART_H);
   const ox = (w - ART_W * k) / 2, oy = (h - ART_H * k) / 2;
-  const falconBox = {
-    position: 'absolute' as const,
-    left: ox + PERCH.x * k + (CANVAS.x - PERCH.x) * k * FALCON_SCALE,
-    top: oy + PERCH.y * k + (CANVAS.y - PERCH.y) * k * FALCON_SCALE,
-    width: CANVAS.w * k * FALCON_SCALE, height: CANVAS.h * k * FALCON_SCALE,
-  };
   // the signed-in canvas, placed so its drawing lands exactly on the guest drawing's box
   const signinBox = {
     position: 'absolute' as const,
@@ -135,12 +124,11 @@ export default function HeroFalconer({ size, flip, signedIn = false, celebrate =
       {inline ? null : <CloudWisp variant={0} width={w * 1.35} height={h * 0.3} opacity={0.5} style={{ bottom: -h * 0.07, left: -w * 0.27 }} />}
       <View style={[StyleSheet.absoluteFill, flip && s.flip]}>
         {!signedIn ? (
-          <>
+          reduced ? (
             <XImage source={FALCONER} contentFit="contain" accessible={false} style={StyleSheet.absoluteFill} />
-            {takeoff ? (
-              <XImage testID="hero-eagle-takeoff" source={EAGLE_TAKEOFF} contentFit="fill" accessible={false} style={falconBox} />
-            ) : null}
-          </>
+          ) : (
+            <XImage testID="hero-falconer-guest" source={freshSource(GUEST, guestPlay) as any} priority="high" contentFit="fill" accessible={false} style={signinBox} />
+          )
         ) : awaitingStory ? null : story ? (
           <XImage testID="hero-falconer-signin" source={freshSource(SIGNIN, celebrate) as any} priority="high" onLoad={() => setLoadedFor(celebrate)} contentFit="fill" accessible={false} style={signinBox} />
         ) : (
