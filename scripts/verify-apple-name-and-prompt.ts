@@ -367,6 +367,9 @@ const modalProblems = (f: Record<string, string>) => {
       { header: 'export const FIREWORK_COLORS', endsWith: /;$/ },
       { header: 'export const PARTY_FIRST_POP_EVENT', endsWith: /;$/ },
       { header: 'export const PARTY_END_EVENT', endsWith: /;$/ },
+      { header: 'export const ROCKET_GRAVITY', endsWith: /;$/ },
+      { header: 'export const OPENING_MS', endsWith: /;$/ },
+      { header: 'export const OPENING_HOP', endsWith: /;$/ },
       { header: 'export function fireworksPlan(' },
       { header: 'export const PARTY_GAP_MS', endsWith: /;$/ },
       { header: 'export const NAME_PARTY_EVENT', endsWith: /;$/ },
@@ -376,7 +379,7 @@ const modalProblems = (f: Record<string, string>) => {
       { header: 'export function startNamePartyFromBox(' },
       { header: 'export function startNameParty(' },
     ], ['startNameParty', 'startNamePartyFromBox', 'claimNameParty', 'fireworksPlan', 'launchEveryFor', 'LAUNCH_EVERY_MS', 'PARTY_MS', 'LAUNCH_FOR_MS', 'FIREWORK_COLORS', 'PARTY_GAP_MS',
-        'PARTY_FIRST_POP_EVENT', 'PARTY_END_EVENT', 'NAME_PARTY_EVENT'], PRE8)) as PartyMod;
+        'PARTY_FIRST_POP_EVENT', 'PARTY_END_EVENT', 'NAME_PARTY_EVENT', 'ROCKET_GRAVITY', 'OPENING_MS', 'OPENING_HOP'], PRE8)) as PartyMod;
   };
   // one module instance, parties started at the given clock times; returns what each start drew and said
   const run = async (code: string, starts: { at: number; reduced: boolean; box?: boolean; heroOn?: boolean }[]) => {
@@ -410,6 +413,14 @@ const modalProblems = (f: Record<string, string>) => {
   check('§8 a LOT of fireworks, quick and non-stop: 70+ rockets over 3+ seconds, spread across the whole width and height', planOk(P8));
   const laptopFull = (P: PartyMod) => P.launchEveryFor(1440) < P.LAUNCH_EVERY_MS && P.launchEveryFor(1440) >= 0.6 * P.LAUNCH_EVERY_MS && P.launchEveryFor(390) === P.LAUNCH_EVERY_MS;
   check('§8 a laptop gets proportionally more rockets than a phone (the full laptop screen fills too), bounded', laptopFull(P8));
+  // SOONER (owner 2026-10-29 «the fireworks come up a bit late»): the first pop within ~0.4 s on a phone — the opening
+  // volley starts OPENING_HOP of the screen below its burst point and climbs at ROCKET_GRAVITY.
+  const firstPopMs = (P: PartyMod) => { const H = 812, d = (P as any).OPENING_HOP * H, g = (P as any).ROCKET_GRAVITY; return Math.sqrt((2 * d) / g) * 16.7; };
+  const soon = (P: PartyMod, src: string) => (P as any).OPENING_MS >= 100 && firstPopMs(P) <= 400
+    && /y: r\.at < OPENING_MS \? \(r\.ty \+ OPENING_HOP\) \* H : H \+ 10/.test(src) && /r\.vy \+= ROCKET_GRAVITY \* dt;/.test(src);
+  check(`§8 the first pop lands fast (${Math.round(firstPopMs(P8))} ms on a phone): an opening volley that starts high, rockets that climb quick`, soon(P8, SRC));
+  const slowSrc = SRC.replace('export const OPENING_HOP = 0.09;', 'export const OPENING_HOP = 0.9;');
+  mustCatch('the first pop coming late again (a full climb from the bottom)', !soon((await run(slowSrc, [])).P, slowSrc));
   mustCatch('a laptop as sparse as a phone', !laptopFull((await run(SRC.replace('Math.max(0.6, 500 / (width || 500))', 'Math.max(1, 500 / (width || 500))'), [])).P));
   check('§8 …in party colours (several hues, Ezhalah green and gold among them)', new Set(P8.FIREWORK_COLORS).size >= 6 && P8.FIREWORK_COLORS.includes('#2f7247') && P8.FIREWORK_COLORS.includes('#d8b14a'));
   check('§8 a celebration draws ONE full-screen canvas layer and tells the headline: the party started, then the first pop',

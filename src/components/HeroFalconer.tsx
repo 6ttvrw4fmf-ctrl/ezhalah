@@ -36,8 +36,9 @@ const SIGNIN = require('../../assets/images/falconer-signin.svg');
 const SIGNED_IN_STILL = require('../../assets/images/falconer-final.svg');
 const SIGNIN_CANVAS = { x: -140, y: -170, w: 310, h: 385 };
 export const SIGNIN_SEQUENCE_MS = 6200;
-// the bulb lights at ~5.0–5.4 s and the glow fades by ~6.2 s; the confetti starts once the story is over
-export const RAIN_AT_MS = SIGNIN_SEQUENCE_MS;
+// the bulb lights at ~5.0–5.4 s and the glow fades by ~6.2 s. SOONER (owner 2026-10-29: «the fireworks come up a bit
+// late, make it faster»): they start as the bulb lights, 1.2 s before the story's last glow, instead of after it.
+export const RAIN_AT_MS = SIGNIN_SEQUENCE_MS - 1200;
 // how long the story waits for its file before its clock starts anyway
 const LOAD_WAIT_MS = 4000;
 // how long, after he appears, a marked sign-in may keep the box empty waiting for its story to start
