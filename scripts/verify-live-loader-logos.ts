@@ -46,12 +46,24 @@ let sink: Seen[] = [];
 // A memory-cache hit reports requestServedFromCache first; remember it so the response counts as kept.
 const servedFromCache = new Set<string>();
 cdp.on('Network.requestServedFromCache', (e: { requestId: string }) => servedFromCache.add(e.requestId));
+// A logo counts only once its body has FINISHED downloading (Network.loadingFinished). responseReceived fires when
+// the headers arrive; on throttled data the old gate counted 129 «received», reloaded while bodies were still in
+// flight, and those cancelled downloads were never cached — 49 «re-downloaded» on a correct build (deploy run 1113,
+// 2026-10-29). A phone keeps downloading; the gate now waits for the same.
+// On the SECOND visit any network response counts at once — a re-download still in flight is still a re-download.
+const pendingLogo = new Map<string, Seen>();
+let phase: 'first' | 'repeat' = 'first';
 cdp.on('Network.responseReceived', (e: any) => {
   if (!LOGO_PATH.test(e.response.url)) return;
   const h = Object.fromEntries(Object.entries(e.response.headers || {}).map(([k, v]) => [k.toLowerCase(), String(v)]));
-  sink.push({ url: e.response.url, status: e.response.status, cacheControl: h['cache-control'] || '',
+  (phase === 'repeat' ? { set: (_k: string, v: Seen) => sink.push(v) } : pendingLogo).set(e.requestId, { url: e.response.url, status: e.response.status, cacheControl: h['cache-control'] || '',
     fromCache: servedFromCache.has(e.requestId) || !!(e.response.fromDiskCache || e.response.fromMemoryCache || e.response.fromPrefetchCache) });
 });
+cdp.on('Network.loadingFinished', (e: { requestId: string }) => {
+  const r = pendingLogo.get(e.requestId);
+  if (r) { pendingLogo.delete(e.requestId); sink.push(r); }
+});
+cdp.on('Network.loadingFailed', (e: { requestId: string }) => { pendingLogo.delete(e.requestId); });
 
 console.log(`\nPost-deploy loader-logo gate → ${URL} (390px phone, slow mobile data)\n`);
 let first: Seen[] = [], repeat: Seen[] = [];
@@ -64,9 +76,9 @@ try {
     await page.waitForTimeout(1000);
     const n = new Set(sink.map((r) => r.url)).size;
     if (n !== last) { last = n; stableSince = Date.now(); }
-    if (n >= MIN_PREFETCHED_LOGOS && Date.now() - stableSince > 5000) break;
+    if (n >= MIN_PREFETCHED_LOGOS && pendingLogo.size === 0 && Date.now() - stableSince > 5000) break;
   }
-  first = sink; sink = [];
+  first = sink; sink = []; pendingLogo.clear(); phase = 'repeat';
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 90_000 });
   // Long enough for the 2.5 s prefetch to fire again and ask for every logo (from cache, if kept).
   await page.waitForLoadState('networkidle', { timeout: 60_000 }).catch(() => {});
