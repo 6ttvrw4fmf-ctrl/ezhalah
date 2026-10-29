@@ -113,8 +113,11 @@ const withTrailing = mutated(SAKANI, `${SAKANI}  # sale side joins the rent walk
 check('a trailing YAML comment after a closing brace (the 2026-10-27 sakani shape) is still planned',
   problems(withTrailing).length === 0 && plan(PLANNER, block(withTrailing) ?? '', 'sakani').sources.join() === 'sakani',
   problems(withTrailing).join('; '));
+// Drop the closing brace whether or not a trailing comment follows it (sakani's line carries one).
+const SAKANI_BROKEN = SAKANI.replace(/\}(\s*#.*)?\s*$/, '');
+check('the unparseable mutant really changed the sakani line (not a no-op)', SAKANI_BROKEN !== SAKANI);
 mustCatch('a source line the planner cannot parse (it must fail the plan, never vanish)',
-  problems(mutated(SAKANI, SAKANI.replace(/\}\s*$/, ''))).length > 0);
+  problems(mutated(SAKANI, SAKANI_BROKEN)).length > 0);
 const dir = mkdtempSync(join(tmpdir(), 'ss-plan-'));
 const ignoresInput = join(dir, 'ignores_input.py');
 writeFileSync(ignoresInput, readFileSync(PLANNER, 'utf8').replace('wanted = [s.strip()', 'wanted = [] and [s.strip()'));
