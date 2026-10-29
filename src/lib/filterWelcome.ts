@@ -104,6 +104,21 @@ export const riyadhDay = (t: number): number => Math.floor((t + 3 * 3600_000) / 
  *  be a day off. A fact line prepared or shown on one Saudi day is never shown on the next. */
 export const sameRiyadhDay = (a: number, b: number): boolean => riyadhDay(a) === riyadhDay(b);
 
+/** A TAB KEEPS ITS LINE (owner 2026-10-28: «after 2 hours when I enter Ezhalah … I see the swap»). Safari shows a saved
+ *  picture of an old tab and then reloads it, so a line that changed while the tab slept visibly swaps. The line a tab
+ *  showed (and its greeting) is kept in that tab's sessionStorage, which survives Safari's reload, and is shown again in
+ *  the same tab for the rest of that Saudi day; a NEW visit (a new tab) still gets the next line after 2 hours. */
+export const TAB_KEY = 'ezhalah:filterWelcome:tab:v1';
+export type TabLine = { id: number; at: number; ar: string; en: string; greet: number | null };
+export function tabLine(raw: string | null | undefined, now: number): TabLine | null {
+  try {
+    const v = JSON.parse(raw ?? 'null');
+    if (!v || !Number.isFinite(v.id) || !Number.isFinite(v.at) || typeof v.ar !== 'string' || typeof v.en !== 'string' || !v.ar || !v.en) return null;
+    if (v.at > now || !sameRiyadhDay(v.at, now)) return null; // never yesterday's line
+    return { id: Number(v.id), at: Number(v.at), ar: v.ar, en: v.en, greet: Number.isInteger(v.greet) ? v.greet : null };
+  } catch { return null; }
+}
+
 /** Saudi Arabia has 13 administrative regions; «كل المناطق» is said only when every one has listings. */
 export const SAUDI_REGION_COUNT = 13;
 const REGION_AR = { riyadh: 'منطقة الرياض', makkah: 'منطقة مكة المكرمة', eastern: 'المنطقة الشرقية', qassim: 'منطقة القصيم' } as const;
