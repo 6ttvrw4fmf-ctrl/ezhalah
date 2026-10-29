@@ -360,17 +360,18 @@ export function headlineReduce(s: HeadlineState, ev: HeadlineEvent): HeadlineSta
 export const PREPARED_MAX_MS = 24 * 60 * 60 * 1000;
 export type WelcomeCache = { id: number; at: number; ar: string; en: string };
 
-// THE SIGN-IN WELCOME (owner 2026-10-22: «whenever the user logs in or signs up, this message appears»,
+// THE SIGN-IN WELCOME (owner 2026-10-22: «whenever the user logs in or signs up, this message appears»; since
+// 2026-10-28 every line opens «نورت {n} 🥳،» — owner: «نورت then name», «yeah with 🥳» —
 // with five wordings so users see different ones). Approved Arabic, word for word; the English is its
 // translation, with the brand never translated. Shown on the page right after a sign-in (or sign-up),
 // then held GREET_HOLD_MS so a reload keeps it; after that the normal rotation resumes. Never chosen
 // by the normal rotation (they are not in WELCOME_LINES).
 export const GREET_LINES: readonly WelcomeLine[] = [
-  { id: 101, when: 'any', needs: [], ar: 'حياك {n}، إزهله طريقتك الجديدة لتلاقي عقارك في السعودية.', en: 'Welcome {n}, Ezhalah is your new way to find your property in Saudi Arabia.' },
-  { id: 102, when: 'any', needs: [], ar: 'أهلاً {n}، مع إزهله صار البحث عن عقارك في السعودية أسهل.', en: 'Hello {n}, with Ezhalah, finding your property in Saudi Arabia just got easier.' },
-  { id: 103, when: 'any', needs: [], ar: 'حياك {n}، إزهله يدور لك على عقارك في كل السعودية.', en: 'Welcome {n}, Ezhalah searches all of Saudi Arabia for your property.' },
-  { id: 104, when: 'any', needs: [], ar: 'هلا {n}، عقارك في السعودية صار أقرب مع إزهله.', en: 'Hi {n}, your property in Saudi Arabia is closer with Ezhalah.' },
-  { id: 105, when: 'any', needs: [], ar: 'مرحباً {n}، إزهله بدايتك الجديدة للبحث عن عقارك في السعودية.', en: 'Welcome {n}, Ezhalah is your fresh start in the search for property in Saudi Arabia.' },
+  { id: 101, when: 'any', needs: [], ar: 'نورت {n} 🥳، إزهله طريقتك الجديدة لتلاقي عقارك في السعودية.', en: 'Welcome {n} 🥳, Ezhalah is your new way to find your property in Saudi Arabia.' },
+  { id: 102, when: 'any', needs: [], ar: 'نورت {n} 🥳، مع إزهله صار البحث عن عقارك في السعودية أسهل.', en: 'Welcome {n} 🥳, with Ezhalah, finding your property in Saudi Arabia just got easier.' },
+  { id: 103, when: 'any', needs: [], ar: 'نورت {n} 🥳، إزهله يدور لك على عقارك في كل السعودية.', en: 'Welcome {n} 🥳, Ezhalah searches all of Saudi Arabia for your property.' },
+  { id: 104, when: 'any', needs: [], ar: 'نورت {n} 🥳، عقارك في السعودية صار أقرب مع إزهله.', en: 'Welcome {n} 🥳, your property in Saudi Arabia is closer with Ezhalah.' },
+  { id: 105, when: 'any', needs: [], ar: 'نورت {n} 🥳، إزهله بدايتك الجديدة للبحث عن عقارك في السعودية.', en: 'Welcome {n} 🥳, Ezhalah is your fresh start in the search for property in Saudi Arabia.' },
 ];
 export const GREET_HOLD_MS = 30 * 60 * 1000;
 /** Which of the five a sign-in shows: starts from the user's own id (so users differ), then moves one
