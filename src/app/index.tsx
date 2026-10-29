@@ -2357,7 +2357,7 @@ export default function Home() {
             <Pressable onPress={() => setSharedSearch(null)} hitSlop={10} style={[s.sharedClose, { right: 12 }]} accessibilityRole="button" accessibilityLabel={t('Close')}>
               <Ionicons name="close" size={20} color={colors.muted} />
             </Pressable>
-            <XImage source={require('../../assets/images/logo-cloud-green-lit.svg')} style={s.sharedEagle} contentFit="contain" />
+            <XImage source={require('../../assets/images/logo-cloud-green-static.svg')} style={s.sharedEagle} contentFit="contain" />
             <Text style={[s.sharedTitle, { writingDirection: isRTL ? 'rtl' : 'ltr' }]}>
               {shareLandingTitle(sharedSearch.name, sharedSearch.q, locale === 'en' ? 'en' : 'ar')}
             </Text>
