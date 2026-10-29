@@ -51,6 +51,8 @@ FALLBACK_MODEL = "openai/gpt-4.1-mini"     # the backup reader: stronger at stri
 FALLBACK_SHARE = 0.05                      # never more than 5 % of a run's ads go to the backup
 FALLBACK_MIN = 20                          # …but a small run may still rescue up to 20
 FALLBACK_BATCH = 4
+FALLBACK_MONTH_USD = 3.0                   # owner 2026-10-28: the backup never spends more than 3 USD a calendar month
+                                           # (inside the one 30 USD monthly wall that every model shares)
 CHECKPOINT_ADS = 500
 CHECKPOINT_UNVERIFIED = 0.05
 CHECKPOINT_USD_PER_AD = 0.001
@@ -648,11 +650,22 @@ def run(args: argparse.Namespace) -> int:
             if (i // args.batch) % 5 == 4 or tot["ads"] >= CHECKPOINT_ADS and not checkpointed:
                 checkpoint()
         if fallback_queue:
+            month0 = datetime.now(timezone.utc).strftime("%Y-%m-01")
+            spent = sum(float(r.get("usd") or 0) for r in (client.table("listing_facts_runs").select("usd")
+                        .eq("requested_model", args.fallback_model).gte("at", month0).limit(100000).execute().data or []))
+            if spent >= FALLBACK_MONTH_USD:
+                print(f"backup reader: {spent:.2f} USD spent this month of {FALLBACK_MONTH_USD:.0f} — {len(fallback_queue)} ads stay unread for next month")
+                fallback_queue.clear()
+        if fallback_queue:
             cap = max(FALLBACK_MIN, int(FALLBACK_SHARE * (tot["ads"] + len(fallback_queue))))
             todo, over = fallback_queue[:cap], fallback_queue[cap:]
+            usd_before_fallback = usd_total
             print(f"backup reader {args.fallback_model}: {len(todo)} ads DeepSeek could not answer"
                   + (f" ({len(over)} over the {FALLBACK_SHARE:.0%} cap stay unread for the next run)" if over else ""))
             for i in range(0, len(todo), FALLBACK_BATCH):
+                if spent + (usd_total - usd_before_fallback) >= FALLBACK_MONTH_USD:
+                    print(f"backup reader: monthly {FALLBACK_MONTH_USD:.0f} USD cap reached mid-run — the rest stay unread")
+                    break
                 process(todo[i:i + FALLBACK_BATCH], 0, True)
     except Stop as e:
         print(f"STOP: {e}")

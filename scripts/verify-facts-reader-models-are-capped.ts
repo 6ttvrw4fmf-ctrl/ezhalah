@@ -42,7 +42,7 @@ export const workflowOffersOnlyListed = (yml: string, models: string[] | null): 
 // allowed cheap non-thinking models, and capped to a small share of each run.
 export const backupIsCapped = (py: string, models: string[] | null): boolean => {
   const m = /^FALLBACK_MODEL = "([^"]+)"/m.exec(py), share = /^FALLBACK_SHARE = ([0-9.]+)/m.exec(py);
-  return !!m && !!share && !!models && models.includes(m[1]) && listIsCheap([m[1]]) && Number(share[1]) > 0 && Number(share[1]) <= 0.1 &&
+  return !!m && !!share && !!models && models.includes(m[1]) && listIsCheap([m[1]]) && Number(share[1]) > 0 && Number(share[1]) <= 0.1 && /^FALLBACK_MONTH_USD = ([0-9.]+)/m.test(py) && Number(/^FALLBACK_MONTH_USD = ([0-9.]+)/m.exec(py)![1]) <= 5 &&
     /if not fallback and args\.fallback_model:\n\s+fallback_queue\.extend\(batch\)/.test(py);
 };
 const PYX = readFileSync(join(root, "scrapers", "facts", "extract.py"), "utf8");
@@ -57,6 +57,7 @@ check('facts-extract.yml offers only models from that list', workflowOffersOnlyL
 
 check("the backup reader is an allowed cheap model, used for at most 10% of a run, only for ads the main model could not answer", backupIsCapped(PYX, models));
 mustCatch("the backup share raised to every ad", !backupIsCapped(PYX.replace(/^FALLBACK_SHARE = [0-9.]+/m, "FALLBACK_SHARE = 1.0"), models));
+mustCatch("the backup monthly cap raised past 5 USD", !backupIsCapped(PYX.replace(/^FALLBACK_MONTH_USD = [0-9.]+/m, "FALLBACK_MONTH_USD = 50.0"), models));
 mustCatch("a premium backup model", !backupIsCapped(PYX.replace(/^FALLBACK_MODEL = "[^"]+"/m, 'FALLBACK_MODEL = "anthropic/claude-sonnet-4.5"'), models));
 mustCatch('the refusal removed', !proxyRefusesUnlisted(TS.replace('|| !(body.model in OPENROUTER_MODELS)', '')));
 mustCatch('a reasoning model added to the list', !listIsCheap([...(models ?? []), 'deepseek/deepseek-r1']));
