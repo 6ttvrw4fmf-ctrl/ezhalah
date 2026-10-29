@@ -161,3 +161,46 @@ def test_an_answering_host_gets_no_late_round(monkeypatch):
     urls, _used, _trace = IP.fetch_catalogue(_Sess("chrome124", 404, ""), BASE, make_session=make)
     assert urls == [] and IP.LATE_ROUND_BACKOFF_S not in slept
     assert made == list(IP.CATALOGUE_PROFILES[1:])
+
+
+# ─────────── the REFUSAL class: gudai 2026-10-29 (every direct profile got HTTP 403) ───────────
+def test_a_refused_egress_tries_the_residential_proxy(monkeypatch):
+    """gudai 2026-10-29 04:52 (job 123263440592): 403 on both sitemaps for every DIRECT profile while the
+    tenant served 12 /property/ URLs to a residential egress. A 403 is the host refusing the runner, not the
+    tenant saying it has no listings, so the proxy route is tried — and no 2-minute late round is spent."""
+    slept: list[float] = []
+    monkeypatch.setattr(IP.time, "sleep", lambda s: slept.append(s))
+    monkeypatch.setenv("WASALT_PROXY_URL", "http://proxy.invalid:1")
+    calls: list[tuple] = []
+
+    def make(profile: str, proxies=None) -> _Sess:
+        calls.append((profile, proxies))
+        return _Sess(profile, 200, SITEMAP) if proxies else _Sess(profile, 403, "<html>Forbidden</html>")
+
+    urls, used, trace = IP.fetch_catalogue(_Sess("chrome124", 403, "Forbidden"), BASE, make_session=make)
+    assert urls == [f"{BASE}/property/a/", f"{BASE}/property/b/"], trace
+    assert calls[-1][1], "the listing pages must ride the proxied session that served the sitemap"
+    assert any(t.startswith("proxy/") for t in trace)
+    assert IP.LATE_ROUND_BACKOFF_S not in slept, "a refusal is about the egress — no late round on the same one"
+
+
+def test_a_refused_egress_without_a_proxy_still_fails_loud(monkeypatch):
+    monkeypatch.setattr(IP.time, "sleep", lambda _s: None)
+    monkeypatch.delenv("WASALT_PROXY_URL", raising=False)
+    urls, _used, trace = IP.fetch_catalogue(
+        _Sess("chrome124", 403, ""), BASE, make_session=lambda prof, proxies=None: _Sess(prof, 403, ""))
+    assert urls == [], "a refused sitemap must never turn into a catalogue"
+    assert any("HTTP 403" in t for t in trace), "the trace must say the host refused"
+
+
+def test_a_refused_proxy_stays_empty(monkeypatch):
+    monkeypatch.setattr(IP.time, "sleep", lambda _s: None)
+    monkeypatch.setenv("WASALT_PROXY_URL", "http://proxy.invalid:1")
+    urls, _used, _trace = IP.fetch_catalogue(
+        _Sess("chrome124", 403, ""), BASE, make_session=lambda prof, proxies=None: _Sess(prof, 403, ""))
+    assert urls == []
+
+
+def test_a_404_is_still_believed_and_spends_no_proxy():
+    assert 404 not in IP.REFUSAL_STATUSES and 200 not in IP.REFUSAL_STATUSES
+    assert 403 in IP.REFUSAL_STATUSES and 429 in IP.REFUSAL_STATUSES

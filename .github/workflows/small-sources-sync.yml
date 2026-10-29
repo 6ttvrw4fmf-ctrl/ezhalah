@@ -145,7 +145,10 @@ jobs:
             # of this batch by page count even though its row count is small.
             - { source: compoundin,    cmd: "python -m scrapers.compoundin.run --type all", tmo: 45 }
             # wslnaa makes one tRPC call per slug (59) on top of the sitemap fetch.
-            - { source: wslnaa,        cmd: "python -m scrapers.wslnaa.run --type all", tmo: 30 }
+            #   wslnaa: `proxy: true` (2026-10-29) — the 10-29 nightly ended «no /properties/ slugs» in 2 s while the
+            #   sitemap listed 63 to another egress; crawl_session() now tries 3 profiles DIRECT first, so the proxy
+            #   is spent only when every direct route is refused.
+            - { source: wslnaa,        cmd: "python -m scrapers.wslnaa.run --type all", tmo: 30, proxy: true }
             # ── onboarded 2026-09-21: eleven platforms ─────────────────────────────────────────────
             # Each is its own matrix job, so one source down never hides another and each keeps its
             # own run ledger. None reads WASALT_PROXY_URL (checked) — no `proxy:` flag. `tmo` is sized
