@@ -22,9 +22,14 @@ const SOURCE_PASS = 'SOURCE: ${{ github.event.inputs.source }}';
 const PLAN_RUN = 'run: python scripts/small_sources_matrix.py "$SOURCE" >> "$GITHUB_OUTPUT"';
 const SYNC_MATRIX = 'matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}';
 
-const ENTRY = /^\s*-\s*\{(.+)\}\s*$/;   // the planner's and duplicateMatrixEntries' line shape
+// Every line that LOOKS like a source — a list item opening a flow map that names `source:` — whatever follows
+// its closing brace. Deliberately LOOSER than the planner's own entry pattern: on 2026-10-26 PR #8877 put a
+// `# comment` after sakani's `}`, the planner's strict pattern stopped matching, this guard used the same strict
+// pattern and so stopped counting the line too, and sakani had no nightly job 10-27..10-29 with every check green.
+// Counting by the loose shape makes «planned N of N» fail the moment the planner drops any line.
+const LOOKS_LIKE_ENTRY = /^\s*-\s*\{.*\bsource\s*:/;
 const entryLines = (t: string) =>
-  t.split('\n').filter((l) => ENTRY.test(l) && !l.trimStart().startsWith('#') && /\bsource\s*:/.test(l));
+  t.split('\n').filter((l) => LOOKS_LIKE_ENTRY.test(l) && !l.trimStart().startsWith('#'));
 
 // The SMALL_SOURCES literal block exactly as YAML bounds it: the lines after `SMALL_SOURCES: |` that are blank
 // or indented deeper than the key.
@@ -101,6 +106,18 @@ mustCatch('the plan job no longer receiving the dispatch input',
 mustCatch('a source line added outside SMALL_SOURCES (the planner would never schedule it)',
   problems(mutated('  sync:\n', '  sync:\n          - { source: zzstray, cmd: "python -m scrapers.zz.run" }\n')).length > 0);
 mustCatch('an expression inside SMALL_SOURCES', problems(mutated('SMALL_SOURCES: |\n', 'SMALL_SOURCES: |\n            # ${{ github.actor }}\n')).length > 0);
+const SAKANI = WF.split('\n').find((l) => /^\s*-\s*\{\s*source:\s*sakani\b/.test(l));
+if (!SAKANI) throw new Error('mutation anchor missing: the sakani line');
+const withTrailing = mutated(SAKANI, `${SAKANI}  # sale side joins the rent walk`);
+// Not a mustCatch: the right answer for a trailing comment is to READ it (as YAML does), so this asserts acceptance.
+check('a trailing YAML comment after a closing brace (the 2026-10-27 sakani shape) is still planned',
+  problems(withTrailing).length === 0 && plan(PLANNER, block(withTrailing) ?? '', 'sakani').sources.join() === 'sakani',
+  problems(withTrailing).join('; '));
+// Drop the closing brace whether or not a trailing comment follows it (sakani's line carries one).
+const SAKANI_BROKEN = SAKANI.replace(/\}(\s*#.*)?\s*$/, '');
+check('the unparseable mutant really changed the sakani line (not a no-op)', SAKANI_BROKEN !== SAKANI);
+mustCatch('a source line the planner cannot parse (it must fail the plan, never vanish)',
+  problems(mutated(SAKANI, SAKANI_BROKEN)).length > 0);
 const dir = mkdtempSync(join(tmpdir(), 'ss-plan-'));
 const ignoresInput = join(dir, 'ignores_input.py');
 writeFileSync(ignoresInput, readFileSync(PLANNER, 'utf8').replace('wanted = [s.strip()', 'wanted = [] and [s.strip()'));
@@ -108,6 +125,12 @@ mustCatch('a planner that ignores the input (a targeted dispatch expands to the 
 const silentUnknown = join(dir, 'silent_unknown.py');
 writeFileSync(silentUnknown, readFileSync(PLANNER, 'utf8').replace('if unknown:', 'if False:'));
 mustCatch('an unknown name planning an empty run instead of failing', problems(WF, silentUnknown).length > 0);
+const strictEntry = join(dir, 'strict_entry.py');
+writeFileSync(strictEntry, readFileSync(PLANNER, 'utf8')
+  .replace('(?:#.*)?$")', '$")')
+  .replace(/raise SystemExit\(f"::error::unparseable[^\n]*/, 'continue'));
+mustCatch('the pre-10-29 planner, which silently dropped a line carrying a trailing comment',
+  problems(withTrailing, strictEntry).length > 0);
 
 if (failed) { console.error(`\n❌ verify-small-sources-targeted-dispatch-is-one-job: ${failed} check(s) failed.`); process.exit(1); }
 console.log(`\n✅ verify-small-sources-targeted-dispatch-is-one-job: a targeted dispatch creates only the jobs it names; the nightly keeps all ${n}.`);

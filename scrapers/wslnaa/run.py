@@ -39,6 +39,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
@@ -47,10 +48,25 @@ SOURCE = "Waslna"
 PREFIX = "WSL"
 
 
+SESSION_HEADERS = {"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"}
+
+
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
-    s.headers.update({"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"})
+    s.headers.update(SESSION_HEADERS)
     return s
+
+
+def crawl_session() -> tuple[cc.Session, list[str]]:
+    """The session the crawl rides: 3 browser profiles DIRECT, then the same 3 through the residential
+    proxy when the job grants one (`proxy: true`), each probing the sitemap on a fresh session.
+
+    2026-10-29 04:59 (job 123263442024): the nightly ended «sitemap returned no /properties/ slugs» in
+    2 s, while the same sitemap listed 63 /properties/ URLs to another egress that day and the four
+    previous nightlies each crawled 62. The single pinned chrome124 session read a non-200 as «no
+    slugs» and recorded nothing about it, so a refusal of the runner looked like an empty site. The
+    attempt log now goes into the run ledger, and the first route that answers 200 carries the crawl."""
+    return retry_smarter_session(f"{BASE}/sitemap.xml", headers=SESSION_HEADERS)
 
 
 _TYPE_EN_AR = {
@@ -270,14 +286,22 @@ def _make_verify_gone(control: Optional[dict]):
     return lambda ad_number: probe(ad_number, canary=canary)
 
 
+SITEMAP_TRACE: list[str] = []
+
+
 def fetch_slugs(s: cc.Session, limit: int = 0) -> list[str]:
     INCOMPLETE.clear()
+    SITEMAP_TRACE.clear()
     r = s.get(f"{BASE}/sitemap.xml", timeout=40)
     if r.status_code != 200:
+        # A refused or failed sitemap is NOT an empty catalogue: say what the host answered.
+        SITEMAP_TRACE.append(f"sitemap HTTP {r.status_code} ({len(r.text or '')} bytes)")
         return []
     urls = sorted({u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if "/properties/" in u})
     slugs = [u.rstrip("/").rsplit("/", 1)[-1] for u in urls if u.rstrip("/").rsplit("/", 1)[-1]]
     slugs = [x for x in slugs if x != "properties"]
+    if not slugs:
+        SITEMAP_TRACE.append(f"sitemap HTTP 200 with {len(urls)} /properties/ locs ({len(r.text or '')} bytes)")
     return slugs[:limit] if limit else slugs
 
 
@@ -311,7 +335,7 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    s = session()
+    s, tried = crawl_session()
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run("wslnaa")
     res: list[dict] = []
@@ -319,7 +343,8 @@ def main() -> int:
     try:
         slugs = fetch_slugs(s, limit=args.limit)
         if not slugs:
-            raise RuntimeError("sitemap returned no /properties/ slugs")
+            raise RuntimeError("sitemap returned no /properties/ slugs | "
+                               + "; ".join(SITEMAP_TRACE + tried))
         print(f"{SOURCE}: {len(slugs)} listings discovered", flush=True)
         skipped: dict[str, int] = {}
         for sl in slugs:

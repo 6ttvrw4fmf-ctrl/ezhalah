@@ -116,7 +116,7 @@ export function duplicateMatrixEntries(text: string): string[] {
   const seen = new Map<string, number>();
   const dups: string[] = [];
   text.split('\n').forEach((raw, i) => {
-    const m = /^\s*-\s*\{(.+)\}\s*,?\s*$/.exec(raw);
+    const m = /^\s*-\s*\{([^}]+)\}\s*,?\s*(?:#.*)?$/.exec(raw);   // a trailing YAML comment must not hide a duplicate
     if (!m) return;
     const fields = new Map<string, string>();
     for (const f of m[1].matchAll(/([A-Za-z_][\w-]*)\s*:\s*(?:"([^"]*)"|'([^']*)'|([^,}]*))/g)) {
