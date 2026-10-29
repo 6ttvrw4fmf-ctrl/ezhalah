@@ -352,7 +352,7 @@ const modalProblems = (f: Record<string, string>) => {
     '',
   ].join('\n');
   type PartyMod = { startNameParty: (r: boolean) => void; startNamePartyFromBox: (r: boolean) => void; claimNameParty: () => () => void;
-    fireworksPlan: (rand?: () => number) => { at: number; x: number; ty: number; c: string; c2: string }[];
+    launchEveryFor: (w: number) => number; LAUNCH_EVERY_MS: number; fireworksPlan: (rand?: () => number, every?: number) => { at: number; x: number; ty: number; c: string; c2: string }[];
     PARTY_MS: number; LAUNCH_FOR_MS: number; FIREWORK_COLORS: string[]; PARTY_GAP_MS: number;
     PARTY_FIRST_POP_EVENT: string; PARTY_END_EVENT: string; NAME_PARTY_EVENT: string };
   const liftParty = async (code: string) => {
@@ -361,6 +361,7 @@ const modalProblems = (f: Record<string, string>) => {
     return (await liftSymbols(tmp, [
       { header: 'export const LAUNCH_FOR_MS', endsWith: /;$/ },
       { header: 'export const LAUNCH_EVERY_MS', endsWith: /;$/ },
+      { header: 'export const launchEveryFor', endsWith: /;$/ },
       { header: 'export const SPARKS_PER_BURST', endsWith: /;$/ },
       { header: 'export const PARTY_MS', endsWith: /;$/ },
       { header: 'export const FIREWORK_COLORS', endsWith: /;$/ },
@@ -374,7 +375,7 @@ const modalProblems = (f: Record<string, string>) => {
       { header: 'export function claimNameParty(' },
       { header: 'export function startNamePartyFromBox(' },
       { header: 'export function startNameParty(' },
-    ], ['startNameParty', 'startNamePartyFromBox', 'claimNameParty', 'fireworksPlan', 'PARTY_MS', 'LAUNCH_FOR_MS', 'FIREWORK_COLORS', 'PARTY_GAP_MS',
+    ], ['startNameParty', 'startNamePartyFromBox', 'claimNameParty', 'fireworksPlan', 'launchEveryFor', 'LAUNCH_EVERY_MS', 'PARTY_MS', 'LAUNCH_FOR_MS', 'FIREWORK_COLORS', 'PARTY_GAP_MS',
         'PARTY_FIRST_POP_EVENT', 'PARTY_END_EVENT', 'NAME_PARTY_EVENT'], PRE8)) as PartyMod;
   };
   // one module instance, parties started at the given clock times; returns what each start drew and said
@@ -404,9 +405,12 @@ const modalProblems = (f: Record<string, string>) => {
   // the launch plan, executed with a seeded random
   let seed = 7; const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   const planOk = (P: PartyMod) => { const r = P.fireworksPlan(rand);
-    return r.length >= 35 && r[r.length - 1].at >= 3000 && r[r.length - 1].at < P.LAUNCH_FOR_MS && r.every((x, i) => i === 0 || x.at >= r[i - 1].at)
+    return r.length >= 70 && r[r.length - 1].at >= 3000 && r[r.length - 1].at < P.LAUNCH_FOR_MS && r.every((x, i) => i === 0 || x.at >= r[i - 1].at)
       && r.every((x) => x.x >= 0.06 && x.x <= 0.94 && x.ty >= 0.06 && x.ty <= 0.6) && Math.min(...r.map((x) => x.x)) < 0.2 && Math.max(...r.map((x) => x.x)) > 0.8; };
-  check('§8 a LOT of fireworks, quick and non-stop: 35+ rockets over 3+ seconds, spread across the whole width and height', planOk(P8));
+  check('§8 a LOT of fireworks, quick and non-stop: 70+ rockets over 3+ seconds, spread across the whole width and height', planOk(P8));
+  const laptopFull = (P: PartyMod) => P.launchEveryFor(1440) < P.LAUNCH_EVERY_MS && P.launchEveryFor(1440) >= 0.6 * P.LAUNCH_EVERY_MS && P.launchEveryFor(390) === P.LAUNCH_EVERY_MS;
+  check('§8 a laptop gets proportionally more rockets than a phone (the full laptop screen fills too), bounded', laptopFull(P8));
+  mustCatch('a laptop as sparse as a phone', !laptopFull((await run(SRC.replace('Math.max(0.6, 500 / (width || 500))', 'Math.max(1, 500 / (width || 500))'), [])).P));
   check('§8 …in party colours (several hues, Ezhalah green and gold among them)', new Set(P8.FIREWORK_COLORS).size >= 6 && P8.FIREWORK_COLORS.includes('#2f7247') && P8.FIREWORK_COLORS.includes('#d8b14a'));
   check('§8 a celebration draws ONE full-screen canvas layer and tells the headline: the party started, then the first pop',
     !!one.layer && one.canvas && one.said[0] === P8.NAME_PARTY_EVENT && one.said.includes(P8.PARTY_FIRST_POP_EVENT), JSON.stringify(one.said));
@@ -423,7 +427,7 @@ const modalProblems = (f: Record<string, string>) => {
   check('§8 no external script, no disco lights, no leftover rain layer in the module', noExternal(SRC));
   mustCatch('fireworks that are never cleared', (await run(SRC.replace('  setTimeout(finish, PARTY_MS);\n', ''), [{ at: 0, reduced: false }])).shots[0].removeAt === null);
   mustCatch('an end the headline never hears (the fact would wait for its fallback)', !(await run(SRC.replace('layer.remove(); say(PARTY_END_EVENT);', 'layer.remove();'), [{ at: 0, reduced: false }])).shots[0].endSaid);
-  mustCatch('a thin show (a rocket every 400 ms)', !planOk((await run(SRC.replace('export const LAUNCH_EVERY_MS = 70;', 'export const LAUNCH_EVERY_MS = 400;'), [])).P));
+  mustCatch('a thin show (a rocket every 400 ms)', !planOk((await run(SRC.replace('export const LAUNCH_EVERY_MS = 35;', 'export const LAUNCH_EVERY_MS = 400;'), [])).P));
   mustCatch('a short burst instead of non-stop (1 s)', !planOk((await run(SRC.replace('export const LAUNCH_FOR_MS = 3500;', 'export const LAUNCH_FOR_MS = 1000;'), [])).P));
   mustCatch('a layer that is not full screen', !fullScreen(SRC.replace('[data-ezh-party]{position:fixed;inset:0;', '[data-ezh-party]{position:absolute;top:0;height:40vh;')));
   mustCatch('fireworks under reduced motion', (await run(SRC.replace('if (reduced || ', 'if ('), [{ at: 0, reduced: true }])).shots[0].drew);

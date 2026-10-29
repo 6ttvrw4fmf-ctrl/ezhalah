@@ -12,7 +12,10 @@ import { Platform } from 'react-native';
  *  (PARTY_FIRST_POP_EVENT) and when the last spark is gone it changes to the fact (PARTY_END_EVENT). One fixed full-screen
  *  canvas, removed at the end and in any case by PARTY_MS. Self-contained: no external script. */
 export const LAUNCH_FOR_MS = 3500;
-export const LAUNCH_EVERY_MS = 70;
+/** faster and denser (owner 2026-10-28: «faster, a lot of pops … full laptop screen … make it cool») */
+export const LAUNCH_EVERY_MS = 35;
+/** Wider screens get proportionally more rockets so a laptop is as full as a phone (at most ~1.7× the phone rate). */
+export const launchEveryFor = (width: number): number => LAUNCH_EVERY_MS * Math.min(1, Math.max(0.6, 500 / (width || 500)));
 export const SPARKS_PER_BURST = 85;
 /** The layer is always gone by then (rise ≤ ~1 s and sparks ≤ ~1.6 s after the last launch). */
 export const PARTY_MS = 6500;
@@ -22,9 +25,9 @@ export const PARTY_FIRST_POP_EVENT = 'ezhalah:party-first-pop';
 export const PARTY_END_EVENT = 'ezhalah:party-end';
 export type Rocket = { at: number; x: number; ty: number; c: string; c2: string };
 /** The launch plan: when each rocket leaves, where (fraction of the width) and how high it bursts (fraction of the height). */
-export function fireworksPlan(rand: () => number = Math.random): Rocket[] {
+export function fireworksPlan(rand: () => number = Math.random, every: number = LAUNCH_EVERY_MS): Rocket[] {
   const out: Rocket[] = [];
-  for (let at = 0, i = 0; at < LAUNCH_FOR_MS; at += LAUNCH_EVERY_MS * (0.6 + 0.8 * rand()), i++) {
+  for (let at = 0, i = 0; at < LAUNCH_FOR_MS; at += every * (0.6 + 0.8 * rand()), i++) {
     out.push({ at: Math.round(at), x: 0.06 + 0.88 * rand(), ty: 0.06 + 0.54 * rand(), c: FIREWORK_COLORS[i % FIREWORK_COLORS.length], c2: FIREWORK_COLORS[(i + 3) % FIREWORK_COLORS.length] });
   }
   return out;
@@ -124,8 +127,8 @@ export function startNameParty(reduced: boolean): void {
   (canvas as any).style.width = '100%'; (canvas as any).style.height = '100%';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const rnd = (a: number, b: number) => a + Math.random() * (b - a);
-  const rockets = fireworksPlan().map((r) => ({ ...r, x: r.x * W, y: H + 10, ty: r.ty * H, vy: 0, done: false }));
-  type Spark = { x: number; y: number; px: number; py: number; vx: number; vy: number; life: number; max: number; c: string; kind: 0 | 1 | 2; w: number; h: number; rot: number; vr: number; flip: number };
+  const rockets = fireworksPlan(Math.random, launchEveryFor(W)).map((r) => ({ ...r, x: r.x * W, y: H + 10, ty: r.ty * H, vy: 0, done: false }));
+  type Spark = { x: number; y: number; px: number; py: number; vx: number; vy: number; life: number; max: number; c: string; kind: 0 | 1 | 2 | 3; w: number; h: number; rot: number; vr: number; flip: number };
   const sparks: Spark[] = [];
   const explode = (r: typeof rockets[number]) => {
     firstPop();
@@ -136,6 +139,11 @@ export function startNameParty(reduced: boolean): void {
         c: Math.random() < 0.5 ? r.c : r.c2, kind: Math.random() < 0.3 ? 1 : 0, w: rnd(3, 6), h: rnd(6, 10), rot: rnd(0, 6), vr: rnd(-0.3, 0.3), flip: rnd(0, 6) });
     }
     for (let i = 0; i < 10; i++) sparks.push({ x: r.x, y: r.y, px: r.x, py: r.y, vx: rnd(-0.6, 0.6), vy: rnd(-0.6, 0.6), life: 0, max: rnd(400, 700), c: '#fff6d8', kind: 2, w: 0, h: 0, rot: 0, vr: 0, flip: 0 });
+    // «make it cool»: about a third of the shells get an inner ring of gold glitter that twinkles
+    if (Math.random() < 0.35) for (let i = 0; i < 28; i++) {
+      const a = (i / 28) * Math.PI * 2, sp = base * 0.45;
+      sparks.push({ x: r.x, y: r.y, px: r.x, py: r.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0, max: rnd(900, 1300), c: '#f2c14e', kind: 3, w: 0, h: 0, rot: 0, vr: 0, flip: 0 });
+    }
   };
   let t0 = -1, last = 0;
   const frame = (now: number) => {
@@ -148,8 +156,8 @@ export function startNameParty(reduced: boolean): void {
       if (r.done) continue;
       alive++;
       if (t < r.at) continue;
-      if (!r.vy) r.vy = -Math.sqrt(2 * 0.22 * (r.y - r.ty)) * 1.02;
-      r.y += r.vy * dt; r.vy += 0.22 * dt;
+      if (!r.vy) r.vy = -Math.sqrt(2 * 0.34 * (r.y - r.ty)) * 1.02;
+      r.y += r.vy * dt; r.vy += 0.34 * dt;
       ctx.globalAlpha = 1; ctx.strokeStyle = r.c; ctx.lineWidth = 2; ctx.lineCap = 'round';
       ctx.beginPath(); ctx.moveTo(r.x, r.y); ctx.lineTo(r.x, r.y - r.vy * 3); ctx.stroke();
       ctx.fillStyle = '#fff6d8'; ctx.beginPath(); ctx.arc(r.x, r.y, 2, 0, 7); ctx.fill();
@@ -162,6 +170,7 @@ export function startNameParty(reduced: boolean): void {
       s.px = s.x; s.py = s.y; s.vx *= Math.pow(0.965, dt); s.vy = s.vy * Math.pow(0.965, dt) + 0.045 * dt; s.x += s.vx * dt; s.y += s.vy * dt;
       ctx.globalAlpha = Math.min(1, k * 1.4);
       if (s.kind === 2) { ctx.fillStyle = s.c; ctx.beginPath(); ctx.arc(s.x, s.y, 3 * k + 1, 0, 7); ctx.fill(); continue; }
+      if (s.kind === 3) { if (Math.random() < 0.6) { ctx.fillStyle = Math.random() < 0.5 ? s.c : '#fff6d8'; ctx.fillRect(s.x - 1.2, s.y - 1.2, 2.4, 2.4); } continue; }
       if (s.kind === 1) {
         s.rot += s.vr * dt; s.flip += 0.14 * dt; s.x += Math.sin(s.flip) * 0.35;
         ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.rot); ctx.scale(1, Math.cos(s.flip)); ctx.fillStyle = s.c; ctx.fillRect(-s.w / 2, -s.h / 2, s.w, s.h); ctx.restore();
