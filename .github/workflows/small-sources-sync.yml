@@ -145,7 +145,10 @@ jobs:
             # of this batch by page count even though its row count is small.
             - { source: compoundin,    cmd: "python -m scrapers.compoundin.run --type all", tmo: 45 }
             # wslnaa makes one tRPC call per slug (59) on top of the sitemap fetch.
-            - { source: wslnaa,        cmd: "python -m scrapers.wslnaa.run --type all", tmo: 30 }
+            #   wslnaa: `proxy: true` (2026-10-29) — the 10-29 nightly ended «no /properties/ slugs» in 2 s while the
+            #   sitemap listed 63 to another egress; crawl_session() now tries 3 profiles DIRECT first, so the proxy
+            #   is spent only when every direct route is refused.
+            - { source: wslnaa,        cmd: "python -m scrapers.wslnaa.run --type all", tmo: 30, proxy: true }
             # ── onboarded 2026-09-21: eleven platforms ─────────────────────────────────────────────
             # Each is its own matrix job, so one source down never hides another and each keeps its
             # own run ledger. None reads WASALT_PROXY_URL (checked) — no `proxy:` flag. `tmo` is sized
@@ -213,7 +216,10 @@ jobs:
             #   default) keeps >=2x at 2 s; re-size from the first dispatched run's duration.
             - { source: aqalemhajer,    cmd: "python -m scrapers.aqalemhajer.run --type all", tmo: 90, proxy: true, browser: true }
             #   sakani: 15 API pages + 282 detail records at 1.5 s (measured 740 s dry run).
-            - { source: sakani,         cmd: "python -m scrapers.sakani.run --type all", tmo: 150, proxy: true }  # sale side (2,963 rows, ~70 min of details at 1.5 s) joins the rent walk: backlog 864, owner 2026-10-25
+            #   sakani sale side (2,963 rows, ~70 min of details at 1.5 s) joins the rent walk: backlog 864, owner
+            #   2026-10-25 -> tmo 150. Keep comments on their OWN line: a comment after the closing brace made the
+            #   planner drop this line, and sakani had no job at all on the 10-27..10-29 nightlies.
+            - { source: sakani,         cmd: "python -m scrapers.sakani.run --type all", tmo: 150, proxy: true }
             #   API / REST sources whose whole catalogue is one page or a handful of calls:
             #   shatri: `proxy: true` (2026-10-02, Scraping Engineer) — WP REST answered 403 to the runner IP;
             #   the scraper probes 3 profiles DIRECT first, so the proxy is spent only when refused.
