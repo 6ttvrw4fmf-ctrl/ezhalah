@@ -447,9 +447,7 @@ const SEARCH_MS = 600;
 // resolves fast the user sees part of the logo wave; on a slow one the whole wave still fits inside
 // the cap (scripts/verify-search-loader-shows-every-platform.ts proves everyPlatformSeen(SEARCH_MAX_HOLD_MS)).
 const SEARCH_MIN_MS = 3000;
-// 10 s → 8 s CAP (owner 2026-10-28: «target 10-12 seconds», every logo + message still shown). The logo cycle is 6 s
-// now (lib/loaderPages LOADER_CYCLE_MS), so results normally arrive at ~6 s; 8 s only bounds a slow phone.
-const SEARCH_MAX_HOLD_MS = 8000;
+const SEARCH_MAX_HOLD_MS = 10000;
 // An Advanced Filter round's search beat (owner 2026-10-11: 5 seconds, «نبحث عن …» changing pick by pick — AfRoundLoader).
 const AF_LOADER_MS = 5000;
 // Soft completion (owner v4): before morphing to results, flag the loader `exiting` and give its
