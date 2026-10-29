@@ -43,8 +43,7 @@ export const workflowOffersOnlyListed = (yml: string, models: string[] | null): 
 export const backupIsCapped = (py: string, models: string[] | null): boolean => {
   const m = /^FALLBACK_MODEL = "([^"]+)"/m.exec(py), share = /^FALLBACK_SHARE = ([0-9.]+)/m.exec(py);
   return !!m && !!share && !!models && models.includes(m[1]) && listIsCheap([m[1]]) && Number(share[1]) > 0 && Number(share[1]) <= 0.1 &&
-    /if not fallback and args.fallback_model:
-s+fallback_queue.extend(batch)/.test(py);
+    /if not fallback and args\.fallback_model:\n\s+fallback_queue\.extend\(batch\)/.test(py);
 };
 const PYX = readFileSync(join(root, "scrapers", "facts", "extract.py"), "utf8");
 const TS = readFileSync(join(root, 'supabase', 'functions', 'facts-extract', 'index.ts'), 'utf8');
