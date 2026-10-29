@@ -26,7 +26,7 @@ import {
 } from '@/lib/auth';
 import { useSaveName } from '@/lib/useSaveName';
 
-const LOGO = require('../../assets/images/logo-cloud-green-lit.svg');
+const LOGO = require('../../assets/images/logo-cloud-green-static.svg'); // solid on the white card (owner 2026-10-28)
 type Step = 'main' | 'google' | 'apple' | 'appleface';
 
 // Open/close animation (owner spec, 2026-08-15): overlay fade ~200-250ms, popup fades in while
