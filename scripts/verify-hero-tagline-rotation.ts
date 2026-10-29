@@ -31,8 +31,9 @@ const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'u
 export function heroWiringProblems(home: string): string[] {
   const bad: string[] = [];
   // A signed-in user's personal welcome line (lib/filterWelcome.ts, owner 2026-10-17) may stand in front
-  // of the rotating pool — `welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])` — and ONLY that token.
-  if (!/heroTitle[^>]*>\{(?:welcomeLine \?\? )?t\(HERO_TAGLINE_KEYS\[heroTagline\]\)\}/.test(home))
+  // of the rotating pool — `welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])` — and ONLY that token (owner 2026-10-28:
+  // it may pass through withVisibleEmoji, which only puts the emoji in its own span so it survives the shine).
+  if (!/heroTitle[^>]*>\{(?:withVisibleEmoji\()?(?:welcomeLine \?\? )?t\(HERO_TAGLINE_KEYS\[heroTagline\]\)\)?\}/.test(home))
     bad.push('the headline is no longer read from HERO_TAGLINE_KEYS — a fixed string would never rotate');
   if (!/useEffect\(\(\) => \{ setHeroTagline\(nextHeroTaglineIndex\(\)\); \}, \[\]\);/.test(home))
     bad.push('the pick is not in a mount effect — a module-scope pick is baked into the pre-rendered HTML and never changes');
