@@ -12,7 +12,7 @@
 //   7. rotation: one line held for 1 hour then a different one, always personal, time lines only at their time.
 import {
   WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, PREPARED_MAX_MS, FACTLESS_ANYTIME_IDS,
-  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, GREET_LINES, GREET_HOLD_MS, greetIndex, greetingFor, fillName, NAME_SLOT, NEW_TODAY_MIN, riyadhDay, type WelcomeFacts,
+  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, GREET_LINES, GREET_HOLD_MS, greetIndex, greetingFor, fillName, NAME_SLOT, NEW_TODAY_MIN, riyadhDay, tabLine, TAB_KEY, type WelcomeFacts,
 } from '../src/lib/filterWelcome.ts';
 
 let failed = 0;
@@ -420,6 +420,46 @@ mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a U
   check('both sign-in paths mark the moment: the Google/Apple return route and Google One Tap',
     /markJustSignedIn\(\);/.test(authSrc) && /log\('signed in via One Tap'\), markJustSignedIn\(\);/.test(tapSrc));
   delete (globalThis as any).localStorage;
+}
+
+// ── A TAB KEEPS ITS LINE (owner 2026-10-28: «after 2 hours when I enter Ezhalah … I see the swap») ──
+// Safari shows a saved picture of a sleeping tab and then reloads it; the line that tab showed is kept in its
+// sessionStorage and shown again for the rest of that Saudi day. EXECUTED through the real tabLine.
+{
+  const t = new Date('2026-10-28T10:00:00Z').getTime();            // 13:00 Riyadh
+  const saved = JSON.stringify({ id: 2007, at: t, ar: '⟦g⟧ ⟦n⟧، تدري إن 66% من إعلانات رابغ أراضٍ؟', en: '⟦g⟧ ⟦n⟧, did you know 66% of Rabigh\'s listings are land?', greet: 3 });
+  const later = tabLine(saved, t + 5 * 3600_000);                    // 18:00 the same day, past the 2-hour hold
+  const nextDay = tabLine(saved, new Date('2026-10-28T21:30:00Z').getTime()); // 00:30 Riyadh, the next day
+  check('a returning tab gets ITS line back the same Saudi day, even after the 2-hour hold (no swap)', later?.id === 2007 && later.greet === 3);
+  check('…but never on the next Saudi day, never from the future, never from garbage',
+    nextDay === null && tabLine(saved, t - 1000) === null && tabLine('{bad', t) === null && tabLine(null, t) === null && tabLine(JSON.stringify({ id: 1, at: t, ar: '', en: 'x' }), t) === null);
+  // the day rule is real: drop it and yesterday's line comes back after midnight
+  const noDay = (raw: string, now: number) => { const v = JSON.parse(raw); return v.at <= now ? v : null; };
+  mustCatch('a tab line kept across midnight (yesterday\'s «أمس»)', noDay(saved, new Date('2026-10-28T21:30:00Z').getTime()) !== null && nextDay === null);
+  const hookTab = (src: string) => src.includes("const tab = !greet && session.present && (nameAr || nameEn) ? readTab(now.getTime()) : null;")
+    && /: tab \? \{ id: tab\.id, ar: tab\.ar, en: tab\.en, fromCache: true, promoted: false \}\n\s*: \(nameAr \|\| nameEn\) \? instantWelcome\(/.test(src)
+    && (src.match(/writeTab\(/g) ?? []).length >= 2 && src.includes('globalThis.sessionStorage?.getItem(TAB_KEY)');
+  check('the hook shows the tab\'s line BEFORE choosing a new one, and records every line it shows in the tab', hookTab(hookSrc));
+  mustCatch('a hook that ignores the tab (back to the swap)', !hookTab(hookSrc.replace('readTab(now.getTime())', 'null')));
+  check('the tab memory is sessionStorage (one tab), never localStorage (every tab would freeze)', TAB_KEY.startsWith('ezhalah:') && !/localStorage\?\.getItem\(TAB_KEY\)/.test(hookSrc));
+}
+
+// ── THE EMOJI STAYS VISIBLE THROUGH THE SHINE (owner 2026-10-28: «the emoji after the name doesn't show») ──
+{
+  const home = (await import('node:fs')).readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
+  const party = (await import('node:fs')).readFileSync(new URL('../src/lib/nameParty.ts', import.meta.url), 'utf8');
+  const reSrc = (home.match(/^const EMOJI_RE = (\/.*\/);$/m) ?? [])[1];
+  const re = reSrc ? new Function(`return ${reSrc}`)() as RegExp : null;
+  const emojis = ['👋', '☀️', '🌙', '🕌', '🌴', '🤍', '☕', '🌿', '😊', '🌤️', '🏡', '✨'];
+  const splits = (r: RegExp | null) => !!r && emojis.every((e) => `مساء الخير يوسف ${e}، تدري إن`.split(r).length === 3 && `مساء الخير يوسف ${e}، تدري إن`.split(r)[1] === e)
+    && 'تدري إن 66% من إعلانات رابغ أراضٍ؟'.split(r).length === 1;
+  check('every greeting emoji is cut into its own span (and a sentence without one is left whole)', splits(re));
+  mustCatch('a pattern that misses the moon 🌙', !splits(/([☀-➿]️?)/));
+  const wired = home.includes('{withVisibleEmoji(welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline]))}')
+    && home.includes("{...({ dataSet: { ezhEmoji: '' } } as any)}")
+    && party.includes('[data-ezh-shine="on"] [data-ezh-emoji]{-webkit-text-fill-color:initial!important;color:initial!important}');
+  check('the headline renders its emoji in that span, and the shine CSS gives the span its own fill', wired);
+  mustCatch('the shine CSS without the emoji rule (the emoji vanishes on iPhone)', !(party.replace('[data-ezh-shine="on"] [data-ezh-emoji]', '[x]').includes('[data-ezh-shine="on"] [data-ezh-emoji]')));
 }
 
 console.log(`\nExample (ar): ${renderWelcome(WELCOME_LINES[3], 'يوسف', FACTS, 'ar')}`);
