@@ -23,6 +23,11 @@ export const PARTY_MS = 6500;
 export const FIREWORK_COLORS = ['#2f7247', '#5fae7c', '#d8b14a', '#f2c14e', '#e9739a', '#4f8fe0', '#a77ee8', '#ff8a3d'];
 export const PARTY_FIRST_POP_EVENT = 'ezhalah:party-first-pop';
 export const PARTY_END_EVENT = 'ezhalah:party-end';
+/** SOONER (owner 2026-10-29: «the fireworks come up a bit late, make it faster»): rockets climb faster, and the opening
+ *  volley (the rockets of the first OPENING_MS) starts already high, so the first pop lands in about a third of a second. */
+export const ROCKET_GRAVITY = 0.6;
+export const OPENING_MS = 160;
+export const OPENING_HOP = 0.09;
 export type Rocket = { at: number; x: number; ty: number; c: string; c2: string };
 /** The launch plan: when each rocket leaves, where (fraction of the width) and how high it bursts (fraction of the height). */
 export function fireworksPlan(rand: () => number = Math.random, every: number = LAUNCH_EVERY_MS): Rocket[] {
@@ -127,7 +132,7 @@ export function startNameParty(reduced: boolean): void {
   (canvas as any).style.width = '100%'; (canvas as any).style.height = '100%';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const rnd = (a: number, b: number) => a + Math.random() * (b - a);
-  const rockets = fireworksPlan(Math.random, launchEveryFor(W)).map((r) => ({ ...r, x: r.x * W, y: H + 10, ty: r.ty * H, vy: 0, done: false }));
+  const rockets = fireworksPlan(Math.random, launchEveryFor(W)).map((r) => ({ ...r, x: r.x * W, y: r.at < OPENING_MS ? (r.ty + OPENING_HOP) * H : H + 10, ty: r.ty * H, vy: 0, done: false }));
   type Spark = { x: number; y: number; px: number; py: number; vx: number; vy: number; life: number; max: number; c: string; kind: 0 | 1 | 2 | 3; w: number; h: number; rot: number; vr: number; flip: number };
   const sparks: Spark[] = [];
   const explode = (r: typeof rockets[number]) => {
@@ -156,8 +161,8 @@ export function startNameParty(reduced: boolean): void {
       if (r.done) continue;
       alive++;
       if (t < r.at) continue;
-      if (!r.vy) r.vy = -Math.sqrt(2 * 0.34 * (r.y - r.ty)) * 1.02;
-      r.y += r.vy * dt; r.vy += 0.34 * dt;
+      if (!r.vy) r.vy = -Math.sqrt(2 * ROCKET_GRAVITY * (r.y - r.ty)) * 1.02;
+      r.y += r.vy * dt; r.vy += ROCKET_GRAVITY * dt;
       ctx.globalAlpha = 1; ctx.strokeStyle = r.c; ctx.lineWidth = 2; ctx.lineCap = 'round';
       ctx.beginPath(); ctx.moveTo(r.x, r.y); ctx.lineTo(r.x, r.y - r.vy * 3); ctx.stroke();
       ctx.fillStyle = '#fff6d8'; ctx.beginPath(); ctx.arc(r.x, r.y, 2, 0, 7); ctx.fill();

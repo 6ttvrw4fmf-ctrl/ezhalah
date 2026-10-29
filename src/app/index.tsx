@@ -43,6 +43,7 @@ import { decodeSharePayload, decodeInvitePayload, shareJoinNote, shareLandingTit
 import { fetchSharedChat, fetchSharedChatCard } from '@/lib/sharedChat';
 import { isProbeFailure } from '@/lib/afProbe';
 import { sentenceName } from '@/lib/nameSync';
+import { typedDir } from '@/lib/typedDir';
 import { useI18n, tDetailOption, tPriceTab, isLatinOnlyInput, ARABIC_ONLY_MSG, CITY_REQUIRED_MSG, DISTRICT_UNCONFIRMED_MSG } from '@/i18n';
 
 const MAX_W = 560; // desktop-web: keep the mobile-first column centered
@@ -1626,7 +1627,7 @@ export default function Home() {
                   testID="city-input"
                   placeholder={t('Choose a city')}
                   placeholderTextColor={colors.muted}
-                  style={[s.flInput, x.flInput]}
+                  style={[s.flInput, x.flInput, typedDir(query.location)]}
                   value={locale === 'en' && citySelected && query.location === citySelected.cityAr ? cityLabel(citySelected) : query.location}
                   autoCorrect={false}
                   onFocus={() => {
@@ -1849,7 +1850,7 @@ export default function Home() {
                   ref={districtRef}
                   testID="district-input"
                   editable={!!citySelected}
-                  style={[s.flInput, x.flInput]}
+                  style={[s.flInput, x.flInput, typedDir(districtText)]}
                   placeholder={citySelected ? '' : t('Select a city first')}
                   placeholderTextColor={colors.muted}
                   value={districtText}
