@@ -109,7 +109,11 @@ import { INTERVIEW_STOP_AT } from '../src/lib/afRanking.ts';
 const DIST = new URL('../dist/', import.meta.url).pathname;
 let failed = 0;
 let skipped = 0;
+// The last step that ran, so an uncaught error says WHERE it happened (2026-10-29: React #419 failed ~6% of runs
+// for weeks and nobody could find it, because the crash line named no page and no step).
+let lastStep = 'start';
 const check = (label, ok, detail = '') => {
+  lastStep = label;
   if (!ok) failed++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail && !ok ? `\n        ${detail}` : ''}`);
 };
@@ -222,7 +226,13 @@ const browser = await chromium.launch(launchOpts);
 const ctx = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'ar-SA', viewport: { width: 1440, height: 900 } });
 const page = await ctx.newPage();
 const crashes = [];
-page.on('pageerror', (e) => { const m = String(e); if (!BENIGN.test(m)) crashes.push(m.slice(0, 200)); });
+page.on('pageerror', (e) => {
+  const m = String(e);
+  if (BENIGN.test(m)) return;
+  // Where and after what: the page URL, the last check that ran, and the first stack frames.
+  const stack = String(e?.stack || '').split('\n').slice(1, 4).map((l) => l.trim()).join(' < ');
+  crashes.push(`${m.slice(0, 200)} — at ${page.url()} after «${lastStep}»${stack ? ` — ${stack.slice(0, 300)}` : ''}`);
+});
 
 const tap = async (txt) => {
   const box = await page.evaluate(CLICK_LEAF, txt);
