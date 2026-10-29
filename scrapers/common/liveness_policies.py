@@ -1236,9 +1236,13 @@ POLICIES: dict[str, _P] = {
         "No oracle is written yet, so this does not claim a direct check."),
     "superoffice": _P(
         _pol("superoffice", 3, 168), CRAWL_PRESENCE_ONLY,
-        "the crawl's OWN seen-set over the sitemap's 184 Arabic office pages; a booked office drops out of it. "
-        "run.py suppresses prune_unseen unless every page was readable.",
-        "No oracle is written yet, so this does not claim a direct check."),
+        "the office's OWN page /branch/<b>/unit/<code>: JSON-LD offer availability OutOfStock or HTTP 404/410 is "
+        "GONE, InStock is LIVE; an old-site /ar/office-details/<slug> URL answering 301/308 to a category page "
+        "(or 404/410) is GONE; anything else UNKNOWN. Handed to every prune_unseen call and to strike_read_gone; "
+        "a gone counts only after an office this crawl saw reads live (2026-10-29, site rebuilt 2026-10-28).",
+        "The crawl reads each served office's own page and stamps it via db.mark_direct_alive. It sees only the "
+        "server-rendered window of each branch list (the rest loads from /api, which robots.txt disallows), so "
+        "an office outside the window is a candidate the own-page read decides, never a kill."),
     "shomou": _P(
         _pol("shomou", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set of in-date ads over the 26-page index; an ad past its own «تاريخ إنتهاء الإعلان» drops out. "
