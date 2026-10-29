@@ -9,6 +9,8 @@ const root = join(import.meta.dirname, '..');
 let fail = 0;
 const check = (label: string, ok: boolean, detail = '') => { if (ok) console.log(`  PASS  ${label}`); else { fail++; console.error(`  FAIL  ${label}${detail ? ` — ${detail}` : ''}`); } };
 
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
+
 console.log('\nTyped text sits on its own language\'s side\n');
 check('English → left', typedDir('Riyadh') === TYPED_LTR);
 check('Arabic → right', typedDir('الرياض') === TYPED_RTL);
