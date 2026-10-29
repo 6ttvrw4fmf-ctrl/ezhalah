@@ -94,7 +94,7 @@ export function auditShareMeta(layout: string, share: string, exists: (p: string
   if (!NAMES_COUNTRY.test(blurb ?? '')) bad.push('the description no longer names the country — it must say «في السعودية» (or «في المملكة»)');
   // The OS share text is BUILT by shareLead()/shareMessage() (owner 2026-10-20 wording, live count) —
   // scripts/verify-main-link-share-says-why-search-sites.ts executes them; here: still wired.
-  if (!/text: lead, url: SHARE_LINK/.test(s) || !/message, url: SHARE_LINK/.test(s)) bad.push('shareNative no longer sends shareLead()/shareMessage()');
+  if (!/const link = loc === 'en' \? SHARE_LINK_EN : SHARE_LINK;/.test(s) || !/text: lead, url: link/.test(s) || !/message, url: link/.test(s)) bad.push('shareNative no longer sends shareLead()/shareMessage()');
 
   if (!exists(OG_FILE)) bad.push(`${OG_FILE} does not exist — og:image would 404 and the preview would be blank`);
   return bad;

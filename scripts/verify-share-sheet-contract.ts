@@ -101,6 +101,7 @@ const fn = (name: string): string => {
 };
 const preamble = [
   `const SHARE_LINK = ${JSON.stringify(shared)};`,
+  `const SHARE_LINK_EN = ${JSON.stringify(`${shared}/?lang=en`)};`,
   ...['SHARE_LEAD_AR_TEMPLATE', 'SHARE_LEAD_AR_NO_COUNT', 'SHARE_LEAD_EN_TEMPLATE', 'SHARE_LEAD_EN_NO_COUNT']
     .map((n) => `const ${n} = ${JSON.stringify(shareConst(n))};`),
   fn('shareLead'), fn('shareMessage'),
@@ -139,7 +140,8 @@ for (const locale of ['ar', 'en'] as const) {
   for (const name of ['X', 'Telegram'] as const) {
     const u = new URL(out.urls[name]);
     check(`[${locale}] ${name}: url= is the link and text= is the sentence WITHOUT it`,
-      u.searchParams.get('url') === LINK && !(u.searchParams.get('text') ?? '').includes(LINK),
+      // the English share sends the English-card link (owner 2026-10-29), the Arabic the plain one
+      u.searchParams.get('url') === (locale === 'en' ? `${LINK}/?lang=en` : LINK) && !(u.searchParams.get('text') ?? '').includes(LINK),
       `text=${u.searchParams.get('text')}`);
   }
   // The property is LOCALE, not word order: the English post must be English and must name the
