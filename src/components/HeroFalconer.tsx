@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Image as XImage } from 'expo-image';
 import Animated from 'react-native-reanimated';
@@ -6,6 +6,7 @@ import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SKY_CALM_PROPS } from '@/lib/scrollCalm';
 import { TAKEOFF_MS } from '@/lib/eagleTakeoff';
 import { startNameParty, claimNameParty } from '@/lib/nameParty';
+import { hasJustSignedIn } from '@/lib/loginWelcome';
 import CloudWisp from './CloudWisp';
 
 // The guest falconer (plain outline) — the owner's reference image (2026-10-26), 167x192.
@@ -39,6 +40,8 @@ export const SIGNIN_SEQUENCE_MS = 6200;
 export const RAIN_AT_MS = SIGNIN_SEQUENCE_MS;
 // how long the story waits for its file before its clock starts anyway
 const LOAD_WAIT_MS = 4000;
+// how long, after he appears, a marked sign-in may keep the box empty waiting for its story to start
+const STORY_WAIT_MS = 4000;
 
 // A browser shares one animation timeline per SVG URL, so a second sign-in in the same tab would show the already-
 // finished animation. A per-play query string gives every play its own fresh timeline.
@@ -89,6 +92,14 @@ export default function HeroFalconer({ size, flip, signedIn = false, celebrate =
   const [loadedFor, setLoadedFor] = useState(0);
   const story = signedIn && !reduced && celebrate > 0;
   const playing = story && celebrate !== done;
+  // NO STILL BEFORE THE STORY (owner 2026-10-28: «I don't like how the person shows first, then it happens»). Right after
+  // a sign-in the page drew the finished still for a moment, then the story restarted from its beginning. While a
+  // sign-in is marked and its story has not started yet (at most STORY_WAIT_MS after he appears), the box stays empty.
+  const mountedAt = useRef(Date.now());
+  const [, recheck] = useState(0);
+  useEffect(() => { const id = setTimeout(() => recheck(1), STORY_WAIT_MS); return () => clearTimeout(id); }, []);
+  const awaitingStory = signedIn && !reduced && celebrate === 0
+    && Date.now() - mountedAt.current < STORY_WAIT_MS && hasJustSignedIn(Date.now());
   useEffect(() => {
     if (!playing) return;
     const fallback = setTimeout(() => setLoadedFor(celebrate), LOAD_WAIT_MS); // a load event that never comes
@@ -130,7 +141,7 @@ export default function HeroFalconer({ size, flip, signedIn = false, celebrate =
               <XImage testID="hero-eagle-takeoff" source={EAGLE_TAKEOFF} contentFit="fill" accessible={false} style={falconBox} />
             ) : null}
           </>
-        ) : story ? (
+        ) : awaitingStory ? null : story ? (
           <XImage testID="hero-falconer-signin" source={freshSource(SIGNIN, celebrate) as any} priority="high" onLoad={() => setLoadedFor(celebrate)} contentFit="fill" accessible={false} style={signinBox} />
         ) : (
           <XImage testID="hero-falconer-final" source={SIGNED_IN_STILL} contentFit="fill" accessible={false} style={signinBox} />
