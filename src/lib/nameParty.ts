@@ -47,6 +47,7 @@ const CSS = `
 @keyframes ezhShakeB{0%{transform:translateX(0)}33%{transform:translateX(-6px)}66%{transform:translateX(6px)}100%{transform:translateX(0)}}
 [data-ezh-shine="on"]{background-image:linear-gradient(100deg,#2f7247 30%,#5fae7c 45%,#d8b14a 50%,#5fae7c 55%,#2f7247 70%)!important;background-size:250% 100%!important;-webkit-background-clip:text!important;background-clip:text!important;-webkit-text-fill-color:transparent;color:transparent!important;animation:ezhShine 2.4s ease-in-out 2}
 @keyframes ezhShine{from{background-position:110% 0}to{background-position:-10% 0}}
+[data-ezh-shine="on"] [data-ezh-emoji]{-webkit-text-fill-color:initial!important;color:initial!important}
 [data-ezh-party]{position:fixed;inset:0;pointer-events:none;z-index:2147483001;overflow:hidden}
 [data-ezh-party] i{position:absolute;opacity:0;animation-name:ezhFall;animation-timing-function:cubic-bezier(.25,.4,.55,1);animation-fill-mode:both;will-change:transform}
 [data-ezh-party] i b{display:block;width:100%;height:100%;border-radius:inherit;background:inherit;animation:ezhFlip linear infinite}
