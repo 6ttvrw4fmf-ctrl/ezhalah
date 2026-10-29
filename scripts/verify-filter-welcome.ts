@@ -203,8 +203,10 @@ const hookSrc = (await import('node:fs')).readFileSync(new URL('../src/lib/useFi
 // itself when the sign-in completes on this screen, and the hand-over from that welcome to a market insight
 // («show the welcome with 🥳, then change it to a market insight», visibly). Nothing else re-decides.
 check('the hook decides once per page load and re-decides ONLY for a sign-in welcome and its hand-over',
-  (hookSrc.match(/setShown\(/g) ?? []).length === 3
-  && /if \(greet\) welcomeThenInsight\(\);/.test(hookSrc) && /nameEn: session\.nameEn \}\);\s*welcomeThenInsight\(\);/.test(hookSrc)
+  // (a fourth setShown only lifts the hold on the welcome at the first firework pop — owner 2026-10-28)
+  (hookSrc.match(/setShown\(/g) ?? []).length === 4
+  && hookSrc.includes('const reveal = () => setShown((s) => (s.hold ? { ...s, hold: false } : s));')
+  && /if \(greet\) welcomeThenInsight\(\);/.test(hookSrc) && /nameEn: session\.nameEn, hold: true \}\);\s*welcomeThenInsight\(\);/.test(hookSrc)
   && (hookSrc.match(/welcomeThenInsight\(\);/g) ?? []).length === 2
   && /const g = takeGreeting\(session, now\);\s*if \(!g\) return;/.test(hookSrc)
   && /instantWelcome\(\{ hasSession: session\.present, cache, next, now,/.test(hookSrc) && /\}, \[\]\);/.test(hookSrc));
@@ -365,25 +367,35 @@ mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a U
 // appears», five wordings so users see different ones, approved word for word) ──
 {
   const APPROVED_AR = [
-    'حياك {n}، إزهله طريقتك الجديدة لتلاقي عقارك في السعودية.',
-    'أهلاً {n}، مع إزهله صار البحث عن عقارك في السعودية أسهل.',
-    'حياك {n}، إزهله يدور لك على عقارك في كل السعودية.',
-    'هلا {n}، عقارك في السعودية صار أقرب مع إزهله.',
-    'مرحباً {n}، إزهله بدايتك الجديدة للبحث عن عقارك في السعودية.',
+    'نورت {n} 🥳، إزهله طريقتك الجديدة لتلاقي عقارك في السعودية.',
+    'نورت {n} 🥳، مع إزهله صار البحث عن عقارك في السعودية أسهل.',
+    'نورت {n} 🥳، إزهله يدور لك على عقارك في كل السعودية.',
+    'نورت {n} 🥳، عقارك في السعودية صار أقرب مع إزهله.',
+    'نورت {n} 🥳، إزهله بدايتك الجديدة للبحث عن عقارك في السعودية.',
   ];
   check('the five sign-in lines are the owner\'s approved Arabic, word for word, in order',
     GREET_LINES.length === 5 && GREET_LINES.every((l, i) => l.ar === APPROVED_AR[i]));
   check('every sign-in line has its English, with the name and the untranslated brand «Ezhalah»',
     GREET_LINES.every((l) => l.en.includes('{n}') && l.en.includes('Ezhalah') && !/[؀-ۿ]/.test(l.en)));
   check('no sign-in line uses the word «حيك» (owner rule 2026-10-17)', GREET_LINES.every((l) => !/(^|\s)حيك(\s|،|$)/.test(l.ar)));
-  // owner 2026-10-27: «remove this party pop 🥳» — the confetti is the party; the facts come only after it
-  const noPop = (lines: readonly { ar: string; en: string }[]) => lines.every((l) => !l.ar.includes('🥳') && !l.en.includes('🥳'));
-  check('no sign-in line carries 🥳 (the confetti is the party)', noPop(GREET_LINES));
-  mustCatch('a 🥳 back on a sign-in line', !noPop([{ ar: 'حياك {n} 🥳', en: 'Welcome {n}' }]));
+  // owner 2026-10-28: «نورت then name … yeah with 🥳» (it had been removed 2026-10-27) — every line opens «نورت {n} 🥳،»,
+  // the 🥳 right after the name in both languages
+  const opens = (lines: readonly { ar: string; en: string }[]) => lines.every((l) => l.ar.startsWith('نورت {n} 🥳، ') && l.en.startsWith('Welcome {n} 🥳, '));
+  check('every sign-in line opens «نورت {name} 🥳،» / "Welcome {name} 🥳,"', opens(GREET_LINES));
+  mustCatch('a sign-in line without the 🥳', !opens([{ ar: 'نورت {n}، إزهله', en: 'Welcome {n} 🥳, Ezhalah' }]));
+  // owner 2026-10-28: falconer → fireworks; «نورت» at the FIRST pop; the fact once the fireworks stop
   const afterParty = (src: string) => /export const WELCOME_TO_INSIGHT_MS = RAIN_AT_MS \+ PARTY_MS;/.test(src)
-    && /import \{ PARTY_MS \} from '@\/lib\/nameParty';/.test(src) && /import \{ RAIN_AT_MS \} from '@\/components\/HeroFalconer';/.test(src);
-  check('the welcome changes to the facts only once the confetti party is over (eagle lands → confetti → facts)', afterParty(hookSrc));
-  mustCatch('the facts arriving before the confetti (a fixed 5 s)', !afterParty(hookSrc.replace('export const WELCOME_TO_INSIGHT_MS = RAIN_AT_MS + PARTY_MS;', 'export const WELCOME_TO_INSIGHT_MS = 5000;')));
+    && src.includes("import { PARTY_MS, PARTY_FIRST_POP_EVENT, PARTY_END_EVENT } from '@/lib/nameParty';") && /import \{ RAIN_AT_MS \} from '@\/components\/HeroFalconer';/.test(src)
+    && src.includes('globalThis.addEventListener?.(PARTY_END_EVENT, () => r(), { once: true } as any);');
+  check('the welcome changes to the facts only when the fireworks are over (capped at falconer + party)', afterParty(hookSrc));
+  mustCatch('the facts arriving before the fireworks (a fixed 5 s)', !afterParty(hookSrc.replace('export const WELCOME_TO_INSIGHT_MS = RAIN_AT_MS + PARTY_MS;', 'export const WELCOME_TO_INSIGHT_MS = 5000;')));
+  mustCatch('the facts not waiting for the fireworks to end', !afterParty(hookSrc.replace('globalThis.addEventListener?.(PARTY_END_EVENT, () => r(), { once: true } as any);', '')));
+  const heldToPop = (src: string) => src.includes('globalThis.addEventListener?.(PARTY_FIRST_POP_EVENT, reveal, { once: true } as any);')
+    && src.includes('return { line: shown.hold ? null : text,') && src.includes('greet: greetIdx, hold: !!greet }')
+    && src.includes('setTimeout(reveal, RAIN_AT_MS + 1500);');
+  check('the «نورت» welcome is held until the FIRST firework pops (with a fallback when no fireworks play)', heldToPop(hookSrc));
+  mustCatch('the welcome shown before the fireworks (no hold)', !heldToPop(hookSrc.replace('return { line: shown.hold ? null : text,', 'return { line: text,')));
+  mustCatch('a hold that never lifts without fireworks', !heldToPop(hookSrc.replace('setTimeout(reveal, RAIN_AT_MS + 1500);', '')));
   check('the normal rotation never picks a sign-in line',
     !WELCOME_LINES.some((l) => GREET_LINES.some((g) => g.id === l.id)) && !FACTLESS_ANYTIME_IDS.some((id) => id >= 101));
   const uids = Array.from({ length: 60 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);

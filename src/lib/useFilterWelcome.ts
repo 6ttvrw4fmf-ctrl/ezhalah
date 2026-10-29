@@ -31,7 +31,7 @@ const writeTab = (l: { id: number | null; ar: string | null; en: string | null }
 import { fetchWelcomeInsights } from '@/data/welcomeInsights';
 import { cityNameEnOfficial, districtNameEnOfficial } from '@/data/locations';
 import { hasJustSignedIn, takeJustSignedIn, SIGNED_IN_EVENT, isFreshSignUp } from '@/lib/loginWelcome';
-import { PARTY_MS } from '@/lib/nameParty';
+import { PARTY_MS, PARTY_FIRST_POP_EVENT, PARTY_END_EVENT } from '@/lib/nameParty';
 import { RAIN_AT_MS } from '@/components/HeroFalconer';
 
 // v2: remembered lines hold NAME_SLOT, not a name. v1 entries had the name baked in (a Latin name
@@ -106,7 +106,7 @@ function takeGreeting(session: StoredSession, now: number): { id: number; ar: st
   return t ? greetingFor(session.uid, t.count, NAME_SLOT) : null;
 }
 
-type Shown = { settled: boolean; id: number | null; ar: string | null; en: string | null; nameAr: string; nameEn: string; greet?: number | null };
+type Shown = { settled: boolean; id: number | null; ar: string | null; en: string | null; nameAr: string; nameEn: string; greet?: number | null; hold?: boolean };
 const UNSETTLED: Shown = { settled: false, id: null, ar: null, en: null, nameAr: '', nameEn: '', greet: null };
 
 export function useFilterWelcome(
@@ -129,6 +129,12 @@ export function useFilterWelcome(
   const welcomeThenInsight = () => {
     // every sign-in welcome comes through here (both paths), so the falconer's celebration is counted here too
     setCelebrate((c) => c + 1);
+    // FIREWORKS DRIVE THE HEADLINE (owner 2026-10-28: «when the first one pops show نورت … once the fireworks stop, change
+    // it to the fact»). The welcome is held (the plain headline stays) until the first rocket bursts; a fallback shows it
+    // anyway when no fireworks play (reduced motion, no canvas).
+    const reveal = () => setShown((s) => (s.hold ? { ...s, hold: false } : s));
+    globalThis.addEventListener?.(PARTY_FIRST_POP_EVENT, reveal, { once: true } as any);
+    setTimeout(reveal, RAIN_AT_MS + 1500);
     const start = Date.now();
     const pick = (async () => {
       const pend = readKey(NEXT_KEY);
@@ -141,7 +147,11 @@ export function useFilterWelcome(
       writeSeen({ ...seen, [c.key]: start });
       return { line: { id: INSIGHT_ID_BASE + c.templateId, at: start, ar: c.ar, en: c.en }, fromNext: false };
     })();
-    const wait = new Promise<void>((r) => setTimeout(r, WELCOME_TO_INSIGHT_MS));
+    // the fact replaces the welcome when the fireworks are over (PARTY_END_EVENT), or at the latest WELCOME_TO_INSIGHT_MS
+    const wait = new Promise<void>((r) => {
+      globalThis.addEventListener?.(PARTY_END_EVENT, () => r(), { once: true } as any);
+      setTimeout(r, WELCOME_TO_INSIGHT_MS);
+    });
     Promise.all([pick, wait]).then(([r]) => {
       if (!alive.current || !r) return;
       const t = Date.now();
@@ -149,7 +159,7 @@ export function useFilterWelcome(
       writeCache({ id: r.line.id, at: t, ar: r.line.ar, en: r.line.en });
       if (r.fromNext) writeKey(NEXT_KEY, null);
       const g = pickGreeting(new Date(t));
-      setShown((s) => ({ ...s, settled: true, id: r.line.id, ar: r.line.ar, en: r.line.en, greet: g }));
+      setShown((s) => ({ ...s, settled: true, id: r.line.id, ar: r.line.ar, en: r.line.en, greet: g, hold: false }));
       writeTab(r.line, g, t);
       setSwapKey((k) => k + 1);
     }).catch(() => {});
@@ -177,7 +187,7 @@ export function useFilterWelcome(
     // or the tab's own greeting while it still fits the hour.
     const tabGreet = tab && tab.greet != null && GREETINGS[tab.greet] && greetingFits(GREETINGS[tab.greet], now) ? tab.greet : null;
     const greetIdx = tabGreet ?? pickGreeting(now);
-    setShown(inst ? { settled: true, id: inst.id, ar: inst.ar, en: inst.en, nameAr, nameEn, greet: greetIdx } : { settled: true, id: null, ar: null, en: null, nameAr, nameEn, greet: greetIdx });
+    setShown(inst ? { settled: true, id: inst.id, ar: inst.ar, en: inst.en, nameAr, nameEn, greet: greetIdx, hold: !!greet } : { settled: true, id: null, ar: null, en: null, nameAr, nameEn, greet: greetIdx });
     if (inst && session.present && !greet) writeTab(inst, greetIdx, tab ? tab.at : now.getTime());
     if (!session.present) return;
     if (greet) welcomeThenInsight();
@@ -237,7 +247,7 @@ export function useFilterWelcome(
       const g = takeGreeting(session, now);
       if (!g) return;
       writeCache({ id: g.id, at: now, ar: g.ar, en: g.en });
-      setShown({ settled: true, id: g.id, ar: g.ar, en: g.en, nameAr: session.nameAr, nameEn: session.nameEn });
+      setShown({ settled: true, id: g.id, ar: g.ar, en: g.en, nameAr: session.nameAr, nameEn: session.nameEn, hold: true });
       welcomeThenInsight();
     };
     if (signedIn) greetNow();
@@ -258,7 +268,7 @@ export function useFilterWelcome(
       ? fillName(fillGreeting(shown.ar, shown.greet ?? null, 'ar'), live || shown.nameAr, 'ar')
       : fillName(fillGreeting(shown.en, shown.greet ?? null, 'en'), live || shown.nameEn, 'en');
     // A market fact (not the sign-in welcome or an older line) can be tapped for «كيف تشتغل؟».
-    return { line: text, settled: shown.settled, swapKey, isInsight: shown.id != null && isInsightLineId(shown.id) };
+    return { line: shown.hold ? null : text, settled: shown.settled, swapKey, isInsight: shown.id != null && isInsightLineId(shown.id) };
   }, [shown, locale, signedIn, name, swapKey]);
   return { ...out, celebrate };
 }
