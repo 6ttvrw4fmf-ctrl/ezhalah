@@ -41,6 +41,7 @@ const load = (src: string) => liftSymbols(
   src === shareSrc ? SHARE : writeTemp(src),
   [
     { header: 'export const SHARE_LINK = ', endsWith: /;$/ },
+    { header: 'export const SHARE_LINK_EN = ', endsWith: /;$/ },
     { header: 'export const SHARE_LEAD_AR_TEMPLATE = ', endsWith: /;$/ },
     { header: 'export const SHARE_LEAD_AR_NO_COUNT = ', endsWith: /;$/ },
     { header: 'export const SHARE_LEAD_EN_TEMPLATE = ', endsWith: /;$/ },
@@ -62,9 +63,14 @@ const real = await load(shareSrc);
 check('liveSiteCount() is the shared site count (148, the card\'s number)', real.liveSiteCount() === 148, String(real.liveSiteCount()));
 check('the Arabic sentence is the owner\'s exact words with that live number', real.shareLead('ar', real.liveSiteCount()) === OWNER_AR, real.shareLead('ar', real.liveSiteCount()));
 check('the message = that sentence, a newline, the link — nothing else', real.shareMessage('ar', 148) === `${OWNER_AR}\n${LINK}`);
-const OWNER_EN = 'Why search 148 real estate sites across Saudi Arabia? Ezhalah, the AI real estate search engine, searches them all for you.';
-check('the English sentence is the owner\'s exact words (2026-10-22) with the same live number', real.shareLead('en', 148) === OWNER_EN, real.shareLead('en', 148));
-check('the English unknown-count form keeps the owner\'s shape with no number', real.shareLead('en', null) === 'Why search every real estate site across Saudi Arabia? Ezhalah, the AI real estate search engine, searches them all for you.');
+// owner 2026-10-29: the English is the Arabic line translated word for word
+const OWNER_EN = 'Why search 148 real estate sites in Saudi Arabia? Ezhalah. Let Ezhalah search for you.';
+check('the English sentence is the owner\'s exact words (2026-10-29, the Arabic translated) with the same live number', real.shareLead('en', 148) === OWNER_EN, real.shareLead('en', 148));
+check('the English unknown-count form keeps the owner\'s shape with no number', real.shareLead('en', null) === 'Why search every real estate site in Saudi Arabia? Ezhalah. Let Ezhalah search for you.');
+// the English share carries the English link, so its card arrives in English (middleware.ts cardLangOf)
+const LINK_EN = 'https://ezhalah.com/?lang=en';
+check('the English message ends with ezhalah.com/?lang=en; the Arabic keeps the plain link',
+  real.shareMessage('en', 148) === `${OWNER_EN}\n${LINK_EN}` && real.shareMessage('ar', 148) === `${OWNER_AR}\n${LINK}`);
 g.__siteCount = null;
 check('count not read yet → unknown (null), never 0', real.liveSiteCount() === null, String(real.liveSiteCount()));
 check('unknown count → «كل المواقع», never a zero or a typed number', real.shareLead('ar', null) === 'ليش تدور في كل مواقع العقار بالسعودية؟ إزهله، خل إزهله يدور عنك' && !/\d/.test(real.shareLead('ar', null)) && !/\d/.test(real.shareLead('en', null)));
@@ -122,7 +128,7 @@ check('the in-app sheet\'s preview shows the sentence that is sent ({lead}), not
 check('the in-app sheet builds lead/msg from shareLead/shareMessage(locale, liveSiteCount())',
   /const count = liveSiteCount\(\);\s*const lead = shareLead\(locale, count\);\s*const msg = shareMessage\(locale, count\);/.test(sheet));
 check('shareNative sends the built sentence to the phone\'s share menu and the native sheet',
-  /text: lead, url: SHARE_LINK/.test(shareSrc) && /message, url: SHARE_LINK/.test(shareSrc) && /const count = liveSiteCount\(\);/.test(shareSrc));
+  /const link = loc === 'en' \? SHARE_LINK_EN : SHARE_LINK;/.test(shareSrc) && /text: lead, url: link/.test(shareSrc) && /message, url: link/.test(shareSrc) && /const count = liveSiteCount\(\);/.test(shareSrc));
 
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
 console.log('\n  mutation proof — the real code, deliberately re-broken\n');
@@ -141,7 +147,7 @@ const mutant = (from: string, to: string) => {
   mustCatch('the owner\'s wording drifting by one word', m.shareLead('ar', 148) !== OWNER_AR);
 }
 {
-  const m = await mutant("'Why search {count} real estate sites across Saudi Arabia? Ezhalah, the AI real estate search engine, searches them all for you.'", "'Ezhalah, the AI meta search engine. {count} sites, one search.'");
+  const m = await mutant("'Why search {count} real estate sites in Saudi Arabia? Ezhalah. Let Ezhalah search for you.'", "'Why search {count} real estate sites across Saudi Arabia? Ezhalah, the AI real estate search engine, searches them all for you.'");
   mustCatch('the English wording drifting back to the old sentence', m.shareLead('en', 148) !== OWNER_EN);
 }
 {
@@ -165,8 +171,12 @@ const mutant = (from: string, to: string) => {
   mustCatch('a bad count rendered into the sentence («ليش تدوّر في -3 موقع» / «2.5 موقع»)', m.shareLead('ar', -3) !== m.shareLead('ar', null) || m.shareLead('ar', 2.5) !== m.shareLead('ar', null));
 }
 {
-  const m = await mutant('return `${shareLead(loc, count)}\\n${SHARE_LINK}`;', 'return `${shareLead(loc, count)} ${SHARE_LINK} ${SHARE_LINK}`;');
+  const m = await mutant("return `${shareLead(loc, count)}\\n${loc === 'en' ? SHARE_LINK_EN : SHARE_LINK}`;", 'return `${shareLead(loc, count)} ${SHARE_LINK} ${SHARE_LINK}`;');
   mustCatch('the link sent twice / on the same line', m.shareMessage('ar', 148) !== `${OWNER_AR}\n${LINK}`);
+}
+{
+  const m = await mutant("return `${shareLead(loc, count)}\\n${loc === 'en' ? SHARE_LINK_EN : SHARE_LINK}`;", 'return `${shareLead(loc, count)}\\n${SHARE_LINK}`;');
+  mustCatch('the English message sending the plain link (Arabic card)', m.shareMessage('en', 148) !== `${OWNER_EN}\n${LINK_EN}`);
 }
 
 if (fail || mutFail) { console.error(`\n❌ main-link-share-says-why-search-sites: ${fail} check(s), ${mutFail} mutation(s) failed`); process.exit(1); }

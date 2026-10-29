@@ -5,6 +5,10 @@ import { loadSiteCount, siteCountNow } from '@/data/siteCount';
 // The real, resolvable share target. ezhalah.com is the final address (owner 2026-10-26); the old
 // ezhalah-app.vercel.app still serves the same deployment, so links shared before today keep working.
 export const SHARE_LINK = 'https://ezhalah.com';
+// THE ENGLISH LINK (owner 2026-10-29: «the language in the card itself … can I change it»). A link-preview card has ONE
+// language per URL, so an English share sends this address and middleware.ts serves link-preview bots an English card
+// for it. The Arabic share keeps the plain link and its Arabic card.
+export const SHARE_LINK_EN = `${SHARE_LINK}/?lang=en`;
 // The hosts that ARE the live site. A share made on any of them says ezhalah.com; a preview or local build
 // keeps its own address so a test share opens the build that made it.
 export const LIVE_SITE_HOSTS = ['ezhalah.com', 'www.ezhalah.com', 'ezhalah-app.vercel.app'];
@@ -47,11 +51,10 @@ export const SHARE_BLURB_EN = 'Free AI property search in Saudi Arabia: big plat
 // SHARE_BLURB_* above stay the page's SEO description and the in-app preview text.
 export const SHARE_LEAD_AR_TEMPLATE = 'ليش تدور في {count} موقع عقاري بالسعودية؟ إزهله، خل إزهله يدور عنك';
 export const SHARE_LEAD_AR_NO_COUNT = 'ليش تدور في كل مواقع العقار بالسعودية؟ إزهله، خل إزهله يدور عنك';
-// English (owner 2026-10-22, replacing 2026-10-20's «AI meta search engine… one search»): the Arabic line
-// translated, longer, and saying what Ezhalah is — «Why search 148 sites one by one? Ezhalah, the AI real
-// estate search engine, searches them all for you, in one place.»
-export const SHARE_LEAD_EN_TEMPLATE = 'Why search {count} real estate sites across Saudi Arabia? Ezhalah, the AI real estate search engine, searches them all for you.';
-export const SHARE_LEAD_EN_NO_COUNT = 'Why search every real estate site across Saudi Arabia? Ezhalah, the AI real estate search engine, searches them all for you.';
+// English (owner 2026-10-29: «the message why search should be the translated Arabic version»): the Arabic line
+// translated word for word — «ليش تدور في 148 موقع عقاري بالسعودية؟ إزهله، خل إزهله يدور عنك».
+export const SHARE_LEAD_EN_TEMPLATE = 'Why search {count} real estate sites in Saudi Arabia? Ezhalah. Let Ezhalah search for you.';
+export const SHARE_LEAD_EN_NO_COUNT = 'Why search every real estate site in Saudi Arabia? Ezhalah. Let Ezhalah search for you.';
 /**
  * The live site count — THE SAME number the WhatsApp card shows (src/data/siteCount.ts: sites with
  * searchable listings, one per platform), or null while it has not been read yet. Owner 2026-10-20:
@@ -71,7 +74,7 @@ export function shareLead(loc: 'ar' | 'en', count: number | null): string {
 }
 /** The sentence WITH the link — what WhatsApp / Mail / Copy receive. One link, always last. */
 export function shareMessage(loc: 'ar' | 'en', count: number | null): string {
-  return `${shareLead(loc, count)}\n${SHARE_LINK}`;
+  return `${shareLead(loc, count)}\n${loc === 'en' ? SHARE_LINK_EN : SHARE_LINK}`;
 }
 export const SHARE_TITLE_AR = 'إزهله';
 // The browser tab / history / suggestion / Google title (owner 2026-10-27, picked from phone-width previews: the
@@ -98,6 +101,7 @@ export async function shareNative(): Promise<boolean> {
   const count = liveSiteCount();
   const lead = shareLead(loc, count);
   const message = shareMessage(loc, count);
+  const link = loc === 'en' ? SHARE_LINK_EN : SHARE_LINK;
   if (Platform.OS === 'web') {
     const nav: any = typeof navigator !== 'undefined' ? navigator : undefined;
     // TOUCH DEVICES ONLY (owner report, 2026-09-05: "on macbook just the link pops up, but on my
@@ -116,7 +120,7 @@ export async function shareNative(): Promise<boolean> {
     if (!coarse) return false;
     if (typeof nav?.share === 'function') {
       try {
-        await nav.share({ title: L.title, text: lead, url: SHARE_LINK });
+        await nav.share({ title: L.title, text: lead, url: link });
         return true;
       } catch (e: any) {
         // Only a deliberate user dismiss (AbortError) counts as "handled" — don't pop the fallback
@@ -131,7 +135,7 @@ export async function shareNative(): Promise<boolean> {
   }
 
   try {
-    await Share.share({ message, url: SHARE_LINK, title: L.title });
+    await Share.share({ message, url: link, title: L.title });
     return true;
   } catch {
     return false;
