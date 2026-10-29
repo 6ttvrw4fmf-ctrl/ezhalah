@@ -23,10 +23,7 @@
 // the owner reported, and `everyPlatformSeen(2200, …)` is false, which is how the barrier proves it.
 
 /** Fade-in stagger between consecutive pills (owner v4 range 60–100ms). */
-// 60 → 35 and groups of 3 → 4 at a 130 ms readable step (owner 2026-10-28: faster search, every logo still lit;
-// the hold cap went 10 s → 8 s). Ceiling re-derived at the 150 ms readable step: pills 197-200 share step 50
-// (floor(199/4) = 49 → 49 × 150 + 560 = 7,910 ms); a 201st starts step 50 → 8,060 ms, past the 8,000 ms cap.
-export const PILL_STAGGER = 35;
+export const PILL_STAGGER = 60;
 /** One pill's own fade-in duration. */
 export const PILL_FADE = 260;
 /**
@@ -62,7 +59,7 @@ export const PILL_FADE = 260;
 // ready and are never held past ten seconds). Derived the same way, by execution: pills 157/158/159
 // share the 52nd step (waveDelayMs(158) = 52 × 180), lit at 9,920ms; a 160th starts step 53 and is
 // not lit until 10,100ms. (The barrier's TRUE-ceiling check is what caught a first guess of 158.)
-export const MAX_ROSTER = 200;
+export const MAX_ROSTER = 159;
 /** Every pill is on screen by this point, worst case. */
 export const LOADER_REVEAL_MS = (MAX_ROSTER - 1) * PILL_STAGGER + PILL_FADE;
 /**
@@ -112,7 +109,7 @@ export const WAVE_LIT_MS = WAVE_RISE + WAVE_HOLD;
  * the first half for every search. Nothing is quicker; three pills simply share a step.
  * At 3 the honest ceiling is 168 platforms, which also covers the 27 sites still to build.
  */
-export const PILL_GROUP = 4;
+export const PILL_GROUP = 3;
 
 /** When the wave reaches pill `index` — pills share a step in groups of PILL_GROUP. */
 export function waveDelayMs(index: number, step: number): number {
@@ -121,7 +118,7 @@ export function waveDelayMs(index: number, step: number): number {
 
 /** How long one pill waits before the wave reaches it. Never faster than a readable step. */
 export function highlightStepMs(roster: number): number {
-  return Math.max(150, Math.round(LOADER_SWEEP_MS / Math.max(1, roster)));
+  return Math.max(180, Math.round(LOADER_SWEEP_MS / Math.max(1, roster)));
 }
 
 /** When the LAST pill has finished fading in, measured from the loader's mount. */

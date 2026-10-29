@@ -1,9 +1,6 @@
 /** Presentation only: every page gets a full dwell before results replace the loader. */
-// FASTER, STILL COMPLETE (owner 2026-10-28: «speed up … all logos must show, all messages … target 10-12 seconds»).
-// Measured on a mid-range phone: Riyadh search → first card 18.4 s, 13.6 s of it before the summary. The logo
-// cycle goes 10 s → 6 s and each page's first/last hold 1 s → 0.7 s; every logo is still shown before results.
-export const LOADER_PAGE_MS = 700;
-export const LOADER_CYCLE_MS = 6000;
+export const LOADER_PAGE_MS = 1000;
+export const LOADER_CYCLE_MS = 10000;
 /** Reserve readable first/last holds; distribute the intervening updates across the same budget. */
 export function loaderStepDelay(total: number, capacity: number, replacements: number): number {
   const remaining = Math.max(0, total - capacity);
