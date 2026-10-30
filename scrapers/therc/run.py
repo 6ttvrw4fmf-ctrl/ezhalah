@@ -57,6 +57,7 @@ from curl_cffi import requests as cc
 from scrapers.common import db
 from scrapers.common import normalize as N
 from scrapers.common.page_pin import pin_from_page
+from scrapers.common.pii import redact_pii
 
 BASE = "https://therc.aqar.digital"
 SITEMAP = f"{BASE}/sitemap.xml"
@@ -77,17 +78,47 @@ def _deobf(s: str) -> str:
     return _OBF.sub(lambda m: m.group(0).translate(_AR2EN).replace("o", "0").replace("O", "0"), s)
 
 
+# The site's own «((رقم المعلن يظهر عند التواصل))» — where it hides the agent's number. Not the ad's text.
+_PLACEHOLDER = re.compile(r"\(\([^()]*\)\)")
+
+
 def _redact(text: Optional[str]) -> Optional[str]:
+    """The ad's «الوصف» text with every CONTACT LINE removed — never the text after it.
+
+    It used to cut the whole description at the FIRST contact marker. This office's ads OPEN with the contact
+    block («📞 للتواصل واتساب:» / the agent's name / «((رقم المعلن يظهر عند التواصل))») and the property only
+    starts below it, so 133 of 447 active rows stored NULL and the AI facts reader could not read them
+    (measured 2026-10-30, e.g. /properties/shk-llaygar-fy-hy-thhr-lbn-mdyn-alryad-mntk-alryad-3: «شقه تتكون من
+    غرفتين و صاله … ٢٧ الف ريال» below «للتواصل واتس / فاطمه»); and an ad with a marker mid-text kept only what
+    came before it. Now: a line carrying a marker goes whole, and when the marker ENDS its line (nothing but a
+    channel word after it) the next non-blank, digit-free short line — the agent's name — goes too. PDPL first:
+    phones are dropped and the shared redactor runs over every line; losing a line beats storing a name."""
     if not text:
         return None
-    t = _deobf(text)
-    m = _CUT.search(t)
-    if m:
-        t = t[:m.start()]
-    t = _PHONE.sub(" ", t)
-    t = re.sub(r"[ \t]+", " ", t).strip()
-    # Some ads OPEN with «📞 للتواصل …», so the cut leaves a lone emoji or a two-letter stub. That is
-    # not a description — return NULL rather than store punctuation as the ad's text.
+    kept: list[str] = []
+    name_next = False
+    for line in _deobf(text).split("\n"):
+        had_placeholder = bool(_PLACEHOLDER.search(line))
+        bare = _PLACEHOLDER.sub(" ", line)
+        if not bare.strip():
+            if not had_placeholder:
+                kept.append("")
+            continue
+        m = _CUT.search(bare)
+        if m:
+            name_next = len(re.sub(r"[\W_]+", " ", bare[m.end():]).split()) <= 2
+            continue
+        if name_next:
+            name_next = False
+            if not re.search(r"[0-9٠-٩]", bare) and len(bare.split()) <= 10:
+                continue
+        if had_placeholder and not re.search(r"\w", bare):
+            continue
+        clean = redact_pii(_PHONE.sub(" ", bare))
+        if clean:
+            kept.append(clean)
+    t = re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+    # Nothing but emoji or a two-letter stub left: not a description — NULL, never punctuation as the ad's text.
     return t if len(re.sub(r"\W+", "", t)) >= 8 else None
 
 
@@ -127,7 +158,22 @@ _REF = re.compile(r"رقم المرجع:\s*([A-Z0-9]+)")
 _PRICE_BLOCK = re.compile(
     r'<div class="text-3xl font-bold" style="color: var\(--color-primary\);">(.*?)</div>', re.S)
 _SPEC = re.compile(r'text-sm text-gray-500">([^<]+)</div>\s*<div class="font-bold text-gray-900">([^<]+)</div>')
-_DESC = re.compile(r'>الوصف</h2>\s*<div class="prose[^"]*">(.*?)</div>', re.S)
+# The «الوصف» prose box's OPENING tag. Its text runs to the box's OWN closing </div> (nesting counted): a
+# «<div>▪️ مطبخ راكب</div>» inside the prose (therc 10283456) used to end the stored text there.
+_DESC = re.compile(r'>الوصف</h2>\s*<div class="prose[^"]*">', re.S)
+_DIV_TAG = re.compile(r"<(/?)div\b", re.I)
+
+
+def _desc_box(body: str) -> Optional[str]:
+    m = _DESC.search(body or "")
+    if not m:
+        return None
+    depth = 1
+    for t in _DIV_TAG.finditer(body, m.end()):
+        depth += -1 if t.group(1) else 1
+        if depth == 0:
+            return body[m.end():t.start()]
+    return None
 _IMAGES = re.compile(r"images\s*:\s*(\[[^\]]*\])")
 _INTERNAL_ID = re.compile(r"/properties/950/(\d+)/")
 # «<type> للبيع|للإيجار في …» — identical to JSON-LD `name`; the ONLY reliable type source here.
@@ -295,7 +341,8 @@ def map_listing(url: str, page: str, lastmod: Optional[str]) -> Optional[tuple[d
     else:
         price_total = price
 
-    description = _redact(_text(_DESC.search(body).group(1))) if _DESC.search(body) else None
+    box = _desc_box(body)
+    description = _redact(_text(box)) if box is not None else None
     said = card_amenities(body)
     photos = _gallery(body)
     if not photos and isinstance(ld.get("image"), str):
