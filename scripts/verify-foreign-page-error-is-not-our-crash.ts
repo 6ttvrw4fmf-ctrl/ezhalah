@@ -24,7 +24,7 @@ check('no stack at all stays an Ezhalah crash (fail closed)', !isForeignOnlyErro
 check('an unreadable app URL stays an Ezhalah crash (fail closed)', !isForeignOnlyError(SANADAK, 'not a url'));
 const smoke = readFileSync(join(root, 'scripts/verify-web-runtime-smoke.mjs'), 'utf8');
 check('the smoke really uses this predicate before counting a crash',
-  /if \(isForeignOnlyError\(e\?\.stack, page\.url\(\)\)\) \{[\s\S]{0,300}return;\s*\}\s*\/\/ Where and after what/.test(smoke));
+  /if \(isForeignOnlyError\(e\?\.stack, page\.url\(\)\)\) \{[\s\S]{0,300}?return;\s*\}[\s\S]{0,400}?crashes\.push\(/.test(smoke));
 
 console.log('\n  mutation proof\n');
 const everyForeign = (st: string) => true;                                   // excuses everything
