@@ -32,6 +32,12 @@
 > found 2026-10-26/27: DealApp 12 → 24 shards then 100 → 230 minutes (55% → ?), Haraj's 1,000-row slice, 17 sites at
 > 0% because a full crawl never reaches `verify_gone` (`db.stamp_seen_alive`), Gathern +3,900 units covered because its
 > checker reads never-checked units first.
+> **Dormant sites are not a gap (2026-10-30).** A site with `platform_registry.status = 'dormant'` is down at its own
+> end; its ads are already out of search and it returns by itself when a crawl saves rows again. Its ads read «0%»
+> in the coverage view, but the `liveness_verification_sla` / `liveness_checking_*` alarms skip it
+> (`ops_platform_is_dormant()`, guard `scripts/verify-liveness-alarms-skip-dormant-sites.ts`). Read the coverage view
+> with `and not ops_platform_is_dormant(platform)`. Never mark a site dormant to silence an alarm: dormant is only for
+> a source that is down at ITS end, proven by its own failed fetches.
 
 **This file is your job.** The cloud routine's prompt only says "follow this file". Written
 2026-09-27 at the owner's request. Model: Claude Sonnet 5.5 (owner, 2026-10-03: all three engineers moved off Opus to keep the shared weekly limit alive), extra high effort.
