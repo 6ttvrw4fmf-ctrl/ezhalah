@@ -473,7 +473,7 @@ mustCatch('same host added to both lists', !disjoint([...IN_APP_PREVIEW_HOSTS, '
 mustCatch('preview is a framed subdomain', !disjoint([...IN_APP_PREVIEW_HOSTS, 'sub.gathern.co'], IN_APP_VIEWER_HOSTS));
 
 const previewRoute = (src: string) => {
-  const route = windowBetween(codeOnly(src), 'const openAd =', 'pushAdTab({ source: l.source, id: l.id, title: listingLocationAr(l), url: url ?? \'\' });', 'agent.tsx');
+  const route = windowBetween(codeOnly(src), 'const openAd =', 'pushAdTab({ source: l.source, id: l.id, title: tabTitle(l), url: url ?? \'\' });', 'agent.tsx');
   return /if \(IS_WEB && inAppPreviewHost\(url\)\) \{\s*pushAdTab\(\{[^}]*listing: l\s*\}\);\s*return;\s*\}\s*if \(!\(IS_WEB && inAppViewerHost\(url\)\)\) \{ void openListing\(l\); return; \}/.test(route);
 };
 check('preview precedes external fallback and carries the card Listing', previewRoute(agent));

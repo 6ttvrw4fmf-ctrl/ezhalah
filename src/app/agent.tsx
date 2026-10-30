@@ -105,7 +105,7 @@ import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTransc
 import { createSharedChat } from '@/lib/sharedChat';
 import { firstChildLeftRow, useDocumentRtl } from '@/lib/useDocumentRtl';
 import { useI18n, LocaleScope, detectLocale, resolveReplyLocale, getLocale, translate, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
-import { listingLocationAr, listingPrice } from '@/lib/listingDisplay';
+import { listingLocationAr, listingLocationEn, listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
 import { botMessage } from '@/lib/botMessage';
@@ -1196,14 +1196,16 @@ export default function Agent() {
       adHintTimer.current = setTimeout(() => setAdHint(''), 2200);
     }
   };
+  // the viewer tab names the place in the interface language (owner 2026-10-29: «everything must be translated»)
+  const tabTitle = (l: Listing) => (locale === 'en' ? listingLocationEn(l) : listingLocationAr(l));
   const openAd = (l: Listing) => {
     const url = listingOpenUrl(l);
     if (IS_WEB && inAppPreviewHost(url)) {
-      pushAdTab({ source: l.source, id: l.id, title: listingLocationAr(l), url: url ?? '', listing: l });
+      pushAdTab({ source: l.source, id: l.id, title: tabTitle(l), url: url ?? '', listing: l });
       return;
     }
     if (!(IS_WEB && inAppViewerHost(url))) { void openListing(l); return; }
-    pushAdTab({ source: l.source, id: l.id, title: listingLocationAr(l), url: url ?? '' });
+    pushAdTab({ source: l.source, id: l.id, title: tabTitle(l), url: url ?? '' });
   };
   // LAPTOP CARDS ARE ALWAYS THE SMALL ROW (owner 2026-10-03: «for the laptop it should always be
   // small … never make them big»), one step tighter while the pane is on screen beside them. Decided
