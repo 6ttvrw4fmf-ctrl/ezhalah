@@ -68,18 +68,18 @@ hours), and never over someone else's pending run. **A line-anchored pin** (`scr
 haraj `asking_price` line) moves whenever `scrapers/haraj/run.py` grows above it: re-pin in the same PR, and it makes
 the PR need the owner merge (scripts/).
 
-**Owed → first thing next run (10-23):**
-- **razre 792 — the site was REBUILT, it is not a Wix auth change.** www.razre.sa is now a custom static site
-  («راز الماسية العقارية»): pages `/projects/<slug>/`, `/districts/<slug>/`, sitemap `/sitemap.xml`, robots
-  `Disallow: /api/`. Old card URLs `/onepro-1/N` and `/com/N` answer 200 but canonical → `/projects/…`. The
-  branch `probe/scraping-20261023` already carries a probe that prints a project page's LD-JSON, inline scripts
-  and unit markup: dispatch `small-sources-sync source=razre` from it **only into an empty queue**, then rewrite
-  fetch+parse in `scrapers/razre/run.py` (the mapper's rules in its docstring still hold). The 94 stale units are
-  routed to ♻️ (backlog 793).
-- **holoul (dormant 10-23 11:14 UTC):** API 504 on all 6 routes 10-22 + 10-23. PR #8374 now writes a FAILED run
-  naming the error; read tonight's holoul row (`ok=false … 504`, or ok + rows ⇒ the hourly auto-return flips it back).
-- **aljassim 784:** nightly 04:3x «challenge unsolved» on 3 fresh profiles, ok on the 07:4x re-crawl (10-20, 10-23).
-  Next step: log each profile's status code in the error before changing the solver.
+**Owed → first thing next run (10-27):**
+- **yameen P0 (926/923):** the 4 for-sale lands (YMN45194/45197/45960/52439) left the list feed on 10-25 and
+  their own pages answer HTTP 404 while the API says «available». #8961 makes the oracle read the own page.
+  Read tonight's yameen run: missing_count should be 2 → removal at grace 3, then the run is ok=true and the P0
+  resolves. Don't burn grace with extra dispatches.
+- **sakani nightly (925):** until #8954 merges, the planner drops sakani from the nightly (trailing `# comment`
+  on its SMALL_SOURCES line). After it merges, the first full nightly walks ~1,617 sale units at 1.5 s (~45
+  min). Read its row: rows_upserted ≈ 279 rent + ~1,600 sale, no `sale_*` skip storm, and prune ran.
+  A back-to-back second walk drew HTTP 429 at session negotiation (10-27 05:46): never re-dispatch sakani
+  within ~30 min of a walk.
+- **864 remainder:** off-plan projects (1,187) go to a hidden table, which needs supabase/ plus 3 guards (owner PR).
+- almuteb: almuteb.sa is NXDOMAIN; almuteb.com.sa is an empty template brochure (proof row 10-27). Re-check weekly.
 - Kept: 575/612 photo floors · 564 gathern redirects · 565 almuteb 503 · 613 wasalt 13746442.
 
 **CHANGED (10-25): a targeted `small-sources-sync` dispatch (`source=<slug>[,<slug>…]`) now creates ONLY those jobs**
@@ -678,6 +678,13 @@ says Sell (656's class, backlog 672) — a rule that decides a contradiction is 
   (10-19: proof run 39203822704 cancelled at 05:54). Read `gh run list --workflow haraj-sync.yml` first and dispatch only
   into an empty queue. The same holds for `small-sources-sync.yml`: on 10-19 one run (39218294587) stayed `in_progress`
   from 07:47 for more than 5 hours and every dispatch behind it queued — read the run list before blaming a site.
+
+## Lesson from 2026-10-27
+- **A scrapers-only PR auto-merges the moment its first push is green.** #8953 merged at 05:37 with the first commit
+  only. The second commit (pushed 05:44) needed its own PR (#8961). Push the whole fix in one commit, or expect a
+  follow-up PR, and never assume a later push rides the same PR.
+- **Test the hypothesis on the live feed before shipping the fix:** the «feed marks them rented» theory for yameen
+  was falsified by its own first run. Probe the unseen rows' API record AND own page first.
 
 ## Lesson from 2026-10-20 (copied by 🔧 from your own report — the second night in a row about dispatch, so it is a rule)
 - **Never dispatch a proof crawl from the PR branch.** Its failed jobs become checks on the PR head and the auto-merge gate
