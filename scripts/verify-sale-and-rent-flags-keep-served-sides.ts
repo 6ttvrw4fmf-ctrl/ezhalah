@@ -25,3 +25,31 @@ mustCatch('Gathern leaking into Buy', wrongFlags((n, d) => (n === 'Gathern' ? tr
 
 assert.deepEqual(wrongFlags(supports), [], 'a platform flag hides a deal side it serves, or lets a rent-only site into Buy');
 console.log('✓ served deal sides are not filtered away by platform flags');
+
+// ── The shared predicate the live robot runs (backlog 1097) — mutation-proven here, executed there ──
+import { hiddenServedSides, type ServedSide } from './lib/platformDealFlags.ts';
+import { liveHalfProblems } from './lib/liveHalf.ts';
+import { loadRegistry } from './lib/testRegistry.ts';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const SERVED_1030: ServedSide[] = [
+  { slug: 'sakani', source: 'سكني', deal: 'Buy', sample: 'sakani_residential_listings:1' },
+  { slug: 'wajaf', source: 'وجف العقارية', deal: 'Rent', sample: 'wajaf_commercial_listings:1' },
+  { slug: 'gathern', source: 'Gathern', deal: 'Rent', sample: 'gathern_residential_listings:1' },
+];
+mustCatch('the 10-30 sakani flag (rent-only) against a served sale row',
+  hiddenServedSides(SERVED_1030, (n, d) => (n === 'سكني' && d === 'Buy' ? false : supports(n, d))).length === 1);
+mustCatch('a Gathern sale row reaching production',
+  hiddenServedSides([{ slug: 'gathern', source: 'Gathern', deal: 'Buy', sample: 'x:1' }], supports).length === 1);
+assert.deepEqual(hiddenServedSides(SERVED_1030, supports), [], 'the real flags hide a served side');
+
+const ROOT = join(import.meta.dirname, '..');
+const homing = liveHalfProblems(
+  'verify-platform-deal-flags-keep-served-sides-live.ts',
+  loadRegistry(ROOT),
+  (name) => existsSync(join(ROOT, 'scripts', name)),
+  (rel) => (existsSync(join(ROOT, rel)) ? readFileSync(join(ROOT, rel), 'utf8') : null),
+);
+assert.deepEqual(homing, [], `the live robot is not homed: ${homing.join('; ')}`);
+console.log('✓ the live robot shares this predicate and is homed in a workflow that runs it');

@@ -155,6 +155,11 @@ engineer's, not yours.
 6. **2:50–3:00 the report.** Then stop. Anything unfinished goes into `ops_engineer_backlog` with its evidence.
 
 ## THE NUMBERS RULE (owner, 2026-10-03): every number a customer sees is true NOW
+
+> **Trap (🦅 10-30):** a value the search index CORRECTS must be corrected on the card too. The 10-28 meter-box rule fixed
+> `search_listings_ar` only; the card (`finalize()` in `src/data/remote.ts`) printed dealapp 451328 at 52,000,000,000 SAR, and
+> the client budget net re-reads that printed price, so «N نتيجة» showed N−1 cards (43 rows, PR 9479). When you correct a
+> served value, grep `finalize()` for the same field in the same PR.
 A customer sees numbers everywhere: the results count, the counts beside cities and districts, the count on every
 Advanced Filter option. **They must equal what a fresh query of the live listings returns, and when a listing dies they
 must drop within one hour** (lifecycle hides it, the hourly search-index sync at :22 removes it from `search_listings_ar`,
