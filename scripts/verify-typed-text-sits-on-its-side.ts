@@ -18,11 +18,14 @@ check('Arabic with an English word → right (Arabic leads)', typedDir('حي Al 
 check('numbers only, or nothing → the field keeps its own side', typedDir('123') === null && typedDir('') === null && typedDir(null) === null);
 
 const home = readFileSync(join(root, 'src/app/index.tsx'), 'utf8');
-const wired = (src: string) => /ref=\{cityRef\}[\s\S]{0,200}?style=\{\[s\.flInput, x\.flInput, typedDir\(query\.location\)\]\}/.test(src)
+const wired = (src: string) => /ref=\{cityRef\}[\s\S]{0,200}?style=\{\[s\.flInput, x\.flInput, typedDir\(cityShown\)\]\}\s*value=\{cityShown\}/.test(src)
   && /ref=\{districtRef\}[\s\S]{0,200}?style=\{\[s\.flInput, x\.flInput, typedDir\(districtText\)\]\}/.test(src)
   && src.includes("import { typedDir } from '@/lib/typedDir';");
 check('the Filter\'s city and district fields follow what was typed (after the interface side, so it wins)', wired(home));
-mustCatch('the city field back on the interface side only', !wired(home.replace('typedDir(query.location)]', ']')));
+mustCatch('the city field back on the interface side only', !wired(home.replace('typedDir(cityShown)]', ']')));
+// A PICKED city searches with its Arabic name but shows «Riyadh» in English: the side must follow what is SHOWN
+// (owner 2026-10-30 screenshot: «Riyadh» sat on the right because the side read the hidden «الرياض»).
+mustCatch('the side reading the hidden Arabic name instead of what the field shows', !wired(home.replace('typedDir(cityShown)]', 'typedDir(query.location)]')));
 mustCatch('the side applied BEFORE the interface side (which would override it)', !wired(home.replace('[s.flInput, x.flInput, typedDir(districtText)]', '[typedDir(districtText), s.flInput, x.flInput]')));
 
 if (fail) { console.error(`\n❌ ${fail} check(s) failed`); process.exit(1); }
