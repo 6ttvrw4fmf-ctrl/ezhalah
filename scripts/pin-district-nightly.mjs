@@ -11,6 +11,7 @@
 // verdict, lat, lng) with PIN_RUN_ID (apple-ring-YYYY-MM-DD): no Apple call, the same loader, the same guards.
 import { createSign } from "node:crypto";
 import { readFileSync } from "node:fs";
+import "./lib/gateFetch.mjs"; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 
 const env = (k, optional = false) => {
   const v = process.env[k];

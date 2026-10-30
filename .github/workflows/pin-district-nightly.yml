@@ -26,6 +26,10 @@ concurrency:
   group: pin-district-nightly
   cancel-in-progress: false
 
+env:
+  # Secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs sends it only to our project's /rest/v1/.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   pins:
     runs-on: ubuntu-latest
