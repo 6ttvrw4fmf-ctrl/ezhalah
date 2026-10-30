@@ -59,4 +59,4 @@ against production; touch secrets, money or law (REGA/PDPL).
 | Date | Kind | Alerts/week before | Cause | Fix |
 |---|---|---|---|---|
 | 2026-10-28 | `located_row_unreachable` | 195 | Sale totals typed into the «سعر المتر» box, multiplied by the area (up to 22 trillion SAR) | `price_typed_in_meter_box_ar()` in the index trigger + P1 `meter_box_typo_served` (`20261028213252`, `20261029003318`, `20261029003805`) |
-| 2026-10-29 | `journey_live_check_failed` | 131 | React #419 in «built app runs», ~6% of runs, location unknown | Step 1: the smoke now names page, step and stack (PR 9236). Step 2 pending: fix where it points. |
+| 2026-10-29 | `journey_live_check_failed` | 131 | React #419 in «built app runs», ~6% of runs: every stack frame was sanadak.sa's own Next.js page (a source site), not Ezhalah | The smoke names page, step and stack (PR 9236); an error whose frames are ALL foreign is noted, not counted (`scripts/lib/foreignError.mjs`, `verify-foreign-page-error-is-not-our-crash.ts`) |
