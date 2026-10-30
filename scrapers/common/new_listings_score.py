@@ -451,7 +451,28 @@ def page_lacks_its_ad(url: str | None, body: str) -> bool:
 _CARD_START = re.compile(r'<div[^>]*class="[^"]*\bcard-item\b')
 
 
+# A page's «similar ads» block is OTHER ads, and so is the footer under it: ashab 21679061 (2026-10-30, re-read
+# runs 41088522215 / 41088846088) — the ad's own header badge says «بيع» (stored بيع), but the sibling cards under
+# «عقارات مشابهة» carry «إيجار» badges, which scored the deal MISMATCH and capped the night. The site's own scraper
+# stops at the same markers (scrapers/ashab/run.py::parse_page); the scorer reads exactly what the scraper reads.
+# alshawaf 21664551 (2026-10-30, re-read runs 41089939871 / 41090169747): the node's own table says «المساحة 250م»
+# (stored 250), and the «related listings» Views table under it (`…duplicate-of-frontpage-block-1`, trap 1 in
+# scrapers/alshawaf/run.py) prints other plots' «المساحة 422.22م»; the area scored MISMATCH and capped the night.
+_SIMILAR_BLOCK = {"ashab.sa": ('id="similar-properties"', "عقارات مشابهة"),
+                  "alshawaf.com.sa": ("duplicate-of-frontpage-block-1",)}
+
+
+def drop_similar_block(url: str | None, body: str) -> str:
+    for host, stops in _SIMILAR_BLOCK.items():
+        if host in (url or "") and body:
+            for stop in stops:
+                if (k := body.find(stop)) > 0:
+                    body = body[:k]
+    return body
+
+
 def scope_to_its_ad(url: str | None, body: str) -> str:
+    body = drop_similar_block(url, body)
     m = _AD_CODE_IN_URL.search(url or "")
     if not m or not body:
         return body
