@@ -12,6 +12,11 @@ import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { hiddenServedSides, type ServedSide } from './lib/platformDealFlags.ts';
 import { supports } from '../src/data/platforms.ts';
 
+// Before measuring, prove the verdict can go red: a planted served side the flags forbid must be caught.
+const mustCatch = (label: string, caught: boolean) => { if (!caught) { console.error(`FAIL: blind to ${label}`); process.exit(1); } };
+mustCatch('a Gathern sale row reaching production',
+  hiddenServedSides([{ slug: 'gathern', source: 'Gathern', deal: 'Buy', sample: 'planted:1' }], supports).length === 1);
+
 const { url: BASE, key: ANON } = resolvePublicSupabase();
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 if (!SERVICE) { console.error('FAIL: SUPABASE_SERVICE_ROLE_KEY is not set — cannot read a row\'s source'); process.exit(1); }
