@@ -97,7 +97,9 @@ check('price_per_meter is NOT folded into the Listing.price string',
 
 // ── 3. the rate is copied verbatim, never computed ─────────────────────────────────────────────
 check('remote.ts passes price_per_meter through verbatim',
-      /pricePerMeter:\s*typeof r\.price_per_meter === 'number' \? r\.price_per_meter : null/.test(REMOTE),
+      // (2026-10-30, PR 9479: read through servedSaleFigures(), verbatim except the owner's meter-box typo rule; executed in verify-aqar-ppm-card-display.ts)
+      /pricePerMeter:\s*typeof sale\.pricePerMeter === 'number' \? sale\.pricePerMeter : null/.test(REMOTE)
+        && /const sale = deal === 'Buy' \? servedSaleFigures\(r\.price_total, r\.price_annual, r\.area_m2, r\.price_per_meter\)\s*\n\s*: \{ priceTotal: r\.price_total, pricePerMeter: r\.price_per_meter \};/.test(REMOTE),
       'the field must be copied as-is — never computed from price/area');
 
 // No arithmetic anywhere on the rate. Reading it, comparing it, and formatting it are fine;
