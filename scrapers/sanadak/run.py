@@ -46,6 +46,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.pii import redact_pii
 
 # PDPL: seller identity + contact — never stored. (sellerLicenseNumber is a REGA licence, kept.)
 _PII_SANADAK = {"sellerId", "sellerName", "sellerUsername", "sellerPhonenumber",
@@ -602,6 +603,11 @@ def _emirate_city(raw: str) -> str:
     return m.group(1) if m else raw
 
 
+def ad_description(raw: Any) -> Optional[str]:
+    """The listing's own published prose, verbatim minus contact details, or None when it says nothing."""
+    return (redact_pii(raw) or None) if isinstance(raw, str) else None
+
+
 def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
     if not o.get("isPublished", True):
         return None, "residential"
@@ -698,6 +704,10 @@ def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
         "region": region,
         "neighborhood": o.get("district") or None,
         "title": o.get("title") or None,
+        # The broker's own prose, published under «الوصف» (2026-10-30: 403 of 710 active residential ads
+        # carried it in the RSC object and source_capture, while `description` was empty on all 710 because
+        # it was never mapped). Verbatim, phones/emails redacted (PDPL); silence stays NULL, never ''.
+        "description": ad_description(o.get("description")),
         "photo_urls": _images(body),
         "rega_location_verified": bool(o.get("sellerLicenseNumber")),
         "additional_info": extra,
