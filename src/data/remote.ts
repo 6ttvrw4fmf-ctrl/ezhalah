@@ -2095,7 +2095,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // field always means "what the source published", nothing else.
       pricePerMeter: typeof sale.pricePerMeter === 'number' ? sale.pricePerMeter : null,
       // Shown as «~~old~~ خصم X٪» under the (already discounted) price. Null = no line at all.
-      discount: priceIsDerived ? null : listingDiscountFrom(deal, r.source ?? 'Aqar', sale.priceTotal, r.price_original, r.discount_pct),
+      discount: priceIsDerived ? null : listingDiscountFrom(deal, r.source ?? 'Aqar', r.price_total, r.price_original, r.discount_pct),
       priceIsDerived,
       area: r.area_m2 ?? 0,
       beds: r.bedrooms ?? 0,
