@@ -35,6 +35,16 @@ from scrapers.facts.extract import _STRIP_RE, _TRANS, BOOL_FACTS, NUM_FACTS, TEX
 MODEL = "word-checker-v1"
 MAX_TEXT = 8000
 _W = re.compile(r"\w")
+# A SHORT AD IS READ WHEN IT IS A PHRASE, NOT A LABEL (2026-10-30, backlog 936). Under 20 folded characters used to be
+# skipped outright, so bahadhabab 10777798 «مفروشه سنه كامله» (16) never answered furnished. A lone word («مصعد») is
+# still never a fact: it reads like a field label with no value, so a short text needs two words or more.
+MIN_NORM_CHARS = 20
+MIN_SHORT_WORDS = 2
+
+
+def readable(folded: str) -> bool:
+    """Is this folded (norm) ad text enough to read facts from? Long enough, or a short phrase of 2+ words."""
+    return len(folded) >= MIN_NORM_CHARS or len(folded.split()) >= MIN_SHORT_WORDS
 
 
 # ── text: line-preserving PDPL sanitize, then a normaliser that remembers where each char came from ─────────
@@ -701,6 +711,8 @@ def facts_of(text: str) -> dict[str, Any]:
 
 # ── self-check: real tricky phrases from the LLM run's report (FACTS_EXTRACT_TEST_2026-10-24.md) ──────────
 def selftest() -> None:
+    # 936: a short phrase is read, a lone word is not
+    assert readable(norm("مفروشه سنه كامله")) and not readable(norm("مصعد")) and not readable(norm("")), "readable"
     for s in ("مَسْبَحٌ، وحديقة", "شارع ١٥ م", "Fully FURNISHED — شقة!", "ﻻ يوجد مصعد"):
         assert norm_map(unicodedata.normalize("NFKC", s))[0] == norm(s), s
 
