@@ -10,6 +10,13 @@ on:
   schedule:
     - cron: '41 */6 * * *' # every 6 h, off the :20/:22 refresh and sync and the :29/:59 detector sweep
   workflow_dispatch:
+  # A PR that edits a flag is judged against production before it merges (and this file proves itself on its PR).
+  pull_request:
+    paths:
+      - src/data/platforms.ts
+      - scripts/lib/platformDealFlags.ts
+      - scripts/verify-platform-deal-flags-keep-served-sides-live.ts
+      - .github/workflows/platform-deal-flags-live.yml
 
 concurrency:
   group: platform-deal-flags-live
@@ -33,7 +40,7 @@ jobs:
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-platform-deal-flags-keep-served-sides-live.ts
 
       - name: Bridge this run's result to alert_event
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
