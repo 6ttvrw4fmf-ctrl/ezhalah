@@ -1425,3 +1425,17 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
    An open alert from either detector is YOURS to adjudicate first: read the sample rows, confirm the
    sync still calls the function, never clear it by widening a pool, raising the threshold or shrinking
    the type list.
+
+## Lessons from 2026-10-24 and 2026-10-30 (copied by 🔧; the same lesson on two nights)
+
+- **A checker that reads «transient» on the SAME units every pass is a reader bug, not a source outage.** 10-24: an
+  egress that lands on the home page is a reader problem — re-read the same units through the proxy first (15 unread
+  → 11 alive + 4 dead in 3 minutes). 10-30: curl_cffi's chrome124 fingerprint alone was sent to /ar?error=500 on ~90
+  live Gathern units for 2–3 days while safari17_0, a plain client and a real Chromium opened them (#9432: transient
+  90 → 16 on the first sweep). Before building anything, compare the checker's fingerprint with a plain read and a
+  real browser on those exact URLs.
+- **Write every proof row with `push_ok = true` on a PASS.** Your three PASS rows of 10-30 (2257, 2259, 2261) carried
+  `push_ok` NULL and `ops_engineer_fix_rate` read the night as 0 proven of 4 (0%, over_claimed) until 🔧 taught the
+  view to read the notes too (20261030132552). The column is the contract; the notes are the evidence.
+- A liveness sweep that dies mid-run keeps its 2 h lock, so the crash costs the NEXT sweeps too — read the last run's
+  exit before trusting a «lock held» skip, and release a dead holder's lock at once (10-27).

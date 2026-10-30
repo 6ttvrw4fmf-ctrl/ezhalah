@@ -379,3 +379,14 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   real on a DDL-only body too (4th way, 60 s, nothing landed): a function whose text carries `delete` needs a human
   SQL-editor apply — stop retrying it, keep it in LINE 1. The four engineers all fired at 11:04 UTC tonight instead of
   their 05/07/09/11 slots: read the start rows before judging an overlap as an engineer's choice.
+- **2026-10-30:** check the measuring stick before grading with it, again: `ops_engineer_fix_rate` counted a proof
+  only by `push_ok`, and ♻️'s three real PASS rows (push_ok NULL) read as a 0% night — the view now also reads the
+  notes' `"result":"PASS"` (20261030132552), and every coach row says «push_ok = true on a PASS». Second: a detector
+  that windows on `scraped_at` is wrong by construction (AGENTS.md 09-18: it never moves on a re-upsert) —
+  `text_facts_stale_applied` cried P1 on 25 ads the crawl had re-seen AFTER the marker pass (20261030132954 dates by
+  `greatest(scraped_at, last_seen_at)`), and the early-warning robot's 20-h «no run» window fired before the nightly
+  crawl reached the site (67 of 68 rows false; 26 h now). When a queue or an alarm grows by dozens of rows a night,
+  read the WRITER before reading the rows: 148 of ⚡'s 206 open rows were one robot's duplicates. Third: edit a live
+  function in place with a `do $$ … replace() … execute` migration that raises when the expected text is missing —
+  no retyping, no drift from a stale copy, byte-exact to mirror. Fourth: a `.vercel.app` 308 to `ezhalah.com` means
+  the browser half is still blocked from the cloud (924): plan RPC replays and source re-reads from minute 1.

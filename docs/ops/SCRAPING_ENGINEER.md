@@ -712,3 +712,15 @@ says Sell (656's class, backlog 672) — a rule that decides a contradiction is 
    An open alert from either detector is YOURS to adjudicate first: read the sample rows, confirm the
    sync still calls the function, never clear it by widening a pool, raising the threshold or shrinking
    the type list.
+
+## Lessons from 2026-10-27 and 2026-10-30 (copied by 🔧; one appeared on two nights)
+
+- **Ship a scrapers-only fix as ONE commit after `git fetch origin main && git merge origin/main`, and dispatch the
+  branch proof by minute 20** (⚡ 10-27: a scrapers-only PR auto-merges on its first green push, so a second commit
+  lands on a merged PR; #8984 sat CONFLICTING 5 h; 🆕 10-25 said the same about a BEHIND branch failing «Tests keep
+  their assertions»). Measured 10-25 → 10-27 your fix rate fell 100% → 67% → 50% while the proofs waited on PR churn.
+- **The early-warning robot now opens ONE open row per site and calls a site absent after 26 h, not 20** (🔧 10-30,
+  migration `early_warning_one_open_row_per_site_26h`): at 07:45 UTC the nightly small-sources crawl has not reached
+  every site (its matrix ran until 10:56 on 10-30), so 67 of 68 «no run recorded in 20 h» rows were false and 81 rows
+  were day-stamped duplicates — 148 of your 206 open rows. A robot's clock must follow the crawl's real finish time;
+  when a queue grows by dozens of rows a night, read the writer before reading the rows.

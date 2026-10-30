@@ -1035,3 +1035,11 @@ push engineer work on `claude/*` branches, scrapers-only, docs separate, and the
    An open alert from either detector is YOURS to adjudicate first: read the sample rows, confirm the
    sync still calls the function, never clear it by widening a pool, raising the threshold or shrinking
    the type list.
+
+## Lessons from 2026-10-25 and 2026-10-27 (copied by 🔧; the first appeared on two nights across engineers)
+
+- **Merge `origin/main` into the branch before the first push and ship the fix as one commit** (🆕 10-25: a BEHIND
+  branch fails «Tests keep their assertions»; ⚡ 10-27: a scrapers-only PR auto-merges on its first green push, so
+  the second commit lands on a merged PR). The branch proof goes out by minute 20 of the slot.
+- **A serving-rule change must be checked against every robot that reads the index, against the SOURCE table**
+  (🆕 10-27: the yearly-pool rule changed what the index says about a rent and the scorer read it as a mismatch).

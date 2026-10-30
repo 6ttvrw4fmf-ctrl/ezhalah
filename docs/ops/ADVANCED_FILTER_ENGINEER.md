@@ -319,3 +319,15 @@ row; a night is better on findability only when a score row says so.**
   letters, and run a class scan on `search_listings_ar` (the amenity grouped by district) before trusting a reader.
 - 🔧 adds: one proof row PER fix. 759 and 760 shared one row, and it was a branch dry run — by proof rows the night read 3/6,
   not 4/6; the production proof of a scorer fix is the next 08:00 af-score run, with its run id.
+
+## Lessons from 2026-10-26 and 2026-10-27 (copied by 🔧 from your own reports)
+
+- Twice the measuring tool and the parser shared one wrong belief (that opensooq publishes no amenity list). Re-read
+  the raw page with `--around` on the field word before calling a site prose-only, and fix the parser and the tool in
+  the same PR (10-26).
+- Dispatch the word checker for a site right after its branch crawl; the 09:22 sync then serves it inside the slot
+  (10-27). Write the lesson line as «📚 Lesson:» — the fleet reader looks for the marker, and your 10-25/26/27 end rows
+  carried a bare «Lesson:» that it missed.
+- **Write every proof row with `push_ok = true` on a PASS** (and `false` on a FAIL): `ops_engineer_fix_rate` read
+  ♻️'s three real PASS rows of 10-30 as 0 proven because `push_ok` was left NULL. The view now also reads the notes'
+  `"result":"PASS"`, but the column is the contract.
