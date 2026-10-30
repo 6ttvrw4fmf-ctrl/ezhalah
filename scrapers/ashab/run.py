@@ -145,7 +145,9 @@ def parse_page(page: str) -> dict[str, Any]:
                                 main, re.S):
         features[_txt(sec)] = {_txt(k): _txt(v) for k, v in re.findall(
             r'font-weight-bolder">([^<]+?)<span[^>]*>\s*<b>([^<]*)</b>', body)}
-    desc = re.search(r'<section id="description"[^>]*>\s*<b>[^<]*</b>(.*?)</section>', main, re.S)
+    # The ad page heads its «نظرة عامة» box with <b>, a UNIT page with <h3> (2026-10-30: all 371 active unit
+    # rows stored an empty description while their own pages print one — «قطعة رقم ( 20 ) تقع ضمن مخطط النرجس…»).
+    desc = re.search(r'<section id="description"[^>]*>\s*<(b|h\d)>[^<]*</\1>(.*?)</section>', main, re.S)
     geo = re.search(r"maps\.google\.com/maps\?q=(-?\d+\.\d+),(-?\d+\.\d+)", main)
     gal = main[g:main.find('id="content"', g)] if g > 0 else ""
     units_at = main.find("<b>الوحدات العقارية</b>")
@@ -157,7 +159,7 @@ def parse_page(page: str) -> dict[str, Any]:
         "top_price": _txt(top.group(2)) if top else "",
         "spec": spec,
         "features": features,
-        "description": _txt(desc.group(1)) if desc else "",
+        "description": _txt(desc.group(2)) if desc else "",
         "lat": geo.group(1) if geo else None,
         "lng": geo.group(2) if geo else None,
         "photos": list(dict.fromkeys(re.findall(r'class="ts-image"\s*data-bg-image="([^"]+)"', gal))),
