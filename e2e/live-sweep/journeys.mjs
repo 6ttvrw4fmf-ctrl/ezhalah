@@ -47,7 +47,7 @@ export function truthFilter({ city, deal, period, types }) {
   if (deal === 'بيع' || deal === 'إيجار') f += `&deal_ar=eq.${enc(deal)}`;
   // price on request (price_annual NULL) is in every period — owner 2026-09-28
   if (deal === 'إيجار' && period === 'سنوي') f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`;
-  if (deal === 'إيجار' && period === 'شهري') f += '&or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),price_annual.is.null)';
+  if (deal === 'إيجار' && period === 'شهري') f += '&or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))';
   if (types?.length) f += `&type_ar=in.(${enc(types.map((t) => `"${t}"`).join(','))})`;
   return f;
 }
