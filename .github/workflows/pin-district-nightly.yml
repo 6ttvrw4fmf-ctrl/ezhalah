@@ -1,0 +1,55 @@
+# Nightly pin districts (owner main rule 2026-10-25, automated 2026-10-30): a served ad with a map pin and no district
+# asks Apple Maps; a MIDDLE home (same district at the pin and 4 spots 150 m around it) is switched on, an EDGE home is
+# held for Google. Guards live in the database (pin_district_load + trg_pin_district_on_list); the alarm
+# mon_detect_pin_district_unvouched watches what is served. Runs before the :10 district-recovery cron and the :15 sync.
+name: Pin districts (nightly)
+
+on:
+  schedule:
+    - cron: '35 2 * * *'   # 02:35 UTC = 7:35 PM Arizona
+  workflow_dispatch:
+    inputs:
+      max_ads:
+        description: 'Ads to ask Apple about tonight (≤ 5 calls each; quota 25,000/day)'
+        default: '600'
+      dry_run:
+        description: 'true = ask Apple, post nothing'
+        default: 'false'
+
+concurrency:
+  group: pin-district-nightly
+  cancel-in-progress: false
+
+jobs:
+  pins:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Secrets present (never printed)
+        env:
+          P8: ${{ secrets.APPLE_MAPS_P8 }}
+          KID: ${{ secrets.APPLE_MAPS_KEY_ID }}
+          TID: ${{ secrets.APPLE_MAPS_TEAM_ID }}
+        run: |
+          missing=""
+          [ -n "$P8" ] || missing="$missing APPLE_MAPS_P8"
+          [ -n "$KID" ] || missing="$missing APPLE_MAPS_KEY_ID"
+          [ -n "$TID" ] || missing="$missing APPLE_MAPS_TEAM_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Apple Maps secrets missing:$missing — the owner adds them in Settings → Secrets (repository). Nothing ran."
+            exit 78
+          fi
+      - name: Ask Apple and load
+        env:
+          APPLE_MAPS_P8: ${{ secrets.APPLE_MAPS_P8 }}
+          APPLE_MAPS_KEY_ID: ${{ secrets.APPLE_MAPS_KEY_ID }}
+          APPLE_MAPS_TEAM_ID: ${{ secrets.APPLE_MAPS_TEAM_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PIN_MAX_ADS: ${{ github.event.inputs.max_ads || '600' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '' }}
+        run: node scripts/pin-district-nightly.mjs
