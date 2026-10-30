@@ -74,6 +74,7 @@ if str(ROOT) not in sys.path:
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.pii import redact_pii  # noqa: E402
 
 SOURCE = "عقاريون"
 BASE = "https://akariyoun.sa"
@@ -444,6 +445,32 @@ _DESC_PANEL = re.compile(r'property_block_title">\s*الوصف\s*</h4>.*?<div cl
 _PROSE_SKIP = ("optical_fibers",)
 
 
+# The panel's OPENING tag, for the stored text: the block runs to ITS OWN closing </div> (nesting counted), so a
+# <div> inside the prose never cuts it short and the next panel never runs into it.
+_DESC_OPEN = re.compile(r'property_block_title">\s*الوصف\s*</h4>.*?<div class="block-body">', re.S)
+_DIV_TAG = re.compile(r"<(/?)div\b", re.I)
+
+
+def parse_description(page_html: str) -> Optional[str]:
+    """The ad's own «الوصف» prose, every paragraph, verbatim — the AI facts reader reads `title + description`
+    (owner 2026-10-30: «we read everything»). Measured that day: 290 of 290 active rows stored NULL while every
+    live page printed this panel (e.g. /properties/shk-llaygar-fy-hy-alshaf-20: floor 19, panorama, metro).
+    PDPL: phones and labelled names go through the shared redactor. No panel / nothing readable -> None, never ''."""
+    m = _DESC_OPEN.search(page_html or "")
+    if not m:
+        return None
+    depth, block = 1, None
+    for t in _DIV_TAG.finditer(page_html, m.end()):
+        depth += -1 if t.group(1) else 1
+        if depth == 0:
+            block = page_html[m.end():t.start()]
+            break
+    if block is None:
+        return None
+    text = html.unescape(re.sub(r"<[^>]+>", " ", re.sub(r"(?i)<br\s*/?>|</(?:p|li|div|h\d)>", "\n", block)))
+    return redact_pii(text) or None
+
+
 def parse_description_amenities(page_html: str) -> dict[str, bool]:
     m = _DESC_PANEL.search(page_html or "")
     if not m:
@@ -546,6 +573,7 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
         "city": city,
         "neighborhood": district,
         "title": title,
+        "description": parse_description(page_html),
         "photo_urls": photos or None,
         **parse_description_amenities(page_html),
         **parse_services(page_html),
