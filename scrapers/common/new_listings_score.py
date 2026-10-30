@@ -803,6 +803,51 @@ def nufouth_page(url: str, ad_number: str | None, fetch=None) -> dict | None:
     return None
 
 
+def safa_page(url: str, fetch=None) -> dict | None:
+    """A safa unit read from its OWN card and sheet (backlog 1087, 2026-10-30). safa has no page per unit: the
+    stored link is a shared list page (/project/units/58?page=1&property_id=14144) carrying 21 OTHER units, and
+    the unit's rooms, area and price live only in the POST /unit/details sheet (scrapers/safa/run.py). 21671007
+    (3 rooms, re-read run 41088522215) scored bedrooms MISMATCH against «عدد الغرف 1» of a co-working unit on
+    that list and capped the 10-30 night at 5. This restates the card's deal and type and the sheet's own
+    facts, labelled; None when either cannot be read (unknown, never wrong)."""
+    m = re.search(r"[?&]property_id=(\d+)", url or "")
+    if not m:
+        return None
+    uid = m.group(1)
+    try:
+        from scrapers.safa import run as safa
+        if fetch is not None:
+            card_html, popup_html = fetch(url, uid)
+        else:
+            s = safa.session()
+            body = safa._get(s, url)
+            token = safa._csrf(body)
+            card_html = dict(safa._CARD_RE.findall(body)).get(uid)
+            popup_html = safa.fetch_unit(s, uid, token) if token and card_html else None
+        if not card_html or not popup_html:
+            return None
+        card, popup = safa.parse_card(card_html), safa.parse_popup(popup_html)
+    except Exception:  # noqa: BLE001
+        return None
+    lines = []
+
+    def put(label, v, tail=""):
+        if isinstance(v, bool) or v in (None, "", 0):
+            return
+        lines.append(f"{label} {str(v).strip()}{tail}")
+    put("نوع الإعلان", card.get("deal_ar"))
+    put("نوع العقار", card.get("type_ar"))
+    put("الموقع", card.get("card_location"))
+    put("المساحة", popup.get("area_total_raw"), " م²")
+    put("عدد الغرف", popup.get("rooms"))
+    put("دورات المياه", popup.get("bathrooms"))
+    put("السعر", popup.get("price_raw"), " ريال")
+    title = str(popup.get("unit_title") or card.get("unit_code") or "")
+    lines += [y.strip() for y in f"{title}\n{popup.get('description') or ''}".splitlines() if y.strip()]
+    return {"title": title, "meta": {}, "jsonld": [], "evidence_lines": lines[:200],
+            "text_head": " | ".join(lines)[:1500]}
+
+
 _DALLALI_RECORDS: "dict | None" = None
 
 
@@ -890,7 +935,7 @@ def tuba_rega_lines(url: str, fetch=None) -> list[str]:
 
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
                pace: float = PACE_S, probe=None, wasalt=None, sanadak=None, muktamel=None, tuba=None,
-               nufouth=None, dallali=None, dwelleo=None) -> dict:
+               nufouth=None, dallali=None, dwelleo=None, safa=None) -> dict:
     if probe is None:
         # Imported here, not at module level: af_score and its hermetic check load this module with
         # source_reread stubbed, and they always pass their own probe.
@@ -927,6 +972,8 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         own = wasalt if ("wasalt.sa" in url or "wasalt.com" in url) else sanadak if "sanadak.sa" in url else None
         if "dallali.com/advertisements/" in url:
             own = dallali or dallali_page
+        if "safainv.sa" in url:
+            own = safa or safa_page
         if "nufouth.com" in url:
             ad_number = (client.table(table).select("ad_number").eq("id", rid).limit(1).execute().data
                          or [{}])[0].get("ad_number")
