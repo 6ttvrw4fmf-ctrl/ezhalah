@@ -60,11 +60,23 @@ def test_coverage_trip_reads_too(wired):
     assert len(calls) == 1
 
 
-def test_a_caller_with_its_own_oracle_keeps_its_own_handling(wired):
+def test_a_caller_with_its_own_oracle_has_the_unseen_read_through_that_oracle(wired):
+    """2026-10-30 nowaisiry NW4437: coverage guard refused (re-saw 8 of 11), its unpublished ad's
+    strike never started. The refused prune now reads the unseen ads through the CALLER's oracle."""
     calls, state = wired
     state["rows"] = _rows(10)
-    assert db.prune_unseen("t", {"TWA0"}, verify_gone=lambda ad: "gone") == -1
-    assert calls == []
+    oracle = lambda ad: "gone"  # noqa: E731
+    assert db.prune_unseen("t", {"TWA0"}, verify_gone=oracle) == -1
+    assert len(calls) == 1 and calls[0]["vg"] is oracle
+    assert calls[0]["max_prune_frac"] == 0.30 and calls[0]["grace"] == 3
+
+
+def test_the_refused_prune_reads_a_table_once_per_run(wired):
+    calls, state = wired
+    state["rows"] = _rows(10)
+    db.prune_unseen("t", {"TWA0"}, verify_gone=lambda ad: "gone")
+    db.prune_unseen("t", {"TWA0"}, verify_gone=lambda ad: "gone")
+    assert len(calls) == 1
 
 
 def test_sharded_or_big_or_empty_is_left_alone(wired):
