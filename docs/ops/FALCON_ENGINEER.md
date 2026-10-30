@@ -292,6 +292,15 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
    check. MISSING with EXTRA 0 and equal totals is a harness suspect first. Fix: the deep-page-cap helper in PR 8397.
 23. A checker's own «success» hides a quarantine (10-23): fleet-liveness reported success while aldarim was quarantined
    for 3 days. Read gate 3 per site from `ops_platform_liveness_coverage`, never from the job colour.
+24. A fix in the index alone leaves the card and the client net behind (10-30): the meter-box price rule (10-28) served
+   260,000 in search while `finalize()` printed the platform row's 52,000,000,000, and `priceFilter()` re-reads the PRINTED
+   price, so the card was dropped after the count. Whenever the index serves a corrected value, diff the index against the
+   platform table field by field (`src/data/remote.ts` `finalize()` reads the platform row) and fix both halves.
+25. A robot red for days with «0 mismatches» everywhere is the harness (10-30): the live sweep failed only its coverage
+   floor for 5 days because it tapped «شهري», renamed «إقامات قصيرة» on 10-25. Read the floor lines, not just the layers.
+26. Agent containers cannot reach ezhalah.com, but GitHub runners can (10-30): browser proofs run through
+   `customer-journey.yml` (dispatch `mode` + `listings`) and the quick-search audit through `qa-coverage-run.yml`
+   (budget 3000). A new workflow can be dispatched only after it is on main; until then its PR run is the proof.
 
 ## Rating (computed, must be earned)
 - **10/10** only when: every map line A–E is covered 100% (or its minimum), the sweep is green, all 10 golden searches pass,
