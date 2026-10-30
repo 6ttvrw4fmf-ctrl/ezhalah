@@ -66,3 +66,25 @@ jobs:
           PIN_LOAD_FROM: ${{ github.event.inputs.load_file }}
           PIN_RUN_ID: ${{ github.event.inputs.run_id }}
         run: node scripts/pin-district-nightly.mjs
+
+  # Failure→alert bridge — same shape as district-name-sweep.yml: a red night must reach a human (alert_event).
+  alert:
+    needs: [pins]
+    if: always()
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bridge this run's result to alert_event
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind data_live_check_failed
+          --workflow pin-district-nightly.yml
+          --status ${{ contains(needs.*.result, 'failure') && 'failure' || (contains(needs.*.result, 'cancelled') && 'cancelled' || 'success') }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      - name: Gate — a night that is not «success» turns this run red
+        run: |
+          [ "${{ needs.pins.result }}" = "success" ] || { echo "::error::pin-district-nightly: ${{ needs.pins.result }}"; exit 1; }
