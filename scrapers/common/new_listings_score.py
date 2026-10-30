@@ -455,7 +455,11 @@ _CARD_START = re.compile(r'<div[^>]*class="[^"]*\bcard-item\b')
 # runs 41088522215 / 41088846088) — the ad's own header badge says «بيع» (stored بيع), but the sibling cards under
 # «عقارات مشابهة» carry «إيجار» badges, which scored the deal MISMATCH and capped the night. The site's own scraper
 # stops at the same markers (scrapers/ashab/run.py::parse_page); the scorer reads exactly what the scraper reads.
-_SIMILAR_BLOCK = {"ashab.sa": ('id="similar-properties"', "عقارات مشابهة")}
+# alshawaf 21664551 (2026-10-30, re-read runs 41089939871 / 41090169747): the node's own table says «المساحة 250م»
+# (stored 250), and the «related listings» Views table under it (`…duplicate-of-frontpage-block-1`, trap 1 in
+# scrapers/alshawaf/run.py) prints other plots' «المساحة 422.22م»; the area scored MISMATCH and capped the night.
+_SIMILAR_BLOCK = {"ashab.sa": ('id="similar-properties"', "عقارات مشابهة"),
+                  "alshawaf.com.sa": ("duplicate-of-frontpage-block-1",)}
 
 
 def drop_similar_block(url: str | None, body: str) -> str:

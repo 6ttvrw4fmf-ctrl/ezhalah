@@ -36,3 +36,28 @@ def test_other_sites_are_untouched():
 def test_a_real_rent_on_the_ad_itself_still_mismatches_a_stored_sale():
     own_rent = BODY.replace("<h4>دور علوي</h4>", "<h4>دور علوي للايجار</h4>")
     assert _deal(own_rent) == S.MISMATCH
+
+
+# alshawaf 21664551 (2026-10-30): the node's own table says «المساحة 250م»; the related-listings table under it
+# (`…duplicate-of-frontpage-block-1`) prints other plots' areas, which scored our 250 a MISMATCH.
+ALSHAWAF_URL = "https://alshawaf.com.sa/22376"
+ALSHAWAF = ('<div id="block-edux-views-block-view-duplicate-of-node-block-1"><table>'
+            '<tr><th>العقار</th><td>\nنص أرض\nسكنية\nللبيع\n</td></tr>'
+            '<tr><th>المساحة</th><td>\n250م\n</td></tr></table></div>'
+            '<div id="block-edux-views-block-view-duplicate-of-frontpage-block-1"><table>'
+            '<tr><td>المساحة\n422.22م<br>شارع\n15</td></tr>'
+            '<tr><td>المساحة\n600م</td></tr></table></div>')
+
+
+def _area(body):
+    return S.compare_listing({"area_m2": 250}, S.page_evidence(body))["area"]
+
+
+def test_alshawaf_related_table_is_not_the_ads_area():
+    scoped = S.scope_to_its_ad(ALSHAWAF_URL, ALSHAWAF)
+    assert "422.22" not in scoped and "250م" in scoped
+    assert _area(scoped) != S.MISMATCH
+
+
+def test_alshawaf_without_the_cut_misreads_the_area():
+    assert _area(ALSHAWAF) == S.MISMATCH
