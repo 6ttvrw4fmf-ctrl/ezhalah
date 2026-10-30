@@ -55,7 +55,7 @@ export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'Eaqartabuk',   i18nKey: 'Eqar Tabuk',                              logo: require('../../assets/images/platform-logos/eaqartabuk-com.png') },
   { name: 'Satel',        i18nKey: 'Satel',                                   logo: require('../../assets/images/platform-logos/satel-sa.png') },
   { name: 'Sadin',        i18nKey: 'Sadin for Real Estate',                   logo: require('../../assets/images/sadin.png') },
-  { name: 'Mustqr',       i18nKey: 'Mustaqarr Real Estate',                   logo: require('../../assets/images/platform-logos/mustqr-sa.png') },
+  { name: 'Mustqr',       i18nKey: 'Mustaqarr Real Estate',                   logo: require('../../assets/images/platform-clean/mustqr.png') },
   { name: 'Ramzalqasim',  i18nKey: 'Ramz Al Qassim Real Estate Investment',  logo: require('../../assets/images/ramzalqassim.png') },
   { name: 'Fursaghyr',    i18nKey: 'Fursa Ghyr Real Estate',                  logo: require('../../assets/images/platform-logos/fursaghyr-com.png') },
   { name: 'Jazwtn',       i18nKey: 'Jazan Watan',                             logo: require('../../assets/images/platform-logos/jazwtn-sa.png') },
@@ -134,7 +134,7 @@ export const PLATFORM_META: LoaderPlatform[] = [
   // These brands use the trimmed, transparent marks collected from their official headers or social
   // profiles. `name` is the stored db `source` (the scraper's SOURCE constant).
   { name: 'دويليو', i18nKey: 'Dwelleo', logo: require('../../assets/images/platform-logos/dwelleo-sa.png') },
-  { name: 'مكتب أقاليم هجر للخدمات العقارية', i18nKey: 'Aqalem Hajer Real Estate Services Office', logo: require('../../assets/images/platform-logos/aqalemhajer-com.png') },
+  { name: 'مكتب أقاليم هجر للخدمات العقارية', i18nKey: 'Aqalem Hajer Real Estate Services Office', logo: require('../../assets/images/platform-clean/aqalemhajer.png') },
   { name: 'سكني', i18nKey: 'Sakani', logo: require('../../assets/images/sakani.png') },
   { name: 'الشاطري للتطوير العقاري', i18nKey: 'Shatri Real Estate Development', logo: require('../../assets/images/platform-logos/shatri.png') },
   { name: 'القاسم العقارية', i18nKey: 'Alqasem Real Estate', logo: require('../../assets/images/platform-logos/alqasem.png') },
