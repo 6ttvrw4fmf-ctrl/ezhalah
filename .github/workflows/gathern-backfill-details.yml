@@ -16,6 +16,12 @@
 name: Gathern detail backfill
 
 on:
+  # Daily (owner 2026-10-30: «we read everything»): this job had NO schedule — only hand dispatches, the last on
+  # 2026-10-03 — so every unit listed since then (4,439 in the week of 10-26 alone, 6,984 active in all) sat with
+  # description NULL and the AI facts reader could not read it. 02:00 UTC: before the word reader (07:05) and the
+  # AI reader (07:40), so a unit's text is read the same morning it is filled.
+  schedule:
+    - cron: "0 2 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -46,3 +52,22 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_MIN_INTERVAL: "1.0"   # ~1 req/s single runner = the block-free rate the probe proved
         run: exec python -m scrapers.gathern.run --backfill-details
+
+  # ── Failure→alert bridge (scheduled since 2026-10-30, so a red run must reach a human) ──────────
+  alert:
+    needs: [backfill]
+    if: always()
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bridge this run's result to alert_event
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind ingestion_check_failed
+          --workflow gathern-backfill-details.yml
+          --status ${{ contains(needs.*.result, 'failure') && 'failure' || (contains(needs.*.result, 'cancelled') && 'cancelled' || 'success') }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

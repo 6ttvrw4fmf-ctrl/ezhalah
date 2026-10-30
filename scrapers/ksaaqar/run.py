@@ -888,6 +888,10 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         # never saw 393 published «yes» and 89 published «no» (🔬 AF engineer, 2026-10-05).
         "air_conditioner": parse_tristate(page_text, "التكييف"),
         **parse_description_amenities(page_html),
+        # The ad's own description, VERBATIM (owner 2026-10-30: «we read everything»). It was parsed for
+        # amenities since 10-08 but never STORED, so all 1,353 active rows had description NULL and the AI
+        # facts reader (title+description >= 30 chars) could not read one ksaaqar ad. Silence stays NULL.
+        "description": _description_text(page_html),
         "title": title or None,
         "photo_urls": own_photos(page_html),
     }
