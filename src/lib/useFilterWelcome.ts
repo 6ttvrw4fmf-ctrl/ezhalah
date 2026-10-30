@@ -65,6 +65,9 @@ const writeSeen = (s: Seen) => { try { globalThis.localStorage?.setItem(SEEN_KEY
  *  (owner 2026-10-27: «the eagle lands … confetti party, then that's it, the message changes, then the facts»). The
  *  falconer's sign-in story starts with the welcome; the confetti starts at RAIN_AT_MS and lasts PARTY_MS. */
 export const WELCOME_TO_INSIGHT_MS = RAIN_AT_MS + PARTY_MS;
+/** Longest the headline waits, hidden, for today's fact on a device that has none yet (owner 2026-10-30: «show facts
+ *  always»). The read costs ~20 ms on the server; past this the plain line shows rather than an empty headline. */
+export const FACT_WAIT_MS = 2500;
 const readCache = () => readKey(CACHE_KEY);
 const writeCache = (c: WelcomeCache) => writeKey(CACHE_KEY, c);
 
@@ -178,11 +181,40 @@ export function useFilterWelcome(
     // Right after a sign-in or sign-up the welcome line takes the place of the rotation (owner
     // 2026-10-22); otherwise the rotation as before.
     const greet = (nameAr || nameEn) ? takeGreeting(session, now.getTime()) : null;
-    // A tab that already showed a line today shows it again — no swap when Safari reloads a sleeping tab (owner 2026-10-28).
-    const tab = !greet && session.present && (nameAr || nameEn) ? readTab(now.getTime()) : null;
+    // FACTS ALWAYS (owner 2026-10-30: «show facts always»). A plain line is never kept or replayed when a fact can be
+    // had: only a FACT is held for its 2 hours, by this device or this tab. The first visit of a day used to show a
+    // plain line («even small cities have a place here») and prepare the fact for the NEXT visit.
+    const isFact = (l: { id: number | null } | null | undefined) => !!l && l.id != null && isInsightLineId(l.id);
+    // A tab that already showed a fact today shows it again — no swap when Safari reloads a sleeping tab (owner 2026-10-28).
+    const tabSeen = !greet && session.present && (nameAr || nameEn) ? readTab(now.getTime()) : null;
+    const tab = isFact(tabSeen) ? tabSeen : null;
     const inst = greet ? { ...greet, fromCache: false, promoted: false }
       : tab ? { id: tab.id, ar: tab.ar, en: tab.en, fromCache: true, promoted: false }
-      : (nameAr || nameEn) ? instantWelcome({ hasSession: session.present, cache, next, now, name: NAME_SLOT }) : null;
+      : (nameAr || nameEn) ? instantWelcome({ hasSession: session.present, cache: isFact(cache) ? cache : null, next, now, name: NAME_SLOT }) : null;
+    // No fact on this device yet (the first visit of a day): read today's now. The headline stays hidden meanwhile
+    // (`settled` false — it never visibly changes, owner 2026-10-17), for at most FACT_WAIT_MS; the plain line shows
+    // only when the read fails or is slow (A FAILED FETCH IS NOT AN EMPTY ANSWER — and never a wait without end).
+    if (!greet && session.present && inst && !isFact(inst)) {
+      const greetNowIdx = pickGreeting(now);
+      const start = now.getTime();
+      const fact = fetchWelcomeInsights(lastLocation, lastDistrict).then((pack) => {
+        if (!pack) return null;
+        const seen = readSeen(start);
+        const c = chooseInsightLine(pack, seen, start, { city: (id) => cityNameEnOfficial(id), district: districtNameEnOfficial }, { district: lastDistrict, city: lastLocation });
+        return c ? { c, seen } : null;
+      }).catch(() => null);
+      const slow = new Promise<null>((r) => setTimeout(() => r(null), FACT_WAIT_MS));
+      void Promise.race([fact, slow]).then((r) => {
+        if (!alive.current) return;
+        const t = Date.now();
+        const line = r ? { id: INSIGHT_ID_BASE + r.c.templateId, at: t, ar: r.c.ar, en: r.c.en } : { id: inst.id, at: t, ar: inst.ar, en: inst.en };
+        if (r) writeSeen({ ...r.seen, [r.c.key]: start });
+        writeCache(line);
+        writeTab(line, greetNowIdx, t);
+        setShown({ settled: true, id: line.id, ar: line.ar, en: line.en, nameAr, nameEn, greet: greetNowIdx });
+      });
+      return;
+    }
     // The greeting is chosen NOW, from the user's own local time (lib/insightWelcome.ts), kept for this page load —
     // or the tab's own greeting while it still fits the hour.
     const tabGreet = tab && tab.greet != null && GREETINGS[tab.greet] && greetingFits(GREETINGS[tab.greet], now) ? tab.greet : null;
