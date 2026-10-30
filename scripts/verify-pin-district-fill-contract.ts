@@ -31,7 +31,24 @@ const sqlData = readFileSync(join(dir, fileData), 'utf8');
 // Versions of migrations that are allowed to switch rows on. The alarm (mon_detect_pin_district_unvouched) and the DB guards
 // (20261025203753) shipped; the owner then decided on 2026-10-25 there is NO «تقريبي» label (the district Apple Maps names
 // is shown as the district), so the label is no longer a precondition. Batch 2, the middle homes, was switched on that day.
-const FLIP_ALLOWED: string[] = ['20261025214336'];
+// 20261030202739 is the loader pin_district_load(): from 2026-10-30 the nightly job (.github/workflows/pin-district-nightly.yml)
+// switches a row on the night it is loaded, but only a MIDDLE home (verdict from the 4-spot ring), and only after the
+// database re-checks list name, city, blank served ad and shared pin — loaderProblems() below pins each of those.
+const FLIP_ALLOWED: string[] = ['20261025214336', '20261030202739'];
+
+function loaderProblems(s: string): string[] {
+  const fail: string[] = [];
+  if (!/create or replace function public\.pin_district_load\(p_rows jsonb, p_run_id text\)/.test(s)) fail.push('pin_district_load is not defined');
+  if (!/select st, lid, cid, list_name, p_run_id, \(verdict = 'middle'\)\s+from _pin_in/.test(s)) fail.push('a home is switched on without the middle verdict');
+  if (!/where list_name is not null and city_ok and blank and not already and not shared\s+and verdict in \('middle', 'edge'\)/.test(s)) fail.push('a guard (list name, city, blank ad, earlier row, shared pin) was dropped from the load');
+  if (!/c\.district_norm = public\.norm_district_tok\(public\.loc_display_district_ar\(r\.cid, r\.name\)\)/.test(s)) fail.push('the list name is not resolved through the spelling memory');
+  if (!/public\.norm_district_tok\(ci\.city_ar\) = public\.norm_district_tok\(coalesce\(r\.locality, ''\)\)/.test(s)) fail.push('the city Apple names is not compared with the served city');
+  if (!/having count\(\*\) >= 5/.test(s)) fail.push('the shared default-pin guard is gone');
+  if (!/on conflict \(source_table, listing_id\) do nothing;/.test(s)) fail.push('the loader can overwrite an earlier row');
+  if (!/revoke all on function public\.pin_district_load\(jsonb, text\) from public, anon, authenticated;/.test(s)) fail.push('the public keys can call the loader');
+  if (!/\^apple-\(nightly\|ring\)-/.test(s)) fail.push('the run_id shape is not checked');
+  return fail;
+}
 
 function armProblems(s: string): string[] {
   const fail: string[] = [];
@@ -139,6 +156,35 @@ for (const [label, mutate] of dataMutants) {
   const m = mutate(sqlData);
   mustCatch(`data: ${label}`, m !== sqlData && dataProblems(m).length > 0, m === sqlData ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 }
+
+const fileLoader = find(/^\d{14}_pin_district_load_middle_on_edge_held\.sql$/, '*_pin_district_load_middle_on_edge_held.sql');
+const sqlLoader = readFileSync(join(dir, fileLoader), 'utf8');
+const liveLoader = loaderProblems(sqlLoader);
+check(`committed migration ${fileLoader} holds every pin`, liveLoader.length === 0, liveLoader.join('; '));
+const loaderMutants: Array<[string, (s: string) => string]> = [
+  ['an edge home switched on', (s) => s.replace("(verdict = 'middle')\n    from _pin_in", "true\n    from _pin_in")],
+  ['city check dropped', (s) => s.replace('where list_name is not null and city_ok and blank', 'where list_name is not null and blank')],
+  ['unlisted name loaded', (s) => s.replace('where list_name is not null and city_ok', 'where city_ok')],
+  ['shared default pin loaded', (s) => s.replace(' and not already and not shared\n', ' and not already\n')],
+  ['earlier row overwritten', (s) => s.replace('on conflict (source_table, listing_id) do nothing;', 'on conflict (source_table, listing_id) do update set applied = excluded.applied;')],
+  ['public keys may call it', (s) => s.replace('revoke all on function public.pin_district_load(jsonb, text) from public, anon, authenticated;', '')],
+  ['any run_id accepted', (s) => s.replace("p_run_id !~ '^apple-(nightly|ring)-", "p_run_id !~ '^")],
+];
+for (const [label, mutate] of loaderMutants) {
+  const m = mutate(sqlLoader);
+  mustCatch(`loader: ${label}`, m !== sqlLoader && loaderProblems(m).length > 0, m === sqlLoader ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+}
+// The nightly job must exist and must only load through the loader (never a direct insert).
+const wf = readFileSync(join(root, '.github', 'workflows', 'pin-district-nightly.yml'), 'utf8');
+const job = readFileSync(join(root, 'scripts', 'pin-district-nightly.mjs'), 'utf8');
+check('the nightly workflow runs scripts/pin-district-nightly.mjs on a schedule', /schedule:/.test(wf) && /node scripts\/pin-district-nightly\.mjs/.test(wf));
+const jobLoadsOnlyThroughLoader = (src: string): boolean =>
+  /rest\/v1\/rpc\/pin_district_load/.test(src) && !/rest\/v1\/listing_pin_district`, \{\s*method: "POST"|insert into listing_pin_district/i.test(src);
+const jobReadsTheRing = (src: string): boolean => /verdict = "middle"/.test(src) && /ring\(lat, lng\)/.test(src) && /verdict = "edge"/.test(src);
+check('the nightly job posts to pin_district_load and never inserts into listing_pin_district itself', jobLoadsOnlyThroughLoader(job));
+check('the nightly job reads the 4-spot ring before calling a home middle', jobReadsTheRing(job));
+mustCatch('nightly: a job that inserts directly is refused', !jobLoadsOnlyThroughLoader(job.replace('rest/v1/rpc/pin_district_load`', 'rest/v1/listing_pin_district`')));
+mustCatch('nightly: a job that skips the ring is refused', !jobReadsTheRing(job.replace('verdict = "edge"; break;', 'break;')));
 
 const files: Array<[string, string]> = all.map((f) => [f, readFileSync(join(dir, f), 'utf8')]);
 const liveFlip = flipProblems(files);
