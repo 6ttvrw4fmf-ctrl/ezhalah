@@ -1,0 +1,616 @@
+{"st": "abaad_residential_listings", "lid": 13214618, "cid": 3525, "name": null, "locality": "ابو عريش", "verdict": "silent", "lat": 16.968192481192354, "lng": 42.80904201660983}
+{"st": "abaad_residential_listings", "lid": 13214619, "cid": 18075, "name": null, "locality": "العسيلة", "verdict": "silent", "lat": 16.928509435675394, "lng": 42.73587446552694}
+{"st": "abaad_residential_listings", "lid": 13214648, "cid": 1848, "name": "الحريضة", "locality": "رجال المع", "verdict": "middle", "lat": 17.781140164353005, "lng": 41.93054270003646}
+{"st": "abaad_residential_listings", "lid": 13214651, "cid": 62, "name": "مخطط الموسى", "locality": "خميس مشيط", "verdict": "edge", "lat": 18.326353679486793, "lng": 42.779512579469674}
+{"st": "abaad_residential_listings", "lid": 13214813, "cid": 17, "name": null, "locality": "احد المسارحة", "verdict": "silent", "lat": 16.877131442171994, "lng": 42.69984190462325}
+{"st": "abaad_residential_listings", "lid": 17060146, "cid": 449, "name": "البير", "locality": "ثادق", "verdict": "middle", "lat": 25.29158555286601, "lng": 45.94737050436365}
+{"st": "abaad_residential_listings", "lid": 22142822, "cid": 3479, "name": null, "locality": "صبيا", "verdict": "silent", "lat": 17.222238804249617, "lng": 42.61960184864433}
+{"st": "abeea_commercial_listings", "lid": 5434266, "cid": 31, "name": "حي التحلية", "locality": "الخبر", "verdict": "middle", "lat": 26.179238, "lng": 50.185734}
+{"st": "abeea_commercial_listings", "lid": 11055204, "cid": 31, "name": "الخبر الشمالية", "locality": "الخبر", "verdict": "edge", "lat": 26.283763, "lng": 50.206828}
+{"st": "abeea_residential_listings", "lid": 638806, "cid": 31, "name": "حي الكورنيش", "locality": "الخبر", "verdict": "middle", "lat": 26.324698, "lng": 50.222419}
+{"st": "abeea_residential_listings", "lid": 645878, "cid": 227, "name": "حي الدوحة الشمالية", "locality": "الظهران", "verdict": "middle", "lat": 26.337363, "lng": 50.171047}
+{"st": "abeea_residential_listings", "lid": 645940, "cid": 1061, "name": "حي غياضة", "locality": "الخرج", "verdict": "edge", "lat": 24.110753, "lng": 47.238238}
+{"st": "abeea_residential_listings", "lid": 645941, "cid": 1061, "name": "حي غياضة", "locality": "الخرج", "verdict": "edge", "lat": 24.111221, "lng": 47.238706}
+{"st": "abeea_residential_listings", "lid": 645959, "cid": 880, "name": null, "locality": "القويعية", "verdict": "silent", "lat": 24.42984, "lng": 45.528638}
+{"st": "abeea_residential_listings", "lid": 659718, "cid": 13, "name": "الظهران", "locality": "امارة المنطقة الشرقية", "verdict": "middle", "lat": 26.329745, "lng": 50.010422}
+{"st": "abeea_residential_listings", "lid": 1035627, "cid": 1061, "name": "حي غياضة", "locality": "الخرج", "verdict": "middle", "lat": 24.110843, "lng": 47.239228}
+{"st": "abeea_residential_listings", "lid": 1035708, "cid": 13, "name": "الظهران", "locality": "امارة المنطقة الشرقية", "verdict": "middle", "lat": 26.329369, "lng": 50.007837}
+{"st": "abeea_residential_listings", "lid": 2117265, "cid": 227, "name": "الدمام", "locality": "بقيق", "verdict": "middle", "lat": 26.019938, "lng": 49.997734}
+{"st": "abeea_residential_listings", "lid": 5635783, "cid": 31, "name": "حي الخور", "locality": "الخبر", "verdict": "middle", "lat": 26.231024, "lng": 50.216225}
+{"st": "abeea_residential_listings", "lid": 5718882, "cid": 31, "name": "حي الندى", "locality": "الدمام", "verdict": "middle", "lat": 26.374088, "lng": 50.083266}
+{"st": "abeea_residential_listings", "lid": 10441127, "cid": 31, "name": "حي الدره", "locality": "الخبر", "verdict": "middle", "lat": 26.061788, "lng": 50.141453}
+{"st": "abeea_residential_listings", "lid": 12399598, "cid": 13, "name": null, "locality": null, "verdict": "silent", "lat": 26.394688, "lng": 50.229109}
+{"st": "abralosol_commercial_listings", "lid": 10303320, "cid": 2748, "name": "حي النزهة", "locality": "المبرز", "verdict": "edge", "lat": 25.460989, "lng": 49.602538}
+{"st": "abralosol_residential_listings", "lid": 10297318, "cid": 12, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.456165, "lng": 49.664024}
+{"st": "abralosol_residential_listings", "lid": 10297468, "cid": 2748, "name": "حي وسط المبرز التاريخي", "locality": "المبرز", "verdict": "edge", "lat": 25.4096289, "lng": 49.5833703}
+{"st": "abralosol_residential_listings", "lid": 10297469, "cid": 13, "name": "حي الأثير", "locality": "الدمام", "verdict": "edge", "lat": 26.4395795, "lng": 50.0597426}
+{"st": "abralosol_residential_listings", "lid": 10297888, "cid": 12, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.459809, "lng": 49.66648}
+{"st": "abralosol_residential_listings", "lid": 10298188, "cid": 12, "name": null, "locality": "الاحساء", "verdict": "silent", "lat": 25.4959172, "lng": 49.7172719}
+{"st": "abralosol_residential_listings", "lid": 10298231, "cid": 12, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "edge", "lat": 25.4712, "lng": 49.6624}
+{"st": "abralosol_residential_listings", "lid": 10302322, "cid": 2748, "name": "حي الأندلس", "locality": "المبرز", "verdict": "edge", "lat": 25.4087071, "lng": 49.5956674}
+{"st": "abralosol_residential_listings", "lid": 10302420, "cid": 2748, "name": "حي الحزم الشمالي", "locality": "المبرز", "verdict": "edge", "lat": 25.418264389038086, "lng": 49.577850341796875}
+{"st": "abralosol_residential_listings", "lid": 10302701, "cid": 13, "name": "حي بدر", "locality": "الدمام", "verdict": "middle", "lat": 26.412257, "lng": 50.021586}
+{"st": "aldarim_residential_listings", "lid": 576426, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.738395250377, "lng": 46.507001186014}
+{"st": "alhoshan_commercial_listings", "lid": 584435, "cid": 2448, "name": null, "locality": "المذنب", "verdict": "silent", "lat": 25.8921834, "lng": 44.1782051}
+{"st": "alhoshan_residential_listings", "lid": 584370, "cid": 500, "name": null, "locality": "شقراء", "verdict": "silent", "lat": 25.545684, "lng": 44.997036}
+{"st": "alhoshan_residential_listings", "lid": 584373, "cid": 3462, "name": null, "locality": "بيش", "verdict": "silent", "lat": 17.2248675, "lng": 42.4206161}
+{"st": "alhoshan_residential_listings", "lid": 584375, "cid": 17, "name": "ابو السلع", "locality": "ابو السلع", "verdict": "middle", "lat": 17.2313166, "lng": 42.6159668}
+{"st": "alhoshan_residential_listings", "lid": 584377, "cid": 2448, "name": "حي الاندلس", "locality": "المذنب", "verdict": "edge", "lat": 25.8264274, "lng": 44.2189662}
+{"st": "alhoshan_residential_listings", "lid": 584385, "cid": 2448, "name": null, "locality": "المذنب", "verdict": "silent", "lat": 25.7089616, "lng": 44.2400873}
+{"st": "aljassim_residential_listings", "lid": 12589992, "cid": 2748, "name": "حي المسعودي", "locality": "المبرز", "verdict": "edge", "lat": 25.4001944, "lng": 49.5965556}
+{"st": "alshawaf_commercial_listings", "lid": 12605890, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.4561, "lng": 49.664}
+{"st": "alshawaf_commercial_listings", "lid": 12605923, "cid": 3677, "name": "الجفر", "locality": "الاحساء", "verdict": "edge", "lat": 25.38023, "lng": 49.639446}
+{"st": "alshawaf_commercial_listings", "lid": 12605958, "cid": 2748, "name": "حي الفيصل", "locality": "المبرز", "verdict": "edge", "lat": 25.4401, "lng": 49.582}
+{"st": "alshawaf_commercial_listings", "lid": 12605960, "cid": 2748, "name": "حي وسط المبرز التاريخي", "locality": "المبرز", "verdict": "edge", "lat": 25.4101, "lng": 49.5834}
+{"st": "alshawaf_residential_listings", "lid": 12605023, "cid": 2748, "name": "حي وسط المبرز التاريخي", "locality": "المبرز", "verdict": "middle", "lat": 25.412558, "lng": 49.591793}
+{"st": "amlakalahsa_residential_listings", "lid": 11606275, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.4650125, "lng": 49.6565781}
+{"st": "amlakalahsa_residential_listings", "lid": 11610611, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.4623625, "lng": 49.6674219}
+{"st": "amlakalahsa_residential_listings", "lid": 11622342, "cid": 2746, "name": "الجشة", "locality": "الاحساء", "verdict": "middle", "lat": 25.3883125, "lng": 49.7697031}
+{"st": "amlakalahsa_residential_listings", "lid": 11622345, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "edge", "lat": 25.4703375, "lng": 49.6596094}
+{"st": "amlakalahsa_residential_listings", "lid": 11622350, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.4649875, "lng": 49.6565781}
+{"st": "amlakalahsa_residential_listings", "lid": 11622374, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.4561625, "lng": 49.6640156}
+{"st": "amlakalahsa_residential_listings", "lid": 11622384, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "edge", "lat": 25.4697625, "lng": 49.6590156}
+{"st": "amlakalahsa_residential_listings", "lid": 21681426, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.4675625, "lng": 49.6617656}
+{"st": "aouj_residential_listings", "lid": 10283219, "cid": 13, "name": null, "locality": "امارة المنطقة الشرقية", "verdict": "silent", "lat": 26.2509211, "lng": 50.0393656}
+{"st": "aqalemhajer_commercial_listings", "lid": 13117272, "cid": 3677, "name": "حي اللويمي", "locality": "الهفوف", "verdict": "edge", "lat": 25.3765659, "lng": 49.632659}
+{"st": "aqalemhajer_commercial_listings", "lid": 13117546, "cid": 3677, "name": "حي البساتين", "locality": "المبرز", "verdict": "middle", "lat": 25.399133682250977, "lng": 49.617855072021484}
+{"st": "aqalemhajer_commercial_listings", "lid": 13117679, "cid": 3677, "name": "حي صويدرة", "locality": "الهفوف", "verdict": "edge", "lat": 25.3747692, "lng": 49.6232252}
+{"st": "aqalemhajer_commercial_listings", "lid": 16121162, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.4561, "lng": 49.664}
+{"st": "aqalemhajer_residential_listings", "lid": 13116316, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.4561, "lng": 49.664}
+{"st": "aqalemhajer_residential_listings", "lid": 13116327, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.4624419, "lng": 49.6675671}
+{"st": "aqalemhajer_residential_listings", "lid": 13116333, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.4679031, "lng": 49.6618042}
+{"st": "aqalemhajer_residential_listings", "lid": 13116337, "cid": 3677, "name": "حي الحي الأكاديمي", "locality": "المبرز", "verdict": "middle", "lat": 25.476791583408, "lng": 49.544653077347}
+{"st": "aqalemhajer_residential_listings", "lid": 13116378, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.4601563, "lng": 49.6597898}
+{"st": "aqalemhajer_residential_listings", "lid": 13116500, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "edge", "lat": 25.468476, "lng": 49.6657727}
+{"st": "aqalemhajer_residential_listings", "lid": 13116524, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.4621151, "lng": 49.6567081}
+{"st": "aqalemhajer_residential_listings", "lid": 13116569, "cid": 3677, "name": null, "locality": "الاحساء", "verdict": "silent", "lat": 25.4959172, "lng": 49.7172719}
+{"st": "aqalemhajer_residential_listings", "lid": 13116607, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.4573555, "lng": 49.6651077}
+{"st": "aqalemhajer_residential_listings", "lid": 13116660, "cid": 3677, "name": "حي المقابل", "locality": "المبرز", "verdict": "edge", "lat": 25.4173908, "lng": 49.5941611}
+{"st": "aqalemhajer_residential_listings", "lid": 13116728, "cid": 3677, "name": "حي الفتح", "locality": "المبرز", "verdict": "edge", "lat": 25.4352655, "lng": 49.5732545}
+{"st": "aqalemhajer_residential_listings", "lid": 13116750, "cid": 3677, "name": "حي وسط المبرز التاريخي", "locality": "المبرز", "verdict": "edge", "lat": 25.410334, "lng": 49.590004}
+{"st": "aqalemhajer_residential_listings", "lid": 13116956, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.459809, "lng": 49.66648}
+{"st": "aqalemhajer_residential_listings", "lid": 13117003, "cid": 3677, "name": "الغويبة", "locality": "الاحساء", "verdict": "edge", "lat": 25.297999, "lng": 49.7442752}
+{"st": "aqalemhajer_residential_listings", "lid": 20006506, "cid": 3677, "name": "الجفر", "locality": "الاحساء", "verdict": "middle", "lat": 25.379041, "lng": 49.7207781}
+{"st": "aqar_commercial_listings", "lid": 292492, "cid": 2800, "name": "حي امتداد الشمال", "locality": "رنية", "verdict": "edge", "lat": 21.26751405376556, "lng": 42.84480803591269}
+{"st": "aqar_commercial_listings", "lid": 293359, "cid": 294, "name": "حي النزهة", "locality": "رماح", "verdict": "edge", "lat": 25.564322, "lng": 47.157524}
+{"st": "aqar_commercial_listings", "lid": 294058, "cid": 3030, "name": null, "locality": "النبهانية", "verdict": "silent", "lat": 25.861119, "lng": 43.179499}
+{"st": "aqar_commercial_listings", "lid": 3717357, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.778255, "lng": 46.385159}
+{"st": "aqar_commercial_listings", "lid": 7663938, "cid": 3462, "name": null, "locality": "الملحاة", "verdict": "silent", "lat": 17.303049840182233, "lng": 42.608617290546505}
+{"st": "aqar_commercial_listings", "lid": 7936801, "cid": 3462, "name": null, "locality": "الملحاة", "verdict": "silent", "lat": 17.30303376887459, "lng": 42.608503882514995}
+{"st": "aqar_commercial_listings", "lid": 8775951, "cid": 3030, "name": null, "locality": "امارة منطقة القصيم", "verdict": "silent", "lat": 25.899113, "lng": 43.222771}
+{"st": "aqar_commercial_listings", "lid": 14955153, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.780194, "lng": 46.325212}
+{"st": "aqar_commercial_listings", "lid": 14955154, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.778033, "lng": 46.421082}
+{"st": "aqar_commercial_listings", "lid": 14955155, "cid": 664, "name": null, "locality": "الدرعية", "verdict": "silent", "lat": 24.782533, "lng": 46.322084}
+{"st": "aqar_commercial_listings", "lid": 14955157, "cid": 664, "name": null, "locality": "الدرعية", "verdict": "silent", "lat": 24.771693, "lng": 46.321085}
+{"st": "aqar_commercial_listings", "lid": 14955160, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.760321, "lng": 46.353306}
+{"st": "aqar_commercial_listings", "lid": 14955162, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.756104, "lng": 46.353264}
+{"st": "aqar_commercial_listings", "lid": 14955163, "cid": 664, "name": null, "locality": "الدرعية", "verdict": "silent", "lat": 24.74014, "lng": 46.39533}
+{"st": "aqar_commercial_listings", "lid": 14956411, "cid": 1150, "name": "البيار", "locality": "خليص", "verdict": "edge", "lat": 22.624613588690853, "lng": 39.655476615219584}
+{"st": "aqar_commercial_listings", "lid": 14956416, "cid": 1150, "name": null, "locality": "وادي الفرع", "verdict": "silent", "lat": 22.972559, "lng": 39.909772}
+{"st": "aqar_commercial_listings", "lid": 14956559, "cid": 2156, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.587587, "lng": 43.125567}
+{"st": "aqar_commercial_listings", "lid": 14956566, "cid": 2156, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.653155, "lng": 43.072674}
+{"st": "aqar_commercial_listings", "lid": 14956568, "cid": 2156, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.663083, "lng": 43.10339}
+{"st": "aqar_commercial_listings", "lid": 14956570, "cid": 2156, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.57416, "lng": 43.172443}
+{"st": "aqar_commercial_listings", "lid": 14956595, "cid": 2800, "name": null, "locality": "النغر", "verdict": "silent", "lat": 21.485655, "lng": 42.70216}
+{"st": "aqar_commercial_listings", "lid": 14956613, "cid": 1390, "name": null, "locality": "المجيرمة", "verdict": "silent", "lat": 20.521308, "lng": 39.780187}
+{"st": "aqar_commercial_listings", "lid": 14956803, "cid": 777, "name": null, "locality": "الحناكية", "verdict": "silent", "lat": 24.82993, "lng": 40.566662}
+{"st": "aqar_commercial_listings", "lid": 14956829, "cid": 777, "name": "الصويدرة", "locality": "امارة منطقة المدينة المنورة", "verdict": "middle", "lat": 24.728343, "lng": 40.157988}
+{"st": "aqar_commercial_listings", "lid": 14956892, "cid": 777, "name": null, "locality": "الحناكية", "verdict": "silent", "lat": 25.063636, "lng": 40.277085}
+{"st": "aqar_commercial_listings", "lid": 14956895, "cid": 777, "name": "حي الصويدرة", "locality": "امارة منطقة المدينة المنورة", "verdict": "middle", "lat": 24.958002, "lng": 40.072804}
+{"st": "aqar_commercial_listings", "lid": 14956896, "cid": 777, "name": null, "locality": "الحناكية", "verdict": "silent", "lat": 24.83464, "lng": 40.470233}
+{"st": "aqar_commercial_listings", "lid": 14956898, "cid": 777, "name": "حي الضريس", "locality": "الحناكية", "verdict": "edge", "lat": 24.881357610752488, "lng": 40.51955647522663}
+{"st": "aqar_commercial_listings", "lid": 14956900, "cid": 777, "name": null, "locality": "الحناكية", "verdict": "silent", "lat": 24.8227, "lng": 40.538068}
+{"st": "aqar_commercial_listings", "lid": 14956912, "cid": 360, "name": "مهد الذهب", "locality": "المهد", "verdict": "middle", "lat": 23.505871, "lng": 40.884216}
+{"st": "aqar_commercial_listings", "lid": 14956957, "cid": 360, "name": "الضميرية", "locality": "الحناكية", "verdict": "middle", "lat": 23.983473, "lng": 40.368036}
+{"st": "aqar_commercial_listings", "lid": 14956959, "cid": 360, "name": null, "locality": "المهد", "verdict": "silent", "lat": 23.032611420378288, "lng": 40.401850550436016}
+{"st": "aqar_commercial_listings", "lid": 14956962, "cid": 360, "name": "الصحن", "locality": "المهد", "verdict": "edge", "lat": 23.01889, "lng": 40.390732}
+{"st": "aqar_commercial_listings", "lid": 14956963, "cid": 360, "name": null, "locality": "المهد", "verdict": "silent", "lat": 23.037672, "lng": 40.461548}
+{"st": "aqar_commercial_listings", "lid": 14957407, "cid": 3030, "name": null, "locality": "امارة منطقة القصيم", "verdict": "silent", "lat": 26.140375, "lng": 42.769237}
+{"st": "aqar_commercial_listings", "lid": 14957409, "cid": 3030, "name": null, "locality": "امارة منطقة القصيم", "verdict": "silent", "lat": 26.036766, "lng": 42.576718}
+{"st": "aqar_commercial_listings", "lid": 14957413, "cid": 3030, "name": null, "locality": "ضرية", "verdict": "silent", "lat": 25.084231, "lng": 42.670319}
+{"st": "aqar_commercial_listings", "lid": 14957414, "cid": 3030, "name": "العمودة الشمالية", "locality": "امارة منطقة القصيم", "verdict": "edge", "lat": 26.158508, "lng": 42.761285}
+{"st": "aqar_commercial_listings", "lid": 14957418, "cid": 3030, "name": null, "locality": "امارة منطقة القصيم", "verdict": "silent", "lat": 26.00693606098053, "lng": 42.592434305796196}
+{"st": "aqar_commercial_listings", "lid": 14957421, "cid": 3030, "name": null, "locality": "امارة منطقة القصيم", "verdict": "silent", "lat": 25.898927, "lng": 43.22339}
+{"st": "aqar_commercial_listings", "lid": 14957427, "cid": 3030, "name": null, "locality": "النبهانية", "verdict": "silent", "lat": 25.86111, "lng": 43.179388}
+{"st": "aqar_commercial_listings", "lid": 14957430, "cid": 3030, "name": "المحلاني", "locality": "عقلة الصقور", "verdict": "middle", "lat": 26.111365, "lng": 42.219453}
+{"st": "aqar_commercial_listings", "lid": 14957455, "cid": 3030, "name": "الذيبية", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.032662, "lng": 43.153241}
+{"st": "aqar_commercial_listings", "lid": 14958174, "cid": 2715, "name": "الجفن", "locality": "عقلة الصقور", "verdict": "middle", "lat": 25.646081, "lng": 41.616636}
+{"st": "aqar_commercial_listings", "lid": 14958198, "cid": 2370, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.572452, "lng": 42.579473}
+{"st": "aqar_commercial_listings", "lid": 14958199, "cid": 2715, "name": "حي حفاير العهين الغربي", "locality": "الشملي", "verdict": "middle", "lat": 26.907316, "lng": 40.278256}
+{"st": "aqar_commercial_listings", "lid": 14958200, "cid": 2370, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.661874, "lng": 42.229733}
+{"st": "aqar_commercial_listings", "lid": 14958204, "cid": 2370, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 28.032761, "lng": 42.536629}
+{"st": "aqar_commercial_listings", "lid": 14958211, "cid": 2370, "name": "الشيحية", "locality": "بقعاء", "verdict": "middle", "lat": 27.867482, "lng": 42.724099}
+{"st": "aqar_commercial_listings", "lid": 14958214, "cid": 2370, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.880205, "lng": 42.410346}
+{"st": "aqar_commercial_listings", "lid": 14958216, "cid": 2370, "name": "الجديدة", "locality": "بقعاء", "verdict": "middle", "lat": 27.987251, "lng": 42.106026}
+{"st": "aqar_commercial_listings", "lid": 14958224, "cid": 2370, "name": "حي بقعاء الشرقيه", "locality": "بقعاء", "verdict": "middle", "lat": 27.852897, "lng": 42.454089}
+{"st": "aqar_commercial_listings", "lid": 14958232, "cid": 2370, "name": null, "locality": "امارة منطقة حائل", "verdict": "silent", "lat": 28.008379, "lng": 41.98283}
+{"st": "aqar_commercial_listings", "lid": 14958234, "cid": 2370, "name": "المندسة الشرقية", "locality": "بقعاء", "verdict": "edge", "lat": 27.929899, "lng": 42.072994}
+{"st": "aqar_commercial_listings", "lid": 14958236, "cid": 2370, "name": null, "locality": "امارة منطقة حائل", "verdict": "silent", "lat": 28.017868, "lng": 41.973194}
+{"st": "aqar_commercial_listings", "lid": 14958238, "cid": 2370, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.801165, "lng": 42.112885}
+{"st": "aqar_commercial_listings", "lid": 14958311, "cid": 3462, "name": "قرار", "locality": "الدرب", "verdict": "middle", "lat": 17.672789, "lng": 42.27292}
+{"st": "aqar_commercial_listings", "lid": 14958313, "cid": 3462, "name": "القاع", "locality": "الدرب", "verdict": "middle", "lat": 17.730285, "lng": 42.08644}
+{"st": "aqar_commercial_listings", "lid": 14958319, "cid": 3462, "name": "حي الكدرة", "locality": "الدرب", "verdict": "edge", "lat": 17.742278, "lng": 42.285601}
+{"st": "aqar_commercial_listings", "lid": 14958328, "cid": 3542, "name": "حي النزهة", "locality": "صامطة", "verdict": "middle", "lat": 16.62668562446216, "lng": 42.91655390902366}
+{"st": "aqar_commercial_listings", "lid": 14958331, "cid": 3462, "name": "الشقيق", "locality": "الدرب", "verdict": "middle", "lat": 17.717394, "lng": 42.031429}
+{"st": "aqar_commercial_listings", "lid": 15533187, "cid": 777, "name": null, "locality": "الحناكية", "verdict": "silent", "lat": 24.817153, "lng": 40.484342}
+{"st": "aqar_commercial_listings", "lid": 15574321, "cid": 2370, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.804941, "lng": 42.115647}
+{"st": "aqar_commercial_listings", "lid": 17002540, "cid": 2370, "name": "الوعيلي", "locality": "بقعاء", "verdict": "edge", "lat": 27.77906, "lng": 42.091679}
+{"st": "aqar_commercial_listings", "lid": 17472828, "cid": 3030, "name": "الحجازية", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.018822, "lng": 43.236233}
+{"st": "aqar_commercial_listings", "lid": 17472841, "cid": 3462, "name": "ابو السداد", "locality": "الدرب", "verdict": "middle", "lat": 17.728132, "lng": 42.250001}
+{"st": "aqar_commercial_listings", "lid": 17910064, "cid": 2370, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.649107, "lng": 42.518188}
+{"st": "aqar_commercial_listings", "lid": 18152781, "cid": 664, "name": null, "locality": "الدرعية", "verdict": "silent", "lat": 24.739912, "lng": 46.376875}
+{"st": "aqar_commercial_listings", "lid": 18415238, "cid": 3030, "name": null, "locality": "عقلة الصقور", "verdict": "silent", "lat": 25.825638, "lng": 42.218611}
+{"st": "aqar_commercial_listings", "lid": 18962858, "cid": 3462, "name": null, "locality": "صبيا", "verdict": "silent", "lat": 17.390054, "lng": 42.593666}
+{"st": "aqar_commercial_listings", "lid": 19327477, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.756059, "lng": 46.332803}
+{"st": "aqar_commercial_listings", "lid": 19530773, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "edge", "lat": 24.738922, "lng": 46.51659}
+{"st": "aqar_commercial_listings", "lid": 19530894, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.754295, "lng": 46.362373}
+{"st": "aqar_commercial_listings", "lid": 19835280, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.747095, "lng": 46.444661}
+{"st": "aqar_commercial_listings", "lid": 19837883, "cid": 2370, "name": null, "locality": "امارة منطقة حائل", "verdict": "silent", "lat": 28.002816, "lng": 41.976547}
+{"st": "aqar_residential_listings", "lid": 27659, "cid": 3462, "name": "حي الصفاء", "locality": "بيش", "verdict": "middle", "lat": 17.373987, "lng": 42.461769}
+{"st": "aqar_residential_listings", "lid": 28324, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.744671, "lng": 46.502227}
+{"st": "aqar_residential_listings", "lid": 29553, "cid": 3462, "name": "القاع", "locality": "الدرب", "verdict": "middle", "lat": 17.721994, "lng": 42.070853}
+{"st": "aqar_residential_listings", "lid": 29799, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "edge", "lat": 24.744076, "lng": 46.335659}
+{"st": "aqar_residential_listings", "lid": 30681, "cid": 939, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.309618, "lng": 43.856741}
+{"st": "aqar_residential_listings", "lid": 30968, "cid": 664, "name": "حي الدرعية الجديدة", "locality": "الدرعية", "verdict": "middle", "lat": 24.754498, "lng": 46.536408}
+{"st": "aqar_residential_listings", "lid": 34221, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.458726, "lng": 49.662322}
+{"st": "aqar_residential_listings", "lid": 34386, "cid": 294, "name": "حي النخيل", "locality": "رماح", "verdict": "middle", "lat": 25.537803, "lng": 47.177197}
+{"st": "aqar_residential_listings", "lid": 35073, "cid": 3462, "name": "حي القائم", "locality": "الدرب", "verdict": "middle", "lat": 17.741927, "lng": 42.268529}
+{"st": "aqar_residential_listings", "lid": 35790, "cid": 3462, "name": null, "locality": "غوان", "verdict": "silent", "lat": 17.297443, "lng": 42.602749}
+{"st": "aqar_residential_listings", "lid": 36057, "cid": 664, "name": "حي الدرعية الجديدة", "locality": "الدرعية", "verdict": "middle", "lat": 24.749287, "lng": 46.525481}
+{"st": "aqar_residential_listings", "lid": 38264, "cid": 664, "name": "حي الدرعية الجديدة", "locality": "الدرعية", "verdict": "middle", "lat": 24.744767, "lng": 46.532611}
+{"st": "aqar_residential_listings", "lid": 38366, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.742024, "lng": 46.510605}
+{"st": "aqar_residential_listings", "lid": 38469, "cid": 3542, "name": "حي البلد", "locality": "صامطة", "verdict": "middle", "lat": 16.599414, "lng": 42.939417}
+{"st": "aqar_residential_listings", "lid": 39081, "cid": 3462, "name": "حي النهضة", "locality": "بيش", "verdict": "middle", "lat": 17.376226, "lng": 42.532809}
+{"st": "aqar_residential_listings", "lid": 39096, "cid": 3484, "name": null, "locality": "السلام العليا", "verdict": "silent", "lat": 17.324413, "lng": 42.553833}
+{"st": "aqar_residential_listings", "lid": 39979, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.783177, "lng": 46.425509}
+{"st": "aqar_residential_listings", "lid": 40105, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.765352, "lng": 46.433839}
+{"st": "aqar_residential_listings", "lid": 40133, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.770518, "lng": 46.42875}
+{"st": "aqar_residential_listings", "lid": 40171, "cid": 664, "name": null, "locality": "الدرعية", "verdict": "silent", "lat": 24.744133, "lng": 46.329742}
+{"st": "aqar_residential_listings", "lid": 40214, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.736163839305714, "lng": 46.50894849502287}
+{"st": "aqar_residential_listings", "lid": 40282, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.750929, "lng": 46.351861}
+{"st": "aqar_residential_listings", "lid": 40368, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.757925, "lng": 46.352347}
+{"st": "aqar_residential_listings", "lid": 40438, "cid": 664, "name": null, "locality": "الدرعية", "verdict": "silent", "lat": 24.729281, "lng": 46.50927}
+{"st": "aqar_residential_listings", "lid": 40497, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.741287997718413, "lng": 46.50353517593775}
+{"st": "aqar_residential_listings", "lid": 40548, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.750935, "lng": 46.360004}
+{"st": "aqar_residential_listings", "lid": 40650, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.750999, "lng": 46.359989}
+{"st": "aqar_residential_listings", "lid": 40691, "cid": 664, "name": "حي الدرعية الجديدة", "locality": "الدرعية", "verdict": "middle", "lat": 24.754284, "lng": 46.533788}
+{"st": "aqar_residential_listings", "lid": 40757, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.749558, "lng": 46.343994}
+{"st": "aqar_residential_listings", "lid": 40789, "cid": 939, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.290594, "lng": 43.857714}
+{"st": "aqar_residential_listings", "lid": 40799, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.767434, "lng": 46.434435}
+{"st": "aqar_residential_listings", "lid": 40853, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "edge", "lat": 24.7586, "lng": 46.33051}
+{"st": "aqar_residential_listings", "lid": 40977, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.742249, "lng": 46.515488}
+{"st": "aqar_residential_listings", "lid": 41008, "cid": 664, "name": "حي الدرعية الجديدة", "locality": "الدرعية", "verdict": "middle", "lat": 24.746456, "lng": 46.529137}
+{"st": "aqar_residential_listings", "lid": 41020, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.806081, "lng": 46.420384}
+{"st": "aqar_residential_listings", "lid": 41061, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.756679, "lng": 46.357973}
+{"st": "aqar_residential_listings", "lid": 41066, "cid": 664, "name": null, "locality": "الدرعية", "verdict": "silent", "lat": 24.774801, "lng": 46.306914}
+{"st": "aqar_residential_listings", "lid": 41113, "cid": 2370, "name": "حي ج2", "locality": "بقعاء", "verdict": "edge", "lat": 27.926541171022265, "lng": 42.36577000983709}
+{"st": "aqar_residential_listings", "lid": 41218, "cid": 664, "name": "العمارية", "locality": "ضرما", "verdict": "middle", "lat": 24.725081, "lng": 46.413987}
+{"st": "aqar_residential_listings", "lid": 41233, "cid": 664, "name": "حي الدرعية الجديدة", "locality": "الدرعية", "verdict": "middle", "lat": 24.747890699712055, "lng": 46.53749270153804}
+{"st": "aqar_residential_listings", "lid": 41383, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.750582, "lng": 46.350621}
+{"st": "aqar_residential_listings", "lid": 41558, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.178658, "lng": 39.123755}
+{"st": "aqar_residential_listings", "lid": 41610, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.756636, "lng": 46.437231}
+{"st": "aqar_residential_listings", "lid": 41916, "cid": 3542, "name": "حي حطين", "locality": "صامطة", "verdict": "middle", "lat": 16.601508, "lng": 42.947147}
+{"st": "aqar_residential_listings", "lid": 41982, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.807262, "lng": 46.428538}
+{"st": "aqar_residential_listings", "lid": 42009, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.801023, "lng": 46.419977}
+{"st": "aqar_residential_listings", "lid": 42015, "cid": 939, "name": null, "locality": "امارة منطقة القصيم", "verdict": "silent", "lat": 26.260384, "lng": 43.81297}
+{"st": "aqar_residential_listings", "lid": 42029, "cid": 939, "name": "حي المليداء", "locality": "امارة منطقة القصيم", "verdict": "edge", "lat": 26.311772, "lng": 43.803204}
+{"st": "aqar_residential_listings", "lid": 42078, "cid": 953, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.228628, "lng": 43.89357}
+{"st": "aqar_residential_listings", "lid": 42084, "cid": 939, "name": "المليداء", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.313425, "lng": 43.807872}
+{"st": "aqar_residential_listings", "lid": 42372, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.113697, "lng": 39.123959}
+{"st": "aqar_residential_listings", "lid": 42426, "cid": 2777, "name": "حي السلام", "locality": "الشماسية", "verdict": "middle", "lat": 26.293418, "lng": 44.255216}
+{"st": "aqar_residential_listings", "lid": 42517, "cid": 3030, "name": "السيح", "locality": "رياض الخبراء", "verdict": "middle", "lat": 25.992922, "lng": 43.232497}
+{"st": "aqar_residential_listings", "lid": 42692, "cid": 2989, "name": "الذيبية", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.020182, "lng": 43.161812}
+{"st": "aqar_residential_listings", "lid": 42728, "cid": 2715, "name": null, "locality": "الغزالة", "verdict": "silent", "lat": 26.824649, "lng": 41.32798}
+{"st": "aqar_residential_listings", "lid": 42920, "cid": 939, "name": "حي المليداء", "locality": "امارة منطقة القصيم", "verdict": "edge", "lat": 26.311105, "lng": 43.80419}
+{"st": "aqar_residential_listings", "lid": 43037, "cid": 2370, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.870568, "lng": 42.727784}
+{"st": "aqar_residential_listings", "lid": 43054, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.758578, "lng": 46.344891}
+{"st": "aqar_residential_listings", "lid": 43263, "cid": 2715, "name": "الروضة", "locality": "امارة منطقة حائل", "verdict": "middle", "lat": 26.770122, "lng": 41.687718}
+{"st": "aqar_residential_listings", "lid": 43271, "cid": 1390, "name": "حي رقم 5", "locality": "الليث", "verdict": "edge", "lat": 20.116699, "lng": 40.286018}
+{"st": "aqar_residential_listings", "lid": 43298, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.742508, "lng": 46.505078}
+{"st": "aqar_residential_listings", "lid": 63662, "cid": 3700, "name": "الكلابية", "locality": "الاحساء", "verdict": "edge", "lat": 25.43118260106915, "lng": 49.64553026053959}
+{"st": "aqar_residential_listings", "lid": 63676, "cid": 3700, "name": "الكلابية", "locality": "الاحساء", "verdict": "edge", "lat": 25.43118257844024, "lng": 49.645550271096}
+{"st": "aqar_residential_listings", "lid": 63707, "cid": 3700, "name": "الكلابية", "locality": "الاحساء", "verdict": "edge", "lat": 25.43118257844024, "lng": 49.645550271096}
+{"st": "aqar_residential_listings", "lid": 63710, "cid": 3700, "name": "الكلابية", "locality": "الاحساء", "verdict": "edge", "lat": 25.43118260106915, "lng": 49.64553026053959}
+{"st": "aqar_residential_listings", "lid": 64645, "cid": 3700, "name": "اسكان الكلابية", "locality": "الاحساء", "verdict": "middle", "lat": 25.458014, "lng": 49.639561}
+{"st": "aqar_residential_listings", "lid": 69300, "cid": 3700, "name": "المقدام", "locality": "الاحساء", "verdict": "edge", "lat": 25.439390495205885, "lng": 49.67016363928796}
+{"st": "aqar_residential_listings", "lid": 73170, "cid": 939, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.268058, "lng": 43.869692}
+{"st": "aqar_residential_listings", "lid": 74855, "cid": 939, "name": "المليداء", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.313053, "lng": 43.805455}
+{"st": "aqar_residential_listings", "lid": 95758, "cid": 3462, "name": null, "locality": "الملحاة", "verdict": "silent", "lat": 17.289841, "lng": 42.602748}
+{"st": "aqar_residential_listings", "lid": 103506, "cid": 3700, "name": "مخطط جواثا", "locality": "الاحساء", "verdict": "middle", "lat": 25.467538, "lng": 49.665736}
+{"st": "aqar_residential_listings", "lid": 107718, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.767851, "lng": 46.428387}
+{"st": "aqar_residential_listings", "lid": 131480, "cid": 1879, "name": "حي السلام", "locality": "خليص", "verdict": "middle", "lat": 22.106038, "lng": 39.31792}
+{"st": "aqar_residential_listings", "lid": 131483, "cid": 664, "name": "حي الدرعية الجديدة", "locality": "الدرعية", "verdict": "middle", "lat": 24.74472, "lng": 46.532638}
+{"st": "aqar_residential_listings", "lid": 131920, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.74166, "lng": 46.502312}
+{"st": "aqar_residential_listings", "lid": 131991, "cid": 664, "name": "حي الدرعية الجديدة", "locality": "الدرعية", "verdict": "middle", "lat": 24.748675, "lng": 46.529666}
+{"st": "aqar_residential_listings", "lid": 132007, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.73816, "lng": 46.512599}
+{"st": "aqar_residential_listings", "lid": 132141, "cid": 664, "name": "حي الدرعية الجديدة", "locality": "الدرعية", "verdict": "middle", "lat": 24.755994, "lng": 46.548002}
+{"st": "aqar_residential_listings", "lid": 132190, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.756423, "lng": 46.353167}
+{"st": "aqar_residential_listings", "lid": 132496, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.111676, "lng": 39.124068}
+{"st": "aqar_residential_listings", "lid": 132510, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.197993, "lng": 39.132438}
+{"st": "aqar_residential_listings", "lid": 132515, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.17851, "lng": 39.121216}
+{"st": "aqar_residential_listings", "lid": 132519, "cid": 1879, "name": "حي أم سدرة", "locality": "جدة", "verdict": "middle", "lat": 22.129072, "lng": 39.13225}
+{"st": "aqar_residential_listings", "lid": 132525, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.105717, "lng": 39.133954}
+{"st": "aqar_residential_listings", "lid": 132579, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.181254, "lng": 39.119362}
+{"st": "aqar_residential_listings", "lid": 132618, "cid": 1879, "name": "حي ثول", "locality": "جدة", "verdict": "middle", "lat": 22.283301, "lng": 39.107436}
+{"st": "aqar_residential_listings", "lid": 132623, "cid": 1879, "name": "حي الهجرة", "locality": "جدة", "verdict": "edge", "lat": 22.156654, "lng": 39.123292}
+{"st": "aqar_residential_listings", "lid": 132783, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "edge", "lat": 22.118659, "lng": 39.131139}
+{"st": "aqar_residential_listings", "lid": 132785, "cid": 1879, "name": "حي أم سدرة", "locality": "جدة", "verdict": "edge", "lat": 22.139949, "lng": 39.120064}
+{"st": "aqar_residential_listings", "lid": 132795, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.189351, "lng": 39.127198}
+{"st": "aqar_residential_listings", "lid": 132796, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.187667, "lng": 39.123908}
+{"st": "aqar_residential_listings", "lid": 132816, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.184678, "lng": 39.12954}
+{"st": "aqar_residential_listings", "lid": 132817, "cid": 1879, "name": "حي أم سدرة", "locality": "جدة", "verdict": "middle", "lat": 22.122121, "lng": 39.126244}
+{"st": "aqar_residential_listings", "lid": 132824, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.18181, "lng": 39.126434}
+{"st": "aqar_residential_listings", "lid": 132864, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.108967, "lng": 39.133131}
+{"st": "aqar_residential_listings", "lid": 132898, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.168543, "lng": 39.137975}
+{"st": "aqar_residential_listings", "lid": 132932, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.20034, "lng": 39.122442}
+{"st": "aqar_residential_listings", "lid": 132992, "cid": 1879, "name": "حي أم سدرة", "locality": "جدة", "verdict": "middle", "lat": 22.133439, "lng": 39.120147}
+{"st": "aqar_residential_listings", "lid": 132994, "cid": 1879, "name": "حي أم سدرة", "locality": "جدة", "verdict": "middle", "lat": 22.139222, "lng": 39.130441}
+{"st": "aqar_residential_listings", "lid": 133005, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.174188, "lng": 39.150734}
+{"st": "aqar_residential_listings", "lid": 133009, "cid": 1879, "name": "حي أم سدرة", "locality": "جدة", "verdict": "middle", "lat": 22.138867, "lng": 39.13145}
+{"st": "aqar_residential_listings", "lid": 133020, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.19448, "lng": 39.124503}
+{"st": "aqar_residential_listings", "lid": 133043, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.167646, "lng": 39.131401}
+{"st": "aqar_residential_listings", "lid": 133044, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.173249, "lng": 39.136263}
+{"st": "aqar_residential_listings", "lid": 133047, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.1128, "lng": 39.130464}
+{"st": "aqar_residential_listings", "lid": 133053, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.106667, "lng": 39.153193}
+{"st": "aqar_residential_listings", "lid": 133086, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.185469, "lng": 39.160706}
+{"st": "aqar_residential_listings", "lid": 133088, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.176435, "lng": 39.117194}
+{"st": "aqar_residential_listings", "lid": 133110, "cid": 1879, "name": "حي أم سدرة", "locality": "جدة", "verdict": "middle", "lat": 22.130207, "lng": 39.139562}
+{"st": "aqar_residential_listings", "lid": 133118, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.113822, "lng": 39.142705}
+{"st": "aqar_residential_listings", "lid": 133121, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.167261, "lng": 39.133882}
+{"st": "aqar_residential_listings", "lid": 133131, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.181292, "lng": 39.117877}
+{"st": "aqar_residential_listings", "lid": 133141, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.167278, "lng": 39.133839}
+{"st": "aqar_residential_listings", "lid": 133149, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.10712, "lng": 39.13159}
+{"st": "aqar_residential_listings", "lid": 133182, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.11206, "lng": 39.15211}
+{"st": "aqar_residential_listings", "lid": 133183, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.181751, "lng": 39.134054}
+{"st": "aqar_residential_listings", "lid": 133191, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.111859, "lng": 39.134489}
+{"st": "aqar_residential_listings", "lid": 133197, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.167206, "lng": 39.131735}
+{"st": "aqar_residential_listings", "lid": 133200, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.167619, "lng": 39.132203}
+{"st": "aqar_residential_listings", "lid": 133201, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.110958, "lng": 39.134074}
+{"st": "aqar_residential_listings", "lid": 133205, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.106566, "lng": 39.131746}
+{"st": "aqar_residential_listings", "lid": 133210, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.167238, "lng": 39.131307}
+{"st": "aqar_residential_listings", "lid": 133215, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.167628, "lng": 39.131417}
+{"st": "aqar_residential_listings", "lid": 133228, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.107184, "lng": 39.153471}
+{"st": "aqar_residential_listings", "lid": 133252, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.203333, "lng": 39.13232}
+{"st": "aqar_residential_listings", "lid": 133257, "cid": 1879, "name": "حي أم سدرة", "locality": "جدة", "verdict": "middle", "lat": 22.139256, "lng": 39.130089}
+{"st": "aqar_residential_listings", "lid": 133269, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.111883, "lng": 39.137775}
+{"st": "aqar_residential_listings", "lid": 133286, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "edge", "lat": 22.164029, "lng": 39.132026}
+{"st": "aqar_residential_listings", "lid": 133315, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.167315, "lng": 39.133863}
+{"st": "aqar_residential_listings", "lid": 133326, "cid": 1879, "name": "حي أم سدرة", "locality": "جدة", "verdict": "middle", "lat": 22.131942, "lng": 39.124425}
+{"st": "aqar_residential_listings", "lid": 133341, "cid": 1879, "name": "حي أم سدرة", "locality": "جدة", "verdict": "middle", "lat": 22.125657, "lng": 39.119918}
+{"st": "aqar_residential_listings", "lid": 133351, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.167465, "lng": 39.123469}
+{"st": "aqar_residential_listings", "lid": 133363, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.167554, "lng": 39.131979}
+{"st": "aqar_residential_listings", "lid": 133371, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.194574, "lng": 39.137147}
+{"st": "aqar_residential_listings", "lid": 133378, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.117036, "lng": 39.147149}
+{"st": "aqar_residential_listings", "lid": 133393, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.172074, "lng": 39.117937}
+{"st": "aqar_residential_listings", "lid": 133394, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.177724, "lng": 39.130153}
+{"st": "aqar_residential_listings", "lid": 133417, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.108669, "lng": 39.135781}
+{"st": "aqar_residential_listings", "lid": 133421, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.171058, "lng": 39.135334}
+{"st": "aqar_residential_listings", "lid": 133426, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.175024, "lng": 39.130606}
+{"st": "aqar_residential_listings", "lid": 133429, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.107541, "lng": 39.152754}
+{"st": "aqar_residential_listings", "lid": 133440, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.167277, "lng": 39.133415}
+{"st": "aqar_residential_listings", "lid": 133457, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.167448, "lng": 39.12389}
+{"st": "aqar_residential_listings", "lid": 133463, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.106311, "lng": 39.132701}
+{"st": "aqar_residential_listings", "lid": 133469, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "edge", "lat": 22.100853, "lng": 39.126764}
+{"st": "aqar_residential_listings", "lid": 133482, "cid": 1879, "name": "حي أم سدرة", "locality": "جدة", "verdict": "middle", "lat": 22.136635, "lng": 39.120956}
+{"st": "aqar_residential_listings", "lid": 133505, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.165577, "lng": 39.125784}
+{"st": "aqar_residential_listings", "lid": 133666, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.739365, "lng": 46.514442}
+{"st": "aqar_residential_listings", "lid": 133758, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.744452, "lng": 46.516061}
+{"st": "aqar_residential_listings", "lid": 133813, "cid": 664, "name": null, "locality": "ضرما", "verdict": "silent", "lat": 24.729719, "lng": 46.416111}
+{"st": "aqar_residential_listings", "lid": 133911, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.182069, "lng": 39.134458}
+{"st": "aqar_residential_listings", "lid": 133948, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.193339, "lng": 39.119492}
+{"st": "aqar_residential_listings", "lid": 133969, "cid": 1879, "name": "حي بلدة ثول", "locality": "جدة", "verdict": "middle", "lat": 22.287168, "lng": 39.133668}
+{"st": "aqar_residential_listings", "lid": 133992, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.199774, "lng": 39.127359}
+{"st": "aqar_residential_listings", "lid": 134063, "cid": 1879, "name": "حي الهجرة", "locality": "جدة", "verdict": "middle", "lat": 22.160601, "lng": 39.156951}
+{"st": "aqar_residential_listings", "lid": 134078, "cid": 1879, "name": "حي سليتة", "locality": "جدة", "verdict": "middle", "lat": 22.22923, "lng": 39.136976}
+{"st": "aqar_residential_listings", "lid": 134082, "cid": 1879, "name": "حي أم سدرة", "locality": "جدة", "verdict": "middle", "lat": 22.122255, "lng": 39.120094}
+{"st": "aqar_residential_listings", "lid": 134093, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.166046, "lng": 39.127632}
+{"st": "aqar_residential_listings", "lid": 134211, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.192737, "lng": 39.129898}
+{"st": "aqar_residential_listings", "lid": 134213, "cid": 1879, "name": "حي الهجرة", "locality": "جدة", "verdict": "middle", "lat": 22.158603, "lng": 39.115955}
+{"st": "aqar_residential_listings", "lid": 134264, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.192737, "lng": 39.129898}
+{"st": "aqar_residential_listings", "lid": 134267, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.106309, "lng": 39.132658}
+{"st": "aqar_residential_listings", "lid": 134276, "cid": 1879, "name": "حي الهجرة", "locality": "جدة", "verdict": "middle", "lat": 22.15791, "lng": 39.119735}
+{"st": "aqar_residential_listings", "lid": 134326, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "edge", "lat": 22.206476, "lng": 39.119768}
+{"st": "aqar_residential_listings", "lid": 134329, "cid": 1879, "name": "حي أم سدرة", "locality": "جدة", "verdict": "middle", "lat": 22.131785, "lng": 39.138162}
+{"st": "aqar_residential_listings", "lid": 134350, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.106277, "lng": 39.132638}
+{"st": "aqar_residential_listings", "lid": 134358, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.190151, "lng": 39.124722}
+{"st": "aqar_residential_listings", "lid": 134360, "cid": 1879, "name": "حي الهجرة", "locality": "جدة", "verdict": "middle", "lat": 22.160097, "lng": 39.121179}
+{"st": "aqar_residential_listings", "lid": 134365, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.195018, "lng": 39.129438}
+{"st": "aqar_residential_listings", "lid": 134377, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.106284, "lng": 39.13268}
+{"st": "aqar_residential_listings", "lid": 134397, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.195919, "lng": 39.132777}
+{"st": "aqar_residential_listings", "lid": 134401, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.189765, "lng": 39.137999}
+{"st": "aqar_residential_listings", "lid": 134424, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.192681, "lng": 39.129908}
+{"st": "aqar_residential_listings", "lid": 134437, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.205924, "lng": 39.119796}
+{"st": "aqar_residential_listings", "lid": 134458, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.194979, "lng": 39.129414}
+{"st": "aqar_residential_listings", "lid": 134477, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.167365, "lng": 39.132176}
+{"st": "aqar_residential_listings", "lid": 134529, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.195038, "lng": 39.129394}
+{"st": "aqar_residential_listings", "lid": 134577, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.195792, "lng": 39.13677}
+{"st": "aqar_residential_listings", "lid": 134599, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.194991, "lng": 39.129414}
+{"st": "aqar_residential_listings", "lid": 134881, "cid": 664, "name": "حي الدرعية الجديدة", "locality": "الدرعية", "verdict": "middle", "lat": 24.756707, "lng": 46.545905}
+{"st": "aqar_residential_listings", "lid": 134887, "cid": 777, "name": null, "locality": "الحناكية", "verdict": "silent", "lat": 24.862102, "lng": 40.478517}
+{"st": "aqar_residential_listings", "lid": 134913, "cid": 777, "name": "حي الحناكية", "locality": "الحناكية", "verdict": "middle", "lat": 24.868837, "lng": 40.528009}
+{"st": "aqar_residential_listings", "lid": 134916, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.746798, "lng": 46.504588}
+{"st": "aqar_residential_listings", "lid": 134921, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.80287, "lng": 46.412334}
+{"st": "aqar_residential_listings", "lid": 134949, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.759829, "lng": 46.434106}
+{"st": "aqar_residential_listings", "lid": 134954, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "edge", "lat": 24.733968, "lng": 46.509295}
+{"st": "aqar_residential_listings", "lid": 134998, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.755694, "lng": 46.357095}
+{"st": "aqar_residential_listings", "lid": 135019, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.753709, "lng": 46.334879}
+{"st": "aqar_residential_listings", "lid": 135052, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.740979, "lng": 46.506857}
+{"st": "aqar_residential_listings", "lid": 135070, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.740175, "lng": 46.500665}
+{"st": "aqar_residential_listings", "lid": 135077, "cid": 2777, "name": "حي السلام", "locality": "الشماسية", "verdict": "middle", "lat": 26.289247, "lng": 44.256499}
+{"st": "aqar_residential_listings", "lid": 135098, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.801916, "lng": 46.409534}
+{"st": "aqar_residential_listings", "lid": 135134, "cid": 664, "name": "العمارية", "locality": "ضرما", "verdict": "middle", "lat": 24.727413, "lng": 46.410994}
+{"st": "aqar_residential_listings", "lid": 135136, "cid": 664, "name": null, "locality": "الدرعية", "verdict": "silent", "lat": 24.797173, "lng": 46.415666}
+{"st": "aqar_residential_listings", "lid": 135210, "cid": 777, "name": "حي البطيحان الغربى", "locality": "الحناكية", "verdict": "middle", "lat": 24.858643, "lng": 40.495179}
+{"st": "aqar_residential_listings", "lid": 135342, "cid": 777, "name": null, "locality": "الحناكية", "verdict": "silent", "lat": 24.861532, "lng": 40.483585}
+{"st": "aqar_residential_listings", "lid": 135353, "cid": 777, "name": "حي الحناكية", "locality": "الحناكية", "verdict": "middle", "lat": 24.867808, "lng": 40.526287}
+{"st": "aqar_residential_listings", "lid": 135371, "cid": 777, "name": "حي الحناكية", "locality": "الحناكية", "verdict": "middle", "lat": 24.867814, "lng": 40.52621}
+{"st": "aqar_residential_listings", "lid": 137132, "cid": 1150, "name": null, "locality": "الكامل", "verdict": "silent", "lat": 22.33713, "lng": 39.820343}
+{"st": "aqar_residential_listings", "lid": 137245, "cid": 1150, "name": "العقيق", "locality": "الطائف", "verdict": "middle", "lat": 22.180325, "lng": 40.805959}
+{"st": "aqar_residential_listings", "lid": 137323, "cid": 1150, "name": null, "locality": "خليص", "verdict": "silent", "lat": 22.574819, "lng": 39.648106}
+{"st": "aqar_residential_listings", "lid": 137329, "cid": 1150, "name": null, "locality": "خليص", "verdict": "silent", "lat": 22.530704, "lng": 39.607229}
+{"st": "aqar_residential_listings", "lid": 137350, "cid": 1150, "name": "السليم", "locality": "خليص", "verdict": "middle", "lat": 22.577244, "lng": 39.643219}
+{"st": "aqar_residential_listings", "lid": 139501, "cid": 360, "name": "مهد الذهب", "locality": "المهد", "verdict": "middle", "lat": 23.499752, "lng": 40.882988}
+{"st": "aqar_residential_listings", "lid": 139542, "cid": 3030, "name": null, "locality": "النبهانية", "verdict": "silent", "lat": 25.866594986793856, "lng": 43.06468255218953}
+{"st": "aqar_residential_listings", "lid": 139626, "cid": 3030, "name": "السيح", "locality": "رياض الخبراء", "verdict": "middle", "lat": 25.992805, "lng": 43.227839}
+{"st": "aqar_residential_listings", "lid": 139648, "cid": 2989, "name": "الذيبية", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.02759, "lng": 43.150043}
+{"st": "aqar_residential_listings", "lid": 139657, "cid": 2989, "name": null, "locality": "امارة منطقة القصيم", "verdict": "silent", "lat": 26.03653, "lng": 43.159678}
+{"st": "aqar_residential_listings", "lid": 139674, "cid": 2989, "name": "الذيبية", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.027857, "lng": 43.149033}
+{"st": "aqar_residential_listings", "lid": 139677, "cid": 2989, "name": "الذيبية", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.02762, "lng": 43.149067}
+{"st": "aqar_residential_listings", "lid": 139690, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.758968255546872, "lng": 46.342801375838434}
+{"st": "aqar_residential_listings", "lid": 139691, "cid": 2989, "name": "الذيبية", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.027778, "lng": 43.145445}
+{"st": "aqar_residential_listings", "lid": 139717, "cid": 3030, "name": null, "locality": "النبهانية", "verdict": "silent", "lat": 25.860929, "lng": 43.082535}
+{"st": "aqar_residential_listings", "lid": 139720, "cid": 664, "name": "حي البليدا", "locality": "الدرعية", "verdict": "edge", "lat": 24.750017, "lng": 46.550236}
+{"st": "aqar_residential_listings", "lid": 139726, "cid": 2512, "name": "القيصومة", "locality": "النبهانية", "verdict": "middle", "lat": 25.745958, "lng": 43.173459}
+{"st": "aqar_residential_listings", "lid": 139738, "cid": 3030, "name": "الصليبي", "locality": "النبهانية", "verdict": "edge", "lat": 25.626253, "lng": 43.054951}
+{"st": "aqar_residential_listings", "lid": 139749, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.741838870521864, "lng": 46.49897973044599}
+{"st": "aqar_residential_listings", "lid": 139752, "cid": 664, "name": "حي الدرعية الجديدة", "locality": "الدرعية", "verdict": "middle", "lat": 24.750019, "lng": 46.526825}
+{"st": "aqar_residential_listings", "lid": 139771, "cid": 3030, "name": "السيح", "locality": "رياض الخبراء", "verdict": "middle", "lat": 25.991678, "lng": 43.227826}
+{"st": "aqar_residential_listings", "lid": 139778, "cid": 2989, "name": null, "locality": "امارة منطقة القصيم", "verdict": "silent", "lat": 26.037228, "lng": 43.160539}
+{"st": "aqar_residential_listings", "lid": 139795, "cid": 3030, "name": null, "locality": "النبهانية", "verdict": "silent", "lat": 25.944111, "lng": 42.937195}
+{"st": "aqar_residential_listings", "lid": 139797, "cid": 3030, "name": "السيح", "locality": "رياض الخبراء", "verdict": "edge", "lat": 25.990075, "lng": 43.225448}
+{"st": "aqar_residential_listings", "lid": 139819, "cid": 3030, "name": null, "locality": "النبهانية", "verdict": "silent", "lat": 25.859399, "lng": 43.078233}
+{"st": "aqar_residential_listings", "lid": 139821, "cid": 3030, "name": "البتراء", "locality": "النبهانية", "verdict": "middle", "lat": 25.941998, "lng": 42.951607}
+{"st": "aqar_residential_listings", "lid": 139823, "cid": 3030, "name": "الصليبي", "locality": "النبهانية", "verdict": "edge", "lat": 25.626839, "lng": 43.043051}
+{"st": "aqar_residential_listings", "lid": 139830, "cid": 3030, "name": null, "locality": "رياض الخبراء", "verdict": "silent", "lat": 25.989816, "lng": 43.22524}
+{"st": "aqar_residential_listings", "lid": 139931, "cid": 939, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.298063, "lng": 43.864607}
+{"st": "aqar_residential_listings", "lid": 139957, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "edge", "lat": 24.735884, "lng": 46.514343}
+{"st": "aqar_residential_listings", "lid": 140257, "cid": 2800, "name": "حي الشمالي", "locality": "رنية", "verdict": "middle", "lat": 21.258540393792448, "lng": 42.8514144565575}
+{"st": "aqar_residential_listings", "lid": 140266, "cid": 294, "name": "حي السلام", "locality": "رماح", "verdict": "middle", "lat": 25.512274, "lng": 47.177965}
+{"st": "aqar_residential_listings", "lid": 140268, "cid": 294, "name": "حي الزهور", "locality": "رماح", "verdict": "edge", "lat": 25.560892338858654, "lng": 47.15178370428772}
+{"st": "aqar_residential_listings", "lid": 140329, "cid": 294, "name": "حي السلام", "locality": "رماح", "verdict": "middle", "lat": 25.512032361895322, "lng": 47.17924670219234}
+{"st": "aqar_residential_listings", "lid": 140370, "cid": 294, "name": "حي الواحة", "locality": "رماح", "verdict": "edge", "lat": 25.554956, "lng": 47.172945}
+{"st": "aqar_residential_listings", "lid": 140382, "cid": 294, "name": "حي الريان", "locality": "رماح", "verdict": "edge", "lat": 25.561247, "lng": 47.172453}
+{"st": "aqar_residential_listings", "lid": 140436, "cid": 2800, "name": "حي الأغر", "locality": "رنية", "verdict": "middle", "lat": 21.264209, "lng": 42.838679}
+{"st": "aqar_residential_listings", "lid": 140453, "cid": 294, "name": "حي التعاون", "locality": "رماح", "verdict": "middle", "lat": 25.566812, "lng": 47.147438}
+{"st": "aqar_residential_listings", "lid": 140495, "cid": 294, "name": "حي الخزامى", "locality": "رماح", "verdict": "edge", "lat": 25.574304, "lng": 47.177484}
+{"st": "aqar_residential_listings", "lid": 140500, "cid": 294, "name": "حي النخيل", "locality": "رماح", "verdict": "middle", "lat": 25.546931, "lng": 47.177367}
+{"st": "aqar_residential_listings", "lid": 140516, "cid": 294, "name": "حي الخزامى", "locality": "رماح", "verdict": "edge", "lat": 25.556631, "lng": 47.176991}
+{"st": "aqar_residential_listings", "lid": 140520, "cid": 294, "name": "الحفنة", "locality": "رماح", "verdict": "middle", "lat": 25.686461, "lng": 46.549948}
+{"st": "aqar_residential_listings", "lid": 140526, "cid": 294, "name": "حي الريان", "locality": "رماح", "verdict": "edge", "lat": 25.563154, "lng": 47.171562}
+{"st": "aqar_residential_listings", "lid": 143404, "cid": 1390, "name": "حي رقم 7", "locality": "الليث", "verdict": "middle", "lat": 20.145687284039692, "lng": 40.26261369213604}
+{"st": "aqar_residential_listings", "lid": 143459, "cid": 1390, "name": "حي رقم 6", "locality": "الليث", "verdict": "middle", "lat": 20.142062, "lng": 40.269795}
+{"st": "aqar_residential_listings", "lid": 143462, "cid": 1390, "name": "حي رقم 6", "locality": "المجيرمة", "verdict": "edge", "lat": 20.139653, "lng": 40.263015}
+{"st": "aqar_residential_listings", "lid": 143472, "cid": 1390, "name": "حي رقم 5", "locality": "الليث", "verdict": "middle", "lat": 20.136335, "lng": 40.278841}
+{"st": "aqar_residential_listings", "lid": 143497, "cid": 1390, "name": "حي رقم 5", "locality": "الليث", "verdict": "middle", "lat": 20.129139, "lng": 40.280059}
+{"st": "aqar_residential_listings", "lid": 143506, "cid": 1390, "name": "حي رقم 5", "locality": "الليث", "verdict": "middle", "lat": 20.119211953950945, "lng": 40.283470253356484}
+{"st": "aqar_residential_listings", "lid": 148974, "cid": 3542, "name": "حي العزيزية", "locality": "صامطة", "verdict": "edge", "lat": 16.623431, "lng": 42.935384}
+{"st": "aqar_residential_listings", "lid": 149104, "cid": 3542, "name": "حي النزهة", "locality": "صامطة", "verdict": "edge", "lat": 16.626894, "lng": 42.912823}
+{"st": "aqar_residential_listings", "lid": 149106, "cid": 3542, "name": null, "locality": "صامطة", "verdict": "silent", "lat": 16.611118, "lng": 42.913983}
+{"st": "aqar_residential_listings", "lid": 149197, "cid": 3462, "name": null, "locality": "صبيا", "verdict": "silent", "lat": 17.316907, "lng": 42.506496}
+{"st": "aqar_residential_listings", "lid": 149201, "cid": 3462, "name": "حي النهضة", "locality": "بيش", "verdict": "middle", "lat": 17.377034, "lng": 42.536942}
+{"st": "aqar_residential_listings", "lid": 149204, "cid": 3462, "name": "حي الخضراء 1", "locality": "بيش", "verdict": "middle", "lat": 17.444138, "lng": 42.532835}
+{"st": "aqar_residential_listings", "lid": 149273, "cid": 3462, "name": "حي الصفاء", "locality": "بيش", "verdict": "middle", "lat": 17.373807, "lng": 42.442166}
+{"st": "aqar_residential_listings", "lid": 149279, "cid": 3462, "name": "حي الخضراء 1", "locality": "بيش", "verdict": "middle", "lat": 17.459305, "lng": 42.541046}
+{"st": "aqar_residential_listings", "lid": 149284, "cid": 3462, "name": "حي الخضراء 1", "locality": "بيش", "verdict": "middle", "lat": 17.460194, "lng": 42.539604}
+{"st": "aqar_residential_listings", "lid": 149290, "cid": 3462, "name": "حي الخضراء 1", "locality": "بيش", "verdict": "middle", "lat": 17.45816, "lng": 42.526235}
+{"st": "aqar_residential_listings", "lid": 149294, "cid": 3462, "name": "حي الخضراء 1", "locality": "بيش", "verdict": "middle", "lat": 17.451071, "lng": 42.513615}
+{"st": "aqar_residential_listings", "lid": 149296, "cid": 3462, "name": "حي الخضراء 1", "locality": "بيش", "verdict": "middle", "lat": 17.446498, "lng": 42.525605}
+{"st": "aqar_residential_listings", "lid": 149308, "cid": 3462, "name": null, "locality": "غوان", "verdict": "silent", "lat": 17.309146, "lng": 42.599737}
+{"st": "aqar_residential_listings", "lid": 149327, "cid": 3462, "name": "حي الخضراء 1", "locality": "بيش", "verdict": "middle", "lat": 17.45906, "lng": 42.541325}
+{"st": "aqar_residential_listings", "lid": 149335, "cid": 3462, "name": "حي القائم", "locality": "الدرب", "verdict": "middle", "lat": 17.747476, "lng": 42.264694}
+{"st": "aqar_residential_listings", "lid": 149344, "cid": 3462, "name": "حي الخضراء 1", "locality": "بيش", "verdict": "middle", "lat": 17.448877, "lng": 42.518555}
+{"st": "aqar_residential_listings", "lid": 149547, "cid": 3462, "name": null, "locality": "السلام العليا", "verdict": "silent", "lat": 17.32056, "lng": 42.526042}
+{"st": "aqar_residential_listings", "lid": 149665, "cid": 3462, "name": null, "locality": "الملحاة", "verdict": "silent", "lat": 17.29822, "lng": 42.599737}
+{"st": "aqar_residential_listings", "lid": 149676, "cid": 3462, "name": "مسلية", "locality": "بيش", "verdict": "middle", "lat": 17.463851, "lng": 42.553482}
+{"st": "aqar_residential_listings", "lid": 149700, "cid": 3462, "name": "الحجروف", "locality": "بيش", "verdict": "edge", "lat": 17.390931, "lng": 42.461779}
+{"st": "aqar_residential_listings", "lid": 149701, "cid": 3462, "name": "القاع", "locality": "الدرب", "verdict": "middle", "lat": 17.723579, "lng": 42.071885}
+{"st": "aqar_residential_listings", "lid": 149731, "cid": 3462, "name": null, "locality": "بيش", "verdict": "silent", "lat": 17.379727, "lng": 42.387008}
+{"st": "aqar_residential_listings", "lid": 149733, "cid": 3462, "name": "الحجروف", "locality": "بيش", "verdict": "edge", "lat": 17.391833, "lng": 42.367682}
+{"st": "aqar_residential_listings", "lid": 149761, "cid": 3462, "name": null, "locality": "غوان", "verdict": "silent", "lat": 17.306348410794644, "lng": 42.599141597069796}
+{"st": "aqar_residential_listings", "lid": 149762, "cid": 3462, "name": null, "locality": "غوان", "verdict": "silent", "lat": 17.31609, "lng": 42.606821}
+{"st": "aqar_residential_listings", "lid": 149777, "cid": 3462, "name": null, "locality": "الملحاة", "verdict": "silent", "lat": 17.2921395911139, "lng": 42.602727238910376}
+{"st": "aqar_residential_listings", "lid": 149793, "cid": 3462, "name": null, "locality": "الملحاة", "verdict": "silent", "lat": 17.29671, "lng": 42.597624}
+{"st": "aqar_residential_listings", "lid": 149829, "cid": 3462, "name": "حي الخالدية", "locality": "بيش", "verdict": "middle", "lat": 17.392403, "lng": 42.492443}
+{"st": "aqar_residential_listings", "lid": 149841, "cid": 3462, "name": "حي الخضراء 1", "locality": "بيش", "verdict": "middle", "lat": 17.454723, "lng": 42.519264}
+{"st": "aqar_residential_listings", "lid": 154632, "cid": 2715, "name": null, "locality": "امارة منطقة حائل", "verdict": "silent", "lat": 26.795037, "lng": 41.68045}
+{"st": "aqar_residential_listings", "lid": 154636, "cid": 2715, "name": "الجفن", "locality": "عقلة الصقور", "verdict": "middle", "lat": 25.644722, "lng": 41.616501}
+{"st": "aqar_residential_listings", "lid": 154648, "cid": 2715, "name": null, "locality": "عقلة الصقور", "verdict": "silent", "lat": 25.640983, "lng": 41.618882}
+{"st": "aqar_residential_listings", "lid": 154649, "cid": 2715, "name": null, "locality": "الغزالة", "verdict": "silent", "lat": 26.832317, "lng": 41.330075}
+{"st": "aqar_residential_listings", "lid": 154650, "cid": 2715, "name": "الروضة", "locality": "امارة منطقة حائل", "verdict": "edge", "lat": 26.786348, "lng": 41.672413}
+{"st": "aqar_residential_listings", "lid": 154658, "cid": 2715, "name": null, "locality": "امارة منطقة حائل", "verdict": "silent", "lat": 26.761274, "lng": 41.705421}
+{"st": "aqar_residential_listings", "lid": 154663, "cid": 2715, "name": null, "locality": "امارة منطقة حائل", "verdict": "silent", "lat": 26.758955, "lng": 41.704405}
+{"st": "aqar_residential_listings", "lid": 154674, "cid": 2715, "name": null, "locality": "الغزالة", "verdict": "silent", "lat": 26.827092, "lng": 41.32793}
+{"st": "aqar_residential_listings", "lid": 154675, "cid": 2715, "name": "الروضة", "locality": "امارة منطقة حائل", "verdict": "middle", "lat": 26.770006, "lng": 41.689125}
+{"st": "aqar_residential_listings", "lid": 154678, "cid": 2715, "name": "الروضة", "locality": "امارة منطقة حائل", "verdict": "middle", "lat": 26.77266, "lng": 41.694402}
+{"st": "aqar_residential_listings", "lid": 154691, "cid": 2715, "name": "الروضة", "locality": "امارة منطقة حائل", "verdict": "middle", "lat": 26.761747, "lng": 41.693089}
+{"st": "aqar_residential_listings", "lid": 154744, "cid": 2715, "name": null, "locality": "الشملي", "verdict": "silent", "lat": 26.943092, "lng": 40.222203}
+{"st": "aqar_residential_listings", "lid": 154810, "cid": 2715, "name": null, "locality": "الشملي", "verdict": "silent", "lat": 26.987493, "lng": 40.273269}
+{"st": "aqar_residential_listings", "lid": 154827, "cid": 2715, "name": null, "locality": "الغزالة", "verdict": "silent", "lat": 26.786726, "lng": 41.316712}
+{"st": "aqar_residential_listings", "lid": 154832, "cid": 2715, "name": null, "locality": "الغزالة", "verdict": "silent", "lat": 26.831414, "lng": 41.329285}
+{"st": "aqar_residential_listings", "lid": 154856, "cid": 2715, "name": null, "locality": "امارة منطقة حائل", "verdict": "silent", "lat": 26.758762, "lng": 41.704334}
+{"st": "aqar_residential_listings", "lid": 154859, "cid": 2715, "name": null, "locality": "الغزالة", "verdict": "silent", "lat": 26.827556, "lng": 41.32307}
+{"st": "aqar_residential_listings", "lid": 154872, "cid": 2715, "name": null, "locality": "الغزالة", "verdict": "silent", "lat": 26.774389, "lng": 41.317608}
+{"st": "aqar_residential_listings", "lid": 156184, "cid": 2370, "name": null, "locality": "الشنان", "verdict": "silent", "lat": 27.543053, "lng": 42.213939}
+{"st": "aqar_residential_listings", "lid": 156188, "cid": 2370, "name": "اللويمي", "locality": "بقعاء", "verdict": "middle", "lat": 27.914375, "lng": 42.350672}
+{"st": "aqar_residential_listings", "lid": 156190, "cid": 2374, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.886448, "lng": 42.690027}
+{"st": "aqar_residential_listings", "lid": 156195, "cid": 2374, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.878913, "lng": 42.672738}
+{"st": "aqar_residential_listings", "lid": 156252, "cid": 2370, "name": "اللويمي", "locality": "بقعاء", "verdict": "edge", "lat": 27.911951, "lng": 42.349695}
+{"st": "aqar_residential_listings", "lid": 156288, "cid": 2370, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.849943, "lng": 42.545897}
+{"st": "aqar_residential_listings", "lid": 156291, "cid": 2370, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.821754, "lng": 42.551386}
+{"st": "aqar_residential_listings", "lid": 156330, "cid": 2370, "name": "حي الحفل", "locality": "بقعاء", "verdict": "edge", "lat": 27.924770853079202, "lng": 42.40184294085075}
+{"st": "aqar_residential_listings", "lid": 156339, "cid": 2370, "name": "حي ج9", "locality": "بقعاء", "verdict": "edge", "lat": 27.899765, "lng": 42.40635}
+{"st": "aqar_residential_listings", "lid": 156348, "cid": 2370, "name": "اللويمي", "locality": "بقعاء", "verdict": "middle", "lat": 27.93207, "lng": 42.372743}
+{"st": "aqar_residential_listings", "lid": 156374, "cid": 2370, "name": "حي ج6", "locality": "بقعاء", "verdict": "middle", "lat": 27.954218, "lng": 42.412839}
+{"st": "aqar_residential_listings", "lid": 156375, "cid": 2370, "name": "حي بقعاء الشرقيه", "locality": "بقعاء", "verdict": "middle", "lat": 27.860117, "lng": 42.464303}
+{"st": "aqar_residential_listings", "lid": 156420, "cid": 2370, "name": "المندسة الشرقية", "locality": "امارة منطقة حائل", "verdict": "middle", "lat": 27.976953, "lng": 42.002423}
+{"st": "aqar_residential_listings", "lid": 156422, "cid": 2370, "name": "اللويمي", "locality": "بقعاء", "verdict": "middle", "lat": 27.901499, "lng": 42.365501}
+{"st": "aqar_residential_listings", "lid": 156443, "cid": 2370, "name": "ضبيعة", "locality": "بقعاء", "verdict": "middle", "lat": 27.970007, "lng": 42.2507}
+{"st": "aqar_residential_listings", "lid": 156446, "cid": 2374, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.895745, "lng": 42.685559}
+{"st": "aqar_residential_listings", "lid": 156466, "cid": 2370, "name": "حي ج2", "locality": "بقعاء", "verdict": "middle", "lat": 27.923335, "lng": 42.368976}
+{"st": "aqar_residential_listings", "lid": 156472, "cid": 2370, "name": "حي الحفل", "locality": "بقعاء", "verdict": "middle", "lat": 27.93105, "lng": 42.393367}
+{"st": "aqar_residential_listings", "lid": 156481, "cid": 17476, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.670696, "lng": 42.551994}
+{"st": "aqar_residential_listings", "lid": 156514, "cid": 2370, "name": "الشعيبة", "locality": "بقعاء", "verdict": "middle", "lat": 27.841994, "lng": 42.774881}
+{"st": "aqar_residential_listings", "lid": 156523, "cid": 2374, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.883307, "lng": 42.664364}
+{"st": "aqar_residential_listings", "lid": 156528, "cid": 2370, "name": "حي الحفل", "locality": "بقعاء", "verdict": "middle", "lat": 27.928164, "lng": 42.397547}
+{"st": "aqar_residential_listings", "lid": 156529, "cid": 2370, "name": "الشعيبة", "locality": "بقعاء", "verdict": "middle", "lat": 27.841986, "lng": 42.774936}
+{"st": "aqar_residential_listings", "lid": 156547, "cid": 2370, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.604964, "lng": 42.291416}
+{"st": "aqar_residential_listings", "lid": 156567, "cid": 2370, "name": "حي بقعاء الشرقيه", "locality": "بقعاء", "verdict": "middle", "lat": 27.864446, "lng": 42.454168}
+{"st": "aqar_residential_listings", "lid": 156570, "cid": 2370, "name": "حي الحفل", "locality": "بقعاء", "verdict": "middle", "lat": 27.921358, "lng": 42.399077}
+{"st": "aqar_residential_listings", "lid": 156571, "cid": 2370, "name": "حي ج6", "locality": "بقعاء", "verdict": "middle", "lat": 27.953916, "lng": 42.413469}
+{"st": "aqar_residential_listings", "lid": 156575, "cid": 2370, "name": "حي ج2", "locality": "بقعاء", "verdict": "middle", "lat": 27.924835, "lng": 42.354347}
+{"st": "aqar_residential_listings", "lid": 156578, "cid": 2370, "name": "الفويلق 1", "locality": "بقعاء", "verdict": "edge", "lat": 27.564272, "lng": 42.609931}
+{"st": "aqar_residential_listings", "lid": 156587, "cid": 2370, "name": "حي بقعاء الشرقيه", "locality": "بقعاء", "verdict": "middle", "lat": 27.862514, "lng": 42.453926}
+{"st": "aqar_residential_listings", "lid": 156603, "cid": 2370, "name": "الشيحية", "locality": "بقعاء", "verdict": "middle", "lat": 27.899038, "lng": 42.688744}
+{"st": "aqar_residential_listings", "lid": 156611, "cid": 2370, "name": "حي الحفل", "locality": "بقعاء", "verdict": "edge", "lat": 27.924397, "lng": 42.401865}
+{"st": "aqar_residential_listings", "lid": 165189, "cid": 939, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.288478, "lng": 43.848784}
+{"st": "aqar_residential_listings", "lid": 165523, "cid": 939, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.280639, "lng": 43.837764}
+{"st": "aqar_residential_listings", "lid": 165682, "cid": 939, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.297217, "lng": 43.860839}
+{"st": "aqar_residential_listings", "lid": 170295, "cid": 939, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.298417, "lng": 43.860354}
+{"st": "aqar_residential_listings", "lid": 170300, "cid": 939, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.2866, "lng": 43.853157}
+{"st": "aqar_residential_listings", "lid": 170487, "cid": 953, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.228628, "lng": 43.89357}
+{"st": "aqar_residential_listings", "lid": 170821, "cid": 953, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.22519, "lng": 43.890328}
+{"st": "aqar_residential_listings", "lid": 171779, "cid": 939, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.314057, "lng": 43.788181}
+{"st": "aqar_residential_listings", "lid": 171784, "cid": 939, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.2866, "lng": 43.853157}
+{"st": "aqar_residential_listings", "lid": 172251, "cid": 953, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.225078, "lng": 43.89025}
+{"st": "aqar_residential_listings", "lid": 172409, "cid": 953, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.224968, "lng": 43.88999}
+{"st": "aqar_residential_listings", "lid": 172539, "cid": 939, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.294626, "lng": 43.864756}
+{"st": "aqar_residential_listings", "lid": 173857, "cid": 939, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.313976, "lng": 43.788177}
+{"st": "aqar_residential_listings", "lid": 174297, "cid": 939, "name": "بريدة", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.298274, "lng": 43.855333}
+{"st": "aqar_residential_listings", "lid": 195702, "cid": 664, "name": null, "locality": "ضرما", "verdict": "silent", "lat": 24.733583, "lng": 46.392506}
+{"st": "aqar_residential_listings", "lid": 195950, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.741221, "lng": 46.497673}
+{"st": "aqar_residential_listings", "lid": 195965, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.743344, "lng": 46.499429}
+{"st": "aqar_residential_listings", "lid": 200249, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.112173, "lng": 39.140159}
+{"st": "aqar_residential_listings", "lid": 200286, "cid": 664, "name": "العمارية", "locality": "ضرما", "verdict": "middle", "lat": 24.726918, "lng": 46.410669}
+{"st": "aqar_residential_listings", "lid": 200433, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.181309, "lng": 39.117933}
+{"st": "aqar_residential_listings", "lid": 200438, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.102988, "lng": 39.150815}
+{"st": "aqar_residential_listings", "lid": 200445, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.181643, "lng": 39.134056}
+{"st": "aqar_residential_listings", "lid": 200450, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.777529, "lng": 46.393524}
+{"st": "aqar_residential_listings", "lid": 200452, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.194541, "lng": 39.124595}
+{"st": "aqar_residential_listings", "lid": 200626, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.18114, "lng": 39.132833}
+{"st": "aqar_residential_listings", "lid": 200636, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.204131, "lng": 39.124092}
+{"st": "aqar_residential_listings", "lid": 200644, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.200166, "lng": 39.134168}
+{"st": "aqar_residential_listings", "lid": 200650, "cid": 1879, "name": "حي الهجرة", "locality": "جدة", "verdict": "middle", "lat": 22.160338, "lng": 39.148497}
+{"st": "aqar_residential_listings", "lid": 200732, "cid": 664, "name": null, "locality": "ضرما", "verdict": "silent", "lat": 24.730347, "lng": 46.393723}
+{"st": "aqar_residential_listings", "lid": 200733, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.758665, "lng": 46.345085}
+{"st": "aqar_residential_listings", "lid": 200898, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.756085, "lng": 46.342593}
+{"st": "aqar_residential_listings", "lid": 200907, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.774408, "lng": 46.38414}
+{"st": "aqar_residential_listings", "lid": 201309, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.106273, "lng": 39.132677}
+{"st": "aqar_residential_listings", "lid": 201692, "cid": 1879, "name": null, "locality": "جدة", "verdict": "silent", "lat": 22.081705, "lng": 39.11795}
+{"st": "aqar_residential_listings", "lid": 326594, "cid": 664, "name": null, "locality": "الدرعية", "verdict": "silent", "lat": 24.781602, "lng": 46.342306}
+{"st": "aqar_residential_listings", "lid": 326598, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.775416, "lng": 46.394188}
+{"st": "aqar_residential_listings", "lid": 326605, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.742696, "lng": 46.504655}
+{"st": "aqar_residential_listings", "lid": 326707, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.774674, "lng": 46.40426}
+{"st": "aqar_residential_listings", "lid": 326709, "cid": 664, "name": null, "locality": "الدرعية", "verdict": "silent", "lat": 24.787097, "lng": 46.380245}
+{"st": "aqar_residential_listings", "lid": 326911, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.777895, "lng": 46.405538}
+{"st": "aqar_residential_listings", "lid": 326916, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.757288, "lng": 46.347828}
+{"st": "aqar_residential_listings", "lid": 395327, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.761246, "lng": 46.335133}
+{"st": "aqar_residential_listings", "lid": 407899, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.754783, "lng": 46.35206}
+{"st": "aqar_residential_listings", "lid": 665710, "cid": 294, "name": "حي النخيل", "locality": "رماح", "verdict": "edge", "lat": 25.548345, "lng": 47.171052}
+{"st": "aqar_residential_listings", "lid": 671084, "cid": 2777, "name": "حي السلام", "locality": "الشماسية", "verdict": "middle", "lat": 26.292164, "lng": 44.255553}
+{"st": "aqar_residential_listings", "lid": 671567, "cid": 664, "name": "حي الدرعية الجديدة", "locality": "الدرعية", "verdict": "edge", "lat": 24.753992, "lng": 46.543786}
+{"st": "aqar_residential_listings", "lid": 673605, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.74221, "lng": 46.512469}
+{"st": "aqar_residential_listings", "lid": 673715, "cid": 664, "name": null, "locality": "الدرعية", "verdict": "silent", "lat": 24.794318, "lng": 46.382498}
+{"st": "aqar_residential_listings", "lid": 741770, "cid": 1390, "name": "حي رقم 5", "locality": "الليث", "verdict": "middle", "lat": 20.128288, "lng": 40.269775}
+{"st": "aqar_residential_listings", "lid": 768928, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.190465, "lng": 39.127243}
+{"st": "aqar_residential_listings", "lid": 772358, "cid": 664, "name": null, "locality": "الدرعية", "verdict": "silent", "lat": 24.758095, "lng": 46.329376}
+{"st": "aqar_residential_listings", "lid": 772364, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.766579, "lng": 46.430621}
+{"st": "aqar_residential_listings", "lid": 772375, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.748375, "lng": 46.505034}
+{"st": "aqar_residential_listings", "lid": 772417, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.774071, "lng": 46.437092}
+{"st": "aqar_residential_listings", "lid": 772441, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.758094, "lng": 46.333189}
+{"st": "aqar_residential_listings", "lid": 772492, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "edge", "lat": 24.736477, "lng": 46.51473}
+{"st": "aqar_residential_listings", "lid": 773242, "cid": 2370, "name": "ضبيعة", "locality": "بقعاء", "verdict": "middle", "lat": 27.97001, "lng": 42.250807}
+{"st": "aqar_residential_listings", "lid": 849425, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.749837, "lng": 46.363323}
+{"st": "aqar_residential_listings", "lid": 850600, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.804855, "lng": 46.406297}
+{"st": "aqar_residential_listings", "lid": 850681, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.763936, "lng": 46.333914}
+{"st": "aqar_residential_listings", "lid": 850701, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.741497630610706, "lng": 46.50835632636255}
+{"st": "aqar_residential_listings", "lid": 850994, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "edge", "lat": 24.807627, "lng": 46.398808}
+{"st": "aqar_residential_listings", "lid": 933356, "cid": 3030, "name": "السيح", "locality": "رياض الخبراء", "verdict": "edge", "lat": 25.99008, "lng": 43.225415}
+{"st": "aqar_residential_listings", "lid": 933834, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.783973, "lng": 46.399719}
+{"st": "aqar_residential_listings", "lid": 981929, "cid": 3030, "name": "عماير سعيدة", "locality": "عقلة الصقور", "verdict": "middle", "lat": 25.778666, "lng": 42.034436}
+{"st": "aqar_residential_listings", "lid": 985697, "cid": 2715, "name": null, "locality": "الشملي", "verdict": "silent", "lat": 26.97101, "lng": 40.278684}
+{"st": "aqar_residential_listings", "lid": 999066, "cid": 1879, "name": "حي ثول", "locality": "جدة", "verdict": "middle", "lat": 22.272527, "lng": 39.118536}
+{"st": "aqar_residential_listings", "lid": 1016456, "cid": 664, "name": "حي الدرعية الجديدة", "locality": "الدرعية", "verdict": "middle", "lat": 24.750543422326402, "lng": 46.5322139959853}
+{"st": "aqar_residential_listings", "lid": 1019061, "cid": 664, "name": null, "locality": "الدرعية", "verdict": "silent", "lat": 24.789066, "lng": 46.358384}
+{"st": "aqar_residential_listings", "lid": 1019726, "cid": 777, "name": "حي الصويدرة", "locality": "امارة منطقة المدينة المنورة", "verdict": "middle", "lat": 24.880413, "lng": 40.111133}
+{"st": "aqar_residential_listings", "lid": 1108886, "cid": 3462, "name": "القاع", "locality": "الدرب", "verdict": "middle", "lat": 17.733147, "lng": 42.08997}
+{"st": "aqar_residential_listings", "lid": 1167619, "cid": 777, "name": "حي الامارة", "locality": "الحناكية", "verdict": "edge", "lat": 24.873314, "lng": 40.534915}
+{"st": "aqar_residential_listings", "lid": 1223280, "cid": 1150, "name": "مشرق", "locality": "الكامل", "verdict": "edge", "lat": 22.572423, "lng": 39.858874}
+{"st": "aqar_residential_listings", "lid": 1224859, "cid": 294, "name": "حي الصناعية", "locality": "رماح", "verdict": "middle", "lat": 25.537109, "lng": 47.157833}
+{"st": "aqar_residential_listings", "lid": 1229059, "cid": 3030, "name": null, "locality": "امارة منطقة القصيم", "verdict": "silent", "lat": 26.036554, "lng": 42.823707}
+{"st": "aqar_residential_listings", "lid": 1244372, "cid": 3462, "name": "حي الخالدية", "locality": "بيش", "verdict": "middle", "lat": 17.377631892593623, "lng": 42.5215091824511}
+{"st": "aqar_residential_listings", "lid": 1245202, "cid": 3542, "name": "حي النزهة", "locality": "صامطة", "verdict": "edge", "lat": 16.625624, "lng": 42.911413}
+{"st": "aqar_residential_listings", "lid": 1253674, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "edge", "lat": 24.787856, "lng": 46.377254}
+{"st": "aqar_residential_listings", "lid": 1255825, "cid": 3030, "name": null, "locality": "امارة منطقة القصيم", "verdict": "silent", "lat": 26.053471, "lng": 43.19179}
+{"st": "aqar_residential_listings", "lid": 1255829, "cid": 3030, "name": null, "locality": "امارة منطقة القصيم", "verdict": "silent", "lat": 25.910692, "lng": 43.168295}
+{"st": "aqar_residential_listings", "lid": 1261162, "cid": 2715, "name": null, "locality": "امارة منطقة حائل", "verdict": "silent", "lat": 26.796886, "lng": 41.681335}
+{"st": "aqar_residential_listings", "lid": 1311161, "cid": 777, "name": "حي الحناكية", "locality": "الحناكية", "verdict": "middle", "lat": 24.864889, "lng": 40.519761}
+{"st": "aqar_residential_listings", "lid": 1311666, "cid": 777, "name": "الحسو", "locality": "الحناكية", "verdict": "edge", "lat": 24.61534, "lng": 41.618206}
+{"st": "aqar_residential_listings", "lid": 1340407, "cid": 664, "name": null, "locality": "ضرما", "verdict": "silent", "lat": 24.732516, "lng": 46.392322}
+{"st": "aqar_residential_listings", "lid": 1340438, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.762314, "lng": 46.333788}
+{"st": "aqar_residential_listings", "lid": 1340465, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.762472, "lng": 46.350165}
+{"st": "aqar_residential_listings", "lid": 1340466, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "edge", "lat": 24.748714957736613, "lng": 46.52063609460566}
+{"st": "aqar_residential_listings", "lid": 1340544, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.803299, "lng": 46.419022}
+{"st": "aqar_residential_listings", "lid": 1340555, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "edge", "lat": 24.780121, "lng": 46.34515}
+{"st": "aqar_residential_listings", "lid": 1340583, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.778567, "lng": 46.39997}
+{"st": "aqar_residential_listings", "lid": 1340584, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "edge", "lat": 24.809183, "lng": 46.412634}
+{"st": "aqar_residential_listings", "lid": 1340588, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.779592, "lng": 46.404144}
+{"st": "aqar_residential_listings", "lid": 1340629, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.755813233449175, "lng": 46.35587130735025}
+{"st": "aqar_residential_listings", "lid": 1350625, "cid": 777, "name": "الصويدرة", "locality": "امارة منطقة المدينة المنورة", "verdict": "middle", "lat": 24.716643, "lng": 40.140365}
+{"st": "aqar_residential_listings", "lid": 1350810, "cid": 777, "name": "حي الصويدرة", "locality": "امارة منطقة المدينة المنورة", "verdict": "middle", "lat": 24.734838, "lng": 40.220342}
+{"st": "aqar_residential_listings", "lid": 1356201, "cid": 2370, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.778296, "lng": 42.551716}
+{"st": "aqar_residential_listings", "lid": 1368311, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.109251, "lng": 39.127889}
+{"st": "aqar_residential_listings", "lid": 1368438, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.18015, "lng": 39.117573}
+{"st": "aqar_residential_listings", "lid": 1368454, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.111185, "lng": 39.134069}
+{"st": "aqar_residential_listings", "lid": 1368456, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.199137, "lng": 39.131188}
+{"st": "aqar_residential_listings", "lid": 1376556, "cid": 777, "name": "الصمد", "locality": "الحناكية", "verdict": "middle", "lat": 25.057216, "lng": 40.441201}
+{"st": "aqar_residential_listings", "lid": 1376567, "cid": 777, "name": null, "locality": "الحناكية", "verdict": "silent", "lat": 24.81881457408796, "lng": 40.47702813196276}
+{"st": "aqar_residential_listings", "lid": 1459497, "cid": 1150, "name": null, "locality": "الجيشي", "verdict": "silent", "lat": 22.005895, "lng": 40.002022}
+{"st": "aqar_residential_listings", "lid": 1462003, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.735471477979587, "lng": 46.509097121330896}
+{"st": "aqar_residential_listings", "lid": 1463807, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.111307, "lng": 39.126493}
+{"st": "aqar_residential_listings", "lid": 1465870, "cid": 456, "name": "واجهة الدمام البحرية", "locality": "القطيف", "verdict": "edge", "lat": 26.544222, "lng": 50.069863}
+{"st": "aqar_residential_listings", "lid": 1481136, "cid": 777, "name": "الصويدرة", "locality": "امارة منطقة المدينة المنورة", "verdict": "middle", "lat": 24.687712, "lng": 40.130625}
+{"st": "aqar_residential_listings", "lid": 1484206, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.102956, "lng": 39.142842}
+{"st": "aqar_residential_listings", "lid": 1484379, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.183108, "lng": 39.120086}
+{"st": "aqar_residential_listings", "lid": 1531541, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.757511, "lng": 46.346618}
+{"st": "aqar_residential_listings", "lid": 1541595, "cid": 2370, "name": "حي صلاح الدين", "locality": "بقعاء", "verdict": "edge", "lat": 27.910098, "lng": 42.343591}
+{"st": "aqar_residential_listings", "lid": 1550760, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.757477, "lng": 46.346772}
+{"st": "aqar_residential_listings", "lid": 1621702, "cid": 2370, "name": "حي صلاح الدين", "locality": "بقعاء", "verdict": "middle", "lat": 27.905662, "lng": 42.349582}
+{"st": "aqar_residential_listings", "lid": 1630349, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.192691, "lng": 39.129899}
+{"st": "aqar_residential_listings", "lid": 1708037, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.10643, "lng": 39.127435}
+{"st": "aqar_residential_listings", "lid": 1708236, "cid": 1879, "name": "حي الهجرة", "locality": "جدة", "verdict": "middle", "lat": 22.160162, "lng": 39.138069}
+{"st": "aqar_residential_listings", "lid": 1753057, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.171549, "lng": 39.145544}
+{"st": "aqar_residential_listings", "lid": 1753073, "cid": 1879, "name": "حي البوادر", "locality": "جدة", "verdict": "middle", "lat": 22.11718, "lng": 39.127146}
+{"st": "aqar_residential_listings", "lid": 1771840, "cid": 777, "name": "الصويدرة", "locality": "امارة منطقة المدينة المنورة", "verdict": "middle", "lat": 24.690689, "lng": 40.140297}
+{"st": "aqar_residential_listings", "lid": 1848169, "cid": 3030, "name": "حي الشفاء", "locality": "عقلة الصقور", "verdict": "middle", "lat": 25.828978, "lng": 42.181273}
+{"st": "aqar_residential_listings", "lid": 1858460, "cid": 2156, "name": null, "locality": "بقعاء", "verdict": "silent", "lat": 27.698142, "lng": 43.042767}
+{"st": "aqar_residential_listings", "lid": 2016695, "cid": 1879, "name": "حي أم سدرة", "locality": "جدة", "verdict": "middle", "lat": 22.127219, "lng": 39.144313}
+{"st": "aqar_residential_listings", "lid": 2106507, "cid": 3462, "name": null, "locality": "غوان", "verdict": "silent", "lat": 17.308361, "lng": 42.602325}
+{"st": "aqar_residential_listings", "lid": 2269995, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "edge", "lat": 24.789563, "lng": 46.336096}
+{"st": "aqar_residential_listings", "lid": 2317500, "cid": 2800, "name": "حي الدار البيضاء 2", "locality": "العثيثي", "verdict": "edge", "lat": 21.216334, "lng": 42.926854}
+{"st": "aqar_residential_listings", "lid": 2476148, "cid": 1879, "name": "ثول", "locality": "جدة", "verdict": "middle", "lat": 22.174547, "lng": 39.126194}
+{"st": "aqar_residential_listings", "lid": 2519393, "cid": 1150, "name": "حي ج3", "locality": "الكامل", "verdict": "edge", "lat": 22.206948, "lng": 39.780157}
+{"st": "aqar_residential_listings", "lid": 2539745, "cid": 3030, "name": "الذيبية", "locality": "امارة منطقة القصيم", "verdict": "middle", "lat": 26.023438, "lng": 43.153565}
+{"st": "aqar_residential_listings", "lid": 2637775, "cid": 664, "name": null, "locality": "ضرما", "verdict": "silent", "lat": 24.733504, "lng": 46.39014}
+{"st": "aqar_residential_listings", "lid": 2639753, "cid": 3030, "name": null, "locality": "امارة منطقة القصيم", "verdict": "silent", "lat": 26.037215, "lng": 43.160489}
+{"st": "aqar_residential_listings", "lid": 2644345, "cid": 2370, "name": "حي صلاح الدين", "locality": "بقعاء", "verdict": "middle", "lat": 27.904894, "lng": 42.347266}
+{"st": "aqar_residential_listings", "lid": 2713556, "cid": 2715, "name": null, "locality": "الشملي", "verdict": "silent", "lat": 26.9426, "lng": 40.222243}
+{"st": "aqar_residential_listings", "lid": 2826142, "cid": 664, "name": null, "locality": "الدرعية", "verdict": "silent", "lat": 24.7781, "lng": 46.360362}
+{"st": "aqar_residential_listings", "lid": 2923861, "cid": 2715, "name": null, "locality": "الشقيق", "verdict": "silent", "lat": 27.181331, "lng": 40.911608}
+{"st": "aqar_residential_listings", "lid": 2923874, "cid": 2715, "name": null, "locality": "الفرحانية", "verdict": "silent", "lat": 27.300828, "lng": 40.948459}
+{"st": "aqar_residential_listings", "lid": 3009729, "cid": 664, "name": null, "locality": "الدرعية", "verdict": "silent", "lat": 24.778738, "lng": 46.360523}
+{"st": "aqar_residential_listings", "lid": 3009732, "cid": 664, "name": "العمارية", "locality": "الدرعية", "verdict": "middle", "lat": 24.776103, "lng": 46.413389}
+{"st": "aqar_residential_listings", "lid": 3015098, "cid": 777, "name": "حي الحناكية", "locality": "الحناكية", "verdict": "middle", "lat": 24.865453, "lng": 40.532346}
+{"st": "aqar_residential_listings", "lid": 3015575, "cid": 777, "name": "حي الصويدرة", "locality": "امارة منطقة المدينة المنورة", "verdict": "middle", "lat": 24.675873, "lng": 40.129748}
+{"st": "aqar_residential_listings", "lid": 3022507, "cid": 2715, "name": null, "locality": "الفرحانية", "verdict": "silent", "lat": 27.299407, "lng": 40.94735}
+{"st": "aqar_residential_listings", "lid": 3076878, "cid": 3542, "name": "حي النزهة", "locality": "صامطة", "verdict": "edge", "lat": 16.626871, "lng": 42.912803}
+{"st": "aqar_residential_listings", "lid": 3178221, "cid": 664, "name": "حي ظهرة العودة غرب", "locality": "الدرعية", "verdict": "middle", "lat": 24.741251191817156, "lng": 46.50062706566358}

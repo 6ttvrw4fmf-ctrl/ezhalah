@@ -7,15 +7,39 @@
 //
 // Env: APPLE_MAPS_P8 (the .p8 contents), APPLE_MAPS_KEY_ID, APPLE_MAPS_TEAM_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 // PIN_MAX_ADS (default 600 → ≤ 3,000 Apple calls of the 25,000/day quota). DRY_RUN=1 asks Apple but posts nothing.
+// PIN_LOAD_FROM=<jsonl> replays a batch of Apple answers already saved (one JSON per line: st, lid, cid, name, locality,
+// verdict, lat, lng) with PIN_RUN_ID (apple-ring-YYYY-MM-DD): no Apple call, the same loader, the same guards.
 import { createSign } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 const env = (k, optional = false) => {
   const v = process.env[k];
   if (!v && !optional) { console.error(`missing env ${k}`); process.exit(78); }
   return v;
 };
-const P8 = env("APPLE_MAPS_P8"), KEY_ID = env("APPLE_MAPS_KEY_ID"), TEAM_ID = env("APPLE_MAPS_TEAM_ID");
 const SB = env("SUPABASE_URL").replace(/\/$/, ""), SR = env("SUPABASE_SERVICE_ROLE_KEY");
+const sbHeaders = { apikey: SR, Authorization: `Bearer ${SR}` };
+async function load(rows, runId) {
+  const r = await fetch(`${SB}/rest/v1/rpc/pin_district_load`, {
+    method: "POST", headers: { ...sbHeaders, "Content-Type": "application/json" },
+    body: JSON.stringify({ p_rows: rows, p_run_id: runId }),
+  });
+  const text = await r.text();
+  if (!r.ok) { console.error(`pin_district_load ${r.status}: ${text.slice(0, 500)}`); process.exit(1); }
+  console.log(`loaded: ${text}`);
+}
+if (process.env.PIN_LOAD_FROM) {
+  const runId = env("PIN_RUN_ID");
+  const rows = readFileSync(process.env.PIN_LOAD_FROM, "utf8").trim().split("\n").filter(Boolean).map((l) => {
+    const j = JSON.parse(l);
+    return { st: j.st, lid: j.lid, cid: j.cid, name: j.name ?? null, locality: j.locality ?? null, verdict: j.verdict, lat: j.lat, lng: j.lng };
+  });
+  console.log(`replaying ${rows.length} saved Apple answers as ${runId}`);
+  await load(rows, runId);
+  process.exit(0);
+}
+
+const P8 = env("APPLE_MAPS_P8"), KEY_ID = env("APPLE_MAPS_KEY_ID"), TEAM_ID = env("APPLE_MAPS_TEAM_ID");
 const MAX = Number(process.env.PIN_MAX_ADS || 600);
 const DRY = process.env.DRY_RUN === "1";
 const RUN_ID = `apple-nightly-${new Date().toISOString().slice(0, 10)}`;
@@ -31,7 +55,6 @@ async function accessToken() {
 }
 
 // 1. candidates: served, blank district, has a pin (the service key reads the same public index)
-const sbHeaders = { apikey: SR, Authorization: `Bearer ${SR}` };
 const cands = [];
 for (let from = 0; cands.length < MAX; from += 1000) {
   const r = await fetch(`${SB}/rest/v1/search_listings_ar?select=source_table,listing_id,city_id,latitude,longitude&production_ready=eq.true&district_ar=is.null&latitude=not.is.null&longitude=not.is.null&city_id=not.is.null&order=last_updated.desc,source_table,listing_id`,
@@ -111,10 +134,4 @@ console.log(`asked ${rows.length} · middle ${by("middle")} · edge ${by("edge")
 // 3. load (every guard lives in the database)
 if (DRY) { console.log("DRY_RUN: nothing posted"); process.exit(0); }
 if (rows.length === 0) { console.log("nothing to load"); process.exit(0); }
-const r = await fetch(`${SB}/rest/v1/rpc/pin_district_load`, {
-  method: "POST", headers: { ...sbHeaders, "Content-Type": "application/json" },
-  body: JSON.stringify({ p_rows: rows, p_run_id: RUN_ID }),
-});
-const text = await r.text();
-if (!r.ok) { console.error(`pin_district_load ${r.status}: ${text.slice(0, 500)}`); process.exit(1); }
-console.log(`loaded: ${text}`);
+await load(rows, RUN_ID);

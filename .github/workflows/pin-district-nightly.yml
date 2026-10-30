@@ -15,6 +15,12 @@ on:
       dry_run:
         description: 'true = ask Apple, post nothing'
         default: 'false'
+      load_file:
+        description: 'Replay saved Apple answers from this JSONL in the repo instead of asking Apple (e.g. data/pin-batches/apple-ring-2026-10-30.jsonl)'
+        default: ''
+      run_id:
+        description: 'run_id for a replay (apple-ring-YYYY-MM-DD)'
+        default: ''
 
 concurrency:
   group: pin-district-nightly
@@ -30,6 +36,7 @@ jobs:
         with:
           node-version: 22
       - name: Secrets present (never printed)
+        if: github.event.inputs.load_file == ''
         env:
           P8: ${{ secrets.APPLE_MAPS_P8 }}
           KID: ${{ secrets.APPLE_MAPS_KEY_ID }}
@@ -52,4 +59,6 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           PIN_MAX_ADS: ${{ github.event.inputs.max_ads || '600' }}
           DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '' }}
+          PIN_LOAD_FROM: ${{ github.event.inputs.load_file }}
+          PIN_RUN_ID: ${{ github.event.inputs.run_id }}
         run: node scripts/pin-district-nightly.mjs
