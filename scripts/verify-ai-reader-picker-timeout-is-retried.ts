@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 let failed = 0;
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
 const check = (label: string, ok: boolean) => { console.log(`${ok ? '  PASS' : '  FAIL'}  ${label}`); if (!ok) failed++; };
 
 export const retriesTimeout = (py: string): boolean => {
@@ -21,8 +22,8 @@ export const retriesTimeout = (py: string): boolean => {
 const PY = readFileSync(join(process.cwd(), 'scrapers', 'facts', 'extract.py'), 'utf8');
 console.log('A picker timeout is retried, never read as nothing to read');
 check('extract.py retries a statement timeout before skipping a table', retriesTimeout(PY));
-check('(mutation) catches retries set to 0', !retriesTimeout(PY.replace(/^SAMPLE_RETRIES = \d+/m, 'SAMPLE_RETRIES = 0')));
-check('(mutation) catches the retry loop removed', !retriesTimeout(PY.replace('for attempt in range(SAMPLE_RETRIES + 1):', 'for attempt in range(1):')));
-check('(mutation) catches a timeout no longer recognised', !retriesTimeout(PY.replace('return "57014" in str(e)', 'return False and str(e)')));
+mustCatch('retries set to 0', !retriesTimeout(PY.replace(/^SAMPLE_RETRIES = \d+/m, 'SAMPLE_RETRIES = 0')));
+mustCatch('the retry loop removed', !retriesTimeout(PY.replace('for attempt in range(SAMPLE_RETRIES + 1):', 'for attempt in range(1):')));
+mustCatch('a timeout no longer recognised', !retriesTimeout(PY.replace('return "57014" in str(e)', 'return False and str(e)')));
 if (failed) { console.error(`\n❌ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✓ a picker timeout is retried');
