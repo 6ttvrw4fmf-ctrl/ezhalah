@@ -43,7 +43,7 @@ check('finalize() serves ×12 and says the site priced per month',
   /const servedAnnual: unknown = cheapYearly \? \(r\.price_annual as number\) \* 12 : r\.price_annual;/.test(remote)
   && /const servedSourcePeriod = cheapYearly \? 'monthly' : \(r\.rent_period \?\? null\);/.test(remote)
   && /listingPriceString\(deal, pool, servedAnnual, sale\.priceTotal/.test(remote)   // falcon 10-30: sale figures via servedSaleFigures (PR 9479)
-  && /const sale = deal === 'Buy' \? servedSaleFigures\(r\.price_total, r\.price_annual, r\.area_m2, r\.price_per_meter\)\s*\n\s*: \{ priceTotal: r\.price_total, pricePerMeter: r\.price_per_meter \};/.test(remote)
+  && /const sale = deal === 'Buy' \? servedSaleFigures\(r\.price_total, r\.price_annual, r\.area_m2, r\.price_per_meter, \{ city: r\.city, commercial: kind === 'com' \}\)\s*\n\s*: \{ priceTotal: r\.price_total, pricePerMeter: r\.price_per_meter \};/.test(remote)
   && /sourceRentPeriod: deal === 'Rent' \? servedSourcePeriod : null,/.test(remote)
   && /priceAnnual: deal === 'Rent' && typeof servedAnnual === 'number' \? servedAnnual : null,/.test(remote));
 mutantCaught('finalize() back on the raw figure', !/listingPriceString\(deal, pool, servedAnnual, r\.price_total/.test(remote.replace('listingPriceString(deal, pool, servedAnnual, r.price_total', 'listingPriceString(deal, pool, r.price_annual, r.price_total')));

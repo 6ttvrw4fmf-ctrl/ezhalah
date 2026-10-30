@@ -2044,7 +2044,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     const servedSourcePeriod = cheapYearly ? 'monthly' : (r.rent_period ?? null);
     // A sale total typed into the per-meter box prints the seller's figure, exactly as the index serves it
     // (src/lib/meterBoxPrice.ts): the card AND the client budget net read this, so they agree with the count.
-    const sale = deal === 'Buy' ? servedSaleFigures(r.price_total, r.price_annual, r.area_m2, r.price_per_meter)
+    const sale = deal === 'Buy' ? servedSaleFigures(r.price_total, r.price_annual, r.area_m2, r.price_per_meter, { city: r.city, commercial: kind === 'com' })
                                 : { priceTotal: r.price_total, pricePerMeter: r.price_per_meter };
     const priceStr = listingPriceString(deal, pool, servedAnnual, sale.priceTotal,
                                         sale.pricePerMeter, r.area_m2);
