@@ -447,7 +447,7 @@ const modalProblems = (f: Record<string, string>) => {
   const passOk = (p: string, css: string) => /const reduced = useReducedMotion\(\);/.test(p)
     && (p.match(/startNamePartyFromBox\(/g) ?? []).length > 0 && (p.match(/startNamePartyFromBox\(/g) ?? []).length === (p.match(/startNamePartyFromBox\(reduced\)/g) ?? []).length
     && !/startNameParty\(/.test(p)
-    && css.includes('@media (prefers-reduced-motion:reduce){[data-ezh-scrim],[data-ezh-scrim] *,[data-ezh-shine]{animation:none!important;transition:none!important}[data-ezh-party]{display:none}}');
+    && css.includes('@media (prefers-reduced-motion:reduce){[data-ezh-scrim],[data-ezh-scrim] *,[data-ezh-shine],[data-ezh-emoji]{animation:none!important;transition:none!important}[data-ezh-party]{display:none}}');
   check('§8 the box hands the real reduced-motion flag to the party, and the CSS stills every motion (fireworks hidden)', passOk(files[PROMPT], SRC));
   mustCatch('the party told motion is fine regardless', !passOk(files[PROMPT].replace('startNamePartyFromBox(reduced)', 'startNamePartyFromBox(false)'), SRC));
   // ONE confetti per sign-in (owner 2026-10-27: «it shows twice»): while the home's falconer is on screen the name box's
