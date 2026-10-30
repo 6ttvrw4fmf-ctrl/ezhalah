@@ -138,6 +138,10 @@ def map_property(d: dict) -> tuple[Optional[tuple[dict, str]], str]:
         "source": SOURCE,
         "active": True,
         "title": redact_pii(title) or None,
+        # The lister's own prose (shown under «المميزات» on the ad page). The detail API has always carried it
+        # as `description` — kept in source_capture, never mapped, so `description` was empty on 708 of 708
+        # (2026-10-30). Verbatim, phones/emails redacted (PDPL); silence stays NULL, never ''.
+        "description": (redact_pii(d.get("description")) or None) if isinstance(d.get("description"), str) else None,
         "property_type": ptype,
         "transaction_type": "Rent" if deal == "Rent" else "Buy",   # deal is validated above
         "city": normalize.map_city(city_ar) if city_ar else None,
