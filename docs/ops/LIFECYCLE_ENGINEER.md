@@ -1425,3 +1425,40 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
    An open alert from either detector is YOURS to adjudicate first: read the sample rows, confirm the
    sync still calls the function, never clear it by widening a pool, raising the threshold or shrinking
    the type list.
+
+## Lessons from 2026-10-26 (🔧 fleet contract K — verified against the database and the run timelines)
+
+- **Dispatch the branch proof FIRST, before any probe, by minute 20.** The runner queue and a shared
+  concurrency group eat the proof: ⚡ 10-23 cancelled its own probe to land the tamyaz proof; 🆕 10-25 lost a
+  district fix to the :10 cut-off behind a 30-min queue; ♻️ 10-26 found fleet-liveness and its recheck share one
+  concurrency group, so a branch proof queued behind a long site waited for it and a second dispatch cancelled
+  the first. Three nights, three engineers: count the queued runs, dispatch the proof, then probe.
+- **Before attributing a recovery to your fix, read the check's own log and ask whether the UNFIXED code also
+  succeeds in the same window.** ⚡ 10-26: the old-code nightly holoul job succeeded 40 min after the branch
+  proof, so PR #8796 is hardening, not the proven root-cause fix. 🆕 10-26: the live AF-oracle check went red on
+  every PR at 07:16 after another session's migration; the fix was already landing (#8820) and merging main was
+  all that was needed.
+- **A run that reports success / «covered 100%» is not coverage.** ♻️ 10-26: offset paging on a tied order
+  skipped 1,755 haraj / 191 rakez / 163 tuba rows while every run said covered 100% — count DISTINCT rows, give
+  the page a unique tie-breaker. 🔧 10-18: engineer-automerge reported «success» three times while a green PR sat
+  BEHIND; 🔧 10-26: the same workflow read «not a mirror» for 24 h on three mirror PRs whose diff was EMPTY
+  (the file had reached main through another PR). Read the run LIST, the detector's open_alerts and the PR's
+  file list, never the conclusion word.
+
+## Lessons from 2026-10-27 (🔧 fleet contract K — verified against the database and the PR timelines)
+
+- **Ship a scrapers-only fix in ONE commit, after `git fetch origin main && git merge origin/main`, and only then
+  push.** The auto-merge (`engineer-automerge.yml`) merges the FIRST green push; a second push restarts the required
+  checks, and a branch behind main either conflicts or fails «Tests keep their assertions» on main's newer
+  assertions. Seen on two nights: 🆕 10-25 (BEHIND branch failed the assertions check) and ⚡ 10-27 (its own lesson);
+  measured 10-27 by 🔧: PR #8984 sat CONFLICTING for 5 h because main had taken #8982/#8990 into the same test file.
+- **A status word is not a result.** ♻️ 10-27: a liveness sweep that died mid-run kept its 2 h lock, so the NEXT
+  sweep skipped and 2,959 freshly crawled units went unread — read the last run's exit before trusting a «lock
+  held» skip, and release a dead holder's lock at once. ♻️ 10-26: «covered 100%» while offset paging skipped
+  2,109 rows. 🆕 10-26: a red check that was another session's. Read the run's exit, the DISTINCT row count and the
+  check's own log.
+- **When a rule changes what the index serves, re-check every robot that reads the index — through the SAME path,
+  against the SOURCE table.** 🆕 10-27: the yearly-pool rule changed the rent figure the index serves and the
+  scorer read 8 correct ads as wrong. 🔧 10-27: the «welcome facts gap» (backlog 914, 8073 vs 8109) was a hand
+  recompute over raw rows that skipped the build's own cross-site dedup (owner 10-22); through the build's path
+  the stored numbers were exact. A hand recompute that skips a step of the product's path is a false alarm, not a bug.
