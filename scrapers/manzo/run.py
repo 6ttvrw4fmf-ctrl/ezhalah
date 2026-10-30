@@ -78,9 +78,10 @@ def walk(s: cc.Session) -> tuple[list[dict], int]:
 
 # THE CRAWL FITS ITS SLOT (2026-10-30). The catalogue grew to 856 ads and each detail record was read one after another,
 # so the run outgrew its 10-minute job and was cancelled every time: no manzo crawl finished after 10-28 08:44, and the
-# ad text (#9404) and feature boxes never reached a row. Four workers, each with its own session on the profile and route
+# ad text (#9404) and feature boxes never reached a row. Ten workers (the API answers ~2 s a record: four still took 7.5 min),
+# each with its own session on the profile and route
 # the probe chose, read the same records in the same order; a record that fails is None, counted unreadable as before.
-DETAIL_WORKERS = 4
+DETAIL_WORKERS = 10
 
 
 def read_details(s: cc.Session, listing: list[dict], fetch=None) -> list[Optional[dict]]:
