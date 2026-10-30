@@ -1,0 +1,7 @@
+[
+  {"platform":"sakani","source_table":"sakani_residential_listings","listing_id":22223302},
+  {"platform":"sakani","source_table":"sakani_residential_listings","listing_id":22223142},
+  {"platform":"sakani","source_table":"sakani_residential_listings","listing_id":22223614},
+  {"platform":"wajaf","source_table":"wajaf_commercial_listings","listing_id":22222373},
+  {"platform":"wajaf","source_table":"wajaf_commercial_listings","listing_id":22222371}
+]
