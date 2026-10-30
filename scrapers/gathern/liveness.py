@@ -344,16 +344,16 @@ def _alt_session():
     return s
 
 
-def _opens_named(s, url: str) -> bool:
-    """True only when `url` answers 200 ON the unit's own page (any locale prefix), naming the unit,
-    and is not gathern's not-found page."""
+def _opens_named(s, url: str, fetch: Optional[str] = None) -> bool:
+    """True only when `fetch` (default: `url`, the stored /view/ address) answers 200 ON the unit's own
+    page (any locale prefix), naming the unit, and is not gathern's not-found page."""
     from urllib.parse import urlsplit
     m = _VIEW.match(url or "")
     if not m:
         return False
     _throttle()
     try:
-        r = s.get(url, timeout=25, allow_redirects=True)
+        r = s.get(fetch or url, timeout=25, allow_redirects=True)
     except Exception:  # noqa: BLE001 — no answer is no verdict
         return False
     final = urlsplit(str(getattr(r, "url", "") or "")).path.rstrip("/").lower()
@@ -368,7 +368,14 @@ def fingerprint_read(status: int, alt, url: str) -> int:
     taken. Anything the first read decided (200, 404, 410, any real status) is returned untouched."""
     if alt is None or status not in (0, HOME_LANDED):
         return status
-    return 200 if _opens_named(alt, url) else status
+    if _opens_named(alt, url):
+        return 200
+    # Measured 10-30 after the first sweep on this read: 16 units still sent BOTH fingerprints home on
+    # /view/, while the same unit's /ar/view/ opened named for safari17_0 (4 of 4 sampled).
+    m = _VIEW.match(url or "")
+    if m and _opens_named(alt, url, f"{m.group(1)}/ar/view/{m.group(2)}/unit/{m.group(3)}"):
+        return 200
+    return status
 
 
 def proxied_session(use_proxy: bool):
