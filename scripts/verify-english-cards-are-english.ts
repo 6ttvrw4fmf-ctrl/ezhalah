@@ -73,6 +73,13 @@ const cardWired = (src: string) =>
   && /r\.value && !isBlankAttrValue\(r\.label, r\.value\)\)/.test(src)
   && /const iso = \/\^\(\\d\{4\}\)-\(\\d\{2\}\)-\(\\d\{2\}\)/.test(src) && src.includes('return `${iso[3]}/${iso[2]}/${iso[1]}`;');
 check('the card sends deed text, unknown values and labels through the translators, hides blanks, reads dates', cardWired(card));
+// Laid out left to right in English: the live card showed «Plan number A/2566» and «.Additional No» because the
+// detail text was hard-wired rtl.
+const ltrWired = (src: string) => !/style=\{card\.addl(?:Label|Value)\}/.test(src)
+  && (src.match(/style=\{\[card\.addl(?:Label|Value), locale !== 'ar' && card\.ltr\]\}/g) ?? []).length === 6
+  && /\n {2}ltr: \{ writingDirection: 'ltr' \},/.test(src);
+check('card details read left to right in English (no mirrored «A/2566»)', ltrWired(card));
+mustCatch('the details hard-wired right-to-left again', !ltrWired(card.replace("style={[card.addlValue, locale !== 'ar' && card.ltr]}", 'style={card.addlValue}')));
 const preview = read('src/components/ListingPreview.tsx');
 check('the ad page translates the street (never hides it) and its detail labels, and hides blanks',
   /const street = place\(String\(l\.street_name \?\? ''\)\.trim\(\)\);/.test(preview)
