@@ -1323,14 +1323,21 @@ def _read_gone_after_refused_prune(table, seen, source, verify_gone, shards, n_a
     tripped — kept existing active rows» and stop there; only 5 (manzo, opensooq, ashab, haraj,
     muktamel) went on to read the unseen ads' own pages. This does it for every caller with no
     oracle of its own: the same own_page_status_oracle prune_unseen would use (404/410 while a page
-    this crawl saw answers live), the collapse cap respected, never raised. A caller with its own
-    verify_gone, or a sharded slice, keeps its own handling, and so does a table of 1,000+ active
-    rows: strike_read_gone reads one 1,000-row slice, so a row past it would count as unseen."""
-    if verify_gone is not None or shards > 1 or not seen or n_active >= 1000:
+    this crawl saw answers live), the collapse cap respected, never raised. A sharded slice keeps its
+    own handling, and so does a table of 1,000+ active rows.
+
+    A caller WITH its own verify_gone is read through THAT oracle (2026-10-30). It used to be left
+    out on the belief that it «keeps its own handling», but most such callers (nowaisiry and the other
+    CANDIDATE_PLUS_DIRECT crawlers) have none: nowaisiry's walk re-saw 8 of 11 commercial ads on
+    10-30, the coverage guard refused the prune, and NW4437 — its post unpublished (REST 401, page
+    404, read gone by dead-visible-score AND a lifecycle spot-check) — stayed on screen at
+    missing_count 0, a strike it could never start. The site's own oracle (its controls, its signal)
+    decides, exactly as it would at grace; only ads it reads gone take a strike."""
+    if table in _READ_GONE_DONE or shards > 1 or not seen or n_active >= 1000:
         return
     _READ_GONE_DONE.add(table)
     try:
-        strike_read_gone(table, seen, source, max_prune_frac=max_prune_frac,
+        strike_read_gone(table, seen, source, verify_gone=verify_gone, max_prune_frac=max_prune_frac,
                          min_active_guard=min_active_guard, grace=grace, _from_refused_prune=True)
     except Exception as e:  # noqa: BLE001 — a failed reading is UNKNOWN; the refused prune stands
         print(f"{table}: own-page reading after a refused prune failed ({type(e).__name__}: {e})", flush=True)
