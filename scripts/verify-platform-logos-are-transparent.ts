@@ -19,20 +19,20 @@
 // cannot be produced faithfully from the asset we have (never as a silent pass):
 //   • eagle-night.jpg — the hero/night backdrop, not a platform logo at all.
 //
-// ponytail: pngHasAlpha() below proves a PNG CAN carry transparency (colour-type/tRNS), not that any
-// pixel actually USES it — a flattened logo re-saved as "RGBA" with every pixel opaque (alpha≡255)
-// would read as clean here. That gap is exactly how the 9 PNG offenders fixed 2026-09-12 (arkaan,
-// abralosol, therc, rawasidark, aouj, azdad, shmoualshmal, amaall) sat broken through this barrier
-// for six days — it never caught them because none were JPEGs. Upgrade path: decode IDAT scanlines
-// (Node's builtin zlib.inflateSync covers the compression; PNG filter-type reconstruction is the
-// remaining ~50-80 lines) and assert at least one pixel's alpha is meaningfully below 255 — verified
-// by hand for this fix via PIL's `alpha.getextrema()`, not automated here.
+// The shared platform pack is also DECODED: an alpha-capable file with only a few transparent
+// corner pixels is still a pasted rectangle. Mostqar (0.013% clear) and Aqalem Hajer (0.306%)
+// exposed that gap on 2026-10-29. Require at least 2% genuinely clear pixels in these brand assets.
+// pngjs already ships in the locked Expo build toolchain; it adds nothing to the app bundle.
 //
 // Run: node --experimental-strip-types scripts/verify-platform-logos-are-transparent.ts
 
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+const { PNG } = createRequire(import.meta.url)('pngjs');
+const ts = createRequire(import.meta.url)('typescript');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCES = ['src/data/loaderPlatforms.ts', 'src/data/platformPickerProfiles.ts', 'src/components/ResultCard.tsx', 'src/components/InfoModal.tsx'];
@@ -57,6 +57,31 @@ function pngHasAlpha(bytes: Buffer): boolean {
   const colourType = bytes[25];
   if (colourType === 4 || colourType === 6) return true;
   return bytes.includes(Buffer.from('tRNS', 'latin1')); // palette/gray/RGB transparency
+}
+
+function pngHasClearBackground(bytes: Buffer): boolean {
+  const { data, width, height } = PNG.sync.read(bytes);
+  let clear = 0;
+  for (let i = 3; i < data.length; i += 4) if (data[i] < 32) clear++;
+  return clear / (width * height) >= 0.02;
+}
+
+// Execute the actual profile assignments, including reviewed overrides. The original collected
+// pack is immutable and retained for provenance; only artwork the app actually chooses is graded.
+const pickerSource = readFileSync(join(ROOT, 'src/data/platformPickerProfiles.ts'), 'utf8');
+function boxedPickerLogos(source: string): string[] {
+  const exports: any = {};
+  const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+  new Function('require', 'exports', js)((path: string) => {
+    if (path.endsWith('.png')) return path;
+    if (path.endsWith('.json')) return JSON.parse(readFileSync(join(ROOT, 'src/data', path), 'utf8'));
+    if (path.endsWith('platformCoverageSentence')) return { platformCoverageSentence: () => '', platformCoverageGroup: () => ({}) };
+    throw new Error(`Unexpected profile dependency: ${path}`);
+  }, exports);
+  const profiles = Object.values(exports.PLATFORM_PICKER_PROFILES) as { logo: string }[];
+  if (profiles.length < 100) throw new Error('The rendered logo roster was not loaded');
+  return profiles.map(profile => profile.logo).filter(path =>
+    !pngHasClearBackground(readFileSync(join(ROOT, 'src/data', path))));
 }
 
 console.log('\nPlatform logos are transparent PNGs (no white-box JPEGs)\n');
@@ -89,6 +114,8 @@ for (const [name, src] of [...refs].sort()) {
 }
 check('no non-exempt JPEG logo is referenced', jpegOffenders === 0, `${jpegOffenders} offender(s)`);
 check('every referenced PNG logo carries a real alpha channel', alphaless === 0, `${alphaless} flattened PNG(s)`);
+const boxed = boxedPickerLogos(pickerSource);
+check('the rendered logo roster uses real transparent backgrounds, not token corner pixels', boxed.length === 0, boxed.join(', '));
 
 // The exemptions are real files and still JPEGs (so the list cannot rot into hiding a fixed one).
 for (const ex of EXEMPT) {
@@ -131,6 +158,20 @@ mustCatch('a flattened palette PNG (colour type 3, no tRNS) is NOT called transp
 mustCatch('an RGBA PNG (colour type 6) IS transparent', pngHasAlpha(pngWith(6)) === true);
 mustCatch('a palette PNG WITH a tRNS chunk IS transparent (the shmoualshmal shape)',
   pngHasAlpha(pngWith(3, true)) === true);
+
+// Encode actual pixels, then exercise the same decoder used against the shipped assets.
+const tile = new PNG({ width: 100, height: 100 });
+tile.data.fill(255);
+mustCatch('an opaque RGBA tile', !pngHasClearBackground(PNG.sync.write(tile)));
+tile.data[3] = 0;
+mustCatch('an opaque tile disguised by one transparent pixel', !pngHasClearBackground(PNG.sync.write(tile)));
+for (let i = 3; i < 4000; i += 4) tile.data[i] = 0;
+check('a logo with genuinely transparent space is accepted', pngHasClearBackground(PNG.sync.write(tile)));
+for (const [clean, original] of [['mustqr.png', 'mustqr-sa.png'], ['aqalemhajer.png', 'aqalemhajer-com.png']]) {
+  const mutant = pickerSource.replace(`platform-clean/${clean}`, `platform-logos/${original}`);
+  mustCatch(`restoring the boxed ${original} in the actual picker assignments`,
+    mutant !== pickerSource && boxedPickerLogos(mutant).some(path => path.endsWith(original)));
+}
 
 console.log(failed === 0
   ? '\n✅ platform-logos-are-transparent: every rendered logo is a transparent PNG (exemptions documented).\n'
