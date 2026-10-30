@@ -378,8 +378,8 @@ export function ResultCard({
             <View style={card.lpFacts} testID="card-lp-facts">
               {lpFacts.map((f) => (
                 <Text key={f.k} style={card.lpFact} numberOfLines={1}>
-                  <Text style={card.addlLabel}>{f.label} </Text>
-                  <Text style={card.addlValue}>{f.value}</Text>
+                  <Text style={[card.addlLabel, locale !== 'ar' && card.ltr]}>{f.label} </Text>
+                  <Text style={[card.addlValue, locale !== 'ar' && card.ltr]}>{f.value}</Text>
                 </Text>
               ))}
             </View>
@@ -801,8 +801,8 @@ function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
       <Text numberOfLines={unfolded ? undefined : 1} style={[card.oneLine, locale === 'ar' ? card.oneLineRtl : card.oneLineLtr]}>
         {visible.map((r) => (
           <Text key={r.key}>
-            <Text style={card.addlLabel}>{enText(attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), locale)} </Text>
-            <Text style={card.addlValue}>{arAttrValue(r.label, r.value, locale)}</Text>
+            <Text style={[card.addlLabel, locale !== 'ar' && card.ltr]}>{enText(attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), locale)} </Text>
+            <Text style={[card.addlValue, locale !== 'ar' && card.ltr]}>{arAttrValue(r.label, r.value, locale)}</Text>
             {'\u2003'}
           </Text>
         ))}
@@ -815,8 +815,8 @@ function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
         {visible.map((r) => (
           <View key={r.key} style={card.addlCell}>
             {/* The source's own Arabic `key` outranks the placeholder — see attrDisplayLabel. */}
-            <Text style={card.addlLabel}>{enText(attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), locale)}</Text>
-            <Text style={card.addlValue}>{arAttrValue(r.label, r.value, locale)}</Text>
+            <Text style={[card.addlLabel, locale !== 'ar' && card.ltr]}>{enText(attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), locale)}</Text>
+            <Text style={[card.addlValue, locale !== 'ar' && card.ltr]}>{arAttrValue(r.label, r.value, locale)}</Text>
           </View>
         ))}
       </View>
@@ -1726,6 +1726,8 @@ const card = StyleSheet.create({
   // aligned with their own Arabic label when the inline groups wrap.
   addlLabel: { fontSize: 10.5, color: colors.muted, fontWeight: '500', writingDirection: 'rtl' },
   addlValue: { flexShrink: 1, fontSize: 11, color: colors.ink, fontWeight: '600', writingDirection: 'rtl' },
+  // English UI: details read left to right («2566/A», «Additional No.»), not mirrored (live 2026-10-29: «A/2566», «.Additional No»).
+  ltr: { writingDirection: 'ltr' },
   addlMoreBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
     paddingVertical: 6, marginTop: 4,
