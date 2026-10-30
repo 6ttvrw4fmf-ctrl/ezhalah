@@ -42,7 +42,8 @@ const NAMES: [string, string][] = [
   ['ضاحية هجر(الحي الخامس)', 'Hajr Suburb - District 5'], ['الرياض - النرجس', 'Riyadh - Al Narjis'],
   ['حي ظهرة نمار', 'Dhahrat Nimar'], ['حي اسكان قوى الامن العام', 'Public Security Housing'],
   ['المحاسن بالمبرز', 'Al Mahasin in Al Mubarraz'], ['شارع الشهيد عز الدين', 'Al Shahid Izz Al Din Street'],
-  ['حي العليا', 'Al Olaya'], ['الرياض', 'Riyadh'],
+  ['حي العليا', 'Al Olaya'], ['الرياض', 'Riyadh'], ['سدرة', 'Sidrah'],
+  ['شارع علي بن حسن', 'Ali bin Hasan Street'],                  // live card read «Ali Ibn Hsn Al Shwytr»
 ];
 for (const [ar, en] of NAMES) { const got = translitPlace(ar); check(`«${ar}» → «${en}»`, got === en, `got «${got}»`); }
 
@@ -77,6 +78,11 @@ check('the ad page translates the street (never hides it) and its detail labels,
   /const street = place\(String\(l\.street_name \?\? ''\)\.trim\(\)\);/.test(preview)
   && preview.includes("locale === 'en' ? freeTextEn(englishCatalogText(r.label)) : t(r.label)")
   && preview.includes('if (isBlankAttrValue(r.label, r.value)) continue;'));
+const agent = read('src/app/agent.tsx');
+const tabWired = (src: string) => src.includes("const tabTitle = (l: Listing) => (locale === 'en' ? listingLocationEn(l) : listingLocationAr(l));")
+  && (src.match(/title: tabTitle\(l\)/g) ?? []).length === 2 && !src.includes('title: listingLocationAr(l)');
+check('the in-app viewer tab names the place in English in the English UI (it showed «الجنادرية، الرياض»)', tabWired(agent));
+mustCatch('the viewer tab back on the Arabic location', !tabWired(agent.replace('title: tabTitle(l), url: url ?? \'\' })', 'title: listingLocationAr(l), url: url ?? \'\' })')));
 const home = read('src/app/index.tsx');
 const noteCleared = (src: string) => /useEffect\(\(\) => \{\s*if \(locale === 'ar'\) return;\s*setLocMsg\(\(m\) => \(m === ARABIC_ONLY_MSG \? '' : m\)\);\s*setDistrictMsg\(\(m\) => \(m === ARABIC_ONLY_MSG \? '' : m\)\);\s*\}, \[locale\]\);/.test(src);
 check('switching to English clears the Arabic-only note under the Filter fields', noteCleared(home));
