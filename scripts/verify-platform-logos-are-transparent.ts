@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 const { PNG } = createRequire(import.meta.url)('pngjs');
+const ts = createRequire(import.meta.url)('typescript');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCES = ['src/data/loaderPlatforms.ts', 'src/data/platformPickerProfiles.ts', 'src/components/ResultCard.tsx', 'src/components/InfoModal.tsx'];
@@ -65,6 +66,24 @@ function pngHasClearBackground(bytes: Buffer): boolean {
   return clear / (width * height) >= 0.02;
 }
 
+// Execute the actual profile assignments, including reviewed overrides. The original collected
+// pack is immutable and retained for provenance; only artwork the app actually chooses is graded.
+const pickerSource = readFileSync(join(ROOT, 'src/data/platformPickerProfiles.ts'), 'utf8');
+function boxedPickerLogos(source: string): string[] {
+  const exports: any = {};
+  const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+  new Function('require', 'exports', js)((path: string) => {
+    if (path.endsWith('.png')) return path;
+    if (path.endsWith('.json')) return JSON.parse(readFileSync(join(ROOT, 'src/data', path), 'utf8'));
+    if (path.endsWith('platformCoverageSentence')) return { platformCoverageSentence: () => '', platformCoverageGroup: () => ({}) };
+    throw new Error(`Unexpected profile dependency: ${path}`);
+  }, exports);
+  const profiles = Object.values(exports.PLATFORM_PICKER_PROFILES) as { logo: string }[];
+  if (profiles.length < 100) throw new Error('The rendered logo roster was not loaded');
+  return profiles.map(profile => profile.logo).filter(path =>
+    !pngHasClearBackground(readFileSync(join(ROOT, 'src/data', path))));
+}
+
 console.log('\nPlatform logos are transparent PNGs (no white-box JPEGs)\n');
 
 // Gather every logo asset referenced by the rendering surfaces.
@@ -83,7 +102,6 @@ check('found platform logo references to grade', refs.size >= 40, `${refs.size} 
 // The invariant, per referenced asset.
 let jpegOffenders = 0;
 let alphaless = 0;
-const boxed: string[] = [];
 for (const [name, src] of [...refs].sort()) {
   const isJpeg = /\.jpe?g$/i.test(name);
   if (isJpeg) {
@@ -93,11 +111,11 @@ for (const [name, src] of [...refs].sort()) {
   // A PNG must actually carry alpha — a flattened PNG is a white box wearing a .png extension.
   const bytes = readFileSync(join(ROOT, 'assets/images', name));
   if (!pngHasAlpha(bytes)) { alphaless++; check(`${name} is a PNG with NO alpha channel (still a box)`, false); }
-  if (/^platform-(logos|clean)\//.test(name) && !pngHasClearBackground(bytes)) boxed.push(name);
 }
 check('no non-exempt JPEG logo is referenced', jpegOffenders === 0, `${jpegOffenders} offender(s)`);
 check('every referenced PNG logo carries a real alpha channel', alphaless === 0, `${alphaless} flattened PNG(s)`);
-check('the shared platform pack uses real transparent backgrounds, not token corner pixels', boxed.length === 0, boxed.join(', '));
+const boxed = boxedPickerLogos(pickerSource);
+check('the rendered logo roster uses real transparent backgrounds, not token corner pixels', boxed.length === 0, boxed.join(', '));
 
 // The exemptions are real files and still JPEGs (so the list cannot rot into hiding a fixed one).
 for (const ex of EXEMPT) {
@@ -149,6 +167,11 @@ tile.data[3] = 0;
 mustCatch('an opaque tile disguised by one transparent pixel', !pngHasClearBackground(PNG.sync.write(tile)));
 for (let i = 3; i < 4000; i += 4) tile.data[i] = 0;
 check('a logo with genuinely transparent space is accepted', pngHasClearBackground(PNG.sync.write(tile)));
+for (const [clean, original] of [['mustqr.png', 'mustqr-sa.png'], ['aqalemhajer.png', 'aqalemhajer-com.png']]) {
+  const mutant = pickerSource.replace(`platform-clean/${clean}`, `platform-logos/${original}`);
+  mustCatch(`restoring the boxed ${original} in the actual picker assignments`,
+    mutant !== pickerSource && boxedPickerLogos(mutant).some(path => path.endsWith(original)));
+}
 
 console.log(failed === 0
   ? '\n✅ platform-logos-are-transparent: every rendered logo is a transparent PNG (exemptions documented).\n'
