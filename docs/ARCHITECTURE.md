@@ -545,6 +545,8 @@ reduced motion makes them static. They never intercept taps or obscure the wordm
 Assets contain no UI or text. Headline cloud wisps touch the outer edges and never
 mask the copy. `CloudWisp` is decorative, pointer-transparent, and hidden from assistive technology.
 Source logos keep their measured frames and original colors, with small varied wisps touching their edges.
+The strip's logos use real transparent artwork, not opaque image backgrounds; cleanup must preserve its
+existing space and bounded rendering, and stay within the logo weight budgets (owner, 2026-10-29).
 The website strip moves each logo and cloud together at **12 px/s** (one 108px slot per **9 seconds**),
 retains the shared wall-clock phase and the iOS-safe bounded window, and becomes static with reduced
 motion. This supersedes the earlier 45 px/s setting. Search-loader roster, ten-second cycle, eligibility,

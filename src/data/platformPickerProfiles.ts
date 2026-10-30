@@ -157,6 +157,8 @@ const LOGOS: Record<string, number> = {
 // Deal uses the same original yellow brand asset as listing cards (owner, 2026-10-08).
 LOGOS["Deal App"] = require("../../assets/images/dealapp.png");
 // Official symbols/light-surface variants avoid white wordmarks and opaque backing tiles.
+LOGOS["Mustqr"] = require("../../assets/images/platform-clean/mustqr.png");
+LOGOS["مكتب أقاليم هجر للخدمات العقارية"] = require("../../assets/images/platform-clean/aqalemhajer.png");
 LOGOS["Aqarcity"] = require("../../assets/images/aqarcity-logo.png");
 LOGOS["Ramzalqasim"] = require("../../assets/images/ramzalqassim.png");
 LOGOS["Amaall"] = require("../../assets/images/amaall.png");
