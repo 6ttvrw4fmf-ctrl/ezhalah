@@ -54,7 +54,6 @@ def _reader_version() -> str:
 
 READER_VERSION = _reader_version()
 PAUSE_S = 0.15
-MIN_NORM_CHARS = 20
 
 
 # ── tables ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -329,7 +328,7 @@ def run(args: argparse.Namespace) -> int:
             nt = norm(text)
             pp = per_platform[platform]
             pp["ads_read"] += 1
-            if len(nt) < MIN_NORM_CHARS:
+            if not W.readable(nt):
                 pp["too_short"] += 1
                 continue
             pp["ads_checked"] += 1
@@ -437,7 +436,7 @@ def overlay_row(table: str, r: dict[str, Any], run_id: str) -> tuple[dict[str, A
     The overlay row keeps only the 20 AF columns, each {v, q}. An ad with no AF fact (or too little text)
     still gets a row with facts {} — that row is the memory that this exact text (src_hash) was read."""
     text = W.clean_text(r.get("title"), r.get("body"))
-    found = W.check(text) if len(norm(text)) >= MIN_NORM_CHARS else []
+    found = W.check(text) if W.readable(norm(text)) else []
     facts = {f["fact"]: {"v": f["value_bool"], "q": f["quote"]}
              for f in found if f["fact"] in AF_COLUMNS and f["value_bool"] is not None and (f["quote"] or "").strip()}
     facts.update({f["fact"]: {"v": f["value_num"], "q": f["quote"]}
@@ -447,6 +446,30 @@ def overlay_row(table: str, r: dict[str, Any], run_id: str) -> tuple[dict[str, A
            "read_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "stale_at": None,
            "reader_version": READER_VERSION}
     return row, found
+
+
+# THE READER OUTLASTS THE :22 SYNC (2026-10-30). sync_search_listings_ar() calls text_facts_mark_stale(), which updates
+# listing_text_facts rows inside its own ~10-minute transaction; an upsert of the same rows waits on them and dies at the
+# service role's 8 s lock/statement timeout. Four tries over ~30 s lost the whole 10-30 nightly read (run 41017887347,
+# 07:24 UTC, «canceling statement due to statement timeout»). A timeout is waited out for up to 15 min; anything else
+# still fails after four tries.
+_LOCK_WAIT_S = 15 * 60
+_TIMEOUT_CODES = ("57014", "55P03")
+
+
+def write_batch(do, tbl: str, sleep=time.sleep, clock=time.monotonic) -> None:
+    t0, attempt = clock(), 0
+    while True:
+        try:
+            do()
+            return
+        except Exception as e:
+            attempt += 1
+            timeout = any(c in str(e) for c in _TIMEOUT_CODES)
+            if (attempt >= 4 and not timeout) or clock() - t0 > _LOCK_WAIT_S:
+                raise
+            print(f"  ! {tbl} upsert retry {attempt}: {str(e)[:120]}")
+            sleep(30 if timeout else 5 * attempt)
 
 
 def run_incremental(args: argparse.Namespace) -> int:
@@ -465,15 +488,8 @@ def run_incremental(args: argparse.Namespace) -> int:
 
     def write(tbl: str, rows: list[dict[str, Any]], conflict: str, ignore: bool) -> None:
         for i in range(0, len(rows), 500):
-            for attempt in range(4):
-                try:
-                    client.table(tbl).upsert(rows[i:i + 500], on_conflict=conflict, ignore_duplicates=ignore).execute()
-                    break
-                except Exception as e:
-                    if attempt == 3:
-                        raise
-                    print(f"  ! {tbl} upsert retry: {str(e)[:120]}")
-                    time.sleep(5 * (attempt + 1))
+            write_batch(lambda: client.table(tbl).upsert(rows[i:i + 500], on_conflict=conflict,
+                                                         ignore_duplicates=ignore).execute(), tbl)
 
     for table in all_tables(platforms):
         after, got = 0, 0
@@ -533,6 +549,10 @@ def selftest() -> None:
     short, _ = overlay_row("aqar_residential_listings", dict(id=8, ad_number="A8", src_hash="0" * 32,
                            title="", body="مصعد"), "facts-words-t")
     assert short["facts"] == {}, short
+    # 936: a short sentence is an ad, not a label — bahadhabab 10777798 «مفروشه سنه كامله» (16 chars) is furnished
+    phrase, _ = overlay_row("bahadhabab_residential_listings", dict(id=10777798, ad_number="BHD39201", src_hash="0" * 32,
+                            title=None, body="مفروشه سنه كامله"), "facts-words-t")
+    assert phrase["facts"].get("furnished", {}).get("v") is True, phrase
     assert vec_literal([0.12345, -1.0]) == "[0.1235,-1.0000]"
     assert all_tables({"aqar"}) == ["aqar_residential_listings", "aqar_commercial_listings"]
     # finder on a toy space: two "pool" ads + one blank ad sitting right next to them → it is the candidate,
@@ -562,6 +582,28 @@ def selftest() -> None:
     rep = finder(np.vstack(vecs), facts, texts, None, min_count=2, rng=rng)
     assert rep["pool"]["candidates"] == 3, rep["pool"]
     assert any("بركه" in g for g, *_ in rep["pool"]["new_words"]), rep["pool"]
+    # the reader waits out the :22 sync's row locks (a statement timeout) instead of losing the night; other errors
+    # still fail after four tries, and a lock that never clears still fails after 15 min.
+    clock = [0.0]
+    tick = lambda s: clock.__setitem__(0, clock[0] + s)
+    calls = []
+
+    def locked_for(n, code="57014"):
+        def do():
+            calls.append(1)
+            if len(calls) <= n:
+                raise RuntimeError(f"{{'code': '{code}', 'message': 'canceling statement due to statement timeout'}}")
+        return do
+    write_batch(locked_for(20), "t", sleep=tick, clock=lambda: clock[0])   # 20 × 30 s = 10 min: the sync's length
+    assert len(calls) == 21, calls
+    for n, code in ((4, "23505"), (60, "57014")):
+        calls.clear()
+        clock[0] = 0.0
+        try:
+            write_batch(locked_for(n, code), "t", sleep=tick, clock=lambda: clock[0])
+            raise AssertionError(f"write_batch swallowed {code}")
+        except RuntimeError:
+            pass
     print("words selftest ok")
 
 
