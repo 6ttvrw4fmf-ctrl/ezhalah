@@ -21,7 +21,15 @@ unauth'd visitors).
 
 ⛔ PDPL: rows include `owner_phone`, `broker`, and a `raw_text` field full of phones / wa.me /
 brokerage names. We DROP `owner_phone`/`broker` outright and REDACT `description` / `title`
-before storing. `raw_text` is never stored.
+before storing. `raw_text` is never stored as-is and is never in the bulk select.
+
+AD TEXT (2026-10-30): 445/1,049 residential + 85/292 commercial active ads had `description` NULL,
+yet the ad page shows their full text — the site renders `raw_text || description`
+(PropertyPage `sa({rawText: s.raw_text||s.description})`; seen live on /property/4827, 4958, 5014).
+So for exactly the rows whose `description` is empty, `ad_texts()` fetches `id,raw_text` in a
+separate, failure-tolerant call and reduces each one IN MEMORY to the ad's own body (`ad_body()`:
+the office's licence/CR header, emoji and its sign-off/footer cut, then the shared redact_pii) —
+the raw string itself is discarded. A failed call leaves the description NULL, never ''.
 
 Usage:
   python -m scrapers.mustqr.run --type all --limit 20
@@ -44,6 +52,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize
+from scrapers.common.pii import redact_pii
 
 SITE = "https://mustqr.sa"
 PROJECT = "https://jzhotxuqwkpykavxpgeu.supabase.co"
@@ -710,7 +719,7 @@ def map_listing(p: dict, n_to_region: dict[str, str]) -> tuple[Optional[dict], s
     region_hint = n_to_region.get(raw_neigh) if raw_neigh else None
 
     title = _redact(p.get("title"))
-    description = _redact(p.get("description"))
+    description = _description(p)
 
     photo_urls = _photos(p.get("images"))
     video_url = _video_url(p.get("videos"))
@@ -860,6 +869,72 @@ def stated_rate_ids(s: cc.Session, jwt: str, rows: list[dict]) -> set[int]:
     return out
 
 
+# ── the ad's own text for rows with no `description` (see module docstring "AD TEXT") ──────────────
+# Emoji, pictographs and the invisible direction marks the office pastes around every line.
+_DECOR_RE = re.compile(
+    "[\U0001F000-\U0001FAFF\u2190-\u21FF\u2300-\u23FF\u25A0-\u27BF\u2900-\u297F"
+    "\u2B00-\u2BFF\uFE0E\uFE0F\u200B-\u200F\u202A-\u202E\u2066-\u2069\u20E3]"
+)
+# The office's own header lines (its FAL licence and commercial register — the same on every ad) and the
+# «عرض جديد» tag: not this ad's text, and not shown on the site's ad page.
+_HEADER_LINE_RE = re.compile(r"رخصة\s*فال|السجل\s*التجاري|^عرض\s*جديد$")
+# Where the office's sign-off begins: «مباشر» / «مكتب مستقر العقاري» / a rule line / «لمتابعة عروضنا …».
+_SIGNOFF_RE = re.compile(r"^(?:مباشر|مكتب\s*مستقر.*|[_\-—–ـ=*.]{5,}.*|.*لمتابعة\s*عروضنا.*)$")
+_MAP_LINK_RE = re.compile(r"https?://(?:www\.)?(?:maps\.google\.\S+|maps\.app\.goo\.gl/\S+|goo\.gl/maps\S*"
+                          r"|google\.[a-z.]+/maps\S*)", re.I)
+
+
+def ad_body(raw: Optional[str]) -> Optional[str]:
+    """The ad's own text out of mustqr's `raw_text`, as its ad page shows it: header, emoji and sign-off
+    cut, map links dropped, then the shared PDPL redactor. Nothing readable left → None (never '')."""
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    lines: list[str] = []
+    for line in raw.splitlines():
+        t = re.sub(r"[ \t]+", " ", _DECOR_RE.sub("", line)).strip()
+        if not t:
+            continue
+        if _SIGNOFF_RE.match(t):
+            break
+        if _HEADER_LINE_RE.search(t):
+            continue
+        lines.append(t)
+    text = _MAP_LINK_RE.sub("", "\n".join(lines))
+    return redact_pii(text) or None
+
+
+AD_TEXT_CHUNK = 100
+
+
+def ad_texts(s: cc.Session, jwt: str, ids: list[int]) -> dict[int, str]:
+    """{id: ad_body(raw_text)} for `ids` (rows whose own `description` is empty). raw_text is read only
+    here, reduced at once and dropped. A failed or refused call is «not known»: those ids are simply
+    absent, so their description stays NULL — never an empty string, never a crash of the crawl."""
+    out: dict[int, str] = {}
+    for i in range(0, len(ids), AD_TEXT_CHUNK):
+        chunk = ",".join(str(int(x)) for x in ids[i:i + AD_TEXT_CHUNK])
+        try:
+            _throttle()
+            r = s.get(f"{PROJECT}/rest/v1/properties?select=id,raw_text&id=in.({chunk})",
+                      headers=_headers(jwt), timeout=45)
+            if r.status_code != 200:
+                print(f"  ad_texts: HTTP {r.status_code} — {r.text[:160]!r}", flush=True)
+                continue
+            for row in r.json():
+                body = ad_body(row.get("raw_text"))
+                if body and row.get("id") is not None:
+                    out[int(row["id"])] = body
+        except Exception as e:  # noqa: BLE001
+            print(f"  ad_texts: {type(e).__name__}: {str(e)[:160]}", flush=True)
+            continue
+    return out
+
+
+def _description(p: dict) -> Optional[str]:
+    """The source's own description when it wrote one; else the ad's body from raw_text (ad_texts)."""
+    return _redact(p.get("description")) or p.get("_ad_text") or None
+
+
 def fetch_all(s: cc.Session, jwt: str, limit: Optional[int] = None) -> list[dict]:
     out: list[dict] = []
     offset = 0
@@ -952,6 +1027,12 @@ def main() -> int:
         if p.get("id") in rate_ids:
             p["_rate_stated"] = True
     print(f"  prices the ad's own text states per metre (server-side match): {len(rate_ids)}")
+    blank = [int(p["id"]) for p in raw if p.get("id") is not None and not _redact(p.get("description"))]
+    texts = ad_texts(s, jwt, blank)
+    for p in raw:
+        if p.get("id") in texts:
+            p["_ad_text"] = texts[p["id"]]
+    print(f"  ad text from the ad body for rows with no description: {len(texts)}/{len(blank)}")
 
     res: list[dict] = []
     com: list[dict] = []
