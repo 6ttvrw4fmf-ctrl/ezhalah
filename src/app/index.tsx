@@ -350,6 +350,13 @@ export default function Home() {
   const [districtMsg, setDistrictMsg] = useState('');
   const districtRef = useRef<TextInput>(null);
   const districtTextRef = useRef('');
+  // The Arabic-only note belongs to the Arabic UI. Switching to English, where Latin typing is the user's own
+  // language, must not leave «هذا التطبيق يدعم اللغة العربية فقط» standing under «Riyadh» (seen live 2026-10-29).
+  useEffect(() => {
+    if (locale === 'ar') return;
+    setLocMsg((m) => (m === ARABIC_ONLY_MSG ? '' : m));
+    setDistrictMsg((m) => (m === ARABIC_ONLY_MSG ? '' : m));
+  }, [locale]);
   // One place to wipe all district state — called wherever the city changes/clears.
   const clearDistrict = () => {
     districtTextRef.current = '';

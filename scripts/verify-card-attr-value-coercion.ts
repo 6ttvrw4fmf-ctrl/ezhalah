@@ -101,7 +101,9 @@ const declarations = [
   { header: 'export function arAttrValue(' },
 ];
 const translitSource = readFileSync('src/lib/translitPlace.ts', 'utf8').replace(/export /g, '').replace("import sa from '@/data/sa-locations.json';", 'const sa = ' + readFileSync('src/data/sa-locations.json', 'utf8') + ';');
-const prelude = `${translitSource}\n
+// arAttrValue's English fallback translates leftover Arabic through freeTextEn (owner 2026-10-29) — the real file.
+const freeTextSource = readFileSync('src/lib/freeTextEn.ts', 'utf8').replace(/export /g, '').replace(/^import .*$/m, '');
+const prelude = `${translitSource}\n${freeTextSource}\n
 const englishCatalogText = ${englishCatalogText.toString()};
 const AR = ${JSON.stringify((await liftSymbols('src/i18n.tsx', [{header:'const AR:'}], ['AR'])).AR)};
 const EN = ${JSON.stringify((await liftSymbols('src/i18n.tsx', [{header:'const EN:'}], ['EN'])).EN)};
@@ -124,7 +126,8 @@ for (const [label, value, expected] of [
   ['Other obligations on the property', 'لايوجد', 'None'],
   ['Other obligations on the property', 'لا يوجد', 'None'],
   ['Amenities', 'موقف', 'Parking'], ['Property services', 'الكهرباء، المياه، الصرف الصحي', 'Electricity, Water Supply, Sanitation'],
-  ['Plan number', '7489/ق/ب', '7489/ق/ب'],
+  // owner 2026-10-29 «everything must be translated to English»: a plan code's lone letters read as Latin letters
+  ['Plan number', '7489/ق/ب', '7489/Q/B'], ['Plan number', '2566/أ', '2566/A'],
 ]) check(`English ${label}: ${value}`, format(label, value, 'en') === expected);
 // Owner 2026-10-24: the English card showed Arabic deed labels and values (sanadak/therc/gathern). Every
 // Arabic label the sources publish, and every closed value, must read as English on the English card.

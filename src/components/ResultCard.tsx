@@ -8,6 +8,7 @@ import type { Listing } from '@/data/listings';
 import { derivedTotalEquation } from '@/data/listings';
 import { useI18n, englishCatalogText, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
+import { freeTextEn } from '@/lib/freeTextEn';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish, attrDisplayLabel, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { whenNear } from '@/lib/nearViewport';
@@ -248,12 +249,12 @@ export function ResultCard({
     // The white space under the chips holds the SOURCE's own key facts — age, facade, street width, plan number,
     // usage — exactly as published, at most 3 on one fixed row (so every card stays the same size). A fact the
     // source did not give is simply absent; nothing is derived or guessed.
-    const factRows = (listing.additional_info ?? []).filter((r) => r && r.label && r.value);
+    const factRows = (listing.additional_info ?? []).filter((r) => r && r.label && r.value && !isBlankAttrValue(r.label, r.value));
     const FACT_ORDER = [/age|عمر/i, /facade|الواجهة/i, /street|عرض الشارع|الشارع/i, /plan|المخطط/i, /usage|استخدام/i];
     const lpFacts: Array<{ k: string; label: string; value: string }> = [];
     for (const re of FACT_ORDER) {
       const r = factRows.find((x) => re.test(`${x.key} ${x.label}`) && !lpFacts.some((f) => f.k === x.key));
-      if (r && lpFacts.length < 3) lpFacts.push({ k: r.key, label: attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), value: arAttrValue(r.label, r.value, locale) });
+      if (r && lpFacts.length < 3) lpFacts.push({ k: r.key, label: enText(attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), locale), value: arAttrValue(r.label, r.value, locale) });
     }
     if (listedClean && lpFacts.length < 3) lpFacts.push({ k: 'listed', label: t('Added'), value: listedClean });
     const CHIP_CAP = 3;
@@ -697,11 +698,26 @@ const FREE_TEXT_PROSE_LABELS = new Set([
 // app — production rendered a blank white page for any search containing such a listing. The
 // boundary fix in remote.ts is the root-cause fix; String() here means no future caller (or a
 // newly-added shape on another platform) can turn one odd source value into a blank screen again.
+// English UI: an Arabic label the catalog does not know is translated, never printed in Arabic.
+const enText = (s: string, locale: string) => (locale === 'en' ? freeTextEn(s) : s);
+
+// A value that says nothing is a field the source left silent, in both languages: «.», «-», «/» (the card printed
+// «Other obligations on the property: .»), and a street width of 0 («Street width 0 m»). Hidden, never printed.
+export function isBlankAttrValue(label: unknown, value: unknown): boolean {
+  const v = String(value ?? '').trim();
+  if (!v || /^[\s.\-–—_/\\,،:;·*]+$/.test(v)) return true;
+  return /street.*width|عرض الشارع/i.test(String(label ?? '')) && /^0+(?:\.0+)?\s*(?:m|متر|م)?$/i.test(v);
+}
+
 export function arAttrValue(label: string, value: string, locale: string): string {
   const v = String(value ?? '').trim();
   if (!v) return value;
   const ll = String(label ?? '').trim().toLowerCase();
   const lv = v.toLowerCase();
+  // A machine timestamp («2026-07-16T13:09:02+03:00») reads as the card's other dates do: «16/07/2026» (the
+  // calendar day the source wrote — no time-zone shift).
+  const iso = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.exec(v);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
   if (locale === 'en') {
     // Translate finite source enums in either direction without changing the stored fact.
     const known = Object.entries(AR_ENUM[ll] ?? {}).find(([, ar]) => ar === v);
@@ -725,12 +741,16 @@ export function arAttrValue(label: string, value: string, locale: string): strin
     }
     if (ll === 'amenities' || ll === 'property services' || ll === 'قنوات العقار' || ll === 'خدمات العقار' || ll === 'الإلتزامات على العقار' || ll === 'الضمانات ومدتها') {
       const aliases: Record<string, string> = { موقف: 'Parking', الكهرباء: 'Electricity', المياه: 'Water Supply', الماء: 'Water Supply', 'الصرف الصحي': 'Sanitation', مياه: 'Water Supply', كهرباء: 'Electricity', 'صرف صحي': 'Sanitation' };
-      return v.split(/[،,]/).map(item => aliases[item.trim()] ?? englishCatalogText(item.trim())).join(', ');
+      return v.split(/[،,]/).map(item => aliases[item.trim()] ?? freeTextEn(englishCatalogText(item.trim()))).join(', ');
     }
-    if (['street', 'address', 'city', 'district', 'deed location'].includes(ll)) return translitPlace(v);
+    if (['street', 'address', 'city', 'district'].includes(ll)) return translitPlace(v);
+    // a sentence («حي X بمدينة Y مساحة الوحدة…»), not a name
+    if (ll === 'deed location') return freeTextEn(v);
     // therc's «32,000 ر.س / yearly»: the Arabic currency mark is the only Arabic in it.
     if (/ر\.س/.test(v)) return v.replace(/\s*ر\.س\s*/g, ' SAR ').replace(/\s+/g, ' ').trim();
-    return englishCatalogText(v);
+    // Last word: whatever the catalog does not know is translated, never printed in Arabic on an English card
+    // («2566/أ» → «2566/A»; owner 2026-10-29: «everything must be translated to English»).
+    return freeTextEn(englishCatalogText(v));
   }
   if (AR_YESNO[lv]) return AR_YESNO[lv];                                   // Electricity/Water/booleans
   if (ll === 'age') {
@@ -773,7 +793,7 @@ function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
   const rows = listing.additional_info;
   if (!rows || rows.length === 0) return null;
   // Preserve the existing valid-row filter; all rows are visible without an expander.
-  const all = rows.filter((r) => r && r.label && r.value);
+  const all = rows.filter((r) => r && r.label && r.value && !isBlankAttrValue(r.label, r.value));
   if (all.length === 0) return null;
   const visible = all;
   if (oneLine) {
@@ -781,7 +801,7 @@ function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
       <Text numberOfLines={unfolded ? undefined : 1} style={[card.oneLine, locale === 'ar' ? card.oneLineRtl : card.oneLineLtr]}>
         {visible.map((r) => (
           <Text key={r.key}>
-            <Text style={card.addlLabel}>{attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)} </Text>
+            <Text style={card.addlLabel}>{enText(attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), locale)} </Text>
             <Text style={card.addlValue}>{arAttrValue(r.label, r.value, locale)}</Text>
             {'\u2003'}
           </Text>
@@ -795,7 +815,7 @@ function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
         {visible.map((r) => (
           <View key={r.key} style={card.addlCell}>
             {/* The source's own Arabic `key` outranks the placeholder — see attrDisplayLabel. */}
-            <Text style={card.addlLabel}>{attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)}</Text>
+            <Text style={card.addlLabel}>{enText(attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), locale)}</Text>
             <Text style={card.addlValue}>{arAttrValue(r.label, r.value, locale)}</Text>
           </View>
         ))}
