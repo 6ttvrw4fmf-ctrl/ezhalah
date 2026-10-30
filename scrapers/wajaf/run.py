@@ -174,6 +174,8 @@ def map_page(d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
         return None, "project_container"
     status = d["badges"][0] if d["badges"] else None
     if status != "متاح":
+        print("PROBE", json.dumps({k: d.get(k) for k in ("url", "badges", "deal", "title", "header_price", "cells")}, ensure_ascii=False), flush=True)
+        print("PROBE_DESC", d.get("url"), (d.get("description") or "")[:1500], flush=True)
         uid = re.search(r"/unit/(\d+)$", d.get("url") or "")    # the same ad_number map_page builds
         db.note_read_gone(f"{PREFIX}U{uid.group(1)}" if uid
                           else f"{PREFIX}{(d.get('url') or '').rstrip('/').rsplit('/', 1)[-1]}", status)
@@ -270,7 +272,7 @@ def main() -> int:
     ap.add_argument("--type", default="all")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
-    dry = a.dry_run
+    dry = True  # PROBE branch: never writes
 
     s = arabic_session()
     ids, declared = walk(s)
