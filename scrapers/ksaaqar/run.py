@@ -53,6 +53,7 @@ from scrapers.common.arabic_location import (  # noqa: E402
 )
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.source_pin import pin_dict  # noqa: E402
+from scrapers.common.pii import redact_pii  # noqa: E402
 
 BASE = "https://ksaaqar.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -891,7 +892,8 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         # The ad's own description, VERBATIM (owner 2026-10-30: «we read everything»). It was parsed for
         # amenities since 10-08 but never STORED, so all 1,353 active rows had description NULL and the AI
         # facts reader (title+description >= 30 chars) could not read one ksaaqar ad. Silence stays NULL.
-        "description": _description_text(page_html),
+        # PDPL: the box carries the broker's phone («0551228113») — redacted here, like every description.
+        "description": redact_pii(_description_text(page_html)),
         "title": title or None,
         "photo_urls": own_photos(page_html),
     }

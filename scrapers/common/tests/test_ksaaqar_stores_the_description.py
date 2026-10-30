@@ -30,6 +30,7 @@ POST = {"id": 1, "slug": "x", "link": "https://ksaaqar.com/ad/x/",
 BOX = ('<div id="adt-ad-description-box"><h4>الوصف:</h4>'
        '<p>شقه للايجار حي الملقا ثلاث غرف وصاله</p>'
        '<p>الشارع 15 م - مطبخ راكب - مصعد</p>'
+       '<p>للتواصل 0551228113 واتساب</p>'
        '</div><div class="sidebar"><p>اعلانات مشابهة</p></div>')
 
 
@@ -40,6 +41,11 @@ def test_the_description_is_stored_verbatim_every_paragraph():
     assert "شقه للايجار حي الملقا ثلاث غرف وصاله" in row["description"]
     assert "الشارع 15 م" in row["description"], "every paragraph, not only the first"
     assert "اعلانات مشابهة" not in row["description"], "the box ends at its own div — never the sidebar"
+
+
+def test_the_brokers_phone_is_redacted():
+    row, _cat, _why = K.map_listing(POST, SPEC, BOX)
+    assert "0551228113" not in row["description"], "PDPL: a phone in the description is never stored"
 
 
 def test_no_box_stays_null_never_empty_string():
