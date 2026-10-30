@@ -1340,6 +1340,7 @@ migration-drift-guard rule in `AGENTS.md`).
 
 
 - **Home headline market facts «تدري إن …» (owner + their dad, 2026-10-22).** Facts only, never advice
+- **Facts always (owner, 2026-10-30: «show facts always»).** A signed-in visitor's headline is a fact every time, including the first visit of a day: only a fact is held for its 2 hours (device and tab); with none on the device the hook reads today's fact at once while the headline stays hidden (no visible swap), for at most `FACT_WAIT_MS` (2.5 s); the plain line shows only when that read fails or is slow. `src/lib/useFilterWelcome.ts`; guard `scripts/verify-filter-welcome.ts`.
   («we never recommend, we must never ever»); prices are the displayed ASKING price («السعر المعروض»).
   Purchase first — أراضي، شقق، عمائر (villas 2 lines, rent 3); a CITY then its busiest DISTRICT, never a
   region; volume = new for-sale ads, this week vs last (steady-crawl sites only), asking price this month
