@@ -4,15 +4,16 @@ import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, font, lightColors, radius } from '@/theme/tokens';
 import { BUZZER_GOLD, TAP44 } from '@/theme/palette';
-import { useI18n, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
+import { useI18n, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR, englishCatalogText } from '@/i18n';
+import { freeTextEn } from '@/lib/freeTextEn';
 import { listingPrice, listingDiscountOldPrice, sourceName, monthlyLineText } from '@/lib/listingDisplay';
-import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, attrDisplayLabel, hideArabicProseInEnglish, translateTrailingPeriodWord } from '@/lib/arabicText';
+import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, attrDisplayLabel, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { translitPlace } from '@/lib/translitPlace';
 import { DIRECTION_LABEL } from '@/lib/afEvidence';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { PICKER_SHEET_BREAKPOINT } from '@/lib/responsive';
 import { useReducedMotion } from '@/lib/useReducedMotion';
-import { SourceBadge, FEATURE_META, arAttrValue } from '@/components/ResultCard';
+import { SourceBadge, FEATURE_META, arAttrValue, isBlankAttrValue } from '@/components/ResultCard';
 import { MOJ_SOURCE_URL, PRICE_MAX, PRICE_MIN, dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojDeals, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojDeal, type MojFacts, districtEmbedUrl, districtPlace, type DistrictPlace, fetchSimilarListings, type SimilarCard } from '@/data/adPageData';
 import { listingOpenUrl } from '@/lib/openListing';
 import { safeHttpUrl } from '@/lib/safeUrl';
@@ -400,7 +401,8 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
   const district = place(arabicOrPlaceholder(t(l.district), locale, LOCATION_UNRESOLVED_AR));
   const sep = locale === 'ar' ? '، ' : ', ';
   const location = (district || city || LOCATION_UNRESOLVED_AR) + (l.district ? `${sep}${city || LOCATION_UNRESOLVED_AR}` : '');
-  const street = hideArabicProseInEnglish(String(l.street_name ?? '').trim() || null, locale) ?? '';
+  // A street is a place name: translated in the English UI (owner 2026-10-29: «everything must be translated»), not hidden.
+  const street = place(String(l.street_name ?? '').trim());
   const address = [street, location].filter(Boolean).join(sep);
   const typeLabel = arabicOrPlaceholder(/[ء-ي]/.test(l.type || '') ? l.type : t(l.cleanType ?? l.type), locale, TYPE_UNRESOLVED_AR);
   // The source's own additional-information panel, through the card's own value/label display rules.
@@ -408,7 +410,8 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
   const extra: [string, string][] = [];
   for (const r of l.additional_info ?? []) {
     if (!r || !r.label || !r.value) continue;
-    const k = attrDisplayLabel(t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR);
+    if (isBlankAttrValue(r.label, r.value)) continue;
+    const k = attrDisplayLabel(locale === 'en' ? freeTextEn(englishCatalogText(r.label)) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR);
     const v = arAttrValue(r.label, String(r.value), locale);
     if (k && v && !shown.has(k)) { shown.add(k); extra.push([k, v]); }
   }
