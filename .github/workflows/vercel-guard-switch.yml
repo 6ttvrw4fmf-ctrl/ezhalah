@@ -1,0 +1,52 @@
+# Turn the front door's robot checks from WATCH to BLOCK, or back (owner 2026-10-30: one "yes" from the owner, no
+# laptop clicks in Vercel). Sets ONE of two allowlisted Production env vars of the canonical project ezhalah-app (the
+# same ids the deploy target guard pins):
+#   EZ_BOTID_ENFORCE      = 1 → api/sb.ts refuses calls Vercel BotID reads as a bot (403). 0 → watch only.
+#   EZ_TURNSTILE_ENFORCE  = 1 → api/sb.ts refuses calls without a Cloudflare human pass. 0 → watch only.
+# It DEPLOYS NOTHING: the value takes effect on the next deploy through deploy-frontend.yml (safe-deploy.sh).
+# Undo = dispatch again with 0, then deploy. Our own robots carry the robot pass and are never refused.
+# Dispatch-only. docs/ops/SCRAPE_GUARD.md.
+name: Vercel guard switch
+
+on:
+  workflow_dispatch:
+    inputs:
+      switch:
+        description: 'Which guard'
+        required: true
+        type: choice
+        options: [EZ_BOTID_ENFORCE, EZ_TURNSTILE_ENFORCE]
+      value:
+        description: '1 = block, 0 = watch only'
+        required: true
+        type: choice
+        options: ['0', '1']
+
+permissions:
+  contents: read
+
+jobs:
+  set-env:
+    name: Set ${{ inputs.switch }}=${{ inputs.value }} in Vercel Production env
+    runs-on: ${{ vars.EZ_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 3
+    steps:
+      - name: Upsert env var
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          KEY: ${{ inputs.switch }}
+          VALUE: ${{ inputs.value }}
+          PROJECT_ID: prj_CLp9BxNzT4RmWL9Is1KjHoQlSAlX
+          TEAM_ID: team_0lVrGRoJbCRIWovPNkfnmwJ7
+        run: |
+          set -euo pipefail
+          case "$KEY" in EZ_BOTID_ENFORCE|EZ_TURNSTILE_ENFORCE) ;; *) echo "Refusing: $KEY is not an allowed switch"; exit 1;; esac
+          case "$VALUE" in 0|1) ;; *) echo "Refusing: value must be 0 or 1"; exit 1;; esac
+          body=$(jq -n --arg k "$KEY" --arg v "$VALUE" '{key: $k, value: $v, type: "plain", target: ["production"]}')
+          code=$(curl -s -o /tmp/out -w '%{http_code}' -X POST \
+            "https://api.vercel.com/v10/projects/$PROJECT_ID/env?teamId=$TEAM_ID&upsert=true" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" -H 'content-type: application/json' --data "$body")
+          if [ "$code" != "200" ] && [ "$code" != "201" ]; then
+            echo "Vercel env upsert failed: HTTP $code"; jq -r '.error.message // .error.code // "no detail"' /tmp/out 2>/dev/null || true; exit 1
+          fi
+          echo "$KEY=$VALUE saved in Vercel Production env. Takes effect on the next deploy (deploy-frontend.yml)."
