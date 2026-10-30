@@ -204,12 +204,13 @@ const hookSrc = (await import('node:fs')).readFileSync(new URL('../src/lib/useFi
 // («show the welcome with 🥳, then change it to a market insight», visibly). Nothing else re-decides.
 check('the hook decides once per page load and re-decides ONLY for a sign-in welcome and its hand-over',
   // (a fourth setShown only lifts the hold on the welcome at the first firework pop — owner 2026-10-28)
-  (hookSrc.match(/setShown\(/g) ?? []).length === 4
+  // (a fifth settles the FIRST visit of a day once today's fact is read — still hidden until then, owner 2026-10-30)
+  (hookSrc.match(/setShown\(/g) ?? []).length === 5
   && hookSrc.includes('const reveal = () => setShown((s) => (s.hold ? { ...s, hold: false } : s));')
   && /if \(greet\) welcomeThenInsight\(\);/.test(hookSrc) && /nameEn: session\.nameEn, hold: true \}\);\s*welcomeThenInsight\(\);/.test(hookSrc)
   && (hookSrc.match(/welcomeThenInsight\(\);/g) ?? []).length === 2
   && /const g = takeGreeting\(session, now\);\s*if \(!g\) return;/.test(hookSrc)
-  && /instantWelcome\(\{ hasSession: session\.present, cache, next, now,/.test(hookSrc) && /\}, \[\]\);/.test(hookSrc));
+  && /instantWelcome\(\{ hasSession: session\.present, cache: isFact\(cache\) \? cache : null, next, now,/.test(hookSrc) && /\}, \[\]\);/.test(hookSrc));
 check('the background writes for LATER visits (the shown line\'s numbers, the next line) and never touches the screen',
   /writeCache\(\{ id: choice\.line\.id, at: held\.at, \.\.\.r \}\)/.test(hookSrc) && /writeKey\(NEXT_KEY, \{ id: INSIGHT_ID_BASE \+ pick\.templateId, at: now\.getTime\(\), ar: pick\.ar, en: pick\.en \}\)/.test(hookSrc)
   && !/setShown\([^)]*\)\s*;\s*\}\)\.catch/.test(hookSrc));
@@ -448,12 +449,31 @@ mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a U
   // the day rule is real: drop it and yesterday's line comes back after midnight
   const noDay = (raw: string, now: number) => { const v = JSON.parse(raw); return v.at <= now ? v : null; };
   mustCatch('a tab line kept across midnight (yesterday\'s «أمس»)', noDay(saved, new Date('2026-10-28T21:30:00Z').getTime()) !== null && nextDay === null);
-  const hookTab = (src: string) => src.includes("const tab = !greet && session.present && (nameAr || nameEn) ? readTab(now.getTime()) : null;")
+  const hookTab = (src: string) => src.includes("const tabSeen = !greet && session.present && (nameAr || nameEn) ? readTab(now.getTime()) : null;")
+    && src.includes('const tab = isFact(tabSeen) ? tabSeen : null;')
     && /: tab \? \{ id: tab\.id, ar: tab\.ar, en: tab\.en, fromCache: true, promoted: false \}\n\s*: \(nameAr \|\| nameEn\) \? instantWelcome\(/.test(src)
     && (src.match(/writeTab\(/g) ?? []).length >= 2 && src.includes('globalThis.sessionStorage?.getItem(TAB_KEY)');
   check('the hook shows the tab\'s line BEFORE choosing a new one, and records every line it shows in the tab', hookTab(hookSrc));
   mustCatch('a hook that ignores the tab (back to the swap)', !hookTab(hookSrc.replace('readTab(now.getTime())', 'null')));
   check('the tab memory is sessionStorage (one tab), never localStorage (every tab would freeze)', TAB_KEY.startsWith('ezhalah:') && !/localStorage\?\.getItem\(TAB_KEY\)/.test(hookSrc));
+}
+
+// ── FACTS ALWAYS (owner 2026-10-30: «show facts always» — the first visit of a day showed «even small cities have a
+// place here» and kept the fact for the NEXT visit). Only a FACT is held; with none on the device the hook reads today's
+// now, hidden (never a visible swap), for at most FACT_WAIT_MS, and the plain line shows only when that read fails.
+{
+  const factsAlways = (src: string) =>
+    src.includes('const isFact = (l: { id: number | null } | null | undefined) => !!l && l.id != null && isInsightLineId(l.id);')
+    && src.includes('cache: isFact(cache) ? cache : null,')
+    && /if \(!greet && session\.present && inst && !isFact\(inst\)\) \{[\s\S]{0,400}?fetchWelcomeInsights\(lastLocation, lastDistrict\)/.test(src)
+    && /void Promise\.race\(\[fact, slow\]\)/.test(src) && /setTimeout\(\(\) => r\(null\), FACT_WAIT_MS\)/.test(src)
+    && /setShown\(\{ settled: true, id: line\.id, ar: line\.ar, en: line\.en, nameAr, nameEn, greet: greetNowIdx \}\);\s*\}\);\s*return;/.test(src);
+  check("facts always: only a fact is held, and a device without one reads today's fact before the headline shows", factsAlways(hookSrc));
+  const { FACT_WAIT_MS: wait } = await import('../src/lib/useFilterWelcome.ts').catch(() => ({ FACT_WAIT_MS: Number(/export const FACT_WAIT_MS = (\d+);/.exec(hookSrc)?.[1]) }));
+  check('the hidden wait is bounded (0 < FACT_WAIT_MS ≤ 3 s), never a headline that waits forever', Number(wait) > 0 && Number(wait) <= 3000);
+  mustCatch('a held plain line blocking the fact again', !factsAlways(hookSrc.replace('cache: isFact(cache) ? cache : null,', 'cache,')));
+  mustCatch('the first visit of a day back to the plain line', !factsAlways(hookSrc.replace('if (!greet && session.present && inst && !isFact(inst)) {', 'if (false) {')));
+  mustCatch('a fact read with no time limit', !factsAlways(hookSrc.replace('void Promise.race([fact, slow])', 'void Promise.race([fact])')));
 }
 
 // ── THE EMOJI STAYS VISIBLE THROUGH THE SHINE (owner 2026-10-28: «the emoji after the name doesn't show») ──
