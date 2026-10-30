@@ -87,6 +87,7 @@
 // Env: PW_CHROMIUM overrides the browser binary; PW_PROXY sets an egress proxy (localhost always
 // bypassed). Both optional — CI needs neither.
 import './lib/robotPass.mjs'; // robot pass + secret handshake for our own browser robots (docs/ops/SCRAPE_GUARD.md)
+import { isForeignOnlyError } from './lib/foreignError.mjs';
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';
@@ -229,6 +230,12 @@ const crashes = [];
 page.on('pageerror', (e) => {
   const m = String(e);
   if (BENIGN.test(m)) return;
+  // Another website's own page crashing (every stack frame on a foreign origin — e.g. sanadak.sa's Next.js React #419
+  // while a listing opened) is not an Ezhalah crash. Logged, never counted; anything with one of our frames still fails.
+  if (isForeignOnlyError(e?.stack, page.url())) {
+    console.log(`NOTE  third-party page error ignored (not Ezhalah code): ${m.slice(0, 120)} — ${String(e?.stack || '').split('\n')[1]?.trim().slice(0, 160) ?? ''}`);
+    return;
+  }
   // Where and after what: the page URL, the last check that ran, and the first stack frames.
   const stack = String(e?.stack || '').split('\n').slice(1, 4).map((l) => l.trim()).join(' < ');
   crashes.push(`${m.slice(0, 200)} — at ${page.url()} after «${lastStep}»${stack ? ` — ${stack.slice(0, 300)}` : ''}`);
