@@ -36,9 +36,12 @@ const SIGNIN = require('../../assets/images/falconer-signin.svg');
 const SIGNED_IN_STILL = require('../../assets/images/falconer-final.svg');
 const SIGNIN_CANVAS = { x: -140, y: -170, w: 310, h: 385 };
 export const SIGNIN_SEQUENCE_MS = 6200;
-// the bulb lights at ~5.0–5.4 s and the glow fades by ~6.2 s. SOONER (owner 2026-10-29: «the fireworks come up a bit
-// late, make it faster»): they start as the bulb lights, 1.2 s before the story's last glow, instead of after it.
-export const RAIN_AT_MS = SIGNIN_SEQUENCE_MS - 1200;
+// The bulb starts lighting at 5.005 s and is fully lit by ~5.6 s (falconer-signin.svg). AFTER THE BULB (owner
+// 2026-10-30: «the fireworks pop before the lightbulb … wait like 2 seconds, then a lot»): the rockets leave about
+// 1.7 s after the bulb is lit, so the first pop lands ~2 s after it (~7.6 s). On 2026-10-29 they had been moved to the
+// bulb itself (5.0 s), which put the first pop on top of it.
+export const BULB_LIT_MS = 5600;
+export const RAIN_AT_MS = BULB_LIT_MS + 1700;
 // how long the story waits for its file before its clock starts anyway
 const LOAD_WAIT_MS = 4000;
 // how long, after he appears, a marked sign-in may keep the box empty waiting for its story to start
