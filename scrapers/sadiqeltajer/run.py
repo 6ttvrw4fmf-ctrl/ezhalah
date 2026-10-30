@@ -42,6 +42,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, norm_district_tok, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.page_pin import pin_from_html  # noqa: E402
+from scrapers.common.pii import redact_pii  # noqa: E402
 
 BASE = "https://sadiq-eltajer.sa"
 SOURCE = "Sadiq Eltajer"
@@ -600,6 +601,11 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         "direction": parse_direction(text),
         "street_width_m": parse_street_width(text),
         "photo_urls": photos(page_html),
+        # The ad's own «تفاصيل الإعلان» box, whole and verbatim (redacted, PDPL) — «للبيع فله بحي البساتين … المكونات
+        # : الدور الاول : مشب . مجلس رجال …». 2026-10-30: 1,740 of 1,740 active rows stored none, so the AI facts
+        # reader had nothing to read. This is the text, not a reading of it: the land / «يليه» filtering above
+        # (unit_description_text) still decides the amenity columns. No box → NULL, never ''.
+        "description": redact_pii(ad_description(page_html)) or None,
     }
     if deal == "Rent":
         row["price_annual"] = price_annual
