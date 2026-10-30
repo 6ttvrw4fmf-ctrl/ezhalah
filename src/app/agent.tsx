@@ -544,7 +544,7 @@ function runTypewriter(total: number, setN: (n: number) => void, onDone?: () => 
 // changes faster than the ceiling restarted it forever and `onDone` never fired — measured 0 times
 // in 90 s against the real function. `onDone` sets doneTyping, which gates «عرض المزيد», so that
 // stall withheld the only control reaching the rest of the results. See src/lib/revealHandoff.ts.
-function Typer({ text, onDone }: { text: string; onDone?: () => void }) {
+function Typer({ text, onDone, reserveSpace = false }: { text: string; onDone?: () => void; reserveSpace?: boolean }) {
   const [n, setN] = useState(0);
   // The denominator is the glyph count, so `n` and the slice below agree on what a step is.
   const total = useMemo(() => glyphCount(text), [text]);
@@ -566,7 +566,10 @@ function Typer({ text, onDone }: { text: string; onDone?: () => void }) {
     return runTypewriter(total, setN, () => { handoff.settle(); onDone?.(); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
-  return <Text>{revealPrefix(text, n)}</Text>;
+  const shown = revealPrefix(text, n);
+  // A right-pinned English bubble otherwise expands left on every tick, dragging the first
+  // letter backwards. Lay out the complete sentence so its start and wrapping stay still.
+  return <Text>{shown}{reserveSpace && <Text aria-hidden style={{ opacity: 0 }}>{text.slice(shown.length)}</Text>}</Text>;
 }
 
 // Like Typer, but reveals "Ezhalah! " (styled as the brand) followed by the reply as one continuous
@@ -4536,7 +4539,7 @@ export default function Agent() {
                 return (
                   <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={[s.userBubble, { alignSelf: 'flex-end' }]}>
                     <Text style={[s.userText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
-                      {m.typing ? <Typer text={m.text} onDone={onBubbleDone} /> : m.text}
+                      {m.typing ? <Typer text={m.text} onDone={onBubbleDone} reserveSpace={!rtl} /> : m.text}
                     </Text>
                   </View>
                 );
