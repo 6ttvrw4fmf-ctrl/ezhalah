@@ -71,6 +71,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
+from scrapers.common.pii import redact_pii  # noqa: E402
 SOURCE = "Satel"
 AD_PREFIX = "ST"
 
@@ -300,11 +301,27 @@ def _resolve_city_region(raw_city_ar: str, raw_city_en: str) -> Optional[str]:
     return raw_city_en or "Riyadh"
 
 
+def detail_description(d: dict) -> Optional[str]:
+    """The listing's own «About this Property» text — the DETAIL record's `descriptionAr`, else `descriptionEn`
+    (HTML), as plain text through redact_pii (PDPL). The filter list carries neither field (0 of 236, 2026-10-30),
+    which is why 69 of 69 active rows stored no description; the detail record has it (C0094: 2,650 chars of
+    English, «Residential building in Al Olaya District, ideally positioned just 2 minutes from Kingdom Tower…»).
+    Stored verbatim in the language the source wrote it. None when the record states no text."""
+    for key in ("descriptionAr", "descriptionEn"):
+        text = redact_pii(normalize.html_block_lines(d.get(key)) or None)
+        if text:
+            return text
+    return None
+
+
 def _attach_detail(row: dict, d: Optional[dict]) -> None:
     """The ad's own record: its gallery when it answered; when it did not (404 included), the row
     is still written from the feed but the list sighting does not certify it (2026-10-03)."""
     if d:
         row["photo_urls"] = _photo_urls(d) or row["photo_urls"]
+        desc = detail_description(d)
+        if desc:
+            row["description"] = desc
     else:
         db.mark_presence_unproven(row)
 
