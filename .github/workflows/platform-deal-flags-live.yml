@@ -1,0 +1,52 @@
+name: Platform deal flags — live guard
+
+# Falcon 2026-10-30 (backlog 1097). runSearch() drops a matched ad whose platform flag (allowsRent / allowsBuy in
+# src/data/platforms.ts) forbids its deal AFTER the count is taken: the customer reads «2 نتيجة» and sees 1 card.
+# Sakani's 1,532 sale ads and wajaf's 4 rent ads were hidden this way for weeks. This robot reads one served row
+# per active platform and deal from production and goes red the day a site starts serving a side its flag forbids.
+# Read-only. A red run reaches the engineers through the alert_event bridge below.
+
+on:
+  schedule:
+    - cron: '41 */6 * * *' # every 6 h, off the :20/:22 refresh and sync and the :29/:59 detector sweep
+  workflow_dispatch:
+  # A PR that edits a flag is judged against production before it merges (and this file proves itself on its PR).
+  pull_request:
+    paths:
+      - src/data/platforms.ts
+      - scripts/lib/platformDealFlags.ts
+      - scripts/verify-platform-deal-flags-keep-served-sides-live.ts
+      - .github/workflows/platform-deal-flags-live.yml
+
+concurrency:
+  group: platform-deal-flags-live
+  cancel-in-progress: false
+
+env:
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  flags:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Every served deal side passes its platform flag
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-platform-deal-flags-keep-served-sides-live.ts
+
+      - name: Bridge this run's result to alert_event
+        if: always() && github.event_name != 'pull_request'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind journey_live_check_failed
+          --workflow platform-deal-flags-live.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
