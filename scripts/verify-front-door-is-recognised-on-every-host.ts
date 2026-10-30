@@ -15,7 +15,7 @@ let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? '' : ' — ' + detail}`); if (!ok) failed++; };
 const mustCatch = (label: string, caught: boolean) => { console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${label}`); if (!caught) failed++; };
 
-const SB = 'https://aannarbkwcymrotzwdbo.supabase.co';
+const SB = 'https://project-under-test.example'; // a stand-in: isOurRpcUrl takes the origin as a parameter
 const RPC = '/sb/rest/v1/rpc/location_search_candidates_ar';
 
 // 1. The predicate, executed.
@@ -27,7 +27,7 @@ check('a foreign host, a preview, plain http or another path is never our backen
   && !isFrontDoorUrl(`http://ezhalah.com${RPC}`) && !isFrontDoorUrl('https://ezhalah.com/agent') && !isFrontDoorUrl('not a url'));
 check('an RPC is ours through the project origin or the front door, and nothing else',
   isOurRpcUrl(`${SB}/rest/v1/rpc/x`, SB) && isOurRpcUrl(`https://ezhalah.com${RPC}`, SB)
-  && !isOurRpcUrl(`https://ezhalah.com/sb/rest/v1/search_listings_ar`, SB) && !isOurRpcUrl('https://other.supabase.co/rest/v1/rpc/x', SB));
+  && !isOurRpcUrl(`https://ezhalah.com/sb/rest/v1/search_listings_ar`, SB) && !isOurRpcUrl('https://another-project.example/rest/v1/rpc/x', SB));
 
 // 2. Mutation proof: the predicate the two robots used before this fix.
 const OLD_BASE = 'https://ezhalah-app.vercel.app';
