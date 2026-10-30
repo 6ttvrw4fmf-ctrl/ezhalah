@@ -477,6 +477,7 @@ def run(args: argparse.Namespace) -> int:
         plan = build_plan(args.limit, platforms)
     print(f"run {args.run_id}: mode {args.mode}; plan {sum(plan.values())} ads over {len(plan)} tables; caps calls≤{args.max_calls} usd≤${args.max_usd}")
     sample: list[dict[str, Any]] = []
+    skipped_tables: list[str] = []            # a table we could not fetch is UNKNOWN, never "nothing to read"
     for table, n in plan.items():
         # A statement timeout here is load, not an empty table: 16 lanes ask the picker at the same second and the
         # largest table (aqar, ~170k ads) timed out in every lane on 2026-10-29, so ~42k unread ads were skipped round
@@ -492,6 +493,7 @@ def run(args: argparse.Namespace) -> int:
                     time.sleep(wait)
                     continue
                 print(f"  ! {table}: sampling failed: {str(e)[:200]}")
+                skipped_tables.append(table)
                 break
     rng.shuffle(sample)
     print(f"sampled {len(sample)} ads")
@@ -715,7 +717,12 @@ def run(args: argparse.Namespace) -> int:
         print("interrupted")
         rc = 130
     checkpoint(final=True)
-    print(json.dumps({"run_id": args.run_id, "ads": tot["ads"], "calls": calls, "usd": round(usd_total, 4),
+    # NEVER A GREEN RUN THAT SKIPPED A SITE (owner 2026-10-30: «make sure we never [skip] and we read everything»).
+    # The ads of every table we could fetch are read first; then a skipped table turns the run red so it is seen.
+    if skipped_tables and rc == 0:
+        print(f"SKIPPED {len(skipped_tables)} table(s) — their unread ads were NOT read: {', '.join(skipped_tables)}")
+        rc = 4
+    print(json.dumps({"run_id": args.run_id, "skipped_tables": skipped_tables, "ads": tot["ads"], "calls": calls, "usd": round(usd_total, 4),
                       "stored": tot["stored"], "unverified": tot["unverified"], "pii": tot["pii"],
                       "invalid": tot["invalid"], "json_fail_calls": tot["json_fail"], "ads_lost": tot["ads_lost"],
                       "exit": rc}, ensure_ascii=False))
