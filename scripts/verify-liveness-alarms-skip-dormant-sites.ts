@@ -48,11 +48,17 @@ const mustCatch = (label: string, caught: boolean) => { console.log(`${caught ? 
 const real = problems(migs);
 check('both liveness checking alarms skip dormant sites and still raise for served ones', real.length === 0, real.join('; '));
 
-const last = migs.filter((m) => /ops_platform_is_dormant/.test(m.s)).at(-1)!;
-const swap = (s: string) => { if (s === last.s) throw new Error('mutation was a no-op'); return migs.map((m) => (m.f === last.f ? { f: m.f, s } : m)); };
-mustCatch('the SLA alarm grading dormant sites again', problems(swap(last.s.replace('if public.ops_platform_is_dormant(r.platform) then', 'if false then'))).length > 0);
-mustCatch('the stalled loop grading dormant sites again', problems(swap(last.s.replace("where not s.injected and s.shape = 'STALLED' and not public.ops_platform_is_dormant(s.platform)\n  loop", "where not s.injected and s.shape = 'STALLED'\n  loop"))).length > 0);
-mustCatch('the helper reading the wrong status', problems(swap(last.s.replace("pr.status = 'dormant'", "pr.status = 'retired'"))).length > 0);
+// Each mutation edits the migration that holds THAT function's newest definition (a later file may only mention the
+// helper without redefining the alarm — 20261030063149 does — so "the newest file that names it" is the wrong target).
+const swapIn = (fn: string, from: string, to: string) => {
+  const t = migs.find((m) => m.f === body(migs, fn)!.f)!;
+  const s = t.s.replace(from, to);
+  if (s === t.s) throw new Error(`mutation was a no-op in ${t.f}`);
+  return migs.map((m) => (m.f === t.f ? { f: m.f, s } : m));
+};
+mustCatch('the SLA alarm grading dormant sites again', problems(swapIn('mon_detect_liveness_verification_sla', 'if public.ops_platform_is_dormant(r.platform) then', 'if false then')).length > 0);
+mustCatch('the stalled loop grading dormant sites again', problems(swapIn('mon_detect_liveness_checking_shortfall', "where not s.injected and s.shape = 'STALLED' and not public.ops_platform_is_dormant(s.platform)\n  loop", "where not s.injected and s.shape = 'STALLED'\n  loop")).length > 0);
+mustCatch('the helper reading the wrong status', problems(swapIn('ops_platform_is_dormant', "pr.status = 'dormant'", "pr.status = 'retired'")).length > 0);
 mustCatch('a later redefinition without the skip', problems([...migs, { f: '29990101000000_x.sql', s: "create or replace function public.mon_detect_liveness_verification_sla() returns integer language plpgsql as $function$ begin perform public.mon_raise('P1', 'liveness_verification_sla', 'x','y','{}'); return 0; end $function$;" }]).length > 0);
 
 if (failed) { console.error(`\n❌ verify-liveness-alarms-skip-dormant-sites: ${failed} check(s) failed.`); process.exit(1); }
