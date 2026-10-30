@@ -63,6 +63,7 @@ _DEAL = {"بيع": "Buy", "إيجار": "Rent"}
 _TYPE_OVERRIDES = {"أرض سكنية": "Residential Land", "عمارة سكنية": "Building",
                    "مستودعات": "Warehouse", "مكاتب إدارية": "Office"}
 _LAND = {"Residential Land", "Commercial Land"}
+PROBE_RAW: dict = {}
 
 
 def get(s: cc.Session, url: str) -> str:
@@ -175,7 +176,11 @@ def map_page(d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
     status = d["badges"][0] if d["badges"] else None
     if status != "متاح":
         print("PROBE", json.dumps({k: d.get(k) for k in ("url", "badges", "deal", "title", "header_price", "cells")}, ensure_ascii=False), flush=True)
-        print("PROBE_DESC", d.get("url"), (d.get("description") or "")[:1500], flush=True)
+        if "مؤجر" in status:
+            _raw = PROBE_RAW.get(d.get("url"), "")
+            _txt = _clean(re.sub(r"(?s)<script.*?</script>|<style.*?</style>", " ", _raw))
+            for _m in re.finditer(r"سنو|سنة|شهر|يومي|ريال|الحد|دفع", _txt):
+                print("PROBE_CTX", d.get("url"), _txt[max(0, _m.start()-120):_m.end()+120], flush=True)
         uid = re.search(r"/unit/(\d+)$", d.get("url") or "")    # the same ad_number map_page builds
         db.note_read_gone(f"{PREFIX}U{uid.group(1)}" if uid
                           else f"{PREFIX}{(d.get('url') or '').rstrip('/').rsplit('/', 1)[-1]}", status)
@@ -288,7 +293,8 @@ def main() -> int:
         while queue:
             url = queue.pop(0)
             try:
-                d = parse_page(url, get(s, url))
+                _raw = get(s, url); PROBE_RAW[url] = _raw
+                d = parse_page(url, _raw)
             except Exception:  # noqa: BLE001
                 unreadable += 1
                 continue
