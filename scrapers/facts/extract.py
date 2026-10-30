@@ -47,6 +47,12 @@ from scrapers.common.pii import redact_pii
 # ── caps (hard; a flag may lower them, never raise them) ───────────────────────────────────────────
 HARD_MAX_CALLS = 10_500
 HARD_MAX_USD = 5.0
+SAMPLE_RETRIES = 3                         # a picker timeout is retried, never read as "nothing to read"
+SAMPLE_RETRY_WAIT = (15, 45, 90)
+
+
+def is_statement_timeout(e: Exception) -> bool:
+    return "57014" in str(e) or "statement timeout" in str(e)
 FALLBACK_MODEL = "openai/gpt-4.1-mini"     # the backup reader: stronger at strict JSON + verbatim quotes, non-thinking
 FALLBACK_SHARE = 0.05                      # never more than 5 % of a run's ads go to the backup
 FALLBACK_MIN = 20                          # …but a small run may still rescue up to 20
@@ -472,10 +478,21 @@ def run(args: argparse.Namespace) -> int:
     print(f"run {args.run_id}: mode {args.mode}; plan {sum(plan.values())} ads over {len(plan)} tables; caps calls≤{args.max_calls} usd≤${args.max_usd}")
     sample: list[dict[str, Any]] = []
     for table, n in plan.items():
-        try:
-            sample.extend(sample_table(table, n, rng) if args.mode == "sample" else sample_silent(table, n, args.seed, args.mode, lane_of(args.shard)))
-        except Exception as e:
-            print(f"  ! {table}: sampling failed: {str(e)[:200]}")
+        # A statement timeout here is load, not an empty table: 16 lanes ask the picker at the same second and the
+        # largest table (aqar, ~170k ads) timed out in every lane on 2026-10-29, so ~42k unread ads were skipped round
+        # after round while each lane read as healthy. Retry a timeout with a staggered wait before giving up on a table.
+        for attempt in range(SAMPLE_RETRIES + 1):
+            try:
+                sample.extend(sample_table(table, n, rng) if args.mode == "sample" else sample_silent(table, n, args.seed, args.mode, lane_of(args.shard)))
+                break
+            except Exception as e:
+                if is_statement_timeout(e) and attempt < SAMPLE_RETRIES:
+                    wait = SAMPLE_RETRY_WAIT[attempt] + random.random() * 10
+                    print(f"  ~ {table}: picker timed out (try {attempt + 1}) — retrying in {wait:.0f}s")
+                    time.sleep(wait)
+                    continue
+                print(f"  ! {table}: sampling failed: {str(e)[:200]}")
+                break
     rng.shuffle(sample)
     print(f"sampled {len(sample)} ads")
     if args.skip_done:
