@@ -150,40 +150,80 @@ export function startNameParty(reduced: boolean): void {
       sparks.push({ x: r.x, y: r.y, px: r.x, py: r.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0, max: rnd(900, 1300), c: '#f2c14e', kind: 3, w: 0, h: 0, rot: 0, vr: 0, flip: 0 });
     }
   };
+  // SMOOTH ON A PHONE (owner 2026-10-30: «it's slow … feels stuck»). Up to ~5,000 sparks are in the air at once, and each
+  // used to be its own beginPath + stroke (and a save/rotate/restore per confetti piece) — far more draw calls than a
+  // phone can make in 16 ms, so frames dropped, and the old 32 ms cap on a frame's step turned every dropped frame into
+  // slow motion. Now: sparks are DRAWN IN BATCHES (one path per colour × width × fade level — a few dozen draw calls a
+  // frame, not thousands), finished sparks leave the list, and a frame steps by the time that really passed (≤ 50 ms),
+  // so a slow phone skips frames instead of slowing the party down.
+  const LEVELS = 3; // fade (alpha) and width steps a spark is drawn at
+  const lines = new Map<string, number[]>(); // `${colour}|${level}` → x0,y0,x1,y1, …
+  const rects = new Map<string, number[]>(); // `${colour}|${level}` → x,y,w,h, …
+  const dots = new Map<number, number[]>();  // level → x,y,r, …
+  const push = <K,>(m: Map<K, number[]>, k: K, ...v: number[]) => { const a = m.get(k); if (a) a.push(...v); else m.set(k, v); };
   let t0 = -1, last = 0;
   const frame = (now: number) => {
     if (ended) return;
     if (t0 < 0) { t0 = now; last = now; }
-    const t = now - t0, dt = Math.min(32, now - last) / 16.7; last = now;
+    const t = now - t0, dt = Math.min(50, now - last) / 16.7; last = now;
     ctx.clearRect(0, 0, W, H);
     let alive = 0;
+    ctx.globalAlpha = 1; ctx.lineWidth = 2; ctx.lineCap = 'round';
     for (const r of rockets) {
       if (r.done) continue;
       alive++;
       if (t < r.at) continue;
       if (!r.vy) r.vy = -Math.sqrt(2 * ROCKET_GRAVITY * (r.y - r.ty)) * 1.02;
       r.y += r.vy * dt; r.vy += ROCKET_GRAVITY * dt;
-      ctx.globalAlpha = 1; ctx.strokeStyle = r.c; ctx.lineWidth = 2; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(r.x, r.y); ctx.lineTo(r.x, r.y - r.vy * 3); ctx.stroke();
-      ctx.fillStyle = '#fff6d8'; ctx.beginPath(); ctx.arc(r.x, r.y, 2, 0, 7); ctx.fill();
+      push(lines, `${r.c}|${LEVELS - 1}`, r.x, r.y - r.vy * 3, r.x, r.y);
+      push(dots, LEVELS - 1, r.x, r.y, 2);
       if (r.vy >= -0.4) { r.done = true; explode(r); }
     }
-    for (const s of sparks) {
+    const drag = Math.pow(0.965, dt);
+    let keep = 0;
+    for (let i = 0; i < sparks.length; i++) {
+      const s = sparks[i];
       s.life += 16.7 * dt; if (s.life > s.max) continue;
-      alive++;
+      sparks[keep++] = s;
       const k = 1 - s.life / s.max;
-      s.px = s.x; s.py = s.y; s.vx *= Math.pow(0.965, dt); s.vy = s.vy * Math.pow(0.965, dt) + 0.045 * dt; s.x += s.vx * dt; s.y += s.vy * dt;
-      ctx.globalAlpha = Math.min(1, k * 1.4);
-      if (s.kind === 2) { ctx.fillStyle = s.c; ctx.beginPath(); ctx.arc(s.x, s.y, 3 * k + 1, 0, 7); ctx.fill(); continue; }
-      if (s.kind === 3) { if (Math.random() < 0.6) { ctx.fillStyle = Math.random() < 0.5 ? s.c : '#fff6d8'; ctx.fillRect(s.x - 1.2, s.y - 1.2, 2.4, 2.4); } continue; }
+      const lv = Math.min(LEVELS - 1, Math.floor(Math.min(1, k * 1.4) * LEVELS));
+      s.px = s.x; s.py = s.y; s.vx *= drag; s.vy = s.vy * drag + 0.045 * dt; s.x += s.vx * dt; s.y += s.vy * dt;
+      if (s.kind === 2) { push(dots, lv, s.x, s.y, 3 * k + 1); continue; }
+      if (s.kind === 3) { if (Math.random() < 0.6) push(rects, `${Math.random() < 0.5 ? s.c : '#fff6d8'}|${lv}`, s.x - 1.2, s.y - 1.2, 2.4, 2.4); continue; }
       if (s.kind === 1) {
-        s.rot += s.vr * dt; s.flip += 0.14 * dt; s.x += Math.sin(s.flip) * 0.35;
-        ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.rot); ctx.scale(1, Math.cos(s.flip)); ctx.fillStyle = s.c; ctx.fillRect(-s.w / 2, -s.h / 2, s.w, s.h); ctx.restore();
+        // confetti: it flips (its height breathes with cos) and sways — drawn upright, which reads the same at this size
+        s.flip += 0.14 * dt; s.x += Math.sin(s.flip) * 0.35;
+        const hh = Math.max(0.8, s.h * Math.abs(Math.cos(s.flip)));
+        push(rects, `${s.c}|${lv}`, s.x - s.w / 2, s.y - hh / 2, s.w, hh);
       } else {
-        ctx.strokeStyle = s.c; ctx.lineWidth = 2.2 * k + 0.6; ctx.lineCap = 'round';
-        ctx.beginPath(); ctx.moveTo(s.px - s.vx * 2, s.py - s.vy * 2); ctx.lineTo(s.x, s.y); ctx.stroke();
+        push(lines, `${s.c}|${lv}`, s.px - s.vx * 2, s.py - s.vy * 2, s.x, s.y);
       }
     }
+    sparks.length = keep;
+    alive += keep;
+    const alphaOf = (lv: number) => (lv + 1) / LEVELS;
+    for (const [key, a] of lines) {
+      const [c, l] = key.split('|'); const lv = Number(l);
+      ctx.globalAlpha = alphaOf(lv); ctx.strokeStyle = c; ctx.lineWidth = 0.9 + lv * 0.8;
+      ctx.beginPath();
+      for (let j = 0; j < a.length; j += 4) { ctx.moveTo(a[j], a[j + 1]); ctx.lineTo(a[j + 2], a[j + 3]); }
+      ctx.stroke();
+    }
+    for (const [key, a] of rects) {
+      const [c, l] = key.split('|');
+      ctx.globalAlpha = alphaOf(Number(l)); ctx.fillStyle = c;
+      ctx.beginPath();
+      for (let j = 0; j < a.length; j += 4) ctx.rect(a[j], a[j + 1], a[j + 2], a[j + 3]);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#fff6d8';
+    for (const [lv, a] of dots) {
+      ctx.globalAlpha = alphaOf(lv);
+      ctx.beginPath();
+      for (let j = 0; j < a.length; j += 3) { ctx.moveTo(a[j] + a[j + 2], a[j + 1]); ctx.arc(a[j], a[j + 1], a[j + 2], 0, 7); }
+      ctx.fill();
+    }
+    lines.clear(); rects.clear(); dots.clear();
     ctx.globalAlpha = 1;
     if (!alive) { finish(); return; }
     raf(frame);
