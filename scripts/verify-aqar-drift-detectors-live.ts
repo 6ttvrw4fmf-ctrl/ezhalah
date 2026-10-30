@@ -65,7 +65,10 @@ async function rest(path: string, init: RequestInit) {
   return text ? JSON.parse(text) : null;
 }
 
-const rpc = (fn: string) => rest(`rpc/${fn}`, { method: 'POST', body: '{}' }).then((v) => v as number);
+const rpc = (fn: string) => rest(`rpc/${fn}`, { method: 'POST', body: '{}' }).then((v) => {
+  if (typeof v !== 'number' || !Number.isInteger(v)) throw new Error(`${fn} answered ${JSON.stringify(v)}, not a count`);
+  return v;
+});
 
 async function setShadow(city_ar: string, city_id: number, region_ar: string) {
   await rest(
@@ -95,27 +98,34 @@ async function assertEqual(label: string, actual: number, expected: number) {
   if (!ok) failed = true;
 }
 
+// BASELINE-RELATIVE (falcon 2026-10-30, backlog 807). This proves the DETECTORS work: the planted bug must add
+// exactly one finding and the restore must take it away again. It used to demand a production baseline of 0, so
+// three real Hofuf rows the detector rightly raised as P1 kept this robot red for 11 days while the detector was
+// catching the planted bug perfectly (3 → 4 → 3). Real findings are the detector's alert; this robot judges the
+// detector. A failed read stays a failure: rpc() throws on any non-200, never returns 0.
+const base = {
+  proven: await rpc('mon_detect_aqar_proven_wrong_resolution'),
+  region: await rpc('mon_detect_city_region_mismatch'),
+};
+console.log(`baseline: proven_wrong ${base.proven}, region_mismatch ${base.region} (real findings, raised by the detectors themselves)`);
 try {
-  await assertEqual('proven_wrong before mutation', await rpc('mon_detect_aqar_proven_wrong_resolution'), 0);
-  await assertEqual('region_mismatch before mutation', await rpc('mon_detect_city_region_mismatch'), 0);
-
   // Mutate: reproduce the exact historic bug shape on this one real row.
   await setShadow(TEST_ROW.wrong_city_ar, TEST_ROW.wrong_city_id, TEST_ROW.correct_region_ar);
   await setSearchIndexRegion(TEST_ROW.wrong_region_id_for_region_test);
 
-  await assertEqual('proven_wrong WHILE mutated (must catch it)', await rpc('mon_detect_aqar_proven_wrong_resolution'), 1);
-  await assertEqual('region_mismatch WHILE mutated (must catch it)', await rpc('mon_detect_city_region_mismatch'), 1);
+  await assertEqual('proven_wrong WHILE mutated (must catch it: baseline + 1)', await rpc('mon_detect_aqar_proven_wrong_resolution'), base.proven + 1);
+  await assertEqual('region_mismatch WHILE mutated (must catch it: baseline + 1)', await rpc('mon_detect_city_region_mismatch'), base.region + 1);
 } finally {
   // Always restore, even if an assertion above threw - this row must never stay mutated.
   await setShadow(TEST_ROW.correct_city_ar, TEST_ROW.correct_city_id, TEST_ROW.correct_region_ar);
   await setSearchIndexRegion(TEST_ROW.correct_region_id);
 }
 
-await assertEqual('proven_wrong AFTER restore', await rpc('mon_detect_aqar_proven_wrong_resolution'), 0);
-await assertEqual('region_mismatch AFTER restore', await rpc('mon_detect_city_region_mismatch'), 0);
+await assertEqual('proven_wrong AFTER restore (back to baseline)', await rpc('mon_detect_aqar_proven_wrong_resolution'), base.proven);
+await assertEqual('region_mismatch AFTER restore (back to baseline)', await rpc('mon_detect_city_region_mismatch'), base.region);
 
 if (failed) {
   console.error('✗ aqar drift detector mutation proof FAILED - see above.');
   process.exit(1);
 }
-console.log('✓ both detectors correctly flip 0 -> nonzero -> 0 against a real reproduced bug, and the test row is restored.');
+console.log('✓ both detectors add exactly the planted bug and drop it on restore, and the test row is restored.');
