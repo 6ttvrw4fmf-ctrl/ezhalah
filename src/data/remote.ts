@@ -17,6 +17,7 @@ import { decodeEntities } from '@/lib/htmlEntities';
 import { dedupePhotoUrls, photoDisplayUrl } from '@/lib/photoUrl';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
 import { listingDiscountFrom } from '@/lib/listingDisplay';
+import { servedSaleFigures } from '@/lib/meterBoxPrice';
 import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import { rotationSeed } from '@/lib/rotationSeed';
 import { truncateGlyphs } from '@/lib/typedReveal';
@@ -2041,9 +2042,13 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     const cheapYearly = deal === 'Rent' && cheapYearlyIsMonthly(r.source ?? '', r.rent_period, r.price_annual, norm.clean);
     const servedAnnual: unknown = cheapYearly ? (r.price_annual as number) * 12 : r.price_annual;
     const servedSourcePeriod = cheapYearly ? 'monthly' : (r.rent_period ?? null);
-    const priceStr = listingPriceString(deal, pool, servedAnnual, r.price_total,
-                                        r.price_per_meter, r.area_m2);
-    const priceIsDerived = isDerivedTotal(deal, r.price_total, r.price_annual, r.price_per_meter, r.area_m2);
+    // A sale total typed into the per-meter box prints the seller's figure, exactly as the index serves it
+    // (src/lib/meterBoxPrice.ts): the card AND the client budget net read this, so they agree with the count.
+    const sale = deal === 'Buy' ? servedSaleFigures(r.price_total, r.price_annual, r.area_m2, r.price_per_meter)
+                                : { priceTotal: r.price_total, pricePerMeter: r.price_per_meter };
+    const priceStr = listingPriceString(deal, pool, servedAnnual, sale.priceTotal,
+                                        sale.pricePerMeter, r.area_m2);
+    const priceIsDerived = isDerivedTotal(deal, sale.priceTotal, r.price_annual, sale.pricePerMeter, r.area_m2);
     // Aqar (both residential & commercial) scrapes its own "no photo" placeholder graphic
     // (villa-default.png, at one of a couple CDN sizes, sometimes with a corrupted trailing
     // backslash) as a literal photo_urls entry - filter it out so a listing with only this
@@ -2088,7 +2093,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // Passed through VERBATIM — no rounding, no unit conversion, no derivation. The decision of
       // whether to SHOW it (and the «سعر المتر 1» placeholder rule) lives in ResultCard, so this
       // field always means "what the source published", nothing else.
-      pricePerMeter: typeof r.price_per_meter === 'number' ? r.price_per_meter : null,
+      pricePerMeter: typeof sale.pricePerMeter === 'number' ? sale.pricePerMeter : null,
       // Shown as «~~old~~ خصم X٪» under the (already discounted) price. Null = no line at all.
       discount: priceIsDerived ? null : listingDiscountFrom(deal, r.source ?? 'Aqar', r.price_total, r.price_original, r.discount_pct),
       priceIsDerived,
