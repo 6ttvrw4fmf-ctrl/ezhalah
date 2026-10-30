@@ -995,6 +995,9 @@ export default function Home() {
   // listing-bearing districts were all the same invisible box. Each now shows ONE small muted
   // Arabic row. English typing is excluded on purpose: that case already has its own message
   // (ARABIC_ONLY_MSG under the field) and must keep it, unchanged.
+  // What the city field SHOWS: a picked city carries its Arabic name for the search but reads in English in the
+  // English UI. Its side follows what is shown — reading the hidden Arabic put «Riyadh» on the right (owner 2026-10-30).
+  const cityShown = locale === 'en' && citySelected && query.location === citySelected.cityAr ? cityLabel(citySelected) : query.location;
   const cityLatin = !!query.location && wrongScript(query.location);
   const cityStatus = cityPoolStatus(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams);
   // A NON-EMPTY LIST IS NOT EVIDENCE THAT THIS COHORT HAS LOADED (routine #8, 2026-09-23, #648).
@@ -1634,8 +1637,8 @@ export default function Home() {
                   testID="city-input"
                   placeholder={t('Choose a city')}
                   placeholderTextColor={colors.muted}
-                  style={[s.flInput, x.flInput, typedDir(query.location)]}
-                  value={locale === 'en' && citySelected && query.location === citySelected.cityAr ? cityLabel(citySelected) : query.location}
+                  style={[s.flInput, x.flInput, typedDir(cityShown)]}
+                  value={cityShown}
                   autoCorrect={false}
                   onFocus={() => {
                     clearBlurTimer(cityBlurTimer); // P3: a pending close from a just-blurred state must not outlive the refocus
