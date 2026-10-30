@@ -267,6 +267,9 @@ WORD_NUMBERS = {"ثلاث": 3, "ثلاثه": 3, "اربع": 4, "اربعه": 4, 
 WORD_NUMBER = re.compile(r"(?<![\u0621-\u064A])(" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
                          + r")(?![\u0621-\u064A])")
 
+WORDED_VALUE_LINE = re.compile(r"^\s*(" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
+                               + r")\s*(?:سنوات|سنين|سنه|غرف|غرفه|صالات|دورات مياه)?\s*$")
+
 
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
@@ -308,6 +311,11 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # (2026-10-20, re-read run 39384692527) print the ad's own «غرفتين نوم» AND, in the related-ads table under
         # it, another unit's «المساحة194مأربع غرف»; reading the number word first scored our 2 bedrooms a MISMATCH.
         worded = {WORD_NUMBERS[m.group(1)] for i in kw_hits for m in WORD_NUMBER.finditer(lines[i])}
+        # A label/value page puts the worded figure on the NEXT line: reinvest 21664052 (2026-10-30, re-read run
+        # 41098655633) prints «عمر العقار» / «ثلاث سنوات» (stored 3), and the bare «3179» of the row before read as
+        # a stated age, so the night scored it a MISMATCH. Only a line that is nothing but the worded figure counts.
+        worded |= {WORD_NUMBERS[m.group(1)] for i in kw_hits if i + 1 < len(lines)
+                   for m in [WORDED_VALUE_LINE.match(lines[i + 1])] if m}
         if any(ONE_WORD.search(lines[i]) for i in kw_hits):
             worded.add(1)
         if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
