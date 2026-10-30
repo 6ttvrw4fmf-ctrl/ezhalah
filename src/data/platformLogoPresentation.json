@@ -1,5 +1,15 @@
 {
   "variants": {
+    "Mustqr": {
+      "asset": "../../assets/images/platform-logos/mustqr-sa.png",
+      "source": "https://mustqr.sa/brand/logo.svg",
+      "preparation": "Removed only the explicit white background rect from the official SVG; exported at 320px as a palette PNG. Original green paths unchanged."
+    },
+    "مكتب أقاليم هجر للخدمات العقارية": {
+      "asset": "../../assets/images/platform-logos/aqalemhajer-com.png",
+      "source": "https://aqalemhajer.com/logos.png",
+      "preparation": "Reused the existing transparent assets/images/aqalemhajer.png symbol, checked against the official blue/gold mark, and exported as an optimized palette PNG."
+    },
     "منصات": {
       "asset": "../../assets/images/platform-clean/menassat.png",
       "source": "https://gomenassat.com/assets/landing/img/realestate_logo.webp"

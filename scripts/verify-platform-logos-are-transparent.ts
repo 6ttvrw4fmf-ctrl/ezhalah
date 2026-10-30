@@ -19,20 +19,19 @@
 // cannot be produced faithfully from the asset we have (never as a silent pass):
 //   • eagle-night.jpg — the hero/night backdrop, not a platform logo at all.
 //
-// ponytail: pngHasAlpha() below proves a PNG CAN carry transparency (colour-type/tRNS), not that any
-// pixel actually USES it — a flattened logo re-saved as "RGBA" with every pixel opaque (alpha≡255)
-// would read as clean here. That gap is exactly how the 9 PNG offenders fixed 2026-09-12 (arkaan,
-// abralosol, therc, rawasidark, aouj, azdad, shmoualshmal, amaall) sat broken through this barrier
-// for six days — it never caught them because none were JPEGs. Upgrade path: decode IDAT scanlines
-// (Node's builtin zlib.inflateSync covers the compression; PNG filter-type reconstruction is the
-// remaining ~50-80 lines) and assert at least one pixel's alpha is meaningfully below 255 — verified
-// by hand for this fix via PIL's `alpha.getextrema()`, not automated here.
+// The shared platform pack is also DECODED: an alpha-capable file with only a few transparent
+// corner pixels is still a pasted rectangle. Mostqar (0.013% clear) and Aqalem Hajer (0.306%)
+// exposed that gap on 2026-10-29. Require at least 2% genuinely clear pixels in these brand assets.
+// pngjs already ships in the locked Expo build toolchain; it adds nothing to the app bundle.
 //
 // Run: node --experimental-strip-types scripts/verify-platform-logos-are-transparent.ts
 
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+const { PNG } = createRequire(import.meta.url)('pngjs');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCES = ['src/data/loaderPlatforms.ts', 'src/data/platformPickerProfiles.ts', 'src/components/ResultCard.tsx', 'src/components/InfoModal.tsx'];
@@ -59,6 +58,13 @@ function pngHasAlpha(bytes: Buffer): boolean {
   return bytes.includes(Buffer.from('tRNS', 'latin1')); // palette/gray/RGB transparency
 }
 
+function pngHasClearBackground(bytes: Buffer): boolean {
+  const { data, width, height } = PNG.sync.read(bytes);
+  let clear = 0;
+  for (let i = 3; i < data.length; i += 4) if (data[i] < 32) clear++;
+  return clear / (width * height) >= 0.02;
+}
+
 console.log('\nPlatform logos are transparent PNGs (no white-box JPEGs)\n');
 
 // Gather every logo asset referenced by the rendering surfaces.
@@ -77,6 +83,7 @@ check('found platform logo references to grade', refs.size >= 40, `${refs.size} 
 // The invariant, per referenced asset.
 let jpegOffenders = 0;
 let alphaless = 0;
+const boxed: string[] = [];
 for (const [name, src] of [...refs].sort()) {
   const isJpeg = /\.jpe?g$/i.test(name);
   if (isJpeg) {
@@ -86,9 +93,11 @@ for (const [name, src] of [...refs].sort()) {
   // A PNG must actually carry alpha — a flattened PNG is a white box wearing a .png extension.
   const bytes = readFileSync(join(ROOT, 'assets/images', name));
   if (!pngHasAlpha(bytes)) { alphaless++; check(`${name} is a PNG with NO alpha channel (still a box)`, false); }
+  if (/^platform-(logos|clean)\//.test(name) && !pngHasClearBackground(bytes)) boxed.push(name);
 }
 check('no non-exempt JPEG logo is referenced', jpegOffenders === 0, `${jpegOffenders} offender(s)`);
 check('every referenced PNG logo carries a real alpha channel', alphaless === 0, `${alphaless} flattened PNG(s)`);
+check('the shared platform pack uses real transparent backgrounds, not token corner pixels', boxed.length === 0, boxed.join(', '));
 
 // The exemptions are real files and still JPEGs (so the list cannot rot into hiding a fixed one).
 for (const ex of EXEMPT) {
@@ -131,6 +140,15 @@ mustCatch('a flattened palette PNG (colour type 3, no tRNS) is NOT called transp
 mustCatch('an RGBA PNG (colour type 6) IS transparent', pngHasAlpha(pngWith(6)) === true);
 mustCatch('a palette PNG WITH a tRNS chunk IS transparent (the shmoualshmal shape)',
   pngHasAlpha(pngWith(3, true)) === true);
+
+// Encode actual pixels, then exercise the same decoder used against the shipped assets.
+const tile = new PNG({ width: 100, height: 100 });
+tile.data.fill(255);
+mustCatch('an opaque RGBA tile', !pngHasClearBackground(PNG.sync.write(tile)));
+tile.data[3] = 0;
+mustCatch('an opaque tile disguised by one transparent pixel', !pngHasClearBackground(PNG.sync.write(tile)));
+for (let i = 3; i < 4000; i += 4) tile.data[i] = 0;
+check('a logo with genuinely transparent space is accepted', pngHasClearBackground(PNG.sync.write(tile)));
 
 console.log(failed === 0
   ? '\n✅ platform-logos-are-transparent: every rendered logo is a transparent PNG (exemptions documented).\n'
