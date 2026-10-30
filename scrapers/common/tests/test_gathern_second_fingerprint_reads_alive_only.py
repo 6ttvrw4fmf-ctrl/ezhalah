@@ -70,3 +70,28 @@ def test_the_sweep_actually_wires_the_second_read():
     import inspect
     src = inspect.getsource(gl.main)
     assert "fingerprint_read(" in src and "_alt_session()" in src
+
+
+class _Route:
+    def __init__(self, table):
+        self.table = table
+
+    def get(self, url, *_a, **_k):
+        st, final, body = self.table[url]
+        return _R(st, final, body)
+
+
+AR = "https://gathern.co/ar/view/157698/unit/220652"
+
+
+def test_home_on_view_but_named_on_ar_view_under_the_second_fingerprint_is_alive(monkeypatch):
+    _no_wait(monkeypatch)
+    alt = _Route({UNIT: (200, HOME, "home"), AR: (200, AR, "<h1>شقة</h1> 220652")})
+    assert gl.fingerprint_read(0, alt, UNIT) == 200
+
+
+def test_ar_view_under_the_second_fingerprint_can_never_kill(monkeypatch):
+    _no_wait(monkeypatch)
+    for ar in ((404, AR, "الصفحة غير موجودة"), (200, HOME, "220652"), (200, AR, "names nothing")):
+        got = gl.fingerprint_read(0, _Route({UNIT: (200, HOME, "home"), AR: ar}), UNIT)
+        assert got == 0 and not gl.looks_dead(got)
