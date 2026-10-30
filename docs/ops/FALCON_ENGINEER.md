@@ -301,6 +301,11 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
 26. Agent containers cannot reach ezhalah.com, but GitHub runners can (10-30): browser proofs run through
    `customer-journey.yml` (dispatch `mode` + `listings`) and the quick-search audit through `qa-coverage-run.yml`
    (budget 3000). A new workflow can be dispatched only after it is on main; until then its PR run is the proof.
+27. A harness failure in a red robot hides the product failure next to it (10-30): af-live-truth-check was red on
+   every real run for days. One job failed because two robots knew the front door only on the old vercel address
+   (PR 9489); the job beside it failed because Gathern's feed dropped `unit_type_ar` and the «استديو» option read 1
+   instead of thousands (PR 9488). Read EVERY failing job of a red robot, never only the first, and when a site moves
+   host, grep every robot for the old host the same day.
 
 ## Rating (computed, must be earned)
 - **10/10** only when: every map line A–E is covered 100% (or its minimum), the sweep is green, all 10 golden searches pass,
