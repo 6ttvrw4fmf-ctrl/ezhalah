@@ -451,7 +451,24 @@ def page_lacks_its_ad(url: str | None, body: str) -> bool:
 _CARD_START = re.compile(r'<div[^>]*class="[^"]*\bcard-item\b')
 
 
+# A page's «similar ads» block is OTHER ads, and so is the footer under it: ashab 21679061 (2026-10-30, re-read
+# runs 41088522215 / 41088846088) — the ad's own header badge says «بيع» (stored بيع), but the sibling cards under
+# «عقارات مشابهة» carry «إيجار» badges, which scored the deal MISMATCH and capped the night. The site's own scraper
+# stops at the same markers (scrapers/ashab/run.py::parse_page); the scorer reads exactly what the scraper reads.
+_SIMILAR_BLOCK = {"ashab.sa": ('id="similar-properties"', "عقارات مشابهة")}
+
+
+def drop_similar_block(url: str | None, body: str) -> str:
+    for host, stops in _SIMILAR_BLOCK.items():
+        if host in (url or "") and body:
+            for stop in stops:
+                if (k := body.find(stop)) > 0:
+                    body = body[:k]
+    return body
+
+
 def scope_to_its_ad(url: str | None, body: str) -> str:
+    body = drop_similar_block(url, body)
     m = _AD_CODE_IN_URL.search(url or "")
     if not m or not body:
         return body
