@@ -43,6 +43,8 @@ SLUG = "manzo"
 _TYPE_AR = {"Apartment": "شقة", "Villa": "فيلا", "Floor": "دور", "Land": "ارض", "Office": "مكتب",
             "Shop": "محل", "Building": "عمارة", "Warehouse": "مستودع", "Studio": "استوديو"}
 _DEAL = {"long_term_rent": "Rent", "sale": "Buy", "sell": "Buy"}
+_FEATURE_COLUMNS = {"elevator": "elevator", "maid_room": "maid_room", "central_ac": "air_conditioner",
+                    "covered_parking": "parking", "laundry_room": "laundry_room", "balcony": "balcony_terrace"}
 _NEVER_STORE = {"lister_info", "borders", "commission", "deep_link", "share_image", "share_title",
                 "share_description", "connectivity", "nearby_pois"}
 
@@ -160,6 +162,13 @@ def map_property(d: dict) -> tuple[Optional[tuple[dict, str]], str]:
     }
     for flag, col in (("electricity_access", "electricity"), ("water_access", "water_supply"), ("sewage_system", "sanitation")):
         if d.get(flag) is True:
+            row[col] = True
+    # The apartment's feature checklist (apartment.features) was kept in additional_info but never mapped, so all 708
+    # ads answered no Advanced Filter amenity (2026-10-30). Only a TICKED box is the source saying yes. An unticked box
+    # is not a «no»: every key is false on ads whose own description says furnished, with a kitchen, and 656 of 659
+    # apartments leave «elevator» unticked. So it stays NULL (unknown), never false.
+    for key, col in _FEATURE_COLUMNS.items():
+        if (apt.get("features") or {}).get(key) is True:
             row[col] = True
     stored = row.get("price_total") if deal == "Buy" else row.get("price_annual")
     row["price_evidence"] = normalize.price_evidence(
