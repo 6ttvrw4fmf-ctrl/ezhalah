@@ -50,6 +50,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, http_liveness, normalize, sold_pin
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.pii import redact_pii
 
 BASE = "https://hajerhouses.com"
 LIST_API = f"{BASE}/wp-json/wp/v2/properties"
@@ -420,8 +421,13 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         # Amenities from the ad's own body (WordPress `content`): «مطبخ مغلق», «غرفة خادمة», «غرفة غسيل».
         # hajer's REM block has NO amenity field (its 20 labels are rooms/area/facade/street/age/…), so
         # the law allows prose here, four outcomes, line by line (🔬 AF engineer 2026-10-07: 0/4 hajer
-        # findability, source-reread 37608383084). The body itself is not stored (PDPL: free text).
+        # findability, source-reread 37608383084).
         **normalize.amenities_from_lines(_body_lines(p)),
+        # The ad body itself — the page's own `<div class="description">` (WordPress `content`): «يتكون من
+        # دورين وملحق: الدور الأرضي •صالة+دورة مياه …» (2026-10-30: 123 of 123 active rows stored none, so the
+        # AI facts reader had nothing to read). Stored verbatim through redact_pii (PDPL); an empty body is
+        # NULL, never ''.
+        "description": redact_pii(_body_lines(p)) or None,
         # A per-metre rate is never a total and never an annual rent — see `rate_only` above.
         "price_total": None if (is_rent or rate_only) else price,
         "price_annual": price_annual,
