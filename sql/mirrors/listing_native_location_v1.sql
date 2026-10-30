@@ -48,6 +48,9 @@
 -- Re-verified 2026-10-25 (migration 20261025035403_pin_district_fill_table_and_recovery_arm): UNCHANGED. That migration
 --   only READS this view (the new pin arm of refresh_district_recovery_table joins it); md5(live pg_get_viewdef) ==
 --   ea8174b63953cfc25aef4a39af032f0a == body below.
+-- Re-verified 2026-10-30 (migration 20261030063801_retired_place_homes_move_to_their_real_town): UNCHANGED. That migration
+--   only READS this view (retired_place_remap_rows / refresh_listing_city_correction join it); md5(live pg_get_viewdef) ==
+--   ea8174b63953cfc25aef4a39af032f0a == body below.
  WITH native AS (
          SELECT 'alhoshan'::text AS platform,
             'alhoshan_residential_listings'::text AS source_table,
