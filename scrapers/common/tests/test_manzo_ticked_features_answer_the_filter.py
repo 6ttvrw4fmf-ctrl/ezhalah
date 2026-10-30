@@ -48,3 +48,29 @@ MANZO_COLUMNS = {"air_conditioner", "balcony_terrace", "elevator", "laundry_room
 
 def test_every_mapped_column_exists_on_the_table():
     assert set(R._FEATURE_COLUMNS.values()) <= MANZO_COLUMNS
+
+
+def test_details_are_read_in_parallel_in_order_and_a_failure_is_unreadable():
+    """10-30: 856 details read one by one outgrew the 10-minute job, so no crawl finished after 10-28."""
+    import threading
+    import time
+
+    from curl_cffi import requests as cc
+
+    live, peak, lock = [0], [0], threading.Lock()
+
+    def fetch(sess, url):
+        with lock:
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+        time.sleep(0.02)
+        with lock:
+            live[0] -= 1
+        if url.endswith("/bad/"):
+            raise RuntimeError("timeout")
+        return {"data": {"slug": url.rstrip("/").rsplit("/", 1)[-1]}}
+
+    listing = [{"slug": f"s{i}"} for i in range(20)] + [{"slug": "bad"}]
+    got = R.read_details(cc.Session(impersonate="chrome124"), listing, fetch=fetch)
+    assert [g and g["slug"] for g in got] == [f"s{i}" for i in range(20)] + [None]
+    assert 1 < peak[0] <= R.DETAIL_WORKERS

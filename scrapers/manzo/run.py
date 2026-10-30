@@ -22,7 +22,9 @@ import argparse
 import datetime as dt
 import json
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
 
@@ -72,6 +74,32 @@ def walk(s: cc.Session) -> tuple[list[dict], int]:
         if not pg.get("has_next"):
             break
     return rows, total
+
+
+# THE CRAWL FITS ITS SLOT (2026-10-30). The catalogue grew to 856 ads and each detail record was read one after another,
+# so the run outgrew its 10-minute job and was cancelled every time: no manzo crawl finished after 10-28 08:44, and the
+# ad text (#9404) and feature boxes never reached a row. Four workers, each with its own session on the profile and route
+# the probe chose, read the same records in the same order; a record that fails is None, counted unreadable as before.
+DETAIL_WORKERS = 4
+
+
+def read_details(s: cc.Session, listing: list[dict], fetch=None) -> list[Optional[dict]]:
+    fetch = fetch or get_json
+    local = threading.local()
+
+    def one(p: dict) -> Optional[dict]:
+        sess = getattr(local, "s", None)
+        if sess is None:
+            sess = local.s = (cc.Session(impersonate=s.impersonate, proxies=s.proxies or None)
+                              if isinstance(s, cc.Session) else s)
+        try:
+            d = fetch(sess, f"{API}/details/s/{p['slug']}/")
+            return d.get("data") or d
+        except Exception:  # noqa: BLE001
+            return None
+
+    with ThreadPoolExecutor(DETAIL_WORKERS) as ex:
+        return list(ex.map(one, listing))
 
 
 def source_published_empty(listing: list, declared: int) -> bool:
@@ -217,11 +245,8 @@ def main() -> int:
     # keeps a row from being read as unseen and lets the own-page oracle find a known-live control.
     listed: set[str] = set()
     try:
-        for p in listing:
-            try:
-                d = get_json(s, f"{API}/details/s/{p['slug']}/")
-                d = d.get("data") or d
-            except Exception:  # noqa: BLE001
+        for p, d in zip(listing, read_details(s, listing)):
+            if d is None:
                 unreadable += 1
                 continue
             listed.add(listed_ad_number(d, p))
