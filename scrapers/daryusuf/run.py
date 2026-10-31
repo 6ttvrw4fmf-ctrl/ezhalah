@@ -450,6 +450,16 @@ _CLOSED_TITLE_RE = re.compile(r"تم\s*البيع|تم\s*الإيجار|تم\s*�
 _OFFPLAN_TITLE_RE = re.compile(r"على\s*الخارطة|(?<![ء-ي])قريب[اً]+(?![ء-ي])|off[\s\-]plan|coming\s*soon", re.I)
 
 
+_URL_DEAL_RE = re.compile(r"-for-(sale|rent)(?:-|/|$)|-لل(بيع|إيجار|ايجار)(?:-|/|$)", re.I)
+
+
+def url_slug_deal(link: str) -> Optional[str]:
+    """«Buy» / «Rent» from the post's own URL slug (/villa-for-sale-on-…/), None when it names neither or both."""
+    found = {("Buy" if (m.group(1) or "").lower() == "sale" or m.group(2) == "بيع" else "Rent")
+             for m in _URL_DEAL_RE.finditer(unquote(link.rstrip("/").rsplit("/", 1)[-1] + "/"))}
+    return found.pop() if len(found) == 1 else None
+
+
 def map_listing(post: dict, terms: dict[int, str]) -> tuple[Optional[dict], str, str]:
     if post.get("id") is None:
         return None, "residential", "no_id"
@@ -470,6 +480,17 @@ def map_listing(post: dict, terms: dict[int, str]) -> tuple[Optional[dict], str,
         deal, property_type = deal or d, property_type or t
     if not slugs:
         deal, property_type = deal_and_type_from_title(title)
+    elif deal:
+        # The editor sometimes files a sale under a «…-for-rent» category: 13109421 «Villa for sale in Al
+        # Matar», /villa-for-sale-on-…/, «1,480,000 SAR», sits in villas-for-rent and was stored as a
+        # 1.48 M yearly rent no sale search could find (2026-10-31). When the category and the title
+        # disagree, the post's own URL slug decides; with no tie-breaker the ad is skipped, never guessed.
+        title_deal, _ = deal_and_type_from_title(title)
+        if title_deal and title_deal != deal:
+            url_deal = url_slug_deal(post.get("link") or "")
+            if url_deal not in (deal, title_deal):
+                return None, "residential", "deal_conflict"
+            deal = url_deal
     if not deal:
         return None, "residential", "deal_unknown"
     content = (post.get("content") or {}).get("rendered") or ""
