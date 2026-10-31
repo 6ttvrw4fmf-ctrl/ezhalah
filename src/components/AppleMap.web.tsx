@@ -232,7 +232,8 @@ export default function AppleMap() {
           const lat = map.region.span.latitudeDelta;
           if (!homeLatDelta) homeLatDelta = lat;
           setZoomed(lat < homeLatDelta * 0.85);
-          fade = Math.max(FADE_FLOOR, Math.min(1, homeLatDelta / lat));
+          // Squared so the drop is quick: 1.2× out → ~70%, 2× out → ~25%, then the floor.
+          fade = Math.max(FADE_FLOOR, Math.min(1, (homeLatDelta / lat) ** 2));
           paint();
         };
         map.addEventListener('region-change-end', onRegion);
