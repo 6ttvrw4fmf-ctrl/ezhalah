@@ -4,14 +4,15 @@
 # (every changed file under scrapers/) lands the same night without waiting for a person. It goes through
 # THE sanctioned merge gate (scripts/safe-pr-merge.ts — verify-merge-gate-transport.ts keeps it the only
 # door): the gate re-reads the PR right before merging and refuses unless every required check on main is
-# exactly SUCCESS, the branch is up to date and mergeable, and the file list still matches. Anything else —
-# app screens (src/), the database (supabase/), workflows (.github/), docs, the agent — still waits for a
-# person. Drafts and forks are never considered. A green scrapers-only PR that is merely BEHIND main is
+# exactly SUCCESS, the branch is up to date and mergeable, and the file list still matches. 2026-10-31 (owner,
+# «8 or better»): the lanes widened to scrapers/, scripts/, e2e/, docs/ and .github/workflows/ — everything the
+# engineers ship except the app screens (src/, public/), package files, the database (supabase/ other than a
+# mirror) and the merge gate itself, which still wait for a person. Drafts and forks are never considered. A green scrapers-only PR that is merely BEHIND main is
 # brought up to date HERE (gh pr update-branch) and merged on a later pass: measured 2026-10-18 (backlog
 # 671), main merged every ~5-20 min, so AF's PR #7482 sat green-but-BEHIND from 10:45 to 13:10, was
 # updated by hand at 13:12 and was BEHIND again by 13:35 — a 9-minute CI cannot win that race by hand,
 # and the engineer whose prompt says «update it» is asleep after its 2-hour slot.
-name: Engineer auto-merge (scrapers only)
+name: Engineer auto-merge (engineer lanes)
 
 on:
   schedule:
@@ -56,7 +57,18 @@ jobs:
           while IFS=$'\t' read -r pr title <&3; do
             [ -n "$pr" ] || continue
             files=$(gh pr view "$pr" --repo "$REPO" --json files -q '.files[].path')
-            outside=$(printf '%s\n' "$files" | grep -v '^scrapers/' || true)
+            # LANES (owner 2026-10-31, «8 or better»): scrapers/, scripts/, e2e/, docs/ and the robots' own workflows
+            # (.github/workflows/) land by themselves — on 10-31 five finished engineer PRs (#9577 robots, #9602
+            # lifecycle+barrier, #9600/#9449 rulebooks, #9607) waited a whole day for a person and capped every score.
+            # The merge GATE itself never auto-merges: engineer-automerge.yml, scripts/safe-pr-merge.ts and the secret
+            # handshake (scripts/lib/gateFetch.mjs, scripts/lib/robotPass.mjs) still need a person, so a robot cannot
+            # widen its own door. src/, public/, package files and supabase/ (other than a mirror) stay with a person.
+            outside=$(printf '%s\n' "$files" \
+              | grep -vE '^(scrapers|scripts|e2e|docs|\.github/workflows)/' \
+              ; printf '%s\n' "$files" \
+              | grep -E '^(\.github/workflows/engineer-automerge\.yml|scripts/safe-pr-merge\.ts|scripts/lib/gateFetch\.mjs|scripts/lib/robotPass\.mjs)$' \
+              ; true)
+            outside=$(printf '%s' "$outside" | sed '/^$/d')
             # A MIRROR PR (owner 2026-10-19): its ONLY files are supabase/migrations/<14 digits>_*.sql and its title
             # says «mirror». Merging it changes nothing in production — migrations reach prod only through the
             # engineers' apply step; the file is the git copy of one ALREADY applied, and an unmirrored one blocks
