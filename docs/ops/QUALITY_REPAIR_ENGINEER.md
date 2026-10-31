@@ -258,6 +258,7 @@ timing so tonight's proofs land inside your 2 hours. (🆕 night 2: 4/12; 🔬 n
 ## Report: this block is the LAST thing you write (short; times in Arizona time, UTC−7)
 > ✅ One plain first line: «Everything is perfectly good.» / «Not good: <what> and I have not fixed it yet.»
 > 📊 **Fix rates (proof rows, not end-row claims):** ⚡ X/Y · 🆕 X/Y · 🔬 X/Y · ♻️ X/Y · you X/Y — name any engineer whose `issues_fixed` exceeds its PASS proof rows
+> 📊 **Pins:** served ads with a map pin N% (Δ vs yesterday) · platforms below their declared floor: none / <platform pct<floor> · publishes-but-0%: none — from `pin_coverage_by_platform()` vs `ops_pin_source_declared` (the rakez lesson, 2026-10-30: a site at 0% that publishes pins is a P1, never «the site has no pins» until you looked in all four places)
 > 🚦 ⚡ GREEN/RED — <reason with the number> · 🆕 GREEN/RED — … · 🔬 GREEN/RED — … · ♻️ GREEN/RED — …
 > 🔧 **Repaired today:** N listings · <what> · before → after
 > 🔢 **Numbers a customer sees:** matched N of 5 scopes · dead listings still counted: N · sync age: N minutes
@@ -311,6 +312,19 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
 
 ## Lessons (your own, one per night)
 
+- **2026-10-30 — the map pin (owner: «make sure the engineers are aware and we never ever get this issue again»).**
+  rakez served 3,660 ads with 0 pins for six weeks; nothing was red because a pinless row is valid at every layer and
+  nobody had looked past the project page (its map page's feed carried every pin). The sweep found 8 more sites the
+  same way (`docs/ops/reports/PIN_CAPTURE_FLEET_2026-10-30.md`). Your part of the lock:
+  1. **Every morning read `select * from pin_coverage_by_platform() where below_floor`** and write the «📊 Pins» line of
+     your report from it (served % · platforms below floor · publishes-but-0 %). A row there is a P1 the engineers own
+     tonight; if ⚡ or 🆕 closed it as «the site has no pins», re-open the rendered page yourself and look in all four
+     places (page · embedded JSON / network calls · site map or list feed · parent project page) before you accept it.
+  2. **A new platform without a row in `data/pin-sources.json` is an unfinished launch** (checklist box 10) — grade it
+     as such, whatever its other numbers say; `none` is accepted only with the URL of the page proven silent.
+  3. **A pin served at the same point for many ads across several districts is the site's office, not a pin** — the
+     :15 strip (`strip_shared_default_pins`) handles it; a project/compound pin shared by its own units in ONE district
+     (`pin_scope: project`) is source truth and must stay.
 - **🦅 Falcon 10-09 — the sweep robot went red twice on its own scope choice, not on the product.** Both runs
   of `live-search-sweep.yml` today scored 0 mismatches / 0 bugs and failed only the «عرض المزيد under AF» floor,
   because the fixed الرياض/شقة scope ran inside the :20 refresh window and AF was «not offered». A floor the

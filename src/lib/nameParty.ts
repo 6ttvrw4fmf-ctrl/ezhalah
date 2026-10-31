@@ -17,6 +17,10 @@ export const LAUNCH_EVERY_MS = 35;
 /** Wider screens get proportionally more rockets so a laptop is as full as a phone (at most ~1.7× the phone rate). */
 export const launchEveryFor = (width: number): number => LAUNCH_EVERY_MS * Math.min(1, Math.max(0.6, 500 / (width || 500)));
 export const SPARKS_PER_BURST = 85;
+/** POP INTO CONFETTI (owner 2026-10-30: «i want the fire works to pop confetti»): half of every shell is confetti (it was
+ *  ~30 %), and each pop also throws CONFETTI_PER_BURST extra pieces that float down slowly after the sparks fade. */
+export const CONFETTI_SHARE = 0.5;
+export const CONFETTI_PER_BURST = 24;
 /** The layer is always gone by then (rise ≤ ~1 s and sparks ≤ ~1.6 s after the last launch). */
 export const PARTY_MS = 6500;
 /** Ezhalah green and gold first, then party colours. */
@@ -70,9 +74,11 @@ const CSS = `
 [data-ezh-shine="on"]{background-image:linear-gradient(100deg,#2f7247 30%,#5fae7c 45%,#d8b14a 50%,#5fae7c 55%,#2f7247 70%)!important;background-size:250% 100%!important;-webkit-background-clip:text!important;background-clip:text!important;-webkit-text-fill-color:transparent;color:transparent!important;animation:ezhShine 2.4s ease-in-out 2}
 @keyframes ezhShine{from{background-position:110% 0}to{background-position:-10% 0}}
 [data-ezh-shine="on"] [data-ezh-emoji]{-webkit-text-fill-color:initial!important;color:initial!important}
+[data-ezh-emoji="party"]{display:inline-block;transform-origin:50% 70%;animation:ezhParty .5s ease-in-out infinite}
+@keyframes ezhParty{0%,100%{transform:rotate(-14deg) scale(1)}25%{transform:rotate(16deg) scale(1.18)}50%{transform:rotate(-10deg) scale(1.05)}75%{transform:rotate(12deg) scale(1.2)}}
 [data-ezh-party]{position:fixed;inset:0;pointer-events:none;z-index:2147483001;overflow:hidden}
 [data-ezh-party] canvas{position:absolute;inset:0;width:100%;height:100%}
-@media (prefers-reduced-motion:reduce){[data-ezh-scrim],[data-ezh-scrim] *,[data-ezh-shine]{animation:none!important;transition:none!important}[data-ezh-party]{display:none}}
+@media (prefers-reduced-motion:reduce){[data-ezh-scrim],[data-ezh-scrim] *,[data-ezh-shine],[data-ezh-emoji]{animation:none!important;transition:none!important}[data-ezh-party]{display:none}}
 `;
 
 export function ensureNameBoxCss(): void {
@@ -141,9 +147,15 @@ export function startNameParty(reduced: boolean): void {
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + rnd(-0.06, 0.06), sp = base * rnd(0.55, 1.05);
       sparks.push({ x: r.x, y: r.y, px: r.x, py: r.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0, max: rnd(1100, 1600),
-        c: Math.random() < 0.5 ? r.c : r.c2, kind: Math.random() < 0.3 ? 1 : 0, w: rnd(3, 6), h: rnd(6, 10), rot: rnd(0, 6), vr: rnd(-0.3, 0.3), flip: rnd(0, 6) });
+        c: Math.random() < 0.5 ? r.c : r.c2, kind: Math.random() < CONFETTI_SHARE ? 1 : 0, w: rnd(3, 6), h: rnd(6, 10), rot: rnd(0, 6), vr: rnd(-0.3, 0.3), flip: rnd(0, 6) });
     }
     for (let i = 0; i < 10; i++) sparks.push({ x: r.x, y: r.y, px: r.x, py: r.y, vx: rnd(-0.6, 0.6), vy: rnd(-0.6, 0.6), life: 0, max: rnd(400, 700), c: '#fff6d8', kind: 2, w: 0, h: 0, rot: 0, vr: 0, flip: 0 });
+    // the extra confetti: party colours, a softer burst, and a longer life so it is still drifting down after the sparks
+    for (let i = 0; i < CONFETTI_PER_BURST; i++) {
+      const a = rnd(0, Math.PI * 2), sp = base * rnd(0.25, 0.7);
+      sparks.push({ x: r.x, y: r.y, px: r.x, py: r.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 0.6, life: 0, max: rnd(1700, 2300),
+        c: FIREWORK_COLORS[(Math.random() * FIREWORK_COLORS.length) | 0], kind: 1, w: rnd(4, 7), h: rnd(7, 11), rot: rnd(0, 6), vr: rnd(-0.3, 0.3), flip: rnd(0, 6) });
+    }
     // «make it cool»: about a third of the shells get an inner ring of gold glitter that twinkles
     if (Math.random() < 0.35) for (let i = 0; i < 28; i++) {
       const a = (i / 28) * Math.PI * 2, sp = base * 0.45;

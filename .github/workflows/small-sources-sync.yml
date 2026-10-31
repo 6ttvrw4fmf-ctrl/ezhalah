@@ -79,7 +79,10 @@ jobs:
             - { source: eaqartabuk, cmd: "python -m scrapers.eaqartabuk.run --type all" }
             - { source: satel,      cmd: "python -m scrapers.satel.run --type all" }
             - { source: sadin,      cmd: "python -m scrapers.sadin.run --type all", proxy: true }
-            - { source: mustqr,      cmd: "python -m scrapers.mustqr.run --type all" }
+            # mustqr (pins, owner 2026-10-30): the only pin the site publishes is the maps.app.goo.gl link a broker pastes
+            # into the ad text; Google answers the runner's plain hop with a 200 script page, so the hop needs the
+            # browser (and the proxy), like aqalemhajer. Measured 2026-10-31: 14 descriptions + raw_text bodies carry one.
+            - { source: mustqr,      cmd: "python -m scrapers.mustqr.run --type all", proxy: true, browser: true }
             - { source: ramzalqasim, cmd: "python -m scrapers.ramzalqasim.run --type all" }
             - { source: fursaghyr,   cmd: "python -m scrapers.fursaghyr.run --type all" }
             - { source: mizlaj,      cmd: "python -m scrapers.mizlaj.run --type all" }
@@ -148,7 +151,9 @@ jobs:
             #   wslnaa: `proxy: true` (2026-10-29) — the 10-29 nightly ended «no /properties/ slugs» in 2 s while the
             #   sitemap listed 63 to another egress; crawl_session() now tries 3 profiles DIRECT first, so the proxy
             #   is spent only when every direct route is refused.
-            - { source: wslnaa,        cmd: "python -m scrapers.wslnaa.run --type all", tmo: 30, proxy: true }
+            # wslnaa (pins, owner 2026-10-30): the API's mapUrl is a maps.app.goo.gl short link per unit; the proxy hop
+            # alone got Google's 200 script page on 2026-10-31 («via proxy | 200→ | body 39»), so the browser hop is on.
+            - { source: wslnaa,        cmd: "python -m scrapers.wslnaa.run --type all", tmo: 30, proxy: true, browser: true }
             # ── onboarded 2026-09-21: eleven platforms ─────────────────────────────────────────────
             # Each is its own matrix job, so one source down never hides another and each keeps its
             # own run ledger. None reads WASALT_PROXY_URL (checked) — no `proxy:` flag. `tmo` is sized
