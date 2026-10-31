@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ModeSwitch from '@/components/ModeSwitch';
 import AppleMap from '@/components/AppleMap';
+import MapDealRow, { MapSearchBar } from '@/components/MapDealRow';
 import HeroBackground from '@/components/HeroBackground';
 import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
 import ShareSheet from '@/components/ShareSheet';
@@ -114,6 +115,8 @@ export default function MapRoute() {
       <View style={s.modeWrap}>
         <ModeSwitch active="map" onSwitch={(to) => router.replace(to === 'filter' ? '/' : '/agent')} t={t} />
       </View>
+      {/* Transaction + filter row above the map (owner 2026-10-31, Zillow's «For sale ▾ | Filters», Ezhalah-themed). */}
+      <View style={s.dealWrap}><MapSearchBar /><MapDealRow /></View>
       <View style={[s.body, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <AppleMap />
       </View>
@@ -139,5 +142,6 @@ const s = StyleSheet.create({
   shareBtnText: { fontSize: 13.5, fontWeight: '700', color: colors.primary, includeFontPadding: false },
   strip: { marginHorizontal: -10, zIndex: 1 },
   modeWrap: { alignSelf: 'center', marginTop: 8, zIndex: 1 },
-  body: { flex: 1, marginTop: 12, zIndex: 1 },
+  dealWrap: { zIndex: 1 },
+  body: { flex: 1, marginTop: 6, zIndex: 1 }, // tight under the row (owner 2026-10-31: «eliminate those extra spaces»)
 });

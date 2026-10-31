@@ -48,6 +48,14 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-10-31. AI facts reader: 13 sites' description text arrived AFTER the AI had read the title alone, so every AI row
+  // written before those crawls is stamped text_hash = 'read-before-text:2026-10-31' and the ad reads as UNREAD again.
+  '20261031080211_ai_facts_reader_rereads_when_the_text_arrives_or_changes.sql':
+    'not a listing-field repair: it re-stamps listing_facts.text_hash so facts_ai_is_read() answers false and the ad is ' +
+    'picked again; nothing a user sees is edited and a re-scrape cannot undo it. The invariant (every new ad with text is ' +
+    'read) is watched by the standing alarm from the day before: ops_ai_facts_unread_new() + mon_detect_text_facts raising ' +
+    'ai_facts_new_ads_unread (20261030061800, P2, fail-closed — scripts/verify-ai-reader-never-skips-silently.ts). The ' +
+    'applied file cannot be edited to name a detector (content parity: this is its byte-exact mirror).',
   // 2026-10-25. Pin districts batch 2 switched on (owner): `applied = true` on listing_pin_district rows, no listing value edited.
   '20261025214336_pin_district_batch_2_switch_on.sql':
     'not a listing-field repair: it flips listing_pin_district.applied, the switch the recovery arm reads; a re-scrape ' +

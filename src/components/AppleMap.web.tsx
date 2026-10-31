@@ -22,6 +22,7 @@
 // → «تعذّر تحميل الخريطة» in the same box, not an empty beige rectangle (A FAILED FETCH IS NOT AN EMPTY ANSWER).
 // Regions that fail to load leave the plain map (still usable) and are reported in the console.
 import { useEffect, useRef, useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
@@ -39,10 +40,12 @@ const FETCH_TIMEOUTS_MS = [8000, 12000, 15000];
 // The Kingdom, whole, on first open, with its neighbours around it: centre near the country's middle, span wide
 // enough for Tabuk to Jazan and Jeddah to Dammam with Yemen, Oman, the Gulf and Jordan showing at the edges.
 const KSA_CENTER = { latitude: 23.5, longitude: 45.5 };
-const KSA_SPAN = { latitudeDelta: 20, longitudeDelta: 24 };
+// A touch closer than before (owner 2026-10-31: «I want the map to feel zoomed in a bit, eliminate those extra
+// spaces»): 20×24 → 18×21.5, the neighbours still at the edges.
+const KSA_SPAN = { latitudeDelta: 18, longitudeDelta: 21.5 };
 // A phone held upright is taller than wide: the same span would leave the Kingdom small in the middle, so there the
 // first view fits the country to the screen's width instead (the neighbours still show above and below).
-const KSA_SPAN_PORTRAIT = { latitudeDelta: 19, longitudeDelta: 22 };
+const KSA_SPAN_PORTRAIT = { latitudeDelta: 17, longitudeDelta: 19.5 };
 
 type Region = {
   id: number; iso: string; en: string; ar: string;
@@ -59,6 +62,7 @@ type Region = {
 
 type MKMap = {
   destroy: () => void;
+  mapType: string;
   region: { span: { latitudeDelta: number; longitudeDelta: number } };
   addOverlay: (o: unknown) => void;
   setRegionAnimated: (r: unknown, animate?: boolean) => void;
@@ -66,7 +70,7 @@ type MKMap = {
 };
 type MapKit = {
   init: (o: { authorizationCallback: (done: (token: string) => void) => void; language?: string }) => void;
-  Map: new (el: HTMLElement, o?: object) => MKMap;
+  Map: (new (el: HTMLElement, o?: object) => MKMap) & { MapTypes: { Standard: string; MutedStandard: string; Hybrid: string; Satellite: string } };
   Coordinate: new (lat: number, lng: number) => unknown;
   CoordinateSpan: new (lat: number, lng: number) => unknown;
   CoordinateRegion: new (center: unknown, span: unknown) => unknown;
@@ -167,6 +171,16 @@ export default function AppleMap() {
   const mapRef = useRef<MKMap | null>(null);
   const [failed, setFailed] = useState(false);
   const [zoomed, setZoomed] = useState(false);
+  // Map style (owner 2026-10-31, Zillow's layers button): the modes Apple's web MapKit offers — standard, satellite
+  // with labels (hybrid), and muted. Driving / transit / traffic exist only in Apple's own apps, not on the web.
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [mapType, setMapType] = useState<'standard' | 'hybrid' | 'muted'>('standard');
+  const applyMapType = (k: 'standard' | 'hybrid' | 'muted') => {
+    const mk = mapkitOf();
+    const m = mapRef.current;
+    if (mk && m) m.mapType = k === 'hybrid' ? mk.Map.MapTypes.Hybrid : k === 'muted' ? mk.Map.MapTypes.MutedStandard : mk.Map.MapTypes.Standard;
+    setMapType(k);
+  };
 
   useEffect(() => {
     let map: MKMap | null = null;
@@ -176,12 +190,19 @@ export default function AppleMap() {
       if (gone) return;
       const el = hostRef.current as unknown as HTMLElement | null;
       if (!el) return;
+      // Apple's own chrome (the  Maps mark, Legal, zoom and compass) follows the page direction, so Arabic mirrored
+      // it. Pinned left-to-right: the Apple mark bottom-LEFT in both languages (owner 2026-10-31: «no matter English
+      // or Arabic, the Apple Maps thing is always on the left»). The map's labels still follow the app language.
+      el.setAttribute('dir', 'ltr');
       initOnce(mk, locale);
       mk.addEventListener('error', onError);
       map = new mk.Map(el, {
         region: ksaRegion(mk, el),
         showsMapTypeControl: false,
         showsPointsOfInterest: false,
+        // The bottom-right corner belongs to our layers button (owner 2026-10-31: «put that thing far right below»);
+        // Apple's +/− would sit under it. Pinch, scroll and double-tap still zoom.
+        showsZoomControl: false,
       });
       mapRef.current = map;
 
@@ -276,6 +297,30 @@ export default function AppleMap() {
           <Text style={s.wholeT}>{t('Whole Kingdom')}</Text>
         </Pressable>
       ) : null}
+      {/* «رسم» top-right, like Zillow's Draw (owner 2026-10-31: «draw, like the screenshot»). Design only: drawing an
+          area to search inside it is the next step; the button does nothing yet. */}
+      {!failed ? (
+        <Pressable style={s.drawBtn} accessibilityRole="button" accessibilityLabel={t('Draw')} testID="map-draw-btn">
+          <Ionicons name="pencil-outline" size={15} color={colors.ink} />
+          <Text style={s.wholeT}>{t('Draw')}</Text>
+        </Pressable>
+      ) : null}
+      {/* Layers, in the bottom-right corner (Apple's zoom control is off so the corner is ours). */}
+      {!failed ? (
+        <Pressable style={s.layersBtn} onPress={() => setLayersOpen((o) => !o)} accessibilityRole="button" accessibilityLabel={t('Map layers')} testID="map-layers-btn">
+          <Ionicons name="layers-outline" size={20} color={colors.ink} />
+        </Pressable>
+      ) : null}
+      {layersOpen && !failed ? (
+        <View style={s.layersCard} testID="map-layers-popup">
+          {([['standard', 'Explore', 'map-outline'], ['hybrid', 'Satellite', 'earth-outline'], ['muted', 'Quiet', 'contrast-outline']] as const).map(([k, label, icon]) => (
+            <Pressable key={k} style={({ hovered }: any) => [s.layerRow, hovered && s.layerRowHover, mapType === k && s.layerRowOn]} onPress={() => { applyMapType(k); setLayersOpen(false); }} accessibilityRole="radio" accessibilityState={{ checked: mapType === k }}>
+              <Ionicons name={icon} size={17} color={mapType === k ? colors.primary : colors.ink} />
+              <Text style={[s.layerT, mapType === k && s.layerTOn]}>{t(label)}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>
   );
@@ -289,6 +334,23 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
   wholeT: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },
+  drawBtn: {
+    position: 'absolute', top: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 999,
+    paddingHorizontal: 14, height: 36, borderWidth: 1, borderColor: colors.tintLine,
+  },
+  layersBtn: {
+    position: 'absolute', right: 12, bottom: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
+  },
+  layersCard: {
+    position: 'absolute', right: 12, bottom: 58, minWidth: 160, backgroundColor: colors.surface, borderRadius: 14, padding: 6,
+    borderWidth: 1, borderColor: colors.tintLine,
+  },
+  layerRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10 },
+  layerRowHover: { backgroundColor: colors.tint },
+  layerRowOn: { backgroundColor: colors.tint },
+  layerT: { fontFamily: font.family.medium, fontSize: 13.5, color: colors.ink },
+  layerTOn: { fontFamily: font.family.bold, color: colors.primary },
   failed: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   failedPill: { backgroundColor: colors.surface, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 9, borderWidth: 1, borderColor: colors.tintLine },
   failedT: { fontFamily: font.family.medium, fontSize: 14, color: colors.ink },
