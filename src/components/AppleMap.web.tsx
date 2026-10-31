@@ -22,6 +22,7 @@
 // → «تعذّر تحميل الخريطة» in the same box, not an empty beige rectangle (A FAILED FETCH IS NOT AN EMPTY ANSWER).
 // Regions that fail to load leave the plain map (still usable) and are reported in the console.
 import { useEffect, useRef, useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
@@ -278,6 +279,14 @@ export default function AppleMap() {
           <Text style={s.wholeT}>{t('Whole Kingdom')}</Text>
         </Pressable>
       ) : null}
+      {/* «رسم» top-right, like Zillow's Draw (owner 2026-10-31: «draw, like the screenshot»). Design only: drawing an
+          area to search inside it is the next step; the button does nothing yet. */}
+      {!failed ? (
+        <Pressable style={s.drawBtn} accessibilityRole="button" accessibilityLabel={t('Draw')} testID="map-draw-btn">
+          <Ionicons name="pencil-outline" size={15} color={colors.ink} />
+          <Text style={s.wholeT}>{t('Draw')}</Text>
+        </Pressable>
+      ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>
   );
@@ -291,6 +300,10 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
   wholeT: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },
+  drawBtn: {
+    position: 'absolute', top: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 999,
+    paddingHorizontal: 14, height: 36, borderWidth: 1, borderColor: colors.tintLine,
+  },
   failed: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   failedPill: { backgroundColor: colors.surface, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 9, borderWidth: 1, borderColor: colors.tintLine },
   failedT: { fontFamily: font.family.medium, fontSize: 14, color: colors.ink },
