@@ -86,8 +86,8 @@ const smooth = (c: string) => c.includes('priority="high" onLoad={() => setLoade
   && /setTimeout\(\(\) => setLoadedFor\(celebrate\), LOAD_WAIT_MS\)/.test(c);
 check('…its clock starts when it is on screen (loaded), with a fallback, and it keeps its last frame after (no blank swap)', smooth(comp) && playGate(comp));
 // owner 2026-10-27: «the animation must be clear, first the animation … it finished, then the confetti … it feels slow»
-// → the whole story fits in 2–3 s (owner 2026-10-30: «faster falcon, then 3s»), its last motion ends by SIGNIN_SEQUENCE_MS,
-// the fireworks leave at 3 s and still pop after the bulb.
+// → the whole story fits in 4–5 s (owner 2026-10-30 «faster falcon», then 2026-10-31 «a little bit slower by 2 seconds»:
+// ~2.34 s → ~4.33 s), its last motion ends by SIGNIN_SEQUENCE_MS, and the fireworks still pop after the bulb.
 const svgEnd = (v: string) => Math.max(0, ...[...v.matchAll(/<(?:animate|animateTransform|animateMotion|set)\b[^>]*>/g)].map((m) => {
   const b = Number((m[0].match(/\sbegin="(-?[\d.]+)s"/) ?? [])[1] ?? 0);
   const d = Number((m[0].match(/\sdur="(-?[\d.]+)s"/) ?? [])[1] ?? 0);
@@ -95,7 +95,7 @@ const svgEnd = (v: string) => Math.max(0, ...[...v.matchAll(/<(?:animate|animate
 }));
 const timing = (c: string, v: string) => {
   const seq = Number((c.match(/export const SIGNIN_SEQUENCE_MS = (\d+);/) ?? [])[1]);
-  return seq >= 2000 && seq <= 3000                                       // quick: 2–3 s
+  return seq >= 4000 && seq <= 5000                                       // 2 s slower than the 2.34 s story: 4–5 s
     && svgEnd(v) * 1000 <= seq + 100                                        // the story is over by then …
     // AFTER THE BULB (owner 2026-10-30: «the fireworks pop before the lightbulb … wait like 2 seconds»). The bulb is the
     // last thing the story starts (its latest SMIL begin); BULB_LIT_MS must come after it, and the first pop (rockets
@@ -105,12 +105,12 @@ const timing = (c: string, v: string) => {
       const add = Number((c.match(/export const RAIN_AT_MS = BULB_LIT_MS \+ (\d+);/) ?? [])[1]);
       const lastBegin = Math.max(...[...v.matchAll(/begin="([\d.]+)s"/g)].map((m) => Number(m[1])));
       const firstPop = lit + add + 260;
-      // FIREWORKS AT 3 s (owner 2026-10-30: «make that 5 seconds 3 seconds»): the rockets leave at 3.0 s, still after the bulb.
-      return lit >= lastBegin * 1000 + 200 && lit + add === 3000 && firstPop - lit >= 700 && firstPop - lit <= 1500;
+      // the rockets leave soon after the bulb is lit (owner 2026-10-30 «faster falcon, then 3s»: right after it, not seconds later)
+      return lit >= lastBegin * 1000 + 200 && add >= 500 && add <= 1000 && firstPop - lit >= 700 && firstPop - lit <= 1500;
     })()
     && c.includes('setTimeout(() => startNameParty(reduced), RAIN_AT_MS)') && c.includes('setTimeout(() => setDone(celebrate), SIGNIN_SEQUENCE_MS)');
 };
-check('…the story is quick (2–3 s), the fireworks leave at 3 s, about 1 s after the bulb lights, then the still takes over', timing(comp, signin), `end=${svgEnd(signin)}s`);
+check('…the story takes 4–5 s, the fireworks leave about 1 s after the bulb lights, then the still takes over', timing(comp, signin), `end=${svgEnd(signin)}s`);
 const playsOnce = (v: string) => !/infinite|indefinite/.test(v) && /<animate/.test(v);
 check('the sign-in animation plays once (nothing loops)', playsOnce(signin));
 const isStill = (v: string) => !/<animate|<set |animation:|@keyframes/.test(v);
@@ -132,9 +132,11 @@ mustCatch('the sign-in animation playing under reduced motion', !playGate(comp.r
 mustCatch('the clock starting before the story is on screen', !smooth(comp.replace('if (!playing || loadedFor !== celebrate) return;', 'if (!playing) return;')));
 mustCatch('a swap to the still file right after the story (blank flash)', !playGate(comp.replace(' : story ? (', ' : playing ? (')));
 mustCatch('the fireworks popping on top of the bulb again', !timing(comp.replace('export const RAIN_AT_MS = BULB_LIT_MS + 790;', 'export const RAIN_AT_MS = BULB_LIT_MS - 600;'), signin));
-mustCatch('a bulb time set before the bulb really lights', !timing(comp.replace('export const BULB_LIT_MS = 2210;', 'export const BULB_LIT_MS = 1800;'), signin));
+mustCatch('a bulb time set before the bulb really lights', !timing(comp.replace('export const BULB_LIT_MS = 4100;', 'export const BULB_LIT_MS = 3500;'), signin));
 mustCatch('the fireworks dragging long after the bulb', !timing(comp.replace('export const RAIN_AT_MS = BULB_LIT_MS + 790;', 'export const RAIN_AT_MS = BULB_LIT_MS + 4000;'), signin));
-mustCatch('the old slow story (6.2 s)', !timing(comp.replace('export const SIGNIN_SEQUENCE_MS = 2340;', 'export const SIGNIN_SEQUENCE_MS = 6200;'), signin));
+mustCatch('the old slow story (6.2 s)', !timing(comp.replace('export const SIGNIN_SEQUENCE_MS = 4340;', 'export const SIGNIN_SEQUENCE_MS = 6200;'), signin));
+mustCatch('the too-fast story again (2.34 s)', !timing(comp.replace('export const SIGNIN_SEQUENCE_MS = 4340;', 'export const SIGNIN_SEQUENCE_MS = 2340;'), signin));
+mustCatch('a story SVG slowed but the timers left fast', !timing(comp.replace('export const SIGNIN_SEQUENCE_MS = 4340;', 'export const SIGNIN_SEQUENCE_MS = 2340;').replace('export const BULB_LIT_MS = 4100;', 'export const BULB_LIT_MS = 2210;'), signin));
 mustCatch('the fireworks back at 5 s', !timing(comp.replace('export const RAIN_AT_MS = BULB_LIT_MS + 790;', 'export const RAIN_AT_MS = BULB_LIT_MS + 2790;'), signin));
 mustCatch('a story still moving after it is meant to be over', !timing(comp, signin.replace('begin="0s"', 'begin="3s"')));
 mustCatch('a looping sign-in animation', !playsOnce(signin.replace('<animate ', '<animate repeatCount="indefinite" ')));
