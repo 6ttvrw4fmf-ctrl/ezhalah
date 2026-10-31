@@ -1,0 +1,45 @@
+name: Quick-search coverage run (RPC vs independent oracle)
+
+# Falcon 2026-10-30. e2e/qa-coverage/run.mjs is the «3,000 quick searches, 0 missing / 0 extra / 0 duplicates /
+# 0 count mismatches» layer of docs/ops/FALCON_ENGINEER.md §A and SEARCH_MATCH_QA_ENGINEER.md §40, planned
+# stalest-first from ops_qa_coverage_ledger. It had NO CI home: it ran from an agent's own container, and since
+# the robot gate (docs/ops/SCRAPE_GUARD.md) refuses /rest/v1/ without the handshake (PT403), it could not run at
+# all. Here it carries EZ_GATE_SECRET. Read-only; concurrency 2, ≤ 1.5 searches/s (the measured safe envelope).
+# Dispatch it by hand for an audit (budget 3000); a PR that changes the planner runs a small slice of it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      budget:
+        description: 'Searches to run (AGENTS.md: check pg_stat_activity first; 3000 for an audit)'
+        required: false
+        default: '3000'
+  pull_request:
+    paths:
+      - e2e/qa-coverage/**
+      - .github/workflows/qa-coverage-run.yml
+
+concurrency:
+  group: qa-coverage-run
+  cancel-in-progress: false
+
+env:
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  coverage:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --no-audit --no-fund
+      - name: Planned searches, each full result set against the SQL oracle
+        env:
+          QA_BUDGET: ${{ github.event_name == 'pull_request' && '200' || github.event.inputs.budget }}
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node e2e/qa-coverage/run.mjs

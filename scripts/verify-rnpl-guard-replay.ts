@@ -116,6 +116,17 @@ const AUDITED_UNINTERPRETABLE = new Map<string, string>([
    'NOT touch coalesce(s.price_total, 0) >= 0 (a no-op sanity term) or search_row_price_gated(' +
    's.deal_ar, s.price_total), which judges a SOURCE-published price and must keep judging exactly ' +
    'that.'],
+  ['20261030235606_meter_box_typo_ceiling_100k.sql',
+   'audited 2026-10-30 (mine, written and read line by line): the meter-box typo rule ' +
+   'price_typed_in_meter_box_ar gains two context arguments (city_ar, commercial) so it also fires ' +
+   'at ≥ 100,000 SAR/m² for residential rows outside the holy cities. enforce_price_size_sanity() is ' +
+   'edited BY ONE EXACT TEXT REPLACE of its single call to that function (pg_get_functiondef + ' +
+   'replace), guarded by a RAISE unless exactly 1 occurrence is found — never a full-function ' +
+   'replace, so a peer\'s later edit to the trigger cannot be clobbered. VERIFIED BY GREP on the ' +
+   'file: ZERO occurrences of payment_monthly and ZERO of rent_now_pay_later/rnpl/RNPL outside ' +
+   'this very reason string; ZERO literal CREATE OR REPLACE FUNCTION enforce_price_size_sanity. The ' +
+   'RNPL/Monthly block of the trigger is untouched by construction: the replace string names only ' +
+   'the price_typed_in_meter_box_ar(NEW.price_total, NEW.area_m2, NEW.price_per_meter) call.'],
   ['20260822141945_top_cities_by_deal_ar_understands_advanced_filter.sql',
    'audited 2026-08-22 (mine, read line by line): makes the trending CITY chip RPC advanced-filter ' +
    'aware. ZERO literal occurrences of payment_monthly and ZERO of rent_now_pay_later/rnpl/RNPL in ' +

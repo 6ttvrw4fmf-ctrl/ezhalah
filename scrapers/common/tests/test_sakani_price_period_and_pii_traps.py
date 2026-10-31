@@ -487,6 +487,50 @@ def test_enumeration_walks_pages_and_demands_the_rich_row(monkeypatch):
         R.enumerate_rent(_Session([_page([RICH_24858], with_rich=False)]))
 
 
+def test_a_challenged_page_gets_fresh_sessions_and_the_walk_goes_on(monkeypatch):
+    # 2026-10-30 16:16 UTC: sale page 69 drew the challenge and the whole night was thrown away
+    monkeypatch.setattr(R.time, "sleep", lambda *_: None)
+    first = [{**RICH_24858, "resource_id": 30000 + i} for i in range(R.PAGE_SIZE)]
+    walled = _Session([_page(first)] + [_CHALLENGE] * 4)            # page 2: challenge on all 4 tries
+    fresh = _Session([_page([RICH_23577])])                           # a fresh session reads page 2
+    monkeypatch.setattr(R, "_walk_renew", lambda: fresh)
+    monkeypatch.setattr(R, "_oracle_sess", None)
+    units = R.enumerate_rent(walled)
+    assert [u[1]["resource_id"] for u in units][-1] == 23577 and len(units) == R.PAGE_SIZE + 1
+    assert fresh.calls[0][1]["page[number]"] == 2 and R._oracle_sess is fresh
+
+
+def test_a_page_still_walled_after_fresh_sessions_keeps_what_was_read(monkeypatch):
+    import pytest
+    monkeypatch.setattr(R.time, "sleep", lambda *_: None)
+    first = [{**RICH_24858, "resource_id": 30000 + i} for i in range(R.PAGE_SIZE)]
+    monkeypatch.setattr(R, "_walk_renew", lambda: _Session([_CHALLENGE] * 4))
+    with pytest.raises(R.WalkIncomplete) as w:
+        R.enumerate_rent(_Session([_page(first)] + [_CHALLENGE] * 4))
+    assert len(w.value.units) == R.PAGE_SIZE
+    # page 1 walled is still a blocked walk: no rows to keep, the run fails closed
+    with pytest.raises(RuntimeError) as w1:
+        R.enumerate_rent(_Session([_CHALLENGE] * 4))
+    assert not isinstance(w1.value, R.WalkIncomplete)
+
+
+def test_an_incomplete_walk_writes_what_it_read_and_never_prunes(monkeypatch):
+    calls = _stub_db(monkeypatch)
+
+    def partway(s):
+        raise R.WalkIncomplete("rent catalogue page 2 unreadable (challenge/transport) — walk aborted",
+                               list(_UNITS))
+    monkeypatch.setattr(R, "enumerate_rent", partway)
+    monkeypatch.setattr(R, "fetch_detail", lambda s, uid: _DETAILS[uid])
+    monkeypatch.setattr(R, "district_names", lambda s, cid, cache: {"500001063": "الشعلة"})
+    monkeypatch.setattr(R, "_controls_live", lambda ads: True)
+    monkeypatch.setattr(sys, "argv", ["run.py"])
+    assert R.main() == 0
+    assert calls["batch"][0] == ("sakani_residential_listings", ["SKI24858", "SKI23577"])
+    assert calls["prune"] == []
+    assert "rent_walk_incompletex1" in calls["end_run"][0][1]["notes"]
+
+
 # ==================================== 6. main() =================================================
 def _stub_db(monkeypatch):
     calls = {"batch": [], "end_run": [], "prune": [], "retire": [], "alive": []}
@@ -502,6 +546,7 @@ def _stub_db(monkeypatch):
     monkeypatch.setattr(R.time, "sleep", lambda *_: None)
     monkeypatch.setattr(R, "session", lambda: object())
     monkeypatch.setattr(R, "_oracle_sess", None)
+    monkeypatch.setattr(R, "_walk_renew", None)       # main() sets it; restored after each test
     # The sale walk (backlog 864) answers one off-plan project here: it is read, never written.
     monkeypatch.setattr(R, "enumerate_sale", lambda s: [(
         {"resource_id": 900, "resource_type": "projects"},

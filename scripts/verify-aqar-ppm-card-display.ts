@@ -114,9 +114,21 @@ check('ResultCard puts the number BEFORE the unit',
 // per-meter rate into it would corrupt both.
 check('price_per_meter is NOT folded into the Listing.price string',
       !/priceStr[^\n]*price_per_meter/.test(REMOTE) && !/price_per_meter[^\n]*priceStr/.test(REMOTE));
+// Repointed 2026-10-30 (falcon, PR 9479): the card reads the per-metre figure through servedSaleFigures(), which
+// returns it VERBATIM except for the one owner-approved case the search index also corrects (20261028213252: a sale
+// total typed into the per-metre box). Same strength, now EXECUTED: a normal rate — fractional included — comes back
+// untouched, and a Rent row never goes through it.
 check('remote.ts passes price_per_meter through verbatim (no rounding / no derivation)',
-      /pricePerMeter:\s*typeof r\.price_per_meter === 'number' \? r\.price_per_meter : null/.test(REMOTE),
+      /pricePerMeter:\s*typeof sale\.pricePerMeter === 'number' \? sale\.pricePerMeter : null/.test(REMOTE)
+        && /: \{ priceTotal: r\.price_total, pricePerMeter: r\.price_per_meter \}/.test(REMOTE),
       'the field must be copied as-is — never computed from price/area');
+{
+  const { servedSaleFigures } = await import('../src/lib/meterBoxPrice.ts');
+  for (const [pt, area, ppm] of [[1_500_000, 600, 2500.75], [null, 3125, 1000], [8_000_000, 900, 8888.88], [52_000_000_000, 200_000, null]] as const) {
+    check(`servedSaleFigures keeps the published rate ${ppm} verbatim (price ${pt}, ${area} m²)`,
+          servedSaleFigures(pt, null, area, ppm).pricePerMeter === ppm);
+  }
+}
 check("LIST_SELECT actually requests the column (else the card can never see it)",
       /'price_per_meter'/.test(REMOTE));
 

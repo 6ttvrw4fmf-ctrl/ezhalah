@@ -327,6 +327,57 @@ def fallback_read(status: int, fb, url: str) -> int:
     return 200 if probe(fb, url) == 200 else status
 
 
+# A second browser fingerprint for the units gathern sends home under the first one (2026-10-30).
+# Measured that morning: ~90 served units read «transient» on every hourly sweep for 2-3 days (their
+# last alive stamp 10-27/10-28) because, to curl_cffi's chrome124 fingerprint, BOTH /view/ and /ar/view/
+# answer 307 -> /ar?error=500. The same URLs, the same minute, open named for safari17_0, for a plain
+# client, and for a real Chromium (3 of 4 on the first visit). So the unit is up; our fingerprint is
+# what gathern errors on. This read may only say ALIVE (the unit's own page, named, not the not-found
+# page); anything else stays no verdict, and it never second-guesses a verdict the first read reached.
+ALT_FINGERPRINT = "safari17_0"
+
+
+def _alt_session():
+    from curl_cffi import requests as cc
+    s = cc.Session(impersonate=ALT_FINGERPRINT)
+    s.headers.update({"Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
+    return s
+
+
+def _opens_named(s, url: str, fetch: Optional[str] = None) -> bool:
+    """True only when `fetch` (default: `url`, the stored /view/ address) answers 200 ON the unit's own
+    page (any locale prefix), naming the unit, and is not gathern's not-found page."""
+    from urllib.parse import urlsplit
+    m = _VIEW.match(url or "")
+    if not m:
+        return False
+    _throttle()
+    try:
+        r = s.get(fetch or url, timeout=25, allow_redirects=True)
+    except Exception:  # noqa: BLE001 — no answer is no verdict
+        return False
+    final = urlsplit(str(getattr(r, "url", "") or "")).path.rstrip("/").lower()
+    own = f"/view/{m.group(2)}/unit/{m.group(3)}"
+    body = getattr(r, "text", "") or ""
+    return (r.status_code == 200 and final in (own, "/ar" + own, "/en" + own)
+            and m.group(3) in body and not any(n in body for n in _NOT_FOUND))
+
+
+def fingerprint_read(status: int, alt, url: str) -> int:
+    """A read that gave no verdict, re-read under the second fingerprint `alt`: only a named 200 is
+    taken. Anything the first read decided (200, 404, 410, any real status) is returned untouched."""
+    if alt is None or status not in (0, HOME_LANDED):
+        return status
+    if _opens_named(alt, url):
+        return 200
+    # Measured 10-30 after the first sweep on this read: 16 units still sent BOTH fingerprints home on
+    # /view/, while the same unit's /ar/view/ opened named for safari17_0 (4 of 4 sampled).
+    m = _VIEW.match(url or "")
+    if m and _opens_named(alt, url, f"{m.group(1)}/ar/view/{m.group(2)}/unit/{m.group(3)}"):
+        return 200
+    return status
+
+
 def proxied_session(use_proxy: bool):
     """gathern's own detail session, optionally routed through the shared Saudi residential proxy.
 
@@ -985,6 +1036,7 @@ def main() -> int:
 
     s = proxied_session(args.proxy)
     fb = proxied_session(True) if (args.proxy_fallback and not args.proxy) else None
+    alt = _alt_session()
 
     # ── CANARY: prove the environment BEFORE deciding any real listing's fate ────────────────────
     # Owner rule 2026-09-03. The trust gate is a lagging signal — it can only condemn a run once the
@@ -1055,7 +1107,7 @@ def main() -> int:
             if not url:
                 continue
             seen += 1
-            status = fallback_read(probe(s, url), fb, url)
+            status = fingerprint_read(fallback_read(probe(s, url), fb, url), alt, url)
             mc_before = int(row.get("missing_count") or 0)
             action, new_missing = classify(status, row.get("missing_count"), args.grace)
             evidence = {

@@ -88,7 +88,7 @@ export const PLATFORMS: Platform[] = [
   // produce the other row, exactly the CompoundIn precedent below. Everything else maps both.
   { name: 'دويليو', domain: 'dwelleo.sa', brand: 'Dwelleo', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'مكتب أقاليم هجر للخدمات العقارية', domain: 'aqalemhajer.com', brand: 'Aqalem Hajer Real Estate Services Office', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
-  { name: 'سكني', domain: 'sakani.sa', brand: 'Sakani', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  { name: 'سكني', domain: 'sakani.sa', brand: 'Sakani', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'الشاطري للتطوير العقاري', domain: 'shatrirealestate.com', brand: 'Shatri Real Estate Development', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'القاسم العقارية', domain: 'alqasem.com.sa', brand: 'Alqasem Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'فكر الإعمار', domain: 'fkralemar.com', brand: 'Fkr Alemar', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
@@ -172,7 +172,7 @@ export const PLATFORMS: Platform[] = [
   // manafe: 77 listings measured 2026-09-27 (210 Jeddah buildings; only REGA-licensed, available units).
   { name: 'منافع العقارية', domain: 'manafe.com.sa', brand: 'Manafe', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // wajaf: 44 Buraidah land/commercial listings measured 2026-09-27 (sold/reserved/let skipped).
-  { name: 'وجف العقارية', domain: 'wajaf.sa', brand: 'Wajaf', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'وجف العقارية', domain: 'wajaf.sa', brand: 'Wajaf', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // albukaeri: 28 direct-sale listings measured 2026-09-27 (Eastern Province, Riyadh).
   { name: 'البكيري العقارية', domain: 'albukaeri.sa', brand: 'AlBukairi', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
   // ryadah: 18 buildings/compounds offering units measured 2026-09-27 (Khobar/Dammam; every price «عند الاتصال»).

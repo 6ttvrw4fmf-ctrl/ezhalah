@@ -1,9 +1,11 @@
-// ModeSwitch — the top-nav control that presents Ezhalah's TWO ways to search as one premium,
+// ModeSwitch — the top-nav control that presents Ezhalah's THREE ways to search as one premium,
 // compact segmented control:
-//   [ ⚟ تصفية | ✧ الوسيط الذكي ]  (English: Filter | Smart Broker)
+//   [ ⚟ تصفية | ✧ الوسيط الذكي | ⌖ خريطة ]  (English: Filter | Smart Broker | Map)
 // One shared component owns 100% of this control's design (same philosophy as the Advanced Filter
-// Design Contract): the two screens (home = filter, /agent = AI) just mount it with `active` and a
-// navigation callback.
+// Design Contract): the three screens (home = filter, /agent = AI, /map = map) just mount it with
+// `active` and a navigation callback.
+// Third tab «خريطة» (owner 2026-10-30): the button first, the map itself later — /map is a landing
+// page for now. Order is fixed Filter | Smart Broker | Map, left to right, in both languages.
 //
 // Design intent (owner redesign 2026-07-24, round 2 — "Apple / Linear / Perplexity, calm & premium"):
 // this is NOT a settings toggle — it must read at a glance as two DIFFERENT experiences. It stays a
@@ -31,7 +33,9 @@ import { useI18n } from '@/i18n';
 
 const IS_WEB = Platform.OS === 'web';
 
-export type SearchMode = 'filter' | 'agent';
+export type SearchMode = 'filter' | 'agent' | 'map';
+// Fixed left-to-right slot of each mode on the track (owner 2026-10-30: Filter | Smart Broker | Map).
+const SLOT: Record<SearchMode, number> = { filter: 0, agent: 1, map: 2 };
 
 // Where the indicator last was, across route changes (module state survives SPA navigation on web
 // and screen swaps on native). Lets the destination screen slide the indicator in from the side the
@@ -69,8 +73,10 @@ function withScreenFade(navigate: () => void): void {
   }));
 }
 
-const SEG_W = 106;   // each half — wider than the old 98 for a more generous, premium footprint
-const SEG_W_EN = 126; // English: «Smart Broker» (~86px) gets the same ~20px air each side as «الوسيط الذكي»
+const SEG_W = 106;   // each third — wider than the old 98 for a more generous, premium footprint
+// English: «Smart Broker» (~86px) gets ~13px air each side. Was 126 with two tabs; with three, 3×126 + 8 = 386px no
+// longer fits a 390px phone, so each third is 112 (3×112 + 8 = 344px).
+const SEG_W_EN = 112;
 // Poppins is not loaded on the web, so its English glyphs fell back to a serif. English labels use the same system
 // stack as the rest of the page there; Arabic keeps what it has (owner: «the Arabic is perfect»).
 const SYSTEM_FONT = IS_WEB ? 'ui-sans-serif, -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif' : undefined;
@@ -92,10 +98,10 @@ export default function ModeSwitch({
 }) {
   const en = useI18n().locale === 'en';
   const segW = en ? SEG_W_EN : SEG_W;
-  const toX = active === 'filter' ? 0 : segW;
+  const toX = SLOT[active] * segW;
   // Start from where the user left the indicator on the previous screen (cross-screen glide);
   // settled if this is a fresh load or we're already there.
-  const from = lastMode && lastMode !== active ? (lastMode === 'filter' ? 0 : segW) : toX;
+  const from = lastMode && lastMode !== active ? SLOT[lastMode] * segW : toX;
   const x = useRef(new Animated.Value(from)).current;
   // The indicator settles on `active` EVERY TIME this control is the one on screen — not just on
   // mount. `active` is the committed truth (which screen you are actually on); the animated value is
@@ -122,7 +128,7 @@ export default function ModeSwitch({
     if (to === active) return;
     // Begin the glide immediately so the tap answers instantly, then let the screen navigate; the
     // destination control picks the motion up from `lastMode` and settles it.
-    Animated.spring(x, { toValue: to === 'filter' ? 0 : segW, ...GLIDE, useNativeDriver: !IS_WEB }).start();
+    Animated.spring(x, { toValue: SLOT[to] * segW, ...GLIDE, useNativeDriver: !IS_WEB }).start();
     withScreenFade(() => onSwitch(to));
   };
 
@@ -162,6 +168,21 @@ export default function ModeSwitch({
       >
         <Ionicons name="sparkles-outline" size={17} color={aiSteady ? colors.ink : colors.muted} />
         <Text style={[s.segT, aiSteady ? s.segTOn : null, en && { fontFamily: SYSTEM_FONT, fontWeight: aiSteady ? '600' : '500' }]} numberOfLines={1}>{t('Smart Assistant')}</Text>
+      </Pressable>
+
+      {/* خريطة / Map — the third way to search (owner 2026-10-30): the button lands first, the map comes later. */}
+      <Pressable
+        style={[s.seg, { width: segW }]}
+        onPress={() => press('map')}
+        hitSlop={6}
+        // @ts-expect-error web-only DOM props on the RNW host node
+        dataSet={{ ...TAP44 }}
+        accessibilityRole="tab"
+        accessibilityState={{ selected: active === 'map' }}
+        accessibilityLabel={t('Map')}
+      >
+        <Ionicons name="map-outline" size={17} color={active === 'map' ? colors.ink : colors.muted} />
+        <Text style={[s.segT, active === 'map' ? s.segTOn : null, en && { fontFamily: SYSTEM_FONT, fontWeight: active === 'map' ? '600' : '500' }]} numberOfLines={1}>{t('Map')}</Text>
       </Pressable>
     </View>
   );
