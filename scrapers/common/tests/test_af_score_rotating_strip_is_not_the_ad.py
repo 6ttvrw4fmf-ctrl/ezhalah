@@ -99,3 +99,9 @@ def test_three_to_five_pages_keep_the_every_page_rule():
     for n in (3, 4, 5):
         pages = _sample(n)
         assert a.template_lines(pages) == set.intersection(*[set(p) for p in pages])
+
+
+def test_maqrat_page_is_read_as_a_first_time_visitor():
+    s = _session_with("maqrat.com", "api.maqrat.com", "aqar.fm")
+    assert a.forget_visits("https://maqrat.com/Property/Details/74", s) == 2
+    assert {c.domain for c in s.cookies.jar} == {"aqar.fm"}

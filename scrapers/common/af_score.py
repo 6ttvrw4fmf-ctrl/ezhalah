@@ -823,7 +823,10 @@ def sample_size(n: int, per_site: int | None) -> int:
 # the whole run, so each tuba page carried the titles of the ads the robot itself had opened before it («شقة مؤثثة
 # للإيجار … جدة حي السلامة» on a Dammam sale). A fresh re-read of the same page (source-reread 41189800679) shows
 # no strip at all. A customer opening the ad's link is a first-time visitor: so is the score.
-FRESH_VISIT_HOSTS = ("tuba.com.sa",)
+# maqrat (🔬 2026-10-31): 3 of its 3 findability misses at 08:00 asked parking / kitchen from lines like «🚦موقف خاص
+# 💵السعر :460 الف», each with a DIFFERENT price, on ads whose fresh re-read (41192889171, 41193052652) has no
+# description and no such line: other ads' text the session had picked up, the tuba shape.
+FRESH_VISIT_HOSTS = ("tuba.com.sa", "maqrat.com")
 
 
 def forget_visits(url: str, session=None) -> int:
