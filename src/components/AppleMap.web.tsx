@@ -200,6 +200,9 @@ export default function AppleMap() {
         region: ksaRegion(mk, el),
         showsMapTypeControl: false,
         showsPointsOfInterest: false,
+        // The bottom-right corner belongs to our layers button (owner 2026-10-31: «put that thing far right below»);
+        // Apple's +/− would sit under it. Pinch, scroll and double-tap still zoom.
+        showsZoomControl: false,
       });
       mapRef.current = map;
 
@@ -302,7 +305,7 @@ export default function AppleMap() {
           <Text style={s.wholeT}>{t('Draw')}</Text>
         </Pressable>
       ) : null}
-      {/* Layers, bottom-right (Apple's own zoom/compass sit bottom-right too, so this rides above them). */}
+      {/* Layers, in the bottom-right corner (Apple's zoom control is off so the corner is ours). */}
       {!failed ? (
         <Pressable style={s.layersBtn} onPress={() => setLayersOpen((o) => !o)} accessibilityRole="button" accessibilityLabel={t('Map layers')} testID="map-layers-btn">
           <Ionicons name="layers-outline" size={20} color={colors.ink} />
@@ -336,11 +339,11 @@ const s = StyleSheet.create({
     paddingHorizontal: 14, height: 36, borderWidth: 1, borderColor: colors.tintLine,
   },
   layersBtn: {
-    position: 'absolute', right: 12, bottom: 96, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface,
+    position: 'absolute', right: 12, bottom: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
   layersCard: {
-    position: 'absolute', right: 12, bottom: 142, minWidth: 160, backgroundColor: colors.surface, borderRadius: 14, padding: 6,
+    position: 'absolute', right: 12, bottom: 58, minWidth: 160, backgroundColor: colors.surface, borderRadius: 14, padding: 6,
     borderWidth: 1, borderColor: colors.tintLine,
   },
   layerRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10 },
