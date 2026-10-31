@@ -7,8 +7,9 @@
 //   • The 13 region boundaries (public/ksa-regions.json — geoBoundaries ADM1, ODbL, simplified to ~2 km / 24 KB)
 //     drawn as polygon overlays in the brand colour, each region's name floating above them, deep inside its own
 //     region (the file's precomputed `label` point: the inside point farthest from the border — owner 2026-10-30:
-//     «let the titles be clear on top, I don't want them covering another box»). Names that would collide at
-//     country zoom step aside (bigger regions win) and come back as you zoom in.
+//     «let the titles be clear on top, I don't want them covering another box»). Every name is always shown: its
+//     lettering is sized to fit inside its own shape at the current zoom — small when the whole country is in view,
+//     growing as you zoom in (owner: «when it's zoomed out, type the name in its shape, make the text small»).
 //   • The neighbours around the Kingdom (Yemen, Oman, the Emirates, Jordan, Egypt…) are in the first view, plain —
 //     only Saudi Arabia is split into regions (owner: «like you see Dubai, Yemen beside, but Saudi is split»).
 //   • Click a region → the map glides to it. «كل المملكة» (top corner) glides back out to the whole country.
@@ -41,7 +42,11 @@ const KSA_SPAN = { latitudeDelta: 20, longitudeDelta: 24 };
 const KSA_SPAN_PORTRAIT = { latitudeDelta: 19, longitudeDelta: 22 };
 // Region names show while the view is wider than this (country / a few regions); they leave as you zoom in so
 // they never sit on top of a city.
-const LABELS_HIDE_BELOW_SPAN = 5;
+const LABELS_HIDE_BELOW_SPAN = 4;
+// Lettering size: fitted to the region's width on screen, never below MIN (still legible) nor above MAX (a label,
+// not a headline).
+const LABEL_PX_MIN = 7.5;
+const LABEL_PX_MAX = 14;
 
 type Region = {
   id: number; iso: string; en: string; ar: string;
@@ -54,7 +59,7 @@ type Region = {
 
 type MKMap = {
   destroy: () => void;
-  region: { span: { latitudeDelta: number } };
+  region: { span: { latitudeDelta: number; longitudeDelta: number } };
   addOverlay: (o: unknown) => void;
   addAnnotation: (a: unknown) => void;
   setRegionAnimated: (r: unknown, animate?: boolean) => void;
@@ -68,8 +73,7 @@ type MapKit = {
   CoordinateRegion: new (center: unknown, span: unknown) => unknown;
   Style: new (o: { strokeColor?: string; fillColor?: string; fillOpacity?: number; lineWidth?: number }) => unknown;
   PolygonOverlay: new (points: unknown[] | unknown[][], o?: { style?: unknown; data?: unknown; enabled?: boolean }) => { style: { fillOpacity: number; lineWidth: number }; data: Region };
-  Annotation: (new (coord: unknown, factory: () => HTMLElement, o?: { data?: unknown; enabled?: boolean; collisionMode?: unknown; displayPriority?: number; size?: { width: number; height: number } }) => { visible: boolean })
-    & { CollisionMode: { Rectangle: unknown } };
+  Annotation: new (coord: unknown, factory: () => HTMLElement, o?: { data?: unknown; enabled?: boolean }) => { visible: boolean };
   addEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
   removeEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
 };
@@ -154,11 +158,24 @@ const regionView = (mk: MapKit, r: Region) => {
 function labelElement(text: string, arabic: boolean): HTMLElement {
   const el = document.createElement('div');
   el.textContent = arabic ? text : text.toUpperCase();
-  el.style.cssText = 'font: 600 ' + (arabic ? '11.5px' : '10.5px') + ' ui-sans-serif, -apple-system, system-ui, "Segoe UI", sans-serif; color: '
+  el.style.cssText = 'font: 600 11px ui-sans-serif, -apple-system, system-ui, "Segoe UI", sans-serif; color: '
     + lightColors.body + '; white-space: nowrap; pointer-events: none; text-align: center; line-height: 1.2;'
     + (arabic ? '' : ' letter-spacing: 0.08em;')
     + ' text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 4px #fff, 0 0 6px #fff;';
   return el;
+}
+
+// Average advance per character at 1 px of font size: Arabic letters (joined) ≈ 0.5 em; tracked capitals ≈ 0.75 em.
+const EM_PER_CHAR_AR = 0.58;
+const EM_PER_CHAR_EN = 0.75;
+// Shapes are not rectangles: a name may use about this much of the region's bbox width before it crosses a border.
+const USABLE_WIDTH = 0.48;
+
+/** The lettering size that fits `text` inside a region `bboxLngWidth` degrees wide, at `pxPerLng` pixels per degree. */
+function fitFontPx(text: string, arabic: boolean, bboxLngWidth: number, pxPerLng: number): number {
+  const widthPx = bboxLngWidth * pxPerLng * USABLE_WIDTH;
+  const px = widthPx / (text.length * (arabic ? EM_PER_CHAR_AR : EM_PER_CHAR_EN));
+  return Math.max(LABEL_PX_MIN, Math.min(LABEL_PX_MAX, px));
 }
 
 export default function AppleMap() {
@@ -198,24 +215,25 @@ export default function AppleMap() {
           });
         });
         overlays.forEach((o) => map!.addOverlay(o));
-        // Names: at the precomputed inside point, above the overlays; when two would overlap, the bigger region's
-        // name stays and the smaller one's returns as you zoom in (MapKit's own collision handling).
-        const maxArea = Math.max(...regions.map((r) => r.area));
+        // Names: at the precomputed inside point, above the overlays, every one always shown, each sized to fit
+        // its own shape at the current zoom (fitLabels below).
+        const labelEls = new Map<number, HTMLElement>();
         const labels = regions.map((r) => {
           const text = ar ? r.ar : r.en;
           return new mk.Annotation(
             new mk.Coordinate(r.label[1], r.label[0]),
-            () => labelElement(text, ar),
-            {
-              data: r, enabled: false,
-              // MapKit measures collisions with this box, not the DOM (a custom element has no size it can read):
-              // ~6.5 px per Arabic letter, ~8 px per tracked capital, plus a little air on each side.
-              size: { width: Math.ceil(text.length * (ar ? 6.5 : 8)) + 12, height: 18 },
-              collisionMode: mk.Annotation.CollisionMode.Rectangle,
-              displayPriority: 250 + Math.round(700 * r.area / maxArea),
-            },
+            () => { const node = labelElement(text, ar); labelEls.set(r.id, node); return node; },
+            { data: r, enabled: false },
           );
         });
+        const fitLabels = () => {
+          if (!map) return;
+          const pxPerLng = el.clientWidth / map.region.span.longitudeDelta;
+          regions.forEach((r) => {
+            const node = labelEls.get(r.id);
+            if (node) node.style.fontSize = fitFontPx(ar ? r.ar : r.en, ar, r.bbox[2] - r.bbox[0], pxPerLng).toFixed(1) + 'px';
+          });
+        };
         labels.forEach((a) => map!.addAnnotation(a));
 
         // Click a region → glide to it; the chosen one is tinted a little stronger until another is chosen.
@@ -233,10 +251,13 @@ export default function AppleMap() {
           if (!map) return;
           const wide = map.region.span.latitudeDelta >= LABELS_HIDE_BELOW_SPAN;
           labels.forEach((a) => { a.visible = wide; });
+          if (wide) fitLabels();
           setZoomed(map.region.span.latitudeDelta < KSA_SPAN_PORTRAIT.latitudeDelta * 0.7);
         };
         map.addEventListener('region-change-end', onRegion);
-        onRegion();
+        // Annotation elements are created lazily by MapKit; size them once they exist, then on every zoom.
+        setTimeout(onRegion, 0);
+        setTimeout(onRegion, 300);
       }).catch((e) => { console.error('[map] regions did not load', e); });
     }).catch(() => { if (!gone) setFailed(true); });
     return () => {
