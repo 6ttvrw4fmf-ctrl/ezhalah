@@ -2,10 +2,12 @@
 // exactly the Kingdom's 13 administrative regions as src/data/sa-locations.json knows them, small, and well-formed:
 //   1. 13 entries, ids 1..13 once each, every id's English/Arabic name consistent with sa-locations.json;
 //   2. every ring is a closed polygon inside Saudi Arabia's bounding box, every bbox encloses its rings;
-//   3. the file stays small (ALWAYS FAST: it is fetched on the Map tab only, but 23 KB must not quietly become 400).
+//   3. every region's name point (`label`) lies inside that region's own mainland ring, so a name never sits in a
+//      neighbour (owner 2026-10-30: «I don't want them covering another box»), and `area` is positive;
+//   4. the file stays small (ALWAYS FAST: it is fetched on the Map tab only, but 23 KB must not quietly become 400).
 import { readFileSync, statSync } from 'node:fs';
 
-type Region = { id: number; iso: string; en: string; ar: string; bbox: [number, number, number, number]; rings: [number, number][][] };
+type Region = { id: number; iso: string; en: string; ar: string; bbox: [number, number, number, number]; rings: [number, number][][]; label: [number, number]; area: number };
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -31,6 +33,20 @@ check('every ring is closed, ≥ 4 points, and inside the Kingdom', regions.ever
   ring.length >= 4 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1] && ring.every(inKsa))));
 check('every bbox encloses its rings', regions.every((r) => { const [w, s, e, n] = r.bbox; return r.rings.every((ring) => ring.every(([lng, lat]) => lng >= w && lng <= e && lat >= s && lat <= n)); }));
 check('regions do not overlap by bbox beyond neighbours (no region swallows the country)', regions.every((r) => (r.bbox[2] - r.bbox[0]) < 15 && (r.bbox[3] - r.bbox[1]) < 12));
+
+const inRing = ([x, y]: [number, number], ring: [number, number][]) => {
+  let ins = false;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const [x1, y1] = ring[i], [x2, y2] = ring[i + 1];
+    if ((y1 > y) !== (y2 > y) && x < ((x2 - x1) * (y - y1)) / (y2 - y1) + x1) ins = !ins;
+  }
+  return ins;
+};
+check('every name point lies inside its own region (its largest ring) and in no other region', regions.every((r) => {
+  const own = r.rings.reduce((a, b) => (a.length >= b.length ? a : b));
+  return inRing(r.label, own) && regions.every((o) => o === r || !o.rings.some((ring) => inRing(r.label, ring)));
+}));
+check('every region has a positive area', regions.every((r) => typeof r.area === 'number' && r.area > 0));
 
 const bytes = statSync(new URL('../public/ksa-regions.json', import.meta.url)).size;
 check(`file stays small (${bytes} bytes ≤ 40 KB)`, bytes <= 40 * 1024);

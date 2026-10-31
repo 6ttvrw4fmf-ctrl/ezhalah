@@ -4,8 +4,13 @@
 //
 // What is on the map, and nothing more:
 //   • Apple's own map (cities, districts, roads appear as you zoom — Apple draws them, in the app's language).
-//   • The 13 region boundaries (public/ksa-regions.json — geoBoundaries ADM1, ODbL, simplified to ~2 km / 23 KB)
-//     drawn as polygon overlays in the brand colour, with the region's name at its centre while zoomed out.
+//   • The 13 region boundaries (public/ksa-regions.json — geoBoundaries ADM1, ODbL, simplified to ~2 km / 24 KB)
+//     drawn as polygon overlays in the brand colour, each region's name floating above them, deep inside its own
+//     region (the file's precomputed `label` point: the inside point farthest from the border — owner 2026-10-30:
+//     «let the titles be clear on top, I don't want them covering another box»). Names that would collide at
+//     country zoom step aside (bigger regions win) and come back as you zoom in.
+//   • The neighbours around the Kingdom (Yemen, Oman, the Emirates, Jordan, Egypt…) are in the first view, plain —
+//     only Saudi Arabia is split into regions (owner: «like you see Dubai, Yemen beside, but Saudi is split»).
 //   • Click a region → the map glides to it. «كل المملكة» (top corner) glides back out to the whole country.
 //     Pinch / scroll / the +− control zoom freely, as on any map.
 //
@@ -27,15 +32,25 @@ const TOKEN_URL = '/api/mapkit-token';
 const REGIONS_URL = '/ksa-regions.json';
 const FETCH_TIMEOUT_MS = 8000;
 
-// The Kingdom, whole, on first open: centre near the country's middle, span wide enough for Tabuk to Jazan and
-// Jeddah to Dammam at once.
-const KSA_CENTER = { latitude: 24.0, longitude: 45.0 };
-const KSA_SPAN = { latitudeDelta: 16, longitudeDelta: 18 };
+// The Kingdom, whole, on first open, with its neighbours around it: centre near the country's middle, span wide
+// enough for Tabuk to Jazan and Jeddah to Dammam with Yemen, Oman, the Gulf and Jordan showing at the edges.
+const KSA_CENTER = { latitude: 23.5, longitude: 45.5 };
+const KSA_SPAN = { latitudeDelta: 20, longitudeDelta: 24 };
+// A phone held upright is taller than wide: the same span would leave the Kingdom small in the middle, so there the
+// first view fits the country to the screen's width instead (the neighbours still show above and below).
+const KSA_SPAN_PORTRAIT = { latitudeDelta: 19, longitudeDelta: 22 };
 // Region names show while the view is wider than this (country / a few regions); they leave as you zoom in so
 // they never sit on top of a city.
 const LABELS_HIDE_BELOW_SPAN = 5;
 
-type Region = { id: number; iso: string; en: string; ar: string; bbox: [number, number, number, number]; rings: [number, number][][] };
+type Region = {
+  id: number; iso: string; en: string; ar: string;
+  bbox: [number, number, number, number]; rings: [number, number][][];
+  /** [lng, lat] of the inside point farthest from the border — where the name goes. */
+  label: [number, number];
+  /** mainland area in square degrees — bigger regions keep their name when names collide. */
+  area: number;
+};
 
 type MKMap = {
   destroy: () => void;
@@ -53,7 +68,8 @@ type MapKit = {
   CoordinateRegion: new (center: unknown, span: unknown) => unknown;
   Style: new (o: { strokeColor?: string; fillColor?: string; fillOpacity?: number; lineWidth?: number }) => unknown;
   PolygonOverlay: new (points: unknown[] | unknown[][], o?: { style?: unknown; data?: unknown; enabled?: boolean }) => { style: { fillOpacity: number; lineWidth: number }; data: Region };
-  Annotation: new (coord: unknown, factory: () => HTMLElement, o?: { data?: unknown; anchorOffset?: unknown; enabled?: boolean }) => { visible: boolean };
+  Annotation: (new (coord: unknown, factory: () => HTMLElement, o?: { data?: unknown; enabled?: boolean; collisionMode?: unknown; displayPriority?: number }) => { visible: boolean })
+    & { CollisionMode: { Rectangle: unknown } };
   addEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
   removeEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
 };
@@ -114,10 +130,13 @@ function initOnce(mk: MapKit, language: string) {
   });
 }
 
-const ksaRegion = (mk: MapKit) => new mk.CoordinateRegion(
-  new mk.Coordinate(KSA_CENTER.latitude, KSA_CENTER.longitude),
-  new mk.CoordinateSpan(KSA_SPAN.latitudeDelta, KSA_SPAN.longitudeDelta),
-);
+const ksaRegion = (mk: MapKit, el: HTMLElement) => {
+  const span = el.clientHeight > el.clientWidth ? KSA_SPAN_PORTRAIT : KSA_SPAN;
+  return new mk.CoordinateRegion(
+    new mk.Coordinate(KSA_CENTER.latitude, KSA_CENTER.longitude),
+    new mk.CoordinateSpan(span.latitudeDelta, span.longitudeDelta),
+  );
+};
 
 /** The view that shows one region whole, with a little air around it. */
 const regionView = (mk: MapKit, r: Region) => {
@@ -156,7 +175,7 @@ export default function AppleMap() {
       initOnce(mk, locale);
       mk.addEventListener('error', onError);
       map = new mk.Map(el, {
-        region: ksaRegion(mk),
+        region: ksaRegion(mk, el),
         showsMapTypeControl: false,
         showsPointsOfInterest: false,
       });
@@ -175,10 +194,14 @@ export default function AppleMap() {
           });
         });
         overlays.forEach((o) => map!.addOverlay(o));
-        const labels = regions.map((r) => {
-          const [w, s, e, n] = r.bbox;
-          return new mk.Annotation(new mk.Coordinate((s + n) / 2, (w + e) / 2), () => labelElement(ar ? r.ar : r.en), { data: r, enabled: false });
-        });
+        // Names: at the precomputed inside point, above the overlays; when two would overlap, the bigger region's
+        // name stays and the smaller one's returns as you zoom in (MapKit's own collision handling).
+        const maxArea = Math.max(...regions.map((r) => r.area));
+        const labels = regions.map((r) => new mk.Annotation(
+          new mk.Coordinate(r.label[1], r.label[0]),
+          () => labelElement(ar ? r.ar : r.en),
+          { data: r, enabled: false, collisionMode: mk.Annotation.CollisionMode.Rectangle, displayPriority: 250 + Math.round(700 * r.area / maxArea) },
+        ));
         labels.forEach((a) => map!.addAnnotation(a));
 
         // Click a region → glide to it; the chosen one is tinted a little stronger until another is chosen.
@@ -196,7 +219,7 @@ export default function AppleMap() {
           if (!map) return;
           const wide = map.region.span.latitudeDelta >= LABELS_HIDE_BELOW_SPAN;
           labels.forEach((a) => { a.visible = wide; });
-          setZoomed(map.region.span.latitudeDelta < KSA_SPAN.latitudeDelta * 0.8);
+          setZoomed(map.region.span.latitudeDelta < KSA_SPAN_PORTRAIT.latitudeDelta * 0.7);
         };
         map.addEventListener('region-change-end', onRegion);
         onRegion();
@@ -215,7 +238,8 @@ export default function AppleMap() {
 
   const showWholeKingdom = () => {
     const mk = mapkitOf();
-    if (mk && mapRef.current) mapRef.current.setRegionAnimated(ksaRegion(mk), true);
+    const el = hostRef.current as unknown as HTMLElement | null;
+    if (mk && el && mapRef.current) mapRef.current.setRegionAnimated(ksaRegion(mk, el), true);
   };
 
   return (
@@ -226,7 +250,7 @@ export default function AppleMap() {
           <Text style={s.wholeT}>{t('Whole Kingdom')}</Text>
         </Pressable>
       ) : null}
-      {failed ? <View style={s.failed} pointerEvents="none"><Text style={s.failedT}>{t('The map could not load')}</Text></View> : null}
+      {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>
   );
 }
@@ -240,5 +264,6 @@ const s = StyleSheet.create({
   },
   wholeT: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },
   failed: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
-  failedT: { fontFamily: font.family.medium, fontSize: 14, color: colors.muted },
+  failedPill: { backgroundColor: colors.surface, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 9, borderWidth: 1, borderColor: colors.tintLine },
+  failedT: { fontFamily: font.family.medium, fontSize: 14, color: colors.ink },
 });
