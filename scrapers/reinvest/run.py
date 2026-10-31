@@ -296,7 +296,8 @@ DETAIL, MEASURED
       construction_period 136 جديد · 137 اقل من سنة · 138 سنة · 139 سنتين · 140 ثلاث سنوات ·
         141 اربع سنوات · 142 خمس سنوات · 143 ست سنوات · 144 سبع سنوات · 145 ثمان سنوات ·
         146 تسع سنوات · 147 عشر سنوات · 148 اكثر من عشر سنوات
-      street_width 0 «-» (unset) · 185 18 · 186 30 · 187 60 · 194 80 · 195 100
+      street_width — SUPERSEDED 2026-10-31: the old 185→18 … 187→60 pairing was wrong 2 of 2 against
+        live pages; the width is now read from the page's own `info_fields_label` table.
       real_estate_facade_id 154 شرقية · 155 غربية · 156 شمالية · 157 جنوبية · 159 جنوبية شرقية ·
         160 جنوبية غربية · 161 شمالية غربية
     Gaps are real options no current listing uses (facade 158, street widths 188-193); they resolve
@@ -305,6 +306,7 @@ DETAIL, MEASURED
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 import threading
@@ -385,8 +387,13 @@ _AGE_BY_ID = {
     141: "اربع سنوات", 142: "خمس سنوات", 143: "ست سنوات", 144: "سبع سنوات",
     145: "ثمان سنوات", 146: "تسع سنوات", 147: "عشر سنوات", 148: "اكثر من عشر سنوات",
 }
-# id 0 is the page's «-» — the field is UNSET, not a zero-metre street.
-_STREET_WIDTH_BY_ID = {185: 18, 186: 30, 187: 60, 194: 80, 195: 100}
+# STREET WIDTH IS NOT RESOLVED FROM THE ID (2026-10-31, backlog 1091/1092). The 2026-09-24 pairing
+# (185→18, 186→30, 187→60, 194→80, 195→100) was contradicted 2 of 2 by the live pages on 2026-10-30
+# (re-read run 41091675244): maard-llaygar-416 carries id 187 and its page prints «عرض الشارع 50»
+# (visible cell AND the embedded REGA licence); ard-llbyaa-1775 carries id 185 and prints 12. The id
+# is a menu bucket, not the licence's metres. The rendered page embeds the resolved licence table
+# (`info_fields_label`), so the width is read from THERE and nowhere else; a page we could not read
+# leaves the column NULL (unknown), never the id's guess.
 _FACADE_BY_ID = {
     154: "شرقية", 155: "غربية", 156: "شمالية", 157: "جنوبية",
     159: "جنوبية شرقية", 160: "جنوبية غربية", 161: "شمالية غربية",
@@ -448,6 +455,67 @@ def _worker_session() -> cc.Session:
     if s is None:
         s = _LOCAL.s = session()
     return s
+
+
+_LABELS_KEY = "info_fields_label"
+
+
+def page_labels(html: Optional[str]) -> Optional[dict[str, Any]]:
+    """The licence table the rendered ad page embeds in its Next.js payload, as a dict, or None when
+    the page carries none. The payload is a JSON object inside a JS string, so its quotes arrive
+    escaped («\\"عرض الشارع\\":50»); the escapes are peeled before the object is parsed, and the
+    object is cut by balanced braces (string-aware) rather than by a regex that could stop early."""
+    if not html:
+        return None
+    at = html.find(_LABELS_KEY)
+    while at >= 0:                           # a `null` copy may precede the filled one
+        got = _labels_at(html[at + len(_LABELS_KEY): at + len(_LABELS_KEY) + 20000])
+        if got:
+            return got
+        at = html.find(_LABELS_KEY, at + 1)
+    return None
+
+
+def _labels_at(seg: str) -> Optional[dict[str, Any]]:
+    for _ in range(3):                       # one level per JS-string nesting
+        if '\\"' not in seg:
+            break
+        seg = seg.replace('\\\\', '\\').replace('\\"', '"')
+    start = seg.find("{")
+    if start < 0 or seg[:start].strip(' "\':') != "":
+        return None
+    depth, in_str, esc = 0, False, False
+    for i, ch in enumerate(seg[start:], start):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    obj = json.loads(seg[start:i + 1])
+                except ValueError:
+                    return None
+                return obj if isinstance(obj, dict) else None
+    return None
+
+
+def street_width_from_labels(labels: Optional[dict[str, Any]]) -> Optional[int]:
+    """«عرض الشارع» as the page's own licence table states it. «-», absent or unreadable → None."""
+    if not isinstance(labels, dict):
+        return None
+    raw = labels.get("عرض الشارع")
+    if raw is None or str(raw).strip() in ("", "-"):
+        return None
+    return normalize.one_street_width(raw)
 
 
 def _strip_marks(s: Optional[str]) -> Optional[str]:
@@ -648,7 +716,8 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "bathrooms": _pos(info.get("bathrooms")),
         "parking": normalize.count_flag(info.get("parking_count")),
         "property_age": normalize.parse_property_age(_AGE_BY_ID.get(age_id)),
-        "street_width_m": normalize.one_street_width(_STREET_WIDTH_BY_ID.get(width_id)),
+        # From the page's own licence table only (see the note at the id tables); never the id.
+        "street_width_m": street_width_from_labels(rec.get("_page_labels")),
         "direction": normalize.one_direction(_FACADE_BY_ID.get(facade_id), diagonal=True),
         "license_number": _clean(rec.get("license_number")),
         "date_added": _clean(rec.get("published_at")) or _clean(rec.get("created_at")),
@@ -695,7 +764,8 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "finishing_type_id": info.get("finishing_type_id"),
         "age_option_id": age_id, "street_width_option_id": width_id, "facade_option_id": facade_id,
         "age_option_label": _AGE_BY_ID.get(age_id),
-        "street_width_option_label": _STREET_WIDTH_BY_ID.get(width_id),
+        "street_width_page_label": (rec.get("_page_labels") or {}).get("عرض الشارع"),
+        "page_labels_read": rec.get("_page_labels") is not None,
         "facade_option_label": _FACADE_BY_ID.get(facade_id),
         "amenity_words": amen_words or None,
         "main_usage": _clean(rec.get("main_usage")),         # the platform's own res/com reading
@@ -849,7 +919,28 @@ def fetch_detail(s: cc.Session, slug: str) -> Optional[dict]:
         data = (r.json() or {}).get("data")
     except ValueError:
         return None
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        return None
+    data["_page_labels"] = fetch_page_labels(s, data)
+    return data
+
+
+def fetch_page_labels(s: cc.Session, rec: dict) -> Optional[dict[str, Any]]:
+    """The rendered page's licence table for this record, or None when the page could not be read.
+    None is UNKNOWN: the fields that come only from it stay NULL for this crawl."""
+    url = _clean(rec.get("url_path"))
+    if not url or urlparse(url).netloc not in ("reinvest.sa", "www.reinvest.sa"):
+        return None
+    for _ in range(3):
+        try:
+            r = s.get(url, timeout=60, headers={"Accept": "text/html"})
+        except Exception:
+            continue
+        if r.status_code == 200:
+            return page_labels(r.text)
+        if r.status_code not in TRANSIENT_STATUSES:
+            return None
+    return None
 
 
 def fetch_details(slugs: list[str]) -> dict[str, dict]:
@@ -992,6 +1083,7 @@ def main() -> int:
                       f"bd={str(r0.get('bedrooms')):>4} pt={r0.get('price_total')} "
                       f"pa={r0.get('price_annual')} rp={r0.get('rent_period')} "
                       f"ppm={r0.get('price_per_meter')} sw={r0.get('street_width_m')} "
+                      f"swp={(r0.get('additional_info') or {}).get('street_width_page_label')} "
                       f"ag={r0.get('property_age')} dir={r0.get('direction')} "
                       f"ph={len(r0.get('photo_urls') or [])}")
             return 0
