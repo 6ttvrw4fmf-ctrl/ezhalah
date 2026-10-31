@@ -920,6 +920,18 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
                     row["find_missed_ids"].append(key)
                     # What the customer asked for, so a miss names its field in the run log (keys only, no PII).
                     print(f"  miss {key} asked {answers}", flush=True)
+                    if True:  # DIAGNOSTIC BRANCH ONLY — never merged
+                        ev = {norm(x) for x in (page.get("evidence_lines") or [])}
+                        hd = {norm(x) for x in (page.get("text_head") or "").split(" | ")}
+                        mt = {norm(x) for x in (page.get("meta") or {}).values()}
+                        for c in answers:
+                            kw = BOOL_KW.get(c)
+                            for x in ad_lines:
+                                m = re.search(kw, x) if kw else None
+                                if m:
+                                    where = ",".join(n for n, st in (("evidence", ev), ("text_head", hd), ("meta", mt), ("title", {norm(page.get("title") or "")})) if x in st)
+                                    snip = re.sub(r"\d{9,}", "<num>", x[max(0, m.start() - 50):m.end() + 30])
+                                    print(f"    why {c}: «{snip}» from [{where}] len {len(x)}", flush=True)
             same = parity(anon, params)
             if same is not None:
                 row["parity_tried"] += 1
