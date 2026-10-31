@@ -313,8 +313,8 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
 
   // ── Draw (Zillow's «Draw Search», owner 2026-10-31: «see how drawing is, copy it like Zillow») ──────────────
   // Enter: the map stops panning/zooming and a transparent layer takes the pointer; a drag paints a freehand
-  // polygon that grows under the finger; lifting closes it; a new drag replaces it. «تطبيق» keeps the shape and
-  // glides the map to it; «إلغاء» discards the sketch (an earlier applied shape stays). «إزالة الرسم» clears it.
+  // polygon that grows under the finger; lifting closes it; a new drag replaces it. «تطبيق» keeps the shape where
+  // it was drawn (the map does not move); «إلغاء» discards the sketch (an earlier applied shape stays). «إزالة الرسم» clears it.
   // Design only for now: nothing searches inside the shape yet.
   const gestures = (on: boolean) => {
     const m = mapRef.current;
@@ -326,16 +326,14 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
     if (m && sketchRef.current) m.removeOverlay(sketchRef.current);
     sketchRef.current = null; setSketch(null); setDrawing(false); gestures(true);
   };
+  // Apply keeps the boundary and leaves the map exactly where it is — like Zillow, it does NOT fly to the shape
+  // (owner 2026-10-31: «drawing just creates a boundary, it doesn't take you there»).
   const applyDrawing = () => {
-    const m = mapRef.current; const mk = mapkitOf();
+    const m = mapRef.current;
     const shape = sketchRef.current;
-    if (!m || !mk || !shape) return;
+    if (!m || !shape) return;
     if (shapeRef.current) m.removeOverlay(shapeRef.current);
     shapeRef.current = shape; sketchRef.current = null;
-    const pts = ptsRef.current;
-    const lats = pts.map((p) => p.latitude), lngs = pts.map((p) => p.longitude);
-    const s0 = Math.min(...lats), n0 = Math.max(...lats), w0 = Math.min(...lngs), e0 = Math.max(...lngs);
-    m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate((s0 + n0) / 2, (w0 + e0) / 2), new mk.CoordinateSpan(Math.max((n0 - s0) * 1.4, 0.02), Math.max((e0 - w0) * 1.4, 0.02))), true);
     setHasShape(true); setSketch(null); setDrawing(false); gestures(true);
   };
   const removeDrawing = () => {
