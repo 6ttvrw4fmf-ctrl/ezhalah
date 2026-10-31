@@ -12,6 +12,8 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ModeSwitch from '@/components/ModeSwitch';
 import AppleMap from '@/components/AppleMap';
+import HeroBackground from '@/components/HeroBackground';
+import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 
@@ -22,6 +24,10 @@ export default function MapRoute() {
 
   return (
     <View style={[s.screen, { paddingTop: insets.top + 12 }]}>
+      {/* The same sky and website strip as the Filter home and the Smart Broker landing, above the pill
+          (owner 2026-10-31: «include this cloud thing on top, above it»). */}
+      <HeroBackground />
+      <View style={s.strip}><HomeWebsiteStrip /></View>
       <View style={s.modeWrap}>
         <ModeSwitch active="map" onSwitch={(to) => router.replace(to === 'filter' ? '/' : '/agent')} t={t} />
       </View>
@@ -34,6 +40,7 @@ export default function MapRoute() {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.paper, paddingHorizontal: 10 },
-  modeWrap: { alignSelf: 'center', marginTop: 8 },
-  body: { flex: 1, marginTop: 12 },
+  strip: { marginHorizontal: -10, zIndex: 1 },
+  modeWrap: { alignSelf: 'center', marginTop: 8, zIndex: 1 },
+  body: { flex: 1, marginTop: 12, zIndex: 1 },
 });
