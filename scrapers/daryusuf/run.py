@@ -93,6 +93,7 @@ from scrapers.common.district_bridge import bridge_rows, bridge_unique, norm_en 
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 
 BASE = "https://daryusuf.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -561,6 +562,9 @@ def map_listing(post: dict, terms: dict[int, str]) -> tuple[Optional[dict], str,
         "featured_media": post.get("featured_media") or None,
         "photo_count": len(photos) or None,
     }.items() if v is not None}
+    # The post's own Elementor map: <iframe src="https://maps.google.com/maps?q=24°27'59.8"N 39°39'44.9"E&output=embed">,
+    # a DMS pair per ad (owner 2026-10-30: 258 ads, 0 pins); page_pin reads it after unescape + unquote.
+    row["additional_info"].update(pin_from_html(content) or {"pin_absent": True})
     return row, category, ""
 
 
