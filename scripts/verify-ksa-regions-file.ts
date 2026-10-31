@@ -7,7 +7,7 @@
 //   4. the file stays small (ALWAYS FAST: it is fetched on the Map tab only, but 23 KB must not quietly become 400).
 import { readFileSync, statSync } from 'node:fs';
 
-type Region = { id: number; iso: string; en: string; ar: string; bbox: [number, number, number, number]; rings: [number, number][][]; label: [number, number]; area: number };
+type Region = { id: number; iso: string; en: string; ar: string; bbox: [number, number, number, number]; rings: [number, number][][]; label: [number, number]; area: number; rot: number; len: number };
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -47,6 +47,7 @@ check('every name point lies inside its own region (its largest ring) and in no 
   return inRing(r.label, own) && regions.every((o) => o === r || !o.rings.some((ring) => inRing(r.label, ring)));
 }));
 check('every region has a positive area', regions.every((r) => typeof r.area === 'number' && r.area > 0));
+check('every name has a readable tilt (|rot| ≤ 50°) and a positive length to fit into', regions.every((r) => Number.isInteger(r.rot) && Math.abs(r.rot) <= 50 && r.len > 0));
 
 const bytes = statSync(new URL('../public/ksa-regions.json', import.meta.url)).size;
 check(`file stays small (${bytes} bytes ≤ 40 KB)`, bytes <= 40 * 1024);

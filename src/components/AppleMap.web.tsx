@@ -9,7 +9,9 @@
 //     region (the file's precomputed `label` point: the inside point farthest from the border — owner 2026-10-30:
 //     «let the titles be clear on top, I don't want them covering another box»). Every name is always shown: its
 //     lettering is sized to fit inside its own shape at the current zoom — small when the whole country is in view,
-//     growing as you zoom in (owner: «when it's zoomed out, type the name in its shape, make the text small»).
+//     growing as you zoom in (owner: «when it's zoomed out, type the name in its shape, make the text small»), and a
+//     long region's name is written along the region's own direction, tilted like CALIFORNIA on Zillow's map
+//     (owner: «for the Northern Borders type it on the side, taking over the map — same with the others»).
 //   • The neighbours around the Kingdom (Yemen, Oman, the Emirates, Jordan, Egypt…) are in the first view, plain —
 //     only Saudi Arabia is split into regions (owner: «like you see Dubai, Yemen beside, but Saudi is split»).
 //   • Click a region → the map glides to it. «كل المملكة» (top corner) glides back out to the whole country.
@@ -53,8 +55,12 @@ type Region = {
   bbox: [number, number, number, number]; rings: [number, number][][];
   /** [lng, lat] of the inside point farthest from the border — where the name goes. */
   label: [number, number];
-  /** mainland area in square degrees — bigger regions keep their name when names collide. */
+  /** mainland area in square degrees. */
   area: number;
+  /** on-screen tilt of the name in degrees (0 = horizontal): long regions are written along their own direction. */
+  rot: number;
+  /** the region's extent along that direction, in longitude-degree units — what the name must fit into. */
+  len: number;
 };
 
 type MKMap = {
@@ -155,26 +161,50 @@ const regionView = (mk: MapKit, r: Region) => {
  *  «make each title smaller, like Zillow's default, clear like ARIZONA»): no bubble, a soft white halo so it reads on
  *  any tile. English is small capitals with a little tracking; Arabic keeps its natural joined letters (no
  *  letter-spacing on Arabic — scripts/verify-no-letter-spacing-on-arabic.ts). */
-function labelElement(text: string, arabic: boolean): HTMLElement {
-  const el = document.createElement('div');
-  el.textContent = arabic ? text : text.toUpperCase();
-  el.style.cssText = 'font: 600 11px ui-sans-serif, -apple-system, system-ui, "Segoe UI", sans-serif; color: '
+function labelElement(text: string, arabic: boolean, rotateDeg: number): { outer: HTMLElement; inner: HTMLElement } {
+  // MapKit measures and positions the element it is given; a rotated or re-sized element would throw that off, so the
+  // element MapKit gets is a 0×0 point and the lettering hangs off it, centred and tilted, in a child of its own.
+  const outer = document.createElement('div');
+  outer.style.cssText = 'width: 0; height: 0; overflow: visible; pointer-events: none;';
+  const inner = document.createElement('div');
+  inner.textContent = arabic ? text : text.toUpperCase();
+  inner.style.cssText = 'position: absolute; left: 0; top: 0; transform: translate(-50%, -50%) rotate(' + rotateDeg + 'deg);'
+    + ' font: 600 11px ui-sans-serif, -apple-system, system-ui, "Segoe UI", sans-serif; color: '
     + lightColors.body + '; white-space: nowrap; pointer-events: none; text-align: center; line-height: 1.2;'
     + (arabic ? '' : ' letter-spacing: 0.08em;')
     + ' text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 4px #fff, 0 0 6px #fff;';
-  return el;
+  outer.appendChild(inner);
+  return { outer, inner };
 }
 
-// Average advance per character at 1 px of font size: Arabic letters (joined) ≈ 0.5 em; tracked capitals ≈ 0.75 em.
-const EM_PER_CHAR_AR = 0.58;
-const EM_PER_CHAR_EN = 0.75;
-// Shapes are not rectangles: a name may use about this much of the region's bbox width before it crosses a border.
-const USABLE_WIDTH = 0.48;
+const LABEL_FONT = '600 100px ui-sans-serif, -apple-system, system-ui, "Segoe UI", sans-serif';
+// Shapes are not rectangles: a horizontal name may use about this much of the region's width before it crosses a
+// border; a name written along the region's long axis (`rot` ≠ 0) has more of the shape's own length to use.
+const USABLE_WIDTH = 0.52;
+const USABLE_LENGTH_TILTED = 0.66;
 
-/** The lettering size that fits `text` inside a region `bboxLngWidth` degrees wide, at `pxPerLng` pixels per degree. */
-function fitFontPx(text: string, arabic: boolean, bboxLngWidth: number, pxPerLng: number): number {
-  const widthPx = bboxLngWidth * pxPerLng * USABLE_WIDTH;
-  const px = widthPx / (text.length * (arabic ? EM_PER_CHAR_AR : EM_PER_CHAR_EN));
+// How wide `text` is per 1 px of font size — MEASURED with the lettering's own font (an estimate per letter was 40%
+// off for joined Arabic and made every name smaller than its region allows), cached per text.
+const widthPerPx = new Map<string, number>();
+function textWidthPerPx(text: string, arabic: boolean): number {
+  const key = (arabic ? 'a:' : 'e:') + text;
+  const have = widthPerPx.get(key);
+  if (have !== undefined) return have;
+  let w = text.length * (arabic ? 0.45 : 0.75); // fallback if a canvas is unavailable
+  const ctx = document.createElement('canvas').getContext('2d');
+  if (ctx) {
+    ctx.font = LABEL_FONT;
+    w = ctx.measureText(arabic ? text : text.toUpperCase()).width / 100 + (arabic ? 0 : 0.08 * text.length);
+  }
+  widthPerPx.set(key, w);
+  return w;
+}
+
+/** The lettering size that fits `text` inside a region whose name-space is `lenDeg` degrees long, at `pxPerLng`
+ *  pixels per degree. */
+function fitFontPx(text: string, arabic: boolean, lenDeg: number, tilted: boolean, pxPerLng: number): number {
+  const widthPx = lenDeg * pxPerLng * (tilted ? USABLE_LENGTH_TILTED : USABLE_WIDTH);
+  const px = widthPx / textWidthPerPx(text, arabic);
   return Math.max(LABEL_PX_MIN, Math.min(LABEL_PX_MAX, px));
 }
 
@@ -218,21 +248,28 @@ export default function AppleMap() {
         // Names: at the precomputed inside point, above the overlays, every one always shown, each sized to fit
         // its own shape at the current zoom (fitLabels below).
         const labelEls = new Map<number, HTMLElement>();
+        const fitOne = (r: Region, node: HTMLElement) => {
+          if (!map) return;
+          const pxPerLng = el.clientWidth / map.region.span.longitudeDelta;
+          node.style.fontSize = fitFontPx(ar ? r.ar : r.en, ar, r.len, r.rot !== 0, pxPerLng).toFixed(1) + 'px';
+        };
         const labels = regions.map((r) => {
           const text = ar ? r.ar : r.en;
           return new mk.Annotation(
             new mk.Coordinate(r.label[1], r.label[0]),
-            () => { const node = labelElement(text, ar); labelEls.set(r.id, node); return node; },
+            () => {
+              // MapKit creates the element when it first draws the annotation, which can be well after the map is
+              // up — so size it right here, at the zoom of that moment, and again on every zoom (fitLabels).
+              const { outer, inner } = labelElement(text, ar, r.rot);
+              labelEls.set(r.id, inner);
+              fitOne(r, inner);
+              return outer;
+            },
             { data: r, enabled: false },
           );
         });
         const fitLabels = () => {
-          if (!map) return;
-          const pxPerLng = el.clientWidth / map.region.span.longitudeDelta;
-          regions.forEach((r) => {
-            const node = labelEls.get(r.id);
-            if (node) node.style.fontSize = fitFontPx(ar ? r.ar : r.en, ar, r.bbox[2] - r.bbox[0], pxPerLng).toFixed(1) + 'px';
-          });
+          regions.forEach((r) => { const node = labelEls.get(r.id); if (node) fitOne(r, node); });
         };
         labels.forEach((a) => map!.addAnnotation(a));
 
