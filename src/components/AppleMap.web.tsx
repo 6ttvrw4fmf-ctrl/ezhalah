@@ -39,10 +39,12 @@ const FETCH_TIMEOUTS_MS = [8000, 12000, 15000];
 // The Kingdom, whole, on first open, with its neighbours around it: centre near the country's middle, span wide
 // enough for Tabuk to Jazan and Jeddah to Dammam with Yemen, Oman, the Gulf and Jordan showing at the edges.
 const KSA_CENTER = { latitude: 23.5, longitude: 45.5 };
-const KSA_SPAN = { latitudeDelta: 20, longitudeDelta: 24 };
+// A touch closer than before (owner 2026-10-31: «I want the map to feel zoomed in a bit, eliminate those extra
+// spaces»): 20×24 → 18×21.5, the neighbours still at the edges.
+const KSA_SPAN = { latitudeDelta: 18, longitudeDelta: 21.5 };
 // A phone held upright is taller than wide: the same span would leave the Kingdom small in the middle, so there the
 // first view fits the country to the screen's width instead (the neighbours still show above and below).
-const KSA_SPAN_PORTRAIT = { latitudeDelta: 19, longitudeDelta: 22 };
+const KSA_SPAN_PORTRAIT = { latitudeDelta: 17, longitudeDelta: 19.5 };
 
 type Region = {
   id: number; iso: string; en: string; ar: string;

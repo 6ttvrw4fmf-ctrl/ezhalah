@@ -140,5 +140,5 @@ const s = StyleSheet.create({
   strip: { marginHorizontal: -10, zIndex: 1 },
   modeWrap: { alignSelf: 'center', marginTop: 8, zIndex: 1 },
   dealWrap: { zIndex: 1 },
-  body: { flex: 1, marginTop: 12, zIndex: 1 },
+  body: { flex: 1, marginTop: 6, zIndex: 1 }, // tight under the row (owner 2026-10-31: «eliminate those extra spaces»)
 });
