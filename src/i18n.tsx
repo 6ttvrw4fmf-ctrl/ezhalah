@@ -292,7 +292,7 @@ const AR: Record<string, string> = {
   'Draw an area': 'ارسم منطقة',
   'Apply': 'تطبيق',
   'Drag on the map to draw an area': 'اسحب على الخريطة لرسم منطقة',
-  'Remove drawing': 'إزالة الرسم',
+  'Remove boundary': 'إزالة الحدود',
   'Open the map': 'افتح الخريطة',
   'Map layers': 'طبقات الخريطة',
   'Explore': 'استكشاف',

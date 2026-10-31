@@ -16,8 +16,8 @@
 //     / `len` fields are kept for a day they are wanted again.
 //   • The neighbours around the Kingdom (Yemen, Oman, the Emirates, Jordan, Egypt…) are in the first view, plain —
 //     only Saudi Arabia is split into regions (owner: «like you see Dubai, Yemen beside, but Saudi is split»).
-//   • Click a region → the map glides to it. «كل المملكة» (top corner) glides back out to the whole country.
-//     Pinch / scroll / the +− control zoom freely, as on any map.
+//   • Click a region → the map glides to it. Pinch / scroll zooms back out, as on any map (no «كل المملكة» button:
+//     owner 2026-10-31, «remove this whole kingdom»).
 //
 // ALWAYS FAST: MapKit JS (Apple's ~200 KB script) and the 23 KB regions file load only when this component mounts,
 // i.e. only when someone opens the Map tab — nothing is added to the entry bundle. The token comes from
@@ -194,7 +194,6 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
   const [sketch, setSketch] = useState<Shape | null>(null);
   const [hasShape, setHasShape] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [zoomed, setZoomed] = useState(false);
   // Map style (owner 2026-10-31, Zillow's layers button): the modes Apple's web MapKit offers — standard, satellite
   // with labels (hybrid), and muted. Driving / transit / traffic exist only in Apple's own apps, not on the web.
   const [layersOpen, setLayersOpen] = useState(false);
@@ -274,15 +273,12 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
           paint();
           map.setRegionAnimated(regionView(mk, r), true);
         });
-        // The «whole Kingdom» button only while zoomed in — "in" measured against the home view MapKit actually
-        // settled on (it widens the requested span to the box's shape, so comparing with the requested numbers left
-        // the button showing after «كل المملكة» — seen on production 2026-10-31).
+        // The home view MapKit actually settled on (it widens the requested span to the box's shape).
         let homeLatDelta = 0;
         const onRegion = () => {
           if (!map) return;
           const lat = map.region.span.latitudeDelta;
           if (!homeLatDelta) homeLatDelta = lat;
-          setZoomed(lat < homeLatDelta * 0.85);
           const ratio = lat / homeLatDelta;
           // Zooming out: squared so the drop is quick: 1.2× out → ~70%, 2× out → ~25%, then the floor.
           // Zooming in: linear from IN_FADE_START down to 0 at IN_FADE_END — Apple's own lines take over.
@@ -378,12 +374,6 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
     };
   }, [drawing]);
 
-  const showWholeKingdom = () => {
-    const mk = mapkitOf();
-    const el = hostRef.current as unknown as HTMLElement | null;
-    if (mk && el && mapRef.current) mapRef.current.setRegionAnimated(ksaRegion(mk, el), true);
-  };
-
   return (
     <View style={s.frame}>
       <View ref={hostRef} style={s.host} />
@@ -406,16 +396,14 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
           <Ionicons name="close" size={22} color={colors.ink} />
         </Pressable>
       ) : null}
-      {zoomed && !failed && !drawing ? (
-        <Pressable style={[s.wholeBtn, onClose && s.wholeBtnShifted]} onPress={showWholeKingdom} accessibilityRole="button" accessibilityLabel={t('Whole Kingdom')}>
-          <Text style={s.wholeT}>{t('Whole Kingdom')}</Text>
-        </Pressable>
-      ) : null}
-      {/* «رسم» top-right, like Zillow's Draw; once a shape is applied it becomes «إزالة الرسم». */}
+      {/* «رسم» top-right, like Zillow's Draw. Once a boundary is applied it becomes Zillow's «Remove Boundary ✕»
+          (owner 2026-10-31: «see how it shows remove boundary»). No «كل المملكة» button any more (owner: «remove
+          this whole kingdom»): pinch / scroll zooms back out, as on any map. */}
       {!failed && !drawing ? (
-        <Pressable style={s.drawBtn} onPress={hasShape ? removeDrawing : startDrawing} accessibilityRole="button" accessibilityLabel={t(hasShape ? 'Remove drawing' : 'Draw')} testID="map-draw-btn">
-          <Ionicons name={hasShape ? 'trash-outline' : 'pencil-outline'} size={15} color={colors.ink} />
-          <Text style={s.wholeT}>{t(hasShape ? 'Remove drawing' : 'Draw')}</Text>
+        <Pressable style={[s.drawBtn, hasShape && s.boundaryBtn]} onPress={hasShape ? removeDrawing : startDrawing} accessibilityRole="button" accessibilityLabel={t(hasShape ? 'Remove boundary' : 'Draw')} testID="map-draw-btn">
+          {hasShape ? null : <Ionicons name="pencil-outline" size={15} color={colors.ink} />}
+          <Text style={[s.wholeT, hasShape && s.boundaryT]}>{t(hasShape ? 'Remove boundary' : 'Draw')}</Text>
+          {hasShape ? <Ionicons name="close" size={17} color={colors.primary} /> : null}
         </Pressable>
       ) : null}
       {/* Layers, far bottom-right (owner 2026-10-31: «always, no matter the language, far down right»): with the map
@@ -443,10 +431,6 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
 const s = StyleSheet.create({
   frame: { flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
   host: { flex: 1 },
-  wholeBtn: {
-    position: 'absolute', top: 12, left: 12, backgroundColor: colors.surface, borderRadius: 999, paddingHorizontal: 14, height: 36,
-    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
-  },
   wholeT: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },
   drawBtn: {
     position: 'absolute', top: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 999,
@@ -469,7 +453,8 @@ const s = StyleSheet.create({
     position: 'absolute', top: 12, left: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
-  wholeBtnShifted: { left: 56 },
+  boundaryBtn: { borderColor: colors.primary, borderWidth: 1.5, backgroundColor: colors.tintFill },
+  boundaryT: { color: colors.primary },
   layersBtn: {
     position: 'absolute', right: 12, bottom: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
