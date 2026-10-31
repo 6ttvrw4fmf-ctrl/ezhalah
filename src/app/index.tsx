@@ -134,11 +134,13 @@ function cityPoolScopeOf(query: SearchQuery) {
  *  shine paints the text see-through over a gradient, and on iPhone an emoji painted see-through simply vanishes; the
  *  nameParty CSS gives [data-ezh-emoji] its own fill, so the emoji stays visible through the shine. */
 const EMOJI_RE = /([☀-➿]️?|[\uD83C-\uD83E][\uDC00-\uDFFF]️?)/;
+const PARTY_EMOJI = '🥳';
 function withVisibleEmoji(text: string) {
   const parts = text.split(EMOJI_RE);
   if (parts.length === 1) return text;
   return parts.map((p, i) => (i % 2 === 1
-    ? <Text key={i} {...({ dataSet: { ezhEmoji: '' } } as any)}>{p}</Text>
+    // 🥳 keeps shaking and blowing while the welcome is up (owner 2026-10-30, CSS in lib/nameParty.ts)
+    ? <Text key={i} {...({ dataSet: { ezhEmoji: p === PARTY_EMOJI ? 'party' : '' } } as any)}>{p}</Text>
     : p));
 }
 
