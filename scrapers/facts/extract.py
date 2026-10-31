@@ -28,6 +28,7 @@ THE RULES THIS CODE ENFORCES (not just asks the model for):
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import math
 import os
@@ -161,12 +162,27 @@ _KUNYA_RE = re.compile(r"(?<![\w])(?:أبو|ابو|أم|ام|بو)\s+[ء-ي]{2,}
 _CONTACT_CLAUSE_RE = re.compile(r"واتس|whats|wa\.me|تلغرام|telegram|للتواصل|للاستفسار|اتصال|جوال|snap|سناب|انستا|insta", re.IGNORECASE)
 _CLAUSE_SPLIT_RE = re.compile(r"([\n\r،,.;؛|•*\-]+)")
 _PHONEISH_RE = re.compile(r"(?:[0-9٠-٩][\s\-.]?){7,}")
+# Wasalt stores the advertiser's text as HTML (<div><p>…</p><br></div>): measured 2026-10-30, 84,395 of 87,263 active
+# wasalt residential descriptions carry tags, ~262 of an average 437 chars were markup, and 172 of a 20k sample were cut
+# by MAX_TEXT_CHARS before their own words ended. Block/break tags become newlines so the contact-clause splitter still
+# sees one clause per line; every other tag is dropped and entities (&amp;, &nbsp;) are decoded.
+_HTML_BREAK_RE = re.compile(r"<\s*(?:br|/p|/div|/li|/h[1-6]|/tr)\b[^>]*>", re.IGNORECASE)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def strip_html(s: str) -> str:
+    s = s or ""
+    if "<" not in s and "&" not in s:
+        return s
+    s = _HTML_BREAK_RE.sub("\n", s)
+    s = _HTML_TAG_RE.sub(" ", s)
+    return html.unescape(s)
 
 
 def sanitize(title: Optional[str], description: Optional[str]) -> str:
     """Title + description with contact data, URLs, kunyas and contact clauses removed, then the fleet
     PII redactor (phones in every shape/digit set, emails, labelled advertiser names)."""
-    raw = "\n".join(x for x in (title or "", description or "") if x)
+    raw = "\n".join(strip_html(x) for x in (title or "", description or "") if x)
     raw = _URL_RE.sub(" ", raw)
     raw = _KUNYA_RE.sub(" ", raw)
     parts = _CLAUSE_SPLIT_RE.split(raw)
