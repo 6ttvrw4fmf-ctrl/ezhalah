@@ -273,7 +273,45 @@ def _reader_for(platform: str):
         # (ops_dead_visible_score 10-31) while 6 albukaeri and 14 superoffice shown ads had no
         # reading for days. Read them the way their crawls' own oracles do (run.read_own_page).
         return _own_page_reader(platform)
+    if platform == "azdad":
+        # 2026-10-31 (♻️): a removed azdad ad answers 200 «غير موجود», so it was scored status-only every
+        # night like albukaeri/superoffice. Its crawl asks the site's own API per ad (run.read_api); read it
+        # the same way. An empty API answer counts as gone only while the API's catalogue is non-empty.
+        return _azdad_reader()
     return None
+
+
+def _azdad_reader():
+    from scrapers.azdad import run as az
+    from scrapers.common.db import sb as _sb
+    session = az.session()
+    client = _sb()
+    state: dict = {}
+
+    def catalogue_n() -> int:
+        if "n" not in state:
+            try:
+                r = session.get(az.API, params={"select": "ad_number", "limit": "1"}, timeout=30)
+                state["n"] = len(r.json()) if r.status_code == 200 and isinstance(r.json(), list) else 0
+            except Exception:  # noqa: BLE001 — an unreadable catalogue makes «no row» UNKNOWN, never gone
+                state["n"] = 0
+        return state["n"]
+
+    def read_azdad(url: str):
+        ad = None
+        for t in ("azdad_residential_listings", "azdad_commercial_listings"):
+            try:
+                rows = client.table(t).select("ad_number").eq("listing_url", url).limit(1).execute().data or []
+            except Exception:  # noqa: BLE001
+                rows = []
+            if rows:
+                ad = rows[0]["ad_number"]
+                break
+        if not ad:
+            return UNKNOWN, "no ad_number on file for this url"
+        v, why = az.read_api(session, ad, catalogue_n())
+        return {"live": ALIVE, "gone": DEAD}.get(v, UNKNOWN), why
+    return read_azdad
 
 
 # Sites whose crawl reads an ad's own page with a measured live AND gone answer

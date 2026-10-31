@@ -72,3 +72,29 @@ def test_dead_visible_score_uses_the_site_reader(monkeypatch):
     from scrapers.common import dead_visible_score as D
     method, _ = D.reader_for("albukaeri", None)
     assert method == "site-reader"
+
+
+def test_azdad_is_read_by_its_own_api(monkeypatch):
+    from scrapers.azdad import run as az
+
+    class _R:
+        def __init__(self, data):
+            self.status_code, self._d = 200, data
+
+        def json(self):
+            return self._d
+
+    class _S:
+        def get(self, url, params=None, timeout=None):
+            ad = (params or {}).get("ad_number", "")
+            if not ad:
+                return _R([{"ad_number": "X"}])            # the catalogue is non-empty
+            return _R([] if ad == "eq.AD-GONE" else [{"ad_number": ad[3:], "status": "متاح"}])
+
+    monkeypatch.setattr(az, "session", lambda: _S())
+    monkeypatch.setattr(az, "_throttle", lambda: None)
+    _wire(monkeypatch, {"https://azdad.sa/property/1": "AD-GONE", "https://azdad.sa/property/2": "AD-LIVE"})
+    read = L._reader_for("azdad")
+    assert read is not None, "azdad must not fall back to the status-only reader"
+    assert read("https://azdad.sa/property/1")[0] == DEAD
+    assert read("https://azdad.sa/property/2")[0] == ALIVE
