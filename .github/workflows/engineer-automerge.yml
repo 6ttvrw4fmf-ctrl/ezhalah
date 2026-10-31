@@ -65,6 +65,15 @@ jobs:
             mirror_only=0
             notmig=$(printf '%s\n' "$files" | grep -vE '^supabase/migrations/[0-9]{14}_[A-Za-z0-9_]+\.sql$' || true)
             if [ -n "$files" ] && [ -z "$notmig" ] && printf '%s' "$title" | grep -qi 'mirror'; then mirror_only=1; fi
+            # An EMPTY mirror PR (owner 2026-10-26, 🔧 backlog 912): its migration file already reached main through
+            # another PR, so the diff is empty and the PR would read «not a mirror» forever (8713 sat 14 h, 8678 24 h,
+            # 8659 27 h, 8921 12 h). Nothing is lost — git and production already agree — so it is closed with the reason.
+            if [ -z "$files" ] && printf '%s' "$title" | grep -qi 'mirror'; then
+              echo "#$pr: empty mirror (its file is already on main) → close"
+              gh pr close "$pr" --repo "$REPO" --comment "Closed by engineer-automerge: this mirror PR's diff is empty — its migration file already reached main through another PR, so git and production already agree (🔧 backlog 912)." \
+                || echo "#$pr: close refused — next pass"
+              continue
+            fi
             if [ -z "$files" ] || { [ -n "$outside" ] && [ "$mirror_only" != 1 ]; }; then
               echo "#$pr: not scrapers-only / not a mirror — left for a person"; continue
             fi
