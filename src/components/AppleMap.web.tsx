@@ -3,10 +3,10 @@
 // like Zillow displays US states» — no property pins yet).
 //
 // What is on the map, and nothing more:
-//   • Apple's own map (cities, districts, roads appear as you zoom — Apple draws them, ALWAYS IN ENGLISH: owner
-//     2026-10-31 chose it, because one MapKit setting drives both the place names and the  Maps mark Apple draws
-//     inside the map image — Arabic puts that mark bottom-right in Arabic, English bottom-left in English — and the
-//     owner wants the mark «always in English» and the bottom-right corner free for the layers button).
+//   • Apple's own map (cities, districts, roads appear as you zoom — Apple draws them IN THE UI LANGUAGE: owner
+//     2026-10-31, «inside Apple Maps is English but outside is Arabic — they must be the same language». One MapKit
+//     setting drives both the place names and the  Maps mark Apple draws inside the map image: Arabic puts that
+//     mark bottom-right in Arabic, English bottom-left in English — so the layers button lifts above it in Arabic).
 //   • Tap the map (compact) → it opens full screen (owner: «when the user clicks on the map take him inside»).
 //   • «رسم» → Zillow's Draw Search: Cancel / draw an area / Apply, a freehand shape dragged on the map.
 //   • The 13 region boundaries (public/ksa-regions.json — geoBoundaries ADM1, ODbL, simplified to ~2 km / 24 KB)
@@ -178,13 +178,12 @@ const regionView = (mk: MapKit, r: Region) => {
   );
 };
 
-const MAP_LANGUAGE = 'en';
-
 /** `onTap` (compact box): a tap anywhere on the map opens it full screen instead of panning it. `full` + `onClose`:
  *  the full-screen map, with its close button top-left. */
 export default function AppleMap({ full = false, onTap, onClose }: { full?: boolean; onTap?: () => void; onClose?: () => void }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const hostRef = useRef<View>(null);
+  const localeRef = useRef(locale);
   const padRef = useRef<View>(null);
   const mapRef = useRef<MKMap | null>(null);
   const sketchRef = useRef<Shape | null>(null);
@@ -216,7 +215,9 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
       // Apple's  Maps mark and «معلومات قانونية» are drawn INSIDE the map image, bottom-right in Arabic, and no
       // page direction or style moves them (measured live 2026-10-31: no DOM node carries them). Our corner controls
       // keep clear of that strip instead.
-      initOnce(mk, MAP_LANGUAGE);
+      initOnce(mk, localeRef.current);
+      // A language switched while MapKit was still loading: init() took the first one; set the current one now.
+      if (mk.language !== localeRef.current) mk.language = localeRef.current;
       mk.addEventListener('error', onError);
       map = new mk.Map(el, {
         region: ksaRegion(mk, el),
@@ -300,6 +301,14 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // THE MAP FOLLOWS THE UI LANGUAGE. `mapkit.language` is live: setting it re-renders Apple's labels and mark in the
+  // new language; the outlines and any drawn boundary stay (measured live on ezhalah.com/map, 2026-10-31).
+  useEffect(() => {
+    localeRef.current = locale;
+    const mk = mapkitOf();
+    if (mk && initialized && mk.language !== locale) mk.language = locale;
+  }, [locale]);
 
   // Full screen ⇄ compact: MapKit sizes its canvas on window resize; nudge it once the box has changed.
   useEffect(() => {
@@ -406,15 +415,15 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
           {hasShape ? <Ionicons name="close" size={17} color={colors.primary} /> : null}
         </Pressable>
       ) : null}
-      {/* Layers, far bottom-right (owner 2026-10-31: «always, no matter the language, far down right»): with the map
-          in English Apple's mark is bottom-LEFT, so this corner is free. */}
+      {/* Layers, far bottom-right (owner 2026-10-31: «far down right»). In English Apple's mark is bottom-LEFT and the
+          corner is free; in Arabic the mark sits bottom-RIGHT, inside the map image, so the button lifts above it. */}
       {!failed && !drawing ? (
-        <Pressable style={s.layersBtn} onPress={() => setLayersOpen((o) => !o)} accessibilityRole="button" accessibilityLabel={t('Map layers')} testID="map-layers-btn">
+        <Pressable style={[s.layersBtn, locale === 'ar' && s.layersBtnAr]} onPress={() => setLayersOpen((o) => !o)} accessibilityRole="button" accessibilityLabel={t('Map layers')} testID="map-layers-btn">
           <Ionicons name="layers-outline" size={20} color={colors.ink} />
         </Pressable>
       ) : null}
       {layersOpen && !failed && !drawing ? (
-        <View style={s.layersCard} testID="map-layers-popup">
+        <View style={[s.layersCard, locale === 'ar' && s.layersCardAr]} testID="map-layers-popup">
           {([['standard', 'Explore', 'map-outline'], ['hybrid', 'Satellite', 'earth-outline'], ['muted', 'Quiet', 'contrast-outline']] as const).map(([k, label, icon]) => (
             <Pressable key={k} style={({ hovered }: any) => [s.layerRow, hovered && s.layerRowHover, mapType === k && s.layerRowOn]} onPress={() => { applyMapType(k); setLayersOpen(false); }} accessibilityRole="radio" accessibilityState={{ checked: mapType === k }}>
               <Ionicons name={icon} size={17} color={mapType === k ? colors.primary : colors.ink} />
@@ -459,6 +468,8 @@ const s = StyleSheet.create({
     position: 'absolute', right: 12, bottom: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
+  layersBtnAr: { bottom: 44 },
+  layersCardAr: { bottom: 90 },
   layersCard: {
     position: 'absolute', right: 12, bottom: 58, minWidth: 160, backgroundColor: colors.surface, borderRadius: 14, padding: 6,
     borderWidth: 1, borderColor: colors.tintLine,
