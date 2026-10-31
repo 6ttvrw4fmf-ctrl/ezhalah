@@ -84,6 +84,11 @@ jobs:
                   git show "$1:$f" | grep -cE '\b(check|mustCatch|assert|assertEqual|expect|problems\.push|bad\.push|fail)\(' || true
                 done | awk '{s+=$1} END {print s+0}'
           }
+          # Compare with where the PR branched off, not with today's main: since main stopped requiring
+          # up-to-date branches (owner, 2026-10-31) a PR can be behind main, and main's newer
+          # assertions would read as this PR deleting them (PR #9524: 15723 → 15713, nothing removed).
+          # A PR that really deletes assertions is still below its own merge-base.
+          BASE_SHA=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
           base=$(count "$BASE_SHA"); head=$(count "$HEAD_SHA")
           echo "assertions: base=$base head=$head (approved=$APPROVED)"
           if [ "$head" -lt "$base" ] && [ "$APPROVED" != "true" ]; then
