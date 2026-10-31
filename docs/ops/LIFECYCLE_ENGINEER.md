@@ -1404,6 +1404,21 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   open. The page had changed `"@type":"RealEstate"` to `"RealEstateListing"`. Fix: PR 8403. On the second QUARANTINED
   morning, fetch ONE live control page and run the site's `_signal()` on it before anything else.
 
+## Lessons from 2026-10-31 (♻️)
+- **A «0 gone» from a status-only reader on a soft-404 site is blindness, not health.** albukaeri (removed ad = 200
+  empty shell) and superoffice (old office page = redirect to a category) were scored `status-only` every night, and
+  their unseen ads were never struck because `strike_read_gone` kept only «gone» readings: 6 albukaeri ads dead since
+  10-13 and 15 superoffice offices dead since 10-27 stayed on screen. Both sites are now read by their own
+  `run.read_own_page` in `lifecycle_spot_check._reader_for` (so the score and the spot check see what their prune sees),
+  and an own-oracle «live» now stamps and clears the strike (PR #9599). Every night, read the score's `method` column:
+  a site whose crawl has a body-reading oracle must never be `status-only` (azdad is the next one).
+- **A diagnostic on a scratch branch must be a DIFFERENT commit.** Check runs attach to the SHA, not the branch: a red
+  spot check dispatched on a scratch branch that points at the PR's own head blocks the merge gate exactly as if it
+  ran on the PR (10-31). Add an empty-diff-free marker commit to the scratch branch first, or push a new PR commit after.
+- **dealapp's sweep is bound by dealapp's view quota (~9 origin renders a minute ≈ 600 ads per 50-minute run).** A
+  bigger `--limit` cannot raise it; only more runs can. `gh-dealapp-liveness` went 2-hourly → hourly on 10-31
+  (migration 20261031110841) when active rows reached 49,052 at 73.0% in SLA.
+
 ## 💰 RENT PRICE RULES EVERY ENGINEER MUST KNOW (owner, 2026-10-25/26 — permanent; canonical text in `docs/ARCHITECTURE.md` §20)
 
 1. **«إقامات قصيرة» (the old «شهري» pool) = Gathern + Aqar Monthly ONLY.** Every other site's rent listing
