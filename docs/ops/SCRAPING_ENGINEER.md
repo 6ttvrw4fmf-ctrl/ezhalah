@@ -744,3 +744,37 @@ says Sell (656's class, backlog 672) — a rule that decides a contradiction is 
    An open alert from either detector is YOURS to adjudicate first: read the sample rows, confirm the
    sync still calls the function, never clear it by widening a pool, raising the threshold or shrinking
    the type list.
+
+## Lessons from 2026-10-27 and 2026-10-30 (copied by 🔧; one appeared on two nights)
+
+- **Ship a scrapers-only fix as ONE commit after `git fetch origin main && git merge origin/main`, and dispatch the
+  branch proof by minute 20** (⚡ 10-27: a scrapers-only PR auto-merges on its first green push, so a second commit
+  lands on a merged PR; #8984 sat CONFLICTING 5 h; 🆕 10-25 said the same about a BEHIND branch failing «Tests keep
+  their assertions»). Measured 10-25 → 10-27 your fix rate fell 100% → 67% → 50% while the proofs waited on PR churn.
+- **The early-warning robot now opens ONE open row per site and calls a site absent after 26 h, not 20** (🔧 10-30,
+  migration `early_warning_one_open_row_per_site_26h`): at 07:45 UTC the nightly small-sources crawl has not reached
+  every site (its matrix ran until 10:56 on 10-30), so 67 of 68 «no run recorded in 20 h» rows were false and 81 rows
+  were day-stamped duplicates — 148 of your 206 open rows. A robot's clock must follow the crawl's real finish time;
+  when a queue grows by dozens of rows a night, read the writer before reading the rows.
+
+## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
+  06:54, after the slot, and a crawl after :20 cannot be customer-proven before the next hour's :22 sync (run
+  41175323616, daryusuf still Rent at 13:30). 🆕 10-31: two fixes merged whose proofs landed at 09:46 / 17:15, outside
+  the slot — rating 8 → 6 on timing alone. 🔧 10-24 / 10-25 lost the band the same way. Rule: pick the proof listing
+  BEFORE the fix, dispatch the proof crawl or journey before minute 30 and before :20 of the hour, and never choose a
+  job whose only proof lands after your slot (hand it to ♻️ or the automatic liveness instead).
+- **② A clean reading means nothing until you know HOW it was read.** ♻️ 10-30: one fingerprint (chrome124) was sent
+  home on ~90 live Gathern units and read «transient» every hour; ♻️ 10-31: albukaeri, superoffice and azdad were read
+  by HTTP status, their removed pages answer 200, so 23 dead ads sat on screen up to 18 days behind a clean row;
+  🔬 10-31: the score session's own cookies built a «recently viewed» strip on tuba that was read as the ad. Rule: before
+  trusting any robot's verdict print its method / fingerprint / session and compare with a plain read and a real browser
+  on the same URL; every body-reading site gets its own reader.
+- **③ Read one REAL record before coding against a field, and re-read the ad before touching data.** 🆕 10-31:
+  `url_path` existed only in our capture, not in the detail API — a 20-minute crawl read 0 of 952 pages. 🔬 10-30: a
+  «fabricated value» alarm on 12 rows was aqar's own value from a re-categorised ad. 🔧 10-31: 701 «stuck» prices were
+  the owner's own served meter-box rule, and the «absurd» wasalt totals are the seller's own words («سعرها 40500000000
+  ر.س» in wasalt's archived payload) — one query of `ar_data` answered what a day of theory would not. Rule: one real
+  record (source_capture / ar_data / the page) before the first line of code; the archive you already store is source
+  truth.

@@ -393,3 +393,36 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   real on a DDL-only body too (4th way, 60 s, nothing landed): a function whose text carries `delete` needs a human
   SQL-editor apply — stop retrying it, keep it in LINE 1. The four engineers all fired at 11:04 UTC tonight instead of
   their 05/07/09/11 slots: read the start rows before judging an overlap as an engineer's choice.
+- **2026-10-30:** check the measuring stick before grading with it, again: `ops_engineer_fix_rate` counted a proof
+  only by `push_ok`, and ♻️'s three real PASS rows (push_ok NULL) read as a 0% night — the view now also reads the
+  notes' `"result":"PASS"` (20261030132552), and every coach row says «push_ok = true on a PASS». Second: a detector
+  that windows on `scraped_at` is wrong by construction (AGENTS.md 09-18: it never moves on a re-upsert) —
+  `text_facts_stale_applied` cried P1 on 25 ads the crawl had re-seen AFTER the marker pass (20261030132954 dates by
+  `greatest(scraped_at, last_seen_at)`), and the early-warning robot's 20-h «no run» window fired before the nightly
+  crawl reached the site (67 of 68 rows false; 26 h now). When a queue or an alarm grows by dozens of rows a night,
+  read the WRITER before reading the rows: 148 of ⚡'s 206 open rows were one robot's duplicates. Third: edit a live
+  function in place with a `do $$ … replace() … execute` migration that raises when the expected text is missing —
+  no retyping, no drift from a stale copy, byte-exact to mirror. Fourth: a `.vercel.app` 308 to `ezhalah.com` means
+  the browser half is still blocked from the cloud (924): plan RPC replays and source re-reads from minute 1.
+
+## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
+  06:54, after the slot, and a crawl after :20 cannot be customer-proven before the next hour's :22 sync (run
+  41175323616, daryusuf still Rent at 13:30). 🆕 10-31: two fixes merged whose proofs landed at 09:46 / 17:15, outside
+  the slot — rating 8 → 6 on timing alone. 🔧 10-24 / 10-25 lost the band the same way. Rule: pick the proof listing
+  BEFORE the fix, dispatch the proof crawl or journey before minute 30 and before :20 of the hour, and never choose a
+  job whose only proof lands after your slot (hand it to ♻️ or the automatic liveness instead).
+- **② A clean reading means nothing until you know HOW it was read.** ♻️ 10-30: one fingerprint (chrome124) was sent
+  home on ~90 live Gathern units and read «transient» every hour; ♻️ 10-31: albukaeri, superoffice and azdad were read
+  by HTTP status, their removed pages answer 200, so 23 dead ads sat on screen up to 18 days behind a clean row;
+  🔬 10-31: the score session's own cookies built a «recently viewed» strip on tuba that was read as the ad. Rule: before
+  trusting any robot's verdict print its method / fingerprint / session and compare with a plain read and a real browser
+  on the same URL; every body-reading site gets its own reader.
+- **③ Read one REAL record before coding against a field, and re-read the ad before touching data.** 🆕 10-31:
+  `url_path` existed only in our capture, not in the detail API — a 20-minute crawl read 0 of 952 pages. 🔬 10-30: a
+  «fabricated value» alarm on 12 rows was aqar's own value from a re-categorised ad. 🔧 10-31: 701 «stuck» prices were
+  the owner's own served meter-box rule, and the «absurd» wasalt totals are the seller's own words («سعرها 40500000000
+  ر.س» in wasalt's archived payload) — one query of `ar_data` answered what a day of theory would not. Rule: one real
+  record (source_capture / ar_data / the page) before the first line of code; the archive you already store is source
+  truth.

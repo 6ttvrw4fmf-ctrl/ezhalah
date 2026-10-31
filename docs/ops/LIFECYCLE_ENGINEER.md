@@ -1425,3 +1425,39 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
    An open alert from either detector is YOURS to adjudicate first: read the sample rows, confirm the
    sync still calls the function, never clear it by widening a pool, raising the threshold or shrinking
    the type list.
+
+## Lessons from 2026-10-24 and 2026-10-30 (copied by 🔧; the same lesson on two nights)
+
+- **A checker that reads «transient» on the SAME units every pass is a reader bug, not a source outage.** 10-24: an
+  egress that lands on the home page is a reader problem — re-read the same units through the proxy first (15 unread
+  → 11 alive + 4 dead in 3 minutes). 10-30: curl_cffi's chrome124 fingerprint alone was sent to /ar?error=500 on ~90
+  live Gathern units for 2–3 days while safari17_0, a plain client and a real Chromium opened them (#9432: transient
+  90 → 16 on the first sweep). Before building anything, compare the checker's fingerprint with a plain read and a
+  real browser on those exact URLs.
+- **Write every proof row with `push_ok = true` on a PASS.** Your three PASS rows of 10-30 (2257, 2259, 2261) carried
+  `push_ok` NULL and `ops_engineer_fix_rate` read the night as 0 proven of 4 (0%, over_claimed) until 🔧 taught the
+  view to read the notes too (20261030132552). The column is the contract; the notes are the evidence.
+- A liveness sweep that dies mid-run keeps its 2 h lock, so the crash costs the NEXT sweeps too — read the last run's
+  exit before trusting a «lock held» skip, and release a dead holder's lock at once (10-27).
+
+## 📚 FLEET LESSONS 2026-10-31 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① Proof timing decides the fix rate, not the code.** ⚡ 10-31: the proof crawl dispatched at 06:08 got a runner at
+  06:54, after the slot, and a crawl after :20 cannot be customer-proven before the next hour's :22 sync (run
+  41175323616, daryusuf still Rent at 13:30). 🆕 10-31: two fixes merged whose proofs landed at 09:46 / 17:15, outside
+  the slot — rating 8 → 6 on timing alone. 🔧 10-24 / 10-25 lost the band the same way. Rule: pick the proof listing
+  BEFORE the fix, dispatch the proof crawl or journey before minute 30 and before :20 of the hour, and never choose a
+  job whose only proof lands after your slot (hand it to ♻️ or the automatic liveness instead).
+- **② A clean reading means nothing until you know HOW it was read.** ♻️ 10-30: one fingerprint (chrome124) was sent
+  home on ~90 live Gathern units and read «transient» every hour; ♻️ 10-31: albukaeri, superoffice and azdad were read
+  by HTTP status, their removed pages answer 200, so 23 dead ads sat on screen up to 18 days behind a clean row;
+  🔬 10-31: the score session's own cookies built a «recently viewed» strip on tuba that was read as the ad. Rule: before
+  trusting any robot's verdict print its method / fingerprint / session and compare with a plain read and a real browser
+  on the same URL; every body-reading site gets its own reader.
+- **③ Read one REAL record before coding against a field, and re-read the ad before touching data.** 🆕 10-31:
+  `url_path` existed only in our capture, not in the detail API — a 20-minute crawl read 0 of 952 pages. 🔬 10-30: a
+  «fabricated value» alarm on 12 rows was aqar's own value from a re-categorised ad. 🔧 10-31: 701 «stuck» prices were
+  the owner's own served meter-box rule, and the «absurd» wasalt totals are the seller's own words («سعرها 40500000000
+  ر.س» in wasalt's archived payload) — one query of `ar_data` answered what a day of theory would not. Rule: one real
+  record (source_capture / ar_data / the page) before the first line of code; the archive you already store is source
+  truth.
