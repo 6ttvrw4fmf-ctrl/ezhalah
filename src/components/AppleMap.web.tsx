@@ -264,7 +264,9 @@ export default function AppleMap({ full = false, onExpand, onClose }: { full?: b
       map = new mk.Map(el, {
         region: ksaRegion(mk, el),
         showsMapTypeControl: false,
-        showsPointsOfInterest: false,
+        // Apple's landmarks ON — mosques, malls, hospitals (owner 2026-10-31: «we want it on; the user can search
+        // landmarks, mosques, malls and hospitals»). The search field already suggests them; the map now shows them.
+        showsPointsOfInterest: true,
         // The bottom-right corner belongs to our layers button (owner 2026-10-31: «put that thing far right below»);
         // Apple's +/− would sit under it. Pinch, scroll and double-tap still zoom.
         showsZoomControl: false,
