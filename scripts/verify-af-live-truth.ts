@@ -668,7 +668,10 @@ await runJourney('Residential/Rent-Monthly/Apartment/Riyadh — rating', {
   // ONLY one selected, so tapping سنوي first is a rejected no-op (can't deselect the last one) — it
   // stays on, and adding شهري on top just gives "both" (كلاهما). Add شهري FIRST (now both selected,
   // removing either is safe), THEN tap سنوي to drop it — order matters for an at-least-one toggle.
-  deal: ['إيجار', 'شراء', 'شهري', 'سنوي'], city: 'الرياض', group: 'الشقق والسكن المشترك', type: 'شقة',
+  // The button's LABEL is «إقامات قصيرة» since 2026-10-25 (src/i18n.tsx 'Short stays'); the period it
+  // sends is still p_rent_period='شهري'. Tapping the old word failed every run from 10-25 to 10-31
+  // («control never rendered: شهري»), so the Gathern subtype journey proved nothing for six days.
+  deal: ['إيجار', 'شراء', 'إقامات قصيرة', 'سنوي'], city: 'الرياض', group: 'الشقق والسكن المشترك', type: 'شقة',
 });
 await runJourney('Commercial/Rent-Annual/Shop/Riyadh — amenity', {
   deal: ['إيجار', 'شراء', 'سنوي'], category: 'تجاري', city: 'الرياض', group: 'التجزئة والمكاتب', type: 'محل',
