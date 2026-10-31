@@ -1508,7 +1508,7 @@ export default function Home() {
               halves of the toggle replace, so toggling costs no history and mounts no duplicates.
               (Search «بحث» still PUSHES — results ARE a child of the form; see onSearch above.) */}
           <RNAnimated.View style={[s.modeWrap, reveal(badgeAnim, 12)]}>
-            <ModeSwitch active="filter" onSwitch={() => router.replace('/agent')} t={t} />
+            <ModeSwitch active="filter" onSwitch={(to) => (to === 'map' ? router.replace('/map') : router.replace('/agent'))} t={t} />
           </RNAnimated.View>
 
           {/* Search card */}
