@@ -305,6 +305,38 @@ These cost your first runs a lot of time. Use them instead of working them out a
   artifact's download host is blocked from the cloud; the log prints the same comparison). It shows
   what the page itself says next to what we store.
 
+## Lessons from 2026-10-30 (owner: «make sure the engineers are aware and we never ever get this issue again» — the map pin)
+
+rakez served 3,660 ads with 0 pins for six weeks. Its project page draws no map, so nobody looked further — and
+`/ar/projects-map/` had been calling `/ar/wp-json/hs-map/v1/projects` with every project's lat/lng the whole time. The same
+night's sweep (every platform below 90 % pins, 146 rendered pages) found 8 more: compoundin (marker in an inline
+`cinMapMarkers` script), mustqr (the Maps link in the ad text, which `ad_body()` dropped), alkhaas (`maps?q=` link),
+awal (`data-latitude` attributes), hajer (`rem_property_map` JSON), daryusuf (a DMS iframe), shatri (Houzez `data-map`
+on the page, not in the REST post), wslnaa (the API's `mapUrl` short link). Full table:
+`docs/ops/reports/PIN_CAPTURE_FLEET_2026-10-30.md`.
+
+1. **THE FOUR-PLACE RULE. Before you write «the site has no pin» (or no price, no photo, no age — pins first), look in
+   all four places on a RENDERED ad page:** (1) the page itself; (2) its embedded JSON, data attributes and the network
+   calls it makes (DevTools → Network, the browser pane's request list, a headless Chromium's response log); (3) a
+   site-wide map or list feed (the «projects map» page, the search/API endpoint, the sitemap); (4) the PARENT page of a
+   unit-in-project site (the project, the compound, the building, the branch). A rendered `maps?ll=` link is often
+   Google's JS drawing a pair that lives elsewhere in the raw HTML — or nowhere, when it geocoded an address (remal):
+   re-read the raw page with curl to find the shape you must parse. Never geocode; never read a JSON-LD `geo` or a map
+   centre that is the same on every ad (nofodh, mustqr, eaqartabuk, macsaib all print the office).
+2. **A site is not onboarded until `data/pin-sources.json` has its row** (launch checklist box 10;
+   `scripts/verify-pin-capture-declared.ts` fails `npm test` without it): `pin_source` ∈ ad-page · page-json · feed ·
+   project-page · partial · none, the proof URL, the date, a floor. Write `none` only with the URL of the page you proved
+   silent after all four places; write `partial` with the share you saw; a publishing site is never declared at floor 0.
+3. **The served number is watched, hourly:** `mon_detect_pin_coverage_below_floor()` raises P1 when a platform with ≥ 50
+   served ads is below its floor, is declared as publishing and serves 0 (the rakez shape), or is launched undeclared.
+   Read `select * from pin_coverage_by_platform() where below_floor` at the start of every run; a red row is tonight's
+   first fix, and the fix is a scraper change + a targeted re-crawl, never a lowered floor.
+4. **The fix has two halves or it is not a fix:** the scraper (with `pin_absent: true` when the page was read and has no
+   pin, and nothing when the page or hop failed, so `keep_stored_pin` keeps yesterday's pair) AND the backfill
+   (targeted `small-sources-sync` dispatch, then the :22 sync), proven in `search_listings_ar` before → after. Then raise
+   the floor in `data/pin-sources.json` + a `*_pin_source*` migration (two-place edit; the barrier refuses one without
+   the other).
+
 ## Lesson from 2026-10-16 (🦅 Falcon: «the site has no field for it» is where prose starts, not where capture ends)
 - wasalt publishes NO structured elevator, air-conditioning or private-entrance field (62,491 stored payloads:
   not in `attributes`, `additionalAttributes` or `propertyInfo`), so those columns were NULL on every wasalt row
