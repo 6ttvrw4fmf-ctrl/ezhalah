@@ -25,6 +25,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): every workflow carries it (verify-gate-handshake.ts). Unused here.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   set-env:
     name: Set ${{ inputs.switch }}=${{ inputs.value }} in Vercel Production env
