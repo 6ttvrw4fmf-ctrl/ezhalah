@@ -53,6 +53,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.district_bridge import bridge_rows, bridge_unique  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
+
+# THE COMPOUND'S OWN MAP MARKER (owner 2026-10-30: 286 ads, 0 pins). The page draws a Leaflet map from an
+# inline script — `cinMapMarkers = [ {marker: {…, position: {lat: 24.8397, lng: 46.7507}}, title: "Azure Al
+# Reem"} ]` — one marker, the compound itself (measured on azure-al-reem, satel-at-opal, salwa-garden-village).
+# Every unit of the compound sits at that marker, so each unit row carries it, marked pin_scope=compound.
+_MARKER = re.compile(r"cinMapMarkers\s*=\s*\[\s*\{\s*marker:\s*\{[^{}]*?position:\s*\{\s*lat:\s*(-?\d{1,2}\.\d{3,})\s*,\s*lng:\s*(-?\d{1,3}\.\d{3,})")
+
+
+def compound_pin(page_html: str) -> dict:
+    """{latitude, longitude} from the page's own marker, else {} (a page with no marker, or one outside KSA)."""
+    m = _MARKER.search(page_html or "")
+    return pin_dict(m.group(1), m.group(2)) if m else {}
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://compoundin.com"
@@ -298,6 +311,7 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
     compound_ac = True if any("air condition" in f for f in ld_features) else None
     pcm = re.search(r'"postalCode":\s*"?(\d{4,6})', page_html)
     postal = pcm.group(1) if pcm else None
+    pin = compound_pin(page_html)      # the page WAS read: no marker → pin_absent, so a stale pair may leave
 
     rows: list[dict] = []
     for card in unit_cards(page_html):
@@ -338,6 +352,7 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
                 "compound": compound_name, "unit_id": uid,
                 "amenities_en": plain(chip) or None,
                 "compound_facilities_en": ", ".join(sorted(ld_features)) or None,
+                **({**pin, "pin_scope": "compound"} if pin else {"pin_absent": True}),
             }.items() if v is not None},
         })
 
