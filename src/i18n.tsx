@@ -287,6 +287,15 @@ const AR: Record<string, string> = {
   // Deals + verbs
   'Rent': 'إيجار',
   'Buy': 'شراء',
+  'All': 'الكل',
+  'Draw': 'رسم',
+  'Map layers': 'طبقات الخريطة',
+  'Explore': 'استكشاف',
+  'Satellite': 'قمر صناعي',
+  'Quiet': 'هادئ',
+  'Region, city, landmark or district': 'منطقة، مدينة، معلم أو حي',
+  ', ': '، ',
+  'Transaction': 'نوع الصفقة',
   'to rent': 'للإيجار',
   'to buy': 'للبيع',
   // Rent verb with the payment period the user picked (Monthly / Yearly) so the summary sentence
