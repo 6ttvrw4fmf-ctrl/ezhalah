@@ -21,6 +21,12 @@ import { fileURLToPath } from 'node:url';
 import { liftSymbols } from './lib/liftSymbols.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+// The repo's mutation-proof convention (verify-new-barriers-are-mutation-proven.ts): a proof is an executable
+// mustCatch(label, caught) applied to a deliberately broken input — here the real file with the swallow removed.
+const mustCatch = (label: string, caught: boolean): void => {
+  if (!caught) { console.error(`✗ (mutation) did not catch ${label}`); process.exit(1); }
+  console.log(`✓ (mutation) catches ${label}`);
+};
 const FILE = join(ROOT, 'src/components/ModeSwitch.tsx');
 const SWALLOW_CALL = 'swallowTransitionRejections(transition);';
 
@@ -87,9 +93,6 @@ const dir = mkdtempSync(join(tmpdir(), 'ezhalah-modeswitch-mutant-'));
 const mutant = join(dir, 'ModeSwitch.mutant.tsx');
 writeFileSync(mutant, src.replace(SWALLOW_CALL, '/* mutant: swallow removed */'));
 const mutantLeaks = await leaks(mutant);
-if (mutantLeaks === 0) {
-  console.error('✗ the mutant (swallow removed) leaked nothing — the harness cannot see the failure it exists to catch');
-  process.exit(1);
-}
+mustCatch('the swallow removed: a skipped View Transition leaks an unhandled rejection the harness can see', mutantLeaks > 0);
 
 console.log(`✓ withScreenFade: a skipped View Transition leaks 0 unhandled rejections (mutant without the swallow leaks ${mutantLeaks})`);
