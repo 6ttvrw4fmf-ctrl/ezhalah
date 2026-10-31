@@ -5,13 +5,10 @@
 // What is on the map, and nothing more:
 //   • Apple's own map (cities, districts, roads appear as you zoom — Apple draws them, in the app's language).
 //   • The 13 region boundaries (public/ksa-regions.json — geoBoundaries ADM1, ODbL, simplified to ~2 km / 24 KB)
-//     drawn as polygon overlays in the brand colour, each region's name floating above them, deep inside its own
-//     region (the file's precomputed `label` point: the inside point farthest from the border — owner 2026-10-30:
-//     «let the titles be clear on top, I don't want them covering another box»). Every name is always shown, in ONE
-//     fixed size at every zoom, like state names on Zillow's map (owner: «they should always be the same size no
-//     matter how much I zoom out»), and a long region's name is written along the region's own direction, tilted
-//     like CALIFORNIA (owner: «for the Northern Borders type it on the side, taking over the map — same with the
-//     others»).
+//     drawn as quiet polygon overlays in the brand colour. The region NAMES are Apple's own (it labels every
+//     region in the app's language): we draw none (owner 2026-10-31: «Apple Maps already has names for those
+//     regions, why are we adding both — remove our names, just the polygon drawing»). The file's `label` / `rot`
+//     / `len` fields are kept for a day they are wanted again.
 //   • The neighbours around the Kingdom (Yemen, Oman, the Emirates, Jordan, Egypt…) are in the first view, plain —
 //     only Saudi Arabia is split into regions (owner: «like you see Dubai, Yemen beside, but Saudi is split»).
 //   • Click a region → the map glides to it. «كل المملكة» (top corner) glides back out to the whole country.
@@ -46,15 +43,6 @@ const KSA_SPAN = { latitudeDelta: 20, longitudeDelta: 24 };
 // A phone held upright is taller than wide: the same span would leave the Kingdom small in the middle, so there the
 // first view fits the country to the screen's width instead (the neighbours still show above and below).
 const KSA_SPAN_PORTRAIT = { latitudeDelta: 19, longitudeDelta: 22 };
-// Region names show while the view is wider than this (country / a few regions); they leave as you zoom in so
-// they never sit on top of a city.
-const LABELS_HIDE_BELOW_SPAN = 4;
-// Lettering size: the same for every region at every zoom (owner 2026-10-30).
-const LABEL_PX_AR = 11.5;
-const LABEL_PX_EN = 10.5;
-// Tracking for the ENGLISH names only (small capitals, like Zillow's state names). Never applied to Arabic —
-// tracking pulls joined letters apart (scripts/verify-no-letter-spacing-on-arabic.ts).
-const TRACKING_EN = '0.08em';
 
 type Region = {
   id: number; iso: string; en: string; ar: string;
@@ -73,7 +61,6 @@ type MKMap = {
   destroy: () => void;
   region: { span: { latitudeDelta: number; longitudeDelta: number } };
   addOverlay: (o: unknown) => void;
-  addAnnotation: (a: unknown) => void;
   setRegionAnimated: (r: unknown, animate?: boolean) => void;
   addEventListener: (name: string, fn: (e: { overlay?: { data?: Region } }) => void) => void;
 };
@@ -84,8 +71,7 @@ type MapKit = {
   CoordinateSpan: new (lat: number, lng: number) => unknown;
   CoordinateRegion: new (center: unknown, span: unknown) => unknown;
   Style: new (o: { strokeColor?: string; strokeOpacity?: number; fillColor?: string; fillOpacity?: number; lineWidth?: number }) => unknown;
-  PolygonOverlay: new (points: unknown[] | unknown[][], o?: { style?: unknown; data?: unknown; enabled?: boolean }) => { style: { fillOpacity: number; lineWidth: number }; data: Region };
-  Annotation: new (coord: unknown, factory: () => HTMLElement, o?: { data?: unknown; enabled?: boolean }) => { visible: boolean };
+  PolygonOverlay: new (points: unknown[] | unknown[][], o?: { style?: unknown; data?: unknown; enabled?: boolean }) => { style: { fillOpacity: number; strokeOpacity: number; lineWidth: number }; data: Region };
   addEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
   removeEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
 };
@@ -175,28 +161,6 @@ const regionView = (mk: MapKit, r: Region) => {
   );
 };
 
-/** A region's name as plain small lettering over the map, like a state name on Zillow's map (owner 2026-10-30:
- *  «make each title smaller, like Zillow's default, clear like ARIZONA»): no bubble, a soft white halo so it reads on
- *  any tile. English is small capitals with a little tracking; Arabic keeps its natural joined letters (no
- *  letter-spacing on Arabic — scripts/verify-no-letter-spacing-on-arabic.ts). */
-function labelElement(text: string, arabic: boolean, rotateDeg: number): { outer: HTMLElement; inner: HTMLElement } {
-  // MapKit measures and positions the element it is given; a rotated or re-sized element would throw that off, so the
-  // element MapKit gets is a 0×0 point and the lettering hangs off it, centred and tilted, in a child of its own.
-  const outer = document.createElement('div');
-  outer.style.cssText = 'width: 0; height: 0; overflow: visible; pointer-events: none;';
-  const inner = document.createElement('div');
-  inner.textContent = arabic ? text : text.toUpperCase();
-  inner.style.cssText = 'position: absolute; left: 0; top: 0; transform: translate(-50%, -50%) rotate(' + rotateDeg + 'deg);'
-    // Understated, like Zillow's state names: grey, medium weight, a soft halo — present, never shouting
-    // (owner 2026-10-30: «same with the title, like the Zillow default, a bit less»).
-    + ' font: 500 ' + (arabic ? LABEL_PX_AR : LABEL_PX_EN) + 'px ui-sans-serif, -apple-system, system-ui, "Segoe UI", sans-serif; color: '
-    + lightColors.muted + '; white-space: nowrap; pointer-events: none; text-align: center; line-height: 1.2;'
-    + (arabic ? '' : ' letter-spacing: ' + TRACKING_EN + ';')
-    + ' text-shadow: 0 0 2px rgba(255,255,255,0.9), 0 0 4px rgba(255,255,255,0.8);';
-  outer.appendChild(inner);
-  return { outer, inner };
-}
-
 export default function AppleMap() {
   const { locale, t } = useI18n();
   const hostRef = useRef<View>(null);
@@ -224,49 +188,53 @@ export default function AppleMap() {
       // The 13 regions: boundaries + names, and click-to-zoom. Drawn QUIETLY so they blend into Apple's map rather
       // than sit on top of it (owner 2026-10-30: «blending in with Apple Maps, I don't want it very bright»): thin,
       // half-transparent brand-coloured lines and a barely-there fill; the chosen region only a touch stronger.
-      const ar = locale === 'ar';
       const stroke = lightColors.primary;
-      const REST = { fillOpacity: 0.035, lineWidth: 1.1 };
-      const CHOSEN = { fillOpacity: 0.1, lineWidth: 1.8 };
+      const REST = { strokeOpacity: 0.55, fillOpacity: 0.035, lineWidth: 1.1 };
+      const CHOSEN = { strokeOpacity: 0.7, fillOpacity: 0.1, lineWidth: 1.8 };
+      // Zoomed out past the country view the outlines FADE, down to a whisper, so Apple's map takes over (owner
+      // 2026-10-31: «when the user zooms out those drawings become so light»). At the country view and closer
+      // they are at full (quiet) strength.
+      const FADE_FLOOR = 0.18;
       loadRegions().then((regions) => {
         if (gone || !map) return;
         const overlays = regions.map((r) => {
           const rings = r.rings.map((ring) => ring.map(([lng, lat]) => new mk.Coordinate(lat, lng)));
           return new mk.PolygonOverlay(rings.length === 1 ? rings[0] : rings, {
-            style: new mk.Style({ strokeColor: stroke, strokeOpacity: 0.55, lineWidth: REST.lineWidth, fillColor: stroke, fillOpacity: REST.fillOpacity }),
+            style: new mk.Style({ strokeColor: stroke, strokeOpacity: REST.strokeOpacity, lineWidth: REST.lineWidth, fillColor: stroke, fillOpacity: REST.fillOpacity }),
             data: r,
           });
         });
         overlays.forEach((o) => map!.addOverlay(o));
-        // Names: at the precomputed inside point, above the overlays, every one always shown, one size at every zoom.
-        const labels = regions.map((r) => new mk.Annotation(
-          new mk.Coordinate(r.label[1], r.label[0]),
-          () => labelElement(ar ? r.ar : r.en, ar, r.rot).outer,
-          { data: r, enabled: false },
-        ));
-        labels.forEach((a) => map!.addAnnotation(a));
-
         // Click a region → glide to it; the chosen one is tinted a little stronger until another is chosen.
-        let chosen: { style: { fillOpacity: number; lineWidth: number } } | null = null;
+        let chosen: (typeof overlays)[number] | null = null;
+        // How strong the outlines are at the current zoom: 1 at the country view and closer, fading towards
+        // FADE_FLOOR as the view widens beyond it.
+        let fade = 1;
+        const paint = () => overlays.forEach((o) => {
+          const base = o === chosen ? CHOSEN : REST;
+          o.style.strokeOpacity = base.strokeOpacity * fade;
+          o.style.fillOpacity = base.fillOpacity * fade;
+          o.style.lineWidth = base.lineWidth;
+        });
         map.addEventListener('select', (e) => {
           const r = e.overlay?.data;
           if (!r || !map) return;
-          if (chosen) { chosen.style.fillOpacity = REST.fillOpacity; chosen.style.lineWidth = REST.lineWidth; }
-          chosen = e.overlay as typeof chosen;
-          if (chosen) { chosen.style.fillOpacity = CHOSEN.fillOpacity; chosen.style.lineWidth = CHOSEN.lineWidth; }
+          chosen = (e.overlay as typeof chosen) ?? null;
+          paint();
           map.setRegionAnimated(regionView(mk, r), true);
         });
-        // Names only while zoomed out; the «whole Kingdom» button only while zoomed in — "in" measured against the
-        // home view MapKit actually settled on (it widens the requested span to the box's shape, so comparing with
-        // the requested numbers left the button showing after «كل المملكة» — seen on production 2026-10-31).
+        // The «whole Kingdom» button only while zoomed in — "in" measured against the home view MapKit actually
+        // settled on (it widens the requested span to the box's shape, so comparing with the requested numbers left
+        // the button showing after «كل المملكة» — seen on production 2026-10-31).
         let homeLatDelta = 0;
         const onRegion = () => {
           if (!map) return;
           const lat = map.region.span.latitudeDelta;
           if (!homeLatDelta) homeLatDelta = lat;
-          const wide = lat >= LABELS_HIDE_BELOW_SPAN;
-          labels.forEach((a) => { a.visible = wide; });
           setZoomed(lat < homeLatDelta * 0.85);
+          // Squared so the drop is quick: 1.2× out → ~70%, 2× out → ~25%, then the floor.
+          fade = Math.max(FADE_FLOOR, Math.min(1, (homeLatDelta / lat) ** 2));
+          paint();
         };
         map.addEventListener('region-change-end', onRegion);
         onRegion();
