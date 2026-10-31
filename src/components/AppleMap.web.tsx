@@ -71,7 +71,7 @@ type MKMap = {
   isScrollEnabled: boolean;
   isZoomEnabled: boolean;
   isRotationEnabled: boolean;
-  region: { span: { latitudeDelta: number; longitudeDelta: number } };
+  region: { center: Coord; span: { latitudeDelta: number; longitudeDelta: number } };
   addOverlay: (o: unknown) => void;
   removeOverlay: (o: unknown) => void;
   convertPointOnPageToCoordinate: (p: DOMPoint) => Coord;
@@ -80,6 +80,11 @@ type MKMap = {
 };
 type Coord = { latitude: number; longitude: number };
 type Shape = { style: { fillOpacity: number; strokeOpacity: number; lineWidth: number }; data: Region; points: unknown[] };
+export type PlaceSuggestion = { displayLines: string[]; coordinate?: Coord };
+type MKSearch = {
+  autocomplete: (q: string, cb: (err: unknown, data: { results: PlaceSuggestion[] }) => void) => number;
+  search: (q: string | PlaceSuggestion, cb: (err: unknown, data: { boundingRegion?: unknown; places: { coordinate: Coord }[] }) => void) => number;
+};
 type MapKit = {
   init: (o: { authorizationCallback: (done: (token: string) => void) => void; language?: string }) => void;
   language: string;
@@ -90,6 +95,7 @@ type MapKit = {
   Style: new (o: { strokeColor?: string; strokeOpacity?: number; fillColor?: string; fillOpacity?: number; lineWidth?: number }) => unknown;
   PolygonOverlay: new (points: unknown[] | unknown[][], o?: { style?: unknown; data?: unknown; enabled?: boolean }) => Shape;
   PolylineOverlay: new (points: unknown[], o?: { style?: unknown; enabled?: boolean }) => Shape;
+  Search: new (o: { region?: unknown; language?: string; limitToCountries?: string; includePointsOfInterest?: boolean }) => MKSearch;
   addEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
   removeEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
 };
@@ -162,6 +168,40 @@ function initOnce(mk: MapKit, language: string) {
   });
 }
 
+// ── The page's search field talks to the map through this (MapDealRow's MapSearchBar) ─────────────────────────
+// One map per page, so one handle: the mounted map registers itself; the field asks Apple for places and flies there.
+const live: { map: MKMap | null; search: MKSearch | null; lang: string } = { map: null, search: null, lang: '' };
+
+/** Apple Maps' own place suggestions (owner 2026-10-31: «this search connected to Apple Maps, like how a user
+ *  searches in Apple Maps»), limited to Saudi Arabia, in the UI language. Resolves [] when MapKit is unavailable:
+ *  the field then simply shows nothing (never a fake "no places"). */
+export async function suggestPlaces(q: string, language: string): Promise<PlaceSuggestion[]> {
+  const query = q.trim();
+  if (query.length < 2) return [];
+  let mk: MapKit;
+  try { mk = await loadMapKit(); } catch { return []; }
+  initOnce(mk, language);
+  if (!live.search || live.lang !== language) {
+    live.search = new mk.Search({ language, limitToCountries: 'SA', includePointsOfInterest: true });
+    live.lang = language;
+  }
+  return new Promise((resolve) => {
+    live.search!.autocomplete(query, (err, data) => resolve(err || !data ? [] : data.results.filter((r) => r.displayLines?.length)));
+  });
+}
+
+/** Glide the map to a suggestion: Apple's bounding region for it when it has one, else a town-sized view around it. */
+export function flyToPlace(p: PlaceSuggestion) {
+  const mk = mapkitOf(); const m = live.map;
+  if (!mk || !m || !live.search) return;
+  live.search.search(p, (err, data) => {
+    const place = !err && data?.places?.[0];
+    const c = place ? place.coordinate : p.coordinate;
+    if (data?.boundingRegion) m.setRegionAnimated(data.boundingRegion, true);
+    else if (c) m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(c.latitude, c.longitude), new mk.CoordinateSpan(0.08, 0.08)), true);
+  });
+}
+
 const ksaRegion = (mk: MapKit, el: HTMLElement) => {
   const span = el.clientHeight > el.clientWidth ? KSA_SPAN_PORTRAIT : KSA_SPAN;
   return new mk.CoordinateRegion(
@@ -179,9 +219,10 @@ const regionView = (mk: MapKit, r: Region) => {
   );
 };
 
-/** `onTap` (compact box): a tap anywhere on the map opens it full screen instead of panning it. `full` + `onClose`:
- *  the full-screen map, with its close button top-left. */
-export default function AppleMap({ full = false, onTap, onClose }: { full?: boolean; onTap?: () => void; onClose?: () => void }) {
+/** `onExpand` (compact box): the ⤢ button top-left opens the map full screen; the box itself pans and zooms in place
+ *  (owner 2026-10-31: «zoom in within his screen without leaving»). `full` + `onClose`: the full-screen map, with its
+ *  close button top-left. */
+export default function AppleMap({ full = false, onExpand, onClose }: { full?: boolean; onExpand?: () => void; onClose?: () => void }) {
   const { t, locale } = useI18n();
   const hostRef = useRef<View>(null);
   const localeRef = useRef(locale);
@@ -229,6 +270,7 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
         showsZoomControl: false,
       });
       mapRef.current = map;
+      live.map = map;
 
       // The 13 regions: boundaries + names, and click-to-zoom. Drawn QUIETLY so they blend into Apple's map rather
       // than sit on top of it (owner 2026-10-30: «blending in with Apple Maps, I don't want it very bright»): thin,
@@ -298,6 +340,7 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
       const mk = mapkitOf();
       if (mk) mk.removeEventListener('error', onError);
       mapRef.current = null;
+      live.map = null;
       map?.destroy();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -322,6 +365,13 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
   // polygon that grows under the finger; lifting closes it; a new drag replaces it. «تطبيق» keeps the shape where
   // it was drawn (the map does not move); «إلغاء» discards the sketch (an earlier applied shape stays). «إزالة الرسم» clears it.
   // Design only for now: nothing searches inside the shape yet.
+  // + / − (owner 2026-10-31: «click to zoom»): halve or double the visible span around the same centre.
+  const zoomBy = (f: number) => {
+    const mk = mapkitOf(); const m = mapRef.current;
+    if (!mk || !m) return;
+    const { center, span } = m.region;
+    m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(center.latitude, center.longitude), new mk.CoordinateSpan(span.latitudeDelta * f, span.longitudeDelta * f)), true);
+  };
   const gestures = (on: boolean) => {
     const m = mapRef.current;
     if (m) { m.isScrollEnabled = on; m.isZoomEnabled = on; m.isRotationEnabled = on; }
@@ -400,8 +450,12 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
   return (
     <View style={s.frame}>
       <View ref={hostRef} style={s.host} />
-      {/* Compact: the whole box is one tap → full screen (the buttons below sit above this layer and keep working). */}
-      {onTap && !failed ? <Pressable style={s.tapPad} onPress={onTap} accessibilityRole="button" accessibilityLabel={t('Open the map')} testID="map-open-full" /> : null}
+      {/* Compact: ⤢ top-left opens the map full screen; the box itself pans and zooms in place. */}
+      {onExpand && !failed && !drawing ? (
+        <Pressable style={s.closeBtn} onPress={onExpand} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
+          <Ionicons name="expand-outline" size={20} color={colors.ink} />
+        </Pressable>
+      ) : null}
       {/* Drawing: this layer takes the pointer instead of the map. */}
       {drawing ? <View ref={padRef} style={s.drawPad} testID="map-draw-pad" /> : null}
       {drawing ? (
@@ -428,6 +482,14 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
           <Text style={[s.wholeT, hasShape && s.boundaryT]}>{t(hasShape ? 'Remove boundary' : 'Draw')}</Text>
           {hasShape ? <Ionicons name="close" size={17} color={colors.primary} /> : null}
         </Pressable>
+      ) : null}
+      {/* + / − above the layers button, same column. */}
+      {!failed && !drawing ? (
+        <View style={[s.zoomCol, locale === 'ar' && s.zoomColAr]} testID="map-zoom">
+          <Pressable style={s.zoomBtn} onPress={() => zoomBy(0.5)} accessibilityRole="button" accessibilityLabel={t('Zoom in')}><Ionicons name="add" size={22} color={colors.ink} /></Pressable>
+          <View style={s.zoomRule} />
+          <Pressable style={s.zoomBtn} onPress={() => zoomBy(2)} accessibilityRole="button" accessibilityLabel={t('Zoom out')}><Ionicons name="remove" size={22} color={colors.ink} /></Pressable>
+        </View>
       ) : null}
       {/* Layers, far bottom-right (owner 2026-10-31: «far down right»). In English Apple's mark is bottom-LEFT and the
           corner is free; in Arabic the mark sits bottom-RIGHT, inside the map image, so the button lifts above it. */}
@@ -459,7 +521,10 @@ const s = StyleSheet.create({
     position: 'absolute', top: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 999,
     paddingHorizontal: 14, height: 36, borderWidth: 1, borderColor: colors.tintLine,
   },
-  tapPad: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  zoomCol: { position: 'absolute', right: 12, bottom: 62, width: 40, backgroundColor: colors.surface, borderRadius: 20, borderWidth: 1, borderColor: colors.tintLine, alignItems: 'center', overflow: 'hidden' },
+  zoomColAr: { bottom: 94 },
+  zoomBtn: { width: 40, height: 38, alignItems: 'center', justifyContent: 'center' },
+  zoomRule: { width: 22, height: 1, backgroundColor: colors.tintLine },
   drawPad: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, touchAction: 'none', cursor: 'crosshair' } as any,
   drawBar: {
     position: 'absolute', top: 0, left: 0, right: 0, height: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

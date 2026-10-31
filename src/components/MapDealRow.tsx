@@ -6,11 +6,12 @@
 // (owner: «if the user selects one he can select the other if he wants, not click then must click apply»): a tick
 // takes effect at once; the popup stays open for more ticks and closes with the X or a tap outside. Design only for now: the choice is kept here and nothing on the map reads
 // it yet; the filter button opens nothing yet — pins, the list and the filter sheet come one step at a time.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
+import { suggestPlaces, flyToPlace, type PlaceSuggestion } from '@/components/AppleMap';
 
 export type MapDeal = 'buy' | 'rent' | 'short';
 const DEALS: { id: MapDeal; label: string }[] = [
@@ -19,20 +20,61 @@ const DEALS: { id: MapDeal; label: string }[] = [
   { id: 'short', label: 'Short stays' },
 ];
 
-/** The search field above the row (owner 2026-10-31, Zillow's «Address, neighborhood, city, ZIP»): a rounded
- *  Ezhalah field with a search glyph. Design only — it searches nothing yet. */
+/** The search field above the row — Apple Maps' own place search (owner 2026-10-31: «this search connected to
+ *  Apple Maps, like how a user searches in Apple Maps»): typing shows Apple's suggestions for Saudi Arabia under the
+ *  field; picking one glides the map there. Suggestions only; nothing filters listings yet. */
 export function MapSearchBar() {
-  const { t, isRTL } = useI18n();
+  const { t, isRTL, locale } = useI18n();
+  const [q, setQ] = useState('');
+  const [hits, setHits] = useState<PlaceSuggestion[]>([]);
+  const [focused, setFocused] = useState(false);
+  const seq = useRef(0);
+  useEffect(() => {
+    const id = ++seq.current;
+    if (q.trim().length < 2) { setHits([]); return; }
+    const h = setTimeout(() => { suggestPlaces(q, locale).then((r) => { if (seq.current === id) setHits(r); }); }, 220);
+    return () => clearTimeout(h);
+  }, [q, locale]);
+  const pick = (p: PlaceSuggestion) => {
+    setQ(p.displayLines[0]); setHits([]); setFocused(false);
+    flyToPlace(p);
+  };
+  const open = focused && hits.length > 0;
   return (
-    <View style={s.search}>
-      <Ionicons name="search" size={16} color={colors.muted} />
-      <TextInput
-        style={[s.searchInput, { textAlign: isRTL ? 'right' : 'left' }]}
-        placeholder={t('Region, city, landmark or district')}
-        placeholderTextColor={colors.muted}
-        accessibilityLabel={t('Search')}
-        testID="map-search"
-      />
+    <View style={s.searchWrap}>
+      <View style={s.search}>
+        <Ionicons name="search" size={16} color={colors.muted} />
+        <TextInput
+          style={[s.searchInput, { textAlign: isRTL ? 'right' : 'left' }]}
+          value={q}
+          onChangeText={setQ}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setTimeout(() => setFocused(false), 150)}
+          placeholder={t('Region, city, landmark or district')}
+          placeholderTextColor={colors.muted}
+          accessibilityLabel={t('Search')}
+          autoCorrect={false}
+          testID="map-search"
+        />
+        {q ? (
+          <Pressable onPress={() => { setQ(''); setHits([]); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')}>
+            <Ionicons name="close-circle" size={17} color={colors.muted} />
+          </Pressable>
+        ) : null}
+      </View>
+      {open ? (
+        <View style={s.hits} testID="map-search-hits">
+          {hits.slice(0, 6).map((p, i) => (
+            <Pressable key={i} style={({ hovered }: any) => [s.hit, hovered && s.optionHover]} onPress={() => pick(p)} accessibilityRole="button">
+              <Ionicons name="location-outline" size={16} color={colors.primary} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={s.hitT} numberOfLines={1}>{p.displayLines[0]}</Text>
+                {p.displayLines[1] ? <Text style={s.hitSub} numberOfLines={1}>{p.displayLines[1]}</Text> : null}
+              </View>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -114,6 +156,11 @@ const GLASS_ON = 'rgba(241,238,244,0.7)';
 const s = StyleSheet.create({
   // BLENDED into the sky, not white (owner 2026-10-31: «I don't like how it's white, blend it more into the
   // background»): a translucent fill the clouds show through, the pill's own hairline border, no drop shadow.
+  searchWrap: { zIndex: 3 },
+  hits: { position: 'absolute', top: 52, left: 0, right: 0, backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.tintLine, padding: 6, ...cardShadow, shadowOpacity: 0.14, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 6 },
+  hit: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10 },
+  hitT: { fontSize: 14, fontWeight: '700', color: colors.ink },
+  hitSub: { fontSize: 12, color: colors.muted, marginTop: 1 },
   search: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 38, paddingHorizontal: 12, borderRadius: radius.pill, backgroundColor: GLASS, borderWidth: 1, borderColor: colors.tintLine, marginTop: 10 },
   searchInput: { flex: 1, minWidth: 0, fontSize: 16, /* ≥16px: iOS Safari zooms into any smaller input (verify-input-font-no-ios-zoom) */ color: colors.ink, paddingVertical: 0, ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}) },
   // Plain `row`: the document direction already lays Arabic out right-to-left (reversing it again flipped the row

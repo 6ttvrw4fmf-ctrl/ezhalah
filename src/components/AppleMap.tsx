@@ -3,7 +3,11 @@
 import { StyleSheet, View } from 'react-native';
 import { colors } from '@/theme/tokens';
 
-export default function AppleMap(_: { full?: boolean; onTap?: () => void; onClose?: () => void }) {
+export type PlaceSuggestion = { displayLines: string[]; coordinate?: { latitude: number; longitude: number } };
+export async function suggestPlaces(_q: string, _language: string): Promise<PlaceSuggestion[]> { return []; }
+export function flyToPlace(_p: PlaceSuggestion) {}
+
+export default function AppleMap(_: { full?: boolean; onExpand?: () => void; onClose?: () => void }) {
   return <View style={s.frame} />;
 }
 
