@@ -127,7 +127,10 @@ const s = StyleSheet.create({
   btnText: { fontSize: 14, fontWeight: '700', color: colors.ink, includeFontPadding: false },
   btnTextActive: { color: colors.primary },
   // CENTERED, a normal popup (owner 2026-10-31: «I don't like how it's not in the centre; a small popup, normal»).
-  backdrop: { flex: 1, backgroundColor: 'rgba(36,35,43,0.28)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  // Pinned to the WHOLE screen, not `flex: 1`: on iPhone Safari the modal wrapper does not stretch, so a flex child
+  // collapsed to its content and the card sat at the top (owner 2026-10-31: «on the phone it doesn't pop up in the
+  // centre of the screen»). Explicit edges centre it on every browser.
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(36,35,43,0.28)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   card: { width: '100%', maxWidth: 320, backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.tintLine, padding: 18, ...cardShadow, shadowOpacity: 0.18, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
   cardHead: { minHeight: 28, justifyContent: 'center', marginBottom: 6, paddingRight: 32 },
   close: { position: 'absolute', right: 0, top: 0, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
