@@ -683,7 +683,7 @@ const runBaselineSearch = async (): Promise<Search | null> => {
   // Buy/Rent are two at-least-one toggles with «شراء» pre-selected; «سنوي» is pre-selected and
   // adding «شهري» first gives BOTH, then dropping «سنوي» leaves monthly-only.
   if (DEAL === 'rent') { await tap('إيجار'); await tap('شراء'); }
-  if (DEAL === 'rent-monthly') { await tap('إيجار'); await tap('شراء'); await tap('شهري'); await tap('سنوي'); }
+  if (DEAL === 'rent-monthly') { await tap('إيجار'); await tap('شراء'); await tap('إقامات قصيرة'); await tap('سنوي'); } // label since 2026-10-25; sends شهري
   for (let attempt = 1; attempt <= 3; attempt++) {
     await page.click('[data-testid="city-input"]');
     await page.fill('[data-testid="city-input"]', '');

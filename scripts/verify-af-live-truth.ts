@@ -506,7 +506,11 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     // search that never fired. Answer at most two more questions (first option, deterministic): measured 10-23, both
     // NO-type journeys needed the EXACT TYPE tier and then one ordinary round question before the round's search fired.
     // The capture is judged exactly as before: a search that never fires still leaves it null and still fails.
-    for (let tier = 0; tier < 2 && lastSearchBody === null; tier++) {
+    // NOT on the BACK journey (2026-10-31, 🔬): R8.2.1 is «Back restores the PREVIOUS question», and this loop answered
+    // two more round questions first (features → bathrooms → age), so Back correctly returned to «age» while the check
+    // expected «features» (run 41178264864: expected=وش المميزات المهمة لك؟ got=كم عمر العقار تقريباً؟, count 14142 vs 4719).
+    // The Back journey needs the card on question TWO; its own `advanced` poll below proves the round moved there.
+    for (let tier = 0; tier < 2 && lastSearchBody === null && !backAndChange; tier++) {
       const next = await readCardUntil((s) => s.hasCard, AGENT_TURN_MS);
       const opts3 = next.hasCard
         ? await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')))
@@ -668,7 +672,10 @@ await runJourney('Residential/Rent-Monthly/Apartment/Riyadh — rating', {
   // ONLY one selected, so tapping سنوي first is a rejected no-op (can't deselect the last one) — it
   // stays on, and adding شهري on top just gives "both" (كلاهما). Add شهري FIRST (now both selected,
   // removing either is safe), THEN tap سنوي to drop it — order matters for an at-least-one toggle.
-  deal: ['إيجار', 'شراء', 'شهري', 'سنوي'], city: 'الرياض', group: 'الشقق والسكن المشترك', type: 'شقة',
+  // The button's LABEL is «إقامات قصيرة» since 2026-10-25 (src/i18n.tsx 'Short stays'); the period it
+  // sends is still p_rent_period='شهري'. Tapping the old word failed every run from 10-25 to 10-31
+  // («control never rendered: شهري»), so the Gathern subtype journey proved nothing for six days.
+  deal: ['إيجار', 'شراء', 'إقامات قصيرة', 'سنوي'], city: 'الرياض', group: 'الشقق والسكن المشترك', type: 'شقة',
 });
 await runJourney('Commercial/Rent-Annual/Shop/Riyadh — amenity', {
   deal: ['إيجار', 'شراء', 'سنوي'], category: 'تجاري', city: 'الرياض', group: 'التجزئة والمكاتب', type: 'محل',
