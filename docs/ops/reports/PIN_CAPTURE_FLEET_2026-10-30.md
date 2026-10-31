@@ -116,9 +116,14 @@ hajer 85 · daryusuf, shatri 90 · awal 85).
 
 ## Still open
 
-- mustqr and wslnaa: their pins are goo.gl short links; the runner's HTTP hop gets Google's 200 script page. Put both
-  on the `browser` lane of `small-sources-sync.yml` (PIN_BROWSER_HOP=1, like the three small sites of 2026-10-20) or
-  route the hop through the proxy, then raise their floors.
+- mustqr 1/1,345 and wslnaa 17/61 — ROOT CAUSE: their pins are `maps.app.goo.gl` short links (mustqr ids 2923, 3876,
+  3877 …; every wslnaa unit) and Google answers the runner's plain and proxy hops with a 200 script page, so the scrapers
+  wrote nothing (honest: neither a pin nor `pin_absent`). Fixed in #9509: both sources now run on the `browser: true` lane
+  of `small-sources-sync.yml` (PIN_BROWSER_HOP=1, the 2026-10-20 lane that resolved the three small sites). Proof = the
+  next crawl + sync; then raise their floors (backlog #1112, scraping-engineer).
+- The mirror PR #9520 cannot go green on its own: the migration cites `scripts/verify-pin-capture-declared.ts`, which
+  lives in the lock PR, and `verify-ops-remediation-scripts-exist.ts` refuses a claim to a file not on that branch. The
+  lock PR #9509 carries the byte-exact migration too, so it is the one that lands the mirror; #9520 is closed after it.
 - The app draws Ezhalah's own ad page (and its pin) only for IN_APP_PREVIEW_HOSTS; rakez and the other fixed sites open
   the SOURCE framed, and `/map` is still the placeholder — the pin is served but not yet drawn for them. Owner call.
 - Backlog #1111: the 13 small capture gaps above.

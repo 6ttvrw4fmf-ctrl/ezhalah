@@ -675,7 +675,7 @@
       "floor_pct": 1,
       "proof_url": "https://mustqr.sa/property/3083",
       "proven_on": "2026-10-30",
-      "note": "Partial at source (BUG fixed #9507): the API's lat/lng columns are restricted to the office; the page's JSON-LD geo is the office (27.5114,41.7208) on every ad; show_location true on 11/1,348 rows. The only published pin is the Google Maps link a broker pastes into the ad text — 14 descriptions + some raw_text bodies (≈1–3%), which ad_body() used to drop. Served 0/1340 (0.0%) on 2026-10-30 before today's fixes."
+      "note": "Partial at source (fix #9507 + browser lane in #9509): the API's lat/lng columns are restricted to the office; the page's JSON-LD geo is the office (27.5114,41.7208) on every ad; show_location true on 11/1,348 rows. The only published pin is the maps.app.goo.gl link a broker pastes into the ad text (ids 2923, 3876, 3877 … — 14 descriptions + raw_text bodies). ROOT CAUSE of 1/1,345 on 2026-10-31: those are SHORT links and Google answers the runner's plain/proxy hop with a 200 script page, so no pair could be read (nothing written, honestly); small-sources-sync now runs mustqr with browser: true (PIN_BROWSER_HOP=1, the 2026-10-20 lane) — measure after the next crawl and raise the floor. Served 1/1,345 (0.1 %) on 2026-10-31."
     },
     "nafithh": {
       "pin_source": "page-json",
@@ -1046,7 +1046,7 @@
       "floor_pct": 20,
       "proof_url": "https://wslnaa.com/properties/nada-avenue-apartment-22",
       "proven_on": "2026-10-30",
-      "note": "BUG fixed #9508: the tRPC API's mapUrl is a maps.app.goo.gl short link per unit (3/3 rendered ads carry it; the three sampled units share their compound's link); followed through page_pin. Served 17/61 (27.9%) on 2026-10-30 before today's fixes."
+      "note": "Fix #9508 + browser lane in #9509: the tRPC API's mapUrl is a maps.app.goo.gl short link per unit (3/3 rendered ads; the sampled units share their compound's link). 2026-10-31 crawl: the proxy hop got Google's 200 script page («via proxy | 200→ | body 39»), so no new pin was written and the 17 stored commercial pins stayed (keep_stored_pin). small-sources-sync now runs wslnaa with browser: true; floor 20 = today's honest 27.9 %. Raise after the next crawl."
     },
     "yameen": {
       "pin_source": "page-json",
