@@ -25,7 +25,7 @@ export function MapSearchBar() {
   const { t, isRTL } = useI18n();
   return (
     <View style={s.search}>
-      <Ionicons name="search" size={18} color={colors.muted} />
+      <Ionicons name="search" size={16} color={colors.muted} />
       <TextInput
         style={[s.searchInput, { textAlign: isRTL ? 'right' : 'left' }]}
         placeholder={t('Region, city, landmark or district')}
@@ -114,11 +114,12 @@ const GLASS_ON = 'rgba(241,238,244,0.7)';
 const s = StyleSheet.create({
   // BLENDED into the sky, not white (owner 2026-10-31: «I don't like how it's white, blend it more into the
   // background»): a translucent fill the clouds show through, the pill's own hairline border, no drop shadow.
-  search: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 46, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: GLASS, borderWidth: 1, borderColor: colors.tintLine, marginTop: 12 },
-  searchInput: { flex: 1, fontSize: 15, color: colors.ink, paddingVertical: 0, ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}) },
+  search: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 38, paddingHorizontal: 12, borderRadius: radius.pill, backgroundColor: GLASS, borderWidth: 1, borderColor: colors.tintLine, marginTop: 10 },
+  searchInput: { flex: 1, fontSize: 14, color: colors.ink, paddingVertical: 0, ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}) },
   // Plain `row`: the document direction already lays Arabic out right-to-left (reversing it again flipped the row
   // back to the left — seen in the local preview).
-  row: { alignItems: 'center', justifyContent: 'flex-start', gap: 8, marginTop: 12 },
+  // Tight under the search field (owner: «the box is very big and a lot of space between it and the buttons»).
+  row: { alignItems: 'center', justifyContent: 'flex-start', gap: 8, marginTop: 8 },
   btn: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 40, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: GLASS, borderWidth: 1, borderColor: colors.tintLine },
   btnActive: { backgroundColor: GLASS_ON, borderColor: colors.primary, borderWidth: 1.5 },
   btnHover: { borderColor: colors.primary },
