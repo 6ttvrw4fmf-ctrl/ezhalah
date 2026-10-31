@@ -52,5 +52,25 @@ check('every name has a readable tilt (|rot| ≤ 50°) and a positive length to 
 const bytes = statSync(new URL('../public/ksa-regions.json', import.meta.url)).size;
 check(`file stays small (${bytes} bytes ≤ 40 KB)`, bytes <= 40 * 1024);
 
+// mutation proof — the predicates above, applied to deliberately broken inputs, must FAIL
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches: ${label}`, caught);
+const clone = (): Region[] => JSON.parse(JSON.stringify(regions));
+const namePointsOk = (rs: Region[]) => rs.every((r) => {
+  const own = r.rings.reduce((a, b) => (a.length >= b.length ? a : b));
+  return inRing(r.label, own) && rs.every((o) => o === r || !o.rings.some((ring) => inRing(r.label, ring)));
+});
+const ringsOk = (rs: Region[]) => rs.every((r) => r.rings.every((ring) => ring.length >= 4 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1] && ring.every(inKsa)));
+const namesOk = (rs: Region[]) => rs.every((r) => { const o = byId.get(r.id); return !!o && (o.ar === `منطقة ${r.ar}` || o.ar === `المنطقة ${r.ar}`); });
+const m1 = clone(); m1[0].label = m1[1].label;              // Riyadh's name moved into Makkah
+mustCatch('a name point placed inside a neighbouring region', !namePointsOk(m1));
+const m2 = clone(); m2[0].rings[0] = m2[0].rings[0].slice(0, -1); // ring no longer closed
+mustCatch('an unclosed ring', !ringsOk(m2));
+const m3 = clone(); m3[0].rings[0][0] = [60, 40];           // a point outside the Kingdom
+mustCatch('a boundary point outside Saudi Arabia', !ringsOk(m3));
+const m4 = clone(); m4[2].ar = 'الدمام';                     // a wrong region name
+mustCatch('a name that is not the official region name', !namesOk(m4));
+const m5 = clone(); m5.pop();                                // only 12 regions
+mustCatch('a missing region', !(m5.length === 13 && new Set(m5.map((r) => r.id)).size === 13));
+
 if (failures) { console.error(`\n${failures} FAILURE(S)`); process.exit(1); }
 console.log('\n✓ public/ksa-regions.json is the Kingdom\'s 13 regions, named as the app names them, closed, inside KSA, and small');

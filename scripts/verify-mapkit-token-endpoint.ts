@@ -49,5 +49,12 @@ check('token answers are never cached', r200.headers.get('cache-control') === 'n
 process.env.MAPKIT_WEB_P8 = 'garbage';
 check('an unreadable key → 503, not a crash', (await GET(req)).status === 503);
 
+// mutation proof — the checks above, against deliberately broken tokens and keys, must FAIL
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches: ${label}`, caught);
+mustCatch('a token whose signature was tampered with', !verifies(tok.slice(0, -4) + 'AAAA'));
+mustCatch('a token whose claims were edited after signing', !verifies(`${h}.${Buffer.from(JSON.stringify({ ...decode(b), iss: 'OTHER' })).toString('base64url')}.${tok.split('.')[2]}`));
+mustCatch('a token signed by a different key', !verifies(mintMapKitToken(generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), 'K', 'T', now)));
+mustCatch('an endpoint with no key answering 200', (await (async () => { delete process.env.MAPKIT_WEB_P8; return (await GET(req)).status; })()) !== 200);
+
 if (failures) { console.error(`\n${failures} FAILURE(S)`); process.exit(1); }
 console.log('\n✓ /api/mapkit-token mints verifiable, origin-pinned, uncached MapKit tokens and fails closed without a key');
