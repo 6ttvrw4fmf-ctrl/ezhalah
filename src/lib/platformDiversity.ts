@@ -218,6 +218,17 @@ export function interleaveRanked<L extends { cleanType?: string | null; rentPeri
   return out;
 }
 
+// The diversity scope of a search that names districts (owner 2026-10-31: «if he selected 2 or more
+// districts we also diversify»). ONE district has nothing to spread across, so its scope stays
+// 'district' (platform → deal → type → photos). TWO or more are searched together, so the result
+// must alternate between them the way a city search alternates between its districts — the 'city'
+// hierarchy (platform → deal → type → DISTRICT → photos). Before this, a two-district search was
+// scoped 'district' and the whole first page could come from whichever district had the fresher ads.
+// Pure permutation: it only picks the key list, never widens the matched set (MATCH FIRST).
+export function scopeForDistricts(nDistricts: number): Scope {
+  return nDistricts > 1 ? 'city' : 'district';
+}
+
 export function orderByScope<L extends { cleanType?: string | null; rentPeriod?: string | null }>(rows: RankedRow<L>[], scope: Scope, multiType = false, mixPeriods = false, opts?: { mixDeals?: boolean; preferPhotos?: boolean }): RankedRow<L>[] {
   // Diversity hierarchy per scope — SUPERSEDES the 2026-06-27 geography-first order (Region → cities →
   // districts → platforms) per owner PERMANENT rule 2026-07-13: "Rule 1 filters always win; Rule 2,
