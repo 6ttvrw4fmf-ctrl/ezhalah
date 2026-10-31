@@ -3,7 +3,12 @@
 // like Zillow displays US states» — no property pins yet).
 //
 // What is on the map, and nothing more:
-//   • Apple's own map (cities, districts, roads appear as you zoom — Apple draws them, in the app's language).
+//   • Apple's own map (cities, districts, roads appear as you zoom — Apple draws them, ALWAYS IN ENGLISH: owner
+//     2026-10-31 chose it, because one MapKit setting drives both the place names and the  Maps mark Apple draws
+//     inside the map image — Arabic puts that mark bottom-right in Arabic, English bottom-left in English — and the
+//     owner wants the mark «always in English» and the bottom-right corner free for the layers button).
+//   • Tap the map (compact) → it opens full screen (owner: «when the user clicks on the map take him inside»).
+//   • «رسم» → Zillow's Draw Search: Cancel / draw an area / Apply, a freehand shape dragged on the map.
 //   • The 13 region boundaries (public/ksa-regions.json — geoBoundaries ADM1, ODbL, simplified to ~2 km / 24 KB)
 //     drawn as quiet polygon overlays in the brand colour. The region NAMES are Apple's own (it labels every
 //     region in the app's language): we draw none (owner 2026-10-31: «Apple Maps already has names for those
@@ -63,11 +68,18 @@ type Region = {
 type MKMap = {
   destroy: () => void;
   mapType: string;
+  isScrollEnabled: boolean;
+  isZoomEnabled: boolean;
+  isRotationEnabled: boolean;
   region: { span: { latitudeDelta: number; longitudeDelta: number } };
   addOverlay: (o: unknown) => void;
+  removeOverlay: (o: unknown) => void;
+  convertPointOnPageToCoordinate: (p: { x: number; y: number }) => Coord;
   setRegionAnimated: (r: unknown, animate?: boolean) => void;
   addEventListener: (name: string, fn: (e: { overlay?: { data?: Region } }) => void) => void;
 };
+type Coord = { latitude: number; longitude: number };
+type Shape = { style: { fillOpacity: number; strokeOpacity: number; lineWidth: number }; data: Region; points: unknown[] };
 type MapKit = {
   init: (o: { authorizationCallback: (done: (token: string) => void) => void; language?: string }) => void;
   language: string;
@@ -76,7 +88,7 @@ type MapKit = {
   CoordinateSpan: new (lat: number, lng: number) => unknown;
   CoordinateRegion: new (center: unknown, span: unknown) => unknown;
   Style: new (o: { strokeColor?: string; strokeOpacity?: number; fillColor?: string; fillOpacity?: number; lineWidth?: number }) => unknown;
-  PolygonOverlay: new (points: unknown[] | unknown[][], o?: { style?: unknown; data?: unknown; enabled?: boolean }) => { style: { fillOpacity: number; strokeOpacity: number; lineWidth: number }; data: Region };
+  PolygonOverlay: new (points: unknown[] | unknown[][], o?: { style?: unknown; data?: unknown; enabled?: boolean }) => Shape;
   addEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
   removeEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
 };
@@ -166,11 +178,21 @@ const regionView = (mk: MapKit, r: Region) => {
   );
 };
 
-export default function AppleMap() {
-  const { locale, t } = useI18n();
+const MAP_LANGUAGE = 'en';
+
+/** `onTap` (compact box): a tap anywhere on the map opens it full screen instead of panning it. `full` + `onClose`:
+ *  the full-screen map, with its close button top-left. */
+export default function AppleMap({ full = false, onTap, onClose }: { full?: boolean; onTap?: () => void; onClose?: () => void }) {
+  const { t } = useI18n();
   const hostRef = useRef<View>(null);
+  const padRef = useRef<View>(null);
   const mapRef = useRef<MKMap | null>(null);
-  const localeRef = useRef(locale);
+  const sketchRef = useRef<Shape | null>(null);
+  const shapeRef = useRef<Shape | null>(null);
+  const ptsRef = useRef<Coord[]>([]);
+  const [drawing, setDrawing] = useState(false);
+  const [sketch, setSketch] = useState<Shape | null>(null);
+  const [hasShape, setHasShape] = useState(false);
   const [failed, setFailed] = useState(false);
   const [zoomed, setZoomed] = useState(false);
   // Map style (owner 2026-10-31, Zillow's layers button): the modes Apple's web MapKit offers — standard, satellite
@@ -195,9 +217,7 @@ export default function AppleMap() {
       // Apple's  Maps mark and «معلومات قانونية» are drawn INSIDE the map image, bottom-right in Arabic, and no
       // page direction or style moves them (measured live 2026-10-31: no DOM node carries them). Our corner controls
       // keep clear of that strip instead.
-      initOnce(mk, localeRef.current);
-      // A language switched while MapKit was still loading: init() took the first one; set the current one now.
-      if (mk.language !== localeRef.current) mk.language = localeRef.current;
+      initOnce(mk, MAP_LANGUAGE);
       mk.addEventListener('error', onError);
       map = new mk.Map(el, {
         region: ksaRegion(mk, el),
@@ -282,20 +302,81 @@ export default function AppleMap() {
       mapRef.current = null;
       map?.destroy();
     };
-    // The map's language is handled by the effect below, not by re-creating the map.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // THE MAP FOLLOWS THE UI LANGUAGE (owner 2026-10-31: «when the user changes the language the map's language changes
-  // automatically»). `mapkit.language` is live: setting it re-renders Apple's labels in the new language — and with
-  // them the  Maps mark, which Apple draws inside the map image (bottom-right and Arabic in the Arabic map,
-  // bottom-left and English in the English one). Measured live 2026-10-31 by setting it on ezhalah.com/map: the
-  // outlines we drew stay; nothing is re-created. init() took the first language; this keeps it in step after.
+  // Full screen ⇄ compact: MapKit sizes its canvas on window resize; nudge it once the box has changed.
   useEffect(() => {
-    localeRef.current = locale;
-    const mk = mapkitOf();
-    if (mk && initialized && mk.language !== locale) mk.language = locale;
-  }, [locale]);
+    const id = requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+    return () => cancelAnimationFrame(id);
+  }, [full]);
+
+  // ── Draw (Zillow's «Draw Search», owner 2026-10-31: «see how drawing is, copy it like Zillow») ──────────────
+  // Enter: the map stops panning/zooming and a transparent layer takes the pointer; a drag paints a freehand
+  // polygon that grows under the finger; lifting closes it; a new drag replaces it. «تطبيق» keeps the shape and
+  // glides the map to it; «إلغاء» discards the sketch (an earlier applied shape stays). «إزالة الرسم» clears it.
+  // Design only for now: nothing searches inside the shape yet.
+  const gestures = (on: boolean) => {
+    const m = mapRef.current;
+    if (m) { m.isScrollEnabled = on; m.isZoomEnabled = on; m.isRotationEnabled = on; }
+  };
+  const startDrawing = () => { setSketch(null); setDrawing(true); gestures(false); };
+  const cancelDrawing = () => {
+    const m = mapRef.current;
+    if (m && sketchRef.current) m.removeOverlay(sketchRef.current);
+    sketchRef.current = null; setSketch(null); setDrawing(false); gestures(true);
+  };
+  const applyDrawing = () => {
+    const m = mapRef.current; const mk = mapkitOf();
+    const shape = sketchRef.current;
+    if (!m || !mk || !shape) return;
+    if (shapeRef.current) m.removeOverlay(shapeRef.current);
+    shapeRef.current = shape; sketchRef.current = null;
+    const pts = ptsRef.current;
+    const lats = pts.map((p) => p.latitude), lngs = pts.map((p) => p.longitude);
+    const s0 = Math.min(...lats), n0 = Math.max(...lats), w0 = Math.min(...lngs), e0 = Math.max(...lngs);
+    m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate((s0 + n0) / 2, (w0 + e0) / 2), new mk.CoordinateSpan(Math.max((n0 - s0) * 1.4, 0.02), Math.max((e0 - w0) * 1.4, 0.02))), true);
+    setHasShape(true); setSketch(null); setDrawing(false); gestures(true);
+  };
+  const removeDrawing = () => {
+    const m = mapRef.current;
+    if (m && shapeRef.current) m.removeOverlay(shapeRef.current);
+    shapeRef.current = null; setHasShape(false);
+  };
+  useEffect(() => {
+    if (!drawing) return;
+    const el = padRef.current as unknown as HTMLElement | null;
+    const m = mapRef.current; const mk = mapkitOf();
+    if (!el || !m || !mk) return;
+    let down = false; let last: { x: number; y: number } | null = null;
+    const onDown = (e: PointerEvent) => {
+      e.preventDefault(); el.setPointerCapture?.(e.pointerId); down = true; last = { x: e.pageX, y: e.pageY };
+      if (sketchRef.current) m.removeOverlay(sketchRef.current);
+      ptsRef.current = [m.convertPointOnPageToCoordinate({ x: e.pageX, y: e.pageY })];
+      sketchRef.current = null; setSketch(null);
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!down || !last) return;
+      if (Math.hypot(e.pageX - last.x, e.pageY - last.y) < 4) return;
+      last = { x: e.pageX, y: e.pageY };
+      ptsRef.current.push(m.convertPointOnPageToCoordinate(last));
+      const pts = ptsRef.current;
+      if (pts.length < 3) return;
+      const coords = pts.map((p) => new mk.Coordinate(p.latitude, p.longitude));
+      if (sketchRef.current) sketchRef.current.points = coords;
+      else {
+        sketchRef.current = new mk.PolygonOverlay(coords, { style: new mk.Style({ strokeColor: lightColors.primary, strokeOpacity: 0.95, lineWidth: 2.5, fillColor: lightColors.primary, fillOpacity: 0.14 }), enabled: false });
+        m.addOverlay(sketchRef.current);
+      }
+    };
+    const onUp = () => { down = false; setSketch(sketchRef.current); };
+    el.addEventListener('pointerdown', onDown); el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', onUp); el.addEventListener('pointercancel', onUp);
+    return () => {
+      el.removeEventListener('pointerdown', onDown); el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp); el.removeEventListener('pointercancel', onUp);
+    };
+  }, [drawing]);
 
   const showWholeKingdom = () => {
     const mk = mapkitOf();
@@ -306,26 +387,45 @@ export default function AppleMap() {
   return (
     <View style={s.frame}>
       <View ref={hostRef} style={s.host} />
-      {zoomed && !failed ? (
-        <Pressable style={s.wholeBtn} onPress={showWholeKingdom} accessibilityRole="button" accessibilityLabel={t('Whole Kingdom')}>
+      {/* Compact: the whole box is one tap → full screen (the buttons below sit above this layer and keep working). */}
+      {onTap && !failed ? <Pressable style={s.tapPad} onPress={onTap} accessibilityRole="button" accessibilityLabel={t('Open the map')} testID="map-open-full" /> : null}
+      {/* Drawing: this layer takes the pointer instead of the map. */}
+      {drawing ? <View ref={padRef} style={s.drawPad} testID="map-draw-pad" /> : null}
+      {drawing ? (
+        <View style={s.drawBar} testID="map-draw-bar">
+          <Pressable style={s.drawBarBtn} onPress={cancelDrawing} hitSlop={8} accessibilityRole="button"><Text style={s.drawBarT}>{t('Cancel')}</Text></Pressable>
+          <Text style={s.drawBarTitle}>{t('Draw an area')}</Text>
+          <Pressable style={s.drawBarBtn} onPress={applyDrawing} disabled={!sketch} hitSlop={8} accessibilityRole="button" accessibilityState={{ disabled: !sketch }} testID="map-draw-apply">
+            <Text style={[s.drawBarT, s.drawBarApply, !sketch && s.drawBarOff]}>{t('Apply')}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {drawing && !sketch ? <View style={s.hint} pointerEvents="none"><Text style={s.hintT}>{t('Drag on the map to draw an area')}</Text></View> : null}
+      {onClose && !drawing ? (
+        <Pressable style={s.closeBtn} onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-close-full">
+          <Ionicons name="close" size={22} color={colors.ink} />
+        </Pressable>
+      ) : null}
+      {zoomed && !failed && !drawing ? (
+        <Pressable style={[s.wholeBtn, onClose && s.wholeBtnShifted]} onPress={showWholeKingdom} accessibilityRole="button" accessibilityLabel={t('Whole Kingdom')}>
           <Text style={s.wholeT}>{t('Whole Kingdom')}</Text>
         </Pressable>
       ) : null}
-      {/* «رسم» top-right, like Zillow's Draw (owner 2026-10-31: «draw, like the screenshot»). Design only: drawing an
-          area to search inside it is the next step; the button does nothing yet. */}
-      {!failed ? (
-        <Pressable style={s.drawBtn} accessibilityRole="button" accessibilityLabel={t('Draw')} testID="map-draw-btn">
-          <Ionicons name="pencil-outline" size={15} color={colors.ink} />
-          <Text style={s.wholeT}>{t('Draw')}</Text>
+      {/* «رسم» top-right, like Zillow's Draw; once a shape is applied it becomes «إزالة الرسم». */}
+      {!failed && !drawing ? (
+        <Pressable style={s.drawBtn} onPress={hasShape ? removeDrawing : startDrawing} accessibilityRole="button" accessibilityLabel={t(hasShape ? 'Remove drawing' : 'Draw')} testID="map-draw-btn">
+          <Ionicons name={hasShape ? 'trash-outline' : 'pencil-outline'} size={15} color={colors.ink} />
+          <Text style={s.wholeT}>{t(hasShape ? 'Remove drawing' : 'Draw')}</Text>
         </Pressable>
       ) : null}
-      {/* Layers, bottom-right, lifted just above Apple's mark strip (Apple's zoom control is off so nothing else is there). */}
-      {!failed ? (
+      {/* Layers, far bottom-right (owner 2026-10-31: «always, no matter the language, far down right»): with the map
+          in English Apple's mark is bottom-LEFT, so this corner is free. */}
+      {!failed && !drawing ? (
         <Pressable style={s.layersBtn} onPress={() => setLayersOpen((o) => !o)} accessibilityRole="button" accessibilityLabel={t('Map layers')} testID="map-layers-btn">
           <Ionicons name="layers-outline" size={20} color={colors.ink} />
         </Pressable>
       ) : null}
-      {layersOpen && !failed ? (
+      {layersOpen && !failed && !drawing ? (
         <View style={s.layersCard} testID="map-layers-popup">
           {([['standard', 'Explore', 'map-outline'], ['hybrid', 'Satellite', 'earth-outline'], ['muted', 'Quiet', 'contrast-outline']] as const).map(([k, label, icon]) => (
             <Pressable key={k} style={({ hovered }: any) => [s.layerRow, hovered && s.layerRowHover, mapType === k && s.layerRowOn]} onPress={() => { applyMapType(k); setLayersOpen(false); }} accessibilityRole="radio" accessibilityState={{ checked: mapType === k }}>
@@ -352,12 +452,30 @@ const s = StyleSheet.create({
     position: 'absolute', top: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 999,
     paddingHorizontal: 14, height: 36, borderWidth: 1, borderColor: colors.tintLine,
   },
+  tapPad: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  drawPad: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, touchAction: 'none', cursor: 'crosshair' } as any,
+  drawBar: {
+    position: 'absolute', top: 0, left: 0, right: 0, height: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 14, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.tintLine,
+  },
+  drawBarBtn: { minWidth: 56, height: 36, justifyContent: 'center' },
+  drawBarT: { fontFamily: font.family.medium, fontSize: 15, color: colors.ink },
+  drawBarTitle: { fontFamily: font.family.bold, fontSize: 15, color: colors.ink },
+  drawBarApply: { fontFamily: font.family.bold, color: colors.primary, textAlign: 'right' },
+  drawBarOff: { opacity: 0.35 },
+  hint: { position: 'absolute', top: 60, left: 0, right: 0, alignItems: 'center' },
+  hintT: { fontFamily: font.family.medium, fontSize: 13, color: colors.ink, backgroundColor: colors.surface, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, overflow: 'hidden', borderWidth: 1, borderColor: colors.tintLine },
+  closeBtn: {
+    position: 'absolute', top: 12, left: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
+  },
+  wholeBtnShifted: { left: 56 },
   layersBtn: {
-    position: 'absolute', right: 12, bottom: 44, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface,
+    position: 'absolute', right: 12, bottom: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
   layersCard: {
-    position: 'absolute', right: 12, bottom: 90, minWidth: 160, backgroundColor: colors.surface, borderRadius: 14, padding: 6,
+    position: 'absolute', right: 12, bottom: 58, minWidth: 160, backgroundColor: colors.surface, borderRadius: 14, padding: 6,
     borderWidth: 1, borderColor: colors.tintLine,
   },
   layerRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10 },

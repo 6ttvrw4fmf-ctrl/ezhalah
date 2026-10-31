@@ -3,7 +3,7 @@
 import { StyleSheet, View } from 'react-native';
 import { colors } from '@/theme/tokens';
 
-export default function AppleMap() {
+export default function AppleMap(_: { full?: boolean; onTap?: () => void; onClose?: () => void }) {
   return <View style={s.frame} />;
 }
 
