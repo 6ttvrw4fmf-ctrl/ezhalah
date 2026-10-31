@@ -108,14 +108,19 @@ export default function MapDealRow() {
   );
 }
 
+const GLASS = 'rgba(255,255,255,0.42)';
+const GLASS_ON = 'rgba(241,238,244,0.7)';
+
 const s = StyleSheet.create({
-  search: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 46, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.tintLine, marginTop: 12, ...cardShadow, shadowOpacity: 0.08, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  // BLENDED into the sky, not white (owner 2026-10-31: «I don't like how it's white, blend it more into the
+  // background»): a translucent fill the clouds show through, the pill's own hairline border, no drop shadow.
+  search: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 46, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: GLASS, borderWidth: 1, borderColor: colors.tintLine, marginTop: 12 },
   searchInput: { flex: 1, fontSize: 15, color: colors.ink, paddingVertical: 0, ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}) },
   // Plain `row`: the document direction already lays Arabic out right-to-left (reversing it again flipped the row
   // back to the left — seen in the local preview).
   row: { alignItems: 'center', justifyContent: 'flex-start', gap: 8, marginTop: 12 },
-  btn: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 40, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.tintLine, ...cardShadow, shadowOpacity: 0.08, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
-  btnActive: { backgroundColor: colors.tint, borderColor: colors.primary, borderWidth: 1.5 },
+  btn: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 40, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: GLASS, borderWidth: 1, borderColor: colors.tintLine },
+  btnActive: { backgroundColor: GLASS_ON, borderColor: colors.primary, borderWidth: 1.5 },
   btnHover: { borderColor: colors.primary },
   btnPressed: { opacity: 0.9, transform: [{ scale: 0.98 }] },
   btnText: { fontSize: 14, fontWeight: '700', color: colors.ink, includeFontPadding: false },
