@@ -506,7 +506,11 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     // search that never fired. Answer at most two more questions (first option, deterministic): measured 10-23, both
     // NO-type journeys needed the EXACT TYPE tier and then one ordinary round question before the round's search fired.
     // The capture is judged exactly as before: a search that never fires still leaves it null and still fails.
-    for (let tier = 0; tier < 2 && lastSearchBody === null; tier++) {
+    // NOT on the BACK journey (2026-10-31, 🔬): R8.2.1 is «Back restores the PREVIOUS question», and this loop answered
+    // two more round questions first (features → bathrooms → age), so Back correctly returned to «age» while the check
+    // expected «features» (run 41178264864: expected=وش المميزات المهمة لك؟ got=كم عمر العقار تقريباً؟, count 14142 vs 4719).
+    // The Back journey needs the card on question TWO; its own `advanced` poll below proves the round moved there.
+    for (let tier = 0; tier < 2 && lastSearchBody === null && !backAndChange; tier++) {
       const next = await readCardUntil((s) => s.hasCard, AGENT_TURN_MS);
       const opts3 = next.hasCard
         ? await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')))
