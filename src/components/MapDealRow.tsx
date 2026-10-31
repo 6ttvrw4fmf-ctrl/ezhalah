@@ -7,7 +7,7 @@
 // takes effect at once; the popup stays open for more ticks and closes with the X or a tap outside. Design only for now: the choice is kept here and nothing on the map reads
 // it yet; the filter button opens nothing yet — pins, the list and the filter sheet come one step at a time.
 import { useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
@@ -18,6 +18,24 @@ const DEALS: { id: MapDeal; label: string }[] = [
   { id: 'rent', label: 'Rent' },
   { id: 'short', label: 'Short stays' },
 ];
+
+/** The search field above the row (owner 2026-10-31, Zillow's «Address, neighborhood, city, ZIP»): a rounded
+ *  Ezhalah field with a search glyph. Design only — it searches nothing yet. */
+export function MapSearchBar() {
+  const { t, isRTL } = useI18n();
+  return (
+    <View style={s.search}>
+      <Ionicons name="search" size={18} color={colors.muted} />
+      <TextInput
+        style={[s.searchInput, { textAlign: isRTL ? 'right' : 'left' }]}
+        placeholder={t('City, district or region')}
+        placeholderTextColor={colors.muted}
+        accessibilityLabel={t('Search')}
+        testID="map-search"
+      />
+    </View>
+  );
+}
 
 export default function MapDealRow() {
   const { t, isRTL } = useI18n();
@@ -91,6 +109,8 @@ export default function MapDealRow() {
 }
 
 const s = StyleSheet.create({
+  search: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 46, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.tintLine, marginTop: 12, ...cardShadow, shadowOpacity: 0.08, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  searchInput: { flex: 1, fontSize: 15, color: colors.ink, paddingVertical: 0, ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}) },
   // Plain `row`: the document direction already lays Arabic out right-to-left (reversing it again flipped the row
   // back to the left — seen in the local preview).
   row: { alignItems: 'center', justifyContent: 'flex-start', gap: 8, marginTop: 12 },
