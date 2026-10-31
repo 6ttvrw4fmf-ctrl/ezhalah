@@ -9,7 +9,7 @@
 // The production side is watched twice an hour by mon_detect_short_stays_pool_drift().
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { rentPool, advertisedMonthly, cardFetchPeriodOr, isShortStayTable, SHORT_STAY_PLATFORMS } from '../src/lib/rentPool.ts';
+import { rentPool, advertisedMonthly, cardFetchPeriodOr, isShortStayTable, SHORT_STAY_PLATFORMS, judgeSilentRentPeriod, SILENT_YEARLY_FROM } from '../src/lib/rentPool.ts';
 
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 let failed = 0;
@@ -25,7 +25,14 @@ check("aqarmonthly → 'monthly' pool, by table, key and the row's display name 
   rentPool('aqarmonthly_residential_listings', 'monthly') === 'monthly' && rentPool('Aqar Monthly', 'monthly') === 'monthly');
 check("any other site, source 'monthly' → 'annual' pool (×12)", rentPool('haraj_residential_listings', 'monthly') === 'annual' && rentPool('Aqar', 'monthly') === 'annual' && rentPool('wasalt', 'MONTHLY') === 'annual');
 check("any other site, source 'annual' → 'annual'", rentPool('aqar_residential_listings', 'annual') === 'annual');
-check('no published period → null, never annual (owner 2026-09-03)', rentPool('aqar_residential_listings', null) === null && rentPool('raghdan', '') === null && rentPool('Aqar', undefined) === null);
+check('no published period and no figure → null, never annual (owner 2026-09-03)', rentPool('aqar_residential_listings', null) === null && rentPool('raghdan', '') === null && rentPool('Aqar', undefined) === null);
+// A SILENT period is judged from the figure (owner 2026-09-28, built 2026-10-31 — mirror of judge_silent_rent_period_ar):
+check('silent + 180,000 warehouse (wajaf 22222374) → yearly pool', rentPool('wajaf_commercial_listings', null, 180000, 'Warehouse') === 'annual' && judgeSilentRentPeriod(180000, 'Warehouse') === 'annual');
+check('silent + 2,500 apartment → a per-month figure → yearly pool at ×12', rentPool('muhaysini_residential_listings', null, 2500, 'Apartment') === 'annual' && judgeSilentRentPeriod(2500, 'Apartment') === 'monthly-figure');
+check('silent + 9,000 (borderline) → null; silent + 2,500 on land → null; silent + 35 (placeholder) → null',
+  rentPool('aqar_residential_listings', null, 9000, 'Apartment') === null && rentPool('aqar_residential_listings', null, 2500, 'Residential Land') === null && rentPool('aqar_residential_listings', null, 35, 'Apartment') === null);
+check('the silent yearly bar is 15,000 inclusive; 14,999 is borderline', judgeSilentRentPeriod(15000, 'Residential Land') === 'annual' && judgeSilentRentPeriod(14999, 'Apartment') === null && SILENT_YEARLY_FROM === 15000);
+check('a stated period still wins over the figure', rentPool('aqar_residential_listings', 'annual', 35, 'Apartment') === 'annual' && rentPool('gathern_residential_listings', null, 180000, 'Apartment') === 'monthly');
 check('«Aqar» alone is not a short-stay site (the prefix must be the whole key)', !isShortStayTable('Aqar') && !isShortStayTable('aqar_residential_listings') && !isShortStayTable('aqarcity'));
 check('the TS platform list is exactly gathern + aqarmonthly', [...SHORT_STAY_PLATFORMS].sort().join(',') === 'aqarmonthly,gathern');
 
@@ -36,14 +43,16 @@ check('short-stay pool → no line (they show no price line)', advertisedMonthly
 check('no price / bad price → no line', advertisedMonthly('annual', 'monthly', null) === null && advertisedMonthly('annual', 'monthly', 0) === null && advertisedMonthly('annual', 'monthly', 'x') === null);
 
 // ── the card-fetch clause per pool and table ───────────────────────────────────────────────────────────────────
-check('yearly search, other site: accepts monthly AND annual source rows (+ unpriced)',
-  cardFetchPeriodOr('annual', 'haraj_residential_listings') === 'rent_period.in.(monthly,annual),price_annual.is.null');
+check('yearly search, other site: accepts monthly AND annual source rows, a silent-period row the index judged, and unpriced',
+  cardFetchPeriodOr('annual', 'haraj_residential_listings') === 'rent_period.in.(monthly,annual),rent_period.is.null,price_annual.is.null');
+mutantCaught('the 10-25 yearly card-fetch clause (no rent_period.is.null) drops a judged silent-period ad the count included',
+  'rent_period.in.(monthly,annual),price_annual.is.null' !== cardFetchPeriodOr('annual', 'haraj_residential_listings'));
 check('yearly search, short-stay table: still excluded (annual-only clause, which they never carry)',
   cardFetchPeriodOr('annual', 'gathern_residential_listings') === 'rent_period.eq.annual,price_annual.is.null');
 check('short-stays search, short-stay table: no clause; other site: monthly-only (the index never returns them)',
   cardFetchPeriodOr('monthly', 'aqarmonthly_residential_listings') === null && cardFetchPeriodOr('monthly', 'aqar_residential_listings') === 'rent_period.eq.monthly,price_annual.is.null');
 check("both: short-stay table no clause; other site in.(monthly,annual)",
-  cardFetchPeriodOr('both', 'gathern_residential_listings') === null && cardFetchPeriodOr('both', 'wasalt_residential_listings') === 'rent_period.in.(monthly,annual),price_annual.is.null');
+  cardFetchPeriodOr('both', 'gathern_residential_listings') === null && cardFetchPeriodOr('both', 'wasalt_residential_listings') === 'rent_period.in.(monthly,annual),rent_period.is.null,price_annual.is.null');
 
 // ── mutation proofs: each guard fails on its own defect ───────────────────────────────────────────────────────
 const oldPool = (_t: string, p: string | null) => (p === 'monthly' ? 'monthly' : p === 'annual' ? 'annual' : null); // PERIOD = SOURCE, the pre-2026-10-25 rule
@@ -59,7 +68,7 @@ const preview = readFileSync(join(root, 'src/components/ListingPreview.tsx'), 'u
 const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
 const index = readFileSync(join(root, 'src/app/index.tsx'), 'utf8');
 check('finalize() pools the row with rentPool(r.source, r.rent_period) and prices with the POOL',
-  /const pool = deal === 'Rent' \? rentPool\(r\.source \?\? '', r\.rent_period\) : null;/.test(remote)
+  /const pool = deal === 'Rent' \? rentPool\(r\.source \?\? '', r\.rent_period, r\.price_annual, norm\.clean\) : null;/.test(remote)
   // (2026-10-26: the figure and the site word are the SERVED ones — a cheap «yearly» home/business rent is ×12 and
   //  'monthly'; scripts/verify-cheap-yearly-is-monthly.ts executes that rule.)
   && /listingPriceString\(deal, pool, servedAnnual/.test(remote) && /rentPeriod: pool,/.test(remote) && /sourceRentPeriod: deal === 'Rent' \? servedSourcePeriod : null,/.test(remote));

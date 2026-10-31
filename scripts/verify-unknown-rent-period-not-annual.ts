@@ -95,10 +95,12 @@ const finalizeSrc = REMOTE.slice(REMOTE.indexOf('function finalize('));
 // so the pattern now allows the extra source fields (and a line break) without allowing a
 // re-inlined formatter — the two checks below still forbid that.
 // 2026-10-25 («إقامات قصيرة» pool, owner): the period handed to listingPriceString is the POOL from
-// src/lib/rentPool.ts, computed once as `pool` — still one owner, still null when the source published nothing.
+// src/lib/rentPool.ts, computed once as `pool` — still one owner. 2026-10-31 (owner): the pool also takes the figure
+// and the clean type, because a SILENT period is now judged from the price (judgeSilentRentPeriod, mirrored by the
+// index's judge_silent_rent_period_ar); a silent row with NO figure, a placeholder, or a borderline figure is still null.
 const { rentPool, cardFetchPeriodOr } = await import('../src/lib/rentPool.ts');
 check('finalize() delegates the price line to listingPriceString()',
-  /const pool = deal === 'Rent' \? rentPool\(r\.source \?\? '', r\.rent_period\) : null;/.test(finalizeSrc)
+  /const pool = deal === 'Rent' \? rentPool\(r\.source \?\? '', r\.rent_period, r\.price_annual, norm\.clean\) : null;/.test(finalizeSrc)
   // (2026-10-26: `servedAnnual` = r.price_annual, or ×12 for a cheap «yearly» home/business rent — one owner still)
   // (2026-10-30, PR 9479: the sale total comes through servedSaleFigures() — the index's meter-box rule — still one owner)
   && /const sale = deal === 'Buy' \? servedSaleFigures\(r\.price_total, r\.price_annual, r\.area_m2, r\.price_per_meter, \{ city: r\.city, commercial: kind === 'com' \}\)/.test(finalizeSrc)
@@ -124,7 +126,7 @@ check('finalize() does not default Listing.rentPeriod to annual either',
 // 2026-10-25: the yearly branch now also admits a source-MONTHLY row (it pools as yearly at ×12, owner rule) —
 // but still only a PUBLISHED period or no price at all. The clause is executed, not read.
 check('keptFiltersReq still filters ANNUAL searches to a PUBLISHED rent_period (or no price at all)',
-  cardFetchPeriodOr('annual', 'aqar_residential_listings') === 'rent_period.in.(monthly,annual),price_annual.is.null'
+  cardFetchPeriodOr('annual', 'aqar_residential_listings') === 'rent_period.in.(monthly,annual),rent_period.is.null,price_annual.is.null'
   && cardFetchPeriodOr('annual', 'gathern_residential_listings') === 'rent_period.eq.annual,price_annual.is.null'
   && /const clause = cardFetchPeriodOr\(q\.rentPeriod, tbl\);\s*\n\s*if \(clause\) req = req\.or\(clause\);/.test(REMOTE),
   'the annual branch no longer requires an explicit annual rent_period — priced NULL-period rows would be '
