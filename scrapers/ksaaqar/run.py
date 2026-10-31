@@ -767,21 +767,31 @@ def _retire_abroad(table: str, abroad: dict[str, str]) -> list[str]:
 # headline paragraph («فيلا مع شقتين. حي المصيف») and name «مطبخ» / «غرفة سائق» in the next ones, so kitchen stayed
 # NULL on ads that state it (CI re-read 39026652684). The «الوصف:» heading is dropped, never read as a fact.
 _DESC_BOX = re.compile(r'id="adt-ad-description-box"[^>]*>', re.S)
-_DESC_P = re.compile(r"<p[^>]*>(.*?)</p>", re.S)
+_DIV_EDGE = re.compile(r"<(/?)div\b", re.I)
+_DESC_H4 = re.compile(r"<h4[^>]*>.*?</h4>", re.S)
 _PROSE_SKIP = ("air_conditioner", "furnished")
 
 
 def _description_text(page_html: str) -> Optional[str]:
+    """The box's own text, however the poster's editor wrapped it. 281 of 1,352 ads stayed NULL after the
+    2026-10-31 crawl because their text is «<p><div>line</div><div>line</div>…</p>» and the old cut at the
+    first «</div>» ended the box before its first paragraph closed (12 Nov 2020 ad «شقق مفروش إيجار شهري»).
+    The box ends where ITS OWN div closes: nested divs are counted, so the sidebar after it is never read."""
     m = _DESC_BOX.search(page_html or "")
     if not m:
         return None
     box = page_html[m.end():m.end() + 20000]
-    first_p = box.find("<p")
-    if first_p < 0:
+    depth, end = 1, len(box)
+    for edge in _DIV_EDGE.finditer(box):
+        depth += -1 if edge.group(1) else 1
+        if depth == 0:
+            end = edge.start()
+            break
+    inner = _DESC_H4.sub("", box[:end])
+    if "<p" not in inner:
         return None
-    end = box.find("</div>", first_p)
-    paras = _DESC_P.findall(box[:end] if end >= 0 else box)
-    return normalize.html_block_lines("</p>".join(paras))
+    text = normalize.html_block_lines(inner)
+    return text or None
 
 
 def stated_rate(page_html: str, price: Optional[int]) -> Optional[int]:
