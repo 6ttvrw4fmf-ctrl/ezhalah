@@ -942,10 +942,13 @@ def fetch_page_labels(s: cc.Session, rec: dict) -> Optional[dict[str, Any]]:
     """The rendered page's licence table for this record, or None when the page could not be read.
     None is UNKNOWN: the fields that come only from it are not written this crawl (the db layer
     drops None, so a stored value stays). Every outcome is counted in PAGE_READS and printed."""
-    url = _clean(rec.get("url_path"))
-    if not url or urlparse(url).netloc not in ("reinvest.sa", "www.reinvest.sa"):
+    # The detail record carries no `url_path` (run 41181394867: no_page_url x952), so the page is
+    # addressed by the same canonical path the stored listing_url is built from.
+    path = listing_path(rec)
+    if not path:
         _page_tally("no_page_url")
         return None
+    url = f"{BASE}{path}"
     last = "no_response"
     for _ in range(3):
         try:

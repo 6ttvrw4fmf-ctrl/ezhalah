@@ -62,3 +62,24 @@ def test_unread_page_is_unknown_not_the_id():
 def test_no_page_means_no_labels():
     assert run.page_labels("") is None
     assert run.page_labels("<html>no table</html>") is None
+
+
+def test_page_is_addressed_without_url_path(monkeypatch):
+    """The live detail record has NO `url_path` (branch crawl 41181394867 read 0 of 952 pages:
+    no_page_url x952). The page must be addressed by listing_path(), exactly like listing_url."""
+    from scrapers.common.tests.test_reinvest_price_and_period import LAND_RENT_223
+    rec = {k: v for k, v in LAND_RENT_223.items() if k != "url_path"}
+    seen = []
+
+    class _R:
+        status_code = 200
+        text = PAGE_50
+
+    class _S:
+        def get(self, url, **_kw):
+            seen.append(url)
+            return _R()
+
+    got = run.fetch_page_labels(_S(), rec)
+    assert seen == [f"{run.BASE}{run.listing_path(rec)}"], seen
+    assert got and got["عرض الشارع"] == 50
