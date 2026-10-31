@@ -83,3 +83,11 @@ def test_page_is_addressed_without_url_path(monkeypatch):
     got = run.fetch_page_labels(_S(), rec)
     assert seen == [f"{run.BASE}{run.listing_path(rec)}"], seen
     assert got and got["عرض الشارع"] == 50
+
+
+def test_a_fraction_on_the_page_clears_the_old_value():
+    """13256919: the page prints «عرض الشارع 3.56»; the old id table had put 18 there. A fraction is
+    never rounded into the smallint column, and the stale 18 must not survive the page's answer."""
+    from scrapers.common import db
+    assert run.street_width_from_labels({"عرض الشارع": "3.56"}) is db.AUTHORITATIVE_NULL
+    assert run.street_width_from_labels({"عرض الشارع": 20}) == 20
