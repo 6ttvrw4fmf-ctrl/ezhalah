@@ -74,7 +74,7 @@ type MKMap = {
   region: { span: { latitudeDelta: number; longitudeDelta: number } };
   addOverlay: (o: unknown) => void;
   removeOverlay: (o: unknown) => void;
-  convertPointOnPageToCoordinate: (p: { x: number; y: number }) => Coord;
+  convertPointOnPageToCoordinate: (p: DOMPoint) => Coord;
   setRegionAnimated: (r: unknown, animate?: boolean) => void;
   addEventListener: (name: string, fn: (e: { overlay?: { data?: Region } }) => void) => void;
 };
@@ -350,16 +350,18 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
     if (!el || !m || !mk) return;
     let down = false; let last: { x: number; y: number } | null = null;
     const onDown = (e: PointerEvent) => {
-      e.preventDefault(); el.setPointerCapture?.(e.pointerId); down = true; last = { x: e.pageX, y: e.pageY };
+      e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch { /* a pointer the browser no longer tracks */ }
+      down = true; last = { x: e.pageX, y: e.pageY };
       if (sketchRef.current) m.removeOverlay(sketchRef.current);
-      ptsRef.current = [m.convertPointOnPageToCoordinate({ x: e.pageX, y: e.pageY })];
+      // MapKit accepts ONLY a real DOMPoint here (a plain {x,y} throws — measured live 2026-10-31: nothing drew).
+      ptsRef.current = [m.convertPointOnPageToCoordinate(new DOMPoint(e.pageX, e.pageY))];
       sketchRef.current = null; setSketch(null);
     };
     const onMove = (e: PointerEvent) => {
       if (!down || !last) return;
       if (Math.hypot(e.pageX - last.x, e.pageY - last.y) < 4) return;
       last = { x: e.pageX, y: e.pageY };
-      ptsRef.current.push(m.convertPointOnPageToCoordinate(last));
+      ptsRef.current.push(m.convertPointOnPageToCoordinate(new DOMPoint(last.x, last.y)));
       const pts = ptsRef.current;
       if (pts.length < 3) return;
       const coords = pts.map((p) => new mk.Coordinate(p.latitude, p.longitude));
