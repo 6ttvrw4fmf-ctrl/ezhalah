@@ -153,8 +153,7 @@ const AR: Record<string, string> = {
   'Smart Assistant': 'الوسيط الذكي',
   // Top-nav ModeSwitch pill's third tab (owner 2026-10-30): the Map way to search.
   'Map': 'خريطة',
-  'Map search is coming soon': 'البحث بالخريطة قريباً',
-  'Browse listings on a map of Saudi Arabia, with prices on every pin.': 'تصفح العقارات على خريطة المملكة، والسعر على كل علامة.',
+  'The map could not load': 'تعذّر تحميل الخريطة',
 
   // Home
   'Find your place': 'اعثر على مكانك',
