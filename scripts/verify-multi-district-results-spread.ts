@@ -26,6 +26,8 @@ const check = (label: string, ok: boolean, detail = '') => {
   if (!ok) failed++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${!ok && detail ? `\n      ${detail}` : ''}`);
 };
+// A mutation proof: the barrier's own predicate, applied to the broken input, must say BROKEN.
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) ${label}`, caught);
 
 type L = { cleanType?: string | null; rentPeriod?: string | null; deal?: string; photos?: string[] };
 const mkRow = (id: number, district: string): RankedRow<L> => ({
@@ -58,8 +60,12 @@ console.log('\n── 2. executed: 20 fresh النرجس ads then 20 older ال�
   // Mutation: the pre-fix scope. The 'district' hierarchy has no district key, so the fresher district
   // owns the whole front of the list — exactly what the owner saw.
   const old = orderByScope(rows, 'district', false, false, { preferPhotos: true });
-  check('(mutation) the old \'district\' scope shows 20 النرجس cards before the first الياسمين',
+  mustCatch('the old \'district\' scope shows 20 النرجس cards before the first الياسمين',
     worstStreak(old.slice(0, 20).map((r) => r.district)) === 20);
+  // The scope decision itself: a rule that keeps 'district' for two districts is the pre-fix bug.
+  const preFix = (n: number) => 'district';
+  mustCatch('a scope rule that returns \'district\' for 2+ districts is detected',
+    preFix(2) !== scopeForDistricts(2));
 }
 
 console.log('\n── 3. remote.ts asks scopeForDistricts, not its own rule ──');
