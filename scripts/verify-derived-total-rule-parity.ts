@@ -109,7 +109,7 @@ check('remote.ts passes per-metre + area into the price string',
   // (2026-10-25: the period argument is the POOL, `pool`, from src/lib/rentPool.ts — the per-metre + area args are unchanged)
   // (2026-10-30, PR 9479: the sale figures come through servedSaleFigures(), verbatim except the owner's meter-box typo rule)
   /listingPriceString\(deal, pool, servedAnnual, sale\.priceTotal,\s*\n?\s*sale\.pricePerMeter, r\.area_m2\)/.test(remote)
-  && /const sale = deal === 'Buy' \? servedSaleFigures\(r\.price_total, r\.price_annual, r\.area_m2, r\.price_per_meter\)\s*\n\s*: \{ priceTotal: r\.price_total, pricePerMeter: r\.price_per_meter \};/.test(remote));
+  && /const sale = deal === 'Buy' \? servedSaleFigures\(r\.price_total, r\.price_annual, r\.area_m2, r\.price_per_meter, \{ city: r\.city, commercial: kind === 'com' \}\)\s*\n\s*: \{ priceTotal: r\.price_total, pricePerMeter: r\.price_per_meter \};/.test(remote));
 check('remote.ts marks the row as derived for the card',
   remote.includes('priceIsDerived'));
 
