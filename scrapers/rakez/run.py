@@ -62,9 +62,16 @@ from scrapers.common.http_liveness import decide  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
     _REGION_AR_FOR, catalog_district, city_ar_for, find_district_in_text, norm_ar, only_city_with_district, to_catalog,
 )
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 SITE = "https://rakez.sa"
 REST = f"{SITE}/wp-json/wp/v2"
+# THE MAP PIN LIVES ON THE SITE'S MAP PAGE, NOT ON THE PROJECT PAGE (owner 2026-10-30: 3,660 ads, 0 pins).
+# /ar/project/<id>/ draws no map, but /ar/projects-map/ calls this feed: one JSON with every mapped
+# project's `id, permalink, lat, lng, city_path, status`. `?lang=en` keys it by the ENGLISH post id —
+# the id every unit names in `unit_project` — while `?lang=ar` keys the same pins by the Arabic twin
+# (measured 2026-10-30 on 27454/66800/75805: identical pairs). A unit's pin is its project's pin.
+MAP_FEED = f"{SITE}/ar/wp-json/hs-map/v1/projects?lang=en"
 PER_PAGE = 100
 # NO User-Agent HERE, deliberately. curl_cffi's `impersonate=` sets a COMPLETE, internally
 # consistent browser header set at the C layer (UA, sec-ch-ua, Accept, …) to match the TLS/JA3
@@ -244,6 +251,36 @@ def fetch_projects(s: cc.Session, lang: str = "") -> dict[int, dict]:
     extra = "&_embed=wp:term,wp:featuredmedia" + (f"&lang={lang}" if lang else "")
     return {p["id"]: p for p in _paged(s, "project", f"project[{lang or 'en'}]", extra)
             if isinstance(p.get("id"), int)}
+
+
+def pins_from_feed(body: Any) -> dict[int, dict]:
+    """{english project id: {latitude, longitude}} from the map feed's body; a project whose pair is
+    missing or outside Saudi Arabia maps to {} (sa_pin), never to a guess."""
+    projects = body.get("projects") if isinstance(body, dict) else body
+    if not isinstance(projects, list):
+        return {}
+    return {p["id"]: pin_dict(p.get("lat"), p.get("lng"))
+            for p in projects if isinstance(p, dict) and isinstance(p.get("id"), int)}
+
+
+def fetch_project_pins(s: cc.Session) -> Optional[dict[int, dict]]:
+    """The site's map feed, once per crawl. None when it could not be read: then no unit carries a pin
+    OR a `pin_absent` this run, so keep_stored_pin keeps yesterday's pair (a failed fetch is not the
+    source saying «no pin»)."""
+    for attempt in range(3):
+        try:
+            r = s.get(MAP_FEED, timeout=60)
+            if r.status_code == 200:
+                return pins_from_feed(r.json())
+            LAST_FETCH_NOTE_PINS[0] = f"map feed HTTP {r.status_code}"
+        except Exception as e:  # noqa: BLE001
+            LAST_FETCH_NOTE_PINS[0] = f"map feed raised {type(e).__name__}: {str(e)[:80]}"
+        if attempt < 2:
+            time.sleep(3 * (attempt + 1))
+    return None
+
+
+LAST_FETCH_NOTE_PINS = ["map feed not attempted"]
 
 
 def fetch_city_terms(s: cc.Session) -> dict[int, dict]:
@@ -505,7 +542,11 @@ def _project_exclusion(en_project: Optional[dict], ar_project: Optional[dict]) -
 
 
 def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
-             tree: dict[int, dict]) -> tuple[Optional[dict], str]:
+             tree: dict[int, dict], pins: Optional[dict[int, dict]] = None) -> tuple[Optional[dict], str]:
+    """`pins` is the map feed read this crawl (fetch_project_pins): the unit inherits its project's pin,
+    marked `pin_scope: project` (one pair shared by every unit of the building is the source's truth,
+    not a default pin — the pin-district loader keeps treating a shared pair as shared). A project the
+    read feed does not map writes `pin_absent: true`; a feed that was not read (None) writes neither."""
     uid = unit.get("id")
     acf = unit.get("acf") or {}
     if not isinstance(uid, int) or not isinstance(acf, dict):
@@ -543,6 +584,7 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
 
     category = ("Residential" if normalize.category_for_type(property_type) == "Residential"
                 else "Commercial")
+    pin = (pins.get(en_id) or {}) if pins is not None else None
 
     row = {
         "ad_number": f"RKZ{uid}",
@@ -575,6 +617,8 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
             "floor_raw": _clean(acf.get("floor")),
             "features_ar": features or None,
             "source_unit_status": acf.get("unit_status"),
+            **({**pin, "pin_scope": "project"} if pin else {}),
+            **({"pin_absent": True} if pin == {} else {}),
         }.items() if v not in (None, "", [], {})},
     }
     # rakez publishes NO structured amenity field per unit, but its own description lists them («مطبخ»,
@@ -792,13 +836,25 @@ def main() -> int:
                 f"the Arabic bridge resolved 0 of {len(needed)} projects — REST answered but "
                 f"/ar/project/<id>/ did not, so every unit is untypeable and unlocatable")
 
+        # The pins, from the site's map feed (module docstring of MAP_FEED). Listed, never guessed:
+        # a project the feed does not map stays NULL and is named in the log.
+        pins = fetch_project_pins(s)
+        if pins is None:
+            print(f"  ⚠ {LAST_FETCH_NOTE_PINS[0]} — no pin written this run; stored pins are kept")
+            pinned, unpinned = 0, []
+        else:
+            unpinned = [i for i in needed if not pins.get(i)]
+            pinned = len(needed) - len(unpinned)
+            print(f"  map feed: {len(pins)} mapped projects; pin for {pinned}/{len(needed)} projects units reference"
+                  + (f"; not on the map: {unpinned[:50]}" if unpinned else ""))
+
         for u in units:
             acf = u.get("acf") or {}
             if _unit_status(acf) != INGESTIBLE_UNIT_STATUS:
                 skipped_status += 1
                 continue
             en_id = acf.get("unit_project")
-            row, cat = map_unit(u, en_projects.get(en_id), bridge.get(en_id), tree)
+            row, cat = map_unit(u, en_projects.get(en_id), bridge.get(en_id), tree, pins)
             if not row:
                 skipped_project += 1
                 continue
@@ -845,7 +901,8 @@ def main() -> int:
                              rows_upserted=len(res_rows) + len(com_rows),
                              notes=(f"pruned={pruned} superseded={superseded} "
                                     f"not_available={skipped_status} excluded={skipped_project} "
-                                    f"bridged={bridged}/{len(needed)}"
+                                    f"bridged={bridged}/{len(needed)} "
+                                    f"pins={'feed unread' if pins is None else f'{pinned}/{len(needed)} projects'}"
                                     + (f" INCOMPLETE: {'; '.join(INCOMPLETE)}" if INCOMPLETE else ""))[:300],
                              degraded=bool(INCOMPLETE),
                              check_tables=["rakez_residential_listings",
