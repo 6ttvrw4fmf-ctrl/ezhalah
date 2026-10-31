@@ -190,10 +190,9 @@ export default function AppleMap() {
       if (gone) return;
       const el = hostRef.current as unknown as HTMLElement | null;
       if (!el) return;
-      // Apple's own chrome (the  Maps mark, Legal, zoom and compass) follows the page direction, so Arabic mirrored
-      // it. Pinned left-to-right: the Apple mark bottom-LEFT in both languages (owner 2026-10-31: «no matter English
-      // or Arabic, the Apple Maps thing is always on the left»). The map's labels still follow the app language.
-      el.setAttribute('dir', 'ltr');
+      // Apple's  Maps mark and «معلومات قانونية» are drawn INSIDE the map image, bottom-right in Arabic, and no
+      // page direction or style moves them (measured live 2026-10-31: no DOM node carries them). Our corner controls
+      // keep clear of that strip instead.
       initOnce(mk, locale);
       mk.addEventListener('error', onError);
       map = new mk.Map(el, {
@@ -305,7 +304,7 @@ export default function AppleMap() {
           <Text style={s.wholeT}>{t('Draw')}</Text>
         </Pressable>
       ) : null}
-      {/* Layers, in the bottom-right corner (Apple's zoom control is off so the corner is ours). */}
+      {/* Layers, bottom-right, lifted just above Apple's mark strip (Apple's zoom control is off so nothing else is there). */}
       {!failed ? (
         <Pressable style={s.layersBtn} onPress={() => setLayersOpen((o) => !o)} accessibilityRole="button" accessibilityLabel={t('Map layers')} testID="map-layers-btn">
           <Ionicons name="layers-outline" size={20} color={colors.ink} />
@@ -339,11 +338,11 @@ const s = StyleSheet.create({
     paddingHorizontal: 14, height: 36, borderWidth: 1, borderColor: colors.tintLine,
   },
   layersBtn: {
-    position: 'absolute', right: 12, bottom: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface,
+    position: 'absolute', right: 12, bottom: 44, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
   },
   layersCard: {
-    position: 'absolute', right: 12, bottom: 58, minWidth: 160, backgroundColor: colors.surface, borderRadius: 14, padding: 6,
+    position: 'absolute', right: 12, bottom: 90, minWidth: 160, backgroundColor: colors.surface, borderRadius: 14, padding: 6,
     borderWidth: 1, borderColor: colors.tintLine,
   },
   layerRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10 },
