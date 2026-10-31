@@ -513,13 +513,17 @@ def street_width_from_labels(labels: Optional[dict[str, Any]]):
 
     Page not read → None (unknown; the db layer keeps whatever is stored). Page read and the table
     says «-» or has no such row → AUTHORITATIVE_NULL: the source itself settled it, so a value the old
-    id table put there is cleared. A number that is not one clean width → None (never guessed)."""
+    id table put there is cleared. A figure that is not one whole width («3.56») → AUTHORITATIVE_NULL
+    too: never rounded, and the stale id value does not survive it."""
     if not isinstance(labels, dict):
         return None
     raw = labels.get("عرض الشارع")
     if raw is None or str(raw).strip() in ("", "-"):
         return db.AUTHORITATIVE_NULL
-    return normalize.one_street_width(raw)
+    # A page that states a width we cannot store as one whole number («3.56», ad 13256919) has
+    # still SPOKEN: whatever the old id table put in the column is not what it says, so clear it.
+    w = normalize.one_street_width(raw)
+    return db.AUTHORITATIVE_NULL if w is None else w
 
 
 def _strip_marks(s: Optional[str]) -> Optional[str]:
