@@ -869,7 +869,8 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
         elif is_sanadak(url) and sanadak is not None:
             page = sanadak(url)
         else:
-            forget_visits(url)
+            _n = forget_visits(url)
+            print(f'    forgot {_n} cookie(s), jar now {len(list(http.session().cookies.jar))}', flush=True)
             try:
                 status, body = probe(url)
             except Exception:  # noqa: BLE001
@@ -917,6 +918,16 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
                     row["find_missed_ids"].append(key)
                     # What the customer asked for, so a miss names its field in the run log (keys only, no PII).
                     print(f"  miss {key} asked {answers}", flush=True)
+                    if True:  # DIAGNOSTIC BRANCH ONLY — never merged
+                        allp = [set(page_lines(pg)) for _, _, _, pg in read]
+                        for c in answers:
+                            kw = BOOL_KW.get(c)
+                            for x in ad_lines:
+                                m = re.search(kw, x) if kw else None
+                                if m:
+                                    on = sum(1 for p in allp if x in p)
+                                    snip = re.sub(r"\d{9,}", "<num>", x[max(0, m.start() - 60):m.end() + 40])
+                                    print(f"    why {c}: «{snip}» on {on}/{len(allp)} pages", flush=True)
             same = parity(anon, params)
             if same is not None:
                 row["parity_tried"] += 1
