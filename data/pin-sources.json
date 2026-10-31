@@ -875,10 +875,10 @@
     },
     "shatri": {
       "pin_source": "ad-page",
-      "floor_pct": 90,
+      "floor_pct": 75,
       "proof_url": "https://shatrirealestate.com/property/apartments-sale-alsafa-jeddah-3-rooms/",
-      "proven_on": "2026-10-30",
-      "note": "BUG fixed #9508: Houzez data-map='{latitude, longitude}' + JSON-LD geo on the ad PAGE (not in the REST post); one rendered ad read (the other timed out). Floor raised to 90 after the 2026-10-31 re-crawl + 02:22 sync. Served 0/50 (0.0%) on 2026-10-30 before today's fixes."
+      "proven_on": "2026-10-31",
+      "note": "BUG fixed #9508: Houzez data-map='{latitude, longitude}' + JSON-LD geo on the ad PAGE (not in the REST post). Re-crawl 2026-10-31: 49/50 raw; the 03:15 default-pin strip then registered 21.53151,39.20492 (the office, 5 ads across 5 districts) and removed it — honest served coverage 39/50 (78 %). Floor 75 (migration 20261031035557), not 90: that floor was measured before the strip had seen the site, never true."
     },
     "shmoualshmal": {
       "pin_source": "none",

@@ -103,7 +103,7 @@ Measured in `search_listings_ar` (production_ready) after the 02:22 UTC sync on 
 | daryusuf | 258 | 0 (0 %) | **253 (98.1 %)** | |
 | hajer | 124 | 0 (0 %) | **116 (93.5 %)** | additional_info is now `{rows, latitude, longitude}` (the legacy bare list could never carry a pin) |
 | awal | 51 | 0 (0 %) | **48 (94.1 %)** | |
-| shatri | 50 | 0 (0 %) | **49 (98.0 %)** | |
+| shatri | 50 | 0 (0 %) | **39 (78.0 %)** | 49 raw after the re-crawl; the 03:15 default-pin strip registered the office point 21.53151,39.20492 (5 ads, 5 districts) and removed it — the robot working; floor set to 75 by migration 20261031035557 |
 | mustqr | 1,345 | 0 (0 %) | 1 (0.1 %) | partial at source; the brokers' links are goo.gl short links and Google answers the runner's hop with a 200 script page — the stored value is honest, the gain needs the browser hop lane |
 | wslnaa | 61 | 17 (27.9 %) | 17 (27.9 %) | same hop block on the API's short links; the stored commercial pins stay |
 
@@ -112,7 +112,7 @@ Measured in `search_listings_ar` (production_ready) after the 02:22 UTC sync on 
 **The lock is live:** migration `20261031023715_pin_source_declared_and_detector` applied 02:37 UTC — 149 declared rows,
 `pin_coverage_by_platform()` reports 0 platforms below floor, `mon_detect_pin_coverage_below_floor()` rostered (returned 0
 on its first run, not orphaned). Floors of the six re-crawled sites were raised in the same change (compoundin, alkhaas,
-hajer 85 · daryusuf, shatri 90 · awal 85).
+hajer 85 · daryusuf 90 · awal 85; shatri 75 after the default-pin strip, migration 20261031035557).
 
 ## Still open
 
