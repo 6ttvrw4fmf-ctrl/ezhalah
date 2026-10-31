@@ -426,9 +426,13 @@ def test_the_capture_is_an_allowlist_not_a_blocklist():
     """The guarantee is structural. Whatever unknown keys a future payload carries, only the named
     ones are copied — so a new contact field cannot ride in on a redactor that has not heard of it."""
     row = _row({**UNIT_726, "brand_new_phone_field": "0555554444", "whatever_else": {"x": 1}})
+    cap = {k: v for k, v in row["source_capture"].items() if k != "source_item"}
     assert "brand_new_phone_field" not in json.dumps(row["source_capture"], ensure_ascii=False)
-    assert "whatever_else" not in json.dumps(row["source_capture"], ensure_ascii=False)
-    assert set(row["source_capture"]) - {"schema"} <= set(S._CAPTURE_KEYS)
+    # 2026-10-13 owner: every site also keeps its source record's FACTS (scrapers/common/capture.py). An unknown field's
+    # NAME is listed under source_item.unkept_keys for review; its VALUE ({"x": 1}) and any contact field never are.
+    assert '"x": 1' not in json.dumps(row["source_capture"], ensure_ascii=False)
+    assert set(cap) - {"schema", "item_schema"} <= set(S._CAPTURE_KEYS)
+
 
 
 # ── 5. THE TYPE MAP ──────────────────────────────────────────────────────────────────────────────
