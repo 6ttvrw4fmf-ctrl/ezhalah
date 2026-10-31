@@ -33,7 +33,11 @@ import { useI18n } from '@/i18n';
 const MAPKIT_SRC = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js';
 const TOKEN_URL = '/api/mapkit-token';
 const REGIONS_URL = '/ksa-regions.json';
-const FETCH_TIMEOUT_MS = 8000;
+// Each request gets a few tries with a growing wait before it counts as failed. Measured on production (first
+// visit after the 2026-10-31 deploy): the token and the regions file both timed out at 8 s once, the next visit
+// answered in ~150 ms — and MapKit never retries a token, so one slow first answer left the map blank for the
+// whole session. A retry turns that into a short delay.
+const FETCH_TIMEOUTS_MS = [8000, 12000, 15000];
 
 // The Kingdom, whole, on first open, with its neighbours around it: centre near the country's middle, span wide
 // enough for Tabuk to Jazan and Jeddah to Dammam with Yemen, Oman, the Gulf and Jordan showing at the edges.
@@ -105,8 +109,20 @@ function loadMapKit(): Promise<MapKit> {
   return scriptLoad;
 }
 
+/** `fetch` with a bounded wait, tried again (longer wait) on a timeout or a network failure; a definite answer
+ *  from the server (any status) is returned at once. */
+async function fetchWithRetry(url: string, init: RequestInit = {}): Promise<Response> {
+  let last: unknown;
+  for (const ms of FETCH_TIMEOUTS_MS) {
+    try {
+      return await fetch(url, { ...init, signal: AbortSignal.timeout(ms) });
+    } catch (e) { last = e; }
+  }
+  throw last instanceof Error ? last : new Error(`fetch failed: ${url}`);
+}
+
 async function fetchToken(): Promise<string> {
-  const r = await fetch(TOKEN_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), cache: 'no-store' });
+  const r = await fetchWithRetry(TOKEN_URL, { cache: 'no-store' });
   if (!r.ok) throw new Error(`token ${r.status}`);
   const j = (await r.json()) as { token?: unknown };
   if (typeof j.token !== 'string' || !j.token) throw new Error('token missing');
@@ -117,7 +133,7 @@ let regionsLoad: Promise<Region[]> | null = null;
 /** The 13 regions, fetched once per page. A failed fetch is an error, never an empty list. */
 function loadRegions(): Promise<Region[]> {
   if (regionsLoad) return regionsLoad;
-  regionsLoad = fetch(REGIONS_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+  regionsLoad = fetchWithRetry(REGIONS_URL)
     .then(async (r) => {
       if (!r.ok) throw new Error(`regions ${r.status}`);
       const j = (await r.json()) as Region[];
@@ -240,12 +256,17 @@ export default function AppleMap() {
           if (chosen) { chosen.style.fillOpacity = CHOSEN.fillOpacity; chosen.style.lineWidth = CHOSEN.lineWidth; }
           map.setRegionAnimated(regionView(mk, r), true);
         });
-        // Names only while zoomed out; the «whole Kingdom» button only while zoomed in.
+        // Names only while zoomed out; the «whole Kingdom» button only while zoomed in — "in" measured against the
+        // home view MapKit actually settled on (it widens the requested span to the box's shape, so comparing with
+        // the requested numbers left the button showing after «كل المملكة» — seen on production 2026-10-31).
+        let homeLatDelta = 0;
         const onRegion = () => {
           if (!map) return;
-          const wide = map.region.span.latitudeDelta >= LABELS_HIDE_BELOW_SPAN;
+          const lat = map.region.span.latitudeDelta;
+          if (!homeLatDelta) homeLatDelta = lat;
+          const wide = lat >= LABELS_HIDE_BELOW_SPAN;
           labels.forEach((a) => { a.visible = wide; });
-          setZoomed(map.region.span.latitudeDelta < KSA_SPAN_PORTRAIT.latitudeDelta * 0.7);
+          setZoomed(lat < homeLatDelta * 0.85);
         };
         map.addEventListener('region-change-end', onRegion);
         onRegion();
