@@ -18,7 +18,7 @@ import { dedupePhotoUrls, photoDisplayUrl } from '@/lib/photoUrl';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
 import { listingDiscountFrom } from '@/lib/listingDisplay';
 import { servedSaleFigures } from '@/lib/meterBoxPrice';
-import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
+import { orderByScope, scopeForDistricts, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import { rotationSeed } from '@/lib/rotationSeed';
 import { truncateGlyphs } from '@/lib/typedReveal';
 import saLocations from './sa-locations.json';
@@ -1582,7 +1582,8 @@ function scopeOf(q: SearchQuery, cities: string[] | null, countryWide: boolean):
   // all of them → diversify by city like a region. (user: search all matches, balanced.)
   if (lm?.ambiguous && lm.cities && lm.cities.length > 1) return 'region';
   if (cities && cities.length > 1) return 'region';
-  if (q.districts && q.districts.length) return 'district';
+  // 2+ districts spread across the chosen districts (owner 2026-10-31); 1 district stays 'district'.
+  if (q.districts && q.districts.length) return scopeForDistricts(q.districts.length);
   return 'city';
 }
 
