@@ -14,6 +14,7 @@
 //   (run from .github/workflows/af-live-truth-check.yml — deliberately NOT in `npm test`, same
 //    precedent as every other live check here: `npm test` is hermetic and runs in seconds.)
 
+import { isOurRpcUrl } from './lib/frontDoorHosts.ts';
 import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
@@ -31,8 +32,8 @@ const RPC_ORIGIN = new URL(REST_URL).origin;
 // THE FRONT DOOR (src/lib/supabase.ts, on since 2026-10-21): on the real site the app's RPCs go to ${BASE}/sb/rest/v1/
 // — our own proxy to the same project — not to supabase.co. Filtering on RPC_ORIGIN alone saw «0 ok / 0 failed …
 // none issued» (af-live-truth run 39940963632) on a round whose probes really ran. Both prefixes are our backend.
-const RPC_PREFIXES = [`${RPC_ORIGIN}/rest/v1/rpc/`, `${BASE}/sb/rest/v1/rpc/`];
-const isOurRpc = (u: string) => RPC_PREFIXES.some((p) => u.startsWith(p));
+// Any host we serve (ezhalah.com since 10-26), not only BASE: scripts/lib/frontDoorHosts.ts.
+const isOurRpc = (u: string) => isOurRpcUrl(u, RPC_ORIGIN);
 
 // Journeys are ARABIC free text plus the answers the agent's disambiguation needs — exactly what a
 // real user types. A city that is also a region needs «مدينة …»; «تقصد المدينة كاملة…» needs
