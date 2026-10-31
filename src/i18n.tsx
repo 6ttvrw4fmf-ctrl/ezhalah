@@ -288,7 +288,7 @@ const AR: Record<string, string> = {
   'Rent': 'إيجار',
   'Buy': 'شراء',
   'All': 'الكل',
-  'City, district or region': 'مدينة، حي أو منطقة',
+  'Region, city, landmark or district': 'منطقة، مدينة، معلم أو حي',
   ', ': '، ',
   'Transaction': 'نوع الصفقة',
   'to rent': 'للإيجار',

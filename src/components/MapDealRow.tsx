@@ -28,7 +28,7 @@ export function MapSearchBar() {
       <Ionicons name="search" size={18} color={colors.muted} />
       <TextInput
         style={[s.searchInput, { textAlign: isRTL ? 'right' : 'left' }]}
-        placeholder={t('City, district or region')}
+        placeholder={t('Region, city, landmark or district')}
         placeholderTextColor={colors.muted}
         accessibilityLabel={t('Search')}
         testID="map-search"
