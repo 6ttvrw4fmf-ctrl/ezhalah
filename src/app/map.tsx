@@ -17,6 +17,7 @@ import AppleMap from '@/components/AppleMap';
 import HeroBackground from '@/components/HeroBackground';
 import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
 import ShareSheet from '@/components/ShareSheet';
+import TopBarLanguage from '@/components/TopBarLanguage';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
 import { useI18n } from '@/i18n';
@@ -91,6 +92,8 @@ export default function MapRoute() {
               <Text style={s.topSignInText}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
             </Pressable>
           )}
+          {/* Language for a guest — between sign-in and share, all three screens (owner 2026-10-31). */}
+          <TopBarLanguage />
           <Pressable
             style={({ pressed, hovered }: any) => [s.shareBtn, hovered && s.shareBtnHover, pressed && s.shareBtnPressed]}
             hitSlop={8}
@@ -125,7 +128,7 @@ const s = StyleSheet.create({
   top: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 4, zIndex: 2 },
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  topBrand: { fontSize: 18, fontWeight: '800', color: colors.ink },
+  topBrand: { fontSize: 22, fontWeight: '800', color: colors.ink }, // same size as الوسيط الذكي's title (owner 2026-10-31: «ezhalah must all be the same size, big»)
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginStart: 'auto' },
   topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
