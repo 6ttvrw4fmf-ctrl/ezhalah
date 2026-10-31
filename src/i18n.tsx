@@ -154,6 +154,7 @@ const AR: Record<string, string> = {
   // Top-nav ModeSwitch pill's third tab (owner 2026-10-30): the Map way to search.
   'Map': 'خريطة',
   'The map could not load': 'تعذّر تحميل الخريطة',
+  'Whole Kingdom': 'كل المملكة',
 
   // Home
   'Find your place': 'اعثر على مكانك',

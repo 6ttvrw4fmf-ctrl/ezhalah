@@ -12,7 +12,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ModeSwitch from '@/components/ModeSwitch';
 import AppleMap from '@/components/AppleMap';
-import { colors, space } from '@/theme/tokens';
+import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 
 export default function MapRoute() {
@@ -33,7 +33,7 @@ export default function MapRoute() {
 }
 
 const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.paper, paddingHorizontal: space.screenSide },
+  screen: { flex: 1, backgroundColor: colors.paper, paddingHorizontal: 10 },
   modeWrap: { alignSelf: 'center', marginTop: 8 },
-  body: { flex: 1, marginTop: 14 },
+  body: { flex: 1, marginTop: 12 },
 });
