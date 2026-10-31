@@ -93,3 +93,9 @@ def test_score_site_forgets_before_every_probe():
     import inspect
     src = inspect.getsource(a.score_site)
     assert src.index("forget_visits(url)") < src.index("status, body = probe(url)")
+
+
+def test_three_to_five_pages_keep_the_every_page_rule():
+    for n in (3, 4, 5):
+        pages = _sample(n)
+        assert a.template_lines(pages) == set.intersection(*[set(p) for p in pages])

@@ -295,7 +295,10 @@ def template_lines(pages: list[list[str]]) -> set[str]:
     readable = [set(p) for p in pages if p]
     if len(readable) < TEMPLATE_MIN_PAGES:
         return set()
-    need = max(TEMPLATE_MIN_PAGES, math.ceil(TEMPLATE_SHARE * len(readable)))
+    if len(readable) < 2 * TEMPLATE_MIN_PAGES:
+        # 3 to 5 pages: «half» would be 2 or 3 pages, too few to tell a template from two ads that agree. Every page.
+        return set.intersection(*readable)
+    need = math.ceil(TEMPLATE_SHARE * len(readable))        # 6+ pages: at least 3, the nightly 10-page sample 5
     seen: dict[str, int] = defaultdict(int)
     for p in readable:
         for x in p:
