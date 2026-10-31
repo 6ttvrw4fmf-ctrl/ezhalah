@@ -52,6 +52,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize
+from scrapers.common.page_pin import pin_from_page, short_maps_link
 from scrapers.common.pii import redact_pii
 
 SITE = "https://mustqr.sa"
@@ -767,6 +768,17 @@ def map_listing(p: dict, n_to_region: dict[str, str]) -> tuple[Optional[dict], s
             extras["lat"] = float(p["lat"]); extras["lng"] = float(p["lng"])
         except (TypeError, ValueError):
             pass
+    # THE PIN IS IN THE AD'S OWN TEXT, WHEN THE BROKER PASTED ONE (owner 2026-10-30: 1,340 ads, 0 pins). The API's
+    # lat/lng columns are restricted to the office (above), the page's JSON-LD «geo» is the office itself
+    # (27.5114,41.7208 on every ad — never read), and the ad text carries a Google Maps link on a minority of ads
+    # (14 descriptions + some raw_text bodies, 2026-10-30). ad_body() drops that link from the stored text, so the
+    # pin is read BEFORE the drop: here for a description, in ad_texts() for a raw_text body. No link anywhere →
+    # pin_absent (the text was read); a link whose hop failed → neither key (keep_stored_pin keeps yesterday's).
+    pin, linked = _ad_pin(p)
+    if pin:
+        extras.update(pin)
+    elif not linked:
+        extras["pin_absent"] = True
     if p.get("created_at"):
         extras["mustqr_created_at"] = p["created_at"]
     if p.get("updated_at"):
@@ -906,10 +918,12 @@ def ad_body(raw: Optional[str]) -> Optional[str]:
 AD_TEXT_CHUNK = 100
 
 
-def ad_texts(s: cc.Session, jwt: str, ids: list[int]) -> dict[int, str]:
+def ad_texts(s: cc.Session, jwt: str, ids: list[int], pins: Optional[dict] = None) -> dict[int, str]:
     """{id: ad_body(raw_text)} for `ids` (rows whose own `description` is empty). raw_text is read only
     here, reduced at once and dropped. A failed or refused call is «not known»: those ids are simply
-    absent, so their description stays NULL — never an empty string, never a crash of the crawl."""
+    absent, so their description stays NULL — never an empty string, never a crash of the crawl.
+    `pins`, when given, is filled with {id: (pin_from_page(raw_text), the text carried a Maps link)} —
+    the ad's own map link, read before ad_body() drops it (map_listing reads it as `_ad_pin`)."""
     out: dict[int, str] = {}
     for i in range(0, len(ids), AD_TEXT_CHUNK):
         chunk = ",".join(str(int(x)) for x in ids[i:i + AD_TEXT_CHUNK])
@@ -921,13 +935,25 @@ def ad_texts(s: cc.Session, jwt: str, ids: list[int]) -> dict[int, str]:
                 print(f"  ad_texts: HTTP {r.status_code} — {r.text[:160]!r}", flush=True)
                 continue
             for row in r.json():
-                body = ad_body(row.get("raw_text"))
+                raw = row.get("raw_text")
+                if pins is not None and isinstance(raw, str) and row.get("id") is not None:
+                    pins[int(row["id"])] = (pin_from_page(raw), bool(_MAP_LINK_RE.search(raw) or short_maps_link(raw)))
+                body = ad_body(raw)
                 if body and row.get("id") is not None:
                     out[int(row["id"])] = body
         except Exception as e:  # noqa: BLE001
             print(f"  ad_texts: {type(e).__name__}: {str(e)[:160]}", flush=True)
             continue
     return out
+
+
+def _ad_pin(p: dict) -> tuple[dict, bool]:
+    """(the ad's own map link as a pin, the text carried a link): from the raw_text body ad_texts() read
+    (`_ad_pin`, an in-memory annotation like `_ad_text`, not a column), else from the description."""
+    if p.get("_ad_pin") is not None:
+        return p["_ad_pin"]
+    desc_raw = p.get("description") if isinstance(p.get("description"), str) else ""
+    return pin_from_page(desc_raw), bool(_MAP_LINK_RE.search(desc_raw) or short_maps_link(desc_raw))
 
 
 def _description(p: dict) -> Optional[str]:
@@ -1028,10 +1054,14 @@ def main() -> int:
             p["_rate_stated"] = True
     print(f"  prices the ad's own text states per metre (server-side match): {len(rate_ids)}")
     blank = [int(p["id"]) for p in raw if p.get("id") is not None and not _redact(p.get("description"))]
-    texts = ad_texts(s, jwt, blank)
+    pins: dict[int, tuple] = {}
+    texts = ad_texts(s, jwt, blank, pins)
     for p in raw:
         if p.get("id") in texts:
             p["_ad_text"] = texts[p["id"]]
+        if p.get("id") in pins:
+            p["_ad_pin"] = pins[p["id"]]
+    print(f"  map links in ad bodies: {sum(1 for v in pins.values() if v[1])}, pins read {sum(1 for v in pins.values() if v[0])}")
     print(f"  ad text from the ad body for rows with no description: {len(texts)}/{len(blank)}")
 
     res: list[dict] = []
