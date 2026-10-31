@@ -139,6 +139,15 @@ SHORT_STAY_TYPE_MAP = {
 }
 SHORT_STAYS = os.environ.get("GATHERN_SHORT_STAYS", "").strip() == "1"
 
+# The site's OWN Arabic name for each unit_type_id (the catalogue labels above). unit_type_ar feeds the
+# Advanced Filter's «نوع الوحدة» answer (استديو / شقق مخدومة / شقة) through sync_gathern_native_attrs.
+# Measured 2026-10-30: the list feed's event_data.unit_type_ar and chalet_category_text were gone on
+# 15,095 of 15,131 live rows, so Riyadh's «استديو» option read 1 where August read 3,719 — while
+# unit_type_id, the same source fact, was still on every item. The text wins when present; the id's
+# label is the fallback, never a guess (an unknown id stays NULL).
+UNIT_TYPE_AR = {6: "شقة", 9: "استديو", 11: "شقق مخدومة", 7: "فيلا", 8: "غرفة",
+                2: "شاليه", 3: "استراحة", 5: "مخيم"}
+
 # Gathern city label (English, from event_data.city_en / cities[].name_en) → canonical Ezhalah city.
 # Gathern's labels differ from Aqar's slugs, so we map the ones map_city() can't already resolve.
 CITY_EN_MAP = {
@@ -1083,7 +1092,7 @@ def map_listing(it: dict) -> Optional[dict]:
     # 22,711 carry description text, 462 say «مفروش», and ZERO say «غير مفروش» — the platform
     # carries no unfurnished units. (Deriving `furnished` from that text would NULL 29,384 of them
     # to recover 462, which is why text-derivation was considered and dropped.)
-    type_ar = ev.get("unit_type_ar") or it.get("chalet_category_text") or ""
+    type_ar = ev.get("unit_type_ar") or UNIT_TYPE_AR.get(type_id) or it.get("chalet_category_text") or ""
     if title:
         title = f"{title} — {type_ar} مفروشة للإيجار الشهري".strip(" —") if type_ar else title
 
