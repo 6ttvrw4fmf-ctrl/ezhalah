@@ -508,13 +508,17 @@ def _labels_at(seg: str) -> Optional[dict[str, Any]]:
     return None
 
 
-def street_width_from_labels(labels: Optional[dict[str, Any]]) -> Optional[int]:
-    """«عرض الشارع» as the page's own licence table states it. «-», absent or unreadable → None."""
+def street_width_from_labels(labels: Optional[dict[str, Any]]):
+    """«عرض الشارع» as the page's own licence table states it.
+
+    Page not read → None (unknown; the db layer keeps whatever is stored). Page read and the table
+    says «-» or has no such row → AUTHORITATIVE_NULL: the source itself settled it, so a value the old
+    id table put there is cleared. A number that is not one clean width → None (never guessed)."""
     if not isinstance(labels, dict):
         return None
     raw = labels.get("عرض الشارع")
     if raw is None or str(raw).strip() in ("", "-"):
-        return None
+        return db.AUTHORITATIVE_NULL
     return normalize.one_street_width(raw)
 
 
@@ -925,21 +929,40 @@ def fetch_detail(s: cc.Session, slug: str) -> Optional[dict]:
     return data
 
 
+PAGE_READS: dict[str, int] = {}
+_PAGE_LOCK = threading.Lock()
+
+
+def _page_tally(why: str) -> None:
+    with _PAGE_LOCK:
+        PAGE_READS[why] = PAGE_READS.get(why, 0) + 1
+
+
 def fetch_page_labels(s: cc.Session, rec: dict) -> Optional[dict[str, Any]]:
     """The rendered page's licence table for this record, or None when the page could not be read.
-    None is UNKNOWN: the fields that come only from it stay NULL for this crawl."""
+    None is UNKNOWN: the fields that come only from it are not written this crawl (the db layer
+    drops None, so a stored value stays). Every outcome is counted in PAGE_READS and printed."""
     url = _clean(rec.get("url_path"))
     if not url or urlparse(url).netloc not in ("reinvest.sa", "www.reinvest.sa"):
+        _page_tally("no_page_url")
         return None
+    last = "no_response"
     for _ in range(3):
         try:
-            r = s.get(url, timeout=60, headers={"Accept": "text/html"})
-        except Exception:
+            r = s.get(url, timeout=60, headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"})
+        except Exception as e:  # noqa: BLE001 — counted, never a crash
+            last = f"error_{type(e).__name__}"
             continue
         if r.status_code == 200:
-            return page_labels(r.text)
+            body = r.text or ""
+            got = page_labels(body)
+            _page_tally("ok" if got else ("key_absent" if _LABELS_KEY not in body else "key_unparsed"))
+            return got
+        last = f"http_{r.status_code}"
         if r.status_code not in TRANSIENT_STATUSES:
-            return None
+            break
+    _page_tally(last)
     return None
 
 
@@ -1067,6 +1090,8 @@ def main() -> int:
         got = {"Rent": by_deal.get("إيجار", 0), "Buy": by_deal.get("بيع", 0)}
         complete = all(declared[d] is not None and declared[d] == got[d] for d in ("Rent", "Buy"))
 
+        if PAGE_READS:
+            print("  ad pages (licence table): " + _tally(PAGE_READS))
         notes = _tally(skipped)
         if skipped:
             print("  skipped (not guessed): " + notes)

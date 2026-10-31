@@ -44,9 +44,12 @@ def test_width_is_the_pages_not_the_ids():
 
 
 def test_dash_is_unset_not_zero():
+    """The page SAYS «-»: the source settled it, so the old id-derived value must be cleared —
+    AUTHORITATIVE_NULL, the one value the db layer writes as NULL instead of dropping."""
+    from scrapers.common import db
     row, _c, why = run.map_listing(_rec(run.page_labels(PAGE_DASH)))
     assert row, why
-    assert row["street_width_m"] is None
+    assert row["street_width_m"] is db.AUTHORITATIVE_NULL
 
 
 def test_unread_page_is_unknown_not_the_id():
