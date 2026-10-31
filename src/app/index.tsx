@@ -20,6 +20,7 @@ import { SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
 import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
+import TopBarLanguage from '@/components/TopBarLanguage';
 import { CATEGORIES, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { cityNameEn, regionNameEn, districtNameEn, ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
@@ -1441,6 +1442,8 @@ export default function Home() {
                   <Text style={[s.topSignInText, x.topSignInText]}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
                 </Pressable>
               )}
+              {/* Language for a guest — between sign-in and share, all three screens (owner 2026-10-31). */}
+              <TopBarLanguage />
               {/* Share — a labelled pill, not a bare glyph (owner 2026-09-05). An unlabelled icon in a
                   corner reads as decoration; «مشاركة» beside it states the action, which is what every
                   major platform does with the one control it wants people to use. The label is hidden
@@ -2454,7 +2457,7 @@ const s = StyleSheet.create({
   top: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 4 },
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   // Note #4 — mobile brand text next to the hamburger.
-  topBrand: { fontSize: 18, fontWeight: '800', color: colors.ink },
+  topBrand: { fontSize: 22, fontWeight: '800', color: colors.ink }, // same size as الوسيط الذكي's title (owner 2026-10-31: «ezhalah must all be the same size, big»)
   // AI Agent badge + Share icon, grouped and pushed to the far-right edge (marginStart:auto) so they
   // sit together in the top-right corner in BOTH languages. (user request.)
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginStart: 'auto' },
