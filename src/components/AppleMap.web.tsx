@@ -68,7 +68,7 @@ type MapKit = {
   CoordinateRegion: new (center: unknown, span: unknown) => unknown;
   Style: new (o: { strokeColor?: string; fillColor?: string; fillOpacity?: number; lineWidth?: number }) => unknown;
   PolygonOverlay: new (points: unknown[] | unknown[][], o?: { style?: unknown; data?: unknown; enabled?: boolean }) => { style: { fillOpacity: number; lineWidth: number }; data: Region };
-  Annotation: (new (coord: unknown, factory: () => HTMLElement, o?: { data?: unknown; enabled?: boolean; collisionMode?: unknown; displayPriority?: number }) => { visible: boolean })
+  Annotation: (new (coord: unknown, factory: () => HTMLElement, o?: { data?: unknown; enabled?: boolean; collisionMode?: unknown; displayPriority?: number; size?: { width: number; height: number } }) => { visible: boolean })
     & { CollisionMode: { Rectangle: unknown } };
   addEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
   removeEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
@@ -147,13 +147,17 @@ const regionView = (mk: MapKit, r: Region) => {
   );
 };
 
-/** A region's name, in a small pill, as a DOM element MapKit positions at the region's centre. */
-function labelElement(text: string): HTMLElement {
+/** A region's name as plain small lettering over the map, like a state name on Zillow's map (owner 2026-10-30:
+ *  «make each title smaller, like Zillow's default, clear like ARIZONA»): no bubble, a soft white halo so it reads on
+ *  any tile. English is small capitals with a little tracking; Arabic keeps its natural joined letters (no
+ *  letter-spacing on Arabic — scripts/verify-no-letter-spacing-on-arabic.ts). */
+function labelElement(text: string, arabic: boolean): HTMLElement {
   const el = document.createElement('div');
-  el.textContent = text;
-  el.style.cssText = 'font: 600 12.5px ui-sans-serif, -apple-system, system-ui, "Segoe UI", sans-serif; color: ' + lightColors.ink
-    + '; background: rgba(255,255,255,0.86); padding: 3px 9px; border-radius: 999px; border: 1px solid ' + lightColors.tintLine
-    + '; white-space: nowrap; pointer-events: none; box-shadow: 0 1px 4px rgba(0,0,0,0.08);';
+  el.textContent = arabic ? text : text.toUpperCase();
+  el.style.cssText = 'font: 600 ' + (arabic ? '11.5px' : '10.5px') + ' ui-sans-serif, -apple-system, system-ui, "Segoe UI", sans-serif; color: '
+    + lightColors.body + '; white-space: nowrap; pointer-events: none; text-align: center; line-height: 1.2;'
+    + (arabic ? '' : ' letter-spacing: 0.08em;')
+    + ' text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 4px #fff, 0 0 6px #fff;';
   return el;
 }
 
@@ -197,11 +201,21 @@ export default function AppleMap() {
         // Names: at the precomputed inside point, above the overlays; when two would overlap, the bigger region's
         // name stays and the smaller one's returns as you zoom in (MapKit's own collision handling).
         const maxArea = Math.max(...regions.map((r) => r.area));
-        const labels = regions.map((r) => new mk.Annotation(
-          new mk.Coordinate(r.label[1], r.label[0]),
-          () => labelElement(ar ? r.ar : r.en),
-          { data: r, enabled: false, collisionMode: mk.Annotation.CollisionMode.Rectangle, displayPriority: 250 + Math.round(700 * r.area / maxArea) },
-        ));
+        const labels = regions.map((r) => {
+          const text = ar ? r.ar : r.en;
+          return new mk.Annotation(
+            new mk.Coordinate(r.label[1], r.label[0]),
+            () => labelElement(text, ar),
+            {
+              data: r, enabled: false,
+              // MapKit measures collisions with this box, not the DOM (a custom element has no size it can read):
+              // ~6.5 px per Arabic letter, ~8 px per tracked capital, plus a little air on each side.
+              size: { width: Math.ceil(text.length * (ar ? 6.5 : 8)) + 12, height: 18 },
+              collisionMode: mk.Annotation.CollisionMode.Rectangle,
+              displayPriority: 250 + Math.round(700 * r.area / maxArea),
+            },
+          );
+        });
         labels.forEach((a) => map!.addAnnotation(a));
 
         // Click a region → glide to it; the chosen one is tinted a little stronger until another is chosen.
