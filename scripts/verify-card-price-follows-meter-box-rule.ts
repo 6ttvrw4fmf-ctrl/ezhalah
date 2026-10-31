@@ -29,6 +29,19 @@ check('a non-matching box → no guess', priceTypedInMeterBox(3000000000150, 450
 check('a sane price is never touched', priceTypedInMeterBox(1500000, 600, 2500) === null);
 check('an absurd per-meter box is never served', priceTypedInMeterBox(6200990767, 62, 100015980) === null);
 
+// 1b. The siblings (owner 2026-10-30, migration *_meter_box_typo_ceiling_100k): the same cases the SQL proof block runs.
+const riyadh = { city: 'الرياض', commercial: false };
+check('the 1,350,000/m² sibling is corrected (dealapp 20483625, Riyadh land, 625 m²)', priceTypedInMeterBox(843750000, 625, 1350000, riyadh) === 1350000);
+check('the 100,000 edge is in', priceTypedInMeterBox(40000000, 400, 100000, riyadh) === 100000);
+check('99,999/m² is not', priceTypedInMeterBox(39999600, 400, 99999, riyadh) === null);
+check('Madinah land at 850,000/m² with the box agreeing is a real price', priceTypedInMeterBox(673251000, 792, 850000, { city: 'المدينة المنورة', commercial: false }) === null);
+check('…also when the platform row spells it in English', priceTypedInMeterBox(673251000, 792, 850000, { city: 'Madinah', commercial: false }) === null);
+check('Makkah keeps the old bar', priceTypedInMeterBox(843750000, 625, 1350000, { city: 'Makkah', commercial: false }) === null);
+check('a commercial row keeps the old bar', priceTypedInMeterBox(843750000, 625, 1350000, { city: 'الرياض', commercial: true }) === null);
+check('no context = the 2026-10-28 rule exactly', priceTypedInMeterBox(843750000, 625, 1350000) === null);
+mustCatch('the sibling without the residential bar (the pre-fix rule) stays at 843,750,000',
+  servedSaleFigures(843750000, null, 625, 1350000).priceTotal === 843750000 && servedSaleFigures(843750000, null, 625, 1350000, riyadh).priceTotal === 1350000);
+
 // 2. Real production rows (dealapp_residential_listings, read 2026-10-30), through the card and the client net.
 const REAL: [string, number, number, number][] = [
   ['1136238', 52_000_000_000, 200_000, 260_000],
@@ -50,7 +63,7 @@ check('a sane sale row is passed through unchanged', sane.priceTotal === 1_500_0
 // 3. The card path routes through it. (Execution above proves the rule; this pins that finalize() uses it.)
 const remote = readFileSync(new URL('../src/data/remote.ts', import.meta.url), 'utf8');
 const fin = remote.slice(remote.indexOf('function finalize('), remote.indexOf('function finalize(') + 6000);
-check('finalize() derives the sale figures with servedSaleFigures()', /servedSaleFigures\(r\.price_total, r\.price_annual, r\.area_m2, r\.price_per_meter\)/.test(fin));
+check('finalize() derives the sale figures with servedSaleFigures()', /servedSaleFigures\(r\.price_total, r\.price_annual, r\.area_m2, r\.price_per_meter, \{ city: r\.city, commercial: kind === 'com' \}\)/.test(fin));
 check('finalize() prints the served total, not r.price_total', /listingPriceString\(deal, pool, servedAnnual, sale\.priceTotal,/.test(fin));
 mustCatch('a finalize() that prints r.price_total again', !/listingPriceString\(deal, pool, servedAnnual, sale\.priceTotal,/.test(fin.replace('sale.priceTotal,', 'r.price_total,')));
 

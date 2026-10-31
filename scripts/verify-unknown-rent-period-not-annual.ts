@@ -101,7 +101,7 @@ check('finalize() delegates the price line to listingPriceString()',
   /const pool = deal === 'Rent' \? rentPool\(r\.source \?\? '', r\.rent_period\) : null;/.test(finalizeSrc)
   // (2026-10-26: `servedAnnual` = r.price_annual, or ×12 for a cheap «yearly» home/business rent — one owner still)
   // (2026-10-30, PR 9479: the sale total comes through servedSaleFigures() — the index's meter-box rule — still one owner)
-  && /const sale = deal === 'Buy' \? servedSaleFigures\(r\.price_total, r\.price_annual, r\.area_m2, r\.price_per_meter\)/.test(finalizeSrc)
+  && /const sale = deal === 'Buy' \? servedSaleFigures\(r\.price_total, r\.price_annual, r\.area_m2, r\.price_per_meter, \{ city: r\.city, commercial: kind === 'com' \}\)/.test(finalizeSrc)
   && /const priceStr = listingPriceString\(deal, pool, servedAnnual, sale\.priceTotal\s*(?:,[\s\S]{0,80}?)?\)/
     .test(finalizeSrc),
   'finalize() no longer calls listingPriceString — the formatting rule has a second owner again, '
