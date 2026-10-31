@@ -520,6 +520,13 @@ The owner's rule, verbatim from that migration:
 > fallback · **NEVER** applies to a sale listing · Never infer monthly just because the number
 > looks small.
 
+> **2026-10-31 — the owner's silent-period rule is BUILT (migration `20261031205445`).** The index
+> trigger `enforce_rent_period_judgment()` judges a silent rent period from the raw figure the site
+> printed (under 7,000 = شهري, 15,000+ = سنوي, 7,000–14,999 stays NULL) and marks it in
+> `search_listings_ar.rent_period_judged`; a stated period is never overruled; gathern / aqarmonthly
+> are شهري. Guard: `mon_detect_priced_rent_unreachable()` (repairs, then P1). The paragraphs below
+> describe the 2026-08-18 design and stay as history; where they disagree, the trigger wins.
+
 **The layer is the whole point, and it is what keeps §22 and this section consistent.** The fallback
 lives in `sync_search_listings_ar` — the only writer of `search_listings_ar.rent_period_ar`, which every
 read surface already consumes — so Normal Filter, Advanced Filter, city/district/Trending counts and

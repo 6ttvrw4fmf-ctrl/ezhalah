@@ -790,6 +790,20 @@ used to end on.
 
 ## 17. Rent-period rules
 
+- **A SILENT period is JUDGED from the price (owner 2026-09-28, every site 2026-10-03, built 2026-10-31 —
+  migration `20261031205445_silent_rent_period_judged_by_price`).** PERIOD = SOURCE when the ad states one:
+  never overruled. When the source prints no period, the index trigger `enforce_rent_period_judgment()`
+  (BEFORE INSERT OR UPDATE on `search_listings_ar`, so every sync and every write passes through it) labels
+  the row from the raw figure the site printed via `judge_silent_rent_period_ar()`: under 7,000 → شهري,
+  15,000 and above → سنوي, 7,000–14,999 → stays NULL (borderline, never a guess; 427 served rows on
+  2026-10-31). gathern / aqarmonthly are monthly-only, so a silent row there is شهري. The shown price is
+  always the source's figure; `rent_period_judged = true` marks every judged row; the raw platform tables
+  are never written. Why: 13,436 served priced rents (aqar 4,194, haraj 2,948, muhaysini 2,736, nofodh
+  1,009, dwelleo 918, wajaf …) sat with NULL and were reachable from NO rent button (wajaf 22222374, a
+  180,000 Buraidah warehouse, answered total=0). Guard: `mon_detect_priced_rent_unreachable()` on the
+  half-hourly roster — repairs first, P1 only for rows the trigger could not label, borderline count in
+  its payload. The «never "no period filter"» rules below are unchanged: a NULL that survives is the
+  borderline or a price-on-request row, and those still enter no single-period pool.
 - `query.rentPeriod` ∈ `{'monthly','annual','both'}`, default `annual`; the control shows only for Rent.
 - **`'both'` (owner feature 2026-08-14) = the UNION OF TWO KNOWN PERIODS, never "no period filter".**
   `p_rent_period IS NULL` already meant "don't filter", and that also admits the rent rows whose source

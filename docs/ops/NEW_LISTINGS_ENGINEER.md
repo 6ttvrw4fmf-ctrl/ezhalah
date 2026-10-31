@@ -310,9 +310,17 @@ catch it the same day, before wrong data piles up across the whole catalog.
    (`docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md`, «The seller's sentence»). For a field with no structured
    version anywhere on that website the scraper may still read prose, with four outcomes (named,
    negated, merely prepared, the neighbourhood's), documented at the mapping.
-4. **Rent period only from the ad's own words, tied to its price.** Never from the platform's name,
-   never defaulted to yearly. A rental that states no period stays out of both rent searches, with no
-   extra label.
+4. **Rent period from the ad's own words, tied to its price — and when the ad is SILENT, judged from
+   the price (owner 2026-09-28, widened to every site 2026-10-03, built 2026-10-31, migration
+   `20261031205445`).** A stated period is never overruled. A rental that states no period gets its
+   label from `judge_silent_rent_period_ar()` in the index trigger `enforce_rent_period_judgment()`:
+   a raw figure under 7,000 = شهري, 15,000 and above = سنوي, 7,000–14,999 stays NULL (borderline,
+   never a guess); gathern / aqarmonthly are monthly-only, so a silent row there is شهري. The shown
+   price is always the source's figure; `search_listings_ar.rent_period_judged = true` marks the
+   judged rows, and the raw platform tables are never written. Never default to yearly by platform
+   name, never label the borderline, never put a label on the card. The guard is
+   `mon_detect_priced_rent_unreachable()` (half-hourly: repairs, then P1 only for rows the trigger
+   could not label). Before 2026-10-31, 13,436 priced rents were reachable from no rent button.
 5. **Price per m² × size is a shown, searchable total**, calculated in search and display only.
    Never stored over the source's own price.
 6. **Location:**
