@@ -69,7 +69,7 @@ Below the 50-ad detector line (45 small platforms, 1 rendered ad each): proven s
 alrifai, alsidra (prints the KSA centroid 23.8859,45.0792), aqaralriyadh, aqarnajran, azdad, azure, ego, eydah, fkralemar,
 marksa, hasaad (plus-code place embed), qmra (text place embed), squares, remaxsa, tamyaz (one office embed);
 partial by the scraper's own read — eightfloor, october, hazim, nawafeth, holoul, jawher, jurash, mobasher, arsh,
-nowaisiry; **capture gaps queued as backlog #1111** (declared publishing, floor 1, 0 % served) — albukaeri, daraa, flow,
+nowaisiry; **capture gaps queued as backlog #1111 (follow-ups: #1113 scraping-engineer, #1114 qa)** (declared publishing, floor 1, 0 % served) — albukaeri, daraa, flow,
 livingcompound, alta, amaall, aqaralsaudia, sodasyat, souq24, safa, superoffice, tawia, sqcc; **unverified** (403 /
 timeout to curl and the headless browser, provisional `none`) — suwar, aalbarrak, fahadalshahri, gudai, masar, safera,
 shmoualshmal.
@@ -120,7 +120,7 @@ hajer 85 · daryusuf, shatri 90 · awal 85).
   3877 …; every wslnaa unit) and Google answers the runner's plain and proxy hops with a 200 script page, so the scrapers
   wrote nothing (honest: neither a pin nor `pin_absent`). Fixed in #9509: both sources now run on the `browser: true` lane
   of `small-sources-sync.yml` (PIN_BROWSER_HOP=1, the 2026-10-20 lane that resolved the three small sites). Proof = the
-  next crawl + sync; then raise their floors (backlog #1112, scraping-engineer).
+  next crawl + sync; then raise their floors (backlog #1113, scraping-engineer; qa #1114).
 - The mirror PR #9520 cannot go green on its own: the migration cites `scripts/verify-pin-capture-declared.ts`, which
   lives in the lock PR, and `verify-ops-remediation-scripts-exist.ts` refuses a claim to a file not on that branch. The
   lock PR #9509 carries the byte-exact migration too, so it is the one that lands the mirror; #9520 is closed after it.
