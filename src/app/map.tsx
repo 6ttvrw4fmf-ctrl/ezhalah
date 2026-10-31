@@ -8,7 +8,7 @@
 // Navigation is a peer toggle, exactly like the other two halves: REPLACE, never push, so switching
 // between the three modes costs no history entries (scripts/verify-mode-switch-costs-no-history.ts).
 import { useRef, useState } from 'react';
-import { Animated as RNAnimated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated as RNAnimated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,6 +25,13 @@ import { shareNative } from '@/lib/share';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
 import { useDocked } from '@/components/Sidebar';
+
+// Pinned left-to-right like Home's top bar (src/app/index.tsx setLtr): «مشاركة» on the physical RIGHT, the
+// sign-in pill to its left, in both languages (owner 2026-10-31: «share and the sign up are on the opposite
+// side, flip it»).
+const setLtr = (node: any) => {
+  if (Platform.OS === 'web' && node?.setAttribute) node.setAttribute('dir', 'ltr');
+};
 
 export default function MapRoute() {
   const router = useRouter();
@@ -51,7 +58,7 @@ export default function MapRoute() {
           sign up / log in for a user not signed in, with a share button»): the sign-in pill only for a guest and
           only once the session is known (never for a signed-in user, not even for a moment — owner 2026-10-18),
           and «مشاركة» always labelled. */}
-      <View style={s.top}>
+      <View ref={setLtr} style={s.top}>
         <View style={s.topRight}>
           {authChecked && !user && !docked && (
             <Pressable
