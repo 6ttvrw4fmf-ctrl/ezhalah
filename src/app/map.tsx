@@ -45,6 +45,10 @@ export default function MapRoute() {
   const topBarRoomy = useAtLeast(SHARE_LABEL_BREAKPOINT);
   const [shareOpen, setShareOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Full-screen map (owner 2026-10-31: «when the user clicks on the map take him inside the map»): a tap on the
+  // compact box lifts the SAME map over the whole screen (no remount: the map, its zoom and any drawing stay);
+  // its X brings the page back.
+  const [full, setFull] = useState(false);
   const shareScale = useRef(new RNAnimated.Value(1)).current;
   const shareSpring = (toValue: number) =>
     RNAnimated.spring(shareScale, { toValue, useNativeDriver: false, speed: 40, bounciness: 6 }).start();
@@ -117,8 +121,8 @@ export default function MapRoute() {
       </View>
       {/* Transaction + filter row above the map (owner 2026-10-31, Zillow's «For sale ▾ | Filters», Ezhalah-themed). */}
       <View style={s.dealWrap}><MapSearchBar /><MapDealRow /></View>
-      <View style={[s.body, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-        <AppleMap />
+      <View style={full ? [s.bodyFull, { paddingTop: insets.top + 8, paddingBottom: Math.max(insets.bottom, 8) }] : [s.body, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <AppleMap full={full} onTap={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} />
       </View>
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
@@ -144,4 +148,5 @@ const s = StyleSheet.create({
   modeWrap: { alignSelf: 'center', marginTop: 8, zIndex: 1 },
   dealWrap: { zIndex: 1 },
   body: { flex: 1, marginTop: 6, zIndex: 1 }, // tight under the row (owner 2026-10-31: «eliminate those extra spaces»)
+  bodyFull: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50, backgroundColor: colors.paper, paddingHorizontal: 8 },
 });
