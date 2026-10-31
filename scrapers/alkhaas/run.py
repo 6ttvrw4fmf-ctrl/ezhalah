@@ -61,6 +61,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 
 BASE = "https://alkhaas.net"
 WORKERS = int(os.environ.get("ALKHAAS_WORKERS", "8"))
@@ -457,7 +458,15 @@ def map_listing(adid: int, body: str) -> tuple[Optional[dict], str]:
     }
     if rega_license:
         row["additional_info"]["rega_ad_license_number"] = rega_license
+    row["additional_info"].update(ad_pin(body))
     return row, category
+
+
+def ad_pin(body: str) -> dict:
+    """The ad's own pin: the page's «الذهاب إلى موقع الإعلان» link, google.com/maps?q=LAT,LNG, beside
+    `var myLat/myLng` (owner 2026-10-30: 209 ads, 0 pins). The theme's JS fallback `lat = 26.117342` (the
+    same on every ad) is a bare number, which page_pin never reads. No link → pin_absent (the page was read)."""
+    return pin_from_html(body) or {"pin_absent": True}
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

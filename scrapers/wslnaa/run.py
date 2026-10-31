@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.http import retry_smarter_session  # noqa: E402
+from scrapers.common.page_pin import pin_from_page  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
@@ -207,6 +208,11 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
         "map_url": p.get("mapUrl"), "slug": p.get("slug"),
         "source_rooms": p.get("rooms"),
     }.items() if v is not None}
+    # The API's mapUrl is the unit's Google Maps link — a maps.app.goo.gl short link on the compound units
+    # (owner 2026-10-30: 61 ads, 17 pins): followed through page_pin. No link → pin_absent; a link whose hop
+    # failed → neither key (keep_stored_pin keeps yesterday's).
+    map_url = str(p.get("mapUrl") or "")
+    row["additional_info"].update(pin_from_page(map_url) or ({} if map_url else {"pin_absent": True}))
     return row, category, ""
 
 
