@@ -366,7 +366,7 @@ def make_verify_gone(s, control_ads, catalogue_n: int) -> Any:
 
 def prune_table(tbl: str, seen: set, verify_gone) -> int:
     """The absence prune; when its guard refuses (-1), strike only ads the API reads gone."""
-    n = db.prune_unseen(tbl, seen, source="Azdad")
+    n = db.prune_unseen(tbl, seen, source="Azdad", verify_gone=verify_gone)
     if n < 0:
         print(f"⚠ {tbl}: prune guard tripped — asking the API about each unseen ad")
         n = db.strike_read_gone(tbl, seen, "Azdad", verify_gone=verify_gone)

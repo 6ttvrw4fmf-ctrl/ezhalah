@@ -1211,6 +1211,14 @@ POLICIES: dict[str, _P] = {
         "the crawl's OWN seen-set over the site's own list /properties («البيع المباشر», 31). "
         "run.py suppresses prune_unseen unless every detail page was readable.",
         "No oracle is written yet, so this does not claim a direct check."),
+    "azdad": _P(
+        _pol("azdad", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the site's own API asked per ad (run.read_api): no row while this run's catalogue is non-empty, "
+        "or status «مباع», is GONE; «متاح» is live; anything else UNKNOWN. A removed ad's page answers 200 "
+        "«غير موجود», so the page status is never used. Absence only nominates; prune_unseen asks this "
+        "oracle at grace (2026-10-31) and strike_read_gone asks it when the prune is refused, each gone "
+        "answer gated on a seen «متاح» control reading live.",
+        "Tier not yet raised: the registry reseed that moves it to CANDIDATE_PLUS_DIRECT is a held apply."),
     "ryadah": _P(
         _pol("ryadah", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the WP REST property posts (Arabic only). "
@@ -1417,7 +1425,7 @@ POLICIES: dict[str, _P] = {
               "reported as unverified, never as verified-alive.")
         for p in (
             "abralosol", "abwbna", "alkhaas", "alobid", "amaall", "amlakalahsa", "aouj", "aqaratikom",
-            "arkaan", "awal", "azdad", "bahadhabab", "erapulse",
+            "arkaan", "awal", "bahadhabab", "erapulse",
             "jurash",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
             "shmoualshmal",
