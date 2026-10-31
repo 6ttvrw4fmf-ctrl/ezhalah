@@ -71,7 +71,7 @@ type MapKit = {
   CoordinateSpan: new (lat: number, lng: number) => unknown;
   CoordinateRegion: new (center: unknown, span: unknown) => unknown;
   Style: new (o: { strokeColor?: string; strokeOpacity?: number; fillColor?: string; fillOpacity?: number; lineWidth?: number }) => unknown;
-  PolygonOverlay: new (points: unknown[] | unknown[][], o?: { style?: unknown; data?: unknown; enabled?: boolean }) => { style: { fillOpacity: number; lineWidth: number }; data: Region };
+  PolygonOverlay: new (points: unknown[] | unknown[][], o?: { style?: unknown; data?: unknown; enabled?: boolean }) => { style: { fillOpacity: number; strokeOpacity: number; lineWidth: number }; data: Region };
   addEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
   removeEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
 };
@@ -189,26 +189,38 @@ export default function AppleMap() {
       // than sit on top of it (owner 2026-10-30: «blending in with Apple Maps, I don't want it very bright»): thin,
       // half-transparent brand-coloured lines and a barely-there fill; the chosen region only a touch stronger.
       const stroke = lightColors.primary;
-      const REST = { fillOpacity: 0.035, lineWidth: 1.1 };
-      const CHOSEN = { fillOpacity: 0.1, lineWidth: 1.8 };
+      const REST = { strokeOpacity: 0.55, fillOpacity: 0.035, lineWidth: 1.1 };
+      const CHOSEN = { strokeOpacity: 0.7, fillOpacity: 0.1, lineWidth: 1.8 };
+      // Zoomed out past the country view the outlines FADE, down to a whisper, so Apple's map takes over (owner
+      // 2026-10-31: «when the user zooms out those drawings become so light»). At the country view and closer
+      // they are at full (quiet) strength.
+      const FADE_FLOOR = 0.18;
       loadRegions().then((regions) => {
         if (gone || !map) return;
         const overlays = regions.map((r) => {
           const rings = r.rings.map((ring) => ring.map(([lng, lat]) => new mk.Coordinate(lat, lng)));
           return new mk.PolygonOverlay(rings.length === 1 ? rings[0] : rings, {
-            style: new mk.Style({ strokeColor: stroke, strokeOpacity: 0.55, lineWidth: REST.lineWidth, fillColor: stroke, fillOpacity: REST.fillOpacity }),
+            style: new mk.Style({ strokeColor: stroke, strokeOpacity: REST.strokeOpacity, lineWidth: REST.lineWidth, fillColor: stroke, fillOpacity: REST.fillOpacity }),
             data: r,
           });
         });
         overlays.forEach((o) => map!.addOverlay(o));
         // Click a region → glide to it; the chosen one is tinted a little stronger until another is chosen.
-        let chosen: { style: { fillOpacity: number; lineWidth: number } } | null = null;
+        let chosen: (typeof overlays)[number] | null = null;
+        // How strong the outlines are at the current zoom: 1 at the country view and closer, fading towards
+        // FADE_FLOOR as the view widens beyond it.
+        let fade = 1;
+        const paint = () => overlays.forEach((o) => {
+          const base = o === chosen ? CHOSEN : REST;
+          o.style.strokeOpacity = base.strokeOpacity * fade;
+          o.style.fillOpacity = base.fillOpacity * fade;
+          o.style.lineWidth = base.lineWidth;
+        });
         map.addEventListener('select', (e) => {
           const r = e.overlay?.data;
           if (!r || !map) return;
-          if (chosen) { chosen.style.fillOpacity = REST.fillOpacity; chosen.style.lineWidth = REST.lineWidth; }
-          chosen = e.overlay as typeof chosen;
-          if (chosen) { chosen.style.fillOpacity = CHOSEN.fillOpacity; chosen.style.lineWidth = CHOSEN.lineWidth; }
+          chosen = (e.overlay as typeof chosen) ?? null;
+          paint();
           map.setRegionAnimated(regionView(mk, r), true);
         });
         // The «whole Kingdom» button only while zoomed in — "in" measured against the home view MapKit actually
@@ -220,6 +232,8 @@ export default function AppleMap() {
           const lat = map.region.span.latitudeDelta;
           if (!homeLatDelta) homeLatDelta = lat;
           setZoomed(lat < homeLatDelta * 0.85);
+          fade = Math.max(FADE_FLOOR, Math.min(1, homeLatDelta / lat));
+          paint();
         };
         map.addEventListener('region-change-end', onRegion);
         onRegion();
