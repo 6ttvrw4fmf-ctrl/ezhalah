@@ -70,6 +70,7 @@ type MKMap = {
 };
 type MapKit = {
   init: (o: { authorizationCallback: (done: (token: string) => void) => void; language?: string }) => void;
+  language: string;
   Map: (new (el: HTMLElement, o?: object) => MKMap) & { MapTypes: { Standard: string; MutedStandard: string; Hybrid: string; Satellite: string } };
   Coordinate: new (lat: number, lng: number) => unknown;
   CoordinateSpan: new (lat: number, lng: number) => unknown;
@@ -169,6 +170,7 @@ export default function AppleMap() {
   const { locale, t } = useI18n();
   const hostRef = useRef<View>(null);
   const mapRef = useRef<MKMap | null>(null);
+  const localeRef = useRef(locale);
   const [failed, setFailed] = useState(false);
   const [zoomed, setZoomed] = useState(false);
   // Map style (owner 2026-10-31, Zillow's layers button): the modes Apple's web MapKit offers — standard, satellite
@@ -193,7 +195,9 @@ export default function AppleMap() {
       // Apple's  Maps mark and «معلومات قانونية» are drawn INSIDE the map image, bottom-right in Arabic, and no
       // page direction or style moves them (measured live 2026-10-31: no DOM node carries them). Our corner controls
       // keep clear of that strip instead.
-      initOnce(mk, locale);
+      initOnce(mk, localeRef.current);
+      // A language switched while MapKit was still loading: init() took the first one; set the current one now.
+      if (mk.language !== localeRef.current) mk.language = localeRef.current;
       mk.addEventListener('error', onError);
       map = new mk.Map(el, {
         region: ksaRegion(mk, el),
@@ -278,9 +282,20 @@ export default function AppleMap() {
       mapRef.current = null;
       map?.destroy();
     };
-    // locale only affects init, which runs once per page.
+    // The map's language is handled by the effect below, not by re-creating the map.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // THE MAP FOLLOWS THE UI LANGUAGE (owner 2026-10-31: «when the user changes the language the map's language changes
+  // automatically»). `mapkit.language` is live: setting it re-renders Apple's labels in the new language — and with
+  // them the  Maps mark, which Apple draws inside the map image (bottom-right and Arabic in the Arabic map,
+  // bottom-left and English in the English one). Measured live 2026-10-31 by setting it on ezhalah.com/map: the
+  // outlines we drew stay; nothing is re-created. init() took the first language; this keeps it in step after.
+  useEffect(() => {
+    localeRef.current = locale;
+    const mk = mapkitOf();
+    if (mk && initialized && mk.language !== locale) mk.language = locale;
+  }, [locale]);
 
   const showWholeKingdom = () => {
     const mk = mapkitOf();
