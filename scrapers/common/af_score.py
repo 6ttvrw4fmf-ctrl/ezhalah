@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
 import os
 import random
 import re
@@ -279,13 +280,25 @@ def page_lines(page: dict) -> list[str]:
 # Measured 2026-10-06 (source-reread 37445697709): each produced a 5/5 «we miss» that no parser could
 # fix. Applied only with TEMPLATE_MIN_PAGES readable pages, so two ads that happen to agree stay ads.
 TEMPLATE_MIN_PAGES = 3
+# A ROTATING strip is template too (🔬 2026-10-31). tuba prints a «featured ads» strip of OTHER ads' titles on every
+# page, a few of a rotating set at a time («شقة مفروشة في جدة حي الفيصلية إيجار شهري سنوي», «شقة مؤثثة للإيجار …
+# جدة حي السلامة»), so no single title is on EVERY page and the old all-pages intersection kept them as the ad's
+# own words. The score then asked «furnished» of Riyadh / Taif / Dammam SALE ads that never say it: 4 of tuba's
+# 4 misses on 10-31 08:00 and 11 of 11 in the 20-page dry run 41188548521 («why furnished:» was always one of those
+# three titles). A line printed on at least half of a website's readable sample pages is that website's, not the ad's.
+TEMPLATE_SHARE = 0.5
 
 
 def template_lines(pages: list[list[str]]) -> set[str]:
     readable = [set(p) for p in pages if p]
     if len(readable) < TEMPLATE_MIN_PAGES:
         return set()
-    return set.intersection(*readable)
+    need = max(TEMPLATE_MIN_PAGES, math.ceil(TEMPLATE_SHARE * len(readable)))
+    seen: dict[str, int] = defaultdict(int)
+    for p in readable:
+        for x in p:
+            seen[x] += 1
+    return {x for x, n in seen.items() if n >= need}
 
 
 # A deed's boundary text («… وتمام الحد المصعد وتمام الحد المنور …», «يحده شمالاً …») names what the unit's border
