@@ -76,6 +76,8 @@ about moving our robots, not visitors.
 2. Dispatch **Front door secret** (stores the same value in the database).
 3. Deploy, then confirm `/sb/rest/v1/…` answers and the database sees the visitor's address.
 4. After a day of `x-ezhalah-bot` showing real visitors as `human`: set `EZ_BOTID_ENFORCE=1`.
+   Switch: dispatch **Vercel guard switch** (`.github/workflows/vercel-guard-switch.yml`, `EZ_BOTID_ENFORCE` / `EZ_TURNSTILE_ENFORCE`,
+   1 = block, 0 = watch), then deploy through deploy-frontend.yml. Undo = the same with 0. Owner approves each flip.
 5. Move our robots off the bare public key (they send the handshake too, from the GitHub secret), then close the back
    door: `robot_gate` refuses the public roles without a valid handshake. Owner present for this step.
 
