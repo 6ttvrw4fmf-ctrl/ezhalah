@@ -4,6 +4,8 @@ A removed albukaeri ad answers HTTP 200 as an empty shell («  | البكيري�
 status reader could only ever say "live": albukaeri, superoffice and azdad were scored status-only
 every night (ops_dead_visible_score 10-31). lifecycle_spot_check._reader_for now reads albukaeri and
 superoffice through their crawls' own run.read_own_page — the same answer their prune acts on.
+Measured from CI 2026-10-31 (spot-check 41196333484 / 41196505860 / 41196530048, controls 5/5 live):
+the 6 albukaeri and 15 superoffice ads the status reader had read «live» all read gone on their own page.
 """
 from __future__ import annotations
 
