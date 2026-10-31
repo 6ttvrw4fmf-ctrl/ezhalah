@@ -93,13 +93,34 @@ floor just under today's number and a served ad that carries the pin as proof.
 
 ### After (filled as the backfills land)
 
-AFTER_PLACEHOLDER
+Measured in `search_listings_ar` (production_ready) after the 02:22 UTC sync on 2026-10-31:
+
+| site | served ads | pins before | pins after | note |
+|---|---:|---:|---:|---|
+| rakez | 3,536 | 0 (0 %) | **3,032 (85.7 %)** | 185 project points; 536 units under 40 projects proven absent from both feeds |
+| compoundin | 286 | 0 (0 %) | **262 (91.6 %)** | |
+| alkhaas | 209 | 0 (0 %) | **195 (93.3 %)** | |
+| daryusuf | 258 | 0 (0 %) | **253 (98.1 %)** | |
+| hajer | 124 | 0 (0 %) | **116 (93.5 %)** | additional_info is now `{rows, latitude, longitude}` (the legacy bare list could never carry a pin) |
+| awal | 51 | 0 (0 %) | **48 (94.1 %)** | |
+| shatri | 50 | 0 (0 %) | **49 (98.0 %)** | |
+| mustqr | 1,345 | 0 (0 %) | 1 (0.1 %) | partial at source; the brokers' links are goo.gl short links and Google answers the runner's hop with a 200 script page — the stored value is honest, the gain needs the browser hop lane |
+| wslnaa | 61 | 17 (27.9 %) | 17 (27.9 %) | same hop block on the API's short links; the stored commercial pins stay |
+
+**Fleet:** 405,425 / 425,042 served ads with a pin (95.38 %) before → **408,753 / 424,365 (96.32 %)** after, **+3,328 pins** in one night.
+
+**The lock is live:** migration `20261031023715_pin_source_declared_and_detector` applied 02:37 UTC — 149 declared rows,
+`pin_coverage_by_platform()` reports 0 platforms below floor, `mon_detect_pin_coverage_below_floor()` rostered (returned 0
+on its first run, not orphaned). Floors of the six re-crawled sites were raised in the same change (compoundin, alkhaas,
+hajer 85 · daryusuf, shatri 90 · awal 85).
 
 ## Still open
 
-- Apply + mirror the detector migration once every fixed site serves ≥ 1 pin (its proof refuses to apply while a
-  declared publisher serves 0 — that is the rule working, not a bug); raise the floors of the 8 fixed sites after
-  their first re-crawl (two-place edit: `data/pin-sources.json` + a `*_pin_source*` migration).
+- mustqr and wslnaa: their pins are goo.gl short links; the runner's HTTP hop gets Google's 200 script page. Put both
+  on the `browser` lane of `small-sources-sync.yml` (PIN_BROWSER_HOP=1, like the three small sites of 2026-10-20) or
+  route the hop through the proxy, then raise their floors.
+- The app draws Ezhalah's own ad page (and its pin) only for IN_APP_PREVIEW_HOSTS; rakez and the other fixed sites open
+  the SOURCE framed, and `/map` is still the placeholder — the pin is served but not yet drawn for them. Owner call.
 - Backlog #1111: the 13 small capture gaps above.
 - Re-open the 7 unverified sites from a residential IP; re-declare any that publish.
 - rakez: 40 projects (431 units) are on neither feed — listed in every crawl log; nothing to do unless the site maps them.
