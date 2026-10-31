@@ -24,7 +24,8 @@ import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
-import { useDocked } from '@/components/Sidebar';
+import Sidebar, { useDocked } from '@/components/Sidebar';
+import { noTranslateRef } from '@/noTranslate';
 
 // Pinned left-to-right like Home's top bar (src/app/index.tsx setLtr): «مشاركة» on the physical RIGHT, the
 // sign-in pill to its left, in both languages (owner 2026-10-31: «share and the sign up are on the opposite
@@ -41,6 +42,7 @@ export default function MapRoute() {
   const docked = useDocked();
   const topBarRoomy = useAtLeast(SHARE_LABEL_BREAKPOINT);
   const [shareOpen, setShareOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const shareScale = useRef(new RNAnimated.Value(1)).current;
   const shareSpring = (toValue: number) =>
     RNAnimated.spring(shareScale, { toValue, useNativeDriver: false, speed: 40, bounciness: 6 }).start();
@@ -59,6 +61,23 @@ export default function MapRoute() {
           only once the session is known (never for a signed-in user, not even for a moment — owner 2026-10-18),
           and «مشاركة» always labelled. */}
       <View ref={setLtr} style={s.top}>
+        {/* Mobile: the hamburger + brand on the physical LEFT, opening the same Sidebar drawer as Home (owner
+            2026-10-31: «this side thing must show, that's important»). On desktop the docked sidebar is mounted
+            by the app layout, so nothing here. */}
+        {!docked ? (
+          <View style={s.topLeft}>
+            <Pressable
+              style={s.hamb}
+              hitSlop={8}
+              // @ts-expect-error web-only DOM props on the RNW host node
+              dataSet={{ ...TAP44, consentKeep: '1' }}
+              onPress={() => setSidebarOpen(true)}
+            >
+              <Ionicons name="menu" size={22} color={colors.ink} />
+            </Pressable>
+            <Text ref={noTranslateRef} style={s.topBrand}>{t('Ezhalah')}</Text>
+          </View>
+        ) : null}
         <View style={s.topRight}>
           {authChecked && !user && !docked && (
             <Pressable
@@ -95,6 +114,7 @@ export default function MapRoute() {
       <View style={[s.body, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <AppleMap />
       </View>
+      {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
     </View>
   );
@@ -102,7 +122,10 @@ export default function MapRoute() {
 
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.paper, paddingHorizontal: 10 },
-  top: { flexDirection: 'row', alignItems: 'center', paddingTop: 4, zIndex: 2 },
+  top: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 4, zIndex: 2 },
+  topLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  topBrand: { fontSize: 18, fontWeight: '800', color: colors.ink },
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginStart: 'auto' },
   topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
