@@ -151,6 +151,10 @@ const AR: Record<string, string> = {
   // Top-nav ModeSwitch pill's AI tab — deliberately shorter than the full 'Ezhalah AI Agent' badge
   // title so the two-tab control stays compact. (top-nav redesign, 2026-07-24.)
   'Smart Assistant': 'الوسيط الذكي',
+  // Top-nav ModeSwitch pill's third tab (owner 2026-10-30): the Map way to search.
+  'Map': 'خريطة',
+  'The map could not load': 'تعذّر تحميل الخريطة',
+  'Whole Kingdom': 'كل المملكة',
 
   // Home
   'Find your place': 'اعثر على مكانك',
@@ -283,6 +287,15 @@ const AR: Record<string, string> = {
   // Deals + verbs
   'Rent': 'إيجار',
   'Buy': 'شراء',
+  'All': 'الكل',
+  'Draw': 'رسم',
+  'Map layers': 'طبقات الخريطة',
+  'Explore': 'استكشاف',
+  'Satellite': 'قمر صناعي',
+  'Quiet': 'هادئ',
+  'Region, city, landmark or district': 'منطقة، مدينة، معلم أو حي',
+  ', ': '، ',
+  'Transaction': 'نوع الصفقة',
   'to rent': 'للإيجار',
   'to buy': 'للبيع',
   // Rent verb with the payment period the user picked (Monthly / Yearly) so the summary sentence

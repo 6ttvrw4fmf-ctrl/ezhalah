@@ -28,6 +28,8 @@ THE RULES THIS CODE ENFORCES (not just asks the model for):
 from __future__ import annotations
 
 import argparse
+import hashlib
+import html
 import json
 import math
 import os
@@ -161,16 +163,47 @@ _KUNYA_RE = re.compile(r"(?<![\w])(?:أبو|ابو|أم|ام|بو)\s+[ء-ي]{2,}
 _CONTACT_CLAUSE_RE = re.compile(r"واتس|whats|wa\.me|تلغرام|telegram|للتواصل|للاستفسار|اتصال|جوال|snap|سناب|انستا|insta", re.IGNORECASE)
 _CLAUSE_SPLIT_RE = re.compile(r"([\n\r،,.;؛|•*\-]+)")
 _PHONEISH_RE = re.compile(r"(?:[0-9٠-٩][\s\-.]?){7,}")
+# Wasalt stores the advertiser's text as HTML (<div><p>…</p><br></div>): measured 2026-10-30, 84,395 of 87,263 active
+# wasalt residential descriptions carry tags, ~262 of an average 437 chars were markup, and 172 of a 20k sample were cut
+# by MAX_TEXT_CHARS before their own words ended. Block/break tags become newlines so the contact-clause splitter still
+# sees one clause per line; every other tag is dropped and entities (&amp;, &nbsp;) are decoded.
+_HTML_BREAK_RE = re.compile(r"<\s*(?:br|/p|/div|/li|/h[1-6]|/tr)\b[^>]*>", re.IGNORECASE)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def strip_html(s: str) -> str:
+    s = s or ""
+    if "<" not in s and "&" not in s:
+        return s
+    s = _HTML_BREAK_RE.sub("\n", s)
+    s = _HTML_TAG_RE.sub(" ", s)
+    return html.unescape(s)
+
+
+def text_hash(title: Optional[str], description: Optional[str]) -> str:
+    """md5 of the RAW title + newline + description the reader was given — the same bytes as
+    public.facts_text_hash(title, description) (migration 20261031080211). Every listing_facts row carries it,
+    so an ad whose text ARRIVES or CHANGES after it was read no longer counts as read: 2,119 ads of 13 small
+    sites were "read" from the title alone before their descriptions were crawled (2026-10-31) and the backlog
+    skipped them for good. Raw, not sanitised: the hash must be computable in SQL from the stored columns."""
+    return hashlib.md5(((title or "") + "\n" + (description or "")).encode("utf-8")).hexdigest()
 
 
 def sanitize(title: Optional[str], description: Optional[str]) -> str:
     """Title + description with contact data, URLs, kunyas and contact clauses removed, then the fleet
     PII redactor (phones in every shape/digit set, emails, labelled advertiser names)."""
-    raw = "\n".join(x for x in (title or "", description or "") if x)
+    raw = "\n".join(strip_html(x) for x in (title or "", description or "") if x)
     raw = _URL_RE.sub(" ", raw)
     raw = _KUNYA_RE.sub(" ", raw)
+    # A contact clause is cut from its first contact word to the clause's end — never the whole clause.
+    # Small sites (ksaaqar, akariyoun, sanadak, manzo…) publish the ad as ONE sentence with no punctuation
+    # («3 غرف ومجلس ومسبح للاستفسار أبو أحمد»); dropping the clause dropped the whole ad (measured 2026-10-31:
+    # ~100 ads read as <30 chars and were never sent to the model).
     parts = _CLAUSE_SPLIT_RE.split(raw)
-    kept = [p for p in parts if not _CONTACT_CLAUSE_RE.search(p)]
+    kept = []
+    for p in parts:
+        m = _CONTACT_CLAUSE_RE.search(p)
+        kept.append(p if not m else p[:m.start()])
     raw = "".join(kept)
     out = redact_pii(raw) or ""
     out = out.replace("[redacted]", " ")
@@ -638,7 +671,8 @@ def run(args: argparse.Namespace) -> int:
                 seen.add(row["fact"])
                 rows.append({"run_id": args.run_id, "platform": r["_platform"], "table_name": r["_table"],
                              "listing_key": str(r["ad_number"]), "listing_url": r.get("listing_url"),
-                             "model": resp.get("model"), "source_value": source_value(row["fact"], r), **row})
+                             "model": resp.get("model"), "source_value": source_value(row["fact"], r),
+                             "text_hash": text_hash(r.get("title"), r.get("text")), **row})
             if ad_id not in parsed:
                 tot["ads_missing_in_reply"] += 1
                 if not fallback and args.fallback_model:
@@ -655,7 +689,8 @@ def run(args: argparse.Namespace) -> int:
                 rows.append({"run_id": args.run_id, "platform": r["_platform"], "table_name": r["_table"],
                              "listing_key": str(r["ad_number"]), "listing_url": r.get("listing_url"),
                              "model": resp.get("model"), "fact": "_none", "value_bool": True, "value_num": None,
-                             "value_text": None, "quote": "", "source_value": None})
+                             "value_text": None, "quote": "", "source_value": None,
+                             "text_hash": text_hash(r.get("title"), r.get("text"))})
         stored = store(rows) - sum(1 for r in rows if r["fact"] == "_none")   # facts stored, markers excluded
         tot["ads"] += len(batch) - len([r for r in batch if (r["_platform"], str(r["ad_number"])) in queued])
         if fallback:

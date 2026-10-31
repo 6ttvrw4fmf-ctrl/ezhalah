@@ -1,0 +1,1059 @@
+{
+  "_readme": [
+    "PIN SOURCES — where each platform's map pin lives, declared at onboarding after looking in ALL FOUR places",
+    "(the rendered ad page · its embedded JSON / data attributes / network calls · a site-wide map or list feed · the parent",
+    "project/compound page). Owner 2026-10-30, after rakez served 3,660 ads with 0 pins for six weeks while its map page's",
+    "feed named every project's lat/lng. Read by scripts/verify-pin-capture-declared.ts (launch checklist box 10) and seeded",
+    "into ops_pin_source_declared, which mon_detect_pin_coverage_below_floor() holds the served index to every hour (P1).",
+    "pin_source: ad-page | page-json | feed | project-page | partial | none. floor_pct: none ⇒ 0, anything else ≥ 1",
+    "(1 = «publishes: at least one served pin»; above 1 = a percentage of served ads, judged at ≥ 50 served ads);",
+    "a ratchet — raise it when a fix lands, never lower it to clear a red (a drop is an incident). proof_url: the page that",
+    "shows the pin, or the page proven silent. A platform absent from this file fails `npm test`.",
+    "Changing a row is a TWO-place edit: this file AND a `*_pin_source*` migration carrying ('platform', 'source', floor)."
+  ],
+  "platforms": {
+    "aalbarrak": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://aalbarrak.com/property/%d9%81%d9%8a%d9%84%d8%a7-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%81%d9%8a-%d8%b4%d8%a7%d8%b1%d8%b9-%d8%b4%d8%a7%d8%b1%d8%b9-%d8%a7%d9%84%d9%85%d9%86%d8%aa%d8%b5%d8%b1-%d8%ad%d9%8a-%d8%a7%d9%84%d9%86/",
+      "proven_on": "2026-10-30",
+      "note": "UNVERIFIED 2026-10-30: 403/timeout to both clients; provisional none — re-open from a residential IP. Served 0/9 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "abaad": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://app.abaadapp.sa/details/601",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 446/446 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "abeea": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://abeea.com.sa/en/property/five-shop-openings-for-rent-in-al-muhandeseen-plan/",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 176/176 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "abralosol": {
+      "pin_source": "partial",
+      "floor_pct": 5,
+      "proof_url": "https://abralosol.com/6570",
+      "proven_on": "2026-10-30",
+      "note": "Partial: the ad page carries a Maps place link only when the broker added one (6570 yes; 7981, 8018 no — pin_absent written). Scraper reads it when present. Served 275/2972 (9.3%) on 2026-10-30 before today's fixes."
+    },
+    "abwbna": {
+      "pin_source": "partial",
+      "floor_pct": 65,
+      "proof_url": "https://www.abwbna.com/properties/45172",
+      "proven_on": "2026-10-30",
+      "note": "Partial: pinned ad has the pair in JSON + a Maps link; 27904 and 54320 show no map at all. Served 103/136 (75.7%) on 2026-10-30 before today's fixes."
+    },
+    "akariyoun": {
+      "pin_source": "page-json",
+      "floor_pct": 95,
+      "proof_url": "https://akariyoun.sa/properties/msnaa-llaygar-fy-hy-almsfa",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (page-json); not re-opened in a browser today. Served 324/325 (99.7%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "alajlan": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://alajlan-re.com/",
+      "proven_on": "2026-10-30",
+      "note": "Proven silent: ads have no page of their own (listing_url is the home page); the only map is the office embed 24.719608,46.646210. Served 0/11 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "albdah": {
+      "pin_source": "partial",
+      "floor_pct": 20,
+      "proof_url": "https://albdah.sa/property/22Uec/details/",
+      "proven_on": "2026-10-30",
+      "note": "Partial: pinned ad has a Maps link + embed; 94qyR and 19kWW show nothing. Served 28/90 (31.1%) on 2026-10-30 before today's fixes."
+    },
+    "albukaeri": {
+      "pin_source": "ad-page",
+      "floor_pct": 1,
+      "proof_url": "https://albukaeri.sa/property/69d220c494242c82c5bc7686",
+      "proven_on": "2026-10-30",
+      "note": "CAPTURE GAP (20 ads, 0%): the raw page carries a maps.app.goo.gl short link per ad; the scraper does not follow it. Below the 50-ad detector line; backlog. Served 0/20 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "aldarim": {
+      "pin_source": "partial",
+      "floor_pct": 80,
+      "proof_url": "https://www.aldarim.sa/en/properties/48548",
+      "proven_on": "2026-10-30",
+      "note": "Partial: pinned ad has JSON + Maps link + short link; 39826 and 40691 show nothing. Served 140/156 (89.7%) on 2026-10-30 before today's fixes."
+    },
+    "alhoshan": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://www.alhoshan.sa/properties/1002",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 27/27 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "aljassim": {
+      "pin_source": "partial",
+      "floor_pct": 15,
+      "proof_url": "https://aljassimaqar.com/4607",
+      "proven_on": "2026-10-30",
+      "note": "Partial: 4912 and 2806 show nothing (rendered); 4607 timed out in the headless browser today but serves a pin read by the scraper's Maps-link path. Served 23/91 (25.3%) on 2026-10-30 before today's fixes."
+    },
+    "alkhaas": {
+      "pin_source": "ad-page",
+      "floor_pct": 85,
+      "proof_url": "https://alkhaas.net/ads/1003",
+      "proven_on": "2026-10-30",
+      "note": "BUG fixed #9508: «الذهاب إلى موقع الإعلان» → google.com/maps?q=LAT,LNG per ad (3/3 rendered ads, distinct pairs). The JS fallback lat 26.117342 is the same on every ad and is never read. Floor raised to 85 after the 2026-10-31 re-crawl + 02:22 sync. Served 0/209 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "almotmkenah": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://almotmkenah.com/annonce/%D9%85%D8%B4%D8%B1%D9%88%D8%B9_%D8%A7%D8%B1%D8%A8%D8%B9_%D9%81%D9%84%D9%84_%D9%85%D8%B3%D8%AA%D9%82%D9%84%D9%87_%D9%84%D9%84%D8%A8%D9%8A%D8%B9_%D9%81%D9%8A_%D8%AD%D9%8A_%D8%A7%D9%84%D8%AC%D9%86%D8%A7%D8%AF%D8%B1%D9%8A%D8%A9-3",
+      "proven_on": "2026-10-30",
+      "note": "Proven silent on 1 rendered ad (no pair, no map, no link). 22 ads. Served 0/22 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "almuteb": {
+      "pin_source": "feed",
+      "floor_pct": 1,
+      "proof_url": "https://almuteb.sa",
+      "proven_on": "2026-10-30",
+      "note": "0 served rows on 2026-10-30; classified from the scraper's read path (feed). Floor 1 = «publishes»; measure on relaunch."
+    },
+    "alobid": {
+      "pin_source": "partial",
+      "floor_pct": 20,
+      "proof_url": "https://www.alobidoffice.com/properties/27673",
+      "proven_on": "2026-10-30",
+      "note": "Partial: pinned ad has a Maps link; 41120 and 40610 show nothing. Served 30/101 (29.7%) on 2026-10-30 before today's fixes."
+    },
+    "alqasem": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://alqasem.com.sa/property/%d8%af%d9%88%d8%b1-vip-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-g2b/",
+      "proven_on": "2026-10-30",
+      "note": "Proven silent on 1 rendered ad. 23 ads. Served 0/23 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "alrifai": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://alrifai.com.sa/index.php?page=property-detail&id=92",
+      "proven_on": "2026-10-30",
+      "note": "Silent on 1 rendered ad: loads Maps JS but prints no pair, link or frame. 17 ads. Served 0/17 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "alsaedan": {
+      "pin_source": "ad-page",
+      "floor_pct": 87,
+      "proof_url": "https://alsaedan.com/sales/unit/3396",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (ad-page); not re-opened in a browser today. Served 300/325 (92.3%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "alshawaf": {
+      "pin_source": "partial",
+      "floor_pct": 35,
+      "proof_url": "https://alshawaf.com.sa/22379",
+      "proven_on": "2026-10-30",
+      "note": "Partial: the ad's own «الموقع» row carries a maps/place link only on some ads (22379 yes; 21660 and 21877 only list OTHER ads' links and the office embed 25.3841505,49.5916303 — never read). Served 465/1009 (46.1%) on 2026-10-30 before today's fixes."
+    },
+    "alsidra": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://alsidra.com.sa/property/%d8%b4%d9%82%d8%a9-%d9%81%d8%a7%d8%ae%d8%b1%d8%a9-%d9%84%d9%84%d8%a7%d9%8a%d8%ac%d8%a7%d8%b1-%d9%81%d9%8a-%d8%ad%d9%8a-%d8%a7%d9%84%d8%ad%d8%b2%d8%a7%d9%85-%d8%a7%d9%84%d8%b0%d9%87%d8%a8%d9%8a-%d8%a7/",
+      "proven_on": "2026-10-30",
+      "note": "Silent: the Leaflet config prints 23.8859,45.0792 — the centre of Saudi Arabia, a default, not a pin. 29 ads. Served 0/29 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "alta": {
+      "pin_source": "page-json",
+      "floor_pct": 1,
+      "proof_url": "https://alta.com.sa/estate_property/%d8%b4%d9%82%d8%a9-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%85%d9%83%d8%a9-%d8%a7%d9%84%d9%85%d9%83%d8%b1%d9%85%d8%a9-%d8%ad%d9%8a-%d8%a8%d8%b7%d8%ad%d8%a7%d8%a1-%d9%82%d8%b1%d9%8a%d8%b4/",
+      "proven_on": "2026-10-30",
+      "note": "CAPTURE GAP (7 ads, 0%): the page prints 21.373688,39.827813 in JSON + a Maps link (1 ad seen; per-ad vs default not yet distinguished). Backlog. Served 0/7 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "amaall": {
+      "pin_source": "page-json",
+      "floor_pct": 1,
+      "proof_url": "https://www.amaall.com/projects/%d8%a3%d8%b1%d8%b6-%d8%b3%d9%83%d9%86%d9%8a%d8%a9-%d8%a8%d9%85%d9%83%d8%a9-%d8%a7%d9%84%d9%85%d9%83%d8%b1%d9%85%d8%a9-%d8%ad%d9%8a-%d8%a7%d9%84%d8%b9%d8%b2%d9%8a%d8%b2%d9%8a%d8%a9/",
+      "proven_on": "2026-10-30",
+      "note": "CAPTURE GAP (32 ads, 0%): the page prints 21.488419,39.934998 in JSON (Leaflet) + a short link (1 ad seen). Backlog. Served 0/32 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "amlakalahsa": {
+      "pin_source": "feed",
+      "floor_pct": 88,
+      "proof_url": "https://amlakalahsa.com/land/%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d8%a7%d8%b1%d8%b6-%d9%81%d9%8a-%d8%a7%d9%84%d9%88%d8%b1%d9%88%d8%af-%d8%a7%d9%84%d8%ba%d8%b1%d8%a8%d9%8a/",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 267/285 (93.7%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "aouj": {
+      "pin_source": "feed",
+      "floor_pct": 87,
+      "proof_url": "https://aoujestates.com/ar/properties/%D8%AF%D8%A8%D9%84%D9%83%D8%B3%D9%8A%D9%86-%D9%81%D9%8A-%D8%AD%D9%8A-%D8%A7%D9%84%D8%B4%D8%B1%D8%A7%D8%B9",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 69/75 (92.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "aqalemhajer": {
+      "pin_source": "partial",
+      "floor_pct": 50,
+      "proof_url": "https://aqalemhajer.com/4721",
+      "proven_on": "2026-10-30",
+      "note": "Partial: pinned ad carries a maps.app.goo.gl short link (followed); 4001 and 5359 show nothing. Served 624/1022 (61.1%) on 2026-10-30 before today's fixes."
+    },
+    "aqar": {
+      "pin_source": "page-json",
+      "floor_pct": 95,
+      "proof_url": "https://sa.aqar.fm/6943435",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (page-json); not re-opened in a browser today. Served 178995/179392 (99.8%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "aqaralriyadh": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://aqaralriyadh.com/%d8%b4%d9%82%d8%a9-%d9%84%d9%84%d8%a5%d9%8a%d8%ac%d8%a7%d8%b1-%d9%81%d9%8a-%d8%ad%d9%8a-%d8%a7%d9%84%d8%a3%d9%86%d8%af%d9%84%d8%b3-%d8%a7%d9%84%d8%b1%d9%8a%d8%a7%d8%b6/",
+      "proven_on": "2026-10-30",
+      "note": "Proven silent on 1 rendered ad. 14 ads. Served 0/14 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "aqaralsaudia": {
+      "pin_source": "page-json",
+      "floor_pct": 1,
+      "proof_url": "https://aqaralsaudia.com/property/%d8%b4%d9%82%d8%a9-%d9%81%d8%a7%d8%ae%d8%b1%d8%a9-%d8%a7%d8%b1%d8%b6%d9%8a%d8%a9-%d8%a8%d8%ad%d9%8a-%d9%84%d8%a8%d9%86-%d8%b1%d9%82%d9%85-1/",
+      "proven_on": "2026-10-30",
+      "note": "CAPTURE GAP (16 ads, 0%): the page prints 24.636784,46.596677 in JSON (Leaflet) + a short link (1 ad seen). Backlog. Served 0/16 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "aqaratikom": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://nawait.sa/real-estate/6dbb596f-4df9-4b67-a984-41f92133ffa7",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 123/125 (98.4%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "aqarcity": {
+      "pin_source": "ad-page",
+      "floor_pct": 95,
+      "proof_url": "https://www.aqarcity.net/property/27803",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (ad-page); not re-opened in a browser today. Served 2095/2100 (99.8%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "aqargate": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://aqargate.com/property/%d9%85%d9%83%d8%aa%d8%a8-%d8%a5%d9%8a%d8%ac%d8%a7%d8%b1-%d9%85%d9%86%d8%b7%d9%82%d8%a9-%d8%a7%d9%84%d8%b1%d9%8a%d8%a7%d8%b6-62/",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 139/140 (99.3%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "aqarmonthly": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://sa.aqar.fm/6828618",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 3618/3678 (98.4%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "aqarnajran": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://aqarnajran.com/%d8%a8%d9%8a%d8%aa-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%81%d9%8a-%d8%ad%d9%8a-%d8%b2%d9%88%d8%b1-%d8%a7%d9%84%d8%b9%d9%85%d8%a7%d8%b1%d9%8a-%d9%86%d8%ac%d8%b1%d8%a7%d9%86%d8%8c-%d9%85%d8%b3%d8%a7%d8%ad/",
+      "proven_on": "2026-10-30",
+      "note": "Proven silent on 1 rendered ad. 39 ads. Served 0/39 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "arkaan": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://arkaanalaqar.com/property/1907",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 1877/1934 (97.1%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "arsh": {
+      "pin_source": "partial",
+      "floor_pct": 70,
+      "proof_url": "https://www.arshglobal.com.sa/%D8%A3%D8%B1%D8%B6-%D8%AA%D8%AC%D8%A7%D8%B1%D9%8A%D8%A9",
+      "proven_on": "2026-10-30",
+      "note": "Partial: goo.gl short links per ad, read when present (17 of 21 served). Served 17/21 (81.0%) on 2026-10-30 before today's fixes."
+    },
+    "ashab": {
+      "pin_source": "page-json",
+      "floor_pct": 95,
+      "proof_url": "https://ashab.sa/properties/166463",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (page-json); not re-opened in a browser today. Served 623/623 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "awal": {
+      "pin_source": "ad-page",
+      "floor_pct": 85,
+      "proof_url": "https://awaalun.com/property/%d8%a7%d8%b1%d8%b6-%d9%85%d8%b3%d9%88%d8%b1%d9%87/",
+      "proven_on": "2026-10-30",
+      "note": "BUG fixed #9508: <div class=marker data-latitude data-longitude> per ad (3/3 rendered ads, distinct pairs); the «Al Rabwa, Ar Ar» JSON is the office. Floor raised to 85 after the 2026-10-31 re-crawl + 02:22 sync. Served 0/51 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "azdad": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://www.azdadalaqaria.com/property/e0b35c05-9b14-42d0-997b-1a857566a825",
+      "proven_on": "2026-10-30",
+      "note": "Proven silent on 1 rendered ad. 20 ads. Served 0/20 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "azure": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://azure.sa/compounds/al-reem",
+      "proven_on": "2026-10-30",
+      "note": "Silent on 1 rendered page: loads Maps JS but prints no pair, link or frame. 32 ads. Served 0/32 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "bahadhabab": {
+      "pin_source": "partial",
+      "floor_pct": 10,
+      "proof_url": "https://www.bahadhabab-res.com/properties/38741",
+      "proven_on": "2026-10-30",
+      "note": "Partial: pinned ad has the pair in JSON; 39029 and 38777 show nothing. Served 11/53 (20.8%) on 2026-10-30 before today's fixes."
+    },
+    "bossbih": {
+      "pin_source": "partial",
+      "floor_pct": 15,
+      "proof_url": "https://bossbihoffice.com.sa/13298",
+      "proven_on": "2026-10-30",
+      "note": "Partial: the ad's own maps/place link only on some ads (13298 yes); 13709/14477 show only the office embed 25.361896,49.631982 (never read) and other ads' links. Served 406/1544 (26.3%) on 2026-10-30 before today's fixes."
+    },
+    "compoundin": {
+      "pin_source": "project-page",
+      "floor_pct": 85,
+      "proof_url": "https://compoundin.com/compounds/riyadh/azure-al-reem",
+      "proven_on": "2026-10-30",
+      "note": "BUG fixed #9507: the compound page's inline `cinMapMarkers = [{marker:{position:{lat,lng}}}]` (one marker = the compound; measured on 3 compounds). Floor raised to 85 after the 2026-10-31 re-crawl + 02:22 sync. Served 0/286 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "dallali": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://dallali.com/advertisements/property/fa37876f-451b-45a4-92a1-b4cccfd0941c",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 14/14 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "daraa": {
+      "pin_source": "ad-page",
+      "floor_pct": 1,
+      "proof_url": "https://daraa.sa/projects/205048",
+      "proven_on": "2026-10-30",
+      "note": "CAPTURE GAP (7 ads, 0%): two maps.app.goo.gl short links on the rendered page; not followed. Below the 50-ad line; backlog. Served 0/7 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "daryusuf": {
+      "pin_source": "ad-page",
+      "floor_pct": 90,
+      "proof_url": "https://daryusuf.com/en/portfolio/villa-for-rent-al-khalidiyah-district-madinah/",
+      "proven_on": "2026-10-30",
+      "note": "BUG fixed #9508: the Elementor iframe maps.google.com/maps?q=24°27'59.8\"N 39°39'44.9\"E (DMS) per ad (3/3 rendered ads, distinct pairs). Floor raised to 90 after the 2026-10-31 re-crawl + 02:22 sync. Served 0/258 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "dealapp": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://dealapp.sa/ar/ad-details/581109",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 46120/46303 (99.6%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "dwelleo": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://www.dwelleo.sa/ar/properties/9000-sqm-office-space-for-rent-in-al-suwaidi-riyadh",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 4484/4517 (99.3%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "eaqartabuk": {
+      "pin_source": "partial",
+      "floor_pct": 25,
+      "proof_url": "https://eaqartabuk.com/property/%d9%81%d9%8a%d9%84%d8%a7-%d8%b1%d9%88%d9%81-%d8%b9%d9%84%d9%88%d9%8a-%d9%85%d8%b3%d8%aa%d9%82%d9%84-%d8%ad%d9%8a-%d8%a7%d9%84%d9%8a%d9%88%d8%a7%d8%af%d9%8a-971/",
+      "proven_on": "2026-10-30",
+      "note": "Partial: ads without their own pin print the site's default 28.392151,36.57399 (Tabuk Park Mall) in JSON-LD and the Leaflet config — registered in ops_default_pin_register and stripped; real pins (971) are read. Served 204/574 (35.5%) on 2026-10-30 before today's fixes."
+    },
+    "earthapp": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://map.earthapp.com.sa/offers/2662819",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 57/57 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "eastabha": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://eastabha.sa/estate_property/4001/",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 164/168 (97.6%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "ebriza": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://ebriza.com.sa/for_sell/626/%D8%A3%D8%A8%D9%87%D8%A7/%D8%A7%D9%84%D8%B4%D8%B1%D9%82%D9%8A%D8%A9/%D8%A7%D8%B1%D8%B6-%D8%A8%D9%8A%D8%B9",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 203/203 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "ego": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://ego-aqar.com/unit-details/2409",
+      "proven_on": "2026-10-30",
+      "note": "Proven silent on 1 rendered ad. 21 ads. Served 0/21 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "eightfloor": {
+      "pin_source": "partial",
+      "floor_pct": 40,
+      "proof_url": "https://www.8floor.sa/properties/37975",
+      "proven_on": "2026-10-30",
+      "note": "Partial by the scraper's own read (1 of 2 served); the pinless rendered ad shows nothing. Served 1/2 (50.0%) on 2026-10-30 before today's fixes."
+    },
+    "eilmalriyada": {
+      "pin_source": "partial",
+      "floor_pct": 10,
+      "proof_url": "https://eilmalriyada.com/real-estate/view/566",
+      "proven_on": "2026-10-30",
+      "note": "Partial: pinned ad has a Maps link + short links and api.eilmalriyada.com/api/recent/566 carries the pair; 473 and 510 show nothing. Served 59/285 (20.7%) on 2026-10-30 before today's fixes."
+    },
+    "erapulse": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://erapulse.sa/property/buraydah-land-sale-ref-msrx3eyl-07fd9",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 44/45 (97.8%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "expattrusted": {
+      "pin_source": "page-json",
+      "floor_pct": 95,
+      "proof_url": "https://expattrustedhousingriyadh.com/p/en/property/al-bustan-village",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (page-json); not re-opened in a browser today. Served 49/50 (98.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "eydah": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://eydah.com/offers/Ey-1001.html",
+      "proven_on": "2026-10-30",
+      "note": "Proven silent on 1 rendered ad. 2 ads. Served 0/2 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "fahadalshahri": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://fahadalshahri.com/product/%d8%b4%d9%82%d9%82-%d8%a8%d8%ad%d9%8a-%d8%a7%d9%84%d8%b1%d9%88%d8%b6%d9%87/",
+      "proven_on": "2026-10-30",
+      "note": "UNVERIFIED 2026-10-30: 403/timeout to both clients; provisional none. Served 0/5 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "fkralemar": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://www.fkralemar.com/offers/apartment-for-sale",
+      "proven_on": "2026-10-30",
+      "note": "Proven silent on 1 rendered page. 10 ads. Served 0/10 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "flow": {
+      "pin_source": "ad-page",
+      "floor_pct": 1,
+      "proof_url": "https://flow.life/en/properties/riyadh-narjis/available-homes/tihama-3-bedroom/fid/o6j2UXkv0Lr9J0YjzDDL",
+      "proven_on": "2026-10-30",
+      "note": "CAPTURE GAP (20 ads, 0%): the rendered page prints a Maps link 24.900543,46.636600 (Mapbox map). Below the 50-ad line; backlog. Served 0/20 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "fursaghyr": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://fursaghyr.com/property/%d8%b9%d9%85%d8%a7%d8%b1%d8%a9-%d8%a8%d9%8a%d8%b9-%d9%85%d9%86%d8%b7%d9%82%d8%a9-%d8%a7%d9%84%d9%85%d8%af%d9%8a%d9%86%d8%a9-%d8%a7%d9%84%d9%85%d9%86%d9%88%d8%b1%d8%a9/",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 8/8 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "gathern": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://gathern.co/view/65814/unit/99257",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 15103/15117 (99.9%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "goldendeal": {
+      "pin_source": "ad-page",
+      "floor_pct": 91,
+      "proof_url": "https://www.goldendeal.sa/properties/49174",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (ad-page); not re-opened in a browser today. Served 308/318 (96.9%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "gomenassat": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://gomenassat.com/ar/offer/792",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 175/177 (98.9%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "gudai": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://gudai.inblaj.net/property/%d8%a3%d8%b1%d8%b6-%d8%b3%d9%83%d9%86%d9%8a%d8%a9-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%81%d9%8a-%d8%ad%d9%8a-%d8%a7%d9%84%d9%81%d9%8a%d8%ad%d8%a7%d8%a1-%d8%a7%d9%84%d8%af%d9%85%d8%a7%d9%85/",
+      "proven_on": "2026-10-30",
+      "note": "UNVERIFIED 2026-10-30: 403/timeout to both clients; provisional none. Served 0/12 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "hajer": {
+      "pin_source": "ad-page",
+      "floor_pct": 85,
+      "proof_url": "https://hajerhouses.com/property/%d8%a8%d9%8a%d8%aa-%d9%85%d9%83%d9%88%d9%86-%d9%85%d9%86-%d8%af%d9%88%d8%b1-%d9%88%d8%ab%d9%84%d8%a7%d8%ab-%d8%b4%d9%82%d9%82-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%81%d9%8a-%d8%ad%d9%8a-%d8%a7%d9%84/",
+      "proven_on": "2026-10-30",
+      "note": "BUG fixed #9508: var rem_property_map = {latitude, longitude} per ad (3/3 rendered ads, distinct pairs). Floor raised to 85 after the 2026-10-31 re-crawl + 02:22 sync. Served 0/124 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "haraj": {
+      "pin_source": "partial",
+      "floor_pct": 75,
+      "proof_url": "https://haraj.com.sa/11191638006",
+      "proven_on": "2026-10-30",
+      "note": "Partial: the seller sets a pin on most ads (a Maps link on 11191638006); 11191640369 and 11191637649 show none, and the page's GraphQL responses carry no pair for them. Served 12765/15587 (81.9%) on 2026-10-30 before today's fixes."
+    },
+    "hasaad": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://hasaadestate.com/projects/%d8%ac%d9%88%d8%a7%d8%b1-19/",
+      "proven_on": "2026-10-30",
+      "note": "Silent: the only map is a place embed whose q= is a short plus code + address text (J44X+G42, As Salamah, Jeddah) — resolving it is geocoding, which we never do. 12 ads. Served 0/12 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "hazim": {
+      "pin_source": "partial",
+      "floor_pct": 10,
+      "proof_url": "https://hazim.sa/properties/6a24951be68e1d79e10e7787",
+      "proven_on": "2026-10-30",
+      "note": "Partial by the scraper's own read (1 of 5 served); the pinless rendered ad shows nothing. Served 1/5 (20.0%) on 2026-10-30 before today's fixes."
+    },
+    "holoul": {
+      "pin_source": "partial",
+      "floor_pct": 35,
+      "proof_url": "https://app.holoul.io/units/10a9d527-6534-4915-abcb-4298d7e30aa0",
+      "proven_on": "2026-10-30",
+      "note": "Partial: the API's location object, read when present (14 of 30 served); the rendered pinless unit shows the map centre 24.500621,46.735823 only. Served 14/30 (46.7%) on 2026-10-30 before today's fixes."
+    },
+    "ialqarawi": {
+      "pin_source": "partial",
+      "floor_pct": 75,
+      "proof_url": "https://ialqarawi.com/index.php?router=card&id=1999&catid=45",
+      "proven_on": "2026-10-30",
+      "note": "Partial by the scraper's own read (Maps link with «q= LAT,LNG», 81.9% served); the site refused the headless browser and curl today (HTTP/2 error) — re-open from a residential IP. Served 2145/2618 (81.9%) on 2026-10-30 before today's fixes."
+    },
+    "ibaax": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://ibaax.sa/ar/advertisements/763",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 152/153 (99.3%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "jawher": {
+      "pin_source": "partial",
+      "floor_pct": 75,
+      "proof_url": "https://www.jawher2030.com/properties/52519",
+      "proven_on": "2026-10-30",
+      "note": "Partial by the scraper's own read (35 of 42 served); a pinless rendered ad still printed a pair in JSON + a Maps link — re-check whether it is a default. Served 35/42 (83.3%) on 2026-10-30 before today's fixes."
+    },
+    "jazwtn": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://jazwtn.sa/projects/%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%82%d8%b7%d8%b9%d8%a9-%d8%b1%d9%82%d9%85-1006-%d9%81%d9%8a-%d9%85%d8%ae%d8%b7%d8%b7-482-%d8%a8%d8%ad%d9%8a-%d8%a7%d9%84%d8%b1%d9%88%d8%a7%d8%a8%d9%8a-%d8%b6%d8%a7/",
+      "proven_on": "2026-10-30",
+      "note": "Proven silent: 2/2 rendered ads carry no pair, no map library, no short link, no map feed. Served 0/97 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "jurash": {
+      "pin_source": "partial",
+      "floor_pct": 80,
+      "proof_url": "https://jurash.sa/property/97/",
+      "proven_on": "2026-10-30",
+      "note": "Partial: the ad's iframe maps?q=18°24'54.0,42°41'44.1 (DMS) read when present (13 of 15 served). Served 13/15 (86.7%) on 2026-10-30 before today's fixes."
+    },
+    "justsa": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://just.sa/l/727",
+      "proven_on": "2026-10-30",
+      "note": "Proven silent: 3/3 rendered ads carry no pair, no map library, no short link. Served 0/73 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "ksaaqar": {
+      "pin_source": "partial",
+      "floor_pct": 15,
+      "proof_url": "https://ksaaqar.com/ad/%d9%84%d9%84%d8%a5%d9%8a%d8%ac%d8%a7%d8%b1-%d8%b4%d9%82%d8%a9-%d8%b9%d8%a7%d8%a6%d9%84%d9%8a%d9%87-%d9%81%d8%a7%d8%ae%d8%b1%d8%a9-%d9%81-%d8%a3%d8%a8%d8%ad%d8%b1-%d8%a7%d9%84%d8%b4%d9%85%d8%a7%d9%84/",
+      "proven_on": "2026-10-30",
+      "note": "Partial by the scraper's own read (26.5% served); the raw page of a pinless ad has no pair and loads Maps JS only; pages timed out in the headless browser today. Served 383/1448 (26.5%) on 2026-10-30 before today's fixes."
+    },
+    "livingcompound": {
+      "pin_source": "ad-page",
+      "floor_pct": 1,
+      "proof_url": "https://livingcompound.com/property/2-bedroom-fully-furnished-apartment-for-rent-al-fayha-jeddah/",
+      "proven_on": "2026-10-30",
+      "note": "CAPTURE GAP (17 ads, 0%): the rendered page prints a Maps link 21.509731,39.203042. Below the 50-ad line; backlog. Served 0/17 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "m3tmd": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://www.m3tmd.com/properties/37109",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 36/37 (97.3%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "macsaib": {
+      "pin_source": "partial",
+      "floor_pct": 1,
+      "proof_url": "https://macsaib.sa/property/fyla-hy-alrhab",
+      "proven_on": "2026-10-30",
+      "note": "Partial: the only embed on every ad is the office 26.361853,43.9304608 (identical on 3/3 rendered ads, never read); 2 served pins come from ads that stated one. Served 2/63 (3.2%) on 2026-10-30 before today's fixes."
+    },
+    "maktab": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://maktab.sa/details/91",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 20/20 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "manafe": {
+      "pin_source": "page-json",
+      "floor_pct": 88,
+      "proof_url": "https://manafe.com.sa/manafemar/project/285",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (page-json); not re-opened in a browser today. Served 72/77 (93.5%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "manzo": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://manzo.com.sa/ar/property/long_term_rent-140m2-86yb8vWa",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 793/795 (99.7%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "maqam": {
+      "pin_source": "feed",
+      "floor_pct": 85,
+      "proof_url": "https://property.maqamco.sa/properties/51641",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 38/42 (90.5%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "maqrat": {
+      "pin_source": "page-json",
+      "floor_pct": 95,
+      "proof_url": "https://maqrat.com/Property/Details/60",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (page-json); not re-opened in a browser today. Served 235/235 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "marksa": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://mar-ksa.com/ar/property/showitem/881",
+      "proven_on": "2026-10-30",
+      "note": "Proven silent on 1 rendered ad. 7 ads. Served 0/7 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "masar": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://masaraqarat.com/aqar/%d8%b4%d9%82%d8%a9-%d9%84%d9%84%d8%a5%d9%8a%d8%ac%d8%a7%d8%b1-4/",
+      "proven_on": "2026-10-30",
+      "note": "UNVERIFIED 2026-10-30: 403/timeout to both clients; provisional none (1 ad). Served 0/1 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "mizlaj": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://mizlaj.com.sa/guest/listings/aakar-371961m2-llbyaa-almdyn-almnor-4tcrzkwY",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 33/33 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "mobasher": {
+      "pin_source": "partial",
+      "floor_pct": 70,
+      "proof_url": "https://mobasher.sa/direct/realestate/%D8%A7%D8%B1%D8%B6-%D8%B2%D8%B1%D8%A7%D8%B9%D9%8A%D8%A9-%D8%A7%D9%84%D8%B1%D9%8A%D8%A7%D8%B6-%D8%A7%D9%84%D8%B9%D9%85%D8%A7%D8%B1%D9%8A%D8%A9--1785325075506",
+      "proven_on": "2026-10-30",
+      "note": "Partial by the scraper's own read (32 of 40 served); the pinless rendered ad printed a Maps link at 24.734276,46.671277 — re-check whether it is a default. Served 32/40 (80.0%) on 2026-10-30 before today's fixes."
+    },
+    "moftah": {
+      "pin_source": "feed",
+      "floor_pct": 1,
+      "proof_url": "https://moftah-aleaqar.com",
+      "proven_on": "2026-10-30",
+      "note": "0 served rows on 2026-10-30; classified from the scraper's read path (feed). Floor 1 = «publishes»; measure on relaunch."
+    },
+    "muajarh": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://muajarh.com/properties/property-1785346629908",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 11/11 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "muhaysini": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://aqaralmuhaysini.com/propertydetails/17910",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 19812/19816 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "muktamel": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://www.muktamel.com/real-estates/34319",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 3892/3892 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "mustqr": {
+      "pin_source": "partial",
+      "floor_pct": 1,
+      "proof_url": "https://mustqr.sa/property/3083",
+      "proven_on": "2026-10-30",
+      "note": "Partial at source (fix #9507 + browser lane in #9509): the API's lat/lng columns are restricted to the office; the page's JSON-LD geo is the office (27.5114,41.7208) on every ad; show_location true on 11/1,348 rows. The only published pin is the maps.app.goo.gl link a broker pastes into the ad text (ids 2923, 3876, 3877 … — 14 descriptions + raw_text bodies). ROOT CAUSE of 1/1,345 on 2026-10-31: those are SHORT links and Google answers the runner's plain/proxy hop with a 200 script page, so no pair could be read (nothing written, honestly); small-sources-sync now runs mustqr with browser: true (PIN_BROWSER_HOP=1, the 2026-10-20 lane) — measure after the next crawl and raise the floor. Served 1/1,345 (0.1 %) on 2026-10-31."
+    },
+    "nafithh": {
+      "pin_source": "page-json",
+      "floor_pct": 95,
+      "proof_url": "https://nafithh.com/web/gallery/266",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (page-json); not re-opened in a browser today. Served 26/26 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "nawafeth": {
+      "pin_source": "partial",
+      "floor_pct": 50,
+      "proof_url": "https://nawafethalwatan.com/Advserments/GetAdvsertismentDetail?advsertismentId=173",
+      "proven_on": "2026-10-30",
+      "note": "Partial by the scraper's own read (9 of 15 served); the pinless rendered ad shows nothing. Served 9/15 (60.0%) on 2026-10-30 before today's fixes."
+    },
+    "nofodh": {
+      "pin_source": "partial",
+      "floor_pct": 60,
+      "proof_url": "https://www.nofodh.sa/listings/326117",
+      "proven_on": "2026-10-30",
+      "note": "Partial: a Maps frame maps?q=LAT,LNG only on ads that have one; the JSON-LD geo (office 24.728956,46.7436311) and the map-selector centre are never read (612433, 560136 carry only those). Served 1811/2556 (70.9%) on 2026-10-30 before today's fixes."
+    },
+    "nowaisiry": {
+      "pin_source": "partial",
+      "floor_pct": 40,
+      "proof_url": "https://alnowaisiry.com/lands/%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d8%a7%d8%b1%d8%b6-360-%d9%85%d8%aa%d8%b1-%d9%81%d9%8a-%d9%85%d8%ae%d8%b7%d8%b7-%d8%a7%d9%84%d8%ae%d9%8a%d8%b1-%d8%a7%d9%84%d8%a3%d9%85%d8%b1%d8%a7%d8%a1-3541/",
+      "proven_on": "2026-10-30",
+      "note": "Partial: a maps.app.goo.gl short link per ad (raw page), read when present (11 of 21 served); the site answered the headless browser 403. Served 11/21 (52.4%) on 2026-10-30 before today's fixes."
+    },
+    "nufouth": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://nufouth.com/latest-offers?ads-N4310=1",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 326/326 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "october": {
+      "pin_source": "partial",
+      "floor_pct": 10,
+      "proof_url": "https://www.1october.com.sa/properties/44236",
+      "proven_on": "2026-10-30",
+      "note": "Partial by the scraper's own read (1 of 5 served); the pinless rendered ad shows nothing. Served 1/5 (20.0%) on 2026-10-30 before today's fixes."
+    },
+    "opensooq": {
+      "pin_source": "partial",
+      "floor_pct": 70,
+      "proof_url": "https://sa.opensooq.com/ar/search/288663068",
+      "proven_on": "2026-10-30",
+      "note": "Partial: pinned ad has JSON + Maps link; 287995454 and 287440508 show nothing. Served 71/88 (80.7%) on 2026-10-30 before today's fixes."
+    },
+    "qmra": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://qmra.sa/property/%d9%82%d9%85%d8%b1%d8%a7-11/",
+      "proven_on": "2026-10-30",
+      "note": "Silent: the only map is a place embed with q=قمرا 11 (text). 5 ads. Served 0/5 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "raghdan": {
+      "pin_source": "page-json",
+      "floor_pct": 95,
+      "proof_url": "https://raghdan.sa/ar/property/522621620527/",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (page-json); not re-opened in a browser today. Served 393/401 (98.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "rakez": {
+      "pin_source": "feed",
+      "floor_pct": 80,
+      "proof_url": "https://rakez.sa/ar/wp-json/hs-map/v1/projects?lang=en",
+      "proven_on": "2026-10-30",
+      "note": "BUG fixed #9503: the project page draws no map; /ar/projects-map/ calls this feed with every project's lat/lng (keyed by the English post id units name). 185 of 230 active projects are on the map (3,229 units); 40 projects / 431 units proven absent from both feeds. Served 0/3602 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "ramzalqasim": {
+      "pin_source": "page-json",
+      "floor_pct": 95,
+      "proof_url": "https://ramzalqasim.com/x/223",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (page-json); not re-opened in a browser today. Served 109/109 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "rawaf": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://rawaf.ai/project/114",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 19/19 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "rawasidark": {
+      "pin_source": "partial",
+      "floor_pct": 1,
+      "proof_url": "https://www.rawasi-dark.com/properties/cmnscv80b0000jj04lxkq9s4m",
+      "proven_on": "2026-10-30",
+      "note": "Partial: pinned ad has a Maps link; cmnrbh42u… and cmnmad9t6… show nothing (1% served). Served 1/101 (1.0%) on 2026-10-30 before today's fixes."
+    },
+    "razre": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://www.razre.sa/projects/raz-55/",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 18/18 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "reinvest": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://reinvest.sa/for-rent/showrooms/explore/riyadh/west-al-uraija/maard-llaygar-405",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 929/929 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "remal": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://www.remalre.com/Real-estate/villas/makkah-moukarma/for-sale-villa-in-public-housing-in-ruseifa/",
+      "proven_on": "2026-10-30",
+      "note": "Proven silent at source: the rendered maps?ll= link is drawn by Google's JS from the ADDRESS (the raw page has no pair; two different ads sit 25 m apart) and the only short link is the office's goo.gl on every page. A geocoded address is not a pin. Served 0/81 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "remaxsa": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://www.remax.sa/en/listings/apartment/for-sale/الرياض/113033009-19",
+      "proven_on": "2026-10-30",
+      "note": "Silent on 1 rendered ad: Leaflet loaded, no pair, link or frame; the page's settings.json carries no pair. 7 ads. Served 0/7 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "rightcompound": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://rightcompound.com/compounds/khobar/palm-springs-compound",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 881/885 (99.5%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "ryadah": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://ryadah.com.sa/property/%d9%85%d8%b3%d8%aa-%d8%b3%d9%83%d9%88%d9%8a%d8%b1/",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 18/18 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "sadin": {
+      "pin_source": "page-json",
+      "floor_pct": 1,
+      "proof_url": "https://www.sadin.com.sa",
+      "proven_on": "2026-10-30",
+      "note": "0 served rows on 2026-10-30; classified from the scraper's read path (page-json). Floor 1 = «publishes»; measure on relaunch."
+    },
+    "sadiqeltajer": {
+      "pin_source": "ad-page",
+      "floor_pct": 95,
+      "proof_url": "https://sadiq-eltajer.sa/ads/llaygar-mhlyn-shrk-bryd-hy-aldahy-alsharaa-alaaam-almsah-120mtr",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (ad-page); not re-opened in a browser today. Served 1709/1738 (98.3%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "safa": {
+      "pin_source": "ad-page",
+      "floor_pct": 1,
+      "proof_url": "https://safainv.sa/units/rental?page=1&property_id=12914",
+      "proven_on": "2026-10-30",
+      "note": "CAPTURE GAP (44 ads, 0%): the rendered page carries a maps.app.goo.gl short link; not followed. Backlog. Served 0/44 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "safera": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://safera.inblaj.net/property/%d8%a7%d8%b3%d8%aa%d8%b1%d8%a7%d8%ad%d8%a9-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d8%b4%d9%85%d8%a7%d9%84-%d8%a8%d8%b1%d9%8a%d8%af%d8%a9-%d8%ad%d9%8a-%d8%a7%d9%84%d9%86%d9%88%d8%b1/",
+      "proven_on": "2026-10-30",
+      "note": "UNVERIFIED 2026-10-30: timeout in the headless browser; provisional none (10 ads). Served 0/10 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "sakan": {
+      "pin_source": "ad-page",
+      "floor_pct": 89,
+      "proof_url": "https://sa.sakan.co/ar/property/details/86163",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (ad-page); not re-opened in a browser today. Served 2345/2478 (94.6%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "sakani": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://sakani.sa/app/market-unit/24501",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 1873/1873 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "sanadak": {
+      "pin_source": "page-json",
+      "floor_pct": 95,
+      "proof_url": "https://sanadak.sa/property-details/7200775576",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (page-json); not re-opened in a browser today. Served 847/849 (99.8%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "satel": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://listings.satel.sa/property/C0066",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 69/69 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "senan": {
+      "pin_source": "feed",
+      "floor_pct": 1,
+      "proof_url": "https://www.senanrealestate.sa",
+      "proven_on": "2026-10-30",
+      "note": "0 served rows on 2026-10-30; classified from the scraper's read path (feed). Floor 1 = «publishes»; measure on relaunch."
+    },
+    "shatri": {
+      "pin_source": "ad-page",
+      "floor_pct": 75,
+      "proof_url": "https://shatrirealestate.com/property/apartments-sale-alsafa-jeddah-3-rooms/",
+      "proven_on": "2026-10-31",
+      "note": "BUG fixed #9508: Houzez data-map='{latitude, longitude}' + JSON-LD geo on the ad PAGE (not in the REST post). Re-crawl 2026-10-31: 49/50 raw; the 03:15 default-pin strip then registered 21.53151,39.20492 (the office, 5 ads across 5 districts) and removed it — honest served coverage 39/50 (78 %). Floor 75 (migration 20261031035557), not 90: that floor was measured before the strip had seen the site, never true."
+    },
+    "shmoualshmal": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://shmoua-alshmal.com/property/%d9%81%d9%8a%d9%84%d8%a7-%d9%85%d9%88%d8%af%d8%b1%d9%86-6-%d8%ba%d8%b1%d9%81/",
+      "proven_on": "2026-10-30",
+      "note": "UNVERIFIED 2026-10-30: timeout in the headless browser; provisional none (6 ads). Served 0/6 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "shomou": {
+      "pin_source": "partial",
+      "floor_pct": 10,
+      "proof_url": "https://shomoalaqar.com.sa/8308",
+      "proven_on": "2026-10-30",
+      "note": "Partial: pinned ad has a Maps link (DMS shape handled); 8432 and 8436 show nothing. Served 26/141 (18.4%) on 2026-10-30 before today's fixes."
+    },
+    "sirdab": {
+      "pin_source": "partial",
+      "floor_pct": 45,
+      "proof_url": "https://marketplace.sirdab.co/ar/ads/5f70019b-e5a3-4ef2-a9c7-6133b9f102cb",
+      "proven_on": "2026-10-30",
+      "note": "Partial: pinned ad has JSON + Maps link + short link; 9574c3f5… and 0e592431… show nothing. Served 304/563 (54.0%) on 2026-10-30 before today's fixes."
+    },
+    "snam": {
+      "pin_source": "feed",
+      "floor_pct": 1,
+      "proof_url": "https://snam.sa",
+      "proven_on": "2026-10-30",
+      "note": "0 served rows on 2026-10-30; classified from the scraper's read path (feed). Floor 1 = «publishes»; measure on relaunch."
+    },
+    "sodasyat": {
+      "pin_source": "ad-page",
+      "floor_pct": 1,
+      "proof_url": "https://sodasyat.sa/single/2722",
+      "proven_on": "2026-10-30",
+      "note": "CAPTURE GAP (13 ads, 0%): the rendered page prints a Maps link 21.593931,39.215316 (1 ad seen). Backlog. Served 0/13 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "sokok": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://sokok.sa/piece/234329030/show",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 400/400 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "souq24": {
+      "pin_source": "ad-page",
+      "floor_pct": 1,
+      "proof_url": "https://24.com.sa/1099/x",
+      "proven_on": "2026-10-30",
+      "note": "CAPTURE GAP (46 ads, 0%): the rendered page prints a Maps link 16.8374,42.6478 (1 ad seen; Jazan). Backlog. Served 0/46 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "sqcc": {
+      "pin_source": "partial",
+      "floor_pct": 1,
+      "proof_url": "https://sqcc.sa/realestate/%d8%b9%d9%85%d8%a7%d8%b1%d9%87-%d9%84%d9%84%d8%a8%d9%8a%d8%b9/",
+      "proven_on": "2026-10-30",
+      "note": "Partial by the scraper's own read (2 of 27 served); the pinless rendered ad printed a Maps link 26.412465,50.022384 — re-check whether the scraper misses it. Backlog. Served 2/27 (7.4%) on 2026-10-30 before today's fixes."
+    },
+    "squares": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://squares.com.sa/property/%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%81%d9%8a%d9%84%d8%a7-%d8%a7%d9%84%d8%a8%d8%b3%d8%a7%d8%aa%d9%8a%d9%86-%d9%81%d9%8a-%d9%85%d8%af%d9%8a%d9%86%d8%a9-%d8%a8%d8%b1%d9%8a%d8%af%d8%a9/",
+      "proven_on": "2026-10-30",
+      "note": "Silent on 1 rendered ad: Leaflet loaded, no pair, link or frame. 16 ads. Served 0/16 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "sukna": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://sukna.app/unit-details?id=658",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 280/285 (98.2%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "superoffice": {
+      "pin_source": "project-page",
+      "floor_pct": 1,
+      "proof_url": "https://superoffice.sa/branch/as-suwaidi/unit/H19",
+      "proven_on": "2026-10-30",
+      "note": "CAPTURE GAP (39 ads, 0%): the unit page's Google embed is the BRANCH building (24.594860,46.695216) the unit sits in — one pair per branch, like a project pin. Below the 50-ad line; backlog. Served 0/39 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "suwar": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://suwar.sa/property/%d9%85%d8%b4%d8%b1%d9%88%d8%b9-%d8%b1%d9%82%d9%85-955-%d9%81%d9%8a%d9%84%d8%a7-%d8%aa%d9%85%d9%84%d9%8a%d9%83-%d8%a7%d9%84%d9%85%d9%88%d9%82%d8%b9-%d9%85%d9%83%d8%a9-%d8%a7%d9%84%d9%86%d9%88%d8%a7/",
+      "proven_on": "2026-10-30",
+      "note": "UNVERIFIED 2026-10-30: 403 to curl and a timeout in the headless browser (shared CDN challenge); the scraper reads no pin. Provisional none — re-open from a residential IP. Served 0/78 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "tamyaz": {
+      "pin_source": "none",
+      "floor_pct": 0,
+      "proof_url": "https://www.tamyaz-sa.com/#property-prop-mv6vu14g89g7",
+      "proven_on": "2026-10-30",
+      "note": "Silent: a single-page site whose ads are hash anchors; the only map is one site-wide embed 21.577807,39.246215 (the office). 15 ads. Served 0/15 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "tawia": {
+      "pin_source": "page-json",
+      "floor_pct": 1,
+      "proof_url": "https://tawia.sa/properties/af75d047-cb1c-449c-9a81-4f77af87653e",
+      "proven_on": "2026-10-30",
+      "note": "CAPTURE GAP (4 ads, 0%): the page's JSON prints 27.019223,49.644855 and a goo.gl short link (1 ad seen). Backlog. Served 0/4 (0.0%) on 2026-10-30 before today's fixes."
+    },
+    "therc": {
+      "pin_source": "partial",
+      "floor_pct": 50,
+      "proof_url": "https://therc.aqar.digital/properties/fyla-llaygar-fy-sharaa-3212-hy-alnthym-mdyn-alryad-mntk-alryad",
+      "proven_on": "2026-10-30",
+      "note": "Partial: pinned ad has a Maps link; two pinless ads show nothing. Served 269/457 (58.9%) on 2026-10-30 before today's fixes."
+    },
+    "thousand": {
+      "pin_source": "partial",
+      "floor_pct": 50,
+      "proof_url": "https://1000.com.sa/property/cmnh40ocy00h110i8axa8h7ye",
+      "proven_on": "2026-10-30",
+      "note": "Partial: pinned ad has its own maps?q=LAT,LNG frame; pinless ads carry an address-text frame (q=الرياض - الازدهار) and the site's shared short link 5f7vuTKUChEwCnt5A — neither is a pin. Served 74/119 (62.2%) on 2026-10-30 before today's fixes."
+    },
+    "tuba": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://tuba.com.sa/property/office-for-rent-in-riyadh-100",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 3407/3409 (99.9%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "villassa": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://villas-sa.com/real/estate/ads/100",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 12/12 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "vmksa": {
+      "pin_source": "page-json",
+      "floor_pct": 95,
+      "proof_url": "https://vm-ksa.com/ar/ads/763",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (page-json); not re-opened in a browser today. Served 194/195 (99.5%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "wadod": {
+      "pin_source": "ad-page",
+      "floor_pct": 95,
+      "proof_url": "https://wadod.sa/property/93",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (ad-page); not re-opened in a browser today. Served 7/7 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "wahadat": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://wahadat.sa/project/%D9%88%D8%B4%D8%A7%D8%AD-%D8%A7%D9%84%D9%86%D8%B1%D8%AC%D8%B3",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 994/998 (99.6%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "wajaf": {
+      "pin_source": "page-json",
+      "floor_pct": 95,
+      "proof_url": "https://wajaf.sa/properties/28/unit/66",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (page-json); not re-opened in a browser today. Served 48/48 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "wasalt": {
+      "pin_source": "feed",
+      "floor_pct": 95,
+      "proof_url": "https://wasalt.sa/en/property/duplex-315-sqm-facing-west-with-6-bedrooms-5927297",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (feed); not re-opened in a browser today. Served 89241/89288 (99.9%). Floor = ratchet below today's number; raise it, never lower it."
+    },
+    "wslnaa": {
+      "pin_source": "feed",
+      "floor_pct": 20,
+      "proof_url": "https://wslnaa.com/properties/nada-avenue-apartment-22",
+      "proven_on": "2026-10-30",
+      "note": "Fix #9508 + browser lane in #9509: the tRPC API's mapUrl is a maps.app.goo.gl short link per unit (3/3 rendered ads; the sampled units share their compound's link). 2026-10-31 crawl: the proxy hop got Google's 200 script page («via proxy | 200→ | body 39»), so no new pin was written and the 17 stored commercial pins stayed (keep_stored_pin). small-sources-sync now runs wslnaa with browser: true; floor 20 = today's honest 27.9 %. Raise after the next crawl."
+    },
+    "yameen": {
+      "pin_source": "page-json",
+      "floor_pct": 95,
+      "proof_url": "https://www.yameen.sa/properties/52351",
+      "proven_on": "2026-10-30",
+      "note": "Classified 2026-10-30 from the scraper's read path (page-json); not re-opened in a browser today. Served 6/6 (100.0%). Floor = ratchet below today's number; raise it, never lower it."
+    }
+  }
+}

@@ -488,7 +488,7 @@ mustCatch('a day rule on UTC instead of Riyadh (23:30 and 00:30 Riyadh share a U
   check('every greeting emoji is cut into its own span (and a sentence without one is left whole)', splits(re));
   mustCatch('a pattern that misses the moon 🌙', !splits(/([☀-➿]️?)/));
   const wired = home.includes('{withVisibleEmoji(welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline]))}')
-    && home.includes("{...({ dataSet: { ezhEmoji: '' } } as any)}")
+    && home.includes("{...({ dataSet: { ezhEmoji: p === PARTY_EMOJI ? 'party' : '' } } as any)}")
     && party.includes('[data-ezh-shine="on"] [data-ezh-emoji]{-webkit-text-fill-color:initial!important;color:initial!important}');
   check('the headline renders its emoji in that span, and the shine CSS gives the span its own fill', wired);
   mustCatch('the shine CSS without the emoji rule (the emoji vanishes on iPhone)', !(party.replace('[data-ezh-shine="on"] [data-ezh-emoji]', '[x]').includes('[data-ezh-shine="on"] [data-ezh-emoji]')));

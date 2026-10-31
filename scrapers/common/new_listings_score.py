@@ -267,6 +267,9 @@ WORD_NUMBERS = {"ثلاث": 3, "ثلاثه": 3, "اربع": 4, "اربعه": 4, 
 WORD_NUMBER = re.compile(r"(?<![\u0621-\u064A])(" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
                          + r")(?![\u0621-\u064A])")
 
+WORDED_VALUE_LINE = re.compile(r"^\s*(" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
+                               + r")\s*(?:سنوات|سنين|سنه|غرف|غرفه|صالات|دورات مياه)?\s*$")
+
 
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
@@ -308,6 +311,11 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # (2026-10-20, re-read run 39384692527) print the ad's own «غرفتين نوم» AND, in the related-ads table under
         # it, another unit's «المساحة194مأربع غرف»; reading the number word first scored our 2 bedrooms a MISMATCH.
         worded = {WORD_NUMBERS[m.group(1)] for i in kw_hits for m in WORD_NUMBER.finditer(lines[i])}
+        # A label/value page puts the worded figure on the NEXT line: reinvest 21664052 (2026-10-30, re-read run
+        # 41098655633) prints «عمر العقار» / «ثلاث سنوات» (stored 3), and the bare «3179» of the row before read as
+        # a stated age, so the night scored it a MISMATCH. Only a line that is nothing but the worded figure counts.
+        worded |= {WORD_NUMBERS[m.group(1)] for i in kw_hits if i + 1 < len(lines)
+                   for m in [WORDED_VALUE_LINE.match(lines[i + 1])] if m}
         if any(ONE_WORD.search(lines[i]) for i in kw_hits):
             worded.add(1)
         if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
@@ -451,7 +459,28 @@ def page_lacks_its_ad(url: str | None, body: str) -> bool:
 _CARD_START = re.compile(r'<div[^>]*class="[^"]*\bcard-item\b')
 
 
+# A page's «similar ads» block is OTHER ads, and so is the footer under it: ashab 21679061 (2026-10-30, re-read
+# runs 41088522215 / 41088846088) — the ad's own header badge says «بيع» (stored بيع), but the sibling cards under
+# «عقارات مشابهة» carry «إيجار» badges, which scored the deal MISMATCH and capped the night. The site's own scraper
+# stops at the same markers (scrapers/ashab/run.py::parse_page); the scorer reads exactly what the scraper reads.
+# alshawaf 21664551 (2026-10-30, re-read runs 41089939871 / 41090169747): the node's own table says «المساحة 250م»
+# (stored 250), and the «related listings» Views table under it (`…duplicate-of-frontpage-block-1`, trap 1 in
+# scrapers/alshawaf/run.py) prints other plots' «المساحة 422.22م»; the area scored MISMATCH and capped the night.
+_SIMILAR_BLOCK = {"ashab.sa": ('id="similar-properties"', "عقارات مشابهة"),
+                  "alshawaf.com.sa": ("duplicate-of-frontpage-block-1",)}
+
+
+def drop_similar_block(url: str | None, body: str) -> str:
+    for host, stops in _SIMILAR_BLOCK.items():
+        if host in (url or "") and body:
+            for stop in stops:
+                if (k := body.find(stop)) > 0:
+                    body = body[:k]
+    return body
+
+
 def scope_to_its_ad(url: str | None, body: str) -> str:
+    body = drop_similar_block(url, body)
     m = _AD_CODE_IN_URL.search(url or "")
     if not m or not body:
         return body
@@ -803,6 +832,51 @@ def nufouth_page(url: str, ad_number: str | None, fetch=None) -> dict | None:
     return None
 
 
+def safa_page(url: str, fetch=None) -> dict | None:
+    """A safa unit read from its OWN card and sheet (backlog 1087, 2026-10-30). safa has no page per unit: the
+    stored link is a shared list page (/project/units/58?page=1&property_id=14144) carrying 21 OTHER units, and
+    the unit's rooms, area and price live only in the POST /unit/details sheet (scrapers/safa/run.py). 21671007
+    (3 rooms, re-read run 41088522215) scored bedrooms MISMATCH against «عدد الغرف 1» of a co-working unit on
+    that list and capped the 10-30 night at 5. This restates the card's deal and type and the sheet's own
+    facts, labelled; None when either cannot be read (unknown, never wrong)."""
+    m = re.search(r"[?&]property_id=(\d+)", url or "")
+    if not m:
+        return None
+    uid = m.group(1)
+    try:
+        from scrapers.safa import run as safa
+        if fetch is not None:
+            card_html, popup_html = fetch(url, uid)
+        else:
+            s = safa.session()
+            body = safa._get(s, url)
+            token = safa._csrf(body)
+            card_html = dict(safa._CARD_RE.findall(body)).get(uid)
+            popup_html = safa.fetch_unit(s, uid, token) if token and card_html else None
+        if not card_html or not popup_html:
+            return None
+        card, popup = safa.parse_card(card_html), safa.parse_popup(popup_html)
+    except Exception:  # noqa: BLE001
+        return None
+    lines = []
+
+    def put(label, v, tail=""):
+        if isinstance(v, bool) or v in (None, "", 0):
+            return
+        lines.append(f"{label} {str(v).strip()}{tail}")
+    put("نوع الإعلان", card.get("deal_ar"))
+    put("نوع العقار", card.get("type_ar"))
+    put("الموقع", card.get("card_location"))
+    put("المساحة", popup.get("area_total_raw"), " م²")
+    put("عدد الغرف", popup.get("rooms"))
+    put("دورات المياه", popup.get("bathrooms"))
+    put("السعر", popup.get("price_raw"), " ريال")
+    title = str(popup.get("unit_title") or card.get("unit_code") or "")
+    lines += [y.strip() for y in f"{title}\n{popup.get('description') or ''}".splitlines() if y.strip()]
+    return {"title": title, "meta": {}, "jsonld": [], "evidence_lines": lines[:200],
+            "text_head": " | ".join(lines)[:1500]}
+
+
 _DALLALI_RECORDS: "dict | None" = None
 
 
@@ -890,7 +964,7 @@ def tuba_rega_lines(url: str, fetch=None) -> list[str]:
 
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
                pace: float = PACE_S, probe=None, wasalt=None, sanadak=None, muktamel=None, tuba=None,
-               nufouth=None, dallali=None, dwelleo=None) -> dict:
+               nufouth=None, dallali=None, dwelleo=None, safa=None) -> dict:
     if probe is None:
         # Imported here, not at module level: af_score and its hermetic check load this module with
         # source_reread stubbed, and they always pass their own probe.
@@ -927,6 +1001,8 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
         own = wasalt if ("wasalt.sa" in url or "wasalt.com" in url) else sanadak if "sanadak.sa" in url else None
         if "dallali.com/advertisements/" in url:
             own = dallali or dallali_page
+        if "safainv.sa" in url:
+            own = safa or safa_page
         if "nufouth.com" in url:
             ad_number = (client.table(table).select("ad_number").eq("id", rid).limit(1).execute().data
                          or [{}])[0].get("ad_number")

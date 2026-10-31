@@ -155,7 +155,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from curl_cffi import requests as cc
 
@@ -276,19 +276,47 @@ def enumerate_sale(s: cc.Session) -> list[tuple[dict, dict]]:
     return enumerate_catalogue(s, "sale")
 
 
+class WalkIncomplete(RuntimeError):
+    """A catalogue page past the first stayed unreadable after fresh sessions: `units` is what the
+    walk read before it. Real rows — written, but never pruned (a partial walk proves nobody gone)."""
+    def __init__(self, msg: str, units: list[tuple[dict, dict]]):
+        super().__init__(msg)
+        self.units = units
+
+
+# 2026-10-30 run 16:16 UTC: sale page 69 drew the challenge on every try and the whole night was
+# thrown away («walk aborted», rows_upserted 0). A challenge is about our session (the detail route
+# already renegotiates on it), so a page gets a cool-down and up to WALK_RENEGOTIATIONS fresh sessions.
+WALK_RENEGOTIATIONS = 2
+_walk_renew: Optional[Callable[[], cc.Session]] = None    # main() sets it; tests leave it None
+
+
 def enumerate_catalogue(s: cc.Session, purpose: str) -> list[tuple[dict, dict]]:
     """Every (search_row, rich_row) attribute pair of one marketplace purpose, in catalogue order.
     Raises on a blocked walk or a changed shape — a blocked transport must never read as an empty
-    catalogue (that would be the prune-everything shape)."""
+    catalogue (that would be the prune-everything shape). Page 1 unreadable fails the run; a later
+    page unreadable after fresh sessions raises WalkIncomplete carrying the rows already read."""
+    global _oracle_sess
     out: list[tuple[dict, dict]] = []
     seen: set[str] = set()
     page = 1
+    renewed = 0
     while True:
         got = fetch_json(s, SEARCH, {"filter[marketplace_purpose]": purpose,
                                      "page[size]": PAGE_SIZE, "page[number]": page})
         if not got or got[0] != 200 or not isinstance(got[1], dict):
-            raise RuntimeError(f"{purpose} catalogue page {page} unreadable "
-                               f"({'HTTP %s' % got[0] if got else 'challenge/transport'}) — walk aborted")
+            if _walk_renew and renewed < WALK_RENEGOTIATIONS:
+                renewed += 1
+                print(f"   ↻ {purpose} page {page} unreadable — cool-down, fresh session "
+                      f"{renewed}/{WALK_RENEGOTIATIONS}", flush=True)
+                time.sleep(PAUSE * 20)
+                _oracle_sess = s = _walk_renew()
+                continue
+            msg = (f"{purpose} catalogue page {page} unreadable "
+                   f"({'HTTP %s' % got[0] if got else 'challenge/transport'}) — walk aborted")
+            if page > 1 and out:
+                raise WalkIncomplete(msg, out)
+            raise RuntimeError(msg)
         data = got[1].get("data") or []
         rich = {d.get("id"): (d.get("attributes") or {})
                 for d in (((got[1].get("meta") or {}).get("first_page") or {}).get("data") or [])}
@@ -704,8 +732,9 @@ def main() -> int:
     want_ids = {x.strip() for x in args.ids.split(",") if x.strip()}
     partial = bool(args.max_units or want_ids) or args.deal != "all"
 
-    global _oracle_sess
+    global _oracle_sess, _walk_renew
     _oracle_sess = s = session()     # the walk warms it; the oracle reuses it (never a cold probe)
+    _walk_renew = session
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run("sakani")
     res: list[dict] = []
@@ -717,7 +746,13 @@ def main() -> int:
         for purpose in ("rent", "sale"):
             if args.deal not in ("all", purpose):
                 continue
-            got = (enumerate_rent if purpose == "rent" else enumerate_sale)(s)
+            try:
+                got = (enumerate_rent if purpose == "rent" else enumerate_sale)(s)
+            except WalkIncomplete as w:
+                got, partial = w.units, True          # keep what was read; no prune below
+                skipped[f"{purpose}_walk_incomplete"] = 1
+                print(f"  ⚠ {w} — keeping the {len(got)} {purpose} rows read before it, no prune", flush=True)
+            s = _oracle_sess or s                     # the walk may have renegotiated the session
             if not got:
                 raise RuntimeError(f"the {purpose} catalogue answered 0 units — treated as blocked, not empty")
             if purpose == "sale":

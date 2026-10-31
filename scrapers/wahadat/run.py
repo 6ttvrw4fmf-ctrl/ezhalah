@@ -277,6 +277,16 @@ def struck_unlisted_projects(sitemap_urls: list[str]) -> list[str]:
     return sorted(out - listed)
 
 
+def project_description(proj: dict[str, Any]) -> Optional[str]:
+    """The project's own about text, tags stripped, PII redacted; None when the page has none."""
+    raw = proj.get("about_ar")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    text = normalize.html_block_lines(raw) if "<" in raw else raw
+    text = re.sub(r"[ \t]+", " ", text).strip()
+    return redact_pii(text) or None
+
+
 def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[str, Any], str]:
     """(row, category) for ONE unit already proven `status == available` and type-resolved."""
     category = normalize.category_for_type(ptype).lower()
@@ -325,6 +335,12 @@ def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[
         # The PROJECT's own gallery (see _main_project). Units carry no images of their own on
         # this source, so every unit of a project shows that project's photos.
         "photo_urls": proj.get("images") or None,
+        # The project's own «about» text (`about_ar`), whole and verbatim (redacted, PDPL). It was
+        # parsed into `proj` since onboarding and never written: 2026-10-31, 0 of 998 active units
+        # stored a description, so the AI facts reader had nothing to read (backlog 892). Units carry
+        # no text of their own on this source, so every unit of a project carries that project's
+        # text — the same scope as its photos. No text → NULL, never ''.
+        "description": project_description(proj),
     }
     if deal == "Buy":
         row["price_total"] = price

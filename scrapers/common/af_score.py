@@ -26,14 +26,17 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
 import os
 import random
 import re
 import sys
 import time
 from collections import defaultdict
+from urllib.parse import urlsplit
 from datetime import datetime, timedelta, timezone
 
+from scrapers.common import http
 from scrapers.common.cleanup import _probe
 from scrapers.common.db import sb
 from scrapers.common.new_listings_score import (
@@ -279,13 +282,28 @@ def page_lines(page: dict) -> list[str]:
 # Measured 2026-10-06 (source-reread 37445697709): each produced a 5/5 «we miss» that no parser could
 # fix. Applied only with TEMPLATE_MIN_PAGES readable pages, so two ads that happen to agree stay ads.
 TEMPLATE_MIN_PAGES = 3
+# A ROTATING strip is template too (🔬 2026-10-31). tuba prints a «featured ads» strip of OTHER ads' titles on every
+# page, a few of a rotating set at a time («شقة مفروشة في جدة حي الفيصلية إيجار شهري سنوي», «شقة مؤثثة للإيجار …
+# جدة حي السلامة»), so no single title is on EVERY page and the old all-pages intersection kept them as the ad's
+# own words. The score then asked «furnished» of Riyadh / Taif / Dammam SALE ads that never say it: 4 of tuba's
+# 4 misses on 10-31 08:00 and 11 of 11 in the 20-page dry run 41188548521 («why furnished:» was always one of those
+# three titles). A line printed on at least half of a website's readable sample pages is that website's, not the ad's.
+TEMPLATE_SHARE = 0.5
 
 
 def template_lines(pages: list[list[str]]) -> set[str]:
     readable = [set(p) for p in pages if p]
     if len(readable) < TEMPLATE_MIN_PAGES:
         return set()
-    return set.intersection(*readable)
+    if len(readable) < 2 * TEMPLATE_MIN_PAGES:
+        # 3 to 5 pages: «half» would be 2 or 3 pages, too few to tell a template from two ads that agree. Every page.
+        return set.intersection(*readable)
+    need = math.ceil(TEMPLATE_SHARE * len(readable))        # 6+ pages: at least 3, the nightly 10-page sample 5
+    seen: dict[str, int] = defaultdict(int)
+    for p in readable:
+        for x in p:
+            seen[x] += 1
+    return {x for x, n in seen.items() if n >= need}
 
 
 # A deed's boundary text («… وتمام الحد المصعد وتمام الحد المنور …», «يحده شمالاً …») names what the unit's border
@@ -800,6 +818,30 @@ def sample_size(n: int, per_site: int | None) -> int:
     return N_BIG if n >= BIG_SITE else min(N_SMALL, n)
 
 
+# A website that remembers what THIS visitor opened (🔬 2026-10-31). tuba prints a «recently viewed» strip from the
+# visitor's cookies, and the score's probe session (scrapers/common/http.session(), one per thread) keeps cookies for
+# the whole run, so each tuba page carried the titles of the ads the robot itself had opened before it («شقة مؤثثة
+# للإيجار … جدة حي السلامة» on a Dammam sale). A fresh re-read of the same page (source-reread 41189800679) shows
+# no strip at all. A customer opening the ad's link is a first-time visitor: so is the score.
+FRESH_VISIT_HOSTS = ("tuba.com.sa",)
+
+
+def forget_visits(url: str, session=None) -> int:
+    """Drop the probe session's cookies for a FRESH_VISIT_HOSTS site before reading one of its pages. Returns how
+    many cookies were dropped; a site outside the list, or a session that cannot be read, is left untouched."""
+    host = (urlsplit(url or "").netloc or "").lower()
+    if not any(host == h or host.endswith("." + h) for h in FRESH_VISIT_HOSTS):
+        return 0
+    try:
+        jar = (session if session is not None else http.session()).cookies.jar
+        mine = [c for c in list(jar) if any((c.domain or "").lstrip(".").endswith(h) for h in FRESH_VISIT_HOSTS)]
+        for c in mine:
+            jar.clear(c.domain, c.path, c.name)
+        return len(mine)
+    except Exception:  # noqa: BLE001 — a session we cannot read is read as before, never failed
+        return 0
+
+
 def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, night: str,
                pace: float = PACE_S, probe=None, wasalt=wasalt_page, sanadak=sanadak_page) -> dict:
     probe = probe or _probe
@@ -830,6 +872,7 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
         elif is_sanadak(url) and sanadak is not None:
             page = sanadak(url)
         else:
+            forget_visits(url)
             try:
                 status, body = probe(url)
             except Exception:  # noqa: BLE001

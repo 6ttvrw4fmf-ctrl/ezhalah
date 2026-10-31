@@ -155,6 +155,11 @@ engineer's, not yours.
 6. **2:50–3:00 the report.** Then stop. Anything unfinished goes into `ops_engineer_backlog` with its evidence.
 
 ## THE NUMBERS RULE (owner, 2026-10-03): every number a customer sees is true NOW
+
+> **Trap (🦅 10-30):** a value the search index CORRECTS must be corrected on the card too. The 10-28 meter-box rule fixed
+> `search_listings_ar` only; the card (`finalize()` in `src/data/remote.ts`) printed dealapp 451328 at 52,000,000,000 SAR, and
+> the client budget net re-reads that printed price, so «N نتيجة» showed N−1 cards (43 rows, PR 9479). When you correct a
+> served value, grep `finalize()` for the same field in the same PR.
 A customer sees numbers everywhere: the results count, the counts beside cities and districts, the count on every
 Advanced Filter option. **They must equal what a fresh query of the live listings returns, and when a listing dies they
 must drop within one hour** (lifecycle hides it, the hourly search-index sync at :22 removes it from `search_listings_ar`,
@@ -663,6 +668,21 @@ Your history, read from the routine log on 2026-10-03:
 
 ## Lessons from real breakages (use them)
 
+- **2026-10-30 (owner: «make sure the engineers are aware and we never ever get this issue again» — the map pin).**
+  rakez served 3,660 ads with 0 pins for six weeks while its map page's feed named every project's lat/lng; the same
+  sweep found 8 more sites (compoundin, mustqr, alkhaas, awal, hajer, daryusuf, shatri, wslnaa) — all fixed, all in
+  `docs/ops/reports/PIN_CAPTURE_FLEET_2026-10-30.md`. Your rules from it:
+  1. **New ads arriving without a pin is a finding, not a trait of the site**, until someone looked in **all four
+     places** on a rendered ad page: the page · its embedded JSON / data attributes / network calls · a site-wide map or
+     list feed · the parent project/compound page. Never geocode, never read an office/default pair printed on every ad.
+  2. **Read the declaration before you write «the source has no pins»:** `data/pin-sources.json`. A platform declared
+     `ad-page | page-json | feed | project-page | partial` whose new ads arrive at 0 % is a scraper bug for tonight
+     (`select * from pin_coverage_by_platform() where below_floor` names it; the hourly detector
+     `mon_detect_pin_coverage_below_floor()` raises it as P1); a platform with no row at all is an unfinished launch
+     (checklist box 10) — say so in your report, do not invent a verdict.
+  3. **Your proof is the served index, before → after**, on a fixed id set (`search_listings_ar.latitude`), never the
+     raw table alone: the pin reaches the customer only after the :22 sync, and `keep_stored_pin` / the default-pin
+     strip can change what is served.
 - **2026-10-10 (copied by 🔧 QA):** read `date -u` before any time-based decision, never estimate the clock (misread 07:31 as 08:05 and nearly skipped a fix). And a «district in search but not in the picker» found within the hour is the :20 refresh / :22 sync order (≤ ~1 h lag), not a defect: re-query `district_options_ar` before logging it.
 - **🦅 Falcon 10-09 — the frozen snapshot can contradict the source's own district.** `listing_native_location_v1`
   falls back to `listings_arabic_locations` for `district_ar` when the native arm yields NULL; 471 served listings

@@ -132,6 +132,11 @@ apply in full: approval removes the question, never the guard.
 10. **Photos and logos:** photos really render (a 200 is not proof); every live website has its logo and its exact name.
 11. **The machines ran:** every scheduled workflow and pg_cron job of the last 7 days, failed or silent; every robot and
    detector that cannot go red; every alert nobody owns.
+12. **Map pins (100% of platforms, owner 2026-10-30):** `select * from pin_coverage_by_platform()` against
+   `data/pin-sources.json` — every active platform has a row (box 10), none is below its floor, none declared as publishing
+   serves 0 %, no floor was lowered since last Friday (`git log -p data/pin-sources.json`). For every `none`, open its proof
+   URL in a rendered browser and look in all four places once a month (trap 27); for every `UNVERIFIED` note, re-open it
+   from a GitHub runner or a residential IP and re-declare. The 2026-10-30 fleet report is the baseline.
 
 **D. Control: the five nightly engineers' week.**
 - Re-test 3 random proof rows per engineer per night of the week (`<engineer>:proof` rows in `ops_daily_engineer_run`). A proof
@@ -292,6 +297,26 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
    check. MISSING with EXTRA 0 and equal totals is a harness suspect first. Fix: the deep-page-cap helper in PR 8397.
 23. A checker's own «success» hides a quarantine (10-23): fleet-liveness reported success while aldarim was quarantined
    for 3 days. Read gate 3 per site from `ops_platform_liveness_coverage`, never from the job colour.
+24. A fix in the index alone leaves the card and the client net behind (10-30): the meter-box price rule (10-28) served
+   260,000 in search while `finalize()` printed the platform row's 52,000,000,000, and `priceFilter()` re-reads the PRINTED
+   price, so the card was dropped after the count. Whenever the index serves a corrected value, diff the index against the
+   platform table field by field (`src/data/remote.ts` `finalize()` reads the platform row) and fix both halves.
+25. A robot red for days with «0 mismatches» everywhere is the harness (10-30): the live sweep failed only its coverage
+   floor for 5 days because it tapped «شهري», renamed «إقامات قصيرة» on 10-25. Read the floor lines, not just the layers.
+26. Agent containers cannot reach ezhalah.com, but GitHub runners can (10-30): browser proofs run through
+   `customer-journey.yml` (dispatch `mode` + `listings`) and the quick-search audit through `qa-coverage-run.yml`
+   (budget 3000). A new workflow can be dispatched only after it is on main; until then its PR run is the proof.
+27. «The site has no map pin» is proven only after ALL FOUR places on a RENDERED ad page (10-30, owner: «make sure the
+   engineers are aware and we never ever get this issue again»): the page · its embedded JSON / data attributes / network
+   calls · a site-wide map or list feed · the parent project/compound page. rakez served 3,660 ads with 0 pins for six
+   weeks because nobody looked past the project page while `/ar/projects-map/` called a feed with every pin; the same
+   sweep found 8 more (compoundin, mustqr, alkhaas, awal, hajer, daryusuf, shatri, wslnaa). Trap 1 is the same rule for
+   every field; for pins the raw page can also LIE the other way: a rendered `maps?ll=` link may be Google's JS geocoding
+   the address (remal), and a pair printed on every ad is the office (nofodh, mustqr, eaqartabuk, macsaib) — never a pin.
+   Your Friday audit line C reads `select * from pin_coverage_by_platform() where below_floor` and
+   `data/pin-sources.json`: a platform below its floor, declared as publishing at 0 %, or launched undeclared is a red
+   row with the engineer who owns it, and a lowered floor is a finding, never a fix.
+   `docs/ops/reports/PIN_CAPTURE_FLEET_2026-10-30.md` is the baseline.
 
 ## Rating (computed, must be earned)
 - **10/10** only when: every map line A–E is covered 100% (or its minimum), the sweep is green, all 10 golden searches pass,

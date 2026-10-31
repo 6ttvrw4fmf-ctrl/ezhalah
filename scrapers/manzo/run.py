@@ -22,7 +22,9 @@ import argparse
 import datetime as dt
 import json
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
 
@@ -43,6 +45,8 @@ SLUG = "manzo"
 _TYPE_AR = {"Apartment": "شقة", "Villa": "فيلا", "Floor": "دور", "Land": "ارض", "Office": "مكتب",
             "Shop": "محل", "Building": "عمارة", "Warehouse": "مستودع", "Studio": "استوديو"}
 _DEAL = {"long_term_rent": "Rent", "sale": "Buy", "sell": "Buy"}
+_FEATURE_COLUMNS = {"elevator": "elevator", "maid_room": "maid_room", "central_ac": "air_conditioner",
+                    "covered_parking": "parking", "laundry_room": "laundry_room", "balcony": "balcony_terrace"}
 _NEVER_STORE = {"lister_info", "borders", "commission", "deep_link", "share_image", "share_title",
                 "share_description", "connectivity", "nearby_pois"}
 
@@ -70,6 +74,33 @@ def walk(s: cc.Session) -> tuple[list[dict], int]:
         if not pg.get("has_next"):
             break
     return rows, total
+
+
+# THE CRAWL FITS ITS SLOT (2026-10-30). The catalogue grew to 856 ads and each detail record was read one after another,
+# so the run outgrew its 10-minute job and was cancelled every time: no manzo crawl finished after 10-28 08:44, and the
+# ad text (#9404) and feature boxes never reached a row. Ten workers (the API answers ~2 s a record: four still took 7.5 min),
+# each with its own session on the profile and route
+# the probe chose, read the same records in the same order; a record that fails is None, counted unreadable as before.
+DETAIL_WORKERS = 10
+
+
+def read_details(s: cc.Session, listing: list[dict], fetch=None) -> list[Optional[dict]]:
+    fetch = fetch or get_json
+    local = threading.local()
+
+    def one(p: dict) -> Optional[dict]:
+        sess = getattr(local, "s", None)
+        if sess is None:
+            sess = local.s = (cc.Session(impersonate=s.impersonate, proxies=s.proxies or None)
+                              if isinstance(s, cc.Session) else s)
+        try:
+            d = fetch(sess, f"{API}/details/s/{p['slug']}/")
+            return d.get("data") or d
+        except Exception:  # noqa: BLE001
+            return None
+
+    with ThreadPoolExecutor(DETAIL_WORKERS) as ex:
+        return list(ex.map(one, listing))
 
 
 def source_published_empty(listing: list, declared: int) -> bool:
@@ -161,6 +192,13 @@ def map_property(d: dict) -> tuple[Optional[tuple[dict, str]], str]:
     for flag, col in (("electricity_access", "electricity"), ("water_access", "water_supply"), ("sewage_system", "sanitation")):
         if d.get(flag) is True:
             row[col] = True
+    # The apartment's feature checklist (apartment.features) was kept in additional_info but never mapped, so all 708
+    # ads answered no Advanced Filter amenity (2026-10-30). Only a TICKED box is the source saying yes. An unticked box
+    # is not a «no»: every key is false on ads whose own description says furnished, with a kitchen, and 656 of 659
+    # apartments leave «elevator» unticked. So it stays NULL (unknown), never false.
+    for key, col in _FEATURE_COLUMNS.items():
+        if (apt.get("features") or {}).get(key) is True:
+            row[col] = True
     stored = row.get("price_total") if deal == "Buy" else row.get("price_annual")
     row["price_evidence"] = normalize.price_evidence(
         field="price", raw=d.get("price"), stored=stored, kind="total" if deal == "Buy" else "annual",
@@ -208,11 +246,8 @@ def main() -> int:
     # keeps a row from being read as unseen and lets the own-page oracle find a known-live control.
     listed: set[str] = set()
     try:
-        for p in listing:
-            try:
-                d = get_json(s, f"{API}/details/s/{p['slug']}/")
-                d = d.get("data") or d
-            except Exception:  # noqa: BLE001
+        for p, d in zip(listing, read_details(s, listing)):
+            if d is None:
                 unreadable += 1
                 continue
             listed.add(listed_ad_number(d, p))

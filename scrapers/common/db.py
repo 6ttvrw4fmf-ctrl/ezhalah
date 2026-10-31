@@ -1374,20 +1374,39 @@ def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=No
     # collapse guard every run since 10-18 and never struck the one ad whose own page read gone. The read
     # count is still capped by max_reads (oldest-seen first) and the strike by the collapse cap.
     rows = [r for r in (_execute(q, what=table + ".read_gone_set").data or []) if r.get("ad_number")]
+    # The caller's OWN measured oracle may answer «live»; the shared default never does on a bare 200.
+    own_oracle = verify_gone is not None
     if verify_gone is None:
         verify_gone = own_page_status_oracle(c, table, seen)
     unseen = sorted((r for r in rows if r["ad_number"] not in seen and r["ad_number"] not in struck_before),
                     key=lambda r: str(r.get("last_seen_at") or ""))[:max_reads]
     gone: list[str] = []
+    live: list[str] = []
     for r in unseen:
         try:
             got = verify_gone(r["ad_number"])
         except Exception as e:  # noqa: BLE001 — an oracle that throws is UNKNOWN, never gone
             print(f"{table}: verify_gone({r['ad_number']}) raised {type(e).__name__}: {e} → unknown")
             continue
-        verdict = (got[0] if isinstance(got, (tuple, list)) else got) or "unknown"
-        if str(verdict).lower() == "gone":
+        verdict = str((got[0] if isinstance(got, (tuple, list)) else got) or "unknown").lower()
+        if verdict == "gone":
             gone.append(r["ad_number"])
+        elif verdict == "live" and own_oracle:
+            live.append(r["ad_number"])
+    # A LIVE READING IS AN ANSWER TOO (2026-10-31, ♻️). This used to keep only «gone», so an unseen ad
+    # whose own page the site's own oracle read live stayed unverified and kept its strikes forever:
+    # albukaeri's walk re-saw 6 of 12 every night, and 6 shown ads had no reading recorded since
+    # 10-13 (66.7% checked in time), 3 of them frozen at missing_count 2 (the 10-16 lesson: a reader
+    # that looks only for «gone» can never clear a strike). Recorded exactly as stamp_seen_alive
+    # records one — the contract's stamp — and, per the law, a live answer resets the strike count.
+    # Only for the caller's own oracle: the shared default reads status alone.
+    if live:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        patch = {"last_liveness_probe_at": now_iso, "missing_count": 0, **direct_alive_patch(now_iso=now_iso)}
+        for i in range(0, len(live), 200):
+            _execute(c.table(table).update(patch).eq("active", True).in_("ad_number", live[i:i + 200]),
+                     what=table + ".read_gone_live")
+        print(f"{table}: {len(live)} unseen ad(s) read live on their own page — stamped alive", flush=True)
     if len(rows) >= min_active_guard:
         gone = gone[:max(0, int(max_prune_frac * len(rows)) - len(struck_before))]
     if _from_refused_prune:

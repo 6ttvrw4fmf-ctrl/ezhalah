@@ -111,7 +111,7 @@ test('Filter mode — Rent + Monthly in Riyadh returns results', async ({ page }
   // tap إيجار (→ both), tap شراء (turns Buy off → Rent-only) — only then does شهري exist to tap.
   await page.getByText('إيجار', { exact: true }).click();   // Rent (both, briefly)
   await page.getByText('شراء', { exact: true }).click();    // turn Buy off → Rent-only
-  await page.getByText('شهري', { exact: true }).click();     // Monthly period
+  await page.getByText('إقامات قصيرة', { exact: true }).click();     // Short-stays period (was «شهري» until 2026-10-25)
   await pickCity(page, 'الرياض');
   await runSearch(page);
   await expect(page.getByText(FOUND).first()).toBeVisible();

@@ -33,6 +33,7 @@ import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupporte
 import VoiceWaveform from '@/components/VoiceWaveform';
 import AgentModelSelector from '@/components/AgentModelSelector';
 import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
+import TopBarLanguage from '@/components/TopBarLanguage';
 import { livePickerNames, loadLivePickerNames, pickerMayOffer } from '@/data/pickerLivePlatforms';
 import { hiddenPlatformNames } from '@/data/loaderActivePlatforms';
 import { useReducedMotion } from '@/lib/useReducedMotion';
@@ -4292,6 +4293,8 @@ export default function Agent() {
             <Text style={s.topSignInText}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
           </Pressable>
         )}
+        {/* Language for a guest — between sign-in and share, all three screens (owner 2026-10-31). */}
+        <TopBarLanguage />
         {/* Note #5 — Share is ALWAYS visible the moment the user is in AI Agent mode. Not gated on
             results, not gated on a completed search. Throughout the entire experience. (user request.) */}
         {/* Redesigned to match the home screen's share button (design review 2026-07-24) — same
@@ -4337,7 +4340,7 @@ export default function Agent() {
       {introLanding ? <View style={s.landingStrip}><HomeWebsiteStrip /></View> : null}
       {shouldRenderModeSwitch(modeGone, replay, openingSaved) && (
         <View style={[s.modeWrap, MODE_EASE, modeSearched && s.modeWrapHidden]}>
-          <ModeSwitch active="agent" onSwitch={() => router.replace('/')} t={t} />
+          <ModeSwitch active="agent" onSwitch={(to) => (to === 'map' ? router.replace('/map') : router.replace('/'))} t={t} />
         </View>
       )}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}

@@ -35,13 +35,16 @@ let guestPlays = 0;
 const SIGNIN = require('../../assets/images/falconer-signin.svg');
 const SIGNED_IN_STILL = require('../../assets/images/falconer-final.svg');
 const SIGNIN_CANVAS = { x: -140, y: -170, w: 310, h: 385 };
-export const SIGNIN_SEQUENCE_MS = 6200;
-// The bulb starts lighting at 5.005 s and is fully lit by ~5.6 s (falconer-signin.svg). AFTER THE BULB (owner
-// 2026-10-30: «the fireworks pop before the lightbulb … wait like 2 seconds, then a lot»): the rockets leave about
-// 1.7 s after the bulb is lit, so the first pop lands ~2 s after it (~7.6 s). On 2026-10-29 they had been moved to the
-// bulb itself (5.0 s), which put the first pop on top of it.
-export const BULB_LIT_MS = 5600;
-export const RAIN_AT_MS = BULB_LIT_MS + 1700;
+// FIREWORKS AT 3 SECONDS, STILL AFTER THE BULB (owner 2026-10-30, later the same day: «make that 5 seconds 3 seconds»,
+// and «faster falcon, then 3s» when asked whether 3 s may come before the bulb). Every time in falconer-signin.svg was
+// scaled by 0.375 again (6.2 s → ~2.34 s, same steps in the same order).
+// A LITTLE SLOWER, BY 2 SECONDS (owner 2026-10-31: «the eagle thing animation is very very fast … make it a little bit
+// slower by 2 seconds»): every time in the SVG was scaled by 1.8547 (~2.34 s → ~4.33 s, same steps in the same order),
+// so the bulb's last step begins at ~3.72 s and it is lit by ~4.1 s. The fireworks keep their place AFTER the bulb
+// (falconer → bulb → fireworks, never a pop on top of the bulb): the rockets leave ~0.8 s after it is lit (~4.9 s).
+export const SIGNIN_SEQUENCE_MS = 4340;
+export const BULB_LIT_MS = 4100;
+export const RAIN_AT_MS = BULB_LIT_MS + 790;
 // how long the story waits for its file before its clock starts anyway
 const LOAD_WAIT_MS = 4000;
 // how long, after he appears, a marked sign-in may keep the box empty waiting for its story to start
