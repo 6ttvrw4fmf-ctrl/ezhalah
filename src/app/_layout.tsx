@@ -153,6 +153,7 @@ function Shell() {
         >
           <Stack.Screen name="index" options={{ animation: 'fade' }} />
           <Stack.Screen name="agent" options={{ animation: 'none' }} />
+          <Stack.Screen name="map" options={{ animation: 'none' }} />
           <Stack.Screen name="interview" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
           {/* The /settings route is GONE (owner 2026-08-28): account controls open as a compact
               panel anchored to the sidebar's profile row — see components/AccountMenu.tsx. */}
