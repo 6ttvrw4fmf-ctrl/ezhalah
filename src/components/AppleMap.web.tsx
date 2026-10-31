@@ -179,6 +179,10 @@ export default function AppleMap() {
       if (gone) return;
       const el = hostRef.current as unknown as HTMLElement | null;
       if (!el) return;
+      // Apple's own chrome (the  Maps mark, Legal, zoom and compass) follows the page direction, so Arabic mirrored
+      // it. Pinned left-to-right: the Apple mark bottom-LEFT in both languages (owner 2026-10-31: «no matter English
+      // or Arabic, the Apple Maps thing is always on the left»). The map's labels still follow the app language.
+      el.setAttribute('dir', 'ltr');
       initOnce(mk, locale);
       mk.addEventListener('error', onError);
       map = new mk.Map(el, {
