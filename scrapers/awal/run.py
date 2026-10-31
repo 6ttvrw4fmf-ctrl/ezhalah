@@ -56,6 +56,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 BASE = "https://awaalun.com"
 LIST_API = f"{BASE}/wp-json/wp/v2/rtcl_listing"
 WORKERS = int(os.environ.get("AWAL_WORKERS", "5"))
@@ -604,7 +605,20 @@ def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, Opti
     # awal publishes no structured amenity field, but its ad text lists the rooms («مجلس – مطبخ – 2 غرف»,
     # «يوجد مدخل كراج»): YES-only from the ad's own words (ADVANCED_FILTER_SOURCE_TRUTH §2), 2026-10-17.
     row.update(prose_answers((p.get("content") or {}).get("rendered", "")))
+    if body:
+        row["additional_info"].update(ad_pin(body))
     return row, category, gone
+
+
+# The page's own marker (rtcl-map): <div class="marker" data-latitude="30.9745075" data-longitude="41.0105538">
+# (owner 2026-10-30: 51 ads, 0 pins). The JSON beside it («Al Rabwa, Ar Ar» 31.0047,41.0495 on every ad) is the
+# office and is never read.
+_MARKER_ATTR = re.compile(r'data-latitude="(-?\d{1,2}\.\d{3,})"\s+data-longitude="(-?\d{1,3}\.\d{3,})"')
+
+
+def ad_pin(body: str) -> dict:
+    m = _MARKER_ATTR.search(body or "")
+    return (pin_dict(m.group(1), m.group(2)) if m else {}) or {"pin_absent": True}
 
 
 # The amenity columns search reads (listing_extra_attrs); prose may answer only these, YES-only.
