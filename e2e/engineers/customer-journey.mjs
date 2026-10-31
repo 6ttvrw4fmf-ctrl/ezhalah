@@ -247,7 +247,7 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
     if (row.deal_ar === 'إيجار') {
       await tap('إيجار');
       await tap('شراء');                                  // deselect Buy → Rent-only (سنوي pre-selected)
-      if (row.rent_period_ar === 'شهري') { await tap('شهري'); await tap('سنوي'); }
+      if (row.rent_period_ar === 'شهري') { await tap('إقامات قصيرة'); await tap('سنوي'); } // button label since 2026-10-25; still sends شهري
     }
 
     step(`city «${row.city_ar}»`);
