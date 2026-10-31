@@ -103,3 +103,159 @@ AFTER_PLACEHOLDER
 - Backlog #1111: the 13 small capture gaps above.
 - Re-open the 7 unverified sites from a residential IP; re-declare any that publish.
 - rakez: 40 projects (431 units) are on neither feed — listed in every crawl log; nothing to do unless the site maps them.
+
+## Appendix — every platform, its verdict and proof (149 rows = `data/pin-sources.json`; nothing skipped)
+
+Verdict words: **publishes · <where>** (the scraper reads it; «BUG fixed» = it did not until tonight), **partial** (the site shows a pin only on some ads; the scraper reads it when present), **proven silent** (the URL shows no pin in any of the four places), **UNVERIFIED** (the site answered 403 / timed out to both curl and the headless browser tonight — declared `none` provisionally, to re-open from a residential IP), **capture gap** (the page publishes, the scraper does not read it yet; below the 50-ad detector line; backlog #1111), **not re-opened today** (≥ 90 % served; classified from the scraper's read path with a ratchet floor).
+
+| platform | served ads | pins before (share) | verdict | floor | proof URL |
+|---|---:|---:|---|---:|---|
+| aqar | 179,392 | 178,995 (99.8 %) | publishes · page JSON — not re-opened today (scraper read path) | 95 | https://sa.aqar.fm/6943435 |
+| wasalt | 89,288 | 89,241 (99.9 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://wasalt.sa/en/property/duplex-315-sqm-facing-west-with-6-bedrooms-5927297 |
+| dealapp | 46,303 | 46,120 (99.6 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://dealapp.sa/ar/ad-details/581109 |
+| muhaysini | 19,816 | 19,812 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://aqaralmuhaysini.com/propertydetails/17910 |
+| haraj | 15,587 | 12,765 (81.9 %) | partial (pin only on some ads) | 75 | https://haraj.com.sa/11191638006 |
+| gathern | 15,117 | 15,103 (99.9 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://gathern.co/view/65814/unit/99257 |
+| dwelleo | 4,517 | 4,484 (99.3 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://www.dwelleo.sa/ar/properties/9000-sqm-office-space-for-rent-in-al-suwaidi-riyadh |
+| muktamel | 3,892 | 3,892 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://www.muktamel.com/real-estates/34319 |
+| aqarmonthly | 3,678 | 3,618 (98.4 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://sa.aqar.fm/6828618 |
+| rakez | 3,602 | 0 (0.0 %) | publishes · feed/API — BUG fixed | 80 | https://rakez.sa/ar/wp-json/hs-map/v1/projects?lang=en |
+| tuba | 3,409 | 3,407 (99.9 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://tuba.com.sa/property/office-for-rent-in-riyadh-100 |
+| abralosol | 2,972 | 275 (9.3 %) | partial (pin only on some ads) | 5 | https://abralosol.com/6570 |
+| ialqarawi | 2,618 | 2,145 (81.9 %) | partial (pin only on some ads) | 75 | https://ialqarawi.com/index.php?router=card&id=1999&catid=45 |
+| nofodh | 2,556 | 1,811 (70.9 %) | partial (pin only on some ads) | 60 | https://www.nofodh.sa/listings/326117 |
+| sakan | 2,478 | 2,345 (94.6 %) | publishes · ad page — not re-opened today (scraper read path) | 89 | https://sa.sakan.co/ar/property/details/86163 |
+| aqarcity | 2,100 | 2,095 (99.8 %) | publishes · ad page — not re-opened today (scraper read path) | 95 | https://www.aqarcity.net/property/27803 |
+| arkaan | 1,934 | 1,877 (97.1 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://arkaanalaqar.com/property/1907 |
+| sakani | 1,873 | 1,873 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://sakani.sa/app/market-unit/24501 |
+| sadiqeltajer | 1,738 | 1,709 (98.3 %) | publishes · ad page — not re-opened today (scraper read path) | 95 | https://sadiq-eltajer.sa/ads/llaygar-mhlyn-shrk-bryd-hy-aldahy-alsharaa-alaaam-almsah-120mtr |
+| bossbih | 1,544 | 406 (26.3 %) | partial (pin only on some ads) | 15 | https://bossbihoffice.com.sa/13298 |
+| ksaaqar | 1,448 | 383 (26.5 %) | partial (pin only on some ads) | 15 | https://ksaaqar.com/ad/%d9%84%d9%84%d8%a5%d9%8a%d8%ac%d8%a7%d8%b1-%d8%b4%d9%82%d8%a9-%d8%b9%d8%a7%d8%a6%d9%84%d9%8a%d9%87-%d9%81%d8%a7%d8%ae%d8%b1%d8%a9-%d9%81-%d8%a3%d8%a8%d8%ad%d8%b1-%d8%a7%d9%84%d8%b4%d9%85%d8%a7%d9%84/ |
+| mustqr | 1,340 | 0 (0.0 %) | partial (pin only on some ads) — BUG fixed | 1 | https://mustqr.sa/property/3083 |
+| aqalemhajer | 1,022 | 624 (61.1 %) | partial (pin only on some ads) | 50 | https://aqalemhajer.com/4721 |
+| alshawaf | 1,009 | 465 (46.1 %) | partial (pin only on some ads) | 35 | https://alshawaf.com.sa/22379 |
+| wahadat | 998 | 994 (99.6 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://wahadat.sa/project/%D9%88%D8%B4%D8%A7%D8%AD-%D8%A7%D9%84%D9%86%D8%B1%D8%AC%D8%B3 |
+| reinvest | 929 | 929 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://reinvest.sa/for-rent/showrooms/explore/riyadh/west-al-uraija/maard-llaygar-405 |
+| rightcompound | 885 | 881 (99.5 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://rightcompound.com/compounds/khobar/palm-springs-compound |
+| sanadak | 849 | 847 (99.8 %) | publishes · page JSON — not re-opened today (scraper read path) | 95 | https://sanadak.sa/property-details/7200775576 |
+| manzo | 795 | 793 (99.7 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://manzo.com.sa/ar/property/long_term_rent-140m2-86yb8vWa |
+| ashab | 623 | 623 (100.0 %) | publishes · page JSON — not re-opened today (scraper read path) | 95 | https://ashab.sa/properties/166463 |
+| eaqartabuk | 574 | 204 (35.5 %) | partial (pin only on some ads) | 25 | https://eaqartabuk.com/property/%d9%81%d9%8a%d9%84%d8%a7-%d8%b1%d9%88%d9%81-%d8%b9%d9%84%d9%88%d9%8a-%d9%85%d8%b3%d8%aa%d9%82%d9%84-%d8%ad%d9%8a-%d8%a7%d9%84%d9%8a%d9%88%d8%a7%d8%af%d9%8a-971/ |
+| sirdab | 563 | 304 (54.0 %) | partial (pin only on some ads) | 45 | https://marketplace.sirdab.co/ar/ads/5f70019b-e5a3-4ef2-a9c7-6133b9f102cb |
+| therc | 457 | 269 (58.9 %) | partial (pin only on some ads) | 50 | https://therc.aqar.digital/properties/fyla-llaygar-fy-sharaa-3212-hy-alnthym-mdyn-alryad-mntk-alryad |
+| abaad | 446 | 446 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://app.abaadapp.sa/details/601 |
+| raghdan | 401 | 393 (98.0 %) | publishes · page JSON — not re-opened today (scraper read path) | 95 | https://raghdan.sa/ar/property/522621620527/ |
+| sokok | 400 | 400 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://sokok.sa/piece/234329030/show |
+| nufouth | 326 | 326 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://nufouth.com/latest-offers?ads-N4310=1 |
+| akariyoun | 325 | 324 (99.7 %) | publishes · page JSON — not re-opened today (scraper read path) | 95 | https://akariyoun.sa/properties/msnaa-llaygar-fy-hy-almsfa |
+| alsaedan | 325 | 300 (92.3 %) | publishes · ad page — not re-opened today (scraper read path) | 87 | https://alsaedan.com/sales/unit/3396 |
+| goldendeal | 318 | 308 (96.9 %) | publishes · ad page — not re-opened today (scraper read path) | 91 | https://www.goldendeal.sa/properties/49174 |
+| compoundin | 286 | 0 (0.0 %) | publishes · parent page — BUG fixed | 1 | https://compoundin.com/compounds/riyadh/azure-al-reem |
+| amlakalahsa | 285 | 267 (93.7 %) | publishes · feed/API — not re-opened today (scraper read path) | 88 | https://amlakalahsa.com/land/%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d8%a7%d8%b1%d8%b6-%d9%81%d9%8a-%d8%a7%d9%84%d9%88%d8%b1%d9%88%d8%af-%d8%a7%d9%84%d8%ba%d8%b1%d8%a8%d9%8a/ |
+| eilmalriyada | 285 | 59 (20.7 %) | partial (pin only on some ads) | 10 | https://eilmalriyada.com/real-estate/view/566 |
+| sukna | 285 | 280 (98.2 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://sukna.app/unit-details?id=658 |
+| daryusuf | 258 | 0 (0.0 %) | publishes · ad page — BUG fixed | 1 | https://daryusuf.com/en/portfolio/villa-for-rent-al-khalidiyah-district-madinah/ |
+| maqrat | 235 | 235 (100.0 %) | publishes · page JSON — not re-opened today (scraper read path) | 95 | https://maqrat.com/Property/Details/60 |
+| alkhaas | 209 | 0 (0.0 %) | publishes · ad page — BUG fixed | 1 | https://alkhaas.net/ads/1003 |
+| ebriza | 203 | 203 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://ebriza.com.sa/for_sell/626/%D8%A3%D8%A8%D9%87%D8%A7/%D8%A7%D9%84%D8%B4%D8%B1%D9%82%D9%8A%D8%A9/%D8%A7%D8%B1%D8%B6-%D8%A8%D9%8A%D8%B9 |
+| vmksa | 195 | 194 (99.5 %) | publishes · page JSON — not re-opened today (scraper read path) | 95 | https://vm-ksa.com/ar/ads/763 |
+| gomenassat | 177 | 175 (98.9 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://gomenassat.com/ar/offer/792 |
+| abeea | 176 | 176 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://abeea.com.sa/en/property/five-shop-openings-for-rent-in-al-muhandeseen-plan/ |
+| eastabha | 168 | 164 (97.6 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://eastabha.sa/estate_property/4001/ |
+| aldarim | 156 | 140 (89.7 %) | partial (pin only on some ads) | 80 | https://www.aldarim.sa/en/properties/48548 |
+| ibaax | 153 | 152 (99.3 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://ibaax.sa/ar/advertisements/763 |
+| shomou | 141 | 26 (18.4 %) | partial (pin only on some ads) | 10 | https://shomoalaqar.com.sa/8308 |
+| aqargate | 140 | 139 (99.3 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://aqargate.com/property/%d9%85%d9%83%d8%aa%d8%a8-%d8%a5%d9%8a%d8%ac%d8%a7%d8%b1-%d9%85%d9%86%d8%b7%d9%82%d8%a9-%d8%a7%d9%84%d8%b1%d9%8a%d8%a7%d8%b6-62/ |
+| abwbna | 136 | 103 (75.7 %) | partial (pin only on some ads) | 65 | https://www.abwbna.com/properties/45172 |
+| aqaratikom | 125 | 123 (98.4 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://nawait.sa/real-estate/6dbb596f-4df9-4b67-a984-41f92133ffa7 |
+| hajer | 124 | 0 (0.0 %) | publishes · ad page — BUG fixed | 1 | https://hajerhouses.com/property/%d8%a8%d9%8a%d8%aa-%d9%85%d9%83%d9%88%d9%86-%d9%85%d9%86-%d8%af%d9%88%d8%b1-%d9%88%d8%ab%d9%84%d8%a7%d8%ab-%d8%b4%d9%82%d9%82-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%81%d9%8a-%d8%ad%d9%8a-%d8%a7%d9%84/ |
+| thousand | 119 | 74 (62.2 %) | partial (pin only on some ads) | 50 | https://1000.com.sa/property/cmnh40ocy00h110i8axa8h7ye |
+| ramzalqasim | 109 | 109 (100.0 %) | publishes · page JSON — not re-opened today (scraper read path) | 95 | https://ramzalqasim.com/x/223 |
+| alobid | 101 | 30 (29.7 %) | partial (pin only on some ads) | 20 | https://www.alobidoffice.com/properties/27673 |
+| rawasidark | 101 | 1 (1.0 %) | partial (pin only on some ads) | 1 | https://www.rawasi-dark.com/properties/cmnscv80b0000jj04lxkq9s4m |
+| jazwtn | 97 | 0 (0.0 %) | proven silent | 0 | https://jazwtn.sa/projects/%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%82%d8%b7%d8%b9%d8%a9-%d8%b1%d9%82%d9%85-1006-%d9%81%d9%8a-%d9%85%d8%ae%d8%b7%d8%b7-482-%d8%a8%d8%ad%d9%8a-%d8%a7%d9%84%d8%b1%d9%88%d8%a7%d8%a8%d9%8a-%d8%b6%d8%a7/ |
+| aljassim | 91 | 23 (25.3 %) | partial (pin only on some ads) | 15 | https://aljassimaqar.com/4607 |
+| albdah | 90 | 28 (31.1 %) | partial (pin only on some ads) | 20 | https://albdah.sa/property/22Uec/details/ |
+| opensooq | 88 | 71 (80.7 %) | partial (pin only on some ads) | 70 | https://sa.opensooq.com/ar/search/288663068 |
+| remal | 81 | 0 (0.0 %) | proven silent | 0 | https://www.remalre.com/Real-estate/villas/makkah-moukarma/for-sale-villa-in-public-housing-in-ruseifa/ |
+| suwar | 78 | 0 (0.0 %) | proven silent — UNVERIFIED | 0 | https://suwar.sa/property/%d9%85%d8%b4%d8%b1%d9%88%d8%b9-%d8%b1%d9%82%d9%85-955-%d9%81%d9%8a%d9%84%d8%a7-%d8%aa%d9%85%d9%84%d9%8a%d9%83-%d8%a7%d9%84%d9%85%d9%88%d9%82%d8%b9-%d9%85%d9%83%d8%a9-%d8%a7%d9%84%d9%86%d9%88%d8%a7/ |
+| manafe | 77 | 72 (93.5 %) | publishes · page JSON — not re-opened today (scraper read path) | 88 | https://manafe.com.sa/manafemar/project/285 |
+| aouj | 75 | 69 (92.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 87 | https://aoujestates.com/ar/properties/%D8%AF%D8%A8%D9%84%D9%83%D8%B3%D9%8A%D9%86-%D9%81%D9%8A-%D8%AD%D9%8A-%D8%A7%D9%84%D8%B4%D8%B1%D8%A7%D8%B9 |
+| justsa | 73 | 0 (0.0 %) | proven silent | 0 | https://just.sa/l/727 |
+| satel | 69 | 69 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://listings.satel.sa/property/C0066 |
+| macsaib | 63 | 2 (3.2 %) | partial (pin only on some ads) | 1 | https://macsaib.sa/property/fyla-hy-alrhab |
+| wslnaa | 61 | 17 (27.9 %) | publishes · feed/API — BUG fixed | 20 | https://wslnaa.com/properties/nada-avenue-apartment-22 |
+| earthapp | 57 | 57 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://map.earthapp.com.sa/offers/2662819 |
+| bahadhabab | 53 | 11 (20.8 %) | partial (pin only on some ads) | 10 | https://www.bahadhabab-res.com/properties/38741 |
+| awal | 51 | 0 (0.0 %) | publishes · ad page — BUG fixed | 1 | https://awaalun.com/property/%d8%a7%d8%b1%d8%b6-%d9%85%d8%b3%d9%88%d8%b1%d9%87/ |
+| expattrusted | 50 | 49 (98.0 %) | publishes · page JSON — not re-opened today (scraper read path) | 95 | https://expattrustedhousingriyadh.com/p/en/property/al-bustan-village |
+| shatri | 50 | 0 (0.0 %) | publishes · ad page — BUG fixed | 1 | https://shatrirealestate.com/property/apartments-sale-alsafa-jeddah-3-rooms/ |
+| wajaf | 48 | 48 (100.0 %) | publishes · page JSON — not re-opened today (scraper read path) | 95 | https://wajaf.sa/properties/28/unit/66 |
+| souq24 | 46 | 0 (0.0 %) | publishes · ad page — capture gap (backlog #1111) | 1 | https://24.com.sa/1099/x |
+| erapulse | 45 | 44 (97.8 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://erapulse.sa/property/buraydah-land-sale-ref-msrx3eyl-07fd9 |
+| safa | 44 | 0 (0.0 %) | publishes · ad page — capture gap (backlog #1111) | 1 | https://safainv.sa/units/rental?page=1&property_id=12914 |
+| jawher | 42 | 35 (83.3 %) | partial (pin only on some ads) | 75 | https://www.jawher2030.com/properties/52519 |
+| maqam | 42 | 38 (90.5 %) | publishes · feed/API — not re-opened today (scraper read path) | 85 | https://property.maqamco.sa/properties/51641 |
+| mobasher | 40 | 32 (80.0 %) | partial (pin only on some ads) | 70 | https://mobasher.sa/direct/realestate/%D8%A7%D8%B1%D8%B6-%D8%B2%D8%B1%D8%A7%D8%B9%D9%8A%D8%A9-%D8%A7%D9%84%D8%B1%D9%8A%D8%A7%D8%B6-%D8%A7%D9%84%D8%B9%D9%85%D8%A7%D8%B1%D9%8A%D8%A9--1785325075506 |
+| aqarnajran | 39 | 0 (0.0 %) | proven silent | 0 | https://aqarnajran.com/%d8%a8%d9%8a%d8%aa-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%81%d9%8a-%d8%ad%d9%8a-%d8%b2%d9%88%d8%b1-%d8%a7%d9%84%d8%b9%d9%85%d8%a7%d8%b1%d9%8a-%d9%86%d8%ac%d8%b1%d8%a7%d9%86%d8%8c-%d9%85%d8%b3%d8%a7%d8%ad/ |
+| superoffice | 39 | 0 (0.0 %) | publishes · parent page — capture gap (backlog #1111) | 1 | https://superoffice.sa/branch/as-suwaidi/unit/H19 |
+| m3tmd | 37 | 36 (97.3 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://www.m3tmd.com/properties/37109 |
+| mizlaj | 33 | 33 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://mizlaj.com.sa/guest/listings/aakar-371961m2-llbyaa-almdyn-almnor-4tcrzkwY |
+| amaall | 32 | 0 (0.0 %) | publishes · page JSON — capture gap (backlog #1111) | 1 | https://www.amaall.com/projects/%d8%a3%d8%b1%d8%b6-%d8%b3%d9%83%d9%86%d9%8a%d8%a9-%d8%a8%d9%85%d9%83%d8%a9-%d8%a7%d9%84%d9%85%d9%83%d8%b1%d9%85%d8%a9-%d8%ad%d9%8a-%d8%a7%d9%84%d8%b9%d8%b2%d9%8a%d8%b2%d9%8a%d8%a9/ |
+| azure | 32 | 0 (0.0 %) | proven silent | 0 | https://azure.sa/compounds/al-reem |
+| holoul | 30 | 14 (46.7 %) | partial (pin only on some ads) | 35 | https://app.holoul.io/units/10a9d527-6534-4915-abcb-4298d7e30aa0 |
+| alsidra | 29 | 0 (0.0 %) | proven silent | 0 | https://alsidra.com.sa/property/%d8%b4%d9%82%d8%a9-%d9%81%d8%a7%d8%ae%d8%b1%d8%a9-%d9%84%d9%84%d8%a7%d9%8a%d8%ac%d8%a7%d8%b1-%d9%81%d9%8a-%d8%ad%d9%8a-%d8%a7%d9%84%d8%ad%d8%b2%d8%a7%d9%85-%d8%a7%d9%84%d8%b0%d9%87%d8%a8%d9%8a-%d8%a7/ |
+| alhoshan | 27 | 27 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://www.alhoshan.sa/properties/1002 |
+| sqcc | 27 | 2 (7.4 %) | partial (pin only on some ads) | 1 | https://sqcc.sa/realestate/%d8%b9%d9%85%d8%a7%d8%b1%d9%87-%d9%84%d9%84%d8%a8%d9%8a%d8%b9/ |
+| nafithh | 26 | 26 (100.0 %) | publishes · page JSON — not re-opened today (scraper read path) | 95 | https://nafithh.com/web/gallery/266 |
+| alqasem | 23 | 0 (0.0 %) | proven silent | 0 | https://alqasem.com.sa/property/%d8%af%d9%88%d8%b1-vip-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-g2b/ |
+| almotmkenah | 22 | 0 (0.0 %) | proven silent | 0 | https://almotmkenah.com/annonce/%D9%85%D8%B4%D8%B1%D9%88%D8%B9_%D8%A7%D8%B1%D8%A8%D8%B9_%D9%81%D9%84%D9%84_%D9%85%D8%B3%D8%AA%D9%82%D9%84%D9%87_%D9%84%D9%84%D8%A8%D9%8A%D8%B9_%D9%81%D9%8A_%D8%AD%D9%8A_%D8%A7%D9%84%D8%AC%D9%86%D8%A7%D8%AF%D8%B1%D9%8A%D8%A9-3 |
+| arsh | 21 | 17 (81.0 %) | partial (pin only on some ads) | 70 | https://www.arshglobal.com.sa/%D8%A3%D8%B1%D8%B6-%D8%AA%D8%AC%D8%A7%D8%B1%D9%8A%D8%A9 |
+| ego | 21 | 0 (0.0 %) | proven silent | 0 | https://ego-aqar.com/unit-details/2409 |
+| nowaisiry | 21 | 11 (52.4 %) | partial (pin only on some ads) | 40 | https://alnowaisiry.com/lands/%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d8%a7%d8%b1%d8%b6-360-%d9%85%d8%aa%d8%b1-%d9%81%d9%8a-%d9%85%d8%ae%d8%b7%d8%b7-%d8%a7%d9%84%d8%ae%d9%8a%d8%b1-%d8%a7%d9%84%d8%a3%d9%85%d8%b1%d8%a7%d8%a1-3541/ |
+| albukaeri | 20 | 0 (0.0 %) | publishes · ad page — capture gap (backlog #1111) | 1 | https://albukaeri.sa/property/69d220c494242c82c5bc7686 |
+| azdad | 20 | 0 (0.0 %) | proven silent | 0 | https://www.azdadalaqaria.com/property/e0b35c05-9b14-42d0-997b-1a857566a825 |
+| flow | 20 | 0 (0.0 %) | publishes · ad page — capture gap (backlog #1111) | 1 | https://flow.life/en/properties/riyadh-narjis/available-homes/tihama-3-bedroom/fid/o6j2UXkv0Lr9J0YjzDDL |
+| maktab | 20 | 20 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://maktab.sa/details/91 |
+| rawaf | 19 | 19 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://rawaf.ai/project/114 |
+| razre | 18 | 18 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://www.razre.sa/projects/raz-55/ |
+| ryadah | 18 | 18 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://ryadah.com.sa/property/%d9%85%d8%b3%d8%aa-%d8%b3%d9%83%d9%88%d9%8a%d8%b1/ |
+| alrifai | 17 | 0 (0.0 %) | proven silent | 0 | https://alrifai.com.sa/index.php?page=property-detail&id=92 |
+| livingcompound | 17 | 0 (0.0 %) | publishes · ad page — capture gap (backlog #1111) | 1 | https://livingcompound.com/property/2-bedroom-fully-furnished-apartment-for-rent-al-fayha-jeddah/ |
+| aqaralsaudia | 16 | 0 (0.0 %) | publishes · page JSON — capture gap (backlog #1111) | 1 | https://aqaralsaudia.com/property/%d8%b4%d9%82%d8%a9-%d9%81%d8%a7%d8%ae%d8%b1%d8%a9-%d8%a7%d8%b1%d8%b6%d9%8a%d8%a9-%d8%a8%d8%ad%d9%8a-%d9%84%d8%a8%d9%86-%d8%b1%d9%82%d9%85-1/ |
+| squares | 16 | 0 (0.0 %) | proven silent | 0 | https://squares.com.sa/property/%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%81%d9%8a%d9%84%d8%a7-%d8%a7%d9%84%d8%a8%d8%b3%d8%a7%d8%aa%d9%8a%d9%86-%d9%81%d9%8a-%d9%85%d8%af%d9%8a%d9%86%d8%a9-%d8%a8%d8%b1%d9%8a%d8%af%d8%a9/ |
+| jurash | 15 | 13 (86.7 %) | partial (pin only on some ads) | 80 | https://jurash.sa/property/97/ |
+| nawafeth | 15 | 9 (60.0 %) | partial (pin only on some ads) | 50 | https://nawafethalwatan.com/Advserments/GetAdvsertismentDetail?advsertismentId=173 |
+| tamyaz | 15 | 0 (0.0 %) | proven silent | 0 | https://www.tamyaz-sa.com/#property-prop-mv6vu14g89g7 |
+| aqaralriyadh | 14 | 0 (0.0 %) | proven silent | 0 | https://aqaralriyadh.com/%d8%b4%d9%82%d8%a9-%d9%84%d9%84%d8%a5%d9%8a%d8%ac%d8%a7%d8%b1-%d9%81%d9%8a-%d8%ad%d9%8a-%d8%a7%d9%84%d8%a3%d9%86%d8%af%d9%84%d8%b3-%d8%a7%d9%84%d8%b1%d9%8a%d8%a7%d8%b6/ |
+| dallali | 14 | 14 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://dallali.com/advertisements/property/fa37876f-451b-45a4-92a1-b4cccfd0941c |
+| sodasyat | 13 | 0 (0.0 %) | publishes · ad page — capture gap (backlog #1111) | 1 | https://sodasyat.sa/single/2722 |
+| gudai | 12 | 0 (0.0 %) | proven silent — UNVERIFIED | 0 | https://gudai.inblaj.net/property/%d8%a3%d8%b1%d8%b6-%d8%b3%d9%83%d9%86%d9%8a%d8%a9-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%81%d9%8a-%d8%ad%d9%8a-%d8%a7%d9%84%d9%81%d9%8a%d8%ad%d8%a7%d8%a1-%d8%a7%d9%84%d8%af%d9%85%d8%a7%d9%85/ |
+| hasaad | 12 | 0 (0.0 %) | proven silent | 0 | https://hasaadestate.com/projects/%d8%ac%d9%88%d8%a7%d8%b1-19/ |
+| villassa | 12 | 12 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://villas-sa.com/real/estate/ads/100 |
+| alajlan | 11 | 0 (0.0 %) | proven silent | 0 | https://alajlan-re.com/ |
+| muajarh | 11 | 11 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://muajarh.com/properties/property-1785346629908 |
+| fkralemar | 10 | 0 (0.0 %) | proven silent | 0 | https://www.fkralemar.com/offers/apartment-for-sale |
+| safera | 10 | 0 (0.0 %) | proven silent — UNVERIFIED | 0 | https://safera.inblaj.net/property/%d8%a7%d8%b3%d8%aa%d8%b1%d8%a7%d8%ad%d8%a9-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d8%b4%d9%85%d8%a7%d9%84-%d8%a8%d8%b1%d9%8a%d8%af%d8%a9-%d8%ad%d9%8a-%d8%a7%d9%84%d9%86%d9%88%d8%b1/ |
+| aalbarrak | 9 | 0 (0.0 %) | proven silent — UNVERIFIED | 0 | https://aalbarrak.com/property/%d9%81%d9%8a%d9%84%d8%a7-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%81%d9%8a-%d8%b4%d8%a7%d8%b1%d8%b9-%d8%b4%d8%a7%d8%b1%d8%b9-%d8%a7%d9%84%d9%85%d9%86%d8%aa%d8%b5%d8%b1-%d8%ad%d9%8a-%d8%a7%d9%84%d9%86/ |
+| fursaghyr | 8 | 8 (100.0 %) | publishes · feed/API — not re-opened today (scraper read path) | 95 | https://fursaghyr.com/property/%d8%b9%d9%85%d8%a7%d8%b1%d8%a9-%d8%a8%d9%8a%d8%b9-%d9%85%d9%86%d8%b7%d9%82%d8%a9-%d8%a7%d9%84%d9%85%d8%af%d9%8a%d9%86%d8%a9-%d8%a7%d9%84%d9%85%d9%86%d9%88%d8%b1%d8%a9/ |
+| alta | 7 | 0 (0.0 %) | publishes · page JSON — capture gap (backlog #1111) | 1 | https://alta.com.sa/estate_property/%d8%b4%d9%82%d8%a9-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%85%d9%83%d8%a9-%d8%a7%d9%84%d9%85%d9%83%d8%b1%d9%85%d8%a9-%d8%ad%d9%8a-%d8%a8%d8%b7%d8%ad%d8%a7%d8%a1-%d9%82%d8%b1%d9%8a%d8%b4/ |
+| daraa | 7 | 0 (0.0 %) | publishes · ad page — capture gap (backlog #1111) | 1 | https://daraa.sa/projects/205048 |
+| marksa | 7 | 0 (0.0 %) | proven silent | 0 | https://mar-ksa.com/ar/property/showitem/881 |
+| remaxsa | 7 | 0 (0.0 %) | proven silent | 0 | https://www.remax.sa/en/listings/apartment/for-sale/الرياض/113033009-19 |
+| wadod | 7 | 7 (100.0 %) | publishes · ad page — not re-opened today (scraper read path) | 95 | https://wadod.sa/property/93 |
+| shmoualshmal | 6 | 0 (0.0 %) | proven silent — UNVERIFIED | 0 | https://shmoua-alshmal.com/property/%d9%81%d9%8a%d9%84%d8%a7-%d9%85%d9%88%d8%af%d8%b1%d9%86-6-%d8%ba%d8%b1%d9%81/ |
+| yameen | 6 | 6 (100.0 %) | publishes · page JSON — not re-opened today (scraper read path) | 95 | https://www.yameen.sa/properties/52351 |
+| fahadalshahri | 5 | 0 (0.0 %) | proven silent — UNVERIFIED | 0 | https://fahadalshahri.com/product/%d8%b4%d9%82%d9%82-%d8%a8%d8%ad%d9%8a-%d8%a7%d9%84%d8%b1%d9%88%d8%b6%d9%87/ |
+| hazim | 5 | 1 (20.0 %) | partial (pin only on some ads) | 10 | https://hazim.sa/properties/6a24951be68e1d79e10e7787 |
+| october | 5 | 1 (20.0 %) | partial (pin only on some ads) | 10 | https://www.1october.com.sa/properties/44236 |
+| qmra | 5 | 0 (0.0 %) | proven silent | 0 | https://qmra.sa/property/%d9%82%d9%85%d8%b1%d8%a7-11/ |
+| tawia | 4 | 0 (0.0 %) | publishes · page JSON — capture gap (backlog #1111) | 1 | https://tawia.sa/properties/af75d047-cb1c-449c-9a81-4f77af87653e |
+| eightfloor | 2 | 1 (50.0 %) | partial (pin only on some ads) | 40 | https://www.8floor.sa/properties/37975 |
+| eydah | 2 | 0 (0.0 %) | proven silent | 0 | https://eydah.com/offers/Ey-1001.html |
+| masar | 1 | 0 (0.0 %) | proven silent — UNVERIFIED | 0 | https://masaraqarat.com/aqar/%d8%b4%d9%82%d8%a9-%d9%84%d9%84%d8%a5%d9%8a%d8%ac%d8%a7%d8%b1-4/ |
+| almuteb | 0 | 0 (—) | publishes · feed/API — dormant, 0 served | 1 | https://almuteb.sa |
+| moftah | 0 | 0 (—) | publishes · feed/API — dormant, 0 served | 1 | https://moftah-aleaqar.com |
+| sadin | 0 | 0 (—) | publishes · page JSON — dormant, 0 served | 1 | https://www.sadin.com.sa |
+| senan | 0 | 0 (—) | publishes · feed/API — dormant, 0 served | 1 | https://www.senanrealestate.sa |
+| snam | 0 | 0 (—) | publishes · feed/API — dormant, 0 served | 1 | https://snam.sa |
