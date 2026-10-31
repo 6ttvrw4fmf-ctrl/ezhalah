@@ -98,10 +98,10 @@
     },
     "alkhaas": {
       "pin_source": "ad-page",
-      "floor_pct": 1,
+      "floor_pct": 85,
       "proof_url": "https://alkhaas.net/ads/1003",
       "proven_on": "2026-10-30",
-      "note": "BUG fixed #9508: «الذهاب إلى موقع الإعلان» → google.com/maps?q=LAT,LNG per ad (3/3 rendered ads, distinct pairs). The JS fallback lat 26.117342 is the same on every ad and is never read. Raise the floor after the first re-crawl. Served 0/209 (0.0%) on 2026-10-30 before today's fixes."
+      "note": "BUG fixed #9508: «الذهاب إلى موقع الإعلان» → google.com/maps?q=LAT,LNG per ad (3/3 rendered ads, distinct pairs). The JS fallback lat 26.117342 is the same on every ad and is never read. Floor raised to 85 after the 2026-10-31 re-crawl + 02:22 sync. Served 0/209 (0.0%) on 2026-10-30 before today's fixes."
     },
     "almotmkenah": {
       "pin_source": "none",
@@ -273,10 +273,10 @@
     },
     "awal": {
       "pin_source": "ad-page",
-      "floor_pct": 1,
+      "floor_pct": 85,
       "proof_url": "https://awaalun.com/property/%d8%a7%d8%b1%d8%b6-%d9%85%d8%b3%d9%88%d8%b1%d9%87/",
       "proven_on": "2026-10-30",
-      "note": "BUG fixed #9508: <div class=marker data-latitude data-longitude> per ad (3/3 rendered ads, distinct pairs); the «Al Rabwa, Ar Ar» JSON is the office. Raise the floor after the first re-crawl. Served 0/51 (0.0%) on 2026-10-30 before today's fixes."
+      "note": "BUG fixed #9508: <div class=marker data-latitude data-longitude> per ad (3/3 rendered ads, distinct pairs); the «Al Rabwa, Ar Ar» JSON is the office. Floor raised to 85 after the 2026-10-31 re-crawl + 02:22 sync. Served 0/51 (0.0%) on 2026-10-30 before today's fixes."
     },
     "azdad": {
       "pin_source": "none",
@@ -308,10 +308,10 @@
     },
     "compoundin": {
       "pin_source": "project-page",
-      "floor_pct": 1,
+      "floor_pct": 85,
       "proof_url": "https://compoundin.com/compounds/riyadh/azure-al-reem",
       "proven_on": "2026-10-30",
-      "note": "BUG fixed #9507: the compound page's inline `cinMapMarkers = [{marker:{position:{lat,lng}}}]` (one marker = the compound; measured on 3 compounds). Raise the floor after the first re-crawl. Served 0/286 (0.0%) on 2026-10-30 before today's fixes."
+      "note": "BUG fixed #9507: the compound page's inline `cinMapMarkers = [{marker:{position:{lat,lng}}}]` (one marker = the compound; measured on 3 compounds). Floor raised to 85 after the 2026-10-31 re-crawl + 02:22 sync. Served 0/286 (0.0%) on 2026-10-30 before today's fixes."
     },
     "dallali": {
       "pin_source": "feed",
@@ -329,10 +329,10 @@
     },
     "daryusuf": {
       "pin_source": "ad-page",
-      "floor_pct": 1,
+      "floor_pct": 90,
       "proof_url": "https://daryusuf.com/en/portfolio/villa-for-rent-al-khalidiyah-district-madinah/",
       "proven_on": "2026-10-30",
-      "note": "BUG fixed #9508: the Elementor iframe maps.google.com/maps?q=24°27'59.8\"N 39°39'44.9\"E (DMS) per ad (3/3 rendered ads, distinct pairs). Raise the floor after the first re-crawl. Served 0/258 (0.0%) on 2026-10-30 before today's fixes."
+      "note": "BUG fixed #9508: the Elementor iframe maps.google.com/maps?q=24°27'59.8\"N 39°39'44.9\"E (DMS) per ad (3/3 rendered ads, distinct pairs). Floor raised to 90 after the 2026-10-31 re-crawl + 02:22 sync. Served 0/258 (0.0%) on 2026-10-30 before today's fixes."
     },
     "dealapp": {
       "pin_source": "feed",
@@ -476,10 +476,10 @@
     },
     "hajer": {
       "pin_source": "ad-page",
-      "floor_pct": 1,
+      "floor_pct": 85,
       "proof_url": "https://hajerhouses.com/property/%d8%a8%d9%8a%d8%aa-%d9%85%d9%83%d9%88%d9%86-%d9%85%d9%86-%d8%af%d9%88%d8%b1-%d9%88%d8%ab%d9%84%d8%a7%d8%ab-%d8%b4%d9%82%d9%82-%d9%84%d9%84%d8%a8%d9%8a%d8%b9-%d9%81%d9%8a-%d8%ad%d9%8a-%d8%a7%d9%84/",
       "proven_on": "2026-10-30",
-      "note": "BUG fixed #9508: var rem_property_map = {latitude, longitude} per ad (3/3 rendered ads, distinct pairs). Raise the floor after the first re-crawl. Served 0/124 (0.0%) on 2026-10-30 before today's fixes."
+      "note": "BUG fixed #9508: var rem_property_map = {latitude, longitude} per ad (3/3 rendered ads, distinct pairs). Floor raised to 85 after the 2026-10-31 re-crawl + 02:22 sync. Served 0/124 (0.0%) on 2026-10-30 before today's fixes."
     },
     "haraj": {
       "pin_source": "partial",
@@ -875,10 +875,10 @@
     },
     "shatri": {
       "pin_source": "ad-page",
-      "floor_pct": 1,
+      "floor_pct": 90,
       "proof_url": "https://shatrirealestate.com/property/apartments-sale-alsafa-jeddah-3-rooms/",
       "proven_on": "2026-10-30",
-      "note": "BUG fixed #9508: Houzez data-map='{latitude, longitude}' + JSON-LD geo on the ad PAGE (not in the REST post); one rendered ad read (the other timed out). Raise the floor after the first re-crawl. Served 0/50 (0.0%) on 2026-10-30 before today's fixes."
+      "note": "BUG fixed #9508: Houzez data-map='{latitude, longitude}' + JSON-LD geo on the ad PAGE (not in the REST post); one rendered ad read (the other timed out). Floor raised to 90 after the 2026-10-31 re-crawl + 02:22 sync. Served 0/50 (0.0%) on 2026-10-30 before today's fixes."
     },
     "shmoualshmal": {
       "pin_source": "none",
