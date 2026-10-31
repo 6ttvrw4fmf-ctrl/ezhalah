@@ -61,6 +61,48 @@ mutantCaught('a pool that guesses annual for an unpublished period', ((_t: strin
 mutantCaught("the old yearly card-fetch clause (rent_period.eq.annual) drops a moved per-month ad", 'rent_period.eq.annual,price_annual.is.null' !== cardFetchPeriodOr('annual', 'haraj_residential_listings'));
 mutantCaught('an advertised line on a short-stay row', advertisedMonthly('monthly', 'monthly', 36000) === null);
 
+// ── THE INDEX AND THE CARD CAN NEVER DISAGREE (owner 2026-10-31: «fix the root so we never ever get it wrong») ─────
+// The index decides a rent row's pool (rentPool, mirrored by the trigger); the card fetch then re-reads the RAW row
+// through cardFetchPeriodOr(). On 2026-10-31 the index put silent-period rows in the yearly pool while the clause still
+// dropped a null raw period: «111 نتيجة», 21 cards never rendered. This enumerates EVERY raw-row shape — period word ×
+// figure × type × site kind — derives the pool the index assigns, and asserts the clause for that pool accepts the
+// shape. A future label the index can produce but the clause rejects fails here, before any customer sees a gap.
+type RawShape = { period: string | null; price: number | null; type: string; table: string };
+// The period words the raw tables hold: NULL (silent), 'annual', 'monthly' (verified 2026-10-31: 0 empty or
+// upper-case words across aqar / haraj / muhaysini / wajaf). The PostgREST clause is case-sensitive, so a scraper that
+// ever wrote another spelling would be a scraper bug, not a pool rule — field_integrity owns that.
+const PERIODS: (string | null)[] = [null, 'annual', 'monthly'];
+const PRICES: (number | null)[] = [null, 1, 299, 300, 2500, 7999, 8000, 14999, 15000, 180000];
+const TYPES = ['Apartment', 'Warehouse', 'Residential Land', 'Room'];
+const TABLES = ['aqar_residential_listings', 'haraj_commercial_listings', 'gathern_residential_listings', 'aqarmonthly_residential_listings'];
+// A tiny evaluator for the PostgREST `.or()` grammar the clause uses: `col.eq.v`, `col.in.(a,b)`, `col.is.null`.
+const clauseAccepts = (clause: string | null, row: RawShape): boolean => {
+  if (clause === null) return true;
+  const val = (col: string) => (col === 'rent_period' ? row.period : col === 'price_annual' ? row.price : undefined);
+  return clause.split(/,(?![^(]*\))/).some((term) => {
+    const m = /^(\w+)\.(eq|in|is)\.(.+)$/.exec(term.trim());
+    if (!m) throw new Error(`unknown clause term «${term}» — teach clauseAccepts() before the card fetch learns it`);
+    const v = val(m[1]);
+    if (m[2] === 'is') return m[3] === 'null' && (v === null || v === undefined);
+    if (m[2] === 'eq') return String(v) === m[3];
+    return m[3].replace(/^\(|\)$/g, '').split(',').includes(String(v));
+  });
+};
+let shapes = 0, gaps: string[] = [];
+for (const table of TABLES) for (const period of PERIODS) for (const price of PRICES) for (const type of TYPES) {
+  const row: RawShape = { period, price, type, table };
+  const pool = rentPool(table, period, price, type);                       // what the index serves this row as
+  shapes++;
+  if (pool === 'annual' && !clauseAccepts(cardFetchPeriodOr('annual', table), row)) gaps.push(`yearly drops ${JSON.stringify(row)}`);
+  if (pool === 'monthly' && !clauseAccepts(cardFetchPeriodOr('monthly', table), row)) gaps.push(`short-stays drops ${JSON.stringify(row)}`);
+  if (pool !== null && !clauseAccepts(cardFetchPeriodOr('both', table), row)) gaps.push(`both drops ${JSON.stringify(row)}`);
+}
+check(`every pooled raw-row shape passes its card-fetch clause (${shapes} shapes, index pool → card clause)`, gaps.length === 0, gaps.slice(0, 5).join(' · '));
+mutantCaught('the 2026-10-31 defect: the yearly clause without rent_period.is.null drops a silent-period row the index pooled as yearly',
+  !clauseAccepts('rent_period.in.(monthly,annual),price_annual.is.null', { period: null, price: 180000, type: 'Warehouse', table: 'wajaf_commercial_listings' })
+  && rentPool('wajaf_commercial_listings', null, 180000, 'Warehouse') === 'annual');
+mutantCaught('a pool rule that admitted a placeholder figure would be caught the same way', rentPool('aqar_residential_listings', null, 1, 'Apartment') === null);
+
 // ── wiring: the app routes every period surface through the pool ─────────────────────────────────────────────
 const remote = readFileSync(join(root, 'src/data/remote.ts'), 'utf8');
 const card = readFileSync(join(root, 'src/components/ResultCard.tsx'), 'utf8');

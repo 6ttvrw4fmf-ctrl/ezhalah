@@ -45,7 +45,9 @@ export function rentPool(sourceTable: string, sourceRentPeriod: string | null | 
   if (isShortStayTable(sourceTable)) return 'monthly';
   const p = String(sourceRentPeriod ?? '').trim().toLowerCase();
   if (p === 'annual' || p === 'monthly') return 'annual';
-  if (p === '') return judgeSilentRentPeriod(priceAnnual, cleanType) ? 'annual' : null;   // silent → judged (owner 2026-10-31)
+  // SILENT = the column is NULL/absent — exactly what the index trigger judges. An empty or unknown WORD is not
+  // silent: the index leaves it alone, so the card must too (the parity enumeration in verify-short-stays-pool.ts).
+  if (sourceRentPeriod == null) return judgeSilentRentPeriod(priceAnnual, cleanType) ? 'annual' : null;
   return null;
 }
 
@@ -70,8 +72,8 @@ export function cheapYearlyIsMonthly(sourceTableOrSource: string, sourceRentPeri
   if (isShortStayTable(sourceTableOrSource)) return false;
   // A stated «yearly» — or, since 2026-10-31, a SILENT period — with a per-month-sized figure on a home/business unit.
   // A stated «monthly» is the pool's job (×12 is already stored); any other word is left alone.
-  const word = String(sourceRentPeriod ?? '').trim().toLowerCase();
-  if (word !== 'annual' && word !== '') return false;
+  const silent = sourceRentPeriod == null;                      // NULL/absent only — an empty word is not silent
+  if (!silent && String(sourceRentPeriod).trim().toLowerCase() !== 'annual') return false;
   if (typeof priceAnnual !== 'number' || !Number.isFinite(priceAnnual) || priceAnnual < CHEAP_YEARLY_FROM || priceAnnual >= CHEAP_YEARLY_BELOW) return false;
   return (CHEAP_YEARLY_TYPES_EN as readonly string[]).includes(String(cleanType ?? ''));
 }

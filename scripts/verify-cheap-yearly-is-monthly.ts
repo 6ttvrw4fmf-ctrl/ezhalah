@@ -25,7 +25,7 @@ check("a per-month-labelled figure is the pool's job, not this rule's", !cheapYe
 // 2026-10-31 (owner): a SILENT period with a per-month-sized figure is served like a cheap «yearly» one — ×12 and
 // «السعر المعلن 3,000 شهرياً» — because the index now puts it in the yearly pool (judge_silent_rent_period_ar). The
 // borderline (8,000–14,999) and placeholders stay untouched; a stated «monthly» is still the pool's job.
-check('a silent period with a per-month figure IS served per month (owner 2026-10-31)', cheapYearlyIsMonthly('aqar', null, 3000, 'Apartment') && cheapYearlyIsMonthly('aqar', '', 3000, 'Apartment'));
+check('a silent (NULL) period with a per-month figure IS served per month (owner 2026-10-31); an empty WORD is not silent', cheapYearlyIsMonthly('aqar', null, 3000, 'Apartment') && cheapYearlyIsMonthly('aqar', undefined, 3000, 'Apartment') && !cheapYearlyIsMonthly('aqar', '', 3000, 'Apartment'));
 check('a silent period with a borderline or placeholder figure is still not guessed', !cheapYearlyIsMonthly('aqar', null, 9000, 'Apartment') && !cheapYearlyIsMonthly('aqar', null, 35, 'Apartment') && !cheapYearlyIsMonthly('aqar', null, 3000, 'Residential Land'));
 check('stay-length platforms untouched', !cheapYearlyIsMonthly('gathern_residential_listings', 'annual', 3000, 'Apartment') && !cheapYearlyIsMonthly('Aqar Monthly', 'annual', 3000, 'Apartment'));
 check('no figure / zero / NaN → untouched', !cheapYearlyIsMonthly('aqar', 'annual', null, 'Apartment') && !cheapYearlyIsMonthly('aqar', 'annual', 0, 'Apartment') && !cheapYearlyIsMonthly('aqar', 'annual', Number.NaN, 'Apartment'));
