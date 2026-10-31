@@ -6,7 +6,15 @@
 //   «سنوي» (Yearly)             = every other platform's rent listing with a published period. A site that quotes
 //                                  PER MONTH is a yearly listing at ×12 (price_annual is already stored as monthly×12),
 //                                  and the card still shows the site's own words: «السعر المعلن 3,000 شهرياً».
-//   null                         = the source published no period. Never guessed (owner 2026-09-03, unchanged).
+//   null                         = the source published no period AND the figure cannot settle it (see below).
+//
+// A SILENT PERIOD IS JUDGED FROM THE PRICE (owner 2026-09-28, every site 2026-10-03, built 2026-10-31 — migrations
+// 20261031205445 + the pool-rule correction the same night; SQL mirror public.judge_silent_rent_period_ar()).
+// 13,436 priced rents (aqar, haraj, muhaysini, nofodh, dwelleo, wajaf …) sat with no period and no rent button could
+// show them. Now, when the site prints no period, the raw figure decides: under 300 = a placeholder, not a rent →
+// null; 300–7,999 on a home/business type = a PER-MONTH figure → the yearly pool at ×12 exactly like a stated
+// monthly («السعر المعلن 2,500 شهرياً»); 15,000 and above = a yearly rent → 'annual'; 8,000–14,999 (or a small figure
+// on land / farm / chalet) stays null — borderline, never a guess. The index does the same, so count = cards.
 //
 // The source tables are untouched: rent_period there stays the site's own word (PERIOD = SOURCE). Only the POOL
 // — the search index's rent_period_ar and the card's /yr suffix — reads the per-month figure as yearly.
@@ -19,10 +27,25 @@ export const isShortStayTable = (tableOrPlatformOrSource: string): boolean =>
 
 export type RentPool = 'monthly' | 'annual' | null;
 
-export function rentPool(sourceTable: string, sourceRentPeriod: string | null | undefined): RentPool {
+export const SILENT_YEARLY_FROM = 15000;                        // SAR, inclusive: a silent figure this big is a yearly rent
+export type SilentJudgment = 'monthly-figure' | 'annual' | null;
+/** The owner's silent-period rule on the raw figure a site printed with NO period (mirror of judge_silent_rent_period_ar). */
+export function judgeSilentRentPeriod(priceAnnual: unknown, cleanType: string | null | undefined): SilentJudgment {
+  if (typeof priceAnnual !== 'number' || !Number.isFinite(priceAnnual)) return null;
+  if (priceAnnual < CHEAP_YEARLY_FROM) return null;                                     // 1, 20, 35 … placeholders
+  if (priceAnnual < CHEAP_YEARLY_BELOW) {
+    return (CHEAP_YEARLY_TYPES_EN as readonly string[]).includes(String(cleanType ?? '')) ? 'monthly-figure' : null;
+  }
+  if (priceAnnual >= SILENT_YEARLY_FROM) return 'annual';
+  return null;                                                                          // 8,000–14,999: borderline
+}
+
+export function rentPool(sourceTable: string, sourceRentPeriod: string | null | undefined,
+  priceAnnual?: unknown, cleanType?: string | null): RentPool {
   if (isShortStayTable(sourceTable)) return 'monthly';
   const p = String(sourceRentPeriod ?? '').trim().toLowerCase();
   if (p === 'annual' || p === 'monthly') return 'annual';
+  if (p === '') return judgeSilentRentPeriod(priceAnnual, cleanType) ? 'annual' : null;   // silent → judged (owner 2026-10-31)
   return null;
 }
 
@@ -45,7 +68,10 @@ export const CHEAP_YEARLY_TYPES_EN = ['Apartment', 'Villa', 'Floor', 'Duplex', '
 export function cheapYearlyIsMonthly(sourceTableOrSource: string, sourceRentPeriod: string | null | undefined,
   priceAnnual: unknown, cleanType: string | null | undefined): boolean {
   if (isShortStayTable(sourceTableOrSource)) return false;
-  if (String(sourceRentPeriod ?? '').trim().toLowerCase() !== 'annual') return false;
+  // A stated «yearly» — or, since 2026-10-31, a SILENT period — with a per-month-sized figure on a home/business unit.
+  // A stated «monthly» is the pool's job (×12 is already stored); any other word is left alone.
+  const word = String(sourceRentPeriod ?? '').trim().toLowerCase();
+  if (word !== 'annual' && word !== '') return false;
   if (typeof priceAnnual !== 'number' || !Number.isFinite(priceAnnual) || priceAnnual < CHEAP_YEARLY_FROM || priceAnnual >= CHEAP_YEARLY_BELOW) return false;
   return (CHEAP_YEARLY_TYPES_EN as readonly string[]).includes(String(cleanType ?? ''));
 }
@@ -60,11 +86,14 @@ export function advertisedMonthly(pool: RentPool, sourceRentPeriod: string | nul
 }
 
 // The PostgREST `.or()` clause the card fetch applies per source table so a row the results RPC returned is never
-// dropped (and a row it would not return is never shown). `null` = no period clause. A priced row with no
-// published period is in neither pool; an unpriced row («سعر عند الطلب») passes every branch (owner 2026-09-28).
+// dropped (and a row it would not return is never shown). `null` = no period clause. An unpriced row («سعر عند
+// الطلب») passes every branch (owner 2026-09-28). Since 2026-10-31 a priced row with NO published period may be in
+// the yearly pool (judged from its figure by the index); the yearly / both clauses therefore accept a null raw
+// period too — the INDEX decided membership (its rent_period_ar), this clause only keeps the card fetch from
+// dropping a row the count already included (10-31: «111 نتيجة» with 21 judged rows the old clause would drop).
 export function cardFetchPeriodOr(pool: 'monthly' | 'annual' | 'both', sourceTable: string): string | null {
   const shortStay = isShortStayTable(sourceTable);
   if (pool === 'monthly') return shortStay ? null : 'rent_period.eq.monthly,price_annual.is.null';
-  if (pool === 'annual') return shortStay ? 'rent_period.eq.annual,price_annual.is.null' : 'rent_period.in.(monthly,annual),price_annual.is.null';
-  return shortStay ? null : 'rent_period.in.(monthly,annual),price_annual.is.null';
+  if (pool === 'annual') return shortStay ? 'rent_period.eq.annual,price_annual.is.null' : 'rent_period.in.(monthly,annual),rent_period.is.null,price_annual.is.null';
+  return shortStay ? null : 'rent_period.in.(monthly,annual),rent_period.is.null,price_annual.is.null';
 }

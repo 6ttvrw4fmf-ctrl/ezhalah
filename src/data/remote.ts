@@ -2035,7 +2035,9 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     // «إقامات قصيرة»; any other site's per-month figure is a YEARLY listing at ×12 (price_annual already is),
     // so its card prints «/سنوياً» — and `sourceRentPeriod` below keeps the site's own word for the
     // «السعر المعلن 3,000 شهرياً» line. An unpublished period still pools as null, never 'annual'.
-    const pool = deal === 'Rent' ? rentPool(r.source ?? '', r.rent_period) : null;
+    // (2026-10-31: a SILENT period is judged from the figure and the clean type — src/lib/rentPool.ts::judgeSilentRentPeriod,
+    //  the same rule the index applied when it put the row in the yearly pool.)
+    const pool = deal === 'Rent' ? rentPool(r.source ?? '', r.rent_period, r.price_annual, norm.clean) : null;
     // A «yearly» rent under 8,000 SAR on a home/business unit is a per-month price (owner 2026-10-26,
     // src/lib/rentPool.ts::cheapYearlyIsMonthly; the index serves it ×12 through rent_price_annual_ar()):
     // served ×12 here too, and the site's word becomes 'monthly' so the card says «السعر المعلن 3,300 شهرياً».
