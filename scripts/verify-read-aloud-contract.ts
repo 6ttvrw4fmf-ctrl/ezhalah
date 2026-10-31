@@ -150,7 +150,9 @@ check('no pause trails the LAST card when there is no closing note; a pause DOES
 // READ_ALOUD_CARD_CAP=5 stopped short). Every visible card is spoken now; the only bound left is the
 // caller's own reveal-count slice (checked next), never a second, stricter one in the script itself.
 check('no card cap remains in the script — every visibleListings entry is spoken, not a .slice()-bounded subset', !/READ_ALOUD_CARD_CAP/.test(readAloudScript) && !/visibleListings\.slice\(/.test(readAloudScript));
-check('the caller passes the VISIBLE (reveal-count-sliced) listings, never the full fetched set — no hidden listing can be spoken', /buildResultsReadAloudSegments\(introText, m\.result\.listings\.slice\(0, shown\), readAloudClosingNote, locale\)/.test(agent));
+check('the caller passes the VISIBLE (reveal-count) listings, never the full fetched set — no hidden listing can be spoken',
+  /buildResultsReadAloudSegmentsCached\(introText, m\.result\.listings, shown, readAloudClosingNote, locale\)/.test(agent)
+  && /buildResultsReadAloudSegments\(summaryText, allListings\.slice\(0, shown\), closingNote, locale\)/.test(readAloudScript));
 // CLOSING NOTE (owner request, 2026-08-23 — "read the note... and say the button also"): the
 // «عرضت لك أول N إعلانات...» text + an available-actions sentence, spoken as the FINAL segment —
 // appended, never re-derived, from the exact same variables agent.tsx's visible Text/buttons use.
@@ -527,8 +529,8 @@ mustCatch('a card cap returning to the script, so listings on screen are silentl
   breaks('src/lib/readAloudScript.ts', (src) => src.replace('visibleListings.forEach(', 'visibleListings.slice(0, 3).forEach(')));
 mustCatch('the intro word changed, so the reading no longer opens the way the owner specified',
   breaks('src/lib/readAloudScript.ts', (src) => src.replace("const INTRO_WORD = 'إزهله';", "const INTRO_WORD = 'مرحبا';")));
-mustCatch('agent.tsx passing the FULL fetched set instead of the reveal-count slice, so a listing the user cannot see is read aloud',
-  breaks('src/app/agent.tsx', (src) => src.replace('m.result.listings.slice(0, shown)', 'm.result.listings')));
+mustCatch('the cached script builder reading the FULL fetched set instead of the reveal-count slice, so a listing the user cannot see is read aloud',
+  breaks('src/lib/readAloudScript.ts', (src) => src.replace('summaryText, allListings.slice(0, shown)', 'summaryText, allListings')));
 
 // — THE RETARGET ITSELF (ops_incident #727), proven in BOTH directions —
 // The property must survive a semantics-preserving refactor of readAloudVoice.ts, and the pin it

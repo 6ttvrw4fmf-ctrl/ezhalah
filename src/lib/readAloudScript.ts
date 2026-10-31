@@ -55,6 +55,20 @@ function cardSpeech(listing: Listing, locale: 'ar' | 'en' = 'ar'): string {
 // function only ever appends it, verbatim, as the final spoken segment. Omit/empty when that block
 // isn't rendered (e.g. an Advanced Filter interview is open) — never speak an action that isn't on
 // screen to tap.
+const spokenCache = new WeakMap<Listing[], { key: string; segments: ReadAloudSegment[] }>();
+/** The script for the first `shown` of `allListings`, REMEMBERED per fetched list. The chat screen asks on every render —
+ *  every key typed in the composer — and rebuilding 500 spoken cards each time was the biggest piece of its own code in
+ *  the typing profile. Same inputs → the same array (so the feedback row can skip too); a new list, count, note or
+ *  language → rebuilt. The result is exactly buildResultsReadAloudSegments(summary, allListings.slice(0, shown), …). */
+export function buildResultsReadAloudSegmentsCached(summaryText: string, allListings: Listing[], shown: number, closingNote?: string, locale: 'ar' | 'en' = 'ar'): ReadAloudSegment[] {
+  const key = [shown, summaryText, closingNote ?? '', locale].join('\u0001');
+  const hit = spokenCache.get(allListings);
+  if (hit && hit.key === key) return hit.segments;
+  const segments = buildResultsReadAloudSegments(summaryText, allListings.slice(0, shown), closingNote, locale);
+  spokenCache.set(allListings, { key, segments });
+  return segments;
+}
+
 export function buildResultsReadAloudSegments(summaryText: string, visibleListings: Listing[], closingNote?: string, locale: 'ar' | 'en' = 'ar'): ReadAloudSegment[] {
   const segments: ReadAloudSegment[] = [{ text: locale === 'en' ? 'Ezhalah' : INTRO_WORD, pauseAfterMs: PAUSE_MS }];
   const summary = summaryText.trim();
