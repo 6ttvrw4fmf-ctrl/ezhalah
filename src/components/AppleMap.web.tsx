@@ -89,6 +89,7 @@ type MapKit = {
   CoordinateRegion: new (center: unknown, span: unknown) => unknown;
   Style: new (o: { strokeColor?: string; strokeOpacity?: number; fillColor?: string; fillOpacity?: number; lineWidth?: number }) => unknown;
   PolygonOverlay: new (points: unknown[] | unknown[][], o?: { style?: unknown; data?: unknown; enabled?: boolean }) => Shape;
+  PolylineOverlay: new (points: unknown[], o?: { style?: unknown; enabled?: boolean }) => Shape;
   addEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
   removeEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
 };
@@ -352,6 +353,10 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
     const m = mapRef.current; const mk = mapkitOf();
     if (!el || !m || !mk) return;
     let down = false; let last: { x: number; y: number } | null = null;
+    // The PENCIL LINE while the finger moves (owner 2026-10-31: «like a pencil, like Zillow»): a stroke that follows
+    // the finger; the filled shape appears only when the finger lifts.
+    let line: Shape | null = null;
+    const dropLine = () => { if (line) { m.removeOverlay(line); line = null; } };
     const onDown = (e: PointerEvent) => {
       e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch { /* a pointer the browser no longer tracks */ }
       down = true; last = { x: e.pageX, y: e.pageY };
@@ -365,19 +370,28 @@ export default function AppleMap({ full = false, onTap, onClose }: { full?: bool
       if (Math.hypot(e.pageX - last.x, e.pageY - last.y) < 4) return;
       last = { x: e.pageX, y: e.pageY };
       ptsRef.current.push(m.convertPointOnPageToCoordinate(new DOMPoint(last.x, last.y)));
-      const pts = ptsRef.current;
-      if (pts.length < 3) return;
-      const coords = pts.map((p) => new mk.Coordinate(p.latitude, p.longitude));
-      if (sketchRef.current) sketchRef.current.points = coords;
+      const coords = ptsRef.current.map((p) => new mk.Coordinate(p.latitude, p.longitude));
+      if (line) line.points = coords;
       else {
+        line = new mk.PolylineOverlay(coords, { style: new mk.Style({ strokeColor: lightColors.primary, strokeOpacity: 0.95, lineWidth: 3 }), enabled: false });
+        m.addOverlay(line);
+      }
+    };
+    const onUp = () => {
+      if (!down) return;
+      down = false; dropLine();
+      const pts = ptsRef.current;
+      if (pts.length >= 3) {
+        const coords = pts.map((p) => new mk.Coordinate(p.latitude, p.longitude));
         sketchRef.current = new mk.PolygonOverlay(coords, { style: new mk.Style({ strokeColor: lightColors.primary, strokeOpacity: 0.95, lineWidth: 2.5, fillColor: lightColors.primary, fillOpacity: 0.14 }), enabled: false });
         m.addOverlay(sketchRef.current);
       }
+      setSketch(sketchRef.current);
     };
-    const onUp = () => { down = false; setSketch(sketchRef.current); };
     el.addEventListener('pointerdown', onDown); el.addEventListener('pointermove', onMove);
     el.addEventListener('pointerup', onUp); el.addEventListener('pointercancel', onUp);
     return () => {
+      dropLine();
       el.removeEventListener('pointerdown', onDown); el.removeEventListener('pointermove', onMove);
       el.removeEventListener('pointerup', onUp); el.removeEventListener('pointercancel', onUp);
     };
