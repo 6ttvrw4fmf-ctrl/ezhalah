@@ -305,6 +305,19 @@ These cost your first runs a lot of time. Use them instead of working them out a
   artifact's download host is blocked from the cloud; the log prints the same comparison). It shows
   what the page itself says next to what we store.
 
+## Lesson from 2026-10-30 (owner: «never ever happen again» — the map pin)
+
+- **Look in ALL FOUR places before you declare a site silent on anything, pins first:** (1) the rendered ad page, (2) its
+  embedded JSON / data attributes / the network calls the page makes (DevTools → Network, or the browser pane's request
+  list), (3) a site-wide map or list feed (the «projects map» page, the search API, the sitemap), (4) the PARENT page for a
+  unit-in-project site (the project, the compound, the building). rakez's project page draws no map, so nobody looked
+  further — and `/ar/projects-map/` had been calling `/ar/wp-json/hs-map/v1/projects` with every project's lat/lng the
+  whole time: 3,660 ads, 0 pins, six weeks. compoundin printed its marker in an inline `cinMapMarkers` script; mustqr's
+  only pin is the Maps link a broker pastes into the ad text, which `ad_body()` was dropping. A site you onboard is not
+  done until `data/pin-sources.json` has its row (checklist box 10, `verify-pin-capture-declared.ts`); write `none` only
+  with the URL of the page you proved silent, and `partial` with the share you saw. The served number is watched hourly
+  by `mon_detect_pin_coverage_below_floor()` — a site declared as publishing that serves 0% is a P1 the same hour.
+
 ## Lesson from 2026-10-16 (🦅 Falcon: «the site has no field for it» is where prose starts, not where capture ends)
 - wasalt publishes NO structured elevator, air-conditioning or private-entrance field (62,491 stored payloads:
   not in `attributes`, `additionalAttributes` or `propertyInfo`), so those columns were NULL on every wasalt row

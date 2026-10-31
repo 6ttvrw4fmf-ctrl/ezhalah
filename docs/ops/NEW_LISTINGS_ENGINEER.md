@@ -668,6 +668,13 @@ Your history, read from the routine log on 2026-10-03:
 
 ## Lessons from real breakages (use them)
 
+- **2026-10-30 (owner: «never ever happen again» — pins):** a new site's ads arriving with no map pin is a finding, not a
+  trait of the site, until someone looked in **all four places**: the rendered ad page, its embedded JSON / data
+  attributes / network calls, a site-wide map or list feed, and the parent project/compound page. rakez served 3,660 ads
+  with 0 pins for six weeks while its map page's feed named every project's lat/lng. Before you log «the source has no
+  pins», open `data/pin-sources.json`: a platform declared `ad-page|page-json|feed|project-page|partial` that arrives at
+  0% is a scraper bug to fix tonight (the hourly detector `mon_detect_pin_coverage_below_floor()` raises it as P1); a
+  platform with no row at all is an unfinished launch (checklist box 10).
 - **2026-10-10 (copied by 🔧 QA):** read `date -u` before any time-based decision, never estimate the clock (misread 07:31 as 08:05 and nearly skipped a fix). And a «district in search but not in the picker» found within the hour is the :20 refresh / :22 sync order (≤ ~1 h lag), not a defect: re-query `district_options_ar` before logging it.
 - **🦅 Falcon 10-09 — the frozen snapshot can contradict the source's own district.** `listing_native_location_v1`
   falls back to `listings_arabic_locations` for `district_ar` when the native arm yields NULL; 471 served listings

@@ -258,6 +258,7 @@ timing so tonight's proofs land inside your 2 hours. (🆕 night 2: 4/12; 🔬 n
 ## Report: this block is the LAST thing you write (short; times in Arizona time, UTC−7)
 > ✅ One plain first line: «Everything is perfectly good.» / «Not good: <what> and I have not fixed it yet.»
 > 📊 **Fix rates (proof rows, not end-row claims):** ⚡ X/Y · 🆕 X/Y · 🔬 X/Y · ♻️ X/Y · you X/Y — name any engineer whose `issues_fixed` exceeds its PASS proof rows
+> 📊 **Pins:** served ads with a map pin N% (Δ vs yesterday) · platforms below their declared floor: none / <platform pct<floor> · publishes-but-0%: none — from `pin_coverage_by_platform()` vs `ops_pin_source_declared` (the rakez lesson, 2026-10-30: a site at 0% that publishes pins is a P1, never «the site has no pins» until you looked in all four places)
 > 🚦 ⚡ GREEN/RED — <reason with the number> · 🆕 GREEN/RED — … · 🔬 GREEN/RED — … · ♻️ GREEN/RED — …
 > 🔧 **Repaired today:** N listings · <what> · before → after
 > 🔢 **Numbers a customer sees:** matched N of 5 scopes · dead listings still counted: N · sync age: N minutes
