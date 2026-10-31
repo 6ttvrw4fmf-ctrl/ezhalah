@@ -57,3 +57,39 @@ def test_small_samples_unchanged():
     assert a.template_lines(_sample(2)) == set()
     three = _sample(3)
     assert a.template_lines(three) == set.intersection(*[set(p) for p in three])
+
+
+# ── The strip's source: tuba's «recently viewed» list, fed by the probe session's cookies ──────────────────
+from curl_cffi import requests as _cc  # noqa: E402
+
+
+def _session_with(*domains: str):
+    s = _cc.Session()
+    for d in domains:
+        s.cookies.set("viewed", "13260983,13260041", domain=d)
+    return s
+
+
+def test_tuba_page_is_read_as_a_first_time_visitor():
+    s = _session_with("tuba.com.sa", ".tuba.com.sa", "aqar.fm")
+    dropped = a.forget_visits("https://tuba.com.sa/property/apartment-for-sale-riyadh-17", s)
+    assert dropped == 2
+    left = {c.domain for c in s.cookies.jar}
+    assert left == {"aqar.fm"}                       # another site's session (e.g. a Cloudflare pass) is kept
+
+
+def test_other_sites_keep_their_cookies():
+    s = _session_with("aqar.fm", "tuba.com.sa")
+    assert a.forget_visits("https://sa.aqar.fm/ad/1", s) == 0
+    assert len(list(s.cookies.jar)) == 2
+
+
+def test_mutation_without_forgetting_the_history_stays():
+    s = _session_with("tuba.com.sa")
+    assert len(list(s.cookies.jar)) == 1             # what every tuba read carried before 2026-10-31
+
+
+def test_score_site_forgets_before_every_probe():
+    import inspect
+    src = inspect.getsource(a.score_site)
+    assert src.index("forget_visits(url)") < src.index("status, body = probe(url)")

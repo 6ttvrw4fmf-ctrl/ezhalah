@@ -33,8 +33,10 @@ import re
 import sys
 import time
 from collections import defaultdict
+from urllib.parse import urlsplit
 from datetime import datetime, timedelta, timezone
 
+from scrapers.common import http
 from scrapers.common.cleanup import _probe
 from scrapers.common.db import sb
 from scrapers.common.new_listings_score import (
@@ -813,6 +815,30 @@ def sample_size(n: int, per_site: int | None) -> int:
     return N_BIG if n >= BIG_SITE else min(N_SMALL, n)
 
 
+# A website that remembers what THIS visitor opened (🔬 2026-10-31). tuba prints a «recently viewed» strip from the
+# visitor's cookies, and the score's probe session (scrapers/common/http.session(), one per thread) keeps cookies for
+# the whole run, so each tuba page carried the titles of the ads the robot itself had opened before it («شقة مؤثثة
+# للإيجار … جدة حي السلامة» on a Dammam sale). A fresh re-read of the same page (source-reread 41189800679) shows
+# no strip at all. A customer opening the ad's link is a first-time visitor: so is the score.
+FRESH_VISIT_HOSTS = ("tuba.com.sa",)
+
+
+def forget_visits(url: str, session=None) -> int:
+    """Drop the probe session's cookies for a FRESH_VISIT_HOSTS site before reading one of its pages. Returns how
+    many cookies were dropped; a site outside the list, or a session that cannot be read, is left untouched."""
+    host = (urlsplit(url or "").netloc or "").lower()
+    if not any(host == h or host.endswith("." + h) for h in FRESH_VISIT_HOSTS):
+        return 0
+    try:
+        jar = (session if session is not None else http.session()).cookies.jar
+        mine = [c for c in list(jar) if any((c.domain or "").lstrip(".").endswith(h) for h in FRESH_VISIT_HOSTS)]
+        for c in mine:
+            jar.clear(c.domain, c.path, c.name)
+        return len(mine)
+    except Exception:  # noqa: BLE001 — a session we cannot read is read as before, never failed
+        return 0
+
+
 def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, night: str,
                pace: float = PACE_S, probe=None, wasalt=wasalt_page, sanadak=sanadak_page) -> dict:
     probe = probe or _probe
@@ -843,6 +869,7 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
         elif is_sanadak(url) and sanadak is not None:
             page = sanadak(url)
         else:
+            forget_visits(url)
             try:
                 status, body = probe(url)
             except Exception:  # noqa: BLE001
