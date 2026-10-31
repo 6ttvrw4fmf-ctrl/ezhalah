@@ -70,10 +70,8 @@ export const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: str
     // RentAnnual: kitchen/AC/age/floor/furnished are fresh-DEAD in this cohort (94/7/564/53 known of
     // 30,356; furnished 100% true on Gathern). What Monthly actually has: Gathern rating (24,716
     // rated), unit subtype (استديو 9,218 / شقق مخدومة 2,040), elevator 62%, parking 33%, bathrooms 56%.
-    // 2026-10-31: a PLAIN short-stays search no longer reads these lists (SHORT_STAYS_QUESTIONS, one
-    // pool); they feed the 'both'-period and Buy+Rent intersections, and the registry's certified
-    // pool (every barrier derives it from these lists). rating / unit_subtype stay CERTIFIED here for
-    // a typed sentence (SHORT_STAYS_CHAT_ONLY) — the card never asks them on short stays.
+    // 2026-10-31: plain short stays reads SHORT_STAYS_QUESTIONS instead (one pool); this list feeds the
+    // 'both' / Buy+Rent intersections and the certified pool. rating/unit_subtype: chat-only there.
     RentMonthly: ['rating', 'unit_subtype', 'amenities', 'bathrooms'],
   },
   Floor: {
