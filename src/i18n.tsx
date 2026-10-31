@@ -151,6 +151,10 @@ const AR: Record<string, string> = {
   // Top-nav ModeSwitch pill's AI tab — deliberately shorter than the full 'Ezhalah AI Agent' badge
   // title so the two-tab control stays compact. (top-nav redesign, 2026-07-24.)
   'Smart Assistant': 'الوسيط الذكي',
+  // Top-nav ModeSwitch pill's third tab (owner 2026-10-30): the Map way to search.
+  'Map': 'خريطة',
+  'Map search is coming soon': 'البحث بالخريطة قريباً',
+  'Browse listings on a map of Saudi Arabia, with prices on every pin.': 'تصفح العقارات على خريطة المملكة، والسعر على كل علامة.',
 
   // Home
   'Find your place': 'اعثر على مكانك',
