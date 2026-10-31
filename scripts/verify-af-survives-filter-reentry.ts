@@ -80,7 +80,7 @@ const lifted = await liftSymbols(
   // the count path is shimmed — counts decide how many offered options are worth SHOWING, never
   // which tokens may be offered, so the identity shim yields the superset (the fail-closed side).
   [
-    `import { cohortAllows, scopeCleanTypes, intersectChips } from ${JSON.stringify(pathToFileURL(join(ROOT, 'src/lib/afCohorts.ts')).href)};`,
+    `import { cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope } from ${JSON.stringify(pathToFileURL(join(ROOT, 'src/lib/afCohorts.ts')).href)};`,
     'type GuidedCounts = Record<string, number>;',
     'const fetchApartmentGuidedCounts = async (_q: unknown) => ({} as GuidedCounts);',
     'const guidedOptions = (_c: unknown, defs: Array<{ key: string }>) => ({ options: defs.map((d) => ({ key: d.key })) });',

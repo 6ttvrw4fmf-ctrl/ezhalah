@@ -114,11 +114,14 @@ const EXPECTED: Record<string, Record<string, number>> = {
   // Rent/Annual 1 -> 2 on 2026-09-01: property_age joined COHORT_GATED_IDS (age-gate unification —
   // it used to be single-type-only and could never fire for a group). Every member of this group
   // (Apartment, Room, Floor, Studio) certifies property_age for RentAnnual.
-  'Apartments & Co-living': { Buy: 0, 'Rent/Annual': 2, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
+  // Rent/Monthly 0 -> 4 on every residential group (owner 2026-10-31): short stays is ONE pool
+  // (Gathern + Aqar Monthly), so cohortAllows() certifies SHORT_STAYS_QUESTIONS + SHORT_STAYS_CHAT_ONLY
+  // for the whole residential side without a type — the per-type intersection no longer applies there.
+  'Apartments & Co-living': { Buy: 0, 'Rent/Annual': 2, 'Rent/Monthly': 4, 'Rent/both': 0, 'Buy+Rent': 0 },
   // Buy 0 -> 1 on 2026-08-23: Duplex certified with its one source-verified field (bathrooms).
-  'Villas & Houses': { Buy: 1, 'Rent/Annual': 0, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
-  'Vacation & Rural': { Buy: 0, 'Rent/Annual': 0, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
-  'Residential Plots': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
+  'Villas & Houses': { Buy: 1, 'Rent/Annual': 0, 'Rent/Monthly': 4, 'Rent/both': 0, 'Buy+Rent': 0 },
+  'Vacation & Rural': { Buy: 0, 'Rent/Annual': 0, 'Rent/Monthly': 4, 'Rent/both': 0, 'Buy+Rent': 0 },
+  'Residential Plots': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 4, 'Rent/both': 0, 'Buy+Rent': 0 },
   // Buy 1 -> 2, Rent/Annual 1 -> 2 on 2026-09-01: same property_age unification — every member of
   // this group (Office, Shop, Showroom) certifies property_age for both deals.
   'Retail & Workspace': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
@@ -264,6 +267,7 @@ const REACHABLE_AT_MIN_USEFUL = [
   'Industrial & Logistics',        // Buy = 1, Rent/Annual = 1
   'Residential Plots',             // Buy = 2, Rent/Annual = 2
   'Retail & Workspace',            // Buy = 1, Rent/Annual = 1
+  'Vacation & Rural',              // Rent/Monthly = 4 (short stays is one pool, owner 2026-10-31)
   'Villas & Houses',               // Buy = 1
 ];
 const reachableNames = reachable.map((g) => g.group).sort();

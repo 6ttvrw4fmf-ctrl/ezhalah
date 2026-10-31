@@ -279,6 +279,17 @@ export function validRentPeriod(v: unknown): 'monthly' | 'annual' | 'both' | und
   return v === 'monthly' || v === 'annual' || v === 'both' ? v : undefined;
 }
 
+// SHORT STAYS IS ONE POOL (owner 2026-10-31). «إقامات قصيرة» = Gathern + Aqar Monthly only
+// (AGENTS.md «rent pools»), every one of their ads in one residential table each — so a plain
+// short-stays search is ONE cohort, whatever property group or type the user did or did not pick.
+// «No property-type question for short stays. The user picked Short stays, that's enough.»
+// Strictly the plain period: a mixed period ('both') or a Buy+Rent scope still spans the yearly
+// inventory and keeps the intersection rules that protect it.
+export function isShortStaysScope(q: Pick<SearchQuery, 'deal' | 'rentPeriod' | 'category' | 'dealCombined' | 'bothDeals'>): boolean {
+  return q.deal === 'Rent' && q.rentPeriod === 'monthly' && q.category === 'Residential'
+    && !q.dealCombined && !q.bothDeals;
+}
+
 // Rent-period toggle logic (owner feature 2026-08-19): the UI shows only two independent buttons,
 // سنوي (annual) and شهري (monthly) — no third «كلاهما» button — but selecting BOTH must still reach
 // the exact same 'both' query value the backend's already-proven كلاهما architecture expects

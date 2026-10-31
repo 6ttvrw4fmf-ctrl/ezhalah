@@ -77,7 +77,7 @@ const lifted = await liftSymbols(
   // labelKey through so T2 can assert the evidence speaks with the chip's own voice (owner
   // decision 6) — without ever hand-listing a label here.
   [
-    `import { cohortAllows, scopeCleanTypes, intersectChips } from ${JSON.stringify(pathToFileURL(join(ROOT, 'src/lib/afCohorts.ts')).href)};`,
+    `import { cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope } from ${JSON.stringify(pathToFileURL(join(ROOT, 'src/lib/afCohorts.ts')).href)};`,
     'type GuidedCounts = Record<string, number>;',
     'const fetchApartmentGuidedCounts = async (_q: unknown) => ({} as GuidedCounts);',
     'const guidedOptions = (_c: unknown, defs: Array<{ key: string; labelKey: string }>) => ({ options: defs.map((d) => ({ key: d.key, labelKey: d.labelKey })) });',

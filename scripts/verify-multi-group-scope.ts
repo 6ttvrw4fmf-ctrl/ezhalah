@@ -26,7 +26,7 @@
 import type { SearchQuery } from '../src/data/search.ts';
 import { groupMembers, groupsMembers, pruneTypesToGroups, typeArForSelection, typeArForTypes } from '../src/data/propertyTypes.ts';
 import { effectiveGroups, effectiveTypes, toggleGroup, typesForGroups, migrateGroups, sanitizeForFilterRestore, HOME_DEFAULT_QUERY, setCategory } from '../src/lib/searchDefaults.ts';
-import { cohortAllows, scopeCleanTypes, intersectChips } from '../src/lib/afCohorts.ts';
+import { cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope } from '../src/lib/afCohorts.ts';
 import { detailForContext } from '../src/data/taxonomy.ts';
 
 let failed = 0;

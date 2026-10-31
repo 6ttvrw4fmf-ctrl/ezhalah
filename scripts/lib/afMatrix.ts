@@ -23,7 +23,7 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { liftSymbols } from './liftSymbols.ts';
-import { COHORT_QUESTIONS } from '../../src/lib/afCohorts.ts';
+import { COHORT_QUESTIONS, shortStaysAsks } from '../../src/lib/afCohorts.ts';
 import { CLEAN_MACRO, ALL_CLEAN_TYPES, HIERARCHY, UNBOXED_TYPES, groupsOf, groupMembers } from '../../src/data/propertyTypes.ts';
 import type { SearchQuery } from '../../src/data/search.ts';
 
@@ -52,6 +52,9 @@ export const MODES: Mode[] = [
 
 /** The certification TABLE's answer (data, not the gate): is `id` certified for this type in this mode? */
 export function tableAllows(type: string, mode: Mode, id: string): boolean {
+  // Short stays (owner 2026-10-31): ONE pool, so every residential type certifies exactly the asked
+  // set (SHORT_STAYS_QUESTIONS) in the plain monthly mode — rating / unit_subtype are chat-only there.
+  if (mode.mode === 'RentMonthly' && CLEAN_MACRO[type] === 'Residential') return shortStaysAsks(id);
   const cfg = COHORT_QUESTIONS[type];
   if (!cfg) return false;
   return mode.legs.every((leg) => (cfg[leg] ?? []).includes(id));
@@ -132,7 +135,7 @@ export async function loadLifted(root: string): Promise<Lifted> {
     ],
     ['ADVANCED_QUESTIONS'],
     [
-      `import { cohortAllows, scopeCleanTypes, intersectChips } from ${href('src/lib/afCohorts.ts')};`,
+      `import { cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope } from ${href('src/lib/afCohorts.ts')};`,
       'type GuidedCounts = any; type AgeOptionCounts = any; type SearchQuery = any; type AdvancedQuestion = any; type AdvancedQuestionResult = any;',
       'const t = (k: string) => k;',
       'const isProbeFailure = (_c: unknown) => false;',
