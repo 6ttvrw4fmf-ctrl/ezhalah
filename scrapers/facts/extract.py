@@ -195,8 +195,15 @@ def sanitize(title: Optional[str], description: Optional[str]) -> str:
     raw = "\n".join(strip_html(x) for x in (title or "", description or "") if x)
     raw = _URL_RE.sub(" ", raw)
     raw = _KUNYA_RE.sub(" ", raw)
+    # A contact clause is cut from its first contact word to the clause's end — never the whole clause.
+    # Small sites (ksaaqar, akariyoun, sanadak, manzo…) publish the ad as ONE sentence with no punctuation
+    # («3 غرف ومجلس ومسبح للاستفسار أبو أحمد»); dropping the clause dropped the whole ad (measured 2026-10-31:
+    # ~100 ads read as <30 chars and were never sent to the model).
     parts = _CLAUSE_SPLIT_RE.split(raw)
-    kept = [p for p in parts if not _CONTACT_CLAUSE_RE.search(p)]
+    kept = []
+    for p in parts:
+        m = _CONTACT_CLAUSE_RE.search(p)
+        kept.append(p if not m else p[:m.start()])
     raw = "".join(kept)
     out = redact_pii(raw) or ""
     out = out.replace("[redacted]", " ")
