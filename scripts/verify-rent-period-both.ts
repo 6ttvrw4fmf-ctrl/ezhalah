@@ -151,7 +151,7 @@ check('the monthly-only sources stay OUT of Buy and of an annual Rent search',
 // remote.ts must still route every period branch through it.
 const { cardFetchPeriodOr } = await import('../src/lib/rentPool.ts');
 check("candidate-level period filter has an explicit 'both' branch",
-  cardFetchPeriodOr('both', 'aqar_residential_listings') === 'rent_period.in.(monthly,annual),price_annual.is.null'
+  cardFetchPeriodOr('both', 'aqar_residential_listings') === 'rent_period.in.(monthly,annual),rent_period.is.null,price_annual.is.null'
   && cardFetchPeriodOr('both', 'gathern_residential_listings') === null
   && /const clause = cardFetchPeriodOr\(q\.rentPeriod, tbl\);\s*\n\s*if \(clause\) req = req\.or\(clause\);/.test(remote),
   "mixed platforms must still require a PUBLISHED monthly|annual period for a priced row — a null one is neither");
