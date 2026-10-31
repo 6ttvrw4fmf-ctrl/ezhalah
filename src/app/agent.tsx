@@ -4337,7 +4337,7 @@ export default function Agent() {
       {introLanding ? <View style={s.landingStrip}><HomeWebsiteStrip /></View> : null}
       {shouldRenderModeSwitch(modeGone, replay, openingSaved) && (
         <View style={[s.modeWrap, MODE_EASE, modeSearched && s.modeWrapHidden]}>
-          <ModeSwitch active="agent" onSwitch={() => router.replace('/')} t={t} />
+          <ModeSwitch active="agent" onSwitch={(to) => (to === 'map' ? router.replace('/map') : router.replace('/'))} t={t} />
         </View>
       )}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
