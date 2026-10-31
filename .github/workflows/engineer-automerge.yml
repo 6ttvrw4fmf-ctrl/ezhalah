@@ -77,7 +77,15 @@ jobs:
             if [ -z "$files" ] || { [ -n "$outside" ] && [ "$mirror_only" != 1 ]; }; then
               echo "#$pr: not scrapers-only / not a mirror — left for a person"; continue
             fi
+            # GitHub answers UNKNOWN while it recomputes mergeability after main moved (🔧 2026-10-24, backlog
+            # 802: #8449 read UNKNOWN at 12:07 while it was BEHIND, so the branch was not updated and the gate
+            # refused it «branch is BEHIND base»; the PR sat 7 h 19 min). Wait for the real answer, briefly.
             state=$(gh pr view "$pr" --repo "$REPO" --json mergeStateStatus -q .mergeStateStatus)
+            for _ in 1 2 3 4 5 6; do
+              [ "$state" = "UNKNOWN" ] || break
+              sleep 5
+              state=$(gh pr view "$pr" --repo "$REPO" --json mergeStateStatus -q .mergeStateStatus)
+            done
             if [ "$state" = "BEHIND" ]; then
               # Up to date first; CI re-runs on the merge commit and a later pass merges it. The gate below
               # would only refuse a BEHIND branch (it never merges one), so this adds no new door.
@@ -90,8 +98,19 @@ jobs:
               continue
             fi
             echo "#$pr: scrapers-only ($state) → safe-pr-merge.ts"
-            node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/safe-pr-merge.ts "$pr" \
-              --expect-files "$(printf '%s\n' "$files" | paste -sd, -)" || echo "#$pr: gate refused (not green / moved) — next pass"
+            gate_out=$(node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/safe-pr-merge.ts "$pr" \
+              --expect-files "$(printf '%s\n' "$files" | paste -sd, -)" 2>&1) && gate_rc=0 || gate_rc=$?
+            printf '%s\n' "$gate_out"
+            if [ "$gate_rc" != 0 ]; then
+              echo "#$pr: gate refused (not green / moved) — next pass"
+              # The gate itself knows BEHIND (it reads the PR's own mergeStateStatus right before merging);
+              # when that is the only thing it named, bring the branch up to date now, as above.
+              if printf '%s' "$gate_out" | grep -q 'branch is BEHIND base'; then
+                echo "#$pr: the gate read BEHIND → gh pr update-branch (merge on a later pass)"
+                GH_TOKEN="${BASELINE_PR_TOKEN:-$GH_TOKEN}" gh pr update-branch "$pr" --repo "$REPO" \
+                  || echo "#$pr: update-branch refused — next pass"
+              fi
+            fi
           done 3<<< "$prs"
 
       # ── Failure→alert bridge (issue #1349): this job runs unattended, so a red run must reach
