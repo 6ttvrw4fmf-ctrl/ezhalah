@@ -313,7 +313,7 @@ def make_verify_gone(s, control_ads) -> Any:
 
 def prune_table(tbl: str, seen: set, verify_gone) -> int:
     """The absence prune; when its guard refuses (-1), strike only ads whose own page reads gone."""
-    n = db.prune_unseen(tbl, seen, source=SOURCE)
+    n = db.prune_unseen(tbl, seen, source=SOURCE, verify_gone=verify_gone)
     if n < 0:
         print(f"  ⚠ {tbl}: prune guard tripped — reading the unseen ads' own pages", flush=True)
         n = db.strike_read_gone(tbl, seen, SOURCE, verify_gone=verify_gone)
