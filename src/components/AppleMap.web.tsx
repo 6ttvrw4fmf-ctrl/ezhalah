@@ -192,9 +192,16 @@ export default function AppleMap() {
       const REST = { strokeOpacity: 0.55, fillOpacity: 0.035, lineWidth: 1.1 };
       const CHOSEN = { strokeOpacity: 0.7, fillOpacity: 0.1, lineWidth: 1.8 };
       // Zoomed out past the country view the outlines FADE, down to a whisper, so Apple's map takes over (owner
-      // 2026-10-31: «when the user zooms out those drawings become so light»). At the country view and closer
-      // they are at full (quiet) strength.
+      // 2026-10-31: «when the user zooms out those drawings become so light»). At the country view they are at
+      // full (quiet) strength. Zoomed IN they fade again, to NOTHING: Apple draws its own region boundaries from
+      // about a quarter of the country view inwards, and ours (a simplified shape from another dataset) can never sit
+      // exactly on Apple's line, so the user saw two lines running side by side (owner 2026-10-31: «still there are
+      // lines, so I'm confused»). One line at a time: ours at the country view, Apple's close up. The polygons stay
+      // on the map, invisible, so a region is still clickable. Measured on ezhalah.com 2026-10-31: Apple's region
+      // boundaries and names appear between 42% and 35% of the country view's span, so ours hands over in that band.
       const FADE_FLOOR = 0.18;
+      const IN_FADE_START = 0.42; // of the home span: ours starts to fade here …
+      const IN_FADE_END = 0.34; //   … and is gone here, where Apple's boundaries are already drawn
       loadRegions().then((regions) => {
         if (gone || !map) return;
         const overlays = regions.map((r) => {
@@ -232,8 +239,12 @@ export default function AppleMap() {
           const lat = map.region.span.latitudeDelta;
           if (!homeLatDelta) homeLatDelta = lat;
           setZoomed(lat < homeLatDelta * 0.85);
-          // Squared so the drop is quick: 1.2× out → ~70%, 2× out → ~25%, then the floor.
-          fade = Math.max(FADE_FLOOR, Math.min(1, (homeLatDelta / lat) ** 2));
+          const ratio = lat / homeLatDelta;
+          // Zooming out: squared so the drop is quick: 1.2× out → ~70%, 2× out → ~25%, then the floor.
+          // Zooming in: linear from IN_FADE_START down to 0 at IN_FADE_END — Apple's own lines take over.
+          fade = ratio >= 1
+            ? Math.max(FADE_FLOOR, Math.min(1, (1 / ratio) ** 2))
+            : Math.max(0, Math.min(1, (ratio - IN_FADE_END) / (IN_FADE_START - IN_FADE_END)));
           paint();
         };
         map.addEventListener('region-change-end', onRegion);
