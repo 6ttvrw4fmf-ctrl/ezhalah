@@ -168,10 +168,12 @@ function labelElement(text: string, arabic: boolean, rotateDeg: number): { outer
   const inner = document.createElement('div');
   inner.textContent = arabic ? text : text.toUpperCase();
   inner.style.cssText = 'position: absolute; left: 0; top: 0; transform: translate(-50%, -50%) rotate(' + rotateDeg + 'deg);'
-    + ' font: 600 ' + (arabic ? LABEL_PX_AR : LABEL_PX_EN) + 'px ui-sans-serif, -apple-system, system-ui, "Segoe UI", sans-serif; color: '
-    + lightColors.body + '; white-space: nowrap; pointer-events: none; text-align: center; line-height: 1.2;'
+    // Understated, like Zillow's state names: grey, medium weight, a soft halo — present, never shouting
+    // (owner 2026-10-30: «same with the title, like the Zillow default, a bit less»).
+    + ' font: 500 ' + (arabic ? LABEL_PX_AR : LABEL_PX_EN) + 'px ui-sans-serif, -apple-system, system-ui, "Segoe UI", sans-serif; color: '
+    + lightColors.muted + '; white-space: nowrap; pointer-events: none; text-align: center; line-height: 1.2;'
     + (arabic ? '' : ' letter-spacing: 0.08em;')
-    + ' text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 4px #fff, 0 0 6px #fff;';
+    + ' text-shadow: 0 0 2px rgba(255,255,255,0.9), 0 0 4px rgba(255,255,255,0.8);';
   outer.appendChild(inner);
   return { outer, inner };
 }
