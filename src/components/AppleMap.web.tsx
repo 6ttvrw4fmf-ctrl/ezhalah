@@ -48,6 +48,9 @@ const LABELS_HIDE_BELOW_SPAN = 4;
 // Lettering size: the same for every region at every zoom (owner 2026-10-30).
 const LABEL_PX_AR = 11.5;
 const LABEL_PX_EN = 10.5;
+// Tracking for the ENGLISH names only (small capitals, like Zillow's state names). Never applied to Arabic —
+// tracking pulls joined letters apart (scripts/verify-no-letter-spacing-on-arabic.ts).
+const TRACKING_EN = '0.08em';
 
 type Region = {
   id: number; iso: string; en: string; ar: string;
@@ -172,7 +175,7 @@ function labelElement(text: string, arabic: boolean, rotateDeg: number): { outer
     // (owner 2026-10-30: «same with the title, like the Zillow default, a bit less»).
     + ' font: 500 ' + (arabic ? LABEL_PX_AR : LABEL_PX_EN) + 'px ui-sans-serif, -apple-system, system-ui, "Segoe UI", sans-serif; color: '
     + lightColors.muted + '; white-space: nowrap; pointer-events: none; text-align: center; line-height: 1.2;'
-    + (arabic ? '' : ' letter-spacing: 0.08em;')
+    + (arabic ? '' : ' letter-spacing: ' + TRACKING_EN + ';')
     + ' text-shadow: 0 0 2px rgba(255,255,255,0.9), 0 0 4px rgba(255,255,255,0.8);';
   outer.appendChild(inner);
   return { outer, inner };
