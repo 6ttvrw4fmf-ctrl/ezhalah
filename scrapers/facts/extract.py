@@ -28,6 +28,7 @@ THE RULES THIS CODE ENFORCES (not just asks the model for):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import math
@@ -177,6 +178,15 @@ def strip_html(s: str) -> str:
     s = _HTML_BREAK_RE.sub("\n", s)
     s = _HTML_TAG_RE.sub(" ", s)
     return html.unescape(s)
+
+
+def text_hash(title: Optional[str], description: Optional[str]) -> str:
+    """md5 of the RAW title + newline + description the reader was given — the same bytes as
+    public.facts_text_hash(title, description) (migration 20261031080211). Every listing_facts row carries it,
+    so an ad whose text ARRIVES or CHANGES after it was read no longer counts as read: 2,119 ads of 13 small
+    sites were "read" from the title alone before their descriptions were crawled (2026-10-31) and the backlog
+    skipped them for good. Raw, not sanitised: the hash must be computable in SQL from the stored columns."""
+    return hashlib.md5(((title or "") + "\n" + (description or "")).encode("utf-8")).hexdigest()
 
 
 def sanitize(title: Optional[str], description: Optional[str]) -> str:
@@ -654,7 +664,8 @@ def run(args: argparse.Namespace) -> int:
                 seen.add(row["fact"])
                 rows.append({"run_id": args.run_id, "platform": r["_platform"], "table_name": r["_table"],
                              "listing_key": str(r["ad_number"]), "listing_url": r.get("listing_url"),
-                             "model": resp.get("model"), "source_value": source_value(row["fact"], r), **row})
+                             "model": resp.get("model"), "source_value": source_value(row["fact"], r),
+                             "text_hash": text_hash(r.get("title"), r.get("text")), **row})
             if ad_id not in parsed:
                 tot["ads_missing_in_reply"] += 1
                 if not fallback and args.fallback_model:
@@ -671,7 +682,8 @@ def run(args: argparse.Namespace) -> int:
                 rows.append({"run_id": args.run_id, "platform": r["_platform"], "table_name": r["_table"],
                              "listing_key": str(r["ad_number"]), "listing_url": r.get("listing_url"),
                              "model": resp.get("model"), "fact": "_none", "value_bool": True, "value_num": None,
-                             "value_text": None, "quote": "", "source_value": None})
+                             "value_text": None, "quote": "", "source_value": None,
+                             "text_hash": text_hash(r.get("title"), r.get("text"))})
         stored = store(rows) - sum(1 for r in rows if r["fact"] == "_none")   # facts stored, markers excluded
         tot["ads"] += len(batch) - len([r for r in batch if (r["_platform"], str(r["ad_number"])) in queued])
         if fallback:
