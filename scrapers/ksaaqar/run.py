@@ -309,12 +309,13 @@ def parse_age(text: str) -> Optional[int]:
 # found it on 3 of 24 pages that plainly state one:
 #     «المساحة: 163.27 متر مربع»   «مساحة الأرض: 525م²»   «المساحة / 620 م»
 #     «مساحة ٢٠٠م²»                «مساحة الأرض الإجمالية: 1,200 م²»
+#     «المساحه الاجمالية ( 2713) متر مربع» — the figure in brackets (12226358, 2026-11-01: stored no area)
 # What makes a match an AREA is a NUMBER followed by a unit — never the word alone, so prose like
 # «نوفر لكم مساحة عمل» (workspace) and «بمساحة مريحة» (roomy) cannot become a measurement.
 _AREA_RE = re.compile(
     r"مساح[ةه](?:\s+(?:الأرض|الارض|العقار|الإجمالية|الاجمالية|الكلية))*"
-    r"\s*[:：/\-]?\s*"
-    r"([\d٠-٩][\d٠-٩,\.]*)\s*(?:م2|م²|متر\s*مربع|متر|م)")
+    r"\s*[:：/\-]?\s*\(?\s*"
+    r"([\d٠-٩][\d٠-٩,\.]*)\s*\)?\s*(?:م2|م²|متر\s*مربع|متر|م)")
 
 
 def parse_area(text: str) -> Optional[int]:

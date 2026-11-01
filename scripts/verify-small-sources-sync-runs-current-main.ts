@@ -50,13 +50,11 @@ const ok = (c: boolean, m: string) => { if (!c) { fail++; console.error('✗ ' +
 const real = problems(WF);
 ok(real.length === 0, `sync job checks out current main for a main dispatch${real.length ? ': ' + real.join('; ') : ''}`);
 
-const mustCatch: [string, string][] = [
-  ['checkout back to the dispatch-time commit (the 2026-10-31 shape)', WF.replace(WANT_REF, '')],
-  ['ref always github.sha', WF.replace(WANT_REF, 'ref: ${{ github.sha }}')],
-  ['ref line commented out', WF.replace(WANT_REF, '# ' + WANT_REF)],
-  ['sync job renamed away', WF.replace(/^ {2}sync:\s*$/m, '  crawl:')],
-];
-for (const [name, mutant] of mustCatch) ok(problems(mutant).length > 0, `mustCatch: ${name}`);
+const mustCatch = (name: string, mutant: string) => ok(problems(mutant).length > 0, `mustCatch: ${name}`);
+mustCatch('checkout back to the dispatch-time commit (the 2026-10-31 shape)', WF.replace(WANT_REF, ''));
+mustCatch('ref always github.sha', WF.replace(WANT_REF, 'ref: ${{ github.sha }}'));
+mustCatch('ref line commented out', WF.replace(WANT_REF, '# ' + WANT_REF));
+mustCatch('sync job renamed away', WF.replace(/^ {2}sync:\s*$/m, '  crawl:'));
 // The plan job's sparse checkout must not satisfy the rule by itself.
 ok(syncJob(WF)?.includes('fromJSON(needs.plan.outputs.matrix)') === true, 'the job checked is the matrix sync job');
 
