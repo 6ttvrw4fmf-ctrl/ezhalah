@@ -268,7 +268,7 @@ check('a live narrowing count chip renders in the card bar and motion respects r
 // ── Brand image: card-owned registry + one shared slot; questions supply only a string TOKEN ─────
 check('brand images are card-owned: registry in the card, single shared slot, token-only config',
   /BRAND_IMAGES/.test(cardSrc) && /brandStrip/.test(cardSrc)
-  && !/require\(/.test(advSrc) && /brandImage: 'ejari-rnpl'/.test(advSrc));
+  && !/require\(/.test(advSrc) && /brandImage: 'rnpl-partners'/.test(advSrc));
 
 // ── Select-then-confirm interaction for ALL ──────────────────────────────────────────────────────
 check('every question is select-then-confirm: rows select, the footer commits',

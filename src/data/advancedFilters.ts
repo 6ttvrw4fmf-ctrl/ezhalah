@@ -44,7 +44,7 @@ export type AdvancedQuestion = {
   titleKey: string;                             // i18n key — the headline
   lineKey?: string;                             // i18n key for the summary line when the id's default label is not this card's (yearly «Space»)
   descriptionKey?: string;                      // i18n key — optional one-line subtitle
-  brandImage?: string;                          // optional asset TOKEN (e.g. 'ejari-rnpl') — the card's
+  brandImage?: string;                          // optional asset TOKEN (e.g. 'rnpl-partners') — the card's
                                                 // own registry maps it to an image and owns the slot/style
   selection: 'single' | 'multi';                // arity — the ONLY behavioural switch
   eligibility: (q: SearchQuery) => boolean;      // the question's own scope gate (never at a call site)
@@ -217,13 +217,14 @@ function guidedOptions(
 }
 
 // Installments (RNPL) — one strict chip. NEUTRAL metadata filter only (no payment calc/estimate/
-// ranking/advice). Placed first. Carries the official EJARI×رايز partnership badge (owner 2026-07-21)
-// via the brandImage TOKEN — the card owns the asset + slot; this config only names it.
+// ranking/advice). Placed first. Carries the instalment-partners strip — EJARI · رايز · tamam · tabby ·
+// tamara (owner 2026-11-01, replacing the EJARI×رايز pair of 2026-07-21) via the brandImage TOKEN — the
+// card owns the asset + slot; this config only names it.
 const RNPL_QUESTION: AdvancedQuestion = {
   id: 'rnpl',
   titleKey: 'Would you rather pay the rent in instalments?',
   descriptionKey: 'Rent now and pay monthly instead of one annual payment',
-  brandImage: 'ejari-rnpl',
+  brandImage: 'rnpl-partners',
   selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'rnpl'),
   async resolveOptions(q) {

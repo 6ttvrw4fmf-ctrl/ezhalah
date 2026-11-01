@@ -177,7 +177,9 @@ export function AdvancedIntroCard({ total, onBegin, onClose, pills }: {
 // the card alone maps token → image and owns the one shared slot + styling it renders in. RN requires
 // static require() calls, which is also why the mapping must live here and not in question config.
 const BRAND_IMAGES: Record<string, ReturnType<typeof require>> = {
-  'ejari-rnpl': require('../../assets/images/ejari-rnpl.png'),
+  // 5 instalment partners in one strip (owner 2026-11-01): EJARI · رايز · tamam · tabby · tamara.
+  // The PNG carries its own light background so the black wordmarks stay readable in dark mode.
+  'rnpl-partners': require('../../assets/images/rnpl-partners.png'),
 };
 
 export type AdvancedQuestionCardProps = {
@@ -619,7 +621,7 @@ const s = StyleSheet.create({
     marginTop: 10, alignItems: 'center', justifyContent: 'center', paddingVertical: 8,
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field,
   },
-  brandImg: { width: 150, height: 46 },
+  brandImg: { width: 300, maxWidth: '100%', height: 47 },
 
   // Options: soft rounded stand-alone rows with breathing room (no dense bordered table) — the
   // Claude-question feel. Selection fills the row with the brand tint + primary border.
