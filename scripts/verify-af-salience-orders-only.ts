@@ -332,7 +332,10 @@ const shape = (r: ReturnType<typeof scoreQuestion>) =>
   const advSrc = readFileSync(join(root, 'src', 'data', 'advancedFilters.ts'), 'utf8');
   const agentSrc = readFileSync(join(root, 'src', 'app', 'agent.tsx'), 'utf8');
   check('§7.1 rankQuestions sorts by exactly (ask-tier desc, then score desc) — the comparator §7 models',
-    /askTier\(b\.question\.id\)\s*-\s*askTier\(a\.question\.id\)\s*\|\|\s*b\.score\s*-\s*a\.score/.test(advSrc),
+    // 2026-10-31: `tier` is askTier on every scope but short stays, where it is the owner's fixed order
+    // (shortStaysAskTier: bathrooms → comfort → outdoors) — the same (tier desc, then score desc) shape.
+    /const tier = isShortStaysScope\(q\) \? shortStaysAskTier : askTier;/.test(advSrc)
+      && /tier\(b\.question\.id\)\s*-\s*tier\(a\.question\.id\)\s*\|\|\s*b\.score\s*-\s*a\.score/.test(advSrc),
     'the production comparator in advancedFilters.ts is no longer the one this section reasons about');
   check('§7.1 the round ends on a COUNT comparison against AF_ROUND_MAX_QUESTIONS, never a re-selection',
     /askedThisRound\s*>=\s*AF_ROUND_MAX_QUESTIONS/.test(agentSrc),
