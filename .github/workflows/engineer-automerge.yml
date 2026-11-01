@@ -51,9 +51,21 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
-          prs=$(gh pr list --repo "$REPO" --state open --limit 50 \
+          # ONE baseline PR at a time (owner session 2026-11-01): every deploy opens a deploy/baseline-* PR and 139 had piled up,
+          # hiding engineer PRs from this list. Only the newest records what is live, so older ones are closed, never merged:
+          # merging an older one would move the recorded baseline backwards. The newest is a docs/ PR and merges below.
+          gh pr list --repo "$REPO" --state open --limit 300 --json number,createdAt,headRefName \
+            -q '[.[] | select(.headRefName|startswith("deploy/baseline-"))] | sort_by(.createdAt) | reverse | .[1:][] | .number' \
+            | while read -r old; do
+                gh pr close "$old" --repo "$REPO" --delete-branch --comment "Closed by engineer-automerge: a newer deploy/baseline PR records what is live." \
+                  || echo "#$old: close refused — next pass"
+              done
+          # --limit 200, not 50 (🔧 2026-11-01): the deploy robot opens a deploy/baseline-* PR per deploy and ~85 of them were
+          # open, so the 50 newest PRs were almost all baselines and every engineer PR older than ~2 days fell out of the
+          # robot's window — #8855 (green barrier), #8818 / #8790 (one-line docs), #8954 (scripts) sat 5–6 days unseen.
+          prs=$(gh pr list --repo "$REPO" --state open --limit 200 \
                   --json number,headRefName,isDraft,isCrossRepository,title \
-                  -q '.[] | select((.headRefName|test("^(claude|nle|lifecycle|af|scraping|qa|kit|fix|mirror)[/-]")) and (.isDraft|not) and (.isCrossRepository|not)) | "\(.number)\t\(.title)"')
+                  -q '.[] | select((.headRefName|test("^(claude|nle|lifecycle|af|scraping|qa|kit|fix|mirror|docs|deploy)[/-]")) and (.isDraft|not) and (.isCrossRepository|not)) | "\(.number)\t\(.title)"')
           while IFS=$'\t' read -r pr title <&3; do
             [ -n "$pr" ] || continue
             files=$(gh pr view "$pr" --repo "$REPO" --json files -q '.files[].path')
@@ -85,6 +97,28 @@ jobs:
               gh pr close "$pr" --repo "$REPO" --comment "Closed by engineer-automerge: this mirror PR's diff is empty — its migration file already reached main through another PR, so git and production already agree (🔧 backlog 912)." \
                 || echo "#$pr: close refused — next pass"
               continue
+            fi
+            # The SAME case with a non-empty file list (🔧 2026-11-01, #9791 sat 2 h 40 min red): GitHub lists a PR's
+            # files against the merge BASE, so a mirror whose file already reached main byte-identical through another
+            # PR (#9793 carried 20261101100930) still reads as a 1-file PR — the rule above never fires, and the stale
+            # branch fails a check main passes (verify-sql-mirrors-not-stale wanted #9793's refreshed mirror header).
+            # Compare blob SHAs file by file: every file identical on main → the merge result is empty → same closure.
+            # Fail closed: any file missing on main, unreadable, or different → fall through to the normal path.
+            if [ -n "$files" ] && printf '%s' "$title" | grep -qi 'mirror'; then
+              head_sha=$(gh pr view "$pr" --repo "$REPO" --json headRefOid -q .headRefOid)
+              identical=1
+              while IFS= read -r f; do
+                [ -n "$f" ] || continue
+                a=$(gh api "repos/$REPO/contents/$f?ref=$head_sha" -q .sha 2>/dev/null || true)
+                b=$(gh api "repos/$REPO/contents/$f?ref=main" -q .sha 2>/dev/null || true)
+                if [ -z "$a" ] || [ -z "$b" ] || [ "$a" != "$b" ]; then identical=0; break; fi
+              done <<< "$files"
+              if [ "$identical" = 1 ]; then
+                echo "#$pr: mirror whose file(s) are already on main byte-identical → close"
+                gh pr close "$pr" --repo "$REPO" --comment "Closed by engineer-automerge: every file of this mirror PR is already on main byte-identical (it reached main through another PR), so the merge result is empty and git and production already agree (🔧 backlog 912 / 11-01 #9791)." \
+                  || echo "#$pr: close refused — next pass"
+                continue
+              fi
             fi
             if [ -z "$files" ] || { [ -n "$outside" ] && [ "$mirror_only" != 1 ]; }; then
               echo "#$pr: not scrapers-only / not a mirror — left for a person"; continue
