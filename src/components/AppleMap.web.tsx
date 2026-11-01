@@ -31,7 +31,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { placeShapeAt } from '@/data/placeShape';
+import { placeShapeAt, type ShapeKind } from '@/data/placeShape';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 
@@ -318,37 +318,42 @@ export function flyToPlace(p: PlaceSuggestion) {
     if (!c) return;
     const style = (fillOpacity: number, lineWidth: number) => new mk.Style({ strokeColor: lightColors.primary, strokeOpacity: 0.85, lineWidth, fillColor: lightColors.primary, fillOpacity });
     const landmark = p.kind ? !isAreaKind(p.kind) && p.kind !== 'street' : !!(place && place.pointOfInterestCategory);
+    // THE REAL BOUNDARY ON EVERY PICK (owner 2026-11-01: «create a boundary around it, don't make just a square»,
+    // then «whenever you choose something … anything»): the place's actual shape from place_shapes (OpenStreetMap) —
+    // a district / city / region outline, or a named site's footprint (mall, hospital, airport, park, hotel …) —
+    // fitted into view with a little air. Only when the point lies in no shape, or the fetch failed, does the old
+    // mark stand in: a soft circle for a landmark, Apple's bounding rectangle for a street or an area. A later pick
+    // wins: the sequence number drops a shape that arrives after the mark was cleared.
+    const seq = live.markSeq;
     if (landmark) {
+      live.mark.pin = new mk.MarkerAnnotation(new mk.Coordinate(c.latitude, c.longitude), { title: (place ? place.name : undefined) ?? p.name ?? p.displayLines[0], color: lightColors.primary, animates: true });
+      m.addAnnotation(live.mark.pin);
+    }
+    const circle = () => {
+      if (live.markSeq !== seq) return;
       const radius = region ? Math.max(120, Math.min(600, region.span.latitudeDelta * 111_000 * 0.35)) : 250;
       live.mark.overlay = new mk.CircleOverlay(new mk.Coordinate(c.latitude, c.longitude), radius, { style: style(0.12, 1.5), enabled: false });
-      live.mark.pin = new mk.MarkerAnnotation(new mk.Coordinate(c.latitude, c.longitude), { title: (place ? place.name : undefined) ?? p.name ?? p.displayLines[0], color: lightColors.primary, animates: true });
       m.addOverlay(live.mark.overlay);
-      m.addAnnotation(live.mark.pin);
-    } else {
-      // THE REAL BOUNDARY (owner 2026-11-01: «create a boundary around it, don't make just a square — it's like an
-      // area»): the place's actual shape from place_shapes (OpenStreetMap), fitted into view with a little air; Apple's
-      // bounding rectangle only when the point lies in no shape of that kind, or the fetch failed. A later pick wins:
-      // the sequence number drops a shape that arrives after the mark was cleared.
-      const seq = live.markSeq;
-      const rectangle = () => {
-        if (!region || live.markSeq !== seq) return;
-        const { center, span } = region;
-        const n = center.latitude + span.latitudeDelta / 2, s0 = center.latitude - span.latitudeDelta / 2;
-        const e = center.longitude + span.longitudeDelta / 2, w = center.longitude - span.longitudeDelta / 2;
-        live.mark.overlay = new mk.PolygonOverlay([[n, w], [n, e], [s0, e], [s0, w]].map(([la, lo]) => new mk.Coordinate(la, lo)), { style: style(0.06, 1.6), enabled: false });
-        m.addOverlay(live.mark.overlay);
-      };
-      const kind = p.kind && isAreaKind(p.kind) ? p.kind : null;
-      if (!kind) return rectangle();
-      placeShapeAt(c.latitude, c.longitude, kind).then((shape) => {
-        if (live.markSeq !== seq) return;
-        if (!shape || shape === 'unknown') return rectangle();
-        live.mark.shapes = shape.rings.map((poly) => new mk.PolygonOverlay(poly.map((ring) => ring.map(([lng, lat]) => new mk.Coordinate(lat, lng))), { style: style(0.08, 2), enabled: false }));
-        for (const o of live.mark.shapes) m.addOverlay(o);
-        const { n, s: s0, e, w } = shape.bbox;
-        m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate((n + s0) / 2, (e + w) / 2), new mk.CoordinateSpan(Math.max((n - s0) * 1.3, 0.01), Math.max((e - w) * 1.3, 0.01))), true);
-      });
-    }
+    };
+    const rectangle = () => {
+      if (!region || live.markSeq !== seq) return;
+      const { center, span } = region;
+      const n = center.latitude + span.latitudeDelta / 2, s0 = center.latitude - span.latitudeDelta / 2;
+      const e = center.longitude + span.longitudeDelta / 2, w = center.longitude - span.longitudeDelta / 2;
+      live.mark.overlay = new mk.PolygonOverlay([[n, w], [n, e], [s0, e], [s0, w]].map(([la, lo]) => new mk.Coordinate(la, lo)), { style: style(0.06, 1.6), enabled: false });
+      m.addOverlay(live.mark.overlay);
+    };
+    const fallback = landmark ? circle : rectangle;
+    const kind: ShapeKind = p.kind && isAreaKind(p.kind) ? p.kind : 'place';
+    placeShapeAt(c.latitude, c.longitude, kind).then((shape) => {
+      if (live.markSeq !== seq) return;
+      if (!shape || shape === 'unknown') return fallback();
+      live.mark.shapes = shape.rings.map((poly) => new mk.PolygonOverlay(poly.map((ring) => ring.map(([lng, lat]) => new mk.Coordinate(lat, lng))), { style: style(kind === 'place' ? 0.14 : 0.08, 2), enabled: false }));
+      for (const o of live.mark.shapes) m.addOverlay(o);
+      const { n, s: s0, e, w } = shape.bbox;
+      const floor = kind === 'place' ? 0.004 : 0.01;
+      m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate((n + s0) / 2, (e + w) / 2), new mk.CoordinateSpan(Math.max((n - s0) * 1.3, floor), Math.max((e - w) * 1.3, floor))), true);
+    });
   });
 }
 

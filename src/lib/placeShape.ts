@@ -1,6 +1,6 @@
 // THE PURE HALF OF src/data/placeShape.ts — no imports, so the barrier can EXECUTE it under plain Node
 // (scripts/verify-map-area-pick-draws-real-boundary.ts). The fetch lives next door; this file only reads an answer.
-export type ShapeKind = 'district' | 'city' | 'region';
+export type ShapeKind = 'district' | 'city' | 'region' | 'place';
 /** GeoJSON MultiPolygon coordinates: [polygon][ring][point] with each point [lng, lat]. */
 export type ShapeRings = number[][][][];
 export type PlaceShape = { nameAr: string | null; nameEn: string | null; rings: ShapeRings; bbox: { n: number; s: number; e: number; w: number } };
