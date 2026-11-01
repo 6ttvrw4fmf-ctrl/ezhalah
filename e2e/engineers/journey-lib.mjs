@@ -142,6 +142,23 @@ export const priceOf = (row) => {
 export const rangeAround = (v, pct = 0.25) =>
   Number.isFinite(v) && v > 0 ? { min: Math.max(0, Math.floor(v * (1 - pct))), max: Math.ceil(v * (1 + pct)) } : null;
 
+/** The Filter's price boxes keep 10 digits (src/app/index.tsx: `toWholeNumberDigits(v).slice(0, 10)`), so the
+ *  most a customer can type is 9,999,999,999. The robot used to type 11 digits and the box silently kept the
+ *  first ten: 21,750,000,000–36,250,000,000 became 2,175,000,000–3,625,000,000, the page honestly answered that
+ *  band (total 11) and the 29-billion ad read as «not found» (🔧 backlog 1141, run 41279009951). What a customer
+ *  can do with such an ad is leave the upper box EMPTY and type the box's maximum in the lower one — so that is
+ *  what the robot does: a bound that does not fit the box is dropped (max) or pinned to the box's ceiling (min). */
+export const PRICE_BOX_MAX_DIGITS = 10;
+export const PRICE_BOX_CEILING = 10 ** PRICE_BOX_MAX_DIGITS - 1;
+export const clampToPriceBox = (range) => {
+  if (!range) return null;
+  const fits = (n) => n != null && String(Math.trunc(n)).length <= PRICE_BOX_MAX_DIGITS;
+  return {
+    min: range.min == null ? null : (fits(range.min) ? range.min : PRICE_BOX_CEILING),
+    max: range.max == null ? null : (fits(range.max) ? range.max : null),
+  };
+};
+
 /** Spread N picks across platforms, round-robin, preserving each platform's own order. */
 export const pickSpread = (rows, n) => {
   const by = new Map();
@@ -201,6 +218,16 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     'stay-length-priced platforms have no customer-visible price');
   assert.equal(priceOf({ platform: 'aqar', deal_ar: 'بيع', price_total: 100000 }), 100000);
   assert.deepEqual(rangeAround(100, 0.25), { min: 75, max: 125 });
+  // the price box keeps 10 digits: a bound that does not fit is not typed (max) or pinned to the ceiling (min)
+  assert.deepEqual(clampToPriceBox(rangeAround(100, 0.25)), { min: 75, max: 125 }, 'a fitting range is untouched');
+  assert.deepEqual(clampToPriceBox(rangeAround(29_000_000_000)), { min: PRICE_BOX_CEILING, max: null },
+    '29 billion: both bounds have 11 digits → min pinned to 9,999,999,999, max left empty (backlog 1141)');
+  assert.deepEqual(clampToPriceBox({ min: 9_000_000_000, max: 11_000_000_000 }), { min: 9_000_000_000, max: null },
+    'only the max overflows → only the max is dropped');
+  assert.equal(clampToPriceBox(null), null);
+  assert.equal(String(PRICE_BOX_CEILING).length, PRICE_BOX_MAX_DIGITS, 'the ceiling itself fits the box');
+  // mutation: a robot that still typed the raw max would type 11 digits — the box cannot hold them
+  assert.ok(String(rangeAround(29_000_000_000).max).length > PRICE_BOX_MAX_DIGITS, 'the unclamped max really overflows');
   const picked = pickSpread([
     { platform: 'a', listing_id: 1 }, { platform: 'a', listing_id: 2 },
     { platform: 'b', listing_id: 3 }, { platform: 'c', listing_id: 4 },
