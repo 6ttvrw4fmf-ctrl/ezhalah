@@ -38,7 +38,7 @@ export const selectorFor = (t) => {
   const q = (v) => JSON.stringify(String(v));
   if (t.kind === 'tab') return `[role="tab"][aria-label=${q(t.value)}]`;
   if (t.kind === 'testid') return `[data-testid=${q(t.value)}]`;
-  return null; // text targets are found by exact innerText (see CLICK_LEAF)
+  return null; // text targets are found by exact visible text (page.getByText)
 };
 
 /** The verdict from what the browser reported. Pure, self-tested: ANY error is a FAIL; a console warning is not,
@@ -90,20 +90,6 @@ const JSON_ONLY = has('json');
 const OUT_DIR = process.env.PROBE_OUT_DIR || path.join(os.tmpdir(), 'page-probe');
 const log = (...m) => { if (!JSON_ONLY) console.log(...m); };
 
-// Click the smallest visible element whose text is exactly `txt` (the customer-journey shape).
-const CLICK_LEAF = (txt) => {
-  let best = null;
-  document.querySelectorAll('div,span,li,button,a').forEach((e) => {
-    if ((e.innerText || '').trim() !== txt) return;
-    const r = e.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0 && (!best || e.children.length <= best.children.length)) best = e;
-  });
-  if (!best) return null;
-  best.scrollIntoView({ block: 'center' });
-  const r = best.getBoundingClientRect();
-  return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-};
-
 const browser = await chromium.launch({
   ...(exe ? { executablePath: exe } : {}),
   args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-background-networking',
@@ -140,13 +126,11 @@ try {
     for (const t of TAPS) {
       const sel = selectorFor(t);
       let hit = false;
-      if (sel) {
-        const el = await page.$(sel);
-        if (el) { await el.click({ force: true }); hit = true; }
-      } else {
-        const box = await page.evaluate(CLICK_LEAF, t.value);
-        if (box) { await page.mouse.click(box.x, box.y); hit = true; }
-      }
+      // Every tap is an ELEMENT click (Playwright resolves the node and clicks it), never a measured point:
+      // a coordinate click must be witnessed (scripts/lib/liveClick.ts) because the page reflows between
+      // measuring and clicking — targeting the element removes that class instead of ledgering it.
+      const loc = sel ? page.locator(sel).first() : page.getByText(t.value, { exact: true }).first();
+      if (await loc.count()) { await loc.click({ force: true, timeout: 5000 }).then(() => { hit = true; }).catch(() => {}); }
       if (!hit) missedTaps.push(`${t.kind}:${t.value} (round ${round})`);
       log(`    · round ${round} tap ${t.kind}:${t.value} ${hit ? '✓' : '✗ not found'}`);
       await page.waitForTimeout(GAP);
