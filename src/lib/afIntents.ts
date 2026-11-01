@@ -273,8 +273,10 @@ export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
 };
 
 /** Ids the generic apply loop owns. amenities is handled by its own per-token gate. */
+// Bag intents have no canonical value of their own: the amenity path certifies their tokens one by one.
+export const BAG_INTENT_IDS: ReadonlySet<string> = new Set(['amenities', 'comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun']);
 export const GENERIC_INTENT_IDS: AfIntentId[] =
-  (Object.keys(AF_INTENTS) as AfIntentId[]).filter((id) => id !== 'amenities');
+  (Object.keys(AF_INTENTS) as AfIntentId[]).filter((id) => !BAG_INTENT_IDS.has(id));
 
 /**
  * Apply the model's proposed AF intents through the REAL certification gate.
