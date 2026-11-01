@@ -738,7 +738,7 @@ here changes the entire product; no other file may hard-code the number.
 | `MIN_OPTIONS_SINGLE` | ~~2~~ **1** | `src/lib/afRanking.ts` | Single-select survives with ≥1 real option (owner 2026-08-26; was 2). |
 | `MIN_OPTIONS_MULTI` | 1 | `src/lib/afRanking.ts` | Multi-select survives with ≥1. |
 | `MEANINGFUL_NARROWING_FRACTION` | 0.025 | `src/lib/afRanking.ts` | The 2.5% narrowing rule (10% until 2026-11-01). |
-| `AF_ROUND_MAX_QUESTIONS` | 4 | `src/lib/afRanking.ts` | Round size cap. |
+| `AF_ROUND_MAX_QUESTIONS` | 7 | `src/lib/afRanking.ts` | Round size cap (4 → 7, owner 2026-11-01). |
 | `MIN_USEFUL_QUESTIONS_TO_SHOW` | 1 | `src/data/advancedFilters.ts` | 0 hides, 1+ asks (owner 2026-08-24). |
 
 ---
@@ -770,7 +770,7 @@ Performed 2026-08-26 against `main@11cfd2f`.
 | R5.3 Per-option floor | ✅ `meaningful()` filter, `MIN_REAL_OPTION_COUNT` | `verify-af-narrowing-gate.ts` |
 | R5.4 Single vs multi survival | ✅ `minOptionsFor()` | `verify-af-two-option-survival.ts` |
 | R5.5 Ladder rungs | ✅ per-rung `scoreQuestion` | `verify-af-narrowing-gate.ts` |
-| R6.1 Round cap 4 | ✅ `AF_ROUND_MAX_QUESTIONS` | `verify-af-round-size.ts` |
+| R6.1 Round cap 7 | ✅ `AF_ROUND_MAX_QUESTIONS` | `verify-af-round-size.ts` |
 | R6.2 Carry answered+skipped | ✅ `afCarryRef.asked` | `verify-af-cross-round-carry.ts` |
 | R6.3 Receipt on prior turn | ✅ `afReceipt[m.id]` + `buildAfSummary()` | `verify-af-round-back-boundary.ts` |
 | R7.1 Live counts = current selection | ✅ `resolveOptions` per-scope | `verify-af-count-belongs-to-selection.ts`; every certified cell × option vs canonical DB truth: `verify-af-matrix-truth.ts` (offline) + `verify-af-matrix-truth-live.ts` (production) |
