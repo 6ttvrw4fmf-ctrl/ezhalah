@@ -188,12 +188,14 @@ export function scoreQuestion(
 // a manual tap on «تحديد أكثر», each computed from the ALREADY-NARROWED cohort of the round before.
 //
 // ROUND SIZE is a COUNT CAP, never a quality filter: a round asks min(availableUsefulQuestions,
-// AF_ROUND_MAX_QUESTIONS) advanced questions, minimum 1. Which questions those are is still decided
+// AF_ROUND_MAX_QUESTIONS = 7) advanced questions, minimum 1. Which questions those are is still decided
 // only by scoreQuestion() — the owner's narrowing rule (2026-08-25) — so a question is never dropped
 // mid-round to hit the cap, and never asked when its options cannot move the set. SCOPE steps (property_group / property_type) do not
 // count toward it: they are the prerequisite that earns the right to ask, exactly as the
 // scope→advanced transition gate already treats them.
-export const AF_ROUND_MAX_QUESTIONS = 4;
+// 2026-11-01 (owner): raised 4 → 7 so each of the Apartments & Co-living locked lists (7 questions:
+// docs/ops/ADVANCED_FILTER_APARTMENTS_GROUP.md) fits ONE round instead of needing a second tap.
+export const AF_ROUND_MAX_QUESTIONS = 7;
 
 // ── THE OFFER GATE — same rule as the ASK gate, one turn earlier (owner 2026-08-24/2026-08-25) ──
 // May we OFFER «تحديد أكثر» at all? A round costs the user taps, so it is offered only when it can

@@ -199,10 +199,16 @@ export function cardKeys(q: SearchQuery, id: string): string[] {
 // cleared the usefulness gates; it never forces one (afRanking.ts). Scopes without cards keep askTier().
 const GROUP_ASK_ORDER = ['rnpl', 'bathrooms', 'property_age', 'street_width', 'direction', 'apartments', 'shops',
   'comfort', 'space', 'who', 'extras', 'safety', 'perks', 'build', 'features', 'services', 'fun'] as const;
-export function groupAskTier(id: string): number {
-  const i = (GROUP_ASK_ORDER as readonly string[]).indexOf(id);
-  return i < 0 ? 0 : GROUP_ASK_ORDER.length - i;
+// Every locked Buy list (Apartment, Floor, Building) opens with age, then bathrooms (owner 2026-10-31 / 2026-11-01).
+// A Buy-only scope asks in that order; a rent or mixed scope (Rent + Buy on a Floor: bathrooms · age) keeps the rent order.
+const BUY_ASK_ORDER = ['rnpl', 'property_age', 'bathrooms', 'street_width', 'direction', 'apartments', 'shops',
+  'comfort', 'space', 'who', 'extras', 'safety', 'perks', 'build', 'features', 'services', 'fun'] as const;
+export function groupAskTier(id: string, q?: SearchQuery): number {
+  const order: readonly string[] = q && scopeDeals(q).join() === 'Buy' ? BUY_ASK_ORDER : GROUP_ASK_ORDER;
+  const i = order.indexOf(id);
+  return i < 0 ? 0 : order.length - i;
 }
+export const groupAskTierFor = (q: SearchQuery) => (id: string): number => groupAskTier(id, q);
 export const hasCards = (q: SearchQuery): boolean => cardPlan(q).length > 0;
 
 // Which amenity chips are safe for a MULTI-TYPE scope: the intersection of every selected type's

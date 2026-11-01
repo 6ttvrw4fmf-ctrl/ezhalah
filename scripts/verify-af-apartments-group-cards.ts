@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardPlan, cohortAllows, certifiedAmenityKeys, COHORT_CARDS, CARD_IDS, AMENITY_BAG_QUESTION_IDS, groupAskTier } from '../src/lib/afCohorts.ts';
+import { cardPlan, cohortAllows, certifiedAmenityKeys, COHORT_CARDS, CARD_IDS, AMENITY_BAG_QUESTION_IDS, groupAskTier, groupAskTierFor } from '../src/lib/afCohorts.ts';
 import type { SearchQuery } from '../src/data/search.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -99,6 +99,16 @@ check('the ask order is the owner\'s numbering: installments → bathrooms → a
   groupAskTier('rnpl') > groupAskTier('bathrooms') && groupAskTier('bathrooms') > groupAskTier('property_age')
   && groupAskTier('property_age') > groupAskTier('comfort') && groupAskTier('comfort') > groupAskTier('space')
   && groupAskTier('space') > groupAskTier('safety') && groupAskTier('build') > groupAskTier('fun') && groupAskTier('nothing') === 0);
+const buyQ = Q({ deal: 'Buy', types: ['Apartment'] });
+const rentBuyQ = Q({ deal: 'Rent', types: ['Floor'], dealCombined: true });
+check('a Buy-only scope asks AGE before bathrooms (every locked Buy list: age → bathrooms → direction → comfort…)',
+  groupAskTier('property_age', buyQ) > groupAskTier('bathrooms', buyQ) && groupAskTier('bathrooms', buyQ) > groupAskTier('direction', buyQ)
+  && groupAskTier('direction', buyQ) > groupAskTier('comfort', buyQ) && groupAskTier('rnpl', buyQ) > groupAskTier('property_age', buyQ));
+check('a rent or mixed scope keeps bathrooms before age (Floor Rent + Buy: bathrooms · age)',
+  groupAskTier('bathrooms', rentBuyQ) > groupAskTier('property_age', rentBuyQ)
+  && groupAskTier('bathrooms', Q({ deal: 'Rent', types: ['Apartment'] })) > groupAskTier('property_age', Q({ deal: 'Rent', types: ['Apartment'] })));
+check('groupAskTierFor(q) is the same ranking, curried for rankQuestions',
+  groupAskTierFor(buyQ)('property_age') === groupAskTier('property_age', buyQ) && groupAskTierFor(buyQ)('bathrooms') === groupAskTier('bathrooms', buyQ));
 check('every chip in every list is a lower_snake token (a p_amenities slug)', Object.values(COHORT_CARDS).every((deals) =>
   Object.values(deals).every((cards) => Object.values(cards!).every((keys) => keys!.every((k) => /^[a-z_0-9]+$/.test(k))))));
 

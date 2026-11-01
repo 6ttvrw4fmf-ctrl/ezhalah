@@ -158,7 +158,7 @@ const AGE_QUESTION: AdvancedQuestion = {
 // multi-type intersection mutation-provable. The cohort DATA moved with it, unchanged. Buy+Rent
 // combined gating (q.dealCombined — owner feature 2026-08-20) lives there too, intersecting with
 // the multi-type/multi-period dimensions rather than being bolted on separately — see afCohorts.ts.
-import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope, shortStaysAskTier, cardKeys, groupAskTier, hasCards } from '@/lib/afCohorts';
+import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope, shortStaysAskTier, cardKeys, groupAskTierFor, hasCards } from '@/lib/afCohorts';
 // Merge picked strict amenity tokens (kitchen/parking/elevator/furnished/rnpl) into q.amenities.
 function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
   return keys.length ? { ...q, amenities: [...new Set([...(q.amenities ?? []), ...keys])] } : q;
@@ -767,7 +767,7 @@ export async function rankQuestions(q: SearchQuery, askedIds: ReadonlySet<string
   // Short stays (owner 2026-10-31): a FIXED order — bathrooms → comfort → space → fun — instead of the
   // contextual score; still only among questions that cleared the gates above.
   // Short stays and the Apartments & Co-living lists ask in the owner's numbered order; every other scope keeps askTier.
-  const tier = isShortStaysScope(q) ? shortStaysAskTier : hasCards(q) ? groupAskTier : askTier;
+  const tier = isShortStaysScope(q) ? shortStaysAskTier : hasCards(q) ? groupAskTierFor(q) : askTier;
   const sorted = ranked.sort((a, b) =>
     tier(b.question.id) - tier(a.question.id) || b.score - a.score);
   // The array is still the array (every existing consumer keeps working); `probeFailed` rides along

@@ -293,19 +293,21 @@ const shape = (r: ReturnType<typeof scoreQuestion>) =>
     askTier(b.id) - askTier(a.id) || b.score - a.score;
   // Deliberately enumerated worst-first, so "the first K in pool order" and "the top K by score"
   // are disjoint answers and the assertion cannot be satisfied by accident.
+  // Nine entries: the pool must stay LARGER than the cap (7 since 2026-11-01) or the cap is never exercised.
   const pool = [
     { id: 'q_worst', score: 0.05 }, { id: 'q_bad', score: 0.12 }, { id: 'q_meh', score: 0.30 },
-    { id: 'q_ok', score: 0.55 }, { id: 'q_good', score: 0.71 }, { id: 'q_best', score: 0.93 },
+    { id: 'q_so_so', score: 0.41 }, { id: 'q_ok', score: 0.55 }, { id: 'q_fine', score: 0.63 },
+    { id: 'q_good', score: 0.71 }, { id: 'q_great', score: 0.84 }, { id: 'q_best', score: 0.93 },
   ];
   const round = (available: typeof pool) =>
     [...available].sort(cmp).slice(0, AF_ROUND_MAX_QUESTIONS).map((q) => q.id);
 
   const full = round(pool);
-  check('§7 a 6-question pool asks exactly AF_ROUND_MAX_QUESTIONS',
+  check('§7 a 9-question pool asks exactly AF_ROUND_MAX_QUESTIONS',
     full.length === AF_ROUND_MAX_QUESTIONS, `asked ${full.length} of a cap of ${AF_ROUND_MAX_QUESTIONS}`);
   check('§7 the round is the TOP-K by score, not the first K enumerated (R6.1.4)',
-    full.join(',') === 'q_best,q_good,q_ok,q_meh',
-    `asked [${full.join(', ')}] — pool order would have given [q_worst, q_bad, q_meh, q_ok]`);
+    full.join(',') === 'q_best,q_great,q_good,q_fine,q_ok,q_so_so,q_meh',
+    `asked [${full.join(', ')}] — pool order would have given [q_worst, q_bad, q_meh, q_so_so, q_ok, q_fine, q_good]`);
   check('§7 no question outscored by an asked one is left out',
     pool.filter((q) => !full.includes(q.id)).every((out) =>
       full.every((inId) => pool.find((q) => q.id === inId)!.score >= out.score)),
@@ -313,7 +315,7 @@ const shape = (r: ReturnType<typeof scoreQuestion>) =>
 
   // The cap is a CEILING, never a quota: a round with fewer useful questions asks fewer, and is
   // never padded with a question scoreQuestion refused.
-  const two = round(pool.slice(4));
+  const two = round(pool.slice(7));
   check('§7 a 2-question pool asks 2, not the cap (the cap never pads a round)',
     two.length === 2, `asked ${two.length}`);
 
@@ -335,7 +337,7 @@ const shape = (r: ReturnType<typeof scoreQuestion>) =>
     // 2026-10-31: `tier` is askTier on every scope but short stays, where it is the owner's fixed order
     // (shortStaysAskTier: bathrooms → comfort → space → fun) — the same (tier desc, then score desc) shape.
     // 2026-11-01: a scope with the Apartments & Co-living cards sorts by the owner's numbered order (groupAskTier).
-    /const tier = isShortStaysScope\(q\) \? shortStaysAskTier : hasCards\(q\) \? groupAskTier : askTier;/.test(advSrc)
+    /const tier = isShortStaysScope\(q\) \? shortStaysAskTier : hasCards\(q\) \? groupAskTierFor\(q\) : askTier;/.test(advSrc)
       && /tier\(b\.question\.id\)\s*-\s*tier\(a\.question\.id\)\s*\|\|\s*b\.score\s*-\s*a\.score/.test(advSrc),
     'the production comparator in advancedFilters.ts is no longer the one this section reasons about');
   check('§7.1 the round ends on a COUNT comparison against AF_ROUND_MAX_QUESTIONS, never a re-selection',

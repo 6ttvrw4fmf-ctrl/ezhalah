@@ -314,8 +314,9 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 
 ### 6.1 Round size
 
-- **R6.1.1** — `AF_ROUND_MAX_QUESTIONS = 4`. A round asks **1, 2, 3, or 4** advanced questions —
-  whichever is `min(availableUseful, 4)`, minimum 1.
+- **R6.1.1** — `AF_ROUND_MAX_QUESTIONS = 7` (owner 2026-11-01; was 4 from 2026-08-24). A round asks
+  **1 to 7** advanced questions — whichever is `min(availableUseful, 7)`, minimum 1 — so each of the
+  Apartments & Co-living locked lists (7 questions) fits one round.
 - **R6.1.2** — There is **no minimum of 2**. A round with a single useful question is a valid
   round (that is what the R4.5 revision established).
 - **R6.1.3** — Scope steps do not count against the cap.
