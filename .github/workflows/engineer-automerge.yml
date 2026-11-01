@@ -63,7 +63,11 @@ jobs:
           # --limit 200, not 50 (🔧 2026-11-01): the deploy robot opens a deploy/baseline-* PR per deploy and ~85 of them were
           # open, so the 50 newest PRs were almost all baselines and every engineer PR older than ~2 days fell out of the
           # robot's window — #8855 (green barrier), #8818 / #8790 (one-line docs), #8954 (scripts) sat 5–6 days unseen.
-          prs=$(gh pr list --repo "$REPO" --state open --limit 200 \
+          # --base main (🔧 2026-11-01, first wide pass 41320862117): a PR aimed at a FEATURE branch has «required contexts:
+          # (none configured)», so the gate merged #4792 into feat/w3b-post-crawl with no required check at all; the
+          # robot's lane is main only. Listing by base also keeps the pass inside its 15-minute period (the 15:22 pass
+          # was cancelled by the 15:37 one while still walking old PRs).
+          prs=$(gh pr list --repo "$REPO" --state open --base main --limit 200 \
                   --json number,headRefName,isDraft,isCrossRepository,title \
                   -q '.[] | select((.headRefName|test("^(claude|nle|lifecycle|af|scraping|qa|kit|fix|mirror|docs|deploy)[/-]")) and (.isDraft|not) and (.isCrossRepository|not)) | "\(.number)\t\(.title)"')
           while IFS=$'\t' read -r pr title <&3; do
