@@ -250,7 +250,9 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
     live.lang = language;
   }
   return new Promise((resolve) => {
-    live.search!.autocomplete(query, (err, data) => resolve(err || !data ? [] : data.results.filter((r) => r.displayLines?.length)));
+    // Only real PLACES: Apple also returns query completions («adidas · Search Nearby») that carry no coordinate and
+    // land nowhere (owner 2026-11-01 saw one in the route fields).
+    live.search!.autocomplete(query, (err, data) => resolve(err || !data ? [] : data.results.filter((r) => r.displayLines?.length && r.coordinate)));
   });
 }
 

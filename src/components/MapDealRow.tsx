@@ -124,13 +124,15 @@ export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onR
           <Ionicons name="close" size={20} color={colors.muted} />
         </Pressable>
       </View>
-      <PlaceField value={from?.displayLines[0] ?? ''} placeholder={t('From')} dot={FROM} autoFocus onPick={(p) => { setFrom(p); go(p, to); }} onClear={() => setFrom(null)} testID="map-route-from" />
+      {/* The fields SAY what can be typed (owner 2026-11-01: «it doesn't show clearly that the user can type a street,
+          landmark, district…»). */}
+      <PlaceField value={from?.displayLines[0] ?? ''} placeholder={`${t('From')}: ${t('Region, city, landmark, district or street')}`} dot={FROM} autoFocus onPick={(p) => { setFrom(p); go(p, to); }} onClear={() => setFrom(null)} testID="map-route-from" />
       <View style={s.swapRow}>
         <Pressable style={s.swapBtn} onPress={swap} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Swap')} testID="map-route-swap">
           <Ionicons name="swap-vertical" size={18} color={colors.primary} />
         </Pressable>
       </View>
-      <PlaceField value={to?.displayLines[0] ?? ''} placeholder={t('To')} dot={TO} onPick={(p) => { setTo(p); go(from, p); }} onClear={() => setTo(null)} testID="map-route-to" />
+      <PlaceField value={to?.displayLines[0] ?? ''} placeholder={`${t('To')}: ${t('Region, city, landmark, district or street')}`} dot={TO} onPick={(p) => { setTo(p); go(from, p); }} onClear={() => setTo(null)} testID="map-route-to" />
       {failed ? <Text style={s.routeFail}>{t('No route found between these two places')}</Text> : null}
     </View>
   );
