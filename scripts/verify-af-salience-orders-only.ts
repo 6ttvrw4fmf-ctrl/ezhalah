@@ -334,7 +334,8 @@ const shape = (r: ReturnType<typeof scoreQuestion>) =>
   check('§7.1 rankQuestions sorts by exactly (ask-tier desc, then score desc) — the comparator §7 models',
     // 2026-10-31: `tier` is askTier on every scope but short stays, where it is the owner's fixed order
     // (shortStaysAskTier: bathrooms → comfort → space → fun) — the same (tier desc, then score desc) shape.
-    /const tier = isShortStaysScope\(q\) \? shortStaysAskTier : askTier;/.test(advSrc)
+    // 2026-11-01: a scope with the Apartments & Co-living cards sorts by the owner's numbered order (groupAskTier).
+    /const tier = isShortStaysScope\(q\) \? shortStaysAskTier : hasCards\(q\) \? groupAskTier : askTier;/.test(advSrc)
       && /tier\(b\.question\.id\)\s*-\s*tier\(a\.question\.id\)\s*\|\|\s*b\.score\s*-\s*a\.score/.test(advSrc),
     'the production comparator in advancedFilters.ts is no longer the one this section reasons about');
   check('§7.1 the round ends on a COUNT comparison against AF_ROUND_MAX_QUESTIONS, never a re-selection',

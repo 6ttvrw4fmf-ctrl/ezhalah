@@ -16,7 +16,8 @@
 //      SHORT_STAYS_QUESTIONS (bathrooms, comfort, space, fun) plus the chat-only ids for a typed sentence
 //   3. neither scope tier (group / type) is asked on short stays
 //   4. the chat-only ids are never ASKED: their card eligibility carries `!isShortStaysScope(q)`, and
-//      the three cards exist, write q.amenities, and inline the SAME keys afCohorts declares
+//      the three cards exist, write q.amenities, and resolve their chips from COHORT_CARDS via cardKeys()
+//      (since 2026-11-01 no card inlines a key list: the plan on a short-stays scope IS the three lists)
 //   5. yearly rent, Buy and the mixed period are byte-for-byte untouched
 //   6. the amenity vocabulary for short stays is the three cards' chips, whatever type is in scope
 //   7. the ask order is bathrooms → comfort → space → fun, and only on short stays
@@ -26,10 +27,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  cohortAllows, certifiedAmenityKeys, isShortStaysScope, shortStaysAsks, shortStaysAskTier,
+  cohortAllows, certifiedAmenityKeys, isShortStaysScope, shortStaysAsks, shortStaysAskTier, cardPlan,
   SHORT_STAYS_QUESTIONS, SHORT_STAYS_CHAT_ONLY, SHORT_STAYS_COMFORT_KEYS, SHORT_STAYS_SPACE_KEYS, SHORT_STAYS_FUN_KEYS,
-  AMENITY_BAG_QUESTION_IDS,
+  AMENITY_BAG_QUESTION_IDS, CARD_IDS, COHORT_CARDS,
 } from '../src/lib/afCohorts.ts';
+import { CHIP_DEFS } from '../src/lib/afChips.ts';
 import { unresolvedScopeTiers } from '../src/lib/afPlan.ts';
 import { groupsFor } from '../src/data/propertyTypes.ts';
 
@@ -42,7 +44,9 @@ const mustCatch = (label: string, caught: boolean) => check(`(mutation) ${label}
 
 const Q = (extra: Record<string, unknown>) =>
   ({ category: 'Residential', deal: 'Rent', rentPeriod: 'monthly', cities: ['الرياض'], ...extra }) as never;
-const ALL_IDS = ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished', 'street_width', 'direction', 'rating', 'unit_subtype', 'comfort', 'space', 'fun'];
+// Every question id the pool knows, the ten themed cards and the two Residential Building ladders included
+// (owner 2026-10-31): on short stays only the three short-stays cards may clear.
+const ALL_IDS = ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished', 'street_width', 'direction', 'rating', 'unit_subtype', ...CARD_IDS, 'apartments', 'shops'];
 const allowed = (q: never) => ALL_IDS.filter((id) => cohortAllows(q, id)).sort().join(',');
 const SHORT_STAYS_CERTIFIED = [...SHORT_STAYS_QUESTIONS, ...SHORT_STAYS_CHAT_ONLY].sort().join(',');
 const CARDS = ['comfort', 'space', 'fun'] as const;
@@ -74,11 +78,15 @@ check('amenities, rating and unit_subtype are chat-only: certified, never asked'
   && shortStaysAsks('bathrooms') && CARDS.every((id) => shortStaysAsks(id)));
 mustCatch('a Buy question leaking into short stays is detected',
   !cohortAllows(Q({}), 'property_age') && !cohortAllows(Q({}), 'rnpl') && !cohortAllows(Q({}), 'furnished'));
-mustCatch('comfort / space / fun are certified NOWHERE but short stays',
-  CARDS.every((id) =>
-    !cohortAllows(Q({ rentPeriod: 'annual', types: ['Apartment'] }), id)
-    && !cohortAllows(Q({ deal: 'Buy', rentPeriod: undefined, types: ['Apartment'] }), id)
-    && !cohortAllows(Q({ rentPeriod: 'both', types: ['Apartment'] }), id)));
+// Since 2026-11-01 comfort / space / fun are ALSO certified on yearly rent and Buy (the Apartments & Co-living
+// lists); what stays short-stays-only is the PLAN: exactly the three short-stays lists, nothing of the yearly cards.
+const ids = (q: never) => cardPlan(q).map((c) => c.id).join(',');
+check('the short-stays plan is exactly comfort → space → fun, for the bare scope and for every group',
+  ids(Q({})) === 'comfort,space,fun' && groupsFor('Residential').every((g) => ids(Q({ typeGroups: [g.group] })) === 'comfort,space,fun'));
+mustCatch('a yearly-only card (safety, perks, build, extras, who, features, services) or ladder (apartments, shops) leaking into short stays is detected',
+  ['safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'apartments', 'shops'].every((id) => !cohortAllows(Q({}), id) && !cohortAllows(Q({ typeGroups: ['Apartments & Co-living'] }), id)));
+mustCatch('the yearly cards still certify on yearly rent (the rule is a plan, not a ban)',
+  cohortAllows(Q({ rentPeriod: 'annual', types: ['Apartment'] }), 'safety') && cohortAllows(Q({ deal: 'Buy', rentPeriod: undefined, types: ['Apartment'] }), 'build'));
 
 console.log('\n── 3. no scope question on short stays ──');
 check('no group, no type → no scope tier is asked', unresolvedScopeTiers(Q({})).length === 0);
@@ -86,7 +94,7 @@ check('group only → the type tier is NOT asked', unresolvedScopeTiers(Q({ type
 mustCatch('the same group-only scope on YEARLY rent still asks the type tier (the rule is short-stays only)',
   unresolvedScopeTiers(Q({ rentPeriod: 'annual', typeGroups: ['Vacation & Rural'] })).length === 1);
 
-console.log('\n── 4. the cards: chat-only ids never asked; the three cards mirror afCohorts ──');
+console.log('\n── 4. the cards: chat-only ids never asked; the three cards resolve from COHORT_CARDS ──');
 {
   const src = readFileSync(join(import.meta.dirname, '..', 'src/data/advancedFilters.ts'), 'utf8');
   const gate = (id: string) => new RegExp(`eligibility: \\(q\\) => cohortAllows\\(q, '${id}'\\) && !isShortStaysScope\\(q\\)`).test(src);
@@ -97,36 +105,52 @@ console.log('\n── 4. the cards: chat-only ids never asked; the three cards m
     const m = new RegExp(`const ${name}: AdvancedQuestion = \\{([\\s\\S]*?)\\n\\};`).exec(src);
     return m ? m[1] : '';
   };
-  const keysIn = (b: string) => [...b.matchAll(/\{ key: '([a-z_]+)'/g)].map((m) => m[1]);
-  const emojisIn = (b: string) => [...b.matchAll(/emoji: '([^']+)'/g)].map((m) => m[1]);
-  const expectKeys: Record<string, readonly string[]> = {
-    COMFORT_QUESTION: SHORT_STAYS_COMFORT_KEYS, SPACE_QUESTION: SHORT_STAYS_SPACE_KEYS, FUN_QUESTION: SHORT_STAYS_FUN_KEYS,
-  };
+  // The cards no longer inline a key list (2026-11-01): each resolves cardOptions(q, id), which reads cardKeys(q, id)
+  // from COHORT_CARDS — so the short-stays lists live in ONE place and the plan below is the executed truth.
   const ids: Record<string, string> = { COMFORT_QUESTION: 'comfort', SPACE_QUESTION: 'space', FUN_QUESTION: 'fun' };
-  for (const name of Object.keys(expectKeys)) {
+  for (const name of Object.keys(ids)) {
     const b = body(name);
     const id = ids[name];
     check(`${name} exists, id ${id}, gated on cohortAllows(q, '${id}'), writes q.amenities`,
       new RegExp(`id: '${id}'`).test(b) && new RegExp(`eligibility: \\(q\\) => cohortAllows\\(q, '${id}'\\)`).test(b) && /apply: addAmenities/.test(b));
-    check(`${name} inlines exactly its afCohorts key list, in order`,
-      keysIn(b).join(',') === [...expectKeys[name]].join(','), `${keysIn(b)} vs ${expectKeys[name]}`);
-    check(`${name}: every chip carries its emoji (owner 2026-11-01)`, emojisIn(b).length === keysIn(b).length);
-    mustCatch(`${name}: a chip key that is not a plain p_amenities slug would be caught`, keysIn(b).every((k) => !/[^a-z_]/.test(k)));
+    check(`${name} resolves its chips through cardOptions(q, '${id}') — never an inlined key list`,
+      new RegExp(`resolveOptions\\(q\\) \\{ return cardOptions\\(q, '${id}'\\); \\}`).test(b) && !/\{ key: '/.test(b), b.slice(0, 200));
   }
-  check('all three cards are in ADVANCED_QUESTIONS, in ask order', /COMFORT_QUESTION, SPACE_QUESTION, FUN_QUESTION,\n\];/.test(src));
-  check('every card that writes the amenities bag is token-filtered on re-entry (AMENITY_BAG_QUESTION_IDS)',
-    ['amenities', ...CARDS].every((id) => AMENITY_BAG_QUESTION_IDS.has(id)) && AMENITY_BAG_QUESTION_IDS.size === 4);
-  check('rankQuestions sorts by shortStaysAskTier on short stays',
-    /const tier = isShortStaysScope\(q\) \? shortStaysAskTier : askTier;/.test(src));
+  check("SPACE_QUESTION is the short-stays «space & safety» wording (eligibility && isShortStaysScope(q)); SPACE_YEARLY_QUESTION is its complement",
+    /eligibility: \(q\) => cohortAllows\(q, 'space'\) && isShortStaysScope\(q\)/.test(body('SPACE_QUESTION'))
+    && /eligibility: \(q\) => cohortAllows\(q, 'space'\) && !isShortStaysScope\(q\)/.test(body('SPACE_YEARLY_QUESTION')));
+  check('cardOptions reads cardKeys(q, id) and CHIP_DEFS (the one voice per token)',
+    /async function cardOptions\(q: SearchQuery, id: string\)/.test(src) && /cardKeys\(q, id\)\.map/.test(src) && /CHIP_DEFS\[key\]/.test(src));
+  const plan = cardPlan(Q({}));
+  const planKeys = (id: string) => plan.find((c) => c.id === id)?.keys ?? [];
+  check('the executed short-stays plan carries the afCohorts short-stays lists, in order',
+    planKeys('comfort').join(',') === [...SHORT_STAYS_COMFORT_KEYS].join(',') && planKeys('space').join(',') === [...SHORT_STAYS_SPACE_KEYS].join(',')
+    && planKeys('fun').join(',') === [...SHORT_STAYS_FUN_KEYS].join(','));
+  check('the short-stays lists are derived from COHORT_CARDS.Apartment.RentMonthly (one source)',
+    SHORT_STAYS_COMFORT_KEYS === COHORT_CARDS.Apartment.RentMonthly!.comfort && SHORT_STAYS_FUN_KEYS === COHORT_CARDS.Apartment.RentMonthly!.fun);
   const all = [...SHORT_STAYS_COMFORT_KEYS, ...SHORT_STAYS_SPACE_KEYS, ...SHORT_STAYS_FUN_KEYS];
-  check('no chip key appears on two cards', new Set(all).size === all.length);
+  check('every short-stays chip has a CHIP_DEFS entry with its emoji (owner 2026-11-01)', all.every((k) => !!CHIP_DEFS[k]?.emoji && !!CHIP_DEFS[k]?.labelKey));
+  check('every chip key in CHIP_DEFS carries an emoji and is a plain p_amenities slug',
+    Object.entries(CHIP_DEFS).every(([k, d]) => /^[a-z_0-9]+$/.test(k) && d.emoji.length > 0));
+  mustCatch('a chip key that is not a plain p_amenities slug would be caught', all.every((k) => !/[^a-z_]/.test(k)));
+  check('the pool ends with the cards, fun last (…SERVICES_QUESTION, FUN_QUESTION)', /SERVICES_QUESTION, FUN_QUESTION,\n\];/.test(src)
+    && /COMFORT_QUESTION, SPACE_QUESTION, SPACE_YEARLY_QUESTION,/.test(src));
+  check('every question that writes the amenities bag is token-filtered on re-entry (AMENITY_BAG_QUESTION_IDS = amenities + 10 cards + apartments + shops = 13)',
+    ['amenities', ...CARD_IDS, 'apartments', 'shops'].every((id) => AMENITY_BAG_QUESTION_IDS.has(id)) && AMENITY_BAG_QUESTION_IDS.size === 13);
+  check('rankQuestions sorts by shortStaysAskTier on short stays (and by groupAskTier where cards exist)',
+    /const tier = isShortStaysScope\(q\) \? shortStaysAskTier : hasCards\(q\) \? groupAskTier : askTier;/.test(src));
+  check('no chip key appears on two short-stays cards', new Set(all).size === all.length);
 }
 
 console.log('\n── 5. everything else is untouched ──');
-check('Apartment / yearly rent keeps its five questions',
-  allowed(Q({ rentPeriod: 'annual', types: ['Apartment'] })) === 'amenities,bathrooms,furnished,property_age,rnpl');
-check("Apartment / 'both' keeps the Annual ∩ Monthly intersection",
-  allowed(Q({ rentPeriod: 'both', types: ['Apartment'] })) === 'amenities,bathrooms');
+// Yearly rent / 'both' now carry the Apartments & Co-living cards (owner 2026-10-31; verify-af-apartments-group-cards.ts
+// pins the lists). What this section pins is that the short-stays rule did not leak: the yearly scope still asks its
+// own questions, and the mixed period is still an intersection (Annual ∩ Monthly: no rnpl, no age, no fun, no perks).
+check('Apartment / yearly rent keeps its questions (installments, bathrooms, age, furnished, amenities + its four cards)',
+  allowed(Q({ rentPeriod: 'annual', types: ['Apartment'] })) === 'amenities,bathrooms,comfort,furnished,perks,property_age,rnpl,safety,space',
+  allowed(Q({ rentPeriod: 'annual', types: ['Apartment'] })));
+check("Apartment / 'both' keeps the Annual ∩ Monthly intersection (the surviving chips pool into comfort · space · extras)",
+  allowed(Q({ rentPeriod: 'both', types: ['Apartment'] })) === 'amenities,bathrooms,comfort,extras,space', allowed(Q({ rentPeriod: 'both', types: ['Apartment'] })));
 check('a GROUP on yearly rent still intersects across its members (Vacation & Rural → nothing)',
   allowed(Q({ rentPeriod: 'annual', typeGroups: ['Vacation & Rural'] })) === '');
 check('Commercial / monthly is unchanged (no cohort → nothing)',

@@ -97,7 +97,12 @@ EXISTING_BOOL = (
 )
 NEW_BOOL = ("majlis", "roof", "warranty", "water_tank", "well", "annex", "two_entrances", "yard",
             "electronic_deed", "grill", "basement", "storage", "garage",
-            "corner_plot")   # corner / on two streets (owner 2026-10-26) — saved, no filter column yet
+            "corner_plot",   # corner / on two streets (owner 2026-10-26) — saved, no filter column yet
+            # the 28 apartment chips (owner 2026-10-31 handoff) — read by the word checker, served by the AF overlay
+            "self_checkin", "wifi", "bills_included", "jacuzzi", "smart_tv", "billiards", "cleaning_service",
+            "soundproof", "cameras", "guard", "smart_entry", "smart_home", "central_gas", "sauna", "kids_play_area",
+            "nursery", "free_maintenance", "intercom", "fire_system", "ev_charger", "central_vacuum", "insulation",
+            "dining_majlis", "own_bathroom", "fridge", "whole_floor", "singles", "families")
 BOOL_FACTS = frozenset(EXISTING_BOOL + NEW_BOOL)
 NUM_FACTS = frozenset(("street_width_m", "floors", "apartments_count", "shops_count", "property_age_years"))
 TEXT_FACTS = frozenset(("boundaries",))

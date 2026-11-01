@@ -37,6 +37,7 @@ import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -256,6 +257,37 @@ _LD_PRICE_RE = re.compile(r'"price"\s*:\s*"?(\d+(?:\.\d+)?)"?')
 # Cap price writes per sweep. The first run after this lands could touch tens of thousands of
 # rows (43,112 aqar rows had never been re-read since capture); a bounded trickle keeps a sweep
 # from turning into a mass-write, and the remainder is simply picked up by the next day's run.
+# PARALLEL PAGE READS (backlog 1140, 2026-11-01). The sweep read one page at a time. Through
+# 2026-10-30 sa.aqar.fm answered in well under the 0.3 s per-host spacing (http.MIN_INTERVAL), so
+# the sweep ran at the throttle's ~2.9 reads/s and a 10.8k-row shard took ~64 min. From 10-31 the
+# same pages take ~1.4 s each (same route, same fingerprints; measured from the job logs: 2.8/s on
+# 10-30 -> 0.6-0.8/s on 11-01), so a shard needed ~4 h and all 16 were SIGINT-killed at the 120-min
+# cap, leaving roughly half of every shard unread. Reading a chunk's pages on a few threads puts
+# the overlap back WITHOUT asking aqar for more: http._throttle still spaces request STARTS 0.3 s
+# apart per host across all threads, so the ceiling stays the ~3 starts/s the sweep always ran at.
+# Only the fetch is parallel; every verdict, strike, hide and write below stays sequential, in id
+# order, exactly as before. 1 restores the old one-at-a-time behaviour.
+READ_WORKERS = max(1, int(os.environ.get("AQAR_LIVENESS_READ_WORKERS", "4")))
+
+
+def prefetch_pages(urls: list[str], fetch, workers: int = READ_WORKERS) -> dict:
+    """Read every distinct non-empty url once, `workers` at a time; return {url: response|None}.
+
+    A fetch that raises is recorded as None (no answer = UNKNOWN downstream), never dropped, so
+    the caller sees exactly the outcome a sequential get() returning None would have produced."""
+    todo = list(dict.fromkeys(u for u in urls if u))
+
+    def _one(u: str):
+        try:
+            return u, fetch(u)
+        except Exception:  # noqa: BLE001 — an exception is no answer, never a verdict
+            return u, None
+    if workers <= 1 or len(todo) <= 1:
+        return dict(_one(u) for u in todo)
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        return dict(ex.map(_one, todo))
+
+
 PRICE_REFRESH_CAP = int(os.environ.get("AQAR_LIVENESS_PRICE_CAP", "500"))
 
 
@@ -600,6 +632,8 @@ def main() -> None:
                 .limit(len(ids))
                 .execute())
             rows = res.data or []
+            pages = prefetch_pages([(row.get("listing_url") or "").strip() for row in rows],
+                                   lambda u: get(u, max_retries=2, keep=gone_statuses))
 
             for row in rows:
                 seen += 1
@@ -607,7 +641,7 @@ def main() -> None:
                 if not url:
                     continue  # no URL → can't check, skip
 
-                r = get(url, max_retries=2, keep=gone_statuses)
+                r = pages.get(url)
                 status = r.status_code if r is not None else 0
                 body = r.text if r is not None else ""
 

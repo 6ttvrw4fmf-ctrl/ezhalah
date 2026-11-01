@@ -4,7 +4,7 @@
 // carry.ts proves that for a round that COMMITTED something (its skips ride the turn's guided record).
 // It could not see the other shape: a round where every question was skipped commits nothing, so
 // finishGuided returns early — no search, no new turn, no guided record — and the SAME turn keeps
-// «خلّنا نحدد الطلب أكثر». Its carry was built from that turn's guided record alone, i.e. asked = [],
+// «🎯 دقّق مع الذكاء». Its carry was built from that turn's guided record alone, i.e. asked = [],
 // so every new tap re-asked the same four questions.
 //
 // Found live by the AF customer journey (ksaaqar_residential_listings:12225740, Riyadh annual-rent

@@ -23,7 +23,7 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { liftSymbols } from './liftSymbols.ts';
-import { COHORT_QUESTIONS, shortStaysAsks } from '../../src/lib/afCohorts.ts';
+import { COHORT_QUESTIONS, COHORT_CARDS, shortStaysAsks, cardPlan, cardKeys, isCardId, AMENITY_BAG_QUESTION_IDS } from '../../src/lib/afCohorts.ts';
 import { CLEAN_MACRO, ALL_CLEAN_TYPES, HIERARCHY, UNBOXED_TYPES, groupsOf, groupMembers } from '../../src/data/propertyTypes.ts';
 import type { SearchQuery } from '../../src/data/search.ts';
 
@@ -57,8 +57,35 @@ export function tableAllows(type: string, mode: Mode, id: string): boolean {
   if (mode.mode === 'RentMonthly' && CLEAN_MACRO[type] === 'Residential') return shortStaysAsks(id);
   const cfg = COHORT_QUESTIONS[type];
   if (!cfg) return false;
-  return mode.legs.every((leg) => (cfg[leg] ?? []).includes(id));
+  // Apartments & Co-living (owner 2026-10-31): a group type (one with COHORT_CARDS) ignores a deal it has no cohort
+  // for in a mixed mode — Floor with Rent + Buy asks its Rent ∩ Buy lists although Floor has no short-stay market.
+  const legs = COHORT_CARDS[type] ? mode.legs.filter((leg) => cfg[leg]) : mode.legs;
+  return legs.length > 0 && legs.every((leg) => (cfg[leg] ?? []).includes(id));
 }
+
+/**
+ * The TABLE's answer for a whole scope: which question ids the pool must offer on `query` in `mode`.
+ * Non-card ids are the per-type intersection above. The themed CARDS (owner 2026-10-31) are certified by their
+ * chips, not by a list: a card is offered iff cardPlan() leaves it a chip every leg certifies, and a mixed scope
+ * pools small cards under new ids («extras»), so their ids are read from the real cardPlan() — whose worked
+ * examples verify-af-apartments-group-cards.ts pins against the owner's lists. Two asking rules ride on top:
+ * the generic amenities card is not asked where cards exist, and the furnished question is not asked where the
+ * comfort card carries the «furnished» chip (the typed sentence keeps both certified through cohortAllows).
+ */
+export function tableOffers(types: string[], mode: Mode, query: SearchQuery, ids: Iterable<string>, view: 'asked' | 'certified' = 'asked'): Set<string> {
+  const out = new Set<string>();
+  for (const id of ids) if (!isCardId(id) && types.every((t) => tableAllows(t, mode, id))) out.add(id);
+  const plan = cardPlan(query);
+  for (const c of plan) out.add(c.id);
+  // the asking rules only: a committed «furnished» or amenities answer stays CERTIFIED (and is carried) on a scope
+  // where the card absorbed the question — `view: 'certified'` is what a re-entry / transition must be judged by.
+  if (view === 'asked') {
+    if (plan.length) out.delete('amenities');
+    if (cardKeys(query, 'comfort').includes('furnished')) out.delete('furnished');
+  }
+  return out;
+}
+export const BAG_IDS: ReadonlySet<string> = AMENITY_BAG_QUESTION_IDS;
 
 export type Scope = { kind: 'type' | 'group'; label: string; types: string[]; category: 'Residential' | 'Commercial'; query: SearchQuery };
 
@@ -115,14 +142,31 @@ export function recorder(): { row: Record<string, unknown>; reads: Set<string> }
   return { row, reads };
 }
 
-const QUESTION_CONSTS = [
+/** Every `*_QUESTION` const in src/data/advancedFilters.ts, in file order — the pool is assembled from these.
+ *  verify-af-matrix-truth.ts asserts the list is complete against the file (a new const nobody lifted is RED). */
+export const QUESTION_CONSTS = [
   'RNPL_QUESTION', 'AGE_QUESTION', 'AMENITIES_QUESTION', 'BATHROOMS_QUESTION', 'FURNISHED_QUESTION',
   'STREET_WIDTH_QUESTION', 'DIRECTION_QUESTION', 'RATING_QUESTION', 'UNIT_SUBTYPE_QUESTION',
-  'COMFORT_QUESTION', 'SPACE_QUESTION', 'FUN_QUESTION',   // the short-stays parts of the amenities card (owner 2026-10-31 / 11-01)
+  // the themed cards (owner 2026-10-31 / 11-01): two consts carry id 'space' (short stays / yearly wording)
+  'COMFORT_QUESTION', 'SPACE_QUESTION', 'SPACE_YEARLY_QUESTION', 'SAFETY_QUESTION', 'PERKS_QUESTION', 'BUILD_QUESTION',
+  'EXTRAS_QUESTION', 'WHO_QUESTION', 'FEATURES_QUESTION', 'SERVICES_QUESTION', 'FUN_QUESTION',
+  'APARTMENTS_QUESTION', 'SHOPS_QUESTION',   // the Residential Building ladders
 ];
+/** The helpers the question consts close over, lifted beside them (cardOptions reads CHIP_DEFS + cardKeys). */
+export const QUESTION_HELPER_SYMBOLS = [
+  { header: 'const CHIP_LABEL_FLOOR', endsWith: /\};$/ },
+  { header: 'async function cardOptions', endsWith: /^\}$/ },
+];
+/** The real cohort + chip modules the lifted pool imports — one line, shared by every lifter. */
+export const afLiftImports = (root: string): string => {
+  const href = (p: string) => JSON.stringify(pathToFileURL(join(root, p)).href);
+  return [
+    `import { cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope, shortStaysAskTier, cardKeys, groupAskTier, hasCards, isCardId } from ${href('src/lib/afCohorts.ts')};`,
+    `import { CHIP_DEFS } from ${href('src/lib/afChips.ts')};`,
+  ].join('\n');
+};
 
 export async function loadLifted(root: string): Promise<Lifted> {
-  const href = (p: string) => JSON.stringify(pathToFileURL(join(root, p)).href);
   const counts = { guided: null as unknown, age: null as unknown };
   (globalThis as Record<string, unknown>).__afMatrixCounts = counts;
   const lifted = await liftSymbols(
@@ -131,12 +175,13 @@ export async function loadLifted(root: string): Promise<Lifted> {
       { header: 'const AGE_LADDER', endsWith: /^\];$/ },
       { header: 'const DIRECTION_DEFS', endsWith: /^\];$/ },
       { header: 'function addAmenities' },
+      ...QUESTION_HELPER_SYMBOLS,
       ...QUESTION_CONSTS.map((h) => ({ header: `const ${h}` })),
       { header: 'export const ADVANCED_QUESTIONS', endsWith: /^\];$/ },
     ],
     ['ADVANCED_QUESTIONS'],
     [
-      `import { cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope } from ${href('src/lib/afCohorts.ts')};`,
+      afLiftImports(root),
       'type GuidedCounts = any; type AgeOptionCounts = any; type SearchQuery = any; type AdvancedQuestion = any; type AdvancedQuestionResult = any;',
       'const t = (k: string) => k;',
       'const isProbeFailure = (_c: unknown) => false;',
@@ -216,7 +261,30 @@ const AMENITY_COL: Record<string, string> = {
   garden: 'garden', balcony: 'balcony', laundry_room: 'laundry_room', optical_fibers: 'optical_fibers', majlis: 'majlis',
   separate_electricity_meter: 'separate_electricity_meter', separate_water_meter: 'separate_water_meter',
   rnpl: 'rent_now_pay_later',
+  // The 39 column-backed chips of the Apartments & Co-living cards (owner handoff 2026-10-31, migration
+  // 20261101100930): token = column, each a boolean IS TRUE on search_listings_ar, counted as cnt_<token>.
+  roof: 'roof', two_entrances: 'two_entrances', annex: 'annex', yard: 'yard', garage: 'garage', grill: 'grill',
+  storage: 'storage', water_tank: 'water_tank', warranty: 'warranty', electronic_deed: 'electronic_deed', basement: 'basement',
+  self_checkin: 'self_checkin', wifi: 'wifi', bills_included: 'bills_included', jacuzzi: 'jacuzzi', smart_tv: 'smart_tv',
+  billiards: 'billiards', cleaning_service: 'cleaning_service', soundproof: 'soundproof', cameras: 'cameras', guard: 'guard',
+  smart_entry: 'smart_entry', smart_home: 'smart_home', central_gas: 'central_gas', sauna: 'sauna', kids_play_area: 'kids_play_area',
+  nursery: 'nursery', free_maintenance: 'free_maintenance', intercom: 'intercom', fire_system: 'fire_system', ev_charger: 'ev_charger',
+  central_vacuum: 'central_vacuum', insulation: 'insulation', dining_majlis: 'dining_majlis', own_bathroom: 'own_bathroom',
+  fridge: 'fridge', whole_floor: 'whole_floor', singles: 'singles', families: 'families',
 };
+// The 6 DERIVED tokens (same migration): one p_amenities slug standing for a predicate over other columns.
+//   separate_meters → (separate_electricity_meter OR separate_water_meter) — SQL three-valued: a row is KNOWN-NOT only
+//   when both meters are false; one false beside a NULL is UNKNOWN (the OR is NULL) and must never be served.
+//   apts4/8/12/20 → apartments_count >= n (a nested «at least» ladder, single-select); has_shops → shops_count >= 1.
+const METERS = ['separate_electricity_meter', 'separate_water_meter'];
+const separateMeters = (): Meaning => ({
+  params: { p_amenities: ['separate_meters'] }, cntCol: 'cnt_separate_meters', cols: METERS,
+  rest: `or=(${METERS.map((c) => `${c}.is.true`).join(',')})`,
+  notMatching: METERS.map((c) => `${c}=is.false`).join('&'),
+  unknown: `or=(and(${METERS[0]}.is.null,${METERS[1]}.not.is.true),and(${METERS[1]}.is.null,${METERS[0]}.not.is.true))`,
+  satisfies: (r) => METERS.some((c) => r[c] === true),
+});
+const APTS_RUNG: Record<string, number> = { apts4: 4, apts8: 8, apts12: 12, apts20: 20 };
 const DIR_COL: Record<string, string> = {
   'شمال': 'cnt_dir_n', 'جنوب': 'cnt_dir_s', 'شرق': 'cnt_dir_e', 'غرب': 'cnt_dir_w',
   'شمال شرق': 'cnt_dir_ne', 'شمال غرب': 'cnt_dir_nw', 'جنوب شرق': 'cnt_dir_se', 'جنوب غرب': 'cnt_dir_sw',
@@ -251,9 +319,15 @@ const ladder = (col: string, cnt: string, params: Record<string, unknown>, n: nu
 export function optionMeaning(field: string, key: string): Meaning | null {
   switch (field) {
     case 'rnpl': return key === 'rnpl' ? bool('rent_now_pay_later', 'cnt_rnpl', { p_amenities: ['rnpl'] }) : null;
-    // comfort / space / fun (owner 2026-10-31 / 11-01): the short-stays parts of the amenities card — same tokens, same meaning.
-    case 'comfort': case 'space': case 'fun':
-    case 'amenities': return AMENITY_COL[key] ? bool(AMENITY_COL[key], `cnt_${key}`, { p_amenities: [key] }) : null;
+    // The themed cards (owner 2026-10-31 / 11-01) are the amenities card split by theme — same tokens, same meaning,
+    // plus the one derived chip (separate_meters) a card may carry.
+    case 'comfort': case 'space': case 'safety': case 'perks': case 'build': case 'extras': case 'who': case 'features': case 'services': case 'fun':
+    case 'amenities':
+      if (key === 'separate_meters') return separateMeters();
+      return AMENITY_COL[key] ? bool(AMENITY_COL[key], `cnt_${key}`, { p_amenities: [key] }) : null;
+    // The Residential Building ladders (owner 2026-10-31): one token per rung, the predicate on the ad's own number.
+    case 'apartments': return APTS_RUNG[key] ? ladder('apartments_count', `cnt_${key}`, { p_amenities: [key] }, APTS_RUNG[key]) : null;
+    case 'shops': return key === 'has_shops' ? ladder('shops_count', 'cnt_has_shops', { p_amenities: ['has_shops'] }, 1) : null;
     case 'bathrooms': return /^[1-4]$/.test(key) ? ladder('bathrooms', `cnt_bath${key}`, { p_bath_min: Number(key) }, Number(key)) : null;
     case 'street_width': return /^(15|20|25|30)$/.test(key) ? ladder('street_width_m', `cnt_stw${key}`, { p_street_width_min: Number(key) }, Number(key)) : null;
     case 'furnished':
@@ -332,8 +406,14 @@ export function fieldMeaning(field: string): FieldMeaning | null {
     paramsBoth: (a, b) => ({ ...a, ...b }),
   });
   switch (field) {
-    case 'comfort': case 'space': case 'fun':   // the short-stays parts of the amenities card (owner 2026-10-31)
+    case 'comfort': case 'space': case 'safety': case 'perks': case 'build': case 'extras': case 'who': case 'features': case 'services': case 'fun':
     case 'amenities': return { ...single('cnt_total_base', ['cnt_amen_unknown']), combine: 'and',
+      paramsBoth: (a, b) => ({ p_amenities: [...(a.p_amenities as string[]), ...(b.p_amenities as string[])] }) };
+    // «How many apartments?» is a single-select «at least» ladder like bathrooms (its apply keeps the first key);
+    // «has shops» is one chip. Each reads its own IS NULL column (cnt_apts_unknown / cnt_shops_unknown).
+    case 'apartments': return { ...single('cnt_total_base', ['cnt_apts_unknown']), combine: 'or', restBoth: lowerRung,
+      paramsBoth: (a, b) => ({ p_amenities: [[...(a.p_amenities as string[]), ...(b.p_amenities as string[])].sort((x, y) => APTS_RUNG[x] - APTS_RUNG[y])[0]] }) };
+    case 'shops': return { ...single('cnt_total_base', ['cnt_shops_unknown']), combine: 'and',
       paramsBoth: (a, b) => ({ p_amenities: [...(a.p_amenities as string[]), ...(b.p_amenities as string[])] }) };
     case 'direction': return {
       combine: 'or', partition: true, totalCol: 'cnt_total_base',

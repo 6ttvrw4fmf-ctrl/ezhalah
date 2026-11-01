@@ -7,6 +7,11 @@ Tools here are read-only against production: they search the live site and read 
 public anon key, never write.
 
 - `full-chain.mjs` — ⚡'s one-listing check: search → «عرض المزيد» → click → the URL it opens.
+- `page-probe.mjs` — 🔧's runtime-error probe for ONE production page: opens it in a real browser (phone
+  emulation), taps like a customer (`tab:<aria-label>` mode pills, `text:<exact text>`, `testid:<id>`) for N quick
+  rounds and FAILS on any uncaught exception, unhandled rejection or console error. How a Sentry fix is proven
+  from CI (`.github/workflows/page-probe.yml`; first customer REACT-NATIVE-F, #9607). `--selftest` checks the
+  pure helpers.
 - `customer-journey.mjs` — 🆕's customer proof for a batch of listings, in BOTH surfaces:
   `--mode normal` (filter → results → card → source URL) and `--mode af` (into the Advanced
   Filter, answering questions the listing's own DB values can answer, then verifying on the

@@ -43,11 +43,167 @@ export function shortStaysAskTier(id: string): number {
 //   🏠 space & safety — majlis · balcony · private roof · soundproof · cameras · cleaning service
 //   ✨ fun            — pool · gym · jacuzzi · smart TV / cinema · billiards
 // «washing machine» rides the existing laundry_room fact (owner: «+ existing laundry_room»).
-export const SHORT_STAYS_COMFORT_KEYS = ['elevator', 'parking', 'private_entrance', 'laundry_room'] as const;
-export const SHORT_STAYS_SPACE_KEYS = ['majlis', 'balcony'] as const;
-export const SHORT_STAYS_FUN_KEYS = ['pool', 'gym'] as const;
-// Every question that writes the one q.amenities bag and is token-filtered on re-entry (afCarry.ts).
-export const AMENITY_BAG_QUESTION_IDS: ReadonlySet<string> = new Set(['amenities', 'comfort', 'space', 'fun']);
+// ── THE OWNER'S LOCKED CARD LISTS (handoff 2026-10-31, built 2026-11-01) ─────────────────────────────────
+// One list per (property type × deal) for the «Apartments & Co-living» group. A CARD is a themed multi-select
+// question (comfort, space, safety, …) whose chips are amenity TOKENS — every token here has its p_amenities arm,
+// its cnt_<token> and its af_canon column (migration 20261101100930). Nothing else is planned by hand: every
+// combination a user can make is computed by cardPlan() below, never by a hand-written list.
+export type CohortDeal = 'RentAnnual' | 'Buy' | 'RentMonthly';
+export const CARD_IDS = ['comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun'] as const;
+export type CardId = (typeof CARD_IDS)[number];
+type CardLists = Partial<Record<CardId, readonly string[]>>;
+// Short stays = Gathern + Aqar Monthly, one pool for the whole group (owner 2026-10-31): Studio, serviced
+// apartment and room are sub-types of apartment there, so the Apartment row is THE short-stays row.
+const SHORT_STAYS_CARDS: CardLists = {
+  comfort: ['self_checkin', 'wifi', 'laundry_room', 'bills_included', 'elevator', 'parking', 'private_entrance'],
+  space: ['majlis', 'balcony', 'roof', 'soundproof', 'cameras', 'cleaning_service'],
+  fun: ['pool', 'gym', 'jacuzzi', 'smart_tv', 'billiards'],
+};
+const APARTMENT_BUY_CARDS: CardLists = {
+  comfort: ['kitchen', 'ac', 'parking', 'elevator', 'private_entrance', 'roof', 'two_entrances'],
+  space: ['majlis', 'maid_room', 'driver_room', 'balcony', 'storage', 'garden', 'whole_floor'],
+  safety: ['cameras', 'guard', 'smart_entry', 'smart_home', 'intercom', 'fire_system', 'ev_charger'],
+  build: ['warranty', 'water_tank', 'central_gas', 'separate_meters', 'central_vacuum', 'pool', 'gym'],
+};
+export const COHORT_CARDS: Record<string, Partial<Record<CohortDeal, CardLists>>> = {
+  Apartment: {
+    RentAnnual: {
+      comfort: ['kitchen', 'ac', 'parking', 'elevator', 'furnished', 'private_entrance', 'bills_included'],
+      space: ['majlis', 'maid_room', 'driver_room', 'roof', 'two_entrances', 'balcony', 'garden'],
+      safety: ['cameras', 'guard', 'smart_entry', 'smart_home', 'central_gas', 'optical_fibers', 'separate_meters'],
+      perks: ['gym', 'pool', 'sauna', 'kids_play_area', 'nursery', 'cleaning_service', 'free_maintenance'],
+    },
+    Buy: APARTMENT_BUY_CARDS,
+    RentMonthly: SHORT_STAYS_CARDS,
+  },
+  Floor: {
+    RentAnnual: {
+      comfort: ['kitchen', 'ac', 'parking', 'furnished', 'private_entrance', 'car_entrance', 'elevator'],
+      space: ['majlis', 'dining_majlis', 'maid_room', 'driver_room', 'roof', 'two_entrances', 'yard'],
+      extras: ['storage', 'laundry_room', 'annex', 'garage', 'grill', 'water_tank', 'balcony'],
+      safety: ['separate_meters', 'optical_fibers', 'cameras', 'smart_entry', 'central_gas', 'smart_home', 'pool'],
+    },
+    Buy: {
+      comfort: ['kitchen', 'ac', 'parking', 'elevator', 'private_entrance', 'car_entrance', 'two_entrances'],
+      space: ['majlis', 'dining_majlis', 'maid_room', 'driver_room', 'roof', 'yard', 'annex'],
+      extras: ['storage', 'laundry_room', 'garage', 'grill', 'balcony', 'garden', 'pool'],
+      build: ['warranty', 'water_tank', 'separate_meters', 'sanitation', 'insulation', 'electronic_deed', 'cameras'],
+    },
+  },
+  Room: {
+    RentAnnual: {
+      comfort: ['ac', 'furnished', 'kitchen', 'bills_included', 'own_bathroom', 'private_entrance', 'parking'],
+      who: ['singles', 'families'],
+      extras: ['optical_fibers', 'cameras', 'elevator', 'guard', 'fridge', 'laundry_room', 'smart_entry'],
+    },
+    RentMonthly: SHORT_STAYS_CARDS,
+  },
+  Studio: {
+    RentAnnual: {
+      comfort: ['furnished', 'kitchen', 'ac', 'parking', 'elevator', 'bills_included', 'private_entrance'],
+      extras: ['gym', 'optical_fibers', 'cameras', 'roof', 'pool', 'balcony', 'laundry_room'],
+    },
+    Buy: APARTMENT_BUY_CARDS,
+    RentMonthly: SHORT_STAYS_CARDS,
+  },
+  'Residential Building': {
+    Buy: {
+      features: ['elevator', 'separate_meters', 'annex', 'parking', 'roof', 'basement', 'two_entrances'],
+      build: ['sanitation', 'warranty', 'optical_fibers', 'water_tank', 'electronic_deed', 'guard', 'cameras'],
+    },
+    RentAnnual: {
+      features: ['parking', 'elevator', 'ac', 'furnished', 'separate_meters', 'basement', 'annex'],
+      services: ['sanitation', 'warranty', 'optical_fibers', 'roof', 'cameras', 'two_entrances', 'water_tank'],
+    },
+  },
+};
+export const SHORT_STAYS_COMFORT_KEYS = SHORT_STAYS_CARDS.comfort!;
+export const SHORT_STAYS_SPACE_KEYS = SHORT_STAYS_CARDS.space!;
+export const SHORT_STAYS_FUN_KEYS = SHORT_STAYS_CARDS.fun!;
+// Every question that writes the one q.amenities bag and is token-filtered on re-entry (afCarry.ts):
+// the generic card, the ten themed cards, and the two Residential Building ladders (apartments, shops).
+export const AMENITY_BAG_QUESTION_IDS: ReadonlySet<string> = new Set(['amenities', ...CARD_IDS, 'apartments', 'shops']);
+export const isCardId = (id: string): id is CardId => (CARD_IDS as readonly string[]).includes(id);
+
+// The deal legs a query spans, in primary order. Buy+Rent combined / bothDeals span all three (the search's
+// p_deal IS NULL); 'both' periods span the two rent legs; plain short stays is one pool (see cardPlan).
+export function scopeDeals(q: SearchQuery): CohortDeal[] {
+  if (q.dealCombined || q.bothDeals) return ['RentAnnual', 'Buy', 'RentMonthly'];
+  if (q.deal === 'Buy') return ['Buy'];
+  if (q.deal !== 'Rent') return [];
+  if (q.rentPeriod === 'monthly') return ['RentMonthly'];
+  if (q.rentPeriod === 'both') return ['RentAnnual', 'RentMonthly'];
+  return ['RentAnnual'];
+}
+const cardUnion = (lists: CardLists | undefined): Set<string> | null =>
+  lists ? new Set(Object.values(lists).flatMap((l) => [...(l ?? [])])) : null;
+// A card stands on its own with this many chips; in a MIXED scope smaller leftovers pool together.
+const CARD_STANDALONE_MIN = 4;
+
+/**
+ * HOW THE LISTS COMBINE (owner rule 2026-10-31, worked examples in docs/ops/ADVANCED_FILTER_APARTMENTS_GROUP.md):
+ * every leg (type × deal) in scope must certify a chip somewhere in ITS lists — INTERSECTION, never union, so a
+ * chip the user taps is true for every ad in the result (UNKNOWN never becomes NO). The surviving chips keep the
+ * PRIMARY leg's card layout (the first selected type, its first deal); a leg with no card lists certifies nothing.
+ * In a mixed scope, cards left with fewer than CARD_STANDALONE_MIN chips are pooled: the pool keeps the first
+ * card's id while it grows, and a trailing small pool is shown as «extras» — the owner's all-three-deals example
+ * (bathrooms · comfort ×6 · extras ×3) is exactly this rule executed. A single leg returns its own list unchanged.
+ */
+export function cardPlan(q: SearchQuery): Array<{ id: CardId; keys: string[] }> {
+  const shortStays = isShortStaysScope(q);
+  const types = shortStays ? ['Apartment'] : scopeCleanTypes(q);
+  const deals = shortStays ? (['RentMonthly'] as CohortDeal[]) : scopeDeals(q);
+  if (!types.length || !deals.length) return [];
+  if (!shortStays && types.some((ty) => !q.category || !offeredUnder(q.category, ty))) return [];
+  // A group type with NO cohort for a deal (Floor / Residential Building have no short-stay ads at all, Room and
+  // Studio no Buy market to speak of) contributes no leg there: the owner's «Floor with Rent + Buy selected
+  // together» list is Rent ∩ Buy, and a combined scope's empty monthly leg must not erase it. Any other type keeps
+  // the stricter rule (every selected deal must be certified) exactly as before.
+  const legs = types.flatMap((type) => deals
+    .filter((deal) => !COHORT_CARDS[type] || COHORT_QUESTIONS[type]?.[deal])
+    .map((deal) => ({ type, deal })));
+  if (!legs.length) return [];
+  const unions = legs.map((l) => cardUnion(COHORT_CARDS[l.type]?.[l.deal]));
+  if (unions.some((u) => !u)) return [];
+  const primary = COHORT_CARDS[legs[0].type]?.[legs[0].deal] ?? {};
+  const kept = CARD_IDS
+    .filter((id) => primary[id])
+    .map((id) => ({ id, keys: (primary[id] ?? []).filter((k) => unions.every((u) => u!.has(k))) }))
+    .filter((c) => c.keys.length);
+  if (legs.length === 1) return kept;
+  // Pooling (mixed scopes only): a card that kept CARD_STANDALONE_MIN chips stands where it is; smaller ones pool
+  // under the first small card's id until the pool is big enough. A trailing pool of 3+ is its own «extras» card
+  // (or joins an extras card already shown); a trailing 1-2 joins the last card shown.
+  const out: Array<{ id: CardId; keys: string[] }> = [];
+  let pool: { id: CardId; keys: string[] } | null = null;
+  for (const c of kept) {
+    if (c.keys.length >= CARD_STANDALONE_MIN) { out.push(c); continue; }
+    pool = pool ? { id: pool.id, keys: [...pool.keys, ...c.keys] } : { id: c.id, keys: [...c.keys] };
+    if (pool.keys.length >= CARD_STANDALONE_MIN) { out.push(pool); pool = null; }
+  }
+  if (pool) {
+    const extras = out.find((c) => c.id === 'extras');
+    if (pool.keys.length >= 3 && !extras) out.push({ id: 'extras', keys: pool.keys });
+    else if (pool.keys.length >= 3 && extras) extras.keys = [...extras.keys, ...pool.keys];
+    else if (out.length) out[out.length - 1] = { id: out[out.length - 1].id, keys: [...out[out.length - 1].keys, ...pool.keys] };
+    else out.push({ id: 'extras', keys: pool.keys });
+  }
+  return out;
+}
+/** The chips card `id` offers in this scope ([] = the card is not offered). */
+export function cardKeys(q: SearchQuery, id: string): string[] {
+  return cardPlan(q).find((c) => c.id === id)?.keys ?? [];
+}
+// The owner's numbered order for the group's lists (2026-10-31): installments → bathrooms → age → street width →
+// facing → apartments → shops → the cards, comfort first, fun last. A tier only reorders questions that already
+// cleared the usefulness gates; it never forces one (afRanking.ts). Scopes without cards keep askTier().
+const GROUP_ASK_ORDER = ['rnpl', 'bathrooms', 'property_age', 'street_width', 'direction', 'apartments', 'shops',
+  'comfort', 'space', 'who', 'extras', 'safety', 'perks', 'build', 'features', 'services', 'fun'] as const;
+export function groupAskTier(id: string): number {
+  const i = (GROUP_ASK_ORDER as readonly string[]).indexOf(id);
+  return i < 0 ? 0 : GROUP_ASK_ORDER.length - i;
+}
+export const hasCards = (q: SearchQuery): boolean => cardPlan(q).length > 0;
 
 // Which amenity chips are safe for a MULTI-TYPE scope: the intersection of every selected type's
 // certified chip list. Returns null when no selected type has a cohort chip list (the caller then
@@ -87,32 +243,44 @@ export function intersectChips(types: string[]): string[] | null {
 //   Studio/RentAnnual    — n=30 nationwide, thin everything; enabled minimally, gates will suppress.
 //   Room/Buy (n=1) and Studio/Buy (n=2) — no cohort: genuinely not applicable.
 export const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: string[]; RentMonthly?: string[] }> = {
+  // ── «Apartments & Co-living» (owner handoff 2026-10-31, built 2026-11-01): the CARD ids (comfort, space,
+  // safety, perks, build, extras, who, features, services, fun) are themed amenity questions whose chips come
+  // from COHORT_CARDS; `amenities` and `furnished` stay listed because the TYPED chat sentence («فيها مصعد»,
+  // «مفروشة») is certified through them (certifiedAmenityKeys / afIntents) — the generic amenities card and the
+  // separate furnished question are not ASKED where a card carries the chip (see advancedFilters.ts).
   Apartment: {
-    RentAnnual: ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished'],
-    Buy: ['property_age', 'amenities', 'bathrooms', 'direction'],
+    RentAnnual: ['rnpl', 'bathrooms', 'property_age', 'comfort', 'space', 'safety', 'perks', 'amenities', 'furnished'],
+    Buy: ['property_age', 'bathrooms', 'direction', 'comfort', 'space', 'safety', 'build', 'amenities'],
     // Monthly (owner order 2026-08-18) — designed from MONTHLY data, deliberately NOT a copy of
     // RentAnnual: kitchen/AC/age/floor/furnished are fresh-DEAD in this cohort (94/7/564/53 known of
     // 30,356; furnished 100% true on Gathern). What Monthly actually has: Gathern rating (24,716
     // rated), unit subtype (استديو 9,218 / شقق مخدومة 2,040), elevator 62%, parking 33%, bathrooms 56%.
     // 2026-10-31: plain short stays reads SHORT_STAYS_QUESTIONS instead (one pool); this list feeds the
     // 'both' / Buy+Rent intersections and the certified pool. rating/unit_subtype: chat-only there.
-    RentMonthly: ['rating', 'unit_subtype', 'amenities', 'bathrooms'],
+    RentMonthly: ['rating', 'unit_subtype', 'amenities', 'bathrooms', 'comfort', 'space', 'fun'],
   },
   Floor: {
-    RentAnnual: ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished'],
-    Buy: ['property_age', 'amenities', 'bathrooms'],
+    RentAnnual: ['rnpl', 'bathrooms', 'property_age', 'comfort', 'space', 'extras', 'safety', 'amenities', 'furnished'],
+    Buy: ['property_age', 'bathrooms', 'direction', 'comfort', 'space', 'extras', 'build', 'amenities'],
   },
+  // Investor type: NO bathrooms (a whole building), NO installments; two ladders of its own — how many apartments
+  // (apartments_count) and has shops (shops_count), both read from the ad's words (owner 2026-10-31).
   'Residential Building': {
-    RentAnnual: ['property_age', 'street_width', 'direction', 'furnished'],
-    Buy: ['property_age', 'street_width', 'direction'],
+    RentAnnual: ['property_age', 'street_width', 'apartments', 'shops', 'features', 'services', 'amenities', 'furnished'],
+    Buy: ['property_age', 'street_width', 'direction', 'apartments', 'shops', 'features', 'build', 'amenities'],
   },
   Room: {
-    RentAnnual: ['property_age', 'amenities', 'furnished'],
+    // NO bathrooms (known on 82 of 2,145 — a strict question would hide 95 %), NO property age (owner 2026-10-31).
+    RentAnnual: ['rnpl', 'comfort', 'who', 'extras', 'amenities', 'furnished'],
     // Monthly 2026-08-18: n=556, 446 rated; elevator 53% / parking 31%. bathrooms dead (0 known).
-    RentMonthly: ['rating', 'amenities'],
+    RentMonthly: ['rating', 'amenities', 'comfort', 'space', 'fun'],
   },
   Studio: {
-    RentAnnual: ['property_age', 'amenities', 'furnished'],
+    // Annual: bathrooms 1+/2+ kept (known on 232), no installments (0 ads), no age (62 known) — owner 2026-10-31.
+    RentAnnual: ['bathrooms', 'comfort', 'extras', 'amenities', 'furnished'],
+    // Buy (78 ads): the Apartment Buy questions; a chip with 0 ads hides itself.
+    Buy: ['property_age', 'bathrooms', 'direction', 'comfort', 'space', 'safety', 'build', 'amenities'],
+    RentMonthly: ['amenities', 'bathrooms', 'comfort', 'space', 'fun'],
   },
   // Villa (2026-08-16): fresh-band profiling designed these. Rent: RNPL ask-first (74.7% of fresh
   // known say yes — the strongest installment market in the DB), AC textbook split, furnished,
@@ -311,7 +479,13 @@ export function scopeCleanTypes(q: SearchQuery): string[] {
 // concept while the certification gate treats them as two. Intersecting is a pure NARROWING, since
 // Buy ∩ RentAnnual ∩ RentMonthly is a subset of any single leg.
 // Proof: scripts/verify-af-question-gate-is-one-predicate.ts §5.
-function cohortAllowsCombined(cfg: NonNullable<(typeof COHORT_QUESTIONS)[string]>, id: string): boolean {
+function cohortAllowsCombined(cfg: NonNullable<(typeof COHORT_QUESTIONS)[string]>, id: string, type?: string): boolean {
+  // Apartments & Co-living (owner 2026-10-31): a deal the type has no cohort for is an empty leg, not a veto — Floor
+  // with Buy + Rent asks bathrooms and age (its Rent ∩ Buy lists) although Floor has no short-stay market at all.
+  if (type && COHORT_CARDS[type]) {
+    const legs = (['Buy', 'RentAnnual', 'RentMonthly'] as const).filter((d) => cfg[d]);
+    return legs.length > 0 && legs.every((d) => (cfg[d] ?? []).includes(id));
+  }
   return (cfg.Buy ?? []).includes(id) && (cfg.RentAnnual ?? []).includes(id) && (cfg.RentMonthly ?? []).includes(id);
 }
 
@@ -322,7 +496,10 @@ function cohortAllowsCombined(cfg: NonNullable<(typeof COHORT_QUESTIONS)[string]
 // selected" into "everything allowed".
 export function cohortAllows(q: SearchQuery, id: string): boolean {
   // Short stays first (owner 2026-10-31): one pool, so no type — and no group — is needed to ask.
-  if (isShortStaysScope(q)) return SHORT_STAYS_CERTIFIED.includes(id);
+  if (isShortStaysScope(q)) return SHORT_STAYS_CERTIFIED.includes(id) && (!isCardId(id) || cardKeys(q, id).length > 0);
+  // A themed card (owner 2026-10-31) is certified exactly when cardPlan() leaves it at least one chip that EVERY
+  // leg of the scope certifies — the same intersection, computed over the chips instead of the question ids.
+  if (isCardId(id)) return cardKeys(q, id).length > 0;
   const types = scopeCleanTypes(q);
   if (!types.length) return false;
   return types.every((type) => {
@@ -334,11 +511,15 @@ export function cohortAllows(q: SearchQuery, id: string): boolean {
     if (!q.category || !offeredUnder(q.category, type)) return false;
     const cfg = COHORT_QUESTIONS[type];
     if (!cfg) return false;                 // uncertified type = EMPTY cohort, never "no constraint"
-    if (q.dealCombined || q.bothDeals) return cohortAllowsCombined(cfg, id);  // bothDeals: see above
+    if (q.dealCombined || q.bothDeals) return cohortAllowsCombined(cfg, id, type);  // bothDeals: see above
     if (q.deal === 'Buy') return (cfg.Buy ?? []).includes(id);
     if (q.deal !== 'Rent') return false;
     if (q.rentPeriod === 'monthly') return (cfg.RentMonthly ?? []).includes(id);
-    if (q.rentPeriod === 'both') return (cfg.RentAnnual ?? []).includes(id) && (cfg.RentMonthly ?? []).includes(id);
+    if (q.rentPeriod === 'both') {
+      // a group type without a monthly cohort has no monthly leg to intersect (same rule as cohortAllowsCombined)
+      if (COHORT_CARDS[type] && !cfg.RentMonthly) return (cfg.RentAnnual ?? []).includes(id);
+      return (cfg.RentAnnual ?? []).includes(id) && (cfg.RentMonthly ?? []).includes(id);
+    }
     return (cfg.RentAnnual ?? []).includes(id); // plain Annual Rent (rentPeriod undefined or 'annual')
   });
 }
@@ -382,6 +563,18 @@ const RESIDENTIAL_AMENITY_BASE = [
 const VILLA_ONLY_AMENITIES = ['car_entrance', 'sanitation'] as const;
 
 export function certifiedAmenityKeys(q: SearchQuery): string[] {
+  // A scope whose cards exist (the Apartments & Co-living lists, owner 2026-10-31) certifies EXACTLY the chips its
+  // cards offer — the typed chat sentence, the cards and the re-entry carry are held to one vocabulary — plus the
+  // Residential Building ladders where those questions are certified (apts4/8/12/20, has_shops are p_amenities
+  // tokens too). This comes BEFORE the generic-amenities gate: on the group box with Buy, Room has no Buy list, so
+  // `amenities` is uncertified while the cards still offer comfort + safety; the carry must keep those answers.
+  const plan = cardPlan(q);
+  if (plan.length) {
+    const keys = new Set(plan.flatMap((c) => c.keys));
+    if (cohortAllows(q, 'apartments')) for (const k of ['apts4', 'apts8', 'apts12', 'apts20']) keys.add(k);
+    if (cohortAllows(q, 'shops')) keys.add('has_shops');
+    return [...keys];
+  }
   // Not certified for this cohort at all ⇒ no amenity token is applicable. Never fall through to a
   // base list here: that would let an uncertified cohort acquire constraints the AF path refuses.
   if (!cohortAllows(q, 'amenities')) return [];

@@ -1419,6 +1419,23 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   bigger `--limit` cannot raise it; only more runs can. `gh-dealapp-liveness` went 2-hourly → hourly on 10-31
   (migration 20261031110841) when active rows reached 49,052 at 73.0% in SLA.
 
+## Lessons from 2026-11-01 (♻️)
+- **A sweep that reads one page at a time inherits the source's latency.** aqar's pages went from <0.3 s to ~1.4 s on
+  10-31 (same route, same fingerprints, same shard size; job logs 2.8 reads/s → 0.6–0.8/s), so every residential shard
+  needed ~4 h and was SIGINT-killed at the 120-min cap (9/16 on 10-31, 16/16 on 11-01), leaving half of each shard
+  unread. When shard time doubles with no code change, read the `(N/s)` progress lines before suspecting a merge.
+  The fix is overlap, not more load: `scrapers/aqar/liveness.py::prefetch_pages` reads each 200-row chunk on
+  `AQAR_LIVENESS_READ_WORKERS` threads while `http._throttle` keeps request STARTS 0.3 s apart per host (PR #9794;
+  branch shard 11-01: 514 reads in 2 m 50 s, 3.0/s).
+- **A flag nobody passes is a fix that never ran.** gathern's `--proxy-fallback` (#8508, 10-24) re-reads no-verdict units
+  through the proxy, alive-only, but `gathern-liveness.yml` never passed it, so GTH246249 read «transient» 36 times in
+  three days while shown. When you build an opt-in flag, wire it into the scheduled command in the same PR and pin it
+  with a test that reads the workflow (PR #9794).
+- **«Served with no check > 26 h» on gathern is mostly units mid-strike, not skipped units.** On 11-01, 48 of 62 were
+  read alive ~28 h earlier and took their first 404 at 06:42; strikes 2 and 3 fall due in the KSA evening, when gathern
+  answers our runners 404 on every control (canary-quarantined 15:37 → 03:08, 10-30 and 10-31). Group that count by
+  `missing_count` and the last reading's verdict before calling it a coverage hole.
+
 ## 💰 RENT PRICE RULES EVERY ENGINEER MUST KNOW (owner, 2026-10-25/26 — permanent; canonical text in `docs/ARCHITECTURE.md` §20)
 
 1. **«إقامات قصيرة» (the old «شهري» pool) = Gathern + Aqar Monthly ONLY.** Every other site's rent listing
@@ -1476,3 +1493,29 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   ر.س» in wasalt's archived payload) — one query of `ar_data` answered what a day of theory would not. Rule: one real
   record (source_capture / ar_data / the page) before the first line of code; the archive you already store is source
   truth.
+
+## 📚 FLEET LESSONS 2026-11-01 (copied by 🔧 under contract K; each verified against the rows or the PR timeline)
+
+- **① A robot merge fires no push-triggered workflow — dispatch the follow-on yourself, the same minute.** 🔬 10-30: a
+  reader-version bump squashed by the auto-merge bot never ran its reader; 🔬 11-01 again: the word-reader fix #9783 sat
+  unread until `facts-words-reader` was dispatched by hand at 10:39 (run 41298393767). The same shape cost ⚡ its night
+  on 11-01: a queued nightly job checked out the DISPATCH-time commit and overwrote the fixed 06:54 crawl (backlog 1139).
+  Rule: after `engineer-automerge` merges your PR, dispatch the workflow that consumes it and read the RUN's commit SHA —
+  a fix is live only when a run from the FIXED commit is the LAST writer (⚡ 11-01). Seen on two nights → written into
+  🔬's rulebook as a rule.
+- **② Pick the job by where its PROOF lands, not by where the bug is.** ⚡ 11-01: three fixes merged, zero proven —
+  runners were saturated and every proof crawl queued past the slot (rating 4). 🆕 11-01: a migration job chose at
+  minute 70 met `apply_migration`'s confirmation prompt that nobody answers at night (draft #9761, nothing applied).
+  ♻️ 11-01 did it right: proofs dated to a NAMED job and UTC time (aqar-liveness 01:00 11-02; gathern-liveness 12:37/13:37)
+  so they count tomorrow instead of failing tonight. Rule: at minute 10 write, per job, the proof's workflow + the UTC
+  time it can land; a job whose proof needs a runner you cannot get or a prompt nobody can answer is swapped for one
+  whose proof is a CI journey or an RPC replay inside the slot — and a migration goes out as a ready draft PR at minute
+  10, never at minute 70.
+- **③ When a robot's number disagrees with the database, read what the robot TYPED before you read the RPC.** 🔧 11-01:
+  backlog 1141 «Filter total 11 vs DB 1» was the journey typing 11 digits into a 10-digit price box
+  (21,750,000,000 → 2,175,000,000; 11 is exactly the DB count for the band the box kept) — not a search bug. 🔧 11-01
+  also: mirror PR #9791 sat 2 h 40 min «red» because GitHub lists a PR's files against the merge BASE, so a mirror whose
+  file already reached main through another PR reads as a 1-file PR (the robot's empty-mirror rule never fires) and fails
+  a stale-mirror check its stale branch cannot pass. ♻️ 11-01 (1147): the sweep SESSION read a dead Gathern unit as
+  no-verdict 36 times while a fresh session read its 404. Rule: a robot's input, session and diff-base are part of the
+  measurement — print them in the evidence before judging the product with the robot's number.

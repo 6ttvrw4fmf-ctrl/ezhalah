@@ -41,7 +41,7 @@ export type AfPhase = 'loading' | 'intro' | 'asking';
 
 /**
  * Does the Advanced Filter interview currently own browsing — i.e. must the «عرض المزيد» /
- * «خلّنا نحدد الطلب أكثر» row stay hidden?
+ * «🎯 دقّق مع الذكاء» row stay hidden?
  *
  * `null` means no interview is open: the interview is FINISHED (or never started) and browsing
  * belongs to the user again — clause 2.
@@ -87,7 +87,7 @@ export function searchIsFinishedAtThreshold(honestTotal: number | null, stopAt: 
 }
 
 /**
- * May a results turn render its actions row — «عرض المزيد» and/or «خلّنا نحدد الطلب أكثر» — right now?
+ * May a results turn render its actions row — «عرض المزيد» and/or «🎯 دقّق مع الذكاء» — right now?
  *
  * ONE gate, so the browsing invitation can never disagree with the terminal chat state (owner rule
  * 2026-09-06, the `final=50` incident). Three reasons to withhold, in order:

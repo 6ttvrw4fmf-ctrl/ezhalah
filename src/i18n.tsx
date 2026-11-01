@@ -487,7 +487,7 @@ const AR: Record<string, string> = {
   '"{city}" isn\'t a city I recognize, I\'ll still search using your other answers.':
     '«{city}» ليست مدينة أعرفها، سأظل أبحث باستخدام إجاباتك الأخرى.',
 
-  // Advanced-filter question engine («خلّنا نحدد الطلب أكثر») — عمر العقار is the first field built on
+  // Advanced-filter question engine («🎯 دقّق مع الذكاء») — عمر العقار is the first field built on
   // this reusable card; new fields add their own strings here, never touch this block's wording.
   'How old is the property?': 'كم عمر العقار تقريباً؟',
   'New construction': 'جديد',
@@ -564,6 +564,73 @@ const AR: Record<string, string> = {
   'Majlis room': 'مجلس',
   'Separate electricity meter': 'عداد كهرباء مستقل',
   'Separate water meter': 'عداد ماء مستقل',
+  // Apartments & Co-living group (owner handoff 2026-10-31, built 2026-11-01): the themed card titles, the two
+  // building questions, the facing tip, the chips (src/lib/afChips.ts CHIP_DEFS labelKeys) and the summary-line labels.
+  '🏠 Space: what matters to you?': '🏠 المساحة: وش الي تحتاجه؟',
+  '🛡️ Safety & smart: what matters to you?': '🛡️ الأمان والذكاء: وش الي يطمنك؟',
+  '✨ Building perks: what matters to you?': '✨ مميزات المبنى: وش الي يسعدك؟',
+  '🧱 Build & services: what matters to you?': '🧱 البناء والخدمات: وش الي تبيه؟',
+  '🏡 Extras: what matters to you?': '🏡 إضافات: وش الي تبيه؟',
+  '👤 Who is it for?': '👤 لمين السكن؟',
+  '🔑 Building features: what matters to you?': '🔑 مميزات العمارة: وش الي تبيه؟',
+  '🧱 Services: what matters to you?': '🧱 الخدمات: وش الي تبيه؟',
+  '🏢 How many apartments?': '🏢 كم عدد الشقق؟',
+  '🏪 Has shops on the ground floor?': '🏪 فيه محلات تجارية بالدور الأرضي؟',
+  '4+ apartments': '٤ شقق فأكثر',
+  '8+ apartments': '٨ شقق فأكثر',
+  '12+ apartments': '١٢ شقة فأكثر',
+  '20+ apartments': '٢٠ شقة فأكثر',
+  'Has shops': 'فيه محلات',
+  '💡 Tip: a north-facing home gets the least direct sun. South gets the most.': '💡 معلومة: الواجهة الشمالية أقل تعرضاً للشمس، والجنوبية الأكثر.',
+  'Private roof': 'سطح خاص',
+  'Two entrances': 'مدخلين',
+  'Annex': 'ملحق',
+  'Yard': 'حوش',
+  'Garage': 'كراج',
+  'Grill': 'مشب',
+  'Storage room': 'غرفة تخزين',
+  'Private water tank': 'خزان ماء خاص',
+  'Warranty': 'ضمانات',
+  'Electronic deed': 'صك إلكتروني',
+  'Basement': 'قبو',
+  'Self check-in': 'دخول ذاتي',
+  'Wi-Fi': 'واي فاي',
+  'Bills included': 'الكهرباء والماء مشمولة',
+  'Jacuzzi': 'جاكوزي',
+  'Smart TV / cinema room': 'شاشة ذكية / سينما',
+  'Billiards table': 'طاولة بلياردو',
+  'Cleaning service': 'خدمة تنظيف',
+  'Soundproof': 'عازل صوت',
+  'Cameras': 'كاميرات مراقبة',
+  'Guard': 'حارس',
+  'Smart entry': 'دخول ذكي',
+  'Smart home': 'منزل ذكي',
+  'Central gas': 'غاز مركزي',
+  'Sauna': 'ساونا',
+  "Kids' play area": 'ألعاب أطفال',
+  'Nursery': 'حضانة',
+  'Free maintenance': 'صيانة مجانية',
+  'Intercom': 'انتركم',
+  'Fire system': 'نظام إطفاء',
+  'EV charger': 'شاحن سيارات كهربائية',
+  'Central vacuum': 'مكنسة مركزية',
+  'Heat & water insulation': 'عزل حراري ومائي',
+  'Dining majlis': 'مقلط',
+  'Own bathroom': 'دورة مياه خاصة',
+  'Fridge': 'ثلاجة',
+  'Whole floor': 'دور كامل',
+  'Singles': 'عزاب',
+  'Families': 'عوائل',
+  'Separate meters': 'عدادات مستقلة',
+  'Safety & smart': 'الأمان والذكاء',
+  'Building perks': 'مميزات المبنى',
+  'Build & services': 'البناء والخدمات',
+  'Extras': 'الإضافات',
+  'Who it is for': 'لمين السكن',
+  'Building features': 'مميزات العمارة',
+  'Services': 'الخدمات',
+  'Apartments': 'الشقق',
+  'Shops': 'المحلات',
   // 'Furnished' key lives in the shared amenities block below (identical value 'مفروش') — not redeclared here.
   // The Advanced Filter's SCOPE steps (owner 2026-08-23) — asked before any certified question when
   // the user has chosen only a category (or only a group). The option LABELS reuse the group/type
@@ -896,7 +963,7 @@ const AR: Record<string, string> = {
     'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي بحث جديد؟ افتح القائمة ☰ فوق واختر «بحث».',
   'I showed you the first {n} listings. For a new search, open the menu and choose Search.':
     'عرضت لك أول {n} إعلانات. تبي بحث جديد؟ افتح القائمة ☰ فوق واختر «بحث».',
-  // …and the narrow-only pair: «عرض المزيد» is not rendered but «خلّنا نحدد الطلب أكثر» is, so the
+  // …and the narrow-only pair: «عرض المزيد» is not rendered but «🎯 دقّق مع الذكاء» is, so the
   // sentence invites exactly the one button that exists.
   'I showed you the first {shown} of {total} matching listings. Want help finding more precise ones?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أساعدك توصل لنتائج أدق؟',
   'I showed you the first {n} listings. Want help finding more precise ones?': 'عرضت لك أول {n} إعلانات. تبي أساعدك توصل لنتائج أدق؟',
@@ -905,10 +972,10 @@ const AR: Record<string, string> = {
   'We found {total} listings matching your search, and showed you {shown}. Want help finding more precise ones?': 'لقينا {total} إعلان يطابق طلبك، وعرضنا لك {shown} منها. تبي أساعدك نلقى نتائج أدق؟',
   'We found {total} listings matching your search, and showed you {shown}.': 'لقينا {total} إعلان يطابق طلبك، وعرضنا لك {shown} منها.',
   'I can show you 100 listings at a time.': 'أقدر أعرض لك 100 إعلان في كل مرة.',
-  'Let’s narrow it down': 'خلّنا نحدد الطلب أكثر',
+  '🎯 Refine with AI': '🎯 دقّق مع الذكاء',
   // COMPLETED-ROUND RECEIPT (owner 2026-08-24) — replaces the action buttons on the results turn a
   // finished Advanced Filter round was opened from. A record of what happened, never a control.
-  'Continued with the advanced filter': 'تابع المستخدم باستخدام التصفية المتقدمة',
+  'Continued with 🎯 Refine with AI': 'تابع المستخدم عبر 🎯 دقّق مع الذكاء',
   // Read Aloud closing note (owner request, 2026-08-23 — "read the note... and say the button
   // also"): spoken ONLY when the matching buttons are actually on screen (agent.tsx gates this the
   // same way), naming the exact same button label(s) so it can never mention an action that isn't

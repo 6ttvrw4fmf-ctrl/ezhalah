@@ -3,7 +3,7 @@
 //
 // WHY THIS EXISTS
 // ---------------
-// Six live browser journeys across two runs (2026-08-23) tapped «خلّنا نحدد الطلب أكثر» on broad
+// Six live browser journeys across two runs (2026-08-23) tapped «🎯 دقّق مع الذكاء» on broad
 // Rent and Buy searches and NEVER got the Advanced Filter card — every one fell through to the
 // legacy district refine chips. Nothing was broken in the gate that decides it. The cause is a
 // composition of three separately-correct rules:
@@ -79,9 +79,12 @@ const MIN_USEFUL = Number(MIN_USEFUL_MATCH[1]);
 // exist to catch. Now its eligibility IS cohortAllows(q, 'property_age'), so it behaves for a group
 // scope exactly like every id already in this list: fires only when EVERY member type of the group
 // certifies it for that deal/period.
+// 2026-10-31 / 11-01: the ten themed cards (certified by their chips — cardKeys — on the Apartments & Co-living
+// lists and the short-stays pool) and the two Residential Building ladders join the gated set.
 const COHORT_GATED_IDS = [
   'rnpl', 'amenities', 'bathrooms', 'furnished', 'street_width', 'direction', 'rating', 'unit_subtype',
   'property_age',
+  'comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun', 'apartments', 'shops',
 ] as const;
 
 // The deal/period shapes a user can actually be in.
@@ -117,11 +120,18 @@ const EXPECTED: Record<string, Record<string, number>> = {
   // Rent/Monthly 0 -> 4 on every residential group (owner 2026-10-31): short stays is ONE pool
   // (Gathern + Aqar Monthly), so cohortAllows() certifies SHORT_STAYS_QUESTIONS + SHORT_STAYS_CHAT_ONLY
   // for the whole residential side without a type — the per-type intersection no longer applies there.
-  'Apartments & Co-living': { Buy: 0, 'Rent/Annual': 2, 'Rent/Monthly': 4, 'Rent/both': 0, 'Buy+Rent': 0 },
+  // 2026-11-01 (owner handoff 2026-10-31, the Apartments & Co-living cards; recomputed by EXECUTING cohortAllows):
+  //   Rent/Monthly 4 -> 7 on every residential group — the three short-stays cards (comfort · space · fun) are gated ids now.
+  //   Buy 0 -> 2: the group box's Buy legs (Apartment, Floor, Studio, Residential Building; Room has no Buy and, being a
+  //     group type, contributes no leg) share a comfort card and a safety card — no non-card id survives Room's empty leg.
+  //   Rent/Annual 2 -> 3: amenities + furnished + the one pooled card of the six shared chips (ac, parking, elevator,
+  //     furnished, cameras, optical_fibers — the owner's «whole group box» example).
+  //   Rent/both 0 -> 2 and Buy+Rent 0 -> 2: the cards that survive the Annual ∩ Monthly (∩ Buy) chip intersection.
+  'Apartments & Co-living': { Buy: 2, 'Rent/Annual': 3, 'Rent/Monthly': 7, 'Rent/both': 2, 'Buy+Rent': 2 },
   // Buy 0 -> 1 on 2026-08-23: Duplex certified with its one source-verified field (bathrooms).
-  'Villas & Houses': { Buy: 1, 'Rent/Annual': 0, 'Rent/Monthly': 4, 'Rent/both': 0, 'Buy+Rent': 0 },
-  'Vacation & Rural': { Buy: 0, 'Rent/Annual': 0, 'Rent/Monthly': 4, 'Rent/both': 0, 'Buy+Rent': 0 },
-  'Residential Plots': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 4, 'Rent/both': 0, 'Buy+Rent': 0 },
+  'Villas & Houses': { Buy: 1, 'Rent/Annual': 0, 'Rent/Monthly': 7, 'Rent/both': 0, 'Buy+Rent': 0 },
+  'Vacation & Rural': { Buy: 0, 'Rent/Annual': 0, 'Rent/Monthly': 7, 'Rent/both': 0, 'Buy+Rent': 0 },
+  'Residential Plots': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 7, 'Rent/both': 0, 'Buy+Rent': 0 },
   // Buy 1 -> 2, Rent/Annual 1 -> 2 on 2026-09-01: same property_age unification — every member of
   // this group (Office, Shop, Showroom) certifies property_age for both deals.
   'Retail & Workspace': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
@@ -206,7 +216,9 @@ for (const { macro, group, types } of shippedGroups) {
 // entry for that deal also certifies property_age (never lowers one; a narrower id can only shrink
 // an intersection, never grow it beyond what was already there).
 const CEILING: Record<string, Record<string, number>> = {
-  'Apartments & Co-living': { Buy: 1, 'Rent/Annual': 2, 'Rent/Monthly': 2 },
+  // 2026-11-01: Buy 1 -> 4 (property_age · direction · build · amenities, shared by every Buy list of the group — Studio
+  // gained a Buy list), Rent/Monthly 2 -> 4 (amenities · comfort · space · fun, shared by Apartment, Room and Studio).
+  'Apartments & Co-living': { Buy: 4, 'Rent/Annual': 2, 'Rent/Monthly': 4 },
   'Villas & Houses': { Buy: 1, 'Rent/Annual': 7, 'Rent/Monthly': 3 },
   'Vacation & Rural': { Buy: 2, 'Rent/Annual': 3, 'Rent/Monthly': 0 },
   'Residential Plots': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0 },

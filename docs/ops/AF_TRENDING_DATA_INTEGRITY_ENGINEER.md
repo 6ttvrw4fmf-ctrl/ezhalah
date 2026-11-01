@@ -527,7 +527,7 @@ Things that cost a previous run real time, and are NOT product defects:
 5. **Advanced Filter lives in the «الوكيل الذكي» (agent) flow, not the Normal Filter «بحث» flow.**
    Reaching it: send an Arabic request, answer the agent's disambiguation (a city that is also a
    region needs «مدينة …»; «تقصد المدينة كاملة، أو حي معيّن؟» needs «المدينة كاملة»), then click
-   «خلّنا نحدد الطلب أكثر». A selected AF option shows a checkmark child at `opacity:1/scale(1)` and a
+   «🎯 دقّق مع الذكاء». A selected AF option shows a checkmark child at `opacity:1/scale(1)` and a
    bolder label — the option container's own background does NOT change, so a background-colour probe
    reports every option unselected.
 

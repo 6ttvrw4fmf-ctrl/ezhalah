@@ -429,7 +429,7 @@ export default function Interview() {
             ) : null}
             <View style={s.titleWrap}>
               <Ionicons name="sparkles" size={16} color={colors.primary} />
-              <Text style={s.title} numberOfLines={1}>{t('Ezhalah AI Agent')}</Text>
+              <Text style={s.title} numberOfLines={1}>{t('🎯 Refine with AI')}</Text>
             </View>
           </View>
           <Pressable onPress={() => router.back()} style={s.xBtn} hitSlop={6}>

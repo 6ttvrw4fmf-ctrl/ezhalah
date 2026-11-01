@@ -63,8 +63,9 @@ check('the orchestrator re-ranks after every answer and tracks asked questions (
 // scoreQuestion, and scoreQuestion still returns null on every gate.
 check('installments is ask-first via a TIER applied in the sort, never by bypassing the gates',
   /ASK_FIRST_TIER/.test(advSrc)
-  // 2026-10-31: `tier` is askTier everywhere but short stays, where it is the owner's fixed order (shortStaysAskTier).
-  && /const tier = isShortStaysScope\(q\) \? shortStaysAskTier : askTier;/.test(advSrc)
+  // 2026-10-31: `tier` is askTier everywhere but short stays, where it is the owner's fixed order (shortStaysAskTier);
+  // 2026-11-01: and the Apartments & Co-living scopes (hasCards), where it is the owner's numbered order (groupAskTier).
+  && /const tier = isShortStaysScope\(q\) \? shortStaysAskTier : hasCards\(q\) \? groupAskTier : askTier;/.test(advSrc)
   && /tier\(b\.question\.id\) - tier\(a\.question\.id\) \|\| b\.score - a\.score/.test(advSrc)
   && !/ASK_FIRST_TIER|askTier/.test(advSrc.slice(advSrc.indexOf('export function scoreQuestion'), advSrc.indexOf('export type RankedQuestion'))));
 // NARROWING GATE — UPDATED 2026-08-25 (owner decision of that date; it supersedes the 2026-08-22
@@ -108,13 +109,16 @@ check('furnished question is one tap, cohort-gated, true tri-state via furnished
 // The DB half of the same contract is the af_registry_monthly_uncertified P1 guard.
 const cohortBlock = cohortSrc.slice(cohortSrc.indexOf('export const COHORT_QUESTIONS'), cohortSrc.indexOf('export function scopeCleanTypes'));
 const monthlyLists = [...cohortBlock.matchAll(/RentMonthly:\s*\[([^\]]*)\]/g)].map((m) => m[1]);
-const MONTHLY_ALLOWED = ['rating', 'unit_subtype', 'amenities', 'bathrooms'];
-check('COHORT_QUESTIONS exists, Monthly keys exist ONLY for the certified cohorts (شقة/غرفة/فيلا)',
+// 2026-10-31 / 11-01: the short-stays cards (comfort · space · fun) are Monthly-certified too, and Studio gained a
+// Monthly list (the owner's Apartments & Co-living lists) — four Monthly lists: Apartment, Room, Studio, Villa.
+const MONTHLY_ALLOWED = ['rating', 'unit_subtype', 'amenities', 'bathrooms', 'comfort', 'space', 'fun'];
+check('COHORT_QUESTIONS exists, Monthly keys exist ONLY for the certified cohorts (شقة/غرفة/استديو/فيلا)',
   /export const COHORT_QUESTIONS/.test(cohortSrc)
-  && monthlyLists.length === 3
-  && /Apartment:\s*\{[\s\S]{0,900}RentMonthly:/.test(cohortBlock)
-  && /Room:\s*\{[\s\S]{0,400}RentMonthly:/.test(cohortBlock)
-  && /Villa:\s*\{[\s\S]{0,700}RentMonthly:/.test(cohortBlock));
+  && monthlyLists.length === 4
+  && /Apartment:\s*\{[\s\S]{0,1400}RentMonthly:/.test(cohortBlock)
+  && /Room:\s*\{[\s\S]{0,500}RentMonthly:/.test(cohortBlock)
+  && /Studio:\s*\{[\s\S]{0,600}RentMonthly:/.test(cohortBlock)
+  && /Villa:\s*\{[\s\S]{0,800}RentMonthly:/.test(cohortBlock));
 check('every Monthly question list draws ONLY from the Monthly-certified set (no Annual copy-paste)',
   monthlyLists.length > 0 && monthlyLists.every((l) =>
     [...l.matchAll(/'([^']+)'/g)].every((m) => MONTHLY_ALLOWED.includes(m[1]))));
@@ -182,14 +186,15 @@ check('RNPL + amenities + bathrooms are cohort-gated through cohortAllows',
   /RNPL_QUESTION[\s\S]{0,420}cohortAllows\(q, 'rnpl'\)/.test(advSrc)
   && /cohortAllows\(q, 'amenities'\)/.test(advSrc)
   && /cohortAllows\(q, 'bathrooms'\)/.test(advSrc)
-  && /export function cohortAllows[\s\S]{0,1300}q\.rentPeriod === 'monthly'\) return \(cfg\.RentMonthly/.test(cohortSrc));
+  && /export function cohortAllows[\s\S]{0,2600}q\.rentPeriod === 'monthly'\) return \(cfg\.RentMonthly/.test(cohortSrc));
 
 // Mixed period ('both', owner 2026-08-19): cohortAllows must require BOTH RentAnnual and RentMonthly
 // membership — union would let a period-specific question fire against the other period's rows.
 // Full behavioral coverage lives in scripts/verify-mixed-period-af-gating.ts (mutation-tested); this
 // is a lighter structural check that the contract-level pool still routes 'both' through that gate.
 check("cohortAllows has an explicit 'both' branch (intersection of RentAnnual and RentMonthly), never aliasing to Annual",
-  /q\.rentPeriod === 'both'\) return \(cfg\.RentAnnual \?\? \[\]\)\.includes\(id\) && \(cfg\.RentMonthly \?\? \[\]\)\.includes\(id\)/.test(cohortSrc));
+  // 2026-10-31: a block — a group type without a monthly cohort reads its Annual list first (afCohorts.ts), then the intersection
+  /q\.rentPeriod === 'both'\) \{[\s\S]{0,400}?return \(cfg\.RentAnnual \?\? \[\]\)\.includes\(id\) && \(cfg\.RentMonthly \?\? \[\]\)\.includes\(id\)/.test(cohortSrc));
 check('Furnished chip is cohort-gated — never offered where the cohort config withholds it',
   /cohortAllows\(q, 'furnished'\)\)\s*defs\.push\(\{\s*key:\s*'furnished'/.test(advSrc));
 

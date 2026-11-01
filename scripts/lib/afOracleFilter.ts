@@ -70,6 +70,32 @@ export const AMENITY_TOKEN_COL: Record<string, string> = {
   furnished: 'furnished',
   rnpl: 'rent_now_pay_later',
   rent_now_pay_later: 'rent_now_pay_later',
+  // The 39 column-backed chips of the Apartments & Co-living cards (owner handoff 2026-10-31, migration
+  // 20261101100930): the clause guards each as `and (not ('tok' = any(p_amenities)) or s.tok)` — token = column.
+  roof: 'roof', two_entrances: 'two_entrances', annex: 'annex', yard: 'yard', garage: 'garage', grill: 'grill',
+  storage: 'storage', water_tank: 'water_tank', warranty: 'warranty', electronic_deed: 'electronic_deed', basement: 'basement',
+  self_checkin: 'self_checkin', wifi: 'wifi', bills_included: 'bills_included', jacuzzi: 'jacuzzi', smart_tv: 'smart_tv',
+  billiards: 'billiards', cleaning_service: 'cleaning_service', soundproof: 'soundproof', cameras: 'cameras', guard: 'guard',
+  smart_entry: 'smart_entry', smart_home: 'smart_home', central_gas: 'central_gas', sauna: 'sauna', kids_play_area: 'kids_play_area',
+  nursery: 'nursery', free_maintenance: 'free_maintenance', intercom: 'intercom', fire_system: 'fire_system', ev_charger: 'ev_charger',
+  central_vacuum: 'central_vacuum', insulation: 'insulation', dining_majlis: 'dining_majlis', own_bathroom: 'own_bathroom',
+  fridge: 'fridge', whole_floor: 'whole_floor', singles: 'singles', families: 'families',
+};
+// The 6 DERIVED tokens of the same migration — one p_amenities slug standing for a predicate over OTHER columns,
+// mirroring the clause arms exactly:
+//   separate_meters → (s.separate_electricity_meter or s.separate_water_meter)   [an OR group: either meter true]
+//   apts4/8/12/20   → s.apartments_count >= n                                    [the Residential Building ladder]
+//   has_shops       → s.shops_count >= 1
+// Each is translated to PostgREST the way the clause reads it: the OR as an `or=(…)` group (so it composes with the
+// other or-groups through `and=(or(…),or(…))`), the numbers as plain `gte` filters.
+export type DerivedAmenity = { cols: string[]; filter: string; orGroup?: boolean };
+export const AMENITY_TOKEN_DERIVED: Record<string, DerivedAmenity> = {
+  separate_meters: { cols: ['separate_electricity_meter', 'separate_water_meter'], filter: 'separate_electricity_meter.is.true,separate_water_meter.is.true', orGroup: true },
+  apts4: { cols: ['apartments_count'], filter: 'apartments_count=gte.4' },
+  apts8: { cols: ['apartments_count'], filter: 'apartments_count=gte.8' },
+  apts12: { cols: ['apartments_count'], filter: 'apartments_count=gte.12' },
+  apts20: { cols: ['apartments_count'], filter: 'apartments_count=gte.20' },
+  has_shops: { cols: ['shops_count'], filter: 'shops_count=gte.1' },
 };
 
 export type OracleOpts = {
@@ -711,8 +737,10 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       case 'p_amenities':
         for (const tok of v as string[]) {
           const col = AMENITY_TOKEN_COL[tok];
-          if (!col) { unhandled.push(`p_amenities:${tok}`); continue; }
-          parts.push(`${col}=is.true`);
+          if (col) { parts.push(`${col}=is.true`); continue; }
+          const derived = AMENITY_TOKEN_DERIVED[tok];
+          if (!derived) { unhandled.push(`p_amenities:${tok}`); continue; }
+          if (derived.orGroup) orGroups.push(derived.filter); else parts.push(derived.filter);
         }
         break;
       // genuinely irrelevant to the WHERE clause (paging/sorting/informational), always safe:
