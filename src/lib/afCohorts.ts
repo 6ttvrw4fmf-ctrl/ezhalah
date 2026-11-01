@@ -16,14 +16,32 @@ export { isShortStaysScope };
 // cohort whatever group or type is in scope — the per-type intersection below is for inventories
 // that differ by type, and here they do not. Measured 2026-10-31 over all 18,963 short-stay ads:
 // bathrooms known on 18,741 (98.8 %, every type ≥ 82 %); amenity chips are positive-only tokens.
-// The two ASKED questions. No property type (decision 1), no rating (decision 2 — Aqar Monthly has
-// no rating, so a rating floor would hide all of its ads).
-export const SHORT_STAYS_QUESTIONS = ['bathrooms', 'amenities'] as const;
-// Certified for a TYPED sentence only («تقييم ٩ وفوق», «استديو»): the chat keeps using them as
-// today (afIntents.ts gates on cohortAllows), the card never asks them.
-export const SHORT_STAYS_CHAT_ONLY = ['rating', 'unit_subtype'] as const;
+// The three ASKED questions, in the owner's order (decision 3): 🚽 bathrooms → 🔑 comfort → 🏊 fun &
+// outdoors. No property type (decision 1), no rating (decision 2 — Aqar Monthly has no rating, so a
+// rating floor would hide all of its ads). `comfort` and `outdoors` are the generic amenities card
+// split in two (owner 2026-10-31, «Exactly 3 questions, in this order»); both write q.amenities.
+export const SHORT_STAYS_QUESTIONS = ['bathrooms', 'comfort', 'outdoors'] as const;
+// Certified for a TYPED sentence only («فيها مصعد», «تقييم ٩ وفوق», «استديو»): the chat keeps using
+// them as today (afIntents.ts gates on cohortAllows), the card never asks them on short stays.
+export const SHORT_STAYS_CHAT_ONLY = ['amenities', 'rating', 'unit_subtype'] as const;
 const SHORT_STAYS_CERTIFIED: readonly string[] = [...SHORT_STAYS_QUESTIONS, ...SHORT_STAYS_CHAT_ONLY];
 export const shortStaysAsks = (id: string): boolean => (SHORT_STAYS_QUESTIONS as readonly string[]).includes(id);
+// The fixed ask order on short stays: rankQuestions() sorts by this tier instead of ASK_FIRST_TIER
+// (a tier only reorders questions that already cleared the usefulness gates — never forces one).
+export function shortStaysAskTier(id: string): number {
+  const i = (SHORT_STAYS_QUESTIONS as readonly string[]).indexOf(id);
+  return i < 0 ? 0 : SHORT_STAYS_QUESTIONS.length - i;
+}
+// The chips each short-stays question offers TODAY — every key already has its count path
+// (cnt_<key> in apartment_guided_counts_ar) and its p_amenities slug. The owner's full lists (self
+// check-in, Wi-Fi, bills included, grill, kids' play area, jacuzzi, outdoor seating) join one chip at
+// a time, each with its free-word-reader words and count first (docs/ops/AI_FACTS_READER.md).
+// COMFORT_QUESTION / OUTDOORS_QUESTION in advancedFilters.ts inline the same keys (they are lifted by
+// barriers and cannot import these); verify-short-stays-one-cohort.ts pins the two copies equal.
+export const SHORT_STAYS_COMFORT_KEYS = ['elevator', 'parking', 'laundry_room'] as const;
+export const SHORT_STAYS_OUTDOORS_KEYS = ['pool', 'garden'] as const;
+// Every question that writes the one q.amenities bag and is token-filtered on re-entry (afCarry.ts).
+export const AMENITY_BAG_QUESTION_IDS: ReadonlySet<string> = new Set(['amenities', 'comfort', 'outdoors']);
 
 // Which amenity chips are safe for a MULTI-TYPE scope: the intersection of every selected type's
 // certified chip list. Returns null when no selected type has a cohort chip list (the caller then
@@ -361,10 +379,10 @@ export function certifiedAmenityKeys(q: SearchQuery): string[] {
   // Not certified for this cohort at all ⇒ no amenity token is applicable. Never fall through to a
   // base list here: that would let an uncertified cohort acquire constraints the AF path refuses.
   if (!cohortAllows(q, 'amenities')) return [];
-  // Short stays (owner 2026-10-31): the residential chips for the whole pool, whatever type is in
-  // scope — a «Vacation & Rural» group would otherwise intersect Rest House's utility trio with
-  // Chalet's nothing and offer no chip at all. AMENITIES_QUESTION mirrors this branch.
-  if (isShortStaysScope(q)) return [...RESIDENTIAL_AMENITY_BASE];
+  // Short stays (owner 2026-10-31): the chips the two short-stays cards offer, for the whole pool,
+  // whatever type is in scope — a «Vacation & Rural» group would otherwise intersect Rest House's
+  // utility trio with Chalet's nothing and offer no chip at all.
+  if (isShortStaysScope(q)) return [...SHORT_STAYS_COMFORT_KEYS, ...SHORT_STAYS_OUTDOORS_KEYS];
   // No empty-scope guard here on purpose: cohortAllows() already returns false when scopeCleanTypes
   // is empty, so a second check is dead code — it cannot change behaviour and cannot be tested. (A
   // mutation removing it was provably EQUIVALENT, which is what exposed it as redundant.)

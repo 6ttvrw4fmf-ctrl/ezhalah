@@ -256,9 +256,14 @@ for (const cell of certified.filter((c) => c.scope.kind === 'type')) {
         // the Filter screen's own edits, written onto the raw store: mode toggles and the type row
         const moved = inMode({ ...stored, category: t.scope.category, typeGroups: groupsOf(t.scope.types), types: t.scope.types } as SearchQuery, t.mode);
         const back = reconcileCommittedAf(moved, L.questions);
-        const listed = t.scope.types.every((ty) => tableAllows(ty, t.mode, f.question.id));
-        // amenities are certified per TOKEN: kept iff the new cell's own card can offer the token
-        const keep = listed && (f.question.id !== 'amenities' || offeredKeys(t.scope, t.mode, 'amenities').has(o.key));
+        const listedFor = (id: string) => t.scope.types.every((ty) => tableAllows(ty, t.mode, id));
+        const listed = listedFor(f.question.id);
+        // amenities are certified per TOKEN: kept iff a card in the new cell that writes the amenities bag
+        // (the card, or its short-stays halves comfort / outdoors — owner 2026-10-31) can offer the token
+        const BAG = ['amenities', 'comfort', 'outdoors'];
+        const keep = BAG.includes(f.question.id)
+          ? BAG.some((id) => listedFor(id) && offeredKeys(t.scope, t.mode, id).has(o.key))
+          : listed;
         const want = keep ? L.rpcAdvancedFilterParams(f.question.apply(inMode({ ...t.scope.query, typeGroups: groupsOf(t.scope.types), types: t.scope.types } as SearchQuery, t.mode), [o.key])) : {};
         assert(same(L.rpcAdvancedFilterParams(back), want) && (back.afFacets?.length ?? 0) === (keep ? 1 : 0),
           `${cell.scope.label}/${cell.mode.mode} ${f.question.id}=${o.key} → ${t.scope.label}/${t.mode.mode}: expected ${keep ? 'KEPT' : 'DROPPED'} (table ${listed ? 'lists' : 'does not list'} it), got ${JSON.stringify(L.rpcAdvancedFilterParams(back))} with ${back.afFacets?.length ?? 0} chip(s)`);

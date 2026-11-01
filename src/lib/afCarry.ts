@@ -20,7 +20,7 @@
 // THIS MODULE IS PURE (no ./remote, no React) so a barrier can EXECUTE it instead of grepping for
 // it — the same reason afCohorts/afPlan/afRanking were extracted.
 import type { SearchQuery } from '@/data/search';
-import { cohortAllows, certifiedAmenityKeys } from './afCohorts.ts';
+import { cohortAllows, certifiedAmenityKeys, AMENITY_BAG_QUESTION_IDS } from './afCohorts.ts';
 import { isScopeQuestionId } from './afPlan.ts';
 import { AF_PREDICATE_FIELDS } from './searchDefaults.ts';
 
@@ -64,8 +64,12 @@ type Applier = { id: string; apply: (q: SearchQuery, keys: string[]) => SearchQu
  */
 export function certifiedFacets(q: SearchQuery, facets: readonly CommittedFacet[]): CommittedFacet[] {
   return facets
-    .filter((f) => !isScopeQuestionId(f.id) && cohortAllows(q, f.id))
-    .map((f) => (f.id === AMENITY_TOKEN_QUESTION_ID ? certifiedAmenityFacet(q, f) : f))
+    // A facet that writes the amenities bag (the card or one of its short-stays halves) is certified
+    // wherever ANY bag card is — the tokens are what matter, and they are filtered per token below.
+    .filter((f) => !isScopeQuestionId(f.id) && (AMENITY_BAG_QUESTION_IDS.has(f.id)
+      ? [...AMENITY_BAG_QUESTION_IDS].some((id) => cohortAllows(q, id))
+      : cohortAllows(q, f.id)))
+    .map((f) => (AMENITY_BAG_QUESTION_IDS.has(f.id) ? certifiedAmenityFacet(q, f) : f))
     .filter((f): f is CommittedFacet => f !== null);
 }
 
@@ -91,7 +95,8 @@ export function certifiedFacets(q: SearchQuery, facets: readonly CommittedFacet[
  * labels are not index-parallel to the keys (so the chip cannot be split honestly) the whole facet
  * goes rather than leave a control that overstates what is actually being filtered.
  */
-const AMENITY_TOKEN_QUESTION_ID = 'amenities';
+// The amenities card and its two short-stays halves (comfort / outdoors, owner 2026-10-31) all write
+// the one q.amenities bag, so all three are token-filtered the same way: AMENITY_BAG_QUESTION_IDS.
 function certifiedAmenityFacet(q: SearchQuery, f: CommittedFacet): CommittedFacet | null {
   const allowed = new Set(certifiedAmenityKeys(q));
   const keep = f.keys.map((_, i) => i).filter((i) => allowed.has(String(f.keys[i] ?? '').trim().toLowerCase()));
