@@ -94,14 +94,14 @@ export const ASK_FIRST_TIER: Record<string, number> = { rnpl: 1 };
 export function askTier(id: string): number { return ASK_FIRST_TIER[id] ?? 0; }
 
 // ── THE NARROWING PREDICATE — ONE rule, used by BOTH gates ──────────────────────────────────────
-// The ONLY place the owner's 5% lives (10% from 2026-08-25 to 2026-11-01; the owner lowered it — «lets lower it»
-// — so a question is asked whenever one of its chips moves the set by a twentieth). scoreQuestion() below calls it to decide whether an OPTION
+// The ONLY place the owner's 2.5% lives (10% from 2026-08-25 to 2026-11-01; the owner lowered it — «lets lower it …
+// lets make it go to 2.5» — so a question is asked whenever one of its chips moves the set by a fortieth). scoreQuestion() below calls it to decide whether an OPTION
 // may be asked about; offersMeaningfulNarrowing() at the bottom of this file calls it to decide
 // whether «تحديد أكثر» may be OFFERED at all. Two copies of this arithmetic would eventually drift
 // into a button that opens a round and immediately closes it — the exact bug shape PR #1094 had to
 // fix for a different cause. One predicate makes that unrepresentable.
 //
-// Removal form (`total - count >= total * FRACTION`), so EXACTLY 5% qualifies.
+// Removal form (`total - count >= total * FRACTION`), so EXACTLY 2.5% qualifies.
 //
 // THE WORKED EXAMPLES BELOW ARE EXECUTED, NOT DECORATIVE. Every `[N=…, k=… -> qualifies|rejected]`
 // in this tree is parsed out and run against this very function by
@@ -115,11 +115,11 @@ export function askTier(id: string): number { return ASK_FIRST_TIER[id] ?? 0; }
 // written in the bracket form here — the parser reads every bracketed example in this file as a live
 // claim to execute, and cannot tell a historical quotation from an assertion.)
 //
-// Above the escape line the 5% clause decides alone: [N=1000, k=950 -> qualifies] is exactly 5%
-// removed, [N=1000, k=951 -> rejected] is just under. The second clause exists so the LAST step to
+// Above the escape line the 2.5% clause decides alone: [N=1000, k=975 -> qualifies] is exactly 2.5%
+// removed, [N=1000, k=976 -> rejected] is just under. The second clause exists so the LAST step to
 // the target is never blocked by a percentage: [N=26, k=25 -> qualifies] removes only 3.8% but lands
 // AT INTERVIEW_STOP_AT, which is the whole point of the round.
-export const MEANINGFUL_NARROWING_FRACTION = 0.05;
+export const MEANINGFUL_NARROWING_FRACTION = 0.025;
 export function optionNarrowsMeaningfully(count: number, total: number): boolean {
   return total - count >= total * MEANINGFUL_NARROWING_FRACTION || count <= INTERVIEW_STOP_AT;
 }
@@ -199,7 +199,7 @@ export const AF_ROUND_MAX_QUESTIONS = 4;
 // May we OFFER «تحديد أكثر» at all? A round costs the user taps, so it is offered only when it can
 // pay for itself: more than INTERVIEW_STOP_AT results AND some remaining option that
 // optionNarrowsMeaningfully(). This gate only ever runs ABOVE the stop line, so its worked examples
-// live there too: [N=100, k=95 -> qualifies] removes exactly 5%, [N=100, k=96 -> rejected] falls
+// live there too: [N=100, k=97 -> qualifies] removes 3%, [N=100, k=98 -> rejected] falls
 // just short, and [N=26, k=25 -> qualifies] wins by landing AT INTERVIEW_STOP_AT rather than by
 // percentage. Nothing qualifying ⇒ the button is HIDDEN. (These are executed — see the note on
 // optionNarrowsMeaningfully above. The pair that used to sit here, "at N=50 an option yielding 45
