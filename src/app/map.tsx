@@ -36,6 +36,8 @@ const setLtr = (node: any) => {
   if (Platform.OS === 'web' && node?.setAttribute) node.setAttribute('dir', 'ltr');
 };
 
+const ROUTE_PROVIDER_READY = false;
+
 export default function MapRoute() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -124,7 +126,10 @@ export default function MapRoute() {
       {/* Transaction + filter row above the map (owner 2026-10-31, Zillow's «For sale ▾ | Filters», Ezhalah-themed). */}
       <View style={s.dealWrap}>{routeMode ? <MapRouteFields onClose={() => setRouteMode(false)} onRouted={() => setFull(true)} /> : <MapSearchBar onPick={() => setFull(true)} />}<MapDealRow /></View>
       <View style={full ? [s.bodyFull, { paddingTop: insets.top + 8, paddingBottom: Math.max(insets.bottom, 8) }] : [s.body, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-        <AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} onRoute={() => { setRouteMode(true); setFull(false); }} />
+        {/* «مسار» is built but HIDDEN (2026-11-01): Apple's directions return ZERO routes anywhere in Saudi Arabia on MapKit JS
+          (measured live: Jeddah→Riyadh, inside Riyadh, walking — all 0; the same call routes in the UAE, the UK, the US).
+          Pass `onRoute` again once a routing provider that covers the Kingdom is chosen (ROUTE_PROVIDER_READY). */}
+      <AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} onRoute={ROUTE_PROVIDER_READY ? () => { setRouteMode(true); setFull(false); } : undefined} />
       </View>
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
