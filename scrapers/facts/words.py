@@ -417,23 +417,33 @@ def run(args: argparse.Namespace) -> int:
 
 
 # ── incremental: the nightly reader that feeds the Advanced Filter overlay (Rule B, owner 2026-10-25) ──────
-# The 20 search-index columns an ad's text may answer — public.text_facts_af_columns(), same order. The DB's
+# The 60 search-index columns an ad's text may answer — public.text_facts_af_columns(), same order. The DB's
 # CHECK refuses any other key and any value without its quote, so this list cannot drift silently.
 AF_COLUMNS = ("furnished", "elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room",
               "private_entrance", "separate_electricity_meter", "separate_water_meter", "electricity",
               "water_supply", "sanitation", "balcony", "laundry_room", "pool", "gym", "garden", "car_entrance",
-              "optical_fibers", "majlis")   # majlis: the 21st AF amenity (owner 2026-10-26, decision #3)
+              "optical_fibers", "majlis",   # majlis: the 21st AF amenity (owner 2026-10-26, decision #3)
+              # owner 2026-10-31: the 11 stored-only facts promoted to filter chips …
+              "roof", "two_entrances", "annex", "yard", "garage", "grill", "storage", "water_tank", "warranty",
+              "electronic_deed", "basement",
+              # … and the 28 new apartment chips, in the handoff's order
+              "self_checkin", "wifi", "bills_included", "jacuzzi", "smart_tv", "billiards", "cleaning_service",
+              "soundproof", "cameras", "guard", "smart_entry", "smart_home", "central_gas", "sauna", "kids_play_area",
+              "nursery", "free_maintenance", "intercom", "fire_system", "ev_charger", "central_vacuum", "insulation",
+              "dining_majlis", "own_bathroom", "fridge", "whole_floor", "singles", "families")
 # The NUMERIC index columns an ad's text may fill — public.text_facts_af_num_columns(), same order. Rule B for
 # numbers (owner 2026-10-25, handoff decision #1): the number fills a BLANK box only, the site's own number is never
 # replaced. The DB CHECK admits a JSON number 4..150 with its quote; the checker already refuses a corner plot,
-# «يحدها 2 شارع», two widths or two bearings, so one ad hands over at most one width.
-AF_NUM_COLUMNS = ("street_width_m",)
+# «يحدها 2 شارع», two widths or two bearings, so one ad hands over at most one width. apartments_count and shops_count
+# (owner 2026-10-31) ride the same path: the checker's _COUNT_RES readers emit one agreed count per ad, as a number
+# with its quote, exactly like the width.
+AF_NUM_COLUMNS = ("street_width_m", "apartments_count", "shops_count")
 
 
 def overlay_row(table: str, r: dict[str, Any], run_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """One text_facts_todo row → (its listing_text_facts row, every fact the checker found).
 
-    The overlay row keeps only the 20 AF columns, each {v, q}. An ad with no AF fact (or too little text)
+    The overlay row keeps only the AF columns (AF_COLUMNS + AF_NUM_COLUMNS), each {v, q}. An ad with no AF fact (or too little text)
     still gets a row with facts {} — that row is the memory that this exact text (src_hash) was read."""
     text = W.clean_text(r.get("title"), r.get("body"))
     found = W.check(text) if W.readable(norm(text)) else []
@@ -546,6 +556,13 @@ def selftest() -> None:
     corner, _ = overlay_row("aqar_residential_listings", dict(id=9, ad_number="A9", src_hash="0" * 32,
                             title="أرض للبيع", body="أرض زاوية على شارع 20م شرقي وشارع 15م شمالي"), "facts-words-t")
     assert "street_width_m" not in corner["facts"], corner
+    # owner 2026-10-31: the two building counts ride the numeric path with their quotes; a promoted stored-only fact
+    # (roof) and a new chip (wifi, bills_included) reach the overlay row like any other AF column
+    bldg, _ = overlay_row("aqar_residential_listings", dict(id=11, ad_number="A11", src_hash="0" * 32,
+                          title="عمارة للبيع", body="عدد الشقق 12، محلين، سطح مستقل، واي فاي، شامل الكهرباء والماء"), "facts-words-t")
+    assert bldg["facts"].get("apartments_count") == {"v": 12.0, "q": "عدد الشقق 12"}, bldg
+    assert bldg["facts"].get("shops_count") == {"v": 2.0, "q": "محلين"}, bldg
+    assert all(bldg["facts"].get(k, {}).get("v") is True for k in ("roof", "wifi", "bills_included")), bldg
     short, _ = overlay_row("aqar_residential_listings", dict(id=8, ad_number="A8", src_hash="0" * 32,
                            title="", body="مصعد"), "facts-words-t")
     assert short["facts"] == {}, short
