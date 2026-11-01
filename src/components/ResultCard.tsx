@@ -37,6 +37,7 @@ const IS_WEB = Platform.OS === 'web';
 
 // Feature key → (icon, EN label key) — the wrapping amenities row on the listing card.
 // The label is run through t() so it localizes to Arabic. Order matters: most useful features first.
+const AMENITY_BAG_IDS = new Set(['amenities', 'comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun', 'apartments', 'shops']);
 export const FEATURE_META: Array<{ key: keyof NonNullable<Listing['features']>; icon: any; label: string }> = [
   { key: 'parking',          icon: 'car-outline',           label: 'Parking' },
   { key: 'maid_room',        icon: 'person-outline',        label: 'Maid Room' },
@@ -216,7 +217,9 @@ export function ResultCard({
   // lights up the same way. Display-only: the set comes from the active answers, and a feature is only
   // drawn at all when the listing itself carries it (the AF predicate is strict, so it always does).
   const pickedFeatures = useMemo(() => {
-    const keys = activeAf?.find((a) => a.id === 'amenities')?.keys ?? [];
+    // Every amenity-bag answer — the classic card and each themed card of the Apartments & Co-living group
+    // (owner handoff 2026-10-31) — writes q.amenities, so any of these ids may carry the picked keys.
+    const keys = (activeAf ?? []).filter((a) => AMENITY_BAG_IDS.has(a.id)).flatMap((a) => a.keys);
     return new Set(keys.map((k) => (k === 'balcony' ? 'balcony_terrace' : AMENITY_COL[k] ?? k)));
   }, [activeAf]);
   const bathPicked = !!activeAf?.some((a) => a.id === 'bathrooms');

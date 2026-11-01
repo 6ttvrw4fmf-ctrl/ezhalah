@@ -1374,6 +1374,12 @@ migration-drift-guard rule in `AGENTS.md`).
   These replace the magnifying-glass emoji; explanatory copy and dismissal stay the same.
   Guards: `scripts/verify-insight-welcome.ts`, `scripts/verify-filter-welcome.ts`.
 
+- **The Apartments & Co-living group of «🎯 Refine with AI» has owner-LOCKED chip lists (2026-10-31)** — one list
+  per type × deal (Apartment / Floor / Room / Studio / Residential building × short stays / annual rent / buy),
+  combined by key-level INTERSECTION in code (`cardPlan()`), never by a hand-written list; a chip exists only where
+  its `cnt_<token>` count exists (migration 20261101100930). The lists, the contract, the pipeline and how it is
+  built: `docs/ops/ADVANCED_FILTER_APARTMENTS_GROUP.md`. Changing a list is a product decision.
+
 ---
 
 ## 21. Open questions / decisions still pending

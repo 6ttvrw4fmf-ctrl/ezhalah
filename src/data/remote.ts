@@ -882,6 +882,19 @@ export type GuidedCounts = {
   // amenity column NULL (the listing stated no amenity at all).
   cnt_rnpl_unknown: number; cnt_amen_unknown: number; cnt_bath_unknown: number;
   cnt_stw_unknown: number; cnt_rating_unknown: number; cnt_sub_unknown: number;
+  // Apartments & Co-living group (owner handoff 2026-10-31, migration 20261101100930): one cnt_<token> per
+  // chip in src/lib/afChips.ts CHIP_DEFS — 39 boolean columns + 6 derived predicates (separate_meters,
+  // apts4/8/12/20 on apartments_count, has_shops on shops_count) — plus the two «لم يذكر» counts.
+  cnt_roof: number; cnt_two_entrances: number; cnt_annex: number; cnt_yard: number; cnt_garage: number;
+  cnt_grill: number; cnt_storage: number; cnt_water_tank: number; cnt_warranty: number; cnt_electronic_deed: number;
+  cnt_basement: number; cnt_self_checkin: number; cnt_wifi: number; cnt_bills_included: number; cnt_jacuzzi: number;
+  cnt_smart_tv: number; cnt_billiards: number; cnt_cleaning_service: number; cnt_soundproof: number; cnt_cameras: number;
+  cnt_guard: number; cnt_smart_entry: number; cnt_smart_home: number; cnt_central_gas: number; cnt_sauna: number;
+  cnt_kids_play_area: number; cnt_nursery: number; cnt_free_maintenance: number; cnt_intercom: number; cnt_fire_system: number;
+  cnt_ev_charger: number; cnt_central_vacuum: number; cnt_insulation: number; cnt_dining_majlis: number; cnt_own_bathroom: number;
+  cnt_fridge: number; cnt_whole_floor: number; cnt_singles: number; cnt_families: number;
+  cnt_separate_meters: number; cnt_apts4: number; cnt_apts8: number; cnt_apts12: number; cnt_apts20: number; cnt_has_shops: number;
+  cnt_apts_unknown: number; cnt_shops_unknown: number;
 };
 
 // De-duped per the comment above fetchPropertyAgeOptionCounts — this is the function RNPL/amenities/

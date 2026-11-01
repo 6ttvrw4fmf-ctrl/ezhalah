@@ -24,7 +24,7 @@
 -- already shrunk — which is the whole point of the answer.
 --
 -- NULL-PRESERVING BY CONSTRUCTION. jsonb_build_object keeps a SQL NULL as a JSON null rather than
--- dropping the key, so all 28 keys are always present when the object is built. That is what lets
+-- dropping the key, so all 70 keys (28 + the 39 group booleans + apartments_count/shops_count/majlis) are always present when the object is built. That is what lets
 -- afEvidence's null-guard distinguish "the source did not publish this" (JSON null → render nothing)
 -- from "the column is missing" (a bug). UNKNOWN stays UNKNOWN, end to end.
 --
@@ -34,7 +34,7 @@
 -- location_search_candidates_ar. Verified against production by a full dry run of that migration on
 -- 2026-09-03 (applied → all six smokes green → rolled back; 350 rows checked for 28 keys,
 -- NULL-preservation and source-row identity, parity 0, gate holding).
--- md5 of the body below: f80b807b6b13a59a40e8d6eb0ccdde88   (2026-10-26 majlis packed, migration 20261026013134; before it: f7427472528cff2b58ccf58c9e124d18, the 2026-10-03 gate amendment)
+-- md5 of the body below: 246f1b2d991fcc0c9fc4ba82b7defa4f   (2026-11-01 Apartments & Co-living pack, migration 20261101100930; before it: f80b807b6b13a59a40e8d6eb0ccdde88, the 2026-10-26 majlis pack)
 -- Re-verify after the migration is applied under the deploy lock.
 -- Amended 2026-10-03 (migration af_every_question_multi_select_unions, owner: «never force the user to
 -- select one thing»): the gate gains p_age_buckets / p_rating_buckets / p_furnished_in, so a search
@@ -66,4 +66,16 @@ case when (
     'water_supply', s.water_supply, 'gym', s.gym, 'pool', s.pool, 'garden', s.garden,
     'balcony', s.balcony, 'laundry_room', s.laundry_room, 'optical_fibers', s.optical_fibers, 'majlis', s.majlis,
     'separate_electricity_meter', s.separate_electricity_meter,
-    'separate_water_meter', s.separate_water_meter) end
+    'separate_water_meter', s.separate_water_meter) || jsonb_build_object(
+    -- Apartments & Co-living group (migration 20261101100930): a second jsonb_build_object joined with || because one
+    -- call takes at most 100 arguments (the pack is now 70 pairs). The 39 text-fact booleans + the two counts the
+    -- derived tokens read (separate_meters reads the two meter columns packed above).
+    'roof', s.roof, 'two_entrances', s.two_entrances, 'annex', s.annex, 'yard', s.yard, 'garage', s.garage,
+    'grill', s.grill, 'storage', s.storage, 'water_tank', s.water_tank, 'warranty', s.warranty, 'electronic_deed', s.electronic_deed,
+    'basement', s.basement, 'self_checkin', s.self_checkin, 'wifi', s.wifi, 'bills_included', s.bills_included, 'jacuzzi', s.jacuzzi,
+    'smart_tv', s.smart_tv, 'billiards', s.billiards, 'cleaning_service', s.cleaning_service, 'soundproof', s.soundproof, 'cameras', s.cameras,
+    'guard', s.guard, 'smart_entry', s.smart_entry, 'smart_home', s.smart_home, 'central_gas', s.central_gas, 'sauna', s.sauna,
+    'kids_play_area', s.kids_play_area, 'nursery', s.nursery, 'free_maintenance', s.free_maintenance, 'intercom', s.intercom, 'fire_system', s.fire_system,
+    'ev_charger', s.ev_charger, 'central_vacuum', s.central_vacuum, 'insulation', s.insulation, 'dining_majlis', s.dining_majlis, 'own_bathroom', s.own_bathroom,
+    'fridge', s.fridge, 'whole_floor', s.whole_floor, 'singles', s.singles, 'families', s.families,
+    'apartments_count', s.apartments_count, 'shops_count', s.shops_count) end
