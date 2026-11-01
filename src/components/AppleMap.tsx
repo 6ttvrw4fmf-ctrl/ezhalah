@@ -6,6 +6,7 @@ import { colors } from '@/theme/tokens';
 export type PlaceSuggestion = { displayLines: string[]; coordinate?: { latitude: number; longitude: number } };
 export async function suggestPlaces(_q: string, _language: string): Promise<PlaceSuggestion[]> { return []; }
 export function flyToPlace(_p: PlaceSuggestion) {}
+export function clearPlaceMark() {}
 
 export default function AppleMap(_: { full?: boolean; onExpand?: () => void; onClose?: () => void }) {
   return <View style={s.frame} />;

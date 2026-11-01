@@ -11,7 +11,7 @@ import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'r
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
-import { suggestPlaces, flyToPlace, type PlaceSuggestion } from '@/components/AppleMap';
+import { suggestPlaces, flyToPlace, clearPlaceMark, type PlaceSuggestion } from '@/components/AppleMap';
 
 export type MapDeal = 'buy' | 'rent' | 'short';
 const DEALS: { id: MapDeal; label: string }[] = [
@@ -60,7 +60,7 @@ export function MapSearchBar({ onPick }: { onPick?: () => void } = {}) {
           testID="map-search"
         />
         {q ? (
-          <Pressable onPress={() => { setQ(''); setHits([]); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')}>
+          <Pressable onPress={() => { setQ(''); setHits([]); clearPlaceMark(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')}>
             <Ionicons name="close-circle" size={17} color={colors.muted} />
           </Pressable>
         ) : null}
