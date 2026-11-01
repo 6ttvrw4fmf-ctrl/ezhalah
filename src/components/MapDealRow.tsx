@@ -53,7 +53,7 @@ export function MapSearchBar({ onPick }: { onPick?: () => void } = {}) {
           onChangeText={setQ}
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 150)}
-          placeholder={t('Region, city, landmark or district')}
+          placeholder={t('Region, city, landmark, district or street')}
           placeholderTextColor={colors.muted}
           accessibilityLabel={t('Search')}
           autoCorrect={false}
