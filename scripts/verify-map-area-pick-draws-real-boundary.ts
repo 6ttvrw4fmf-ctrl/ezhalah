@@ -37,8 +37,8 @@ mustCatch('a bbox that is not the shape\'s', !(typeof a === 'object' && a !== nu
 // Wiring.
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const mod = readFileSync(join(root, 'src/data/placeShape.ts'), 'utf8');
-check('placeShape.ts asks by coordinate through the bounded RPC', /boundedRpc<ShapeRow\[\]>\(supabase\.rpc\('place_shape_at', \{ p_lat: lat, p_lng: lng, p_kind: kind \}\)\)/.test(mod));
-check('AppleMap.web.tsx: EVERY pick fetches its shape and draws every polygon (owner 2026-11-01: «anything»)', /placeShapeAt\(c\.latitude, c\.longitude, kind\)/.test(web) && /live\.mark\.shapes = shape\.rings\.map\(\(poly\) => new mk\.PolygonOverlay\(/.test(web));
+check('placeShape.ts asks by coordinate through the bounded RPC', /boundedRpc<ShapeRow\[\]>\(supabase\.rpc\('place_shape_at', \{ p_lat: lat, p_lng: lng, p_kind: kind, p_name: name \?\? null \}\)\)/.test(mod));
+check('AppleMap.web.tsx: EVERY pick fetches its shape and draws every polygon (owner 2026-11-01: «anything»)', /placeShapeAt\(c\.latitude, c\.longitude, kind, \(place \? place\.name : undefined\) \?\? p\.name\)/.test(web) && /live\.mark\.shapes = shape\.rings\.map\(\(poly\) => new mk\.PolygonOverlay\(/.test(web));
 check('AppleMap.web.tsx: an area asks for its own kind, everything else for a site footprint', /const kind: ShapeKind = p\.kind && isAreaKind\(p\.kind\) \? p\.kind : 'place';/.test(web));
 check('AppleMap.web.tsx: the circle / rectangle is only the fallback (no shape, or the fetch failed)', /if \(!shape \|\| shape === 'unknown'\) return fallback\(\);/.test(web) && /const fallback = landmark \? circle : rectangle;/.test(web));
 check('AppleMap.web.tsx: a landmark keeps its pin whatever the shape lookup says', /if \(landmark\) \{\n\s+live\.mark\.pin = new mk\.MarkerAnnotation\(/.test(web));

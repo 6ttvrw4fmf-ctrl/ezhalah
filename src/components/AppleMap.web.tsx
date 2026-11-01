@@ -345,7 +345,8 @@ export function flyToPlace(p: PlaceSuggestion) {
     };
     const fallback = landmark ? circle : rectangle;
     const kind: ShapeKind = p.kind && isAreaKind(p.kind) ? p.kind : 'place';
-    placeShapeAt(c.latitude, c.longitude, kind).then((shape) => {
+    // The picked name only breaks a tie between shapes AT the point (an airport and the terminal inside it).
+    placeShapeAt(c.latitude, c.longitude, kind, (place ? place.name : undefined) ?? p.name).then((shape) => {
       if (live.markSeq !== seq) return;
       if (!shape || shape === 'unknown') return fallback();
       live.mark.shapes = shape.rings.map((poly) => new mk.PolygonOverlay(poly.map((ring) => ring.map(([lng, lat]) => new mk.Coordinate(lat, lng))), { style: style(kind === 'place' ? 0.14 : 0.08, 2), enabled: false }));

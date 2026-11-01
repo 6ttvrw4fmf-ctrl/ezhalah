@@ -16,10 +16,10 @@ import { placeShapeFrom, type PlaceShape, type ShapeKind, type ShapeRow } from '
 export { placeShapeFrom, type PlaceShape, type ShapeKind, type ShapeRings } from '@/lib/placeShape';
 
 /** The shape of the `kind` area that contains the point, bounded by the app's one RPC timeout. */
-export async function placeShapeAt(lat: number, lng: number, kind: ShapeKind): Promise<PlaceShape | null | 'unknown'> {
+export async function placeShapeAt(lat: number, lng: number, kind: ShapeKind, name?: string): Promise<PlaceShape | null | 'unknown'> {
   if (!supabase) return 'unknown';
   try {
-    const result = await boundedRpc<ShapeRow[]>(supabase.rpc('place_shape_at', { p_lat: lat, p_lng: lng, p_kind: kind }));
+    const result = await boundedRpc<ShapeRow[]>(supabase.rpc('place_shape_at', { p_lat: lat, p_lng: lng, p_kind: kind, p_name: name ?? null }));
     return placeShapeFrom(result);
   } catch {
     return 'unknown';
