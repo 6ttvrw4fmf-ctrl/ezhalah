@@ -85,7 +85,11 @@ type Coord = { latitude: number; longitude: number };
 type Shape = { style: { fillOpacity: number; strokeOpacity: number; lineWidth: number }; data: Region; points: unknown[] };
 /** An Apple autocomplete row, plus what suggestPlaces() learned about it: its kind (city / district / mosque …),
  *  a clean subtitle and the name Apple's Place carries. `kind` is absent when the row could not be resolved in time. */
-export type PlaceSuggestion = { displayLines: string[]; coordinate?: Coord; kind?: PlaceKind; subtitle?: string; name?: string };
+export type PlaceSuggestion = { displayLines: string[]; coordinate?: Coord; kind?: PlaceKind; subtitle?: string; name?: string; apple?: unknown };
+/** What Search.search() accepts: Apple's OWN autocomplete result (an instance it type-checks), never a copy of it. A row
+ *  suggestPlaces() built by spreading keeps the original under `apple`; without it MapKit throws «`query` passed to
+ *  `Search.search()` is neither a string nor SearchAutocompleteResult» and the map never moves (seen live 2026-11-01). */
+const appleQuery = (p: PlaceSuggestion): PlaceSuggestion => (p.apple ?? p) as PlaceSuggestion;
 type MKRegion = { center: Coord; span: { latitudeDelta: number; longitudeDelta: number } };
 type MKPlace = {
   coordinate: Coord; name?: string; pointOfInterestCategory?: string;
@@ -196,7 +200,7 @@ export function clearRoute() {
 
 const resolvePlace = (p: PlaceSuggestion): Promise<Coord | null> => new Promise((resolve) => {
   if (!live.search) return resolve(p.coordinate ?? null);
-  live.search.search(p, (err, data) => resolve((!err && data?.places?.[0]?.coordinate) || p.coordinate || null));
+  live.search.search(appleQuery(p), (err, data) => resolve((!err && data?.places?.[0]?.coordinate) || p.coordinate || null));
 });
 
 /** «مسار» — Apple's driving route from one place to another, drawn in the brand colour with a soft band around it
@@ -280,11 +284,11 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
         thoroughfare: p.thoroughfare, poi: p.pointOfInterestCategory, span: p.region?.span?.latitudeDelta,
       };
       const kind = classifyPlace(facts);
-      resolve({ ...r, name: facts.name, kind, subtitle: placeSubtitle(facts, kind, country), coordinate: p.coordinate ?? r.coordinate });
+      resolve({ ...r, apple: r.apple ?? r, name: facts.name, kind, subtitle: placeSubtitle(facts, kind, country), coordinate: p.coordinate ?? r.coordinate });
     });
   });
   const resolved = await Promise.all(rows.slice(0, 8).map(resolve1));
-  const named = resolved.map((r) => ({ ...r, name: r.name ?? r.displayLines[0] }));
+  const named = resolved.map((r) => ({ ...r, apple: r.apple ?? r, name: r.name ?? r.displayLines[0] }));
   return sortByKind(dedupePlaces(named)).slice(0, 6);
 }
 
@@ -292,7 +296,7 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
 export function flyToPlace(p: PlaceSuggestion) {
   const mk = mapkitOf(); const m = live.map;
   if (!mk || !m || !live.search) return;
-  live.search.search(p, (err, data) => {
+  live.search.search(appleQuery(p), (err, data) => {
     const place = !err && data?.places?.[0];
     const c = place ? place.coordinate : p.coordinate;
     live.history.push(m.region);

@@ -91,6 +91,18 @@ const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
 check('AppleMap.web.tsx: suggestPlaces classifies, dedupes and sorts', /classifyPlace\(facts\)/.test(web) && /sortByKind\(dedupePlaces\(/.test(web) && /placeSubtitle\(facts, kind, country\)/.test(web));
 check('AppleMap.web.tsx: an unresolved row is kept with its two lines (timeout → resolve(r))', /setTimeout\(\(\) => resolve\(r\), \d+\)/.test(web));
 check('AppleMap.web.tsx: the mark follows the kind (pin for a landmark, outline for an area)', /isAreaKind\(p\.kind\)/.test(web));
+// PICKING A ROW MUST FLY (seen live 2026-11-01): Search.search() accepts only Apple's own SearchAutocompleteResult
+// instance; a row built by spreading is a plain object and MapKit throws, so the map never moved. Every row keeps the
+// original under `apple`, and every search() outside the resolver passes appleQuery(p).
+class AppleResult { displayLines = ['x']; }
+const spread = { ...new AppleResult(), kind: 'city' as PlaceKind, apple: undefined as unknown };
+const kept = { ...new AppleResult(), kind: 'city' as PlaceKind, apple: new AppleResult() };
+const appleQuery = (p: { apple?: unknown }) => p.apple ?? p;
+mustCatch('a spread row being handed to Search.search() as if it were Apple\'s instance', !(appleQuery(spread) instanceof AppleResult));
+check('appleQuery() hands Apple\'s own instance back when the row kept it', appleQuery(kept) instanceof AppleResult);
+const searchCalls = web.split('\n').filter((l) => /^\s*(live\.)?search\.search\(/.test(l) && !/search\.search\(r,/.test(l));
+check('AppleMap.web.tsx: every search() on a picked row passes appleQuery(p)', searchCalls.length >= 2 && searchCalls.every((l) => /\.search\(appleQuery\(p\)/.test(l)), searchCalls.filter((l) => !/appleQuery\(p\)/.test(l)).join(' | '));
+check('AppleMap.web.tsx: every row suggestPlaces() builds keeps Apple\'s result under `apple`', (web.match(/apple: r\.apple \?\? r/g) || []).length >= 2);
 check('MapDealRow.tsx: the row shows t(KIND_LABEL[kind]) and the clean subtitle', /t\(KIND_LABEL\[p\.kind\]\)/.test(field) && /p\.subtitle \?\? p\.displayLines\[1\]/.test(field));
 check('i18n: every tag label is translated', (Object.values(KIND_LABEL)).every((k) => new RegExp(`^\\s*'${k}':\\s*'[^']+'`, 'm').test(i18n)), Object.values(KIND_LABEL).filter((k) => !new RegExp(`^\\s*'${k}':`, 'm').test(i18n)).join(','));
 
