@@ -11,7 +11,7 @@ import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'r
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
-import { suggestPlaces, flyToPlace, clearPlaceMark, type PlaceSuggestion } from '@/components/AppleMap';
+import { suggestPlaces, flyToPlace, clearPlaceMark, routeBetween, type PlaceSuggestion } from '@/components/AppleMap';
 
 export type MapDeal = 'buy' | 'rent' | 'short';
 const DEALS: { id: MapDeal; label: string }[] = [
@@ -20,53 +20,50 @@ const DEALS: { id: MapDeal; label: string }[] = [
   { id: 'short', label: 'Short stays' },
 ];
 
-/** The search field above the row — Apple Maps' own place search (owner 2026-10-31: «this search connected to
- *  Apple Maps, like how a user searches in Apple Maps»): typing shows Apple's suggestions for Saudi Arabia under the
- *  field; picking one glides the map there. Suggestions only; nothing filters listings yet. */
-/** `onPick`: the page opens the full-screen map when a place is chosen (owner 2026-10-31: «when the user clicks
- *  take him inside the map … when he types a city, region, landmark or district take him there»). */
-export function MapSearchBar({ onPick }: { onPick?: () => void } = {}) {
+/** One place field with Apple's suggestions under it (Saudi Arabia, UI language). `onPick` gets the chosen place;
+ *  `onClear` fires on the ✕. `dot` draws a coloured dot before the text (the route's from / to). */
+function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocus }: {
+  value: string; placeholder: string; onPick: (p: PlaceSuggestion) => void; onClear?: () => void; dot?: string; testID: string; autoFocus?: boolean;
+}) {
   const { t, isRTL, locale } = useI18n();
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(value);
   const [hits, setHits] = useState<PlaceSuggestion[]>([]);
   const [focused, setFocused] = useState(false);
   const seq = useRef(0);
+  useEffect(() => { setQ(value); }, [value]);
   useEffect(() => {
     const id = ++seq.current;
-    if (q.trim().length < 2) { setHits([]); return; }
+    if (q.trim().length < 2 || q === value) { setHits([]); return; }
     const h = setTimeout(() => { suggestPlaces(q, locale).then((r) => { if (seq.current === id) setHits(r); }); }, 220);
     return () => clearTimeout(h);
-  }, [q, locale]);
-  const pick = (p: PlaceSuggestion) => {
-    setQ(p.displayLines[0]); setHits([]); setFocused(false);
-    onPick?.();
-    flyToPlace(p);
-  };
+  }, [q, locale, value]);
+  const pick = (p: PlaceSuggestion) => { setQ(p.displayLines[0]); setHits([]); setFocused(false); onPick(p); };
   const open = focused && hits.length > 0;
   return (
     <View style={s.searchWrap}>
       <View style={s.search}>
-        <Ionicons name="search" size={16} color={colors.muted} />
+        {dot ? <View style={[s.dot, { backgroundColor: dot }]} /> : <Ionicons name="search" size={16} color={colors.muted} />}
         <TextInput
           style={[s.searchInput, { textAlign: isRTL ? 'right' : 'left' }]}
           value={q}
           onChangeText={setQ}
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 150)}
-          placeholder={t('Region, city, landmark, district or street')}
+          placeholder={placeholder}
           placeholderTextColor={colors.muted}
-          accessibilityLabel={t('Search')}
+          accessibilityLabel={placeholder}
           autoCorrect={false}
-          testID="map-search"
+          autoFocus={autoFocus}
+          testID={testID}
         />
         {q ? (
-          <Pressable onPress={() => { setQ(''); setHits([]); clearPlaceMark(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')}>
+          <Pressable onPress={() => { setQ(''); setHits([]); onClear?.(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Close')}>
             <Ionicons name="close-circle" size={17} color={colors.muted} />
           </Pressable>
         ) : null}
       </View>
       {open ? (
-        <View style={s.hits} testID="map-search-hits">
+        <View style={s.hits} testID={`${testID}-hits`}>
           {hits.slice(0, 6).map((p, i) => (
             <Pressable key={i} style={({ hovered }: any) => [s.hit, hovered && s.optionHover]} onPress={() => pick(p)} accessibilityRole="button">
               <Ionicons name="location-outline" size={16} color={colors.primary} />
@@ -78,6 +75,63 @@ export function MapSearchBar({ onPick }: { onPick?: () => void } = {}) {
           ))}
         </View>
       ) : null}
+    </View>
+  );
+}
+
+/** The search field above the row — Apple Maps' own place search (owner 2026-10-31: «this search connected to
+ *  Apple Maps, like how a user searches in Apple Maps»): typing shows Apple's suggestions for Saudi Arabia under the
+ *  field; picking one glides the map there and marks it. `onPick`: the page opens the full-screen map (owner: «when
+ *  the user clicks take him inside the map»). Suggestions only; nothing filters listings yet. */
+export function MapSearchBar({ onPick }: { onPick?: () => void } = {}) {
+  const { t } = useI18n();
+  const [value, setValue] = useState('');
+  return (
+    <PlaceField
+      value={value}
+      placeholder={t('Region, city, landmark, district or street')}
+      onPick={(p) => { setValue(p.displayLines[0]); onPick?.(); flyToPlace(p); }}
+      onClear={() => { setValue(''); clearPlaceMark(); }}
+      testID="map-search"
+    />
+  );
+}
+
+const FROM = '#60466e';
+const TO = '#c84646';
+
+/** «مسار» — from here to here (owner 2026-10-31, design approved from the mock-up): two stacked fields, «من» and
+ *  «إلى», each with Apple's suggestions; a swap arrow; ✕ leaves the mode (a drawn route stays until «إزالة المسار»).
+ *  Once both are picked, Apple's driving route draws with a soft band around it and the map fits it; `onRouted`
+ *  opens the full-screen map. */
+export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onRouted?: () => void }) {
+  const { t } = useI18n();
+  const [from, setFrom] = useState<PlaceSuggestion | null>(null);
+  const [to, setTo] = useState<PlaceSuggestion | null>(null);
+  const [failed, setFailed] = useState(false);
+  const go = async (a: PlaceSuggestion | null, b: PlaceSuggestion | null) => {
+    if (!a || !b) return;
+    setFailed(false);
+    const ok = await routeBetween(a, b);
+    if (ok) onRouted?.(); else setFailed(true);
+  };
+  const swap = () => { const a = from, b = to; setFrom(b); setTo(a); go(b, a); };
+  return (
+    <View style={s.routeWrap} testID="map-route-fields">
+      <View style={s.routeHead}>
+        <Text style={s.routeTitle}>{t('Route')}</Text>
+        <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('Close')} testID="map-route-close">
+          <Ionicons name="close" size={20} color={colors.muted} />
+        </Pressable>
+      </View>
+      <PlaceField value={from?.displayLines[0] ?? ''} placeholder={t('From')} dot={FROM} autoFocus onPick={(p) => { setFrom(p); go(p, to); }} onClear={() => setFrom(null)} testID="map-route-from" />
+      <View style={s.swapRow}>
+        <Pressable style={s.swapBtn} onPress={swap} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Swap')} testID="map-route-swap">
+          <Ionicons name="swap-vertical" size={18} color={colors.primary} />
+        </Pressable>
+      </View>
+      <PlaceField value={to?.displayLines[0] ?? ''} placeholder={t('To')} dot={TO} onPick={(p) => { setTo(p); go(from, p); }} onClear={() => setTo(null)} testID="map-route-to" />
+      {failed ? <Text style={s.routeFail}>{t('No route found between these two places')}</Text> : null}
     </View>
   );
 }
@@ -160,6 +214,13 @@ const s = StyleSheet.create({
   // BLENDED into the sky, not white (owner 2026-10-31: «I don't like how it's white, blend it more into the
   // background»): a translucent fill the clouds show through, the pill's own hairline border, no drop shadow.
   searchWrap: { zIndex: 3 },
+  dot: { width: 12, height: 12, borderRadius: 6 },
+  routeWrap: { zIndex: 3 },
+  routeHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, paddingHorizontal: 4 },
+  routeTitle: { fontSize: 14, fontWeight: '800', color: colors.ink },
+  swapRow: { alignItems: 'flex-end', marginTop: -2, marginBottom: -8, zIndex: 4, paddingHorizontal: 6 },
+  swapBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.tintLine, alignItems: 'center', justifyContent: 'center' },
+  routeFail: { fontSize: 12.5, color: colors.muted, marginTop: 8, paddingHorizontal: 6 },
   hits: { position: 'absolute', top: 52, left: 0, right: 0, backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.tintLine, padding: 6, ...cardShadow, shadowOpacity: 0.14, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 6 },
   hit: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10 },
   hitT: { fontSize: 14, fontWeight: '700', color: colors.ink },
