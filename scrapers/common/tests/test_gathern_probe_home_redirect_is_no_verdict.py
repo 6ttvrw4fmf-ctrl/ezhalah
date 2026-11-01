@@ -200,3 +200,13 @@ def test_proxy_fallback_only_rereads_no_verdict_and_only_takes_a_200(monkeypatch
     assert gl.fallback_read(404, live, UNIT) == 404, "a direct verdict is never second-guessed"
     assert gl.fallback_read(200, gone, UNIT) == 200
     assert gl.fallback_read(0, None, UNIT) == 0, "no --proxy-fallback, no proxy read"
+
+
+def test_scheduled_sweep_actually_passes_proxy_fallback():
+    """2026-11-01: --proxy-fallback existed for a week and no workflow passed it, so no-verdict units
+    were never re-read and sat «transient» on screen for days. The scheduled sweep must pass it."""
+    import pathlib
+    wf = (pathlib.Path(__file__).resolve().parents[3] / ".github/workflows/gathern-liveness.yml").read_text()
+    cmd = wf.split("exec python -m scrapers.gathern.liveness", 1)[1].split("\n\n", 1)[0]
+    assert "--proxy-fallback" in cmd, "the gathern sweep no longer re-reads no-verdict units"
+    assert "WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}" in wf
