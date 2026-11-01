@@ -9,7 +9,7 @@
 //
 // WHAT THAT COSTS. It does not produce a harness error. It produces a FALSE ACCUSATION AGAINST
 // PRODUCTION, because the next assertion is always "…and then the app did X". Measured on production
-// 2026-09-24 (الرياض/شراء/شقة desktop, fleet healthy): 11 of 24 taps on «خلّنا نحدد الطلب أكثر»
+// 2026-09-24 (الرياض/شراء/شقة desktop, fleet healthy): 11 of 24 taps on «🎯 دقّق مع الذكاء»
 // landed on `card-listing-11678443`, and each one was reported as «the offer opened but no af-card
 // appeared in 45s» — i.e. as a broken Advanced Filter. `ops_incident` #340 is five days of that.
 //

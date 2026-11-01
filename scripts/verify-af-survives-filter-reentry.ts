@@ -12,7 +12,7 @@
 //
 // THE DEFECT (owner P0, reproduced live on production 2026-09-01, six ways out of six):
 //   الرياض / إيجار / سنوي / تجاري / محل  →  566 listings
-//   «خلّنا نحدد الطلب أكثر» → «كم عمر العقار؟» → «جديد»  →  243
+//   «🎯 دقّق مع الذكاء» → «كم عمر العقار؟» → «جديد»  →  243
 //   back to «تصفية», press «بحث»  →  566 again, and the captured request body differs from the
 //   committed one by EXACTLY one key: `p_is_new_construction` is simply gone.
 // It reproduced through a Trending city card, a Trending district card, a Trending card for a

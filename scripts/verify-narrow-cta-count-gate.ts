@@ -2,7 +2,7 @@
 // ONLY the normal lightweight actions (Load more if genuinely more exists, 👍/Share) — never a
 // "narrow further" prompt. The auto-opening AF intro overlay already gated correctly on this exact
 // threshold (agent.tsx's `gateTotal > INTERVIEW_STOP_AT`, PR #608-era fix). The SEPARATE manual
-// «خلّنا نحدد الطلب أكثر» button under the results closing message did NOT — it rendered
+// «🎯 دقّق مع الذكاء» button under the results closing message did NOT — it rendered
 // unconditionally, and its click path fell through to the plain refine-chip flow for any ≤25 scope
 // (proved by tracing rankQuestions' own MIN_TOTAL_TO_SHOW floor) rather than doing nothing.
 //

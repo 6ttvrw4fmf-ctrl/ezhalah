@@ -904,7 +904,7 @@ try {
     // any click. Only the recorded timeout evidence below permits an UNKNOWN skip.
     const ctaBack = await page.evaluate(() =>
       Array.from(document.querySelectorAll('div,span,button,a,[role="button"]'))
-        .some((e) => (e.innerText || '').trim().includes('خلّنا نحدد الطلب أكثر') && e.getBoundingClientRect().width > 0));
+        .some((e) => (e.innerText || '').trim().includes('🎯 دقّق مع الذكاء') && e.getBoundingClientRect().width > 0));
     // UNKNOWN IS NOT A DEFECT (owner 2026-08-26, PR #1152). AF now distinguishes "the sources say
     // there is nothing useful to ask" from "the probes never answered". On the SECOND verdict the
     // product deliberately declines to open and offers NOTHING in place of AF — that is the correct,
@@ -1061,7 +1061,7 @@ try {
 
   let jOpened = false;
   for (let i = 0; i < 6 && !jOpened; i++) {
-    await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+    await tap('🎯 دقّق مع الذكاء').catch(() => {});
     await page.waitForTimeout(1200);
     jOpened = await afPresent();
   }
@@ -1200,7 +1200,7 @@ try {
   check('[J0] 0-question scope (Factory/Buy+Rent-combined/الرياض) lands with a real start count', Number.isFinite(jZeroStart), `start=${jZeroStart}`);
   let jZeroOpened = false;
   for (let i = 0; i < 4 && !jZeroOpened; i++) {
-    await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+    await tap('🎯 دقّق مع الذكاء').catch(() => {});
     await page.waitForTimeout(1200);
     jZeroOpened = await afPresent();
   }

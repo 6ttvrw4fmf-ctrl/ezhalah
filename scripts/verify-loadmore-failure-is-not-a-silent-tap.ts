@@ -20,7 +20,7 @@
 // THE TWO-TAP, 500-CAP RULE (owner 2026-09-14, supersedes Task 4 rev. 2's unbounded drain). A press's
 // reveal target comes from `revealTarget(cur, total)`: a FIRST tap (still at the initial-reveal floor)
 // reveals up to the next 100-boundary, leaving any extra fetched rows buffered — the chat stays open,
-// offering «عرض المزيد» and/or «خلّنا نحدد الطلب أكثر» again. The LAST tap (revealCount already past
+// offering «عرض المزيد» and/or «🎯 دقّق مع الذكاء» again. The LAST tap (revealCount already past
 // that floor) reveals up to SECOND_PAGE_CAP (500) and the chat COMPLETES: on a ≤500 set that shows
 // everything, on a >500 set it caps at 500 and the terminal Advanced-Filter state takes over. There
 // is no third tap. The failure contract is unchanged in both branches: a failure on ANY page tells

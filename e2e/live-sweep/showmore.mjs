@@ -15,7 +15,7 @@
 // every remaining page" model this header carried until 2026-09-14):
 //   · «عرض المزيد» gives at most TWO reveals and never shows more than SECOND_PAGE_CAP (500) cards;
 //   · the FIRST press reveals the 100-boundary (10 → 100) and leaves both «عرض المزيد» and
-//     «خلّنا نحدد الطلب أكثر» standing;
+//     «🎯 دقّق مع الذكاء» standing;
 //   · the SECOND press reveals up to the 500 cap (or the true end) and then the pager RETIRES.
 //     Where inventory remains unreached, «تحديد أكثر» stays on screen as the forward path.
 // So a healthy الرياض run is 10 → 100 → 500 → (pager gone, «تحديد أكثر» offered). Measured on

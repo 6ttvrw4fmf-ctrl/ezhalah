@@ -162,7 +162,7 @@ check('agent.tsx builds the closing note from the SAME moreNoteText the visible 
 // `resultsActionsRowVisible` and still carries the interview phase — so the pattern tolerates that
 // one conjunct and nothing else.
 check('the spoken available-actions sentence names only button(s) that are ACTUALLY on screen (gated by the same showActionsRow used for the visible buttons row, incl. the Advanced-Filter-open hide)', /const showActionsRow = (?:!afReceipt\[m\.id\] && )?resultsActionsRowVisible\(\{[\s\S]{0,240}?afPhase: ageFlow\?\.phase \?\? null/.test(agent) && /const spokenActionsNote = !showActionsRow \? ''/.test(agent) && /\{showActionsRow \? \(/.test(agent));
-check('the spoken action label(s) are the exact SAME t(\'Load more\')/t(\'Let’s narrow it down\') strings the visible buttons render — never a separately-worded copy', /const spokenActionLabels = \[hasMore && replyT\('Load more'\), canNarrowFurther && replyT\('Let’s narrow it down'\)\]\.filter\(Boolean\) as string\[\];/.test(agent));
+check('the spoken action label(s) are the exact SAME t(\'Load more\')/t(\'🎯 Refine with AI\') strings the visible buttons render — never a separately-worded copy', /const spokenActionLabels = \[hasMore && replyT\('Load more'\), canNarrowFurther && replyT\('🎯 Refine with AI'\)\]\.filter\(Boolean\) as string\[\];/.test(agent));
 // No raw/internal fields anywhere in the card-speech builder: id, source_url, free-text
 // description/title, or a raw JSON dump. Platform name IS spoken (owner request, 2026-08-22) but only
 // via the shared listingPlatformAr() display helper, never a raw listing.source read in this file.

@@ -1,4 +1,4 @@
-// LIVE: the AI-agent flow's «خلّنا نحدد الطلب أكثر» must never be offered and then render nothing.
+// LIVE: the AI-agent flow's «🎯 دقّق مع الذكاء» must never be offered and then render nothing.
 //
 // The sibling scripts/verify-af-live-truth.ts reaches Advanced Filter through the FILTER flow only.
 // On 2026-08-26 that was the difference between green and the truth: the identical cohort

@@ -104,7 +104,7 @@ check('search lands with a real count', await waitFor(async () => (await counts(
 const startCount = (await counts())[0];
 console.log('  start:', startCount);
 
-// AF round via the latest turn's «خلّنا نحدد الطلب أكثر» (testID results-narrow)
+// AF round via the latest turn's «🎯 دقّق مع الذكاء» (testID results-narrow)
 const narrow = page.locator('[data-testid="results-narrow"]');
 check('narrow CTA renders on the newest turn', await waitFor(async () => (await narrow.count()) > 0 && await narrow.first().isVisible(), 20000));
 await narrow.first().click(); await page.waitForTimeout(2500);

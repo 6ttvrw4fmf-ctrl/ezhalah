@@ -38,7 +38,7 @@ const liveChat = () => ({
     { id: 'm1', role: 'user', text: 'شقة للإيجار في الرياض' },
     { id: 'm2', role: 'agent', text: 'لقينا 1,240 إعلان', typing: false },
     { id: 'm3', role: 'results', result: { listings: listings(45, 'r1'), matchTotal: 1240, pageOffset: 45, hasMore: true, query: { deal: 'Rent' } } },
-    { id: 'm4', role: 'agent', text: 'خلّنا نحدد الطلب أكثر' },
+    { id: 'm4', role: 'agent', text: '🎯 دقّق مع الذكاء' },
     { id: 'm5', role: 'results', result: { listings: listings(20, 'r2'), matchTotal: 310, pageOffset: 20, hasMore: true, query: { deal: 'Rent', types: ['Apartment'] } } },
     { id: 'm6', role: 'results', result: { listings: listings(12, 'r3'), matchTotal: 88, pageOffset: 12, hasMore: false, query: { deal: 'Rent', types: ['Apartment'], bathrooms: 2 } } },
   ],

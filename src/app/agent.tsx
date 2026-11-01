@@ -118,7 +118,7 @@ import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates
 import { markSearchLeftBehind } from '@/lib/searchLeftBehind';
 import { PLATFORM_META, type LoaderPlatform } from '@/data/loaderPlatforms';
 
-// Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
+// Property Age advanced-filter eligibility. Reached from the EXISTING «🎯 دقّق مع الذكاء» button
 // below a results block — NEVER before first results. Its gate is cohortAllows(q, 'property_age')
 // (src/lib/afCohorts.ts), the same canonical registry every other Advanced Filter question uses — a
 // type/deal/period fires only when COHORT_QUESTIONS has live-verified evidence for it (see
@@ -1308,7 +1308,7 @@ export default function Agent() {
   const pendingRefineRef = useRef<{ q: SearchQuery; dim: string } | null>(null); // a >25 "refine" question awaiting the user's one-line answer
   const refineMsgIdRef = useRef<string | null>(null); // the results turn the latest runRefine is building
   // Advanced-question overlay (عمر العقار, apartment-only for now) — a transient card shown ON TOP of
-  // the current results when «خلّنا نحدد الطلب أكثر» is tapped in an apartment scope. Answering hands
+  // the current results when «🎯 دقّق مع الذكاء» is tapped in an apartment scope. Answering hands
   // off to the SAME runRefine mechanism used by the pre-existing chip flow (echoes a user bubble,
   // re-runs search, renders a new results turn) — never a separate navigation/route.
   const [ageFlow, setAgeFlow] = useState<
@@ -1386,7 +1386,7 @@ export default function Agent() {
   const afCarryRef = useRef<{ msgId: string; originQ: SearchQuery; facets: GuidedFacet[]; asked: string[] } | null>(null);
   // SKIP-EVERYTHING ROUNDS, per results turn (2026-10-06, contract R6.2.2 / R8.1.3). A round that
   // commits nothing returns early from finishGuided — no search, no new turn — so the turn it was
-  // opened from keeps «خلّنا نحدد الطلب أكثر», and that button's carry is built from the turn's
+  // opened from keeps «🎯 دقّق مع الذكاء», and that button's carry is built from the turn's
   // guided record, which a skip-only round never writes. Without this record the next tap re-asked
   // the SAME questions forever: on Annual Rent → Apartment (rnpl/furnished/age/bathrooms fill the
   // 4-question round) a customer who only wanted AC or an elevator could never reach the amenities.
@@ -2000,7 +2000,7 @@ export default function Agent() {
   // shipped behavior). THE FIRST tap on a turn reveals the next clean 100-boundary only (…→100, not
   // past it) — exactly BROWSE_BATCH's old boundary math, never retired, just no longer the ONLY
   // target. The chat stays open and BOTH offers stand: «عرض المزيد» (if more than 100 remain) and
-  // «خلّنا نحدد الطلب أكثر» (if a useful AF question exists) — resultsActionsRowVisible already
+  // «🎯 دقّق مع الذكاء» (if a useful AF question exists) — resultsActionsRowVisible already
   // renders whichever apply, unchanged. A SECOND tap on that same turn — i.e. the user explicitly
   // asking again after already seeing the first hundred — drains every remaining page and finishes
   // the search: composer locked, exactly like R11.1's small-set completion, reachable at any total.
@@ -2282,7 +2282,7 @@ export default function Agent() {
   // for "a refine question is already on screen awaiting an answer" — `send()`'s REFINE INTERCEPT and
   // `runRefine()` both already treat it that way (only ONE pending refine is ever a valid state). Nothing
   // previously stopped a second startRefine() call while one was already pending: both call sites route
-  // through this ONE function via «خلّنا نحدد الطلب أكثر» (the fallback when the AF plan has 0 useful
+  // through this ONE function via «🎯 دقّق مع الذكاء» (the fallback when the AF plan has 0 useful
   // questions — see startAgeFlow) and the outline «نتائج أدق» button, and NEITHER call site disables
   // itself while its own async work is in flight. A rapid double-tap on either (or the AF entry re-showing
   // its CTA the instant `setAgeFlow(null)` fires, one tick before this runs) fired startRefine() twice and
@@ -2329,7 +2329,7 @@ export default function Agent() {
     // (شقة/فيلا/دور/أرض) that were NOT the canonical taxonomy — no group tier, no Studio/Room/
     // Residential Building/Rest House/Duplex, nothing commercial — and wrote only the scalar
     // `q.type`, bypassing the typeGroups/types multi-select the whole app is built on. It was
-    // reachable from the same «خلّنا نحدد الطلب أكثر» button as the interview, so which type
+    // reachable from the same «🎯 دقّق مع الذكاء» button as the interview, so which type
     // question a user got depended on live counts. Property type is now asked in exactly ONE place,
     // the Advanced Filter's scope prefix, always from HIERARCHY. `applyRefinement`'s 'type' branch
     // is deliberately kept: an in-flight `pendingRefineRef` from before this change, and the
@@ -3013,7 +3013,7 @@ export default function Agent() {
         // every-setCompleted-is-gated ratchet still means something: the defect that check exists for
         // is a "nothing left to ask" VERDICT silently locking the chat (2026-09-12), which this is
         // not — this fires on a round that actually landed results, never on a probe's opinion.
-        // OFF since 2026-10-05 (owner: re-offer «خلّنا نحدد الطلب أكثر» while >25 + a useful question; a tap, never a timer).
+        // OFF since 2026-10-05 (owner: re-offer «🎯 دقّق مع الذكاء» while >25 + a useful question; a tap, never a timer).
         const afRoundEndsChat = false;
         if (afRoundEndsChat || searchIsFinishedAtThreshold(total, INTERVIEW_STOP_AT)) setCompleted(true);
         // A ROUND NEVER RE-OPENS ITSELF (owner 2026-09-20 — REVERSES the 2026-09-04 "rounds continue
@@ -3044,7 +3044,7 @@ export default function Agent() {
     });
   };
 
-  // Entry point for «خلّنا نحدد الطلب أكثر» (and the auto-open after an eligible Filter search). Build
+  // Entry point for «🎯 دقّق مع الذكاء» (and the auto-open after an eligible Filter search). Build
   // the PLAN once — the eligible questions whose initial options clear the floor — so the progress bar
   // reflects reality, then present them select-then-confirm. Nothing qualifies → fall through to the
   // pre-existing refine chips so a manual TAP is never a no-op. The AUTO path passes fallbackToRefine=
@@ -3065,7 +3065,7 @@ export default function Agent() {
     // AUTO entry (owner 2026-08-16, supersedes the 2026-08-03 results-first rule): an eligible
     // Filter search with > 25 results opens on the calm INTRO — the count + invitation — never a
     // question. The plan resolves in the background while the intro is on screen, so «يلا نبدأ»
-    // feels instant. A manual «خلّنا نحدد الطلب أكثر» tap skips the intro (the user already opted in).
+    // feels instant. A manual «🎯 دقّق مع الذكاء» tap skips the intro (the user already opted in).
     setAgeFlow(opts?.auto ? { phase: 'intro', total: opts?.total ?? null } : { phase: 'loading' });
     // SEEDED FROM THE CARRY (owner 2026-08-24), not emptied. The opening rank happens BEFORE the
     // first syncGuidedFromSteps, so starting from an empty set here made round 2 rank — and then ask
@@ -3235,7 +3235,7 @@ export default function Agent() {
 
   // «رجوع» — one question back (owner 2026-08-22). From the FIRST question it leaves the interview
   // entirely: the record is dropped and ageFlow goes null, which is exactly what the pre-AF CTA row
-  // is gated on, so «خلّنا نحدد الطلب أكثر» + «عرض المزيد» come straight back. Nothing was searched
+  // is gated on, so «🎯 دقّق مع الذكاء» + «عرض المزيد» come straight back. Nothing was searched
   // during the interview, so there is nothing else to undo.
   const onAgeBack = () => {
     if (ageFlow?.phase !== 'asking') return;
@@ -3652,7 +3652,7 @@ export default function Agent() {
         if (run.cancelled) return;
         // REMOVED (owner 2026-08-19): the auto-open AF intro popup after a filter search is killed.
         // The advanced filter interview must ONLY appear inline below the result cards when the user
-        // manually taps «خلّنا نحدد الطلب أكثر». No popup, no overlay, no auto-open — ever.
+        // manually taps «🎯 دقّق مع الذكاء». No popup, no overlay, no auto-open — ever.
         void promptSignupSoon(run); // guest used their free search (filter) → prompt sign-up
       } catch {
         if (!run.cancelled) {
@@ -4879,7 +4879,7 @@ export default function Agent() {
                         // "once user finishes with the advanced filter … let this message immediately
                         // show"). The receipt string is written the instant finishGuided runs, but it
                         // renders in the `else` of this flag — so until today the origin turn kept its
-                        // «عرض المزيد / خلّنا نحدد الطلب أكثر» row for the whole ~10s the new search
+                        // «عرض المزيد / 🎯 دقّق مع الذكاء» row for the whole ~10s the new search
                         // took, because `chatCompleted` only flips in runRefine's onFetched. The wait
                         // was never a timer to tune; it was this gate resolving late.
                         //
@@ -4945,7 +4945,7 @@ export default function Agent() {
                         // Read Aloud closing note (owner request, 2026-08-23: "read the note... and say the
                         // button also") — names the SAME button label(s) actually rendered below, in the same
                         // order, so it can never mention an action that isn't on screen to tap.
-                        const spokenActionLabels = [hasMore && replyT('Load more'), canNarrowFurther && replyT('Let’s narrow it down')].filter(Boolean) as string[];
+                        const spokenActionLabels = [hasMore && replyT('Load more'), canNarrowFurther && replyT('🎯 Refine with AI')].filter(Boolean) as string[];
                         const spokenActionsNote = !showActionsRow ? ''
                           : spokenActionLabels.length === 2
                             ? replyT('You can tap {a} or {b}.', { a: spokenActionLabels[0], b: spokenActionLabels[1] })
@@ -4962,10 +4962,10 @@ export default function Agent() {
                                   when far fewer matched (owner 2026-08-20). Removed: with the browse cap one «عرض
                                   المزيد» reveals everything up to the cap, so the button needs no count caption. */}
                               {/* «عرض المزيد» ALWAYS pages the next 100 (buffer reveal, then real DB fetch when spent);
-                                  «خلّنا نحدد الطلب أكثر» asks ONE clarifying question then re-searches — but only
+                                  «🎯 دقّق مع الذكاء» asks ONE clarifying question then re-searches — but only
                                   when there is genuinely more than INTERVIEW_STOP_AT=25 left to narrow. */}
                               {/* HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21). Once the
-                                  user taps «خلّنا نحدد الطلب أكثر», the AF interview owns this moment —
+                                  user taps «🎯 دقّق مع الذكاء», the AF interview owns this moment —
                                   the old CTA row must not sit behind it competing for the same decision.
                                   `ageFlow` covers every AF phase (loading → intro → asking), so
                                   the row is gone from the tap until the flow closes, and returns by itself
@@ -5012,7 +5012,7 @@ export default function Agent() {
                                         style={s.mBtnPrimary}
                                         disabled={busy}
                                       >
-                                        <Text style={s.mBtnPrimaryTx}>{replyT('Let’s narrow it down')}</Text>
+                                        <Text style={s.mBtnPrimaryTx}>{replyT('🎯 Refine with AI')}</Text>
                                       </GoldShineButton>
                                     </GoldPulse>
                                   ) : null}
@@ -5027,7 +5027,7 @@ export default function Agent() {
                                    the pills use, so skipped answers can never appear here. */
                                 <View style={s.afReceipt} testID="af-round-receipt">
                                   <Text style={[s.afReceiptHead, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
-                                    {`✓ ${replyT('Continued with the advanced filter')}`}
+                                    {`✓ ${replyT('Continued with 🎯 Refine with AI')}`}
                                   </Text>
                                   {/* The round, in the order it happened — answers and skips in ONE
                                       sentence (see finishGuided). No «اخترت:» label any more: the line now
@@ -5402,7 +5402,7 @@ export default function Agent() {
           self-positions fixed/top regardless of scroll. See src/components/ReadAloudPlayer.tsx. */}
       <ReadAloudPlayer />
       {/* عمر العقار advanced-question overlay (owner 2026-07-13) — a transient card over the CURRENT
-          results, reached only via «خلّنا نحدد الطلب أكثر» in an apartment-only scope. Absolutely
+          results, reached only via «🎯 دقّق مع الذكاء» in an apartment-only scope. Absolutely
           positioned over the whole screen, same visual language as the interview overlay (dimmed
           backdrop + centered card), but rendered inline here rather than as a separate route, so
           answering can hand off directly to runRefine and update THIS same conversation in place. */}
@@ -5615,7 +5615,7 @@ const s = StyleSheet.create({
   // The two actions under the «more than 25» message (owner 2026-09-20: gold primary + white
   // secondary — see the JSX above for which button wears which now).
   mBtnRow: { flexWrap: 'wrap', gap: 8, marginTop: 2 },
-  // PRIMARY = «خلّنا نحدد الطلب أكثر». Layout only — GoldShineButton (CardReveal.tsx) paints the
+  // PRIMARY = «🎯 دقّق مع الذكاء». Layout only — GoldShineButton (CardReveal.tsx) paints the
   // actual gold gradient + shine sweep + hover/press darken; no flat backgroundColor here anymore.
   mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}) },
   mBtnPrimaryTx: { fontSize: 13, fontWeight: '700', color: colors.goldOnFill, lineHeight: 18 },
