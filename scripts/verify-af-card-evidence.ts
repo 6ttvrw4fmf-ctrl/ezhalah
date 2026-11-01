@@ -457,7 +457,7 @@ console.log('\n── T4. injection: one carrier, one prop, comparator, strip on
   // R12A.1 — VISIBLE WITHOUT EXPANDING. The 2026-09-02 draft rendered the first AF_CHIP_CAP = 4 and
   // hid the rest behind a «+N» expander. R12A.1 requires an ACTIVE selection to be visible "without
   // expanding, scrolling a sub-panel, or opening the source", and rounds accumulate — five or more
-  // committed answers is ordinary (AF_ROUND_MAX_QUESTIONS is 4 per round, and a single amenities
+  // committed answers is ordinary (AF_ROUND_MAX_QUESTIONS is 7 per round, and a single amenities
   // answer emits one chip PER TOKEN), so a cap of four would hide a field the user explicitly asked
   // for. These three assertions are the rule: map over the WHOLE array, no slice, no expander.
   assert(/\{evidence\.map\(\(c, i\) => \(/.test(strip),

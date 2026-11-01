@@ -414,7 +414,7 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
     if (!targets.length) { result.status = 'UNKNOWN'; result.failedStep = 'listing carries no DB-known AF answer (all unknown/false)'; return result; }
     result.evidence.cardFoundBeforeAF = found;            // informative, not the AF verdict
     step(`open AF (targets: ${targets.map((t) => t.kind === 'amenity' ? t.token : 'furnished=yes').join(', ')})`);
-    // A round asks at most AF_ROUND_MAX_QUESTIONS (4) questions, so a chip the listing can answer
+    // A round asks at most AF_ROUND_MAX_QUESTIONS (7) questions, so a chip the listing can answer
     // (e.g. AC on annual-rent apartments, behind rnpl/furnished/age/bathrooms) is often only offered
     // in ROUND 2. A customer who did not see it presses «🎯 دقّق مع الذكاء» again; so do we
     // (2026-10-06: ksaaqar AC read UNKNOWN for that reason alone). Up to 3 rounds.
