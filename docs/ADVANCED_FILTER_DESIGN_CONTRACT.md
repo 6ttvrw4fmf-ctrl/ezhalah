@@ -302,7 +302,7 @@ narrowing the market for them, not forcing them to fill another form.» Everythi
 
 > **Partly superseded on 2026-08-25** — see «Amendment 2026-08-25» at the end of this file. The
 > ORDERING half below stands. The ELIGIBILITY half's `count < N` was replaced by
-> `optionNarrowsMeaningfully(count, N)` (≥10% removed, or landing at/under the target): the
+> `optionNarrowsMeaningfully(count, N)` (≥2.5% removed — 10% until the owner lowered it on 2026-11-01 — or landing at/under the target): the
 > small-slice protection this amendment won is permanent, the lopsided-majority half was an
 > over-correction and the owner reversed it. Kept in full because this gate has now moved twice.
 
@@ -572,8 +572,8 @@ invent questions and do not force questions just to reach the 25-listing target.
 qualifies  ==  (total - count >= total * MEANINGFUL_NARROWING_FRACTION)  ||  (count <= INTERVIEW_STOP_AT)
 ```
 
-`MEANINGFUL_NARROWING_FRACTION = 0.10`, `INTERVIEW_STOP_AT = 25` (unchanged). The removal form is
-written so that EXACTLY 10% qualifies (N=100 k=90 and N=30 k=27 both ask; N=100 k=91 does not). The
+`MEANINGFUL_NARROWING_FRACTION = 0.025` (0.10 until 2026-11-01), `INTERVIEW_STOP_AT = 25` (unchanged). The removal form is
+written so that EXACTLY the fraction qualifies (at today's 2.5%: N=200 k=195 and N=40 k=39 both ask; N=200 k=196 does not; at the old 10%: N=100 k=90 and N=30 k=27 asked, N=100 k=91 did not). The
 second clause exists so the LAST step to the target is never blocked by a percentage: at N=26 an
 option yielding 25 removes 3.8% and still qualifies, because it lands AT the target.
 
@@ -674,7 +674,7 @@ useless/lopsided option but leaves one genuinely useful option, do not throw awa
 just because one option remains. Treat that remaining option as a valid yes/no narrowing question
 when it meaningfully reduces the results under our existing rule. Example: if 1,000 listings become
 60 by selecting «مفروشة», that is clearly useful and Advanced Filter should be allowed to ask it.»
-«Do not change any of the existing thresholds: meaningful reduction 10%, stop target 25, minimum
+(2026-11-01: the owner lowered the meaningful reduction 10% → 2.5% — «lets lower it» — so more questions are asked; the rest below stands) «Do not change any of the existing thresholds: meaningful reduction 10%, stop target 25, minimum
 useful questions 1, option floor 5.»
 
 **The change, in full.** `MIN_OPTIONS_SINGLE` in `src/lib/afRanking.ts` moved **2 → 1**. Nothing
@@ -682,7 +682,7 @@ else. `minOptionsFor()` is now uniform (`single === multi === 1`); every other c
 
 | constant | value | status |
 |---|---|---|
-| `MEANINGFUL_NARROWING_FRACTION` | `0.1` | **frozen, unchanged** |
+| `MEANINGFUL_NARROWING_FRACTION` | `0.025` | **owner lowered it 2026-11-01 (was 0.1)** |
 | `INTERVIEW_STOP_AT` | `25` | **frozen, unchanged** |
 | `MIN_USEFUL_QUESTIONS_TO_SHOW` | `1` | **frozen, unchanged** |
 | `MIN_REAL_OPTION_COUNT` | `5` | **frozen, unchanged** (now pinned by a barrier — it was not before) |

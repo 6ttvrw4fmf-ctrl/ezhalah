@@ -49,7 +49,8 @@ const check = (label: string, ok: boolean, detail = '') => {
 const opt = (key: string, count: number): AdvancedOption => ({ key, label: key, count });
 
 // THE EXACT SHAPE, as `furnished` would really arrive from guidedOptions(): a heavily-skewed cohort
-// of N = 1,000 known matches — 940 confirmed unfurnished, 60 confirmed furnished, 12 unknown
+// of N = 1,000 known matches — 980 confirmed unfurnished (940 until the owner lowered the line to 2.5% on
+// 2026-11-01; a 6% cut is a real chip now), 60 confirmed furnished, 12 unknown
 // (unknown ≠ no, never counted). This is the owner's own worked example, verbatim.
 //
 // THE SCALE IS DELIBERATE AND LOAD-BEARING — DO NOT SHRINK IT (kept from the 2026-08-25 original,
@@ -64,7 +65,7 @@ const opt = (key: string, count: number): AdvancedOption => ({ key, label: key, 
 // Both options already clear the ABSOLUTE per-option floor (MIN_REAL_OPTION_COUNT = 5) that
 // meaningful() applies upstream, so nothing but the narrowing gate is in play here.
 const N = 1000;
-const LOPSIDED = 940;  // 6% cut  — fails the 10% fraction, is NOT ≤25 ⇒ filtered out
+const LOPSIDED = 980;  // 2% cut  — fails the 2.5% fraction (2026-11-01), is NOT ≤25 ⇒ filtered out
 const SLICE = 60;      // 94% cut — the genuinely good narrowing choice that survives the gate
 const twoOption = { options: [opt('no', LOPSIDED), opt('yes', SLICE)], unknownCount: 12, total: N };
 
@@ -100,7 +101,7 @@ check(`fixture is DECISIVE: the survivor (${SLICE}) is above INTERVIEW_STOP_AT (
 // it is also satisfiable while the small-slice half regresses. Assert the survivor set explicitly.
 {
   const survivors = twoOption.options.filter((o) => optionNarrowsMeaningfully(o.count, N));
-  check(`the lopsided option (${LOPSIDED}/${N}, a 6% cut) is STILL the one the gate rejects`,
+  check(`the lopsided option (${LOPSIDED}/${N}, a 2% cut) is STILL the one the gate rejects`,
     optionNarrowsMeaningfully(LOPSIDED, N) === false,
     'if this is true the 2026-08-25 gym rule is gone and §1 is passing for the wrong reason');
   check(`the small slice (${SLICE}/${N}, a 94% cut) SURVIVES the gate — one-sidedness is permanent`,
@@ -123,11 +124,11 @@ check(`fixture is DECISIVE: the survivor (${SLICE}) is above INTERVIEW_STOP_AT (
 // With the arity floor at 1, `optionNarrowsMeaningfully` is the ONLY remaining gate. A single-select
 // whose every option is lopsided must still die: that is the owner's gym rule, untouched by the
 // reversal. Two shapes, both at a scale where the ≤ INTERVIEW_STOP_AT escape cannot rescue anything.
-check('a single-select where the ONLY option is lopsided (940 of 1,000, a 6% cut) is still NOT asked',
+check('a single-select where the ONLY option is lopsided (980 of 1,000, a 2% cut) is still NOT asked',
   scoreQuestion('furnished', 'single', { options: [opt('no', LOPSIDED)], unknownCount: 12, total: N }) === null,
   'the arity floor moved to 1; the NARROWING gate is what must still refuse this');
-check('a single-select where EVERY option is lopsided (940 and 980 of 1,000) is still NOT asked',
-  scoreQuestion('bathrooms', 'single', { options: [opt('2', 980), opt('3', LOPSIDED)], unknownCount: 0, total: N }) === null);
+check('a single-select where EVERY option is lopsided (980 and 990 of 1,000) is still NOT asked',
+  scoreQuestion('bathrooms', 'single', { options: [opt('2', 990), opt('3', LOPSIDED)], unknownCount: 0, total: N }) === null);
 check('the owner\'s gym: a no-op option (1,000 of 1,000, a 0% cut) is still NOT asked, at either arity',
   scoreQuestion('furnished', 'single', { options: [opt('yes', N)], unknownCount: 0, total: N }) === null
   && scoreQuestion('amenities', 'multi', { options: [opt('gym', N)], unknownCount: 0, total: N }) === null);

@@ -236,7 +236,7 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 - **R5.1.1** — An option qualifies for asking if and only if:
   > `total - count >= total × 0.10`  **OR**  `count <= 25`
 - **R5.1.2** — In plain English: **choosing this option must remove at least 10% of the current
-  results, OR leave the user at 25 or fewer.** `MEANINGFUL_NARROWING_FRACTION = 0.1` and
+  results, OR leave the user at 25 or fewer.** `MEANINGFUL_NARROWING_FRACTION = 0.025` (0.1 until 2026-11-01) and
   `INTERVIEW_STOP_AT = 25`.
 
 ### 5.2 The rule is ONE-SIDED — this is deliberate
@@ -736,7 +736,7 @@ here changes the entire product; no other file may hard-code the number.
 | `MIN_REAL_OPTION_COUNT` | 5 | `src/lib/afRanking.ts` | Absolute per-option floor. |
 | `MIN_OPTIONS_SINGLE` | ~~2~~ **1** | `src/lib/afRanking.ts` | Single-select survives with ≥1 real option (owner 2026-08-26; was 2). |
 | `MIN_OPTIONS_MULTI` | 1 | `src/lib/afRanking.ts` | Multi-select survives with ≥1. |
-| `MEANINGFUL_NARROWING_FRACTION` | 0.10 | `src/lib/afRanking.ts` | The 10% narrowing rule. |
+| `MEANINGFUL_NARROWING_FRACTION` | 0.025 | `src/lib/afRanking.ts` | The 2.5% narrowing rule (10% until 2026-11-01). |
 | `AF_ROUND_MAX_QUESTIONS` | 4 | `src/lib/afRanking.ts` | Round size cap. |
 | `MIN_USEFUL_QUESTIONS_TO_SHOW` | 1 | `src/data/advancedFilters.ts` | 0 hides, 1+ asks (owner 2026-08-24). |
 

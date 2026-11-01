@@ -187,7 +187,7 @@ export function boundaryReport(rows: Row[], p: Pred): { exercised: boolean; viol
  */
 export const MIN_REAL_OPTION_COUNT = 5;
 export const INTERVIEW_STOP_AT = 25;
-export const MEANINGFUL_NARROWING_FRACTION = 0.1;
+export const MEANINGFUL_NARROWING_FRACTION = 0.025;   // owner 2026-11-01: 10% → 2.5% («lets lower it … 2.5»)
 export function optionWouldRender(count: number, total: number): boolean {
   if (count < MIN_REAL_OPTION_COUNT) return false;
   return total - count >= total * MEANINGFUL_NARROWING_FRACTION || count <= INTERVIEW_STOP_AT;
