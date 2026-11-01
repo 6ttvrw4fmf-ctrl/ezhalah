@@ -1,0 +1,80 @@
+name: Page probe (production, real browser)
+
+# 🔧 Quality & Repair 2026-11-01. AGENTS.md: a change is live only when a real browser walked the customer's path on
+# production — and a Sentry fix is resolved only after that walk. The cloud sessions cannot reach ezhalah.com
+# (backlog 924), and customer-journey.mjs knows only the search path; e2e/engineers/page-probe.mjs opens ONE page,
+# taps like a customer (the mode pills, a button, a test id) and fails on any uncaught exception, unhandled
+# rejection or console error. First customer: Sentry REACT-NATIVE-F (#9607) — tap the mode pills on /map quickly,
+# read 0 errors. ONE browser at a time against production (AGENTS.md «OUR OWN ROBOTS MUST NOT TAKE PRODUCTION
+# DOWN»): the concurrency group is shared with the customer journey, so the two robots queue behind each other.
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'page to open'
+        required: false
+        default: 'https://ezhalah-app.vercel.app/map'
+      taps:
+        description: 'comma list of tab:<aria-label> | text:<exact text> | testid:<data-testid>'
+        required: false
+        default: 'tab:تصفية,tab:خريطة,tab:الوسيط الذكي,tab:خريطة'
+      repeat:
+        description: 'rounds of taps'
+        required: false
+        default: '3'
+      gap:
+        description: 'ms between taps («twice fast» = 120)'
+        required: false
+        default: '120'
+      phone:
+        description: 'full mobile emulation'
+        type: boolean
+        required: false
+        default: true
+  pull_request:
+    paths:
+      - e2e/engineers/page-probe.mjs
+      - .github/workflows/page-probe.yml
+
+concurrency:
+  group: production-browser-customer-journey
+  cancel-in-progress: false
+
+env:
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  probe:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Self-check (pure helpers)
+        run: node e2e/engineers/page-probe.mjs --selftest
+      - name: Install Playwright + browser
+        run: |
+          npm i -D @playwright/test@^1.49 playwright@^1.49
+          npx playwright install --with-deps chromium
+      - name: Open the page and tap like a customer
+        env:
+          URL: ${{ github.event.inputs.url || 'https://ezhalah-app.vercel.app/map' }}
+          TAPS: ${{ github.event.inputs.taps || 'tab:تصفية,tab:خريطة,tab:الوسيط الذكي,tab:خريطة' }}
+          REPEAT: ${{ github.event.inputs.repeat || '3' }}
+          GAP: ${{ github.event.inputs.gap || '120' }}
+          PHONE: ${{ github.event.inputs.phone || 'true' }}
+          PROBE_OUT_DIR: ${{ runner.temp }}/page-probe
+        run: |
+          args=(--url "$URL" --taps "$TAPS" --repeat "$REPEAT" --gap "$GAP")
+          if [ "$PHONE" = "true" ]; then args+=(--phone); fi
+          node e2e/engineers/page-probe.mjs "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: page-probe-screens
+          path: ${{ runner.temp }}/page-probe
+          if-no-files-found: ignore
+          retention-days: 7

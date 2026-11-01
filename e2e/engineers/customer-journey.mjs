@@ -41,7 +41,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   normUrl, isMainSearch, afTargetsFor, carriedOnRequest, typeUi, TYPE_UI,
-  priceOf, rangeAround, pickSpread, idKey,
+  priceOf, rangeAround, clampToPriceBox, pickSpread, idKey,
 } from './journey-lib.mjs';
 
 // ── environment ────────────────────────────────────────────────────────────────────────────
@@ -289,9 +289,10 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
     // listings are left to narrow (INTERVIEW_STOP_AT, src/lib/afRanking.ts), and the AF answers
     // are what narrows — membership is proven on the request, so no area/price box is needed.
     const area = MODE === 'af' ? null : rangeAround(Number(row.area_m2));
-    const price = MODE === 'af' ? null : rangeAround(priceOf(row));
+    // The price boxes keep 10 digits — type only what a customer can (journey-lib clampToPriceBox, backlog 1141).
+    const price = MODE === 'af' ? null : clampToPriceBox(rangeAround(priceOf(row)));
     if (area) { step(`area ${area.min}–${area.max}`); await fillRange('area-min-input', area.min); await fillRange('area-max-input', area.max); }
-    if (price) { step(`price ${price.min}–${price.max}`); await fillRange('price-min-input', price.min); await fillRange('price-max-input', price.max); }
+    if (price) { step(`price ${price.min ?? '—'}–${price.max ?? '— (above the box\'s 10 digits)'}`); await fillRange('price-min-input', price.min); await fillRange('price-max-input', price.max); }
 
     step('بحث');
     const n0 = searches.length;
