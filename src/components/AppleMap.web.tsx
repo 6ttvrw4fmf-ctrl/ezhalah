@@ -175,12 +175,17 @@ const live: { map: MKMap | null; search: MKSearch | null; lang: string } = { map
 /** Apple Maps' own place suggestions (owner 2026-10-31: «this search connected to Apple Maps, like how a user
  *  searches in Apple Maps»), limited to Saudi Arabia, in the UI language. Resolves [] when MapKit is unavailable:
  *  the field then simply shows nothing (never a fake "no places"). */
-export async function suggestPlaces(q: string, language: string): Promise<PlaceSuggestion[]> {
+export async function suggestPlaces(q: string, uiLanguage: string): Promise<PlaceSuggestion[]> {
   const query = q.trim();
   if (query.length < 2) return [];
   let mk: MapKit;
   try { mk = await loadMapKit(); } catch { return []; }
-  initOnce(mk, language);
+  initOnce(mk, uiLanguage);
+  // THE MAP SPEAKS THE LANGUAGE THE USER TYPES (owner 2026-10-31: «if the user types English or Arabic make sure the
+  // map turns that language»): Arabic letters → Arabic labels and suggestions, Latin letters → English. A query with
+  // neither (digits only) keeps whatever the map has. The UI-language effect in AppleMap resets it on a UI switch.
+  const language = /[\u0600-\u06FF]/.test(query) ? 'ar' : /[A-Za-z]/.test(query) ? 'en' : mk.language || uiLanguage;
+  if (mk.language !== language) mk.language = language;
   if (!live.search || live.lang !== language) {
     live.search = new mk.Search({ language, limitToCountries: 'SA', includePointsOfInterest: true });
     live.lang = language;
@@ -238,7 +243,8 @@ export default function AppleMap({ full = false, onExpand, onClose }: { full?: b
   // Map style (owner 2026-10-31, Zillow's layers button): the modes Apple's web MapKit offers — standard, satellite
   // with labels (hybrid), and muted. Driving / transit / traffic exist only in Apple's own apps, not on the web.
   const [layersOpen, setLayersOpen] = useState(false);
-  const [mapType, setMapType] = useState<'standard' | 'hybrid' | 'muted'>('standard');
+  // Satellite with labels by default (owner 2026-10-31: «keep the default satellite»).
+  const [mapType, setMapType] = useState<'standard' | 'hybrid' | 'muted'>('hybrid');
   const applyMapType = (k: 'standard' | 'hybrid' | 'muted') => {
     const mk = mapkitOf();
     const m = mapRef.current;
@@ -263,6 +269,7 @@ export default function AppleMap({ full = false, onExpand, onClose }: { full?: b
       mk.addEventListener('error', onError);
       map = new mk.Map(el, {
         region: ksaRegion(mk, el),
+        mapType: mk.Map.MapTypes.Hybrid,
         showsMapTypeControl: false,
         // Apple's landmarks ON — mosques, malls, hospitals (owner 2026-10-31: «we want it on; the user can search
         // landmarks, mosques, malls and hospitals»). The search field already suggests them; the map now shows them.

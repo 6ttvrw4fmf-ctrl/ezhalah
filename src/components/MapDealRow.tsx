@@ -23,7 +23,9 @@ const DEALS: { id: MapDeal; label: string }[] = [
 /** The search field above the row — Apple Maps' own place search (owner 2026-10-31: «this search connected to
  *  Apple Maps, like how a user searches in Apple Maps»): typing shows Apple's suggestions for Saudi Arabia under the
  *  field; picking one glides the map there. Suggestions only; nothing filters listings yet. */
-export function MapSearchBar() {
+/** `onPick`: the page opens the full-screen map when a place is chosen (owner 2026-10-31: «when the user clicks
+ *  take him inside the map … when he types a city, region, landmark or district take him there»). */
+export function MapSearchBar({ onPick }: { onPick?: () => void } = {}) {
   const { t, isRTL, locale } = useI18n();
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<PlaceSuggestion[]>([]);
@@ -37,6 +39,7 @@ export function MapSearchBar() {
   }, [q, locale]);
   const pick = (p: PlaceSuggestion) => {
     setQ(p.displayLines[0]); setHits([]); setFocused(false);
+    onPick?.();
     flyToPlace(p);
   };
   const open = focused && hits.length > 0;
