@@ -88,12 +88,20 @@ check('no cohort has its own certified answer stripped by the shared amenity gat
 const aptAnnual = { type: 'Apartment', category: 'Residential', deal: 'Rent', rentPeriod: 'annual' } as never;
 eq('Apartment/RentAnnual: a furnished answer is certified, not refused',
   partitionRequestedAmenities(aptAnnual, ['furnished']), { certified: ['furnished'], rejected: [] });
+// 2026-10-31: Residential Building/RentAnnual gained the features + services cards, so no cohort certifies furnished
+// while certifying NO chips any more (measured by executing every cohort × leg). The shape that mattered is kept:
+// furnished rides its OWN gate, so it is certified on a cohort whose chip list does not carry it (Residential Building —
+// its «furnished» is a chip on its features card too — and Office, whose chips are the utility trio).
 const rbAnnual = { type: 'Residential Building', category: 'Residential', deal: 'Rent', rentPeriod: 'annual' } as never;
-check('Residential Building/RentAnnual certifies furnished while certifying NO amenity chips',
-  cohortAllows(rbAnnual, 'furnished') && !cohortAllows(rbAnnual, 'amenities')
-  && certifiedAmenityKeys(rbAnnual).length === 0);
-eq('...and its furnished answer still survives the gate (the early-return case)',
+check('Residential Building/RentAnnual certifies furnished (its own gate) beside its features/services chips',
+  cohortAllows(rbAnnual, 'furnished') && cohortAllows(rbAnnual, 'amenities') && certifiedAmenityKeys(rbAnnual).includes('basement'));
+eq('...and its furnished answer survives the gate',
   partitionRequestedAmenities(rbAnnual, ['furnished']), { certified: ['furnished'], rejected: [] });
+const officeAnnual = { type: 'Office', category: 'Commercial', deal: 'Rent', rentPeriod: 'annual' } as never;
+check('Office/RentAnnual certifies furnished while its chip list (the utility trio) does not carry it — the own-gate case',
+  cohortAllows(officeAnnual, 'furnished') && !certifiedAmenityKeys(officeAnnual).includes('furnished'));
+eq('...and its furnished answer still survives the gate (the bag-writer rule, not the chip list)',
+  partitionRequestedAmenities(officeAnnual, ['furnished']), { certified: ['furnished'], rejected: [] });
 
 // ── 2. THE OPPOSITE ERROR, which is worse: no token may ride the WRONG question's certification ───
 // rnpl certifies on 3 cohorts, amenities on 24. Gating rnpl on 'amenities' would let it through

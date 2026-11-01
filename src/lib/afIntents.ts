@@ -27,7 +27,11 @@ import { cohortAllows } from './afCohorts.ts';
 
 export type AfIntentId =
   | 'property_age' | 'street_width' | 'direction' | 'bathrooms'
-  | 'rating' | 'rnpl' | 'unit_subtype' | 'furnished' | 'amenities';
+  | 'rating' | 'rnpl' | 'unit_subtype' | 'furnished' | 'amenities'
+  // The Apartments & Co-living cards and the Residential Building ladders (owner 2026-10-31): bag questions whose
+  // tokens the amenity path certifies per token (partitionRequestedAmenities); listed so the registry is COMPLETE.
+  | 'comfort' | 'space' | 'safety' | 'perks' | 'build' | 'extras' | 'who' | 'features' | 'services' | 'fun'
+  | 'apartments' | 'shops';
 
 export type AfIntent = {
   /** The canonical AF question id. cohortAllows(q, id) is the certification gate — always. */
@@ -196,11 +200,83 @@ export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
       return keep.length === (q.amenities?.length ?? 0) ? q : { ...q, amenities: keep.length ? keep : null };
     },
   },
+  comfort: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'comfort', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  space: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'space', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  safety: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'safety', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  perks: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'perks', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  build: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'build', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  extras: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'extras', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  who: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'who', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  features: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'features', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  services: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'services', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  fun: {
+    // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
+    // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
+    id: 'fun', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
+  },
+  apartments: {
+    // The Residential Building ladder: one p_amenities token (apts4/8/12/20 = apartments_count >= n).
+    id: 'apartments', vocabulary: ['apts4', 'apts8', 'apts12', 'apts20'],
+    canonicalize: (raw) => (['apts4', 'apts8', 'apts12', 'apts20'].includes(raw) ? raw : null),
+    apply: (q, key) => ({ ...q, amenities: [...new Set([...(q.amenities ?? []).filter((t) => !/^apts\d+$/.test(t)), key])] }),
+    clear: (q) => {
+      const keep = (q.amenities ?? []).filter((t) => !/^apts\d+$/.test(t));
+      return keep.length === (q.amenities?.length ?? 0) ? q : { ...q, amenities: keep.length ? keep : null };
+    },
+  },
+  shops: {
+    // «Has shops on the ground floor»: the has_shops token (shops_count >= 1).
+    id: 'shops', vocabulary: ['has_shops'],
+    canonicalize: (raw) => (raw === 'has_shops' ? raw : null),
+    apply: (q, key) => ({ ...q, amenities: [...new Set([...(q.amenities ?? []), key])] }),
+    clear: (q) => {
+      const keep = (q.amenities ?? []).filter((t) => t !== 'has_shops');
+      return keep.length === (q.amenities?.length ?? 0) ? q : { ...q, amenities: keep.length ? keep : null };
+    },
+  },
 };
 
 /** Ids the generic apply loop owns. amenities is handled by its own per-token gate. */
+// Bag intents have no canonical value of their own: the amenity path certifies their tokens one by one.
+export const BAG_INTENT_IDS: ReadonlySet<string> = new Set(['amenities', 'comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun']);
 export const GENERIC_INTENT_IDS: AfIntentId[] =
-  (Object.keys(AF_INTENTS) as AfIntentId[]).filter((id) => id !== 'amenities');
+  (Object.keys(AF_INTENTS) as AfIntentId[]).filter((id) => !BAG_INTENT_IDS.has(id));
 
 /**
  * Apply the model's proposed AF intents through the REAL certification gate.

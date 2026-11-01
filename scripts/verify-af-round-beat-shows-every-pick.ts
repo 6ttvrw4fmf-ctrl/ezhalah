@@ -86,11 +86,15 @@ const beatProblems = (fn: Steps): string[] => {
   if (fn([age, age]).length !== 1) out.push('the same answer twice is more than one beat');
   return out;
 };
-// A mutant is the REAL afSummary.ts with one line broken, loaded from a temp copy (the file has no imports).
+// A mutant is the REAL afSummary.ts with one line broken, loaded from a temp copy (its one import, the pure
+// ./afChips.ts chip table, is copied beside it — 2026-11-01).
 const SUMMARY_SRC = readFileSync(join(ROOT, 'src/lib/afSummary.ts'), 'utf8');
+const CHIPS_SRC = readFileSync(join(ROOT, 'src/lib/afChips.ts'), 'utf8');
 const loadMutant = async (from: string, to: string): Promise<Steps> => {
   if (!SUMMARY_SRC.includes(from)) throw new Error(`mutation anchor missing: ${from.slice(0, 70)}`);
-  const f = join(mkdtempSync(join(tmpdir(), 'af-beat-')), 'afSummary.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'af-beat-'));
+  writeFileSync(join(dir, 'afChips.ts'), CHIPS_SRC);
+  const f = join(dir, 'afSummary.ts');
   writeFileSync(f, SUMMARY_SRC.replace(from, to));
   return ((await import(`${pathToFileURL(f).href}?m=${Math.random()}`)) as { buildAfBeatSteps: Steps }).buildAfBeatSteps;
 };

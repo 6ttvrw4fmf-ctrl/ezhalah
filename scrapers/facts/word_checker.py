@@ -107,6 +107,12 @@ _INHERITED = {   # catalogue key → normalize._AMENITY_TOKENS key (balcony_terr
 _METER = r"(?:مستقل|مستقله|منفصل|منفصله|خاص|خاصه)"
 _WATER = r"(?:ال)?(?:مياه|ماء|مويه)"
 _POWER = r"(?:ال)?(?:كهرباء|كهربائي|كهربا|كهربه|كهرب)"
+# who may rent (singles / families): «مسموح للعزاب» is a yes, «غير مسموح / ممنوع / لا نقبل …» an explicit no
+_NOT_ALLOWED = r"(?:غير مسموح|ممنوع|ممنوعه|ممنوعين|لا نقبل|ما نقبل|لا يسمح|لا يقبل|لا نسمح)"
+_ALLOWED = r"(?<!غير )(?<!لا )(?<!ما )(?:مسموح|مسموحه|يسمح|نسمح|نقبل|يقبل)"
+_TO = r"(?:لل|ل|ب|بال|ال|وال)?"
+_WHO_MAY_RENT = frozenset({"singles", "families"})
+_BILL = r"(?:كهرباء|كهربا|كهربه|كهرب|ماء|مياه|مويه|فواتير|فاتوره|خدمات|غاز)"   # what a rent may include (bills_included)
 
 FACT_TOKENS: dict[str, list[Any]] = {
     "elevator": ["^اصانصير", "^اسانسير", "^اصنصير", "^اسنسير"],
@@ -188,9 +194,57 @@ FACT_TOKENS: dict[str, list[Any]] = {
     "basement": ["^قبو$", "^بدروم", "^بيسمنت", "^basement"],
     "storage": ["^مستودع", "^مخزن$", "^مخازن$", "re:(?:ال)?غرف(?:ه)? (?:لل|ال)?تخزين", "^storage"],
     "garage": ["^كراج", "^جراج", "^قراج", "^garage"],
+    # ── the 28 apartment chips (owner 2026-10-31 handoff): the Advanced Filter learns them from the ad's own words ──
+    # self_checkin and smart_entry overlap on purpose (both fire on «دخول ذكي» / «قفل ذكي»).
+    "self_checkin": ["دخول ذاتي", "دخول ذكي", "قفل ذكي", "تسجيل دخول ذاتي", "self check in", "self checkin", "smart lock"],
+    # «نت» only as a whole word («بالنت», «والنت»); «انترنت» / «إنترنت» by their own start; wi-fi folds to «wi fi»
+    "wifi": ["واي فاي", "وايفاي", "^انترنت", "^نت$", "wifi", "wi fi", "internet"],
+    # ONLY the «included» phrasing — never a bare «كهرباء» / «ماء» (those are the supply facts, with their cues)
+    "bills_included": [rf"re:(?:شامل|شامله|يشمل|تشمل) (?:لل|ال)?{_BILL}(?: و(?:ال)?{_BILL})*",
+                       rf"re:(?:ال)?{_BILL}(?: و(?:ال)?{_BILL})* (?:مشمول|مشموله|مشمولين|مشمولات)",
+                       rf"re:(?:ال)?{_BILL}(?: و(?:ال)?{_BILL})* (?:علي|ع) (?:ال)?مالك",
+                       "bills included", "utilities included", "including bills", "including utilities"],
+    "jacuzzi": ["^جاكوزي", "^جكوزي", "jacuzzi"],
+    "smart_tv": ["re:(?:شاشه|شاشات|تلفزيون|تلفزيونات|تلفاز) (?:ذكي|ذكيه|سمارت)", "سمارت تي في", "غرفة سينما", "سينما منزلية",
+                 "^سينما$", "^بروجكتر", "^بروجيكتر", "smart tv", "^cinema", "projector"],
+    "billiards": ["^بليارد", "billiard", "pool table"],
+    "cleaning_service": ["re:خدم(?:ه|ات) (?:ال)?(?:تنظيف|نظافه)", "تنظيف يومي", "تنظيف اسبوعي", "cleaning service",
+                         "housekeeping"],
+    "soundproof": ["re:عازل(?:ه|ات)? (?:لل|ال)?صوت", "عزل صوت", "soundproof"],
+    "cameras": ["^كاميرات", "^كامرات", "كاميرا مراقبة", "cctv", "security camera"],
+    "guard": ["^حارس$", "^حراسه$", "^حراس$", "re:حارس (?:لل|ال)?(?:عماره|مبني|بنايه|برج)", "نظام امن", "security guard"],
+    "smart_entry": ["دخول ذكي", "قفل ذكي", "مدخل ذكي", "smart entry", "smart lock"],
+    "smart_home": ["سمارت هوم", "منزل ذكي", "بيت ذكي", "re:نظام (?:ال)?(?:منزل|بيت) (?:ال)?ذكي", "نظام ذكي", "smart home"],
+    # «تمديد» is a PREPARED word for every other fact; here the piping IS the feature, so the regex owns the word
+    "central_gas": ["غاز مركزي", "re:تمديد(?:ات)? (?:ال)?غاز (?:ال)?مركزي", "خزان غاز طبيعي", "central gas"],
+    "sauna": ["^ساونا", "غرفة بخار", "sauna", "steam room"],
+    "kids_play_area": ["re:(?:منطقه|مناطق|ملعب|ملاعب|العاب|صاله|ساحه) (?:العاب )?(?:لل|ال)?اطفال", "kids play area",
+                       "playground", "play area"],
+    "nursery": ["^حضانه", "nursery"],
+    "free_maintenance": ["re:(?:ال)?صيانه (?:ال)?مجاني(?:ه|ا)?", "re:خدم(?:ه|ات) (?:ال)?صيانه",
+                         "re:(?:ال)?صيانه (?:علي|ع) (?:ال)?مالك", "free maintenance"],
+    "intercom": ["^انتركوم", "^انتركم", "^intercom"],
+    "fire_system": ["re:نظام (?:ال)?(?:اطفاء|حريق)", "re:(?:ال)?انذار (?:ال)?حريق", "re:كاشف(?:ات)? (?:ال)?دخان",
+                    "re:طفاي(?:ه|ات) (?:ال)?حريق", "fire alarm", "fire system", "smoke detector", "fire extinguisher"],
+    "ev_charger": ["re:(?:شاحن|شواحن) (?:ال)?(?:سيارات|سياره) (?:ال)?كهربائي(?:ه)?",
+                   "re:(?:شاحن|شواحن) (?:ال)?كهربائي(?:ه)? (?:لل|ال)?سيار(?:ات|ه)", "ev charger", "ev charging"],
+    "central_vacuum": ["مكنسة مركزية", "مكانس مركزية", "central vacuum"],
+    # a bare «عازل» is the soundproof fact's ambiguity — only the thermal / water kinds count here
+    "insulation": ["عزل حراري", "عزل مائي", "عازل حراري", "عازل مائي", "عزل فوم", "^عوازل", "re:معزول(?:ه)? (?:حراريا|مائيا)",
+                   "thermal insulation", "waterproofing"],
+    "dining_majlis": ["^مقلط", "re:(?:مجلس|صاله|غرفه) (?:ال)?طعام", "dining majlis", "dining room"],
+    "own_bathroom": ["re:(?:حمام|حمامات|دوره مياه|دورات مياه) (?:خاص|خاصه)", "private bathroom", "ensuite", "en suite"],
+    "fridge": ["^ثلاج", "fridge", "refrigerator"],
+    "whole_floor": ["re:(?:ال)?(?:دور|طابق) (?:بال|ال)?كامل", "whole floor", "entire floor"],
+    # «مسموح» is the permit guard's word for every other fact; here the ad's yes / no is exactly that word
+    "singles": ["^عزاب", "singles", (rf"re:{_NOT_ALLOWED} {_TO}عزاب(?:ي|يه)?", False), (rf"re:{_ALLOWED} {_TO}عزاب(?:ي|يه)?", True)],
+    "families": ["^عوائل", "^عائلات", "families", (rf"re:{_NOT_ALLOWED} {_TO}(?:عوائل|عائلات)", False),
+                 (rf"re:{_ALLOWED} {_TO}(?:عوائل|عائلات)", True)],
 }
 for _k, _src in _INHERITED.items():
     FACT_TOKENS[_k] = list(N._AMENITY_TOKENS[_src]) + FACT_TOKENS[_k]
+# washing machine rides the existing laundry_room fact (owner 2026-10-31); «غسالة صحون» is excluded below
+FACT_TOKENS["laundry_room"] += ["^غساله$", "^غسالات$", "washing machine"]
 
 # Not read from prose (the LLM run found 0 rows: a platform feature, not something ads say).
 NOT_IN_PROSE = frozenset({"installment_available", "rent_now_pay_later"})
@@ -200,7 +254,9 @@ assert set(FACT_TOKENS) | NOT_IN_PROSE == BOOL_FACTS, set(FACT_TOKENS) ^ BOOL_FA
 # «بدون مكيفات ومطبخ» negates both, «بدون عمولة ومطبخ» negates nothing.
 _LIST_WORDS = frozenset(_n(w) for w in (
     "مكيفات", "مكيف", "مطبخ", "مصعد", "مسبح", "اثاث", "مواقف", "موقف", "حوش", "سطح", "ملحق", "مجلس", "خزان",
-    "خزانات", "عداد", "كهرباء", "مياه", "ماء", "صرف", "تكييف", "حديقه", "كراج", "مستودع", "بلكونه", "بئر"))
+    "خزانات", "عداد", "كهرباء", "مياه", "ماء", "صرف", "تكييف", "حديقه", "كراج", "مستودع", "بلكونه", "بئر",
+    # the apartment chips a negator may reach across (owner 2026-10-31): «بدون واي فاي وكاميرات وثلاجه»
+    "واي", "فاي", "وايفاي", "نت", "انترنت", "كاميرات", "ثلاجه", "جاكوزي", "ساونا", "حارس", "حراسه", "انتركوم", "غساله"))
 
 # ── guards ────────────────────────────────────────────────────────────────────────────────────────────────
 # PREPARED / POSSIBLE: the thing is not there yet — no row (the scrapers' _PREPARED_ONLY + «possible» words).
@@ -249,7 +305,8 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
                   "توفير", "تاجير", "التاجير", "مستاجر", "دخل", "الدخل", "عائد", "العائد", "ايجار", "الايجار",
                   "الخصوصيه", "خصوصيه", "سير", "راحه", "الراحه")),
     "roof": (("مستوي", "مستوى"), ("المطبخ", "مطبخ", "رخام", "جرانيت", "عمل", "الارض", "البحر", "الطاوله")),
-    "water_tank": ((), ("ملابس", "مطبخ", "المطبخ", "حائط", "جداري", "دولاب", "خشب", "حائطيه", "ملابس")),
+    "water_tank": ((), ("ملابس", "مطبخ", "المطبخ", "حائط", "جداري", "دولاب", "خشب", "حائطيه", "ملابس",
+                        "غاز", "الغاز", "وقود", "ديزل")),            # «خزان غاز» is the gas fact, not a water tank
     "well": ((), ("السلم", "سلم", "الدرج", "درج", "المصعد", "مصعد", "عثمان", "سلوي")),
     "annex": (("حمام", "دوره", "دورات", "مطبخ", "غرف", "غرفه"),
               ("به", "بها", "بالغرفه", "بالصاله", "بالمطبخ", "بالمجلس", "بغرفه", "بالمبني", "بالفيلا")),
@@ -262,9 +319,9 @@ _EXCLUDE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     # «مياه مستقل» / «كهرباء مستقلة» shapes; «خزانات وعدادات مستقلة» names the meter itself)
     "separate_water_meter": (("خزان", "دور", "حمام", "مغسل", "سخان", "تحلي", "فلتر", "مضخ", "بئر", "بير"), ()),
     "separate_electricity_meter": (("غرف", "لوح", "مولد", "تمديد", "خزان"), ()),
-    "laundry_room": ((), ("سيار", "السيار")),
+    "laundry_room": ((), ("سيار", "السيار", "صحون", "الصحون", "اطباق", "الاطباق", "مواعين")),   # «غسالة صحون» is a dishwasher
     "kitchen": (("ادوات", "سطح"), ()),
-    "pool": (("ادوات", "مستلزمات"), ()),
+    "pool": (("ادوات", "مستلزمات"), ("table",)),                 # «pool table» is billiards
     # bench-v2: «مدخل مكيّف», «مداخل مكيفة», «ممرات مكيفة» — the building's lobby, not the unit's AC
     "air_conditioner": (("مدخل", "مداخل", "ممر", "لوبي", "ردهه", "بهو", "مصلي"), ()),
     "furnished": (("محل", "معرض", "مستودع", "محلات", "معارض"), ()),
@@ -285,7 +342,7 @@ _UTILITY = tuple(_n(w) for w in ("كهرب", "مياه", "ماء", "مويه", "
                                  "sanitation", "fibre", "fiber", "telephone", "phone"))
 # Public amenities a neighbourhood also has: «مسجد وحديقة قريبة من العمارة», «حديقة … مقابل العمارة»,
 # and the items of a «خدمات قريبة: مسجد - حديقة» list — the nearby word may come AFTER, or a clause before.
-_PUBLIC_FACTS = frozenset({"garden", "pool", "gym", "parking"})
+_PUBLIC_FACTS = frozenset({"garden", "pool", "gym", "parking", "nursery", "kids_play_area"})
 _NEAR_AFTER = tuple(_n(w) for w in ("قريب", "بالقرب", "مجاور", "بجوار", "مقابل"))
 _METER_FACTS = frozenset({"separate_water_meter", "separate_electricity_meter"})
 _DIGITS = "0123456789"
@@ -419,6 +476,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
     head = t[ws:s]                                   # the glued part of the word before a loose hit
     if fact == "balcony" and N._inside_a_name(t, s, t[s:e]):
         return None, s, e
+    if fact == "majlis" and nxt[:1] and nxt[0] in ("طعام", "الطعام"):   # «مجلس طعام» is the dining_majlis fact
+        return None, s, e
     if fact == "warranty":
         word = t[ws:we]
         if word in ("لضمان", "ولضمان"):              # «لضمان الخصوصية» = "to ensure", not a warranty
@@ -472,6 +531,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return None, s, e
     if forced is not None:
         return forced, ws, we
+    if fact in _WHO_MAY_RENT and any(_strip_wa(w).startswith("ممنوع") for w in gp[-3:]):
+        return False, ws, we                         # «ممنوع العزاب»: the bare word's own no (the forced regex agrees)
     if _billing_not_supply(fact, prev, nxt):
         return None, s, e
     if head in ("un", "غير") or head.endswith("غير"):
@@ -953,6 +1014,84 @@ def selftest() -> None:
         ("غرفة خادمة مع دورة مياه", {"maid_room": True}, ("water_supply",)),
         ("حي المشرفة", {}, ("balcony",)),
         ("شقة كبيرة", {}, ("well",)),
+        # ── the 28 apartment chips (owner 2026-10-31): one yes each, the old guards still hold ──
+        ("شقة بنظام دخول ذاتي", {"self_checkin": True}, ()),
+        ("self check-in with smart lock", {"self_checkin": True, "smart_entry": True}, ()),
+        ("قفل ذكي ودخول ذكي", {"self_checkin": True, "smart_entry": True}, ()),
+        ("واي فاي مجاني", {"wifi": True}, ()),
+        ("شقة مع إنترنت وتلفزيون", {"wifi": True}, ()),
+        ("مع النت والكهرباء", {"wifi": True}, ()),
+        ("بدون واي فاي", {"wifi": False}, ()),
+        ("لا يوجد انترنت", {"wifi": False}, ()),
+        ("مفروشة بالكامل", {}, ("wifi",)),                         # «نت» never fires inside another word
+        ("شامل الكهرباء والماء", {"bills_included": True}, ()),
+        ("الإيجار يشمل الفواتير", {"bills_included": True}, ()),
+        ("الفواتير مشمولة بالإيجار", {"bills_included": True}, ()),
+        ("الكهرباء على المالك", {"bills_included": True}, ()),
+        ("bills included", {"bills_included": True}, ()),
+        ("غير شامل الكهرباء", {"bills_included": False}, ()),
+        ("كهرباء وماء", {}, ("bills_included",)),
+        ("واصل كهرباء وماء", {}, ("bills_included",)),
+        ("شقة بجاكوزي خاص", {"jacuzzi": True}, ()),
+        ("بدون جاكوزي", {"jacuzzi": False}, ()),
+        ("شاشة ذكية في كل غرفة", {"smart_tv": True}, ()),
+        ("غرفة سينما مع بروجكتر", {"smart_tv": True}, ()),
+        ("طاولة بلياردو", {"billiards": True}, ("pool",)),
+        ("pool table and gym", {"billiards": True, "gym": True}, ("pool",)),
+        ("خدمة تنظيف يومية", {"cleaning_service": True}, ()),
+        ("housekeeping included", {"cleaning_service": True}, ()),
+        ("جدران عازلة للصوت", {"soundproof": True}, ("insulation",)),
+        ("عزل صوتي ممتاز", {"soundproof": True}, ()),
+        ("كاميرات مراقبة على مدار الساعة", {"cameras": True}, ()),
+        ("بدون كاميرات", {"cameras": False}, ()),
+        ("حارس للعمارة", {"guard": True}, ()),
+        ("أمن وحراسة 24 ساعة", {"guard": True}, ()),
+        ("غرفة حارس", {"guard": True}, ()),
+        ("مدخل ذكي", {"smart_entry": True}, ("self_checkin",)),
+        ("نظام سمارت هوم", {"smart_home": True}, ()),
+        ("نظام المنزل الذكي", {"smart_home": True}, ()),
+        ("تمديد غاز مركزي", {"central_gas": True}, ()),
+        ("خزان غاز طبيعي", {"central_gas": True}, ("water_tank",)),
+        ("ساونا وغرفة بخار", {"sauna": True}, ()),
+        ("منطقة ألعاب أطفال", {"kids_play_area": True}, ()),
+        ("ملعب للأطفال", {"kids_play_area": True}, ()),
+        ("قريب من ملعب أطفال", {}, ("kids_play_area",)),
+        ("حضانة أطفال داخل المجمع", {"nursery": True}, ()),
+        ("قريب من حضانة", {}, ("nursery",)),
+        ("خدمات قريبة: حضانة - مسجد", {}, ("nursery",)),
+        ("صيانة مجانية طوال السنة", {"free_maintenance": True}, ()),
+        ("الصيانة على المالك", {"free_maintenance": True}, ()),
+        ("انتركوم مرئي", {"intercom": True}, ()),
+        ("إنتركم", {}, ()),                                         # a lone word is never a fact
+        ("نظام إطفاء حريق وكاشف دخان", {"fire_system": True}, ()),
+        ("طفايات حريق في كل دور", {"fire_system": True}, ()),
+        ("شاحن سيارات كهربائية", {"ev_charger": True}, ()),
+        ("ev charger in the garage", {"ev_charger": True, "garage": True}, ()),
+        ("مكنسة مركزية", {"central_vacuum": True}, ()),
+        ("عزل حراري ومائي", {"insulation": True}, ("soundproof",)),
+        ("عوازل حرارية", {"insulation": True}, ()),
+        ("عازل", {}, ("insulation", "soundproof")),
+        ("مقلط ومجلس رجال", {"dining_majlis": True, "majlis": True}, ()),
+        ("صالة طعام واسعة", {"dining_majlis": True}, ()),
+        ("مجلس طعام", {"dining_majlis": True}, ("majlis",)),
+        ("غرفة نوم بحمام خاص", {"own_bathroom": True}, ()),
+        ("دورة مياة خاصة", {"own_bathroom": True}, ("water_supply",)),
+        ("ثلاجة وغسالة", {"fridge": True, "laundry_room": True}, ()),
+        ("بدون ثلاجه", {"fridge": False}, ()),
+        ("غسالة ملابس", {"laundry_room": True}, ()),
+        ("washing machine", {"laundry_room": True}, ()),
+        ("غسالة صحون", {}, ("laundry_room",)),
+        ("دور كامل للإيجار", {"whole_floor": True}, ()),
+        ("شقة في الدور الأول", {}, ("whole_floor",)),
+        ("للعزاب فقط", {"singles": True}, ()),
+        ("مسموح للعزاب", {"singles": True}, ()),
+        ("غير مسموح للعزاب", {"singles": False}, ()),
+        ("ممنوع العزاب", {"singles": False}, ()),
+        ("سكن عوائل", {"families": True}, ()),
+        ("للعوائل فقط", {"families": True}, ("singles",)),
+        ("لا نقبل العوائل", {"families": False}, ()),
+        ("عدد الشقق 12", {"apartments_count": 12.0}, ()),
+        ("عمارة فيها محلين", {"shops_count": 2.0}, ()),
     ]
     bad = []
     for text, want, absent in cases:

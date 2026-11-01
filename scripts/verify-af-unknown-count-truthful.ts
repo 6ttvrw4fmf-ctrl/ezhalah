@@ -146,21 +146,29 @@ const MUST_READ_COLUMN: Array<[string, string, string]> = [
   ['BATHROOMS_QUESTION', 'const FURNISHED_QUESTION', 'cnt_bath_unknown'],
   ['STREET_WIDTH_QUESTION', 'const DIRECTION_DEFS', 'cnt_stw_unknown'],
   ['RATING_QUESTION', 'const UNIT_SUBTYPE_QUESTION', 'cnt_rating_unknown'],
-  ['UNIT_SUBTYPE_QUESTION', 'const COMFORT_QUESTION', 'cnt_sub_unknown'],
-  // The short-stays halves of the amenities card (owner 2026-10-31) read the same amenity unknown column.
-  ['COMFORT_QUESTION', 'const SPACE_QUESTION', 'cnt_amen_unknown'],
-  ['SPACE_QUESTION', 'const FUN_QUESTION', 'cnt_amen_unknown'],
-  ['FUN_QUESTION', 'export const ADVANCED_QUESTIONS', 'cnt_amen_unknown'],
+  ['UNIT_SUBTYPE_QUESTION', '// ── THE THEMED CARDS', 'cnt_sub_unknown'],
+  // The ten themed cards (owner 2026-10-31 / 11-01) all resolve through the ONE shared helper, cardOptions(), which
+  // reads the amenity unknown column; the loop below also pins that every card const goes through it.
+  ['cardOptions', 'const COMFORT_QUESTION', 'cnt_amen_unknown'],
+  // The two Residential Building ladders read their own IS NULL columns (migration 20261101100930).
+  ['APARTMENTS_QUESTION', 'const SHOPS_QUESTION', 'cnt_apts_unknown'],
+  ['SHOPS_QUESTION', 'export const ADVANCED_QUESTIONS', 'cnt_shops_unknown'],
   ['RNPL_QUESTION', 'const AMENITIES_QUESTION', 'cnt_rnpl_unknown'],
 ];
+const CARD_CONSTS = ['COMFORT_QUESTION', 'SPACE_QUESTION', 'SPACE_YEARLY_QUESTION', 'SAFETY_QUESTION', 'PERKS_QUESTION', 'BUILD_QUESTION',
+  'EXTRAS_QUESTION', 'WHO_QUESTION', 'FEATURES_QUESTION', 'SERVICES_QUESTION', 'FUN_QUESTION'];
 const columnProblems = (src: string): string[] => {
   const out: string[] = [];
   const bodyIn = (marker: string, end: string) => {
     const i = src.indexOf(marker);
     return i < 0 ? '' : src.slice(i, src.indexOf(end, i) > 0 ? src.indexOf(end, i) : i + 1400);
   };
+  for (const name of CARD_CONSTS) {
+    const body = bodyIn(`const ${name}`, '\n};');
+    if (!/resolveOptions\(q\) \{ return cardOptions\(q, '[a-z]+'\); \}/.test(body)) out.push(`${name}: does not resolve through cardOptions() — its 😔 line is unaccounted for`);
+  }
   for (const [q, end, col] of MUST_READ_COLUMN) {
-    const body = bodyIn(`const ${q}`, end);
+    const body = bodyIn(q === 'cardOptions' ? 'async function cardOptions' : `const ${q}`, end);
     const calls = callArgCounts(body, 'guidedOptions');
     if (!body || !calls.length) { out.push(`${q}: NO guidedOptions call found — check went vacuous`); continue; }
     if (!calls.every((n) => n === 3)) out.push(`${q}: a guidedOptions call has no unknown resolver (arg counts ${calls.join(', ')}) — its 😔 line disappears`);
@@ -171,12 +179,13 @@ const columnProblems = (src: string): string[] => {
   return out;
 };
 const colReal = columnProblems(af);
-check('the six DB-backed questions each read their own IS NULL column, never a subtraction',
+check('the DB-backed questions (and the cards\' shared cardOptions) each read their own IS NULL column, never a subtraction',
   colReal.length === 0, colReal.join('; '));
 check('the client type carries every DB unknown column the questions read',
   MUST_READ_COLUMN.every(([, , col]) => new RegExp(`\\b${col}: number`).test(read('src/data/remote.ts'))));
 check('the migration that creates those columns is in the repo (mirror rule)',
-  MUST_READ_COLUMN.every(([, , col]) => read('supabase/migrations/20261003184909_af_guided_counts_unknown_count_for_every_question.sql').includes(`as ${col}`)));
+  MUST_READ_COLUMN.every(([, , col]) => read('supabase/migrations/20261003184909_af_guided_counts_unknown_count_for_every_question.sql').includes(`as ${col}`)
+    || read('supabase/migrations/20261101100930_apartments_group_advanced_filter_chips.sql').includes(`as ${col}`)));
 // And the two that DO claim one must genuinely pass the third argument, or the derivations above are
 // dead prose describing code that no longer runs.
 for (const [q, end] of [['FURNISHED_QUESTION', 'const STREET_WIDTH_QUESTION'], ['DIRECTION_QUESTION', 'const RATING_QUESTION']] as const) {
@@ -331,6 +340,9 @@ colMut('one amenities branch dropping its resolver',
   'chosen, (c) => c.cnt_amen_unknown)', 'chosen)');
 colMut('RNPL reading another question\'s column',
   '(c) => c.cnt_rnpl_unknown', '(c) => c.cnt_amen_unknown');
+colMut('a card helper that drops its unknown resolver (every themed card loses its 😔 line at once)',
+  'defs, (c) => c.cnt_amen_unknown);', 'defs);');
+colMut('a themed card bypassing the shared helper', "async resolveOptions(q) { return cardOptions(q, 'safety'); },", 'async resolveOptions(q) { return guidedOptions(await fetchApartmentGuidedCounts(q), []); },');
 
 for (const m of mutations) console.log(`  ✓ mutation caught: ${m}`);
 

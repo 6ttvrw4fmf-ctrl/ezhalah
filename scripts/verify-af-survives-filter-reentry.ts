@@ -45,7 +45,7 @@ import { liftSymbols } from './lib/liftSymbols.ts';
 import { stripComments } from './lib/stripComments.ts';
 import { sanitizeForFilterRestore, AF_PREDICATE_FIELDS, toggleGroup, setCategory } from '../src/lib/searchDefaults.ts';
 import { reconcileCommittedAf, certifiedFacets, stripCommittedAf, withoutFacet } from '../src/lib/afCarry.ts';
-import { COHORT_QUESTIONS, certifiedAmenityKeys, cohortAllows } from '../src/lib/afCohorts.ts';
+import { COHORT_QUESTIONS, certifiedAmenityKeys, cohortAllows, AMENITY_BAG_QUESTION_IDS } from '../src/lib/afCohorts.ts';
 import { CLEAN_MACRO, groupsOf } from '../src/data/propertyTypes.ts';
 import type { SearchQuery } from '../src/data/search.ts';
 
@@ -65,23 +65,20 @@ const assert = (cond: boolean, msg: string) => {
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 // ── the real code, lifted ────────────────────────────────────────────────────────────────────────
-const QUESTION_CONSTS = [
-  'RNPL_QUESTION', 'AGE_QUESTION', 'AMENITIES_QUESTION', 'BATHROOMS_QUESTION', 'FURNISHED_QUESTION',
-  'STREET_WIDTH_QUESTION', 'DIRECTION_QUESTION', 'RATING_QUESTION', 'UNIT_SUBTYPE_QUESTION',
-  'COMFORT_QUESTION', 'SPACE_QUESTION', 'FUN_QUESTION',   // the short-stays parts of the amenities card (owner 2026-10-31 / 11-01)
-];
+// The pool's consts and the lift prelude are shared with every lifter (scripts/lib/afMatrix.ts).
+import { QUESTION_CONSTS, QUESTION_HELPER_SYMBOLS, afLiftImports } from './lib/afMatrix.ts';
 const lifted = await liftSymbols(
   join(ROOT, 'src/data/advancedFilters.ts'),
   // addAmenities is a plain function two questions use as their whole apply(); the rest are object
   // literals whose members are all lazily evaluated, so apply() needs no prelude at all.
-  [{ header: 'function addAmenities' }, { header: 'const AGE_LADDER', endsWith: /^\];$/ }, ...QUESTION_CONSTS.map((header) => ({ header: `const ${header}` }))],
+  [{ header: 'function addAmenities' }, { header: 'const AGE_LADDER', endsWith: /^\];$/ }, ...QUESTION_HELPER_SYMBOLS, ...QUESTION_CONSTS.map((header) => ({ header: `const ${header}` }))],
   ['addAmenities', ...QUESTION_CONSTS],
   // §12 also CALLS AMENITIES_QUESTION.resolveOptions, to read the token set the card can offer from
   // the question itself rather than hand-listing it here. Its cohort logic is imported REAL; only
   // the count path is shimmed — counts decide how many offered options are worth SHOWING, never
   // which tokens may be offered, so the identity shim yields the superset (the fail-closed side).
   [
-    `import { cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope } from ${JSON.stringify(pathToFileURL(join(ROOT, 'src/lib/afCohorts.ts')).href)};`,
+    afLiftImports(ROOT),
     'type GuidedCounts = Record<string, number>;',
     'const fetchApartmentGuidedCounts = async (_q: unknown) => ({} as GuidedCounts);',
     'const guidedOptions = (_c: unknown, defs: Array<{ key: string }>) => ({ options: defs.map((d) => ({ key: d.key })) });',
@@ -189,9 +186,12 @@ console.log('\n── 3. EVERY question, on a cohort the registry itself certifi
 const ANSWER_KEYS: Record<string, string[]> = {
   property_age: ['upto5'], amenities: ['elevator'], rnpl: ['rnpl'], bathrooms: ['3'],
   furnished: ['no'], street_width: ['20'], direction: ['شمال'], rating: ['9.0_rc10'], unit_subtype: ['استديو'],
-  // The two short-stays halves of the amenities card (owner 2026-10-31) — certified by the short-stays
-  // rule in cohortAllows(), not by a COHORT_QUESTIONS leg, so certifiedScopeFor() names their scope.
-  comfort: ['elevator'], space: ['majlis'], fun: ['pool'],
+  // The themed cards (owner 2026-10-31 / 11-01) — certified by their CHIPS (cardKeys), not by a COHORT_QUESTIONS
+  // leg, so certifiedScopeFor() names a group scope whose plan carries each card; and the two Residential
+  // Building ladders, which write one p_amenities token each.
+  comfort: ['elevator'], space: ['majlis'], fun: ['pool'], safety: ['cameras'], perks: ['gym'], build: ['warranty'],
+  extras: ['storage'], who: ['singles'], features: ['basement'], services: ['sanitation'],
+  apartments: ['apts8'], shops: ['has_shops'],
 };
 const LEGS = {
   Buy: { deal: 'Buy' as const, rentPeriod: 'annual' as const },
@@ -199,9 +199,19 @@ const LEGS = {
   RentMonthly: { deal: 'Rent' as const, rentPeriod: 'monthly' as const },
 };
 /** The first (type, deal-leg) the registry certifies this question for. */
+// Where each card is certified (cardKeys non-empty), on a single type × deal of the Apartments & Co-living lists.
+const CARD_SCOPES: Record<string, [string, keyof typeof LEGS]> = {
+  comfort: ['Apartment', 'RentMonthly'], space: ['Apartment', 'RentMonthly'], fun: ['Apartment', 'RentMonthly'],
+  safety: ['Apartment', 'RentAnnual'], perks: ['Apartment', 'RentAnnual'], build: ['Apartment', 'Buy'],
+  extras: ['Floor', 'RentAnnual'], who: ['Room', 'RentAnnual'], features: ['Residential Building', 'Buy'],
+  services: ['Residential Building', 'RentAnnual'],
+};
 function certifiedScopeFor(id: string): SearchQuery | null {
-  if (id === 'comfort' || id === 'space' || id === 'fun') {
-    return { ...SHOP, ...LEGS.RentMonthly, category: 'Residential', typeGroups: groupsOf(['Apartment']), types: ['Apartment'] };
+  if (CARD_SCOPES[id]) {
+    const [type, leg] = CARD_SCOPES[id];
+    const scope = { ...SHOP, ...LEGS[leg], category: 'Residential', typeGroups: groupsOf([type]), types: [type] } as SearchQuery;
+    if (!cohortAllows(scope, id)) throw new Error(`CARD_SCOPES is stale: ${id} is not certified on ${type}/${leg}`);
+    return scope;
   }
   for (const [type, cfg] of Object.entries(COHORT_QUESTIONS)) {
     for (const leg of ['RentAnnual', 'Buy', 'RentMonthly'] as const) {
@@ -563,12 +573,16 @@ assert(same(reconcileCommittedAf({ ...amenQ.apply(VILLA, ['car_entrance']), afFa
 // list, so filtering it would drop a certified answer and WIDEN. Its own 1:1 question gate is its
 // per-token gate. A THIRD question learning to write `amenities` must force that decision again,
 // so the writers are discovered by EXECUTING every apply(), never assumed.
-const amenityWriters = ADVANCED.filter((q) => {
+// (two consts carry id 'space' — the short-stays and the yearly wording — so the ids are de-duplicated)
+const amenityWriters = [...new Set(ADVANCED.filter((q) => {
   const probe: SearchQuery = { ...SHOP };
   return !same(q.apply(probe, ANSWER_KEYS[q.id]).amenities, probe.amenities);
-}).map((q) => q.id).sort();
-assert(same(amenityWriters, ['amenities', 'comfort', 'fun', 'rnpl', 'space']),
-  `exactly five questions write amenity tokens — the card, its three short-stays parts (token-filtered by afCarry's AMENITY_BAG_QUESTION_IDS) and rnpl (found: ${amenityWriters.join(', ')})`);
+}).map((q) => q.id))].sort();
+// The pinned writer set: the amenities card, the ten themed cards and the two Residential Building ladders — every
+// id afCarry token-filters (AMENITY_BAG_QUESTION_IDS) — plus rnpl, which is gated on its own id instead.
+const PINNED_WRITERS = [...AMENITY_BAG_QUESTION_IDS, 'rnpl'].sort();
+assert(same(amenityWriters, PINNED_WRITERS),
+  `exactly ${PINNED_WRITERS.length} questions write amenity tokens — the bag questions (token-filtered by afCarry's AMENITY_BAG_QUESTION_IDS) and rnpl (found: ${amenityWriters.join(', ')})`);
 assert(!certifiedAmenityKeys(certifiedScopeFor('rnpl')!).includes('rnpl'),
   '«rnpl» is deliberately absent from certifiedAmenityKeys — token-filtering it would drop a certified answer');
 assert(certifiedFacets(certifiedScopeFor('rnpl')!, [rnplFacet]).length === 1,

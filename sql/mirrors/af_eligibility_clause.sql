@@ -1,4 +1,15 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-11-01 (migration 20261101100930, the Apartments & Co-living group — owner handoff 2026-10-31):
+--   CHANGED — the amenity whitelist gains the 45 group tokens between ''majlis'' and ''furnished'' (39 boolean
+--   text-fact columns roof … families + 6 derived: separate_meters = (separate_electricity_meter or
+--   separate_water_meter), apts4/8/12/20 = apartments_count >= n, has_shops = shops_count >= 1), and one predicate
+--   arm per token after the majlis arm, each `and (not (''<token>'' = any(p_amenities)) or <pred>)` exactly as the
+--   migration's format('           and (not (%L = any(p_amenities)) or %s)', token, pred) wrote it. Rebuilt by
+--   rebuild_af_filter_rpcs(); top_cities_by_deal_ar carries the byte-identical copy. Body below = the previous body
+--   plus exactly those edits, applied to this file with the same replace the migration ran on production:
+--   Recorded md5 of pg_get_functiondef: 126242b981111b6879a3f27c162478b7
+--   (length 15,487; the previous text hashed 62539dd9f79949bfbb7842182e72e4f7, 11,546.) NOT YET registered in ops_sql_mirror_expected —
+--   af_eligibility_clause.sql sits in verify-mirror-md5-is-registered.ts UNREGISTERED_MIRROR_BASELINE.
 -- Re-verified 2026-10-26 (migration 20261026011638_majlis_advanced_filter_amenity):
 --   CHANGED — the amenity whitelist gains ''majlis'' and the predicate arm `and (not (''majlis'' = any(p_amenities)) or s.majlis)`
 --   (owner decision #3: the first filter question born from the stored text facts; search_listings_ar.majlis =
@@ -250,7 +261,7 @@ AS $function$ select E'
       and (p_deal       is null or s.deal_ar = p_deal)
       and (p_rent_period is null
            or s.deal_ar <> ''إيجار''
-           or (s.price_annual is null and p_rent_period in (''شهري'',''سنوي'',''كلاهما''))  -- price on request: no figure a period could misstate (owner 2026-09-28)
+           or (s.price_annual is null and (p_rent_period in (''سنوي'',''كلاهما'') or (p_rent_period = ''شهري'' and s.platform in (''gathern'',''aqarmonthly''))))  -- price on request: no figure a period could misstate (owner 2026-09-28)
            or (p_rent_period = ''شهري'' and s.payment_monthly = true and not coalesce(s.rent_now_pay_later, false))
            or (p_rent_period = ''سنوي'' and (s.rent_period_ar = ''سنوي'' or (s.rent_period_ar = ''شهري'' and coalesce(s.rent_now_pay_later, false))))
            or (p_rent_period = ''كلاهما'' and (s.payment_monthly = true or s.rent_period_ar = ''سنوي'' or (s.rent_period_ar = ''شهري'' and coalesce(s.rent_now_pay_later, false))))
@@ -326,7 +337,7 @@ AS $function$ select E'
       and (p_has_license is null or (p_has_license and s.license_number is not null))
       and (p_amenities is null or (
                not exists (select 1 from unnest(p_amenities) tok
-                           where tok not in (''elevator'',''parking'',''kitchen'',''ac'',''maid_room'',''driver_room'',''private_entrance'',''car_entrance'',''sanitation'',''electricity'',''water_supply'',''gym'',''pool'',''garden'',''balcony'',''laundry_room'',''optical_fibers'',''separate_electricity_meter'',''separate_water_meter'',''majlis'',''furnished'',''rnpl'',''rent_now_pay_later''))
+                           where tok not in (''elevator'',''parking'',''kitchen'',''ac'',''maid_room'',''driver_room'',''private_entrance'',''car_entrance'',''sanitation'',''electricity'',''water_supply'',''gym'',''pool'',''garden'',''balcony'',''laundry_room'',''optical_fibers'',''separate_electricity_meter'',''separate_water_meter'',''majlis'',''roof'',''two_entrances'',''annex'',''yard'',''garage'',''grill'',''storage'',''water_tank'',''warranty'',''electronic_deed'',''basement'',''self_checkin'',''wifi'',''bills_included'',''jacuzzi'',''smart_tv'',''billiards'',''cleaning_service'',''soundproof'',''cameras'',''guard'',''smart_entry'',''smart_home'',''central_gas'',''sauna'',''kids_play_area'',''nursery'',''free_maintenance'',''intercom'',''fire_system'',''ev_charger'',''central_vacuum'',''insulation'',''dining_majlis'',''own_bathroom'',''fridge'',''whole_floor'',''singles'',''families'',''separate_meters'',''apts4'',''apts8'',''apts12'',''apts20'',''has_shops'',''furnished'',''rnpl'',''rent_now_pay_later''))
            and (not (''elevator''         = any(p_amenities)) or s.elevator)
            and (not (''parking''          = any(p_amenities)) or s.parking)
            and (not (''kitchen''          = any(p_amenities)) or s.kitchen)
@@ -347,6 +358,51 @@ AS $function$ select E'
            and (not (''separate_electricity_meter''    = any(p_amenities)) or s.separate_electricity_meter)
            and (not (''separate_water_meter''          = any(p_amenities)) or s.separate_water_meter)
            and (not (''majlis''                       = any(p_amenities)) or s.majlis)
+           and (not (''roof'' = any(p_amenities)) or s.roof)
+           and (not (''two_entrances'' = any(p_amenities)) or s.two_entrances)
+           and (not (''annex'' = any(p_amenities)) or s.annex)
+           and (not (''yard'' = any(p_amenities)) or s.yard)
+           and (not (''garage'' = any(p_amenities)) or s.garage)
+           and (not (''grill'' = any(p_amenities)) or s.grill)
+           and (not (''storage'' = any(p_amenities)) or s.storage)
+           and (not (''water_tank'' = any(p_amenities)) or s.water_tank)
+           and (not (''warranty'' = any(p_amenities)) or s.warranty)
+           and (not (''electronic_deed'' = any(p_amenities)) or s.electronic_deed)
+           and (not (''basement'' = any(p_amenities)) or s.basement)
+           and (not (''self_checkin'' = any(p_amenities)) or s.self_checkin)
+           and (not (''wifi'' = any(p_amenities)) or s.wifi)
+           and (not (''bills_included'' = any(p_amenities)) or s.bills_included)
+           and (not (''jacuzzi'' = any(p_amenities)) or s.jacuzzi)
+           and (not (''smart_tv'' = any(p_amenities)) or s.smart_tv)
+           and (not (''billiards'' = any(p_amenities)) or s.billiards)
+           and (not (''cleaning_service'' = any(p_amenities)) or s.cleaning_service)
+           and (not (''soundproof'' = any(p_amenities)) or s.soundproof)
+           and (not (''cameras'' = any(p_amenities)) or s.cameras)
+           and (not (''guard'' = any(p_amenities)) or s.guard)
+           and (not (''smart_entry'' = any(p_amenities)) or s.smart_entry)
+           and (not (''smart_home'' = any(p_amenities)) or s.smart_home)
+           and (not (''central_gas'' = any(p_amenities)) or s.central_gas)
+           and (not (''sauna'' = any(p_amenities)) or s.sauna)
+           and (not (''kids_play_area'' = any(p_amenities)) or s.kids_play_area)
+           and (not (''nursery'' = any(p_amenities)) or s.nursery)
+           and (not (''free_maintenance'' = any(p_amenities)) or s.free_maintenance)
+           and (not (''intercom'' = any(p_amenities)) or s.intercom)
+           and (not (''fire_system'' = any(p_amenities)) or s.fire_system)
+           and (not (''ev_charger'' = any(p_amenities)) or s.ev_charger)
+           and (not (''central_vacuum'' = any(p_amenities)) or s.central_vacuum)
+           and (not (''insulation'' = any(p_amenities)) or s.insulation)
+           and (not (''dining_majlis'' = any(p_amenities)) or s.dining_majlis)
+           and (not (''own_bathroom'' = any(p_amenities)) or s.own_bathroom)
+           and (not (''fridge'' = any(p_amenities)) or s.fridge)
+           and (not (''whole_floor'' = any(p_amenities)) or s.whole_floor)
+           and (not (''singles'' = any(p_amenities)) or s.singles)
+           and (not (''families'' = any(p_amenities)) or s.families)
+           and (not (''separate_meters'' = any(p_amenities)) or (s.separate_electricity_meter or s.separate_water_meter))
+           and (not (''apts4'' = any(p_amenities)) or s.apartments_count >= 4)
+           and (not (''apts8'' = any(p_amenities)) or s.apartments_count >= 8)
+           and (not (''apts12'' = any(p_amenities)) or s.apartments_count >= 12)
+           and (not (''apts20'' = any(p_amenities)) or s.apartments_count >= 20)
+           and (not (''has_shops'' = any(p_amenities)) or s.shops_count >= 1)
            and (not (''furnished''        = any(p_amenities)) or s.furnished)
            and (not (''rnpl''             = any(p_amenities) or ''rent_now_pay_later'' = any(p_amenities)) or s.rent_now_pay_later)))
       and ((p_street_width_min is null and p_street_width_max is null)

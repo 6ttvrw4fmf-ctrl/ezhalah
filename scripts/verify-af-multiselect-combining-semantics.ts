@@ -70,7 +70,7 @@ check('the af_eligibility_clause mirror exists and carries the amenities predica
 const vocabMatch = clause.match(/where tok not in \(([^)]*)\)/);
 check('the clause carries the fail-closed amenity vocabulary guard', !!vocabMatch);
 const clauseTokens = vocabMatch
-  ? [...vocabMatch[1].matchAll(/''([a-z_]+)''/g)].map((m) => m[1])
+  ? [...vocabMatch[1].matchAll(/''([a-z_0-9]+)''/g)].map((m) => m[1])   // apts4 / apts8 / … carry a digit (2026-11-01)
   : [];
 check('the vocabulary guard lists a plausible token set', clauseTokens.length >= 12,
   `${clauseTokens.length} tokens: ${clauseTokens.join(',')}`);
@@ -78,15 +78,30 @@ check('the vocabulary guard lists a plausible token set', clauseTokens.length >=
 // ── R7.2.2 (a) — AMENITIES COMBINE WITH AND ──────────────────────────────────────────────────────
 // Every token must have its own conjunctive guard: `and (not (''tok'' = any(p_amenities)) or s.col)`.
 // Chained with `and`, N ticked chips intersect. This is the shape Part 6 item 12 guards.
-const guardRe = /and \(not \(''([a-z_]+)''\s*=\s*any\(p_amenities\)(?:\s*or\s*''([a-z_]+)''\s*=\s*any\(p_amenities\))?\)\s*or\s*s\.([a-z_]+)\)/g;
+const guardRe = /and \(not \(''([a-z_0-9]+)''\s*=\s*any\(p_amenities\)(?:\s*or\s*''([a-z_]+)''\s*=\s*any\(p_amenities\))?\)\s*or\s*s\.([a-z_]+)\)/g;
 const guards = new Map<string, string>();     // token -> column
 for (const m of clause.matchAll(guardRe)) {
   guards.set(m[1], m[3]);
   if (m[2]) guards.set(m[2], m[3]);           // the rnpl / rent_now_pay_later alias pair
 }
-check('every vocabulary token has a per-column conjunctive guard (multi-amenity = AND)',
-  clauseTokens.every((t) => guards.has(t)),
-  `missing: ${clauseTokens.filter((t) => !guards.has(t)).join(',') || 'none'}`);
+// The DERIVED tokens (migration 20261101100930) keep the same conjunctive shape with a predicate instead of a column:
+//   `and (not ('separate_meters' = any(p_amenities)) or (s.separate_electricity_meter or s.separate_water_meter))`
+//   `and (not ('apts4' = any(p_amenities)) or s.apartments_count >= 4)`  ·  `… or s.shops_count >= 1)`
+// Each is still its own AND-ed guard; what the oracle must emit for it is the predicate, not `col=is.true`.
+const derivedRe = /and \(not \(''([a-z_0-9]+)''\s*=\s*any\(p_amenities\)\)\s*or\s*(\(s\.[a-z_]+ or s\.[a-z_]+\)|s\.[a-z_]+ >= \d+)\)/g;
+const derivedGuards = new Map<string, string>();   // token -> SQL predicate
+for (const m of clause.matchAll(derivedRe)) derivedGuards.set(m[1], m[2]);
+const ORACLE_DERIVED: Record<string, string> = {
+  separate_meters: 'or=(separate_electricity_meter.is.true,separate_water_meter.is.true)',
+  apts4: 'apartments_count=gte.4', apts8: 'apartments_count=gte.8', apts12: 'apartments_count=gte.12', apts20: 'apartments_count=gte.20',
+  has_shops: 'shops_count=gte.1',
+};
+check('every derived token the clause guards has a stated oracle translation (and no stray derived guard exists)',
+  [...derivedGuards.keys()].sort().join() === Object.keys(ORACLE_DERIVED).sort().join(),
+  `clause: ${[...derivedGuards.keys()].join(',')} · oracle: ${Object.keys(ORACLE_DERIVED).join(',')}`);
+check('every vocabulary token has a per-column (or per-predicate) conjunctive guard (multi-amenity = AND)',
+  clauseTokens.every((t) => guards.has(t) || derivedGuards.has(t)),
+  `missing: ${clauseTokens.filter((t) => !guards.has(t) && !derivedGuards.has(t)).join(',') || 'none'}`);
 check('the amenity guards are joined by AND, never collapsed into a single or-list',
   !/or \(not \(''[a-z_]+'' = any\(p_amenities\)\)/.test(clause));
 // The literal regression shape: a disjunction of the amenity COLUMNS.
@@ -133,17 +148,30 @@ check('every chip the UI can send is in the clause vocabulary (else the clause f
 // and must report nothing unhandled. This is what was broken for 'ac' and 'furnished'.
 for (const tok of clauseTokens) {
   const { qs, unhandled } = buildOracleQS({ ...PROBE_LOC, p_amenities: [tok] });
+  if (derivedGuards.has(tok)) {
+    check(`the independent oracle understands derived '${tok}' and filters its predicate (${derivedGuards.get(tok)})`,
+      unhandled.length === 0 && qs.includes(ORACLE_DERIVED[tok]),
+      unhandled.length ? `unhandled: ${unhandled.join(',')}` : `qs: ${qs}`);
+    continue;
+  }
   const col = guards.get(tok)!;
   check(`the independent oracle understands '${tok}' and filters s.${col}`,
     unhandled.length === 0 && qs.includes(`${col}=is.true`),
     unhandled.length ? `unhandled: ${unhandled.join(',')}` : `qs: ${qs}`);
+}
+// Two derived OR tokens beside an age bucket must stay separate or-groups joined by AND — never one flattened or-list.
+{
+  const twoOr = buildOracleQS({ ...PROBE_LOC, p_amenities: ['separate_meters', 'apts8'] });
+  check("'separate_meters' + 'apts8' AND together: the OR group and the gte filter both appear, conjunctively",
+    twoOr.unhandled.length === 0 && twoOr.qs.includes('or=(separate_electricity_meter.is.true,separate_water_meter.is.true)') && twoOr.qs.includes('apartments_count=gte.8'),
+    twoOr.qs);
 }
 // …and the reverse direction: a token the clause REJECTS must not be silently filtered by the
 // oracle, or the oracle disagrees with a fail-closed RPC and reports a phantom mismatch.
 // pool/gym/garden/balcony moved OUT of this list 2026-08-31 — they are now genuinely certified
 // (see AMENITY_TOKEN_COL's own history comment) and are exercised in the clauseTokens loop above
 // instead. Replaced with other still-uncertified concepts so this direction keeps real coverage.
-for (const bogus of ['view', 'security', 'storage_room', 'not_a_real_amenity']) {
+for (const bogus of ['view', 'security', 'storage_room', 'not_a_real_amenity', 'apts3', 'separate_meter']) {
   const { unhandled } = buildOracleQS({ ...PROBE_LOC, p_amenities: [bogus] });
   check(`the oracle refuses '${bogus}' (not in the clause vocabulary) instead of inventing a filter`,
     unhandled.some((u) => u.includes(bogus)));

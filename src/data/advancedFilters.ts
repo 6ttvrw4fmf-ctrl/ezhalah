@@ -158,7 +158,7 @@ const AGE_QUESTION: AdvancedQuestion = {
 // multi-type intersection mutation-provable. The cohort DATA moved with it, unchanged. Buy+Rent
 // combined gating (q.dealCombined — owner feature 2026-08-20) lives there too, intersecting with
 // the multi-type/multi-period dimensions rather than being bolted on separately — see afCohorts.ts.
-import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope, shortStaysAskTier } from '@/lib/afCohorts';
+import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope, shortStaysAskTier, cardKeys, groupAskTier, hasCards } from '@/lib/afCohorts';
 // Merge picked strict amenity tokens (kitchen/parking/elevator/furnished/rnpl) into q.amenities.
 function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
   return keys.length ? { ...q, amenities: [...new Set([...(q.amenities ?? []), ...keys])] } : q;
@@ -240,7 +240,8 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
   selection: 'multi',
   // Short stays never ASK this card (owner 2026-10-31): COMFORT_QUESTION / SPACE_QUESTION / FUN_QUESTION below are
   // its themed parts there; a typed chat sentence may still use it (cohortAllows keeps it certified).
-  eligibility: (q) => cohortAllows(q, 'amenities') && !isShortStaysScope(q),
+  // …and a scope whose themed cards exist (owner 2026-10-31) asks the cards, never this generic one.
+  eligibility: (q) => cohortAllows(q, 'amenities') && !isShortStaysScope(q) && !hasCards(q),
   async resolveOptions(q) {
     const defs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
       { key: 'kitchen',  labelKey: 'Kitchen',  count: (c) => c.cnt_kitchen },
@@ -358,7 +359,9 @@ const FURNISHED_QUESTION: AdvancedQuestion = {
   id: 'furnished',
   titleKey: 'Do you prefer it furnished?',
   selection: 'single',
-  eligibility: (q) => cohortAllows(q, 'furnished'),
+  // Where the comfort card carries «furnished» as a chip (owner 2026-10-31: «Furnished is a chip here, not its own
+  // question»), the separate question is not asked; the typed «مفروشة» keeps its certification through cohortAllows.
+  eligibility: (q) => cohortAllows(q, 'furnished') && !cardKeys(q, 'comfort').includes('furnished'),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
       { key: 'yes', labelKey: 'Furnished',   count: (c) => c.cnt_furnished },
@@ -418,7 +421,8 @@ const DIRECTION_DEFS: Array<{ key: string; labelKey: string; count: (c: GuidedCo
 const DIRECTION_QUESTION: AdvancedQuestion = {
   id: 'direction',
   titleKey: 'Which direction do you prefer?',
-  descriptionKey: 'Results update as you choose',
+  // The sun tip (owner 2026-10-31): a fact, never advice — the same grey line style as «Results update as you choose».
+  descriptionKey: '💡 Tip: a north-facing home gets the least direct sun. South gets the most.',
   selection: 'single',
   // Not asked once directions are already committed — the same guard unit_subtype carries, for the
   // same reason. cnt_dir_* is computed INSIDE a scope that already applies p_directions, while
@@ -506,35 +510,110 @@ const UNIT_SUBTYPE_QUESTION: AdvancedQuestion = {
 // equal. Every key already has its count path (cnt_<key>) and its p_amenities slug — the owner's
 // remaining chips (self check-in, Wi-Fi, bills included, grill, kids' play area, jacuzzi, outdoor
 // seating) join one at a time once the free word reader and the count exist for each.
+// ── THE THEMED CARDS (owner handoff 2026-10-31, built 2026-11-01) ──────────────────────────────────────
+// Every card offers the chips cardKeys(q, id) returns for THIS scope (afCohorts.ts COHORT_CARDS + the intersection
+// rule in cardPlan). One voice per token: CHIP_DEFS holds its labelKey + emoji; the count column is cnt_<token>
+// (migration 20261101100930) — a chip exists only where its COUNT path exists. Every card writes q.amenities.
+import { CHIP_DEFS } from '@/lib/afChips';
+const CHIP_LABEL_FLOOR: Record<string, string> = { laundry_room: 'Laundry room' };
+async function cardOptions(q: SearchQuery, id: string): Promise<AdvancedQuestionResult> {
+  const floor = scopeCleanTypes(q).every((ty) => ty === 'Floor');
+  const defs = cardKeys(q, id).map((key) => {
+    const d = CHIP_DEFS[key];
+    const labelKey = (floor && CHIP_LABEL_FLOOR[key]) || d.labelKey;
+    return { key, labelKey, emoji: d.emoji, count: (c: GuidedCounts) => (c as unknown as Record<string, number>)[`cnt_${key}`] };
+  });
+  return guidedOptions(await fetchApartmentGuidedCounts(q), defs, (c) => c.cnt_amen_unknown);
+}
 const COMFORT_QUESTION: AdvancedQuestion = {
   id: 'comfort',
   titleKey: '🔑 Comfort: what matters to you?',
   descriptionKey: 'Results update as you choose',
   selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'comfort'),
-  async resolveOptions(q) {
-    return guidedOptions(await fetchApartmentGuidedCounts(q), [
-      { key: 'elevator',         labelKey: 'Elevator',         emoji: '🛗', count: (c) => c.cnt_elevator },
-      { key: 'parking',          labelKey: 'Parking',          emoji: '🅿️', count: (c) => c.cnt_parking },
-      { key: 'private_entrance', labelKey: 'Private entrance', emoji: '🚪', count: (c) => c.cnt_private_entrance },
-      // «washing machine» rides the existing laundry_room fact (owner 2026-11-01: «+ existing laundry_room»)
-      { key: 'laundry_room',     labelKey: 'Washing machine',  emoji: '🧺', count: (c) => c.cnt_laundry_room },
-    ], (c) => c.cnt_amen_unknown);
-  },
+  async resolveOptions(q) { return cardOptions(q, 'comfort'); },
   apply: addAmenities,
 };
+// «Space & safety» is the short-stays wording the owner approved; the yearly / buy lists call the card «Space».
 const SPACE_QUESTION: AdvancedQuestion = {
   id: 'space',
   titleKey: '🏠 Space & safety: what matters to you?',
   descriptionKey: 'Results update as you choose',
   selection: 'multi',
-  eligibility: (q) => cohortAllows(q, 'space'),
-  async resolveOptions(q) {
-    return guidedOptions(await fetchApartmentGuidedCounts(q), [
-      { key: 'majlis',  labelKey: 'Majlis room', emoji: '🛋️', count: (c) => c.cnt_majlis },
-      { key: 'balcony', labelKey: 'Balcony',     emoji: '🌅', count: (c) => c.cnt_balcony },
-    ], (c) => c.cnt_amen_unknown);
-  },
+  eligibility: (q) => cohortAllows(q, 'space') && isShortStaysScope(q),
+  async resolveOptions(q) { return cardOptions(q, 'space'); },
+  apply: addAmenities,
+};
+const SPACE_YEARLY_QUESTION: AdvancedQuestion = {
+  id: 'space',
+  titleKey: '🏠 Space: what matters to you?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'space') && !isShortStaysScope(q),
+  async resolveOptions(q) { return cardOptions(q, 'space'); },
+  apply: addAmenities,
+};
+const SAFETY_QUESTION: AdvancedQuestion = {
+  id: 'safety',
+  titleKey: '🛡️ Safety & smart: what matters to you?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'safety'),
+  async resolveOptions(q) { return cardOptions(q, 'safety'); },
+  apply: addAmenities,
+};
+const PERKS_QUESTION: AdvancedQuestion = {
+  id: 'perks',
+  titleKey: '✨ Building perks: what matters to you?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'perks'),
+  async resolveOptions(q) { return cardOptions(q, 'perks'); },
+  apply: addAmenities,
+};
+const BUILD_QUESTION: AdvancedQuestion = {
+  id: 'build',
+  titleKey: '🧱 Build & services: what matters to you?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'build'),
+  async resolveOptions(q) { return cardOptions(q, 'build'); },
+  apply: addAmenities,
+};
+const EXTRAS_QUESTION: AdvancedQuestion = {
+  id: 'extras',
+  titleKey: '🏡 Extras: what matters to you?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'extras'),
+  async resolveOptions(q) { return cardOptions(q, 'extras'); },
+  apply: addAmenities,
+};
+const WHO_QUESTION: AdvancedQuestion = {
+  id: 'who',
+  titleKey: '👤 Who is it for?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'who'),
+  async resolveOptions(q) { return cardOptions(q, 'who'); },
+  apply: addAmenities,
+};
+const FEATURES_QUESTION: AdvancedQuestion = {
+  id: 'features',
+  titleKey: '🔑 Building features: what matters to you?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'features'),
+  async resolveOptions(q) { return cardOptions(q, 'features'); },
+  apply: addAmenities,
+};
+const SERVICES_QUESTION: AdvancedQuestion = {
+  id: 'services',
+  titleKey: '🧱 Services: what matters to you?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'services'),
+  async resolveOptions(q) { return cardOptions(q, 'services'); },
   apply: addAmenities,
 };
 const FUN_QUESTION: AdvancedQuestion = {
@@ -543,11 +622,39 @@ const FUN_QUESTION: AdvancedQuestion = {
   descriptionKey: 'Results update as you choose',
   selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'fun'),
+  async resolveOptions(q) { return cardOptions(q, 'fun'); },
+  apply: addAmenities,
+};
+// ── RESIDENTIAL BUILDING — two questions of its own (owner 2026-10-31): the apartment ladder and «has shops».
+// Both are read from the ad's own words (apartments_count / shops_count, migration 20261101100930) and written as
+// ONE p_amenities token each (apts4/8/12/20 = apartments_count >= n, has_shops = shops_count >= 1), so the count,
+// the search and the card proof all run on the same predicate. Single-select ladder, exactly like bathrooms.
+const APARTMENTS_QUESTION: AdvancedQuestion = {
+  id: 'apartments',
+  titleKey: '🏢 How many apartments?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'single',
+  eligibility: (q) => cohortAllows(q, 'apartments') && !(q.amenities ?? []).some((a) => /^apts\d+$/.test(a)),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
-      { key: 'pool', labelKey: 'Pool', emoji: '🏊', count: (c) => c.cnt_pool },
-      { key: 'gym',  labelKey: 'Gym',  emoji: '🏋️', count: (c) => c.cnt_gym },
-    ], (c) => c.cnt_amen_unknown);
+      { key: 'apts4',  labelKey: '4+ apartments',  count: (c) => c.cnt_apts4 },
+      { key: 'apts8',  labelKey: '8+ apartments',  count: (c) => c.cnt_apts8 },
+      { key: 'apts12', labelKey: '12+ apartments', count: (c) => c.cnt_apts12 },
+      { key: 'apts20', labelKey: '20+ apartments', count: (c) => c.cnt_apts20 },
+    ], (c) => c.cnt_apts_unknown);
+  },
+  apply: (q, keys) => addAmenities(q, keys.slice(0, 1)),
+};
+const SHOPS_QUESTION: AdvancedQuestion = {
+  id: 'shops',
+  titleKey: '🏪 Has shops on the ground floor?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'shops'),
+  async resolveOptions(q) {
+    return guidedOptions(await fetchApartmentGuidedCounts(q), [
+      { key: 'has_shops', labelKey: 'Has shops', emoji: '🏪', count: (c) => c.cnt_has_shops },
+    ], (c) => c.cnt_shops_unknown);
   },
   apply: addAmenities,
 };
@@ -555,7 +662,9 @@ const FUN_QUESTION: AdvancedQuestion = {
 export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
   RNPL_QUESTION, AGE_QUESTION, AMENITIES_QUESTION, BATHROOMS_QUESTION, FURNISHED_QUESTION,
   STREET_WIDTH_QUESTION, DIRECTION_QUESTION, RATING_QUESTION, UNIT_SUBTYPE_QUESTION,
-  COMFORT_QUESTION, SPACE_QUESTION, FUN_QUESTION,
+  APARTMENTS_QUESTION, SHOPS_QUESTION,
+  COMFORT_QUESTION, SPACE_QUESTION, SPACE_YEARLY_QUESTION, SAFETY_QUESTION, PERKS_QUESTION, BUILD_QUESTION,
+  EXTRAS_QUESTION, WHO_QUESTION, FEATURES_QUESTION, SERVICES_QUESTION, FUN_QUESTION,
 ];
 
 // ── THE SCOPE PREFIX: CATEGORY → GROUP → TYPE → the pool above (owner 2026-08-23) ────────────────
@@ -657,7 +766,8 @@ export async function rankQuestions(q: SearchQuery, askedIds: ReadonlySet<string
   // opens the interview whenever it is genuinely useful, and silently steps aside when it is not.
   // Short stays (owner 2026-10-31): a FIXED order — bathrooms → comfort → space → fun — instead of the
   // contextual score; still only among questions that cleared the gates above.
-  const tier = isShortStaysScope(q) ? shortStaysAskTier : askTier;
+  // Short stays and the Apartments & Co-living lists ask in the owner's numbered order; every other scope keeps askTier.
+  const tier = isShortStaysScope(q) ? shortStaysAskTier : hasCards(q) ? groupAskTier : askTier;
   const sorted = ranked.sort((a, b) =>
     tier(b.question.id) - tier(a.question.id) || b.score - a.score);
   // The array is still the array (every existing consumer keeps working); `probeFailed` rides along

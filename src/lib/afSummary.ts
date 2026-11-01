@@ -1,4 +1,4 @@
-// AF emoji summary sentences (owner 2026-08-22). PURE — zero runtime deps.
+// AF emoji summary sentences (owner 2026-08-22). PURE — its one runtime import is the pure chip table (afChips.ts).
 // Each selected Advanced Filter attribute → emoji + Arabic label.
 //
 // TWO SENTENCES, TWO AUDIENCES — do not merge them.
@@ -21,12 +21,19 @@
 // that is why it carries ⏭️ rather than the question's own emoji: «عمر العقار 🏗️» sitting between
 // two real answers reads as a third answer. «تخطى عمر العقار ⏭️» cannot be mistaken for one.
 
+// The explicit entries win; every other chip token takes its emoji from CHIP_DEFS (src/lib/afChips.ts, pure),
+// so a token added to a card is never «✅» here. The derived tokens (migration 20261101100930) are named too.
+import { CHIP_DEFS } from './afChips.ts';
+
 const AMENITY_EMOJI: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(CHIP_DEFS).map(([k, d]) => [k, d.emoji])),
   kitchen: '🍳', parking: '🅿️', elevator: '🛗', ac: '❄️',
   private_entrance: '🚪', maid_room: '🧹', driver_room: '🚘',
   car_entrance: '🚗', sanitation: '🚰', furnished: '🛋️',
   electricity: '⚡', water_supply: '💧',
   laundry_room: '🧺', pool: '🏊', garden: '🌳', gym: '🏋️', balcony: '🌅', majlis: '🛋️',
+  optical_fibers: '🌐', separate_electricity_meter: '⚡', separate_water_meter: '⚡', separate_meters: '⚡',
+  apts4: '🏢', apts8: '🏢', apts12: '🏢', apts20: '🏢', has_shops: '🏪',
 };
 
 // `total` = the size of the set this question was asked against (what the pick is checked against) — only the
@@ -53,9 +60,19 @@ function facetItems(f: AfFacet, locale: 'ar' | 'en' = 'ar'): string[] {
         break;
       // The short-stays halves (owner 2026-11-01): their chip labels already carry the emoji in front
       // («🛗 مصعد», guidedOptions' `emoji`), so the item is the label as the user saw it.
+      // Same for every themed card of the Apartments & Co-living group (owner handoff 2026-10-31).
       case 'comfort':
       case 'space':
       case 'fun':
+      case 'safety':
+      case 'perks':
+      case 'build':
+      case 'extras':
+      case 'who':
+      case 'features':
+      case 'services':
+      case 'apartments':
+      case 'shops':
         for (const l of f.labels) items.push(l);
         break;
       // SCOPE tiers (owner 2026-08-23) — multi-select like amenities, so each picked group/type is
@@ -151,6 +168,15 @@ export const AF_LINE_LABEL: Record<string, string> = {
   comfort: 'Comfort',
   space: 'Space & safety',
   fun: 'Fun',
+  safety: 'Safety & smart',
+  perks: 'Building perks',
+  build: 'Build & services',
+  extras: 'Extras',
+  who: 'Who it is for',
+  features: 'Building features',
+  services: 'Services',
+  apartments: 'Apartments',
+  shops: 'Shops',
   furnished: 'Furnishing',
   property_age: 'Property age',
   rnpl: 'Payment',
@@ -200,6 +226,15 @@ const SKIPPED_QUESTION: Record<string, string> = {
   comfort: 'الراحة',
   space: 'المساحة والأمان',
   fun: 'الترفيه',
+  safety: 'الأمان والذكاء',
+  perks: 'مميزات المبنى',
+  build: 'البناء والخدمات',
+  extras: 'الإضافات',
+  who: 'لمين السكن',
+  features: 'مميزات العمارة',
+  services: 'الخدمات',
+  apartments: 'عدد الشقق',
+  shops: 'المحلات',
   bathrooms: 'دورات المياه',
   furnished: 'الفرش',
   street_width: 'عرض الشارع',

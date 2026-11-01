@@ -35,7 +35,9 @@ export type Pred =
   | { kind: 'between'; col: string; lo: number; hi: number }
   | { kind: 'eq'; col: string; v: unknown }
   | { kind: 'in'; col: string; vs: unknown[] }
-  | { kind: 'and'; preds: Pred[] };
+  | { kind: 'and'; preds: Pred[] }
+  // either disjunct holds (SQL `a or b`: TRUE when any is true — a NULL beside a TRUE still passes; NULL beside FALSE is UNKNOWN)
+  | { kind: 'or'; preds: Pred[] };
 
 /**
  * STRICT evaluation: a NULL (or missing) column value makes every leaf FALSE. This is R2.5.2 /
@@ -44,6 +46,7 @@ export type Pred =
  */
 export function rowSatisfies(row: Row, p: Pred): boolean {
   if (p.kind === 'and') return p.preds.every((x) => rowSatisfies(row, x));
+  if (p.kind === 'or') return p.preds.some((x) => rowSatisfies(row, x));
   const v = row[p.col];
   if (v === null || v === undefined) return false;
   switch (p.kind) {
@@ -59,6 +62,8 @@ export function rowSatisfies(row: Row, p: Pred): boolean {
 /** Every column a predicate reads — the columns whose NULLs must never appear in a returned set. */
 export function strictCols(p: Pred): string[] {
   if (p.kind === 'and') return [...new Set(p.preds.flatMap(strictCols))];
+  // an OR has no column whose NULL alone excludes the row (a TRUE elsewhere still admits it) — nothing is strict
+  if (p.kind === 'or') return [];
   return [p.col];
 }
 
