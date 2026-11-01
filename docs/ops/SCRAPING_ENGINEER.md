@@ -68,18 +68,27 @@ hours), and never over someone else's pending run. **A line-anchored pin** (`scr
 haraj `asking_price` line) moves whenever `scrapers/haraj/run.py` grows above it: re-pin in the same PR, and it makes
 the PR need the owner merge (scripts/).
 
-**Owed → first thing next run (10-27):**
-- **yameen P0 (926/923):** the 4 for-sale lands (YMN45194/45197/45960/52439) left the list feed on 10-25 and
-  their own pages answer HTTP 404 while the API says «available». #8961 makes the oracle read the own page.
-  Read tonight's yameen run: missing_count should be 2 → removal at grace 3, then the run is ok=true and the P0
-  resolves. Don't burn grace with extra dispatches.
-- **sakani nightly (925):** until #8954 merges, the planner drops sakani from the nightly (trailing `# comment`
-  on its SMALL_SOURCES line). After it merges, the first full nightly walks ~1,617 sale units at 1.5 s (~45
-  min). Read its row: rows_upserted ≈ 279 rent + ~1,600 sale, no `sale_*` skip storm, and prune ran.
-  A back-to-back second walk drew HTTP 429 at session negotiation (10-27 05:46): never re-dispatch sakani
-  within ~30 min of a walk.
-- **864 remainder:** off-plan projects (1,187) go to a hidden table, which needs supabase/ plus 3 guards (owner PR).
-- almuteb: almuteb.sa is NXDOMAIN; almuteb.com.sa is an empty template brochure (proof row 10-27). Re-check weekly.
+**NEW (11-01): a queued nightly job used to run the code of the moment it was DISPATCHED.** The 04:22 nightly's
+144 jobs wait hours for a runner (11-01: 96 still queued at 05:15; dealapp's 24 shards hold up to 12 runners for
+hours), so a fix merged at 06:07 was undone at 07:16 by the nightly's daryusuf job pinned to ad8e469 (13109421
+back to Rent). #9739 makes the `sync` job check out `main` for a main-ref run (guard
+`verify-small-sources-sync-runs-current-main.ts`). It applies from the FIRST nightly dispatched after 06:17 UTC
+11-01; the 11-01 nightly itself still runs its old commit, so a site fixed today is proven by a targeted run
+dispatched after the merge, never by that nightly. This container cannot open ezhalah.com (proxy refuses it):
+every customer proof is the CI `customer-journey.yml` run.
+
+**Owed → first thing next run (11-01):**
+- **daryusuf 1133/1139:** the 11-01 nightly's daryusuf job (run 41272812432, job 124751175863, commit c1c2445,
+  which HAS the 06a6856 fix) was still queued at 06:20. Read `daryusuf_residential_listings` 13109421/13109370:
+  transaction_type must be Buy with price_total. Then customer-journey.yml with
+  `[{"platform":"daryusuf","source_table":"daryusuf_residential_listings","listing_id":13109421}]` must PASS
+  (بيع · المدينة المنورة · المطار · فيلا · ر.س 1,480,000).
+- **ksaaqar 1134 area:** targeted run `source=souq24,ksaaqar` dispatched 06:18 on d32dffc → 12226358 area_m2
+  must read 2713. Its price 29,000,000,000 is source-verified (ops_price_source_verified, reread 41276260022).
+  The filter-count mismatch on that band is routed to repair (backlog 1141).
+- **souq24 1111 pins:** the same targeted run → pin_coverage_by_platform() souq24 0/46 → most of 46, one card's pin
+  = the page's «الحصول على الإتجاه» link; then raise its floor in data/pin-sources.json. A later nightly souq24
+  job on an OLD commit would rewrite additional_info without the pin: re-read coverage after it, too.
 - Kept: 575/612 photo floors · 564 gathern redirects · 565 almuteb 503 · 613 wasalt 13746442.
 
 **CHANGED (10-25): a targeted `small-sources-sync` dispatch (`source=<slug>[,<slug>…]`) now creates ONLY those jobs**
