@@ -91,6 +91,7 @@ const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
 check('AppleMap.web.tsx: suggestPlaces classifies, dedupes and sorts', /classifyPlace\(facts\)/.test(web) && /sortByKind\(dedupePlaces\(/.test(web) && /placeSubtitle\(facts, kind, country\)/.test(web));
 check('AppleMap.web.tsx: an unresolved row is kept with its two lines (timeout → resolve(r))', /setTimeout\(\(\) => resolve\(r\), \d+\)/.test(web));
 check('AppleMap.web.tsx: the mark follows the kind (pin for a landmark, outline for an area)', /isAreaKind\(p\.kind\)/.test(web));
+check('AppleMap.web.tsx: the view is wider than the outline, so the outline is seen', /region\.span\.latitudeDelta \* 1\.3, region\.span\.longitudeDelta \* 1\.3/.test(web));
 // PICKING A ROW MUST FLY (seen live 2026-11-01): Search.search() accepts only Apple's own SearchAutocompleteResult
 // instance; a row built by spreading is a plain object and MapKit throws, so the map never moved. Every row keeps the
 // original under `apple`, and every search() outside the resolver passes appleQuery(p).
