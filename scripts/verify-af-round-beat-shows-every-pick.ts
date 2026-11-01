@@ -103,13 +103,15 @@ mustCatch('a beat per pick (a multi-select answer showing the same number twice)
 mustCatch('a beat that drops the size (every pool null)', beatProblems(await loadMutant(`pool: ${REAL_POOL}`, 'pool: null')).length > 0);
 mustCatch('a beat that invents a size when none was known (0 treated as a count)', beatProblems(await loadMutant("typeof f.total === 'number' && f.total > 0 ?", "typeof f.total === 'number' ?")).length > 0);
 mustCatch('the same answer shown twice (no dedupe)', beatProblems(await loadMutant('.filter((it) => !seen.has(it));', ';')).length > 0);
-const LOADER_NUMBER = /pool != null \? t\('Checking \{count\} properties…', \{ count: grouped\(pool\) \}\) : `\$\{t\('Checking'\)\} \$\{pick\}…`/;
+// owner 2026-11-01: the beat names the pick («نفحص مصعد…»), one after another — never the set size.
+const LOADER_NUMBER = /const text = `\$\{t\('Checking'\)\} \$\{pick\}…`;/;
 const AGENT_STRIPPED = stripComments(AGENT);
 const wiredToSteps = (loader: string, agent: string) => LOADER_NUMBER.test(loader)
   && /<AfRoundLoader key=\{m\.id\} items=\{m\.afRound\.items\} pools=\{m\.afRound\.pools\}/.test(agent)
   && /buildAfBeatSteps\(ageFlowFacetsRef\.current\)/.test(agent) && !/Searching for/.test(loader);
-check('the loader says «نفحص N عقار…» (or names the pick when no size is known) and the round hands it the sizes', wiredToSteps(AF_SRC, AGENT_STRIPPED));
-mustCatch('the loader going back to «نبحث عن»', !wiredToSteps(AF_SRC.replace("t('Checking {count} properties…'", "t('Searching for'"), AGENT_STRIPPED));
+check('the loader says «نفحص <pick>…», one pick after another, and the round hands it the steps', wiredToSteps(AF_SRC, AGENT_STRIPPED));
+mustCatch('the loader going back to «نبحث عن»', !wiredToSteps(AF_SRC.replace("`${t('Checking')} ${pick}…`", "`${t('Searching for')} ${pick}…`"), AGENT_STRIPPED));
+mustCatch('the loader showing the set size instead of the pick', !wiredToSteps(AF_SRC.replace("const text = `${t('Checking')} ${pick}…`;", "const text = t('Checking {count} properties…', { count: pool });"), AGENT_STRIPPED));
 mustCatch('the round no longer handing the loader the sizes', !wiredToSteps(AF_SRC, AGENT_STRIPPED.replace('pools={m.afRound.pools}', '')));
 mustCatch('the round building its beats from the picks alone (no sizes)', !wiredToSteps(AF_SRC, AGENT_STRIPPED.replace('buildAfBeatSteps(ageFlowFacetsRef.current)', 'buildAfSummaryItems(ageFlowFacetsRef.current)')));
 
