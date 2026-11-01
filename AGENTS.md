@@ -687,9 +687,15 @@ So, the moment `apply_migration` returns:
 2. open the PR with **«mirror» in the title** (`--head mirror/<version> --base main`).
 `engineer-automerge.yml` (every 15 min) merges a mirror-only PR through `safe-pr-merge.ts` once every
 required check — including byte-parity against production — is green (owner, 2026-10-19). Your feature
-PR may carry the same file too; identical content does not conflict. GitHub's merge queue (owner,
-2026-10-22) keeps the required checks from restarting every time `main` moves; the three required-check
-workflows run on `merge_group` for that reason.
+PR may carry the same file too; identical content does not conflict.
+**`main` does NOT require branches to be up to date (owner, 2026-10-31: `strict=false` on its required
+status checks).** The merge queue noted on 2026-10-22 was never actually on (no ruleset exists), so with
+`strict=true` every PR restarted its ~10-minute checks each time `main` moved (every ~20-30 min): mirror
+PR #9506 was re-run seven times in four hours, and 13 of the last 30 frontend deploys were refused for
+`missing_in_git` behind mirrors that could not win that race. All 7 required checks are unchanged and
+still run on every PR and again on `main` after each merge. Do not turn `strict` back on without the
+owner — it re-creates the deploy jam. The `merge_group` triggers on the required-check workflows are
+harmless and stay.
 
 **Check the SQL's citations BEFORE you apply it, not in CI afterwards.** Write the SQL to a file
 first and run `node --experimental-strip-types scripts/check-migration-before-apply.ts <file.sql>`.

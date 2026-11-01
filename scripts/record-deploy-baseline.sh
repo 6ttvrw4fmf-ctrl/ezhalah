@@ -76,7 +76,15 @@ open_baseline_pr() {   # $1 = sha, $2 = branch
 \`docs/DEPLOY_BASELINE.txt\` records the commit production actually serves; every future
 \`preflight-verify.sh\` refuses to deploy anything that does not contain it. A direct push to main is
 refused by branch protection from a runner, so the baseline is recorded the way protection intends —
-as a PR, running the same required checks as any other." 2>&1)" || { echo "   gh pr create failed: $url"; return 1; }
+as a PR, running the same required checks as any other." 2>&1)" || {
+    # A redeploy of the same commit finds its PR already open (2026-10-30: PR #9452 turned two shipped
+    # deploys RED). The branch was just force-pushed above, so that open PR already carries this
+    # baseline commit — it is recorded, not lost. Any other failure stays a failure.
+    case "$url" in
+      *"already exists"*) echo "   Baseline PR already open for $branch (updated by the push above): $(printf '%s' "$url" | grep -oE 'https://[^ ]+/pull/[0-9]+' | tail -1)"
+                          return 0 ;;
+    esac
+    echo "   gh pr create failed: $url"; return 1; }
   echo "   Baseline PR: $url"
   # This script never merges it. AGENTS.md's merge gate is a single sanctioned door
   # (scripts/safe-pr-merge.ts) and nothing else in the tree may invoke that GitHub action or call
