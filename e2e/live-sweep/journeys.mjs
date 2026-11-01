@@ -236,7 +236,7 @@ export async function commitOneAfAnswer(page, name, requests, before, served) {
 }
 
 async function afAnswerRound(page, name, requests, before, served) {
-  const narrow = page.getByText('خلّنا نحدد الطلب أكثر', { exact: false });
+  const narrow = page.getByText('🎯 دقّق مع الذكاء', { exact: false });
   if (!await narrow.count()) {
     if (before != null && before > 25) note(`${name}: AF not offered at ${before} results (allowed: needs a useful question)`);
     return null;
