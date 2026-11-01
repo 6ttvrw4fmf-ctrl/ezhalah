@@ -31,7 +31,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { classifyPlace, placeSubtitle, dedupePlaces, sortByKind, isAreaKind, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
+import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 
 const MAPKIT_SRC = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js';
@@ -85,7 +85,7 @@ type Coord = { latitude: number; longitude: number };
 type Shape = { style: { fillOpacity: number; strokeOpacity: number; lineWidth: number }; data: Region; points: unknown[] };
 /** An Apple autocomplete row, plus what suggestPlaces() learned about it: its kind (city / district / mosque …),
  *  a clean subtitle and the name Apple's Place carries. `kind` is absent when the row could not be resolved in time. */
-export type PlaceSuggestion = { displayLines: string[]; coordinate?: Coord; kind?: PlaceKind; subtitle?: string; name?: string; apple?: unknown };
+export type PlaceSuggestion = { displayLines: string[]; coordinate?: Coord; kind?: PlaceKind; subtitle?: string; name?: string; locality?: string; apple?: unknown };
 /** What Search.search() accepts: Apple's OWN autocomplete result (an instance it type-checks), never a copy of it. A row
  *  suggestPlaces() built by spreading keeps the original under `apple`; without it MapKit throws «`query` passed to
  *  `Search.search()` is neither a string nor SearchAutocompleteResult» and the map never moves (seen live 2026-11-01). */
@@ -284,12 +284,14 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
         thoroughfare: p.thoroughfare, poi: p.pointOfInterestCategory, span: p.region?.span?.latitudeDelta,
       };
       const kind = classifyPlace(facts);
-      resolve({ ...r, apple: r.apple ?? r, name: facts.name, kind, subtitle: placeSubtitle(facts, kind, country), coordinate: p.coordinate ?? r.coordinate });
+      resolve({ ...r, apple: r.apple ?? r, name: facts.name, kind, subtitle: placeSubtitle(facts, kind, country), locality: p.locality, coordinate: p.coordinate ?? r.coordinate });
     });
   });
   const resolved = await Promise.all(rows.slice(0, 8).map(resolve1));
   const named = resolved.map((r) => ({ ...r, apple: r.apple ?? r, name: r.name ?? r.displayLines[0] }));
-  return sortByKind(dedupePlaces(named)).slice(0, 6);
+  // A user-written description («طريق الملك فهد اللي دايم زحمه») is not a place; what was typed sorts first.
+  const places = named.filter((r) => !isNoiseName(r.name));
+  return sortByKind(dropAreaShadows(dedupePlaces(places.length ? places : named)), query).slice(0, 6);
 }
 
 /** Glide the map to a suggestion: Apple's bounding region for it when it has one, else a town-sized view around it. */
