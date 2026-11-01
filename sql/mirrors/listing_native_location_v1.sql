@@ -1,6 +1,9 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-11-01 (migration 20261101144106 reads this matview, it does not change it): UNCHANGED,
+-- pg_get_viewdef(..., true) still hashes to the value recorded below.
+--
 -- Re-verified 2026-09-27 (migration 20260927014059_w3b_maqam_earthapp_nawafeth_wiring_into_search):
 -- CHANGED. 28 arms added since the 2026-09-26 wave-2 refresh, all spliced immediately after the
 -- nufouth commercial arm by six wiring passes that each forgot this file and the registered digest:

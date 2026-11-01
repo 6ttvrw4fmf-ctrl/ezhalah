@@ -26,6 +26,11 @@ const find = (re: RegExp, what: string): string => {
 const fileArm = find(/^\d{14}_pin_district_fill_table_and_recovery_arm\.sql$/, '*_pin_district_fill_table_and_recovery_arm.sql');
 const fileData = find(/^\d{14}_pin_district_fill_batch_1_inert\.sql$/, '*_pin_district_fill_batch_1_inert.sql');
 const sqlArm = readFileSync(join(dir, fileArm), 'utf8');
+// The function itself is judged in the NEWEST migration that redefines it (2026-11-01, backlog 1099: the arm compares the pin
+// with the SERVED city first, and may fill an ad whose neighborhood text resolved to no district — «Doha», «AL- Thumamah street»).
+const FN_HEAD = /CREATE OR REPLACE FUNCTION public\.refresh_district_recovery_table\(/i;
+const fileFn = all.filter((f) => FN_HEAD.test(readFileSync(join(dir, f), 'utf8'))).at(-1) ?? fileArm;
+const sqlFn = readFileSync(join(dir, fileFn), 'utf8');
 const sqlData = readFileSync(join(dir, fileData), 'utf8');
 
 // Versions of migrations that are allowed to switch rows on. The alarm (mon_detect_pin_district_unvouched) and the DB guards
@@ -50,7 +55,7 @@ function loaderProblems(s: string): string[] {
   return fail;
 }
 
-function armProblems(s: string): string[] {
+function armProblems(s: string, sFn: string = s): string[] {
   const fail: string[] = [];
   if (!/create table if not exists public\.listing_pin_district \(/.test(s)) fail.push('listing_pin_district is not created');
   if (!/primary key \(source_table, listing_id\)/.test(s)) fail.push('listing_pin_district lost its (source_table, listing_id) key');
@@ -59,15 +64,15 @@ function armProblems(s: string): string[] {
   if (!/revoke all on table public\.listing_pin_district from public, anon, authenticated;/.test(s)) fail.push('listing_pin_district is readable by the public keys');
   if (!/alter table public\.district_recovery add column if not exists basis text;/.test(s)) fail.push('district_recovery has no basis column to mark pin rows');
 
-  const fn = s.match(/CREATE OR REPLACE FUNCTION public\.refresh_district_recovery_table\([\s\S]*?\$function\$;/i)?.[0] ?? '';
+  const fn = sFn.match(/CREATE OR REPLACE FUNCTION public\.refresh_district_recovery_table\([\s\S]*?\$function\$;/i)?.[0] ?? '';
   if (!fn) { fail.push('refresh_district_recovery_table is not redefined'); return fail; }
   const arm = fn.match(/-- PIN ARM[\s\S]*?\$f\$, p_table, p_table\);/)?.[0] ?? '';
   if (!arm) { fail.push('the pin arm is missing from refresh_district_recovery_table'); return fail; }
   if (!/from public\.listing_pin_district p/.test(arm)) fail.push('the pin arm does not read listing_pin_district');
   if (!/\bp\.applied\b/.test(arm)) fail.push('the pin arm serves rows that are not switched on');
-  if (!/p\.city_id = coalesce\(v1\.city_id, s\.city_id\)/.test(arm)) fail.push('the pin arm no longer requires the pin city to be the served city');
+  if (!/p\.city_id = coalesce\(s\.city_id, v1\.city_id\)/.test(arm)) fail.push('the pin arm no longer requires the pin city to be the SERVED city (s.city_id first)');
   if (!/\(v1\.district_ar is null or btrim\(v1\.district_ar\) = ''\)/.test(arm)) fail.push('the pin arm may overrule a native district');
-  if (!/nullif\(btrim\(x\.neighborhood\), ''\) is null/.test(arm)) fail.push('the pin arm may overrule a non-blank neighborhood');
+  if (!/and \(nullif\(btrim\(x\.neighborhood\), ''\) is null\s+or not exists \(select 1 from _drt t where t\.source_table = p\.source_table and t\.listing_id = p\.listing_id\)\)/.test(arm)) fail.push('the pin arm may overrule a neighborhood that resolved to a district');
   if (!/not exists \(\s*select 1 from public\.listing_source_district_ar sd\s+where sd\.source_table = p\.source_table and sd\.listing_id = p\.listing_id\)/.test(arm)) fail.push('the pin arm may overrule a district the source states');
   if (!/on conflict \(source_table, listing_id\) do nothing/.test(arm)) fail.push('the pin arm can replace a district another arm resolved');
   if (!/now\(\), false, 'pin'/.test(arm)) fail.push('pin rows are not marked verbatim = false / basis = pin');
@@ -120,13 +125,14 @@ let failed = 0;
 const check = (label: string, ok: boolean, why = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : ` — ${why}`}`); };
 const mustCatch = (label: string, caught: boolean, why = '') => check(`mutant caught: ${label}`, caught, why);
 
-const liveArm = armProblems(sqlArm);
-check(`committed migration ${fileArm} holds every pin`, liveArm.length === 0, liveArm.join('; '));
+const liveArm = armProblems(sqlArm, sqlFn);
+check(`committed migrations ${fileArm} + ${fileFn} hold every pin`, liveArm.length === 0, liveArm.join('; '));
 const armMutants: Array<[string, (s: string) => string]> = [
   ['rows are served without being switched on', (s) => s.replace('      and p.applied\n', '')],
-  ['pin city no longer checked', (s) => s.replace('      and p.city_id = coalesce(v1.city_id, s.city_id)\n', '')],
-  ['native district may be overruled', (s) => s.replace("      and (v1.district_ar is null or btrim(v1.district_ar) = '')\n      and nullif(", '      and nullif(')],
-  ['non-blank neighborhood may be overruled', (s) => s.replace("      and nullif(btrim(x.neighborhood), '') is null\n", '')],
+  ['pin city no longer checked', (s) => s.replace('      and p.city_id = coalesce(s.city_id, v1.city_id)\n', '')],
+  ['pin judged in the raw site city, not the served one', (s) => s.replace('p.city_id = coalesce(s.city_id, v1.city_id)', 'p.city_id = coalesce(v1.city_id, s.city_id)')],
+  ['native district may be overruled', (s) => s.replace("      and (v1.district_ar is null or btrim(v1.district_ar) = '')\n      and (nullif(", '      and (nullif(')],
+  ['a resolved neighborhood may be overruled', (s) => s.replace("\n           or not exists (select 1 from _drt t where t.source_table = p.source_table and t.listing_id = p.listing_id))", '\n           or true)')],
   ['source-stated district may be overruled', (s) => s.replace(/      and not exists \(\n            select 1 from public\.listing_source_district_ar sd\n            where sd\.source_table = p\.source_table and sd\.listing_id = p\.listing_id\)\n    on conflict \(source_table, listing_id\) do nothing\n  \$f\$, p_table, p_table\);/, '    on conflict (source_table, listing_id) do nothing\n  $f$, p_table, p_table);')],
   ['pin arm replaces other recoveries', (s) => s.replace(/(from public\.listing_pin_district p[\s\S]*?)on conflict \(source_table, listing_id\) do nothing/, '$1on conflict (source_table, listing_id) do update set district_ar = excluded.district_ar')],
   ['pin rows counted as verbatim', (s) => s.replace("now(), false, 'pin'", "now(), true, 'pin'")],
@@ -137,8 +143,9 @@ const armMutants: Array<[string, (s: string) => string]> = [
   ['rows default to switched on', (s) => s.replace('applied      boolean not null default false', 'applied      boolean not null default true')],
 ];
 for (const [label, mutate] of armMutants) {
-  const m = mutate(sqlArm);
-  mustCatch(`arm: ${label}`, m !== sqlArm && armProblems(m).length > 0, m === sqlArm ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+  const m = mutate(sqlArm), mf = mutate(sqlFn);
+  const applied = m !== sqlArm || mf !== sqlFn;
+  mustCatch(`arm: ${label}`, applied && armProblems(m, mf).length > 0, !applied ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 }
 
 const liveData = dataProblems(sqlData);
