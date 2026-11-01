@@ -399,6 +399,8 @@ export default function Home() {
   // unexpected value here (e.g. from some future code path that bypasses TypeScript's own type)
   // must still fall back to the safe default rather than leaving both buttons unselected.
   const rentPeriod: 'monthly' | 'annual' | 'both' = validRentPeriod(query.rentPeriod) ?? 'annual';
+  // only «إقامات قصيرة» picked (Rent, not شراء+إيجار): the price box is hidden — see the PRICE range block
+  const shortStaysOnly = query.deal === 'Rent' && !query.dealCombined && rentPeriod === 'monthly';
   // Buy+Rent combined multi-select (owner feature 2026-08-20): every Trending/pool call below reads
   // effDeal instead of query.deal directly — null tells top_cities_by_deal_ar/district_options_ar
   // (and every locations.ts pool wrapping them) to scope to the combined Buy ∪ Rent(any period) set,
@@ -2229,6 +2231,12 @@ export default function Home() {
                     </>
                   )}
 
+                  {/* NO PRICE BOX FOR SHORT STAYS (owner 2026-11-01: «remove price for short stays»). Their stays are
+                      priced by length (the guest picks dates on the platform) and every card already shows no price
+                      (listingPrice → ''), so a من/إلى budget there filters on a figure the user never sees. Hidden only when
+                      «إقامات قصيرة» is the ONLY period; «سنوي» alone or both keep it. The period toggle already clears
+                      typed bounds when the period changes. */}
+                  {!shortStaysOnly && (<>
                   {/* PRICE range (من / إلى ريال) — always available, independent of beds/area. HARD filter.
                       When شراء+إيجار are BOTH selected (owner feature 2026-08-20), this box is the BUY
                       budget and a SECOND, independent Rent budget box renders right below it — owner
@@ -2259,6 +2267,7 @@ export default function Home() {
                   {priceHint && (
                     <Text style={[s.rangeNote, x.rangeNote, priceHint.warn ? s.rangeNoteWarn : null]}>{priceHint.text}</Text>
                   )}
+                  </>)}
 
                   {query.dealCombined && (
                     <Reveal>
