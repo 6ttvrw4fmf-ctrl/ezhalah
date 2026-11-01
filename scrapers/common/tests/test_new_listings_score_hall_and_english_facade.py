@@ -37,3 +37,10 @@ def test_english_facade_is_the_arabic_direction():
     assert _cmp({"direction_ar": "شرق"}, body, "direction_ar") == S.MATCH
     assert _cmp({"direction_ar": "غرب"}, body, "direction_ar") == S.MISMATCH
     assert _cmp({"direction_ar": "شمال"}, "<p>واجهة العقار: Northern</p>", "direction_ar") == S.MATCH
+
+
+def test_english_number_word_on_the_age_line():
+    body = "<p>نوع العقار: Apartment عمر العقار: Nine Year مساحة العقار: 494</p>"
+    assert _cmp({"property_age": 9}, body, "property_age") == S.MATCH
+    assert _cmp({"property_age": 4}, body, "property_age") == S.MISMATCH
+    assert S.EN_NUMBER.search("Someone") is None

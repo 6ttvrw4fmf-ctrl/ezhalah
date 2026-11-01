@@ -284,6 +284,10 @@ WORD_NUMBERS = {"ثلاث": 3, "ثلاثه": 3, "اربع": 4, "اربعه": 4, 
 WORD_NUMBER = re.compile(r"(?<![\u0621-\u064A])(" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
                          + r")(?![\u0621-\u064A])")
 
+EN_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+              "ten": 10, "eleven": 11, "twelve": 12}
+EN_NUMBER = re.compile(r"(?<![A-Za-z])(" + "|".join(EN_NUMBERS) + r")(?![A-Za-z])", re.I)
+
 WORDED_VALUE_LINE = re.compile(r"^\s*(" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
                                + r")\s*(?:سنوات|سنين|سنه|غرف|غرفه|صالات|دورات مياه)?\s*$")
 
@@ -333,6 +337,9 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # a stated age, so the night scored it a MISMATCH. Only a line that is nothing but the worded figure counts.
         worded |= {WORD_NUMBERS[m.group(1)] for i in kw_hits if i + 1 < len(lines)
                    for m in [WORDED_VALUE_LINE.match(lines[i + 1])] if m}
+        # haraj's REGA licence block writes the figure in English: «عمر العقار: Nine Year» (21839193, stored 9; branch
+        # re-score 41284494062, 2026-11-01). An English number word on the keyword's own line states that figure too.
+        worded |= {EN_NUMBERS[m.group(1).lower()] for i in kw_hits for m in EN_NUMBER.finditer(lines[i])}
         if any(ONE_WORD.search(lines[i]) for i in kw_hits):
             worded.add(1)
         if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
