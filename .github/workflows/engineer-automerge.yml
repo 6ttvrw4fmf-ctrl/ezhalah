@@ -51,9 +51,12 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
-          prs=$(gh pr list --repo "$REPO" --state open --limit 50 \
+          # --limit 200, not 50 (🔧 2026-11-01): the deploy robot opens a deploy/baseline-* PR per deploy and ~85 of them were
+          # open, so the 50 newest PRs were almost all baselines and every engineer PR older than ~2 days fell out of the
+          # robot's window — #8855 (green barrier), #8818 / #8790 (one-line docs), #8954 (scripts) sat 5–6 days unseen.
+          prs=$(gh pr list --repo "$REPO" --state open --limit 200 \
                   --json number,headRefName,isDraft,isCrossRepository,title \
-                  -q '.[] | select((.headRefName|test("^(claude|nle|lifecycle|af|scraping|qa|kit|fix|mirror)[/-]")) and (.isDraft|not) and (.isCrossRepository|not)) | "\(.number)\t\(.title)"')
+                  -q '.[] | select((.headRefName|test("^(claude|nle|lifecycle|af|scraping|qa|kit|fix|mirror|docs)[/-]")) and (.isDraft|not) and (.isCrossRepository|not)) | "\(.number)\t\(.title)"')
           while IFS=$'\t' read -r pr title <&3; do
             [ -n "$pr" ] || continue
             files=$(gh pr view "$pr" --repo "$REPO" --json files -q '.files[].path')
