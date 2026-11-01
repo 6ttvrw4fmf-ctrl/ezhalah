@@ -194,7 +194,9 @@ function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
 //     at all — the one number true for the whole amenities card). Never a subtraction for these.
 function guidedOptions(
   counts: GuidedCounts | null | { __probeFailed: true },
-  defs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }>,
+  // `emoji` (owner 2026-11-01, short stays): shown BEFORE the label on the card chip, and carried into the
+  // committed facet's label so the result pills show the same «🛗 مصعد».
+  defs: Array<{ key: string; labelKey: string; emoji?: string; count: (c: GuidedCounts) => number }>,
   // Supply ONLY when the count is provably the number of listings whose source did not state the
   // field. Omit it and the question honestly reports "I don't know how many didn't say".
   unknownOf?: (c: GuidedCounts) => number,
@@ -205,7 +207,7 @@ function guidedOptions(
   if (isProbeFailure(counts)) return { options: [], unknownCount: null, total: 0, probeFailed: true };
   if (!counts || counts.cnt_total_base < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: null, total: counts?.cnt_total_base ?? 0 };
   return {
-    options: meaningful(defs.map((d) => ({ key: d.key, label: t(d.labelKey), count: d.count(counts) }))),
+    options: meaningful(defs.map((d) => ({ key: d.key, label: d.emoji ? `${d.emoji} ${t(d.labelKey)}` : t(d.labelKey), count: d.count(counts) }))),
     // Clamp at 0: a negative would mean the arithmetic no longer partitions the scope, and printing
     // a negative "did not mention" is worse than printing nothing.
     unknownCount: unknownOf ? Math.max(0, unknownOf(counts)) : null,
@@ -506,29 +508,29 @@ const UNIT_SUBTYPE_QUESTION: AdvancedQuestion = {
 // seating) join one at a time once the free word reader and the count exist for each.
 const COMFORT_QUESTION: AdvancedQuestion = {
   id: 'comfort',
-  titleKey: '🔑 Comfort — what matters to you?',
+  titleKey: '🔑 Comfort: what matters to you?',
   descriptionKey: 'Results update as you choose',
   selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'comfort'),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
-      { key: 'elevator',     labelKey: 'Elevator',     count: (c) => c.cnt_elevator },
-      { key: 'parking',      labelKey: 'Parking',      count: (c) => c.cnt_parking },
-      { key: 'laundry_room', labelKey: 'Laundry room', count: (c) => c.cnt_laundry_room },
+      { key: 'elevator',     labelKey: 'Elevator',     emoji: '🛗', count: (c) => c.cnt_elevator },
+      { key: 'parking',      labelKey: 'Parking',      emoji: '🅿️', count: (c) => c.cnt_parking },
+      { key: 'laundry_room', labelKey: 'Laundry room', emoji: '🧺', count: (c) => c.cnt_laundry_room },
     ], (c) => c.cnt_amen_unknown);
   },
   apply: addAmenities,
 };
 const OUTDOORS_QUESTION: AdvancedQuestion = {
   id: 'outdoors',
-  titleKey: '🏊 Fun & outdoors — what matters to you?',
+  titleKey: '🏊 Fun & outdoors: what matters to you?',
   descriptionKey: 'Results update as you choose',
   selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'outdoors'),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
-      { key: 'pool',   labelKey: 'Pool',   count: (c) => c.cnt_pool },
-      { key: 'garden', labelKey: 'Garden', count: (c) => c.cnt_garden },
+      { key: 'pool',   labelKey: 'Pool',   emoji: '🏊', count: (c) => c.cnt_pool },
+      { key: 'garden', labelKey: 'Garden', emoji: '🌳', count: (c) => c.cnt_garden },
     ], (c) => c.cnt_amen_unknown);
   },
   apply: addAmenities,
