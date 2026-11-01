@@ -95,7 +95,7 @@ export function certifiedFacets(q: SearchQuery, facets: readonly CommittedFacet[
  * labels are not index-parallel to the keys (so the chip cannot be split honestly) the whole facet
  * goes rather than leave a control that overstates what is actually being filtered.
  */
-// The amenities card and its two short-stays halves (comfort / outdoors, owner 2026-10-31) all write
+// The amenities card and its short-stays parts (comfort / space / fun, owner 2026-10-31 and 2026-11-01) all write
 // the one q.amenities bag, so all three are token-filtered the same way: AMENITY_BAG_QUESTION_IDS.
 function certifiedAmenityFacet(q: SearchQuery, f: CommittedFacet): CommittedFacet | null {
   const allowed = new Set(certifiedAmenityKeys(q));

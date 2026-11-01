@@ -238,8 +238,8 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
   titleKey: 'What amenities matter to you?',
   descriptionKey: 'Results update as you choose',
   selection: 'multi',
-  // Short stays never ASK this card (owner 2026-10-31): COMFORT_QUESTION / OUTDOORS_QUESTION below are
-  // its two halves there; a typed chat sentence may still use it (cohortAllows keeps it certified).
+  // Short stays never ASK this card (owner 2026-10-31): COMFORT_QUESTION / SPACE_QUESTION / FUN_QUESTION below are
+  // its themed parts there; a typed chat sentence may still use it (cohortAllows keeps it certified).
   eligibility: (q) => cohortAllows(q, 'amenities') && !isShortStaysScope(q),
   async resolveOptions(q) {
     const defs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
@@ -498,11 +498,11 @@ const UNIT_SUBTYPE_QUESTION: AdvancedQuestion = {
 
 // ── SHORT STAYS: the amenities card in two halves (owner 2026-10-31) ──────────────────────────────
 // «إقامات قصيرة» asks exactly three questions, in this order: 🚽 bathrooms → 🔑 comfort → 🏊 fun &
-// outdoors (afCohorts.ts SHORT_STAYS_QUESTIONS; rankQuestions() below keeps the order). Both halves
+// space & safety → ✨ fun (afCohorts.ts SHORT_STAYS_QUESTIONS; rankQuestions() below keeps the order). All three
 // write the ONE q.amenities bag through addAmenities, exactly like AMENITIES_QUESTION, so the card
 // evidence («مطابق لطلبك»), the receipt chips and the re-entry carry work unchanged. The chip keys are
 // INLINED here (these objects are lifted by barriers and cannot import a list) and mirrored by
-// SHORT_STAYS_COMFORT_KEYS / SHORT_STAYS_OUTDOORS_KEYS; verify-short-stays-one-cohort.ts pins them
+// SHORT_STAYS_COMFORT_KEYS / SHORT_STAYS_SPACE_KEYS / SHORT_STAYS_FUN_KEYS; verify-short-stays-one-cohort.ts pins them
 // equal. Every key already has its count path (cnt_<key>) and its p_amenities slug — the owner's
 // remaining chips (self check-in, Wi-Fi, bills included, grill, kids' play area, jacuzzi, outdoor
 // seating) join one at a time once the free word reader and the count exist for each.
@@ -514,23 +514,39 @@ const COMFORT_QUESTION: AdvancedQuestion = {
   eligibility: (q) => cohortAllows(q, 'comfort'),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
-      { key: 'elevator',     labelKey: 'Elevator',     emoji: '🛗', count: (c) => c.cnt_elevator },
-      { key: 'parking',      labelKey: 'Parking',      emoji: '🅿️', count: (c) => c.cnt_parking },
-      { key: 'laundry_room', labelKey: 'Laundry room', emoji: '🧺', count: (c) => c.cnt_laundry_room },
+      { key: 'elevator',         labelKey: 'Elevator',         emoji: '🛗', count: (c) => c.cnt_elevator },
+      { key: 'parking',          labelKey: 'Parking',          emoji: '🅿️', count: (c) => c.cnt_parking },
+      { key: 'private_entrance', labelKey: 'Private entrance', emoji: '🚪', count: (c) => c.cnt_private_entrance },
+      // «washing machine» rides the existing laundry_room fact (owner 2026-11-01: «+ existing laundry_room»)
+      { key: 'laundry_room',     labelKey: 'Washing machine',  emoji: '🧺', count: (c) => c.cnt_laundry_room },
     ], (c) => c.cnt_amen_unknown);
   },
   apply: addAmenities,
 };
-const OUTDOORS_QUESTION: AdvancedQuestion = {
-  id: 'outdoors',
-  titleKey: '🏊 Fun & outdoors: what matters to you?',
+const SPACE_QUESTION: AdvancedQuestion = {
+  id: 'space',
+  titleKey: '🏠 Space & safety: what matters to you?',
   descriptionKey: 'Results update as you choose',
   selection: 'multi',
-  eligibility: (q) => cohortAllows(q, 'outdoors'),
+  eligibility: (q) => cohortAllows(q, 'space'),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
-      { key: 'pool',   labelKey: 'Pool',   emoji: '🏊', count: (c) => c.cnt_pool },
-      { key: 'garden', labelKey: 'Garden', emoji: '🌳', count: (c) => c.cnt_garden },
+      { key: 'majlis',  labelKey: 'Majlis room', emoji: '🛋️', count: (c) => c.cnt_majlis },
+      { key: 'balcony', labelKey: 'Balcony',     emoji: '🌅', count: (c) => c.cnt_balcony },
+    ], (c) => c.cnt_amen_unknown);
+  },
+  apply: addAmenities,
+};
+const FUN_QUESTION: AdvancedQuestion = {
+  id: 'fun',
+  titleKey: '✨ Fun: what matters to you?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'fun'),
+  async resolveOptions(q) {
+    return guidedOptions(await fetchApartmentGuidedCounts(q), [
+      { key: 'pool', labelKey: 'Pool', emoji: '🏊', count: (c) => c.cnt_pool },
+      { key: 'gym',  labelKey: 'Gym',  emoji: '🏋️', count: (c) => c.cnt_gym },
     ], (c) => c.cnt_amen_unknown);
   },
   apply: addAmenities,
@@ -539,7 +555,7 @@ const OUTDOORS_QUESTION: AdvancedQuestion = {
 export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
   RNPL_QUESTION, AGE_QUESTION, AMENITIES_QUESTION, BATHROOMS_QUESTION, FURNISHED_QUESTION,
   STREET_WIDTH_QUESTION, DIRECTION_QUESTION, RATING_QUESTION, UNIT_SUBTYPE_QUESTION,
-  COMFORT_QUESTION, OUTDOORS_QUESTION,
+  COMFORT_QUESTION, SPACE_QUESTION, FUN_QUESTION,
 ];
 
 // ── THE SCOPE PREFIX: CATEGORY → GROUP → TYPE → the pool above (owner 2026-08-23) ────────────────
@@ -639,7 +655,7 @@ export async function rankQuestions(q: SearchQuery, askedIds: ReadonlySet<string
   // Ask-first tier wins ONLY among questions that already cleared the usefulness gates above
   // (scoreQuestion returned non-null); within a tier, the contextual score decides. So installments
   // opens the interview whenever it is genuinely useful, and silently steps aside when it is not.
-  // Short stays (owner 2026-10-31): a FIXED order — bathrooms → comfort → outdoors — instead of the
+  // Short stays (owner 2026-10-31): a FIXED order — bathrooms → comfort → space → fun — instead of the
   // contextual score; still only among questions that cleared the gates above.
   const tier = isShortStaysScope(q) ? shortStaysAskTier : askTier;
   const sorted = ranked.sort((a, b) =>
