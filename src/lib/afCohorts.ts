@@ -8,7 +8,22 @@
 // The cohort DATA below is unchanged, byte for byte, from where it was profiled and certified.
 import type { SearchQuery } from '@/data/search';
 import { groupsMembers, offeredUnder } from '../data/propertyTypes.ts';
-import { effectiveTypes, effectiveGroups } from './searchDefaults.ts';
+import { effectiveTypes, effectiveGroups, isShortStaysScope } from './searchDefaults.ts';
+export { isShortStaysScope };
+
+// ── SHORT STAYS: one pool, one cohort, no type question (owner 2026-10-31) ───────────────────────
+// «إقامات قصيرة» is Gathern + Aqar Monthly and nothing else, so a plain short-stays search is one
+// cohort whatever group or type is in scope — the per-type intersection below is for inventories
+// that differ by type, and here they do not. Measured 2026-10-31 over all 18,963 short-stay ads:
+// bathrooms known on 18,741 (98.8 %, every type ≥ 82 %); amenity chips are positive-only tokens.
+// The two ASKED questions. No property type (decision 1), no rating (decision 2 — Aqar Monthly has
+// no rating, so a rating floor would hide all of its ads).
+export const SHORT_STAYS_QUESTIONS = ['bathrooms', 'amenities'] as const;
+// Certified for a TYPED sentence only («تقييم ٩ وفوق», «استديو»): the chat keeps using them as
+// today (afIntents.ts gates on cohortAllows), the card never asks them.
+export const SHORT_STAYS_CHAT_ONLY = ['rating', 'unit_subtype'] as const;
+const SHORT_STAYS_CERTIFIED: readonly string[] = [...SHORT_STAYS_QUESTIONS, ...SHORT_STAYS_CHAT_ONLY];
+export const shortStaysAsks = (id: string): boolean => (SHORT_STAYS_QUESTIONS as readonly string[]).includes(id);
 
 // Which amenity chips are safe for a MULTI-TYPE scope: the intersection of every selected type's
 // certified chip list. Returns null when no selected type has a cohort chip list (the caller then
@@ -55,6 +70,8 @@ export const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: str
     // RentAnnual: kitchen/AC/age/floor/furnished are fresh-DEAD in this cohort (94/7/564/53 known of
     // 30,356; furnished 100% true on Gathern). What Monthly actually has: Gathern rating (24,716
     // rated), unit subtype (استديو 9,218 / شقق مخدومة 2,040), elevator 62%, parking 33%, bathrooms 56%.
+    // 2026-10-31: plain short stays reads SHORT_STAYS_QUESTIONS instead (one pool); this list feeds the
+    // 'both' / Buy+Rent intersections and the certified pool. rating/unit_subtype: chat-only there.
     RentMonthly: ['rating', 'unit_subtype', 'amenities', 'bathrooms'],
   },
   Floor: {
@@ -280,6 +297,8 @@ function cohortAllowsCombined(cfg: NonNullable<(typeof COHORT_QUESTIONS)[string]
 // scope returns false explicitly — [].every() is `true`, which would otherwise turn "nothing
 // selected" into "everything allowed".
 export function cohortAllows(q: SearchQuery, id: string): boolean {
+  // Short stays first (owner 2026-10-31): one pool, so no type — and no group — is needed to ask.
+  if (isShortStaysScope(q)) return SHORT_STAYS_CERTIFIED.includes(id);
   const types = scopeCleanTypes(q);
   if (!types.length) return false;
   return types.every((type) => {
@@ -342,6 +361,10 @@ export function certifiedAmenityKeys(q: SearchQuery): string[] {
   // Not certified for this cohort at all ⇒ no amenity token is applicable. Never fall through to a
   // base list here: that would let an uncertified cohort acquire constraints the AF path refuses.
   if (!cohortAllows(q, 'amenities')) return [];
+  // Short stays (owner 2026-10-31): the residential chips for the whole pool, whatever type is in
+  // scope — a «Vacation & Rural» group would otherwise intersect Rest House's utility trio with
+  // Chalet's nothing and offer no chip at all. AMENITIES_QUESTION mirrors this branch.
+  if (isShortStaysScope(q)) return [...RESIDENTIAL_AMENITY_BASE];
   // No empty-scope guard here on purpose: cohortAllows() already returns false when scopeCleanTypes
   // is empty, so a second check is dead code — it cannot change behaviour and cannot be tested. (A
   // mutation removing it was provably EQUIVALENT, which is what exposed it as redundant.)

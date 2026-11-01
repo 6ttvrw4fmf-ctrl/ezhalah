@@ -158,7 +158,7 @@ const AGE_QUESTION: AdvancedQuestion = {
 // multi-type intersection mutation-provable. The cohort DATA moved with it, unchanged. Buy+Rent
 // combined gating (q.dealCombined — owner feature 2026-08-20) lives there too, intersecting with
 // the multi-type/multi-period dimensions rather than being bolted on separately — see afCohorts.ts.
-import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, intersectChips } from '@/lib/afCohorts';
+import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope } from '@/lib/afCohorts';
 // Merge picked strict amenity tokens (kitchen/parking/elevator/furnished/rnpl) into q.amenities.
 function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
   return keys.length ? { ...q, amenities: [...new Set([...(q.amenities ?? []), ...keys])] } : q;
@@ -277,6 +277,9 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
     // cohorts' cards are unchanged.
     // Multi-type safe: only when EVERY selected type is Villa — a Villa+Apartment scope must not be
     // offered a chip that only villa ads carry. (owner 2026-08-20 intersection rule.)
+    // Short stays (owner 2026-10-31): the residential chips for the whole pool, whatever type is in
+    // scope — mirrors certifiedAmenityKeys(). No villa extras, no commercial trio, no «مفروشة».
+    if (isShortStaysScope(q)) return guidedOptions(await fetchApartmentGuidedCounts(q), defs, (c) => c.cnt_amen_unknown);
     const scope = scopeCleanTypes(q);
     if (scope.length > 0 && scope.every((ty) => ty === 'Villa')) {
       defs.push({ key: 'car_entrance', labelKey: 'Car entrance', count: (c) => c.cnt_car_entrance });
@@ -448,7 +451,8 @@ const RATING_QUESTION: AdvancedQuestion = {
   id: 'rating',
   titleKey: 'What rating would you prefer?',
   selection: 'single',
-  eligibility: (q) => cohortAllows(q, 'rating'),
+  // Short stays never ASK it (owner 2026-10-31: Aqar Monthly has no rating); a typed sentence may still use it.
+  eligibility: (q) => cohortAllows(q, 'rating') && !isShortStaysScope(q),
   async resolveOptions(q) {
     const floor = q.ratingMin ?? 0;
     const rungs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
@@ -479,7 +483,8 @@ const UNIT_SUBTYPE_QUESTION: AdvancedQuestion = {
   id: 'unit_subtype',
   titleKey: 'What kind of unit?',
   selection: 'multi',
-  eligibility: (q) => cohortAllows(q, 'unit_subtype') && !(q.unitSubtypes?.length),
+  // Short stays never ASK it (owner 2026-10-31, no property-type question); a typed «استديو» may still use it.
+  eligibility: (q) => cohortAllows(q, 'unit_subtype') && !isShortStaysScope(q) && !(q.unitSubtypes?.length),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
       { key: 'استديو',      labelKey: 'Studio unit',        count: (c) => c.cnt_sub_studio },

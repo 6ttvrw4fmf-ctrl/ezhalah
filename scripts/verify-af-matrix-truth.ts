@@ -99,6 +99,9 @@ for (const cell of cells) {
 }
 for (const type of ALL_CLEAN_TYPES.filter((t) => !COHORT_QUESTIONS[t])) {
   for (const cell of cells.filter((c) => c.scope.kind === 'type' && c.scope.label === type)) {
+    // Short stays (owner 2026-10-31) is ONE pool: a residential type with no cohort of its own (Chalet, Camp…)
+    // still gets the pool's asked set in the plain monthly mode — §1 above already holds it to tableAllows().
+    if (cell.mode.mode === 'RentMonthly' && CLEAN_MACRO[type] === 'Residential') continue;
     assert(cell.fields.length === 0, `${type} has no cohort and must offer NOTHING in ${cell.mode.mode}`);
   }
 }
