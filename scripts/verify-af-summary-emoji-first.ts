@@ -58,4 +58,15 @@ for (const locale of ['ar', 'en'] as const) {
 }
 assert.ok(checked >= 30, `expected to check many items, checked ${checked}`);
 
+// MUTATION PROOF — the predicate this barrier applies to every real item must FAIL on the old shape.
+// `mustCatch(label, caught)`: `caught` is true only when the predicate rejects the broken input.
+function mustCatch(label: string, caught: boolean): void {
+  assert.ok(caught, `mutation NOT caught: ${label}`);
+  console.log(`  (mutation) catches ${label}`);
+}
+const brokenItems = ['يقبل التقسيط 💳', 'عمر جديد ✨', 'شمال 🧭', '+٣ حمامات 🚿', 'تخطى عمر العقار ⏭️', 'Age Up to 2 years 🏗️'];
+mustCatch('an emoji-last pill of the old shape (every one of the six)', brokenItems.every((it) => !emojiFirst(it)));
+mustCatch('a receipt item with no emoji at all', !emojiFirst('تخطى عمر العقار'));
+mustCatch('an item whose emoji is glued to the word with no space', !emojiFirst('🛗مصعد'));
+
 console.log(`verify-af-summary-emoji-first: OK — ${checked} items, every one starts with its emoji`);
