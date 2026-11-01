@@ -57,7 +57,7 @@
 //     scripts/verify-frontend-bundle-matches-source-live.ts
 
 import { join } from 'node:path';
-import { certifiedAmenityKeys } from '../src/lib/afCohorts.ts';
+import { certifiedAmenityKeys, COHORT_CARDS } from '../src/lib/afCohorts.ts';
 import type { SearchQuery } from '../src/data/search.ts';
 import { liftSymbols } from './lib/liftSymbols.ts';
 
@@ -260,6 +260,14 @@ const lifted = await liftSymbols(
 const groups: LiteralGroup[] = [
   { name: 'RESIDENTIAL_AMENITY_BASE', tokens: lifted.RESIDENTIAL_AMENITY_BASE as string[] },
   { name: 'VILLA_ONLY_AMENITIES', tokens: lifted.VILLA_ONLY_AMENITIES as string[] },
+  // Since 2026-11-01 (acd24b7e) Apartment's chips come from these themed card lists, not from the base array, so
+  // every token read as «an undeployed runtime push» and this check was red over a current bundle. Each card ships
+  // as a literal run, so a card changed in main and not deployed still goes red here.
+  ...Object.entries(COHORT_CARDS).flatMap(([type, deals]) =>
+    Object.entries(deals ?? {}).flatMap(([deal, cards]) =>
+      Object.entries(cards ?? {})
+        .filter(([, tokens]) => (tokens as readonly string[]).length >= 2)
+        .map(([card, tokens]) => ({ name: `COHORT_CARDS.${type}.${deal}.${card}`, tokens: tokens as readonly string[] })))),
 ];
 
 const html = await fetchText(`${PROD}/`, 'production HTML');
