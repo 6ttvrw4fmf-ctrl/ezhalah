@@ -215,7 +215,7 @@ check('the retired «اختياراتك» / «تخطيت» label keys are gone',
   // the middle — where it happened. Without these the card could satisfy §5 by dropping the skips.
   const roundLog = buildAfRoundLog(d.askedIds, d.facets);
   check('the ROUND LOG replays all three steps, skip in the middle, in ask order',
-    roundLog === '+٣ حمامات 🚿، تخطى الفرش ⏭️، وعمر ٣-٥ سنوات 🏗️', `log="${roundLog}"`);
+    roundLog === '🚿 +٣ حمامات، ⏭️ تخطى الفرش، و🏗️ عمر ٣-٥ سنوات', `log="${roundLog}"`);
   check('the log names the skipped QUESTION, never the value the user declined',
     roundLog.includes('تخطى الفرش') && !roundLog.includes('مفروشة') && !roundLog.includes('🛋️'), roundLog);
   check('a round that skipped everything produces an EMPTY summary (⇒ no receipt renders)',
