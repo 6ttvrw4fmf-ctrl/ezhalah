@@ -78,7 +78,7 @@ type Steps = typeof buildAfBeatSteps;
 // What a beat builder must do — judged on ANY copy of it, so a mutant of the real source is held to the same list.
 const beatProblems = (fn: Steps): string[] => {
   const out: string[] = [];
-  if (JSON.stringify(fn([age, lift])) !== JSON.stringify([{ label: 'عمر جديد ✨', pool: 1425 }, { label: 'مصعد 🛗، وتكييف ❄️', pool: 830 }]))
+  if (JSON.stringify(fn([age, lift])) !== JSON.stringify([{ label: '✨ عمر جديد', pool: 1425 }, { label: '🛗 مصعد، و❄️ تكييف', pool: 830 }]))
     out.push('not one beat per answered question with the set size it was checked against');
   if (fn([lift]).length !== 1) out.push('a multi-select answer (elevator + A/C) is more than one beat');
   if (!fn([F('property_age', ['new'], ['جديد']), F('property_age', ['old'], ['قديم'], 0)]).every((x) => x.pool === null))
