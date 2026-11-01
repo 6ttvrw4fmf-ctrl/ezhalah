@@ -1419,6 +1419,23 @@ enumeration intake): a number that jumps by 3x needs its own line in the end row
   bigger `--limit` cannot raise it; only more runs can. `gh-dealapp-liveness` went 2-hourly → hourly on 10-31
   (migration 20261031110841) when active rows reached 49,052 at 73.0% in SLA.
 
+## Lessons from 2026-11-01 (♻️)
+- **A sweep that reads one page at a time inherits the source's latency.** aqar's pages went from <0.3 s to ~1.4 s on
+  10-31 (same route, same fingerprints, same shard size; job logs 2.8 reads/s → 0.6–0.8/s), so every residential shard
+  needed ~4 h and was SIGINT-killed at the 120-min cap (9/16 on 10-31, 16/16 on 11-01), leaving half of each shard
+  unread. When shard time doubles with no code change, read the `(N/s)` progress lines before suspecting a merge.
+  The fix is overlap, not more load: `scrapers/aqar/liveness.py::prefetch_pages` reads each 200-row chunk on
+  `AQAR_LIVENESS_READ_WORKERS` threads while `http._throttle` keeps request STARTS 0.3 s apart per host (PR #9794;
+  branch shard 11-01: 514 reads in 2 m 50 s, 3.0/s).
+- **A flag nobody passes is a fix that never ran.** gathern's `--proxy-fallback` (#8508, 10-24) re-reads no-verdict units
+  through the proxy, alive-only, but `gathern-liveness.yml` never passed it, so GTH246249 read «transient» 36 times in
+  three days while shown. When you build an opt-in flag, wire it into the scheduled command in the same PR and pin it
+  with a test that reads the workflow (PR #9794).
+- **«Served with no check > 26 h» on gathern is mostly units mid-strike, not skipped units.** On 11-01, 48 of 62 were
+  read alive ~28 h earlier and took their first 404 at 06:42; strikes 2 and 3 fall due in the KSA evening, when gathern
+  answers our runners 404 on every control (canary-quarantined 15:37 → 03:08, 10-30 and 10-31). Group that count by
+  `missing_count` and the last reading's verdict before calling it a coverage hole.
+
 ## 💰 RENT PRICE RULES EVERY ENGINEER MUST KNOW (owner, 2026-10-25/26 — permanent; canonical text in `docs/ARCHITECTURE.md` §20)
 
 1. **«إقامات قصيرة» (the old «شهري» pool) = Gathern + Aqar Monthly ONLY.** Every other site's rent listing
