@@ -178,7 +178,7 @@ export function AdvancedIntroCard({ total, onBegin, onClose, pills }: {
 // static require() calls, which is also why the mapping must live here and not in question config.
 const BRAND_IMAGES: Record<string, ReturnType<typeof require>> = {
   // 5 instalment partners in one strip (owner 2026-11-01): EJARI · رايز · tamam · tabby · tamara.
-  // The PNG carries its own light background so the black wordmarks stay readable in dark mode.
+  // Five equal white chips on a transparent PNG, so the black wordmarks stay readable in dark mode.
   'rnpl-partners': require('../../assets/images/rnpl-partners.png'),
 };
 
@@ -615,13 +615,10 @@ const s = StyleSheet.create({
   unknownNote: { fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, opacity: 0.85, paddingHorizontal: 2, paddingTop: 3 },
 
   // Shared brand-image slot — one fixed position (under the subtitle, above the options) and one
-  // style for ANY question that names a brandImage token. The PNG carries its own branding; the
-  // strip is a neutral token-only frame.
-  brandStrip: {
-    marginTop: 10, alignItems: 'center', justifyContent: 'center', paddingVertical: 8,
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field,
-  },
-  brandImg: { width: 300, maxWidth: '100%', height: 47 },
+  // style for ANY question that names a brandImage token. The PNG carries its own chips, so the
+  // strip adds no second frame around them (owner 2026-11-01).
+  brandStrip: { marginTop: 10, alignItems: 'center', justifyContent: 'center' },
+  brandImg: { width: '100%', aspectRatio: 1008 / 120 },
 
   // Options: soft rounded stand-alone rows with breathing room (no dense bordered table) — the
   // Claude-question feel. Selection fills the row with the brand tint + primary border.
