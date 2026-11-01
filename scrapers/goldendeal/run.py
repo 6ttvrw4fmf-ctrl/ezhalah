@@ -39,6 +39,13 @@ THE TRAPS, EACH MEASURED:
    the API keeps serving such items (goldendeal: 1 sold + 1 unavailable; yameen: 12 rented + 2
    unavailable of 27). SKIPPED, tallied as status_<value>, and the liveness oracle reads them as GONE
    so a row the crawl refuses cannot be self-healed back to life.
+   WITHDRAWN IN PLACE (measured 2026-09-28): the office can also take an item off its site while
+   leaving it «available» — published_on_website 0. The list API drops it (every one of 276
+   goldendeal / 130 maqam / 29 yameen listed items is published_on_website 1) but the detail API
+   still serves it: GDL52019 / GDL52111 / GDL53568 (unpublished 2026-09-26) miss every crawl, and at
+   the third miss the oracle read «available» and self-healed them (missing_count → 0) — forever.
+   _withdrawn() is the ONE predicate the crawl and the oracle share: not available, or not
+   published → gone.
 2. FOUR RENT FIELDS FOR ONE UNIT. A rent item may publish monthly AND quarterly AND semi-annual AND
    annual figures at once (yameen 43065: 2,500 / 7,500 / 15,000 / 30,000). PERIOD = SOURCE: when the
    source publishes an ANNUAL figure that figure is stored verbatim as annual; monthly-only is
@@ -142,6 +149,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
+from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
 
 
@@ -178,7 +186,7 @@ TYPE_AR = {
 }
 # Exact overrides for the tokens normalize.TYPE_MAP_EN lacks (map_type_en is exact-match, no
 # substring pass). Every value is an existing canonical type. The shared map already folds the
-# site's other tokens (mansion → Villa, resort → Hotel, townhouse → Villa); a token neither map
+# site's other tokens (mansion → Villa, resort → Hotel, townhouse → «تاون هاوس»); a token neither map
 # knows («palace») is skipped as type_unmapped, never forced.
 TYPE_OVERRIDES_EN = {"building_studio": "Studio", "kiosk": "Kiosk", "workshop": "Workshop",
                      "istraha": "Rest House", "villa_floor": "Floor"}
@@ -252,6 +260,15 @@ def fetch_all(s: cc.Session, tenant: Tenant, limit: int = 0) -> tuple[list[dict]
             return items[:limit], total
         time.sleep(PAGE_PAUSE)
     return items, total
+
+
+def _withdrawn(L: dict) -> str:
+    """The office's own reason an item is not on offer (trap 1), '' when it is: a status other than
+    available, or taken off the website while still «available» (published_on_website 0)."""
+    status = (L.get("availability_status") or "").strip().lower()
+    if status != "available":
+        return f"status_{status or 'blank'}"
+    return "unpublished" if str(L.get("published_on_website")).strip() == "0" else ""
 
 
 # ── FIELD HELPERS ───────────────────────────────────────────────────────────────────────────────
@@ -377,6 +394,26 @@ def _title(L: dict, tok: str, transaction_type: str) -> Optional[str]:
 
 
 # ── MAPPING ─────────────────────────────────────────────────────────────────────────────────────
+_HOP_SESSION: Optional[cc.Session] = None
+
+
+def _short_link_pin(L: dict) -> dict:
+    """Owner 2026-10-20: the API's latitude/longitude are null on most ads while the description links
+    the pin as «maps.app.goo.gl/…» (5/5 sampled pin-less ads). Followed through page_pin's hop (the
+    headless-Chromium leg runs where the workflow installed it — PIN_BROWSER_HOP); {} when absent."""
+    global _HOP_SESSION
+    text = json.dumps(L, ensure_ascii=False)                       # json.dumps never escapes "/"
+    pin = pin_from_html(text)          # owner 2026-10-20 night: a plain «maps.google.com/?q=LAT,LNG» link too
+    if pin:
+        return pin
+    short = short_maps_link(text)
+    if not short:
+        return {}
+    if _HOP_SESSION is None:
+        _HOP_SESSION = cc.Session()
+    return pin_from_short_link(short, lambda u: resolve_redirect(_HOP_SESSION, u))
+
+
 def map_listing(L: dict, tenant: Tenant = TENANT, *,
                 this_year: Optional[int] = None) -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason). row is None exactly when skip_reason is set."""
@@ -385,8 +422,9 @@ def map_listing(L: dict, tenant: Tenant = TENANT, *,
     if not isinstance(pid, int) or pid <= 0:
         return None, "residential", "missing_id"
     status = (L.get("availability_status") or "").strip().lower()
-    if status != "available":
-        return None, "residential", f"status_{status or 'blank'}"      # trap 1
+    withdrawn = _withdrawn(L)
+    if withdrawn:
+        return None, "residential", withdrawn                           # trap 1
 
     tok = (L.get("type") or "").strip().lower()
     src_category = (L.get("category") or "").strip().lower()
@@ -470,6 +508,7 @@ def map_listing(L: dict, tenant: Tenant = TENANT, *,
         "additional_info": redact_capture({k: v for k, v in {
             "latitude": _float(L.get("latitude")),
             "longitude": _float(L.get("longitude")),
+            **({} if _float(L.get("latitude")) is not None else _short_link_pin(L)),
             "ref": (L.get("unit_number") or None),
             "type_token": tok,
             "type_ar": TYPE_AR.get(tok),
@@ -553,8 +592,7 @@ def _signal_for(pid: int):
                 return None
             if data.get("id") != pid:
                 return None
-            live = (data.get("availability_status") or "").strip().lower() == "available"
-            return "live" if live else "gone"
+            return "gone" if _withdrawn(data) else "live"
         return None
     return _signal
 
@@ -582,17 +620,104 @@ def make_canary(tenant: Tenant, control_pid: Optional[int],
     return canary
 
 
+def _web_status(tenant: Tenant, pid: int, session_factory: Callable[[], Any]) -> Optional[int]:
+    """HTTP status of the listing's OWN page (the card's link), None when it could not be read or
+    the request landed on a different path."""
+    url = f"{tenant.base}/properties/{pid}"
+    try:
+        r = session_factory().get(url, timeout=30, allow_redirects=True)
+    except Exception:  # noqa: BLE001 — unreadable is no opinion
+        return None
+    return r.status_code if str(getattr(r, "url", url)).rstrip("/") == url else None
+
+
 def verify_gone_for(tenant: Tenant, canary: Callable[[], tuple[bool, str]],
-                    session_factory: Callable[[], Any] = session):
+                    session_factory: Callable[[], Any] = session, web_control: Optional[int] = None):
+    """The API record's verdict, then — for a record the API still calls live — the listing's OWN
+    page (2026-10-27, backlog 923). yameen 45194/45197/45960/52439: the office edited them 10-25,
+    the list feed dropped them and www.yameen.sa/properties/<id> answers HTTP 404, while the detail
+    API still says available / published_on_website 1 — so the oracle read «live», reset their
+    missing_count every night and a customer tapping the card landed on a 404. A 404 on the own
+    page counts only while `web_control` (an id THIS run mapped) answers 200 on its own page; any
+    other answer keeps the API's verdict. The kill still waits for prune_unseen's full grace."""
+    web_ok: dict[str, bool] = {}
+
+    def _web_control_ok() -> bool:
+        if "v" not in web_ok:
+            web_ok["v"] = bool(web_control) and _web_status(tenant, int(web_control), session_factory) == 200
+        return web_ok["v"]
+
     def _verify(ad_number: str) -> tuple[str, str]:
         pid = ad_number[len(tenant.prefix):]
         if not ad_number.startswith(tenant.prefix) or not pid.isdigit():
             return "unknown", f"{ad_number!r} is not a {tenant.prefix}<id> ad number"
-        return LivenessProbe(platform=tenant.platform, signal=_signal_for(int(pid)),
-                             session=session_factory,
-                             url_for=lambda _ad: api_url(tenant, int(pid)),
-                             canary=canary).verify_gone(ad_number)
+        verdict, why = LivenessProbe(platform=tenant.platform, signal=_signal_for(int(pid)),
+                                     session=session_factory,
+                                     url_for=lambda _ad: api_url(tenant, int(pid)),
+                                     canary=canary).verify_gone(ad_number)
+        if verdict == "live" and web_control and _web_control_ok() \
+                and _web_status(tenant, int(pid), session_factory) == 404:
+            return "gone", f"API says live but the listing's own page answers HTTP 404 ({why})"
+        return verdict, why
     return _verify
+
+
+_RETIRED = {"status_sold", "status_rented", "status_unavailable"}
+
+
+def read_unseen_after_refused_prune(table: str, rows: list, tenant: Tenant, verify) -> int:
+    """The absence prune was refused (collapse/coverage guard): read the unseen rows' own records
+    and pages through `verify` so a row that is gone takes its strike anyway (db.strike_read_gone:
+    full grace, the collapse cap respected, never raised). 2026-10-27: yameen's 4 dropped lands were
+    never struck because the refused prune threw the reading away every night."""
+    try:
+        return db.strike_read_gone(table, {r["ad_number"] for r in rows}, tenant.source, verify_gone=verify)
+    except Exception as e:  # noqa: BLE001 — a failed reading is UNKNOWN; the refused prune stands
+        print(f"  {table}: reading after a refused prune failed ({type(e).__name__}: {e})", flush=True)
+        return 0
+
+
+def strike_feed_retired(table: str, rows: list, items: list, tenant: Tenant, verify) -> int:
+    """Remove the stored ads THIS run's own feed marked sold / rented / unavailable (trap 1), before
+    the absence prune runs (2026-10-27, backlog 923). yameen: 4 of 10 active rows turned «rented» in
+    the feed, the crawl skipped them, prune_unseen's collapse guard read «re-saw 6 of 10», refused the
+    prune and demoted every run for three days (P0 silent_scraper_death) while the four stayed on
+    screen. Owner 2026-10-20 «once we see it, remove it» (aldarim): an ad the feed retired AND whose
+    own API record reads gone through the canaried oracle is struck at grace 1. Any other unseen ad
+    answers unknown here and is left to the ordinary prune; the collapse cap is never raised."""
+    retired = {f"{tenant.prefix}{L.get('id')}" for L in items if _withdrawn(L) in _RETIRED}
+    if not retired:
+        return 0
+
+    def only_feed_retired(ad_number: str):
+        if ad_number not in retired:
+            return "unknown", "not marked retired by this run's feed"
+        return verify(ad_number)
+    try:
+        return db.strike_read_gone(table, {r["ad_number"] for r in rows}, tenant.source,
+                                   verify_gone=only_feed_retired, grace=1)
+    except Exception as e:  # noqa: BLE001 — a failed reading is UNKNOWN; the prune guard still stands
+        print(f"  {table}: feed-retired strike failed ({type(e).__name__}: {e})", flush=True)
+        return 0
+
+
+def make_verify_gone(tenant: Tenant, session_factory: Optional[Callable[[], Any]] = None):
+    """The one-argument oracle the daily direct check calls (fleet_liveness.SITES `_make_verify_gone()`):
+    the crawl's own verify_gone_for + make_canary, with the caller's control row as the canary. The
+    crawl builds the same pair inside its run, so this tenant's ads went unread by the daily check
+    (0 of 293 goldendeal, 42 maqam, 10 yameen checked in time on 2026-10-08)."""
+    sf = session_factory or (lambda: session(tenant))     # the tenant's own Origin/Referer
+
+    def factory(control: Optional[dict] = None):
+        ad = str((control or {}).get("ad_number") or "")
+        pid = ad[len(tenant.prefix):]
+        pid_ok = ad.startswith(tenant.prefix) and pid.isdigit()
+        return verify_gone_for(tenant, make_canary(tenant, int(pid) if pid_ok else None, sf), sf,
+                               web_control=int(pid) if pid_ok else None)
+    return factory
+
+
+_make_verify_gone = make_verify_gone(TENANT)
 
 
 def print_dry(source: str, res: list[dict], com: list[dict]) -> None:
@@ -645,10 +770,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         degraded = False
         if args.type == "all" and complete:
             control = next((int(r["ad_number"][len(PREFIX):]) for r in res + com), None)
-            verify = verify_gone_for(TENANT, make_canary(TENANT, control))
+            verify = verify_gone_for(TENANT, make_canary(TENANT, control), web_control=control)
             for table, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                strike_feed_retired(table, rows, items, TENANT, verify)
                 pruned = db.prune_unseen(table, {r["ad_number"] for r in rows}, SOURCE,
                                          verify_gone=verify)
+                if pruned < 0:
+                    read_unseen_after_refused_prune(table, rows, TENANT, verify)
                 degraded = degraded or pruned < 0
                 print(f"  {table}: pruned {pruned}")
         healthy = db.end_run(run_id, ok=True, rows_seen=len(items),

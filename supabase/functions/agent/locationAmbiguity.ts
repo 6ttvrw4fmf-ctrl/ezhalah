@@ -1,3 +1,4 @@
+import { nearQuestionAr, nearQuestionEn, geoQuestionAr, geoQuestionEn, regionQuestionText, variantText, listCities, PIN, HOUSE } from "./questionExamples.ts";
 // ─────────────────────────────────────────────────────────────────────────────
 // locationAmbiguity — the three LOST cases restored (round-2 fix, "LOST LOCATION-AMBIGUITY CASES").
 //
@@ -32,9 +33,9 @@ const WANTS_WHOLE_RE = /كامل|كاملة|بالكامل|كلها|كل\s*(?:ا
  * @param nm the region's canonical Arabic name (loc_classify's `name`, kind === 'region')
  * @param text this turn's raw user message
  */
-export function plainRegionQuestion(nm: string, text: string): string | null {
+export function plainRegionQuestion(nm: string, text: string, avoid = "", en = false): string | null {
   if (WANTS_WHOLE_RE.test(text)) return null;
-  return `تقصد ${nm} كاملة، أو مدينة معيّنة؟`;
+  return regionQuestionText(nm, text, avoid, en);
 }
 
 // A generic "near <phrase>" construct — Arabic + English. Deliberately NOT the deleted client's full
@@ -61,9 +62,81 @@ const GEOGRAPHY_CUE_RE = /بحر|شاطئ|ساحل|كورنيش|واجهة\s*ب�
  *
  * @param text this turn's raw user message (location has already been resolved to "" by the caller)
  */
-export function emptyLocationQuestion(text: string): string | null {
+export function emptyLocationQuestion(text: string, avoid = "", en = false): string | null {
   const near = text.match(NEAR_PHRASE_RE);
-  if (near) return `في أي مدينة تبحث عن عقار ${near[1].trim()}؟`;
-  if (GEOGRAPHY_CUE_RE.test(text)) return "تقصد في أي مدينة أو منطقة؟";
+  if (near) return en ? nearQuestionEn(near[1].trim(), text, avoid) : nearQuestionAr(near[1].trim(), text, avoid);
+  if (GEOGRAPHY_CUE_RE.test(text)) return en ? geoQuestionEn(text, avoid) : geoQuestionAr(text, avoid);
   return null;
+}
+
+// ── RULEBOOK DRAFT 2 (owner 2026-10-13: «I want those new instructions to be live»). Three things the live agent did wrong, each
+// found by typing the message into production: it searched two cities at once, mixed residential with commercial, and said
+// «أدور لك شقق قريبة من جامعة الملك سعود» although nothing measures distance yet (the search covers the whole city).
+
+const orList = (names: readonly string[], en: boolean): string =>
+  names.length > 1 ? `${names.slice(0, -1).join(en ? ", " : "، ")}${en ? " or " : " ولا "}${names[names.length - 1]}` : (names[0] ?? "");
+
+// ONE CITY PER SEARCH. `cities` = the cities the user named, most listings first.
+export const SEVERAL_CITIES_AR: readonly string[] = [
+  "البحث يكون في مدينة وحدة كل مرة. نبدأ في {l}؟", "أدور لك في مدينة وحدة بكل بحث، تبي {l}؟", "كل بحث يكون لمدينة وحدة، أي وحدة نبدأ فيها: {l}؟",
+];
+export const SEVERAL_CITIES_EN: readonly string[] = [
+  "I search one city at a time. Should we start with {l}?", "Each search covers one city. Which first, {l}?", "One city per search. Do you want {l}?",
+];
+export function severalCitiesQuestion(cities: readonly string[], seed: string, avoid = "", en = false): string {
+  const names = en ? cities.map((c) => listCities([c], true)) : cities;
+  return `${variantText(en ? SEVERAL_CITIES_EN : SEVERAL_CITIES_AR, seed, avoid, { l: orList(names, en) })} ${PIN}`;
+}
+
+// RESIDENTIAL AND COMMERCIAL ARE NEVER ONE SEARCH (the Filter can't mix them either). «شقة أو محل» used to search every type in the
+// city (villas, land, all of it). A word inside a «near …» phrase («شقة قريبة من محلات») is a place, not a wish, so it doesn't count.
+// «دور» is left out on purpose: it is also the verb «دوّر» (search).
+const B = "(?<![\\p{L}])[وبل]?(?:ال)?";
+const E = "(?![\\p{L}])";
+const RES_WORD = new RegExp(`${B}(شقة|شقه|شقق|فيلا|فيلة|فله|فلل|بيت|بيوت|منزل|دوبلكس|دبلكس|استديو|ستوديو)${E}|\\b(apartments?|flats?|villas?|houses?|duplex(?:es)?|studios?)\\b`, "iu");
+const COM_WORD = new RegExp(`${B}(محل|محلات|معرض|معارض|مكتب|مكاتب|مستودع|مستودعات|ورشة|ورش|فندق|مجمع\\s*تجاري|عمارة\\s*تجارية|مبنى\\s*تجاري)${E}|\\b(shops?|stores?|offices?|warehouses?|showrooms?|workshops?|hotels?)\\b`, "iu");
+const NEAR_ANY = new RegExp(NEAR_PHRASE_RE.source, "giu");
+export const RES_COM_AR: readonly string[] = [
+  "السكني والتجاري كل واحد ببحث لحاله. تبي {r} ولا {c}؟", "نبحث سكني أو تجاري في كل مرة، أي واحد أول: {r} ولا {c}؟", "ما نخلط السكني مع التجاري في بحث واحد. تبي {r} أول ولا {c}؟",
+];
+export const RES_COM_EN: readonly string[] = [
+  "Residential and commercial are searched separately. Do you want the {r} or the {c} first?", "Each search is either residential or commercial. Which first, {r} or {c}?",
+  "I can't mix residential and commercial in one search. Start with the {r} or the {c}?",
+];
+export function residentialCommercialQuestion(text: string, avoid = "", en = false): string | null {
+  const t = String(text ?? "").replace(NEAR_ANY, " ");
+  const r = RES_WORD.exec(t), c = COM_WORD.exec(t);
+  if (!r || !c) return null;
+  const word = (m: RegExpExecArray) => (m[1] ?? m[2] ?? "").trim().toLowerCase();
+  return `${variantText(en ? RES_COM_EN : RES_COM_AR, text, avoid, { r: word(r), c: word(c) })} ${HOUSE}`;
+}
+
+// NEAR A LANDMARK / WITHIN A DISTANCE: not measured yet («maps later», owner 2026-10-09), the search covers the whole city, so the
+// reply says exactly that instead of promising «قريبة من …». Only for a whole-city search (a district search is already narrower).
+const DISTANCE_RE = /(?:تبعد|يبعد|على\s*بعد|مسافة)\s*[\d٠-٩]|[\d٠-٩]+\s*(?:كيلو|كم|km|دقايق|دقائق|دقيقة|minutes?|mins?)\s*(?:عن|من|from|to|away)(?![\p{L}])|[\d٠-٩]+\s*(?:متر|م)\s*(?:عن|from|away)(?![\p{L}])|\bwithin\s+[\d.]+\s*(?:km|kilomet\w*|met\w*|miles?|minutes?)|\bwalking\s+distance\b/iu;
+export const NOT_MEASURED_AR: readonly string[] = [
+  "ما نقدر نقيس القرب من المعالم حالياً، فأدور لك في {c} كلها", "تحديد المسافة عن المعالم ما هو متوفر للحين، أدور لك في {c} كاملة", "للحين ما نحدد القرب بالمسافة، أعرض لك {c} كلها",
+];
+export const NOT_MEASURED_EN: readonly string[] = [
+  "We can't measure distance to landmarks yet, so I'm searching all of {c}", "Distance to a landmark isn't available yet, here is the whole of {c}", "We don't filter by distance yet, so I'm showing all of {c}",
+];
+export function proximityNotMeasuredText(text: string, city: string, en = false, avoid = ""): string | null {
+  const c = String(city ?? "").trim();
+  if (!c || /[،,]/.test(c) || !(NEAR_PHRASE_RE.test(text) || DISTANCE_RE.test(text))) return null;
+  return `${variantText(en ? NOT_MEASURED_EN : NOT_MEASURED_AR, text, avoid, { c: en ? listCities([c], true) : c })} ${HOUSE}`;
+}
+
+/** The message names a property kind of its own («شقة», «محل», "villa"). */
+export const namesAProperty = (text: string): boolean => RES_WORD.test(String(text ?? "")) || COM_WORD.test(String(text ?? ""));
+
+// A COMPLETE NEW REQUEST — a property word AND the place, with no «خلها / ضيف / شيل / بدل…» change word — starts a fresh search: nothing
+// from the previous one rides along (live 2026-10-13, the owner watching: «فيلا للبيع في جدة فيها مسبح» kept «٤ غرف» from a Riyadh
+// apartment search and found nothing). A piece («٣ غرف», «بس بالملقا», «خلها شقق») still changes the current search.
+const CHANGE_WORD = new RegExp(`(?<![\\p{L}])(?:خلها|خليها|خله|خلّها|ضيف|زيد|شيل|احذف|نفس|بدل|بدال|غير|غيرها|غيّرها|عدل|عدّل)${E}|\\b(?:make it|change|instead|same)\\b`, "iu");
+const fold = (s: string) => String(s ?? "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").toLowerCase();
+export function isFreshRequest(text: string, city: string): boolean {
+  const c = String(city ?? "").trim();
+  if (!c || /[،,]/.test(c) || CHANGE_WORD.test(String(text ?? "")) || !namesAProperty(text)) return false;
+  const t = fold(text);
+  return t.includes(fold(c).replace(/^ال/, "")) || t.includes(fold(listCities([c], true)));
 }

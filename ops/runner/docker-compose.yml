@@ -1,0 +1,27 @@
+# N identical ephemeral runners. Scale with RUNNERS in .env (setup.sh writes it; default 12 on an AX102).
+# NO docker.sock mount — a job must never be able to reach the host's Docker (that would be root on the server).
+services:
+  runner:
+    image: ezhalah-runner:local
+    build:
+      context: .
+      args:
+        BASE: ${BASE_IMAGE}
+    restart: always
+    deploy:
+      replicas: ${RUNNERS:-12}
+      resources:
+        limits:
+          cpus: "${CPUS_PER_RUNNER:-2.5}"
+          memory: ${MEM_PER_RUNNER:-9g}
+    environment:
+      REPO_URL: https://github.com/6ttvrw4fmf-ctrl/ezhalah
+      RUNNER_SCOPE: repo
+      ACCESS_TOKEN: ${GH_RUNNER_PAT}
+      LABELS: ezhalah-own
+      EPHEMERAL: "true"
+      DISABLE_AUTO_UPDATE: "true"
+      RUNNER_NAME_PREFIX: ezhalah-own
+      RANDOM_RUNNER_SUFFIX: "true"
+    tmpfs:
+      - /tmp:size=4g

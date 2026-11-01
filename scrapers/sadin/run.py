@@ -49,7 +49,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize  # noqa: E402
-from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
+from scrapers.common.http import TRANSIENT_STATUSES, retry_smarter_session  # noqa: E402
 
 BASE = "https://www.sadin.com.sa"
 # 2026-07 site redesign ("v4", found live 2026-07-30 after 4 days of 0-card runs): /properties/all
@@ -137,12 +137,15 @@ def _throttle() -> None:
     _last = time.monotonic()
 
 
+_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
+}
+
+
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
-    s.headers.update({
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
-    })
+    s.headers.update(_HEADERS)
     return s
 
 
@@ -765,7 +768,10 @@ def main() -> int:
                     help="small validation run: upsert only the first N parsed listings, NO prune")
     args = ap.parse_args()
 
-    s = session()
+    # Retry smarter (2026-09-27): 3 browser profiles direct, then through the proxy, so a failure
+    # is recorded as "every route tried" rather than "chrome124 once".
+    s, tried = retry_smarter_session(LIST_ALL, headers=_HEADERS)
+    print(f"Sadin: probe {' '.join(tried)}", flush=True)
     cards, sale_ids, rent_ids = fetch_catalog(s)
     ids = list(cards.keys())
     if args.limit:
@@ -838,7 +844,7 @@ def main() -> int:
             print(f"  list-fetch failures: {fail_summary}", flush=True)
         notes = f"pruned={pruned}"
         if fail_summary:
-            notes += f" | list-fetch failures: {fail_summary}"
+            notes += f" | list-fetch failures: {fail_summary} | probe {' '.join(tried)}"
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=notes[:300], check_tables=["sadin_residential_listings", "sadin_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)

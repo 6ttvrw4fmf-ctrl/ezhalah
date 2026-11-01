@@ -28,7 +28,7 @@ SOURCE SHAPE (measured live 2026-09-24, before any code)
   the price-card text so a period word the site adds later is honoured on the source's own word.
 · PII: the detail page shows the marketer's personal name and avatar (`rv-agent-mini`); that block
   is never read. The description is passed through pii.redact_pii.
-· TYPES: «دور أرضي»/«دور علوي» → Floor (the bare «دور» is Floor); «تاون هاوس» → Villa and
+· TYPES: «دور أرضي»/«دور علوي» → Floor (the bare «دور» is Floor); «تاون هاوس» keeps its own name (owner 2026-10-12) and
   «بينتهاوس» → Apartment follow the fleet's own folds (rawasidark / rakez / dealapp).
 · PRICE = SOURCE: J1516 is a «دور أرضي» for sale at 900 — stored as 900 (a 1-riyal ad stays 1).
 
@@ -60,6 +60,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 
@@ -71,7 +72,7 @@ PAUSE = 0.5   # seconds between detail fetches — a small office, be polite
 
 _TYPE_OVERRIDES = {
     "دور أرضي": "Floor", "دور علوي": "Floor",
-    "تاون هاوس": "Villa",        # fleet fold: TYPE_MAP_EN 'Townhouse' → 'Villa' (rawasidark)
+    "تاون هاوس": "تاون هاوس",        # fleet fold: TYPE_MAP_EN 'Townhouse' → 'Villa' (rawasidark)
     "بينتهاوس": "Apartment",     # a penthouse is sold as an apartment (rakez, dealapp)
 }
 _AVAILABLE = "متاح"
@@ -88,6 +89,17 @@ _JNUM_RE = re.compile(r"\bJ\d{3,6}\b")
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome")   # impersonate OWNS the User-Agent — never set one here
     s.headers.update({"Accept-Language": "ar,en;q=0.7"})
+    return s
+
+
+def walk_session() -> cc.Session:
+    # 2026-10-05 (Scraping Engineer): one pinned profile, no retry — a single refused handshake or
+    # stalled connect failed the whole night (10-05 04:32 curl 28 connect timeout, ok 10-04 with 82
+    # rows). Probe 3 profiles DIRECT, then the residential proxy (`proxy: true` → WASALT_PROXY_URL,
+    # spent only when DIRECT is refused), and keep the session that is served. The attempt log is the
+    # step-6 evidence if the site is truly down.
+    s, tried = retry_smarter_session(f"{CATALOGUE}?ajax=1&page=1&per_page=1", headers=dict(session().headers))
+    print(f"{SOURCE}: probe {' '.join(tried)}", flush=True)
     return s
 
 
@@ -322,7 +334,7 @@ def main() -> int:
     ap.add_argument("--no-detail", action="store_true", help="skip the per-unit page (JSON only)")
     args = ap.parse_args()
 
-    s = session()
+    s = walk_session()
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run("justsa")
     res: list[dict] = []

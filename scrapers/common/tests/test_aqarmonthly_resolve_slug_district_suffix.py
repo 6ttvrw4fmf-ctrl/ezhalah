@@ -294,3 +294,92 @@ def test_resolve_leaves_a_genuinely_unknown_location_unknown(monkeypatch):
     monkeypatch.setattr(al, "_REGION_NORM", {})
     r = al.resolve("مدينة لا توجد في الكتالوج")
     assert (r["city_id"], r["region_id"], r["confidence"]) == (None, None, "unresolved")
+
+
+# ── the STREET limb: Aqar's empty «حي» label glues the word "street" into the district ───────────
+# Found live 2026-09-27 while fixing the card's glued `neighborhood` (PR #4995) — a DIFFERENT and
+# older defect, in the same capture. Aqar builds the slug by joining its own address segments with
+# «-», and the FIRST segment is the district-TYPE label «حي» carrying no value whenever the ad names
+# only a street. Address «حي ، شارع ابن هلال الفلالي ، حي الرمال ، الرياض ، منطقة الرياض» becomes
+# slug «حي-شارع-ابن-هلال-الفلالي-حي-الرمال-الرياض-منطقة-الرياض», so a first-match capture reads the
+# STREET and ignores the real district named LATER in the same slug. 34 active rows sat in
+# search_listings_ar — and on the card — as «حي شارع ابن هلال», «حي شارع جبل اجا», or just «حي شارع».
+#
+# Every slug below is a real production slug (anon key, 2026-09-27), with the district the row's own
+# `address` field independently confirms.
+
+
+@pytest.fixture
+def street_catalog(monkeypatch):
+    monkeypatch.setattr(al, "_load", lambda: None)
+    monkeypatch.setattr(al, "_CITY", {
+        "الرياض": [(3, 1)], "النماص": [(2519, 6)], "الخبر": [(31, 5)],
+        "المدينه المنوره": [(14, 3)], "الطائف": [(5, 2)],
+    })
+    monkeypatch.setattr(al, "_CID_AR", {3: "الرياض", 2519: "النماص", 31: "الخبر",
+                                        14: "المدينة المنورة", 5: "الطائف"})
+    monkeypatch.setattr(al, "_REGION_NORM", {"منطقه الرياض": 1})
+    yield
+
+
+STREET_SLUGS = [
+ # (slug, district the row's own `address` names, ad_number, what the card/index used to read)
+ ("حي-شارع-ابن-هلال-الفلالي-حي-الرمال-الرياض-منطقة-الرياض-6148228",
+  "حي الرمال", "AQM6148228", "حي شارع ابن هلال"),
+ ("حي-شارع-جبل-اجا-حي-النسيم-الغربي-الرياض-منطقة-الرياض-5839371",
+  "حي النسيم الغربي", "AQM5839371", "حي شارع جبل اجا"),
+ # THE OVERLAP CASE: the skipped 3-token window ends ON the district's own «حي», so a CONSUMING
+ # match would eat that marker and find nothing after it. This is why the capture is a lookahead.
+ ("حي-شارع-النرجس-حي-الصحافة-الرياض-منطقة-الرياض-5813546",
+  "حي الصحافة", "AQM5813546", "حي شارع النرجس حي"),
+ # An ASCII digit is outside [؀-ۿ], so the street capture is the bare word «شارع» — the district was
+ # literally the word "street". Two «النماص» tokens still collapse to one city strip, not two.
+ ("حي-شارع-79-المطل-حي-المطل-النماص-النماص-5781411",
+  "حي المطل", "AQM5781411", "حي شارع"),
+ # «مدينة» must NOT be treated as a street marker: this district really is «حي مدينة العمال».
+ ("حي-شارع-السادس-عشر-حي-مدينة-العمال-الخبر-الخبر-6288645",
+  "حي مدينة العمال", "AQM6288645", "حي شارع السادس عشر"),
+ # A two-word official city, doubled, after a long street — the city-suffix rules still apply to the
+ # SECOND «حي»'s capture exactly as they did to the first's.
+ ("حي-شارع-خالد-بن-يزيد-بن-حارثة-حي-الدويخلة-المدينة-المنورة-المدينة-المنورة-4236097",
+  "حي الدويخلة", "AQM4236097", "حي شارع خالد بن"),
+]
+
+
+@pytest.mark.parametrize("slug,district,ad,was", STREET_SLUGS)
+def test_a_street_labelled_hay_is_skipped_for_the_real_district(street_catalog, slug, district, ad, was):
+    r = al.resolve_slug(slug)
+    assert r["district_ar"] == district, f"{ad}: used to read «{was}»"
+    assert "شارع" not in (r["district_ar"] or ""), f"{ad}: the word «شارع» is a street, not a district"
+
+
+def test_the_street_skip_never_invents_a_district_when_the_slug_names_none(street_catalog):
+    """AQM5728162 — its only «حي» is the empty label, and no later «حي» exists, so the slug names no
+    district at all. None, not the street: run.py then falls back to its catalog-validated address
+    parse, and failing that the district is honestly NULL (exact-location-only)."""
+    r = al.resolve_slug(
+        "حي-شارع-ابي-الفتوح-الحسن-بن-جعفر-بن-محمد-بن-الحسن-القراحين-الطائف-الطائف-5728162")
+    assert r["district_ar"] is None
+    assert r["city_id"] == 5                       # the city is unaffected by the district skip
+
+
+def test_every_street_marker_is_skipped_not_just_the_one_seen_live(street_catalog):
+    """«شارع» is the shape production produced; «طريق»/«ممر» are the same slug vocabulary and no
+    catalog district starts with any of them (checked against loc_catalog_district, 2026-09-27)."""
+    for marker in ("شارع", "طريق", "ممر"):
+        r = al.resolve_slug(f"حي-{marker}-الملك-فهد-حي-الرمال-الرياض-منطقة-الرياض-1")
+        assert r["district_ar"] == "حي الرمال", marker
+
+
+def test_the_first_hay_still_wins_when_it_names_a_district(street_catalog):
+    """Only a STREET capture is skipped. A slug whose first «حي» is a real district keeps it, even
+    when a later «حي» exists — the fix must not turn this into "last match wins"."""
+    r = al.resolve_slug("حي-المهدية-حي-النرجس-الرياض-منطقة-الرياض-1")
+    # Unchanged from before the fix: the same greedy 3-token capture, taken at the FIRST «حي».
+    assert r["district_ar"] == "حي المهدية حي النرجس"
+
+
+def test_a_district_that_merely_contains_a_street_word_is_untouched(street_catalog):
+    """Anti-overreach: the marker is only ever tested against the capture's FIRST token."""
+    r = al.resolve_slug("حي-النرجس-شارع-الرياض-منطقة-الرياض-1")
+    assert r["district_ar"] == "حي النرجس شارع"

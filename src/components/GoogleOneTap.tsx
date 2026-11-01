@@ -50,6 +50,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { supabase } from '@/lib/supabase';
+import { markJustSignedIn } from '@/lib/loginWelcome';
 import { useApp } from '@/store';
 import { useI18n } from '@/i18n';
 
@@ -61,6 +62,67 @@ const GOOGLE_WEB_CLIENT_ID = '39473044808-06l9dgmb4jsta05h4c5hqdglbsoaqrb5.apps.
 // Keyed to the SAME `hl` value on every load for a given locale, so it's still one cacheable script.
 const gisSrc = (hl: 'ar' | 'en') => `https://accounts.google.com/gsi/client?hl=${hl}`;
 // FedCM resolves well under a second when it works; generous enough not to race a slow network.
+// Backlog 676 (measured on production 2026-10-18, iPhone emulation): the mobile One Tap sheet focuses
+// its own iframe when it renders, which closes the keyboard and swallows every character typed after it
+// — a visitor typing «المرموثة» in the city field kept «ال» (document.activeElement moved to the sheet's
+// IFRAME after the 2nd character and stayed there). So the prompt never STARTS while a text field has
+// focus: it waits for the next focusout and tries again (and keeps waiting if focus only moved to another
+// field). This is not a cancel(): Google never sees a dismissal, so no cooldown starts.
+export function isTextFieldFocused(doc: Pick<Document, 'activeElement'>): boolean {
+  const el = doc.activeElement as (Element & { isContentEditable?: boolean }) | null;
+  if (!el) return false;
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true;
+}
+export function deferWhileTyping(doc: Document, fn: () => void, settleMs = 150): boolean {
+  if (!isTextFieldFocused(doc)) return false;
+  const onOut = () => { doc.removeEventListener('focusout', onOut); setTimeout(fn, settleMs); };
+  doc.addEventListener('focusout', onOut);
+  return true;
+}
+
+// Backlog 739 (676 reopened; measured on production 2026-10-19, 4 of 4 runs, bundle 33ecb9c): when the
+// sheet is ALREADY on screen before the visitor taps the city field (it renders ~1 s after load; the tap
+// came at 3.0–3.6 s), deferWhileTyping cannot help — the prompt had started long before. Google's iframe
+// then takes focus a moment later (its content finishes loading / re-renders), the keyboard closes and
+// every following character is lost: «المرموثة» arrived as «ا» or nothing. Making the iframe `inert`
+// while typing was tried on the live page and did NOT stop it (the frame focuses itself from inside).
+// What works (2 of 2 at 600 ms, 1 of 1 at 900 ms per character, injected into the live page): when a
+// text field loses focus and the new owner is Google's iframe, give the field its focus back on the
+// next tick. The sheet stays on screen and stays clickable; Google sees no dismissal, so no cooldown.
+export function isGsiFrame(el: Element | null | undefined): boolean {
+  if (!el || el.tagName !== 'IFRAME') return false;
+  return /accounts\.google\.com\/gsi/.test(el.getAttribute('src') ?? '');
+}
+type GuardDoc = Pick<Document, 'activeElement' | 'addEventListener' | 'removeEventListener' | 'contains'>;
+const isTextField = (el: any): boolean =>
+  !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true);
+// Only a visitor who is TYPING is protected: a field that got focus or a keystroke within this window.
+// A visitor who stopped typing and then taps the sheet on purpose is leaving the field, and is let go.
+export const TYPING_WINDOW_MS = 2000;
+/** Returns the field's focus when Google's iframe steals it mid-typing. Returns the teardown. */
+export function installTypingGuard(
+  doc: GuardDoc,
+  schedule: (fn: () => void) => void = (fn) => setTimeout(fn, 0),
+  now: () => number = () => Date.now(),
+): () => void {
+  let lastTypingAt = -Infinity;
+  const onIn = (e: Event) => { if (isTextField(e.target)) lastTypingAt = now(); };
+  const onKey = (e: Event) => { if (isTextField(e.target)) lastTypingAt = now(); };
+  const onOut = (e: Event) => {
+    const field = e.target as (Element & { focus?: (o?: FocusOptions) => void }) | null;
+    if (!isTextField(field)) return;
+    if (now() - lastTypingAt > TYPING_WINDOW_MS) return;   // the visitor had stopped: a deliberate tap elsewhere
+    // The cross-origin frame becomes activeElement only AFTER focusout has dispatched, so the check is deferred.
+    schedule(() => {
+      if (isGsiFrame(doc.activeElement) && doc.contains(field!)) field!.focus?.({ preventScroll: true });
+    });
+  };
+  doc.addEventListener('focusin', onIn);
+  doc.addEventListener('keydown', onKey);
+  doc.addEventListener('focusout', onOut);
+  return () => { doc.removeEventListener('focusin', onIn); doc.removeEventListener('keydown', onKey); doc.removeEventListener('focusout', onOut); };
+}
+
 const FEDCM_FALLBACK_MS = 4000;
 // getUser() must never be able to stall the prompt indefinitely (see the bounded race below).
 const GETUSER_TIMEOUT_MS = 2500;
@@ -127,6 +189,8 @@ export default function GoogleOneTap() {
     let cancelled = false;
     let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
     let momentSeen = false;
+    // Backlog 739: a visitor typing keeps the keyboard even when the sheet is already up (see installTypingGuard).
+    const stopTypingGuard = installTypingGuard(document);
     // Undoes the one-shot navigator.credentials.get patch installed in start(). Held at EFFECT scope,
     // not inside start(), because the case it exists for is the one where start()'s own restore never
     // runs: GIS never calls credentials.get at all, so the patched function is never entered and the
@@ -169,7 +233,7 @@ export default function GoogleOneTap() {
                 // of this effect either (see the DEPS note at the bottom of this file).
                 openAuth();
               }
-              else log('signed in via One Tap');
+              else log('signed in via One Tap'), markJustSignedIn();
             } catch (e) {
               diag.exchangeError = String(e); log('token exchange threw', String(e));
               openAuth();
@@ -205,6 +269,8 @@ export default function GoogleOneTap() {
 
     const start = () => {
       if (cancelled) return;
+      // A visitor typing keeps the prompt out (backlog 676): start again on the next focusout.
+      if (deferWhileTyping(document, () => { if (!cancelled) start(); })) { log('a text field has focus — the prompt waits for focusout'); return; }
       // No FedCM in this browser → the legacy path is the only one that can work; spending the single
       // attempt on FedCM there would guarantee no prompt.
       if (!fedcmSupported) { run(false); return; }
@@ -350,7 +416,7 @@ export default function GoogleOneTap() {
     // exponential cooldown (2h → 1d → 7d → 30d) — that alone can make One Tap "disappear" for days.
     // The credentials.get restore is the second half of the patch's contract: if GIS never called it,
     // the patched function never ran, so this is the only path that takes it back off the global.
-    return () => { cancelled = true; if (fallbackTimer) clearTimeout(fallbackTimer); restoreCredentialsGet?.(); };
+    return () => { cancelled = true; stopTypingGuard(); if (fallbackTimer) clearTimeout(fallbackTimer); restoreCredentialsGet?.(); };
     // DEPS: signedOut ONLY. `user` must not be here — it is no longer read in this effect, and with a
     // stale/deleted-account token the store flips it mid-flight, which re-runs the effect: the cleanup
     // sets cancelled = true on the in-flight start(), and the re-run bails on startedRef. Net effect,

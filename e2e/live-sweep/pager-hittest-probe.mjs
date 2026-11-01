@@ -16,6 +16,7 @@
 // REPEATEDLY once the page is quiet, which is the exact question "is something on top of it?" —
 // and then tries an ordinary trusted click. §40.7: do not report a harness failure as a product
 // failure, and do not hide a product failure as a harness one without proving it is one.
+import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from '@playwright/test';
 
 const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';

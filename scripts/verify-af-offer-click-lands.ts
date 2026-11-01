@@ -29,7 +29,7 @@
 // byte-for-byte in behaviour, and the barrier asserts it FAILS the same predicate the shipped one
 // passes. So the predicate is proven to discriminate, not merely to be satisfied.
 import { openAfOffer, CLICK_LEAF_SRC, AF_OFFER_TESTID, AF_OFFER_CTA } from './lib/afOfferLive.ts';
-import { ARM_CLICK_WITNESS_SRC, READ_CLICK_WITNESS_SRC, clickWitnessed, isStable } from './lib/liveClick.ts';
+import { ARM_CLICK_WITNESS_SRC, READ_CLICK_WITNESS_SRC, STRAY_OVERLAY_SRC, clickWitnessed, isStable } from './lib/liveClick.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -87,6 +87,7 @@ function stubPage(opts: {
       };
       if (fn === ARM_CLICK_WITNESS_SRC) { armed = true; hit = null; return undefined; }
       if (fn === READ_CLICK_WITNESS_SRC) { const h = hit; hit = null; return h; }
+      if (fn === STRAY_OVERLAY_SRC) return false;  // no listing opened over the chat
       return opts.hasTurn;                       // the has-turn reader (and the scroller, ignored)
     },
     mouse: {
@@ -168,6 +169,42 @@ const FAST = { timeoutMs: 400, pollMs: 5 };
     r.opened === true && (r as any).attempts === 3, JSON.stringify(r));
 }
 
+// ── 3b. a miss that OPENED A LISTING is closed before the next tap (🔬 2026-10-16) ──────────────
+// The stray tap lands on a card and opens the ad viewer over the chat; while it is open every tap
+// lands on the sheet. Production, جدة · فيلا · 390x844: 2 of 4 runs ended «intercepted» this way.
+{
+  const overlayStub = (blind: boolean) => {
+    let attempt = 0; let armed = false; let hit: any = null; let overlay = false;
+    const page = {
+      evaluate: async (fn: any) => {
+        if (fn === CLICK_LEAF_SRC) return { present: true, point: { x: 100, y: 200 } };
+        if (fn === ARM_CLICK_WITNESS_SRC) { armed = true; hit = null; return undefined; }
+        if (fn === READ_CLICK_WITNESS_SRC) { const h = hit; hit = null; return h; }
+        if (fn === STRAY_OVERLAY_SRC) return blind ? false : overlay;
+        return true;
+      },
+      keyboard: { press: async (k: string) => { if (k === 'Escape') overlay = false; } },
+      mouse: {
+        click: async () => {
+          attempt++;
+          if (!armed) return;
+          if (overlay) { hit = { onTarget: false, tid: 'ad-viewer-sheet', txt: 'الواجهة' }; return; }
+          if (attempt === 1) { overlay = true; hit = MISSED; return; }   // the first tap opens a listing
+          hit = { onTarget: true, tid: AF_OFFER_TESTID, txt: AF_OFFER_CTA };
+        },
+      },
+      waitForTimeout: async (ms: number) => { await new Promise((r) => setTimeout(r, Math.min(ms, 5))); },
+    };
+    return page;
+  };
+  const r = await openAfOffer(overlayStub(false) as any, { timeoutMs: 2000, pollMs: 5 });
+  check('a miss that opened a listing is closed, and the next tap reaches the CTA',
+    r.opened === true && (r as any).attempts === 2, JSON.stringify(r));
+  const m = await openAfOffer(overlayStub(true) as any, { timeoutMs: 2000, pollMs: 5 });
+  mustCatch('a harness that never closes the stray listing (every retry lands on the sheet)',
+    m.opened === false && m.reason === 'intercepted');
+}
+
 // ── 4. a page that reports no click at all fails CLOSED ──────────────────────────────────────────
 {
   const s = stubPage({ ctaPresent: true, hasTurn: true, lands: () => true, silentWitness: true });
@@ -190,7 +227,7 @@ const FAST = { timeoutMs: 400, pollMs: 5 };
 //
 // Measured on production 2026-09-25 (الرياض/شراء/شقة desktop, fleet healthy): after removing the
 // last AF pill, `[data-testid="results-narrow"]` AND an exact `textContent` leaf for
-// «خلّنا نحدد الطلب أكثر» were present at EVERY 3 s sample for the full 60 s budget, while the click
+// «🎯 دقّق مع الذكاء» were present at EVERY 3 s sample for the full 60 s budget, while the click
 // probe returned null on every poll — the offer renders under a reveal cascade that was still
 // mounting cards (90 → 150 during the window). `openAfOffer` counted `ctaSeen` off the CLICK probe,
 // so it read 0, and returned `reason: 'absent'` — the one verdict in this file that blames Advanced

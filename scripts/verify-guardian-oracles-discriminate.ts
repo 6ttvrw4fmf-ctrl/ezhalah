@@ -126,7 +126,12 @@ function makePage(
     if (stubborn) return;
     live = new Set();
     // The hand-off, on a real timer: the card mounts a beat after the modal unmounts.
-    if (pending) { const { hosts, afterMs } = pending; pending = null; setTimeout(() => { live = new Set(hosts); }, afterMs); }
+    // afterMs 0 = NO GAP: the card is already mounted when the modal goes (production since at
+    // least 2026-10-24, sampled every ~40 ms, 6/6) — a poll can never land on an empty screen.
+    if (pending) {
+      const { hosts, afterMs } = pending; pending = null;
+      if (afterMs <= 0) live = new Set(hosts); else setTimeout(() => { live = new Set(hosts); }, afterMs);
+    }
   };
   const p = {
     groundPresses: 0,
@@ -142,6 +147,7 @@ function makePage(
       const click = async () => { p.closeClicks++; closed(); };
       return {
         host,
+        getAttribute: async (a: string) => (a === 'data-testid' ? host.match(/"([^"]+)"/)![1] : null),
         click,
         $: async (s: string) => (s === CLOSE_X && live.has(CLOSE_X) && host !== MODAL ? { click } : null),
       };
@@ -216,6 +222,16 @@ console.log('\n§2b a dismissal verdict survives the modal→card hand-off (#118
   const second = await dismissAuthInvitation(p as never, 2000);
   check('dismiss → reappeared → dismiss again ends stably gone (the journey\'s own sequence)',
     first === 'reappeared' && second === 'dismissed');
+}
+{
+  // THE 2026-10-24 CANARY FLAKE: the hand-off with NO gap. The old verdict needed to SEE a zero, so
+  // against this page it waited out its budget and called a closed modal 'still-open' — a
+  // HarnessError, an UNDETERMINED journey, an aborted release. The identity check reads it right.
+  const p = makePage([MODAL], false, { hosts: [CARD, CLOSE_X], afterMs: 0 });
+  const first = await dismissAuthInvitation(p as never, 1000);
+  const second = await dismissAuthInvitation(p as never, 1000);
+  check('a gapless modal→card hand-off reports "reappeared", never "still-open"', first === 'reappeared');
+  check('…and the card that took over then dismisses for real', second === 'dismissed');
 }
 // KNOWN BOUND, stated rather than hidden: the hold is 1500 ms against a measured 250-750 ms
 // hand-off. A presentation that took longer than the hold to mount would read as 'dismissed'. The
@@ -345,6 +361,16 @@ console.log('§2 mutations — the real file is edited and re-executed');
     () => makePage([MODAL], false, { hosts: [CARD, CLOSE_X], afterMs: 600 }),
   );
 
+  // M6 — THE 2026-10-24 FLAKE ITSELF: judge the hand-off only by catching an empty screen. On the
+  // gapless page there is none to catch, so a modal that closed reads 'still-open' — the UNDETERMINED
+  // that aborted two canaries on a healthy build.
+  await withMutation(
+    'dropping the identity check, so a gapless modal→card hand-off reads as a modal that never closed',
+    (s) => s.replace("    if ((await countVisible(page, closed)) === 0) return 'reappeared';\n", ''),
+    (r) => r === 'still-open',
+    () => makePage([MODAL], false, { hosts: [CARD, CLOSE_X], afterMs: 0 }),
+  );
+
   // M5 — the scoped × reverted to a page-wide lookup: it reaches for a control that belongs to a
   // presentation other than the one on screen, and clicks it instead of closing what is up.
   await withMutation(
@@ -367,6 +393,33 @@ console.log('\n§3 no guardian journey asserts on raw RPC traffic');
     raw.length === 0);
   check('the journeys do assert on the classified list',
     src.includes('ctx.resultsSearches.length'));
+}
+
+// ═══ §4 · the card's location, on BOTH cards (backlog 839, incident #965) ═══════════════════════
+// The laptop photo-first card (ResultCard.tsx `row === 'roomy'`, owner 2026-10-11) prints no country
+// line, so the old country-line-only check failed every desktop card from 2026-10-11 although each
+// showed «حي النرجس, الرياض». The samples are the cards' real innerText (incident #965 evidence and a
+// phone card), executed against the journey's own predicate.
+console.log('\n§4 the result card location reads both card shapes');
+{
+  const { cardLocationProblem } = await import('../e2e/guardian/journeys.mjs');
+  const LAPTOP = '#1\nفيلا للبيع\nsa.aqar.fm\nر.س 2,800,000\nر.س 2,850,000\nخصم 2٪\nاضغط هنا 👆\nللتأكد من التوفر والتفاصيل\nحي النرجس, الرياض\nفيلا\n\n4\nغرف\n\n5\nحمامات\n\n241 م²\nالمساحة\nأضيف 01/09/2026\nمستضاف على عقار';
+  const LAPTOP_NO_DISTRICT = LAPTOP.replace('حي النرجس, الرياض', 'الرياض');
+  const PHONE = 'فيلا للبيع\nsa.aqar.fm\nحي النرجس, الرياض\nر.س 2,800,000\nالرياض, المملكة العربية السعودية';
+  check('a laptop card «حي النرجس, الرياض» has a location', cardLocationProblem(LAPTOP, 'الرياض') === null);
+  check('a laptop card with no district («الرياض») has a location', cardLocationProblem(LAPTOP_NO_DISTRICT, 'الرياض') === null);
+  check('a phone card «الرياض, المملكة العربية السعودية» has a location', cardLocationProblem(PHONE, 'الرياض') === null);
+  mustCatch('a laptop card that prints «الموقع غير محدد» instead of the city',
+    cardLocationProblem(LAPTOP.replace('حي النرجس, الرياض', 'حي النرجس, الموقع غير محدد'), 'الرياض') !== null);
+  mustCatch('a laptop card filed under another city than the one searched',
+    cardLocationProblem(LAPTOP.replace('حي النرجس, الرياض', 'حي النرجس, جدة'), 'الرياض') !== null);
+  mustCatch('a laptop card with no location line at all',
+    cardLocationProblem(LAPTOP.replace('حي النرجس, الرياض\n', ''), 'الرياض') !== null);
+  mustCatch('a phone card whose country line names no city',
+    cardLocationProblem(PHONE.replace('الرياض, المملكة', '\nالمملكة').replace('حي النرجس, الرياض\n', ''), 'الرياض') !== null);
+  const src = readFileSync(join(ROOT, 'e2e/guardian/journeys.mjs'), 'utf8');
+  check('G5 asserts through cardLocationProblem, against the city it searched',
+    src.includes('cardLocationProblem(t, SEARCH_CITY)') && src.includes('searchAsGuest(page, { city: SEARCH_CITY })'));
 }
 
 if (failed) { console.error(`\nverify-guardian-oracles-discriminate: ${failed} check(s) failed`); process.exit(1); }

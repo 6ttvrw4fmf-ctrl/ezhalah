@@ -55,11 +55,17 @@ concurrency:
   group: deploy-frontend-production
   cancel-in-progress: false
 
+env:
+  # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
+  # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   deploy:
     name: safe-deploy.sh → ezhalah-app.vercel.app
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # 30 + the canary gate's guardian journeys (owner 2026-10-23)
+    timeout-minutes: 45
 
     # THE MINIMUM THE BASELINE RECORD NEEDS, and nothing else (naming any permission sets every
     # other one to none, so this is a tightening of the repo default as well as a grant).
@@ -203,10 +209,21 @@ jobs:
           BASELINE_PR_TOKEN: ${{ secrets.BASELINE_PR_TOKEN }}
         run: scripts/record-deploy-baseline.sh --probe
 
+      - name: Install the browser the canary gate drives
+        # scripts/canary-gate.sh (called inside safe-deploy.sh) runs the guardian journeys against the
+        # 10% canary of a rolling release; it needs Chromium on the runner BEFORE the deploy step.
+        if: ${{ !inputs.dry_run }}
+        run: npx playwright install --with-deps chromium
+
       - name: Deploy via the sanctioned guarded entrypoint
         if: ${{ !inputs.dry_run }}
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}              # authenticates the Vercel CLI
+          # ROLLING RELEASE SWITCH (owner 2026-10-23, step 3 «fail small»): "1" once the Vercel project
+          # has Rolling Releases configured (manual-approval, one 10% stage). safe-deploy.sh then reads the
+          # canary and scripts/canary-gate.sh decides complete/abort. Unset = the legacy 100% path.
+          EZ_ROLLING_RELEASE: ${{ vars.EZ_ROLLING_RELEASE }}
+          GUARDIAN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}              # deploy lock
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           # safe-deploy.sh builds its own holder string and calls deploy-lock.sh; the TTL is the one
@@ -265,6 +282,27 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
 
+      # ── Post-deploy loader-logo gate (owner 2026-10-25: «make sure this never happens again») ────
+      # The owner's iPhone showed the search loader with names and EMPTY logo frames. Every repo-side
+      # check was green and a local build drew every logo: the failure was the served Cache-Control
+      # (max-age=0 on ~145 logos, re-downloaded during every search on mobile data) and a prefetch that
+      # never ran on Home. Both only exist on the live site, so a real phone-sized Chromium on throttled
+      # data opens Home twice — no searches — and fails the run if the logos are not prefetched,
+      # not immutable, or re-downloaded on the second visit.
+      - name: Post-deploy loader-logo gate (blocking)
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -o pipefail
+          npx playwright install chromium >/dev/null 2>&1 || true
+          node --experimental-strip-types scripts/verify-live-loader-logos.ts 2>&1 | tee /tmp/loader-logos.log
+          status=$?
+          {
+            echo "### Loader-logo gate"
+            if [ $status -eq 0 ]; then echo "✅ logos prefetched before the first search, cached for a year"; else
+              echo "🚨 **Phones on mobile data will see empty logo frames in the search loader.**"; grep -E "^FAIL" /tmp/loader-logos.log | head -5 | sed 's/^/- /'; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
       - name: Report
         if: always()
         # SAFETY DEFECT FIXED 2026-08-05: this step used to branch on `job.status` alone and print
@@ -278,7 +316,7 @@ jobs:
         # check failed". So decide from EVIDENCE in the captured safe-deploy log, not from job state.
         run: |
           LOG=/tmp/safe-deploy.log
-          SHIPPED=no; REFUSED_PRE=no; POST_FAILED=no; DEPLOY_URL=""
+          SHIPPED=no; REFUSED_PRE=no; POST_FAILED=no; DEPLOY_URL=""; CANARY=""
 
           if [ -f "$LOG" ]; then
             # safe-deploy.sh only reaches these lines AFTER the production deploy returned a deployment.
@@ -287,6 +325,8 @@ jobs:
             if grep -qE 'REFUSING TO DEPLOY|safe-deploy: REFUSED' "$LOG"; then REFUSED_PRE=yes; fi
             # These fire only AFTER a successful deploy (alias/env/smoke-test/drift checks).
             if grep -q 'REFUSING TO ADVANCE THE BASELINE' "$LOG"; then POST_FAILED=yes; fi
+            # The canary gate (scripts/canary-gate.sh) prints exactly one of these when a rolling release was in flight.
+            if grep -q 'CANARY UNRESOLVED' "$LOG"; then CANARY=unresolved; elif grep -q 'CANARY ABORTED' "$LOG"; then CANARY=aborted; elif grep -q 'CANARY PASSED' "$LOG"; then CANARY=passed; fi
             DEPLOY_URL="$(grep -oE 'https://ezhalah-[a-z0-9]+-[a-z0-9-]+\.vercel\.app' "$LOG" | tail -1)"
           fi
 
@@ -294,6 +334,18 @@ jobs:
             if [ "${{ inputs.dry_run }}" = "true" ]; then
               echo "### 🧪 Dry run — NOTHING WAS DEPLOYED"
               echo "Verification only. The deploy step was skipped by design."
+
+            elif [ "$CANARY" = "unresolved" ]; then
+              echo "### ⚠️ CANARY UNRESOLVED — rollback was not confirmed"
+              echo "The rollout command failed. Traffic may still reach the canary; inspect the active rolling release in Vercel."
+              echo "The baseline did not advance. Read the command failure in the log before recovering the release."
+
+            elif [ "$CANARY" = "aborted" ]; then
+              echo "### 🔁 CANARY ABORTED — rolled back automatically"
+              echo ""
+              echo "The new build went to 10% of visitors, a guard or rollout command failed, and"
+              echo "the release was aborted by scripts/canary-gate.sh: all traffic is back on the previous build. The baseline"
+              echo "did not advance. Read the guardian lines in the log, fix, and deploy again."
 
             elif [ "$SHIPPED" = "yes" ] && [ "$POST_FAILED" = "yes" ]; then
               echo "### ⚠️ DEPLOY SUCCEEDED — POST-DEPLOY VERIFICATION FAILED"
@@ -315,6 +367,7 @@ jobs:
             elif [ "${{ job.status }}" = "success" ]; then
               echo "### ✅ DEPLOY SUCCEEDED — all post-deploy checks passed"
               echo "Alias assertion passed inside safe-deploy.sh — the canonical URL is serving this build."
+              [ "$CANARY" = "passed" ] && echo "Rolling release: 10% canary passed the guardian journeys and was promoted to 100%."
 
             elif [ "$REFUSED_PRE" = "yes" ]; then
               echo "### ⛔ REFUSED BY A GATE — NOTHING WAS DEPLOYED"

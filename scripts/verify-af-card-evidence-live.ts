@@ -33,6 +33,7 @@
 //   PW_EXECUTABLE_PATH=/opt/pw-browsers/chromium node --experimental-strip-types scripts/verify-af-card-evidence-live.ts
 //   AF_EV_CITY / AF_EV_GROUP / AF_EV_TYPE   scope (defaults الرياض / الشقق والسكن المشترك / شقة)
 //   AF_EV_MOBILE=1                          390x844 touch viewport
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { chromium } from 'playwright';
@@ -174,7 +175,7 @@ async function main() {
   // ── 2. commit real AF answers through the agent flow ─────────────────────────────────────────
   const opened = await openAfOffer(page);
   if (!opened.opened) {
-    skip('the AF offer opened', `NOT VERIFIED — ${opened.reason} after ${opened.waitedMs}ms`);
+    skip('the AF offer opened', `NOT VERIFIED — ${opened.reason} after ${opened.waitedMs}ms${(opened as any).hit ? ` · hit: ${(opened as any).hit}` : ""}`);
     console.log(`\n✗ could not reach Advanced Filter; nothing about §12A was proved`);
     await browser.close(); process.exit(1);
   }

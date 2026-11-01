@@ -512,6 +512,28 @@ def _images(body: str, featured: Optional[str]) -> list[str]:
     return out[:25]
 
 
+# ── the ad's OWN «المميزات» chip list (🔬 AF engineer, 2026-10-14) ──────────────────────────────────────
+# Every /projects/<slug>/ page prints `<ul class="list-inline projServ">` with one <li><p> per feature:
+# «مجالس ضيافة · 2 غرف · 2 دورات مياة · مطبخ · خزان مستقل · موقف خاص» (3 live ads re-read 10-14; the list
+# varies per ad, e.g. «موقف خاص» on one of the three, so it is a unit statement, not a site template).
+# jazwtn scored 0 of 4 findable on 10-14, kitchen missed 4 of 5: the scraper never read this list.
+# A chip present → True. A chip absent is silence → NULL (a chip list never says «no»). The second
+# projServ block on the page is the warranty list («ضمان على …») and is not read.
+_CHIPS_RE = re.compile(r'<ul class="list-inline projServ">(.*?)</ul>', re.S)
+_CHIP_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner",
+              "private_entrance")
+
+
+def feature_answers(body: str) -> dict[str, bool]:
+    m = _CHIPS_RE.search(body or "")
+    out: dict[str, bool] = {}
+    for chip in re.findall(r"<p>([^<]+)</p>", m.group(1)) if m else []:
+        for col, val in normalize.amenities_from_text(chip.strip()).items():
+            if val is True and col in _CHIP_COLS:
+                out[col] = True
+    return out
+
+
 def map_listing(body: str, url: str, featured: Optional[str]) -> tuple[Optional[dict], str]:
     title_raw = _title(body)
     if not title_raw:
@@ -640,6 +662,7 @@ def map_listing(body: str, url: str, featured: Optional[str]) -> tuple[Optional[
         "photo_urls": _images(body, featured),
         "additional_info": info,
     }
+    row.update(feature_answers(body))
     return row, category
 
 

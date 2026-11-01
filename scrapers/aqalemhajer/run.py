@@ -142,6 +142,7 @@ from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
+from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link  # noqa: E402
 
 BASE = "https://aqalemhajer.com"
 SOURCE = "مكتب أقاليم هجر للخدمات العقارية"
@@ -179,7 +180,7 @@ TYPE_OVERRIDES = {
     "ارضين متجاورتين": "Residential Land", "أرضين متجاورات": "Residential Land",
     "متجاورات": "Residential Land",                                            # 5 + 2 + 2
     "ارض تجارية": "Commercial Land",                                           # 7
-    "تاون هاوس": "Villa",                                                      # 6 (normalize: Townhouse→Villa)
+    "تاون هاوس": "تاون هاوس",                                                  # 6 (kept under its own name; search files it under Duplex)
     "شقق دبلكسية": "Apartment", "شقة دبلكسية": "Apartment", "شقة علوية": "Apartment",  # bossbih precedent
     "بيت عربي": "Villa", "بيت شعبي": "Villa",                                  # 2
     # A house sold WITH its flats is one lot; the head noun decides (بيت → Villa, the shared map).
@@ -334,6 +335,9 @@ def parse_detail(page_html: str) -> dict:
         "fields": fields,
         "photos": photos,
         "fal_license": m_fal.group(1) if m_fal else None,
+        # The office links its pin as a maps.app.goo.gl short link; fetch_detail follows it (owner 2026-10-19).
+        "pin": pin_from_html(page_html),
+        "pin_link": short_maps_link(page_html),
     }
 
 
@@ -342,7 +346,10 @@ def fetch_detail(s: cc.Session, nid: str) -> Optional[dict]:
     # The themed 404 is a fully parseable page, so the STATUS decides, never "did fields parse".
     if r.status_code != 200 or f'data-history-node-id="{nid}"' not in r.text:
         return None
-    return parse_detail(r.text)
+    d = parse_detail(r.text)
+    if not d.get("pin") and d.get("pin_link"):
+        d["pin"] = pin_from_short_link(d["pin_link"], lambda u: resolve_redirect(s, u))
+    return d
 
 
 # ── PARSERS ─────────────────────────────────────────────────────────────────────────────────────
@@ -555,6 +562,7 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
         "views_count": ix.get("views"),
         "photo_urls": photos[:20] if (detail or photos) else None,
         "additional_info": redact_capture({k: v for k, v in {
+            **(detail.get("pin") or {}),
             "price_label": label or None,
             "price_basis": basis,
             "price_amount_raw": amount,
@@ -625,6 +633,15 @@ def verify_gone_for(live_nid: str):
                              url_for=lambda _ad: f"{BASE}/{nid}",
                              canary=_canary_for(live_nid)).verify_gone(ad_number)
     return _verify_gone
+
+
+def _make_verify_gone(control: Optional[dict] = None):
+    """The one-argument oracle the daily direct check calls (fleet_liveness.SITES, 2026-10-08): the
+    crawl's own verify_gone_for, with the caller's control row as the in-run canary. No control (or
+    one from another numbering) gives a canary that cannot pass, so no removal is believed."""
+    ad = str((control or {}).get("ad_number") or "")
+    nid = ad[len(PREFIX):] if ad.startswith(PREFIX) and ad[len(PREFIX):].isdigit() else ""
+    return verify_gone_for(nid)
 
 
 def main() -> int:

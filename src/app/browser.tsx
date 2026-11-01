@@ -8,6 +8,7 @@ import type { Listing } from '@/data/listings';
 import { useApp } from '@/store';
 import { useI18n } from '@/i18n';
 import { openListing } from '@/lib/openListing';
+import { safeHttpUrl } from '@/lib/safeUrl';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -65,7 +66,7 @@ export default function Browser() {
     if (m[2].startsWith('/en/') || m[2] === '/en') return url;
     return `${m[1]}/en${m[2]}`;
   };
-  const realUrl = localize(listing?.source_url);
+  const realUrl = safeHttpUrl(localize(listing?.source_url));
   const proxyUrl = realUrl ? `/api/proxy?url=${encodeURIComponent(realUrl)}` : undefined;
 
   if (resolving || (!IS_WEB && listing)) {

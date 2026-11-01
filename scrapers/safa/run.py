@@ -132,8 +132,8 @@ from LIST pages, so mark_direct_alive() is deliberately NOT called.
 WHAT THE SOURCE PUBLISHES, AND WHAT IS NEVER GUESSED
 ----------------------------------------------------
   · TYPE comes from the card's own chip: شقة (119 cards), تاون هاوس (35), فيلا (4), دوبلكس (1).
-    «تاون هاوس» → Villa is the fleet fold (TYPE_MAP_EN 'Townhouse' → 'Villa'; taxonomy.source.json
-    lists «تاون هاوس» among Villa's rawTypes; justsa/rawasidark already do exactly this). «الدور» →
+    «تاون هاوس» keeps its own name (owner 2026-10-12; taxonomy.source.json lists it among Duplex's
+    rawTypes; justsa/rawasidark do exactly this). «الدور» →
     Floor covers the unit filter's own definite-article spelling. 3 rent cards publish NO chip at
     all: they skip as type_missing. The unit code's «-APT» suffix is an identifier component, not a
     published type, and nothing is read from it. The filter also offers «مساحة عمل مشتركه» and
@@ -259,10 +259,10 @@ READY = "وحدات جاهزة"          # the source's own READY marker
 OFF_PLAN = "على الخارطة"        # the source's own OFF-PLAN marker ("sold on the map")
 SOLD_OUT = "مباع"
 
-# «تاون هاوس» is not in the shared TYPE_MAP_AR; the fleet fold is TYPE_MAP_EN 'Townhouse' → 'Villa'
-# and src/data/taxonomy.source.json lists «تاون هاوس» among Villa's own rawTypes. justsa/rawasidark
+# «تاون هاوس» is not in the shared TYPE_MAP_AR; it keeps its own name (TYPE_MAP_EN 'Townhouse' → «تاون هاوس»)
+# and src/data/taxonomy.source.json lists «تاون هاوس» among Duplex's rawTypes (owner 2026-10-12). justsa/rawasidark
 # already apply exactly this override. «الدور» is the filter's own definite-article spelling of دور.
-_TYPE_OVERRIDES = {"تاون هاوس": "Villa", "الدور": "Floor"}
+_TYPE_OVERRIDES = {"تاون هاوس": "تاون هاوس", "الدور": "Floor"}
 
 _DEAL = {"للبيع": "Buy", "للإيجار": "Rent"}
 

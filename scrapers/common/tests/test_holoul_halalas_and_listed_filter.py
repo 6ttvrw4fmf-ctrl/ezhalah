@@ -38,3 +38,75 @@ def test_no_licence_is_a_demo_row_and_no_ad_type_is_not_assumed_a_sale():
 def test_the_advertiser_is_never_stored():
     (row, _), _ = R.map_unit(_u())
     assert "0501234567" not in str(row) and "مكتب س" not in str(row)
+
+
+def test_the_units_own_api_location_is_its_pin():
+    # audit 2026-10-21: «أدوار بدر» units carry location {latitude, longitude} = the building's address point;
+    # the scraper ignored it, so 30 units showed a border over a published pin.
+    (row, _), _ = R.map_unit(_u(location={"latitude": 24.500621, "longitude": 46.735823}))
+    assert row["additional_info"]["latitude"] == 24.500621 and row["additional_info"]["longitude"] == 46.735823
+
+
+def test_no_location_means_no_pin_not_a_guess():
+    (row, _), _ = R.map_unit(_u())
+    assert "latitude" not in row["additional_info"]
+
+
+def test_a_source_that_fails_every_route_still_writes_a_failed_run_naming_the_error(monkeypatch):
+    """10-22/10-23: every route answered 504 and the crawl died before begin_run, leaving no row."""
+    calls = []
+    monkeypatch.setattr(R.db, "begin_run", lambda slug: calls.append(("begin", slug)) or 42)
+    monkeypatch.setattr(R.db, "end_run", lambda rid, **kw: calls.append(("end", rid, kw)) or True)
+
+    def boom(*a, **k):
+        raise RuntimeError("HTTP Error 504: ")
+    monkeypatch.setattr(R, "retry_smarter_session", boom)
+    monkeypatch.setattr("sys.argv", ["holoul", "--type", "all"])
+    with pytest.raises(RuntimeError):
+        R.main()
+    assert calls[0] == ("begin", "holoul")
+    end = calls[-1]
+    assert end[0] == "end" and end[1] == 42 and end[2]["ok"] is False and "504" in end[2]["notes"]
+
+
+class _Resp:
+    def __init__(self, code, body=None):
+        self.status_code, self._b = code, body
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise Exception(f"HTTP Error {self.status_code}: ")
+
+    def json(self):
+        return self._b
+
+
+def test_the_walk_reads_small_pages_and_outlasts_a_gateway_timeout(monkeypatch):
+    """10-21 → 10-25 the nightly read «HTTP Error 504»; on 10-26 the per_page=100 page took 8.2 s and every
+    10-row page ~1 s. The walk now asks for small pages and retries a 504 instead of dying on it."""
+    monkeypatch.setattr(R.time, "sleep", lambda s: None)
+    asked, failed_once = [], set()
+
+    class S:
+        def get(self, url, **kw):
+            asked.append(url)
+            page = int(url.split("page=")[1].split("&")[0])
+            if page == 1 and page not in failed_once:
+                failed_once.add(page)
+                return _Resp(504)
+            return _Resp(200, {"pages": 3, "total": 45, "result": [{"id": f"p{page}-{i}"} for i in range(15)]})
+
+    rows, total = R.walk(S())
+    assert len(rows) == 45 and total == 45
+    assert all(f"per_page={R.PER_PAGE}" in u for u in asked) and R.PER_PAGE <= 20
+
+
+def test_a_page_that_never_answers_names_itself_in_the_failure(monkeypatch):
+    monkeypatch.setattr(R.time, "sleep", lambda s: None)
+
+    class S:
+        def get(self, url, **kw):
+            return _Resp(504)
+
+    with pytest.raises(RuntimeError, match=r"units page 0 .*504"):
+        R.walk(S())

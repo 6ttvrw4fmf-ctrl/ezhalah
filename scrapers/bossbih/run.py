@@ -64,7 +64,10 @@ THE FIVE THINGS THIS SOURCE WILL GET WRONG IF YOU TRUST THE OBVIOUS THING:
    city would move them 400 km to Riyadh. Scanning these tails against the city catalog is worse
    still: «النخيل» (31), «الزهراء» (28), «الصفا» (22), «النزهة» (15), «الحمراء» (13), «الريان»,
    «الفيصلية», «العزيزية» are ALL both real Saudi city names and Al-Ahsa district names here, so a
-   substring city scan mislabels 150+ listings. No city is ever read from the title.
+   substring city scan mislabels 150+ listings. No city is ever SCANNED out of the title. The one
+   exception (2026-10-13, backlog #455) is a title whose WHOLE place text is a measured Al-Ahsa
+   town («… في حرض», «… بالجشه»), listed by name in AHSA_TOWN_CITIES: there the office itself
+   named the town, so it is the source's city (city_basis «listing_title_town»), never a guess.
    The pool the district name is matched against is NOT the stored city_id: the governorate-level
    «الاحساء» (3677) carries ZERO districts in the catalog, so matching against it alone would leave
    district_ar NULL on all 1,485 rows. Each Al-Ahsa town's pool is asked and a name is taken only
@@ -131,9 +134,10 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize as N  # noqa: E402
-from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.arabic_location import find_district_in_text, norm_ar, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
+from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link  # noqa: E402
 
 BASE = "https://bossbihoffice.com.sa"
 SOURCE = "مكتب بوصبيح"
@@ -171,6 +175,20 @@ OUTSIDE_AREA_TOKENS = ("حائل", "حفر الباطن", "الشنان", "بق�
 # never made (docstring §3).
 AHSA_DISTRICT_POOLS = ((12, "الهفوف"), (2748, "المبرز"), (2038, "العيون"), (2764, "الجفر"),
                        (2653, "العمران"), (243, "بقيق"), (3700, "جواثا"), (2643, "يبرين"))
+
+# Al-Ahsa TOWNS the office names as the PLACE itself: «بيت للبيع في حرض», «أرض للبيع في البطالية»,
+# «البريد بالجشه». Each is a catalog CITY of the Eastern region (resolved through to_catalog with the
+# region hint), none is a district in any AHSA_DISTRICT_POOLS town, and every one is measured on live
+# titles (2026-10-13, backlog #455: حرض 30, البطالية 8, الفضول 4, الطرف 3, القرين 2, الشهارين 2, …).
+# These rows were booked under the governorate «الاحساء», so a customer searching حرض (where Deal
+# App's 13 حرض ads already live) never found them. The source DID name the town here, so this is the
+# source's own city, not a derived one. MEASURED NAMES ONLY, matched against the WHOLE tail (or a
+# trailing «ب/بال<town>»), never as a substring scan — the docstring's §3 warning stands: «الجابرية»
+# is deliberately absent (39 abralosol ads use it as an المبرز district), as are «المركز» (a plain
+# word) and every name that is also an Al-Ahsa district («القارة», «المنيزلة», «التويثير», «الشعبة»).
+AHSA_TOWN_CITIES = ("حرض", "البطالية", "الفضول", "الطرف", "القرين", "الشهارين", "الدالوة",
+                    "التهيمية", "الحليلة", "خريص", "الجشة", "العيون")
+_AHSA_TOWN_BY_NORM = {norm_ar(t): t for t in AHSA_TOWN_CITIES}
 
 # An administrative prefix names a SETTLEMENT, never a district, and «مدينة» in particular collides
 # with a real catalog district called «حي المدينة» — leaving it in matched «طابه بمدينة الشنان» to
@@ -506,6 +524,8 @@ def parse_detail(page_html: str) -> dict:
         "site_total": N.to_int(m_site_total.group(1)) if m_site_total else None,
         "photos": photos,
         "fal_license": m_fal.group(1) if m_fal else None,
+        # The «الموقع» google.com/maps/place/LAT,LNG link; the page's embed is only a map centre.
+        "pin": pin_from_html(art) or pin_from_html(page_html),
     }
 
 
@@ -520,6 +540,9 @@ def fetch_detail(s: cc.Session, nid: str) -> Optional[dict]:
         return None
     # The same identity test _signal_for() uses for a life: this page is node `nid` itself.
     d["_own_node"] = f'data-history-node-id="{nid}"' in r.text
+    if not d.get("pin"):
+        # Same office-site template as abralosol/aqalemhajer: the «الموقع» link may be a short link.
+        d["pin"] = pin_from_short_link(short_maps_link(r.text), lambda u: resolve_redirect(s, u))
     return d
 
 
@@ -553,6 +576,23 @@ def resolve_district(district_raw: Optional[str]) -> Optional[str]:
     return found.pop() if len(found) == 1 else None
 
 
+def town_city(district_raw: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """(town, rest) when the office's place text IS a named Al-Ahsa town («حرض», «قرية الحليلة») or
+    ends in «ب/بال<town>» («البريد بالجشه» → ("الجشة", "البريد")); (None, None) otherwise."""
+    if not district_raw:
+        return None, None
+    text = norm_ar(_ADMIN_PREFIX_RE.sub(" ", district_raw)).strip()
+    if text in _AHSA_TOWN_BY_NORM:
+        return _AHSA_TOWN_BY_NORM[text], None
+    m = re.match(r"^(.+?)\s+ب(?:ال)?(\S+)$", text)
+    if m:
+        tail = m.group(2)
+        for cand in (tail, "ال" + tail):
+            if cand in _AHSA_TOWN_BY_NORM:
+                return _AHSA_TOWN_BY_NORM[cand], m.group(1).strip() or None
+    return None, None
+
+
 def _type_phrase(title: str) -> str:
     """The words BEFORE the deal word — the source's own type phrase («أرض تجارية», «منزل عظم»)."""
     m = _DEAL_RE.search(f" {title} ")
@@ -561,6 +601,7 @@ def _type_phrase(title: str) -> str:
 
 def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason). row is None exactly when the source leaves it unpublishable."""
+    detail_read = bool(detail)      # the detail page was fetched and parsed (a failed fetch is {})
     detail = detail or {}
     title = detail.get("title") or ix["title"]
     fields: dict[str, str] = detail.get("fields") or {}
@@ -591,10 +632,17 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
     # names a place OUTSIDE the governorate is the source contradicting that default → skip.
     if district_raw and any(tok in district_raw for tok in OUTSIDE_AREA_TOKENS):
         return None, category, "outside_office_area"
-    city_id, region_id = to_catalog(OFFICE_CITY_AR, region_hint=REGION_HINT)
+    city_ar, city_basis = OFFICE_CITY_AR, "office_published_city_governorate_grain"
+    district_ar = resolve_district(district_raw)
+    town, town_rest = (None, None) if district_ar else town_city(district_raw)
+    if town:
+        t_id, t_reg = to_catalog(town, region_hint=REGION_HINT)
+        if t_id and t_reg == to_catalog(OFFICE_CITY_AR, region_hint=REGION_HINT)[1]:
+            city_ar, city_basis = town, "listing_title_town"
+            district_ar = find_district_in_text(town_rest, t_id) if town_rest else None
+    city_id, region_id = to_catalog(city_ar, region_hint=REGION_HINT)
     if not city_id:
         return None, category, "city_not_in_catalog"
-    district_ar = resolve_district(district_raw)
 
     amount = detail.get("price_amount")
     if amount is None:
@@ -614,7 +662,21 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
         # search/display layer under the owner's 2026-09-03 reversal.
         price_per_meter = amount
         if transaction_type == "Buy":
+            # The site's own «الإجمالي» figure, or — when the detail page WAS read and prints none —
+            # AUTHORITATIVE_NULL: the source settled that this ad has a rate and no total, so the
+            # upsert clears a stale total instead of keeping it (Falcon 2026-10-09: six ads were
+            # served at «0 ر.س» for 18 days because an older adapter had stored 0 and a plain None
+            # is dropped by db._unknown_must_not_overwrite_known). A FAILED detail fetch is not the
+            # source speaking, so it still sends None.
             price_total = detail.get("site_total")
+            # «الإجمالي 0» beside a positive rate is the site's own calculator multiplying the rate by an
+            # EMPTY area field, not a published total (Falcon 2026-10-16, CI source-reread 38963817563:
+            # nids 12209, 13994, 14199, 10372, 14144 print «المتر 1/200/4/3/250 ريال» and «الإجمالي 0»).
+            # Read as a total it booked six live ads at «0 ر.س» again, a week after 2026-10-09 cleared them.
+            if price_total == 0 and amount > 0:
+                price_total = None
+            if price_total is None and detail_read:
+                price_total = db.AUTHORITATIVE_NULL
     elif amount is not None and basis == "total" and transaction_type == "Rent":
         # PERIOD = SOURCE. Only a token in the price LABEL — the field that is ABOUT this figure —
         # may set the period. The description is deliberately NOT searched: it is long prose and a
@@ -627,6 +689,11 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
         rent_period, price_annual = (rp, annual) if rp else (None, amount)
     elif amount is not None and basis == "total":
         price_total = amount
+    if basis == "total" and basis_from == "detail_label" and detail_read:
+        # The ad's own page labels its figure a TOTAL («السعر 350 ريال», BSB14657 rendered 2026-10-18), so it states no
+        # rate: a rate stored by an older read clears instead of riding along (14657 kept price_per_meter 350 beside
+        # its 350 total — a None is dropped by db._unknown_must_not_overwrite_known).
+        price_per_meter = db.AUTHORITATIVE_NULL
     # A number with no basis label ANYWHERE stays out of both price columns: the source published a
     # figure but not what it means, and a total is a different fact from a rate. The raw figure
     # survives in additional_info, so nothing published is hidden.
@@ -652,8 +719,8 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
         **_amenities(description),
         "property_type": property_type,
         "transaction_type": transaction_type,
-        "city": N.map_city(OFFICE_CITY_AR),
-        "city_ar": OFFICE_CITY_AR,
+        "city": N.map_city(city_ar),
+        "city_ar": city_ar,
         "city_id": city_id,
         "region_id": region_id,
         "district_ar": district_ar,
@@ -676,6 +743,7 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
         # unknown-must-not-overwrite-known guard keeps a previously stored list.
         "photo_urls": photos[:20] if (detail or photos) else None,
         "additional_info": redact_capture({k: v for k, v in {
+            **(detail.get("pin") or {}),
             "price_label": label,
             "price_basis": basis,
             "price_basis_from": basis_from,
@@ -690,7 +758,7 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
             "property_age_raw": fields.get("al-mr") or None,
             "fal_license": detail.get("fal_license"),
             "bump_date": ix.get("bump_date"),      # a REFRESH date, not created_at
-            "city_basis": "office_published_city_governorate_grain",
+            "city_basis": city_basis,
             "district_source": "listing_title" if district_raw else None,
         }.items() if v is not None}),
         # Raw-capture standard: every structured fact the page published, so a field we learn to

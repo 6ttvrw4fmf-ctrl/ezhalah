@@ -1,0 +1,140 @@
+# 2026-10-19: also migration-MIRROR PRs (see the comment in the loop).
+# Owner decision 2026-10-18 («yes turn it on», «on for all engineers»): a night engineer's fix (branches
+# claude/ nle/ lifecycle/ af/ scraping/ qa/ kit/ fix/ — every engineer's naming) that touches ONLY the scraping robots
+# (every changed file under scrapers/) lands the same night without waiting for a person. It goes through
+# THE sanctioned merge gate (scripts/safe-pr-merge.ts — verify-merge-gate-transport.ts keeps it the only
+# door): the gate re-reads the PR right before merging and refuses unless every required check on main is
+# exactly SUCCESS, the branch is up to date and mergeable, and the file list still matches. 2026-10-31 (owner,
+# «8 or better»): the lanes widened to scrapers/, scripts/, e2e/, docs/ and .github/workflows/ — everything the
+# engineers ship except the app screens (src/, public/), package files, the database (supabase/ other than a
+# mirror) and the merge gate itself, which still wait for a person. Drafts and forks are never considered. A green scrapers-only PR that is merely BEHIND main is
+# brought up to date HERE (gh pr update-branch) and merged on a later pass: measured 2026-10-18 (backlog
+# 671), main merged every ~5-20 min, so AF's PR #7482 sat green-but-BEHIND from 10:45 to 13:10, was
+# updated by hand at 13:12 and was BEHIND again by 13:35 — a 9-minute CI cannot win that race by hand,
+# and the engineer whose prompt says «update it» is asleep after its 2-hour slot.
+name: Engineer auto-merge (engineer lanes)
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  statuses: read
+
+concurrency:
+  group: engineer-automerge
+  cancel-in-progress: false
+
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  merge:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Scrapers-only claude/* PRs → the sanctioned gate (it refuses anything not green)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASELINE_PR_TOKEN: ${{ secrets.BASELINE_PR_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          prs=$(gh pr list --repo "$REPO" --state open --limit 50 \
+                  --json number,headRefName,isDraft,isCrossRepository,title \
+                  -q '.[] | select((.headRefName|test("^(claude|nle|lifecycle|af|scraping|qa|kit|fix|mirror)[/-]")) and (.isDraft|not) and (.isCrossRepository|not)) | "\(.number)\t\(.title)"')
+          while IFS=$'\t' read -r pr title <&3; do
+            [ -n "$pr" ] || continue
+            files=$(gh pr view "$pr" --repo "$REPO" --json files -q '.files[].path')
+            # LANES (owner 2026-10-31, «8 or better»): scrapers/, scripts/, e2e/, docs/ and the robots' own workflows
+            # (.github/workflows/) land by themselves — on 10-31 five finished engineer PRs (#9577 robots, #9602
+            # lifecycle+barrier, #9600/#9449 rulebooks, #9607) waited a whole day for a person and capped every score.
+            # The merge GATE itself never auto-merges: engineer-automerge.yml, scripts/safe-pr-merge.ts and the secret
+            # handshake (scripts/lib/gateFetch.mjs, scripts/lib/robotPass.mjs) still need a person, so a robot cannot
+            # widen its own door. src/, public/, package files and supabase/ (other than a mirror) stay with a person.
+            outside=$(printf '%s\n' "$files" \
+              | grep -vE '^(scrapers|scripts|e2e|docs|\.github/workflows)/' \
+              ; printf '%s\n' "$files" \
+              | grep -E '^(\.github/workflows/engineer-automerge\.yml|scripts/safe-pr-merge\.ts|scripts/lib/gateFetch\.mjs|scripts/lib/robotPass\.mjs)$' \
+              ; true)
+            outside=$(printf '%s' "$outside" | sed '/^$/d')
+            # A MIRROR PR (owner 2026-10-19): its ONLY files are supabase/migrations/<14 digits>_*.sql and its title
+            # says «mirror». Merging it changes nothing in production — migrations reach prod only through the
+            # engineers' apply step; the file is the git copy of one ALREADY applied, and an unmirrored one blocks
+            # EVERY frontend deploy (drift gate: 10-18 #7555, #7619). The required checks (incl. the byte-parity
+            # check against production) still decide, through the same gate.
+            mirror_only=0
+            notmig=$(printf '%s\n' "$files" | grep -vE '^supabase/migrations/[0-9]{14}_[A-Za-z0-9_]+\.sql$' || true)
+            if [ -n "$files" ] && [ -z "$notmig" ] && printf '%s' "$title" | grep -qi 'mirror'; then mirror_only=1; fi
+            # An EMPTY mirror PR (owner 2026-10-26, 🔧 backlog 912): its migration file already reached main through
+            # another PR, so the diff is empty and the PR would read «not a mirror» forever (8713 sat 14 h, 8678 24 h,
+            # 8659 27 h, 8921 12 h). Nothing is lost — git and production already agree — so it is closed with the reason.
+            if [ -z "$files" ] && printf '%s' "$title" | grep -qi 'mirror'; then
+              echo "#$pr: empty mirror (its file is already on main) → close"
+              gh pr close "$pr" --repo "$REPO" --comment "Closed by engineer-automerge: this mirror PR's diff is empty — its migration file already reached main through another PR, so git and production already agree (🔧 backlog 912)." \
+                || echo "#$pr: close refused — next pass"
+              continue
+            fi
+            if [ -z "$files" ] || { [ -n "$outside" ] && [ "$mirror_only" != 1 ]; }; then
+              echo "#$pr: not scrapers-only / not a mirror — left for a person"; continue
+            fi
+            # GitHub answers UNKNOWN while it recomputes mergeability after main moved (🔧 2026-10-24, backlog
+            # 802: #8449 read UNKNOWN at 12:07 while it was BEHIND, so the branch was not updated and the gate
+            # refused it «branch is BEHIND base»; the PR sat 7 h 19 min). Wait for the real answer, briefly.
+            state=$(gh pr view "$pr" --repo "$REPO" --json mergeStateStatus -q .mergeStateStatus)
+            for _ in 1 2 3 4 5 6; do
+              [ "$state" = "UNKNOWN" ] || break
+              sleep 5
+              state=$(gh pr view "$pr" --repo "$REPO" --json mergeStateStatus -q .mergeStateStatus)
+            done
+            if [ "$state" = "BEHIND" ]; then
+              # Up to date first; CI re-runs on the merge commit and a later pass merges it. The gate below
+              # would only refuse a BEHIND branch (it never merges one), so this adds no new door.
+              echo "#$pr: scrapers-only but BEHIND main → gh pr update-branch (merge on a later pass)"
+              # With the built-in token the update commit starts NO workflow, so the required checks would never
+              # report and the PR would wait forever. BASELINE_PR_TOKEN (the PAT deploy-frontend.yml already uses
+              # for the same reason) makes the update a normal push that runs CI; without it, fall back.
+              GH_TOKEN="${BASELINE_PR_TOKEN:-$GH_TOKEN}" gh pr update-branch "$pr" --repo "$REPO" \
+                || echo "#$pr: update-branch refused — next pass"
+              continue
+            fi
+            echo "#$pr: scrapers-only ($state) → safe-pr-merge.ts"
+            gate_out=$(node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/safe-pr-merge.ts "$pr" \
+              --expect-files "$(printf '%s\n' "$files" | paste -sd, -)" 2>&1) && gate_rc=0 || gate_rc=$?
+            printf '%s\n' "$gate_out"
+            if [ "$gate_rc" != 0 ]; then
+              echo "#$pr: gate refused (not green / moved) — next pass"
+              # The gate itself knows BEHIND (it reads the PR's own mergeStateStatus right before merging);
+              # when that is the only thing it named, bring the branch up to date now, as above.
+              if printf '%s' "$gate_out" | grep -q 'branch is BEHIND base'; then
+                echo "#$pr: the gate read BEHIND → gh pr update-branch (merge on a later pass)"
+                GH_TOKEN="${BASELINE_PR_TOKEN:-$GH_TOKEN}" gh pr update-branch "$pr" --repo "$REPO" \
+                  || echo "#$pr: update-branch refused — next pass"
+              fi
+            fi
+          done 3<<< "$prs"
+
+      # ── Failure→alert bridge (issue #1349): this job runs unattended, so a red run must reach
+      # alert_event to reach a human. One open alert per workflow file; the next green run resolves it.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind barrier_check_failed
+          --workflow engineer-automerge.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

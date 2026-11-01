@@ -51,7 +51,10 @@ const defining = readdirSync(MIG_DIR)
   .sort();
 
 check('a migration defines the gathern-overlay district fix', defining.length > 0);
-const sql = defining.length ? readFileSync(join(MIG_DIR, defining[defining.length - 1]), 'utf8') : '';
+// The ORIGINAL surgical fix (20260911213602) is the subject of these checks. Since 2026-10-04 a later full
+// redefinition (20261004073216) also carries the fingerprint; whether the LATEST view keeps the resolver is
+// verify-gathern-district-survives-v2-redefinitions.ts's job, so this barrier keeps reading the first one.
+const sql = defining.length ? readFileSync(join(MIG_DIR, defining[0]), 'utf8') : '';
 
 // ── 1. THE FIX TARGETS THE RIGHT VIEW, THE RIGHT COLUMN ─────────────────────────────────────────
 check('#1 it rewrites listing_native_location_v2',

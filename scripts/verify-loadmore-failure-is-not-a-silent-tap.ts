@@ -20,7 +20,7 @@
 // THE TWO-TAP, 500-CAP RULE (owner 2026-09-14, supersedes Task 4 rev. 2's unbounded drain). A press's
 // reveal target comes from `revealTarget(cur, total)`: a FIRST tap (still at the initial-reveal floor)
 // reveals up to the next 100-boundary, leaving any extra fetched rows buffered — the chat stays open,
-// offering «عرض المزيد» and/or «خلّنا نحدد الطلب أكثر» again. The LAST tap (revealCount already past
+// offering «عرض المزيد» and/or «🎯 دقّق مع الذكاء» again. The LAST tap (revealCount already past
 // that floor) reveals up to SECOND_PAGE_CAP (500) and the chat COMPLETES: on a ≤500 set that shows
 // everything, on a >500 set it caps at 500 and the terminal Advanced-Filter state takes over. There
 // is no third tap. The failure contract is unchanged in both branches: a failure on ANY page tells
@@ -127,6 +127,7 @@ const PRELUDE = [
   // same drain it always did. That it must be declared at all is the point: the lift
   // runs the REAL loadMore, so a guard added to production code cannot be invisible here.
   'const conversationEpochRef = { current: 0 };',
+  'const prefetchRef = { current: new Map() }; // no saved-chat pre-load in this fixture (2026-10-07)',
   // Real shape: revealCount[mid] ?? initialReveal(m.result). Seeding it here — not by faking
   // initialReveal's return value — is what lets alreadyExpandedOnce read exactly as it does in the
   // real component: a first press has no entry (falls through to the floor), a later press has one.
@@ -173,7 +174,7 @@ const runLoadMore = async (
   };
   const m = await liftSymbols(
     file,
-    [{ header: '  const loadMore = async (m: Extract<ChatMsg, { role: \'results\' }>) => {', endsWith: /^  \};$/ }],
+    [{ header: '  const loadMore = async (m: Extract<ChatMsg, { role: \'results\' }>, requestedTarget?: number) => {', endsWith: /^  \};$/ }],
     ['loadMore'],
     PRELUDE,
   );
@@ -427,8 +428,8 @@ check('store.tsx pages at the shared LOAD_MORE_PAGE_SIZE, not a private copy of 
 // reveals past what revealTarget returns reintroduces the over-reveal. Proves §2's first-press checks
 // are not vacuous: without the boundary, a first press on a 5,000-match search reveals past 100.
 const mFirstOverreveals = mutantOf(agentSrc,
-  'const target = revealTarget(cur, m.result.matchTotal ?? Infinity);',
-  'const target = revealTarget(cur, m.result.matchTotal ?? Infinity) + 500;');
+  'revealTarget(cur, m.result.matchTotal ?? Infinity)',
+  '(revealTarget(cur, m.result.matchTotal ?? Infinity) + 500)');
 const overrevealBus = await runLoadMore(
   mFirstOverreveals,
   [{ listings: PAGE(150, 10), nextOffset: 500, hasMore: true }],
@@ -445,9 +446,12 @@ mustCatch('M-first-overreveals — a first press revealing past the 100-boundary
 // reasons rather than on an unrelated signature change. (It threw `mutation anchor missing` when the
 // argument landed — loud and fail-closed, which is the right way round.)
 const LOADMORE_CALL_ARGS = 'q, pageOffset, m.result.rotationSeed';
+// 2026-10-07: the page can come from a saved chat's pre-load (prefetchNextPage) or the live fetch, so
+// the destructure now reads `page`; the live call keeps LOADMORE_CALL_ARGS, asserted just below.
+if (!agentSrc.includes(`page = await loadMoreListings(${LOADMORE_CALL_ARGS});`)) throw new Error('loadMore no longer pages with the set\'s own seed');
 const mDrop = mutantOf(agentSrc,
-  `const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(${LOADMORE_CALL_ARGS});`,
-  `const { listings: more, nextOffset, hasMore } = await loadMoreListings(${LOADMORE_CALL_ARGS});\n        const failed = undefined;`);
+  `const { listings: more, nextOffset, hasMore, failed } = page;`,
+  `const { listings: more, nextOffset, hasMore } = page;\n        const failed = undefined;`);
 const dropBus = await runLoadMore(mDrop, [{ listings: [], nextOffset: 0, hasMore: true, failed: true }], PAGE(10));
 mustCatch('M-drop — ignoring `failed` reproduces the silent dead tap (no message, no cards)',
   dropBus.appended.length === 0 && dropBus.merged.length === 10,
@@ -487,8 +491,8 @@ mustCatch('M-unbounded — a drain with no page budget runs past it and is caugh
 // M-unbounded-reveal: THE CRASH, restored — remove the 500 cap so a press reveals the whole cohort,
 // exactly the code that mounted ~20,000 cards and killed the renderer. Proves §CEILING is not vacuous.
 const mUnboundedReveal = mutantOf(agentSrc,
-  'const target = revealTarget(cur, m.result.matchTotal ?? Infinity);',
-  'const target = Infinity;');
+  'revealTarget(cur, m.result.matchTotal ?? Infinity)',
+  'Infinity');
 {
   const pages = Array.from({ length: 40 }, (_, i) => ({
     listings: PAGE(LOAD_MORE_PAGE_SIZE, 100 + i * LOAD_MORE_PAGE_SIZE),
@@ -502,9 +506,11 @@ const mUnboundedReveal = mutantOf(agentSrc,
 
 // M-no-finish: a successful complete drain that forgets to call setCompleted would leave the user
 // stuck — everything shown, but the composer still live and no New Chat offered.
+// Anchored on loadMore's OWN terminal predicate (2026-10-07: restoreLeftState has its own
+// `if (revealIsTerminal) setCompleted(true);`, so the bare line no longer names loadMore's).
 const mNoFinish = mutantOf(agentSrc,
-  'if (revealIsTerminal) setCompleted(true);',
-  'if (false) setCompleted(true);');
+  'revealTo >= Math.min(SECOND_PAGE_CAP, totalForCap) || (!hasMoreNow && revealTo >= mergedLen);',
+  'false;');
 const noFinishBus = await runLoadMore(mNoFinish, [{ listings: PAGE(10, 10), nextOffset: 20, hasMore: false }], PAGE(10));
 mustCatch('M-no-finish — a drain that reached the end but never finishes the chat is caught',
   noFinishBus.completed !== true, `completed: ${noFinishBus.completed}`);

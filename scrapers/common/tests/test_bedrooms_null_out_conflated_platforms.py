@@ -97,9 +97,11 @@ def test_mustqr_rooms_field_no_longer_feeds_bedrooms():
 
 
 def test_october_specs_bedrooms_no_longer_feeds_beds():
+    # 2026-09-28: october moved to the Nuzul API, whose `bedrooms` is the same total-room counter
+    # (45056: bedrooms=5, «3 غرف نوم» in its own text) — map_listing overrides it after the spread.
     text = _src("october")
     assert 'beds = specs.get("bedrooms")' not in text
-    assert re.search(r"beds = None\n    baths = specs\.get", text)
+    assert re.search(r'\*\*\{k: v for k, v in fields\.items\(\)[^\n]*\n[^\n]*\n\s+"bedrooms": None,', text)
 
 
 def test_raghdan_no_longer_derives_bedrooms_dead_helper_removed():

@@ -42,7 +42,7 @@ def _page(*, name, ref, price, period="", specs=(), rooms="null", area="251.00",
         # The similar-properties strip: another listing's price, period and type. Everything below
         # «عقارات مشابهة» must be invisible to the parser.
         'عقارات مشابهة'
-        '<span class="bg-gray-100">رقم المرجع: AQ000000</span>'
+        '<span class="bg-gray-100">رقم المرجع: AQ000000</span><p>شقة مع مطبخ راكب ومصعد</p>'
         '<div class="text-3xl font-bold" style="color: var(--color-primary);">'
         '9,999,999 <span class="text-lg font-normal">ر.س</span>'
         '<span class="text-base font-normal text-gray-500">/ monthly</span></div>'
@@ -121,3 +121,61 @@ def test_similar_properties_strip_cannot_leak_into_the_row():
     assert (r["price_total"], r["price_annual"], r["rent_period"]) == (680000, None, None)
     assert r["city"] == "Riyadh" and r["region"] == "Riyadh"
     assert r["neighborhood"] == "حي الرمال"
+
+
+# ── amenities from the ad's own «الوصف» (🔬 AF engineer, 2026-10-08) ───────────────────────────────
+# therc publishes no amenity field; 236 of 447 live descriptions named a kitchen and 0 were stored.
+# Verbatim shapes from live therc_residential_listings 10283567 / 10283466 (2026-10-08).
+from scrapers.therc.run import description_amenities  # noqa: E402
+
+
+def test_bulleted_description_states_kitchen_and_maid_room():
+    d = ("🟧الفيلا تتكون من * حوش * ⁠مدخل سيارة * ⁠مشب * ⁠ملحق * ⁠مطبخ * ⁠غرفة خادمة * ⁠مجلس")
+    out = description_amenities(d)
+    assert out.get("kitchen") is True and out.get("maid_room") is True
+
+
+def test_check_mark_bullets_are_separate_statements():
+    d = "تفاصيل الشقة: ✔️ 3 غرف نوم ✔️ صالة ✔️ لا يوجد مصعد ✔️ مطبخ راكب"
+    out = description_amenities(d)
+    assert out.get("kitchen") is True
+    assert out.get("elevator") is False, "«لا يوجد مصعد» is a stated no (owner 2026-10-24), its own bullet"
+
+
+def test_neighbourhood_is_not_the_unit_and_silence_is_nothing():
+    assert description_amenities("قريب من مواقف عامة وجميع الخدمات") == {}
+    assert description_amenities(None) == {}
+
+
+# ── amenities come from the WHOLE «الوصف» card, not the redacted stored text (🔬 2026-10-12) ──────────
+_PLAIN_DESC = '<div class="prose prose-sm">فيلا واسعة بحي طويق مع مسبح ومجلس وحديقة خاصة.</div>'
+_KW = dict(name="استراحة للإيجار في حي قصور ال مقبل, مدينة الرياض", ref="AQ747942", price="150,000",
+           period=_YEARLY, locality="الرياض", district="حي هذلولة", badge="استراحة")
+
+
+def _with_desc(desc_html: str, tail: str = "") -> dict:
+    page = _page(**_KW).replace(_PLAIN_DESC, desc_html + tail)
+    row, _cat = map_listing(URL, page, None)
+    return row
+
+
+def test_ad_opening_with_a_contact_line_still_answers():
+    """therc 11241522, verbatim shape: the card OPENS with «للتواصل واتس :», so the stored description is cut
+    to nothing — the amenities below it must still be read, and the contact name never stored."""
+    row = _with_desc('<div class="prose prose-sm max-w-none">للتواصل واتس :<br />\nفاطمه <br />\n<br />\n'
+                     '✅✅✅✅✅ <br />\n<br />\nشاليه للإيجار السنوي<br />\nمؤثثة بالكامل + طاولة بلياردو<br />\n'
+                     '• مطبخ مؤثث ومجهز<br />\n</div>')
+    assert row["kitchen"] is True
+    assert not (row.get("description") or "").count("فاطمه")
+
+
+def test_lines_after_the_first_are_read():
+    """therc 10283456: «▪️ مصعد متوفر … ▪️ مطبخ راكب … ▪️ عدد 3 مكيفات راكبة» below the first line."""
+    row = _with_desc('<div class="prose prose-sm max-w-none">🏡 دور علوي للإيجار – الدور الأول في فيلا<br />\n'
+                     '▪️ مصعد متوفر<br />\n<div>▪️ مطبخ راكب</div>\n▪️ عدد 3 مكيفات راكبة<br />\n</div>')
+    assert row["elevator"] is True and row["kitchen"] is True and row["air_conditioner"] is True
+
+
+def test_similar_listings_strip_never_answers():
+    row = _with_desc(_PLAIN_DESC)
+    assert "kitchen" not in row and "elevator" not in row      # «مطبخ» only in the strip below

@@ -34,7 +34,8 @@ SOURCE SHAPE (measured live 2026-09-24, before any code)
   city_not_in_catalog (reported upward). Two projects (23, 45) carry the English string «…, Ad
   Dirah, Riyadh, Riyadh governorate, …»; «Riyadh» → «الرياض» through a closed two-entry table.
   `location.neighborhood` («الربيع», «النرجس», «Ad Dirah») feeds find_district_in_text; an English
-  one stays NULL.
+  one reads the shared source-attested EN→AR bridge (scrapers/common/district_bridge, unique answers only,
+  confirmed against the city's catalogue): «Ad Dirah» → «حي الديرة» (14 ads had none, 2026-10-20).
 · TYPES: propertyType.name is «فيلا » (44, trailing space), «مبنى» (18), «دور » (9), absent (1).
   «مبنى» → Building follows the fleet's own reading (alsidra, dealapp, sadin, souq24); the 18 units
   so labelled are floors of an «أدوار» project that the source itself calls مبنى. Absent → skip.
@@ -72,6 +73,7 @@ import argparse
 import datetime as dt
 import json
 import re
+from functools import lru_cache
 import sys
 import time
 from pathlib import Path
@@ -83,6 +85,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.district_bridge import bridge_rows, bridge_unique, norm_en  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 
@@ -150,6 +154,14 @@ def city_from_location(loc: dict) -> Optional[str]:
     return None
 
 
+def walk_session() -> tuple[cc.Session, list[str]]:
+    """3 browser profiles DIRECT, then the residential proxy (when the job has it), each a fresh
+    session; the first the catalogue answers 200 is kept. 2026-10-20 (Scraping Engineer): the one
+    pinned chrome session got «projects page 1 → HTTP 502» on 4 runs from 10-19 (181 seen on 10-18),
+    and nothing recorded whether another profile or route would have been served."""
+    return retry_smarter_session(f"{API}?page=1&limit=1", headers=dict(session().headers))
+
+
 def fetch_projects(s: cc.Session) -> tuple[list[dict], int]:
     out: list[dict] = []
     total = 0
@@ -189,6 +201,12 @@ def project_photos(detail: Optional[dict]) -> list[str]:
     return out
 
 
+@lru_cache(maxsize=None)
+def _bridge_en_ar(city_en: str) -> dict[str, str]:
+    """The EN→AR district bridge for one city, unique keys only (scrapers/common/district_bridge)."""
+    return bridge_unique(bridge_rows(city_en), norm_en) if city_en else {}
+
+
 def map_listing(project: dict, unit: dict, photos: list[str],
                 today: Optional[dt.date] = None) -> tuple[Optional[dict], str, str]:
     pid, uid = project.get("id"), unit.get("id")
@@ -212,6 +230,9 @@ def map_listing(project: dict, unit: dict, photos: list[str],
     city_id, region_id = to_catalog(city_ar)
     district_raw = (loc.get("neighborhood") or "").strip() or None
     district_ar = find_district_in_text(district_raw, city_id) if district_raw else None
+    if not district_ar and district_raw and district_raw.isascii():
+        ar = _bridge_en_ar(normalize.map_city(city_ar) or "").get(norm_en(district_raw) or "")
+        district_ar = find_district_in_text(ar, city_id) if ar else None
 
     price_raw = unit.get("priceSar")
     price = _pos(price_raw)
@@ -318,7 +339,8 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    s = session()
+    s, route = walk_session()
+    print(f"{SOURCE}: route {' · '.join(route)}", flush=True)
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run("snam")
     res: list[dict] = []
@@ -396,7 +418,8 @@ def main() -> int:
         return 0
     except Exception as e:
         if run_id:
-            db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])
+            db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0,
+                       notes=f"{e} (route {' '.join(route)})"[:300])
         print(f"✗ {SOURCE}: {e}", flush=True)
         return 1
 

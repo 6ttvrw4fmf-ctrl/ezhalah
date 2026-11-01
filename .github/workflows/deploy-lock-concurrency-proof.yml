@@ -28,11 +28,14 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
   SB: https://aannarbkwcymrotzwdbo.supabase.co
 
 jobs:
   setup:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     outputs:
       barrier: ${{ steps.plan.outputs.barrier }}
     steps:
@@ -56,7 +59,7 @@ jobs:
 
   race:
     needs: setup
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -94,7 +97,7 @@ jobs:
     # most important safety property in the system — precisely the kind of noise that teaches people
     # to ignore a red build. A refusal to race is a SKIP, never a violation.
     if: needs.setup.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     steps:
       - name: Exactly ONE writer may have won
         env:
@@ -126,7 +129,7 @@ jobs:
   cleanup:
     needs: [setup, race, assert]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     steps:
       - name: Remove this run's test holders
         env:

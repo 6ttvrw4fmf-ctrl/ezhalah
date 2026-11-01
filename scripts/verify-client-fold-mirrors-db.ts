@@ -23,7 +23,7 @@ const check = (label: string, ok: boolean) => {
 console.log('\nclient folds mirror the DB district token — user spelling matches our catalog\n');
 
 const FOLDS: Array<[string, string]> = [
-  ['src/data/locations.ts',  'norm (locations)'],
+  ['src/lib/locationSuggest.ts', 'norm (locations)'], // moved out of src/data/locations.ts 2026-10-03 so a barrier can execute it
   ['src/lib/chatSearch.ts',  'normalizeArabic (chat)'],
   ['src/lib/translitPlace.ts','normAr (landmark)'],
 ];
@@ -39,7 +39,7 @@ for (const [rel, label] of FOLDS) {
 // listing's RAW text against the static catalog json; neither is the district token, so neither
 // folds digits — asserted here so the asymmetry is deliberate, not drift.
 {
-  const loc = readFileSync(join(root, 'src/data/locations.ts'), 'utf8');
+  const loc = readFileSync(join(root, 'src/lib/locationSuggest.ts'), 'utf8');
   check('norm (locations): trailing number folded (المحمدية 2 → المحمدية)', /\.replace\(\/\[0-9\]\+\$\/, ?['"]{2}\)/.test(loc));
   check('norm (locations): LEADING number folded too (1النرجس → النرجس)', /\.replace\(\/\^\[0-9\]\+\/, ?['"]{2}\)/.test(loc));
   for (const [rel, label] of [['src/lib/chatSearch.ts', 'normalizeArabic (chat)'], ['src/lib/translitPlace.ts', 'normAr (landmark)']] as const) {

@@ -29,6 +29,8 @@
 //   BASE_URL=http://localhost:8081 node …        # against a local build
 //   SWEEP_ONLY=trending-city node …              # one journey kind while developing
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
+import '../../scripts/lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
+import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium, devices } from '@playwright/test';
 import { appendFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { parseVisibleState } from './visibleState.mjs';
@@ -610,7 +612,9 @@ async function setDeal(page, deal) {
 }
 async function setPeriod(page, period) {
   if (period !== 'شهري') return;
-  await page.getByText('شهري', { exact: true }).first().click(); await sleep(500);
+  // The button reads «إقامات قصيرة» since 2026-10-25 (the request still sends p_rent_period='شهري'); tapping the
+  // old word threw, so the sweep ran no monthly journey and stayed red from 10-26 on a floor it could not reach.
+  await page.getByText('إقامات قصيرة', { exact: true }).first().click(); await sleep(500);
   await page.getByText('سنوي', { exact: true }).first().click(); await sleep(900);
 }
 // «not offered» must mean the PRODUCT did not offer it — never "the list had not rendered yet".
@@ -871,8 +875,10 @@ function dbFilterFromRequest(req, tax, cities) {
   // p_region_ids is a plain column predicate in the served index, so it needs no interpretation.
   if (req.p_region_ids?.length) f += `&region_id=in.(${req.p_region_ids.map((n) => Number(n)).join(',')})`;
   if (req.p_deal) f += `&deal_ar=eq.${enc(req.p_deal)}`;
-  if (req.p_rent_period === 'سنوي') f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`;
-  if (req.p_rent_period === 'شهري') f += '&payment_monthly=is.true&rent_now_pay_later=not.is.true';
+  // price on request (price_annual NULL) is in every period — owner 2026-09-28
+  if (req.p_rent_period === 'سنوي') f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`;
+  // Unpriced rows join «إقامات قصيرة» only from gathern + aqarmonthly (af_eligibility_clause, 20261026071543).
+  if (req.p_rent_period === 'شهري') f += '&or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))';
   // ── المدينة: mirror the RPC's THREE arms, never the label alone ───────────────────────────────
   // The RPC's city predicate is (read from prosrc 2026-09-01, and what §42.2 describes):
   //     normalize_ar(s.city_ar) = any(city_tokens)      ← the LABEL arm

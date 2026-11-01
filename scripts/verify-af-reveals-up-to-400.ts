@@ -77,7 +77,7 @@ const agent = stripComments(read('src/app/agent.tsx'));
 check('the results message carries afCompleted (provenance on the message, not racy state)',
   /role: 'results'[\s\S]{0,400}?afCompleted\?: boolean/.test(agent));
 check('only a round that COMMITTED through runRefine sets it (opts.guided is the one writer)',
-  /playListings\(run, statusId, buildScrapeIntro\(result\.query \?\? refined\), result, label, !!opts\?\.guided\)/.test(agent));
+  /playListings\(run, statusId,\s*opts\?\.guided \? guidedSearchSummary\(opts\.guided\.baseQ, opts\.guided\.facets\) : buildScrapeIntro\(result\.query \?\? refined\),\s*result, label, !!opts\?\.guided\)/.test(agent));
 check('the reveal helper forwards the flag to the pure function',
   /initialRevealPure\(\{[^}]*afCompleted \}\)/.test(agent));
 check('every render/load-more site reads the SAME flag (no site left on the old baseline)',

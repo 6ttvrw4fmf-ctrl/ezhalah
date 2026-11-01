@@ -65,7 +65,7 @@ TYPE_MAP = {
     # residential
     "VILLA": "Villa", "VILLA-IN-COMPLEX": "Villa", "VILLA-2-APARTMENTS": "Villa",
     "VILLA3-APARTMENTS": "Villa", "VILLA-APARTMENT": "Villa", "BONE-VILLA": "Villa",
-    "TOWNHOUSE": "Villa", "DUPLEX": "Duplex", "DUPLEX APARTMENT": "Apartment", "PENTHOUSE": "Apartment",
+    "TOWNHOUSE": "تاون هاوس", "DUPLEX": "Duplex", "DUPLEX APARTMENT": "Apartment", "PENTHOUSE": "Apartment",
     "CASTLE": "Villa", "DEMOTIC-HOUSE": "House", "COUNTRY HOUSE": "Villa", "COMPOUND": "Compound",
     "APARTMENT": "Apartment", "APARTMENT-TOWER": "Apartment", "APARTMENT-COMPLEX": "Apartment",
     "ROVE-APARTMENT": "Apartment", "STUDIO": "Apartment", "FURNISHED-APARTMENT": "Apartment",

@@ -94,6 +94,11 @@ console.log('\n3) the committed key is anon, not service_role');
 // to chase into node_modules to answer "does this touch Supabase".
 // ---------------------------------------------------------------------------
 const RESOLVER_MODULE_PATH = fileURLToPath(new URL('./lib/public-supabase.ts', import.meta.url));
+// The secret-handshake module (docs/ops/SCRAPE_GUARD.md) names our database host only to RECOGNISE our own calls and
+// decorate them; it never connects to anything, needs no secret to load, and is a no-op without EZ_GATE_SECRET. Like
+// the resolver's own file, its naming the host is not evidence that a script talks to Supabase. (2026-10-22: without
+// this, every browser robot that imports robotPass.mjs, which imports it, was misread as a Supabase caller.)
+const HANDSHAKE_MODULE_PATH = fileURLToPath(new URL('./lib/gateFetch.mjs', import.meta.url));
 const LOCAL_IMPORT_RE = /\b(?:from|import)\s*\(?\s*['"](\.\.?\/[^'"]+)['"]/g;
 const MAX_CLOSURE_FILES = 200; // ponytail: bounded fan-out guard; raise if a real live check legitimately needs a deeper local import tree
 
@@ -159,7 +164,7 @@ function classifyLiveCheck(entryFile: string): {
   // env vars it reads as fallbacks — that is not evidence of a SCRIPT bypassing it.
   let rawSupabaseSignal = false;
   for (const [file, text] of closure) {
-    if (file === RESOLVER_MODULE_PATH) continue;
+    if (file === RESOLVER_MODULE_PATH || file === HANDSHAKE_MODULE_PATH) continue;
     if (RAW_SUPABASE_SIGNAL.test(text)) { rawSupabaseSignal = true; break; }
   }
 

@@ -79,10 +79,10 @@ type Case = {
 };
 
 const CASES: Case[] = [
-  { label: 'Villa/Buy · street width ≥ 20', types: ['فيلا','تاون هاوس','بيت'], deal: 'بيع', category: 'Residential',
+  { label: 'Villa/Buy · street width ≥ 20', types: ['فيلا','بيت'], deal: 'بيع', category: 'Residential',
     rpc: { p_street_width_min: 20 }, rest: 'street_width_m=gte.20', strictCol: 'street_width_m',
     notMatching: 'street_width_m=lt.20' },
-  { label: 'Villa/Buy · bathrooms ≥ 3', types: ['فيلا','تاون هاوس','بيت'], deal: 'بيع', category: 'Residential',
+  { label: 'Villa/Buy · bathrooms ≥ 3', types: ['فيلا','بيت'], deal: 'بيع', category: 'Residential',
     rpc: { p_bath_min: 3 }, rest: 'bathrooms=gte.3', strictCol: 'bathrooms', notMatching: 'bathrooms=lt.3' },
   { label: 'Apartment/Rent-Annual · confirmed furnished', types: ['شقة','مبنى شقق مخدومة','ملحق علوي'], deal: 'إيجار',
     category: 'Residential', period: 'سنوي', rpc: { p_furnished: true }, rest: 'furnished=is.true', strictCol: 'furnished',
@@ -109,9 +109,12 @@ const CASES: Case[] = [
 // The rent-period rule, expressed as PostgREST filters (the product rule, not our SQL):
 //   annual  = source says annual, OR a monthly-priced row that is an RNPL instalment plan
 //   monthly = a real monthly rental that is NOT an RNPL instalment plan
+// Price on request (price_annual NULL) is in «سنوي» and «كلاهما» (owner 2026-09-28: no figure to misstate) — but
+// in «شهري» (the «إقامات قصيرة» pool) ONLY for gathern + aqarmonthly (owner 2026-10-26, migration 20261026071543:
+// «we need to shift those to annual rent» — 6,229 price-on-request rows from other sites had leaked into short stays).
 const periodRest = (p?: string) =>
-  p === 'سنوي'  ? '&or=(rent_period_ar.eq.سنوي,and(rent_period_ar.eq.شهري,rent_now_pay_later.is.true))'
-  : p === 'شهري' ? '&payment_monthly=is.true&rent_now_pay_later=not.is.true'
+  p === 'سنوي'  ? '&or=(rent_period_ar.eq.سنوي,and(rent_period_ar.eq.شهري,rent_now_pay_later.is.true),price_annual.is.null)'
+  : p === 'شهري' ? '&or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))'
   : '';
 
 async function restCount(c: Case, extra: string): Promise<number | null> {

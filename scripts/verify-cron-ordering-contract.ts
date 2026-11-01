@@ -47,7 +47,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  type ContractRow, hourlyMinute, mirrorCurrencyProblem, mirrorDriftProblems, orderingProblems,
+  type ContractRow, type LockDependency, hourlyMinute, mirrorCurrencyProblem, mirrorDriftProblems, orderingProblems,
 } from './lib/cronOrdering.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -69,7 +69,7 @@ if (!existsSync(join(ROOT, MIRROR))) {
   console.error(`FAIL  ${MIRROR} is missing — deleting the mirror must not disarm this check`);
   process.exit(1);
 }
-let mirror: { contract?: unknown; schedules?: unknown; _mirrored_through_migration?: unknown };
+let mirror: { contract?: unknown; schedules?: unknown; lock_dependencies?: unknown; _mirrored_through_migration?: unknown };
 try {
   mirror = JSON.parse(readFileSync(join(ROOT, MIRROR), 'utf8'));
 } catch (e) {
@@ -79,6 +79,7 @@ try {
 
 const contract = mirror.contract as ContractRow[];
 const schedules = (mirror.schedules ?? {}) as Record<string, string>;
+const locks = (mirror.lock_dependencies ?? []) as LockDependency[];
 
 check('the mirror declares a non-empty contract', Array.isArray(contract) && contract.length > 0,
   'an empty contract and a mirror that failed to parse are indistinguishable, and the empty '
@@ -104,7 +105,7 @@ for (const job of named) {
 }
 
 // ── THE RULE ITSELF ─────────────────────────────────────────────────────────────────────────────
-const problems = orderingProblems(contract, schedules);
+const problems = orderingProblems(contract, schedules, locks);
 check('every declared consumer trails its producer by at least the declared gap',
   problems.length === 0, problems.join('\n      '));
 
@@ -217,8 +218,24 @@ mustCatch('…while the healthy pair is NOT flagged (gap 14 >= 9)',
 mustCatch('…and a gap EXACTLY at the floor is allowed, not off-by-one refused (gap 9 >= 9)',
   orderingProblems(ROW, { producer: '36 * * * *', consumer: '45 * * * *' }).length === 0);
 
+// A declared lock replaces the gap (2026-10-13: jobid 17 holds a transaction-scoped advisory lock to COMMIT and
+// jobid 28 blocks on it — proof row 1055), but only when the mirror declares that lock on those two jobs.
+const LOCKED: ContractRow[] = [{ upstream_job: 'producer', downstream_job: 'consumer', min_gap_minutes: 7,
+  satisfied_by_lock: 'k' }];
+const LOCK = [{ key: 'k', producer: 'producer', consumer: 'consumer' }];
+check('(lock) a 2-minute gap under a declared and matching lock dependency is not a violation',
+  orderingProblems(LOCKED, { producer: '20 * * * *', consumer: '22 * * * *' }, LOCK).length === 0);
+mustCatch('a row that claims a lock the mirror does not declare',
+  orderingProblems(LOCKED, { producer: '20 * * * *', consumer: '22 * * * *' }, []).length > 0);
+mustCatch('a declared lock on OTHER jobs than the row\'s',
+  orderingProblems(LOCKED, { producer: '20 * * * *', consumer: '22 * * * *' },
+    [{ key: 'k', producer: 'producer', consumer: 'someone-else' }]).length > 0);
+mustCatch('a lock with a different key than the row claims',
+  orderingProblems(LOCKED, { producer: '20 * * * *', consumer: '22 * * * *' },
+    [{ key: 'other', producer: 'producer', consumer: 'consumer' }]).length > 0);
+
 mustCatch('…and the REAL committed mirror passes the same rule (this is not a fixture-only proof)',
-  orderingProblems(contract, schedules).length === 0);
+  orderingProblems(contract, schedules, locks).length === 0);
 
 // ── the drift predicate the live half's verdict comes from, proven HERE so it is covered per-PR ──
 mustCatch('a production contract row the committed mirror does not carry',

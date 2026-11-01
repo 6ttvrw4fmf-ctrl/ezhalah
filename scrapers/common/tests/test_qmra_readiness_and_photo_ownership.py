@@ -162,7 +162,7 @@ def test_a_bare_post_with_no_property_type_term_is_refused():
 
 
 @pytest.mark.parametrize("name,expected", [("دور", "Floor"), ("شقق", "Apartment"),
-                                           ("تاون هاوس", "Villa"), ("مكاتب", "Office")])
+                                           ("تاون هاوس", "تاون هاوس"), ("مكاتب", "Office")])
 def test_every_type_word_this_source_has_ever_shown_resolves(name, expected):
     rec = {"_embedded": {"wp:term": [[{"taxonomy": "property-type", "id": 1, "name": name}]]}}
     assert R._resolved_type(rec) == (expected, "")

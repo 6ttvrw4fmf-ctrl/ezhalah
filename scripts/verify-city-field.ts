@@ -205,7 +205,7 @@ const cityWriter = (() => {
 check('the one city-suggestion writer exists (every assertion below reads it)', cityWriter.length > 0,
   'writeCitySuggestionsForCohort not found in index.tsx — re-anchor these checks rather than deleting them');
 check('onFocus with empty text shows the deal+period+category-scoped Top 6 (topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6))',
-  /onFocus=\{\(\) => \{[\s\S]{0,3000}?writeCitySuggestionsForCohort\(cohort, true\)/.test(indexSrc)
+  /onFocus=\{\(\) => \{[\s\S]{0,3400}?writeCitySuggestionsForCohort\(cohort, true\)/.test(indexSrc) // window 3000→3400 (2026-10-04): the focus path now also sets the rows at once before the fetch
   && /topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)/.test(cityWriter));
 check(
   'REGRESSION (found live in testing): the Top-6-on-focus promise callback re-checks cityTextRef at resolution time before overwriting citySuggestions — without this guard, a keystroke typed right after focus can have its correctly-filtered results silently clobbered back to the stale Top 6 by the async callback resolving a moment later',

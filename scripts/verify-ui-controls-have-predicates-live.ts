@@ -46,7 +46,7 @@ const REG_URL = process.env.EZHALAH_SUPABASE_URL || 'https://aannarbkwcymrotzwdb
 const regKey = resolvePublicSupabase(process.env).key;
 
 const advancedSrc = readFileSync(join(ROOT, 'src/data/advancedFilters.ts'), 'utf8');
-const chipKeys = amenityChipKeys(advancedSrc);
+const chipKeys = amenityChipKeys(advancedSrc, readFileSync(join(ROOT, 'src/lib/afChips.ts'), 'utf8'));
 
 // THE WHOLE CONTROL SURFACE, not just the amenity chips (2026-09-12, routine #9). Four of the nine
 // live questions narrow on something that is not an amenity, so judging chipKeys alone left them

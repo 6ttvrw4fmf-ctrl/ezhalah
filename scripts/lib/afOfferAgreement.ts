@@ -8,7 +8,7 @@
 //    immediately close' stops being unlikely and becomes unrepresentable."
 //
 // On 2026-08-26 it was represented, in production, on the deployed bundle 22a2936. In the AI-agent
-// chat flow the «خلّنا نحدد الطلب أكثر» CTA was offered, the tap entered startAgeFlow (the actions
+// chat flow the «🎯 دقّق مع الذكاء» CTA was offered, the tap entered startAgeFlow (the actions
 // row hid at t=5.0s, which only happens once setAgeFlow({phase:'loading'}) lands), the round
 // computed an EMPTY plan, and the row came back at t=8.2s with no question ever rendered. The user
 // taps a visible button and gets a three-second flicker.
@@ -56,7 +56,7 @@
 // the run still goes red (a check that could not certify must never read green) while saying the
 // truthful thing.
 export type AfCtaObservation = {
-  /** Was «خلّنا نحدد الطلب أكثر» (testID=results-narrow) present before the tap? */
+  /** Was «🎯 دقّق مع الذكاء» (testID=results-narrow) present before the tap? */
   ctaOffered: boolean;
   /** Did an actual AF question card render at any point after the tap? */
   cardEverAppeared: boolean;

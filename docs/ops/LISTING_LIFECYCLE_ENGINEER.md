@@ -908,6 +908,133 @@ never re-probed, never stamped, and equally stuck — but there is no symmetric 
 the honest answer is a fresh DIRECT re-probe of the contradicting row by the oracle that killed it,
 not a write. Tracked separately; see `ops_incident` #530/#531/#533.
 
+### §4.1f — A RULE THAT LIVES IN TWO TIERS MUST BE EXECUTED AGAINST ONE CORPUS (2026-09-27, routine #11)
+
+§4.1b and §4.1c fixed a law that lived in eleven copies by moving it into one place. This is the case
+where you **cannot** do that, and what to do instead.
+
+Aqar City reworded its expired page around 2026-09-20, dropping «هذا» from «هذا الإعلان منتهي». The
+rule that reads that wording exists **twice**, written independently, in two tiers:
+
+| tier | where | what it does |
+|---|---|---|
+| DELETE | `scrapers/common/cleanup.py::_aqarcity_expired` | decides a permanent delete |
+| DEACTIVATION | `scrapers/aqarcity/run.py::_probe_id` → `_verify_gone` | decides a soft inactivation |
+
+**`ops_incident` #730 (2026-09-25) found the reword and fixed the DELETE copy. Nothing in the repo
+connected it to the other one.** So for two more days the deleter could see that an aqarcity ad was
+expired while the pruner could not, and §G.9.7 — *"no equivalent hidden path remains"* — had been
+answered for one tier only. Measured 2026-09-27, DIRECT, cohorts **interleaved**:
+
+| marker | already-dead (n=26) | known-alive controls (n=26) |
+|---|---:|---:|
+| «هذا الإعلان منتهي» — what `run.py` shipped | **0** | 0 |
+| «الإعلان غير متاح» | **26** | **0** |
+| «إعلان منتهي» | 23 | **0** |
+| `application/ld+json` | 0 | 25 |
+
+Six of those dead rows were `active = true`, at or past the 3-strike grace (`missing_count` 3 and 6)
+and **present in `search_listings_ar`**. Users could find and click six listings Aqar City had already
+expired, and nothing would ever have retired them.
+
+**§0 held, in the direction that matters, and that is exactly why it went unnoticed for two days.**
+The blind rule made `_verify_gone` answer `unknown`, so kills were **withheld** — not one listing was
+wrongly deactivated. A defect whose only symptom is a guard being *more* conservative produces no
+alert, no error and no bad row. It is the §4.1c/#778/#714 shape: an oracle that has quietly stopped
+being able to say GONE.
+
+Three things to carry forward:
+
+1. **When the copies cannot be merged, pin their EQUIVALENCE instead.** Merging these two would have
+   broken `scripts/verify-aqarcity-expiry-oracle-can-fire.ts`, whose mutation harness matches the
+   delete copy's exact source lines and raises `MUTATION TARGET VANISHED` if they move — a well-built
+   barrier owned by another change. So the new barrier
+   (`verify-aqarcity-expired-marker-is-the-sources-own-words.ts`) **executes both real predicates over
+   one corpus and fails on any disagreement.** Two copies stay, and divergence becomes unshippable.
+   That is the rule #730 had no way to state, and it is the one a third reword needs.
+2. **A thorough barrier over one copy cannot see the other one.** `verify-aqarcity-expiry-oracle-can-
+   fire.ts` is excellent — real captured bytes, ASCII-only fixture provenance, mutation targets that
+   fail loudly when they move — and it was **green throughout**, correctly, because it executes only
+   `cleanup.py`. Coverage of a copy is not coverage of a rule. When a barrier's cohort is "this
+   function", ask what else answers the same question.
+3. **Mirror the sibling's decision; do not re-derive one.** The first cut of this fix used a bare
+   `«إعلان منتهي» in body`. `cleanup.py` had deliberately anchored it to the title-suffix shape
+   (`-\s*إعلان منتهي\s*(?:\||"|<|&)`) because a bare substring also convicts a seller who writes the
+   phrase in a description — and on this platform a death eventually becomes a permanent DELETE. The
+   safer reading was found by **reading the sibling implementation**, not by reasoning from scratch.
+   Where two tiers must agree, the stricter tier's decision is the one to copy.
+
+**The fleet-wide variants check, and it came back clean — aqarcity was the only one.** The question
+§G.9.7 actually asks here is *which other platform has its death signal written twice?* Answered by
+reading `scrapers/common/cleanup.py`'s `PLATFORMS` table against each platform's liveness module:
+
+| platform | delete tier | deactivation tier | two independent copies? |
+|---|---|---|---|
+| **aqar** | `_aqar_dead` | `scrapers/aqar/liveness.py` | **no** — cleanup.py *imports* `DEAD_MARKERS` and `looks_closed` from it (line 34). The law already lives once, learned 2026-09-20 the same way. |
+| **wasalt** | `_wasalt_markers` | `scrapers/wasalt/liveness.py` | **no** — reuses aqar's markers, and wasalt's real signal is a hard 404 handled by `verdict()`'s status branch. No soft-close text to drift. |
+| **gathern** | `_never` | `scrapers/gathern/liveness.py` | **no** — 404-only by policy; there is no text signal to reword. |
+| **aqarcity** | `_aqarcity_expired` | `run.py::_probe_id` | **YES** — the only one, and the one that drifted. |
+
+So the class is closed fleet-wide rather than patched for one platform. Note the shape of the answer:
+three of the four were safe because someone had already applied "the law lives once", and the
+exception was the platform where the two tiers happened to be written by different changes at
+different times. **A duplicated rule is not a design decision anyone made; it is what happens when
+two tiers grow independently.**
+
+Also added, because this platform expresses "gone" as an HTTP 200 and §4.2 lesson 3 / `LISTING_
+LIVENESS.md` §5.4 require it: an **in-run positive control** gating both kill shapes, failing closed
+(no canary → no removal), armed only from rows the run actually parsed. This is strictly *more*
+conservative than what shipped, which killed on `notfound` with no control at all.
+
+### §4.1g — A DETECTOR MUST NOT HARDCODE ITS OWN DIAGNOSIS (2026-09-27, routine #11)
+
+`mon_detect_deletion_clock_stalled` fired for the first time ever on 2026-09-27 (`alert_event` 6325,
+aqarcity) and told the reader, in two **hardcoded string constants**, *"the verification the deletion
+depends on is not happening"* and *"re-probe the candidates so the real live/dead split is known"*.
+
+Measured the same hour across all four delete-enabled platforms:
+
+| platform | eligible | latest GONE | no verdict | class |
+|---|---:|---:|---:|---|
+| aqarcity | 334 | **334** | 0 | `SOURCE_CONFIRMED_DEAD` — verifier **done** |
+| aqar | 26,032 | 6 | 26,026 | `PARTIALLY_VERIFIED` |
+| gathern | 1,686 | 0 | 1,686 | `UNVERIFIED` |
+| wasalt | 12,540 | 0 | 12,540 | `UNVERIFIED` |
+
+**Both cases were live at once, they need opposite responses, and the alert text was identical.** On
+aqar/gathern/wasalt the stock advice is exactly right. On aqarcity it sent the responder to re-measure
+something already measured a month earlier, and hid the real blocker: aqarcity is the only enabled
+platform with `drain_backlog = false`. That is §8.3's trap and §2.3's lesson 2 — right about the WHAT,
+wrong about the WHY, with a remedy field that cannot work.
+
+`ops_lifecycle_backlog_evidence_class(platform, p_inject)` (migration `20260927150016`) measures it,
+and the detector branches on the measurement. Two measurement rules it encodes, both nearly got wrong:
+
+1. **LATEST verdict per row, never "a GONE exists"** (§4.1c: a relisting publishes the reversal).
+2. **Join on `listing_id` OR `ad_number`, never one alone.** `ops_stale_inactivation_probe`'s identity
+   columns are populated inconsistently per writer, and the two joins disagree in **opposite**
+   directions on the two platforms that matter most: aqarcity matches 334/334 by `ad_number` and 0 by
+   `listing_id`; aqar matches 6 by `listing_id` and 0 by `ad_number`. Five probe rows fleet-wide carry
+   neither column and are unattributable by any join. A single-column join under-counts evidence and
+   so mislabels an EVIDENCED backlog `UNVERIFIED` — safe for deletion, and exactly the wrong answer.
+
+Two design points worth reusing:
+
+- **`CONTRADICTED` outranks every other class, including `SOURCE_CONFIRMED_DEAD`.** A deletion-eligible
+  row whose latest verdict is LIVE is a restore candidate (§3.1); folding it into "partially verified"
+  would let the one row that must never be deleted hide inside a percentage. It is zero today; the
+  class exists so a future non-zero cannot arrive silently.
+- **No class is permission, and the fully-evidenced one least of all.** The `do_not` refusal is ONE
+  constant emitted byte-identically in every branch, and it names `drain_backlog` explicitly, because
+  that is the field a reader of this alert will reach for. A detector that explains a stall more
+  precisely must not thereby read as a licence to clear it.
+
+The classifier is self-tested in **four** directions on every sweep (`lifecycle_evidence_class_blind`,
+which self-heals), following §2.5a's precedent. The mutation was watched in production: collapsing
+`UNVERIFIED` into `SOURCE_CONFIRMED_DEAD` — the most dangerous direction, since it would tell every
+responder that an absence-started backlog had been source-confirmed — raised the blind alarm, and
+restoring the byte-identical definition cleared it.
+
 ### §4.2 — What the rest of the ledger actually is (surveyed 2026-09-06)
 
 Every remaining platform was probed read-only, dead cohort against interleaved live controls, and

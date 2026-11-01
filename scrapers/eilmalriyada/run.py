@@ -268,10 +268,10 @@ def rent_period_stated(price: Optional[int], text: Optional[str]) -> tuple[Optio
 
 
 # ── mapping ───────────────────────────────────────────────────────────────────────────────────────
-# The site's exact spellings. Exact-match only; the fleet folds a townhouse into Villa
+# The site's exact spellings. Exact-match only; a town house keeps its own name (owner 2026-10-12)
 # (normalize.TYPE_MAP line ~308) and a complex into Commercial Building.
 TYPE_OVERRIDES = {
-    "تاون هاوس": "Villa", "شقق مفروشة": "Apartment", "فيلا دوبلكس": "Duplex", "شقة دوبلكس": "Duplex",
+    "تاون هاوس": "تاون هاوس", "شقق مفروشة": "Apartment", "فيلا دوبلكس": "Duplex", "شقة دوبلكس": "Duplex",
     "معارض تجارية": "Showroom", "معرض تجاري": "Showroom", "مجمع تجاري": "Commercial Building",
     "دور سكني": "Floor", "استديو": "Studio",
 }

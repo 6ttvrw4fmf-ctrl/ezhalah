@@ -1,3 +1,4 @@
+import { sourceName } from '@/lib/listingDisplay';
 import type { Category, Deal } from './taxonomy';
 import type { LocationResolution } from './locations';
 import type { ProximityIntent } from './proximity';
@@ -9,14 +10,19 @@ import { supports } from './platforms';
 // The app's single Arabic folding helper — it documents itself as mirroring the RPC's normalize_ar,
 // so district matching on the client and in the RPC stay one definition. (listingInDistricts)
 import { normalizeArabic } from '../lib/chatSearch';
-import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
+import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, translate, type Locale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
+import { currencyCalcLine } from '@/lib/currencyCalc';
+import { bigAreaMin } from './bigSize';
+import { AMENITY_LABEL } from '@/lib/afEvidence';
 import { combinedBudgetParts } from '@/lib/combinedBudget';
+import { withAdvancedLines, type AfFacet } from '@/lib/afSummary';
 import { bedroomTokensPure } from '@/lib/roomBedrooms';
 import { translitPlace } from '@/lib/translitPlace';
 import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { groupMembers, CLEAN_MACRO, SUBGROUPS } from './propertyTypes';
 import { pickFilterGreetingOpening } from './filterGreetingRotation';
+import { pickEnglishFilterGreetingOpening } from './filterGreetingRotation';
 import { primeFilterGreetings } from './loaderFilterGreetings';
 
 // A parsed search. Every field optional — empty fields broaden, never dead-end. (PRD §6.1)
@@ -77,6 +83,7 @@ export type SearchQuery = {
   // the engine scopes `location` to THIS region only and must NOT treat it as ambiguous (the user
   // already chose). Absent on a normal single-city search. (2026-06-26 twin-city false-zero fix.)
   regionPin?: string;
+  geographicScope?: "CITY" | "REGION" | "NATIONWIDE";
   // The user's ORIGINAL foreign-currency budget, e.g. "USD 100,000" — shown alongside the SAR figure
   // in the Budget line for transparency ("USD 100,000 (≈ SAR 375,000)"). Empty when SAR. (user request.)
   priceOriginal?: string;
@@ -84,7 +91,7 @@ export type SearchQuery = {
   // Absent → default freshness ranking. Strictly factual sorts only — never "best"/"popular" (that
   // would breach non-advisory neutrality). (user training decision.)
   sort?: SortKey;
-  // How many listings the user explicitly asked to see (1–25). Absent → the default grid.
+  // How many listings the user explicitly asked to see (up to the existing 500-card ceiling). Absent → the default grid.
   // Drives how many cards the chat reveals up front. (user training decision.)
   count?: number;
   // Specific district / neighborhood filter — populated when the user named one explicitly ("حي
@@ -120,6 +127,8 @@ export type SearchQuery = {
   // bypassed so the user sees that platform's listings in full. Empty/undefined → all platforms.
   // (user: "if I say show me gathern only, show me gathern only".)
   sources?: string[];
+  excludedSources?: string[];
+  sourceSelectionChanged?: boolean;
   // Subcategory GROUP selected in the filter (e.g. "Vacation & Rural") — a SOFT/broad intent: match
   // any clean type in that group. `type` (a single CLEAN property type, e.g. "Chalet") is the HARD
   // exact filter. Both feed the one engine; the filter sets these, the agent resolves to them.
@@ -145,11 +154,14 @@ export type SearchQuery = {
   // strings. Mutually exclusive with bedrooms in the UI. Supersede contextSize when set. HARD filter.
   areaMin?: string | null;
   areaMax?: string | null;
+  // Display-only: 'big' when areaMin came from the user's word «كبير»/"big" (src/data/bigSize.ts), so the summary can say
+  // what we did with it. Never a filter by itself — areaMin is the filter.
+  areaNote?: 'big' | null;
   // Price range (filter UI, SAR — same unit as the displayed price for the chosen deal/period): min →
   // price ≥ min, max → price ≤ max, both → between. Raw digit strings. HARD filter (no closest-above).
   priceMin?: string | null;
   priceMax?: string | null;
-  // Property-age advanced-filter answer («خلّنا نحدد الطلب أكثر» → عمر العقار). Absent → no age filter
+  // Property-age advanced-filter answer («🎯 دقّق مع الذكاء» → عمر العقار). Absent → no age filter
   // (the default; broadens rather than dead-ends, same as every other optional field here).
   // isNewConstruction=true is جديد — a distinct concept from a numeric property_age, not "age 0".
   // ageMin/ageMax cover the 5 numeric buckets (أقل من سنة = 0..0, … , ١٠+ سنوات = 10..null). The UI
@@ -179,6 +191,15 @@ export type SearchQuery = {
   // preferred directions (Residential Building + Apartment/Buy). Both map 1:1 to existing RPC params
   // (p_street_width_min / p_directions) — strict, unknown excluded, never invented.
   streetWidthMin?: number | null;
+  // SEVERAL ANSWERS TO ONE QUESTION (owner 2026-10-03: «never force the user to select one thing»). Each
+  // is the UNION of exactly the picked options, used only when 2+ are picked (one pick keeps the
+  // single-answer field above): `ageBuckets` = the age question's keys ('new','1_2','3_5','6_9','10p'),
+  // `ratingBuckets` = '9.5' / '9.0' / '9.0_rc10', `furnishedIn` = [true,false] for «مفروش + غير مفروش»
+  // (the listings that STATED either; silent stays out). Map to p_age_buckets / p_rating_buckets /
+  // p_furnished_in (migration af_every_question_multi_select_unions).
+  ageBuckets?: string[] | null;
+  ratingBuckets?: string[] | null;
+  furnishedIn?: boolean[] | null;
   directions?: string[] | null;
   // THE RECEIPT FOR EVERY AF PREDICATE ABOVE (owner P0 2026-09-01). Each committed Advanced Filter
   // answer, in commit order — the same {id, keys, labels} the results-turn pills already render.
@@ -230,11 +251,12 @@ export const locationPhrase = (q: SearchQuery) => q.location.trim() || 'Saudi Ar
 const placeText = (q: SearchQuery) => {
   const city = q.location.trim();
   if (!city) return t('Saudi Arabia');
-  const cityText = arabicOrUnresolved(tPlace(city));
+  const displayPlace = (name: string) => getLocale() === 'en' ? translitPlace(name) : arabicOrUnresolved(tPlace(name));
+  const cityText = displayPlace(city);
   // When the user picked a district in the filter, show it in front of the city so the summary
   // reflects exactly what was selected: "حي X، جدة". (owner UI request 2026-07-18.)
   const dist = q.districtLabel?.trim();
-  return dist ? t('{district}, {city}', { district: arabicOrUnresolved(tPlace(dist)), city: cityText }) : cityText;
+  return dist ? t('{district}, {city}', { district: displayPlace(dist), city: cityText }) : cityText;
 };
 const verbText = (q: SearchQuery) => {
   if (q.bothDeals || q.dealCombined) return t('to rent or buy');
@@ -292,7 +314,10 @@ export function priceCalcNote(q: SearchQuery): string {
 // "villa with 5+ bedrooms at SAR 1,000/m²" from misreading 5 bedrooms as 5 m². (PRD §6.2)
 function fixedSize(q: SearchQuery): number {
   if (!q.detail) return 0;
-  if (q.type && detailFor(q.type).isBedrooms) return 0; // detail is bedrooms, not an area
+  // detail is a BEDROOM count (1–4, 5+) for a dwelling type — not an area. A dwelling's detail that is NOT bedroom-shaped
+  // («300») is a size the user typed, and a per-m² price × that size is the total (owner 2026-10-11: «price per meter
+  // multiplied by this»); before, a villa with a typed size never got the calculated total.
+  if (q.type && detailFor(q.type).isBedrooms && /^([1-4]|5\+?)$/.test(q.detail.trim())) return 0;
   const clean = q.detail.replace(/,/g, '');
   return /^\d+$/.test(clean) ? parseInt(clean, 10) || 0 : 0;
 }
@@ -415,7 +440,7 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
     ? t("I couldn't find anything at {amount}, but here are some similar to what you're looking for:", { amount: tooLowAmount })
     : t('{calc}Here are {what} {verb} {place} that match what you’re looking for.', { calc: calcNote, what: subWhat, verb, place: subPlace });
 
-  return { bubble, sub };
+  return { bubble: getLocale() === 'en' ? pickEnglishFilterGreetingOpening() + bubble : bubble, sub };
 }
 
 export const grouped = (n: number) => n.toLocaleString('en-US');
@@ -426,11 +451,35 @@ export const grouped = (n: number) => n.toLocaleString('en-US');
 // its annual equivalent (×12); a small Buy figure is read as a price PER m² and, when an exact size is
 // known, multiplied to a calculated total. An explicit annual (agent-converted) or a preset band is
 // shown verbatim. Returns the bullet text(s) WITHOUT the leading "• ". (user spec: Filter Price Intelligence.)
-function budgetLines(q: SearchQuery): string[] {
+// Explicit language for a chat summary; never mutates the interface locale.
+function summaryLanguage(loc: Locale) {
+  const tx = (key: string, vars?: Record<string, string | number>) => translate(loc, key, vars);
+  const arabicOrUnresolved = (key: string) => arabicOrPlaceholder(key, loc, LOCATION_UNRESOLVED_AR);
+  const arabicOrTypeUnresolved = (key: string) => arabicOrPlaceholder(key, loc, TYPE_UNRESOLVED_AR);
+  return {
+    t: tx, getLocale: () => loc,
+    tWord: (key: string) => arabicOrTypeUnresolved(tWord(key, loc)), tPlace: (key: string) => arabicOrUnresolved(tPlace(key, loc)),
+    tPriceTab: (key: string) => tPriceTab(key, loc), tDetailOption: (key: string) => tDetailOption(key, loc),
+    arabicOrUnresolved,
+    arabicOrTypeUnresolved,
+    budgetWords: () => ({ buy: tx('Buy budget'), rent: tx('Rent budget (yearly basis)'), from: tx('From'), to: tx('To'), sar: tx('SAR') }),
+  };
+}
+
+function budgetLines(q: SearchQuery, loc: Locale = getLocale()): string[] {
+  const { t, tPriceTab, budgetWords } = summaryLanguage(loc);
   const sar = t('SAR');
   // If the user gave a foreign currency, lead with their original figure so both are visible:
   // "Your budget: USD 100,000" then the SAR line(s) used for the actual search. (user request.)
-  const orig = q.priceOriginal ? [`${t('Your budget')}: ${q.priceOriginal}`] : [];
+  // The user's figure is shown as the CALCULATION that produced the SAR number («5,000,000 دينار كويتي × 12.2 =
+  // ر.س 61,000,000», owner 2026-10-11), falling back to their raw figure for a currency we do not convert.
+  const onePrice = !q.priceOriginal ? null : (() => { const lo = numOrNull(q.priceMin), hi = numOrNull(q.priceMax);
+    if (lo != null && hi == null) return lo; if (hi != null && lo == null) return hi;
+    const amt = lo == null ? (parseInt(((q.priceInput ?? '').match(/\d/g) ?? []).join(''), 10) || null) : null;
+    // a MONTHLY figure the agent already multiplied by 12: the conversion's result is the monthly one
+    return amt != null && q.priceIsAnnual && q.rentPeriod === 'monthly' && amt % 12 === 0 ? amt / 12 : amt; })();
+  const orig = q.priceOriginal
+    ? [`${t('Your budget')}: ${currencyCalcLine(q.priceOriginal, onePrice, loc === 'en' ? 'en' : 'ar', sar) ?? q.priceOriginal}`] : [];
   // COMBINED شراء+إيجار → one labelled bullet per budget half the user filled, never a single
   // unlabelled `Budget` read off the Buy boxes alone. See @/lib/combinedBudget.
   if (q.dealCombined) return [...orig, ...combinedBudgetParts(q, ': ', budgetWords())];
@@ -459,6 +508,14 @@ function budgetLines(q: SearchQuery): string[] {
     if (amount < 200 && !q.priceIsAnnual) return orig; // unrealistic — engine broadens, nothing to show
     const yearly = `${t('Budget')}: ${t('{a}/year', { a: `${sar} ${grouped(amount)}` })}`;
     // Agent already annualized, or the figure is too large to be a monthly rent → show it as annual.
+    // The agent turned the user's MONTHLY figure into a yearly one (×12): show their own figure and the maths, not only the result.
+    if (q.priceIsAnnual && q.rentPeriod === 'monthly' && amount % 12 === 0) {
+      return [
+        ...orig,
+        `${t('Monthly Rent')}: ${t('{a}/month', { a: `${sar} ${grouped(amount / 12)}` })}`,
+        `${t('Annual Equivalent')}: ${t('{a}/year', { a: `${sar} ${grouped(amount)}` })}`,
+      ];
+    }
     if (q.priceIsAnnual || amount > 25_000) return [...orig, yearly];
     // Otherwise read it as a monthly rent and show the ×12 annual equivalent (most platforms store annual).
     return [
@@ -512,8 +569,11 @@ function arabicOrTypeUnresolved(s: string): string {
   return arabicOrPlaceholder(s, getLocale(), TYPE_UNRESOLVED_AR);
 }
 
-function locationLines(q: SearchQuery): string[] {
+function locationLines(q: SearchQuery, loc: Locale = getLocale()): string[] {
+  const { t, tPlace, getLocale, arabicOrUnresolved } = summaryLanguage(loc);
   const lm = q.locationMatch;
+  if (q.geographicScope === 'REGION') return [`${getLocale() === 'ar' ? 'المنطقة' : 'Region'}: ${q.regionPin}`];
+  if (q.geographicScope === 'NATIONWIDE') return [getLocale() === 'ar' ? 'النطاق: كل السعودية' : 'Scope: Nationwide (Saudi Arabia)'];
   if (!lm || lm.kind === 'none') {
     return q.location.trim() ? [`${t('City')}: ${arabicOrUnresolved(tPlace(q.location.trim()))}`] : [];
   }
@@ -542,7 +602,8 @@ function locationLines(q: SearchQuery): string[] {
   }
   switch (lm.kind) {
     case 'city':
-      out.push(`${t('City')}: ${arabicOrUnresolved(tPlace(lm.label))}`);
+      // English summary: the canonical English city («Riyadh»), never the Arabic label the agent typed («الرياض») — found by the live UI battery
+      out.push(`${t('City')}: ${getLocale() === 'en' && lm.city ? lm.city : arabicOrUnresolved(tPlace(lm.label))}`);
       // Region disambiguates same-named cities/districts across the Kingdom. (user: include the region.)
       if (regionLabel) out.push(`${t('Region')}: ${regionLabel}`);
       break;
@@ -589,23 +650,16 @@ function locationLines(q: SearchQuery): string[] {
 // Platform table-prefix → human display name, for the Search Summary's "Platform" line.
 // Values are the i18n KEYS (full display forms, same as the card's sourceName) so searchSummary can t()
 // them → Arabic. (owner 2026-07-08: no English platform names anywhere in the UI.)
-const SOURCE_LABELS: Record<string, string> = {
-  aqar: 'AQAR', wasalt: 'Wasalt', aldarim: 'Aldarim Real Estate', aqargate: 'Aqar Gate', alhoshan: 'Al Hoshan',
-  hajer: 'Hajer Houses Real Estate', sanadak: 'Sanadak', eastabha: 'East Abha Real Estate', aqarcity: 'Aqar City', raghdan: 'Raghdan Real Estate',
-  eaqartabuk: 'Eqar Tabuk', satel: 'Satel', sadin: 'Sadin for Real Estate', toor: 'TOOR', mustqr: 'Mustaqarr Real Estate',
-  ramzalqasim: 'Ramz Al Qassim Real Estate Investment', fursaghyr: 'Fursa Ghyr Real Estate', jazwtn: 'Jazan Watan', mizlaj: 'Mizlaj Real Estate',
-  muktamel: 'Muktamel', aqaratikom: 'Nawait', awal: 'Awal United for Real Estate', alta: 'Alta Real Estate Services', abwbna: 'Abwbna Real Estate', bahadhabab: 'Bahadhabab Real Estate', alobid: 'Alobid Office Real Estate', remal: 'Remal Real Estate', amaall: 'Amaall Real Estate Services', amlakalahsa: 'Amlak Al-Ahsa Real Estate', aqaralsaudia: 'Aqar Al Saudia Real Estate', shmoualshmal: 'Shmou Al Shmal Real Estate', alkhaas: 'Al Khaas', azdad: 'Azdad Al Aqariah',
-  abeea: 'Abeea Real Estate', jurash: 'Jurash Real Estate', alnokhba: 'Al Nokhba', dealapp: 'Deal App',
-  ksaaqar: 'KSA Aqar Real Estate', sadiqeltajer: 'Sadiq Eltajer Real Estate',
-  erapulse: 'Era Pulse', nowaisiry: 'Al Nowaisiry Real Estate', october: '1 October Real Estate', gathern: 'Gathern',
-};
 
-export function searchSummary(q: SearchQuery): string {
+export function searchSummary(q: SearchQuery, loc: Locale = getLocale()): string {
+  const { t, tWord, tPlace, tDetailOption, getLocale, arabicOrUnresolved, arabicOrTypeUnresolved } = summaryLanguage(loc);
   const lines: string[] = [];
   // English keeps the canonical capitalized type ("Villa", "Rest House"); Arabic uses the translation.
   // If the user didn't pick a SPECIFIC type, fall back to the CATEGORY they have selected (Residential/
   // Commercial — always one or the other), so a default-button "Search" still shows what they chose.
   // (user request: "if user just clicks search by default, it shows what the button clicked at.")
+  if (q.excludedSources?.length) lines.push(`• ${getLocale() === 'ar' ? 'المواقع المستبعدة' : 'Excluded websites'}: ${[...new Set(q.excludedSources.map(source => t(sourceName(source))))].join(getLocale() === 'ar' ? '، ' : ', ')}`);
+  if (q.count) lines.push(`• ${getLocale() === 'ar' ? 'عدد النتائج المطلوب' : 'Requested results'}: ${q.count}`);
   const summaryTypes = effectiveTypes(q);
   if (summaryTypes.length) lines.push(`• ${t('Property Type')}: ${summaryTypes.map((x) => getLocale() === 'ar' ? arabicOrTypeUnresolved(tWord(x)) : x).join('، ')}`);
   else if (effectiveGroups(q).length) lines.push(`• ${t('Property Type')}: ${effectiveGroups(q).map((g) => arabicOrTypeUnresolved(t(g))).join('، ')}`);
@@ -613,23 +667,30 @@ export function searchSummary(q: SearchQuery): string {
   // For Rent, append the Monthly / Yearly period the user picked so the summary reflects the toggle. (owner UI request 2026-07-18.)
   // dealCombined's Rent side has no period selector (accepts both) so no period suffix applies there.
   const period = q.deal === 'Rent' && !q.dealCombined && q.rentPeriod
-    ? ` (${t(q.rentPeriod === 'monthly' ? 'Monthly' : q.rentPeriod === 'both' ? 'Both' : 'Yearly')})` : '';
+    ? ` (${t(q.rentPeriod === 'monthly' ? 'Short stays' : q.rentPeriod === 'both' ? 'Both' : 'Yearly')})` : '';
   lines.push(`• ${t('Transaction Type')}: ${(q.bothDeals || q.dealCombined) ? t('Rent or Buy') : t(q.deal === 'Rent' ? 'For Rent' : 'For Sale')}${period}`);
   // Platform filter line — when the user restricted to specific platforms ("Aqar only"), show which,
   // so the filter is visibly confirmed. (user: "when I type alkhaas it must be al khaas, not aqar".)
   if (q.sources && q.sources.length) {
-    const names = q.sources.map((s) => t(SOURCE_LABELS[s] ?? s)).join('، ');
+    const names = [...new Set(q.sources.map((source) => t(sourceName(source))))].join('، ');
     lines.push(`• ${t('Platform')}: ${names}`);
   }
   // Always show a location line. If nothing was typed/inferred, the search covers the whole Kingdom,
   // so the summary says "City: Saudi Arabia". (user request: empty region → Saudi Arabia.)
-  const locLines = locationLines(q);
+  const locLines = locationLines(q, loc);
   if (locLines.length) for (const l of locLines) lines.push(`• ${l}`);
   else lines.push(`• ${t('City')}: ${t('Saudi Arabia')}`);
   // Filter path: the District field's pick is carried in districtLabel (the location match here is the
   // CITY), so add an explicit District line so the summary reflects the chosen neighborhood. (owner UI request.)
   if (q.districtLabel?.trim()) lines.push(`• ${t('District')}: ${arabicOrUnresolved(tPlace(q.districtLabel.trim()))}`);
-  for (const b of budgetLines(q)) lines.push(`• ${b}`);
+  // The AI chat carries its district in `q.districts`, not districtLabel: «شقة في الرياض حي النرجس» searched حي النرجس and the summary never
+  // said so (live 2026-10-13). Any district the location lines above did not already name gets its line.
+  else {
+    const shown = locLines.join(' ');
+    const unshown = (q.districts ?? []).filter((d) => d.trim() && !shown.includes(d.trim().replace(/^حي\s+/, '')));
+    if (unshown.length) lines.push(`• ${t(unshown.length > 1 ? 'Districts' : 'District')}: ${unshown.map((d) => arabicOrUnresolved(tPlace(d.trim()))).join(getLocale() === 'ar' ? '، ' : ', ')}`);
+  }
+  for (const b of budgetLines(q, loc)) lines.push(`• ${b}`);
   // Category/group-level refinements (filter UI). Each has its own field, so the labels are unambiguous.
   const summaryBeds = effectiveBeds(q);
   if (summaryBeds.length) lines.push(`• ${t('Bedrooms')}: ${summaryBeds.join('، ')}`);
@@ -637,7 +698,11 @@ export function searchSummary(q: SearchQuery): string {
   if (aLo != null || aHi != null) {
     const r = aLo != null && aHi != null ? `${t('From')} ${grouped(aLo)} ${t('To')} ${grouped(aHi)}`
       : aLo != null ? `${t('From')} ${grouped(aLo)}` : `${t('To')} ${grouped(aHi!)}`;
-    lines.push(`• ${t('Size')}: ${r} ${t('m²')}`);
+    // «big» is shown as what we turned it into, only while the figure still IS that threshold — a later explicit
+    // size or a type change must never keep a stale «big» label.
+    const bigLabel = q.areaNote === 'big' && aHi == null && aLo != null && aLo === bigAreaMin(q.type)
+      ? ` (${t('big by Saudi market standards')})` : '';
+    lines.push(`• ${t('Size')}: ${r} ${t('m²')}${bigLabel}`);
   } else if (q.contextSize) lines.push(`• ${t('Size')}: ${q.contextSize} ${t('m²')}`);
   if (q.detail) {
     // Type/agent path shares ONE detail field for BEDROOM count OR SIZE. Label by VALUE: a bedroom-
@@ -646,11 +711,26 @@ export function searchSummary(q: SearchQuery): string {
     else if (/^([1-4]|5\+?)$/.test(q.detail)) lines.push(`• ${t('Bedrooms')}: ${q.detail}`);
     else lines.push(`• ${t('Size')}: ${q.detail} ${t('m²')}`);
   }
+  // The features the search REALLY requires (certified tokens only — an uncertified one never reaches q.amenities), so the
+  // user sees «غرفة خادمة» in the restatement of «بيت مع غرفة للخادمة», not only as a tag on each card (owner 2026-10-11).
+  const wantedAmenities = (q.amenities ?? []).filter((a) => a in AMENITY_LABEL);
+  if (wantedAmenities.length) lines.push(`• ${t('Amenities')}: ${wantedAmenities.map((a) => t(AMENITY_LABEL[a])).join('، ')}`);
   return `${t('Search Summary')}\n${lines.join('\n')}`;
 }
 
 // AF emoji summary — pure function lives in @/lib/afSummary (zero deps, testable standalone).
 export { buildAfSummary, buildAfRoundLog } from '@/lib/afSummary';
+
+// THE SUMMARY OF A TURN THAT CAME FROM AN ADVANCED FILTER ROUND (owner 2026-10-03): the summary the
+// user already read — built from the query as it stood BEFORE the first round (`baseQ`), so the
+// original type group, deal, period, city and region lines stay exactly as they were — continued by one
+// labelled line per committed answer («• نوع العقار المحدد: شقة», «• دورات المياه: +١»), no heading and
+// no emoji (withAdvancedLines). Rebuilt from `baseQ` + ALL facets each time, so a second round adds to
+// the list instead of replacing it. Committed answers only (summary == committed state): a skipped
+// question never appears here.
+export function guidedSearchSummary(baseQ: SearchQuery, facets: AfFacet[]): string {
+  return withAdvancedLines(searchSummary(baseQ), facets, t);
+}
 
 // A compact, dot-separated one-liner of what the user asked for — shown right before scraping as a
 // "Looking for: Villa · Rent · Riyadh · SAR 5,000 · 3 beds" confirmation. Empty fields are skipped so
@@ -751,7 +831,7 @@ export function interpretPrice(rawDigits: string, deal: Deal, sizeM2?: number, i
 // here, beside the cursor it is only meaningful next to, rather than in an app-level slot a later
 // (or CANCELLED) search can overwrite. Optional because a transcript persisted before this field
 // existed carries none; see loadMoreListings for what that falls back to.
-export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery; total?: number; pageOffset?: number; hasMore?: boolean; matchTotal?: number; rotationSeed?: string };
+export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery; total?: number; pageOffset?: number; hasMore?: boolean; matchTotal?: number; rotationSeed?: string; /** the backend fetch FAILED — an empty list is NOT «no matches» */ fetchFailed?: boolean; /** saved chat only: how many cards the user had on screen when it was saved (chatTranscript.ts) */ restoreTo?: number; /** saved chat only: the chat had finished when it was saved */ restoreCompleted?: true };
 
 function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   // A clean TYPE or subcategory GROUP is selected → the server fetch already scoped the rows, so run
@@ -1030,10 +1110,16 @@ const cleanOf = (l: Listing): string => l.cleanType ?? l.type;
 // (agent path) as a 1-element list, else empty. One code path covers single + multi everywhere.
 export { effectiveTypes, effectiveGroups } from '@/lib/searchDefaults';
 
+// «أرض خام» is a TAG on a land row, not its type: the card keeps the source's own land type, and the
+// SERVER already restricted the pool to tagged rows (p_types token 'أرض خام', af_eligibility_clause).
+// So client-side the box matches any land clean type — never a non-land row.
+const RAW_LAND_CARRIERS = ['Commercial Land', 'Industrial Land', 'Residential Land', 'Agriculture Plot', 'Other Land'];
+
 function matchesType(l: Listing, q: SearchQuery): boolean {
   const c = cleanOf(l);
   const sel = effectiveTypes(q);
-  if (sel.length) return sel.some((s) => s === c || (SUBGROUPS[s]?.includes(c) ?? false)); // OR across selected clean types; a subgroup box (مرافق خدمية) matches any of its member types
+  if (sel.length) return sel.some((s) => s === c || (SUBGROUPS[s]?.includes(c) ?? false)
+    || (s === 'Raw Land' && RAW_LAND_CARRIERS.includes(c))); // OR across selected clean types; a subgroup box (مرافق خدمية) matches any of its member types
   // OR across every selected group: a listing qualifies by belonging to ANY of them.
   const grps = effectiveGroups(q);
   if (grps.length) return grps.some((g) => groupMembers(g).includes(c));
@@ -1511,7 +1597,7 @@ export function runSearch(q: SearchQuery, pools: Pools, opts?: { fetchFailed?: b
   // Return up to 25 matches (display cap): the chat shows the first `count` the user explicitly
   // asked for, or up to 25 by default. Fewer than 25 available → show whatever exists; never pad
   // to 25 by inventing rows.
-  const count = q.count && q.count >= 1 ? Math.min(q.count, 25) : undefined;
+  const count = q.count && q.count >= 1 ? Math.min(q.count, 500) : undefined;
   // 0-results case → a friendly, ACTIONABLE recommendation. Three situations:
   //  (a) the server fetch FAILED (network/backend error) → tell the user to retry, not that nothing
   //      matched. (opts.fetchFailed is set by runQuery when fetchListingsForQuery returned null.)
@@ -1544,7 +1630,7 @@ export function runSearch(q: SearchQuery, pools: Pools, opts?: { fetchFailed?: b
   // the MATCHING set, so «عرض جميع النتائج» must be able to reveal ALL of them (progressively), not just
   // the first 200. Matches the fetch cap so no matching listing is unreachable. [[filter-candidate-cap-underreturn-2026-07-08]]
   const SHOW_ALL_MAX = 1500;
-  return { heading: heading(q), notes: ns, listings: listings.slice(0, SHOW_ALL_MAX), sortNote, count, suggestion, total };
+  return { heading: heading(q), notes: ns, listings: listings.slice(0, SHOW_ALL_MAX), sortNote, count, suggestion, total, ...(opts?.fetchFailed && listings.length === 0 ? { fetchFailed: true } : {}) };
 }
 
 // Try relaxing one query field at a time and see which unlocks results. The order matters: we

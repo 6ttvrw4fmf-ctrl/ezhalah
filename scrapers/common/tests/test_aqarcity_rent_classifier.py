@@ -51,3 +51,28 @@ if __name__ == "__main__":
     test_no_monthly_keyword_stays_annual()
     test_ambiguous_multi_unit_ad_falls_back_unchanged()
     print("OK — aqarcity rent-period classifier regression tests pass")
+
+
+# ── a page that states NO period: judge by the price (owner rule 2026-09-28; 348 rows were «annual») ──
+from scrapers.aqarcity.run import rent_period_for  # noqa: E402
+
+
+def test_a_silent_page_with_a_monthly_looking_price_is_monthly():
+    body = "مكاتب مجهزة - جيران محترمين - نظافة وصيانة دورية المطلوب: 2000 ريال رقم ترخيص الإعلان: 7100293228"
+    assert rent_period_for(body, "", 2000, "شقة للإيجار في جدة حي البوادي") == "monthly"
+    assert rent_period_for("مكتب صغير المطلوب 595 ريال", "", 595, "مكتب للإيجار") == "monthly"
+
+
+def test_a_silent_page_with_a_yearly_looking_price_stays_annual():
+    assert rent_period_for("فيلا للإيجار المطلوب 85000 ريال", "", 85000, "فيلا للإيجار") == "annual"
+
+
+def test_a_page_that_names_a_period_keeps_the_existing_decision():
+    assert rent_period_for("محل للإيجار سنوي 8000 ريال", "", 8000, "محل للإيجار") == "annual"
+    assert rent_period_for("شقة للإيجار 1700 ريال شهري", "YEAR", 1700, "شقة للإيجار") == "monthly"
+    # the installment shape: «شهري» names the payment, offers.price is already the annual total
+    assert rent_period_for("الايجار الشهري :3000ريال السنوي: 36000", "YEAR", 36000, "شقة للإيجار") == "annual"
+
+
+def test_a_structured_year_unit_is_not_overruled_by_the_price():
+    assert rent_period_for("المطلوب 2000 ريال", "YEAR", 2000, "شقة للإيجار") == "annual"

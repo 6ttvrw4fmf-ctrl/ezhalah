@@ -86,6 +86,8 @@
 //
 // Env: PW_CHROMIUM overrides the browser binary; PW_PROXY sets an egress proxy (localhost always
 // bypassed). Both optional — CI needs neither.
+import './lib/robotPass.mjs'; // robot pass + secret handshake for our own browser robots (docs/ops/SCRAPE_GUARD.md)
+import { isForeignOnlyError } from './lib/foreignError.mjs';
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';
@@ -108,7 +110,11 @@ import { INTERVIEW_STOP_AT } from '../src/lib/afRanking.ts';
 const DIST = new URL('../dist/', import.meta.url).pathname;
 let failed = 0;
 let skipped = 0;
+// The last step that ran, so an uncaught error says WHERE it happened (2026-10-29: React #419 failed ~6% of runs
+// for weeks and nobody could find it, because the crash line named no page and no step).
+let lastStep = 'start';
 const check = (label, ok, detail = '') => {
+  lastStep = label;
   if (!ok) failed++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail && !ok ? `\n        ${detail}` : ''}`);
 };
@@ -183,6 +189,31 @@ const BENIGN = /Minified React error #(418|423|425)/;
 // a harness race, not a product defect. Named once so both journeys move together next time.
 const SEARCH_BEAT_FLOOR_MS = 12000;
 
+// The September passive probe hides the CTA when its bounded retry is UNKNOWN. The old
+// journey inferred UNKNOWN only from a CTA coming back after a click, so it misdiagnosed
+// this earlier timeout as a broken open. Require network evidence for BOTH complete rounds;
+// a missing request, pending request, HTTP error, or any answered probe still fails closed.
+function observeAfProbeTimeouts(page) {
+  const attempts = new Map();
+  const names = ['apartment_guided_counts_ar', 'property_age_option_counts_ar'];
+  const onRequest = (request) => {
+    const name = new URL(request.url()).pathname.split('/rpc/')[1];
+    if (names.includes(name)) attempts.set(request, { name, start: Date.now(), timedOut: false });
+  };
+  const onFailed = (request) => {
+    const attempt = attempts.get(request);
+    if (attempt) attempt.timedOut = Date.now() - attempt.start >= 3500
+      && /ERR_ABORTED|ERR_TIMED_OUT/.test(request.failure()?.errorText ?? '');
+  };
+  page.on('request', onRequest);
+  page.on('requestfailed', onFailed);
+  return {
+    undetermined: () => names.every((name) => [...attempts.values()].filter((p) => p.name === name).length >= 2)
+      && [...attempts.values()].every((p) => p.timedOut),
+    dispose: () => { page.off('request', onRequest); page.off('requestfailed', onFailed); },
+  };
+}
+
 const launchOpts = { args: ['--no-sandbox', '--ignore-certificate-errors', '--disable-quic'] };
 if (process.env.PW_CHROMIUM) launchOpts.executablePath = process.env.PW_CHROMIUM;
 // A TLS-terminating egress proxy can reset Chromium's post-quantum ClientHello; pinning max TLS
@@ -196,7 +227,19 @@ const browser = await chromium.launch(launchOpts);
 const ctx = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'ar-SA', viewport: { width: 1440, height: 900 } });
 const page = await ctx.newPage();
 const crashes = [];
-page.on('pageerror', (e) => { const m = String(e); if (!BENIGN.test(m)) crashes.push(m.slice(0, 200)); });
+page.on('pageerror', (e) => {
+  const m = String(e);
+  if (BENIGN.test(m)) return;
+  // Another website's own page crashing (every stack frame on a foreign origin — e.g. sanadak.sa's Next.js React #419
+  // while a listing opened) is not an Ezhalah crash. Logged, never counted; anything with one of our frames still fails.
+  if (isForeignOnlyError(e?.stack, page.url())) {
+    console.log(`NOTE  third-party page error ignored (not Ezhalah code): ${m.slice(0, 120)} — ${String(e?.stack || '').split('\n')[1]?.trim().slice(0, 160) ?? ''}`);
+    return;
+  }
+  // Where and after what: the page URL, the last check that ran, and the first stack frames.
+  const stack = String(e?.stack || '').split('\n').slice(1, 4).map((l) => l.trim()).join(' < ');
+  crashes.push(`${m.slice(0, 200)} — at ${page.url()} after «${lastStep}»${stack ? ` — ${stack.slice(0, 300)}` : ''}`);
+});
 
 const tap = async (txt) => {
   const box = await page.evaluate(CLICK_LEAF, txt);
@@ -427,6 +470,45 @@ try {
   await tap('بحث');
   const mobResults = await waitForBody(RESULT_COUNT, 40000);
   check('[mobile] a search produces results', mobResults);
+
+  // ---- Journey D2: «عرض المزيد» 100 → 500 must not download every new card's photo (2026-10-06). ----
+  // Each card's web probe (ResultCard ListingPhoto, the CORP / 404 safety net) used to start on
+  // mount, so the second press fetched ~325 photos at once (200–470 KB each) and the photo actually
+  // on screen waited 8–35 s behind them on a phone network. Photos must load as cards come NEAR the
+  // screen (src/lib/nearViewport.ts). This counts what the BUILT app really fetches, so it also
+  // catches the flood coming back by any other road: a prefetch, an eager <img>, an expo-image change.
+  {
+    const PHOTO_BUDGET = 100; // fixed build 14–31 (cards on and ~6 below the screen, broken-photo retries); flood 326–367
+    const cardsShown = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="result-card-grid"]')].pop()
+      ?.querySelectorAll('[data-testid^="card-listing-"]').length ?? 0);
+    const pressPager = async () => {
+      const pager = page.locator('[data-testid="results-load-more"]').last();
+      await pager.waitFor({ state: 'attached', timeout: 40000 });
+      await pager.evaluate((el) => el.scrollIntoView({ block: 'center' })); // the inner ScrollView moves only this way
+      await page.waitForTimeout(600);
+      await pager.click({ timeout: 15000 });
+    };
+    const waitCards = async (min, ms) => { const until = Date.now() + ms; let n = 0;
+      while (Date.now() < until && (n = await cardsShown()) < min) await page.waitForTimeout(400); return n; };
+    try {
+      await pressPager();
+      const first = await waitCards(100, 30000);
+      await page.waitForTimeout(3000);
+      const photos = [];
+      const onReq = (r) => { const u = r.url();
+        if (r.resourceType() === 'image' && !u.startsWith(BASE) && !/^(data|blob):/.test(u)) photos.push(u); };
+      page.on('request', onReq);
+      await pressPager();
+      const second = await waitCards(first + 1, 20000);
+      await page.waitForTimeout(6000);
+      page.off('request', onReq);
+      if (second <= first) skipCheck('[mobile] «عرض المزيد» photo budget', `the second press revealed nothing (${first} → ${second} cards) — no reveal to measure`);
+      else check(`[mobile] «عرض المزيد» ${first} → ${second} downloads only the photos near the screen (${photos.length} ≤ ${PHOTO_BUDGET})`,
+        photos.length <= PHOTO_BUDGET, `${photos.length} photo requests in 6 s — every new card is downloading its photo at once`);
+    } catch (e) {
+      skipCheck('[mobile] «عرض المزيد» photo budget', `the pager was not reachable: ${String(e).split('\n')[0].slice(0, 140)}`);
+    }
+  }
 
   searchCalls = 0;
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -776,6 +858,7 @@ try {
     await page.waitForTimeout(300);
   }
   await tap('الفلل والبيوت'); await tap('فيلا');
+  const afProbeTimeouts = observeAfProbeTimeouts(page);
   await tap('بحث');
   const reentrancyStart = await waitForCount(45000);
   check('[I] reentrancy-journey scope lands with a real start count', Number.isFinite(reentrancyStart), `start=${reentrancyStart}`);
@@ -804,21 +887,24 @@ try {
   //
   // So: tap ONCE, then poll on the same 45s budget the count waits already use, and say WHY on
   // failure instead of printing a bare `false` (the [H mobile] precedent).
-  await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+  // The total can render before the passive probes finish and before this CTA exists.
+  // Wait for the actual control; never swallow a missing click and pretend an open ran.
+  const narrowButton = page.getByTestId('results-narrow');
+  const ctaReady = await narrowButton.waitFor({ state: 'visible', timeout: 45000 }).then(() => true, () => false);
+  if (ctaReady) await narrowButton.click();
   let afOpened = false;
-  const afOpenUntil = Date.now() + 45000;
+  const afOpenUntil = Date.now() + (ctaReady ? 45000 : 0);
   while (Date.now() < afOpenUntil) {
     afOpened = await afPresent();
     if (afOpened) break;
     await page.waitForTimeout(500);
   }
   if (!afOpened) {
-    // Distinguish the two ways this legitimately ends up false, so the next failure explains itself:
-    // the CTA coming BACK means AF opened and closed again (fell back to refine), which is a real
-    // product signal; the CTA still absent means the open is simply still in flight.
+    // Presence alone cannot diagnose this: the passive probe can withhold the CTA before
+    // any click. Only the recorded timeout evidence below permits an UNKNOWN skip.
     const ctaBack = await page.evaluate(() =>
       Array.from(document.querySelectorAll('div,span,button,a,[role="button"]'))
-        .some((e) => (e.innerText || '').trim().includes('خلّنا نحدد الطلب أكثر') && e.getBoundingClientRect().width > 0));
+        .some((e) => (e.innerText || '').trim().includes('🎯 دقّق مع الذكاء') && e.getBoundingClientRect().width > 0));
     // UNKNOWN IS NOT A DEFECT (owner 2026-08-26, PR #1152). AF now distinguishes "the sources say
     // there is nothing useful to ask" from "the probes never answered". On the SECOND verdict the
     // product deliberately declines to open and offers NOTHING in place of AF — that is the correct,
@@ -830,15 +916,15 @@ try {
       const t = document.body.innerText;
       return ['أي حي تفضّل', 'كم ميزانيتك', 'كم غرفة'].some((c) => t.includes(c));
     });
-    if (ctaBack && !refineChipsShown) {
-      console.log('SKIP  [I] Advanced Filter opens on this large multi-district scope '
-        + '— AF declined on an UNDETERMINED probe batch (no refine chips offered), which is the '
+    if (!refineChipsShown && afProbeTimeouts.undetermined()) {
+      skipCheck('[I] Advanced Filter opens on this large multi-district scope',
+        'BOTH count RPCs timed out in BOTH bounded attempts (no refine chips offered), which is the '
         + 'specified behaviour under «UNKNOWN must never become NO». This is an environment/latency '
         + 'symptom, not a product defect: the per-question count probes did not answer within 4s. '
         + 'A REAL regression would instead show the refine chips (a probe-backed "nothing to narrow").');
     } else
     check('[I] Advanced Filter opens on this large multi-district scope', false,
-      `af-card never appeared within 45s. cta-returned=${ctaBack}\n`
+      `af-card never appeared within 45s. cta-ready=${ctaReady} cta-returned=${ctaBack}\n`
       + `        cta-returned=true  => startAgeFlow RAN and DECLINED: its ranked plan came back shorter\n`
       + `                              than MIN_USEFUL_QUESTIONS_TO_SHOW, so it setAgeFlow(null) and fell\n`
       + `                              back to refine. That has TWO causes and they look identical here:\n`
@@ -847,11 +933,13 @@ try {
       + `                                     AGE_COUNT_TIMEOUT_MS) so every question lost its options.\n`
       + `                              (ii) is a load artefact being rendered as a data verdict — see the\n`
       + `                              JOURNEY I note in this file's header before calling it a regression.\n`
-      + `        cta-returned=false => the open never landed at all (still in flight / crashed).\n`
+      + `        cta-ready=false => no click ran; the passive probe never exposed the control.\n`
+      + `        cta-ready=true, cta-returned=false => the clicked interview never landed.\n`
       + `        url=${page.url()} body=${(await body()).slice(0, 300).replace(/\n/g, ' | ')}`);
   } else {
     check('[I] Advanced Filter opens on this large multi-district scope', true);
   }
+  afProbeTimeouts.dispose();
   // `afOpened` is the interview LOOP's own variable below and flips to false the moment the card
   // closes — which is the normal, successful end of the interview. The gates further down must ask
   // "did it ever open?", so latch that here rather than re-reading a variable that means something
@@ -973,7 +1061,7 @@ try {
 
   let jOpened = false;
   for (let i = 0; i < 6 && !jOpened; i++) {
-    await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+    await tap('🎯 دقّق مع الذكاء').catch(() => {});
     await page.waitForTimeout(1200);
     jOpened = await afPresent();
   }
@@ -1112,7 +1200,7 @@ try {
   check('[J0] 0-question scope (Factory/Buy+Rent-combined/الرياض) lands with a real start count', Number.isFinite(jZeroStart), `start=${jZeroStart}`);
   let jZeroOpened = false;
   for (let i = 0; i < 4 && !jZeroOpened; i++) {
-    await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+    await tap('🎯 دقّق مع الذكاء').catch(() => {});
     await page.waitForTimeout(1200);
     jZeroOpened = await afPresent();
   }

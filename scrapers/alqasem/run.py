@@ -62,6 +62,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import city_ar_for, find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 BASE = "https://alqasem.com.sa"
 SOURCE = "القاسم العقارية"
@@ -87,8 +88,10 @@ NOT_FOUND_TITLE = "الصفحة غير موجودة"
 
 def session() -> cc.Session:
     # impersonate owns the User-Agent — never set one here.
-    s = cc.Session(impersonate="chrome")
-    s.headers.update({"Accept-Language": "ar,en;q=0.7"})
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(BASE, headers={"Accept-Language": "ar,en;q=0.7"}, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     return s
 
 
@@ -298,6 +301,22 @@ def _make_verify_gone(url_by_ad: dict[str, str]):
     return verify_gone
 
 
+DIRECT_ALIVE_ORACLE = "alqasem.detail_fetch.single_property_postid"
+
+
+def stamp_crawl_read(row: dict, page_html: str) -> bool:
+    """Mark a row built from its own page as directly read alive — only when the SAME live limb the
+    removal oracle uses (200 + body class single-property postid-<this row's id>) holds on that page.
+    Anything else stamps nothing (the row is still written exactly as before)."""
+    pid = str(row.get("ad_number") or "")[len(PREFIX):]
+    if not pid.isdigit() or row.get("active") is not True:
+        return False
+    if _signal_for(int(pid))(200, page_html, False) != "live":
+        return False
+    db.mark_direct_alive(row, oracle=DIRECT_ALIVE_ORACLE)
+    return True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -325,11 +344,16 @@ def main() -> int:
         url_by_ad: dict[str, str] = {}
         for u in urls:
             time.sleep(_PAUSE)
-            row, cat, why = map_listing(u, fetch(s, u))
+            page = fetch(s, u)              # raises on any non-200: the run fails, nothing is stamped
+            row, cat, why = map_listing(u, page)
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue
             url_by_ad[row["ad_number"]] = u
+            # THE CRAWL IS THE ORACLE (owner 2026-10-26: every ad we show gets a direct check). This
+            # row was just built from ITS OWN page; the removal oracle's live limb read on that same
+            # body (200 + single-property postid-<this id>) certifies it. Zero extra requests.
+            stamp_crawl_read(row, page)
             if args.type != "all" and cat != args.type:
                 continue
             (com if cat == "commercial" else res).append(row)

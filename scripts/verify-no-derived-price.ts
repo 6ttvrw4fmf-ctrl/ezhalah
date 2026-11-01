@@ -139,14 +139,26 @@ for (const f of pyFiles) {
 // and 629 -> 660 on 2026-09-12 when the daily engineer added _fetch_page() (retries a transient
 // list-fetch 5xx/503 instead of failing on the first one — the same fix already applied to
 // ramzalqasim/eastabha) 31 lines above the call; re-verified: still the file's ONLY
-// _extract_price(desc_raw) call, ninth shift, same exception.
-const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:660']);
+// _extract_price(desc_raw) call, ninth shift, same exception. 660 -> 663 on 2026-09-27 when the
+// scraping engineer hoisted session()'s headers into a shared _HEADERS dict (for the
+// retry_smarter_session() profile/proxy probe); re-verified: still the file's ONLY
+// _extract_price(desc_raw) call, tenth shift, same exception.
+// SECOND DECLARED EXCEPTION — an OWNER DECISION, not a pending one (2026-10-17: «Haraj = ALL real-estate offers …
+// read the facts from the seller's own words … price only when a number is tied to a price word»). An
+// unlicensed Haraj post has no price field at all; scrapers/haraj/prose.py:asking_price() is the narrow,
+// tested reader the owner specified (a price word + one figure; a bid, a range, two figures, a deposit,
+// a phone or a count → NULL; pinned by scrapers/common/tests/test_haraj_prose_offers.py). Line-anchored like
+// sadin's: re-verify it is still the file's ONLY asking_price(title, description) call before re-pinning.
+// (2026-10-18: 332 → 338 — the district-precedence change above it added six lines; still the only call.)
+// (2026-10-19: 349 → 379 — licence_district() and its hook above it added thirty lines; still the only call.)
+// (2026-10-19: 379 → 400 — deal_conflict() above map_post (backlog 656/672) added 21 lines; still the only call.)
+const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:663', 'scrapers/haraj/run.py:400']);
 const proseUnapproved = proseOffenders.filter(o => !PROSE_ALLOWLIST.has(o.split(': ')[0]));
 check('no scraper assigns a listing price from prose (outside the declared, dated exception)',
   proseUnapproved.length === 0);
 for (const o of proseUnapproved) console.error('  PROSE-PRICE  ' + o);
-check('the sadin exception is still the ONLY one, and still present (so it cannot be forgotten)',
-  proseOffenders.length === 1 && PROSE_ALLOWLIST.has(proseOffenders[0]?.split(': ')[0]));
+check('the declared exceptions (sadin, haraj) are the ONLY ones, and both still present (so neither is forgotten)',
+  proseOffenders.length === PROSE_ALLOWLIST.size && proseOffenders.every(o => PROSE_ALLOWLIST.has(o.split(': ')[0])));
 
 // LAYER 3 — a per-square-metre rate may never be stored AS the total. Found live in wasalt (7
 // land rows held averageSalePricePerSqm in price_total) and aqar (20 rows held «سعر المتر»).
@@ -211,11 +223,12 @@ mustCatch('…and the conditional-tuple return shape (parse_price)',
   derivesAPrice('    return ((ppm * area_m2) if (ppm and area_m2) else None), ppm'));
 mustCatch('…and the mirror order, area × rate, through wrapped operands',
   derivesAPrice('    return float(row["area_m2"]) * float(row["price_per_meter"])'));
-// A real, faithful return from the fleet — october annualizes a stated rent — mutated into the shape.
-const realReturnLine = readFileSync(join(root, 'october/run.py'), 'utf8')
-  .split('\n').find((l) => /return round\(price \* periods\)/.test(l)) ?? '';
-mustCatch('a real october return line mutated into price × area',
-  derivesAPrice(realReturnLine.replace('periods', 'area')));
+// A real, faithful return from the fleet — annualize_rent's weekly limb (price × periods) — mutated
+// into the shape. (Was october's `return round(price * periods)`, gone with its HTML reader 2026-09-28.)
+const realReturnLine = readFileSync(join(root, 'common/normalize.py'), 'utf8')
+  .split('\n').find((l) => /^\s+return price \* 52$/.test(l)) ?? '';
+mustCatch('a real annualize_rent return line mutated into price × area',
+  derivesAPrice(realReturnLine.replace('52', 'area')));
 
 mustCatch('a price assigned out of the DESCRIPTION (the 47 aqar rows that stored a rental income as the sale price)',
   assignsPriceFromProse('    row["price_total"] = _extract_price(description)'));
@@ -239,7 +252,7 @@ mustCatch('…and a reset (`a = b = c = None`) is not mistaken for a derivation'
 mustCatch('…and a COMMENT describing the banned shape is prose, not an offence',
   !derivesAPrice('    x = 1  # never: price_per_meter = price_total / area')
   && !assignsPriceFromProse('    x = 1  # never read price from the description'));
-mustCatch('…and the REAL october return (price × periods — not an area) is NOT flagged',
+mustCatch('…and the REAL annualize_rent return (price × periods — not an area) is NOT flagged',
   realReturnLine !== '' && !derivesAPrice(realReturnLine));
 // The two false positives found 2026-09-21: output and a regex CONSTANT never store a price.
 mustCatch('…and a debug print / f-string naming both price fields is NOT flagged',

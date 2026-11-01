@@ -21,6 +21,7 @@ import {
   loadersPresent, ok, open, parseColor, pickCity, relativeLuminance, resultsState, runSearch,
   searchAsGuest, sleep, tap, until, violated,
 } from './harness.mjs';
+import { zeroRendered } from '../lib/resultsSentence.mjs';
 
 // ── G1 · theme ───────────────────────────────────────────────────────────────────────────────────
 // WHAT THIS ASSERTS, AND WHY IT IS NOT "the guest app must be dark".
@@ -504,6 +505,25 @@ const CARD_JUNK = [
 // symptom of the raw-vs-canonical bug («سعر المتر ر.س 0» on five live dealapp cards, 2026-07-26).
 const PRICE_ON_REQUEST = 'السعر عند الطلب';
 const ZERO_MONEY = /(?:ر\.س\s*0(?![\d.,])|(?<![\d.,])0\s*(?:ر\.س|ريال\/م²|ريال(?![\p{L}])))/u;
+const COUNTRY_AR = 'المملكة العربية السعودية';
+const SEARCH_CITY = 'الرياض';   // G5 searches this city; every card it renders must name it
+// WHERE A CARD SAYS ITS LOCATION — two cards, two shapes (src/components/ResultCard.tsx).
+//   phone / tablet / the laptop's tight row: «<city>, المملكة العربية السعودية» (the country line);
+//   the laptop photo-first card (row === 'roomy', owner 2026-10-11) has NO country line: its location is
+//   the title line «<district>, <city>» or «<city>».
+// The check used to read only the country line, so from 2026-10-11 every desktop run failed on every
+// card although each one showed «حي النرجس, الرياض» (incident #965, backlog 839). The laptop shape is
+// held to the SEARCHED city, which is stricter than the country line's «any text»: a card printing
+// «الموقع غير محدد» or another city fails. Returns the problem, or null.
+export function cardLocationProblem(text, city) {
+  // Same line only: the old «\s*» crossed a newline, so a price line above a bare country line read as
+  // its «city» (caught by the mutation proof in verify-guardian-oracles-discriminate.ts §4).
+  const country = text.match(new RegExp(`(.*?)[،,]?[^\\S\\n]*${COUNTRY_AR}`, 'u'));
+  if (country) return country[1].trim() ? null : 'no location — the country line names no city';
+  const names = (line) => line === city || line.endsWith(`, ${city}`) || line.endsWith(`، ${city}`);
+  if (text.split('\n').map((l) => l.trim()).some(names)) return null;
+  return `no location — neither a country line nor a location line naming the searched city «${city}»`;
+}
 
 const G5 = {
   id: 'result-card-tells-the-truth',
@@ -512,13 +532,19 @@ const G5 = {
   steps: [
     'Open https://ezhalah-app.vercel.app/, dismiss the sign-in card, pick الرياض and press «بحث».',
     'Read the rendered text of every card-listing-* element.',
-    'For each card assert: a price figure or «السعر عند الطلب»; a «سيأخذك إلى <domain>» source attribution; a non-empty location before «المملكة العربية السعودية».',
+    'For each card assert: a price figure or «السعر عند الطلب»; a visible source domain whose link names the same «سيأخذك إلى <domain>»; a location: a non-empty city before «المملكة العربية السعودية», or (laptop photo-first card) a location line naming the searched city.',
     'For each card assert no HTML entity, no «[object Object]», no bare «undefined»/«NaN», and no zero-valued money token.',
   ],
   async run(page, ctx) {
-    await searchAsGuest(page);
+    await searchAsGuest(page, { city: SEARCH_CITY });
     const cards = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="card-listing-"]')]
-      .map((c) => ({ id: c.getAttribute('data-testid'), text: c.innerText || '' })));
+      .map((c) => ({
+        id: c.getAttribute('data-testid'),
+        text: c.innerText || '',
+        // The «الضغط على هذا الإعلان سيأخذك إلى <host>» sentence is the card link's accessible name
+        // (ResultCard.tsx); the card SHOWS the host on its own line beside «مستضاف على X».
+        aria: [...c.querySelectorAll('[aria-label]')].map((e) => e.getAttribute('aria-label') || ''),
+      })));
     if (!cards.length) throw new HarnessError('the search rendered no cards to inspect');
 
     const bad = [];
@@ -529,10 +555,15 @@ const G5 = {
       if (!hasPrice) bad.push(`${card.id}: no price treatment at all — neither a figure nor «${PRICE_ON_REQUEST}»`);
       const zero = t.match(ZERO_MONEY);
       if (zero) bad.push(`${card.id}: renders a zero-valued money token «${zero[0].trim()}» — a NULL price surfacing as 0`);
-      const source = t.match(/سيأخذك إلى\s+(\S+\.\S+)/u);
-      if (!source) bad.push(`${card.id}: no source attribution — the «الضغط على هذا الإعلان سيأخذك إلى <منصة>» line names no domain`);
-      const location = t.match(/(.*)،?\s*المملكة العربية السعودية/u) || t.match(/([^\n]+),\s*المملكة العربية السعودية/u);
-      if (!location || !location[1].trim()) bad.push(`${card.id}: no location — the country line names no city`);
+      // Source attribution = the host a customer SEES on the card, and the link's «سيأخذك إلى <host>» names
+      // the same host (a screen reader hears where the tap goes). Either missing, or the two disagreeing, fails.
+      const shownHost = t.match(/^\s*((?:[a-z0-9-]+\.)+[a-z]{2,})\s*$/imu)?.[1]?.toLowerCase() ?? null;
+      const saidHost = [t, ...card.aria].map((x) => x.match(/سيأخذك إلى\s+(\S+\.\S+)/u)?.[1]).find(Boolean)?.toLowerCase() ?? null;
+      if (!shownHost) bad.push(`${card.id}: no source attribution — the card shows no source domain`);
+      if (!saidHost) bad.push(`${card.id}: no source attribution — the «الضغط على هذا الإعلان سيأخذك إلى <منصة>» link names no domain`);
+      if (shownHost && saidHost && shownHost !== saidHost) bad.push(`${card.id}: the card shows ${shownHost} but its link says it goes to ${saidHost}`);
+      const where = cardLocationProblem(t, SEARCH_CITY);
+      if (where) bad.push(`${card.id}: ${where}`);
       for (const [re, label] of junk) {
         const m = t.match(re);
         if (m) bad.push(`${card.id}: renders ${label} («${m[0]}») in card text`);
@@ -599,7 +630,12 @@ const DOORS = [
   // correct in front of it — a false alarm on a deliberate product decision. The open-signal and the
   // close step are per-door now: a door with no closer is asserted on its CONTENT and its close
   // mechanism is left uncovered rather than guessed at.
-  { path: '/about', must: ['من نحن', 'الثقة والشفافية', 'إخلاء المسؤولية'], form: false, closer: null },
+  // Its copy is the owner's About redesign (InfoModal.tsx AboutBody): the «الثقة والشفافية» /
+  // «إخلاء المسؤولية» headings no longer exist, so asserting them failed on every build, stable and
+  // canary alike, and the canary gate could not see a real /about break. These are the lines it
+  // renders today: the hero line and the "search platform only" disclaimer line.
+  // scripts/verify-guardian-door-copy-is-rendered.ts fails if a door asserts copy the app no longer renders.
+  { path: '/about', must: ['من نحن', 'بحث عقاري أذكى، يجمع السوق السعودي في مكان واحد.', 'إزهله منصة بحث فقط.'], form: false, closer: null },
 ];
 
 const G7 = {
@@ -610,7 +646,7 @@ const G7 = {
     'Navigate to https://ezhalah-app.vercel.app/support — assert the info modal opens on the home URL.',
     'Assert the support screen renders its heading, its Subject/Message/Email fields and the response-time panel. Do NOT press «إرسال».',
     'Press the modal close control and assert the modal is gone and the app is still rendered.',
-    'Repeat for /about, asserting «من نحن», «الثقة والشفافية» and «إخلاء المسؤولية». /about has no × by design, so it is proven open by its own copy and its close mechanism is recorded as NOT COVERED.',
+    'Repeat for /about, asserting «من نحن», its hero line and its «إزهله منصة بحث فقط» disclaimer line. /about has no × by design, so it is proven open by its own copy and its close mechanism is recorded as NOT COVERED.',
   ],
   async run(page, ctx) {
     const bad = [];
@@ -658,7 +694,22 @@ const G7 = {
 // sits in. The product must say so in Arabic rather than quietly widening or padding the page.
 // «عرض المزيد» is asserted by TESTID, never by text: the same words are also a per-card attribute
 // expander, so a text search would fail on a perfectly honest zero screen.
-const ZERO_PHRASES = ['ما فيه نتائج', 'ما لقيت', 'ما لقينا'];
+// THE ZERO VOCABULARY IS DERIVED FROM THE SHIPPED POOL, NEVER RESTATED HERE.
+//
+// This was a hand-written `['ما فيه نتائج', 'ما لقيت', 'ما لقينا']`, and on 2026-09-26 the app's
+// catch-all no-results sentence became an 80-template ROTATION (src/data/noResultsRotation.ts, owner
+// rule). Production then answered an impossible budget with «ما طلع لنا تطابق في بحث العقار، جرّب
+// توسّع نطاق البحث وإزهله 😢» — a perfectly honest zero, opening with a phrase no entry in that list
+// contains — so this journey called the PRODUCT dishonest and opened ops_incident #852 and #853
+// against it. Measured: guardian-journeys.yml run 36313435466, FAIL 2/2 (desktop and mobile), while
+// the other 14 journeys passed.
+//
+// PR #4890 fixed this exact class in e2e/live-sweep/ the same day, and its lesson is the one that
+// matters here: «derive the predicate from the shipped pool, never restate it». It repaired two
+// copies; this was the THIRD, one directory over, and nothing in the repo connected them. So the
+// import is the fix — zeroRendered() reads the same baked pool with the same parser, so a pool that
+// grows tomorrow is covered without editing this file.
+const zeroStatementIn = (text) => zeroRendered(text);
 
 const G8 = {
   id: 'empty-results-are-honest',
@@ -675,13 +726,18 @@ const G8 = {
     const state = await resultsState(page);
     const text = await bodyText(page);
     const bad = [];
-    const said = ZERO_PHRASES.find((p) => text.includes(p));
-    if (!said) bad.push(`an impossible budget produced no Arabic no-results statement (expected one of ${JSON.stringify(ZERO_PHRASES)})`);
+    const said = zeroStatementIn(text);
+    if (!said) {
+      bad.push('an impossible budget produced no Arabic no-results statement — no template from the '
+        + 'shipped zero pool (src/data/noResultsRotation.ts) and no MSA zero phrase is on screen. '
+        + 'The pool is READ, not restated, so this is the product being silent rather than the '
+        + 'journey not knowing this month\'s wording (see the note above).');
+    }
     if (state.cards > 0) bad.push(`an impossible budget still rendered ${state.cards} result card(s)`);
     if (state.loadMore > 0) bad.push('an impossible budget still offered the «عرض المزيد» pager');
     if (state.countChip) bad.push(`an impossible budget still quoted a Results-Found count of ${state.countChip}`);
     if (ctx.pageErrors.length) bad.push(`uncaught page error on the empty-results screen: ${ctx.pageErrors[0]}`);
-    const evidence = { state, said: said ?? null };
+    const evidence = { state, zeroStatementPresent: said };
     return bad.length ? violated(bad, evidence) : ok(evidence);
   },
 };

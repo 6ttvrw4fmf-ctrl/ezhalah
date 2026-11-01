@@ -23,11 +23,20 @@ DUPLICATES: the same office is sometimes posted twice (287292450 / 287291798: sa
 district, price and area). A later id with the identical (licence, district, price, area) is dropped;
 a shared licence ALONE is not a duplicate (one licence covers a Jeddah villa and a Madinah flat).
 
+AVAILABILITY (measured 2026-10-02): every SERP item carries its own `is_active` (True on 77 of 77).
+The ad pages of the two ads the SERP had dropped (284834558, 286273548) are an «Archive Listing» —
+«هذا الإعلان غير متوفر» — whose post says `is_active: false` while its listing_status still says
+"posted": is_active is the availability flag, listing_status is not one. `expired_at` is the ad's own
+end date («29-11-2026», equal to its page's price_valid_until; both dropped ads left the SERP on
+theirs). Within ~2 days of it the SERP prints a relative phrase instead («قبل 17 ساعة», 5 of 77, all
+five pages still live) whose sign is lost — that reads 'unknown' and is kept, never guessed.
+
 PDPL: the item names the member / shop and carries a masked phone number — none is stored.
 """
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import re
 import sys
@@ -40,7 +49,9 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 BASE = "https://sa.opensooq.com"
@@ -53,9 +64,17 @@ IMPERSONATE = "chrome"
 
 _TYPE_AR = {"ApartmentsForSale": "شقة", "ApartmentsForRent": "شقة", "VillasAndPalacesForSale": "فيلا",
             "VillasAndPalacesForRent": "فيلا", "WholeBuildingForSale": "عمارة", "WholeBuildingForRent": "عمارة",
-            "property_rent_commercial_Offices": "مكتب", "RE_HotelApartments": "شقة"}
-_LAND_USAGE = {"سكنية": "ارض", "تجارية": "أرض تجارية", "زراعية": "أرض زراعية"}
+            "property_rent_commercial_Offices": "مكتب", "RE_HotelApartments": "شقة",
+            # 2026-10-25 (owner: every type the site shows): measured live, each skipped as type_unmapped
+            # until now — 288899568 (warehouse, yearly), 288830702 (house «HomesForSale»), 288551466 (rooms, monthly).
+            # Shops are NOT mapped: all 3 filed there are a car-wash business sale (×2) or a whole building.
+            "property_rent_commercial_Warehouses": "مستودع", "HomesForSale": "بيت", "RE_RoomsForRent": "غرفة"}
+_MULTI_USE = "الاستخدام المتعدد"
+# owner 2026-09-27: multi-use land is BOTH residential and commercial land — it maps to residential here
+# and commercial_twin() lists the same ad as Commercial Land too, so it answers both searches
+_LAND_USAGE = {"سكنية": "ارض", "تجارية": "أرض تجارية", "زراعية": "أرض زراعية", _MULTI_USE: "ارض"}
 _PERIOD = {"شهري": "monthly", "سنوي": "annual"}
+_LISTING_STATUS_MEASURED = {"posted", "reposted"}     # 75 + 2 of 77; any other word is kept and counted
 _NEVER_STORE = {"member_id", "member_display_name", "member_user_name", "member_avatar_uri", "shop_name",
                 "shop_logo_uri", "phone_number", "phone_reveal_key", "member_rating_avg", "member_rating_count"}
 
@@ -88,6 +107,17 @@ def walk(s: cc.Session) -> tuple[list[dict], int]:
     return items, count
 
 
+def unavailable(x: dict, today: Any = None) -> str:
+    """Why the item's OWN fields say it is not on offer — '' when they say it is."""
+    if x.get("is_active") is False:
+        return "inactive_at_source"
+    if x.get("is_active") is not True:
+        return "status_unreadable"      # not read ≠ available and ≠ dead: main() neither upserts nor prunes
+    if normalize.ad_expiry_state(x.get("expired_at"), today) == "expired":
+        return "ad_end_date_expired"
+    return ""
+
+
 def chips(x: dict) -> list[str]:
     return [c.strip() for c in (x.get("cps") or []) if isinstance(c, str) and c.strip()]
 
@@ -118,6 +148,25 @@ def _count(cs: list[str], noun_re: str) -> Optional[int]:
     return None
 
 
+def commercial_twin(x: dict, row: dict) -> Optional[dict]:
+    """The Commercial Land copy of a multi-use plot (same ad, same url) — None for every other ad."""
+    if x.get("cat2_code") == "LandsForSale" and _MULTI_USE in chips(x):
+        return dict(row, property_type="Commercial Land")
+    return None
+
+
+def _page_pin(s: cc.Session, ad_id: Any, said: Optional[dict] = None) -> dict:
+    """The ad page's pin; when `said` is given and the page carries its amenity section, said["answers"] is set (one GET)."""
+    try:
+        r = s.get(f"{BASE}/ar/search/{ad_id}", timeout=20)
+        time.sleep(0.3)
+        if said is not None and r.status_code == 200 and (got := page_amenities(r.text)) is not None:
+            said["answers"] = got
+        return pin_from_html(r.text) if r.status_code == 200 else {}
+    except Exception:  # noqa: BLE001 — a failed page read is "no pin this fetch"
+        return {}
+
+
 def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
     cs = chips(x)
     title = x.get("title") or ""
@@ -132,7 +181,7 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
 
     cat2 = x.get("cat2_code") or ""
     if cat2 == "LandsForSale":
-        usage = next((c for c in cs if c in _LAND_USAGE or c == "الاستخدام المتعدد"), None)
+        usage = next((c for c in cs if c in _LAND_USAGE), None)
         if usage not in _LAND_USAGE:
             return None, f"land_usage_{usage or 'unstated'}_owner_question"
         type_ar = _LAND_USAGE[usage]
@@ -202,7 +251,86 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v not in (None, "", [])})
     cap = {k: v for k, v in x.items() if k not in _NEVER_STORE}
     row["source_capture"] = strip_pii_fields({"schema": "opensooq.serp.v1", "item": cap})
+    row.update(prose_answers(f"{title}\n{desc}"))
     return (row, category), ""
+
+
+# The SERP card has no amenity field (its chips carry rooms, baths, furnished, area, floor, age and period), and its
+# masked_description is cut at ~125 characters («… ووغرفة مط»). The AD PAGE does publish one (corrected 2026-10-26,
+# CI source-reread 40301252058: 14174571's page ticks «موقف سيارات» and «مصعد» under «وسائل الراحة» → «إضافية (2)»,
+# stored NULL — the 10-14 note «the ad page prints no amenity list» was wrong). page_amenities() reads that list; when
+# the page answers, it replaces the snippet prose. The prose stays only for an ad whose page could not be read.
+# furnished stays chip-only.
+_PROSE_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance")
+
+
+def prose_answers(text: Optional[str]) -> dict[str, bool]:
+    return {c: v for c, v in normalize.prose_amenities(text, skip=("furnished",)).items() if c in _PROSE_COLS}
+
+
+# The page's Next.js flight data carries the section as (escaped) JSON:
+#   "dynamicTabsSection":[{"title":"وسائل الراحة","tabs":[{"title":"إضافية (2)","items":["موقف سيارات","مصعد"]},
+#                                                       {"title":"المناطق المجاورة (5)","items":["سوبر ماركت","مسجد",…]}]}]
+# «المناطق المجاورة» is what is NEAR the building (a mosque, a school), never the unit's own: it is never read.
+_TABS = re.compile(r'"dynamicTabsSection":\[\{"title":"وسائل الراحة".*?"tabs":\[(.*?\]\})\]\}\]', re.S)
+_TAB = re.compile(r'\{"title":"([^"]*)"[^{}]*?"items":\[([^\]]*)\]')
+_NEARBY = "المناطق المجاورة"
+
+
+def page_amenities(body: Optional[str]) -> Optional[dict[str, bool]]:
+    """The ad's own ticked amenities from its page; None when the page carries no «وسائل الراحة» section."""
+    flat = re.sub(r'\\+"', '"', html.unescape(body or ""))
+    m = _TABS.search(flat)
+    if not m:
+        return None
+    items = [i for title, raw in _TAB.findall(m.group(1)) if not title.startswith(_NEARBY)
+             for i in re.findall(r'"([^"]+)"', raw)]
+    return {c: v for c, v in normalize.amenities_from_text("\n".join(items)).items() if c in _PROSE_COLS and v}
+
+
+RES_TABLE, COM_TABLE = "opensooq_residential_listings", "opensooq_commercial_listings"
+_ARCHIVED = "هذا الإعلان غير متوفر"      # the «Archive Listing» page of a removed ad (measured 2026-10-02)
+
+
+def _signal_for(post_id: str):
+    """'live' | 'gone' | None for the ad's OWN page /ar/search/<id> — only what it says about ITSELF.
+
+    Measured 2026-10-02 on the two ads the SERP had dropped (284834558, 286273548): the page is an
+    «Archive Listing» that prints «هذا الإعلان غير متوفر». A hard 404/410 is gone too. A live page is
+    a 200 that carries this ad's own id and no archive banner. A redirect elsewhere, a block, a 5xx,
+    or a 200 that does not name this ad is UNKNOWN — never read as dead (LISTING_LIVENESS.md §3)."""
+    def signal(status, body, moved) -> Optional[str]:
+        if status in (404, 410):
+            return "gone"
+        if status != 200 or moved:
+            return None
+        if _ARCHIVED in body:
+            return "gone"
+        return "live" if post_id and post_id in body else None
+    return signal
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for the daily direct check (fleet_liveness.SITES). 2026-10-11: OpenSooq's
+    prune never hid anything — its guard trips on a 100-row catalogue (re-saw 54 of 72) and absence
+    never hides on its own — so 19 ads its SERP had dropped (since 09-28) stayed on screen. A removal
+    is believed only while a known-live ad from the same run still reads live through this session."""
+    url_for = stored_listing_url((RES_TABLE, COM_TABLE))
+    s = cc.Session(impersonate=IMPERSONATE)
+    s.headers.update({"Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
+
+    def probe(ad_number: str, canary=None):
+        post_id = str(ad_number or "").removeprefix(PREFIX)
+        return LivenessProbe(platform=SLUG, signal=_signal_for(post_id), session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no known-live row to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
 
 
 def main() -> int:
@@ -220,10 +348,16 @@ def main() -> int:
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
+    kept: dict[str, int] = {}
     seen_keys: set[tuple] = set()
     try:
         for x in sorted(items, key=lambda i: i["id"]):          # oldest id wins a duplicate pair
-            got, why = map_listing(x)
+            why = unavailable(x)
+            got, why = (None, why) if why else map_listing(x)
+            if got and x.get("listing_status") not in _LISTING_STATUS_MEASURED:
+                k = f"listing_status_{x.get('listing_status')}"
+                kept[k] = kept.get(k, 0) + 1
+                db.mark_presence_unproven(got[0])          # kept as before, never stamped as checked
             if not got:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue
@@ -234,10 +368,32 @@ def main() -> int:
                     skipped.get("duplicate_post_same_licence_district_price_area", 0) + 1
                 continue
             seen_keys.add(key)
+            # Owner 2026-10-20: the SERP JSON carries no coordinates, the ad's own page does
+            # («google.com/maps/search/?api=1&query=LAT,LNG», 5/5 sampled). One GET per kept ad; a page
+            # that does not answer leaves the row as it was (no pin → the district border).
+            said: dict = {}
+            pin = _page_pin(s, x["id"], said)
+            if "answers" in said:
+                # the ad page's own ticked list is the structured statement: it replaces the snippet prose (law §2)
+                for c in _PROSE_COLS:
+                    row.pop(c, None)
+                row.update(said["answers"])
+            if pin:
+                row["additional_info"] = {**(row.get("additional_info") or {}), **pin}
             (com if cat == "commercial" else res).append(row)
+            if normalize.ad_expiry_state(x.get("expired_at")) == "unknown":
+                # no readable end date (measured 2026-10-02: 5 of 77 live ads carry «قبل 17 ساعة» there):
+                # not proof of anything, so the ad stays — and the run says so instead of staying silent
+                kept["expired_at_not_a_date"] = kept.get("expired_at_not_a_date", 0) + 1
+            twin = commercial_twin(x, row)
+            if twin:
+                com.append(twin)
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
+        if kept:
+            print("  kept, status value never measured or end date unread (not guessed): "
+                  + ", ".join(f"{k}x{v}" for k, v in sorted(kept.items())), flush=True)
         if dry:
             print(f"DRY: {len(res)} residential + {len(com)} commercial")
             for row in res + com:
@@ -254,16 +410,19 @@ def main() -> int:
             res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com}, source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
-        complete = len(items) >= declared > 0
-        for tbl, rr in (("opensooq_residential_listings", res), ("opensooq_commercial_listings", com)):
+        complete = len(items) >= declared > 0 and "status_unreadable" not in skipped
+        verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+        for tbl, rr in ((RES_TABLE, res), (COM_TABLE, com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE, verify_gone=verify_gone)
                 if n < 0:
-                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
+                    print(f"  ⚠ {tbl}: prune guard tripped — reading the unseen ads' own pages", flush=True)
+                    n = db.strike_read_gone(tbl, {r["ad_number"] for r in rr}, SOURCE, verify_gone)
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
-            print("  NOT pruning: the walk fell short of the declared count", flush=True)
+            print("  NOT pruning: the walk fell short of the declared count, or an item's status was unreadable",
+                  flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(items), rows_upserted=len(res) + len(com),
                              check_tables=["opensooq_residential_listings", "opensooq_commercial_listings"])
         if not healthy:

@@ -11,7 +11,7 @@ export const GROUP_IMG: Record<string, any> = {
   'Retail & Workspace':                require('../../assets/icons/retail-workspace.png'),
   'Industrial & Logistics':            require('../../assets/icons/industrial-logistics.png'),
   'Commercial Buildings & Facilities': require('../../assets/icons/commercial-buildings-facilities.png'),
-  'Commercial & Industrial Plots':     require('../../assets/icons/commercial-industrial-plots.png'),
+  'Commercial & Industrial Plots':     require('../../assets/icons/land-plots.png'),
 };
 
 export const TYPE_IMG: Record<string, any> = {
@@ -43,6 +43,8 @@ export const TYPE_IMG: Record<string, any> = {
   'Service Facilities':   require('../../assets/icons/service-facilities.png'), // مرافق خدمية — owner-provided icon (sliced from assets/images/المرافق الخدمية.jpg → 256² monochrome alpha, 2026-07-07)
   'Commercial Land':      require('../../assets/icons/commercial-land.png'),
   'Industrial Land':      require('../../assets/icons/industrial-land.png'),
+  'Raw Land':             require('../../assets/icons/raw-land.png'), // Owner-approved cactus and stones; shared OptionBox size/tint.
+  'Other Land':           require('../../assets/icons/commercial-land.png'), // PLACEHOLDER until the owner picks an «أرض أخرى» photo (2026-10-10)
   // sliced from the user's «staff housing bank telecom» sheet → monochrome alpha (2026-07-01)
   'Bank':                 require('../../assets/icons/bank.png'),
   'Telecom Tower':        require('../../assets/icons/telecom-tower.png'),

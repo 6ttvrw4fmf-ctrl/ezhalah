@@ -296,7 +296,8 @@ DETAIL, MEASURED
       construction_period 136 جديد · 137 اقل من سنة · 138 سنة · 139 سنتين · 140 ثلاث سنوات ·
         141 اربع سنوات · 142 خمس سنوات · 143 ست سنوات · 144 سبع سنوات · 145 ثمان سنوات ·
         146 تسع سنوات · 147 عشر سنوات · 148 اكثر من عشر سنوات
-      street_width 0 «-» (unset) · 185 18 · 186 30 · 187 60 · 194 80 · 195 100
+      street_width — SUPERSEDED 2026-10-31: the old 185→18 … 187→60 pairing was wrong 2 of 2 against
+        live pages; the width is now read from the page's own `info_fields_label` table.
       real_estate_facade_id 154 شرقية · 155 غربية · 156 شمالية · 157 جنوبية · 159 جنوبية شرقية ·
         160 جنوبية غربية · 161 شمالية غربية
     Gaps are real options no current listing uses (facade 158, street widths 188-193); they resolve
@@ -305,9 +306,11 @@ DETAIL, MEASURED
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
@@ -322,6 +325,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://reinvest.sa"
 API = "https://api.reinvest.sa/api/v1/real-estate"
@@ -333,6 +337,10 @@ SLUG = "reinvest"
 RES_TABLE = "reinvest_residential_listings"
 COM_TABLE = "reinvest_commercial_listings"
 PAGE_SIZE = 1000
+# The one-page roster (~880 rows) answered HTTP 500 on every try of four crawls on 2026-10-08
+# (04:32–05:20 UTC), and on 10-01/10-07 too, while the same walk in small pages is ordinary API work.
+# When the big page fails, the walk is retried in pages of this size before the run gives up.
+FALLBACK_PAGE_SIZE = 100
 # The roster does not carry the resolved per-listing fields, so every slug needs its own record
 # (measured: 813 of them in 41 s at 10 workers, 813/813 answering 200).
 WORKERS = 8
@@ -379,8 +387,13 @@ _AGE_BY_ID = {
     141: "اربع سنوات", 142: "خمس سنوات", 143: "ست سنوات", 144: "سبع سنوات",
     145: "ثمان سنوات", 146: "تسع سنوات", 147: "عشر سنوات", 148: "اكثر من عشر سنوات",
 }
-# id 0 is the page's «-» — the field is UNSET, not a zero-metre street.
-_STREET_WIDTH_BY_ID = {185: 18, 186: 30, 187: 60, 194: 80, 195: 100}
+# STREET WIDTH IS NOT RESOLVED FROM THE ID (2026-10-31, backlog 1091/1092). The 2026-09-24 pairing
+# (185→18, 186→30, 187→60, 194→80, 195→100) was contradicted 2 of 2 by the live pages on 2026-10-30
+# (re-read run 41091675244): maard-llaygar-416 carries id 187 and its page prints «عرض الشارع 50»
+# (visible cell AND the embedded REGA licence); ard-llbyaa-1775 carries id 185 and prints 12. The id
+# is a menu bucket, not the licence's metres. The rendered page embeds the resolved licence table
+# (`info_fields_label`), so the width is read from THERE and nowhere else; a page we could not read
+# leaves the column NULL (unknown), never the id's guess.
 _FACADE_BY_ID = {
     154: "شرقية", 155: "غربية", 156: "شمالية", 157: "جنوبية",
     159: "جنوبية شرقية", 160: "جنوبية غربية", 161: "شمالية غربية",
@@ -442,6 +455,75 @@ def _worker_session() -> cc.Session:
     if s is None:
         s = _LOCAL.s = session()
     return s
+
+
+_LABELS_KEY = "info_fields_label"
+
+
+def page_labels(html: Optional[str]) -> Optional[dict[str, Any]]:
+    """The licence table the rendered ad page embeds in its Next.js payload, as a dict, or None when
+    the page carries none. The payload is a JSON object inside a JS string, so its quotes arrive
+    escaped («\\"عرض الشارع\\":50»); the escapes are peeled before the object is parsed, and the
+    object is cut by balanced braces (string-aware) rather than by a regex that could stop early."""
+    if not html:
+        return None
+    at = html.find(_LABELS_KEY)
+    while at >= 0:                           # a `null` copy may precede the filled one
+        got = _labels_at(html[at + len(_LABELS_KEY): at + len(_LABELS_KEY) + 20000])
+        if got:
+            return got
+        at = html.find(_LABELS_KEY, at + 1)
+    return None
+
+
+def _labels_at(seg: str) -> Optional[dict[str, Any]]:
+    for _ in range(3):                       # one level per JS-string nesting
+        if '\\"' not in seg:
+            break
+        seg = seg.replace('\\\\', '\\').replace('\\"', '"')
+    start = seg.find("{")
+    if start < 0 or seg[:start].strip(' "\':') != "":
+        return None
+    depth, in_str, esc = 0, False, False
+    for i, ch in enumerate(seg[start:], start):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    obj = json.loads(seg[start:i + 1])
+                except ValueError:
+                    return None
+                return obj if isinstance(obj, dict) else None
+    return None
+
+
+def street_width_from_labels(labels: Optional[dict[str, Any]]):
+    """«عرض الشارع» as the page's own licence table states it.
+
+    Page not read → None (unknown; the db layer keeps whatever is stored). Page read and the table
+    says «-» or has no such row → AUTHORITATIVE_NULL: the source itself settled it, so a value the old
+    id table put there is cleared. A figure that is not one whole width («3.56») → AUTHORITATIVE_NULL
+    too: never rounded, and the stale id value does not survive it."""
+    if not isinstance(labels, dict):
+        return None
+    raw = labels.get("عرض الشارع")
+    if raw is None or str(raw).strip() in ("", "-"):
+        return db.AUTHORITATIVE_NULL
+    # A page that states a width we cannot store as one whole number («3.56», ad 13256919) has
+    # still SPOKEN: whatever the old id table put in the column is not what it says, so clear it.
+    w = normalize.one_street_width(raw)
+    return db.AUTHORITATIVE_NULL if w is None else w
 
 
 def _strip_marks(s: Optional[str]) -> Optional[str]:
@@ -642,7 +724,8 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "bathrooms": _pos(info.get("bathrooms")),
         "parking": normalize.count_flag(info.get("parking_count")),
         "property_age": normalize.parse_property_age(_AGE_BY_ID.get(age_id)),
-        "street_width_m": normalize.one_street_width(_STREET_WIDTH_BY_ID.get(width_id)),
+        # From the page's own licence table only (see the note at the id tables); never the id.
+        "street_width_m": street_width_from_labels(rec.get("_page_labels")),
         "direction": normalize.one_direction(_FACADE_BY_ID.get(facade_id), diagonal=True),
         "license_number": _clean(rec.get("license_number")),
         "date_added": _clean(rec.get("published_at")) or _clean(rec.get("created_at")),
@@ -669,6 +752,8 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
                               "count": len(photos or [])}
 
     extra = {
+        # The API's own `latitude`/`longitude` (present on every ad), through the one gate (owner 2026-10-19).
+        **pin_dict(rec.get("latitude"), rec.get("longitude")),
         "source_id": rec.get("id"), "source_slug": _clean(rec.get("slug")), "type_ar": type_ar,
         "region_ar": _clean(rec.get("region")),
         # exact m², before area_m2's INTEGER round
@@ -687,7 +772,8 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "finishing_type_id": info.get("finishing_type_id"),
         "age_option_id": age_id, "street_width_option_id": width_id, "facade_option_id": facade_id,
         "age_option_label": _AGE_BY_ID.get(age_id),
-        "street_width_option_label": _STREET_WIDTH_BY_ID.get(width_id),
+        "street_width_page_label": (rec.get("_page_labels") or {}).get("عرض الشارع"),
+        "page_labels_read": rec.get("_page_labels") is not None,
         "facade_option_label": _FACADE_BY_ID.get(facade_id),
         "amenity_words": amen_words or None,
         "main_usage": _clean(rec.get("main_usage")),         # the platform's own res/com reading
@@ -719,14 +805,31 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
 
 
 # ── FETCH ────────────────────────────────────────────────────────────────────────────────────────
+# The roster API throws short bursts of HTTP 500 and stalls past the read timeout, each fine minutes
+# later: 2026-10-01 «Operation timed out after 60000 ms» and 2026-10-07 «page 1 returned 500» both
+# killed the whole night's crawl on its first request, and the 04:58 re-crawl read all 891 rows. The
+# old loop retried only gateway statuses (500 is not one), with no pause, and let a transport error
+# escape on the first try. Now: any 5xx / 429 / transport error is retried with a growing pause
+# (~75 s in all); a 4xx is believed at once; still failing → the run fails loudly, as before.
+_JSON_ATTEMPTS = 5
+_JSON_BACKOFF_S = 5.0
+
+
 def _json(s: cc.Session, url: str, *, what: str) -> dict:
-    r = None
-    for _ in range(3):
-        r = s.get(url, timeout=60)
-        if r.status_code not in TRANSIENT_STATUSES:
+    r, err = None, None
+    for attempt in range(_JSON_ATTEMPTS):
+        try:
+            r, err = s.get(url, timeout=60), None
+        except Exception as exc:  # noqa: BLE001 — a timeout / reset is retried, then reported
+            r, err = None, exc
+        if r is not None and not (r.status_code >= 500 or r.status_code == 429
+                                  or r.status_code in TRANSIENT_STATUSES):
             break
+        if attempt + 1 < _JSON_ATTEMPTS:
+            time.sleep(_JSON_BACKOFF_S * (attempt + 1))
     if r is None or r.status_code != 200:
-        raise RuntimeError(f"{what} returned {getattr(r, 'status_code', 'no response')}")
+        got = getattr(r, "status_code", None) or (f"no response ({err})" if err else "no response")
+        raise RuntimeError(f"{what} returned {got}")
     try:
         body = r.json()
     except ValueError as exc:
@@ -743,8 +846,17 @@ def fetch_roster(s: cc.Session, limit: int = 0) -> list[dict]:
     — that is what the website's counter is for (see declared_totals). A page that repeats itself
     stops the walk rather than looping forever.
     """
+    try:
+        return _walk_roster(s, PAGE_SIZE, limit)
+    except RuntimeError as exc:
+        print(f"{SOURCE}: roster in pages of {PAGE_SIZE} failed ({exc}) — walking it in pages of "
+              f"{FALLBACK_PAGE_SIZE}", flush=True)
+        return _walk_roster(s, FALLBACK_PAGE_SIZE, limit)
+
+
+def _walk_roster(s: cc.Session, page_size: int, limit: int = 0) -> list[dict]:
     rows: dict[str, dict] = {}
-    url: Optional[str] = f"{API}?per_page={PAGE_SIZE}&page=1"
+    url: Optional[str] = f"{API}?per_page={page_size}&page=1"
     pages = 0
     while url:
         body = _json(s, url, what=f"{API} page {pages + 1}")
@@ -760,7 +872,11 @@ def fetch_roster(s: cc.Session, limit: int = 0) -> list[dict]:
             break                       # page repeated itself
         if limit and len(rows) >= limit:
             return list(rows.values())[:limit]
-        url = _clean((body.get("links") or {}).get("next"))
+        # The endpoint's own `links.next` drops per_page (10-08: pages of 100 → page 2 came back at
+        # the default size, every row a repeat, and the walk stopped at 100 of ~900). The page size
+        # is ours, so is the next URL; `links.next` only says whether there is one.
+        nxt = _clean((body.get("links") or {}).get("next"))
+        url = f"{API}?per_page={page_size}&page={pages + 1}" if nxt and len(batch) >= page_size else None
     print(f"{SOURCE}: roster {len(rows)} listings over {pages} page(s)", flush=True)
     return list(rows.values())
 
@@ -811,7 +927,50 @@ def fetch_detail(s: cc.Session, slug: str) -> Optional[dict]:
         data = (r.json() or {}).get("data")
     except ValueError:
         return None
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        return None
+    data["_page_labels"] = fetch_page_labels(s, data)
+    return data
+
+
+PAGE_READS: dict[str, int] = {}
+_PAGE_LOCK = threading.Lock()
+
+
+def _page_tally(why: str) -> None:
+    with _PAGE_LOCK:
+        PAGE_READS[why] = PAGE_READS.get(why, 0) + 1
+
+
+def fetch_page_labels(s: cc.Session, rec: dict) -> Optional[dict[str, Any]]:
+    """The rendered page's licence table for this record, or None when the page could not be read.
+    None is UNKNOWN: the fields that come only from it are not written this crawl (the db layer
+    drops None, so a stored value stays). Every outcome is counted in PAGE_READS and printed."""
+    # The detail record carries no `url_path` (run 41181394867: no_page_url x952), so the page is
+    # addressed by the same canonical path the stored listing_url is built from.
+    path = listing_path(rec)
+    if not path:
+        _page_tally("no_page_url")
+        return None
+    url = f"{BASE}{path}"
+    last = "no_response"
+    for _ in range(3):
+        try:
+            r = s.get(url, timeout=60, headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"})
+        except Exception as e:  # noqa: BLE001 — counted, never a crash
+            last = f"error_{type(e).__name__}"
+            continue
+        if r.status_code == 200:
+            body = r.text or ""
+            got = page_labels(body)
+            _page_tally("ok" if got else ("key_absent" if _LABELS_KEY not in body else "key_unparsed"))
+            return got
+        last = f"http_{r.status_code}"
+        if r.status_code not in TRANSIENT_STATUSES:
+            break
+    _page_tally(last)
+    return None
 
 
 def fetch_details(slugs: list[str]) -> dict[str, dict]:
@@ -938,6 +1097,8 @@ def main() -> int:
         got = {"Rent": by_deal.get("إيجار", 0), "Buy": by_deal.get("بيع", 0)}
         complete = all(declared[d] is not None and declared[d] == got[d] for d in ("Rent", "Buy"))
 
+        if PAGE_READS:
+            print("  ad pages (licence table): " + _tally(PAGE_READS))
         notes = _tally(skipped)
         if skipped:
             print("  skipped (not guessed): " + notes)
@@ -954,6 +1115,7 @@ def main() -> int:
                       f"bd={str(r0.get('bedrooms')):>4} pt={r0.get('price_total')} "
                       f"pa={r0.get('price_annual')} rp={r0.get('rent_period')} "
                       f"ppm={r0.get('price_per_meter')} sw={r0.get('street_width_m')} "
+                      f"swp={(r0.get('additional_info') or {}).get('street_width_page_label')} "
                       f"ag={r0.get('property_age')} dir={r0.get('direction')} "
                       f"ph={len(r0.get('photo_urls') or [])}")
             return 0

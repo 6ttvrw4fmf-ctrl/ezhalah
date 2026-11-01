@@ -88,6 +88,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
 import sys
 import threading
@@ -100,8 +101,9 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, http, normalize  # noqa: E402
+from scrapers.common.page_pin import pin_from_html, pin_from_page  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
-    find_district_in_text, is_ambiguous_standalone_word, to_catalog,
+    find_district_in_text, is_ambiguous_standalone_word, known_district_keys, title_hayy_district, to_catalog,
 )
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
@@ -202,10 +204,24 @@ def session() -> cc.Session:
     below is the catalogue page the run needs anyway, so a profile is only accepted when it answers
     with real cards.
     """
-    return http.negotiated_session(
-        f"{BASE}/index.php?router=cards&catid={sorted(CATEGORY_IDS)[0]}&type=1",
-        headers={"Accept-Language": "ar,en;q=0.7"},
-        served=lambda r: r.status_code == 200 and '<section class="cards' in r.text)
+    probe = f"{BASE}/index.php?router=cards&catid={sorted(CATEGORY_IDS)[0]}&type=1"
+    kw = dict(headers={"Accept-Language": "ar,en;q=0.7"},
+              served=lambda r: r.status_code == 200 and '<section class="cards' in r.text)
+    # 2026-09-28: on alternate days every profile DIRECT drew an empty «HTTP 202» (a bot-challenge
+    # page, not a catalogue) from the runner's datacenter IP — 4 of the last 7 crawls died here while
+    # re-runs hours later succeeded. When the direct route is walled, ride the residential proxy
+    # (`proxy: true` in small-sources-sync.yml sets WASALT_PROXY_URL). No proxy configured → the
+    # direct failure is raised unchanged, so the run still says exactly why it stopped.
+    try:
+        return http.negotiated_session(probe, **kw)
+    except RuntimeError as direct_err:
+        purl = os.environ.get("WASALT_PROXY_URL", "").strip()
+        if not purl:
+            raise
+        try:
+            return http.negotiated_session(probe, proxies={"http": purl, "https": purl}, **kw)
+        except RuntimeError as proxy_err:
+            raise RuntimeError(f"{direct_err} | via proxy: {proxy_err}") from None
 
 
 def _clean(raw: Optional[str]) -> str:
@@ -430,20 +446,40 @@ def rooms_from_prose(text: Optional[str]) -> dict[str, Any]:
     return out
 
 
+# This office's own spellings of two catalogued عنيزة districts (owner 2026-10-17: 34 ads had no district).
+# «الأشرافية» = حي الاشرفية, «إشبيليا» = حي اشبيلية — the same place, an extra alef / a final ا for ة.
+# Exact-word swaps only; find_district_in_text still accepts nothing outside loc_catalog_district.
+_KNOWN_SPELLINGS = [(re.compile(r"(?<![ء-ي])ال[أا]شرافي[ةه](?![ء-ي])"), "الاشرفية"),
+                    (re.compile(r"(?<![ء-ي])[إأا]شبيليا(?![ء-ي])"), "اشبيلية")]
+
+
+def _known_spelling(text: Optional[str]) -> str:
+    out = text or ""
+    for rx, canon in _KNOWN_SPELLINGS:
+        out = rx.sub(canon, out)
+    return out
+
+
 def city_from_title(title: str) -> tuple[Optional[str], Optional[int], Optional[int]]:
     """Ask the CATALOG which token of the title is a city, scanning right to left (Arabic titles
     put the city last, so «بحي بدر بمدينة الرياض» must not resolve to the town بدر). A region label
     («منطقة القصيم») only becomes a hint for the city scan — never the location itself."""
     toks = [t for t in _TOK_SPLIT.split(title or "") if t]
     hint: Optional[int] = None
-    for i in range(len(toks) - 1, -1, -1):
+    # Windows are anchored on their LAST token and tried longest first (2026-10-14): the old scan
+    # started each window at a token, so the one-word tail «الباطن» of «بمدينة حفر الباطن» was asked
+    # before the two-word «حفر الباطن» and resolved to a Qassim village (15 listings), «رياض
+    # الخبراء» to «الخبراء» (10), and «بمدينة المنورة» fell through to the district before it (3).
+    for end in range(len(toks), 0, -1):
         for size in (2, 1):
-            if i + size > len(toks):
+            if end - size < 0:
                 continue
-            cand = " ".join(toks[i:i + size])
+            cand = " ".join(toks[end - size:end])
             forms = [cand]
             if cand[:1] in "بل" and len(cand) > 2:
                 forms.append(cand[1:])        # «بعنيزة» → «عنيزة», keeping the raw form too
+            if normalize._norm_ar(forms[-1]).startswith("مدينه "):
+                forms.append("ال" + forms[-1])  # «(ب)مدينة المنورة» is «المدينة المنورة»
             for form in forms:
                 if normalize._norm_ar(form) in _CITY_STOP or is_ambiguous_standalone_word(form):
                     continue
@@ -483,7 +519,9 @@ def parse_detail(page_html: str) -> dict[str, Any]:
         return {}
     title = _clean((re.findall(r"<h3[^>]*>(.*?)</h3>", page_html, re.S) or [""])[0])
     photos = list(dict.fromkeys(html.unescape(u) for u in _BIG_IMG_RE.findall(page_html)))
-    return {"fields": fields, "title": title, "photos": photos}
+    # Owner 2026-10-20: the ad's own Maps embed «maps/embed/v1/place?q=LAT,LNG» (5/5 sampled ads; 2,609
+    # ads were on the district border for nothing). Through the one gate (sa_pin); {} when absent.
+    return {"fields": fields, "title": title, "photos": photos, "pin": pin_from_page(page_html)}
 
 
 def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
@@ -540,24 +578,45 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         city_ar = city_raw
         # The field WAS the city here, not a district — never also read it as one below.
         field_is_a_city = True
-        district_ar = find_district_in_text(title, city_id)
+        district_ar = find_district_in_text(_known_spelling(title), city_id)
     else:
         # city_ar is the source's own Arabic text for the city — the very token to_catalog accepted.
         city_ar = city_raw
         # A «الحي» the catalog recognises as a CITY is not this listing's district (measured: three
         # عنيزة rentals carry «الحي: الدوادمي»).
         field_is_a_city = bool(district_field) and bool(to_catalog(district_field)[0])
-        district_ar = ((find_district_in_text(district_field, city_id) if not field_is_a_city else None)
-                       or find_district_in_text(title, city_id))
+        district_ar = ((find_district_in_text(_known_spelling(district_field), city_id) if not field_is_a_city else None)
+                       or find_district_in_text(_known_spelling(title), city_id))
+
+    # The title names the district the catalogue lacks: «للبيع أرض سكنية بحي المليداء بمدينة بريدة», «بحي شعب عامر …».
+    # Its «حي X» in the title's spelling when it is exactly a district the catalogue or the served index knows for
+    # this city (2026-10-18: 52 of the 100 titled rows with no district). Never fuzzy.
+    title_hayy = title_hayy_district(title, known_district_keys(city_id)) if (city_id and not district_ar) else None
+    if title_hayy:
+        district_ar = title_hayy
 
     area_m2, area_skip = parse_area(f.get("مساحة الأرض"))
     som, som_ppm, som_skip = parse_money(f.get("سعر السوم"))
     lim, lim_ppm, lim_skip = parse_money(f.get("سعر الحد"))
+    # «سعر السوم: 0» is the CURRENT BID on an ad nobody has bid on yet, not an asking price (🦅 Falcon
+    # 2026-10-16, backlog 316: ids 556 and 557 print «سعر السوم 0» beside «سعر الحد: على السوم» and were
+    # served as Buy ads at «0 ر.س» for weeks). No bid is no figure. Because the page WAS read and printed
+    # that 0, the silence is written as AUTHORITATIVE_NULL below, so a stored 0 cannot survive the upsert.
+    zero_bid = som == 0
+    if zero_bid:
+        som = None
     # «سعر السوم» is the figure being asked/bid, «سعر الحد» the seller's floor — the السوم wins when
     # both are stated, and additional_info always records WHICH one the card is showing.
     price, price_basis = ((som, "سعر السوم") if som is not None
                           else (lim, "سعر الحد") if lim is not None else (None, None))
     ppm = som_ppm if som_ppm is not None else lim_ppm
+    # The ad's own description states THIS figure per metre: QRW2823 prints «سعر الحد 900» and, in its description,
+    # «سعر المتر 900 ريال» on a 400 m² plot (rendered 2026-10-18) — the cell's figure is the rate, not a 900 total.
+    # Owner rule 2026-10-18: a rate needs the ad's own per-metre marker tied to that figure (normalize.stated_per_metre).
+    rate_in_text = bool(deal != "Rent" and price is not None and ppm is None
+                        and normalize.stated_per_metre(desc, price))
+    if rate_in_text:
+        ppm, price = price, None
     # ppm × area is NOT computed here: owner rule 2026-09-03 derives it in the search/display layer
     # only (price_total_effective, shown as ≈ and sale-only). price_total keeps meaning "the source
     # said this"; the rate goes to price_per_meter below.
@@ -580,7 +639,7 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         "city_id": city_id,
         "region_id": region_id,
         "district_ar": district_ar,
-        "neighborhood": (None if field_is_a_city else district_field) or None,
+        "neighborhood": (None if field_is_a_city else district_field) or title_hayy or None,
         "area_m2": area_m2,
         "price_per_meter": ppm,
         "photo_urls": detail.get("photos", [])[:20] or None,
@@ -613,7 +672,8 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         if period:
             row["rent_period"] = period
     else:
-        row["price_total"] = price
+        row["price_total"] = (db.AUTHORITATIVE_NULL if rate_in_text
+                              else price if (price is not None or not zero_bid) else db.AUTHORITATIVE_NULL)
     row["additional_info"] = {k: v for k, v in {
         "property_number": f.get("رقم العقار"),
         "category_ar": cat_ar,
@@ -629,7 +689,9 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         "area_skip_reason": area_skip or None,
         "area_raw": f.get("مساحة الأرض") or None,
         "district_field_raw": district_field if field_is_a_city else None,
+        "district_source": "title" if title_hayy else None,
         "added_ago_raw": None if _is_blank(f.get("مضاف منذ")) else f.get("مضاف منذ"),
+        **(detail.get("pin") or {}),
     }.items() if v is not None}
     return row, category, ""
 

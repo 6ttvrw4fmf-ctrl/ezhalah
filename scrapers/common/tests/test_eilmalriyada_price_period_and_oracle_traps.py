@@ -451,7 +451,7 @@ def test_off_plan_region_city_and_type_skips():
 # ═══════════════════════════════ 4. advanced-filter facts in real columns ════════════════════════
 def test_cms_sentinels_open_bounds_and_tatweel_443_297_217():
     row, _, _ = R.map_listing(ELR_TOWNHOUSE, None)
-    assert row["property_type"] == "Villa"                              # the fleet folds a townhouse
+    assert row["property_type"] == "تاون هاوس"                           # a town house keeps its own name
     assert row["property_age"] == 0                                     # «جديدة»
     assert row["direction"] is None and row["additional_info"]["direction_raw"] == "غربية شمالية"
     assert row["street_width_m"] == 18 and (row["bedrooms"], row["bathrooms"]) == (4, 6)

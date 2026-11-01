@@ -53,6 +53,9 @@ const SAMPLES: Record<string, { value: unknown; cohort: any }> = {
   direction:     { value: ['شمال'], cohort: BUY_VILLA   },
   street_width:  { value: '20',     cohort: BUY_VILLA   },
   furnished:     { value: 'yes',    cohort: ANNUAL_APT  },
+  // the Residential Building ladders (owner 2026-10-31)
+  apartments:    { value: 'apts8',  cohort: { ...BUY_VILLA, type: 'Residential Building' } },
+  shops:         { value: 'has_shops', cohort: { ...BUY_VILLA, type: 'Residential Building' } },
 };
 for (const id of GENERIC_INTENT_IDS) {
   const sample = SAMPLES[id];

@@ -39,12 +39,13 @@ export const STICKY_FIELDS = [
   // supabase/functions/agent/index.ts's establishedState construction (both read a `.price`/`.af`
   // shape that only ever existed on the edge's OWN wire format, never on this type). The real budget
   // fields — priceInput/priceMin/priceMax/priceBand — are already listed below and unaffected.
-  'deal', 'bothDeals', 'rentPeriod', 'type', 'category', 'location', 'regionPin', 'districtPin',
+  'deal', 'bothDeals', 'rentPeriod', 'type', 'category', 'location', 'geographicScope', 'regionPin', 'districtPin',
   'districts', 'detail', 'contextSize', 'priceInput', 'priceIsAnnual', 'priceOriginal',
-  'priceMin', 'priceMax', 'priceBand', 'areaMin', 'areaMax', 'sources',
+  'priceMin', 'priceMax', 'priceBand', 'areaMin', 'areaMax', 'areaNote', 'sources', 'excludedSources', 'count',
   // advanced filter (the canonical AF question outputs)
   'amenities', 'furnishedPref', 'ratingMin', 'reviewsMin', 'bathMin', 'ageMin', 'ageMax',
   'isNewConstruction', 'streetWidthMin', 'directions', 'unitSubtypes',
+  'ageBuckets', 'ratingBuckets', 'furnishedIn',
   // ORDERING (owner, 2026-09-06). A vague adjective («رخيصة», «كبيرة») sets q.sort, and the owner's
   // ruling is that it "sticks until they change it" — same contract as every other stated field.
   // Without this entry a follow-up like «خلها في حي الشاطئ» silently dropped the cheapest-first
@@ -106,7 +107,8 @@ export function mergeConversationState(
   const defaulted = new Set<string>(DEFAULTED_FIELDS as readonly string[]);
   for (const key of STICKY_FIELDS) {
     // A defaulted field counts as established ONLY if this turn actually said it.
-    const establishedNow = said && defaulted.has(key) ? said.has(key) : established(out[key]);
+    const explicitLocation = said?.has(key) && ["sources", "excludedSources", "location", "geographicScope", "regionPin", "districtPin", "districts"].includes(key);
+    const establishedNow = explicitLocation || (said && defaulted.has(key) ? said.has(key) : established(out[key]));
     if (!establishedNow && established(p[key])) out[key] = p[key];
   }
   return out as unknown as SearchQuery;
@@ -147,7 +149,9 @@ export function describeKnownState(q: SearchQuery | null | undefined): string {
   push('propertyType', s.type);
   push('location', s.location);
   push('region', s.regionPin);
+  push('geographicScope', s.geographicScope);
   push('district', s.districtPin);
+  push('districts', s.districts);
   push('bedroomsOrSize', s.detail);
   // The budget is stored annualized for rent; say so, or the model will read 72000 as a monthly figure.
   //
@@ -173,5 +177,7 @@ export function describeKnownState(q: SearchQuery | null | undefined): string {
   push('direction', s.directions);
   push('unitSubtype', s.unitSubtypes);
   push('platforms', s.sources);
+  push('excludedPlatforms', s.excludedSources);
+  push('count', s.count);
   return bits.join(', ');
 }

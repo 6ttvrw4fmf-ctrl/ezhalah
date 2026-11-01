@@ -7,6 +7,17 @@
   "trailingSlash": false,
   "redirects": [
     {
+      "source": "/:path((?!sb/|api/).*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "ezhalah-app.vercel.app"
+        }
+      ],
+      "destination": "https://ezhalah.com/:path",
+      "permanent": true
+    },
+    {
       "source": "/agent",
       "destination": "/",
       "permanent": false
@@ -14,7 +25,36 @@
   ],
   "headers": [
     {
-      "source": "/((?!_expo/).*)",
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'self'"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), geolocation=(), microphone=(self)"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
+        }
+      ]
+    },
+    {
+      "source": "/((?!_expo/|assets/).*)",
       "headers": [
         {
           "key": "Cache-Control",
@@ -30,16 +70,57 @@
           "value": "public, max-age=31536000, immutable"
         }
       ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/_img/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Cross-Origin-Resource-Policy",
+          "value": "same-origin"
+        }
+      ]
     }
   ],
   "rewrites": [
     {
-      "source": "/_img/sadin/:path*",
-      "destination": "https://sadin.com.sa/:path*"
+      "source": "/s/:p",
+      "destination": "/api/share-card?p=:p"
     },
     {
-      "source": "/_img/eydah/:path*",
-      "destination": "https://eydah.com/:path*"
+      "source": "/sb/rest/v1/:ezsbpath*",
+      "destination": "/api/sb?__p=:ezsbpath*"
+    },
+    {
+      "source": "/_img/sadin/media/properties/:path*",
+      "destination": "https://sadin.com.sa/media/properties/:path*"
+    },
+    {
+      "source": "/_img/sadin/media/property-assets/:path*",
+      "destination": "https://sadin.com.sa/media/property-assets/:path*"
+    },
+    {
+      "source": "/_img/eydah/assets/listings/:path*",
+      "destination": "https://eydah.com/assets/listings/:path*"
     }
+  ],
+  "regions": [
+    "hnd1"
   ]
 }

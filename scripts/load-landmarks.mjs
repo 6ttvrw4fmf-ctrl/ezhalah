@@ -1,6 +1,7 @@
 // One-time loader: reads the 14 local landmark JSON catalogs and bulk-upserts every record into the
 // Supabase `landmarks` table. The data flows file → script → DB and never passes through the chat.
 // Run:  SUPABASE_SERVICE_ROLE_KEY=... node scripts/load-landmarks.mjs   (URL is read from .env)
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { createClient } from '@supabase/supabase-js';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

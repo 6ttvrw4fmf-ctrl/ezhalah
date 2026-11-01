@@ -1,47 +1,90 @@
 import { Platform, Share } from 'react-native';
 import { getLocale } from '@/i18n';
+import { loadSiteCount, siteCountNow } from '@/data/siteCount';
 
-// The real, resolvable share target (the deployed app).
-export const SHARE_LINK = 'https://ezhalah-app.vercel.app';
-// The picture people actually SEE in WhatsApp / iMessage / X / Telegram / LinkedIn. It must be an
-// ABSOLUTE url — a crawler fetching the page has no origin to resolve "/og-image.jpg" against — and
-// it is a composed card: the existing eagle mark from assets/images/ezhalah-logo.png, knocked out
-// white on the brand green, over the name and the one-line promise. No new logo was drawn — the mark
-// is the project's own file. It replaced a crop of the eagle-night artwork (owner, 2026-09-05: "just
-// include the logo, let it look professional") because a photographic crop reads as a stock image at
-// thumbnail size, while a logo card reads as a brand.
+// The real, resolvable share target. ezhalah.com is the final address (owner 2026-10-26); the old
+// ezhalah-app.vercel.app still serves the same deployment, so links shared before today keep working.
+export const SHARE_LINK = 'https://ezhalah.com';
+// THE ENGLISH LINK (owner 2026-10-29: «the language in the card itself … can I change it»). A link-preview card has ONE
+// language per URL, so an English share sends this address and middleware.ts serves link-preview bots an English card
+// for it. The Arabic share keeps the plain link and its Arabic card.
+export const SHARE_LINK_EN = `${SHARE_LINK}/?lang=en`;
+// The hosts that ARE the live site. A share made on any of them says ezhalah.com; a preview or local build
+// keeps its own address so a test share opens the build that made it.
+export const LIVE_SITE_HOSTS = ['ezhalah.com', 'www.ezhalah.com', 'ezhalah-app.vercel.app'];
+/** The address a share link starts with: ezhalah.com on the live site and in the native app, else this page's own. */
+export function shareOrigin(): string {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return SHARE_LINK;
+  const host = window.location?.hostname ?? '';
+  return LIVE_SITE_HOSTS.includes(host) ? SHARE_LINK : window.location.origin;
+}
+// Owner-approved share artwork (2026-10-11): the existing green eagle on white,
+// identical to the app icon. The in-app preview uses the same image as external cards.
 // THE FILENAME CARRIES A VERSION, AND THAT IS LOAD-BEARING. WhatsApp, Facebook and LinkedIn cache a
 // link's preview card KEYED BY URL and re-fetch it on their own schedule — the same trap Chrome's
 // favicon store sprang on 2026-09-05, where correct new bytes at an unchanged path stayed invisible
 // for months. Replacing the bytes of og-image.jpg would leave everyone who has ever shared the link
 // on the old picture. RENAME THE FILE when the artwork changes; never overwrite it in place.
-export const OG_IMAGE = `${SHARE_LINK}/og-image-v4.jpg`;
-// ONE message, owner-authored (2026-09-05, rewritten by the owner 2026-09-23 to the home screen's own
-// question plus an explicit «اضغط هنا» call to action), used everywhere that used to keep its own copy and drift:
-// the OS share text, the in-app sheet, X/Telegram/WhatsApp/Mail, and the og: card. The LEAD is the
-// sentence alone — targets that take the link in their own `url=` parameter must not be handed it
-// twice — and MESSAGE is that lead plus the link, for targets that carry everything in one string.
-export const SHARE_LEAD_AR = 'تدور على العقارات وتبي تشوف كل المعروض في مكان واحد؟ في ثواني مع إزهله ✨\nاضغط هنا 👇';
-export const SHARE_LEAD_EN = 'Looking for a property and want to see everything on offer in one place? In seconds with Ezhalah ✨\nTap here 👇';
-export const SHARE_MESSAGE_AR = `${SHARE_LEAD_AR}\n${SHARE_LINK}`;
-export const SHARE_MESSAGE_EN = `${SHARE_LEAD_EN}\n${SHARE_LINK}`;
-// og:description and the in-app preview get the sentence WITHOUT the emoji or the link: a preview
-// card already shows the domain under it, and repeating the url inside the description is the mark
-// of a page that was never actually looked at in a chat window.
-export const SHARE_BLURB_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، عقارات السعودية في ثواني.';
-export const SHARE_BLURB_EN = 'Looking for a property and want to see everything on offer in one place? Every property listing in Saudi Arabia, in seconds.';
+// v7 = the cloud-eagle logo, 192×192 (owner 2026-10-24: «this is the final logo … replace it everywhere»). v6 = 192×192 (owner 2026-10-18: «look how big … keep it small»). WhatsApp draws a BIG banner for an
+// og:image ≥ ~300px wide and a small side thumbnail below that — the same 192px card the search-share
+// links (/s/…) already get. Keep it under 300px.
+export const OG_IMAGE = `${SHARE_LINK}/og-image-v9.png`;
+// THE PAGE DESCRIPTION — the sentence under Ezhalah's title in a Google result (owner 2026-10-27, built with the owner from
+// phone-width previews): a free AI property search engine in Saudi Arabia, then three «from … to …» pairs — big
+// platforms to small brokerage offices, Riyadh to Sharurah (a far, uncommon city with real listings; owner 2026-10-28 «شرورة not haql»), villas to raw
+// land — then buy / rent / short stays and «إزهله. خله يدور عنك.» — the name standing alone
+// (its Saudi meaning «leave it to me / count on me»), then «let it search for you» (the owner's exact words). English mirrors it: «Ezhalah. Let it search for you.» It opens without «إزهله»: the title
+// above already says it and the ending repeats it. Shows uncut at phone width; no numbers, no harakat.
+// It replaces the 2026-10-11 question-form wording.
+// No emoji (owner 2026-10-18: «remove the emoji … make it professional»).
+export const SHARE_BLURB_AR = 'محرك بحث عقاري مجاني بالذكاء الاصطناعي في السعودية: من المنصات الكبيرة لمكاتب الوساطة، من الرياض لشرورة، من الفلل للأراضي الخام. بيع وإيجار وإقامات قصيرة. إزهله. خله يدور عنك.';
+// The preview CARD's own line (owner 2026-10-18: the card repeated the sent message and was cut off).
+// middleware.ts serves link-preview bots the same line WITH live numbers (src/lib/homeCard.ts); this
+// number-free form is the static fallback. Pinned equal to HOME_CARD_FALLBACK_AR.
+export const SHARE_CARD_DESC_AR = 'كل مواقع العقار في السعودية في مكان واحد.';
+export const SHARE_BLURB_EN = 'Free AI property search in Saudi Arabia: big platforms to small offices, Riyadh to Sharurah, villas to raw land. Buy, rent or short stays. Ezhalah. Let it search for you.';
+// THE SENT MESSAGE (owner 2026-10-26: names Saudi Arabia so the card need not repeat 148, no harakat, «إزهله، خل إزهله»;
+// first set 2026-10-20, replacing the long sentence above in the share message only):
+// «ليش تدوّر في 148 موقع؟ إزهله يدوّر عنك». The number is LIVE — the same count the app shows
+// («148»: the platform catalog minus the sites the registry marks dormant, src/data/loaderPlatforms.ts
+// + loaderActivePlatforms.ts), never typed; while that count is unknown the sentence says «كل المواقع».
+// SHARE_BLURB_* above stay the page's SEO description and the in-app preview text.
+export const SHARE_LEAD_AR_TEMPLATE = 'ليش تدور في {count} موقع عقاري بالسعودية؟ إزهله، خل إزهله يدور عنك';
+export const SHARE_LEAD_AR_NO_COUNT = 'ليش تدور في كل مواقع العقار بالسعودية؟ إزهله، خل إزهله يدور عنك';
+// English (owner 2026-10-29: «the message why search should be the translated Arabic version»): the Arabic line
+// translated word for word — «ليش تدور في 148 موقع عقاري بالسعودية؟ إزهله، خل إزهله يدور عنك».
+export const SHARE_LEAD_EN_TEMPLATE = 'Why search {count} real estate sites in Saudi Arabia? Ezhalah. Let Ezhalah search for you.';
+export const SHARE_LEAD_EN_NO_COUNT = 'Why search every real estate site in Saudi Arabia? Ezhalah. Let Ezhalah search for you.';
+/**
+ * The live site count — THE SAME number the WhatsApp card shows (src/data/siteCount.ts: sites with
+ * searchable listings, one per platform), or null while it has not been read yet. Owner 2026-10-20:
+ * the sentence said 146 (logo catalog minus dormant) next to a card saying 148 — one number now.
+ */
+export function liveSiteCount(): number | null {
+  return siteCountNow();
+}
+// Start the read at app load so the count is known by the time anyone taps Share (the tap handler
+// must not await: navigator.share only works inside the gesture). Same guard SearchLoader.tsx uses.
+if (Platform.OS !== 'web' || typeof window !== 'undefined') void loadSiteCount();
+/** The sentence on its own (X / Telegram put the link in their own url= parameter). */
+export function shareLead(loc: 'ar' | 'en', count: number | null): string {
+  const live = typeof count === 'number' && Number.isInteger(count) && count > 0 ? count : null;
+  if (loc === 'ar') return live ? SHARE_LEAD_AR_TEMPLATE.replace('{count}', String(live)) : SHARE_LEAD_AR_NO_COUNT;
+  return live ? SHARE_LEAD_EN_TEMPLATE.replace('{count}', String(live)) : SHARE_LEAD_EN_NO_COUNT;
+}
+/** The sentence WITH the link — what WhatsApp / Mail / Copy receive. One link, always last. */
+export function shareMessage(loc: 'ar' | 'en', count: number | null): string {
+  return `${shareLead(loc, count)}\n${loc === 'en' ? SHARE_LINK_EN : SHARE_LINK}`;
+}
 export const SHARE_TITLE_AR = 'إزهله';
+// The browser tab / history / suggestion / Google title (owner 2026-10-27, picked from phone-width previews: the
+// Kingdom wording). Both are checked to FIT uncut — the owner's longer English «…at once in the Kingdom» was cut off,
+// so the English is «All Saudi properties in one place» (matches the Arabic, fits). The share card keeps the plain name.
+export const PAGE_TITLE_AR = 'إزهله | ابحث في كل عقارات المملكة بمكان واحد';
+export const PAGE_TITLE_EN = 'Ezhalah | All Saudi properties in one place';
 const SHARE = {
-  en: {
-    title: 'Ezhalah',
-    blurb: SHARE_BLURB_EN,
-    message: SHARE_MESSAGE_EN,
-  },
-  ar: {
-    title: SHARE_TITLE_AR,
-    blurb: SHARE_BLURB_AR,
-    message: SHARE_MESSAGE_AR,
-  },
+  en: { title: 'Ezhalah' },
+  ar: { title: SHARE_TITLE_AR },
 };
 
 // Invoke the device's REAL share sheet so the user can actually send the link to any app or
@@ -53,7 +96,12 @@ const SHARE = {
 // in-app fallback; returns false only when no native sharing exists (e.g. desktop Chrome), so the
 // caller can open the custom ShareSheet instead.
 export async function shareNative(): Promise<boolean> {
-  const L = SHARE[getLocale() === 'ar' ? 'ar' : 'en'];
+  const loc: 'ar' | 'en' = getLocale() === 'ar' ? 'ar' : 'en';
+  const L = SHARE[loc];
+  const count = liveSiteCount();
+  const lead = shareLead(loc, count);
+  const message = shareMessage(loc, count);
+  const link = loc === 'en' ? SHARE_LINK_EN : SHARE_LINK;
   if (Platform.OS === 'web') {
     const nav: any = typeof navigator !== 'undefined' ? navigator : undefined;
     // TOUCH DEVICES ONLY (owner report, 2026-09-05: "on macbook just the link pops up, but on my
@@ -72,7 +120,7 @@ export async function shareNative(): Promise<boolean> {
     if (!coarse) return false;
     if (typeof nav?.share === 'function') {
       try {
-        await nav.share({ title: L.title, text: L.blurb, url: SHARE_LINK });
+        await nav.share({ title: L.title, text: lead, url: link });
         return true;
       } catch (e: any) {
         // Only a deliberate user dismiss (AbortError) counts as "handled" — don't pop the fallback
@@ -87,7 +135,7 @@ export async function shareNative(): Promise<boolean> {
   }
 
   try {
-    await Share.share({ message: L.message, url: SHARE_LINK, title: L.title });
+    await Share.share({ message, url: link, title: L.title });
     return true;
   } catch {
     return false;

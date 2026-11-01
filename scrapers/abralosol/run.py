@@ -41,13 +41,18 @@ import json
 import re
 import sys
 import time
+from functools import lru_cache
 from typing import Any, Optional
 
 from curl_cffi import requests as cc
 
+from scrapers.common import arabic_location as AL
 from scrapers.common import db
+from scrapers.common.http import retry_smarter_session
+from scrapers.common.http_liveness import LivenessProbe
 from scrapers.common import normalize as N
 from scrapers.common.pii import redact_capture, redact_pii
+from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link
 
 BASE = "https://abralosol.com"
 SOURCE = "Abr Alosol"
@@ -108,6 +113,22 @@ OTHER_CITY_TOKENS: tuple[tuple[str, str], ...] = (
     ("بقيق", "Abqaiq"),
 )
 OFFICE_CITY = "Hofuf"        # canonical English for الأحساء / الهفوف (N.map_city("الأحساء"))
+# المبرز is Al-Ahsa's second city (catalog city 2748), and the office sells there too. Before
+# 2026-10-09 every such ad fell to office_default and was served under الهفوف: a customer searching
+# المبرز could not find ~330 of them, and their districts never resolved (QA 2026-10-09, backlog 206).
+#   ad_text           → the ad's own title/description names «المبرز» and never «الهفوف»
+#                       («بيت عربي في المبرز حي الحزم», «حي الغسانية ٢، المبرز – الأحساء»).
+#   district_mubarraz → the district is one ≥2 independent pages place in المبرز: the ads' own text
+#                       and amlakalahsa (an Al-Ahsa office whose geocoded city is المبرز), measured
+#                       2026-10-09. A name with one confirmation (المصطفى, محاسن, الرضا, جوهرة النزهة)
+#                       is NOT here; it keeps office_default until a second page confirms it.
+MUBARRAZ_CITY = "Mubarraz"   # loc_city_map «mubarraz» → المبرز (migration 20261009172136)
+MUBARRAZ_REGION = "Eastern Province"
+MUBARRAZ_DISTRICTS = frozenset({
+    "جوهرة الهادي", "الغسانية", "الجابرية", "الراجحي", "بوسحبل", "دانة الراشدية",
+    "بستان المطيرفي", "الحزم", "درة الشمال",
+})
+_DISTRICT_SUFFIX = re.compile(r"\s*[0-9٠-٩]+\s*$")  # «الغسانية ٢» → «الغسانية»
 _STREETY = ("شارع", "طريق")  # «شارع الظهران» is a street in Hofuf, not the city of Dhahran
 
 # PDPL: redact_pii() removes numbers/handles; this truncates the contact CTA prose that precedes
@@ -166,21 +187,50 @@ def _clean(text: Optional[str]) -> Optional[str]:
 
 
 def _session() -> cc.Session:
-    return cc.Session(impersonate="chrome124", timeout=30)
+    # 2026-10-13 (Scraping Engineer, backlog 488/63): one pinned profile, no retry route. The 10-13
+    # nightly read /node?page=0 as nothing on chrome124 and logged an empty catalogue (pages=0).
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it.
+    s, tried = retry_smarter_session(f"{BASE}/node?page=0", timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
+    return s
 
 
-def _get(s: cc.Session, url: str, tries: int = 3) -> Optional[str]:
+def _fetch(s: cc.Session, url: str, tries: int = 3) -> tuple[Optional[int], Optional[str]]:
+    """(status, body). The status survives, so a page that said 404/410 (gone) is told apart from
+    one we could not read (None — UNKNOWN, LISTING_LIVENESS.md §1)."""
     for attempt in range(tries):
         try:
             r = s.get(url)
             if r.status_code == 200:
-                return r.text
-            if r.status_code == 404:
-                return None
+                return 200, r.text
+            if r.status_code in GONE_STATUSES:
+                return r.status_code, None
         except Exception:
             pass
         time.sleep(1.5 * (attempt + 1))
-    return None
+    return None, None
+
+
+GONE_STATUSES = (404, 410)
+
+
+def _why_unreadable(s: cc.Session, url: str) -> str:
+    """One more read whose only job is to NAME the failure for the run's notes. 2026-10-13: every
+    route failed with CertificateVerifyError and the notes could not tell an expired certificate
+    from a wrong host or a missing intermediate, which need different fixes."""
+    try:
+        r = s.get(url)
+        return f"HTTP {r.status_code}"
+    except Exception as e:  # noqa: BLE001 — the reason is the point
+        return f"{type(e).__name__}: {str(e)[:220]}"
+
+
+class IndexUnreadable(RuntimeError):
+    """The catalogue's first index page could not be read: a failed fetch, never «0 listings»."""
+
+
+def _get(s: cc.Session, url: str, tries: int = 3) -> Optional[str]:
+    return _fetch(s, url, tries)[1]
 
 
 # ── index row parsing ───────────────────────────────────────────────────────────────────────────
@@ -200,7 +250,10 @@ def _price(cell_html: str) -> dict:
             txt = txt[len(label):]
             break
     amount = N.to_int(txt)
-    # «على السوم» with no figure (~10% of the catalog) → NULL, never 0.
+    # «على السوم» with no figure (~10% of the catalog) → NULL, never 0. A NEGATIVE figure is the same placeholder:
+    # nid 7132 prints «على السوم | -2 ريال» and to_int drops the sign, so it was served as a 2 SAR plot (2026-10-18).
+    if re.match(r"\s*[-−–]\s*\d", txt):
+        amount = None
     if amount is not None and amount > 0:
         out["amount"] = amount
     return out
@@ -256,10 +309,49 @@ def _parse_index(rec: dict) -> dict:
     }
 
 
+# ── LIVENESS ORACLE (wired 2026-10-07, ♻️) ─────────────────────────────────────────────────────
+# prune_unseen ran WITHOUT a verify_gone here, so an ad missing from three crawls was hidden with no
+# reading of its own page (P1 unknown_treated_as_dead, 1 hide on 2026-10-07 05:00 UTC). The crawl
+# itself already reads a removed ad's own page as 404/410 (`_detail` → {"gone": status}, crawler
+# audit 2026-10-02), so the same reading now decides the kill: 404/410 → gone; 200 on the ad's own
+# /{nid} whose <article> carries this nid → live; anything else → no answer. Same shape as arkaan
+# (2026-10-06, proven in production 2026-10-07: 7 of 7 hides carried a GONE row).
+def _oracle_signal(status, body, moved) -> Optional[str]:
+    if status in GONE_STATUSES:
+        return "gone"
+    return "live" if status == 200 and not moved and _ARTICLE.search(body or "") else None
+
+
+def _oracle_url_for(ad_number: str) -> Optional[str]:
+    m = re.fullmatch(r"ABR(\d+)", ad_number or "")
+    return f"{BASE}/{m.group(1)}" if m else None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """verify_gone for db.prune_unseen. A 404/410 is believed only while a known-live ad from this
+    run (`control`) still reads live through the same session."""
+    s = _session()
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="abralosol", signal=_oracle_signal, session=lambda: s,
+                             url_for=_oracle_url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 # ── detail page ─────────────────────────────────────────────────────────────────────────────────
 def _detail(s: cc.Session, nid: str) -> dict:
-    """{title, blocks, description, photo_urls, label} from /{nid}. Empty dict if unfetchable."""
-    page = _get(s, f"{BASE}/{nid}")
+    """{title, blocks, description, photo_urls, label} from /{nid}. Empty dict if unfetchable;
+    {"gone": status} when the ad's own page answered 404/410."""
+    status, page = _fetch(s, f"{BASE}/{nid}")
+    if status in GONE_STATUSES:
+        return {"gone": status}
     if not page:
         return {}
     art = _ARTICLE.search(page)
@@ -318,18 +410,112 @@ def _detail(s: cc.Session, nid: str) -> dict:
         "photo_urls": photos,
         "label": label,
         "age_raw": age_raw,
+        # The «الموقع» link: google.com/maps/place/LAT,LNG, or a maps.app.goo.gl short link that is
+        # followed by redirect (measured 2026-10-19: ad 7890 carries only the short form).
+        # The ad's OWN article only (audit 2026-10-21): the page below it lists other ads, each with its own
+        # maps/place link, and reading the whole page stored a NEIGHBOUR's pin — 95 «الراشدية» ads shared one.
+        "pin": pin_from_html(body) or pin_from_short_link(short_maps_link(body), lambda u: resolve_redirect(s, u)),
     }
 
 
 # ── mapping ─────────────────────────────────────────────────────────────────────────────────────
-def _city(district: Optional[str]) -> tuple[Optional[str], Optional[str], str]:
-    """(city, region, basis). See OTHER_CITY_TOKENS for why the table is small and explicit."""
+def _city(district: Optional[str], text: Optional[str] = None) -> tuple[Optional[str], Optional[str], str]:
+    """(city, region, basis). See OTHER_CITY_TOKENS for why the table is small and explicit, and
+    MUBARRAZ_DISTRICTS for the two المبرز bases."""
     d = (district or "").strip()
     if d and not d.startswith(_STREETY):
         for token, city in OTHER_CITY_TOKENS:
             if token in d:
                 return city, N.region_for_city(city), "district_token"
+    t = text or ""
+    if "المبرز" in t and "الهفوف" not in t:
+        return MUBARRAZ_CITY, MUBARRAZ_REGION, "ad_text"
+    if d and _DISTRICT_SUFFIX.sub("", d).removeprefix("حي ").strip() in MUBARRAZ_DISTRICTS:
+        return MUBARRAZ_CITY, MUBARRAZ_REGION, "district_mubarraz"
+    if _OTHER_REGION.search(d + " " + t):
+        # The ad places itself outside Al-Ahsa: the office default would file it in the WRONG city.
+        return None, None, "names_other_region"
     return OFFICE_CITY, N.region_for_city(OFFICE_CITY), "office_default"
+
+
+# The office also sells outside Al-Ahsa. 17994690 (2026-10-16) «أرض للبيع في مدينة الروضة – حائل … بمنطقة حائل»
+# took office_default and was served to customers searching الهفوف. An ad that names a place in another
+# REGION never takes the office's city: unknown is honest, a Hofuf filing is wrong (🆕 backlog #588).
+# الرياض / مكة / المدينة are absent for the reason OTHER_CITY_TOKENS gives: here they are Al-Ahsa street
+# and district names; «المدينة المنورة» is the unambiguous form.
+_OTHER_REGION = re.compile(r"(حائل|القصيم|بريدة|عنيزة|تبوك|جازان|نجران|الباحة|الجوف|عسير|أبها|ابها|"
+                           r"المدينة المنورة|جدة|الطائف|خميس مشيط|ينبع)")
+
+
+# ── DISTRICT FROM THE TITLE (2026-10-18) ────────────────────────────────────────────────────────
+# 96 live rows (92 الهفوف + 4 المبرز, both tables) carried an EMPTY tags cell while their own h1 named
+# the district («بيت جاهز للبيع في الراشديةأ», «أرض للبيع في الحي الخامس ضاحية هجرج»). The title may fill `neighborhood` ONLY where a whole slice of it keys EXACTLY to
+# a district already attested for THAT city: the catalogue (loc_catalog_district) plus the districts
+# this office's own tags cell already published for the city. Both sides use norm_district_tok — the
+# ONE key district_norm is built with (ة/ه, ى/ي, أإآ/ا, leading «حي »/«ال», end digits folded) — so
+# «الغسانيه» finds «الغسانية». The site glues the plot's BLOCK LETTER to the district («الراشديةأ» ×12,
+# «ضاحية هجرد» ×6, «الحي الثانيج»): one trailing أ/ب/ج/د is split off the last word before the same
+# exact comparison. Nothing else bends: no edit distance («ضاحية هجرة» is nothing), no prefix, no
+# fragment, no guess. The stored value is the title's own slice as written («حي الراجحي» keeps its
+# «حي »), never the catalogue spelling. Computed AFTER _city() and never fed back into it: the title
+# district names the neighbourhood, not the town.
+_CITY_AR = {OFFICE_CITY: "الهفوف", MUBARRAZ_CITY: "المبرز", **{city: tok for tok, city in OTHER_CITY_TOKENS}}
+_TITLE_WORD = re.compile(r"[\u0621-\u064a]+")   # Arabic letters only: a plot number never joins a name
+_BLOCK_LETTERS = "أبجد"                          # a plot's block letter, glued: «الراشديةأ», «ضاحية هجرج»
+_MAX_DISTRICT_WORDS = 4                          # «حي» + a three-word name; the taxonomy has nothing longer
+_PLAN_WORD = "مخطط"                              # «مخطط الرياض» is a subdivision plan, never the الرياض district
+# A town's own name is never its district: «شمال المبرز» (6997) is a direction from a city, and this
+# office's tags cell has filed «الهفوف» / «الاحساء» as a neighbourhood before.
+_CITY_KEYS = frozenset(AL.norm_district_tok(ar) for ar in (*_CITY_AR.values(), "الأحساء"))
+
+
+@lru_cache(maxsize=None)
+def _known_districts(city: str) -> frozenset[str]:
+    """norm_district_tok keys attested for `city`: the catalogue's districts for that town plus every
+    district this office's own tags cell already published there (both abralosol tables). Fetched
+    lazily, once per city per run. A failed lookup logs once and answers EMPTY — the title then fills
+    nothing, exactly as before — never a crash. ponytail: the empty answer is cached for the run too,
+    so an outage costs one log line, not one failed query per row."""
+    try:
+        cid, _ = AL.to_catalog(_CITY_AR.get(city), region_hint=N.region_for_city(city) or MUBARRAZ_REGION)
+        keys = set(AL.catalog_district_keys(cid))
+        for tbl in ("abralosol_residential_listings", "abralosol_commercial_listings"):
+            for lo in range(0, 50_000, 1000):          # PostgREST serves at most 1,000 rows a page
+                page = db._execute(db.sb().table(tbl).select("neighborhood").eq("city", city)
+                                   .range(lo, lo + 999), what=f"{tbl}.known_districts").data or []
+                keys.update(AL.norm_district_tok(r["neighborhood"]) for r in page if r.get("neighborhood"))
+                if len(page) < 1000:
+                    break
+        keys.discard("")
+        return frozenset(keys)
+    except Exception as e:  # noqa: BLE001 — degrade to «no district», never crash the crawl
+        print(f"⚠ known-district lookup failed for {city}: {str(e)[:160]} — titles fill no district this run",
+              flush=True)
+        return frozenset()
+
+
+def _title_district(title: Optional[str], known: frozenset[str]) -> Optional[str]:
+    """The title's OWN slice whose norm_district_tok key is in `known` — longest window first, so
+    «حي الراجحي» beats «الراجحي» and «ضاحية هجر» beats «هجر». Exact key equality only: no edit
+    distance, no prefix («الراجحية» ≠ «الراجحي»), no fragment of a longer known name; a plan's name
+    («مخطط الرياض») and a town's name («شمال المبرز») are never a district. Else None."""
+    if not title or not known:
+        return None
+    words = list(_TITLE_WORD.finditer(title))
+    for size in range(min(_MAX_DISTRICT_WORDS, len(words)), 0, -1):
+        for i in range(len(words) - size + 1):
+            window = [w.group() for w in words[i:i + size]]
+            if _PLAN_WORD in window or (i and words[i - 1].group() == _PLAN_WORD):
+                continue                       # a plan's name is the plan's, not a district's
+            span = title[words[i].start():words[i + size - 1].end()]
+            # As written first, then with a glued block letter split off the last word. Still exact:
+            # the de-glued span must itself key to a known name.
+            deglued = span[:-1] if len(window[-1]) > 1 and span[-1] in _BLOCK_LETTERS else ""
+            for cand in (span, deglued):
+                key = AL.norm_district_tok(cand) if cand else ""
+                if key and key in known and key not in _CITY_KEYS:
+                    return cand
+    return None
 
 
 # The ad body's own explicit per-metre statement, e.g. «... وسعر المتر 1,600 ريال». It overrides a
@@ -351,6 +537,9 @@ def _per_metre_in_body(amount: Optional[int], blocks: list[str]) -> bool:
         for m in _PER_METRE_PROSE.finditer(block):
             if N.to_int(m.group(1)) == amount:
                 return True
+        # the marker AFTER the figure too: nid 7472 «الحد 1,650 ريال» and its body «بسعر 1,650 ريال للمتر» (2026-10-18)
+        if N.stated_per_metre(block, amount):
+            return True
     return False
 
 
@@ -443,6 +632,8 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
     if amount is not None and basis == "per_sqm":
         # PRICE = SOURCE: a per-m² rate is not a total, and area is never used to make one.
         price_per_meter = amount
+        if transaction_type == "Buy":
+            price_total = db.AUTHORITATIVE_NULL     # the source settled «a rate, no total»: clears a stored total
     elif transaction_type == "Rent":
         # PERIOD = SOURCE — only an explicit token the source states ABOUT THIS FIGURE, from the
         # price label or the adjacent body text (see _period_text). Nothing is read from magnitude,
@@ -453,12 +644,26 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
         price_annual = annual if rent_period and basis == "total" else None
     elif amount is not None and basis == "total":
         price_total = amount
+    elif amount is None and p.get("label") == "على السوم":
+        price_total = db.AUTHORITATIVE_NULL         # «على السوم», open to offers: the source states no price
     # amount with NO basis label anywhere (2/100 sampled) stays NULL in BOTH price columns: the
     # source published a number but not what it means, and a total is a different fact from a rate.
     # rent_period is still recorded when the body states it — the period is a fact about the LEASE,
     # not about which column the number lands in.
 
-    city, region, city_basis = _city(ix["district"])
+    city, region, city_basis = _city(
+        ix["district"], f"{detail.get('title') or ''} {detail.get('description') or ''}")
+    if city_basis == "names_other_region":
+        # The ad itself settles that the office city is wrong. A plain None is dropped by
+        # db._unknown_must_not_overwrite_known, so a row already filed under الهفوف stayed there
+        # (17994690 re-crawled 10-17 05:55: still Hofuf). AUTHORITATIVE_NULL writes the unknown.
+        city, region = db.AUTHORITATIVE_NULL, db.AUTHORITATIVE_NULL
+    district, district_from = ix["district"], None
+    if not district and detail.get("title") and isinstance(city, str):
+        # Tags cell empty → the h1, exact match only (see _title_district). AFTER _city(), so the
+        # city rules above are untouched; this fills neighborhood/district_ar and nothing else.
+        district = _title_district(detail["title"], _known_districts(city))
+        district_from = "title" if district else None
     photos = detail.get("photo_urls") or []
     if not photos and ix["thumb"] and PLACEHOLDER_IMG not in ix["thumb"]:
         thumb = re.sub(r"/styles/[^/]+/public/", "/", ix["thumb"]).split("?")[0]
@@ -473,8 +678,12 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
         "transaction_type": transaction_type,
         "city": city,
         "region": region,
-        "neighborhood": ix["district"],
+        "neighborhood": district,
         "area_m2": N.to_int(ix["area_raw"]),
+        # The index cell «شارع 40» is the site's structured street width. It was kept only in
+        # additional_info, so 1,890 ads (1,526 of 1,653 lands) answered no street-width question
+        # (🔬 2026-10-10). One number → metres; «15+15» is two streets → NULL, never a pick.
+        "street_width_m": N.one_street_width(ix["street_width"]),
         # Bedrooms/bathrooms: the facet field exists but is populated on ~11 rows site-wide; both
         # otherwise live only in narrative prose («3 غرف ومجلس», «دورتين مياه»). NULL, not parsed.
         "bedrooms": None,
@@ -492,6 +701,11 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
         "title": _clean(detail.get("title") or title_text) or None,
         "description": detail.get("description"),
         "additional_info": redact_capture({k: v for k, v in {
+            **(detail.get("pin") or {}),
+            # The ad's own article WAS read and carries no pin (audit 2026-10-21). keep_stored_pin keeps an old
+            # pin only for a write that does not say this, so a failed short-link hop still keeps its pin while a
+            # neighbour's pin stored before the article-only fix can finally leave.
+            **({"pin_absent": True} if detail and not detail.get("pin") else {}),
             "price_label": p["label"],
             "price_basis": basis,
             "price_basis_from": basis_from,
@@ -503,7 +717,8 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
             "property_age_raw": detail.get("age_raw"),
             "bump_date": ix["bump_date"],       # a REFRESH date, not created_at
             "city_basis": city_basis,           # derived — see _city()
-            "district_ar": ix["district"],
+            "district_ar": district,
+            "district_from": district_from,   # "title" only when the h1 filled it
         }.items() if v is not None}),
         # Rule 7: the whole source payload, raw, so a future field never needs a re-scrape.
         "source_capture": redact_capture({
@@ -516,7 +731,18 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
             "detail_photos": detail.get("photo_urls") or [],
         }),
     }
+    # Amenities: abralosol publishes NO structured amenity field (DOM only, fact blocks carry area /
+    # street / age / price), so the ad's own prose is the only source (ADVANCED_FILTER_SOURCE_TRUTH
+    # §2): yes or nothing, never no. 535 built ads named a kitchen / parking / maid room while all
+    # 2,803 stored NULL (🔬 2026-10-10, ops_af_score abralosol kitchen we_miss). Land and farms are
+    # skipped: «شرقا مواقف سيارات» on a plot describes a neighbour, not the property.
+    if not property_type.endswith("Land") and property_type != "Farm":
+        row.update(N.prose_amenities(detail.get("description"), skip=_PROSE_SKIP))
     return row, N.category_for_type(property_type).lower()
+
+
+# Read from prose never: fibre is a neighbourhood service line, furnished is a rent-time fact.
+_PROSE_SKIP = ("optical_fibers", "furnished")
 
 
 # ── crawl ───────────────────────────────────────────────────────────────────────────────────────
@@ -526,11 +752,19 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
     com: list[dict] = []
     seen: set[str] = set()
     stats = {"rows": 0, "skipped_no_deal": 0, "skipped_no_type": 0, "no_price": 0,
-             "per_sqm": 0, "unlabelled_price": 0, "detail_failed": 0, "pages": 0}
+             "per_sqm": 0, "unlabelled_price": 0, "detail_failed": 0, "detail_gone": 0, "pages": 0}
 
     for page in range(MAX_PAGES):
         html = _get(s, f"{BASE}/node?page={page}")
-        recs = _index_rows(html or "")
+        if html is None:
+            # An index page we could not READ is not the end of the catalogue (A FAILED FETCH IS
+            # NOT AN EMPTY ANSWER). Page 0 unreadable = the run failed, said so in its notes; a
+            # later page = keep what was read and mark the crawl incomplete so nothing is pruned.
+            if page == 0:
+                raise IndexUnreadable(f"index page 0 unreadable ({BASE}/node?page=0): {_why_unreadable(s, f'{BASE}/node?page=0')}")
+            stats["incomplete"] = f"index page {page} unreadable"
+            break
+        recs = _index_rows(html)
         if not recs:
             break
         stats["pages"] += 1
@@ -542,6 +776,13 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
             fresh += 1
             ix = _parse_index(rec)
             detail = _detail(s, ix["nid"]) if want_detail else {}
+            if detail.get("gone"):
+                # Its OWN page said gone in this very run: never write it active from the index row
+                # (crawler audit 2026-10-02). Left out of the seen set, prune_unseen's 3-strike guard
+                # ages it out; one reading hides nothing.
+                stats["detail_gone"] += 1
+                time.sleep(DETAIL_PAUSE)
+                continue
             if want_detail:
                 if not detail:
                     stats["detail_failed"] += 1
@@ -553,6 +794,8 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
                 stats[key] += 1
                 continue
             row, category = mapped
+            if want_detail and not detail:
+                db.mark_presence_unproven(row)      # its own page was not read this run: no stamp
             if row["price_total"] is None and row["price_annual"] is None and row["price_per_meter"] is None:
                 stats["no_price"] += 1
             if row["price_per_meter"] is not None:
@@ -619,9 +862,12 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
-        for tbl, rows_seen in (("abralosol_residential_listings", res),
-                               ("abralosol_commercial_listings", com)):
-            nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE)
+        verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+        for tbl, rows_seen in (() if stats.get("incomplete") else
+                               (("abralosol_residential_listings", res),
+                                ("abralosol_commercial_listings", com))):
+            nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE,
+                                 verify_gone=verify_gone)
             if nn < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

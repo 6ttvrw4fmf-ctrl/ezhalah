@@ -688,6 +688,10 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         # PRICE = SOURCE: a per-m² rate is not a total, and area is NEVER multiplied here. The
         # searchable total is derived in the search/display layer from this column.
         price_per_meter = amount
+        # The source settled «a rate, no total»: AUTHORITATIVE_NULL clears a total an older read stored. SHW22164
+        # («سعر المتر 870») kept price_total 870 from 2026-09-21 beside the rate, because a plain None is dropped.
+        if transaction_type != "Rent":
+            price_total = db.AUTHORITATIVE_NULL
     elif amount is not None and p["basis"] == "total":
         if transaction_type == "Rent":
             # PERIOD = SOURCE. The site states none anywhere (measured: شهري/سنوي/يومي appear zero

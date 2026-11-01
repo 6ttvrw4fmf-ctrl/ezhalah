@@ -148,8 +148,14 @@ if (!resHits) pass(`no string OR comment claims user data lives in the Kingdom (
 // names it replaces: any file carrying About section copy must carry the provenance statement with
 // it. A future third copy of the About text is caught by the same check, and a copy that keeps the
 // sections while dropping the provenance line — the actual regression this guards — cannot ship.
-const hasProvenance = (s: string) => /Listing licensing/.test(s) && /does not issue/i.test(s);
-const ABOUT_SECTIONS = ['About Us', 'Our role', 'Disclaimer', 'Data & privacy', 'Listing licensing'];
+const hasProvenance = (s: string) => /Every listing is published by its source platform/.test(s) && /does not issue/i.test(s);
+const ABOUT_SECTIONS = [
+  'About Us',
+  'Ezhalah',
+  'Smarter property search, bringing the Saudi market together in one place.',
+  'Ezhalah is a search platform only. We do not own, list, sell, or rent properties, and we run no transactions and take no commission.',
+  'Every listing is published by its source platform and remains subject to its licensing. Ezhalah does not issue or own listings.',
+];
 const aboutCopyFiles = files.filter((f) => {
   const src = readFileSync(f, 'utf8');
   return ABOUT_SECTIONS.filter((h) => src.includes(`'${h}'`)).length >= 2;

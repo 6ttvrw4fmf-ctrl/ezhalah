@@ -1,4 +1,4 @@
-// LIVE: the AI-agent flow's «خلّنا نحدد الطلب أكثر» must never be offered and then render nothing.
+// LIVE: the AI-agent flow's «🎯 دقّق مع الذكاء» must never be offered and then render nothing.
 //
 // The sibling scripts/verify-af-live-truth.ts reaches Advanced Filter through the FILTER flow only.
 // On 2026-08-26 that was the difference between green and the truth: the identical cohort
@@ -14,6 +14,8 @@
 //   (run from .github/workflows/af-live-truth-check.yml — deliberately NOT in `npm test`, same
 //    precedent as every other live check here: `npm test` is hermetic and runs in seconds.)
 
+import { isOurRpcUrl } from './lib/frontDoorHosts.ts';
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { judgeAfCta, type AfCtaObservation } from './lib/afOfferAgreement.ts';
@@ -27,6 +29,11 @@ const BASE = 'https://ezhalah-app.vercel.app';
 // env — precisely the "it only runs if a secret happens to be set" failure that rule exists for.
 const { url: REST_URL } = resolvePublicSupabase(process.env);
 const RPC_ORIGIN = new URL(REST_URL).origin;
+// THE FRONT DOOR (src/lib/supabase.ts, on since 2026-10-21): on the real site the app's RPCs go to ${BASE}/sb/rest/v1/
+// — our own proxy to the same project — not to supabase.co. Filtering on RPC_ORIGIN alone saw «0 ok / 0 failed …
+// none issued» (af-live-truth run 39940963632) on a round whose probes really ran. Both prefixes are our backend.
+// Any host we serve (ezhalah.com since 10-26), not only BASE: scripts/lib/frontDoorHosts.ts.
+const isOurRpc = (u: string) => isOurRpcUrl(u, RPC_ORIGIN);
 
 // Journeys are ARABIC free text plus the answers the agent's disambiguation needs — exactly what a
 // real user types. A city that is also a region needs «مدينة …»; «تقصد المدينة كاملة…» needs
@@ -133,7 +140,7 @@ const run = async () => {
     const afRpcs: string[] = [];
     page.on('request', (r) => {
       const u = r.url();
-      if (u.startsWith(RPC_ORIGIN) && u.includes('/rest/v1/rpc/')) afRpcs.push(u.split('/rpc/')[1].split('?')[0]);
+      if (isOurRpc(u)) afRpcs.push(u.split('/rpc/')[1].split('?')[0]);
     });
     // OBSERVE WHETHER THE COUNT PROBES ANSWERED — do not infer it from what rendered
     // (ops_incident #340, 2026-09-20). These two RPCs are the ONLY inputs to probeVerdict(); if they
@@ -145,14 +152,14 @@ const run = async () => {
     const probeLog: string[] = [];
     page.on('response', (res) => {
       const u = res.url();
-      if (!u.startsWith(RPC_ORIGIN) || !COUNT_RPCS.test(u)) return;
+      if (!isOurRpc(u) || !COUNT_RPCS.test(u)) return;
       const name = u.split('/rpc/')[1].split('?')[0];
       if (res.status() >= 200 && res.status() < 300) probeOk++; else probeBad++;
       probeLog.push(`${name}:${res.status()}`);
     });
     page.on('requestfailed', (r) => {
       const u = r.url();
-      if (!u.startsWith(RPC_ORIGIN) || !COUNT_RPCS.test(u)) return;
+      if (!isOurRpc(u) || !COUNT_RPCS.test(u)) return;
       probeBad++;
       probeLog.push(`${u.split('/rpc/')[1].split('?')[0]}:FAILED(${r.failure()?.errorText ?? '?'})`);
     });
@@ -171,7 +178,12 @@ const run = async () => {
       // waits >= 8,000 ms, and 6,000 sits beneath its floor.
       const arrival = await awaitFirstResultsSettled(
         () => page.locator('[data-testid^="card-listing-"]').count(),
-        async () => (await page.locator('[data-testid="results-actions"]').count()) > 0,
+        // …AND the searching turn has handed over. Measured 2026-10-23 on production: the count held at 24 for
+        // ~2 s with the actions row mounted while the loader («نراجع 172,667 إعلان في الرياض…», its platform roster
+        // testid loader-roster) was still up; the cascade went on to 36 cards, and the CTA tap landed on a covered,
+        // off-screen button and issued NOTHING — read as «0 ok / 0 failed … none issued» (run 39940963632).
+        async () => (await page.locator('[data-testid="results-actions"]').count()) > 0
+          && (await page.locator('[data-testid="loader-roster"]').count()) === 0,
         (ms) => page.waitForTimeout(ms),
       );
       if (!arrival.settled) {

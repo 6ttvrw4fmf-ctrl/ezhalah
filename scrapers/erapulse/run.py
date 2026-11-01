@@ -57,6 +57,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize as N  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 SITE = "https://erapulse.sa"
 API = "https://api.erapulse.sa"
@@ -386,6 +387,8 @@ def map_listing(p: dict, hood_city: Optional[dict[str, str]] = None) -> tuple[Op
 
     # ── extra amenity / spec flags into additional_info (no dedicated columns) ──
     info: dict[str, Any] = {
+        # Owner 2026-10-20: the API item's own latitude/longitude (strings, e.g. "26.3533274","43.9774966").
+        **pin_dict(p.get("latitude"), p.get("longitude")),
         "source_id": str(p.get("id")),
         "ref_number": ref,
         "subtype": subtype or None,

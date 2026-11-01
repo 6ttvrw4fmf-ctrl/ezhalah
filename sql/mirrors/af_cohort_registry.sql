@@ -1,10 +1,21 @@
 -- MIRROR of the LIVE production TABLE public.af_cohort_registry. NOT a migration — this file is
+-- Re-verified 2026-11-01 (migration 20261101110658_studio_buy_and_short_stays_cohorts_certified): CHANGED — SIX rows
+--   added — Studio (استوديو / ستوديو / شقَّة صغيرة (استوديو)) on بيع (no period) and on إيجار شهري: the Apartments &
+--   Co-living lists (owner handoff 2026-10-31).
+--   Production ROWS md5 with the recipe below = 8e8380efba9bef27ccfdaea48dc1953e, 67 rows, 0 disabled.
+--   File body md5 (verify-sql-mirrors-not-stale): 687874c046510ca26174c0b07ede549d
+-- Re-verified 2026-10-11 (migration 20261011022451_other_land_af_cohort_certified): CHANGED — ONE row
+--   added — deal بيع, no period, type «أرض», enabled: the Other Land (أرض أخرى) Buy cohort, certified on the
+--   4,040 plots whose source states no usage (street width 99%, direction 88%).
+--   Production ROWS md5 with the recipe below = fb1fa4c99a73605e4467b1546382855e, 61 rows, 0 disabled.
+--   File body md5 (verify-sql-mirrors-not-stale): 9d8e20d92a377643ea211c3962cc05fd
+-- Re-verified 2026-10-10 (migration 20261010000246_raw_land_af_cohort_certified, owner session): CHANGED —
+--   ONE row added — deal بيع, no period, type «أرض خام», enabled: the raw-land Buy cohort, certified on the
+--   6,008 tagged rows (street width 92%, direction 84%; RPC = SQL parity 2,816 = 2,816 and 220 = 220).
+--   Production ROWS md5 with the recipe below = 91414163c96afb6d851b462fac7f29bf, 60 rows, 0 disabled.
+--   File body md5 (verify-sql-mirrors-not-stale): 308be01c3e1a067eb0bf1e4300c0f887
 -- READ, never applied; the rows below already exist in production and the insert is written
 -- idempotently only so the mirror is a runnable statement rather than a blob.
--- Re-verified 2026-09-27 (migration 20260921111609_age_gap_alert_respects_a_recorded_decision): UNCHANGED.
---   Production ROWS md5 (recipe below) = e24bc3e63b85a7d2c84714b03ff5b710, 59 rows, 0 disabled.
---   Stamped for verify-sql-mirrors-not-stale (B2): the previous same-day stamp named no version at or
---   after this migration, so nothing proved it was re-checked AFTER it. Nothing in the body was edited.
 -- Re-verified 2026-09-21 (routine #5, the age-gap/decided-source fix): the production ROWS md5,
 --   re-derived with the exact recipe below, = e24bc3e63b85a7d2c84714b03ff5b710 — identical again,
 --   59 rows, 0 disabled, so the registry is UNCHANGED. Re-stamped for the same reason as the
@@ -65,21 +76,29 @@ insert into public.af_cohort_registry (deal_ar, rent_period_ar, type_ar, enabled
   ('إيجار', 'سنوي', 'مكاتب مشتركة', true),
   ('إيجار', 'سنوي', 'مكتب', true),
   ('إيجار', 'سنوي', 'ورشة', true),
+  ('إيجار', 'شهري', 'استوديو', true),
+  ('إيجار', 'شهري', 'ستوديو', true),
   ('إيجار', 'شهري', 'شقة', true),
+  ('إيجار', 'شهري', 'شقَّة صغيرة (استوديو)', true),
   ('إيجار', 'شهري', 'غرفة', true),
   ('إيجار', 'شهري', 'فيلا', true),
+  ('بيع', NULL, 'أرض', true),
   ('بيع', NULL, 'أرض تجارية', true),
+  ('بيع', NULL, 'أرض خام', true),
   ('بيع', NULL, 'أرض زراعية', true),
   ('بيع', NULL, 'أرض سكنية', true),
   ('بيع', NULL, 'أرض صناعية', true),
   ('بيع', NULL, 'استراحة', true),
+  ('بيع', NULL, 'استوديو', true),
   ('بيع', NULL, 'برج', true),
+  ('بيع', NULL, 'ستوديو', true),
   ('بيع', NULL, 'بيت', true),
   ('بيع', NULL, 'تاون هاوس', true),
   ('بيع', NULL, 'درايف ثرو', true),
   ('بيع', NULL, 'دوبلكس', true),
   ('بيع', NULL, 'دور', true),
   ('بيع', NULL, 'شقة', true),
+  ('بيع', NULL, 'شقَّة صغيرة (استوديو)', true),
   ('بيع', NULL, 'عمارة', true),
   ('بيع', NULL, 'فندق', true),
   ('بيع', NULL, 'فيلا', true),

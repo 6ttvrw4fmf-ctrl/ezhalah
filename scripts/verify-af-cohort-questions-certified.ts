@@ -67,8 +67,11 @@ const enabledKeys = new Set(registry.filter((r) => r.enabled).map((r) => `${r.de
 check('§0 the registry mirror parses into rows (the barrier can see its own input)',
   registry.length > 0, `${MIRROR} yielded 0 rows — a parse break must fail, never silently pass`);
 check('§0 the mirror row count matches the count its own header recorded',
-  /\b59 rows\b/.test(mirrorSrc) ? registry.length === 59 : registry.length > 0,
-  `header says 59, parsed ${registry.length}`);
+  // 61 since 2026-10-10 (+ «أرض» / Buy, Other Land, migration 20261011022451); 60 since 2026-10-09
+  // (+ «أرض خام» / Buy, migration 20261010000246); was 59.
+  // the NEWEST «N rows» stamp in the header (re-verification stamps are prepended; older ones stay as history)
+  (() => { const m = /\b(\d+) rows\b/.exec(mirrorSrc); return m ? registry.length === Number(m[1]) : registry.length > 0; })(),
+  `header says 61, parsed ${registry.length}`);
 
 // The COHORT_QUESTIONS slot names, mapped to the registry's (deal_ar, rent_period_ar) coordinates.
 const SLOT: Record<string, { deal: string; period: string }> = {

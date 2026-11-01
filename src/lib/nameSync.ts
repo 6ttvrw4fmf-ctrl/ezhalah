@@ -60,17 +60,32 @@ export function pickName(
   return en || (scriptOf(base) === 'en' ? base : '') || base;
 }
 
+/** The name to put INSIDE A SENTENCE in `locale`: pickName's spelling, but never one in the other script —
+ *  no Arabic name in an English line («يوسف, the market…», owner P1 2026-10-24), no Latin in an Arabic one.
+ *  '' while the right spelling isn't known yet: the caller shows its line without a name instead. */
+export function sentenceName(u: { name?: string; nameEn?: string; nameAr?: string } | null | undefined, locale: Locale): string {
+  const n = pickName(u, locale);
+  const wrongScript = locale === 'en' ? /[\u0600-\u06FF]/.test(n) : /[A-Za-z]/.test(n);
+  return wrongScript ? '' : n;
+}
+
 // Build the synced {name, nameEn, nameAr} patch from a freshly-typed value. `name` stays the value
 // the user actually typed; the opposite script is generated (Gemini, with phonetic fallback for AR).
 export async function buildSyncedName(typed: string): Promise<BilingualName> {
   const v = (typed ?? '').trim();
   if (!v) return { name: v };
-  const sc = scriptOf(v);
-  if (sc === 'ar') {
-    const en = await transliterateName(v, 'en'); // no deterministic AR→EN fallback
-    return { name: v, nameAr: v, ...(en ? { nameEn: en } : {}) };
-  }
-  // Typed in Latin: generate Arabic (Gemini, else phonetic table so it's never empty).
-  const ar = (await transliterateName(v, 'ar')) || phoneticAr(v, true);
-  return { name: v, nameEn: v, ...(ar ? { nameAr: ar } : {}) };
+  const other = await otherSpelling(v);
+  return scriptOf(v) === 'ar'
+    ? { name: v, nameAr: v, ...(other ? { nameEn: other } : {}) }
+    : { name: v, nameEn: v, ...(other ? { nameAr: other } : {}) };
+}
+
+/** The OTHER script's spelling of a typed name: Arabic → Latin (Gemini only — no deterministic AR→EN
+ *  fallback), Latin → Arabic (Gemini, else the phonetic table so it's never empty). '' when none.
+ *  buildSyncedName and the «وش نناديك؟» live preview both use it, so the preview is the saved spelling's source. */
+export async function otherSpelling(typed: string): Promise<string> {
+  const v = (typed ?? '').trim();
+  if (!v) return '';
+  if (scriptOf(v) === 'ar') return (await transliterateName(v, 'en')) ?? '';
+  return (await transliterateName(v, 'ar')) || phoneticAr(v, true) || '';
 }

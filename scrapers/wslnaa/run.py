@@ -32,23 +32,42 @@ import re
 import sys
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlencode
 
 from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
+from scrapers.common.page_pin import pin_from_page  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://wslnaa.com"
 SOURCE = "Waslna"
 PREFIX = "WSL"
 
 
+SESSION_HEADERS = {"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"}
+
+
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
-    s.headers.update({"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"})
+    s.headers.update(SESSION_HEADERS)
     return s
+
+
+def crawl_session() -> tuple[cc.Session, list[str]]:
+    """The session the crawl rides: 3 browser profiles DIRECT, then the same 3 through the residential
+    proxy when the job grants one (`proxy: true`), each probing the sitemap on a fresh session.
+
+    2026-10-29 04:59 (job 123263442024): the nightly ended «sitemap returned no /properties/ slugs» in
+    2 s, while the same sitemap listed 63 /properties/ URLs to another egress that day and the four
+    previous nightlies each crawled 62. The single pinned chrome124 session read a non-200 as «no
+    slugs» and recorded nothing about it, so a refusal of the runner looked like an empty site. The
+    attempt log now goes into the run ledger, and the first route that answers 200 carries the crawl."""
+    return retry_smarter_session(f"{BASE}/sitemap.xml", headers=SESSION_HEADERS)
 
 
 _TYPE_EN_AR = {
@@ -72,6 +91,28 @@ def _int(v: Any) -> Optional[int]:
         return n if n > 0 else None      # area/price of 0 means "not stated", never zero
     except (TypeError, ValueError):
         return None
+
+
+# BATHROOMS FROM THE AD'S OWN LAYOUT SENTENCE (🔬 AF engineer 2026-10-11, backlog 263). The tRPC payload has no
+# bathroom field, so the description is the only place wslnaa states one («تتكون من غرفتي نوم وصالة ومطبخ ودورتي
+# مياه»); ops_af_score 10-08 read it on the page while we stored none on 61 of 61. A digit count wins
+# (normalize.baths_from_leading_count, «و3 دورات مياه»); a lone dual «دورتي/دورتين مياه» is 2; a lone singular
+# «دورة مياه» is 1. Any mix («غرفة ماستر بدورة مياه، ودورتي مياه» = 3 in total) is NOT added up: unknown, NULL.
+_BATH_ANY = re.compile(r"[\d٠-٩]\s*(?:دورات|دورة|حمامات)\s*(?:ال)?مي[اآ][هة]")
+_BATH_DUAL = re.compile(r"دورت(?:ي|ين)\s*(?:ال)?مي[اآ][هة]")
+_BATH_ONE = re.compile(r"دورة\s*(?:ال)?مي[اآ][هة]")
+
+
+def _bathrooms_from_text(text: Optional[str]) -> Optional[int]:
+    t = str(text or "")
+    if _BATH_ANY.search(t):
+        return normalize.baths_from_leading_count(t)
+    duals, ones = len(_BATH_DUAL.findall(t)), len(_BATH_ONE.findall(t))
+    if duals == 1 and ones == 0:
+        return 2
+    if ones == 1 and duals == 0:
+        return 1
+    return None
 
 
 def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
@@ -144,6 +185,8 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
         "area_m2": _int(p.get("area")),
         "bedrooms": (_int(p.get("rooms"))
                      if (p.get("type") or "").strip().lower() in _DWELLING_TYPES else None),
+        "bathrooms": (_bathrooms_from_text(p.get("description"))
+                      if (p.get("type") or "").strip().lower() in _DWELLING_TYPES else None),
         "photo_urls": imgs[:20] or None,
     }
     if deal == "Rent":
@@ -165,16 +208,106 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
         "map_url": p.get("mapUrl"), "slug": p.get("slug"),
         "source_rooms": p.get("rooms"),
     }.items() if v is not None}
+    # The API's mapUrl is the unit's Google Maps link — a maps.app.goo.gl short link on the compound units
+    # (owner 2026-10-30: 61 ads, 17 pins): followed through page_pin. No link → pin_absent; a link whose hop
+    # failed → neither key (keep_stored_pin keeps yesterday's).
+    map_url = str(p.get("mapUrl") or "")
+    row["additional_info"].update(pin_from_page(map_url) or ({} if map_url else {"pin_absent": True}))
     return row, category, ""
 
 
+# Why a walk may not be the whole catalogue. Non-empty → no prune this run.
+INCOMPLETE: list[str] = []
+
+# ── REMOVAL (measured 2026-10-02). Until then this crawler had NO removal step at all: a unit the
+# office rented out or deleted stayed active here for good.
+#
+# The PAGE cannot answer: /properties/<anything> is the app shell, HTTP 200 even for a slug that
+# never existed. The listing's own RECORD can (properties.bySlug), and it has TWO removal answers:
+#   · RENTED — the path this site actually uses. Its own properties.list serves 83 records: 59
+#     «available» and 24 «rented» (every one active=true, deletedAt=null, updated 2026-06-14 to
+#     2026-08-16). 0 of the 24 are in the sitemap (59 slugs, all 59 «available»), and 10 of 10
+#     probed answer HTTP 200 with status «rented» — never a 404. 0 of 59 live records carry it, so
+#     it is not furniture. Its own page stamps such a record «تم التأجير» (PropertyDetail.tsx:351).
+#   · NOT_FOUND — a slug that never existed (and a wrong id) answers HTTP 404 with tRPC's
+#     {"message":"NOT_FOUND","path":"properties.bySlug"}.
+# «sold»: 0 records carry it today. It is read as a removal on the site's OWN page code, not on a
+# measured record: that same line stamps `status==="rented"||status==="sold"` («تم البيع»), and its
+# list filter calls the pair «تم التأجير / البيع» (unavailable). The app defines exactly four
+# statuses: available, reserved, rented, sold.
+# UNMEASURED, so UNKNOWN (held and counted by prune_unseen, never hidden — exactly like a block, a
+# 5xx or a body that is not that JSON): «reserved», any other status, active=false and a non-null
+# deletedAt, each on 0 of 83 records.
+RES_TABLE, COM_TABLE = "wslnaa_residential_listings", "wslnaa_commercial_listings"
+
+
+def _record_url(slug: str) -> str:
+    payload = json.dumps({"0": {"json": {"slug": slug}}}, ensure_ascii=False, separators=(",", ":"))
+    return f"{BASE}/api/trpc/properties.bySlug?{urlencode({'batch': 1, 'input': payload})}"
+
+
+# What the record's own `status` says. Anything not named here is UNKNOWN.
+_STATUS_SAYS = {"available": "live", "rented": "gone", "sold": "gone"}
+
+
+def _signal(status, body, moved) -> Optional[str]:
+    """'live' | 'gone' | None — only what this listing's own record affirmatively answers."""
+    if moved or status not in (200, 404):
+        return None
+    try:
+        got = json.loads(body)[0]
+        if status == 404:
+            err = got["error"]["json"]
+            said = (err["message"], err["data"]["path"])
+            return "gone" if said == ("NOT_FOUND", "properties.bySlug") else None
+        p = got["result"]["data"]["json"]
+        if not p["active"] or p.get("deletedAt"):
+            return None
+        return _STATUS_SAYS.get(str(p["status"]).lower())
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+        return None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for db.prune_unseen. A «rented»/«sold» record or a NOT_FOUND is believed
+    only while a known-live listing from this run (`control`) still reads live through the same
+    session."""
+    stored = stored_listing_url((RES_TABLE, COM_TABLE))
+    s = session()
+
+    def url_for(ad_number: str) -> Optional[str]:
+        slug = (stored(ad_number) or "").rstrip("/").rsplit("/", 1)[-1]
+        return _record_url(slug) if slug else None
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="wslnaa", signal=_signal, session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
+SITEMAP_TRACE: list[str] = []
+
+
 def fetch_slugs(s: cc.Session, limit: int = 0) -> list[str]:
+    INCOMPLETE.clear()
+    SITEMAP_TRACE.clear()
     r = s.get(f"{BASE}/sitemap.xml", timeout=40)
     if r.status_code != 200:
+        # A refused or failed sitemap is NOT an empty catalogue: say what the host answered.
+        SITEMAP_TRACE.append(f"sitemap HTTP {r.status_code} ({len(r.text or '')} bytes)")
         return []
     urls = sorted({u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if "/properties/" in u})
     slugs = [u.rstrip("/").rsplit("/", 1)[-1] for u in urls if u.rstrip("/").rsplit("/", 1)[-1]]
     slugs = [x for x in slugs if x != "properties"]
+    if not slugs:
+        SITEMAP_TRACE.append(f"sitemap HTTP 200 with {len(urls)} /properties/ locs ({len(r.text or '')} bytes)")
     return slugs[:limit] if limit else slugs
 
 
@@ -182,10 +315,13 @@ def fetch_one(s: cc.Session, slug: str) -> Optional[dict]:
     payload = json.dumps({"0": {"json": {"slug": slug}}}, ensure_ascii=False, separators=(",", ":"))
     r = s.get(f"{BASE}/api/trpc/properties.bySlug", params={"batch": 1, "input": payload}, timeout=40)
     if r.status_code != 200:
+        if r.status_code != 404:        # a 404 is the record's own answer; anything else is unread
+            INCOMPLETE.append(f"{slug}: HTTP {r.status_code}")
         return None
     try:
         p = r.json()[0]["result"]["data"]["json"]
     except (ValueError, KeyError, IndexError, TypeError):
+        INCOMPLETE.append(f"{slug}: record was not readable JSON")
         return None
     # The tRPC payload OMITS `slug` for the building-level combination offers (numeric slugs
     # 540001, 570001-570005 — "الجزء السكني بالكامل", "3 فتحات تجارية متجاورة", …). `listing_url`
@@ -205,7 +341,7 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    s = session()
+    s, tried = crawl_session()
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run("wslnaa")
     res: list[dict] = []
@@ -213,7 +349,8 @@ def main() -> int:
     try:
         slugs = fetch_slugs(s, limit=args.limit)
         if not slugs:
-            raise RuntimeError("sitemap returned no /properties/ slugs")
+            raise RuntimeError("sitemap returned no /properties/ slugs | "
+                               + "; ".join(SITEMAP_TRACE + tried))
         print(f"{SOURCE}: {len(slugs)} listings discovered", flush=True)
         skipped: dict[str, int] = {}
         for sl in slugs:
@@ -250,7 +387,24 @@ def main() -> int:
             source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+        # REMOVAL. A listing missing from this run is only a CANDIDATE: at three misses its own
+        # record is re-read, and it is hidden only when that record says «rented»/«sold» or answers
+        # NOT_FOUND (_signal). A record still on offer heals the row. No prune on a partial walk or
+        # a single-vertical run.
+        pruned = 0
+        if INCOMPLETE:
+            print(f"  ⚠ walk incomplete — no prune: {'; '.join(INCOMPLETE)[:300]}")
+        elif args.type == "all":
+            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+            for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                k = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=verify_gone)
+                if k < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += k
         healthy = db.end_run(run_id, ok=True, rows_seen=len(slugs), rows_upserted=len(res) + len(com),
+                             notes=f"pruned={pruned}",
                              check_tables=["wslnaa_residential_listings",
                                            "wslnaa_commercial_listings"])
         if not healthy:

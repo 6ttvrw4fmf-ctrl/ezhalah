@@ -43,6 +43,8 @@ visual and behavioural below is owned by the shared component.
 
 ## 2. Card layout — identical for every question
 
+**Owner visual revision, 2026-10-01:** use one short source-data sentence in a subtle information strip immediately below the question/description and above the options: «خيارات بحثك وأعدادها مبنية على بيانات الإعلانات المنشورة؛ غياب المعلومة لا ينفي توفرها، فتأكد من الإعلان الأصلي.» It replaces the two footer notes, keeping both current-search scope and missing-is-not-no semantics while directing users to the original listing. Use a thin neutral card border and compact option rows with at least 48 px height. The refined conversational revision uses a quiet header with a green brand mark, a prominent question, and tinted selected rows with a green check and border. Continue stays solid green with a direction-aware arrow. Press feedback starts immediately (120 ms), question content fades/slides 6 px over 180 ms, and the pinned footer does not fade or translate between questions. Reduced motion removes movement. The existing callbacks execute immediately without waiting for animation; counts and search timing are unchanged. Preserve the existing count, unknown-count caption, selection, progress, committed pills and pinned action behavior.
+
 ```
 ┌───────────────────────────────────────────┐
 │  ✦  Ezhalah AI Agent                    ✕  │  Shell top-bar (fixed)
@@ -159,6 +161,8 @@ Both تخطي and رجوع are equal-width real buttons (§4); رجوع carries 
   prior pick; checkbox for multi — toggles); it does **not** auto-advance. The footer `Show {N}`
   commits and advances. This kills the "tap-to-advance vs toggle-then-confirm" whiplash — single and
   multi feel identical; only the selection count differs.
+- **No question forces one answer** *(owner 2026-10-03, product contract R7.2.3)*: every advanced
+  question renders checkboxes; several ticks are the exact union of what was ticked.
 - **Every question is optional/skippable** (§7).
 - **One unified eligibility gate.** `eligibility(scope)` is the *only* visibility rule a question
   declares, and all questions share the same gate contract (same thresholds: a question shows only when
@@ -222,7 +226,7 @@ free.
 - **«رجوع» on every question** (owner 2026-08-22). It steps back exactly one question and restores
   that question's recorded answer — including restoring a skip AS a skip (open, no predicate).
   From the FIRST question it leaves the interview and hands the pre-AF controls back
-  («خلّنا نحدد الطلب أكثر» + «عرض المزيد»), which is automatic: that row is gated on `!ageFlow`.
+  («🎯 دقّق مع الذكاء» + «عرض المزيد»), which is automatic: that row is gated on `!ageFlow`.
 - **The interview is ONE ordered step record** (`ageFlowStepsRef`), and query/asked/labels/facets are
   DERIVED from it by `syncGuidedFromSteps(cursor)` — the query is rebuilt from `baseQ` by re-applying
   the steps *before* the cursor, never un-applied by a per-question inverse. This is what makes "no
@@ -281,17 +285,24 @@ narrowing the market for them, not forcing them to fill another form.» Everythi
   beat plays over the final search: fragments drift inward, copy uses REAL numbers («نراجع N عقار
   ونطلع لك الأنسب» → «لقينا N عقار أقرب لطلبك»), minimum ~1.4 s, dismissed by setTimeout latches
   with a 15 s failsafe + a catch on the search itself. Skip-everything closes with no beat.
-- **Results summary + removable pills.** The guided results turn shows «بناءً على: …» and each
-  committed answer as a removable pill. Removal is PURE recomputation: rebuild from the interview's
-  baseQ by re-applying the remaining facets through each question's own `apply()` — never a
-  hand-written inverse — then re-search immediately (no mining beat on removal).
+- **Results summary + read-only chips** *(amended 2026-10-03, owner: «we should not show any X
+  button on this»)*. The guided results turn's «ملخص البحث» is the ORIGINAL summary (built from the
+  query before the first round) continued by one labelled bullet per committed answer — «• نوع العقار
+  المحدد: شقة», «• دورات المياه: +١», «• المميزات: المطبخ، مصعد» — no heading and no emoji (the chips
+  carry the emoji), cumulative across rounds (same label ⇒ same line). Each answer is also a plain chip — no ✕, no press, in the transcript or
+  in the round card. Nothing removes an answer from the results; it is changed only by Back inside the
+  round. The earlier «بناءً على: …» sentence and removable pills are retired.
+- **The reader stays in place** *(2026-10-03)*. Earlier turns are dimmed while a search loads, never
+  hidden, so the thread keeps its height; the view eases to the user's own answers bubble and lands on
+  the new turn — never to the top. Going back to the Filter always opens a clean form.
+- **The «didn't mention this» line** *(2026-10-03)* leads with 😔: «😔 N إعلان لم يذكر هذه المعلومة».
 
 
 ## Amendment 2026-08-22 (a) — the narrowing gate (owner-approved, supersedes the 8%-90% option band)
 
 > **Partly superseded on 2026-08-25** — see «Amendment 2026-08-25» at the end of this file. The
 > ORDERING half below stands. The ELIGIBILITY half's `count < N` was replaced by
-> `optionNarrowsMeaningfully(count, N)` (≥10% removed, or landing at/under the target): the
+> `optionNarrowsMeaningfully(count, N)` (≥2.5% removed — 10% until the owner lowered it on 2026-11-01 — or landing at/under the target): the
 > small-slice protection this amendment won is permanent, the lopsided-majority half was an
 > over-correction and the owner reversed it. Kept in full because this gate has now moved twice.
 
@@ -561,8 +572,8 @@ invent questions and do not force questions just to reach the 25-listing target.
 qualifies  ==  (total - count >= total * MEANINGFUL_NARROWING_FRACTION)  ||  (count <= INTERVIEW_STOP_AT)
 ```
 
-`MEANINGFUL_NARROWING_FRACTION = 0.10`, `INTERVIEW_STOP_AT = 25` (unchanged). The removal form is
-written so that EXACTLY 10% qualifies (N=100 k=90 and N=30 k=27 both ask; N=100 k=91 does not). The
+`MEANINGFUL_NARROWING_FRACTION = 0.025` (0.10 until 2026-11-01), `INTERVIEW_STOP_AT = 25` (unchanged). The removal form is
+written so that EXACTLY the fraction qualifies (at today's 2.5%: N=200 k=195 and N=40 k=39 both ask; N=200 k=196 does not; at the old 10%: N=100 k=90 and N=30 k=27 asked, N=100 k=91 did not). The
 second clause exists so the LAST step to the target is never blocked by a percentage: at N=26 an
 option yielding 25 removes 3.8% and still qualifies, because it lands AT the target.
 
@@ -663,7 +674,7 @@ useless/lopsided option but leaves one genuinely useful option, do not throw awa
 just because one option remains. Treat that remaining option as a valid yes/no narrowing question
 when it meaningfully reduces the results under our existing rule. Example: if 1,000 listings become
 60 by selecting «مفروشة», that is clearly useful and Advanced Filter should be allowed to ask it.»
-«Do not change any of the existing thresholds: meaningful reduction 10%, stop target 25, minimum
+(2026-11-01: the owner lowered the meaningful reduction 10% → 2.5% — «lets lower it» — so more questions are asked; the rest below stands) «Do not change any of the existing thresholds: meaningful reduction 10%, stop target 25, minimum
 useful questions 1, option floor 5.»
 
 **The change, in full.** `MIN_OPTIONS_SINGLE` in `src/lib/afRanking.ts` moved **2 → 1**. Nothing
@@ -671,7 +682,7 @@ else. `minOptionsFor()` is now uniform (`single === multi === 1`); every other c
 
 | constant | value | status |
 |---|---|---|
-| `MEANINGFUL_NARROWING_FRACTION` | `0.1` | **frozen, unchanged** |
+| `MEANINGFUL_NARROWING_FRACTION` | `0.025` | **owner lowered it 2026-11-01 (was 0.1)** |
 | `INTERVIEW_STOP_AT` | `25` | **frozen, unchanged** |
 | `MIN_USEFUL_QUESTIONS_TO_SHOW` | `1` | **frozen, unchanged** |
 | `MIN_REAL_OPTION_COUNT` | `5` | **frozen, unchanged** (now pinned by a barrier — it was not before) |

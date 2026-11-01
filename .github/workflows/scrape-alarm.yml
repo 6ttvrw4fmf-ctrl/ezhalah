@@ -1,0 +1,41 @@
+# Scrape alarm + auto-block (security plan Phase 4, 2026-10-21; docs/ops/SCRAPE_GUARD.md). Hourly: blocks for 24 h any caller that pulled a bulk-download's worth
+# of listing rows in the past hour, stores the address privately (ops_scrape_suspect), leaves a quiet P3 record carrying only
+# country / city / network / device. A failed log query FAILS the job (never "nobody is scraping"), and
+# mon_detect_scrape_alarm_silent() alarms if no run succeeds for 4 hours. Read-only against production except those
+# writes. Logic: scripts/lib/scrapeAlarm.ts (executed by scripts/verify-scrape-alarm.ts in npm test).
+name: Scrape alarm
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: scrape-alarm
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  scrape-alarm:
+    name: Look for bulk listing downloads in the past hour
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Scrape alarm
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_ALARM_KNOWN_IPS: ${{ vars.SCRAPE_ALARM_KNOWN_IPS }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/scrape-alarm.ts

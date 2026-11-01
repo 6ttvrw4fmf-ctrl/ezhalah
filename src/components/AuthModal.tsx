@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image as XImage } from 'expo-image'; // SVG logo: a vector drawing, not a photo (owner 2026-10-24)
 import Animated, { Easing, interpolate, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, cardShadow } from '@/theme/tokens';
@@ -7,6 +8,9 @@ import { Spinner } from '@/components/ui';
 import { useApp, type AuthUser } from '@/store';
 import { useI18n, t } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
+import { LinearGradient } from 'expo-linear-gradient';
+import { SkyEagleLightUp } from '@/components/SidebarSky';
+import { useResolvedTheme, useThemePalette } from '@/lib/appearance';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { canDragAuthPopup } from '@/lib/authPopupBehavior';
@@ -16,9 +20,13 @@ import {
   isBackendLive,
   signInWithProvider,
   authenticateWithFaceId,
+  APPLE_JS_SIGNIN,
+  prepareAppleJs,
+  signInWithAppleJs,
 } from '@/lib/auth';
+import { useSaveName } from '@/lib/useSaveName';
 
-const LOGO = require('../../assets/images/ezhalah-logo.png');
+const LOGO = require('../../assets/images/logo-cloud-green-static.svg'); // solid on the white card (owner 2026-10-28)
 type Step = 'main' | 'google' | 'apple' | 'appleface';
 
 // Open/close animation (owner spec, 2026-08-15): overlay fade ~200-250ms, popup fades in while
@@ -55,12 +63,12 @@ const OVERLAY_POSITION = (Platform.OS === 'web' ? 'fixed' : 'absolute') as any;
 // OAuth redirect landing target (Google/Apple/Supabase redirect back to a real URL) — it bounces
 // straight to '/' or '/agent' and is never UI a real user sees.
 export default function AuthModal() {
-  const { authOpen, closeAuth, signIn } = useApp();
+  const { authOpen, closeAuth, signIn, authNote } = useApp();
   if (!authOpen) return null;
-  return <Sheet onClose={closeAuth} onSignedIn={signIn} />;
+  return <Sheet onClose={closeAuth} onSignedIn={signIn} note={authNote} />;
 }
 
-function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: AuthUser) => void }) {
+function Sheet({ onClose, onSignedIn, note }: { onClose: () => void; onSignedIn: (u: AuthUser) => void; note?: string | null }) {
   const { isRTL } = useI18n();
   const reducedMotion = useReducedMotion();
   const closingRef = useRef(false);
@@ -146,6 +154,7 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
             onPress={() => {}}
           >
             <Animated.View style={[s.pop, drag && s.popWide, cardStyle]}>
+              <AuthSky radius={24} />
               {/* Desktop grab strip — a designated header region (the logo band) that picks the
                   whole card up. It never overlaps the heading, the privacy link or the buttons, so
                   every interactive element stays plainly clickable; the cursor alone announces the
@@ -158,7 +167,7 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
                   style={[s.grip, { cursor: 'grab', touchAction: 'none', userSelect: 'none' } as never]}
                 />
               )}
-              <AuthForm onRequestClose={close} onSignedIn={onSignedIn} backRef={backRef} />
+              <AuthForm onRequestClose={close} onSignedIn={onSignedIn} backRef={backRef} note={note} />
             </Animated.View>
           </Pressable>
         </Pressable>
@@ -174,7 +183,8 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
 // modal (Sheet above) renders it full-size; the small draggable SignInCard renders it `compact`.
 // Only STYLES differ between the two; state, handlers, providers and copy are this one code path,
 // so there is never a second auth system to drift.
-export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
+export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }: {
+  note?: string | null; // a shared link's «يوسف شاركك: …», shown above the heading
   onRequestClose: () => void;
   onSignedIn: (u: AuthUser) => void;
   compact?: boolean;
@@ -196,6 +206,13 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
     onSignedIn(u);
     onRequestClose();
   };
+
+  // Apple JS (flagged, see src/lib/auth.ts): load Apple's script while the chooser is on screen, so
+  // the tap opens Apple's popup directly — a popup opened after a slow await is blocked.
+  const saveName = useSaveName();
+  useEffect(() => {
+    if (APPLE_JS_SIGNIN && isBackendLive && Platform.OS === 'web') void prepareAppleJs();
+  }, []);
 
   // Apple Face ID: mirror the prototype's scan→verified beat, but on a native build we actually
   // invoke the device biometric (expo-local-authentication) and bail if it fails. Unchanged from the
@@ -244,6 +261,17 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
     // sign-in — if Apple isn't enabled in Supabase yet (or fails), surface a clear message instead.
     if (isBackendLive) {
       if (Platform.OS === 'web') {
+        if (APPLE_JS_SIGNIN) {
+          const a = await signInWithAppleJs();
+          if (a.cancelled) return; // the user closed Apple's window: stay on the chooser
+          if (a.signedIn) {
+            // Apple sends the name on the FIRST authorization only — keep it through the rename path.
+            // No name → nothing written; «وش نناديك؟» asks instead. Never invented.
+            if (a.name) saveName(a.name);
+            return onRequestClose(); // the store adopts the session via onAuthStateChange
+          }
+          // a.fallback → today's redirect, below. Never leave the user stuck.
+        }
         const r = await signInWithProvider('apple');
         if (r.redirected) return;
         if (r.user) return done(r.user);
@@ -289,10 +317,20 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
                   />
                 </Pressable>
               )}
-              <RNImage source={LOGO} style={[s.popEagle, cp && c.popEagle]} resizeMode="contain" />
+              <View style={[s.popEagle, cp && c.popEagle]}><SkyEagleLightUp size={cp ? 64 : 112} /></View>
               {/* ── main ───────────────────────────────────────────────── */}
               {step === 'main' && (
                 <>
+                  {/* What a shared link holds (owner 2026-10-18): «يوسف شاركك: شقق للإيجار في حي النرجس». */}
+                  {/* Owner-approved design 2026-10-22: the bold invite and «سجّل دخولك وتنفتح لك فوراً» under it, in
+                      a green box — no initial circle (owner: «no need for this letter») — in front of the visitor
+                      on phone and laptop. */}
+                  {note ? (
+                    <View style={s.shareNote} accessibilityRole="text">
+                      <Text style={s.shareNoteTitle}>{note}</Text>
+                      <Text style={s.shareNoteSub}>{t(/يرحّب بك للانضمام|welcomes you to join/.test(note) ? 'Sign up free and start searching' : 'Sign in and it opens right away')}</Text>
+                    </View>
+                  ) : null}
                   <Text style={[s.formHead, cp && c.formHead]}>{t('Sign in or create your free account')}</Text>
                   <Text style={[s.formSub, cp && c.formSub]}>{t('Sign in to unlock more of Ezhalah.')}</Text>
                   <Text style={[s.agree, cp && c.agree]}>
@@ -345,7 +383,7 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
                     <Text style={s.gauthBarText}>{t('Sign in with Google')}</Text>
                   </View>
                   <View style={s.gauthApp}>
-                    <RNImage source={LOGO} style={s.gauthAppLogo} resizeMode="cover" />
+                    <XImage source={LOGO} style={s.gauthAppLogo} contentFit="contain" />
                     <Text style={s.gauthTitle}>{t('Choose an account')}</Text>
                     <Text style={s.gauthSub}>
                       {t('to continue to')} <Text style={{ fontWeight: '600', color: '#202124' }}>{t('Ezhalah')}</Text>
@@ -428,6 +466,15 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
   );
 }
 
+/** The sign-in card IS the sky (owner 2026-10-24: «change the entire white background, match it with blue — this
+ *  looks like a pasted image»): the cloud eagle lights up straight on it. Light: the logo's own blue; dark: the dusk sky. */
+export function AuthSky({ radius }: { radius: number }) {
+  const dark = useResolvedTheme() === 'dark';
+  const pal = useThemePalette();
+  return <LinearGradient pointerEvents="none" colors={dark ? [pal.skyTop, pal.skyBottom] : ['#8DC2E8', '#E6F3FB']}
+    style={[StyleSheet.absoluteFill, { borderRadius: radius }]} />;
+}
+
 // COMPACT overlays for the small SignInCard presentation (owner 2026-08-29: "full login,
 // shrunk"). Sizes only — colors/copy/logic are the shared form above. The phoneInput font size is
 // deliberately NOT overridden (16 on web — the iOS-zoom barrier's rule applies to the shared
@@ -435,7 +482,7 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
 // backend those steps are never reached (real OAuth redirects take over).
 const c = StyleSheet.create({
   popClose: { top: 8, end: 8, width: 26, height: 26, borderRadius: 13 },
-  popEagle: { width: 52, height: 42, marginTop: 10, marginBottom: 6 },
+  popEagle: { width: 64, height: 64, marginTop: 10, marginBottom: 6 },
   formHead: { fontSize: 15.5, lineHeight: 22, marginBottom: 2 },
   formSub: { fontSize: 11.5, lineHeight: 16, marginBottom: 4 },
   agree: { fontSize: 10.5, lineHeight: 15, marginBottom: 12, paddingHorizontal: 0 },
@@ -468,7 +515,7 @@ const s = StyleSheet.create({
   // the heading so the text, the privacy link and the buttons never start a drag.
   grip: { position: 'absolute', top: 0, left: 0, right: 0, height: 120, zIndex: 4 },
   pop: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent', // AuthSky paints the card
     borderRadius: 24,
     paddingTop: 34,
     paddingBottom: 30,
@@ -490,9 +537,16 @@ const s = StyleSheet.create({
   // The bare dark-green eagle mark. No separate fly-in/bounce/wink — the whole card (including this)
   // fades+scales in together as ONE motion (owner 2026-08-15: "no bouncing, spinning, excessive
   // movement, or flashy animation" — a back-eased overshoot + blink sequence doesn't qualify).
-  popEagle: { alignSelf: 'center', width: 100, height: 80, marginBottom: 14 },
+  popEagle: { alignSelf: 'center', width: 112, height: 112, marginBottom: 14 },
 
   // Arabic typography: weights carry the hierarchy — no Latin letter-spacing on Arabic script.
+  shareNote: {
+    alignSelf: 'stretch', alignItems: 'center',
+    backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine, borderRadius: 14,
+    paddingVertical: 10, paddingHorizontal: 14, marginBottom: 12,
+  },
+  shareNoteTitle: { fontSize: 14.5, lineHeight: 21, fontWeight: '800', color: colors.chipIcon, textAlign: 'center' },
+  shareNoteSub: { fontSize: 12, lineHeight: 17, color: colors.muted, marginTop: 2, textAlign: 'center' },
   formHead: { fontSize: 24, fontWeight: '800', color: colors.ink, textAlign: 'center', marginBottom: 6, lineHeight: 34 },
   formSub: { fontSize: 14.5, color: colors.body, textAlign: 'center', marginBottom: 10, lineHeight: 22 },
   // Owner 2026-09-04: the agreement line reads as its own, separate block below the intro — not
@@ -523,7 +577,7 @@ const s = StyleSheet.create({
   gauthBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 18, borderBottomWidth: 1, borderBottomColor: '#ececec' },
   gauthBarText: { fontSize: 14, fontWeight: '500', color: '#3c4043' },
   gauthApp: { alignItems: 'center', paddingVertical: 22 },
-  gauthAppLogo: { width: 46, height: 46, borderRadius: 23, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  gauthAppLogo: { width: 46, height: 46, borderRadius: 23, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   gauthTitle: { fontSize: 22, fontWeight: '400', color: '#202124' },
   gauthSub: { fontSize: 14, color: '#5f6368', marginTop: 4 },
   gauthList: { paddingVertical: 4 },
@@ -551,7 +605,7 @@ const s = StyleSheet.create({
   appleEmailT: { fontSize: 14, fontWeight: '600', color: colors.ink },
   appleEmailS: { fontSize: 12, color: colors.muted },
   toggle: { width: 44, height: 26, borderRadius: 13, backgroundColor: '#d3d6d4', justifyContent: 'center' },
-  toggleOn: { backgroundColor: colors.primary },
+  toggleOn: { backgroundColor: colors.selFill },
   knob: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff', marginLeft: 3, ...cardShadow },
   knobOn: { marginLeft: 21 },
   appleContinue: { backgroundColor: '#000', height: 50, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginTop: 18 },
@@ -560,7 +614,7 @@ const s = StyleSheet.create({
   // Face ID
   faceWrap: { alignItems: 'center', justifyContent: 'center', minHeight: 360, gap: 14 },
   faceIc: { width: 86, height: 86, borderRadius: 24, backgroundColor: colors.dark, alignItems: 'center', justifyContent: 'center' },
-  faceIcDone: { backgroundColor: colors.primary },
+  faceIcDone: { backgroundColor: colors.selFill },
   faceT: { fontSize: 18, fontWeight: '700', color: colors.ink, marginTop: 4 },
   faceS: { fontSize: 13.5, color: colors.muted },
 

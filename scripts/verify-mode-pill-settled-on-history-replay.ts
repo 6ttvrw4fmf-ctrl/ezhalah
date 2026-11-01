@@ -30,6 +30,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { shouldRenderModeSwitch } from '../src/lib/shouldRenderModeSwitch.ts';
 
 const root = join(import.meta.dirname, '..');
 const src = readFileSync(join(root, 'src/app/agent.tsx'), 'utf8');
@@ -59,14 +60,41 @@ if (initMatch) {
     'collapse animation silently breaks');
 }
 
-// ── 2. The render site must gate the wrapper's EXISTENCE on modeGone, not merely its style class ──
-// (If a future edit changed this to `<View style={[..., modeGone && s.hidden]}>` — always mounted,
-// visibility toggled by class — the initializer fix above would no longer prevent the flash: MODE_EASE
-// would still be present on the very first paint, ready to transition.)
-check('the pill wrapper only exists in the tree when NOT modeGone (unmount, not just hide)',
-  /\{!modeGone && \(\s*<View style=\{\[s\.modeWrap, MODE_EASE, modeSearched && s\.modeWrapHidden\]\}>/.test(src),
-  'the wrapper must be conditionally RENDERED (unmounted when modeGone), not just styled — ' +
-  'otherwise MODE_EASE is live on first paint regardless of the initializer');
+// ── 2. Execute the actual render predicate to catch a replay param changing on a mounted screen ──
+check('saved-chat replay suppresses the animated pill synchronously, before effects run',
+  shouldRenderModeSwitch(false, '0') === false,
+  'replay="0" must suppress the wrapper even if the previous chat left modeGone=false');
+check('a settled live-search pill remains absent',
+  shouldRenderModeSwitch(true, undefined) === false,
+  'modeGone=true must retain normal live-search behavior');
+check('a fresh chat still renders the mode pill',
+  shouldRenderModeSwitch(false, undefined) === true,
+  'the Filter / AI control must remain available on a fresh chat');
+check('agent render uses the tested predicate for the animated wrapper',
+  /\{shouldRenderModeSwitch\(modeGone, replay, openingSaved\) && \(\s*<View style=\{\[s\.modeWrap, MODE_EASE, modeSearched && s\.modeWrapHidden\]\}>/.test(src),
+  'the production render must use the tested predicate, including the opening-saved-chat flag');
+
+// SWITCHING BETWEEN SAVED CHATS (owner 2026-10-08: «when a logged-in user changes between chats, the
+// empty home shows for a bit then goes away»). The sidebar consumes ?replay=0 at once and the saved
+// chat restores while `msgs` is empty, so the router param alone cannot keep the new-chat landing away.
+check('a saved chat that is still opening never shows the pill, even with replay consumed and modeGone reset',
+  shouldRenderModeSwitch(false, undefined, true) === false,
+  'openingSaved=true must suppress the pill — this is the gap between the tap and the restored chat');
+check('the new-chat landing (pill, «بحث» chip, example text) is off while a saved chat opens',
+  /const introLanding = !openingSaved && msgs\.every\(/.test(src),
+  'introLanding must be false while openingSaved — an empty msgs list mid-open is not a new chat');
+check('opening a saved chat raises the flag before the old chat fades out',
+  /const epochAtTap = conversationEpochRef\.current;\s*setOpeningSaved\(true\);\s*runAfterAnimation\(/.test(src),
+  'turnToSavedChat must set openingSaved before the swap');
+check('the flag drops exactly when the opened chat starts fading in',
+  /mine !== conversationEpochRef\.current\) return;\s*setOpeningSaved\(false\);\s*Animated\.parallel\(/.test(src),
+  'otherwise the landing stays hidden after the chat is back, or shows before it');
+check('New Chat clears the flag so its own landing appears',
+  /resetConversationState\(\);\s*setOpeningSaved\(false\);/.test(src),
+  'a New Chat during an open must not inherit a hidden landing');
+check('the pill does not return on the empty mid-open screen',
+  /if \(!modeSearched && modeGone && !openingSavedRef\.current\) setModeGone\(false\);/.test(src),
+  'modeGone must not reset while a saved chat is opening');
 
 // ── 3. MUTATION PROOF — revert the fix in a copy of the source text and prove the check catches it ──
 const mustCatch = (label: string, invariantHeldOnBrokenInput: boolean) => {
@@ -80,6 +108,9 @@ const mustCatch = (label: string, invariantHeldOnBrokenInput: boolean) => {
 // eslint-disable-next-line no-new-func
 const revertedValue = new Function('replay', `const v = (false); return typeof v === 'function' ? v() : v;`)('0');
 mustCatch('pre-fix initializer (plain false) on a replay', revertedValue === true);
+// The 2026-10-08 regression: the predicate without the third argument returns true mid-open.
+const preFix = (modeGone: boolean, replay?: string) => !modeGone && replay !== '0';
+mustCatch('pre-fix predicate (no openingSaved) mid-open', preFix(false, undefined) === false);
 
 console.log(failed
   ? `\n✗ verify-mode-pill-settled-on-history-replay: ${failed} check(s) failed.\n`

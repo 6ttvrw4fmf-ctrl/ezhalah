@@ -79,9 +79,9 @@ check(
   const wrapper = remoteSrc.match(/function ageAgnostic<[\s\S]*?\n\}/)?.[0] ?? '';
   const stripped = [...wrapper.matchAll(/\bp_[a-z_]+/g)].map((m) => m[0]).sort();
   check(
-    'ageAgnostic() strips exactly the three age params it prices — nothing else',
+    'ageAgnostic() strips exactly the age params it prices (incl. the 2026-10-03 mixture p_age_buckets) — nothing else',
     !viaSharedHelperAge
-    || JSON.stringify(stripped) === JSON.stringify(['p_age_max', 'p_age_min', 'p_is_new_construction']),
+    || JSON.stringify(stripped) === JSON.stringify(['p_age_buckets', 'p_age_max', 'p_age_min', 'p_is_new_construction']),
   );
 }
 

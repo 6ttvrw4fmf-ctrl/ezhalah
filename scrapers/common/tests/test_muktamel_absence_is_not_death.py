@@ -204,3 +204,34 @@ def test_every_prune_call_site_passes_the_oracle():
         assert None not in kw, (
             f"prune_unseen at line {c.lineno} passes **kwargs, so whether an oracle reaches it "
             "cannot be read from the call site")
+
+
+def test_a_slug_redirect_is_the_listing_and_only_404_is_gone(monkeypatch):
+    """Measured 2026-09-28: an ASSIGNED id 302s to its own `/real-estates/<id>/<arabic-slug>`; a
+    removed or unassigned id 302s to `/404`, which answers 200. The probe AND its canary read the
+    slug redirect as "path changed → gone", so the canary failed closed on its own live control and
+    every removal was withheld (1,975 UNKNOWN probe rows in 10 days). Runs the REAL probe, canary,
+    signal and law over a stub session that lands where muktamel really sends each id.
+    """
+    base = "https://www.muktamel.com"
+    landing = {"32320": f"{base}/real-estates/32320/أرض-للبيع-في-ابها-الغدير",  # live, slugged
+               "999999": f"{base}/404",                                         # removed
+               "31000": f"{base}/"}                     # not /404: no opinion, never a kill
+
+    class _Session:
+        def get(self, url, **_kw):
+            return type("R", (), {"status_code": 200, "text": "<html>page</html>",
+                                  "url": landing[url.rsplit("/", 1)[1]]})()
+
+    monkeypatch.setattr(muktamel, "_session", _Session)          # the canary's read
+    monkeypatch.setattr(muktamel._probe, "session", _Session)    # the probe's read
+    monkeypatch.setattr(muktamel._probe, "backoff", 0)
+    monkeypatch.setattr(muktamel, "_canary_ids", [32320])
+    monkeypatch.setattr(muktamel, "_canary_state", {"verdict": None, "reason": "not evaluated"})
+
+    for ad, why in (("MK32320", "the slug redirect IS the listing"),
+                    ("MK31000", "only a /404 landing may read as removed")):
+        got = muktamel._probe.verify_gone(ad)
+        assert got[0] != "gone", f"{ad}: {why}, got {got!r}"
+    got = muktamel._probe.verify_gone("MK999999")
+    assert got[0] == "gone", f"a /404 landing must retire once the live control validates: {got!r}"

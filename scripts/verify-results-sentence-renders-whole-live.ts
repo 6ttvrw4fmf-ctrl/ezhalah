@@ -180,9 +180,18 @@ async function main() {
       }
     }
 
-    const cards = await page.evaluate(() =>
+    // COUNT CARDS, NOT NODES. Each card renders its «#N» badge in a NESTED div, so both the outer
+    // and the inner element match `^#\d+$` and the naive `.length` reports exactly TWICE the cards
+    // on screen. Measured on production 2026-09-27: 72 matching divs for 36 distinct badges,
+    // ratio 2.00. That made this line print «cards on screen: 1000» for a run holding 500 — exactly
+    // SECOND_PAGE_CAP — so the one diagnostic a reader consults to check the reveal ceiling said the
+    // ceiling had been doubled. It cost this routine a full investigation to establish the product
+    // was fine. The badge number is the card's own identity, so counting DISTINCT badges is both
+    // correct and self-checking: a duplicate card would show up as a count below the highest badge.
+    const cards = await page.evaluate(() => new Set(
       [...document.querySelectorAll('div')]
-        .filter((e) => /^#\d+$/.test(((e as HTMLElement).innerText || '').trim())).length);
+        .map((e) => ((e as HTMLElement).innerText || '').trim())
+        .filter((t) => /^#\d+$/.test(t))).size);
 
     // Read, idle a long time, read again. #347's sentence stayed frozen for 90s+, so a single read
     // cannot tell a mid-reveal sentence from a permanently dead one.

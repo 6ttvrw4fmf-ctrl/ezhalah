@@ -45,8 +45,9 @@ const scrapeDistrictRows = () => {
 export function truthFilter({ city, deal, period, types }) {
   let f = `city_ar=eq.${enc(city)}`;
   if (deal === 'بيع' || deal === 'إيجار') f += `&deal_ar=eq.${enc(deal)}`;
-  if (deal === 'إيجار' && period === 'سنوي') f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`;
-  if (deal === 'إيجار' && period === 'شهري') f += '&payment_monthly=is.true&rent_now_pay_later=not.is.true';
+  // price on request (price_annual NULL) is in every period — owner 2026-09-28
+  if (deal === 'إيجار' && period === 'سنوي') f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`;
+  if (deal === 'إيجار' && period === 'شهري') f += '&or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))';
   if (types?.length) f += `&type_ar=in.(${enc(types.map((t) => `"${t}"`).join(','))})`;
   return f;
 }
@@ -235,7 +236,7 @@ export async function commitOneAfAnswer(page, name, requests, before, served) {
 }
 
 async function afAnswerRound(page, name, requests, before, served) {
-  const narrow = page.getByText('خلّنا نحدد الطلب أكثر', { exact: false });
+  const narrow = page.getByText('🎯 دقّق مع الذكاء', { exact: false });
   if (!await narrow.count()) {
     if (before != null && before > 25) note(`${name}: AF not offered at ${before} results (allowed: needs a useful question)`);
     return null;
@@ -362,9 +363,11 @@ export async function cardClickBack(plan) {
     if (!await pickCity(page, plan.city)) { note(`${name}: city not offered — skipped`); return null; }
     await runSearch(page);
     const before = lastCount(await page.evaluate(() => document.body.innerText));
-    const card = page.locator('text=/الضغط على هذا الإعلان/').first();
+    // The card's own testID + its photo link's role — never the «الضغط على هذا الإعلان» copy, which
+    // PR #5425 (2026-10-01) moved into that link's aria-label, so a text locator found no card at all.
+    const card = page.locator('[data-testid^="card-listing-"] [role="link"]').first();
     if (!await card.count()) { note(`${name}: no cards rendered — skipped`); return null; }
-    const target = await page.evaluate(() => (document.body.innerText.match(/الضغط على هذا الإعلان سيأخذك إلى\s*([^\s\n]+)/) || [])[1] ?? null);
+    const target = ((await card.getAttribute('aria-label')) ?? '').match(/سيأخذك إلى\s*(\S+)/)?.[1] ?? null;
     const ctx = page.context();
     const opened = ctx.waitForEvent('page', { timeout: 25000 }).catch(() => null);
     await card.click({ timeout: 15000 }).catch(() => {});
@@ -376,7 +379,7 @@ export async function cardClickBack(plan) {
         defect(name, 'RENDERED→EXTERNAL', `card promised ${target} but opened ${host}`);
       }
       await tab.close();
-    }
+    } else note(`${name}: the card opened no new tab (in-app ad viewer host?) — external host not checked`);
     await page.bringToFront(); await sleep(2200);
     const after = lastCount(await page.evaluate(() => document.body.innerText));
     if (before != null && after != null && before !== after) {
@@ -453,19 +456,18 @@ export async function typedDistrict(plan) {
   });
 }
 
-/** 9 — CLEAR ALL must reset the form. */
+/** 9 — THERE IS NO «مسح الكل» (owner 2026-10-03: «this should never show»). The control was removed:
+ *  coming back to the Filter after a search always opens a clean form, so there is nothing to clear.
+ *  This journey keeps its name so the sweep's coverage contract still counts it, and now asserts the
+ *  ABSENCE — with the form filled in, where the button used to appear. */
 export async function clearAll(plan) {
-  const name = `clear-all:${plan.city}`;
+  const name = `no-clear-all:${plan.city}`;
   return withPage(false, async (page) => {
     if (!await pickCity(page, plan.city)) return null;
     await page.locator('[data-testid="price-max-input"]').fill('500000').catch(() => {});
     await sleep(1200);
-    const clear = page.getByText('مسح الكل', { exact: false });
-    if (!await clear.count()) { note(`${name}: no «مسح الكل» control — skipped`); return null; }
-    await clear.first().click(); await sleep(2200);
-    const city = await page.locator('[data-testid="city-input"]').inputValue().catch(() => '');
-    const price = await page.locator('[data-testid="price-max-input"]').inputValue().catch(() => '');
-    if (city || price) defect(name, 'UI', `Clear All left city="${city}" priceMax="${price}"`);
-    return { name, ok: !city && !price };
+    const shown = await page.getByText('مسح الكل', { exact: false }).count();
+    if (shown) defect(name, 'UI', '«مسح الكل» is on screen with the form filled in — it was removed 2026-10-03');
+    return { name, ok: !shown };
   });
 }

@@ -18,7 +18,7 @@ on:
         required: false
         default: "24000"
       max_id:
-        description: "Highest listing id to scan"
+        description: "Floor for the top of the scan — the real ceiling is probed from the source each run"
         required: false
         default: "32000"
 
@@ -26,9 +26,14 @@ concurrency:
   group: muktamel-sync
   cancel-in-progress: false
 
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 330   # 1.4MB/page × ~8k live-band ids is slow; stay under GitHub's 6h cap
     steps:
       - uses: actions/checkout@v4

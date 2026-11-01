@@ -220,14 +220,16 @@ function main(): void {
         // Land, أرض زراعية/ارض زراعية→Farm, دوبلكس/دوبليكس→Duplex, استوديو/ستوديو→Studio.
         // 10 → 9 on 2026-07-20 (owner request): House folds into Villa (few raw listings) — House
         // removed from residential_set, its raw words (بيت/منزل/حوش/house) now target Villa.
-        ['TYPE_MAP_AR', Object.keys(py.TYPE_MAP_AR).length, 42],
+        // 42 → 43 and 9 → 10 on 2026-10-12 (owner): «تاون هاوس» keeps its own name (TYPE_MAP_AR) and routes
+        // residential (residential_set); the app's search files it under Duplex.
+        ['TYPE_MAP_AR', Object.keys(py.TYPE_MAP_AR).length, 43],
         ['SLUG_TO_TYPE', Object.keys(py.SLUG_TO_TYPE).length, 26],
-        ['residential_set', py.residential_set.length, 9],
+        ['residential_set', py.residential_set.length, 10],
       ];
       let countOk = true;
       for (const [n, got, want] of counts)
         if (got !== want) { bad(`normalize.py ${n}: parsed ${got} entries, expected ${want} (parser bug or map drift)`); countOk = false; }
-      if (countOk) ok('normalize.py shapes self-check: TYPE_MAP_AR(42), SLUG_TO_TYPE(26), residential_set(9) — parsed statically, zero external interpreter');
+      if (countOk) ok('normalize.py shapes self-check: TYPE_MAP_AR(43), SLUG_TO_TYPE(26), residential_set(10) — parsed statically, zero external interpreter');
 
       // Value-equality vs the source-generated Python maps (NFC-normalized, order-independent).
       eqMap('normalize.py TYPE_MAP_AR', gen.TYPE_MAP_AR, py.TYPE_MAP_AR);

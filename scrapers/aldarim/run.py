@@ -36,6 +36,8 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, http_liveness, normalize
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.pii import redact_pii
+from scrapers.common.source_pin import pin_dict
 
 # PDPL: never store advertiser contact/identity. The rest of the API item is kept.
 _PII = {"whatsapp_number", "rega_advertiser_number"}
@@ -80,6 +82,49 @@ def _throttle() -> None:
     _last = time.monotonic()
 
 
+# ── The source's own per-listing verdict (owner 2026-10-20) ──────────────────────────────────
+# Measured on aldarim: ten ads the API marked availability_status «unavailable» stayed ACTIVE for 6–15 days
+# — the crawl skips them, and the page probe still answers 200 for them — so they were served with a
+# district border. The Nuzul API is a DIRECT per-listing oracle: /api/public/properties/{id} answers 404
+# for a deleted ad (measured) and availability_status for the rest. Asked only at grace, from
+# prune_unseen; absence alone still never kills (docs/ops/LISTING_LIVENESS.md).
+_AD_PREFIX = "ALD"
+_SOURCE_UNAVAILABLE: set[str] = set()      # ad_numbers the API marked not-available THIS run
+_ORACLE_S = None
+
+
+def _api_verify_gone(ad_number: str) -> tuple[str, str]:
+    global _ORACLE_S
+    if ad_number in _SOURCE_UNAVAILABLE:
+        return "gone", "source API availability_status is not available (this run)"
+    pid = ad_number[len(_AD_PREFIX):] if ad_number.startswith(_AD_PREFIX) else ""
+    if not pid.isdigit():
+        return "unknown", f"{ad_number!r} is not a {_AD_PREFIX}<id> ad number"
+    try:
+        if _ORACLE_S is None:
+            _ORACLE_S = session()
+        r = _ORACLE_S.get(f"{API}/{pid}", timeout=30)
+    except Exception as e:  # noqa: BLE001 — a failed fetch is UNKNOWN, never a death
+        return "unknown", f"api {type(e).__name__}"
+    if r.status_code == 404:
+        return "gone", "source API 404 for this id"
+    if r.status_code != 200:
+        return "unknown", f"api HTTP {r.status_code}"
+    try:
+        d = r.json()
+        d = d.get("data") if isinstance(d, dict) and isinstance(d.get("data"), dict) else d
+        st = (d.get("availability_status") or "").strip().lower()
+    except Exception:  # noqa: BLE001
+        return "unknown", "api body not json"
+    return ("live", "api available") if st in ("available", "") else ("gone", f"source API availability_status={st}")
+
+
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    """API verdict first (direct, per listing); the page probe only when the API could not answer."""
+    v = _api_verify_gone(ad_number)
+    return v if v[0] != "unknown" else _probe.verify_gone(ad_number)
+
+
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
     s.headers.update(HEADERS)
@@ -117,8 +162,12 @@ def session() -> cc.Session:
 # something that MIMICS death. The canary asks, before every single removal, whether the site is
 # still rendering real listings to us right now, using URLs THIS RUN already fetched successfully.
 # It fails CLOSED: no canary, no removal.
+# 2026-10-20 the site's ld+json changed «"@type":"RealEstate"» to «"@type":"RealEstateListing"» (live page
+# /en/properties/26049 read 2026-10-23). The old exact match missed every live page, so fleet_liveness quarantined
+# aldarim on «opening controls 0/5 live» every day from 10-20 and no listing was verified for 3 days (alert 10445).
+# Both forms are the page stating it renders this listing.
 _LD_REAL_ESTATE = re.compile(
-    r'<script[^>]+application/ld\+json[^>]*>\s*\{[^<]*"@type"\s*:\s*"RealEstate"', re.S)
+    r'<script[^>]+application/ld\+json[^>]*>\s*\{[^<]*"@type"\s*:\s*"RealEstate(?:Listing)?"', re.S)
 _NOT_FOUND_TITLE = re.compile(r"<title[^>]*>\s*Property Not Found\b", re.I)
 
 _canary: dict[str, Any] = {"urls": [], "verdict": None, "reason": "not evaluated"}
@@ -273,6 +322,19 @@ def _flag(v: Any) -> Optional[bool]:
 AGELESS_TYPES = {"Residential Land", "Commercial Land", "Gas Station"}
 
 
+# A ZERO IS NEVER PRINTED (🔬 AF engineer 2026-10-09, backlog 246; the goldendeal ruling of 2026-09-23 on the
+# same Nuzul SaaS). The ad page renders «المصعد 1», «موقف سيارة مخصص 1», «الخدمات · كهرباء» only for a POSITIVE
+# value and prints nothing at 0 — re-read on abwbna 36968, aldarim 54267, alobid 40615, bahadhabab 38743
+# (source-reread run 37931268959): «مصعد» appears only in the site's label dictionary, never as a 0 row, and
+# aldarim 54267 advertises «التكييف 5 سنوات» while is_ac_installed was 0. AC was «no» on 419 of 419 ads and «yes»
+# on none. So a 0 is the office not filling the field: positive → yes, 0 → AUTHORITATIVE_NULL (clears the stored
+# «no»), absent → None. ADVANCED_FILTER_SOURCE_TRUTH §2: never infer «no» from missing data.
+def _yes_or_silence(v: Optional[bool]) -> Any:
+    if v is True:
+        return True
+    return db.AUTHORITATIVE_NULL if v is False else None
+
+
 def _age_from_year_built(v) -> Optional[int]:
     """aldarim's `year_built` → an exact age in years, or None.
 
@@ -400,24 +462,30 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "city": _city(L.get("city")),
         "neighborhood": (_name(L.get("district")) or "").replace(" Dist.", "").strip() or None,
         "title": L.get("name_en") or L.get("name_ar"),
+        # The ad's own text (🔬 AF 2026-10-27): the Rule B word checker reads only `description`, and this Nuzul
+        # tenant left it NULL, so «ومتاح مصعد» in description_ar never reached the Advanced Filter (0 text facts).
+        "description": redact_pii(L.get("description_ar") or L.get("description_en")) or None,
         "photo_urls": _photos(L),
         "property_age": None if property_type in AGELESS_TYPES
                         else _age_from_year_built(L.get("year_built")),
         "rega_location_verified": bool(L.get("rega_ad_number")),
-        "additional_info": _additional_info(L),
+        # Owner 2026-10-20: the API item's own latitude/longitude (strings). The panel rows keep their
+        # legacy shape under "rows" (src/data/remote.ts buildAdditionalInfo unwraps it); the index reads
+        # the pin from the object (listing_rich_attrs → search_listings_ar.latitude).
+        "additional_info": {"rows": _additional_info(L), **pin_dict(L.get("latitude"), L.get("longitude"))},
         # Feature-grid booleans the card renders with icons — mapped from Aldarim's flags/counts so the
         # card shows real features (Electricity/Water/Sewage/AC/parking…) instead of "No features".
         # Tri-state (2026-08-11): silence is NOT a denial. All four keys are 0/1 flags aldarim really
         # publishes, so a `false` here is source truth and is preserved; only a null/absent key now
         # stores NULL instead of a fabricated "no". `is_ac_installed` is the one that had actually
         # gone wrong in production — null on 12 active rows, every one of them stored as false.
-        "electricity":      _flag(L.get("has_electricity")),
-        "water_supply":     _flag(L.get("has_water")),
-        "sanitation":       _flag(L.get("has_sewage")),
-        "air_conditioner":  _flag(L.get("is_ac_installed")),
+        "electricity":      _yes_or_silence(_flag(L.get("has_electricity"))),
+        "water_supply":     _yes_or_silence(_flag(L.get("has_water"))),
+        "sanitation":       _yes_or_silence(_flag(L.get("has_sewage"))),
+        "air_conditioner":  _yes_or_silence(_flag(L.get("is_ac_installed"))),
         # kitchen keeps its OWN resolver (PR#455): a non-zero `kitchens` COUNT proves a kitchen even
         # when the flag reads 0, which _flag alone cannot express.
-        "kitchen":          _kitchen_state(L.get("is_kitchen_installed"), L.get("kitchens")),
+        "kitchen":          _yes_or_silence(_kitchen_state(L.get("is_kitchen_installed"), L.get("kitchens"))),
         # TRI-STATE COUNTS (2026-09-11, ops_incident #154). These five were
         # `(_int(L.get(k)) or 0) > 0`, and to_int_numeric() returns None for an explicit source 0 AND
         # for a source null alike — so a listing the API said NOTHING about was stored as a confident
@@ -426,11 +494,16 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         # and JSON null on 20 abwbna / 12-13 aldarim rows per key (the fabricated ones). count_flag()
         # keeps the published negative and returns UNKNOWN for the silence. Same rule, same reason as
         # _flag() above; one shared definition rather than a fifth private copy.
-        "parking":          normalize.count_flag(L.get("parking_spots")),
-        "elevator":         normalize.count_flag(L.get("elevators")),
-        "maid_room":        normalize.count_flag(L.get("maid_rooms")),
-        "driver_room":      normalize.count_flag(L.get("driver_rooms")),
-        "balcony_terrace":  normalize.count_flag(L.get("balconies")),
+        "parking":          _yes_or_silence(normalize.count_flag(L.get("parking_spots"))),
+        "elevator":         _yes_or_silence(normalize.count_flag(L.get("elevators"))),
+        # structured facade + street-width cells (2026-10-11, normalize.facade_from_slug): they used to reach
+        # additional_info only, so no direction / street-width answer could find the ad.
+        "direction":        normalize.facade_from_slug(L.get("facade")),
+        "street_width_m":   normalize.one_street_width_of(*(L.get(k) for k in (
+            "street_width", "street_width_north", "street_width_south", "street_width_east", "street_width_west"))),
+        "maid_room":        _yes_or_silence(normalize.count_flag(L.get("maid_rooms"))),
+        "driver_room":      _yes_or_silence(normalize.count_flag(L.get("driver_rooms"))),
+        "balcony_terrace":  _yes_or_silence(normalize.count_flag(L.get("balconies"))),
         # (no detail_enriched — that's a Wasalt-only enrichment flag; Aldarim's API is already complete.)
         # ── Arabic-native (additive, shadow) + complete-source capture ──────────
         "city_ar": city_ar,
@@ -439,6 +512,9 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "region_id": rid,
         "source_capture": {k: v for k, v in L.items() if k not in _PII},
     }
+    # An untouched room block is silence (2026-10-05): every 0 in it now maps to AUTHORITATIVE_NULL through
+    # _yes_or_silence above, which also CLEARS a stored False. silence_unfilled_room_block() would turn that back
+    # into a plain None the upsert drops, leaving the old False in place, so it is no longer called here.
     return row, category
 
 
@@ -465,6 +541,7 @@ def main() -> int:
                 # SKIP sold/rented — Aldarim's API returns them, but they're not available to buy/rent.
                 # (Found in recon: 74 of 231 were sold/rented. We only show what's actually on offer.)
                 if (L.get("availability_status") or "").lower() not in ("available", "", None):
+                    _SOURCE_UNAVAILABLE.add(f"{_AD_PREFIX}{L.get('id')}")   # the source's own verdict, used at grace
                     continue
                 row, cat = map_listing(L)
                 if not row or not row.get("property_type"):
@@ -511,8 +588,14 @@ def main() -> int:
                 print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
             for tbl, seen_ads in (("aldarim_residential_listings", seen_res), ("aldarim_commercial_listings", seen_com)):
+                # Owner 2026-10-20 «once we see it, remove it»: an ad this run's own API marked unavailable,
+                # or whose record answers 404, is removed NOW — only rows _verify_gone reads «gone» are
+                # struck, at grace 1. The registry tier (FLEET_DAILY_DIRECT, grace 3) is unchanged for the
+                # daily revisit; this is the crawl's own direct reading.
+                if _SOURCE_UNAVAILABLE:
+                    db.strike_read_gone(tbl, set(seen_ads), "Aldarim", verify_gone=_verify_gone, grace=1)
                 n = db.prune_unseen(tbl, set(seen_ads), source="Aldarim",
-                                    verify_gone=_probe.verify_gone)
+                                    verify_gone=_verify_gone)
                 if n < 0:
                     print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
                 else:

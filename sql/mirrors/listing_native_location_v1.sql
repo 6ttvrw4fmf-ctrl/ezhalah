@@ -1,14 +1,9 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
--- Re-verified 2026-09-27 (migration 20260927032439_sql_mirror_expected_catches_up_to_batch5_arms):
---   the body below (batch5, md5 6933a8725df7ea9007e04af125a58982) is vouched for by that migration's own
---   apply-time DO block, which raised unless md5(pg_get_viewdef) equalled this digest. Stamped here
---   because verify-sql-mirrors-not-stale (B2) needs the covering version ON a stamp line.
---   NOT CURRENT BEYOND THIS TREE: production has since applied 20260927034721_batch6_arsh_wiring_into_search
---   (live md5 a54da52cab72eb2ae85924fe4c4cfa50 on 2026-09-27, registry already caught up by
---   20260927035255), which is not committed yet. When it lands, (B2) turns this mirror RED until the
---   batch6 PR refreshes this body and stamps that version.
+-- Re-verified 2026-11-01 (migration 20261101144106 reads this matview, it does not change it): UNCHANGED,
+-- pg_get_viewdef(..., true) still hashes to the value recorded below.
+--
 -- Re-verified 2026-09-27 (migration 20260927014059_w3b_maqam_earthapp_nawafeth_wiring_into_search):
 -- CHANGED. 28 arms added since the 2026-09-26 wave-2 refresh, all spliced immediately after the
 -- nufouth commercial arm by six wiring passes that each forgot this file and the registered digest:
@@ -18,14 +13,47 @@
 --   The arms were spliced into the previous body in the rendering the wiring migrations use, and the
 --   result was PROVEN equal to production: md5 of the spliced body (trailing newline stripped, which
 --   is how pg_get_viewdef returns it) == md5(pg_get_viewdef('public.listing_native_location_v1',true)).
---   • md5 of everything below this header block: 6933a8725df7ea9007e04af125a58982
+--   • md5 of everything below this header block: ea8174b63953cfc25aef4a39af032f0a
 --   • 111,322 -> 127,992 chars; then batch5 (holoul eightfloor manzo, 20260927021406) -> 131,577,
---     registry caught up by sql_mirror_expected_catches_up_to_batch5_arms.
+--     registry caught up by sql_mirror_expected_catches_up_to_batch5_arms; then batch6 (arsh,
+--     20260927034721) -> 132,712, registry caught up by sql_mirror_expected_catches_up_to_batch6_arms;
+--     then batch 7 (9 platforms, 20260927113204 + the 123833 location-index replay) -> 143,227, registry
+--     caught up by sql_mirror_expected_catches_up_to_batch7_arms; then superoffice (20260927203450) -> 144,502,
+--     registry caught up by sql_mirror_expected_catches_up_to_superoffice_arms; then shomou + maktab
+--     (20260928033432) -> 146,852, registry caught up by sql_mirror_expected_catches_up_to_shomou_maktab_arms.
+-- Re-verified 2026-09-28 (migration 20260928033432_shomou_maktab_wiring_into_search): 4 arms spliced after
+--   the nufouth commercial anchor; md5(live pg_get_viewdef) == 5f223424d56192158ef4e40c69e12c31 == body below.
 --   • registry caught up in the same pass: sql_mirror_expected_catches_up_through_wave3b_arms.
+-- Re-verified 2026-10-02 (migration 20261002143502_source_list_presence_tier): UNCHANGED. That migration
+--   only READS this view (ops_platform_protection_matrix selects from it); md5(live pg_get_viewdef) ==
+--   5f223424d56192158ef4e40c69e12c31 == body below, 146,852 chars.
+-- Re-verified 2026-10-05 (migration 20261005132644_stale_refresh_location_index_hourly_thresholds): UNCHANGED.
+--   That migration only names this view inside a mon_refresh_targets notes string; md5(live
+--   pg_get_viewdef) == 5f223424d56192158ef4e40c69e12c31 == body below, 146,852 chars.
+-- Re-verified 2026-10-08 (the New Listings Engineer's English-city-before-first-sync migration): UNCHANGED.
+--   That migration only names this view inside job 17's cron command string (it inserts two calls
+--   around the existing refresh); md5(live pg_get_viewdef) == 5f223424d56192158ef4e40c69e12c31 == body below, 146,852 chars.
+-- Re-verified 2026-10-09 (migration 20261009172709_recovered_district_vouches_only_when_verbatim): UNCHANGED.
+--   That migration only READS this view (refresh_district_recovery selects from it); md5(live
+--   pg_get_viewdef) == 5f223424d56192158ef4e40c69e12c31 == body below, 146,852 chars.
 --
 -- CAUGHT BY verify-sql-mirrors-not-stale only because the w3b wiring landed on a NEW calendar day:
 -- the four same-day passes before it left this mirror stale and the barrier green (it compares
 -- dates, not bodies), while mon_detect_sql_mirror_drift compared live against the wave-2 digest.
+-- Re-verified 2026-10-16 (Haraj wiring): two haraj arms spliced after the maktab commercial arm; md5 ea8174b63953cfc25aef4a39af032f0a == live.
+-- Re-verified 2026-10-18 (migrations 20261018081657_district_recovery_carries_the_source_word and
+--   20261018083435_source_district_carried_fleet_wide_null_district_is_red): UNCHANGED. Both only READ this view
+--   (refresh_district_recovery_table selects from it; the proofs count rows it holds); md5(live pg_get_viewdef) ==
+--   ea8174b63953cfc25aef4a39af032f0a == body below.
+-- Re-verified 2026-10-21 (migration 20261021003001_internal_views_are_not_a_public_api): UNCHANGED. That migration
+--   only REVOKES anon/authenticated SELECT on this view (security Phase 1.3); md5(live pg_get_viewdef) ==
+--   ea8174b63953cfc25aef4a39af032f0a == body below.
+-- Re-verified 2026-10-25 (migration 20261025035403_pin_district_fill_table_and_recovery_arm): UNCHANGED. That migration
+--   only READS this view (the new pin arm of refresh_district_recovery_table joins it); md5(live pg_get_viewdef) ==
+--   ea8174b63953cfc25aef4a39af032f0a == body below.
+-- Re-verified 2026-10-30 (migration 20261030063801_retired_place_homes_move_to_their_real_town): UNCHANGED. That migration
+--   only READS this view (retired_place_remap_rows / refresh_listing_city_correction join it); md5(live pg_get_viewdef) ==
+--   ea8174b63953cfc25aef4a39af032f0a == body below.
  WITH native AS (
          SELECT 'alhoshan'::text AS platform,
             'alhoshan_residential_listings'::text AS source_table,
@@ -506,6 +534,342 @@
             nufouth_commercial_listings.transaction_type
            FROM nufouth_commercial_listings
           WHERE nufouth_commercial_listings.active
+        UNION ALL
+         SELECT 'shomou'::text AS platform,
+            'shomou_residential_listings'::text AS source_table,
+            shomou_residential_listings.id AS listing_id,
+            shomou_residential_listings.city_ar,
+            shomou_residential_listings.city_id,
+            shomou_residential_listings.district_ar,
+            shomou_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            shomou_residential_listings.transaction_type
+           FROM shomou_residential_listings
+          WHERE shomou_residential_listings.active
+        UNION ALL
+         SELECT 'shomou'::text AS platform,
+            'shomou_commercial_listings'::text AS source_table,
+            shomou_commercial_listings.id AS listing_id,
+            shomou_commercial_listings.city_ar,
+            shomou_commercial_listings.city_id,
+            shomou_commercial_listings.district_ar,
+            shomou_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            shomou_commercial_listings.transaction_type
+           FROM shomou_commercial_listings
+          WHERE shomou_commercial_listings.active
+        UNION ALL
+         SELECT 'maktab'::text AS platform,
+            'maktab_residential_listings'::text AS source_table,
+            maktab_residential_listings.id AS listing_id,
+            maktab_residential_listings.city_ar,
+            maktab_residential_listings.city_id,
+            maktab_residential_listings.district_ar,
+            maktab_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            maktab_residential_listings.transaction_type
+           FROM maktab_residential_listings
+          WHERE maktab_residential_listings.active
+        UNION ALL
+         SELECT 'maktab'::text AS platform,
+            'maktab_commercial_listings'::text AS source_table,
+            maktab_commercial_listings.id AS listing_id,
+            maktab_commercial_listings.city_ar,
+            maktab_commercial_listings.city_id,
+            maktab_commercial_listings.district_ar,
+            maktab_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            maktab_commercial_listings.transaction_type
+           FROM maktab_commercial_listings
+          WHERE maktab_commercial_listings.active
+        UNION ALL
+         SELECT 'haraj'::text AS platform,
+            'haraj_residential_listings'::text AS source_table,
+            haraj_residential_listings.id AS listing_id,
+            haraj_residential_listings.city_ar,
+            haraj_residential_listings.city_id,
+            haraj_residential_listings.district_ar,
+            haraj_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            haraj_residential_listings.transaction_type
+           FROM haraj_residential_listings
+          WHERE haraj_residential_listings.active
+        UNION ALL
+         SELECT 'haraj'::text AS platform,
+            'haraj_commercial_listings'::text AS source_table,
+            haraj_commercial_listings.id AS listing_id,
+            haraj_commercial_listings.city_ar,
+            haraj_commercial_listings.city_id,
+            haraj_commercial_listings.district_ar,
+            haraj_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            haraj_commercial_listings.transaction_type
+           FROM haraj_commercial_listings
+          WHERE haraj_commercial_listings.active
+        UNION ALL
+         SELECT 'superoffice'::text AS platform,
+            'superoffice_residential_listings'::text AS source_table,
+            superoffice_residential_listings.id AS listing_id,
+            superoffice_residential_listings.city_ar,
+            superoffice_residential_listings.city_id,
+            superoffice_residential_listings.district_ar,
+            superoffice_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            superoffice_residential_listings.transaction_type
+           FROM superoffice_residential_listings
+          WHERE superoffice_residential_listings.active
+        UNION ALL
+         SELECT 'superoffice'::text AS platform,
+            'superoffice_commercial_listings'::text AS source_table,
+            superoffice_commercial_listings.id AS listing_id,
+            superoffice_commercial_listings.city_ar,
+            superoffice_commercial_listings.city_id,
+            superoffice_commercial_listings.district_ar,
+            superoffice_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            superoffice_commercial_listings.transaction_type
+           FROM superoffice_commercial_listings
+          WHERE superoffice_commercial_listings.active
+        UNION ALL
+         SELECT 'sirdab'::text AS platform,
+            'sirdab_residential_listings'::text AS source_table,
+            sirdab_residential_listings.id AS listing_id,
+            sirdab_residential_listings.city_ar,
+            sirdab_residential_listings.city_id,
+            sirdab_residential_listings.district_ar,
+            sirdab_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            sirdab_residential_listings.transaction_type
+           FROM sirdab_residential_listings
+          WHERE sirdab_residential_listings.active
+        UNION ALL
+         SELECT 'sirdab'::text AS platform,
+            'sirdab_commercial_listings'::text AS source_table,
+            sirdab_commercial_listings.id AS listing_id,
+            sirdab_commercial_listings.city_ar,
+            sirdab_commercial_listings.city_id,
+            sirdab_commercial_listings.district_ar,
+            sirdab_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            sirdab_commercial_listings.transaction_type
+           FROM sirdab_commercial_listings
+          WHERE sirdab_commercial_listings.active
+        UNION ALL
+         SELECT 'ashab'::text AS platform,
+            'ashab_residential_listings'::text AS source_table,
+            ashab_residential_listings.id AS listing_id,
+            ashab_residential_listings.city_ar,
+            ashab_residential_listings.city_id,
+            ashab_residential_listings.district_ar,
+            ashab_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            ashab_residential_listings.transaction_type
+           FROM ashab_residential_listings
+          WHERE ashab_residential_listings.active
+        UNION ALL
+         SELECT 'ashab'::text AS platform,
+            'ashab_commercial_listings'::text AS source_table,
+            ashab_commercial_listings.id AS listing_id,
+            ashab_commercial_listings.city_ar,
+            ashab_commercial_listings.city_id,
+            ashab_commercial_listings.district_ar,
+            ashab_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            ashab_commercial_listings.transaction_type
+           FROM ashab_commercial_listings
+          WHERE ashab_commercial_listings.active
+        UNION ALL
+         SELECT 'manafe'::text AS platform,
+            'manafe_residential_listings'::text AS source_table,
+            manafe_residential_listings.id AS listing_id,
+            manafe_residential_listings.city_ar,
+            manafe_residential_listings.city_id,
+            manafe_residential_listings.district_ar,
+            manafe_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            manafe_residential_listings.transaction_type
+           FROM manafe_residential_listings
+          WHERE manafe_residential_listings.active
+        UNION ALL
+         SELECT 'manafe'::text AS platform,
+            'manafe_commercial_listings'::text AS source_table,
+            manafe_commercial_listings.id AS listing_id,
+            manafe_commercial_listings.city_ar,
+            manafe_commercial_listings.city_id,
+            manafe_commercial_listings.district_ar,
+            manafe_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            manafe_commercial_listings.transaction_type
+           FROM manafe_commercial_listings
+          WHERE manafe_commercial_listings.active
+        UNION ALL
+         SELECT 'wajaf'::text AS platform,
+            'wajaf_residential_listings'::text AS source_table,
+            wajaf_residential_listings.id AS listing_id,
+            wajaf_residential_listings.city_ar,
+            wajaf_residential_listings.city_id,
+            wajaf_residential_listings.district_ar,
+            wajaf_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            wajaf_residential_listings.transaction_type
+           FROM wajaf_residential_listings
+          WHERE wajaf_residential_listings.active
+        UNION ALL
+         SELECT 'wajaf'::text AS platform,
+            'wajaf_commercial_listings'::text AS source_table,
+            wajaf_commercial_listings.id AS listing_id,
+            wajaf_commercial_listings.city_ar,
+            wajaf_commercial_listings.city_id,
+            wajaf_commercial_listings.district_ar,
+            wajaf_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            wajaf_commercial_listings.transaction_type
+           FROM wajaf_commercial_listings
+          WHERE wajaf_commercial_listings.active
+        UNION ALL
+         SELECT 'albukaeri'::text AS platform,
+            'albukaeri_residential_listings'::text AS source_table,
+            albukaeri_residential_listings.id AS listing_id,
+            albukaeri_residential_listings.city_ar,
+            albukaeri_residential_listings.city_id,
+            albukaeri_residential_listings.district_ar,
+            albukaeri_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            albukaeri_residential_listings.transaction_type
+           FROM albukaeri_residential_listings
+          WHERE albukaeri_residential_listings.active
+        UNION ALL
+         SELECT 'albukaeri'::text AS platform,
+            'albukaeri_commercial_listings'::text AS source_table,
+            albukaeri_commercial_listings.id AS listing_id,
+            albukaeri_commercial_listings.city_ar,
+            albukaeri_commercial_listings.city_id,
+            albukaeri_commercial_listings.district_ar,
+            albukaeri_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            albukaeri_commercial_listings.transaction_type
+           FROM albukaeri_commercial_listings
+          WHERE albukaeri_commercial_listings.active
+        UNION ALL
+         SELECT 'ryadah'::text AS platform,
+            'ryadah_residential_listings'::text AS source_table,
+            ryadah_residential_listings.id AS listing_id,
+            ryadah_residential_listings.city_ar,
+            ryadah_residential_listings.city_id,
+            ryadah_residential_listings.district_ar,
+            ryadah_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            ryadah_residential_listings.transaction_type
+           FROM ryadah_residential_listings
+          WHERE ryadah_residential_listings.active
+        UNION ALL
+         SELECT 'ryadah'::text AS platform,
+            'ryadah_commercial_listings'::text AS source_table,
+            ryadah_commercial_listings.id AS listing_id,
+            ryadah_commercial_listings.city_ar,
+            ryadah_commercial_listings.city_id,
+            ryadah_commercial_listings.district_ar,
+            ryadah_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            ryadah_commercial_listings.transaction_type
+           FROM ryadah_commercial_listings
+          WHERE ryadah_commercial_listings.active
+        UNION ALL
+         SELECT 'sqcc'::text AS platform,
+            'sqcc_residential_listings'::text AS source_table,
+            sqcc_residential_listings.id AS listing_id,
+            sqcc_residential_listings.city_ar,
+            sqcc_residential_listings.city_id,
+            sqcc_residential_listings.district_ar,
+            sqcc_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            sqcc_residential_listings.transaction_type
+           FROM sqcc_residential_listings
+          WHERE sqcc_residential_listings.active
+        UNION ALL
+         SELECT 'sqcc'::text AS platform,
+            'sqcc_commercial_listings'::text AS source_table,
+            sqcc_commercial_listings.id AS listing_id,
+            sqcc_commercial_listings.city_ar,
+            sqcc_commercial_listings.city_id,
+            sqcc_commercial_listings.district_ar,
+            sqcc_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            sqcc_commercial_listings.transaction_type
+           FROM sqcc_commercial_listings
+          WHERE sqcc_commercial_listings.active
+        UNION ALL
+         SELECT 'daraa'::text AS platform,
+            'daraa_residential_listings'::text AS source_table,
+            daraa_residential_listings.id AS listing_id,
+            daraa_residential_listings.city_ar,
+            daraa_residential_listings.city_id,
+            daraa_residential_listings.district_ar,
+            daraa_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            daraa_residential_listings.transaction_type
+           FROM daraa_residential_listings
+          WHERE daraa_residential_listings.active
+        UNION ALL
+         SELECT 'daraa'::text AS platform,
+            'daraa_commercial_listings'::text AS source_table,
+            daraa_commercial_listings.id AS listing_id,
+            daraa_commercial_listings.city_ar,
+            daraa_commercial_listings.city_id,
+            daraa_commercial_listings.district_ar,
+            daraa_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            daraa_commercial_listings.transaction_type
+           FROM daraa_commercial_listings
+          WHERE daraa_commercial_listings.active
+        UNION ALL
+         SELECT 'tawia'::text AS platform,
+            'tawia_residential_listings'::text AS source_table,
+            tawia_residential_listings.id AS listing_id,
+            tawia_residential_listings.city_ar,
+            tawia_residential_listings.city_id,
+            tawia_residential_listings.district_ar,
+            tawia_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            tawia_residential_listings.transaction_type
+           FROM tawia_residential_listings
+          WHERE tawia_residential_listings.active
+        UNION ALL
+         SELECT 'tawia'::text AS platform,
+            'tawia_commercial_listings'::text AS source_table,
+            tawia_commercial_listings.id AS listing_id,
+            tawia_commercial_listings.city_ar,
+            tawia_commercial_listings.city_id,
+            tawia_commercial_listings.district_ar,
+            tawia_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            tawia_commercial_listings.transaction_type
+           FROM tawia_commercial_listings
+          WHERE tawia_commercial_listings.active
+        UNION ALL
+         SELECT 'arsh'::text AS platform,
+            'arsh_residential_listings'::text AS source_table,
+            arsh_residential_listings.id AS listing_id,
+            arsh_residential_listings.city_ar,
+            arsh_residential_listings.city_id,
+            arsh_residential_listings.district_ar,
+            arsh_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            arsh_residential_listings.transaction_type
+           FROM arsh_residential_listings
+          WHERE arsh_residential_listings.active
+        UNION ALL
+         SELECT 'arsh'::text AS platform,
+            'arsh_commercial_listings'::text AS source_table,
+            arsh_commercial_listings.id AS listing_id,
+            arsh_commercial_listings.city_ar,
+            arsh_commercial_listings.city_id,
+            arsh_commercial_listings.district_ar,
+            arsh_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            arsh_commercial_listings.transaction_type
+           FROM arsh_commercial_listings
+          WHERE arsh_commercial_listings.active
         UNION ALL
          SELECT 'holoul'::text AS platform,
             'holoul_residential_listings'::text AS source_table,

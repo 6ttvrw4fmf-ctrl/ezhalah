@@ -1,3 +1,4 @@
+import searchSources from '../../supabase/functions/agent/searchSources.json';
 // The Ezhalah AI Agent. Turns a free-text message into either a neutral listing search or a
 // plain reply. It is deliberately NON-ADVISORY (PRD §7): it never recommends a property, never
 // says "best/better/good deal", and never gives buying or financial advice — it only acknowledges
@@ -13,12 +14,14 @@ import { toLatinDigits } from '@/lib/inputHygiene';
 import { vagueOrdering } from '@/lib/vagueOrdering';
 import { parseProximity, proximityKeywords, type ProximityIntent } from './proximity';
 import { type Category } from './taxonomy';
-import { t, getLocale } from '@/i18n';
+import { getLocale, detectLocale, resolveReplyLocale, translate, type Locale } from '@/i18n';
 import { supabase } from '@/lib/supabase';
 import { partitionRequestedAmenities, cohortAllows } from '@/lib/afCohorts';
 import { certifyAfOnMergedState as certifyAf, type CertifiableBackendQuery } from '@/lib/afCertify';
 import { mergeConversationState, rescuedFields, describeKnownState } from '@/lib/conversationState';
 import { landmarkHint, ensureLandmarks } from './landmarks';
+import { bigWanted, bigAreaMin } from './bigSize';
+import { parsePriceBounds } from '@/lib/priceBounds';
 import { normalizeType, isCleanType, CLEAN_MACRO } from './propertyTypes';
 
 // askCount (owner-approved consolidation, 2026-08-30): the SERVER's own running clarifying-question
@@ -102,8 +105,8 @@ const CURRENCY_RATES: Record<string, number> = {
 // doesn't set a type, which broadens honestly). (audit items 1/5, 2026-07-27)
 const TYPE_SYNONYMS: Record<string, string> = {
   flat: 'Apartment', apt: 'Apartment', studio: 'Studio', penthouse: 'Apartment', duplex: 'Duplex',
-  mansion: 'Villa', palace: 'Villa', townhouse: 'Villa', home: 'Villa', dwelling: 'Villa',
-  plot: 'Residential Land', cabin: 'Chalet',
+  mansion: 'Villa', palace: 'Villa', townhouse: 'Duplex', home: 'Villa', dwelling: 'Villa',
+  plot: 'Residential Land', cabin: 'Chalet', 'raw land': 'Raw Land', 'undeveloped land': 'Raw Land',
   workspace: 'Office', clinic: 'Office', storage: 'Warehouse', depot: 'Warehouse',
   store: 'Shop', retail: 'Shop', boutique: 'Shop', gallery: 'Showroom', garage: 'Workshop',
   plant: 'Factory', ranch: 'Farm', orchard: 'Agriculture Plot', campsite: 'Camp',
@@ -206,8 +209,19 @@ const AR_TYPE: Record<string, string> = {
   // before the bare 'أرض'/'ارض' entries below or it can never be reached. (Found live 2026-07-23:
   // the original أرض-زراعية fix was silently dead code because of exactly this ordering.)
   'أرض زراعية': 'Agriculture Plot', 'ارض زراعية': 'Agriculture Plot',
+  // أرض خام (owner 2026-10-09) — before the bare أرض/ارض for the same prefix reason.
+  'أرض خام': 'Raw Land', 'ارض خام': 'Raw Land', 'أراضي خام': 'Raw Land', 'اراضي خام': 'Raw Land',
+  'أرض غير مخدومة': 'Raw Land', 'ارض غير مخدومة': 'Raw Land',
   'أرض': 'Residential Land', 'ارض': 'Residential Land',
 };
+
+// The AI sometimes names the type with its Arabic word («شقة») instead of the canonical «Apartment». queryFromBackend() did not know it,
+// filed it under the Commercial fallback, and a two-turn chat («شقة في الرياض وجدة» → «الرياض») showed OFFICES (live 2026-10-13).
+// The same words the free-text parser reads; anything else passes through untouched.
+export function typeFromAgent(ty: string | null): string | null {
+  if (!ty) return null;
+  return AR_TYPE[ty] ?? AR_TYPE[ty.replace(/^ال/, '')] ?? ty;
+}
 const RES_TYPES = new Set(Object.entries(CLEAN_MACRO).filter(([, c]) => c === 'Residential').map(([t]) => t));
 const AR_BUY = /(شراء|للبيع|تمليك|اشتري|أشتري|بيع)/;
 const AR_RENT = /(إيجار|ايجار|للإيجار|للايجار|استئجار|تأجير)/;
@@ -220,6 +234,11 @@ const AR_REALESTATE = new RegExp(
 // the same {kind, reply, query} contract. Build a full SearchQuery from the flat
 // fields it sends, deriving the category from the type (the engine needs both).
 type BackendQuery = {
+  sourceSelectionChanged?: boolean;
+  excludedPlatforms?: string[];
+  geographicScope?: "CITY" | "REGION" | "NATIONWIDE";
+  locationStateValidated?: boolean;
+  districts?: string[];
   deal?: string;
   location?: string;
   type?: string | null;
@@ -280,13 +299,13 @@ export function resetRejectionNotices(): void { announcedRejections.clear(); }
  * there is nothing new to say. Keyed by the intent id, so «تقييم» explained once stays explained
  * even as the conversation moves on.
  */
-function rejectionNotice(): string {
+function rejectionNotice(locale: Locale = getLocale()): string {
   const fresh = lastRejectedFilters
     .map((f) => String(f).split(':')[0])           // 'rating:ممتاز' -> 'rating'
     .filter((f) => f && !announcedRejections.has(f));
   if (!fresh.length) return '';
   for (const f of fresh) announcedRejections.add(f);
-  return t('That option is not available in this search, so I showed the results without it.');
+  return translate(locale, 'That option is not available in this search, so I showed the results without it.');
 }
 
 // AREA NICKNAMES → known district lists. The engine filters by district when these are present, so
@@ -344,10 +363,18 @@ function resolveDistrictsFromText(userText: string, city: string): string[] {
   // Q33: «حي الملقا أو حي حطين أو حي الياسمين»). Each match is ≤2 Arabic tokens, stopping on
   // scope/conjunction tokens (في/و/أو/منطقة/مدينة) so «حي العزيزية في الرياض» captures «العزيزية», not
   // «العزيزية في الرياض». (audit #6: was a single .match() — only the first حي was kept.)
-  const arHiRe = /حي\s+([؀-ۿ]+(?:\s+(?!في|و|أو|منطقة|مدينة)[؀-ۿ]+)?)/g;
+  // …and never on a budget / deal / feature word or a «بالرياض» place: «حي النرجس بحدود ٦٠ ألف» searched a district «النرجس بحدود»
+  // that no listing has (live 2026-10-13, seen once the summary started naming the chat's districts).
+  // A district NAME never starts with «في / من / على»: «وش أفضل حي في الرياض؟» became a district «في الرياض؟» that the next turn searched.
+  // …nor swallows a room / bathroom / feature count: «حي النرجس حمامين» searched a district «النرجس حمامين» (ops_zero_result_log 2026-10-13 07:42).
+  const arHiRe = /حي\s+(?!(?:في|من|على|عند|بال|قريب|قريبة|جنب|يكون|فيه|فيها)(?![؀-ۿ]))([؀-ۿ]+(?:\s+(?!في|و|أو|منطقة|مدينة|بال|لل|(?:بحدود|حدود|تحت|فوق|اقل|أقل|اكثر|أكثر|بسعر|سعر|ايجار|إيجار|شهري|سنوي|مفروش|مفروشة|غرف|غرفة|غرفتين|حمام|حمامين|حمامات|دور|دورين|صالة|صالتين|مجلس|مطبخ|مسبح|مصعد|موقف|مواقف|حوش|مع|قريب|قريبة|جنب|ميزانية|ميزانيتي|الحد)(?![؀-ۿ]))[؀-ۿ]+)?)/g;
   for (const m of ar.matchAll(arHiRe)) out.push(m[1].trim());
-  const enHiRe = /\b(?:in|district\s+of|neighborhood\s+of)\s+(?:al[-\s])?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s*(?:district|neighborhood)?/g;
-  for (const m of userText.matchAll(enHiRe)) out.push(`Al ${m[1]}`);
+  // English needs the WORD «district»/«neighborhood»: a bare «in X» names a CITY far more often
+  // («apartment for sale in Riyadh»), and treating it as a district turned the city into a district
+  // filter «Al Riyadh» that no listing carries — a false «no results» (ops_zero_result_log
+  // 2026-10-08, Buy·شقة·الرياض = 0 vs thousands). The place itself is still resolved from q.location.
+  const enHiRe = /\b(?:(?:district|neighbou?rhood)\s+of\s+(?:[Aa]l[-\s])?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})|in\s+(?:[Aa]l[-\s])?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:district|neighbou?rhood)\b)/g;
+  for (const m of userText.matchAll(enHiRe)) out.push(`Al ${m[1] ?? m[2]}`);
 
   return Array.from(new Set(out));
 }
@@ -389,13 +416,15 @@ const PLATFORM_PATTERNS: Array<[RegExp, string]> = [
   [/1\s*october|october|اكتوبر|أكتوبر/i, 'october'],
 ];
 function resolveSourcesFromText(text: string): string[] {
+  const exact = Object.entries(searchSources).find(([name, slugs]) => name.toLowerCase() === text.trim().toLowerCase() || slugs.includes(text.trim().toLowerCase()));
+  if (exact) return exact[1];
   const out = new Set<string>();
   for (const [re, prefix] of PLATFORM_PATTERNS) if (re.test(text)) out.add(prefix);
   // Bare "Aqar" only when no aqar-compound already matched (so "Aqar Gate" → aqargate, not both).
   if (!out.has('aqargate') && !out.has('aqarcity') && !out.has('aqaratikom') && /\baqar\b|aqar\.fm/i.test(text)) {
     out.add('aqar');
   }
-  return Array.from(out);
+  return [...new Set(Array.from(out).flatMap(slug => Object.values(searchSources).find(slugs => slugs.includes(slug)) ?? [slug]))];
 }
 // Apply a platform filter (and Gathern's monthly implication) onto a query built from any path.
 // When the edge already gave its own platform-restriction judgment (edgePlatforms is a real array,
@@ -522,9 +551,17 @@ function certifyAfOnMergedState(merged: SearchQuery, b: BackendQuery): SearchQue
 }
 export function statedKeys(b: BackendQuery): string[] {
   const said: string[] = [];
-  if (b.deal === 'Buy' || b.deal === 'Rent') said.push('deal');
-  if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual' || b.rentPeriod === 'both') said.push('rentPeriod');
+  if (Array.isArray(b.platforms)) said.push("sources");
+  if (Array.isArray(b.excludedPlatforms)) said.push("excludedSources");
+  if (b.locationStateValidated === true) said.push("location", "regionPin", "districtPin", "districts", "geographicScope");
+  // RENT OR BUY IS ONE DECISION (found live 2026-10-11, owner's real-user test): «ابغى شقة» leaves it open
+  // (bothDeals:true), then «الرياض ٢ غرف إيجار سنوي» says RENT — the edge answered deal:Rent, bothDeals:false, but
+  // `bothDeals` was not counted as stated, so the merge rescued the old «open» flag and the search ran as
+  // «rent OR buy» (the first card was a FOR-SALE apartment). A single stated deal closes the question, and
+  // `false` is a real answer.
   if (b.bothDeals === true) said.push('bothDeals', 'deal');
+  else if (b.deal === 'Buy' || b.deal === 'Rent') said.push('deal', 'bothDeals');
+  if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual' || b.rentPeriod === 'both') said.push('rentPeriod');
   if (b.priceIsAnnual === true) said.push('priceIsAnnual');
   // category is never sent by the edge; it is DERIVED from the type, so it is stated exactly when a
   // type was stated.
@@ -544,7 +581,9 @@ function _n(x: string): number { return parseInt(x.replace(/[,،\s]/g, ''), 10) 
 export function parseAreaConstraint(text: string): { areaMin?: number; areaMax?: number } {
   if (!text) return {};
   const s = text.replace(/[٠-٩]/g, (d) => String(_AR_DIGITS.indexOf(d)));
-  const U = '(?:م²|م2|م\\.?|متر\\s?مربع|متر|mts?|m²|m2|sq\\.?\\s?m|sqm|square\\s?met(?:er|re)s?|met(?:er|re)s?)';
+  // «م» alone is the unit «m», but it is also the FIRST LETTER of «مليون» / «ملايين» / «مئة»: without the lookahead «تحت ٣ مليون» read as
+  // «under 3 m» (max area 3 m², zero results) — found live 2026-10-11 on «فيلا للبيع في جدة تحت ٣ مليون».
+  const U = '(?:م²|م2|م(?![ء-ي])\\.?|متر\\s?مربع|متر|mts?|m²|m2|sq\\.?\\s?m|sqm|square\\s?met(?:er|re)s?|met(?:er|re)s?)';
   const N = '(\\d[\\d,،\\s]*\\d|\\d)';
   // RANGE first: «من X إلى Y (متر)» | «بين X و Y (متر)» | «X - Y متر»
   let m = s.match(new RegExp(`(?:من|from)\\s*${N}\\s*(?:إلى|الى|to|-|–|—|حتى)\\s*${N}\\s*${U}`, 'i'))
@@ -552,17 +591,28 @@ export function parseAreaConstraint(text: string): { areaMin?: number; areaMax?:
        || s.match(new RegExp(`${N}\\s*(?:-|–|—)\\s*${N}\\s*${U}`, 'i'));
   if (m) { const a = _n(m[1]), b = _n(m[2]); if (a > 0 && b > 0) return { areaMin: Math.min(a, b), areaMax: Math.max(a, b) }; }
   // MIN: «فوق/أكثر من/أكبر من/… N متر»  OR  «N متر فأكثر/وفوق/فما فوق/أو أكثر/+»
-  const MIN = '(?:فوق|اكثر\\s?من|أكثر\\s?من|اكبر\\s?من|أكبر\\s?من|ما\\s?فوق|not\\s?less\\s?than|at\\s?least|over|above|more\\s?than|min(?:imum)?|starting\\s?(?:from|at))';
+  const MIN = '(?:فوق|اكثر\\s?من|أكثر\\s?من|اكبر\\s?من|أكبر\\s?من|ما\\s?فوق|لا\\s?(?:يقل|تقل)\\s?عن|ما\\s?(?:ت|ي)قل\\s?عن|على\\s?(?:الاقل|الأقل)|بحد\\s?(?:ادنى|أدنى)|الحد\\s?(?:الادنى|الأدنى)|no\\s?(?:smaller|less)\\s?than|not\\s?less\\s?than|at\\s?least|over|above|(?<!not\\s)(?<!no\\s)more\\s?than|min(?:imum)?|starting\\s?(?:from|at))';
   m = s.match(new RegExp(`${MIN}\\s*${N}\\s*${U}`, 'i'))
    || s.match(new RegExp(`${N}\\s*${U}\\s*(?:فأكثر|فاكثر|و\\s?فوق|وفوق|فما\\s?فوق|أو\\s?أكثر|او\\s?اكثر|\\+|and\\s?(?:up|above|over)|or\\s?more|and\\s?more)`, 'i'))
    || s.match(new RegExp(`${N}\\s*${U}\\s*\\+`, 'i'));
   if (m) { const a = _n(m[1]); if (a > 0) return { areaMin: a }; }
   // MAX: «تحت/أقل من/أصغر من/لا يتجاوز/… N متر»
-  const MAX = '(?:تحت|اقل\\s?من|أقل\\s?من|اصغر\\s?من|أصغر\\s?من|حد\\s?اقصى|حد\\s?أقصى|لا\\s?يتجاوز|up\\s?to|under|below|less\\s?than|no\\s?more\\s?than|max(?:imum)?|at\\s?most)';
+  const MAX = '(?:تحت|اقل\\s?من|أقل\\s?من|اصغر\\s?من|أصغر\\s?من|حد\\s?اقصى|حد\\s?أقصى|بحد\\s?(?:اقصى|أقصى)|الحد\\s?(?:الاقصى|الأقصى)|لا\\s?(?:يتجاوز|تتجاوز|يزيد|تزيد|يتعدى|تتعدى)(?:\\s?عن)?|ما\\s?(?:ت|ي)(?:زيد|تجاوز|تعدى|تعدي)(?:\\s?عن)?|up\\s?to|under|below|less\\s?than|no\\s?more\\s?than|not\\s?more\\s?than|no\\s?(?:bigger|larger)\\s?than|max(?:imum)?|at\\s?most)';
   m = s.match(new RegExp(`${MAX}\\s*${N}\\s*${U}`, 'i'));
   if (m) { const a = _n(m[1]); if (a > 0) return { areaMax: a }; }
   return {};
 }
+
+// «أرض خام» / «اراضي خام» / «ارض غير مخدومة» / raw land — whole-word خام (never «الخامس»).
+const RAW_LAND_PHRASE = /(أرض|ارض|أراضي|اراضي|اراضى|أراضى)\s+(?:(ال)?خام(?![\u0621-\u064A])|غير\s+مخدوم|غير\s+مطور)|\braw\s+lands?\b|\bundeveloped\s+lands?\b/i;
+const RAW_LAND_LIFTABLE = new Set(['Residential Land', 'Commercial Land', 'Industrial Land', 'Agriculture Plot']);
+// A BARE land word («أرض للبيع في البديعة», «اراضي بالرياض») names no usage, so the user asked for land, not
+// residential land (owner 2026-10-10: a plot whose source states no usage is «أرض أخرى» and must be
+// findable). The bare word opens the whole land group «الأراضي» — the same scope the Filter's group gives
+// — instead of the edge's guess of one usage. Any usage/raw qualifier the user typed keeps its own type.
+const BARE_LAND_WORD = /(^|[^\u0621-\u064A])(ال)?(أرض|ارض|أراضي|اراضي|اراضى|أراضى)(?![\u0621-\u064A])/;
+const LAND_QUALIFIER = /سكن|تجار|صناع|زراع|مزرع|خام|غير\s+مخدوم|غير\s+مطور|\b(residential|commercial|industrial|agricultur|farm|raw)/i;
+const LAND_GROUP = 'Commercial & Industrial Plots';
 
 export function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts?: string[]): SearchQuery {
   let q = emptyQuery();
@@ -578,7 +628,7 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual' || b.rentPeriod === 'both') q.rentPeriod = b.rentPeriod;
   q.location = typeof b.location === 'string' ? b.location.trim() : '';
 
-  const ty = typeof b.type === 'string' && b.type.trim() ? b.type.trim() : null;
+  const ty = typeFromAgent(typeof b.type === 'string' && b.type.trim() ? b.type.trim() : null);
   if (ty) {
     if (isCleanType(ty)) {
       // The agent already returned a CLEAN type (it knows them from the DB behavior notes, e.g.
@@ -602,6 +652,19 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
       q.category = norm.macro;
     }
   }
+  // أرض خام (owner 2026-10-09). The edge model's type vocabulary predates this box (an edge deploy is an
+  // owner CLI step), so it answers a land type or nothing for «ابي ارض خام». The user's OWN words decide:
+  // a raw-land phrase lifts a land/empty type to 'Raw Land' (its home is تجاري → «الأراضي»). Never
+  // touches a non-land type — «شقة … خام» is not a raw land.
+  if (RAW_LAND_PHRASE.test(userText) && (q.type == null || RAW_LAND_LIFTABLE.has(q.type))) {
+    q.type = 'Raw Land';
+    q.category = CLEAN_MACRO['Raw Land'];
+  } else if (BARE_LAND_WORD.test(userText) && !LAND_QUALIFIER.test(userText)
+             && (q.type == null || RAW_LAND_LIFTABLE.has(q.type))) {
+    q.type = null;
+    q.typeGroups = [LAND_GROUP];
+    q.category = 'Commercial';
+  }
 
   // `detail` may be a bedroom count (1–5+) OR a size in m² — for a home the user can give EITHER (their
   // choice). We keep whatever was given; the summary labels it Bedrooms vs Size by its value.
@@ -622,10 +685,34 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
     q.detail = null;
   }
 
+  // «كبير» / "big" (owner 2026-10-11): read on the SAUDI scale (src/data/bigSize.ts) — an area minimum for the chosen
+  // type, never a bedroom count. Only from the user's OWN words, only when no explicit size was given, and only for a
+  // type that has a measured threshold; otherwise the word stays what it was: a largest-first ordering (vagueOrdering).
+  if (q.areaMin == null && q.areaMax == null && _areaTexts.some(bigWanted)) {
+    // a bare «أرض» (no usage said) is the whole land group, whose «big» is the residential-land figure (900 m², the Saudi big plot)
+    const bigMin = bigAreaMin(q.type) ?? (!q.type && q.typeGroups?.length === 1 && q.typeGroups[0] === LAND_GROUP ? bigAreaMin('Residential Land') : null);
+    if (bigMin) { q.areaMin = String(bigMin); q.areaNote = 'big'; }
+  }
+
   q.priceInput = String(b.price ?? '').replace(/[^\d]/g, '');
   if (typeof b.priceOriginal === 'string' && b.priceOriginal.trim()) q.priceOriginal = b.priceOriginal.trim();
+  // «MORE THAN 3 MILLION» IS A FLOOR (owner 2026-10-11; found by the live battery): the edge's single price slot is applied as a CEILING, so
+  // «فيلا أكثر من ٣ مليون» searched villas UNDER 3 million, and «من ١ الى ٣ مليون» lost its lower bound. A floor or a range the user wrote
+  // becomes real priceMin/priceMax (the same fields the Filter uses, so the summary and the search both show «من … إلى …»).
+  if (!q.bothDeals && !q.dealCombined && q.rentPeriod !== 'monthly') {
+    const edgeSar = Number(String(b.price ?? '').replace(/[^\d]/g, '')) || null;
+    for (const _tx of _areaTexts) {
+      const pb = parsePriceBounds(_tx, edgeSar);
+      if (pb.min == null || (q.deal === 'Rent' && pb.min < 20_000)) continue;       // a small rent figure is a monthly one: leave it to the edge
+      q.priceMin = String(Math.round(pb.min));
+      if (pb.max != null) q.priceMax = String(Math.round(pb.max));
+      q.priceInput = '';
+      q.priceIsAnnual = false;
+      break;
+    }
+  }
   if (typeof b.sort === 'string' && b.sort.trim() && b.sort !== 'none') q.sort = b.sort.trim() as SearchQuery['sort'];
-  if (typeof b.count === 'number' && b.count >= 1) q.count = Math.min(Math.floor(b.count), 25);
+  if (typeof b.count === 'number' && b.count >= 1) q.count = Math.min(Math.floor(b.count), 500);
   // Layer on the explicit district resolution from the raw user text — area phrases ("North
   // Riyadh") expand to known district lists; literal district mentions ("حي الرمال") pass through.
   const districts = resolveDistrictsFromText(userText, q.location);
@@ -636,9 +723,18 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   if (typeof b.regionPin === 'string' && b.regionPin.trim()) q.regionPin = b.regionPin.trim();
   if (typeof b.districtPin === 'string' && b.districtPin.trim()) {
     const d = b.districtPin.trim();
-    q.districts = Array.from(new Set([...(q.districts ?? []), d]));
+    // One district, one entry: «النرجس» (read from the text) and «حي النرجس» (the edge's pin) are the same place, and the summary
+    // listed both («الأحياء: النرجس، حي النرجس», live 2026-10-13).
+    const bare = (x: string) => x.replace(/^حي\s+/, '').trim();
+    q.districts = [...(q.districts ?? []).filter((x) => bare(x) !== bare(d)), d];
   }
+  q.sourceSelectionChanged = b.sourceSelectionChanged === true;
   applySourceFilter(q, userText, b.platforms);
+  // Explicit transaction/period wins over a selected source's legacy defaults.
+  if (b.deal === 'Buy' || b.deal === 'Rent') { q.deal = b.deal; q.bothDeals = b.bothDeals === true; }
+  if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual' || b.rentPeriod === 'both') q.rentPeriod = b.rentPeriod;
+  if (Array.isArray(b.platforms) && !b.platforms.length) q.sources = [];
+  if (Array.isArray(b.excludedPlatforms)) q.excludedSources = [...new Set(b.excludedPlatforms.flatMap(resolveSourcesFromText))];
   // Street / "near a mosque|school|park" terms from the raw message (Q3) — matched against the
   // listing's own street/title/description in runSearch; empty for an ordinary search.
   // Location-RELATIONSHIP layer (2026-06-26): parse «قريب من مستشفى الحبيب» → {near, hospital,
@@ -724,7 +820,20 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   //
   // Only when the user has not chosen a sort themselves — an explicit control always outranks a word.
   const ordering = vagueOrdering(userText);
-  if (ordering && !q.sort) q.sort = ordering;
+  // …EXCEPT «big» that already became a Saudi size threshold (src/data/bigSize.ts): the threshold IS what the word means now.
+  // Largest-first on top of it only surfaced source outliers (a «villa» of 337,650 m² as #1, twice) and pushed the permanent
+  // rule — match first, then diversify the platforms — aside (owner 2026-10-11).
+  if (ordering && !q.sort && !(ordering === 'area_desc' && q.areaNote === 'big')) q.sort = ordering;
+
+  // A complete catalog-validated state replaces local extraction, including an intentional empty district set.
+  if (b.locationStateValidated === true && typeof b.location === 'string' && Array.isArray(b.districts)) {
+    q.geographicScope = b.geographicScope;
+    q.location = b.location;
+    q.locationMatch = undefined;
+    q.regionPin = b.regionPin;
+    Object.assign(q, { districtPin: undefined });
+    q.districts = b.districts.filter((d): d is string => typeof d === 'string');
+  }
 
   return q;
 }
@@ -737,7 +846,7 @@ export type AgentHistoryTurn = { role: 'user' | 'model'; text: string };
 async function callAgentBackend(
   text: string,
   ctx: {
-    loggedIn: boolean; order: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[];
+    locale?: Locale; loggedIn: boolean; order: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[];
     prevQuery?: SearchQuery | null;
     // Conversation-scoped decision state (owner-approved consolidation, 2026-08-30) — the server is
     // the single decision authority (supabase/functions/agent/decide.ts) but has no memory of its
@@ -767,7 +876,7 @@ async function callAgentBackend(
       supabase.functions.invoke('agent', {
         body: {
           text,
-          locale: getLocale(),
+          locale: ctx.locale ?? getLocale(),
           loggedIn: ctx.loggedIn,
           order: ctx.order,
           history: ctx.history ?? [],
@@ -798,6 +907,7 @@ async function callAgentBackend(
       return {
         kind: 'listings',
         reply: String(d.reply ?? ''),
+        notice: typeof d.notice === 'string' ? d.notice : undefined,
         askCount: askCountOut,
         // CLARIFICATION MUST NOT RESET THE CONVERSATION (owner-reported bug 2026-08-29).
         // queryFromBackend builds a FRESH query from this turn's model output, so anything the model
@@ -812,7 +922,9 @@ async function callAgentBackend(
         // So we tell the merge exactly what this turn stated.
         query: certifyAfOnMergedState(
           mergeConversationState(
-            ctx.prevQuery ?? null,
+            // A complete new request («فيلا للبيع في جدة فيها مسبح») starts fresh: the edge says so, and nothing from the previous search
+            // rides along (live 2026-10-13: it kept «٤ غرف» from a Riyadh apartment search and found nothing).
+            d.query?.fresh === true ? null : (ctx.prevQuery ?? null),
             queryFromBackend(d.query ?? {}, text, ctx.attemptTexts ?? [text]),
             statedKeys(d.query ?? {}),
           ),
@@ -964,7 +1076,7 @@ export function parseQuery(text: string): SearchQuery {
 // grouped numbers, and area units ("sqm", "m2", "square meters") are normalised to m². This is
 // purely how Ezhalah ECHOES the request — the search engine does its own parsing. (user request:
 // "you fix measurements, currencies, money, everything — act like an AI agent.")
-function normalizeForReadback(original: string): string {
+function normalizeForReadback(original: string, locale: Locale = getLocale()): string {
   const { text: fixed } = spellFix(original);
   let s = toLatinDigits(fixed);
 
@@ -991,7 +1103,7 @@ function normalizeForReadback(original: string): string {
   //    (dollars/dirhams/pounds…) and an optional scale (k/m/million/thousand), e.g.
   //    "$3,000" → "SAR 11,250", "2k dollars" → "SAR 7,500", "1.5 million eur" → "SAR 6,150,000".
   const symCur: Record<string, string> = { '$': 'usd', '€': 'euro', '£': 'pound' };
-  const sar = getLocale() === 'en' ? 'SAR' : 'ريال';
+  const sar = locale === 'en' ? 'SAR' : 'ريال';
   const CUR_RE =
     /(?:([$€£])\s*)?(\d[\d,.]*)(?:\s*(million|thousand|billion|mn|bn|k|m)(?![A-Za-z]))?(?:\s*(usd|us\$|dollars?|aed|dirhams?|dhm|dhs|dh|euros?|eur|gbp|pounds?|kwd|dinars?|bhd|bd|kd|qar|qr|omr|egp|sar|sr|riyals?|دولار(?:ات)?|يورو|درهم|دينار|ريال(?:ات)?)(?![A-Za-z]))?/gi;
   s = s.replace(CUR_RE, (whole, sym, numStr, scale, word) => {
@@ -1053,10 +1165,10 @@ function alreadyRestates(reply: string): boolean {
 // with currencies/measurements normalised and shown with Western digits — so Ezhalah always "reads
 // back" the request before the cards appear. (user request: "always retype as an AI what the user
 // wrote… fix what he wrote… always rewrite what the user wrote before displaying the property.")
-function withRestate(original: string, tail: string): string {
-  const shown = normalizeForReadback(original);
+function withRestate(original: string, tail: string, locale: Locale = getLocale()): string {
+  const shown = normalizeForReadback(original, locale);
   const lead =
-    getLocale() === 'en'
+    locale === 'en'
       ? `Got it — you're looking for "${shown}".`
       : `تمام، فهمت أنك تبحث عن «${shown}».`;
   return tail ? `${lead} ${tail}` : lead;
@@ -1069,14 +1181,14 @@ function withRestate(original: string, tail: string): string {
 // mood (the LLM is unreliable for a bare platform-only request). Genuine confidentiality QUESTIONS
 // keep the model's neutral deflection. (user: "if I type give me aqar only, show me aqar only.")
 const PLATFORM_Q_RE = /[?؟]|\b(do|does|did|are|is|can|could|would|which|what|where|how|why|who)\b|\b(هل|وش|وين|كيف|ليش|ايش|إيش)\b/i;
-function maybeForcePlatformSearch(turn: AgentTurn, text: string): AgentTurn {
+function maybeForcePlatformSearch(turn: AgentTurn, text: string, locale: Locale = getLocale()): AgentTurn {
   if (turn.kind === 'listings') return turn;       // already searching → sources set by queryFromBackend
   const sources = resolveSourcesFromText(text);
   if (!sources.length) return turn;                // no platform named → leave the model's reply
   if (PLATFORM_Q_RE.test(text)) return turn;       // "do you search Aqar?" → keep neutral deflection
   const q = parseQuery(text);                      // applySourceFilter sets q.sources (+ Gathern→monthly)
   if (!q.sources || !q.sources.length) return turn;
-  return { kind: 'listings', reply: withRestate(text, ''), query: q };
+  return { kind: 'listings', reply: withRestate(text, '', locale), query: q };
 }
 
 // Classify the message and craft a neutral reply. Deterministic; the listings themselves are
@@ -1087,10 +1199,12 @@ function maybeForcePlatformSearch(turn: AgentTurn, text: string): AgentTurn {
 // when they give a direct search order ("I want…/show me…/أريد…"); otherwise Ezhalah just helps,
 // neutrally, like a normal assistant and invites them to say "show me" when ready.
 export async function respond(text: string, opts?: {
-  loggedIn?: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[]; prevQuery?: SearchQuery | null;
+  locale?: Locale; loggedIn?: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[]; prevQuery?: SearchQuery | null;
   askCount?: number; userMessageId?: string; historyTurnsRaw?: number;
 }): Promise<AgentTurn> {
   const v = text.trim();
+  const replyLocale = resolveReplyLocale(v, opts?.history ?? [], opts?.locale ?? getLocale());
+  const t = (key: string) => translate(replyLocale, key);
   const loggedIn = !!opts?.loggedIn;
   if (!v) return { kind: 'message', reply: t("Tell me what you're looking for and I'll search for it.") };
 
@@ -1114,40 +1228,40 @@ export async function respond(text: string, opts?: {
   // forget which caveats this conversation has already given.
   if (!opts?.prevQuery) resetRejectionNotices();
   const backend = await callAgentBackend(v, {
-    loggedIn, order, history: opts?.history, attemptTexts: opts?.attemptTexts, prevQuery: opts?.prevQuery ?? null,
+    locale: replyLocale, loggedIn, order, history: opts?.history, attemptTexts: opts?.attemptTexts, prevQuery: opts?.prevQuery ?? null,
     askCount: opts?.askCount, userMessageId: opts?.userMessageId, historyTurnsRaw: opts?.historyTurnsRaw,
   });
   if (backend) {
     // Named-platform filter safety net: if the user said "Aqar only" / "Gathern فقط" but the model
     // deflected, force the search. When we override, the reply is already final — return as-is.
-    const forced = maybeForcePlatformSearch(backend, v);
+    const forced = maybeForcePlatformSearch(backend, v, replyLocale);
     if (forced !== backend) return forced;
     // For a GUEST listings search we lead with the deterministic normalization echo ("Got it — you're
     // looking for …" with currencies/measurements fixed), keeping the fast search-first feel. For a
     // LOGGED-IN user the model already returns its own structured read-back ("Here is what I have for
     // you: …" — user's prompt spec), so we show that verbatim and DON'T prepend a second restatement.
     if (backend.kind === 'listings' && !loggedIn && !alreadyRestates(backend.reply)) {
-      backend.reply = withRestate(v, backend.reply);
+      backend.reply = withRestate(v, backend.reply, replyLocale);
     }
     // Append AFTER the restatement so the reply still leads with what we ARE searching for; the
     // caveat is a tail, not a headline. The search itself is untouched — everything we could apply
     // has been applied.
     // LISTINGS ONLY, and the call itself is gated — not just its output. The sentence is «…so I
     // showed the results without it», which is simply untrue on a clarification turn where no results
-    // are shown. Worse, rejectionNotice() MUTATES announcedRejections: saying it on a message turn
+    // are shown. Worse, rejectionNotice(replyLocale) MUTATES announcedRejections: saying it on a message turn
     // spent the once-per-conversation budget on a turn that showed nothing, so the listings turn that
     // really did search without the filter then stayed silent about it.
     //
     // Nothing is lost by waiting. lastRejectedFilters is rebuilt every turn from the merged state, so
     // if the filter is still uncertified when the search runs it is announced there — and if the
     // user's answer made it certifiable, it gets APPLIED and there was never anything to announce.
-    const notice = backend.kind === 'listings' ? rejectionNotice() : '';
+    const notice = backend.kind === 'listings' ? rejectionNotice(replyLocale) : '';
     if (notice && backend.kind === 'listings') {
       backend.reply = `${String(backend.reply ?? '').trim()}\n${notice}`.trim();
       // ALSO a structured field (2026-09-11 fix), not just appended to `.reply`: the listings-turn
       // UI never renders `.reply` (see the AgentTurn comment above) — without this, the notice was
       // computed, consumed one-time from announcedRejections, and then shown to nobody.
-      backend.notice = notice;
+      backend.notice = [backend.notice, notice].filter(Boolean).join('\n');
     }
     return backend;
   }
@@ -1180,7 +1294,7 @@ export async function respond(text: string, opts?: {
     // Guest, or a logged-in user giving a direct order → show listings for any property search.
     if (isRealEstate || order) {
       const base = t('Here are some properties you might be interested in:');
-      return { kind: 'listings', reply: withRestate(v, base), query: parseQuery(fixed.text) };
+      return { kind: 'listings', reply: withRestate(v, base, replyLocale), query: parseQuery(fixed.text) };
     }
     if (ADVICE_RE.test(v)) {
       return {

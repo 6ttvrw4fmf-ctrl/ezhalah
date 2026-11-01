@@ -6,6 +6,7 @@
 // Same pattern as verify-af-narrowing-gate.ts, verify-chat-persistence.ts, etc: execute pure
 // logic, do not grep for it. This is what lets Ezhalah adopt client telemetry at all under PDPL.
 
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { readFileSync } from 'node:fs';
 import { scrubEvent, isEnabled, type SentryEventShape } from '../src/lib/observability.ts';
 

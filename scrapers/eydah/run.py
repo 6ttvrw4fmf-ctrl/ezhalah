@@ -32,6 +32,13 @@ SOURCE SHAPE (measured live 2026-09-24; fully static HTML, no JS, no pagination)
   So: 200 + RealEstateListing naming THIS url → live; 200 + the home graph (or any 200 without a
   RealEstateListing) → gone; 404 → gone; anything else → no opinion. Removal is additionally gated
   by an in-run positive control that fails CLOSED.
+
+  AVAILABILITY (measured live 2026-10-02). Both offers print JSON-LD offers.availability =
+  https://schema.org/InStock (2/2) and no sold / reserved wording anywhere on the page or its index
+  card. No other value has ever been seen here, so none is filtered on: the value is archived in
+  additional_info.availability, and an offer whose value is NOT InStock (or is absent) is still
+  written as before but counted in the run notes as `unmeasured_availability_kept_active[<value>]`,
+  so the first offer the office marks in place is visible instead of silent.
 """
 from __future__ import annotations
 
@@ -135,6 +142,7 @@ def map_listing(href: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]
     district_ar = find_district_in_text(district_raw, city_id) or find_district_in_text(title, city_id)
     description = redact_pii(_text(ld.get("description")) or None)
     offer = ld.get("offers") or {}
+    availability = str(offer.get("availability") or "").rsplit("/", 1)[-1] or None
     price = normalize.to_int_numeric(offer.get("price")) if isinstance(offer.get("price"), (int, float)) \
         else normalize.to_int(offer.get("price"))
     area = normalize.to_int_numeric((ld.get("floorSize") or {}).get("value")) or normalize.to_int(specs.get("المساحة"))
@@ -182,9 +190,12 @@ def map_listing(href: str, d: dict[str, Any]) -> tuple[Optional[dict], str, str]
         "plot_no": specs.get("رقم المخطط"),
         "property_age_raw": specs.get("عمر العقار"),
         "date_posted": ld.get("datePosted"),
+        "availability": availability,
         "advertiser_fal_licence": d.get("advertiser_fal_licence"),
     }.items() if v is not None}
-    return row, category, ""
+    # A row AND a note: the only measured value is InStock; anything else is kept, never guessed.
+    return row, category, ("" if availability == "InStock"
+                           else f"unmeasured_availability_kept_active[{availability or 'absent'}]")
 
 
 def fetch_index(s: cc.Session) -> tuple[list[str], Optional[int]]:
@@ -239,6 +250,27 @@ def _make_verify_gone(control_ad: Optional[str], url_by_ad: dict[str, str]):
     return lambda ad_number: probe(ad_number, canary=canary)
 
 
+CRAWL_LIVE_ORACLE = "eydah.detail_fetch.jsonld_url_instock"
+
+
+def mark_crawl_read_live(row: dict, d: dict) -> bool:
+    """Stamp a row whose OWN offer page this crawl read live, by the oracle's own rule (2026-10-27).
+
+    _make_signal's LIVE is «200 + a RealEstateListing JSON-LD whose url is THIS listing's url». The
+    crawl reads exactly that page for every row it writes (fetch_detail returns None on a non-200 or
+    a page with no such JSON-LD — the homepage soft-404). A two-offer catalogue re-read in full every
+    night never let a row reach grace, so the oracle was never asked and nothing was ever verified.
+    Stamped only when the JSON-LD names this row's url AND the offer says InStock (the only measured
+    availability); any other availability is kept but not certified. Zero extra requests."""
+    ld = (d or {}).get("ld") or {}
+    offer = ld.get("offers") if isinstance(ld.get("offers"), dict) else {}
+    availability = str(offer.get("availability") or "").rsplit("/", 1)[-1]
+    if not row.get("listing_url") or ld.get("url") != row["listing_url"] or availability != "InStock":
+        return False
+    db.mark_direct_alive(row, oracle=CRAWL_LIVE_ORACLE)
+    return True
+
+
 def db_listing_url(ad_number: str) -> Optional[str]:
     """The row's OWN stored URL (case-sensitive on this host — never rebuilt from the ad_number)."""
     from scrapers.common.http_liveness import stored_listing_url
@@ -271,8 +303,11 @@ def main() -> int:
                 skipped["detail_unreachable_or_not_a_listing"] = skipped.get("detail_unreachable_or_not_a_listing", 0) + 1
                 continue
             row, cat, why = map_listing(href, d)
-            if not row:
+            if row:
+                mark_crawl_read_live(row, d)
+            if why:
                 skipped[why] = skipped.get(why, 0) + 1
+            if not row:
                 continue
             if args.type != "all" and cat != args.type:
                 continue

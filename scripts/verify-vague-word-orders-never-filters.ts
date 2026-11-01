@@ -1,5 +1,10 @@
 // A VAGUE ADJECTIVE SETS AN ORDERING, NEVER A VALUE (owner ruling, 2026-09-06).
 //
+// ONE EXCEPTION, by the owner on 2026-10-11 («when someone says big, think Saudi — what is big in Riyadh»): «كبير / big» right
+// next to a property noun is an area MINIMUM on the Saudi scale (src/data/bigSize.ts, pinned by
+// verify-agent-shows-the-calculation-and-saudi-big.ts) and is then NOT also sorted largest-first. Every other vague word below
+// (cheap, expensive, small, a rating) still orders and never filters.
+//
 // «ابغى شقة رخيصة في جدة» must not invent a budget and «شقة كبيرة» must not invent a size: a number
 // the user never said is a fabricated filter that silently hides listings they wanted. It must also
 // not do NOTHING, which is what shipped before — the word had no effect at all.
@@ -72,7 +77,7 @@ check((STICKY_FIELDS as readonly string[]).includes('sort'),
 
 // ── 7. AN EXPLICIT SORT OUTRANKS A WORD ──────────────────────────────────────────────────────
 const agent = readFileSync(join(root, 'src/data/agent.ts'), 'utf8');
-check(/if \(ordering && !q\.sort\) q\.sort = ordering;/.test(agent),
+check(/if \(ordering && !q\.sort && !\(ordering === 'area_desc' && q\.areaNote === 'big'\)\) q\.sort = ordering;/.test(agent),
   'a sort the user chose in the UI is never overwritten by an adjective');
 
 // ── MUTATION PROOF ───────────────────────────────────────────────────────────────────────────

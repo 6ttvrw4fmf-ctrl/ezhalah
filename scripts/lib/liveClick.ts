@@ -9,7 +9,7 @@
 //
 // WHAT THAT COSTS. It does not produce a harness error. It produces a FALSE ACCUSATION AGAINST
 // PRODUCTION, because the next assertion is always "…and then the app did X". Measured on production
-// 2026-09-24 (الرياض/شراء/شقة desktop, fleet healthy): 11 of 24 taps on «خلّنا نحدد الطلب أكثر»
+// 2026-09-24 (الرياض/شراء/شقة desktop, fleet healthy): 11 of 24 taps on «🎯 دقّق مع الذكاء»
 // landed on `card-listing-11678443`, and each one was reported as «the offer opened but no af-card
 // appeared in 45s» — i.e. as a broken Advanced Filter. `ops_incident` #340 is five days of that.
 //
@@ -69,6 +69,31 @@ export async function clickWitnessed(page: any, box: { x: number; y: number }, w
   const hit = await page.evaluate(READ_CLICK_WITNESS_SRC).catch(() => null);
   if (hit?.onTarget) return { landed: true, hit: want.testid || want.text || '(target)' };
   return { landed: false, hit: hit ? (hit.tid || hit.txt || '(unlabelled)') : '(no click event seen)' };
+}
+
+/**
+ * A STRAY TAP OPENS A LISTING, AND THE LISTING THEN TAKES EVERY LATER TAP (🔬 2026-10-16).
+ * A missed click usually lands on a listing card, and a card's job is to open the ad viewer — a
+ * sheet over the whole chat on a phone. Every retry after that hits the sheet, never the CTA, so
+ * six attempts are spent on one miss. Measured on production (جدة · فيلا · 390x844): 2 of 4 runs
+ * of verify-af-card-evidence-live.ts ended «intercepted», the screenshot showing the ad viewer open
+ * and the CTA under it. A person closes the sheet (✕ or Escape) and taps again; so does this.
+ */
+// ANY VISIBLE VIEWER, NOT THE FIRST ONE (🔬 2026-10-17, backlog 597). The app keeps a viewer mounted and
+// hidden («out of sight, nothing deleted», AdViewer.tsx), so the first match can be a hidden one while a
+// visible one takes every tap. Forcing the case on production showed it: the retry never pressed Escape.
+export const STRAY_OVERLAY_SRC = () => [...document.querySelectorAll('[data-testid="ad-viewer"]')].some((v: any) => {
+  const r = v.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 && getComputedStyle(v).display !== 'none';
+});
+
+/** Close the ad viewer a stray tap opened, the way a person does. True when one was closed. */
+export async function dismissStrayOverlay(page: any): Promise<boolean> {
+  const open = await page.evaluate(STRAY_OVERLAY_SRC).catch(() => false);
+  if (!open) return false;
+  try { await page.keyboard.press('Escape'); } catch { /* a page without a keyboard keeps its sheet */ }
+  await page.waitForTimeout(600);
+  return true;
 }
 
 /** Two measurements this close together mean the control has stopped moving. */

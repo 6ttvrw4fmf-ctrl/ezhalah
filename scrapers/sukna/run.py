@@ -114,7 +114,7 @@ THE TRAPS, ALL MEASURED
    «بنتهاوس » 31, «فيلا» 16, «شقة» 16, "penthouse" 14, «أدوار » 9. Only 4 of the 12 resolve through
    the shared TYPE_MAP_AR unaided. Every override below is an EXISTING fleet mapping, not a new
    judgment: «بنتهاوس»→Apartment (dwelleo, rakez, dealapp, justsa, azure, rightcompound),
-   «تاون هاوس»→Villa (dwelleo, eilmalriyada, aqalemhajer; TYPE_MAP_EN already folds "townhouse"),
+   «تاون هاوس» keeps its own name (dwelleo, eilmalriyada, aqalemhajer; TYPE_MAP_EN maps "townhouse" the same way),
    «فلل»→Villa and «أدوار»/«ادوار»→Floor (souq24, alkhaas). The English slugs go through the
    shared TYPE_MAP_EN, with "penthouse" overridden to match its Arabic twin. Values are stripped
    before lookup because the source pads them.
@@ -227,8 +227,9 @@ DETAIL, MEASURED
   · `obligations_on_the_property` is the same sentence on all 597 («لا يوجد التزامات على العقار»)
     and `guarantees_and_their_duration`, `property_usage`, `project_ownership`, `threedurl` and
     `user_id` are empty on all 597 — none is read.
-  · `latitude`/`longitude` are published on 515 rows; the listing tables carry no coordinate
-    columns, so they are not stored.
+  · `latitude`/`longitude` are published on 515 rows — the UNIT's own point (unit 310: 24.749000,
+    46.694260; its project list carries other points). Stored as the pin since 2026-10-21 (mapping
+    audit: all 286 served Sukna ads showed a district border over a published pin).
   · LISTING URLS VERIFIED: 6 of the 290 mapped rows were re-opened on sukna.app after the walk, and
     each answered 200 with its OWN content — the page's JSON-LD `url` equals the stored listing_url,
     its `name` is this row's unit number, and its `offers.price` equals the stored price_total to the
@@ -258,6 +259,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 # The BROWSER host (suknamdn.sa 301s here) and the API host. Both measured — see the docstring.
 SITE = "https://sukna.app"
@@ -285,7 +287,7 @@ _TYPE_OVERRIDES = {
     "أدوار": "Floor",
     # Fleet-settled folds.
     "بنتهاوس": "Apartment",     # a penthouse is sold as an apartment (dwelleo, rakez, dealapp, …)
-    "تاون هاوس": "Villa",        # TYPE_MAP_EN already folds "townhouse" → Villa
+    "تاون هاوس": "تاون هاوس",  # a town house keeps its own name (owner 2026-10-12)
     # The English slugs this source mixes in. apartment/villa/duplex/townhouse already resolve via
     # the shared TYPE_MAP_EN; "penthouse" is in neither shared map, so it is folded like its twin.
     "penthouse": "Apartment",
@@ -571,6 +573,8 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "after_sales_services": [_clean((s or {}).get("ar_title")) for s in
                                  (rec.get("after_sales_services") or [])
                                  if isinstance(s, dict) and _clean(s.get("ar_title"))] or None,
+        # The unit's OWN published point (audit 2026-10-21); outside Saudi Arabia, 0 or missing → no pin.
+        **pin_dict(rec.get("latitude"), rec.get("longitude")),
     }
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v is not None})
     # The capture is PRIVATE, but "private" is not "may accumulate contact details". Redact the

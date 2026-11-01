@@ -63,7 +63,25 @@ const PROBE_ROOT = 'scrapers.common.cleanup';
 // `scrapers.common.verify_deletions`, which imports its `_probe`. A FLOOR, not a list — a module
 // that imports that probe tomorrow needs no edit here, and LOWERING it is a deliberate reviewed
 // change, because a shrinking cohort is how this check stops checking.
-const COHORT_FLOOR = 2;
+// Raised to 3 on 2026-09-27: `scrapers.common.lifecycle_spot_check` (the Lifecycle Engineer's
+// read-only double-check) opens ads through cleanup's `_probe`, so it joined the cohort, and its
+// workflow carries the browser like the other two. Raised to 4 the same day:
+// `scrapers.common.source_reread` (the independent re-read the 🆕 New Listings and 🔬 Listing
+// Accuracy engineers use) fetches the same way, and its workflow carries the browser too.
+// Raised to 5 on 2026-10-02: `scrapers.common.dead_visible_score` (the nightly "dead ads a customer
+// can see" measurement) opens aqar/wasalt/aqarcity ads through lifecycle_spot_check.open_ad → cleanup
+// `_probe`, so it joined the cohort, and dead-visible-score.yml carries the browser like the others.
+// 2026-10-03: `scrapers.common.new_listings_score` (the 🆕 New Listings Engineer's nightly comparison
+// of new ads with their original pages) re-reads ads through cleanup's `_probe`, so it joined the
+// cohort (6). No workflow runs it — the engineer's own container does — and a wasalt page it cannot
+// read is counted UNREADABLE (never a verdict on the ad), which the score prints as such.
+// 2026-10-04: `scrapers.common.af_score` (the 🔬 Advanced Filter Engineer's nightly score) imports
+// new_listings_score and so reaches the same probe (7). Its workflow af-score.yml runs it under
+// xvfb with WASALT_BROWSER and Chromium, like new-listings-score.yml.
+// 2026-10-05: `scrapers.common.af_robot` (the 🔬 hourly robot customer) imports af_score's request
+// builder and so joins the cohort (8). It never opens a page, but af-robot.yml carries the same
+// transport anyway — the rule is per invocation, not per intent.
+const COHORT_FLOOR = 8;
 
 const ls = (glob: string) =>
   execFileSync('git', ['ls-files', glob], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);

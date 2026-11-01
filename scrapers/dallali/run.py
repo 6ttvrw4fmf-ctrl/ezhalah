@@ -22,6 +22,13 @@ RENT PERIOD: the page renders «/ سنة» for every rent (a UI constant, no per
 shared owner rule decides (normalize.rent_period_from_ad): the ad's own text tied to its price first,
 then a monthly-looking price (≤ 10,000), else the page's yearly.
 
+AVAILABILITY IS THE STOREFRONT'S OWN RULE (measured 2026-10-02). Its bundle (assets/index-*.js) hides
+a listing with `e.is_active ? !!e.expires_at && new Date(e.expires_at) <= now : true` and queries
+`expires_at.is.null,expires_at.gt.<now>`; expired() below is that test. Feed today: is_active true on
+7 of 7, expires_at null on 7 of 7 (the record's other timestamps are ISO). The REGA licence's own
+endDate is dd/mm/yyyy (creationDate «02/09/2026» on the ad created 2026-09-02; «04/08/2027» on 7 of
+7) and goes through the fleet's ad-end-date gate.
+
 PDPL: the licence names the responsible employee and his mobile, a phone number, the advertiser, the
 advertiser id and the deed number — none is stored.
 """
@@ -31,6 +38,7 @@ import argparse
 import json
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -39,6 +47,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 API = "https://p1.dallali.com/listings/public"
@@ -46,7 +55,6 @@ SITE = "https://dallali.com/advertisements/property"
 SOURCE = "دلّالي"
 PREFIX = "DLL"
 SLUG = "dallali"
-IMPERSONATE = "chrome"
 
 # unit_type → the Arabic word the fleet's type map already knows.
 _UNIT_TYPE_AR = {"office": "مكتب", "apartment": "شقة", "villa": "فيلا", "residential_land": "ارض",
@@ -61,7 +69,7 @@ _NEVER_STORE = {"phoneNumber", "responsibleEmployeeName", "responsibleEmployeePh
 def get_json(s: cc.Session, url: str) -> Any:
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=40)
+            r = s.get(url, timeout=40)
             r.raise_for_status()
             return r.json()
         except Exception:  # noqa: BLE001
@@ -95,9 +103,29 @@ def _num(v: Any) -> Optional[float]:
         return None
 
 
+def expired(x: dict) -> str:
+    """Why the listing's own dates say it is over — '' when they do not."""
+    raw = x.get("expires_at")
+    if raw:
+        try:
+            end = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            return "status_unreadable"
+        if (end if end.tzinfo else end.replace(tzinfo=timezone.utc)) <= datetime.now(timezone.utc):
+            return "expired_at_source"
+    if normalize.ad_expiry_state((x.get("rega_display_data") or {}).get("endDate")) == "expired":
+        return "ad_licence_expired"
+    return ""
+
+
 def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
-    if not x.get("is_active"):
+    if x.get("is_active") is False:
         return None, "inactive"
+    if x.get("is_active") is not True:
+        return None, "status_unreadable"    # not read ≠ available and ≠ dead: main() does not prune
+    why = expired(x)
+    if why:
+        return None, why
     rega = x.get("rega_display_data") or {}
     unit = x.get("unit") or {}
     loc = rega.get("location") or {}
@@ -193,7 +221,10 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(f"{API}?purpose=all&page=1", timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     listings, declared = walk(s)
     print(f"{SOURCE}: {len(listings)} listing(s) (API declares total={declared})", flush=True)
 
@@ -201,6 +232,7 @@ def main() -> int:
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
+    kept: dict[str, int] = {}
     try:
         for x in listings:
             got, why = map_listing(x)
@@ -209,9 +241,17 @@ def main() -> int:
                 continue
             row, cat = got
             (com if cat == "commercial" else res).append(row)
+            if normalize.ad_expiry_state((x.get("rega_display_data") or {}).get("endDate")) == "unknown":
+                # the licence end date is absent or not a readable date (measured 2026-10-02: readable
+                # dd/mm/yyyy on 7 of 7). The storefront's own rule (is_active, expires_at) passed, so the
+                # listing stays — counted out loud, never silently taken as «still licensed»
+                kept["licence_end_date_unread"] = kept.get("licence_end_date_unread", 0) + 1
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
+        if kept:
+            print("  kept, end date unread (not guessed): "
+                  + ", ".join(f"{k}x{v}" for k, v in sorted(kept.items())), flush=True)
         if dry:
             print(f"DRY: {len(res)} residential + {len(com)} commercial")
             for row in res + com:
@@ -227,7 +267,7 @@ def main() -> int:
             res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com}, source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
-        complete = len(listings) >= declared > 0
+        complete = len(listings) >= declared > 0 and "status_unreadable" not in skipped
         for tbl, rr in (("dallali_residential_listings", res), ("dallali_commercial_listings", com)):
             if rr and complete:
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
@@ -236,7 +276,8 @@ def main() -> int:
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
-            print("  NOT pruning: the walk fell short of the declared total", flush=True)
+            print("  NOT pruning: the walk fell short of the declared total, or a listing's status was unreadable",
+                  flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(listings), rows_upserted=len(res) + len(com),
                              check_tables=["dallali_residential_listings", "dallali_commercial_listings"])
         if not healthy:

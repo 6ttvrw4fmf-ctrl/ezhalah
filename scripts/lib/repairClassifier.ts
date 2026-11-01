@@ -63,13 +63,22 @@ export const stripSqlComments = (s: string) =>
  *  exactly the kind that needs something standing watch. */
 export const LISTING_TABLE = /(^|_)listings$|^search_listings_ar$|^listing_[a-z0-9_]+$/;
 
-/** Does this migration EXECUTE a repair of listing data? */
+/** Does this migration EXECUTE a repair of listing data?
+ *
+ *  DYNAMIC SQL COUNTS (2026-10-06, AF engineer). A repair over a family of tables is written
+ *  `foreach t in array [...] loop execute format($q$ update public.%I_listings … $q$, t)`. The table
+ *  name then holds a format() placeholder, which the name pattern used to stop at — so
+ *  20261005094209 (446 aldarim-SaaS rows) and three earlier repairs passed as "not a repair".
+ *  A placeholder is read as a stand-in name: `%I_listings` is a listing table. A name that is ONLY a
+ *  placeholder (`update %I set …`) counts when the executed SQL names a listing table as a literal,
+ *  which is how those loops list their targets. */
 export function repairsData(sql: string): boolean {
   const body = executedSql(stripSqlComments(sql));
-  const re = /\bupdate\s+(?:only\s+)?([a-z_][a-z0-9_.]*)/gi;
+  const re = /\bupdate\s+(?:only\s+)?([a-z_%][a-z0-9_.%]*)/gi;
   for (let m = re.exec(body); m; m = re.exec(body)) {
-    const t = m[1].toLowerCase().replace(/^public\./, '');
+    const t = m[1].toLowerCase().replace(/^public\./, '').replace(/%[is]/g, 'x');
     if (LISTING_TABLE.test(t)) return true;
+    if (t === 'x' && /'(?:public\.)?[a-z0-9_]*_listings'/i.test(body)) return true;
   }
   return false;
 }

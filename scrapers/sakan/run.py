@@ -111,8 +111,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.liveness_policies import policy_for  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_capture  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://sa.sakan.co"
 SITEMAP = f"{BASE}/ar/pdpmap.xml"
@@ -183,7 +186,10 @@ _SPEC_LABEL_RE = re.compile(r'<span class="(?:fn|f14)">([^<]+)</span>')
 _SPEC_VALUE_RE = re.compile(r'<span class="(?:fn fn--b|f16 f16-700)">([^<]*)</span>')
 _PRICE_BLOCK_RE = re.compile(
     r'class="price details__action--inner-section-1">(.{0,900}?)</div>\s*</div>', re.S)
-_PRICE_NUM_RE = re.compile(r'<span class="f20[^"]*">\s*([\d,.\u0660-\u0669]+)\s*</span>')
+# The price block's first all-numeric span. Two templates print it (class "f20 …" and, on pages with
+# the REGA panel, "fb fb--h fb--red"); since the 2026-09-30 redesign dropped `offers` from the
+# ld+json this block is the only place the price is published, so it must be read on both.
+_PRICE_NUM_RE = re.compile(r'<span[^>]*>\s*([\d,.\u0660-\u0669]+)\s*</span>')
 _PRICE_PERIOD_RE = re.compile(r'/\s*([^<>/]{1,24})\s*</span>')
 _DESC_RE = re.compile(r'<div id="accordion_div"[^>]*>(.*?)</div>', re.S)
 _PHOTO_RE = re.compile(r'https://[^\s"\'\\<>]*?/property_image/[^\s"\'\\<>]+?\.webp')
@@ -248,10 +254,34 @@ def ad_id_from_url(url: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
+_SAKAN_MARKER = re.compile(r"google\.maps\.LatLng\(\s*(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})\s*\)")
+_SAKAN_FLAG = re.compile(r"show_exact_location")
+# The old shared default (registered in ops_default_pin_register 2026-10-20) is never an ad's pin.
+_SAKAN_DEFAULTS = {(24.7173, 46.6753)}
+
+
+def _marker_when_flag_absent(page: str) -> dict:
+    if not page or _SAKAN_FLAG.search(page):
+        return {}
+    m = _SAKAN_MARKER.search(page)
+    if not m:
+        return {}
+    if (round(float(m.group(1)), 4), round(float(m.group(2)), 4)) in _SAKAN_DEFAULTS:
+        return {}
+    return pin_dict(m.group(1), m.group(2))
+
+
 def parse_page(url: str, page: str) -> dict[str, Any]:
     """Every fact this source publishes, read off one detail page. Pure — no network, so the
     offline barrier feeds it saved HTML and exercises this exact function."""
     out: dict[str, Any] = {"url": url, "ad_id": ad_id_from_url(url)}
+    # The ad's own marker («new google.maps.LatLng(…)»), read when the page says
+    # show_exact_location = true (owner 2026-10-19) — or, since Sakan's pages stopped printing that flag
+    # at all (measured 2026-10-22: 96939/96960 in حي الندوة carry two DIFFERENT markers 60 m apart and
+    # no flag anywhere), when the page is silent about it. A page that says `= false` is still the
+    # site's approximation and is not read; a marker shared by many ads (the old Riyadh centre) is
+    # stripped fleet-wide by strip_shared_default_pins().
+    out["pin"] = pin_from_html(page) or _marker_when_flag_absent(page)
 
     res: dict[str, Any] = {}
     crumbs: list[dict[str, Any]] = []
@@ -262,6 +292,10 @@ def parse_page(url: str, page: str) -> dict[str, Any]:
             continue
         if d.get("@type") == "SingleFamilyResidence":
             res = d
+        elif d.get("@type") == "RealEstateListing" and isinstance(d.get("about"), dict):
+            # 2026-09-30 redesign: the dwelling's block moved under `about`, typed by what it is
+            # (Apartment, Accommodation, SingleFamilyResidence, …), and `offers` is no longer printed.
+            res = d["about"]
         elif d.get("@type") == "BreadcrumbList":
             crumbs = [c for c in d.get("itemListElement") or [] if isinstance(c, dict)]
 
@@ -396,6 +430,14 @@ def _amenities(p: dict[str, Any], specs: dict[str, str]) -> dict[str, bool]:
     for svc in p.get("services") or []:            # «✓ خدمة …» rows: affirmative, structured
         if svc in _SERVICE_COL:
             struct[_SERVICE_COL[svc]] = True
+    # The floor-details block's labelled «المطابخ: N» count (normalize.kitchen_from_count): a stated
+    # count joins the prose side; a prose «بدون مطبخ» against a count ≥1 is a contradiction → dropped.
+    kc = normalize.kitchen_from_count(p.get("description"))
+    if kc is not None:
+        if "kitchen" in prose and prose["kitchen"] != kc:
+            prose.pop("kitchen")
+        else:
+            prose["kitchen"] = kc
     out = dict(prose)
     for k, v in struct.items():
         if k in out and out[k] != v:
@@ -518,6 +560,7 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     # PDPL: the spec table names the responsible EMPLOYEE and their mobile («اسم الموظف المسؤول»,
     # «هاتف الموظف المسؤول»), and additional_info is anon-readable — redact_capture drops those keys.
     row["additional_info"] = redact_capture({k: v for k, v in {
+        **(p.get("pin") or {}),
         "type_ar": p.get("type_ar"),
         "city_ar_raw": city_raw if city_raw != city_ar else None,
         "features": p.get("features") or None,
@@ -542,7 +585,17 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
 # PARSEABLE page» incident), and such a body would parse to an empty record and be filed as an
 # ordinary type/deal skip instead of a fetch failure. Requiring the listing's own JSON-LD block
 # keeps the two apart: no payload → DEFINITIVE miss, transport failure → retried.
-_LISTING_MARKER = "SingleFamilyResidence"
+#
+# Since the 2026-09-30 redesign every listing page carries a "RealEstateListing" block and only
+# villas still print "SingleFamilyResidence" (18 of 18 sampled pages on 2026-10-02; the /properties
+# list page prints neither). Requiring the old word alone turned every apartment, floor and office
+# into a fetch miss: 2,019 of 2,971 detail reads on 2026-10-02, a prune guard tripped every run, and
+# the daily direct check read 894 of 947 ads as UNKNOWN.
+_LISTING_MARKERS = ("RealEstateListing", "SingleFamilyResidence")
+
+
+def _is_listing(body: str) -> bool:
+    return any(m in body for m in _LISTING_MARKERS)
 
 
 def fetch_page(s: cc.Session, url: str, *, tries: int = 3) -> Optional[str]:
@@ -552,7 +605,7 @@ def fetch_page(s: cc.Session, url: str, *, tries: int = 3) -> Optional[str]:
         except Exception:
             r = None
         if r is not None and r.status_code == 200:
-            return r.text if _LISTING_MARKER in r.text else None
+            return r.text if _is_listing(r.text) else None
         if r is not None and r.status_code == 404:
             return None                           # definitively gone, not a transient block
         time.sleep(1.5 * (attempt + 1))           # 403/5xx/timeout: transient until proven otherwise
@@ -577,6 +630,13 @@ def fetch_page(s: cc.Session, url: str, *, tries: int = 3) -> Optional[str]:
 # on its title/description; anything else has no opinion. Because the death is a page that is not
 # the listing, every removal is also gated by an in-run POSITIVE CONTROL (a row this same run mapped
 # must still be served as itself), and it fails CLOSED: no control, no removal.
+# Owner 2026-10-20 («remove the dead ones, leave it for our lifecycle»). An expired Sakan ad keeps ITS OWN
+# canonical (/ar/property/details/<this id>-…) but loses the listing payload and prints the source's own
+# notice «هذا العقار لم يعد متاحاً» in a property-unavailable-notice block (measured on 94392, «هذا الإعلان قد
+# انتهت صلاحيته» on the photo). Without a payload the signal had no opinion, so those ads were never
+# retired and the app served them with a district border. The notice on the ad's own page, for this id,
+# is the source's direct statement that the listing is gone — still behind the in-run positive control.
+_UNAVAILABLE_NOTICE = re.compile(r'property-unavailable-notice|هذا العقار لم يعد متاح')
 _CANONICAL = re.compile(r'<link rel="canonical" href="https://sa\.sakan\.co/ar/'
                         r'(?:property/details/(\d+)-|properties/)')
 
@@ -587,8 +647,12 @@ def _signal_for(ad_id: str):
         if not m:
             return None
         if m.group(1) is None:
-            return "gone" if (moved and _LISTING_MARKER not in body) else None
-        if m.group(1) != ad_id or _LISTING_MARKER not in body:
+            return "gone" if (moved and not _is_listing(body)) else None
+        if m.group(1) != ad_id:
+            return None
+        if _UNAVAILABLE_NOTICE.search(body):
+            return "gone"                          # the source's own «لم يعد متاحاً» on this ad's own page
+        if not _is_listing(body):
             return None
         p = parse_page(f"{BASE}{DETAIL_PATH}{ad_id}-", body)
         state = (p.get("status") or "").strip()
@@ -689,7 +753,9 @@ def main() -> int:
             for tbl, rows in (("sakan_residential_listings", res),
                               ("sakan_commercial_listings", com)):
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
-                                    verify_gone=verify_gone)
+                                    verify_gone=verify_gone,
+                                    # owner 2026-10-20 «once we see it, remove it»: the registry's grace (1)
+                                    grace=policy_for("sakan").grace)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
                 else:

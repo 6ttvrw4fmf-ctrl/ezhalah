@@ -336,7 +336,10 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
     # ── floor / parking ──
     floor_no = _to_int(f.get("pt_floor"))
     garage_txt = (f.get("pt_garages") or "").strip()
-    parking = bool(garage_txt and garage_txt not in ("-", "—", "0"))
+    # pt_garages is jurash's ONE structured parking field: a printed garage → True, a printed «0» → False,
+    # an empty or «-» field is silence → NULL (🔬 AF engineer, 2026-10-14). It used to be bool(...), so
+    # 5 of 5 active ads with no garage field stored parking = False, «no» the source never said.
+    parking = parking_answer(garage_txt)
 
     # ── location ── city (Arabic) → English; region DERIVED from the city.
     city_ar = (f.get("city") or "").strip()
@@ -404,7 +407,23 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
         "photo_urls": _images(body),
         "additional_info": info,
     }
+    # Every other amenity has NO structured field on jurash; the ad's own «مكونات العقار» prose is the
+    # statement (law §2), yes-or-nothing: 15321317 «… صالة 3 غرف نوم مطبخ 4 دورات مياه …» stored kitchen
+    # NULL, and jurash scored 0 of 4 findable on 10-14 with kitchen missed on 3 of 5. Parking stays
+    # structured-only (above).
+    row.update(prose_answers(description))
     return row, category, gone
+
+
+_PROSE_COLS = ("kitchen", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance")
+
+
+def parking_answer(garage_txt: str) -> Optional[bool]:
+    return True if garage_txt and garage_txt not in ("-", "—", "0") else (False if garage_txt == "0" else None)
+
+
+def prose_answers(description: Optional[str]) -> dict[str, bool]:
+    return {c: v for c, v in normalize.prose_amenities(description, skip=("parking",)).items() if c in _PROSE_COLS}
 
 
 def _pin_sold_inactive(table: str, ad_numbers: list[str],

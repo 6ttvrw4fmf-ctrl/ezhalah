@@ -3,22 +3,42 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { colors, radius, cardShadow } from '@/theme/tokens';
+import { colors, radius } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
 import { derivedTotalEquation } from '@/data/listings';
-import { useI18n, t as tr, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
+import { useI18n, englishCatalogText, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
+import { freeTextEn } from '@/lib/freeTextEn';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish, attrDisplayLabel, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
+import { whenNear } from '@/lib/nearViewport';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
-import { afEvidence, type ActiveAf } from '@/lib/afEvidence';
+import { isStayLengthPriced, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
+import { monthlyLineText } from '@/lib/listingDisplay';
+
+// THE MONTHLY LINE UNDER EVERY YEARLY PRICE (owner 2026-10-26): «السعر المعلن 3,000 شهرياً» when the site quoted
+// per month (pool yearly at ×12), «≈ 3,000 شهرياً» (÷12) when it quoted per year. The text comes from the shared
+// price contract (listingDisplay.ts), so every surface prints the same words.
+function monthlyLine(listing: Listing, locale: 'ar' | 'en') {
+  const text = monthlyLineText(listing, locale);
+  if (text == null) return null;
+  return <Text style={card.pricePerMeter} numberOfLines={1} testID="card-monthly-line">{text}</Text>;
+}
+import { afEvidence, AMENITY_COL, type ActiveAf } from '@/lib/afEvidence';
+import { typeImg } from '@/theme/propertyIcons';
+import { GoldShineButton, GoldSurface } from './CardReveal';
+import { BuzzLayer } from './CardBuzzer';
+import { partyConfetti } from './ConfettiOverlay';
+import { inAppViewerHost } from '@/lib/inAppViewer';
+import { listingOpenUrl } from '@/lib/openListing';
 
 const IS_WEB = Platform.OS === 'web';
 
-// Feature key → (icon, EN label key) — the 2-column grid on the right side of the residential card.
+// Feature key → (icon, EN label key) — the wrapping amenities row on the listing card.
 // The label is run through t() so it localizes to Arabic. Order matters: most useful features first.
-const FEATURE_META: Array<{ key: keyof NonNullable<Listing['features']>; icon: any; label: string }> = [
+const AMENITY_BAG_IDS = new Set(['amenities', 'comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun', 'apartments', 'shops']);
+export const FEATURE_META: Array<{ key: keyof NonNullable<Listing['features']>; icon: any; label: string }> = [
   { key: 'parking',          icon: 'car-outline',           label: 'Parking' },
   { key: 'maid_room',        icon: 'person-outline',        label: 'Maid Room' },
   { key: 'elevator',         icon: 'arrow-up-circle-outline', label: 'Elevator' },
@@ -30,6 +50,7 @@ const FEATURE_META: Array<{ key: keyof NonNullable<Listing['features']>; icon: a
   { key: 'private_entrance', icon: 'walk-outline',          label: 'Private Entrance' },
   { key: 'air_conditioner',  icon: 'snow-outline',          label: 'Air Conditioning' },
   { key: 'optical_fibers',   icon: 'wifi-outline',          label: 'Fiber Internet' },
+  { key: 'majlis',           icon: 'people-outline',        label: 'Majlis room' },
   { key: 'water_supply',     icon: 'water-outline',         label: 'Water Supply' },
   { key: 'electricity',      icon: 'flash-outline',         label: 'Electricity' },
   { key: 'sanitation',       icon: 'shield-checkmark-outline', label: 'Sanitation' },
@@ -68,21 +89,23 @@ export function PopIn({ index, style, children }: { index: number; style?: any; 
   );
 }
 
-// Listing card. Two shapes:
-//  • "compact" (phone / default): a small horizontal row — image left, details right.
-//  • "grid" (web): a bigger vertical card — image on top, details below — that tiles across the
-//    screen in a wrap grid so the user barely scrolls. (user request.)
-// The rich residential card — design locked by the user. Three sections side-by-side on web:
-//   LEFT  : photo with rank badge + platform badge + source URL strip
-//   MIDDLE: type label, city/district title, price, RNPL pill, stat row (beds/baths/area/type/date)
-//   RIGHT : "Hosted on AQAR" panel + 2-column features grid + "+N More Features" expander
-// On phones the three stack vertically. Land/Camp/Building (no beds) gracefully drops the beds chip.
-// Aqar-only for now; other platforms can plug into the same shape once their scrapers land.
+// Photo-first card approved by the owner: a clear source-link photo, then compact details.
+// Prose stays hidden; every amenity and additional-information value is immediately visible.
+//
+// LAPTOP ROW (owner 2026-10-03: «the image is so big … for the laptop it should always be small»).
+// With `row` set the same card lays out as a list row: a small rounded photo on the inline-start
+// side, every detail beside it — about half the stacked height. 'roomy' (no ad pane beside the
+// results) keeps every amenity and additional-information value visible, wrapped. 'tight' (the pane
+// is beside the results, so the column is narrow) shrinks the photo again and holds the amenities
+// and the additional information to ONE truncated line each; a tap on those lines unfolds them.
+// Nothing is dropped in either mode, and the «مطابق لطلبك» strip is never truncated (R12A.1).
+// `row` undefined is the phone/tablet card, unchanged.
 export function ResultCard({
   listing,
   onOpen,
   rank,
   activeAf,
+  row,
 }: {
   listing: Listing;
   onOpen: () => void;
@@ -91,8 +114,27 @@ export function ResultCard({
   // The Advanced-Filter predicates the turn's search ran with (afActive(m.result.query)) — one
   // stable reference per results turn; the memo comparator in agent.tsx compares it by identity.
   activeAf?: ActiveAf;
+  row?: 'roomy' | 'tight';
 }) {
   const { t, isRTL, locale } = useI18n();
+  const tight = row === 'tight';
+  // 'tight' only: the two truncated secondary lines, unfolded by a tap on them.
+  const [unfolded, setUnfolded] = useState(false);
+  // THE PARTY IS FOR THE SITES THAT OPEN INSIDE EZHALAH (owner 2026-10-17: «whenever a user clicks on a
+  // listing I want this party confetti … on everything», then «your job is doing it for the 76 sites …
+  // the ones after I'll do it later»): on every layout — laptop roomy, laptop tight, phone — a press on
+  // the photo, the body or the gold button bumps `burst` and the golden buzzer + the screen-level
+  // confetti play, but ONLY when this listing opens inside Ezhalah (web, IN_APP_VIEWER_HOSTS). A card
+  // that opens a new tab or the native preview page opens exactly as before, with no party.
+  const [burst, setBurst] = useState(0);
+  // GOLD = OPENS INSIDE EZHALAH (owner 2026-10-17: «the golden frame only with the 76 … the rest silver»):
+  // the ring and the «اضغط هنا» strip are gold for a listing on the in-app viewer list, silver otherwise.
+  const inside = !!inAppViewerHost(listingOpenUrl(listing));
+  const tone: 'gold' | 'silver' = inside ? 'gold' : 'silver';
+  const partyHere = IS_WEB && inside;
+  // PRESS = OPEN. The ad opens first, synchronously inside the click (a delayed window.open would be
+  // popup-blocked); the buzzer is bumped second and is pure decoration.
+  const fire = () => { onOpen(); if (partyHere) { setBurst((b) => b + 1); partyConfetti(); } };
   // Evidence for the «مطابق لطلبك» strip: NEVER read from listing.features / listing.bathrooms (raw,
   // NULL-coerced) — only from listing.canon, the canonical row the predicate actually passed on.
   const evidence = useMemo(() => afEvidence(activeAf ?? [], listing.canon, t), [activeAf, listing.canon, t]);
@@ -153,16 +195,15 @@ export function ResultCard({
   // (dealapp "تاون هاوس", "ملحق علوي"…); for English-raw sources (aqar stores "Apartment") show the
   // source-matching Arabic via the clean mapping — never English on the card. Mapping stays filter-only.
   const typeLabel = arabicOrPlaceholder(
-    /[ء-ي]/.test(listing.type || '') ? listing.type : t(listing.cleanType ?? listing.type),
+    locale === 'en' ? englishCatalogText(listing.type || listing.cleanType || '') : /[ء-ي]/.test(listing.type || '') ? listing.type : t(listing.cleanType ?? listing.type),
     locale,
     TYPE_UNRESOLVED_AR,
   );
-  // desktop 3-column layout. Goes through useAtLeast so the FIRST client render reproduces the
+  // Responsive thumbnail sizing. Goes through useAtLeast so the FIRST client render reproduces the
   // server's answer (no window ⇒ compact); comparing the width inline here was the second half of
   // the React #418 P0 of 2026-08-21 — it differs only in style attributes, but React compares those
   // during hydration too, which is why the live page logged two errors and not one.
   const horizontal = useAtLeast(CARD_WIDE_BREAKPOINT);
-  const [expanded, setExpanded] = useState(false);
   const txtAlign = isRTL ? ('right' as const) : ('left' as const);
   const wDir = isRTL ? ('rtl' as const) : ('ltr' as const);
 
@@ -170,9 +211,21 @@ export function ResultCard({
   const allActive = (listing.features
     ? FEATURE_META.filter((m) => Boolean(listing.features?.[m.key]))
     : []);
-  const VISIBLE = 6;
-  const visible = expanded ? allActive : allActive.slice(0, VISIBLE);
-  const overflow = Math.max(0, allActive.length - VISIBLE);
+  // THE CARD LIGHTS UP WHAT THE USER ASKED FOR (owner 2026-10-05: «check mark and highlight — when the
+  // user gets the answer, the property card shows it»). Every feature the Advanced Filter asked for is
+  // drawn IN PLACE with a ✓ and the brand tint, and moved to the front of the grid; the bathrooms stat
+  // lights up the same way. Display-only: the set comes from the active answers, and a feature is only
+  // drawn at all when the listing itself carries it (the AF predicate is strict, so it always does).
+  const pickedFeatures = useMemo(() => {
+    // Every amenity-bag answer — the classic card and each themed card of the Apartments & Co-living group
+    // (owner handoff 2026-10-31) — writes q.amenities, so any of these ids may carry the picked keys.
+    const keys = (activeAf ?? []).filter((a) => AMENITY_BAG_IDS.has(a.id)).flatMap((a) => a.keys);
+    return new Set(keys.map((k) => (k === 'balcony' ? 'balcony_terrace' : AMENITY_COL[k] ?? k)));
+  }, [activeAf]);
+  const bathPicked = !!activeAf?.some((a) => a.id === 'bathrooms');
+  const visible = pickedFeatures.size
+    ? [...allActive.filter((f) => pickedFeatures.has(f.key)), ...allActive.filter((f) => !pickedFeatures.has(f.key))]
+    : allActive;
   // Land listings (amlakalahsa, etc.) legitimately have zero boolean amenities (no elevator/parking/
   // kitchen on raw land) while still having real street_width/parcel_number in additional_info — that
   // combo was rendering "No additional features listed" directly above a populated "Additional
@@ -181,10 +234,175 @@ export function ResultCard({
   // panels would otherwise be blank. (owner-reported 2026-09-13, found while re-testing amlakalahsa.)
   const hasAddlInfo = !!listing.additional_info?.some((r) => r && r.label && r.value);
 
+
+  // ─── LAPTOP PHOTO-FIRST CARD (owner 2026-10-11) ───────────────────────────────────────────────
+  // `row` is only ever set on the laptop (web, ≥1024px), so the phone/tablet card below is untouched.
+  // 'roomy' (nothing open beside the results) = this photo-first card. 'tight' (the ad pane is open beside) =
+  // the OLD compact row below, as it always was — «the layout changes» when a card is pressed (owner 2026-10-11).
+  // A big photo on top, then the price with the gold «اضغط هنا» button right across from it, the
+  // location, the type icon + rooms + size, the chips (the Advanced-Filter picks first, with a ✓),
+  // the source's own small facts, and the source's logo. Every value is still the listing's own:
+  // nothing is derived, and a value the source did not give renders nothing.
+  if (row === 'roomy') {
+    const photos = listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []);
+    const stay = isStayLengthPriced(listing.source);
+    const typeIcon = typeImg(listing.cleanType ?? '');
+    // PLAIN + SAME SIZE (owner 2026-10-11): every laptop card has the same fixed rows — one title line, one
+    // main line, ONE row of at most 3 chips (the Advanced-Filter picks come first) with a plain «+N».
+    // The white space under the chips holds the SOURCE's own key facts — age, facade, street width, plan number,
+    // usage — exactly as published, at most 3 on one fixed row (so every card stays the same size). A fact the
+    // source did not give is simply absent; nothing is derived or guessed.
+    const factRows = (listing.additional_info ?? []).filter((r) => r && r.label && r.value && !isBlankAttrValue(r.label, r.value));
+    const FACT_ORDER = [/age|عمر/i, /facade|الواجهة/i, /street|عرض الشارع|الشارع/i, /plan|المخطط/i, /usage|استخدام/i];
+    const lpFacts: Array<{ k: string; label: string; value: string }> = [];
+    for (const re of FACT_ORDER) {
+      const r = factRows.find((x) => re.test(`${x.key} ${x.label}`) && !lpFacts.some((f) => f.k === x.key));
+      if (r && lpFacts.length < 3) lpFacts.push({ k: r.key, label: enText(attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), locale), value: arAttrValue(r.label, r.value, locale) });
+    }
+    if (listedClean && lpFacts.length < 3) lpFacts.push({ k: 'listed', label: t('Added'), value: listedClean });
+    const CHIP_CAP = 3;
+    const shownFeats = visible.slice(0, CHIP_CAP);
+    const moreFeats = visible.length - shownFeats.length;
+    return (
+      // THE GOLD FRAME (owner 2026-10-17, «make the frame … golden shining like a buzzer … for all»): a
+      // thin shining gold ring around EVERY card, painted like the gold button; the card sits inside it.
+      <GoldSurface tone={tone} style={card.goldRing} testID="card-gold-frame">
+      <View testID={`card-listing-${listing.id}`} style={[card.wrap, card.lpWrap, { direction: wDir }]}>
+        <Pressable onPress={fire} accessibilityRole="link" accessibilityLabel={t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })} style={card.lpPhoto}>
+          <ListingPhoto photos={photos} style={card.photo} t={t} />
+          <View style={card.lpFade} pointerEvents="none" />
+          {rank ? (
+            <View style={card.rankBadge} pointerEvents="none">
+              <Text style={card.rankText}>#{rank}</Text>
+            </View>
+          ) : null}
+          {/* THE GOLD STRIP on the laptop photo-first card too (owner 2026-10-17: «for all»). */}
+          <GoldSurface tone={tone} style={card.lpPhotoFoot} pointerEvents="none" testID="card-gold-strip">
+            <Text style={card.lpPhotoFootTx}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
+            {listing.source_url ? <Text style={[card.lpPhotoFootTx, card.lpHost]} numberOfLines={1}>{sourceHost(listing.source)}</Text> : null}
+          </GoldSurface>
+        </Pressable>
+
+        <View style={card.lpBody}>
+          <View style={card.lpPriceRow}>
+            <View style={card.lpPriceCol}>
+              {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
+              {stay ? null : <Text style={[card.price, card.lpPrice]} numberOfLines={1}>{listingPrice(listing, locale)}</Text>}
+              {monthlyLine(listing, locale)}
+              {listing.discount ? (
+                <View style={card.discountRow} testID="card-discount">
+                  <Text style={card.discountOld} numberOfLines={1}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
+                  <View style={card.discountBadge}><Text style={card.discountBadgeTx}>{t('Discount {pct}%', { pct: listing.discount.pct })}</Text></View>
+                </View>
+              ) : null}
+            </View>
+            {listing.source_url ? (
+              <View style={card.lpCta}>
+                <GoldShineButton shine="css" onPress={fire} style={card.lpGold} testID="card-open-gold">
+                  <Text style={card.lpGoldTx}>{t('Click here 👆')}</Text>
+                </GoldShineButton>
+                <Text style={card.lpCtaNote}>{t('To confirm availability and details')}</Text>
+              </View>
+            ) : null}
+          </View>
+          {(listing.price === 'Price on request' || listing.priceIsDerived) && listing.pricePerMeter != null && listing.pricePerMeter > 1 ? (
+            <Text style={card.pricePerMeter} numberOfLines={1}>
+              {t('Price Per m²')} <Text style={card.pricePerMeterStrong}>{Number(listing.pricePerMeter).toLocaleString('en-US')} {t('SAR/m²')}</Text>
+            </Text>
+          ) : null}
+          {listing.priceIsDerived ? (() => {
+            const eq = derivedTotalEquation(listing.pricePerMeter, listing.area);
+            return eq ? (
+              <Text style={card.derivedTotalEquation} numberOfLines={1}>
+                {`${eq.perMeter.toLocaleString('en-US')} ${t('SAR/m²')} × ${eq.area.toLocaleString('en-US')} ${t('m²')} = ${eq.total.toLocaleString('en-US')} ${t('SAR')}`}
+              </Text>
+            ) : null;
+          })() : null}
+          {listing.priceIsDerived ? (
+            <Text style={card.derivedTotalNote} numberOfLines={1}>{t('Calculated from price per m² × area — not published by the source')}</Text>
+          ) : null}
+
+          <Text style={[card.title, card.lpTitle, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
+            {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
+          </Text>
+
+          {ratingVal != null ? (
+            <View style={card.ratingRow}>
+              <Ionicons name="star" size={13} color="#f5a623" />
+              <Text style={card.ratingText}>
+                {ratingVal}
+                {reviewsCount != null ? <Text style={card.ratingCount}>{`  (${t('{n} reviews', { n: reviewsCount })})`}</Text> : null}
+              </Text>
+            </View>
+          ) : null}
+          {listing.rent_now_pay_later ? <RnplBanner monthly={listing.rent_now_pay_later_monthly ?? undefined} source={listing.source} t={t} /> : null}
+
+          {/* The main filter line: the TYPE first (its own icon from the Filter), then rooms, baths, size. */}
+          <View style={card.statsRow}>
+            <View style={card.lpType}>
+              {typeIcon ? <Image source={typeIcon} style={card.lpTypeIcon} contentFit="contain" tintColor={colors.primary} /> : <Ionicons name="business-outline" size={16} color={colors.primary} />}
+              <Text style={card.lpTypeTx} numberOfLines={1}>{typeLabel}</Text>
+            </View>
+            {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
+            {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} picked={bathPicked} /> : null}
+            {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${t('m²')}`} small={t('Area')} /> : null}
+          </View>
+
+          {evidence.length > 0 ? (
+            <View style={card.afRow} testID="card-af-evidence">
+              <Text style={card.afLabel}>{t('Matches your request')}</Text>
+              {evidence.map((c, i) => (
+                <View key={`${c.id}:${i}`} style={card.afChip} testID={`card-af-evidence-${c.id}`}>
+                  <Ionicons name="checkmark-circle" size={12} color={colors.primary} />
+                  <Text style={card.afChipText}>{c.text}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          {shownFeats.length > 0 ? (
+            <View style={card.lpChips}>
+              {shownFeats.map((f) => {
+                const picked = pickedFeatures.has(f.key);
+                return (
+                  <View key={f.key} style={[card.lpChip, picked && card.lpChipPicked]} testID={picked ? `card-feature-picked-${f.key}` : undefined}>
+                    {picked ? <Ionicons name="checkmark" size={12} color={colors.onFill} /> : null}
+                    <Text style={[card.lpChipTx, picked && card.lpChipTxPicked]} numberOfLines={1}>{t(f.label)}</Text>
+                  </View>
+                );
+              })}
+              {moreFeats > 0 ? (
+                <View style={[card.lpChip, card.lpChipMore]}><Text style={card.lpChipTx}>{`+${moreFeats}`}</Text></View>
+              ) : null}
+            </View>
+          ) : null}
+
+          {lpFacts.length > 0 ? (
+            <View style={card.lpFacts} testID="card-lp-facts">
+              {lpFacts.map((f) => (
+                <Text key={f.k} style={card.lpFact} numberOfLines={1}>
+                  <Text style={[card.addlLabel, locale !== 'ar' && card.ltr]}>{f.label} </Text>
+                  <Text style={[card.addlValue, locale !== 'ar' && card.ltr]}>{f.value}</Text>
+                </Text>
+              ))}
+            </View>
+          ) : null}
+
+          <View style={card.lpFoot}>
+            <View style={card.hostHead}>
+              <View style={[card.hostBadge, card.lpBadge]}><SourceBadge source={listing.source} /></View>
+              <Text style={card.hostedOn}>{t('Hosted on {name}', { name: locale === 'en' ? englishCatalogText(sourceName(listing.source)) : t(sourceName(listing.source)) })}</Text>
+            </View>
+          </View>
+        </View>
+        <BuzzLayer burst={burst} />
+      </View>
+      </GoldSurface>
+    );
+  }
+
   return (
-    // Desktop (≥820px): 3 columns side-by-side. Mobile/narrow: STACK vertically (photo on top, then
-    // info, then features) — the row layout crammed all 3 columns into a phone width and broke badly.
-    // (user-reported: "look how it looks like in the phone, it's horrible".)
+    // Keep the linked photo above a content-sized body on every screen.
     // NOTE: the feedback row (thumbs/share) is NOT here — owner 2026-07-09 moved it to render ONCE per
     // results response, below the «تبي أعرض لك المزيد…» message (see agent.tsx + FeedbackRow.tsx).
     // testID carries the listing's own id so a live journey can hold THIS card to THIS listing's
@@ -192,29 +410,35 @@ export function ResultCard({
     // checkable if a rendered card can be identified in the DOM; matching strips to rows by position
     // is unsound, because a row that earns no chip renders no strip and silently shifts the rest.
     // Rendering-only: no style, no behaviour, and web-only `testID` becomes `data-testid`.
-    <View testID={`card-listing-${listing.id}`} style={[card.wrap, { flexDirection: horizontal ? 'row' : 'column' }]}>
-      {/* ─── photo block (full-width banner on mobile) ───── */}
-      <Pressable onPress={onOpen} style={[card.photoCol, horizontal ? card.photoColWide : card.photoColMobile]}>
+    <GoldSurface tone={tone} style={card.goldRing} testID="card-gold-frame">
+    <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow, { direction: wDir }]}>
+      {/* The whole photo keeps the existing source-listing action. */}
+      <Pressable onPress={fire} accessibilityRole="link" accessibilityLabel={t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })} style={[card.photoCol, row ? [card.photoColRow, tight && card.photoColTight] : horizontal ? card.photoColWide : card.photoColMobile]}>
         <ListingPhoto photos={(listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []))} style={card.photo} t={t} />
         {rank ? (
-          <View style={card.rankBadge} pointerEvents="none">
-            <Text style={card.rankText}>#{rank}</Text>
+          <View style={[card.rankBadge, row && card.rankBadgeRow]} pointerEvents="none">
+            <Text style={[card.rankText, row && card.rankTextRow]}>#{rank}</Text>
           </View>
         ) : null}
         {/* user request: removed the white "AQAR" pill that floated over the photo's top-right.
-            Source attribution still appears in the bottom strip and in the right-side panel. */}
+            Source attribution appears in the photo strip and the compact source row. */}
+        {/* THE GOLD STRIP (owner 2026-10-17): the «اضغط هنا» strip shines gold like the buzzer, on every card. */}
         {listing.source_url ? (
-          <View style={card.sourceStrip} pointerEvents="none">
-            <Text style={card.sourceText} numberOfLines={1}>{t(sourceName(listing.source)).toUpperCase()} · {sourceHost(listing.source)}</Text>
-            <Ionicons name="open-outline" size={11} color="#fff" />
-          </View>
+          <GoldSurface tone={tone} style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none" testID="card-gold-strip">
+            <Text style={[card.photoAction, row && card.photoActionRow]}>{t('Click here 👆')}</Text>
+            <Text style={[card.sourceText, row && card.sourceTextRow]} numberOfLines={row ? 1 : undefined}>{sourceHost(listing.source)}</Text>
+          </GoldSurface>
         ) : null}
       </Pressable>
 
+      <View style={row ? card.bodyRow : card.body}>
       {/* ─── property info ───────────────────────── */}
-      <Pressable onPress={onOpen} style={[card.midCol, horizontal && card.midColFlex]}>
-        <View style={card.typeRow}>
-          <Ionicons name="home-outline" size={13} color={colors.muted} />
+      <Pressable onPress={fire} style={[card.midCol, row && card.midColRow]}>
+        <View style={card.sourceRow}>
+          <View style={card.hostHead}>
+            <View style={card.hostBadge}><SourceBadge source={listing.source} /></View>
+            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: locale === 'en' ? englishCatalogText(sourceName(listing.source)) : t(sourceName(listing.source)) })}</Text>
+          </View>
           <Text style={card.typeLabel}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
         </View>
         {/* JUNK_LOCATION_TOKENS guard (2026-07-10 location-data-quality audit): city/district can
@@ -223,9 +447,22 @@ export function ResultCard({
             «الموقع غير محدد» instead of an empty title / a bare ", السعودية" — never blank, never
             the raw junk token. A present district with no city (or vice versa) is the normal,
             non-bug case and is untouched. */}
-        <Text style={[card.title, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
+        <View style={card.headline}>
+        <Text style={[card.title, tight && card.titleTight, { textAlign: txtAlign, writingDirection: wDir }]}>
           {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
         </Text>
+        {/* Stay-length platforms print NO price line (owner 2026-10-26): listingPrice() is '' for them. */}
+        {isStayLengthPriced(listing.source) ? null : <Text style={[card.price, row && card.priceRow, tight && card.priceTight]} numberOfLines={1}>{listingPrice(listing, locale)}</Text>}
+        {monthlyLine(listing, locale)}
+        </View>
+        {/* Source-published discount (owner 2026-10-19): the old price struck through + «خصم X٪»,
+            under the final price. Rendered only when the source showed one — see listingDiscountFrom(). */}
+        {listing.discount ? (
+          <View style={card.discountRow} testID="card-discount">
+            <Text style={card.discountOld} numberOfLines={1}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
+            <View style={card.discountBadge}><Text style={card.discountBadgeTx}>{t('Discount {pct}%', { pct: listing.discount.pct })}</Text></View>
+          </View>
+        ) : null}
         <View style={card.locRow}>
           <Ionicons name="location-outline" size={12} color={colors.primary} />
           <Text style={card.locText}>{place(cityAr) || LOCATION_UNRESOLVED_AR}, {t('Saudi Arabia')}</Text>
@@ -236,7 +473,7 @@ export function ResultCard({
             </View>
           ) : null}
         </View>
-        <Text style={card.price} numberOfLines={1}>{tPrice(listing.price)}</Text>
+
         {/* Source-published «سعر المتر», e.g. «سعر المتر 175 ر.س». Shown ONLY when the source printed
             no total/annual price — i.e. exactly the listings whose price line reads «السعر عند الطلب»
             — so it adds information where there was none and never competes with a real price.
@@ -313,8 +550,8 @@ export function ResultCard({
         ) : null)}
         <View style={card.statsRow}>
           {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
-          {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} /> : null}
-          {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${tr('m²')}`} small={t('Area')} /> : null}
+          {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} picked={bathPicked} /> : null}
+          {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${t('m²')}`} small={t('Area')} /> : null}
           <Stat icon="business-outline" big={typeLabel} small={t('Property Type')} />
           {listedClean ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
         </View>
@@ -344,43 +581,58 @@ export function ResultCard({
         ) : null}
       </Pressable>
 
-      {/* ─── features panel (full-width below info on mobile) ─ */}
-      <View style={[card.rightCol, horizontal ? card.rightColSide : card.rightColBottom]}>
-        <View style={card.hostHead}>
-          <SourceBadge source={listing.source} />
-          <View style={{ flex: 1 }}>
-            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: t(sourceName(listing.source)) })}</Text>
-            <Text style={card.hostHint} numberOfLines={2}>
-              {t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })}
+      {/* Amenities and additional information: full card width when stacked, under the facts in a
+          row. 'tight' holds each to one truncated line; tapping them unfolds the full values. */}
+      {tight ? (
+        <Pressable
+          onPress={() => setUnfolded((v) => !v)}
+          accessibilityRole="button"
+          accessibilityLabel={t(unfolded ? 'Show less' : 'See more')}
+          accessibilityState={{ expanded: unfolded }}
+          style={[card.rightCol, card.rightColRow]}
+        >
+          {visible.length > 0 ? (
+            <Text numberOfLines={unfolded ? undefined : 1} style={[card.oneLine, { textAlign: txtAlign, writingDirection: wDir }]}>
+              {visible.map((f) => (
+                <Text key={f.key} style={[card.featText, pickedFeatures.has(f.key) && card.featTextPicked]}>
+                  <Ionicons name={pickedFeatures.has(f.key) ? 'checkmark-circle' : f.icon} size={12} color={colors.primary} />{` ${t(f.label)}\u2003`}
+                </Text>
+              ))}
             </Text>
-          </View>
-        </View>
+          ) : hasAddlInfo ? null : (
+            <Text style={card.noFeat}>{t('No additional features listed')}</Text>
+          )}
+          <AdditionalInformationPanel listing={listing} t={t} locale={locale} oneLine unfolded={unfolded} />
+        </Pressable>
+      ) : (
+      <View style={[card.rightCol, row && card.rightColRow]}>
         {visible.length > 0 ? (
           <View style={card.featGrid}>
-            {visible.map((f) => (
-              <View key={f.key} style={card.featCell}>
-                <Ionicons name={f.icon} size={14} color={colors.primary} />
-                <Text style={card.featText} numberOfLines={1}>{t(f.label)}</Text>
-              </View>
-            ))}
+            {visible.map((f) => {
+              const picked = pickedFeatures.has(f.key);
+              return (
+                <View key={f.key} style={[card.featCell, picked && card.featCellPicked]} testID={picked ? `card-feature-picked-${f.key}` : undefined}>
+                  <Ionicons name={picked ? 'checkmark-circle' : f.icon} size={14} color={colors.primary} />
+                  <Text style={[card.featText, picked && card.featTextPicked]}>{t(f.label)}</Text>
+                </View>
+              );
+            })}
           </View>
         ) : hasAddlInfo ? null : (
           <Text style={card.noFeat}>{t('No additional features listed')}</Text>
         )}
-        {overflow > 0 ? (
-          <Pressable onPress={() => setExpanded((x) => !x)} style={card.moreBtn}>
-            <Text style={card.moreText}>
-              {expanded ? t('Show fewer features') : t('+{n} More Features', { n: overflow })}
-            </Text>
-            <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color={colors.primary} />
-          </Pressable>
-        ) : null}
         {/* Wasalt-only "Additional Information" panel — Property usage / Age / Facade / Street /
             Ad source / Plan number / Land number, etc. Aqar rows have additional_info = null and
             the panel is hidden (Aqar's card stays exactly as it was). (user request 2026-06.) */}
         <AdditionalInformationPanel listing={listing} t={t} locale={locale} />
+
       </View>
+      )}
+      </View>
+      {/* the golden-buzzer party on EVERY card — laptop tight row and phone alike (owner 2026-10-17) */}
+      <BuzzLayer burst={burst} />
     </View>
+    </GoldSurface>
   );
 }
 
@@ -449,11 +701,60 @@ const FREE_TEXT_PROSE_LABELS = new Set([
 // app — production rendered a blank white page for any search containing such a listing. The
 // boundary fix in remote.ts is the root-cause fix; String() here means no future caller (or a
 // newly-added shape on another platform) can turn one odd source value into a blank screen again.
-function arAttrValue(label: string, value: string, locale: string): string {
+// English UI: an Arabic label the catalog does not know is translated, never printed in Arabic.
+const enText = (s: string, locale: string) => (locale === 'en' ? freeTextEn(s) : s);
+
+// A value that says nothing is a field the source left silent, in both languages: «.», «-», «/» (the card printed
+// «Other obligations on the property: .»), and a street width of 0 («Street width 0 m»). Hidden, never printed.
+export function isBlankAttrValue(label: unknown, value: unknown): boolean {
+  const v = String(value ?? '').trim();
+  if (!v || /^[\s.\-–—_/\\,،:;·*]+$/.test(v)) return true;
+  return /street.*width|عرض الشارع/i.test(String(label ?? '')) && /^0+(?:\.0+)?\s*(?:m|متر|م)?$/i.test(v);
+}
+
+export function arAttrValue(label: string, value: string, locale: string): string {
   const v = String(value ?? '').trim();
   if (!v) return value;
   const ll = String(label ?? '').trim().toLowerCase();
   const lv = v.toLowerCase();
+  // A machine timestamp («2026-07-16T13:09:02+03:00») reads as the card's other dates do: «16/07/2026» (the
+  // calendar day the source wrote — no time-zone shift).
+  const iso = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.exec(v);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  if (locale === 'en') {
+    // Translate finite source enums in either direction without changing the stored fact.
+    const known = Object.entries(AR_ENUM[ll] ?? {}).find(([, ar]) => ar === v);
+    if (known) return known[0].replace(/-/g, ' ');
+    if (v === 'نعم') return 'Yes';
+    if (v === 'لا') return 'No';
+    if (ll === 'facade') {
+      const directions: Record<string, string> = { شرق: 'East', شرقية: 'East', غرب: 'West', غربية: 'West', شمال: 'North', شمالية: 'North', جنوب: 'South', جنوبية: 'South' };
+      const parts = v.split(/[\s-]+/);
+      if (parts.every(part => directions[part])) return parts.map(part => directions[part]).join(' ');
+    }
+    if (/street.*width|عرض الشارع/i.test(ll)) return v.replace(/^(\d+(?:\.\d+)?)\s*(?:متر|م)$/u, '$1 m');
+    if (ll === 'age' || ll === 'building age (years)') {
+      if (v === 'جديد') return 'New';
+      if (v === 'أقل من سنة') return 'Less than 1 year';
+      if (v === 'سنة واحدة' || v === 'سنة' || v === 'سنه') return '1 year';
+      if (/^اكثر من عشر سنوات$/.test(v)) return 'Over 10 years';
+      if (v === 'سنتان') return '2 years';
+      const years = /^(أكثر من )?(\d+) (?:سنوات|سنة)$/.exec(v);
+      if (years) return `${years[1] ? 'Over ' : ''}${years[2]} years`;
+    }
+    if (ll === 'amenities' || ll === 'property services' || ll === 'قنوات العقار' || ll === 'خدمات العقار' || ll === 'الإلتزامات على العقار' || ll === 'الضمانات ومدتها') {
+      const aliases: Record<string, string> = { موقف: 'Parking', الكهرباء: 'Electricity', المياه: 'Water Supply', الماء: 'Water Supply', 'الصرف الصحي': 'Sanitation', مياه: 'Water Supply', كهرباء: 'Electricity', 'صرف صحي': 'Sanitation' };
+      return v.split(/[،,]/).map(item => aliases[item.trim()] ?? freeTextEn(englishCatalogText(item.trim()))).join(', ');
+    }
+    if (['street', 'address', 'city', 'district'].includes(ll)) return translitPlace(v);
+    // a sentence («حي X بمدينة Y مساحة الوحدة…»), not a name
+    if (ll === 'deed location') return freeTextEn(v);
+    // therc's «32,000 ر.س / yearly»: the Arabic currency mark is the only Arabic in it.
+    if (/ر\.س/.test(v)) return v.replace(/\s*ر\.س\s*/g, ' SAR ').replace(/\s+/g, ' ').trim();
+    // Last word: whatever the catalog does not know is translated, never printed in Arabic on an English card
+    // («2566/أ» → «2566/A»; owner 2026-10-29: «everything must be translated to English»).
+    return freeTextEn(englishCatalogText(v));
+  }
   if (AR_YESNO[lv]) return AR_YESNO[lv];                                   // Electricity/Water/booleans
   if (ll === 'age') {
     if (lv === 'new') return 'جديد';
@@ -487,115 +788,199 @@ function arAttrValue(label: string, value: string, locale: string): string {
 // Render Wasalt's "Additional Information" rows on the card. Shows first 4 rows, with a
 // "See more" toggle that reveals the rest. Hidden entirely for Aqar (and for any Wasalt row
 // where the field hasn't been backfilled yet). Mirrors the on-site Wasalt panel design.
-function AdditionalInformationPanel({ listing, t, locale }: { listing: Listing; t: (k: string, p?: any) => string; locale: string }) {
+function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
+  listing: Listing; t: (k: string, p?: any) => string; locale: string;
+  /** Laptop 'tight' row: the same rows as one truncated line (the card unfolds it on tap). */
+  oneLine?: boolean; unfolded?: boolean;
+}) {
   const rows = listing.additional_info;
-  const [open, setOpen] = useState(false);
   if (!rows || rows.length === 0) return null;
-  // Defensive cap: even if the scraper later expands the field set, the UI stays tidy.
-  const all = rows.filter((r) => r && r.label && r.value);
+  // Preserve the existing valid-row filter; all rows are visible without an expander.
+  const all = rows.filter((r) => r && r.label && r.value && !isBlankAttrValue(r.label, r.value));
   if (all.length === 0) return null;
-  const visible = open ? all : all.slice(0, 4);
+  const visible = all;
+  if (oneLine) {
+    return (
+      <Text numberOfLines={unfolded ? undefined : 1} style={[card.oneLine, locale === 'ar' ? card.oneLineRtl : card.oneLineLtr]}>
+        {visible.map((r) => (
+          <Text key={r.key}>
+            <Text style={[card.addlLabel, locale !== 'ar' && card.ltr]}>{enText(attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), locale)} </Text>
+            <Text style={[card.addlValue, locale !== 'ar' && card.ltr]}>{arAttrValue(r.label, r.value, locale)}</Text>
+            {'\u2003'}
+          </Text>
+        ))}
+      </Text>
+    );
+  }
   return (
     <View style={card.addlPanel}>
-      <Text style={card.addlTitle}>{t('Additional Information')}</Text>
       <View style={card.addlGrid}>
         {visible.map((r) => (
           <View key={r.key} style={card.addlCell}>
             {/* The source's own Arabic `key` outranks the placeholder — see attrDisplayLabel. */}
-            <Text style={card.addlLabel}>{attrDisplayLabel(t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)}</Text>
-            <Text style={card.addlValue} numberOfLines={2}>{arAttrValue(r.label, r.value, locale)}</Text>
+            <Text style={[card.addlLabel, locale !== 'ar' && card.ltr]}>{enText(attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), locale)}</Text>
+            <Text style={[card.addlValue, locale !== 'ar' && card.ltr]}>{arAttrValue(r.label, r.value, locale)}</Text>
           </View>
         ))}
       </View>
-      {all.length > 4 ? (
-        <Pressable onPress={() => setOpen((x) => !x)} style={card.addlMoreBtn}>
-          <Text style={card.addlMoreText}>{open ? t('See less') : t('See more')}</Text>
-          <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={14} color={colors.primary} />
-        </Pressable>
-      ) : null}
+
     </View>
   );
 }
 
-// Source-aware brand badge — same square shape for every platform, just swaps the logo art.
-// Both PNGs are pre-baked with their own background + rounded shape, so contentFit="contain"
-// shows the whole logo without halos. Defaults to Aqar (the original source) for unknown values.
-// (user request: replace Aqar with Wasalt cleanly, both rendered identical shape.)
-const AQAR_LOGO = require('../../assets/images/aqar-logo.png');
-const WASALT_LOGO = require('../../assets/images/wasalt-logo.png');
-const ALDARIM_LOGO = require('../../assets/images/aldarim.png');
-const AQARGATE_LOGO = require('../../assets/images/aqargate-logo.png');
-const ALHOSHAN_LOGO = require('../../assets/images/alhoshan.png');
-const HAJER_LOGO = require('../../assets/images/hajer-logo.png');
-const SANADAK_LOGO = require('../../assets/images/sanadak-logo.png');
-const EASTABHA_LOGO = require('../../assets/images/eastabha-logo.png');
+// Original brand artwork shared with the website picker. Source aliases remain explicit below.
+const AQAR_LOGO = require('../../assets/images/platform-logos/sa-aqar-fm.png');
+const WASALT_LOGO = require('../../assets/images/platform-logos/wasalt-sa.png');
+const ALDARIM_LOGO = require('../../assets/images/platform-logos/aldarim-sa.png');
+const AQARGATE_LOGO = require('../../assets/images/platform-logos/aqargate-com.png');
+const ALHOSHAN_LOGO = require('../../assets/images/platform-logos/alhoshan-sa.png');
+const HAJER_LOGO = require('../../assets/images/platform-logos/hajerhouses-com.png');
+const SANADAK_LOGO = require('../../assets/images/platform-logos/sanadak-sa.png');
+const EASTABHA_LOGO = require('../../assets/images/platform-logos/eastabha-sa.png');
 const AQARCITY_LOGO = require('../../assets/images/aqarcity-logo.png');
-const RAGHDAN_LOGO = require('../../assets/images/raghdan.png');
-const EAQARTABUK_LOGO = require('../../assets/images/eaqartabuk.png');
-const SATEL_LOGO = require('../../assets/images/satel.png');
+const RAGHDAN_LOGO = require('../../assets/images/platform-logos/raghdan-sa.png');
+const EAQARTABUK_LOGO = require('../../assets/images/platform-logos/eaqartabuk-com.png');
+const SATEL_LOGO = require('../../assets/images/platform-logos/satel-sa.png');
 const SADIN_LOGO = require('../../assets/images/sadin.png');
 const TOOR_LOGO = require('../../assets/images/toor.png');
-const MUSTQR_LOGO = require('../../assets/images/mustaqr.png');
+const MUSTQR_LOGO = require('../../assets/images/platform-clean/mustqr.png');
 const RAMZALQASIM_LOGO = require('../../assets/images/ramzalqassim.png');
-const FURSAGHYR_LOGO = require('../../assets/images/fursaghyr.png');
-const JAZWTN_LOGO = require('../../assets/images/jazan-watan.png');
-const MUKTAMEL_LOGO = require('../../assets/images/muktamel.png');
-const MIZLAJ_LOGO = require('../../assets/images/mizlaj.png');
+const FURSAGHYR_LOGO = require('../../assets/images/platform-logos/fursaghyr-com.png');
+const JAZWTN_LOGO = require('../../assets/images/platform-logos/jazwtn-sa.png');
+const MUKTAMEL_LOGO = require('../../assets/images/platform-logos/muktamel-com.png');
+const MIZLAJ_LOGO = require('../../assets/images/platform-logos/mizlaj-com-sa.png');
 const DEALAPP_LOGO = require('../../assets/images/dealapp.png');
-const GATHERN_LOGO = require('../../assets/images/gathern.png');
-const OCTOBER_LOGO = require('../../assets/images/october.png');
-const ARKAAN_LOGO = require('../../assets/images/arkaan.png');
-const ABRALOSOL_LOGO = require('../../assets/images/abralosol.png');
-const THERC_LOGO = require('../../assets/images/therc.png');
-const RAWASIDARK_LOGO = require('../../assets/images/rawasidark.png');
-const AOUJ_LOGO = require('../../assets/images/aouj.png');
-const AQARATIKOM_LOGO = require('../../assets/images/aqaratikom.png');
-const BAHADHABAB_LOGO = require('../../assets/images/bahadhabab.png');
-const ALOBID_LOGO = require('../../assets/images/alobid.png');
-const ABWBNA_LOGO = require('../../assets/images/abwbna.png');
-const REMAL_LOGO = require('../../assets/images/remal.png');
+const GATHERN_LOGO = require('../../assets/images/platform-logos/gathern-co.png');
+const OCTOBER_LOGO = require('../../assets/images/platform-logos/1october-com-sa.png');
+const ARKAAN_LOGO = require('../../assets/images/platform-logos/arkaanalaqar-com.png');
+const ABRALOSOL_LOGO = require('../../assets/images/platform-logos/abralosol-com.png');
+const THERC_LOGO = require('../../assets/images/platform-logos/therc-sa.png');
+const RAWASIDARK_LOGO = require('../../assets/images/platform-logos/rawasi-dark-com.png');
+const AOUJ_LOGO = require('../../assets/images/platform-logos/aoujestates-com.png');
+const AQARATIKOM_LOGO = require('../../assets/images/platform-logos/nawait-sa.png');
+const BAHADHABAB_LOGO = require('../../assets/images/platform-logos/bahadhabab-res-com.png');
+const ALOBID_LOGO = require('../../assets/images/platform-logos/alobidoffice-com.png');
+const ABWBNA_LOGO = require('../../assets/images/platform-logos/abwbna-com.png');
+const REMAL_LOGO = require('../../assets/images/platform-logos/remalre-com.png');
 const AMAALL_LOGO = require('../../assets/images/amaall.png');
 const AQARALSAUDIA_LOGO = require('../../assets/images/aqaralsaudia.png');
-const SUWAR_LOGO = require('../../assets/images/suwar.png');
-const GUDAI_LOGO = require('../../assets/images/gudai.png');
-const SAFERA_LOGO = require('../../assets/images/safera.png');
+const SUWAR_LOGO = require('../../assets/images/platform-logos/suwar-sa.png');
+const GUDAI_LOGO = require('../../assets/images/platform-logos/gudai-inblaj-net.png');
+const SAFERA_LOGO = require('../../assets/images/platform-logos/safera-inblaj-net.png');
 const ALHUMAIDAN_LOGO = require('../../assets/images/alhumaidan.png');
-const AQARNAJRAN_LOGO = require('../../assets/images/aqarnajran.png');
-const FAHADALSHAHRI_LOGO = require('../../assets/images/fahadalshahri.png');
-const COMPOUNDIN_LOGO = require('../../assets/images/compoundin.png');
+const AQARNAJRAN_LOGO = require('../../assets/images/platform-logos/aqarnajran-com.png');
+const FAHADALSHAHRI_LOGO = require('../../assets/images/platform-clean/maqam.png');
+const COMPOUNDIN_LOGO = require('../../assets/images/platform-logos/compoundin-com.png');
 const WSLNAA_LOGO = require('../../assets/images/wslnaa.png');
-const RAKEZ_LOGO = require('../../assets/images/rakez.png');
-const AKARIYOUN_LOGO = require('../../assets/images/akariyoun.png');
-// NEUTRAL placeholder for platforms whose own marks the owner is still supplying — today the 35
-// onboarded 2026-09-24 (batch 36) plus Al Sidra of 2026-09-21. It is a plain building glyph
-// and belongs to no company. The branches below MUST
-// exist even while they render this: the fallback at the end of SourceBadge returns عقار's logo,
-// so a missing branch stamps another company's mark on their listings — the misattribution the
-// owner called a legal problem, not a cosmetic one.
-const MOFTAH_LOGO = require('../../assets/images/moftah.png');
-const MASAR_LOGO = require('../../assets/images/masar.png');
-const GOMENASSAT_LOGO = require('../../assets/images/gomenassat.png');
-const SAKAN_LOGO = require('../../assets/images/sakan.png');
-const BOSSBIH_LOGO = require('../../assets/images/bossbih.png');
-const ALSHAWAF_LOGO = require('../../assets/images/alshawaf.png');
-const IALQARAWI_LOGO = require('../../assets/images/ialqarawi.png');
-const ALJASSIM_LOGO = require('../../assets/images/aljassim.png');
-const ALMOTMKENAH_LOGO = require('../../assets/images/almotmkenah.png');
+const RAKEZ_LOGO = require('../../assets/images/platform-logos/rakez-sa.png');
+const AKARIYOUN_LOGO = require('../../assets/images/platform-logos/akariyoun-sa.png');
+// Owner-supplied logos replace the former generic office placeholders.
+const MOFTAH_LOGO = require('../../assets/images/platform-logos/moftah-aleaqar-com.png');
+const MASAR_LOGO = require('../../assets/images/platform-logos/masaraqarat-com.png');
+const GOMENASSAT_LOGO = require('../../assets/images/platform-clean/menassat.png');
+const SAKAN_LOGO = require('../../assets/images/platform-logos/sa-sakan-co.png');
+const BOSSBIH_LOGO = require('../../assets/images/platform-logos/bossbihoffice-com-sa.png');
+const ALSHAWAF_LOGO = require('../../assets/images/platform-logos/alshawaf-com-sa.png');
+const IALQARAWI_LOGO = require('../../assets/images/platform-logos/ialqarawi-com.png');
+const ALJASSIM_LOGO = require('../../assets/images/platform-logos/aljassimaqar-com.png');
+const ALMOTMKENAH_LOGO = require('../../assets/images/platform-logos/almotmkenah-com.png');
 const NUFOUTH_LOGO = require('../../assets/images/nufouth.png');
-const PLATFORM_PLACEHOLDER_LOGO = require('../../assets/images/platform-placeholder.png');
-const KSAAQAR_LOGO = require('../../assets/images/ksaaqar.png');
-const SADIQELTAJER_LOGO = require('../../assets/images/sadiq-eltajer.png');
-const AMLAKALAHSA_LOGO = require('../../assets/images/amlakalahsa.png');
+const ALSIDRA_LOGO = require('../../assets/images/platform-logos/alsidra.png');
+const SHATRI_LOGO = require('../../assets/images/platform-logos/shatri.png');
+const ALQASEM_LOGO = require('../../assets/images/platform-logos/alqasem.png');
+const FKRALEMAR_LOGO = require('../../assets/images/platform-logos/fkralemar.png');
+const WADOD_LOGO = require('../../assets/images/platform-logos/wadod.png');
+const ALMUTEB_LOGO = require('../../assets/images/platform-clean/almuteb.png');
+const AALBARRAK_LOGO = require('../../assets/images/platform-logos/aalbarrak.png');
+const ALRIFAI_LOGO = require('../../assets/images/platform-clean/alrifai-small.png');
+const SODASYAT_LOGO = require('../../assets/images/platform-logos/sodasyat.png');
+const HASAAD_LOGO = require('../../assets/images/platform-logos/hasaad.png');
+const AQARALRIYADH_LOGO = require('../../assets/images/platform-logos/aqaralriyadh.png');
+const SNAM_LOGO = require('../../assets/images/platform-logos/snam.png');
+const JAWHER_LOGO = require('../../assets/images/platform-logos/jawher.png');
+const M3TMD_LOGO = require('../../assets/images/platform-logos/m3tmd.png');
+const SENAN_LOGO = require('../../assets/images/platform-logos/senan.png');
+const YAMEEN_LOGO = require('../../assets/images/platform-logos/yameen.png');
+const ALBDAH_LOGO = require('../../assets/images/platform-logos/albdah.png');
+const EYDAH_LOGO = require('../../assets/images/platform-logos/eydah.png');
+const TAMYAZ_LOGO = require('../../assets/images/platform-logos/tamyaz.png');
+const HAZIM_LOGO = require('../../assets/images/platform-logos/hazim.png');
+const VILLASSA_LOGO = require('../../assets/images/platform-logos/villassa.png');
+const MARKSA_LOGO = require('../../assets/images/platform-logos/marksa.png');
+const LIVINGCOMPOUND_LOGO = require('../../assets/images/platform-logos/livingcompound.png');
+const AZURE_LOGO = require('../../assets/images/platform-logos/azure.png');
+const EXPATTRUSTED_LOGO = require('../../assets/images/platform-logos/expattrusted.png');
+const FLOW_LOGO = require('../../assets/images/platform-clean/flow.png');
+const SQUARES_LOGO = require('../../assets/images/platform-logos/squares.png');
+const RAWAF_LOGO = require('../../assets/images/platform-logos/rawaf.png');
+const MACSAIB_LOGO = require('../../assets/images/platform-logos/macsaib.png');
+const ARSHGLOBAL_LOGO = require('../../assets/images/platform-logos/arsh.png');
+const SUPEROFFICE_LOGO = require('../../assets/images/platform-logos/superoffice.png');
+const MAKTAB_LOGO = require('../../assets/images/platform-logos/maktab.png');
+const WAJAF_LOGO = require('../../assets/images/platform-logos/wajaf.png');
+const ALBUKAERI_LOGO = require('../../assets/images/platform-logos/albukaeri.png');
+const RYADAH_LOGO = require('../../assets/images/platform-logos/ryadah.png');
+const SQCC_LOGO = require('../../assets/images/platform-logos/sqcc.png');
+const DARAA_LOGO = require('../../assets/images/platform-logos/daraa.png');
+const TAWIA_LOGO = require('../../assets/images/platform-logos/tawia.png');
+const MANZO_LOGO = require('../../assets/images/platform-logos/manzo.png');
+const EIGHTFLOOR_LOGO = require('../../assets/images/platform-logos/eightfloor.png');
+const HOLOUL_LOGO = require('../../assets/images/platform-logos/holoul.png');
+const NAFITHH_LOGO = require('../../assets/images/platform-logos/nafithh.png');
+const MOBASHER_LOGO = require('../../assets/images/platform-logos/mobasher.png');
+const MUAJARH_LOGO = require('../../assets/images/platform-logos/muajarh.png');
+const DALLALI_LOGO = require('../../assets/images/platform-logos/dallali.png');
+const MAQAMCO_LOGO = require('../../assets/images/platform-logos/maqam.png');
+const EARTHAPP_LOGO = require('../../assets/images/platform-logos/earthapp.png');
+const NAWAFETH_LOGO = require('../../assets/images/platform-logos/nawafeth.png');
+const REMAX_LOGO = require('../../assets/images/platform-logos/remaxsa.png');
+const QMRA_LOGO = require('../../assets/images/platform-logos/qmra.png');
+const ALAJLAN_LOGO = require('../../assets/images/platform-logos/alajlan.png');
+const EGO_LOGO = require('../../assets/images/platform-logos/ego.png');
+const SAFA_LOGO = require('../../assets/images/platform-logos/safa.png');
+const DWELLEO_LOGO = require('../../assets/images/platform-logos/dwelleo-sa.png');
+const MUHAYSINI_LOGO = require('../../assets/images/platform-logos/aqaralmuhaysini-com.png');
+const TUBA_LOGO = require('../../assets/images/platform-logos/tuba-com-sa.png');
+const NOFODH_LOGO = require('../../assets/images/platform-logos/nofodh-sa.png');
+const AQALEMHAJER_LOGO = require('../../assets/images/platform-clean/aqalemhajer.png');
+const WAHADAT_LOGO = require('../../assets/images/platform-logos/wahadat-sa.png');
+const ASHAB_LOGO = require('../../assets/images/platform-logos/ashab-sa.png');
+const REINVEST_LOGO = require('../../assets/images/platform-logos/reinvest-sa.png');
+const SIRDAB_LOGO = require('../../assets/images/platform-logos/marketplace-sirdab-co.png');
+const SOKOK_LOGO = require('../../assets/images/platform-logos/sokok-sa.png');
+const ABAAD_LOGO = require('../../assets/images/platform-logos/app-abaadapp-sa.png');
+const ALSAEDAN_LOGO = require('../../assets/images/alsaedan.png');
+const SAKANI_LOGO = require('../../assets/images/sakani.png');
+const SUKNA_LOGO = require('../../assets/images/platform-logos/sukna-app.png');
+const DARYUSUF_LOGO = require('../../assets/images/platform-logos/daryusuf-com.png');
+const EILMALRIYADA_LOGO = require('../../assets/images/eilmalriyada.png');
+const GOLDENDEAL_LOGO = require('../../assets/images/platform-logos/goldendeal-sa.png');
+const EBRIZA_LOGO = require('../../assets/images/platform-logos/ebriza-com-sa.png');
+const SHOMOU_LOGO = require('../../assets/images/platform-logos/shomoalaqar-com-sa.png');
+// Haraj: official header artwork, collected 2026-10-18 UTC.
+const HARAJ_LOGO = require('../../assets/images/platform-logos/haraj.png');
+const VMKSA_LOGO = require('../../assets/images/platform-logos/vm-ksa-com.png');
+const IBAAX_LOGO = require('../../assets/images/platform-logos/ibaax-sa.png');
+const THOUSAND_LOGO = require('../../assets/images/platform-logos/1000-com-sa.png');
+const RAZRE_LOGO = require('../../assets/images/platform-clean/raz.png');
+const MAQRAT_LOGO = require('../../assets/images/platform-clean/maqrat.png');
+const OPENSOOQ_LOGO = require('../../assets/images/platform-logos/sa-opensooq-com.png');
+const JUSTSA_LOGO = require('../../assets/images/platform-logos/just-sa.png');
+const MANAFE_LOGO = require('../../assets/images/platform-logos/manafe-com-sa.png');
+const RIGHTCOMPOUND_LOGO = require('../../assets/images/platform-logos/rightcompound-com.png');
+const KSAAQAR_LOGO = require('../../assets/images/platform-logos/ksaaqar-com.png');
+const SADIQELTAJER_LOGO = require('../../assets/images/platform-logos/sadiq-eltajer-sa.png');
+const AMLAKALAHSA_LOGO = require('../../assets/images/platform-logos/amlakalahsa-com.png');
 const ALTA_LOGO = require('../../assets/images/alta.png');
-const SHMOUALSHMAL_LOGO = require('../../assets/images/shmoualshmal.png');
+const SHMOUALSHMAL_LOGO = require('../../assets/images/platform-logos/shmoua-alshmal-com.png');
 const AWAL_LOGO = require('../../assets/images/awal.png');
-const AZDAD_LOGO = require('../../assets/images/azdad.png');
-const ALKHAAS_LOGO = require('../../assets/images/alkhaas.png');
-const ABEEA_LOGO = require('../../assets/images/abeea.png');
-const JURASH_LOGO = require('../../assets/images/jurash.png');
+const AZDAD_LOGO = require('../../assets/images/platform-logos/azdadalaqaria-com.png');
+const ALKHAAS_LOGO = require('../../assets/images/platform-logos/alkhaas-net.png');
+const ABEEA_LOGO = require('../../assets/images/platform-logos/abeea-com-sa.png');
+const JURASH_LOGO = require('../../assets/images/platform-logos/jurash-sa.png');
 const ALNOKHBA_LOGO = require('../../assets/images/alnokhba.png');
-const SOUQ24_LOGO = require('../../assets/images/souq24.png');
-const ERAPULSE_LOGO = require('../../assets/images/erapulse.png');
+const SOUQ24_LOGO = require('../../assets/images/platform-logos/24-com-sa.png');
+const ERAPULSE_LOGO = require('../../assets/images/platform-logos/erapulse-sa.png');
 const NOWAISIRY_LOGO = require('../../assets/images/nowaisiry.png');
 // Card hero photo with graceful fallback. Some sources (e.g. aqarcity) carry photo URLs that have
 // been deleted on their CDN and 302→/notfound, or are only published as thumbnails — listing one
@@ -620,9 +1005,19 @@ function ListingPhoto({ photos, style, t }: { photos: string[]; style: any; t: (
   //
   // The probe costs one extra request per candidate; the browser cache then serves the <img>
   // render for free, and a URL that loads is never probed twice (idx stops advancing).
+  //
+  // ONLY ONCE THE CARD IS NEAR THE SCREEN (2026-10-06). The <img> is lazy, but this probe was not:
+  // «عرض المزيد» 100 → 500 mounts ~400 cards below the fold and every one of them downloaded its
+  // photo at once (measured on a phone profile: ~325 photo requests averaging 200–470 KB, queued
+  // in front of the photos actually on screen). `near` holds the probe until the card is within
+  // NEAR_MARGIN of view (src/lib/nearViewport.ts); a blocked / 404 / deleted photo still ends at
+  // the next photo or the placeholder, just when the card is about to be seen.
+  const box = useRef<View>(null);
+  const [near, setNear] = useState(!IS_WEB);
+  useEffect(() => (near ? undefined : whenNear(box.current, () => setNear(true))), [near]);
   const key = photos.join('|');
   useEffect(() => {
-    if (!IS_WEB || typeof window === 'undefined') return;
+    if (!IS_WEB || !near || typeof window === 'undefined') return;
     const uri = photos[idx];
     if (!uri) return;
     let cancelled = false;
@@ -632,30 +1027,33 @@ function ListingPhoto({ photos, style, t }: { photos: string[]; style: any; t: (
     probe.onerror = () => { if (!cancelled) setIdx((i) => (i === idx ? i + 1 : i)); };
     probe.src = uri;
     return () => { cancelled = true; probe.onerror = null; };
-  }, [key, idx]);
+  }, [key, idx, near]);
 
   const uri = photos[idx];
-  if (!uri) {
-    return (
-      <View style={[style, card.photoFallback]}>
-        <Ionicons name="image-outline" size={28} color={colors.muted} />
-        <Text style={card.photoFallbackText}>{t('No photo available')}</Text>
-      </View>
-    );
-  }
+  // `box` is the element `near` watches; it has the photo's own size, so the layout is unchanged.
   return (
-    <Image
-      key={uri}
-      source={{ uri }}
-      style={style}
-      contentFit="cover"
-      transition={150}
-      onError={() => setIdx((i) => i + 1)}
-    />
+    <View ref={box} style={style}>
+      {!uri ? (
+        <View style={[style, card.photoFallback]}>
+          <Ionicons name="image-outline" size={28} color={colors.muted} />
+          <Text style={card.photoFallbackText}>{t('No photo available')}</Text>
+        </View>
+      ) : (
+        <Image
+          key={uri}
+          source={{ uri }}
+          style={style}
+          contentFit="cover"
+          transition={150}
+          loading="lazy"
+          onError={() => setIdx((i) => i + 1)}
+        />
+      )}
+    </View>
   );
 }
 
-function SourceBadge({ source }: { source: string }) {
+export function SourceBadge({ source }: { source: string }) {
   // SPACING IS NOT IDENTITY (production defect, 2026-09-04). Every branch below tests a closed-up
   // slug, but the DB `source` value is a human brand string that often carries SPACES: production
   // stores 'Abr Alosol', 'THE RC' and 'Rawasi Dark', so `includes('abralosol' | 'therc' |
@@ -672,7 +1070,7 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('aldarim')) return <PlatformLogo source={ALDARIM_LOGO} />;
   if (s.includes('aqargate')) return <PlatformLogo source={AQARGATE_LOGO} />;
   if (s.includes('alhoshan')) return <PlatformLogo source={ALHOSHAN_LOGO} />;
-  if (s.includes('aqalemhajer') || s.includes('مكتب أقاليم هجر للخدمات العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />; // 2026-09-24: BEFORE 'hajer', which 'aqalemhajer' contains
+  if (s.includes('aqalemhajer') || s.includes('مكتب أقاليم هجر للخدمات العقارية')) return <PlatformLogo source={AQALEMHAJER_LOGO} />; // 2026-09-24: BEFORE 'hajer', which 'aqalemhajer' contains
   if (s.includes('hajer')) return <PlatformLogo source={HAJER_LOGO} />;
   if (s.includes('sanadak')) return <PlatformLogo source={SANADAK_LOGO} />;
   if (s.includes('eastabha')) return <PlatformLogo source={EASTABHA_LOGO} />;
@@ -745,7 +1143,7 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('al nokhba') || s.includes('alnokhba')) return <PlatformLogo source={ALNOKHBA_LOGO} />;
   if (s.includes('gathern')) return <PlatformLogo source={GATHERN_LOGO} />;
   // 2026-06 batch — text-chips until the user supplies logos.
-  if (s.includes('goldendeal') || s.includes('الصفقة الذهبية العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />; // 2026-09-24: BEFORE 'deal', which 'goldendeal' contains
+  if (s.includes('goldendeal') || s.includes('الصفقة الذهبية العقارية')) return <PlatformLogo source={GOLDENDEAL_LOGO} />; // 2026-09-24: BEFORE 'deal', which 'goldendeal' contains
   if (s.includes('deal')) return <PlatformLogo source={DEALAPP_LOGO} />;
   if (s.includes('souq')) return <PlatformLogo source={SOUQ24_LOGO} />;
   if (s.includes('pulse')) return <PlatformLogo source={ERAPULSE_LOGO} />;
@@ -756,14 +1154,12 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('abralosol')) return <PlatformLogo source={ABRALOSOL_LOGO} />;
   if (s.includes('arkaan')) return <PlatformLogo source={ARKAAN_LOGO} />;
   if (s.includes('rawasidark')) return <PlatformLogo source={RAWASIDARK_LOGO} />;
-  // ── onboarded 2026-09-21: the SAME neutral placeholder for all eleven until the owner supplies
-  // each real logo. LAST on purpose, right above the fallback: no new token can capture an existing
-  // platform's source, and each branch must EXIST — the fallback below is عقار's own logo.
-  if (s.includes('alsidra') || s.includes('al sidra') || s.includes('السدرة')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  // Keep new source aliases after the established specific matches.
+  if (s.includes('alsidra') || s.includes('al sidra') || s.includes('السدرة')) return <PlatformLogo source={ALSIDRA_LOGO} />;
   if (s.includes('moftah') || s.includes('مفتاح العقار')) return <PlatformLogo source={MOFTAH_LOGO} />;
   if (s.includes('masar') || s.includes('مسار المستقبل')) return <PlatformLogo source={MASAR_LOGO} />;
   if (s.includes('menassat') || s.includes('منصات')) return <PlatformLogo source={GOMENASSAT_LOGO} />;
-  if (s.includes('sakani') || s.includes('سكني')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />; // 2026-09-24: BEFORE 'sakan', which 'sakani' contains
+  if (s.includes('sakani') || s.includes('سكني')) return <PlatformLogo source={SAKANI_LOGO} />; // 2026-09-24: BEFORE 'sakan', which 'sakani' contains
   if (s.includes('sakan')) return <PlatformLogo source={SAKAN_LOGO} />;
   if (s.includes('bossbih') || s.includes('بوصبيح')) return <PlatformLogo source={BOSSBIH_LOGO} />;
   if (s.includes('alshawaf') || s.includes('al shawaf') || s.includes('الشواف')) return <PlatformLogo source={ALSHAWAF_LOGO} />;
@@ -774,74 +1170,86 @@ function SourceBadge({ source }: { source: string }) {
   // name, and first match wins, so the shorter branch would steal every nofodh card and show it under
   // another company's brand and domain. Specific token first. Caught by
   // verify-platform-registration-complete, which is the barrier that exists for exactly this.
-  if (s.includes('نفوذ للاستثمار العقاري') || s.includes('nofodh')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('نفوذ للاستثمار العقاري') || s.includes('nofodh')) return <PlatformLogo source={NOFODH_LOGO} />;
   if (s.includes('nufouth') || s.includes('نفوذ')) return <PlatformLogo source={NUFOUTH_LOGO} />;
-  // ── onboarded 2026-09-24 (batch 36): the SAME neutral placeholder for all 35 until the owner supplies
-  // each real logo. LAST, right above the fallback, for the reason stated above. aqalemhajer,
-  // goldendeal and sakani sit ABOVE 'hajer' / 'deal' / 'sakan', which contain their slugs.
-  if (s.includes('dwelleo') || s.includes('دويليو')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('shatri') || s.includes('الشاطري للتطوير العقاري')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('alqasem') || s.includes('القاسم العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('fkralemar') || s.includes('فكر الإعمار')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('wadod') || s.includes('ودود العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('almuteb') || s.includes('آل متعب العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('aalbarrak') || s.includes('البراك للعقارات')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('alrifai') || s.includes('الرفاعي للعقار')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('sodasyat') || s.includes('سداسيات العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('hasaad') || s.includes('حصاد الاقتصادية للعقارات')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('aqaralriyadh') || s.includes('عقار الرياض')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('justsa') || s.includes('فقط نقطة العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('snam') || s.includes('سنام العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('jawher') || s.includes('جواهر للوساطة والتسويق العقاري')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('m3tmd') || s.includes('مقر المعتمد')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('senan') || s.includes('سنان العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('thousand') || s.includes('1000 العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('yameen') || s.includes('يمين العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('ebriza') || s.includes('إبريزة العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('eilmalriyada') || s.includes('علم الريادة الإدارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('daryusuf') || s.includes('دار يوسف العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('albdah') || s.includes('البداح للعقارات')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('eydah') || s.includes('الإيضاح')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('tamyaz') || s.includes('تمايز العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('hazim') || s.includes('حازم')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('villassa') || s.includes('فلل')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('marksa') || s.includes('مار العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('rightcompound')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('livingcompound')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('azure')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('expattrusted') || s.includes('expat trusted housing')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('flow')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('أبعاد') || s.includes('abaad')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('آي باكس') || s.includes('ibaax')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('وحدات') || s.includes('wahadat')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('المربعات') || s.includes('squares')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('رواف') || s.includes('rawaf')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('مكسب العقارية') || s.includes('macsaib')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('maqrat')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('مانزو') || s.includes('manzo')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('الطابق الثامن') || s.includes('8floor') || s.includes('eightfloor')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('حلول') || s.includes('holoul')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('السوق المفتوح') || s.includes('opensooq')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('معرض نافذة') || s.includes('nafithh')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('مباشر') || s.includes('mobasher')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('مؤاجرة') || s.includes('muajarh')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('دلّالي') || s.includes('dallali')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('شركة مقام للتطوير العقاري') || s.includes('maqamco') || s.includes('maqam development')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('تطبيق أرض') || s.includes('earthapp')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('نوافذ الوطن') || s.includes('nawafeth') || s.includes('nawafethalwatan')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('re/max') || s.includes('remaxsa')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('قمرا') || s.includes('qmra')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('العجلان') || s.includes('alajlan')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('آل سعيدان') || s.includes('alsaedan')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('إيجو عقار') || s.includes('ego')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('أحمد المحيسني العقارية') || s.includes('muhaysini')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('راز العقارية') || s.includes('razre')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('ري إنفست') || s.includes('reinvest')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('صفا للاستثمار') || s.includes('safa')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('صكوك العقارية') || s.includes('sokok')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('سكنة') || s.includes('sukna')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('طوبة العقارية') || s.includes('tuba')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  // Specific aliases above must precede shorter brand names.
+  if (s.includes('dwelleo') || s.includes('دويليو')) return <PlatformLogo source={DWELLEO_LOGO} />;
+  if (s.includes('shatri') || s.includes('الشاطري للتطوير العقاري')) return <PlatformLogo source={SHATRI_LOGO} />;
+  if (s.includes('alqasem') || s.includes('القاسم العقارية')) return <PlatformLogo source={ALQASEM_LOGO} />;
+  if (s.includes('fkralemar') || s.includes('فكر الإعمار')) return <PlatformLogo source={FKRALEMAR_LOGO} />;
+  if (s.includes('wadod') || s.includes('ودود العقارية')) return <PlatformLogo source={WADOD_LOGO} />;
+  if (s.includes('almuteb') || s.includes('آل متعب العقارية')) return <PlatformLogo source={ALMUTEB_LOGO} />;
+  if (s.includes('aalbarrak') || s.includes('البراك للعقارات')) return <PlatformLogo source={AALBARRAK_LOGO} />;
+  if (s.includes('alrifai') || s.includes('الرفاعي للعقار')) return <PlatformLogo source={ALRIFAI_LOGO} />;
+  if (s.includes('sodasyat') || s.includes('سداسيات العقارية')) return <PlatformLogo source={SODASYAT_LOGO} />;
+  if (s.includes('hasaad') || s.includes('حصاد الاقتصادية للعقارات')) return <PlatformLogo source={HASAAD_LOGO} />;
+  if (s.includes('aqaralriyadh') || s.includes('عقار الرياض')) return <PlatformLogo source={AQARALRIYADH_LOGO} />;
+  if (s.includes('justsa') || s.includes('فقط نقطة العقارية')) return <PlatformLogo source={JUSTSA_LOGO} />;
+  if (s.includes('snam') || s.includes('سنام العقارية')) return <PlatformLogo source={SNAM_LOGO} />;
+  if (s.includes('jawher') || s.includes('جواهر للوساطة والتسويق العقاري')) return <PlatformLogo source={JAWHER_LOGO} />;
+  if (s.includes('m3tmd') || s.includes('مقر المعتمد')) return <PlatformLogo source={M3TMD_LOGO} />;
+  if (s.includes('senan') || s.includes('سنان العقارية')) return <PlatformLogo source={SENAN_LOGO} />;
+  if (s.includes('thousand') || s.includes('1000 العقارية')) return <PlatformLogo source={THOUSAND_LOGO} />;
+  if (s.includes('yameen') || s.includes('يمين العقارية')) return <PlatformLogo source={YAMEEN_LOGO} />;
+  if (s.includes('ebriza') || s.includes('إبريزة العقارية')) return <PlatformLogo source={EBRIZA_LOGO} />;
+  if (s.includes('eilmalriyada') || s.includes('علم الريادة الإدارية')) return <PlatformLogo source={EILMALRIYADA_LOGO} />;
+  if (s.includes('daryusuf') || s.includes('دار يوسف العقارية')) return <PlatformLogo source={DARYUSUF_LOGO} />;
+  if (s.includes('albdah') || s.includes('البداح للعقارات')) return <PlatformLogo source={ALBDAH_LOGO} />;
+  if (s.includes('eydah') || s.includes('الإيضاح')) return <PlatformLogo source={EYDAH_LOGO} />;
+  if (s.includes('tamyaz') || s.includes('تمايز العقارية')) return <PlatformLogo source={TAMYAZ_LOGO} />;
+  if (s.includes('hazim') || s.includes('حازم')) return <PlatformLogo source={HAZIM_LOGO} />;
+  if (s.includes('villassa') || s.includes('فلل')) return <PlatformLogo source={VILLASSA_LOGO} />;
+  if (s.includes('marksa') || s.includes('مار العقارية')) return <PlatformLogo source={MARKSA_LOGO} />;
+  if (s.includes('rightcompound')) return <PlatformLogo source={RIGHTCOMPOUND_LOGO} />;
+  if (s.includes('livingcompound')) return <PlatformLogo source={LIVINGCOMPOUND_LOGO} />;
+  if (s.includes('azure')) return <PlatformLogo source={AZURE_LOGO} />;
+  if (s.includes('expattrusted') || s.includes('expat trusted housing')) return <PlatformLogo source={EXPATTRUSTED_LOGO} />;
+  if (s.includes('flow')) return <PlatformLogo source={FLOW_LOGO} />;
+  if (s.includes('أبعاد') || s.includes('abaad')) return <PlatformLogo source={ABAAD_LOGO} />;
+  if (s.includes('آي باكس') || s.includes('ibaax')) return <PlatformLogo source={IBAAX_LOGO} />;
+  if (s.includes('وحدات') || s.includes('wahadat')) return <PlatformLogo source={WAHADAT_LOGO} />;
+  if (s.includes('المربعات') || s.includes('squares')) return <PlatformLogo source={SQUARES_LOGO} />;
+  if (s.includes('رواف') || s.includes('rawaf')) return <PlatformLogo source={RAWAF_LOGO} />;
+  if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return <PlatformLogo source={VMKSA_LOGO} />;
+  if (s.includes('مكسب العقارية') || s.includes('macsaib')) return <PlatformLogo source={MACSAIB_LOGO} />;
+  if (s.includes('maqrat')) return <PlatformLogo source={MAQRAT_LOGO} />;
+  if (raw === 'arsh' || s.includes('عرش العقارية') || s.includes('arshglobal')) return <PlatformLogo source={ARSHGLOBAL_LOGO} />;
+  if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return <PlatformLogo source={SUPEROFFICE_LOGO} />;
+  if (s.includes('شموع العقار') || s.includes('shomou')) return <PlatformLogo source={SHOMOU_LOGO} />;
+  if (s.includes('حراج') || s.includes('haraj')) return <PlatformLogo source={HARAJ_LOGO} />;
+  if (s.includes('منصة مكتب') || s.includes('maktab')) return <PlatformLogo source={MAKTAB_LOGO} />;
+  if (s.includes('سرداب') || s.includes('sirdab')) return <PlatformLogo source={SIRDAB_LOGO} />;
+  if (raw === 'ashab' || s.includes('عشاب العقارية') || s.includes('ashab.sa')) return <PlatformLogo source={ASHAB_LOGO} />;
+  if (s.includes('منافع العقارية') || s.includes('manafe')) return <PlatformLogo source={MANAFE_LOGO} />;
+  if (s.includes('وجف العقارية') || s.includes('wajaf')) return <PlatformLogo source={WAJAF_LOGO} />;
+  if (s.includes('البكيري العقارية') || s.includes('albukaeri')) return <PlatformLogo source={ALBUKAERI_LOGO} />;
+  if (s.includes('ريادة العقارية') || s.includes('ryadah')) return <PlatformLogo source={RYADAH_LOGO} />;
+  if (s.includes('مجموعة صالح القرشي العقارية') || s.includes('sqcc')) return <PlatformLogo source={SQCC_LOGO} />;
+  if (s.includes('دارا للتطوير العقاري') || s.includes('daraa')) return <PlatformLogo source={DARAA_LOGO} />;
+  if (s.includes('مكتب طوية للعقار') || s.includes('tawia')) return <PlatformLogo source={TAWIA_LOGO} />;
+  if (s.includes('مانزو') || s.includes('manzo')) return <PlatformLogo source={MANZO_LOGO} />;
+  if (s.includes('الطابق الثامن') || s.includes('8floor') || s.includes('eightfloor')) return <PlatformLogo source={EIGHTFLOOR_LOGO} />;
+  if (s.includes('حلول') || s.includes('holoul')) return <PlatformLogo source={HOLOUL_LOGO} />;
+  if (s.includes('السوق المفتوح') || s.includes('opensooq')) return <PlatformLogo source={OPENSOOQ_LOGO} />;
+  if (s.includes('معرض نافذة') || s.includes('nafithh')) return <PlatformLogo source={NAFITHH_LOGO} />;
+  if (s.includes('مباشر') || s.includes('mobasher')) return <PlatformLogo source={MOBASHER_LOGO} />;
+  if (s.includes('مؤاجرة') || s.includes('muajarh')) return <PlatformLogo source={MUAJARH_LOGO} />;
+  if (s.includes('دلّالي') || s.includes('dallali')) return <PlatformLogo source={DALLALI_LOGO} />;
+  if (raw === 'maqam' || s.includes('شركة مقام للتطوير العقاري') || s.includes('maqamco') || s.includes('maqam development')) return <PlatformLogo source={MAQAMCO_LOGO} />;
+  if (s.includes('تطبيق أرض') || s.includes('earthapp')) return <PlatformLogo source={EARTHAPP_LOGO} />;
+  if (s.includes('نوافذ الوطن') || s.includes('nawafeth') || s.includes('nawafethalwatan')) return <PlatformLogo source={NAWAFETH_LOGO} />;
+  if (s.includes('re/max') || s.includes('remaxsa')) return <PlatformLogo source={REMAX_LOGO} />;
+  if (s.includes('قمرا') || s.includes('qmra')) return <PlatformLogo source={QMRA_LOGO} />;
+  if (s.includes('العجلان') || s.includes('alajlan')) return <PlatformLogo source={ALAJLAN_LOGO} />;
+  if (s.includes('آل سعيدان') || s.includes('alsaedan')) return <PlatformLogo source={ALSAEDAN_LOGO} />;
+  if (s.includes('إيجو عقار') || s.includes('ego')) return <PlatformLogo source={EGO_LOGO} />;
+  if (s.includes('أحمد المحيسني العقارية') || s.includes('muhaysini')) return <PlatformLogo source={MUHAYSINI_LOGO} />;
+  if (s.includes('راز العقارية') || s.includes('razre')) return <PlatformLogo source={RAZRE_LOGO} />;
+  if (s.includes('ري إنفست') || s.includes('reinvest')) return <PlatformLogo source={REINVEST_LOGO} />;
+  if (s.includes('صفا للاستثمار') || s.includes('safa')) return <PlatformLogo source={SAFA_LOGO} />;
+  if (s.includes('صكوك العقارية') || s.includes('sokok')) return <PlatformLogo source={SOKOK_LOGO} />;
+  if (s.includes('سكنة') || s.includes('sukna')) return <PlatformLogo source={SUKNA_LOGO} />;
+  if (s.includes('طوبة العقارية') || s.includes('tuba')) return <PlatformLogo source={TUBA_LOGO} />;
   return <PlatformLogo source={AQAR_LOGO} />;
 }
 
@@ -995,15 +1403,29 @@ function sourceHost(source: string): string {
   if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return 'vm-ksa.com';
   if (s.includes('مكسب العقارية') || s.includes('macsaib')) return 'macsaib.sa';
   if (s.includes('maqrat')) return 'maqrat.com';
+  if (raw === 'arsh' || s.includes('عرش العقارية') || s.includes('arshglobal')) return 'arshglobal.com.sa';
+  if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return 'superoffice.sa';
+  if (s.includes('شموع العقار') || s.includes('shomou')) return 'shomoalaqar.com.sa';
+  if (s.includes('حراج') || s.includes('haraj')) return 'haraj.com.sa';
+  if (s.includes('منصة مكتب') || s.includes('maktab')) return 'maktab.sa';
+  if (s.includes('سرداب') || s.includes('sirdab')) return 'marketplace.sirdab.co';
+  if (raw === 'ashab' || s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'ashab.sa';
+  if (s.includes('منافع العقارية') || s.includes('manafe')) return 'manafe.com.sa';
+  if (s.includes('وجف العقارية') || s.includes('wajaf')) return 'wajaf.sa';
+  if (s.includes('البكيري العقارية') || s.includes('albukaeri')) return 'albukaeri.sa';
+  if (s.includes('ريادة العقارية') || s.includes('ryadah')) return 'ryadah.com.sa';
+  if (s.includes('مجموعة صالح القرشي العقارية') || s.includes('sqcc')) return 'sqcc.sa';
+  if (s.includes('دارا للتطوير العقاري') || s.includes('daraa')) return 'daraa.sa';
+  if (s.includes('مكتب طوية للعقار') || s.includes('tawia')) return 'tawia.sa';
   if (s.includes('مانزو') || s.includes('manzo')) return 'manzo.com.sa';
   if (s.includes('الطابق الثامن') || s.includes('8floor') || s.includes('eightfloor')) return 'www.8floor.sa';
   if (s.includes('حلول') || s.includes('holoul')) return 'holoul.io';
   if (s.includes('السوق المفتوح') || s.includes('opensooq')) return 'sa.opensooq.com';
-  if (s.includes('معرض نافذة') || s.includes('nafithh')) return 'nafithh.sa';
+  if (s.includes('معرض نافذة') || s.includes('nafithh')) return 'nafithh.com';
   if (s.includes('مباشر') || s.includes('mobasher')) return 'mobasher.sa';
   if (s.includes('مؤاجرة') || s.includes('muajarh')) return 'muajarh.com';
   if (s.includes('دلّالي') || s.includes('dallali')) return 'dallali.com';
-  if (s.includes('شركة مقام للتطوير العقاري') || s.includes('maqamco') || s.includes('maqam development')) return 'property.maqamco.sa';
+  if (raw === 'maqam' || s.includes('شركة مقام للتطوير العقاري') || s.includes('maqamco') || s.includes('maqam development')) return 'property.maqamco.sa';
   if (s.includes('تطبيق أرض') || s.includes('earthapp')) return 'earthapp.com.sa';
   if (s.includes('نوافذ الوطن') || s.includes('nawafeth') || s.includes('nawafethalwatan')) return 'nawafethalwatan.com';
   if (s.includes('re/max') || s.includes('remaxsa')) return 'remax.sa';
@@ -1063,11 +1485,11 @@ function RnplBanner({ monthly, source, t }: { monthly?: number; source?: string;
 }
 
 // One stat chip — used in the middle column's stats row.
-function Stat({ icon, big, small }: { icon: any; big: string; small: string }) {
+function Stat({ icon, big, small, picked }: { icon: any; big: string; small: string; picked?: boolean }) {
   return (
-    <View style={card.statChip}>
-      <Ionicons name={icon} size={14} color={colors.primary} />
-      <View>
+    <View style={[card.statChip, picked && card.statChipPicked]} testID={picked ? 'card-stat-picked' : undefined}>
+      <Ionicons name={picked ? 'checkmark-circle' : icon} size={14} color={colors.primary} />
+      <View style={card.statWords}>
         <Text style={card.statBig} numberOfLines={1}>{big}</Text>
         <Text style={card.statSmall} numberOfLines={1}>{small}</Text>
       </View>
@@ -1075,17 +1497,39 @@ function Stat({ icon, big, small }: { icon: any; big: string; small: string }) {
   );
 }
 
-// New rich residential card — three side-by-side sections on desktop, stacked on phone.
+// Approved photo-first layout; content height follows the actual listing details.
 const card = StyleSheet.create({
   wrap: {
-    backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.fieldLine,
-    overflow: 'hidden', ...cardShadow,
-    alignItems: 'stretch', // flexDirection set inline (row desktop / column mobile)
+    backgroundColor: colors.surface, borderRadius: 10, borderWidth: 1, borderColor: colors.fieldLine,
+    overflow: 'hidden',
+    alignItems: 'stretch',
   },
-  // photo column — fixed-size on desktop, full-width banner on mobile
+  // Full-width photo with compact, naturally wrapping details underneath.
+  body: { minWidth: 0 },
   photoCol: { position: 'relative', backgroundColor: colors.tint, overflow: 'hidden' },
-  photoColWide: { width: 240, height: 200 },
-  photoColMobile: { width: '100%', height: 200 },
+  photoColWide: { width: '100%', height: 235 },
+  photoColMobile: { width: '100%', height: 185 },
+  // Laptop row: a small rounded photo on the inline-start side that grows only as tall as the
+  // details beside it; 'tight' is the narrower column beside the ad pane.
+  wrapRow: { flexDirection: 'row' },
+  bodyRow: { flex: 1, minWidth: 0 },
+  photoColRow: { width: 168, minHeight: 118, margin: 8, borderRadius: 8, alignSelf: 'stretch' },
+  photoColTight: { width: 124, minHeight: 100, margin: 6 },
+  rankBadgeRow: { top: 5, left: 5, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 },
+  rankTextRow: { fontSize: 10 },
+  sourceStripRow: { paddingVertical: 4, paddingHorizontal: 7, columnGap: 6, rowGap: 0 },
+  photoActionRow: { fontSize: 10.5 },
+  sourceTextRow: { fontSize: 9, flexShrink: 1 },
+  midColRow: { paddingStart: 4, paddingEnd: 12, paddingTop: 7, paddingBottom: 0, gap: 2 },
+  rightColRow: { paddingStart: 4, paddingEnd: 12, paddingTop: 3, paddingBottom: 8, gap: 1 },
+  titleTight: { fontSize: 14 },
+  priceRow: { fontSize: 17 },
+  priceTight: { fontSize: 15.5 },
+  stayNoteRow: { fontSize: 12 },
+  // One truncated line of amenities / additional information ('tight'); unfolds to wrap on tap.
+  oneLine: { fontSize: 11.5, lineHeight: 18, color: colors.ink },
+  oneLineRtl: { writingDirection: 'rtl', textAlign: 'right' },
+  oneLineLtr: { writingDirection: 'ltr', textAlign: 'left' },
   photo: { width: '100%', height: '100%' },
   photoFallback: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surface2 },
   photoFallbackText: { fontSize: 11, color: colors.muted, fontWeight: '600' },
@@ -1100,20 +1544,65 @@ const card = StyleSheet.create({
   },
   platformText: { color: colors.primary, fontSize: 10.5, fontWeight: '700' },
   sourceStrip: {
-    position: 'absolute', bottom: 0, left: 0, right: 0, paddingVertical: 5, paddingHorizontal: 8,
-    backgroundColor: 'rgba(8,32,18,0.62)', flexDirection: 'row', alignItems: 'center', gap: 5,
+    position: 'absolute', bottom: 0, left: 0, right: 0, paddingVertical: 9, paddingHorizontal: 10,
+    flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 5,
   },
-  sourceText: { color: '#fff', fontSize: 10, fontWeight: '600', flex: 1 },
+  // Dark text ON the gold strip (goldOnFill), the same pairing as the gold button.
+  sourceText: { color: colors.goldOnFill, fontSize: 10, fontWeight: '700', writingDirection: 'ltr' },
+  photoAction: { color: colors.goldOnFill, fontSize: 12, fontWeight: '800' },
+  // The shining gold ring around every card: 3px of gradient showing around the card's own corners.
+  goldRing: { borderRadius: 13, padding: 3 },
+
+
+  // ─── LAPTOP PHOTO-FIRST CARD (owner 2026-10-11) ───
+  lpWrap: { borderRadius: radius.card, position: 'relative' },
+  lpPhoto: { width: '100%', aspectRatio: 1.78, position: 'relative', backgroundColor: colors.tint, overflow: 'hidden' } as object,
+  // a soft dark fade behind the rank badge so it always reads, whatever the photo is
+  lpFade: { position: 'absolute', top: 0, left: 0, right: 0, height: 64, backgroundColor: 'rgba(14,32,22,0.28)' },
+  lpPhotoFoot: {
+    position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 12, paddingVertical: 8,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+  },
+  // Dark text ON the gold strip (goldOnFill), like the gold button.
+  lpPhotoFootTx: { color: colors.goldOnFill, fontSize: 12, fontWeight: '700' },
+  lpHost: { writingDirection: 'ltr', flexShrink: 1 },
+  lpBody: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10, gap: 5, minWidth: 0 },
+  lpPriceRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
+  lpPriceCol: { flexShrink: 1, minWidth: 0 },
+  lpPrice: { fontSize: 22, lineHeight: 26 },
+  lpCta: { alignItems: 'center', gap: 4, flexShrink: 0 },
+  lpGold: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  lpGoldTx: { color: colors.goldOnFill, fontSize: 12.5, fontWeight: '800' },
+  lpCtaNote: { fontSize: 11, color: colors.muted },
+  lpTitle: { fontSize: 15, lineHeight: 20 },
+  lpType: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  lpTypeIcon: { width: 22, height: 22 },
+  lpTypeTx: { fontSize: 13, fontWeight: '700', color: colors.ink },
+  lpChips: { flexDirection: 'row', flexWrap: 'nowrap', gap: 6, overflow: 'hidden' },
+  lpChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.tint, borderRadius: 999,
+    borderWidth: 1, borderColor: colors.tintLine, paddingHorizontal: 10, paddingVertical: 4, flexShrink: 1,
+  },
+  lpChipPicked: { backgroundColor: colors.selFill, borderColor: colors.selFill },
+  lpChipTx: { fontSize: 12, color: colors.primary, fontWeight: '500', flexShrink: 1 },
+  lpChipTxPicked: { color: colors.onFill, fontWeight: '700' },
+  lpChipMore: { backgroundColor: colors.surface, borderStyle: 'dashed' },
+  lpFacts: { flexDirection: 'row', flexWrap: 'nowrap', columnGap: 14, overflow: 'hidden', alignItems: 'center' },
+  lpFact: { flexShrink: 1 },
+  lpFoot: { marginTop: 'auto', borderTopWidth: 1, borderTopColor: colors.fieldLine, borderStyle: 'dashed', paddingTop: 6 },
+  lpBadge: { width: 72, height: 34 },
 
   // MIDDLE: property info
-  midCol: { paddingHorizontal: 14, paddingVertical: 12, gap: 6 },
-  midColFlex: { flex: 1.5 }, // desktop only — in the mobile column stack, flex would collapse it
+  midCol: { minWidth: 0, paddingHorizontal: 10, paddingTop: 5, paddingBottom: 2, gap: 3 },
+  sourceRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', columnGap: 8 },
+  headline: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', columnGap: 8, rowGap: 2 },
   typeRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  typeLabel: { fontSize: 11.5, color: colors.muted, fontWeight: '500' },
-  title: { fontSize: 18, fontWeight: '800', color: colors.dark, letterSpacing: -0.3 },
-  desc: { fontSize: 13, color: colors.muted, lineHeight: 19, marginTop: 8 },
+  typeLabel: { fontSize: 10.5, color: colors.muted, fontWeight: '500', flexShrink: 1 },
+  title: { fontSize: 15, fontWeight: '700', color: colors.ink, flexShrink: 1 }, // no tracking: titles are Arabic (joining + ligatures)
+  // Owner 2026-10-01: omit the bio from compact cards; details remain on the source page.
+  desc: { display: 'none' },
   locRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
-  locText: { fontSize: 12, color: colors.primary, fontWeight: '500' },
+  locText: { fontSize: 11, color: colors.primary, fontWeight: '500' },
   // Small region pill (e.g. "North Riyadh") next to the city line — light green, compact.
   regionChip: {
     flexDirection: 'row', alignItems: 'center', gap: 3,
@@ -1129,11 +1618,18 @@ const card = StyleSheet.create({
     backgroundColor: colors.tint, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3,
   },
   afChipText: { fontSize: 10.5, color: colors.primary, fontWeight: '700' },
-  price: { fontSize: 16.5, fontWeight: '800', color: colors.primary, marginTop: 2 },
+  price: { fontSize: 20, fontWeight: '800', color: colors.primary, maxWidth: '100%', flexShrink: 0 },
+  // Gathern / Aqar Monthly price line is a sentence, not a figure: same colour, sized as a prompt to tap.
+  stayNote: { fontSize: 13, fontWeight: '700', color: colors.primary, maxWidth: '100%', flexShrink: 1 },
+  // Discount line under the price: struck-through original + amber «خصم X٪» pill, on the price's edge.
+  discountRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 2 },
+  discountOld: { fontSize: 12.5, color: colors.muted, fontWeight: '500', textDecorationLine: 'line-through' },
+  discountBadge: { backgroundColor: colors.amberBg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  discountBadgeTx: { fontSize: 11.5, fontWeight: '700', color: colors.amberInk },
   // Guest-rating chip (Gathern) — star + score, with a muted review-count suffix. Sits just under
   // the price; only rendered when the listing actually carries a rating. (Gathern Tier-1.)
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
-  ratingText: { fontSize: 12.5, fontWeight: '700', color: colors.dark },
+  ratingText: { fontSize: 12.5, fontWeight: '700', color: colors.ink },
   ratingCount: { fontSize: 11, fontWeight: '500', color: colors.muted },
 
   // Source-published «سعر المتر» subline, rendered directly under the price line on listings that
@@ -1163,18 +1659,19 @@ const card = StyleSheet.create({
   aqsatBanner: { backgroundColor: colors.aqsatBg, borderColor: colors.aqsatLine },
   aqsatLogo: { width: 104, height: 40 },
   rnplFromLine: { fontSize: 10.5, color: colors.muted, fontWeight: '500' },
-  rnplFromStrong: { color: colors.dark, fontWeight: '700' },
+  rnplFromStrong: { color: colors.ink, fontWeight: '700' },
 
-  statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 4 },
-  statChip: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  statBig: { fontSize: 12.5, fontWeight: '700', color: colors.dark, lineHeight: 15 },
+  statsRow: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 8, rowGap: 4, marginTop: 2 },
+  statChip: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: '100%' },
+  statChipPicked: { backgroundColor: colors.tint, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  statWords: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: 3, flexShrink: 1 },
+  statBig: { fontSize: 12.5, fontWeight: '700', color: colors.ink, lineHeight: 15 },
   statSmall: { fontSize: 10, color: colors.muted, lineHeight: 12 },
 
-  // RIGHT: features
-  rightCol: { paddingHorizontal: 14, paddingVertical: 12, gap: 9 },
-  rightColSide: { width: 240, borderLeftWidth: 1, borderLeftColor: colors.fieldLine },     // desktop: side column
-  rightColBottom: { width: '100%', borderTopWidth: 1, borderTopColor: colors.fieldLine },  // mobile: below info
-  hostHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  // Full-width amenities and compact source footer.
+  rightCol: { paddingHorizontal: 10, paddingBottom: 9, paddingTop: 4, gap: 3 },
+  hostHead: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
+  hostBadge: { width: 96, height: 48, flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
   thercBadge: { borderRadius: 8, backgroundColor: '#1f5f8b', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   aoujBadge: { borderRadius: 8, backgroundColor: '#8b5a1f', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   abralosolBadge: { borderRadius: 8, backgroundColor: '#3f6b4a', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
@@ -1204,11 +1701,14 @@ const card = StyleSheet.create({
   nowaisiryBadge:{ borderRadius: 8, backgroundColor: '#3a5a2f', alignItems: 'center', justifyContent: 'center' },
   octoberBadge:  { borderRadius: 8, backgroundColor: '#6b3a2f', alignItems: 'center', justifyContent: 'center' },
   badgeText: { color: '#fff', fontWeight: '800', fontSize: 11, lineHeight: 13, textAlign: 'center' },
-  hostedOn: { fontSize: 12, fontWeight: '700', color: colors.dark },
+  hostedOn: { fontSize: 10.5, fontWeight: '500', color: colors.ink, flexShrink: 1 },
   hostHint: { fontSize: 10, color: colors.muted, lineHeight: 13 },
-  featGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-  featCell: { width: '50%', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
-  featText: { fontSize: 11.5, color: colors.dark, fontWeight: '500', flexShrink: 1 },
+  featGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 2 },
+  featCell: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2, maxWidth: '100%' },
+  featText: { fontSize: 11.5, color: colors.ink, fontWeight: '500', flexShrink: 1 },
+  // An Advanced-Filter pick, lit in place: the «مطابق لطلبك» chip's tint, primary bold text, ✓ icon.
+  featCellPicked: { backgroundColor: colors.tint, borderRadius: 6, paddingHorizontal: 6 },
+  featTextPicked: { color: colors.primary, fontWeight: '700' },
   noFeat: { fontSize: 11, color: colors.muted, fontStyle: 'italic' },
   moreBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
@@ -1216,26 +1716,21 @@ const card = StyleSheet.create({
   },
   moreText: { fontSize: 11.5, fontWeight: '600', color: colors.primary },
   // Wasalt "Additional Information" panel — sits BELOW the features grid, with a soft separator
-  // line so it reads as its own section. Two-column responsive grid matching the live Wasalt page.
+  // line so it reads as its own section. Each label/value pair wraps as one group.
   addlPanel: {
-    marginTop: 10, paddingTop: 10,
-    borderTopWidth: 1, borderTopColor: colors.fieldLine,
+    marginTop: 0, paddingTop: 3,
   },
-  addlTitle: { fontSize: 12.5, fontWeight: '700', color: colors.ink, marginBottom: 6 },
-  addlGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  addlTitle: { fontSize: 11.5, fontWeight: '700', color: colors.ink, marginBottom: 3 },
+  addlGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 16, rowGap: 2 },
   addlCell: {
-    width: '50%', paddingVertical: 4, paddingRight: 6, gap: 1,
+    maxWidth: '100%', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', paddingVertical: 2, columnGap: 5, rowGap: 1,
   },
-  // writingDirection is REQUIRED here, not decorative: with no explicit direction, RN Web isolates
-  // each Text run (unicode-bidi:isolate) and lets the BROWSER pick its direction from the run's own
-  // content — an Arabic label auto-resolves rtl, but a bare-digit value (e.g. street_width="15",
-  // parcel_number="190") has no strong bidi character and auto-resolves ltr. Two 50%-width RTL cells
-  // then each right-align their label but LEFT-align their value, so every value slides to the far
-  // side of its own cell — on a 2-cell row the neighbor's label ends up sitting right next to the
-  // WRONG value (measured live: أملاك الأحساء's «عرض الشارع» / «رقم القطعة» pair, amlakalahsa is the
-  // first source to show two numeric additional_info fields side by side, which is what exposed it).
+  // Keep explicit direction on source labels and values: bare numeric values must remain
+  // aligned with their own Arabic label when the inline groups wrap.
   addlLabel: { fontSize: 10.5, color: colors.muted, fontWeight: '500', writingDirection: 'rtl' },
-  addlValue: { fontSize: 11.5, color: colors.ink, fontWeight: '600', writingDirection: 'rtl' },
+  addlValue: { flexShrink: 1, fontSize: 11, color: colors.ink, fontWeight: '600', writingDirection: 'rtl' },
+  // English UI: details read left to right («2566/A», «Additional No.»), not mirrored (live 2026-10-29: «A/2566», «.Additional No»).
+  ltr: { writingDirection: 'ltr' },
   addlMoreBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
     paddingVertical: 6, marginTop: 4,

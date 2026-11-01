@@ -16,12 +16,14 @@
 // the district is NULL. We never substitute a different district — unknown stays unknown.
 //
 // NOT wired into `npm test` (CI has no network/DB). Run after any district/location migration and
-// from the daily production audit:
-//   EXPO_PUBLIC_SUPABASE_URL=... EXPO_PUBLIC_SUPABASE_ANON_KEY=... \
-//     node --experimental-strip-types scripts/verify-district-source-truth-live.ts
+// from the daily production audit. The mon_* views are not readable with the public key (2026-10-18,
+// 20261018170933_mon_views_are_not_a_public_api), so this needs the service key:
+//   SUPABASE_SERVICE_ROLE_KEY=... node --experimental-strip-types scripts/verify-district-source-truth-live.ts
 
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
-const { url: URL_BASE, key: KEY } = resolvePublicSupabase();
+const { url: URL_BASE } = resolvePublicSupabase();
+const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+if (!KEY) { console.error('SUPABASE_SERVICE_ROLE_KEY is required: the mon_* views it reads are not public.'); process.exit(1); }
 
 const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
 

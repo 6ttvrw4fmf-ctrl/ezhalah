@@ -74,6 +74,7 @@ if str(ROOT) not in sys.path:
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.pii import redact_pii  # noqa: E402
 
 SOURCE = "عقاريون"
 BASE = "https://akariyoun.sa"
@@ -275,6 +276,22 @@ PPM_RE = re.compile(
     r"سعر\s*المتر\s*للأرض\s*</span>\s*:\s*([\d٠-٩][\d٠-٩.,]*)\s*(مليار|مليون|ألف|الف)?")
 
 
+# «<h6 class="prt-price-fix text-warning"><span class="badge badge-warning">طريقة الدفع</span> : سنوي</h6>»
+# The live page indents the closing tag by ~52 spaces after the value («: سنوي\n<52 spaces></h6>», CI
+# source-reread 38515266387, 2026-10-14), so the value is read up to the trailing whitespace, not up to
+# «</h6>»: a 30-character window that had to reach «</h6>» matched no live page, and all 150 rentals
+# stayed with no period after the 10-13 fix.
+PAYMENT_RE = re.compile(r"طريقة\s*الدفع\s*</span>\s*:\s*([^<\s][^<]{0,29}?)\s*</h6>")
+_PAYMENT_PERIOD = {"سنوي": "annual", "شهري": "monthly"}
+
+
+def parse_payment_period(page_html: str) -> Optional[str]:
+    """'annual' / 'monthly' from the listing's «طريقة الدفع» field, exactly one of those two words.
+    «نصف سنوي», «ربع سنوي», «دفعات» or any other value has no bucket here → None (unknown)."""
+    m = PAYMENT_RE.search(page_html or "")
+    return _PAYMENT_PERIOD.get(re.sub(r"\s+", " ", html.unescape(m.group(1))).strip()) if m else None
+
+
 def parse_price_exact(page_html: str) -> Optional[int]:
     """The EXACT price, when the page publishes one.
 
@@ -418,6 +435,49 @@ def parse_services(page_html: str) -> dict[str, Any]:
 
 
 
+# The ad's own «الوصف» panel: <h4 class="property_block_title">الوصف</h4> … <div class="block-body"><p>…</p>.
+# akariyoun publishes NO structured amenity field (its spec table is rooms/area/age/facade/street and the
+# «خدمات العقار» services cell), so this panel is the only statement of kitchen / lift / parking / maid room,
+# and prose is lawful there — read with the four outcomes, line by line (ADVANCED_FILTER_SOURCE_TRUTH §2).
+# Never the whole page: every page also carries the site's ad-creation form and the district's services.
+_DESC_PANEL = re.compile(r'property_block_title">\s*الوصف\s*</h4>.*?<div class="block-body">(.*?)</div>', re.S)
+# Structured elsewhere on the page (parse_services) — never re-read from prose.
+_PROSE_SKIP = ("optical_fibers",)
+
+
+# The panel's OPENING tag, for the stored text: the block runs to ITS OWN closing </div> (nesting counted), so a
+# <div> inside the prose never cuts it short and the next panel never runs into it.
+_DESC_OPEN = re.compile(r'property_block_title">\s*الوصف\s*</h4>.*?<div class="block-body">', re.S)
+_DIV_TAG = re.compile(r"<(/?)div\b", re.I)
+
+
+def parse_description(page_html: str) -> Optional[str]:
+    """The ad's own «الوصف» prose, every paragraph, verbatim — the AI facts reader reads `title + description`
+    (owner 2026-10-30: «we read everything»). Measured that day: 290 of 290 active rows stored NULL while every
+    live page printed this panel (e.g. /properties/shk-llaygar-fy-hy-alshaf-20: floor 19, panorama, metro).
+    PDPL: phones and labelled names go through the shared redactor. No panel / nothing readable -> None, never ''."""
+    m = _DESC_OPEN.search(page_html or "")
+    if not m:
+        return None
+    depth, block = 1, None
+    for t in _DIV_TAG.finditer(page_html, m.end()):
+        depth += -1 if t.group(1) else 1
+        if depth == 0:
+            block = page_html[m.end():t.start()]
+            break
+    if block is None:
+        return None
+    text = html.unescape(re.sub(r"<[^>]+>", " ", re.sub(r"(?i)<br\s*/?>|</(?:p|li|div|h\d)>", "\n", block)))
+    return redact_pii(text) or None
+
+
+def parse_description_amenities(page_html: str) -> dict[str, bool]:
+    m = _DESC_PANEL.search(page_html or "")
+    if not m:
+        return {}
+    return normalize.prose_amenities(normalize.html_block_lines(m.group(1)), skip=_PROSE_SKIP)
+
+
 def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], str, Optional[str]]:
     """(row, category, raw_price_text). row is None when the page is not a real listing."""
     t = _txt(page_html)
@@ -513,11 +573,25 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
         "city": city,
         "neighborhood": district,
         "title": title,
+        "description": parse_description(page_html),
         "photo_urls": photos or None,
+        **parse_description_amenities(page_html),
         **parse_services(page_html),
     }
     if is_rent:
-        row["price_annual"] = price
+        # The listing's own «طريقة الدفع : سنوي» field (2026-10-13, backlog 493): every akariyoun rental
+        # prints it, and none of the 191 stored a period, so no rent search ever found one. The fleet
+        # rule decides: the ad's own text tying a period to THIS price wins, a figure <= 10,000 is
+        # monthly, then a title naming one period, and only then the site's field.
+        pay = parse_payment_period(page_html)
+        if price is not None:
+            desc = _DESC_PANEL.search(page_html or "")
+            ad_text = normalize.html_block_lines(desc.group(1)) if desc else ""
+            period, row["price_annual"] = normalize.rent_period_from_ad(price, ad_text, pay, title)
+        else:
+            period, row["price_annual"] = pay, None
+        if period:
+            row["rent_period"] = period
     else:
         row["price_total"] = price
     if ppm is not None:

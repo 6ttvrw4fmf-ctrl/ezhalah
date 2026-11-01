@@ -1,0 +1,55 @@
+# Haraj SHADOW crawl (backlog 311, owner order 2026-10-09). Reads haraj.com.sa with our honest bot
+# user-agent, classifies each real-estate post as offer / request / other / doubt, and PRINTS the
+# sample for the hand-check the owner requires before Haraj may go live. It writes NOTHING: no
+# database secret is given to it, so it cannot. Runs on pushes that change the Haraj crawler and on demand.
+name: Haraj shadow crawl
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_posts:
+        description: "How many posts to read (1 request a second)"
+        default: "1500"
+      files:
+        description: "How many hourly sitemap files to read"
+        default: "6"
+      skip_hours:
+        description: "Skip the newest N hourly files (use a window no earlier hand-check used)"
+        default: "18"
+  # The push trigger was removed 2026-10-17: Haraj is LIVE (haraj-sync.yml), and a shadow crawl on every
+  # branch push would read haraj.com.sa IN PARALLEL with the live crawl — two readers break the owner's
+  # ≤ 1 request/second rule. The classifier tests run in haraj-sync.yml and the scraper test suite.
+
+concurrency:
+  group: haraj-shadow
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  shadow:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Classifier tests
+        run: pip install pytest && python -m pytest -q scrapers/common/tests/test_haraj_classify.py
+      - name: Shadow crawl (prints only)
+        # --slug-filter + --want-offers: the owner's gate is a hand-check of 100 «offer» verdicts; the sitemap
+        # is every category, so pick property-titled posts and stop at 110 offers (2026-10-11).
+        run: >-
+          exec python -m scrapers.haraj.shadow --max-posts "${{ github.event.inputs.max_posts || '1500' }}"
+          --slug-filter --files ${{ github.event.inputs.files || '6' }} --skip-hours ${{ github.event.inputs.skip_hours || '18' }} --want-offers 110

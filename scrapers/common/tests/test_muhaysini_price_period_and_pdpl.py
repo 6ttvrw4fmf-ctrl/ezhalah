@@ -1923,13 +1923,16 @@ def test_a_period_beside_the_wrong_number_is_refused():
     MHS1834 «اجار شهري 5500 السنوي 65000» — 5,500 monthly, 65,000 annual; the structured field holds
             the annual. The loose rule stored 780,000.
     """
-    for name, published in (("APT_RENT_TWO_INSTALMENTS_NOT_MONTHLY", 35000),
-                            ("FLOOR_RENT_MONTHLY_AND_ANNUAL_BOTH_PRINTED", 65000)):
+    # MHS1834's «السنوي» IS attached to the stored 65,000 (nearest number), so since 2026-10-16 (backlog #585)
+    # it reads annual — the reading this file's notes always said was right; it converts nothing. «الشهري»
+    # still never multiplies either figure.
+    for name, published, period in (("APT_RENT_TWO_INSTALMENTS_NOT_MONTHLY", 35000, None),
+                                    ("FLOOR_RENT_MONTHLY_AND_ANNUAL_BOTH_PRINTED", 65000, "annual")):
         rec = RECORDS[name]
         assert "شهري" in rec["description"]
         assert rec["AdValidator"]["advertisement"]["propertyPrice"] == published
         row = mapped(name)
-        assert row.get("rent_period") is None, f"{name}: the period describes the OTHER figure"
+        assert row.get("rent_period") == period, f"{name}: the monthly word describes the OTHER figure"
         assert row["price_annual"] == published, f"{name}: the price must be stored as published"
         assert row["price_annual"] != published * 12
 
@@ -2099,8 +2102,10 @@ def test_the_region_hint_uses_the_licence_spelling_so_a_twin_resolves():
     """loc_catalog_region stores «منطقة القصيم»; the platform's own `Region.name` is the BARE
     «القصيم», which the shared hint resolver cannot match (it strips a «منطقة » prefix, it never
     adds one). Passing the bare form first left 33 real rows unresolved. البدائع is a genuine twin
-    (Hail 2358 / Qassim 2481), so only the licence spelling separates them."""
-    assert al._hint_to_id("القصيم") is None, "the bare region name is not a resolvable hint"
+    (Hail 2358 / Qassim 2481), so only the licence spelling separates them.
+    Since 2026-10-08 the shared resolver also adds the «منطقة» prefix (sadiqeltajer's bare «القصيم»
+    left 9 twins unresolved), so BOTH spellings must resolve to the same region."""
+    assert al._hint_to_id("القصيم") == 4, "the bare region name is a resolvable hint"
     assert al._hint_to_id("منطقة القصيم") == 4
     assert mhs._land_total({}, "Buy") is None       # unrelated key absent → None, never a KeyError
 
@@ -2128,7 +2133,7 @@ def test_type_mapping_covers_every_word_the_platform_publishes():
         "عمارة سكنية": "Building", "استراحة": "Rest House", "معرض": "Showroom", "مكتب": "Office",
         "مزرعة": "Farm", "مستودع": "Warehouse", "مجمع تجاري ": "Commercial Building",
         "ارض تجاري": "Commercial Land", "محطة وقود": "Gas Station", "غرف عزاب": "Room",
-        "ورشة ": "Workshop", "ستوديو": "Studio", "فندق": "Hotel", "تاون هاوس": "Villa",
+        "ورشة ": "Workshop", "ستوديو": "Studio", "فندق": "Hotel", "تاون هاوس": "تاون هاوس",
         "مصنع": "Factory", "محل تجاري": "Shop", "دوبلكس": "Duplex",
         "مستشفى - مركز صحي": "Health Center",
     }

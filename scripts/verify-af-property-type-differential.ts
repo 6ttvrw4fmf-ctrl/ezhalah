@@ -38,7 +38,8 @@
 // src/data/propertyTypes.ts — the SAME pure function src/data/remote.ts:352 uses to build `p_types`.
 // Several folds are deliberate owner rules, and hard-coding a naive one-label-per-type expectation
 // here would manufacture false leaks:
-//   • Villa  = فيلا + قصر + تاون هاوس + بيت      (owner 2026-07-20)
+//   • Villa  = فيلا + قصر + بيت                   (owner 2026-07-20)
+//   • Duplex = دوبلكس + تاون هاوس                 (owner 2026-10-12: town house is under Duplex)
 //   • Apartment = شقة + مبنى شقق مخدومة + ملحق علوي
 //   • Rest House = استراحة + إستراحة              (hamza spelling variant, aqarcity)
 // Importing the real function instead of restating it means this barrier cannot drift from the
@@ -65,6 +66,7 @@
 import { COHORT_QUESTIONS, COHORT_CHIPS } from '../src/lib/afCohorts.ts';
 import { typeArForTypes, CLEAN_MACRO } from '../src/data/propertyTypes.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
+import { missingVerdict } from './lib/searchDeepPageCap.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
@@ -268,15 +270,18 @@ for (const c of CASES) {
     const countOk = r.total === os.size;
     if (r.total === 0 && os.size === 0) { skippedEmpty++; continue; }   // empty cohort proves nothing
     checked++;
-    if (missing.length || extra.length || r.dupes || !countOk) {
+    // Cap-aware (scripts/lib/searchDeepPageCap.ts): past offset 25,000 the RPC returns nothing, so on a scope that
+    // big MISSING must equal exactly the unreachable tail, and the walk must have returned every reachable row.
+    const mv = missingVerdict(missing.length, rs.size, r.total, PAGE);
+    if (!mv.ok || extra.length || r.dupes || !countOk) {
       fail(label,
-        `MISSING=${missing.length} EXTRA=${extra.length} DUPES=${r.dupes} ` +
+        `MISSING=${missing.length}${mv.tail ? ` (unreachable tail ${mv.tail}: ${mv.detail})` : ''} EXTRA=${extra.length} DUPES=${r.dupes} ` +
         `rpc_total=${r.total} oracle=${os.size}` +
         (extra.length ? `\n      first EXTRA (wrong type or fails the predicate): ${extra.slice(0, 3).join(', ')}` : '') +
         (missing.length ? `\n      first MISSING (eligible but dropped): ${missing.slice(0, 3).join(', ')}` : ''));
       worst.push(label);
     } else {
-      pass(label, `${r.total} rows · MISSING=0 EXTRA=0 DUPES=0`);
+      pass(label, `${r.total} rows · MISSING=${missing.length}${mv.tail ? ' (= unreachable tail)' : ''} EXTRA=0 DUPES=0`);
     }
   } catch (e: any) {
     fail(label, `probe error: ${e.message}`);

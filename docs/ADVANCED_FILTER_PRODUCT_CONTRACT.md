@@ -188,7 +188,7 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 
 ---
 
-## 4. The offer button («خلّنا نحدد الطلب أكثر»)
+## 4. The offer button («🎯 دقّق مع الذكاء»)
 
 ### 4.1 Manual only, never auto-popup
 
@@ -236,7 +236,7 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 - **R5.1.1** — An option qualifies for asking if and only if:
   > `total - count >= total × 0.10`  **OR**  `count <= 25`
 - **R5.1.2** — In plain English: **choosing this option must remove at least 10% of the current
-  results, OR leave the user at 25 or fewer.** `MEANINGFUL_NARROWING_FRACTION = 0.1` and
+  results, OR leave the user at 25 or fewer.** `MEANINGFUL_NARROWING_FRACTION = 0.025` (0.1 until 2026-11-01) and
   `INTERVIEW_STOP_AT = 25`.
 
 ### 5.2 The rule is ONE-SIDED — this is deliberate
@@ -334,9 +334,23 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 - **R6.3.1** — A new results turn lands with the narrowed count (e.g. 5,000 → 900).
 - **R6.3.2** — The PREVIOUS turn's action buttons are replaced by a read-only **receipt** of what
   was committed (e.g. "✓ عرض الشارع: ≥20م · عدد الحمامات: ≥3").
-- **R6.3.3** — Committed answers also appear as **removable pills** above the new turn (see §9).
+- **R6.3.3** — Committed answers also appear as **read-only chips** above the new turn, and are
+  listed in that turn's summary as labelled lines (see §9). Each chip shows its emoji (شقة 🏡).
+  (Owner 2026-10-03: removable pills retired — no chip carries a ✕.)
 - **R6.3.4** — If the new turn still has >25 results AND a useful question remains, the offer
   button appears again — the user may run another round.
+  *(2026-09-20 → 2026-10-05: for two weeks a completed round CLOSED the chat at any total
+  (`afRoundEndsChat`); the owner reinstated this rule on 2026-10-05 — «if there are still more than 25
+  ads and a useful question left, show «🎯 دقّق مع الذكاء» again; it never pops up by itself». The
+  «never re-opens itself» half (no timer, a tap only) stays.)*
+- **R6.3.5** — **The reader stays in place** (owner 2026-10-03). When a round starts its search,
+  earlier turns are DIMMED, never hidden, so the thread keeps its height and nothing collapses
+  under the reader. The view eases down to the user's own answers bubble (the new loader is right
+  under it), and lands on the new turn when its results arrive. It never jumps to the top.
+- **R6.3.6** — **Going back to the Filter always opens a clean form** (owner 2026-10-03). A search
+  is never kept on the Filter screen and there is no «مسح الكل». Signed in, the last search lives
+  in the sidebar history; as a guest it is not saved. No committed AF answer is carried back to
+  the Filter. Enforced by `verify-clear-all-reset.ts` and `verify-af-state-never-leaks-into-filter.ts`.
 
 ### 6.4 Progressive narrowing example (Example E)
 
@@ -359,8 +373,13 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
   (after all normal filters + all previously-committed AF facts).
 - **R7.1.2** — The Continue button ("متابعة · N نتيجة") shows the count for the **current
   tentative selection**, before committing.
-- **R7.1.3** — The unknown-count caption ("X إعلان لم يذكر …") shows how many listings have no
-  value for the field — never rolled into any option's count.
+- **R7.1.3** — The unknown-count caption («😔 X إعلان لم يذكر هذه المعلومة») shows how many listings
+  have no value for the field — never rolled into any option's count. It leads with 😔 (owner
+  2026-10-03) and is on EVERY question (owner 2026-10-03): age, furnished and direction derive it;
+  RNPL, amenities, bathrooms, street width, rating and unit subtype read a database `IS NULL` count
+  in the committed scope (migration 20261003184909; amenities = the listing stated no amenity at
+  all). Never a subtraction over threshold rungs, never a guess, never 0 — a count that is 0 or a
+  probe that failed shows nothing.
 
 ### 7.2 Multi-select marginal vs combined
 
@@ -390,6 +409,31 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 
   **No production behaviour changes with this confirmation** — both shapes were already implemented
   and barriered. A future run must not re-open R7.2.2 as an owner question.
+
+- ~~**R7.2.3 — NEVER FORCE ONE ANSWER**~~ **SUPERSEDED by R7.2.4 (owner 2026-10-05)** — kept for history. *(owner 2026-10-03: «many users want to choose جديد or ١–٢
+  years … It's a new rule» · «never force the user to select one thing»)*. EVERY advanced question is
+  multi-select (`selection: 'multi'`), and several picks mean EXACTLY their union — «جديد + ٦–٩» is
+  those two buckets and nothing between («you show a mixture of the ages you selected»; no gap fill,
+  never collapsed to one pick). One pick keeps the single-answer fields; two or more use the union
+  params `p_age_buckets` / `p_rating_buckets` / `p_furnished_in` (migration
+  `af_every_question_multi_select_unions`); the «at least» ladders (bathrooms, street width) union to
+  the LOWEST pick; unit subtypes were already an array. «مفروش + غير مفروش» = the listings that STATED
+  either way — a silent listing is in neither. Barrier (renamed): `scripts/verify-af-selection-policy.ts`.
+
+- **R7.2.4 — ONE TAP WHERE A SECOND PICK WOULD WIDEN** *(owner 2026-10-05: «I don't like how you can
+  select more than one thing, where it started giving you so many results» — measured live: جديد alone
+  10,846, + ١–٢ → 12,990, the count went UP)*. Several picks are allowed only where they NARROW or name
+  what the user is looking for:
+  - **features (amenities)** — several, ALL required (AND): elevator 2,538 → + private entrance 380.
+  - **property type / group / unit subtype** — several, like the Filter form's own type choice.
+  - **installments** — a single chip, so arity cannot widen it.
+  - **age** — ONE tap from a cumulative «up to» ladder: جديد · حتى سنتين · حتى ٥ سنوات · حتى ٩ سنوات.
+    «New or 1–2 years» is one tap (حتى سنتين = `p_age_buckets ['new','1_2']`); every rung is the union of
+    the disjoint buckets under it, so its count is their exact sum and no tap can make a number grow.
+  - **bathrooms, street width, rating** — ONE tap («+٣» already means 3 or more).
+  - **furnished, direction** — ONE tap; Skip («تخطي») = doesn't matter.
+  A single-select apply takes the FIRST key if a caller ever hands two — a second key is never smuggled
+  in. Barrier: `scripts/verify-af-selection-policy.ts` (executes what each pick sends; mutation-proven).
 
 ### 7.3 No stale counts
 
@@ -472,20 +516,27 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 
 ### 9.1 What pills show
 
-- **R9.1.1** — Every COMMITTED (not skipped) AF answer appears as a removable pill above the
-  newest results turn. The pill's label is the human-readable summary of the answer.
-- **R9.1.2** — Pills are cumulative across all rounds — a pill from Round 1 is still visible and
-  removable after Round 3.
+- **R9.1.1** — Every COMMITTED (not skipped) AF answer is listed in the newest results turn's
+  summary as a labelled line of the SAME list — «• نوع العقار المحدد: شقة», «• دورات المياه: +١»,
+  «• المميزات: المطبخ، مصعد» — no «من الفلتر المتقدم» heading, no emoji (owner 2026-10-03; answers
+  sharing a label merge into one line), right after the ORIGINAL «ملخص البحث» lines (type
+  group, deal and period, city, region — built from the query as it stood BEFORE the first round,
+  never overwritten by an answer). The same answers also appear as chips above the turn. (The separate
+  «بناءً على: …» sentence is gone: the summary says it once.)
+- **R9.1.2** — The list and the chips are cumulative across all rounds — an answer from Round 1 is
+  still shown after Round 3 (the summary is rebuilt from the original query plus ALL committed
+  facets each time).
 
-### 9.2 Removing a pill
+### 9.2 Pills are read-only (owner 2026-10-03: «we should not show any X button on this»)
 
-- **R9.2.1** — Tapping a pill's ✕ removes ONLY that one committed predicate. Every other
-  committed answer stays.
-- **R9.2.2** — The search re-runs without that predicate. The result count may WIDEN. A new
-  results turn lands below with the new count. Nothing above is rewritten.
-- **R9.2.3** — The removed question becomes eligible to be asked again in a future round — it is
-  DROPPED from the `asked` carry. Removing a pill must not permanently "burn" that question.
-- **R9.2.4** — Enforced by `verify-af-cross-round-carry.ts` (the pill-removal + asked-drop check).
+- **R9.2.1** — No pill carries a ✕ or any press handler, in the transcript row or in the round card
+  (where the pills stand above the scrim, per #155). There is no removal path.
+- **R9.2.2** — A committed answer is changed only by going Back inside the round, never from the
+  results. The carried `asked` set therefore only ever grows.
+- **R9.2.3** — *(retired)* The 2026-08 rules that removed a pill and dropped its question from the
+  `asked` carry no longer apply: nothing removes a pill.
+- **R9.2.4** — Enforced by `verify-af-committed-pills-are-never-covered.ts` and
+  `verify-af-cross-round-carry.ts`.
 
 ### 9.3 What pills are NOT
 
@@ -577,6 +628,11 @@ column. That is the whole point: the user asked for a gym, so the card must say 
 - **R12A.5** — The card's vocabulary must cover the certified vocabulary. Every certified amenity
   token must be renderable; a token the RPC can filter on but the card cannot draw is a defect of
   this rule, not a missing nice-to-have.
+- **R12A.7** — **The card lights up what was asked, in place** *(owner 2026-10-05: «check mark and
+  highlight — when the user gets the answer, the property card shows it»)*. Besides the «مطابق لطلبك»
+  strip, every feature the user asked for is drawn in the card's own feature grid with a ✓ and the
+  brand tint, ahead of the unselected features; the bathrooms stat lights up the same way when the
+  bathrooms question was answered. Display-only (ResultCard.tsx `pickedFeatures` / `bathPicked`).
 - **R12A.6** — Barrier-protected like every other rule here: a live journey proves selection →
   visible-on-card for each certified field, and a static barrier proves the card's vocabulary is a
   superset of the certified token set, so adding a token to the filter without adding it to the
@@ -680,7 +736,7 @@ here changes the entire product; no other file may hard-code the number.
 | `MIN_REAL_OPTION_COUNT` | 5 | `src/lib/afRanking.ts` | Absolute per-option floor. |
 | `MIN_OPTIONS_SINGLE` | ~~2~~ **1** | `src/lib/afRanking.ts` | Single-select survives with ≥1 real option (owner 2026-08-26; was 2). |
 | `MIN_OPTIONS_MULTI` | 1 | `src/lib/afRanking.ts` | Multi-select survives with ≥1. |
-| `MEANINGFUL_NARROWING_FRACTION` | 0.10 | `src/lib/afRanking.ts` | The 10% narrowing rule. |
+| `MEANINGFUL_NARROWING_FRACTION` | 0.025 | `src/lib/afRanking.ts` | The 2.5% narrowing rule (10% until 2026-11-01). |
 | `AF_ROUND_MAX_QUESTIONS` | 4 | `src/lib/afRanking.ts` | Round size cap. |
 | `MIN_USEFUL_QUESTIONS_TO_SHOW` | 1 | `src/data/advancedFilters.ts` | 0 hides, 1+ asks (owner 2026-08-24). |
 

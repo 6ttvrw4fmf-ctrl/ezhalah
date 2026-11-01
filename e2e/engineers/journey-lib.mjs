@@ -1,0 +1,237 @@
+// 🆕 New Listings Engineer — pure helpers for customer-journey.mjs (no browser, no network).
+// Kept separate so the matching / request-parsing logic has a hermetic self-check:
+//   node e2e/engineers/journey-lib.mjs        ← runs the asserts below, exits 0 when sound.
+
+/** URL equality the way full-chain.mjs compares: scheme-normalised, no fragment, no trailing /. */
+// A stored ad URL and the URL the card opened are the SAME ad when they differ only by scheme, a
+// trailing slash, a fragment, or a leading language segment: since #7890 the Arabic app opens the
+// localized form of a source URL (src/lib/localizeAdUrl.ts: gathern.co/view/… → /ar/view/…), so a
+// customer who opened the unit still read FAIL «opened …/ar/view/… ≠ stored …/view/…» (🔧 10-23,
+// backlog 801). One leading /ar/ or /en/ is dropped on BOTH sides; the rest of the path must match.
+export const normUrl = (u) =>
+  String(u || '').split('#')[0].replace(/\/+$/, '').replace(/^http:/, 'https:')
+    .replace(/^(https:\/\/[^/]+)\/(?:ar|en)(?=\/|$)/i, '$1');
+
+/** The main search of a بحث press: page 0 of a real page size. index.tsx also fires one
+ *  p_limit:1 count probe per visible district, and those can land AFTER the main search —
+ *  select by SHAPE, never by recency (the 2026-09-28 '419' failure trusted the wrong signal). */
+export const isMainSearch = (body) =>
+  (body?.p_offset ?? 0) === 0 && Number(body?.p_limit ?? 0) > 1;
+
+// Advanced Filter amenity chips (src/data/advancedFilters.ts AMENITIES_QUESTION) → the
+// search_listings_ar column each p_amenities token asserts. Order = preference when picking
+// what to answer for a listing.
+export const AMENITY_TOKEN_COLUMN = {
+  elevator: 'elevator', kitchen: 'kitchen', parking: 'parking',
+  ac: 'air_conditioner', private_entrance: 'private_entrance',
+  maid_room: 'maid_room', driver_room: 'driver_room',
+  balcony: 'balcony', pool: 'pool', garden: 'garden', gym: 'gym',
+  laundry_room: 'laundry_room', optical_fibers: 'optical_fibers',
+};
+
+/** The 1–2 Advanced Filter answers this listing is KNOWN (in the DB) to satisfy.
+ *  Amenity chips need the column true; the furnished question (Rent-only cohort) needs
+ *  furnished === true. Tri-state law: NULL is unknown and never a target. */
+// Cohort chips (src/lib/afCohorts.ts COHORT_CHIPS + the Villa-only branch of AMENITIES_QUESTION):
+// a pure-Villa scope adds مدخل سيارة / صرف صحي; a Rest House or Agriculture Plot scope renders ONLY
+// its listed chips (the utility trio, + kitchen for Rest House). Without these the journey could
+// never prove a utility answer (backlog 332: Deal App electricity/water/sewage), so a lost one went
+// unseen. Keyed by type_ar; a type not listed keeps the residential base chips.
+export const COHORT_TOKENS = {
+  'فيلا': { only: null, extra: ['car_entrance', 'sanitation'] },
+  'استراحة': { only: ['kitchen', 'electricity', 'water_supply', 'sanitation'], extra: [] },
+  'أرض زراعية': { only: ['electricity', 'water_supply', 'sanitation'], extra: [] },
+};
+const UTILITY_COLUMN = { car_entrance: 'car_entrance', sanitation: 'sanitation', electricity: 'electricity', water_supply: 'water_supply' };
+
+export const afTargetsFor = (row, max = 2) => {
+  const t = [];
+  const cohort = COHORT_TOKENS[row.type_ar] ?? { only: null, extra: [] };
+  const tokens = cohort.only ?? [...Object.keys(AMENITY_TOKEN_COLUMN), ...cohort.extra];
+  for (const token of tokens) {
+    const col = AMENITY_TOKEN_COLUMN[token] ?? UTILITY_COLUMN[token];
+    if (row[col] === true) t.push({ kind: 'amenity', token });
+  }
+  if (row.deal_ar === 'إيجار' && row.furnished === true) t.push({ kind: 'furnished' });
+  return t.slice(0, max);
+};
+
+/** Did the captured search body carry every answered predicate? (p_amenities is the bag the
+ *  amenity chips write into; the furnished QUESTION lands on p_furnished — src/data/remote.ts.) */
+export const carriedOnRequest = (body, answered) => {
+  const bag = Array.isArray(body?.p_amenities) ? body.p_amenities : [];
+  const missing = answered.filter((t) =>
+    t.kind === 'amenity' ? !bag.includes(t.token) : body?.p_furnished !== true);
+  return { carried: answered.length > 0 && missing.length === 0, missing };
+};
+
+// Filter-home UI labels per search_listings_ar.type_ar — MIRRORS src/data/propertyTypes.ts
+// (HIERARCHY + CLEAN_TO_TYPE_AR) and src/i18n.tsx (Arabic labels). A type outside this table
+// makes the journey UNKNOWN rather than guessing a tap.
+const G = {
+  apt: 'الشقق والسكن المشترك', villa: 'الفلل والبيوت', vac: 'الاستراحات والريف',
+  rplot: 'الأراضي السكنية', retail: 'التجزئة والمكاتب', ind: 'الصناعة واللوجستيات',
+  cbld: 'المباني والمرافق', cplot: 'الأراضي',
+};
+export const TYPE_UI = {
+  'شقة': { cat: 'سكني', group: G.apt, tap: 'شقة' },
+  'دور': { cat: 'سكني', group: G.apt, tap: 'دور' },
+  'استوديو': { cat: 'سكني', group: G.apt, tap: 'استوديو' },
+  'غرفة': { cat: 'سكني', group: G.apt, tap: 'غرفة' },
+  'عمارة سكنية': { cat: 'سكني', group: G.apt, tap: 'عمارة سكنية' },
+  'عمارة': { cat: 'سكني', group: G.apt, tap: 'عمارة سكنية' },
+  'مجمع': { cat: 'سكني', group: G.apt, tap: 'عمارة سكنية' },
+  'فيلا': { cat: 'سكني', group: G.villa, tap: 'فيلا' },
+  'بيت': { cat: 'سكني', group: G.villa, tap: 'فيلا' },
+  'دوبلكس': { cat: 'سكني', group: G.villa, tap: 'دوبلكس' },
+  'تاون هاوس': { cat: 'سكني', group: G.villa, tap: 'دوبلكس' }, // owner 2026-10-12: town house is filed under Duplex
+  'استراحة': { cat: 'سكني', group: G.vac, tap: 'استراحة' },
+  'شاليه': { cat: 'سكني', group: G.vac, tap: 'شاليه' },
+  'مخيم': { cat: 'سكني', group: G.vac, tap: 'مخيم' },
+  'مزرعة': { cat: 'سكني', group: G.vac, tap: 'مزرعة' },
+  'أرض زراعية': { cat: 'سكني', group: G.vac, tap: 'أرض زراعية' },
+  'أرض سكنية': { cat: 'سكني', group: G.rplot, tap: 'أرض سكنية' },
+  'مكتب': { cat: 'تجاري', group: G.retail, tap: 'مكتب' },
+  'محل': { cat: 'تجاري', group: G.retail, tap: 'محل' },
+  'معرض': { cat: 'تجاري', group: G.retail, tap: 'معرض' },
+  'مستودع': { cat: 'تجاري', group: G.ind, tap: 'مستودع' },
+  'ورشة': { cat: 'تجاري', group: G.ind, tap: 'ورشة' },
+  'مصنع': { cat: 'تجاري', group: G.ind, tap: 'مصنع' },
+  'مبنى تجاري': { cat: 'تجاري', group: G.cbld, tap: 'مبنى تجاري' },
+  'فندق': { cat: 'تجاري', group: G.cbld, tap: 'فندق' },
+  'محطة وقود': { cat: 'تجاري', group: G.cbld, tap: 'محطة وقود' },
+  'سكن عمال': { cat: 'تجاري', group: G.cbld, tap: 'سكن عمال' },
+  'أرض تجارية': { cat: 'تجاري', group: G.cplot, tap: 'أرض تجارية' },
+  'أرض صناعية': { cat: 'تجاري', group: G.cplot, tap: 'أرض صناعية' },
+};
+// A type the catalog calls «both» (known_type_ar macro both — today only «عمارة») lives in BOTH
+// categories, and the SOURCE TABLE decides which one a customer must open: a building stored in a
+// *_commercial_listings table is served only under تجاري → «مبنى تجاري» (§41.14: the residential
+// overlay deliberately excludes «عمارة»). The Falcon's 10-09 run marked aldarim_commercial 576461 a
+// product FAIL for a search that returned 0, when the real product path (مبنى تجاري, Riyadh / حي
+// العليا, Buy) returns it as 1 of 2 — the harness had sent the customer to the wrong category.
+export const COMMERCIAL_TABLE_UI = { 'عمارة': 'مبنى تجاري' };
+export const typeUi = (typeAr, sourceTable) => {
+  const t = String(typeAr || '').normalize('NFC');
+  if (/_commercial_listings$/.test(String(sourceTable || '')) && COMMERCIAL_TABLE_UI[t]) return TYPE_UI[COMMERCIAL_TABLE_UI[t]] ?? null;
+  return TYPE_UI[t] ?? null;
+};
+
+/** Stay-length-priced platforms show «اضغط للاطلاع…», never a figure (owner 2026-10-02) —
+ *  a customer cannot use a price range to find them, so the journey must not set one. */
+export const STAY_LENGTH_PRICED = new Set(['gathern', 'aqarmonthly']);
+
+/** The price a customer would budget around, or null when none applies. PRICE = SOURCE:
+ *  the range is built AROUND the stored value, never written over it. */
+export const priceOf = (row) => {
+  if (STAY_LENGTH_PRICED.has(String(row.platform || '').toLowerCase())) return null;
+  // Rent: the search filters on price_annual (a monthly budget is ×12'd on the SERVER), and the card
+  // prints a monthly rent as price_annual ÷ 12 — so that is the figure a customer budgets around. The
+  // old order typed price_annual into the MONTHLY box whenever price_total was null (muktamel 16138529:
+  // 900,000 «a month» for a 75,000/month showroom → total 0, a false «can't find» on 2026-10-08).
+  const annual = Number(row.price_annual);
+  const p = row.deal_ar === 'إيجار'
+    ? (Number.isFinite(annual) && annual > 0
+        ? (row.rent_period_ar === 'شهري' ? annual / 12 : annual)
+        : row.price_total)
+    : row.price_total ?? row.price_total_effective;
+  return Number.isFinite(Number(p)) && Number(p) > 0 ? Number(p) : null;
+};
+
+/** A customer-shaped range around a known value (wide enough to survive rounding). */
+export const rangeAround = (v, pct = 0.25) =>
+  Number.isFinite(v) && v > 0 ? { min: Math.max(0, Math.floor(v * (1 - pct))), max: Math.ceil(v * (1 + pct)) } : null;
+
+/** The Filter's price boxes keep 10 digits (src/app/index.tsx: `toWholeNumberDigits(v).slice(0, 10)`), so the
+ *  most a customer can type is 9,999,999,999. The robot used to type 11 digits and the box silently kept the
+ *  first ten: 21,750,000,000–36,250,000,000 became 2,175,000,000–3,625,000,000, the page honestly answered that
+ *  band (total 11) and the 29-billion ad read as «not found» (🔧 backlog 1141, run 41279009951). What a customer
+ *  can do with such an ad is leave the upper box EMPTY and type the box's maximum in the lower one — so that is
+ *  what the robot does: a bound that does not fit the box is dropped (max) or pinned to the box's ceiling (min). */
+export const PRICE_BOX_MAX_DIGITS = 10;
+export const PRICE_BOX_CEILING = 10 ** PRICE_BOX_MAX_DIGITS - 1;
+export const clampToPriceBox = (range) => {
+  if (!range) return null;
+  const fits = (n) => n != null && String(Math.trunc(n)).length <= PRICE_BOX_MAX_DIGITS;
+  return {
+    min: range.min == null ? null : (fits(range.min) ? range.min : PRICE_BOX_CEILING),
+    max: range.max == null ? null : (fits(range.max) ? range.max : null),
+  };
+};
+
+/** Spread N picks across platforms, round-robin, preserving each platform's own order. */
+export const pickSpread = (rows, n) => {
+  const by = new Map();
+  for (const r of rows) {
+    if (!by.has(r.platform)) by.set(r.platform, []);
+    by.get(r.platform).push(r);
+  }
+  const buckets = [...by.values()];
+  const out = [];
+  for (let i = 0; out.length < n; i++) {
+    const had = out.length;
+    for (const b of buckets) if (b.length > i && out.length < n) out.push(b[i]);
+    if (out.length === had) break;
+  }
+  return out;
+};
+
+export const idKey = (r) => `${r.source_table}:${r.listing_id}`;
+
+// ── hermetic self-check ─────────────────────────────────────────────────────────────────────
+import { fileURLToPath } from 'node:url';
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  const assert = (await import('node:assert')).strict;
+  assert.equal(normUrl('http://x.sa/a/#frag'), 'https://x.sa/a');
+  assert.equal(normUrl('https://x.sa/a'), normUrl('http://x.sa/a/'));
+  // the localized form the Arabic app opens is the stored ad (backlog 801)
+  assert.equal(normUrl('https://gathern.co/ar/view/175503/unit/245201'), normUrl('https://gathern.co/view/175503/unit/245201'));
+  assert.equal(normUrl('https://aoujestates.com/ar/properties/x'), normUrl('https://aoujestates.com/ar/properties/x'));
+  assert.notEqual(normUrl('https://gathern.co/ar/view/1/unit/2'), normUrl('https://gathern.co/view/1/unit/3'), 'a different unit is a different ad');
+  assert.notEqual(normUrl('https://x.sa/area/1'), normUrl('https://x.sa/1'), 'only a whole /ar/ segment is a language, not a prefix of a word');
+  assert.ok(isMainSearch({ p_offset: 0, p_limit: 24 }));
+  assert.ok(!isMainSearch({ p_offset: 0, p_limit: 1 }), 'district count probe is not the main search');
+  assert.ok(!isMainSearch({ p_offset: 24, p_limit: 24 }), 'page 2 is not the main search');
+  const row = { deal_ar: 'إيجار', furnished: true, elevator: true, kitchen: null, parking: false };
+  assert.deepEqual(afTargetsFor(row), [{ kind: 'amenity', token: 'elevator' }, { kind: 'furnished' }],
+    'NULL is unknown and false is no — neither is a target');
+  // cohort chips: a Rest House answers only its own chips; a villa adds sewage after the base set;
+  // an apartment never targets a utility chip it is never offered
+  assert.deepEqual(afTargetsFor({ type_ar: 'استراحة', deal_ar: 'بيع', elevator: true, electricity: true, sanitation: true }),
+    [{ kind: 'amenity', token: 'electricity' }, { kind: 'amenity', token: 'sanitation' }]);
+  assert.deepEqual(afTargetsFor({ type_ar: 'فيلا', deal_ar: 'بيع', sanitation: true, electricity: true }),
+    [{ kind: 'amenity', token: 'sanitation' }]);
+  assert.deepEqual(afTargetsFor({ type_ar: 'شقة', deal_ar: 'بيع', electricity: true, sanitation: true }), []);
+  assert.ok(carriedOnRequest({ p_amenities: ['elevator'], p_furnished: true },
+    afTargetsFor(row)).carried);
+  assert.ok(!carriedOnRequest({ p_amenities: [] }, [{ kind: 'amenity', token: 'elevator' }]).carried);
+  assert.ok(!carriedOnRequest({}, []).carried, 'zero answers can never count as carried');
+  assert.equal(typeUi('شقة').group, 'الشقق والسكن المشترك');
+  assert.equal(typeUi('نوع غريب'), null);
+  // a «both» type follows its SOURCE TABLE's category: the same «عمارة» is residential in a
+  // residential table and «مبنى تجاري» in a commercial one (Falcon 2026-10-09)
+  assert.equal(typeUi('عمارة', 'aqar_residential_listings').tap, 'عمارة سكنية');
+  assert.equal(typeUi('عمارة', 'aldarim_commercial_listings').tap, 'مبنى تجاري');
+  assert.equal(typeUi('عمارة', 'aldarim_commercial_listings').cat, 'تجاري');
+  assert.equal(typeUi('محل', 'aldarim_commercial_listings')?.cat ?? null, typeUi('محل')?.cat ?? null);
+  assert.equal(priceOf({ platform: 'gathern', deal_ar: 'إيجار', price_total: 500 }), null,
+    'stay-length-priced platforms have no customer-visible price');
+  assert.equal(priceOf({ platform: 'aqar', deal_ar: 'بيع', price_total: 100000 }), 100000);
+  assert.deepEqual(rangeAround(100, 0.25), { min: 75, max: 125 });
+  // the price box keeps 10 digits: a bound that does not fit is not typed (max) or pinned to the ceiling (min)
+  assert.deepEqual(clampToPriceBox(rangeAround(100, 0.25)), { min: 75, max: 125 }, 'a fitting range is untouched');
+  assert.deepEqual(clampToPriceBox(rangeAround(29_000_000_000)), { min: PRICE_BOX_CEILING, max: null },
+    '29 billion: both bounds have 11 digits → min pinned to 9,999,999,999, max left empty (backlog 1141)');
+  assert.deepEqual(clampToPriceBox({ min: 9_000_000_000, max: 11_000_000_000 }), { min: 9_000_000_000, max: null },
+    'only the max overflows → only the max is dropped');
+  assert.equal(clampToPriceBox(null), null);
+  assert.equal(String(PRICE_BOX_CEILING).length, PRICE_BOX_MAX_DIGITS, 'the ceiling itself fits the box');
+  // mutation: a robot that still typed the raw max would type 11 digits — the box cannot hold them
+  assert.ok(String(rangeAround(29_000_000_000).max).length > PRICE_BOX_MAX_DIGITS, 'the unclamped max really overflows');
+  const picked = pickSpread([
+    { platform: 'a', listing_id: 1 }, { platform: 'a', listing_id: 2 },
+    { platform: 'b', listing_id: 3 }, { platform: 'c', listing_id: 4 },
+  ], 3);
+  assert.deepEqual(picked.map((r) => r.platform).sort(), ['a', 'b', 'c'], 'spread across platforms first');
+  console.log('journey-lib self-check: OK');
+}

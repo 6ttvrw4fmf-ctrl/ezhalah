@@ -1033,7 +1033,7 @@ def test_an_auction_ad_is_refused():
     ("فيلا", "Villa", "residential"),
     ("دور", "Floor", "residential"),
     ("أرض سكنية", "Residential Land", "residential"),
-    ("تاون هاوس", "Villa", "residential"),
+    ("تاون هاوس", "تاون هاوس", "residential"),
     ("عمارة سكنية", "Building", "residential"),
     ("محل", "Shop", "commercial"),
     ("مكتب", "Office", "commercial"),
@@ -1045,7 +1045,7 @@ def test_every_type_word_the_catalogue_contains_maps_and_lands_in_the_right_tabl
         word, expected, category):
     """All eleven words, counted over the whole catalogue 2026-09-24: أرض سكنية 1,288, شقة 691,
     فيلا 156, محل 143, دور 28, تاون هاوس 22, مستودع 22, مكتب 14, معرض 6, عمارة تجارية 3,
-    عمارة سكنية 1. «تاون هاوس» → Villa is the fleet's existing decision, not a new one."""
+    عمارة سكنية 1. «تاون هاوس» keeps its own name (owner 2026-10-12); the app's search files it under Duplex."""
     got = R.normalize.map_type_exact(word, R._TYPE_OVERRIDES)
     assert got == expected, f"«{word}» must map to {expected}"
     assert R.normalize.category_for_type(got).lower() == category

@@ -64,11 +64,38 @@ export const AMENITY_TOKEN_COL: Record<string, string> = {
   balcony: 'balcony',
   laundry_room: 'laundry_room',
   optical_fibers: 'optical_fibers',
+  majlis: 'majlis',
   separate_electricity_meter: 'separate_electricity_meter',
   separate_water_meter: 'separate_water_meter',
   furnished: 'furnished',
   rnpl: 'rent_now_pay_later',
   rent_now_pay_later: 'rent_now_pay_later',
+  // The 39 column-backed chips of the Apartments & Co-living cards (owner handoff 2026-10-31, migration
+  // 20261101100930): the clause guards each as `and (not ('tok' = any(p_amenities)) or s.tok)` — token = column.
+  roof: 'roof', two_entrances: 'two_entrances', annex: 'annex', yard: 'yard', garage: 'garage', grill: 'grill',
+  storage: 'storage', water_tank: 'water_tank', warranty: 'warranty', electronic_deed: 'electronic_deed', basement: 'basement',
+  self_checkin: 'self_checkin', wifi: 'wifi', bills_included: 'bills_included', jacuzzi: 'jacuzzi', smart_tv: 'smart_tv',
+  billiards: 'billiards', cleaning_service: 'cleaning_service', soundproof: 'soundproof', cameras: 'cameras', guard: 'guard',
+  smart_entry: 'smart_entry', smart_home: 'smart_home', central_gas: 'central_gas', sauna: 'sauna', kids_play_area: 'kids_play_area',
+  nursery: 'nursery', free_maintenance: 'free_maintenance', intercom: 'intercom', fire_system: 'fire_system', ev_charger: 'ev_charger',
+  central_vacuum: 'central_vacuum', insulation: 'insulation', dining_majlis: 'dining_majlis', own_bathroom: 'own_bathroom',
+  fridge: 'fridge', whole_floor: 'whole_floor', singles: 'singles', families: 'families',
+};
+// The 6 DERIVED tokens of the same migration — one p_amenities slug standing for a predicate over OTHER columns,
+// mirroring the clause arms exactly:
+//   separate_meters → (s.separate_electricity_meter or s.separate_water_meter)   [an OR group: either meter true]
+//   apts4/8/12/20   → s.apartments_count >= n                                    [the Residential Building ladder]
+//   has_shops       → s.shops_count >= 1
+// Each is translated to PostgREST the way the clause reads it: the OR as an `or=(…)` group (so it composes with the
+// other or-groups through `and=(or(…),or(…))`), the numbers as plain `gte` filters.
+export type DerivedAmenity = { cols: string[]; filter: string; orGroup?: boolean };
+export const AMENITY_TOKEN_DERIVED: Record<string, DerivedAmenity> = {
+  separate_meters: { cols: ['separate_electricity_meter', 'separate_water_meter'], filter: 'separate_electricity_meter.is.true,separate_water_meter.is.true', orGroup: true },
+  apts4: { cols: ['apartments_count'], filter: 'apartments_count=gte.4' },
+  apts8: { cols: ['apartments_count'], filter: 'apartments_count=gte.8' },
+  apts12: { cols: ['apartments_count'], filter: 'apartments_count=gte.12' },
+  apts20: { cols: ['apartments_count'], filter: 'apartments_count=gte.20' },
+  has_shops: { cols: ['shops_count'], filter: 'shops_count=gte.1' },
 };
 
 export type OracleOpts = {
@@ -115,8 +142,17 @@ export function directionVariantsFrom(observed: Iterable<string>): Record<string
   return map;
 }
 
+/** The «Raw Land» filter token; matched against the index's unit_subtype_ar TAG, not type_ar. */
+export const RAW_LAND_TAG = 'أرض خام';
+/** Platforms whose stored age 10 includes the source's OPEN bucket («أكثر من 10 سنوات», «10+ years», REGA
+ *  «Ten Year»), each read on its own published field 2026-10-25 (migrations 20261025065509, 20261025072931). */
+export const AGE_OPEN_10_PLATFORMS = ['aqar', 'aqarcity', 'haraj', 'muhaysini', 'reinvest', 'tuba', 'wasalt'] as const;
+
 export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string; unhandled: string[] } {
   const parts = ['production_ready=is.true'];
+  // Mixture params (owner 2026-10-03) are each ONE disjunction; collected and emitted once at the end so
+  // two of them never become two competing `or=` keys.
+  const orGroups: string[] = [];
   const unhandled: string[] = [];
 
   // `production_ready=is.true` IS NOT THE WHOLE ADMISSION RULE (found live 2026-09-01).
@@ -289,7 +325,18 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
    * one-kind (the two-scope case this module already handled), it is byte-identical to the old
    * `type_ar.in.(…)` — so this changes NOTHING except the mixed-kind case it was written for.
    */
+  // RAW LAND IS A TAG, NOT A TYPE (🔬 AF engineer, 2026-10-12). The «Raw Land» box sends the token «أرض خام»,
+  // which no index row stores as type_ar: a raw plot keeps its source type and is TAGGED
+  // unit_subtype_ar = 'أرض خام'. Production's type arm reads (live location_search_candidates_ar)
+  //     s.type_ar = any(p_types) or (s.unit_subtype_ar = 'أرض خام' and 'أرض خام' = any(p_types))
+  // and this oracle emitted the first half only, so it counted 0 where the RPC counted the tagged plots. It
+  // agreed while no row was tagged; once 281 were, every Raw Land cell of af-live-truth-check went red
+  // (run 38215288912, «base count RPC == oracle» rpc=11 oracle=0 in جدة) — a tool undercount, not a product bug.
   const typeConjunct = (permitted: string[], tables: string[] | null | undefined): string => {
+    const c = typeConjunctNoTag(permitted, tables);
+    return permitted.includes(RAW_LAND_TAG) ? `or(${c},unit_subtype_ar.eq.${enc(`"${RAW_LAND_TAG}"`)})` : c;
+  };
+  const typeConjunctNoTag = (permitted: string[], tables: string[] | null | undefined): string => {
     const plain = `type_ar.in.(${permitted.map((x) => enc(`"${x}"`)).join(',')})`;
     if (!macros || !category || !mixedKind(tables)) return plain;
     const both = permitted.filter((t) => macros[t] === 'both');
@@ -588,15 +635,19 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
         // wrongly filter Buy rows by a rent column. The app never sends a period without
         // p_deal='إيجار' (rentPeriodParam returns null otherwise), so this is refused, not modelled.
         if (reqBody.p_deal !== 'إيجار') { unhandled.push(`p_rent_period=${v} with p_deal=${JSON.stringify(reqBody.p_deal ?? null)} (the clause only applies a period to Rent rows)`); break; }
-        if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`);
-        else if (v === 'شهري') parts.push(`payment_monthly=is.true&rent_now_pay_later=not.is.true`);
+        // The سنوي and كلاهما arms also admit price on request (price_annual NULL) — the line the clause
+        // gained 2026-09-28 (owner: «سعر عند الطلب … both monthly and yearly»). Under شهري («إقامات قصيرة»)
+        // an unpriced row is admitted ONLY from the two stay-length platforms (owner 2026-10-26, migration
+        // 20261026071543: «shift those to annual rent»).
+        if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`);
+        else if (v === 'شهري') parts.push(`or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),and(price_annual.is.null,platform.in.(gathern,aqarmonthly)))`);
         // BOTH periods (rentPeriod 'both' → 'كلاهما'), translated VERBATIM from the clause (2026-09-02):
         //   p_rent_period = 'كلاهما' and (s.payment_monthly = true
         //                                 or s.rent_period_ar = 'سنوي'
         //                                 or (s.rent_period_ar = 'شهري' and coalesce(s.rent_now_pay_later,false)))
         // It is the union of the two single-period arms — NOT "no period filter": a rent row whose
         // source published no period at all stays OUT (R1.5.1; migration rent_period_both_monthly_and_annual).
-        else if (v === 'كلاهما') parts.push(`or=(payment_monthly.is.true,rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`);
+        else if (v === 'كلاهما') parts.push(`or=(payment_monthly.is.true,rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`);
         else unhandled.push(`p_rent_period=${v}`);
         break;
       // beds/bath/price/floor are handled ABOVE, where the clause's exact-vs-min and
@@ -621,7 +672,12 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       case 'p_has_license': parts.push(v === true ? 'license_number=not.is.null' : 'license_number=is.null&license_number=not.is.null'); break;
       case 'p_furnished': parts.push(`furnished=is.${v}`); break;
       case 'p_age_min': parts.push(`property_age=gte.${v}`); break;
-      case 'p_age_max': parts.push(`property_age=lte.${v}`); break;
+      // An upper bound never admits an OPEN bucket: on these platforms «more than 10» is stored as its
+      // floor 10, so a 10 there has no upper end (AGE_OPEN_10_PLATFORMS).
+      case 'p_age_max':
+        parts.push(`property_age=lte.${v}`);
+        if (Number(v) >= 10) orGroups.push(`property_age.lt.10,platform.not.in.(${AGE_OPEN_10_PLATFORMS.join(',')})`);
+        break;
       case 'p_street_width_min': parts.push(`street_width_m=gte.${v}`); break;
       case 'p_street_width_max': parts.push(`street_width_m=lte.${v}`); break;
       // DIRECTIONS ARE NOT STORED CANONICALLY (found 2026-09-02, full-surface sweep). The clause
@@ -643,6 +699,37 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       case 'p_rating_min': parts.push(`rating=gte.${v}`); break;
       case 'p_reviews_min': parts.push(`reviews_count=gte.${v}`); break;
       case 'p_unit_subtypes': parts.push(`unit_subtype_ar=in.${inList(v as string[])}`); break;
+      // SEVERAL ANSWERS = THEIR UNION (owner 2026-10-03, migration af_every_question_multi_select_unions).
+      // Bucket edges restated from the age/rating questions' own option meanings, not from our SQL.
+      case 'p_age_buckets': {
+        const AGE_OR: Record<string, string> = {
+          new: 'property_age.eq.0', '1_2': 'and(property_age.gte.1,property_age.lte.2)',
+          '3_5': 'and(property_age.gte.3,property_age.lte.5)', '6_9': 'and(property_age.gte.6,property_age.lte.9)',
+          '10p': 'property_age.gte.10',
+        };
+        const ks = v as string[];
+        const bad = ks.filter((k) => !AGE_OR[k]);
+        if (bad.length) { unhandled.push(`p_age_buckets:${bad.join('|')}`); break; }
+        if (ks.length) orGroups.push(ks.map((k) => AGE_OR[k]).join(','));
+        break;
+      }
+      case 'p_rating_buckets': {
+        const RATE_OR: Record<string, string> = {
+          '9.5': 'rating.gte.9.5', '9.0': 'rating.gte.9', '9.0_rc10': 'and(rating.gte.9,reviews_count.gte.10)',
+        };
+        const ks = v as string[];
+        const bad = ks.filter((k) => !RATE_OR[k]);
+        if (bad.length) { unhandled.push(`p_rating_buckets:${bad.join('|')}`); break; }
+        if (ks.length) orGroups.push(ks.map((k) => RATE_OR[k]).join(','));
+        break;
+      }
+      // furnished = any([true,false]) — the listings that STATED either way; NULL is in neither.
+      case 'p_furnished_in': {
+        const bs = v as boolean[];
+        if (bs.includes(true) && bs.includes(false)) parts.push('furnished=not.is.null');
+        else if (bs.length) parts.push(`furnished=is.${bs[0]}`);
+        break;
+      }
       // MULTI-AMENITY IS AND (R7.2.2). Each ticked chip is its own boolean column, so every token
       // appends its OWN conjunctive part — PostgREST joins top-level filters with AND, matching the
       // clause's `and (not ('tok' = any(p_amenities)) or s.col)` chain. Collapsing these into one
@@ -650,8 +737,10 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       case 'p_amenities':
         for (const tok of v as string[]) {
           const col = AMENITY_TOKEN_COL[tok];
-          if (!col) { unhandled.push(`p_amenities:${tok}`); continue; }
-          parts.push(`${col}=is.true`);
+          if (col) { parts.push(`${col}=is.true`); continue; }
+          const derived = AMENITY_TOKEN_DERIVED[tok];
+          if (!derived) { unhandled.push(`p_amenities:${tok}`); continue; }
+          if (derived.orGroup) orGroups.push(derived.filter); else parts.push(derived.filter);
         }
         break;
       // genuinely irrelevant to the WHERE clause (paging/sorting/informational), always safe:
@@ -675,5 +764,7 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       default: unhandled.push(`${k}=${JSON.stringify(v)}`);
     }
   }
+  if (orGroups.length === 1) parts.push(`or=(${orGroups[0]})`);
+  else if (orGroups.length > 1) parts.push(`and=(${orGroups.map((g) => `or(${g})`).join(',')})`);
   return { qs: parts.join('&'), unhandled };
 }

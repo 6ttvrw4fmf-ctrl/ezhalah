@@ -1,6 +1,7 @@
-# Weekly aqarcity retention cleanup via the unified engine. Honors the aqarcity policy row. Deletes a
+# Aqarcity retention cleanup via the unified engine. Honors the aqarcity policy row. Deletes a
 # listing ONLY after re-fetching its aqarcity URL and finding the «الإعلان منتهي» expired banner on a
-# 200 page; every other 200 is live → self-heal. Triggered weekly by pg_cron (gh-aqarcity-cleanup).
+# 200 page; every other 200 is live → self-heal. Since 2026-09-28 the DAILY run is fleet-cleanup.yml
+# (aqarcity is enabled, so run_fleet covers it); this workflow stays for manual and bounded runs.
 name: Aqarcity cleanup
 on:
   workflow_dispatch:
@@ -21,9 +22,14 @@ on:
 concurrency:
   group: aqarcity-cleanup
   cancel-in-progress: false
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   cleanup:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4

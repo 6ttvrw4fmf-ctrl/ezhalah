@@ -106,6 +106,7 @@ const DECLARED: Record<string, Verdict> = {
   'verify-aqargate-absence-cannot-deactivate.ts': 'offline-safe',  // re-measured in a clean venv (first run was red on a broken interpreter)
   'verify-aqarmonthly-coverage-beats-row-floor.ts': 'offline-safe',  // re-measured in a clean venv (first run was red on a broken interpreter)
   'verify-aqarmonthly-district-suffix-guard.ts': 'offline-safe',
+  'verify-af-score-measures-the-customer-path.ts': 'offline-safe',  // 2026-10-04: normal=0, SUPABASE_URL blackholed=0; its python harness stubs scrapers.common.db/cleanup/source_reread in sys.modules before exec, no client is ever built
   'verify-authoritative-null-price.ts': 'offline-safe',
   'verify-cleanup-anomaly-gate.ts': 'offline-safe',
   // Measured 2026-09-20 (routine #11, run 49535): normal exit 0, blackhole exit 0. It spawns python
@@ -117,6 +118,7 @@ const DECLARED: Record<string, Verdict> = {
   // harness replaces scrapers.common.db in sys.modules BEFORE importing the enricher, so no client is
   // ever constructed and the verdict cannot depend on production being reachable.
   'verify-enrich-ar-stops-before-the-ci-wall.ts': 'offline-safe',
+  'verify-every-site-has-the-full-lifecycle.ts': 'offline-safe',  // 2026-09-28: normal=0, SUPABASE_URL blackholed=0
   'verify-gathern-brackets-its-canary.ts': 'offline-safe',
   'verify-gathern-canary-pool-cannot-deadlock.ts': 'offline-safe',
   'verify-gathern-liveness-trust-gate.ts': 'offline-safe',
@@ -125,8 +127,13 @@ const DECLARED: Record<string, Verdict> = {
   'verify-liveness-registry-describes-real-evidence.ts': 'offline-safe',
   'verify-liveness-registry-mirror.ts': 'offline-safe',
   'verify-mustqr-absence-cannot-deactivate.ts': 'offline-safe',
+  // 2026-10-25: normal=0, SUPABASE_URL blackholed=0. Its python harness imports only scrapers.haraj.parse (pure string
+  // parsing; scrapers.common.db is never loaded — checked via sys.modules) to run age_of on a fixed vocabulary.
+  'verify-open-age-bucket-never-answers-up-to.ts': 'offline-safe',
   'verify-prune-without-oracle-is-declared.ts': 'offline-safe',
   'verify-raghdan-absence-cannot-deactivate.ts': 'offline-safe',  // re-measured in a clean venv (first run was red on a broken interpreter)
+  'verify-raghdan-description-is-the-brokers-text.ts': 'offline-safe',  // 2026-10-25: normal=0, SUPABASE_URL blackholed=0; pure map_listing over a page string, no client is ever built
+  'verify-raghdan-keeps-the-deed-boundaries.ts': 'offline-safe',  // 2026-10-25: normal=0, SUPABASE_URL blackholed=0; pure map_listing over a page string
   'verify-rent-scrapers-annualise.ts': 'offline-safe',
   'verify-sanadak-absence-cannot-deactivate.ts': 'offline-safe',  // re-measured in a clean venv (first run was red on a broken interpreter)
   'verify-sanadak-rsc-object-match.ts': 'offline-safe',

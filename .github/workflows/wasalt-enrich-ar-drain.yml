@@ -1,0 +1,74 @@
+name: Wasalt enrich AR — parallel backlog drain
+
+# Owner 2026-10-19: «Wasalt gives a pin 100% — use DataImpulse to fix the backlog, then stop».
+# The map pin for a Wasalt ad lives ONLY on its Arabic detail page (ar_data, read by enrich_ar.py
+# through a real browser + the Saudi residential proxy). Measured that day: 23,066 active ads had never
+# been fetched, so they were served with no pin; the single-browser daily job (wasalt-enrich-ar.yml,
+# ~400 ads per 45-minute run) drains ~4,900 a week against ~2,350 new — about nine weeks.
+#
+# This fans the SAME enricher across 10 shards (enrich_ar's own `--shards 10` split by ad_number's last
+# digit, zero overlap) with --allow-backfill, so one dispatch clears ~9,000 ads in 90 minutes. It is
+# dispatch-only and has NO schedule: it exists for an owner-approved drain, never as a standing cost.
+# Rows the budget does not reach stay pending for the next dispatch or the daily job. Read-only on
+# Wasalt beyond what the daily job already does; each shard writes ~1 row every few seconds.
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_seconds:
+        description: "Per-shard time budget in seconds (5400 = 90 min)"
+        required: false
+        default: "5400"
+      limit:
+        description: "Max rows per shard (ceiling on the SELECT; time is the real bound)"
+        required: false
+        default: "3000"
+
+concurrency:
+  group: wasalt-enrich-ar          # never alongside the daily single-browser job on the same rows
+  cancel-in-progress: false
+
+env:
+  # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
+  # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  drain:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 110
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
+      - name: Enrich AR shard ${{ matrix.shard }} (backlog drain)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
+          SCRAPE_MIN_INTERVAL: "0.3"
+        run: |
+          # Same transport as wasalt-enrich-ar.yml: headed Chromium under xvfb clears Cloudflare, the
+          # residential proxy supplies the IP it demands. --allow-backfill is the explicit authorisation
+          # the circuit breaker asks for; --max-pending is lifted for the same reason.
+          exec xvfb-run -a python -m scrapers.wasalt.enrich_ar \
+            --table wasalt_residential_listings \
+            --shard ${{ matrix.shard }} --shards 10 \
+            --limit ${{ github.event.inputs.limit || 3000 }} \
+            --workers 1 \
+            --max-pending 1000000 \
+            --allow-backfill \
+            --retry-errs 0 \
+            --max-seconds ${{ github.event.inputs.max_seconds || 5400 }}

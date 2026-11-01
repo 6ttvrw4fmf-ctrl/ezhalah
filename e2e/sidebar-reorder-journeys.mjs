@@ -1,6 +1,7 @@
 // SIDEBAR PRESS-HOLD-DRAG REORDER — real-browser journeys A–G (owner spec 2026-08-24).
 // Signed-in state is seeded client-side (a local session object + history:<sub> in localStorage);
 // no backend account is touched — sidebar history is a purely client-side feature.
+import '../scripts/lib/robotPass.mjs'; // robot pass + secret handshake for our own browser robots (docs/ops/SCRAPE_GUARD.md)
 import { chromium, devices } from '@playwright/test';
 
 const BASE = process.env.BASE_URL || 'http://localhost:8123';

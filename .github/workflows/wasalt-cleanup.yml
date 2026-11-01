@@ -35,9 +35,14 @@ concurrency:
   group: wasalt-cleanup
   cancel-in-progress: false
 
+env:
+  # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
+  # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   cleanup:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # 180 min (was 60): the re-check drives a real browser per candidate (~15-20s each through the
     # Cloudflare path), so a drain batch of ~500 needs ~2.5h. 60 min cancelled the first drain
     # dry-run mid-recheck (2026-09-20). Still far under GitHub's 6h ceiling.

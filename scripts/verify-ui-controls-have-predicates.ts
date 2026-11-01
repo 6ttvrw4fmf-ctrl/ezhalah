@@ -93,7 +93,7 @@ if (!vocabMatch) {
   console.log('  FAIL  could not read the amenity vocabulary from sql/mirrors/af_eligibility_clause.sql');
   process.exit(1);                       // FAIL CLOSED: deleting the mirror must not disarm the check
 }
-const RESULTS_SLUGS = new Set([...vocabMatch[1].matchAll(/''([a-z_]+)''/g)].map((m) => m[1]));
+const RESULTS_SLUGS = new Set([...vocabMatch[1].matchAll(/''([a-z_0-9]+)''/g)].map((m) => m[1]));   // apts4… carry a digit
 if (RESULTS_SLUGS.size < 12) {
   console.log(`  FAIL  amenity vocabulary parsed as only ${RESULTS_SLUGS.size} tokens — parse miss, not a real shrink`);
   process.exit(1);                       // a silently-empty Set would make every slug check vacuous
@@ -101,8 +101,10 @@ if (RESULTS_SLUGS.size < 12) {
 
 // The chip keys come from the SHARED derivation both halves use, so the live half can never end up
 // judging a different set of chips than this one certifies.
-const chipKeys = amenityChipKeys(advanced);
+const chips = read('src/lib/afChips.ts');
+const chipKeys = amenityChipKeys(advanced, chips);
 check('found the amenity-bearing question blocks', chipKeys.length > 0);
+check('the themed cards\' CHIP_DEFS table was parsed (≥ 40 tokens) and carries the owner\'s chips', chipKeys.length >= 40 && ['wifi', 'cameras', 'separate_meters', 'apts8', 'has_shops'].every((k) => chipKeys.includes(k)), `${chipKeys.length}: ${chipKeys.join(', ')}`);
 
 // ── 1. every amenity chip's key is a real results slug ──────────────────────────────────────────
 check('amenity questions declare the expected chips', chipKeys.length >= 6, `found ${chipKeys.length}: ${chipKeys.join(', ')}`);

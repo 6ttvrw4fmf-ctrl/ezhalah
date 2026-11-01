@@ -30,9 +30,13 @@ on:
       confirm_limit:
         description: "strike step: max rows HEAD/GET-verified this run (pilot uses a small cap)"
         type: string
-        default: "1500"
+        default: "3000"
       skip_enum:
         description: "PILOT ONLY: skip the 4.5h enum and run the strike step against the LAST completed enum (must be <36h old, else the coverage guard refuses). For repeatable pilots."
+        type: boolean
+        default: false
+      confirm_only:
+        description: "with skip_enum: page-confirm only the rows already at 3 strikes; strike nothing (an extra drain between enumerations never counts one enumeration twice)"
         type: boolean
         default: false
       repair_clock_bug_backlog:
@@ -56,13 +60,32 @@ concurrency:
   group: wasalt-enum-liveness
   cancel-in-progress: false
 
+env:
+  # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
+  # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
+  # This dispatch's start, before any shard runs. The rollup sums only shard rows started after it:
+  # its 36h window alone also swept in the PREVIOUS dispatch's shards whenever two dispatches landed
+  # <36h apart (see run_enum_rollup()).
+  stamp:
+    if: ${{ !inputs.skip_enum && !inputs.repair_clock_bug_backlog }}
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 2
+    outputs:
+      at: ${{ steps.t.outputs.at }}
+    steps:
+      - id: t
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
   enum:
-    name: Enum ${{ matrix.slug }} ${{ matrix.deal }}
+    name: Enum ${{ matrix.slug }} ${{ matrix.deal }} ${{ matrix.first }}
+    needs: stamp
     # PILOT skip (run strike against the last completed enum) OR the one-time repair dispatch —
     # either way the 4.5h enum has no reason to run.
     if: ${{ !inputs.skip_enum && !inputs.repair_clock_bug_backlog }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # SHARDED 2026-09-19. This was ONE job walking ~3,300 pages. Through the browser that is
     # 10-16h (measured ~11-18 s/page) against GitHub's 6h hosted-runner ceiling: run 35416642741
     # died at the 330-minute wall two-thirds through, having upserted 35,826 listings. Raising the
@@ -78,7 +101,14 @@ jobs:
       # A slice missing here is never enumerated, so every live listing in it would be counted
       # "unseen by the enum" and struck — the category-level version of the same failure the rollup
       # guard catches at the shard-count level. COMMERCIAL HAS ITS OWN 7 SLUGS; leaving them out was
-      # a real bug caught in review. 34 shards total; keep --shards-expected below in step.
+      # a real bug caught in review. 35 shards total; keep --shards-expected below in step.
+      #
+      # ROOM HAS NO FILTER ON THE SITE (read in a real browser 2026-11-01: wasalt.sa's Type menu has no
+      # Room, and propertyTypeData=room returns the whole list). So the room shards are the only walk
+      # that sees the types with no slug: Room (101 live), House, Complex, Gas Station, Farming Land.
+      # They must stay whole-list walks. room/sale is ~1,870 pages, 303+ min, and passed the 330-min
+      # cap on 10-21, 10-29 and 10-31, which threw away all 34 shards' strikes. Two jobs, overlapping
+      # by 10 pages so an ad sliding down during the walk is still read.
       matrix:
         include:
           - { type: residential, slug: apartment, deal: sale }
@@ -97,7 +127,8 @@ jobs:
           - { type: residential, slug: chalet, deal: rent }
           - { type: residential, slug: farm, deal: sale }
           - { type: residential, slug: farm, deal: rent }
-          - { type: residential, slug: room, deal: sale }
+          - { type: residential, slug: room, deal: sale, first: 1, last: 1000 }
+          - { type: residential, slug: room, deal: sale, first: 990, last: 2000 }
           - { type: residential, slug: room, deal: rent }
           - { type: residential, slug: duplex, deal: sale }
           - { type: residential, slug: duplex, deal: rent }
@@ -156,16 +187,16 @@ jobs:
           # is a FLOOR: it counts rendered HTML, and scripts are deliberately not blocked because
           # the challenge needs them. Re-measure before raising --pages or the cadence.
           exec xvfb-run -a python -m scrapers.wasalt.run \
-            --type ${{ matrix.type }} --slug ${{ matrix.slug }} --deal ${{ matrix.deal }} --pages 2000
+            --type ${{ matrix.type }} --slug ${{ matrix.slug }} --deal ${{ matrix.deal }} --start-page ${{ matrix.first || 1 }} --pages ${{ matrix.last || 2000 }}
 
   rollup:
     name: Roll the shards up into one enumeration
-    needs: enum
+    needs: [stamp, enum]
     # Only runs when EVERY shard succeeded. `fail-fast: false` lets the other slices finish so the
     # rollup can report exactly which are missing, but a single failed shard still stops publication:
     # a slice nobody enumerated is a slice whose every live listing would be counted "unseen".
     if: ${{ !inputs.skip_enum && needs.enum.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -182,12 +213,13 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           # No proxy and no browser: this step only reads scrape_runs and writes one row.
-          # --shards-expected must equal the matrix size (residential 10 + commercial 7, x2 deals = 34).
+          # --shards-expected must equal the matrix size (residential 10 + commercial 7, x2 deals = 34, + room/sale's second part = 35).
           # It is re-checked
           # against the DB rather than against CI, because a job can succeed having written nothing.
           exec python -m scrapers.wasalt.liveness \
             --mode enum-rollup \
-            --shards-expected 34 \
+            --shards-expected 35 \
+            --since "${{ needs.stamp.outputs.at }}" \
             ${{ inputs.dry_run && '--dry-run' || '' }}
 
   strike:
@@ -197,8 +229,8 @@ jobs:
     # coverage guard still refuses if the last enum is >36h old or below the row floor, so skipping
     # here never bypasses the safety — it only avoids re-running the 4.5h enum for a repeat pilot.
     if: ${{ always() && ((needs.enum.result == 'success' && needs.rollup.result == 'success') || inputs.skip_enum) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -227,17 +259,24 @@ jobs:
           # headless=False is what clears the challenge; the runner has no display, so xvfb-run
           # supplies a virtual one. --workers 1 because Playwright's sync API is thread-bound
           # (liveness.py forces it anyway; passing it keeps the command honest).
+          # --max-seconds 19800 (330 min) sits under timeout-minutes: 350 with room for setup and
+          # one stuck browser check (~9 min hard deadline). Results are flushed as the run goes, so
+          # a stop loses nothing. 70 min confirmed ~570 rows per run while ~4,000 rows the
+          # enumeration no longer serves waited (2026-10-02: struck=4090, killed=573) — dead ads
+          # stayed visible for a week. 330 min confirms ~2,700 at the measured ~7.3 s per check.
           exec xvfb-run -a python -m scrapers.wasalt.liveness \
             --mode enum-strike \
             --grace 3 \
             --workers 1 \
-            --confirm-limit ${{ inputs.confirm_limit || '1500' }} \
+            --confirm-limit ${{ inputs.confirm_limit || '3000' }} \
+            --max-seconds 19800 \
+            ${{ inputs.confirm_only && '--confirm-only' || '' }} \
             ${{ inputs.dry_run && '--dry-run' || '' }}
 
   repair:
     name: ONE-TIME — repair the clock-bug backlog (does not touch active)
     if: ${{ inputs.repair_clock_bug_backlog == true }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4

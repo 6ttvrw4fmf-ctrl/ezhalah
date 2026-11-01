@@ -13,7 +13,7 @@ Underscore-prefixed module name keeps pytest from collecting it as a test file.
 OLD_WASALT_TYPE_MAP = {
     'Apartment': 'Apartment',
     'Villa': 'Villa',
-    'Townhouse': 'Villa',
+    'Townhouse': 'Duplex',
     'Duplex': 'Villa',
     'Floor': 'Floor',
     'Building': 'Building',
@@ -163,7 +163,7 @@ OLD_WASALT_CITY_MAP = {
 OLD_ALDARIM_TYPE_MAP = {
     'land': 'Residential Land',
     'villa': 'Villa',
-    'townhouse': 'Villa',
+    'townhouse': 'Duplex',
     'duplex': 'Villa',
     'mansion': 'Villa',
     'apartment': 'Apartment',

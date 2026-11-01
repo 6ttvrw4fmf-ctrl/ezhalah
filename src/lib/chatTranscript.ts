@@ -36,6 +36,11 @@ export type PersistedChat = {
   // active composer. Optional and only ever `true`, so older transcripts and the persistence barrier's
   // literal round-trip are byte-identical when unset.
   completed?: true;
+  // Results turns the «تحديد أكثر» offer probe already said YES for (owner 2026-10-07: «I change the
+  // chat, go back later, and the Advanced Filter button takes a few seconds to show»). Restored so the
+  // button shows at once; the probe still re-runs in the background and corrects it. Optional and only
+  // ever `true` values, so older transcripts round-trip byte-identically.
+  afCanNarrow?: Record<string, true>;
 };
 
 // Bounds. Listings dominate transcript size (a card is ~1-2KB of JSON); everything else is text.
@@ -44,9 +49,32 @@ export type PersistedChat = {
 // de-dups against held cards, so continuation is gap-free (the exact rule store.tsx's snapshot
 // truncation established). LOCAL_TRANSCRIPT_ENTRIES bounds how many chats keep their transcript in
 // localStorage (the server keeps all of them; older local ones re-hydrate from the server on open).
-export const TRANSCRIPT_LISTING_CAP = 60;
+// SAVED = EVERYTHING THE USER SAW (owner 2026-10-08: «it should never load — a saved chat just opens, like a
+// chat»). The cap is the product's own display ceiling (SECOND_PAGE_CAP = 500 in resultCount.ts): «عرض المزيد»
+// never shows more, so a chat that was browsed to its end is saved whole and reopens with no fetch at all.
+// (It was 60, which made every reopen refetch the rest — seconds under load.) Size: ~2.6 KB a card ⇒ ≤ ~1.3 MB
+// a chat; store.tsx keeps only the newest few on disk under a byte budget, the server keeps all of them.
+export const TRANSCRIPT_LISTING_CAP = 500;
 export const TRANSCRIPT_FIRST_PAGE = 10;
 export const LOCAL_TRANSCRIPT_ENTRIES = 10;
+// Which chats keep their transcript on LOCAL disk: newest first, at most LOCAL_TRANSCRIPT_ENTRIES, within a BYTE
+// budget (a saved chat now holds up to 500 cards, ~1.3 MB, and localStorage is ~5 MB for the WHOLE history —
+// one write over the quota fails for all of it). The newest is always kept. Pure so it is tested directly.
+export const LOCAL_TRANSCRIPT_BYTES = 2_400_000;
+export function pickLocalTranscripts<T extends { id: string; ts: number; tRev?: number; transcript?: object }>(
+  items: readonly T[], sizeOf: (t: object) => number, entries = LOCAL_TRANSCRIPT_ENTRIES, bytes = LOCAL_TRANSCRIPT_BYTES,
+): Set<string> {
+  const keep = new Set<string>();
+  let spent = 0;
+  for (const it of items.slice().sort((a, b) => (b.tRev ?? b.ts) - (a.tRev ?? a.ts))) {
+    if (!it.transcript || keep.size >= entries) continue;
+    const n = sizeOf(it.transcript);
+    if (keep.size > 0 && spent + n > bytes) continue;
+    keep.add(it.id);
+    spent += n;
+  }
+  return keep;
+}
 
 type LiveChatState = {
   msgs: Array<Record<string, any> & { id: string; role: string }>;
@@ -54,6 +82,7 @@ type LiveChatState = {
   afReceipt: Record<string, string>;
   guidedPills: { msgId: string; baseQ: unknown; facets: unknown[]; asked: string[]; total: number | null } | null;
   completed?: boolean;
+  afCanNarrow?: Record<string, boolean>;
 };
 
 // Serialize the live screen state into a persistable transcript. Returns null when there is no
@@ -72,10 +101,18 @@ export function serializeChat(live: LiveChatState): PersistedChat | null {
       const r = rest.result;
       const revealed = live.revealCount[m.id] ?? TRANSCRIPT_FIRST_PAGE;
       const keep = Math.min(r.listings.length, Math.max(TRANSCRIPT_FIRST_PAGE, Math.min(revealed, TRANSCRIPT_LISTING_CAP)));
-      lastResultsTruncated = keep < r.listings.length; // the LAST results turn's value is the one that stands
+      // «Truncated» now means the user LOST cards they had on screen (keep < what they revealed). Dropping
+      // buffer rows beyond what they saw (a 1,500-row page-0 buffer, 500 revealed) loses nothing: the chat
+      // reopens exactly as left, and a finished chat stays finished.
+      lastResultsTruncated = keep < Math.min(revealed, r.listings.length); // the LAST results turn's value is the one that stands
       if (keep < r.listings.length) {
         // Truncated ⇒ restart paging (store.tsx snapshot precedent): loadMore de-dups, gap-free.
-        rest.result = { ...r, listings: r.listings.slice(0, keep), pageOffset: 0, hasMore: true };
+        // …and remember what the user HAD on screen, so reopening brings exactly that back without a tap
+        // (owner 2026-10-07: «after the user is done and goes back, it shows what he did»). agent.tsx's
+        // restoreLeftState() refetches the missing cards and re-reveals up to this number.
+        rest.result = { ...r, listings: r.listings.slice(0, keep), pageOffset: 0, hasMore: true,
+          ...(revealed > keep ? { restoreTo: revealed } : {}),
+          ...(revealed > keep && live.completed ? { restoreCompleted: true as const } : {}) };
       }
     }
     msgs.push(rest as PersistedMsg);
@@ -87,6 +124,8 @@ export function serializeChat(live: LiveChatState): PersistedChat | null {
   for (const [id, n] of Object.entries(live.revealCount)) if (kept.has(id) && n > 0) revealCount[id] = Math.min(n, TRANSCRIPT_LISTING_CAP);
   const afReceipt: Record<string, string> = {};
   for (const [id, s] of Object.entries(live.afReceipt)) if (kept.has(id) && s) afReceipt[id] = s;
+  const afCanNarrow: Record<string, true> = {};
+  for (const [id, yes] of Object.entries(live.afCanNarrow ?? {})) if (kept.has(id) && yes === true) afCanNarrow[id] = true;
   const gp = live.guidedPills;
   return {
     v: 1,
@@ -122,6 +161,7 @@ export function serializeChat(live: LiveChatState): PersistedChat | null {
     msgs,
     revealCount,
     afReceipt,
+    ...(Object.keys(afCanNarrow).length ? { afCanNarrow } : {}),
     guidedPills: gp && kept.has(gp.msgId)
       ? { msgId: gp.msgId, baseQ: gp.baseQ, facets: gp.facets, asked: gp.asked, total: gp.total }
       : null,
@@ -151,6 +191,9 @@ export function restoreChat(raw: unknown): (PersistedChat & { doneTyping: Record
       ? p.guidedPills
       : null,
     ...(p.completed === true ? { completed: true as const } : {}),
+    ...(p.afCanNarrow && typeof p.afCanNarrow === 'object'
+      ? { afCanNarrow: Object.fromEntries(Object.entries(p.afCanNarrow).filter(([, v]) => v === true)) as Record<string, true> }
+      : {}),
     doneTyping,
   };
 }

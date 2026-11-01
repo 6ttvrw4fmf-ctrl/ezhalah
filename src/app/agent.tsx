@@ -1,27 +1,41 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { agentResultRequest, resultQuantityChange } from '@/lib/agentResultRequest';
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Easing,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  Share,
   TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { Image } from 'expo-image';
+import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, MAX_PICKER_SOURCES, platformRegionIds, platformRegionShare, platformRegionListings } from '@/data/platformPickerProfiles';
+import PickerRegionsMap, { regionLabel } from '@/components/PickerRegionsMap';
+import { pickAfCourtesyOpening } from '@/data/afCourtesyOpeners';
+import AfRoundLoader from '@/components/AfRoundLoader';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
-import { TAP44 } from '@/theme/palette';
+import { COMPOSER_INPUT, TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
+import { shouldRenderModeSwitch } from '@/lib/shouldRenderModeSwitch';
 import { isAppSessionStarted } from '@/lib/appSession';
 import { msgRTL } from '@/lib/textDirection';
-import { stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
+import { stopReadAloud, subscribeReadAloud, stripEmoji } from '@/lib/readAloud';
 import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupported } from '@/lib/voiceInput';
 import VoiceWaveform from '@/components/VoiceWaveform';
+import AgentModelSelector from '@/components/AgentModelSelector';
+import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
+import TopBarLanguage from '@/components/TopBarLanguage';
+import { livePickerNames, loadLivePickerNames, pickerMayOffer } from '@/data/pickerLivePlatforms';
+import { hiddenPlatformNames } from '@/data/loaderActivePlatforms';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
 import { initialReveal as initialRevealPure, CASCADE_MAX } from '@/lib/initialReveal';
@@ -40,6 +54,7 @@ import { CardIn, LoadingDots, GoldPulse, GoldShineButton } from '@/components/Ca
 // render but behaves identically for the same listing.
 const MemoResultCard = memo(ResultCard, (prev, next) =>
   prev.listing === next.listing && prev.rank === next.rank && prev.variant === next.variant
+  && prev.row === next.row
   // activeAf is one frozen reference per results turn (afActive memoises on m.result.query), so
   // identity is the right comparison; without this term the card would swallow the prop.
   && prev.activeAf === next.activeAf);
@@ -48,14 +63,27 @@ import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard } from '@/components/ResultCard';
+import type { Listing } from '@/data/listings';
+import { ResultCardGrid } from '@/components/ResultCardGrid';
+import { DeadCardShade } from '@/components/DeadCardShade';
+import { cardKey, fetchGoneKeys } from '@/lib/deadCards';
 import { parseQuery, respond } from '@/data/agent';
 import { fetchListingsForQuery } from '@/data/remote';
 import { buildLocationProbeQuery, replyAfterLocationProbe } from '@/lib/agentLocationProbe';
+import { logZeroResult } from '@/data/zeroResultLog';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
-import { openListing } from '@/lib/openListing';
-import { filterToChat, searchSummary, buildAfSummary, buildAfRoundLog, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, NO_RESULTS_GENERIC_FALLBACK_EN, type SearchQuery, type SearchResult } from '@/data/search';
+import { listingOpenUrl, openListing } from '@/lib/openListing';
+import {
+  EMPTY_AD_PANE, closeAdTab, hideAdPane, inAppPreviewHost, inAppViewerHost, openAdTab, showAdPane, type AdPane, type AdTab,
+} from '@/lib/inAppViewer';
+import { PICKER_SHEET_BREAKPOINT, VIEWER_SPLIT_BREAKPOINT, CARDS_THREE_ACROSS_BREAKPOINT, SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
+import { useAtLeast } from '@/lib/useAtLeast';
+import AdViewer from '@/components/AdViewer';
+import { ConfettiOverlay } from '@/components/ConfettiOverlay';
+import { buildAfSummaryItems, buildAfBeatSteps } from '@/lib/afSummary';
+import { filterToChat, searchSummary, guidedSearchSummary, buildAfSummary, buildAfRoundLog, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, NO_RESULTS_GENERIC_FALLBACK_EN, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
@@ -68,19 +96,29 @@ import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { pickResultsFoundSentence } from '@/data/resultsFoundRotation';
 import { pickNoResultsSentence } from '@/data/noResultsRotation';
+import { pickName } from '@/lib/nameSync';
+import { encodeSharePayload, encodeInvitePayload, shareLink, shareMessage, SHARE_INVITE_LINE } from '@/lib/shareSearch';
+import { shareNative, shareLead, liveSiteCount, shareOrigin } from '@/lib/share';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
-import { screenKeyboardInset } from '@/lib/visualViewportFrame';
+import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
-import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
+import { createSharedChat } from '@/lib/sharedChat';
+import { firstChildLeftRow, useDocumentRtl } from '@/lib/useDocumentRtl';
+import { useI18n, LocaleScope, detectLocale, resolveReplyLocale, getLocale, translate, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
+import { listingLocationAr, listingLocationEn, listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
+import { botMessage } from '@/lib/botMessage';
+import { cityQuestionAr, nearQuestionAr, geoQuestionAr, wholeCityQuestionText, twinRegionQuestion, twinDistrictQuestion, regionOrCityQuestion, regionQuestionWithHint, nextVariant, REFINE_DISTRICT_AR, REFINE_DISTRICT_EN, REFINE_BUDGET_AR, REFINE_BUDGET_EN, REFINE_BEDS_AR, REFINE_BEDS_EN, REFINE_FREE_AR, REFINE_FREE_EN, SEARCH_FAILED_AR, SEARCH_FAILED_EN, wholeCityQuestionSubject as wholeCitySubject, PIN } from '@/data/questionExamples';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard, type ShellPills } from '@/components/AdvancedQuestionCard';
-import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes } from '@/lib/afProbe';
+import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes, offersNarrowing } from '@/lib/afProbe';
 import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, resolveScopeOptionsInBackground, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, primeLiveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
+import { markSearchLeftBehind } from '@/lib/searchLeftBehind';
+import { PLATFORM_META, type LoaderPlatform } from '@/data/loaderPlatforms';
 
-// Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
+// Property Age advanced-filter eligibility. Reached from the EXISTING «🎯 دقّق مع الذكاء» button
 // below a results block — NEVER before first results. Its gate is cohortAllows(q, 'property_age')
 // (src/lib/afCohorts.ts), the same canonical registry every other Advanced Filter question uses — a
 // type/deal/period fires only when COHORT_QUESTIONS has live-verified evidence for it (see
@@ -108,6 +146,9 @@ function anyGuidedEligible(q: SearchQuery): boolean {
 }
 
 const IS_WEB = Platform.OS === 'web';
+// ChatGPT's own font list (system UI face), with the platform Arabic faces named so Arabic renders in
+// the system's modern Arabic type instead of a browser fallback. Native keeps the platform default.
+const CHAT_FONT = IS_WEB ? 'ui-sans-serif, -apple-system, system-ui, "Segoe UI", "SF Arabic", "Noto Sans Arabic", Helvetica, Arial, sans-serif' : undefined;
 // On the web the results tile into a wrap grid, so the conversation column is wider to give them
 // room (the user barely scrolls). On phone it stays a comfortable single-column reading width.
 const MAX_W = IS_WEB ? 940 : 560;
@@ -133,11 +174,11 @@ type RefinePrompt = { dim: string; baseQ: SearchQuery; options: { label: string;
 // One committed Advanced Filter answer: which question, which option keys, and the labels shown for
 // them. Skips never produce one (they write no predicate), which is what makes the summary EQUAL the
 // committed state by construction.
-type GuidedFacet = { id: string; keys: string[]; labels: string[] };
+type GuidedFacet = { id: string; keys: string[]; labels: string[]; total?: number };
 
 type ChatMsg =
   | { id: string; role: 'user'; text: string; typing?: boolean }
-  | { id: string; role: 'agent'; text: string; typing?: boolean; greeting?: boolean; refine?: RefinePrompt; refineDone?: boolean }
+  | { id: string; role: 'agent'; text: string; typing?: boolean; greeting?: boolean; refine?: RefinePrompt; refineDone?: boolean; stopNote?: boolean }
   | { id: string; role: 'results'; text: string; result: SearchResult; typing?: boolean; slogan?: string; summary?: string;
       /** This turn was produced by a COMPLETED Advanced Filter round — it reveals up to AF_REVEAL_MAX
        *  instead of the first-screen width (owner 2026-09-20). Carried ON the message, not in state:
@@ -147,7 +188,7 @@ type ChatMsg =
   // `query` + `resultSources` feed the search-loading animation's platform strip (which real
   // platforms to show while searching); they never affect the search itself. `exiting` tells the
   // loader to fade out softly just before the morph to results (owner v4: no hard cut).
-  | { id: string; role: 'status'; phase: 'thinking' | 'searching'; slogan?: string; summary?: string; query?: SearchQuery; resultSources?: string[]; exiting?: boolean };
+  | { id: string; role: 'status'; phase: 'thinking' | 'searching'; slogan?: string; summary?: string; query?: SearchQuery; resultSources?: string[]; exiting?: boolean; afRound?: { items: string[]; pools?: Array<number | null> } };
 
 const uid = () => 'm' + Date.now() + Math.round(Math.random() * 1e6);
 
@@ -166,16 +207,12 @@ const bedsLabel = (n: string, ar: boolean): string => {
 // playful "you got it" in Najdi colour, never a recommendation or any judgement on the search (user
 // request: speak in the Saudi dialect, plain and simple, never advise). The English locale gets
 // equivalent breezy one-liners so a non-Arabic user reads the same energy.
-// The opening greeting Ezhalah types into a fresh chat (owner-authored FINAL copy, 2026-08-23 —
-// verbatim, do not edit without an explicit owner instruction; the intro-rotator barrier pins it
-// byte-exact). One warm Saudi sentence that says exactly what Ezhalah does. Language follows the UI
-// locale — rendered live (not frozen at send time) so flipping language re-renders it. The English
-// branch stays the bare brand word: the product is Arabic-only and English is latent code — no
-// English marketing copy is invented here (owner brief §10).
+// Owner-approved static welcome (2026-10-03). Only the empty chat renders it;
+// conversation replies keep their existing typing and loading animations.
 const greetingText = (locale: Locale): string =>
   locale === 'ar'
-    ? 'ارحب، أنا إزهله. قلّي وش العقار اللي تدور عليه، وأنا أبحث لك بين المنصات العقارية وأطابق الخيارات مع طلبك لين نلقى اللي يناسبك… إزهلها وفالك الطيب.'
-    : 'Ezhalah';
+    ? 'وش العقار اللي في بالك؟\nقل لنا مواصفاته، وإزهله.'
+    : 'What property are you after?\nDescribe it and Ezhalah';
 
 // Ezhalah's SEARCHING-phase voice — one Najdi-flavoured swagger line chosen at random before each
 // search (its recognizable Saudi personality, NOT generic "searching now"). Shown ONLY while searching,
@@ -197,18 +234,25 @@ const HYPE_EN = ['Ezhalah'];
 // rendered as plain text directly under the Search Summary — NO "Ezhalah!" prefix, no sparkle icon,
 // so it doesn't look like a second slogan. The branded slogan above carries the personality. (user request.)
 const RESULT_AR = [
-  'وجدت بعض العقارات التي تطابق بحثك.',
-  'وجدت بعض الخيارات بناءً على طلبك.',
-  'هذه بعض العقارات التي قد تناسب بحثك.',
+  'وجدت بعض العقارات التي تطابق بحثك 🏡',
+  'وجدت بعض الخيارات بناءً على طلبك 🔍',
+  'هذه بعض العقارات التي تطابق بحثك ✨',
+  'طلعت لك عقارات حسب طلبك 🏘️',
 ];
 const RESULT_EN = [
-  'I found a few properties based on your search.',
-  'I found a few options based on what you asked for.',
-  'Here are some properties that match your search.',
+  'I found a few properties based on your search 🏡',
+  'I found a few options based on what you asked for 🔍',
+  'Here are some properties that match your search ✨',
+  'Here is what matches your request 🏘️',
 ];
+// Never the same line twice in a row (owner 2026-10-11: «not the same message, so it is not a chatbot that repeats itself»).
+let lastResultDone = -1;
 const resultDone = (locale: Locale): string => {
   const arr = locale === 'ar' ? RESULT_AR : RESULT_EN;
-  return arr[Math.floor(Math.random() * arr.length)];
+  let i = Math.floor(Math.random() * arr.length);
+  if (i === lastResultDone) i = (i + 1) % arr.length;
+  lastResultDone = i;
+  return arr[i];
 };
 // Pick a slogan in the LANGUAGE OF THE USER'S MESSAGE (not the UI locale). Counting Arabic vs
 // Latin word-runs in the text lets a user type "I want an apartment in Riyadh" inside an Arabic
@@ -239,12 +283,8 @@ const arLabel = (s: string) => arabicOrPlaceholder(s, 'ar', LOCATION_UNRESOLVED_
 // re-parsed that generic noun as المدينة المنورة and searched the wrong region entirely.
 // scripts/verify-agent-whole-city-answer.ts round-trips these two so the template cannot drift out
 // from under the parser.
-export const wholeCityQuestion = (cityAr: string) => `تقصد مدينة ${cityAr} كاملة، أو حي معيّن؟`;
-export function wholeCityQuestionSubject(text: string | null | undefined): string | null {
-  const m = /^تقصد مدينة (.+) كاملة، أو حي معيّن؟$/u.exec((text ?? '').trim());
-  const city = m?.[1]?.trim();
-  return city ? city : null;
-}
+export const wholeCityQuestion = (cityAr: string) => wholeCityQuestionText(cityAr);
+export const wholeCityQuestionSubject = (text: string | null | undefined): string | null => wholeCitySubject(text);
 
 // The region-AND-city TWIN NAME behind the «مدينة X ولا منطقة X كاملة؟» question (and behind the
 // whole-region question for the same names), so send() knows which name the user is answering about on
@@ -277,8 +317,8 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
     const prox = (q.proximity ?? [])
       .map((p) => (p.text || `${p.phrase} ${p.name || p.categoryAr}`).trim())
       .filter(Boolean);
-    if (prox.length) return `في أي مدينة تبحث عن عقار ${prox.join(' و')}؟`;
-    return 'في أي مدينة تبحث؟';
+    if (prox.length) return nearQuestionAr(prox.join(' و'), userText);
+    return cityQuestionAr(userText, '', q.type);
   }
   // The user asked for the whole CITY or REGION — honour it, don't ask to narrow. Kingdom-wide is
   // deliberately NOT in this test any more: «الرياض كاملة» is a supported scope, «كل المملكة» is not.
@@ -297,24 +337,24 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
     // audit #2 fix: show the REGIONS, not the city display labels (which are identical for twins and
     // dedupe to one blank option). «الهفوف موجودة في أكثر من منطقة (المنطقة الشرقية، منطقة الرياض)…»
     const regions = Array.from(new Set(lm.twinRegions));
-    return `«${arLabel(lm.label)}» موجودة في أكثر من منطقة (${regions.join('، ')}). أي منطقة تقصد؟`;
+    return twinRegionQuestion(arLabel(lm.label), regions.join('، '), userText);
   }
   // Region-vs-city SAME NAME (الرياض/جازان/تبوك/حائل/نجران/الباحة/الجوف) → ask مدينة ولا منطقة, never
   // default to the city. Must precede the generic city branch below. (audit #4 / Q38.)
   if (lm.regionOrCity) {
     if (scopeChoice) return null; // they picked one of the two options — search it, don't re-ask it
     const label = arLabel(lm.label);
-    return `«${label}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة ${label} ولا منطقة ${label} كاملة؟`;
+    return regionOrCityQuestion(label, userText);
   }
   // Geography cue (sea/mountain/desert) with NO city → ask the city; never auto-pick a default.
   // (audit #12 / Q39 case A.)
   if (lm.kind === 'geography' && lm.needsCity) {
-    return 'تقصد في أي مدينة أو منطقة؟';
+    return geoQuestionAr(userText);
   }
   // 1) A bare district shared by several cities → ask WHICH CITY (cities with listings first).
   if (lm.kind === 'district' && lm.ambiguous && lm.cities && lm.cities.length > 1) {
     const names = Array.from(new Set(lm.cities.slice(0, 8).map((c) => cityDisplay(c, 'ar')))).slice(0, 6);
-    return `«${arLabel(lm.label)}» موجود في أكثر من مدينة (${names.join('، ')}). أي مدينة تقصدها؟`;
+    return twinDistrictQuestion(arLabel(lm.label).replace(/^حي\s+/, ''), names.join('، '), userText);
   }
   // 2) A REGION → ask the WHOLE region or a specific city (name a couple of its real, in-inventory cities).
   if (lm.kind === 'region') {
@@ -329,7 +369,7 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
     if (scopeNamedForTwin(userText, regionOrCityTwin(loc)) === 'region') return null;
     const cities = topCitiesInRegion(lm.region ?? lm.city ?? loc, 2).map((c) => cityDisplay(c, 'ar'));
     const hint = cities.length ? ` مثل ${cities.join(' أو ')}` : '';
-    return `تقصد ${arLabel(lm.label)} كاملة، أو مدينة معيّنة${hint}؟`;
+    return regionQuestionWithHint(arLabel(lm.label), hint, userText);
   }
   // 3) A whole CITY with no neighbourhood → ask the WHOLE city or a specific district.
   if (lm.kind === 'city') {
@@ -339,14 +379,7 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
 }
 
 function detectMsgLang(s: string): 'en' | 'ar' | null {
-  const words = s.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  let ar = 0, en = 0;
-  for (const w of words) {
-    if (/[؀-ۿ]/.test(w)) ar++;
-    else if (/[A-Za-z]/.test(w)) en++;
-  }
-  if (ar === en) return null;
-  return ar > en ? 'ar' : 'en';
+  return detectLocale(s);
 }
 const hypePhrase = (locale: Locale, messageText?: string) => {
   const detected = messageText ? detectMsgLang(messageText) : null;
@@ -406,7 +439,18 @@ const SEARCH_MS = 600;
 // (the 52nd pill is lit at 9,740ms; a 57th roster would not be lit until 10,640ms). Platform #57
 // therefore needs a real decision — a longer floor, or a wave that lights more than one pill per
 // step — and MAX_ROSTER is the guard that will stop it silently slipping through.
-const SEARCH_MIN_MS = 10600;
+//
+// OWNER 2026-10-17 — RESULTS AS SOON AS THEY ARE READY, NEVER HELD PAST TEN SECONDS. This reverses
+// the 2026-09-06 "wait the full ten seconds" floor above (kept for history): the owner's goal is now
+// «less than 10 seconds, that's the max». So the floor becomes a short MINIMUM (the roster is never a
+// flash) and a hard MAXIMUM caps every artificial hold — the minimum beat AND the page-dwell gate
+// below. A slow network can still take longer; that is the network, not a hold. On a search that
+// resolves fast the user sees part of the logo wave; on a slow one the whole wave still fits inside
+// the cap (scripts/verify-search-loader-shows-every-platform.ts proves everyPlatformSeen(SEARCH_MAX_HOLD_MS)).
+const SEARCH_MIN_MS = 3000;
+const SEARCH_MAX_HOLD_MS = 10000;
+// An Advanced Filter round's search beat (owner 2026-10-11: 5 seconds, «نبحث عن …» changing pick by pick — AfRoundLoader).
+const AF_LOADER_MS = 5000;
 // Soft completion (owner v4): before morphing to results, flag the loader `exiting` and give its
 // fade-out this long — the strip glides away into the results state instead of vanishing in a frame.
 const LOADER_EXIT_MS = 450;
@@ -466,10 +510,15 @@ const STOP_PROCESSING_MS = 450;
 function runTypewriter(total: number, setN: (n: number) => void, onDone?: () => void): () => void {
   if (total <= 0) { onDone?.(); return () => {}; }
   let i = 0;
+  // finish() stops the interval too. When the fallback paid out first, the still-running interval
+  // used to keep calling setN(i) — rewinding the finished sentence — and its own last tick hit the
+  // `done` guard, leaving the reveal one tick short for good: the Results-Found emoji (always the
+  // last glyph) vanished (owner 2026-10-04: «sometimes doesn't show an emoji»).
   let done = false;
   const finish = () => {
     if (done) return;
     done = true;
+    clearInterval(id);
     setN(total);
     onDone?.();
   };
@@ -573,8 +622,9 @@ function BrandReveal({ brand, text, onDone }: { brand: string; text: string; onD
 // text is structurally impossible to overwrite.
 const INTRO_EX_FADE_MS = 220;
 function IntroExampleRotator({ reducedMotion }: { reducedMotion: boolean }) {
+  const { locale } = useI18n();
   const [w, setW] = useState(0);
-  const pool = useMemo(() => introExamplesForWidth(w), [w]);
+  const pool = useMemo(() => introExamplesForWidth(w, locale), [w, locale]);
   const [i, setI] = useState(0);
   const [phase, setPhase] = useState<'in' | 'shown' | 'out'>('shown');
   const text = pool.length ? pool[i % pool.length] : '';
@@ -616,7 +666,7 @@ function IntroExampleRotator({ reducedMotion }: { reducedMotion: boolean }) {
       onLayout={(e) => setW(e.nativeEvent.layout.width)}
     >
       {text ? (
-        <Text numberOfLines={1} ellipsizeMode="tail" style={[s.introRotatorText, ease, pose]}>
+        <Text numberOfLines={1} ellipsizeMode="tail" style={[s.introRotatorText, locale === 'en' && s.introRotatorTextEn, ease, pose]}>
           {text}
         </Text>
       ) : null}
@@ -627,7 +677,8 @@ function IntroExampleRotator({ reducedMotion }: { reducedMotion: boolean }) {
 export default function Agent() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { t, locale, setLocale } = useI18n();
+  const { t, locale } = useI18n();
+  const docRtl = useDocumentRtl(locale === 'ar'); // the split row follows the page's real dir (owner 2026-10-21)
   const { seed, filter, chatBubble, chatSub, replay, fresh, hid } = useLocalSearchParams<{
     seed?: string;
     filter?: string;
@@ -637,7 +688,62 @@ export default function Agent() {
     fresh?: string;
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
-  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript } = useApp();
+  const { user, authChecked, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript } = useApp();
+  // SHARE THIS SEARCH (owner 2026-10-17): a signed-in user's «مشاركة» sends the search itself with the
+  // approved line «عقارات من {name} لك على إزهله 🦅 …» (src/lib/shareSearch.ts). The link lands on
+  // Home, never on /agent — a pasted link must not run a search by itself (appSession gate). A guest,
+  // or a result whose query is unknown, keeps the plain homepage share.
+  const sharedCopyRef = useRef<{ j: string; url: string } | null>(null);
+  // Saves a COPY of this conversation (public.shared_chat) and returns its short /s/<code> link — one copy
+  // per unchanged conversation. q = the search the card names, or null for a chat with no search (the card
+  // then reads «محادثة من يوسف على إزهله», owner 2026-10-18 option A). null result = not saved.
+  const chatShareUrl = async (q: SearchQuery | null): Promise<string | null> => {
+    if (!user) return null;
+    const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
+    const name = pickName(user, loc);
+    if (!name.trim()) return null;
+    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow: afCanNarrow }); // same fields as the capture below
+    if (!t || !t.msgs.length) return null;
+    const j = JSON.stringify(t);
+    if (sharedCopyRef.current?.j === j) return sharedCopyRef.current.url;
+    const code = await createSharedChat(name, loc, q, t);
+    if (!code) return null;
+    const origin = shareOrigin();
+    const url = shareLink(origin, code);
+    sharedCopyRef.current = { j, url };
+    return url;
+  };
+  // THE TOP «مشاركة» INSIDE A CHAT (owner 2026-10-18): a signed-in user with a conversation on screen shares
+  // THAT chat — named after its latest search, or «محادثة من يوسف» when it has none. Guests and an empty
+  // screen keep the homepage share. Phone: the phone's own share menu with the link alone (the card holds
+  // the title). Desktop: the link is copied and the pill says so.
+  // AN INVITATION TO JOIN (owner 2026-10-23): the Share under a reply with no results to show (a «هلا», a
+  // question, a search that found nothing) sends a personal welcome — card «يوسف يرحّب بك للانضمام إلى إزهله»,
+  // popup with the same words — and, as the message text, the top Share's marketing line («ليش تدوّر في 148
+  // موقع؟ إزهله يدوّر عنك»). A guest has no name to invite with: the plain link with that same line.
+  const inviteFor = (): { shareUrl?: string; shareText?: string } => {
+    const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
+    const text = shareLead(loc, liveSiteCount());
+    const payload = user ? encodeInvitePayload(pickName(user, loc), loc) : null;
+    const origin = shareOrigin();
+    return { shareUrl: payload ? shareLink(origin, payload) : origin, shareText: text };
+  };
+  const shareFor = (q: SearchQuery | undefined): { shareUrl?: string; shareText?: string; prepareShare?: () => Promise<string | null> } => {
+    if (!user || !q) return {};
+    const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
+    const name = pickName(user, loc);
+    const payload = encodeSharePayload(q, name, loc);
+    const text = shareMessage(name, q, loc);
+    if (!payload || !text) return {};
+    const origin = shareOrigin();
+    // THE WHOLE CHAT (owner 2026-10-17: «sharing it means I share the chat history»): pressing Share saves
+    // a COPY of this conversation (public.shared_chat) and shares its short /s/<code> link; the search
+    // link above is only the fallback when that save fails. One copy per unchanged conversation.
+    const prepareShare = () => chatShareUrl(q);
+    // The text beside the link is the invite LINE, not the title (owner 2026-10-22: the card cut «Open it on
+    // Ezhalah, the AI real…» — say it in full as the message; the card keeps «يوسف شاركك: …» as its title).
+    return { shareUrl: shareLink(origin, payload), prepareShare, shareText: SHARE_INVITE_LINE[loc] };
+  };
   // THE ONE STORE WRITER FOR THIS SCREEN. Every write into the shared query the Filter home binds to
   // goes through here, always sanitized — enforced by verify-af-state-never-leaks-into-filter.ts,
   // which counts the `setQuery(` calls in this file precisely so a second, unsanitized writer cannot
@@ -652,7 +758,91 @@ export default function Agent() {
   // Per-message "Load More" in flight, so a double-tap can't double-fetch the same page.
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
+  // History chats (owner 2026-10-18): a reopened saved chat (`hid`) shows its cards frozen at search time.
+  // Ask once per opened chat (and again only when more cards appear) which were removed at their source
+  // since; those cards stay in place and are shaded «انتهى الإعلان» (DeadCardShade), never removed.
+  const [goneKeys, setGoneKeys] = useState<Set<string>>(() => new Set());
+  const goneCheckedRef = useRef<string>('');
+  useEffect(() => {
+    if (!hid) return;
+    const cards = msgs.flatMap((x) => (x.role === 'results' && !x.typing ? x.result.listings : []));
+    const stamp = `${hid}:${cards.length}`;
+    if (cards.length === 0 || goneCheckedRef.current === stamp) return;
+    goneCheckedRef.current = stamp;
+    // No cancel on re-render: «removed at the source» is a fact about the listing, true in any chat, so a
+    // late answer can only add correct marks (a cancelled first answer would leave this chat unchecked).
+    void fetchGoneKeys(cards).then((gone) => {
+      if (gone.size) setGoneKeys((prev) => new Set([...prev, ...gone]));
+    });
+  }, [hid, msgs]);
   const [typed, setTyped] = useState('');
+  // The source picker owns the exact websites selected for this conversation.
+  const [platformPickerOpen, setPlatformPickerOpen] = useState(false);
+  const [platformPickerSearch, setPlatformPickerSearch] = useState('');
+  // The picker's regions map (owner 2026-10-10): the tapped catalogue region, or null = whole kingdom.
+  const [pickerRegion, setPickerRegion] = useState<number | null>(null);
+  const [selectedSources, setSelectedSources] = useState<string[]>([]);
+  const [pickerSourceExplicit, setPickerSourceExplicit] = useState(false);
+  const selectedPlatforms = useMemo(
+    () => PLATFORM_META.filter((platform, index, all) => selectedSources.includes(platform.name) && all.findIndex(p => p.name === platform.name) === index),
+    [selectedSources],
+  );
+  // Bumped when the live-sites list lands, so the picker re-filters without a reopen.
+  const [pickerLiveTick, setPickerLiveTick] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    void loadLivePickerNames().then(() => { if (alive) setPickerLiveTick((n) => n + 1); });
+    return () => { alive = false; };
+  }, []);
+  const offeredPlatforms = useMemo(() => {
+    const needle = platformPickerSearch.replace(/\s+/g, '').toLocaleLowerCase();
+    const unique = new Map<string, LoaderPlatform>();
+    const liveNames = livePickerNames();
+    const downNames = hiddenPlatformNames();
+    for (const platform of PLATFORM_META) {
+      // `logoOnly` brands are intentionally advertised in the loader but have no searchable
+      // inventory. They must never be offered as a source restriction that would return nothing.
+      if (platform.logoOnly) continue;
+      // A DOWN or EMPTY site is never offered (owner 2026-10-09) — src/data/pickerLivePlatforms.ts.
+      if (!pickerMayOffer(platform.name, liveNames, downNames)) continue;
+      if (!unique.has(platform.name)) unique.set(platform.name, platform);
+    }
+    return Array.from(unique.values()).sort((a, b) => PLATFORM_PICKER_PROFILES[a.name].group.ar.order - PLATFORM_PICKER_PROFILES[b.name].group.ar.order).filter((platform) => {
+      if (!needle) return true;
+      return `${platform.name} ${t(platform.i18nKey)}`.replace(/\s+/g, '').toLocaleLowerCase().includes(needle);
+    });
+  }, [platformPickerSearch, t, pickerLiveTick]);
+  // THE REGIONS MAP (owner 2026-10-10: «highlight the entire region … so users are aware of where they
+  // cover»). A tapped region is a VIEW over the offered list — only the sites with listings there — and
+  // never a change to the search: the restriction still comes solely from selectedSources/choosePlatform.
+  const pickerRegionCounts = useMemo(() => {
+    const counts: Record<number, number> = {};
+    for (const platform of offeredPlatforms) for (const id of platformRegionIds(platform.name)) counts[id] = (counts[id] ?? 0) + 1;
+    return counts;
+  }, [offeredPlatforms]);
+  // Measured listings per region across the offered sites — the «4,120 إعلان» beside a tapped region.
+  const pickerRegionListings = useMemo(() => {
+    const sums: Record<number, number> = {};
+    for (const platform of offeredPlatforms) for (const id of platformRegionIds(platform.name)) sums[id] = (sums[id] ?? 0) + platformRegionListings(platform.name, id);
+    return sums;
+  }, [offeredPlatforms]);
+  // A tapped region lists the sites with listings there, its own offices first (the share of their
+  // inventory in that region, highest first), the nationwide portals after.
+  const pickerPlatforms = useMemo(
+    () => (pickerRegion === null ? offeredPlatforms : offeredPlatforms.filter((platform) => platformRegionIds(platform.name).includes(pickerRegion))
+      .sort((a, b) => platformRegionShare(b.name, pickerRegion) - platformRegionShare(a.name, pickerRegion))),
+    [offeredPlatforms, pickerRegion],
+  );
+  // The regions the lit sites cover — the map glows there so the user sees the reach of their picks.
+  // «كل المواقع» (nothing lit) = every site, so the whole kingdom glows (owner 2026-10-10).
+  const pickerCoveredRegions = useMemo(
+    () => new Set(selectedSources.length ? selectedSources.flatMap((name) => platformRegionIds(name)) : Object.keys(pickerRegionCounts).map(Number)),
+    [selectedSources, pickerRegionCounts],
+  );
+  const [loaderBottomInset, setLoaderBottomInset] = useState<number>();
+  // Where the logo grid's top will sit once the thread has glided down to it (window px) — the grid is sized for THAT, so every logo gets its full page (owner 2026-10-17).
+  const [loaderSettleTop, setLoaderSettleTop] = useState<number>();
+  const loaderNodeRef = useRef<any>(null);
   // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): a search that arrived via Normal Filter's
   // «بحث» (the `?filter=` param — see the effect below, the ONE place this flips true) shows its
   // results with no composer at all; free-text follow-up chat exists ONLY on a conversation that
@@ -676,6 +866,10 @@ export default function Agent() {
   const COMPOSER_MIN_H = 22;
   const COMPOSER_MAX_H = 112;
   const [inputH, setInputH] = useState(COMPOSER_MIN_H);
+  // EMPTY = ONE LINE (owner 2026-10-11, iPhone: placeholder at the top, buttons dropped to the bottom). An empty box's
+  // height never comes from measuring its PLACEHOLDER (iOS Safari wraps it onto a second line and reports that height):
+  // the box is as tall as the text typed, and exactly one line when nothing is typed.
+  const composerH = typed ? Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) : COMPOSER_MIN_H;
   // Focus glow — border eases fieldLine→primary and the lift deepens slightly (s.composerFocused +
   // COMPOSER_EASE). Same calm register as ModeSwitch's raised indicator: a state change you feel
   // more than notice.
@@ -687,6 +881,26 @@ export default function Agent() {
     Animated.spring(sendScale, { toValue, stiffness: 260, damping: 26, mass: 0.7, useNativeDriver: Platform.OS !== 'web' }).start();
   const [sendHover, setSendHover] = useState(false);
   const inputRef = useRef<any>(null);
+  // A tap ANYWHERE on the composer pill focuses the input (owner 2026-10-04, real iPhone: «I can't type
+  // using my phone»). The textarea is one 22px line inside a taller pill, so on iOS a finger landing
+  // on the pill's padding, the rotating examples or the row gap focused nothing. Controls (mic, Send,
+  // «بحث» — RNW renders them focusable) keep their own tap; the click handler runs inside the user's
+  // gesture, so iOS raises the keyboard. Callback ref: the pill remounts when filterOrigin flips.
+  const composerTapRef = useRef<{ node: any; onTap: (ev: Event) => void } | null>(null);
+  const composerRef = useCallback((node: any) => {
+    if (!IS_WEB) return;
+    const prev = composerTapRef.current;
+    if (prev) { prev.node.removeEventListener('click', prev.onTap); composerTapRef.current = null; }
+    if (!node?.addEventListener) return;
+    const onTap = (ev: Event) => {
+      const target = ev.target as HTMLElement | null;
+      if (!target || target.closest?.('textarea, button, a, [role="button"], [tabindex]')) return;
+      if (voiceActiveRef.current) return;
+      inputRef.current?.focus?.();
+    };
+    node.addEventListener('click', onTap);
+    composerTapRef.current = { node, onTap };
+  }, []);
   // Desktop-web keyboard contract (ChatGPT/Claude convention): Enter sends and KEEPS focus for the
   // next message; Shift+Enter makes a new line. Bound as a raw DOM keydown on the textarea because
   // RNW's onKeyPress normalization reported key: "" for Enter (observed live) — the DOM event is
@@ -732,12 +946,22 @@ export default function Agent() {
   const shareScale = useRef(new Animated.Value(1)).current;
   const shareSpring = (toValue: number) =>
     Animated.spring(shareScale, { toValue, stiffness: 260, damping: 26, mass: 0.7, useNativeDriver: Platform.OS !== 'web' }).start();
+  // Same rule as the Filter screen: «مشاركة» always shows; below this width the sign-in pill shortens.
+  const topBarRoomy = useAtLeast(SHARE_LABEL_BREAKPOINT);
   // Filter / AI ModeSwitch (owner 2026-08-16): the pill no longer lives in the top-right corner —
   // it sits CENTERED under the header, mirroring the home hero's centered pill, so switching modes
   // reads as one control staying in the middle rather than teleporting into the corner. And the
   // moment a search happens (any user message or results — same condition that hides the guest
   // chips), it fades + collapses away: mid-conversation the pill is noise. JS driver (height).
   const modeSearched = msgs.some((m) => m.role === 'user' || m.role === 'results');
+  // Once a search has LANDED here, the Filter home must open clean when the user comes back to it
+  // (owner 2026-10-03) — see src/lib/searchLeftBehind.ts. Keyed on each results turn that lands, never
+  // on the first message: a search the user cancels before its results arrive (Back or Stop during
+  // the loader) never happened, and the Filter must come back with their city, district and area
+  // EXACTLY as they left them (verify-web-runtime-smoke.mjs [E]/[F]/[H]). Counting the turns, not a
+  // boolean, so a second search landing on this same screen raises it again.
+  const landedResultsCount = msgs.filter((m) => m.role === 'results').length;
+  useEffect(() => { if (landedResultsCount > 0) markSearchLeftBehind(); }, [landedResultsCount]);
   // BUG (owner-reported 2026-09-11): opening an old chat from the sidebar made this pill visibly
   // pop up then collapse away — a "weird animation" on every single history open. Root cause: `msgs`
   // starts EMPTY (useState([]) above) and openSaved() fills it in ONE async setMsgs() call once the
@@ -751,14 +975,30 @@ export default function Agent() {
   // is untouched — modeGone still starts false, so its intentional collapse-on-first-message plays
   // exactly as before.
   const [modeGone, setModeGone] = useState(() => replay === '0');
+  // A SAVED CHAT IS OPENING (owner 2026-10-08: «when a logged-in user changes between chats, the empty
+  // home shows for a bit then goes away»). turnToSavedChat clears the old conversation and keeps the
+  // view invisible for a moment while the saved one restores (longer when its transcript comes from the
+  // server). In that gap `msgs` is empty and `?replay=0` has already been consumed, so
+  // every "is this a brand-new chat?" test said yes and painted the new-chat landing around the
+  // invisible conversation: the Filter / AI pill, the «بحث» chip and the rotating example text.
+  // True from the sidebar tap until the opened chat starts fading in; the ref is for effects.
+  const [openingSaved, setOpeningSavedState] = useState(false);
+  // The results turn whose saved cards are still coming back (restoreLeftState). Its closing line and
+  // buttons wait; a quiet loading line stands in, so nothing appears and then rearranges.
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const openingSavedRef = useRef(false);
+  const setOpeningSaved = (v: boolean) => { openingSavedRef.current = v; setOpeningSavedState(v); };
   useEffect(() => {
+    // A restored saved chat lands settled, with no collapse animation (same rule as replay === '0').
+    if (modeSearched && !modeGone && openingSavedRef.current) { setModeGone(true); return; }
     if (modeSearched && !modeGone) {
       // Let the CSS collapse (MODE_EASE, 200ms) finish, then unmount. setTimeout, not an animation
       // callback — hidden tabs freeze rAF, and unmount must never hang on one (see afterAnimation).
       const id = setTimeout(() => setModeGone(true), 220);
       return () => clearTimeout(id);
     }
-    if (!modeSearched && modeGone) setModeGone(false); // new chat — pill returns settled
+    // …but a saved chat in the middle of opening is not a new chat: its messages are about to land.
+    if (!modeSearched && modeGone && !openingSavedRef.current) setModeGone(false); // new chat — pill returns settled
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modeSearched]);
   // ChatGPT-style feedback confirmation: a small «شكراً على ملاحظتك» toast at the TOP of the chat
@@ -917,6 +1157,66 @@ export default function Agent() {
   // On desktop it's a permanent column → no button. (user: couldn't see the burger on the phone.)
   const docked = useDocked();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // IN-APP AD VIEWER, v2 (owner 2026-10-03, revised after review): a listing from an allowlisted
+  // site (lib/inAppViewer.ts) opens INSIDE Ezhalah — a tabbed mini-browser beside the results at/
+  // above VIEWER_SPLIT_BREAKPOINT («whenever I click a new tab pops up»), a partial sheet below it.
+  // Web only; every other site, and native, keep openListing() exactly as before. The results never
+  // unmount, so closing returns them at the same scroll position. trackOpen fires first either way.
+  // The pane's state (tabs, active tab, hidden) is ONE value driven by pure functions in
+  // lib/inAppViewer.ts — openAdTab (every click opens a new tab, MAX_AD_TABS cap, and a card click always SHOWS
+  // the pane), closeAdTab (one tab; the last one clears the pane), hideAdPane / showAdPane (the
+  // pane's own ✕ hides, nothing is deleted) — all executed by scripts/verify-in-app-viewer-allowlist.ts.
+  const [adPane, setAdPane] = useState<AdPane<AdTab<Listing>>>(EMPTY_AD_PANE);
+  const [adHint, setAdHint] = useState('');
+  const adHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // MemoResultCard's comparator deliberately IGNORES onOpen ("behaves identically for the same
+  // listing" — see its header). An openAd that read `adPane` from its own render would break that
+  // contract: an already-revealed card keeps the closure from the render it was memoised in, and a
+  // stale empty list REPLACED the first tab instead of appending the second (caught live in the v2
+  // harness). The ref mirror makes every closure read the same current pane, whenever it was made.
+  const adPaneRef = useRef<AdPane<AdTab<Listing>>>(EMPTY_AD_PANE);
+  // THE TAP IS INSTANT (owner 2026-10-27: «when I click on a listing that opens inside ezhalah it takes time, it
+  // doesn't feel smooth»). Measured on ezhalah.com: the tap froze the page for ~380 ms on a fast laptop (1-2 s on a
+  // phone) — opening the pane re-lays-out every card into the tight row in ONE blocking render. The pane update is a
+  // TRANSITION: the tap's own feedback (buzzer, confetti) paints first, and the pane + card re-layout render in small
+  // slices that never block input. The ref stays synchronous, so a second tap still sees the newest pane.
+  // Guard: scripts/verify-listing-tap-is-instant.ts
+  const commitAdPane = (p: AdPane<AdTab<Listing>>) => { adPaneRef.current = p; startTransition(() => setAdPane(p)); };
+  const viewerSplit = useAtLeast(VIEWER_SPLIT_BREAKPOINT);
+  // Laptop photo-first cards: 3 across on a wide screen with nothing open beside them, else 2 across.
+  const cardsThreeAcross = useAtLeast(CARDS_THREE_ACROSS_BREAKPOINT);
+  // Phone: the site picker is a bottom sheet; wider: a floating card (owner 2026-10-09).
+  const pickerSheet = !useAtLeast(PICKER_SHEET_BREAKPOINT);
+  const pushAdTab = (tab: AdTab<Listing>) => {
+    const { evicted, ...next } = openAdTab(adPaneRef.current, tab);
+    commitAdPane(next);
+    if (evicted) {
+      // The cap's subtle hint: a small pill over the page, gone on its own.
+      setAdHint(t('Oldest tab closed'));
+      if (adHintTimer.current) clearTimeout(adHintTimer.current);
+      adHintTimer.current = setTimeout(() => setAdHint(''), 2200);
+    }
+  };
+  // the viewer tab names the place in the interface language (owner 2026-10-29: «everything must be translated»)
+  const tabTitle = (l: Listing) => (locale === 'en' ? listingLocationEn(l) : listingLocationAr(l));
+  const openAd = (l: Listing) => {
+    const url = listingOpenUrl(l);
+    if (IS_WEB && inAppPreviewHost(url)) {
+      pushAdTab({ source: l.source, id: l.id, title: tabTitle(l), url: url ?? '', listing: l });
+      return;
+    }
+    if (!(IS_WEB && inAppViewerHost(url))) { void openListing(l); return; }
+    pushAdTab({ source: l.source, id: l.id, title: tabTitle(l), url: url ?? '' });
+  };
+  // LAPTOP CARDS ARE ALWAYS THE SMALL ROW (owner 2026-10-03: «for the laptop it should always be
+  // small … never make them big»), one step tighter while the pane is on screen beside them. Decided
+  // HERE, from the screen's already-mounted width gate, so a card mounts straight into its row and
+  // never paints one frame of the tall phone layout first. Phone and tablet pass nothing.
+  const adPaneBeside = viewerSplit && adPane.tabs.length > 0 && !adPane.hidden;
+  const cardRow = viewerSplit ? (adPaneBeside ? 'tight' as const : 'roomy' as const) : undefined;
+  // The photo-first grid shows only while nothing is open beside the results; with the ad pane open the cards
+  // go back to the compact rows (cardRow 'tight'), like before.
+  const cardCols = viewerSplit && !adPaneBeside ? (cardsThreeAcross ? 3 as const : 2 as const) : undefined;
   // Which result messages have finished typing their reply. The property cards stay hidden until the
   // words above them are fully written out, so listings never appear before Ezhalah has spoken (user
   // request). Keyed by message id.
@@ -987,7 +1287,7 @@ export default function Agent() {
   // fully buffered on page 0; revealing listings.length IS revealing every match, and resultCounts()
   // then reports hasMore=false on its own — «عرض المزيد» simply never appears. Larger sets are untouched.
   const initialReveal = (r: SearchResult | undefined | null, afCompleted = false): number =>
-    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount(r?.listings), afCompleted });
+    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount(r?.listings), requestedCount: r?.query?.count, afCompleted });
   // Page 0 fetches up to data/remote.ts QUERY_LIMIT (1500) MATCHING candidates (RPC filters before the cap).
   // If it fills that page the DB has more (m.result.hasMore) — the "how many" message then says «أكثر من N»
   // (never a faked exact total) and «عرض المزيد» fetches the next real page. Once fully paged, listings.length
@@ -995,6 +1295,7 @@ export default function Agent() {
   // One chunk eases in at a time — onScroll fires every frame and would otherwise start a new
   // stagger on top of the running one, so cards would arrive in bursts instead of a steady line.
   const scrollChunkRef = useRef(false);
+  const lastPaginationResultRef = useRef<string | null>(null);
   // revealCount, readable SYNCHRONOUSLY. The scroll handler needs the current value to decide the
   // next chunk; reading the state variable there would see the value from the render that installed
   // the handler and re-reveal the same cards every scroll.
@@ -1007,7 +1308,7 @@ export default function Agent() {
   const pendingRefineRef = useRef<{ q: SearchQuery; dim: string } | null>(null); // a >25 "refine" question awaiting the user's one-line answer
   const refineMsgIdRef = useRef<string | null>(null); // the results turn the latest runRefine is building
   // Advanced-question overlay (عمر العقار, apartment-only for now) — a transient card shown ON TOP of
-  // the current results when «خلّنا نحدد الطلب أكثر» is tapped in an apartment scope. Answering hands
+  // the current results when «🎯 دقّق مع الذكاء» is tapped in an apartment scope. Answering hands
   // off to the SAME runRefine mechanism used by the pre-existing chip flow (echoes a user bubble,
   // re-runs search, renders a new results turn) — never a separate navigation/route.
   const [ageFlow, setAgeFlow] = useState<
@@ -1059,7 +1360,7 @@ export default function Agent() {
   // {question id, picked keys, labels}. The results pills rebuild the query from baseQ by re-applying
   // the REMAINING facets — removal is pure recomputation, never an ad-hoc inverse per question.
   const ageFlowBaseQRef = useRef<SearchQuery | null>(null);
-  const ageFlowFacetsRef = useRef<Array<{ id: string; keys: string[]; labels: string[] }>>([]);
+  const ageFlowFacetsRef = useRef<Array<{ id: string; keys: string[]; labels: string[]; total?: number }>>([]);
   // THE interview record (owner 2026-08-22, «رجوع»): one ordered list of every question presented,
   // each carrying the answer given for it. `keys: null` = presented but not answered yet; `[]` =
   // skipped (no preference, NO predicate). A cursor walks it, so Back is simply "move the cursor
@@ -1083,6 +1384,13 @@ export default function Agent() {
   //             ageFlowAskedRef in syncGuidedFromSteps, never mutated in place.)
   // Written on every tap before startAgeFlow, so a stale value can never be read.
   const afCarryRef = useRef<{ msgId: string; originQ: SearchQuery; facets: GuidedFacet[]; asked: string[] } | null>(null);
+  // SKIP-EVERYTHING ROUNDS, per results turn (2026-10-06, contract R6.2.2 / R8.1.3). A round that
+  // commits nothing returns early from finishGuided — no search, no new turn — so the turn it was
+  // opened from keeps «🎯 دقّق مع الذكاء», and that button's carry is built from the turn's
+  // guided record, which a skip-only round never writes. Without this record the next tap re-asked
+  // the SAME questions forever: on Annual Rent → Apartment (rnpl/furnished/age/bathrooms fill the
+  // 4-question round) a customer who only wanted AC or an elevator could never reach the amenities.
+  const afSkippedByMsgRef = useRef<Record<string, string[]>>({});
   // CONVERSATION IDENTITY (owner 2026-08-25 — «treat Ezhalah's chat like ChatGPT»). This screen owns
   // which sidebar chat the on-screen conversation belongs to. Every recorded turn passes it, so an
   // AF round / refine / follow-up UPDATES that one entry instead of minting a new one per narrowed
@@ -1358,12 +1666,92 @@ export default function Agent() {
   // `animated: false` while a saved-chat landing is in flight (owner 2026-08-29: opening a chat must
   // BE at the latest message, never visibly drag the page down to it). Live turns keep the glide.
   const landInstantRef = useRef(false);
-  const toBottom = () => requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: !landInstantRef.current }));
+  // Search-loader layout and delayed landing callbacks must never pull the page down.
+  const searchingVisibleRef = useRef(false);
+  searchingVisibleRef.current = msgs.some((m) => m.role === 'status' && m.phase === 'searching');
+  const toBottom = () => requestAnimationFrame(() => {
+    if (searchingVisibleRef.current) return;
+    scrollRef.current?.scrollToEnd({ animated: !landInstantRef.current });
+  });
   const toTop = () => requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
   const onGrow = () => {
+    if (searchingVisibleRef.current) return;
     if (pinModeRef.current === 'top') toTop();
     else if (pinModeRef.current === 'bottom') toBottom();
   };
+
+  // A SLOW, FRIENDLY SCROLL THE USER CAN INTERRUPT (owner 2026-10-17: «take the user slowly down»). The browser's own
+  // smooth scroll is a quick flick; this eases over about a second and stops the instant a finger, wheel or key moves.
+  const glideRef = useRef<number | null>(null);
+  const glideTo = (target: number, ms = 1100) => {
+    const node = (scrollRef.current as any)?.getScrollableNode?.();
+    if (glideRef.current != null) { cancelAnimationFrame(glideRef.current); glideRef.current = null; }
+    if (!node) { scrollRef.current?.scrollTo({ y: target, animated: true }); return; }
+    const from = node.scrollTop;
+    const dist = Math.min(target, node.scrollHeight - node.clientHeight) - from;
+    if (Math.abs(dist) < 4) return;
+    const calm = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (calm) { node.scrollTop = from + dist; return; }
+    let stopped = false;
+    const stop = () => { stopped = true; };
+    const kinds = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+    kinds.forEach((k) => node.addEventListener(k, stop, { passive: true, once: true }));
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const p = Math.min(1, (now - t0) / ms);
+      if (stopped || p >= 1) {
+        kinds.forEach((k) => node.removeEventListener(k, stop));
+        glideRef.current = null;
+        if (!stopped) node.scrollTop = from + dist;
+        return;
+      }
+      node.scrollTop = from + dist * (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2);
+      glideRef.current = requestAnimationFrame(step);
+    };
+    glideRef.current = requestAnimationFrame(step);
+  };
+
+  // A SEARCH STARTS → THE LOADER GETS THE WHOLE SCREEN (owner 2026-10-17: «when you start the animation for the
+  // logos and search, make sure you show all animations and logos, no matter what, and take him down»). The thread
+  // glides down until the loader's top sits just under the header, and the logo grid is sized for that spot, so a
+  // long conversation can no longer squeeze the roster into two rows above the box.
+  const loaderId = msgs.find((m) => m.role === 'status' && m.phase === 'searching' && !m.afRound)?.id;
+  useEffect(() => {
+    if (!IS_WEB || !loaderId) { setLoaderSettleTop(undefined); return; }
+    const scNode = (scrollRef.current as any)?.getScrollableNode?.();
+    // The roster mounts and grows a moment AFTER the loader does (its site list loads first), so one glide would stop
+    // short of the room the grid later makes. Measure and glide again as it settles — until the user takes over.
+    let tookOver = false;
+    const take = () => { tookOver = true; };
+    const kinds = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+    kinds.forEach((k) => scNode?.addEventListener(k, take, { passive: true, once: true }));
+    const settle = (ms: number) => {
+      const wrap = loaderNodeRef.current;
+      if (tookOver || !wrap?.getBoundingClientRect || !scNode?.getBoundingClientRect) return;
+      const GAP = 8;
+      const sc = scNode.getBoundingClientRect();
+      const box = wrap.getBoundingClientRect();
+      const grid = wrap.querySelector?.('[data-testid="loader-roster"]')?.getBoundingClientRect();
+      const headlineH = grid ? Math.max(0, grid.top - box.top) : 48;
+      setLoaderSettleTop(Math.round(sc.top + GAP + headlineH));
+      glideTo(Math.max(0, box.top - sc.top + scNode.scrollTop - GAP), ms);
+    };
+    const timers = [280, 1200, 2400, 3800, 5500].map((at, n) => setTimeout(() => settle(n === 0 ? 1100 : 650), at));
+    return () => { timers.forEach(clearTimeout); kinds.forEach((k) => scNode?.removeEventListener(k, take)); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaderId]);
+
+  // THE KEYBOARD OPENS → THE CHAT GOES DOWN (owner 2026-10-17, screenshot: «when I click on it must take me down,
+  // not up, and I can't see anything»). The pinned root shrinks to the space above the keyboard and the thread
+  // stays where it was, so the newest answer sat behind the box. Settle at the newest message as the box takes
+  // focus and again as the visible window finishes resizing (iOS reports the keyboard late, in steps).
+  useEffect(() => {
+    if (!IS_WEB || !composerFocused) return;
+    const down = () => { if (!searchingVisibleRef.current) scrollRef.current?.scrollToEnd({ animated: true }); };
+    const ids = [0, 160, 380, 700].map((ms) => setTimeout(down, ms));
+    const off = onVisibleWindowResize(down);
+    return () => { ids.forEach(clearTimeout); off(); };
+  }, [composerFocused]);
 
   // OPEN A SAVED CHAT AT ITS LATEST CONTENT (owner 2026-08-29, supersedes the open-at-top rule):
   // tapping a sidebar conversation must land the viewport on the newest message, like every chat
@@ -1483,11 +1871,12 @@ export default function Agent() {
 
     setStopped(true); // hide the "I can get you something more precise" CTA on the stopped results
     setBusy(false);   // search no longer running
-    // Drop the in-flight thinking/searching bubbles; the cards already shown stay frozen. Add Ezhalah's
-    // stop acknowledgement directly under the user's request (shown instantly, no typewriter). (user request.)
+    // Drop the in-flight thinking/searching bubbles; the cards already shown stay frozen. Then one quiet line
+    // under the request, like ChatGPT's «Stopped searching» (owner 2026-10-10) — not a full reply with a
+    // question; the composer is right there for whatever comes next.
     setMsgs((m) => [
       ...m.filter((x) => x.role !== 'status'),
-      { id: uid(), role: 'agent', text: tr("I've stopped the search. Is there anything else I can help you with today?"), typing: false },
+      { id: uid(), role: 'agent', text: tr('Search stopped'), typing: false, stopNote: true },
     ]);
     toBottom();
   };
@@ -1503,12 +1892,13 @@ export default function Agent() {
   // can see we understood, right before "Ezhalah is searching…". (user request.)
   // The structured "Search Summary" of exactly what we parsed — now shown WITH the results (under the
   // professional header), NOT with the slogan. The slogan lives only in the transient searching status.
-  const buildScrapeIntro = (q: SearchQuery) => searchSummary(q);
+  const buildScrapeIntro = (q: SearchQuery, replyLocale: Locale = locale) => searchSummary(q, replyLocale);
 
   // When each status bubble's SEARCHING phase became visible — playListings only waits out the
   // REMAINDER of SEARCH_MIN_MS from this moment, so the beat overlaps the real network time instead
   // of following it. (owner 2026-07-09: no artificial delays, results show as soon as ready.)
   const searchingAtRef = useRef<Record<string, number>>({});
+  const loaderPresentedRef = useRef<Record<string, boolean>>({});
   // Flip a chat-turn 'thinking' status into the live searching loader the moment the query is KNOWN
   // (right before runQuery) — the pills + min-beat then overlap the fetch exactly like the
   // filter/refine paths. Without this, chat searches only started their beat AFTER the results were
@@ -1525,14 +1915,15 @@ export default function Agent() {
     // 1) SEARCHING phase: status bubble shows the slogan + summary. Slogan language follows the
     // user's MESSAGE text (English message → English slogan) instead of the UI locale, so users
     // who chat in one language and have their UI in the other still get the matching slogan.
-    const slogan = hypePhrase(getLocale(), messageText);
+    const replyLocale: Locale = summary ? (msgRTL(summary) ? 'ar' : 'en') : ((messageText ? detectLocale(messageText) : null) ?? locale);
+    const slogan = hypePhrase(replyLocale, messageText);
     // The searching status renders the platform-checking ANIMATION (SearchLoader), not the slogan.
     // We still carry slogan + summary through so they appear in the RESULTS bubble below (unchanged).
     // `resultSources` only lets result-present platforms LEAD the (frozen) pill order — it is NOT a
     // completion signal and must never drive checkmarks (owner: no ✓ in the loader, ever).
     const resultSources = Array.from(new Set(result.listings.map((l) => l.source).filter(Boolean)));
     setMsgs((m) => m.map((x) => (x.id === statusId
-      ? { id: statusId, role: 'status', phase: 'searching', slogan, summary, query: result.query ?? (x.role === 'status' ? x.query : undefined), resultSources }
+      ? { id: statusId, role: 'status', phase: 'searching', slogan, summary, query: result.query ?? (x.role === 'status' ? x.query : undefined), resultSources, afRound: x.role === 'status' ? x.afRound : undefined }
       : x)));
     toBottom();
     // Wait only the REMAINDER of the minimum searching beat (counted from when the searching loader
@@ -1540,8 +1931,24 @@ export default function Agent() {
     // network, so in practice it's already consumed → results morph in IMMEDIATELY on resolve.
     const since = searchingAtRef.current[statusId] ?? Date.now();
     searchingAtRef.current[statusId] = since;
-    const remaining = SEARCH_MIN_MS - (Date.now() - since);
-    if (remaining > 0) await waitRun(run, remaining);
+    // A NEW search waits the 10.6 s every-platform floor + its page dwell. An Advanced Filter round
+    // (2026-10-05 skipped it; 10-10 10 s of logos; owner 2026-10-11: 5 s, one sentence) waits AF_LOADER_MS instead.
+    if (!afCompleted) {
+      const remaining = SEARCH_MIN_MS - (Date.now() - since);
+      if (remaining > 0) await waitRun(run, remaining);
+      // Presentation-only gate: each logo/name page must finish its actual visible dwell.
+      // The search has already completed; this changes only when its results are revealed.
+      // …but never past the owner's ten-second cap (2026-10-17): whatever page is up when the cap
+      // lands, the results come in.
+      while (!run.cancelled && loaderPresentedRef.current[statusId] !== true && Date.now() - since < SEARCH_MAX_HOLD_MS) await waitRun(run, 100);
+    } else {
+      // AN ADVANCED FILTER ROUND HOLDS ITS ONE-SENTENCE BEAT FOR 5 SECONDS (owner 2026-10-11: «make it 5
+      // seconds … one sentence of what he selected»; 10-10 was 10 s of logos, 10-05 skipped it). A plain
+      // floor from when the beat appeared — no page-dwell gate, so it is never longer than 5 s.
+      const remaining = AF_LOADER_MS - (Date.now() - since);
+      if (remaining > 0) await waitRun(run, remaining);
+    }
+    delete loaderPresentedRef.current[statusId];
     delete searchingAtRef.current[statusId];
     if (run.cancelled) return;
     // Soft completion (owner v4): the loader fades out gently instead of vanishing in a single
@@ -1553,10 +1960,11 @@ export default function Agent() {
     //    [slogan] → [Search Summary] → [Result intro] → [Sort line] → [Property cards].
     //    The slogan + summary CARRY OVER from the searching status into this same bubble — they don't
     //    disappear and don't appear as a duplicate block. (user-reported order bug.)
+    liveTurnsRef.current.add(statusId); // a live turn: its cards play the mount-in (cardInMotion)
     setMsgs((m) =>
       m.map((x) =>
         x.id === statusId
-          ? { id: statusId, role: 'results', text: resultDone(getLocale()), result, typing: true, slogan, summary, afCompleted }
+          ? { id: statusId, role: 'results', text: resultDone(replyLocale), result, typing: true, slogan, summary, afCompleted }
           : x,
       ),
     );
@@ -1592,7 +2000,7 @@ export default function Agent() {
   // shipped behavior). THE FIRST tap on a turn reveals the next clean 100-boundary only (…→100, not
   // past it) — exactly BROWSE_BATCH's old boundary math, never retired, just no longer the ONLY
   // target. The chat stays open and BOTH offers stand: «عرض المزيد» (if more than 100 remain) and
-  // «خلّنا نحدد الطلب أكثر» (if a useful AF question exists) — resultsActionsRowVisible already
+  // «🎯 دقّق مع الذكاء» (if a useful AF question exists) — resultsActionsRowVisible already
   // renders whichever apply, unchanged. A SECOND tap on that same turn — i.e. the user explicitly
   // asking again after already seeing the first hundred — drains every remaining page and finishes
   // the search: composer locked, exactly like R11.1's small-set completion, reachable at any total.
@@ -1613,18 +2021,53 @@ export default function Agent() {
   // QUERY_LIMIT) — those extra rows are still merged into the buffer, just not revealed yet, so the
   // NEXT tap reveals from what is already fetched before ever asking the network for more.
   // loadingMore guards a double-tap from double-fetching.
-  // «عرض المزيد» cascade cadence — inside the owner's 40–80ms stagger window; each mounting card also
-  // fades+rises via CardIn, so the reveal flows in instead of landing at once. (owner 2026-07-09.)
+  // «عرض المزيد» cascade cadence — inside the owner's 40–80ms stagger window; each card fades+rises
+  // via CardIn, so the reveal flows in instead of landing at once. (owner 2026-07-09.)
   const LOAD_MORE_STEP_MS = 55;
-  // Only the VISIBLE screenful cascades one-by-one (~0.8s); the rest mount together right after,
-  // below the fold, each still fading in via CardIn. Keeps the premium feel without one sequential
-  // re-render per card of the whole unvirtualized list (review perf fix 2026-07-09).
+  // Only the VISIBLE screenful cascades; the rest mount right after, below the fold, with no animation.
   const CASCADE_VISIBLE = 14;
+  // Which cards the latest press staggers and which it mounts still, per turn (read by CardIn at mount).
+  const cascadeWindowRef = useRef<Record<string, { from: number; animEnd: number }>>({});
+  // Results turns a search produced LIVE in this conversation (added where the turn is created, cleared
+  // by resetConversationState). Only their cards play the mount-in.
+  const liveTurnsRef = useRef(new Set<string>());
+  const cardInMotion = (mid: string, i: number) => {
+    const w = cascadeWindowRef.current[mid];
+    // A still card's placeholder height until it nears the screen: the median phone card / laptop row.
+    const still = { stillHeight: cardRow ? 140 : 340 };
+    // A RESTORED turn (sidebar open, snapshot, replay) renders in its final state. Its cards used to replay
+    // the mount-in all at once, each held at opacity 0 by an animation that could not start while hundreds
+    // of cards mounted — switching chats went blank on the owner's iPhone (2026-10-10; measured locally:
+    // 8 frames in 5 s, the cards on screen at opacity 0 throughout).
+    if (!w || i < w.from) return liveTurnsRef.current.has(mid) ? {} : still;
+    return i >= w.animEnd ? still : { delayMs: (i - w.from) * LOAD_MORE_STEP_MS };
+  };
+  // TWO RENDERS PER PRESS, NOT FOURTEEN (owner 2026-10-05: «عرض المزيد takes time … should never
+  // ever have this»). The drip re-rendered the whole unvirtualized list once per card, then mounted
+  // everything else in one more render — measured at 4× CPU on a production export, the first new
+  // card took seconds. Now the on-screen cards mount in ONE render and CardIn staggers them by
+  // index (same 55ms cascade, played by CSS on web), and the rest mount once that frame has painted.
+  // WHICH cards and in WHAT order are unchanged: the same slice of the same list reaches `target`.
+  // Ownership/teardown unchanged too: revealActiveRef + `revealing` hold until the rest is mounted,
+  // and finalizeReveal()/Stop/new turn take over exactly as they did from dripRange().
   const cascadeIn = (mid: string, from: number, target: number) => {
-    const animEnd = Math.min(from + CASCADE_VISIBLE, target);
-    dripRange(mid, from, animEnd, LOAD_MORE_STEP_MS, () => {
-      if (target > animEnd) setRevealCount((c) => ({ ...c, [mid]: target }));
-    });
+    if (target <= from) return;
+    // A scroll chunk may have mounted past `from` since this press's render; stagger from there.
+    const start = Math.max(from, revealCountRef.current[mid] ?? 0);
+    const animEnd = Math.min(start + CASCADE_VISIBLE, target);
+    cascadeWindowRef.current[mid] = { from: start, animEnd };
+    setRevealCount((c) => ({ ...c, [mid]: Math.max(c[mid] ?? 0, animEnd) }));   // never un-mounts a card
+    if (animEnd >= target) return;   // the whole press fit on screen: one render, nothing pending
+    revealActiveRef.current = { id: mid, count: target };
+    setRevealing(true);
+    const rest = () => {
+      if (revealActiveRef.current?.id !== mid) return;   // finalize/Stop/new turn owns it now
+      revealActiveRef.current = null;
+      setRevealCount((c) => ({ ...c, [mid]: target }));
+      setRevealing(false);
+    };
+    // rAF runs just before the on-screen batch paints; the timeout lands just after that paint.
+    requestAnimationFrame(() => { revealTimers.current.push(setTimeout(rest, 0)); });
   };
   // A defensive backstop against a pathological `hasMore` that never clears, and a bound on how many
   // search RPCs ONE tap may cost production — NOT a real product ceiling (the 2026-08-29
@@ -1637,7 +2080,66 @@ export default function Agent() {
   // was 25,000 and the two biggest cities sit past it. See drainPageBudget()'s note for the live
   // measurement; the arithmetic lives there now so the constant and its justification cannot drift.
   const MAX_DRAIN_PAGES = drainPageBudget(LOAD_MORE_PAGE_SIZE);
-  const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>) => {
+  // A SAVED CHAT PRE-LOADS ITS NEXT PAGE (owner 2026-10-07: «show me more from a saved chat loads so
+  // long — this should never happen»). A reopened chat keeps only its first cards (TRANSCRIPT_LISTING_CAP
+  // in the transcript, SNAPSHOT_CAP in a legacy snapshot), so its first «عرض المزيد» used to start a
+  // 500-row page AT TAP TIME — seconds under load — while a live chat already holds that page. The open
+  // path now starts the exact page the tap would ask for (same query, offset and seed) the moment the chat
+  // is restored, and loadMore consumes it instead of fetching. Never trusted across conversations (epoch)
+  // or offsets, and a failed prefetch is never used: the tap then fetches live, exactly as before.
+  const prefetchRef = useRef(new Map<string, { epoch: number; offset: number; p: Promise<Awaited<ReturnType<typeof loadMoreListings>> | null> }>());
+  // ONE AT A TIME, ADVANCED FILTER FIRST (the #3420 lesson: heavy calls fired together slow each other).
+  // The «تحديد أكثر» probe starts first — the passive effect claims it by key, so the button shows as soon
+  // as on a live search — and the page fetch only starts once that probe has answered.
+  const prefetchNextPage = (list: ChatMsg[], asked: readonly string[] = []) => {
+    const last = [...list].reverse().find((mm) => mm.role === 'results') as Extract<ChatMsg, { role: 'results' }> | undefined;
+    const r = last?.result;
+    if (!last || !r?.query) return;
+    if ((r.matchTotal ?? r.listings.length) > INTERVIEW_STOP_AT) prefetchNarrowing(r.query, asked);
+    if (!r.hasMore || r.listings.length >= SECOND_PAGE_CAP) return;
+    const offset = r.pageOffset ?? 0;
+    const q = r.query;
+    // A chat that must bring back cards it had on screen fetches them first (the user is waiting on
+    // that); otherwise the «تحديد أكثر» probe goes first.
+    const restoring = (r.restoreTo ?? 0) > r.listings.length;
+    const afFirst: Promise<unknown> = restoring ? Promise.resolve() : (afPrefetchRef.current?.p ?? Promise.resolve());
+    prefetchRef.current.set(last.id, {
+      epoch: conversationEpochRef.current, offset,
+      p: afFirst.catch(() => null).then(() => loadMoreListings(q, offset, last.result.rotationSeed)).catch(() => null),
+    });
+  };
+
+  // A SAVED CHAT REOPENS EXACTLY AS IT WAS LEFT (owner 2026-10-07: «after the user is done and goes back,
+  // it shows what he did — signed in or not, the same»). The transcript keeps only the first cards; when
+  // the user had more on screen it records how many (restoreTo). This brings the rest back with no tap:
+  // it takes the page prefetchNextPage already started, merges it, re-reveals up to restoreTo and, if the
+  // chat had finished, finishes it again. A failed page leaves the honest pager in place instead.
+  const restoreLeftState = async (list: ChatMsg[]) => {
+    const last = [...list].reverse().find((mm) => mm.role === 'results') as Extract<ChatMsg, { role: 'results' }> | undefined;
+    const r = last?.result;
+    if (!last || !r?.restoreTo || r.restoreTo <= r.listings.length) return;
+    const pre = prefetchRef.current.get(last.id);
+    if (!pre) return;
+    prefetchRef.current.delete(last.id);
+    const epoch = conversationEpochRef.current;
+    setRestoringId(last.id);
+    const page = await pre.p;
+    if (conversationEpochRef.current !== epoch) return;
+    setRestoringId(null);
+    if (!page || page.failed) return;
+    const seen = new Set(r.listings.map((l) => `${l.source}:${l.id}`));
+    const add = page.listings.filter((l) => { const k = `${l.source}:${l.id}`; if (seen.has(k)) return false; seen.add(k); return true; });
+    const mergedLen = r.listings.length + add.length;
+    setMsgs((prev) => prev.map((mm) => (mm.id !== last.id || mm.role !== 'results' || !mm.result) ? mm
+      : { ...mm, result: { ...mm.result, listings: [...mm.result.listings, ...add], pageOffset: page.nextOffset, hasMore: page.hasMore } }));
+    const to = Math.min(r.restoreTo, mergedLen);
+    setRevealCount((c) => ({ ...c, [last.id]: Math.max(c[last.id] ?? 0, to) }));
+    // The same named terminal gate loadMore uses: the restored reveal reached the terminal it had when saved.
+    const revealIsTerminal = r.restoreCompleted === true && to >= r.restoreTo;
+    if (revealIsTerminal) setCompleted(true);
+  };
+
+  const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>, requestedTarget?: number) => {
     const mid = m.id;
     const q = m.result.query;
     // THE CONVERSATION THIS PRESS BELONGS TO (ops_incident #599). Captured before the first await so
@@ -1660,7 +2162,7 @@ export default function Agent() {
     // its 2,000-card ceiling are retired. `alreadyExpandedOnce` still tells the two taps apart for the
     // completion check below; the target itself now comes straight from revealTarget().
     void alreadyExpandedOnce;
-    const target = revealTarget(cur, m.result.matchTotal ?? Infinity);
+    const target = requestedTarget == null ? revealTarget(cur, m.result.matchTotal ?? Infinity) : Math.min(SECOND_PAGE_CAP, requestedTarget, m.result.matchTotal ?? Infinity);
     // De-dup against the CLOSURE copy (same data the message holds) so the merge is exact.
     const seen = new Set(m.result.listings.map((l) => `${l.source}:${l.id}`));
     const add: typeof m.result.listings = [];
@@ -1698,7 +2200,13 @@ export default function Agent() {
         // and never claim completion for a reveal that did not actually finish.
         // THE SEED THIS SET WAS CUT FROM (ops_incident #796) — never the app's latest. m.result is the
         // block being paged, so its own rotationSeed is the only one whose `pageOffset` means anything.
-        const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(q, pageOffset, m.result.rotationSeed);
+        // The page a saved chat started loading when it was opened (prefetchNextPage) — used only for
+        // this exact conversation and offset, and only if it succeeded; otherwise fetch live as before.
+        const pre = prefetchRef.current.get(mid);
+        if (pre) prefetchRef.current.delete(mid);
+        let page = pre && pre.epoch === epoch && pre.offset === pageOffset ? await pre.p : null;
+        if (!page || page.failed) page = await loadMoreListings(q, pageOffset, m.result.rotationSeed);
+        const { listings: more, nextOffset, hasMore, failed } = page;
         // THE USER LEFT THIS CONVERSATION WHILE THE PAGE WAS IN FLIGHT — every write below belongs
         // to a chat that no longer exists, and this screen is now showing a different one
         // (router.replace to the SAME route: same component instance, nothing remounted).
@@ -1735,7 +2243,7 @@ export default function Agent() {
       // started while pages were fetching, reveal instantly (no cascade) — the drip machinery
       // belongs to the new turn now; cards still fade in via CardIn. (review fix, unchanged.)
       const revealTo = Math.min(target, mergedLen);
-      if (runRef.current) setRevealCount((c) => ({ ...c, [mid]: revealTo }));
+      if (runRef.current || revealTo <= cur) setRevealCount((c) => ({ ...c, [mid]: revealTo }));
       else cascadeIn(mid, cur, revealTo);
       // FINISHED ONLY WHEN NOTHING IS LEFT TO REVEAL, PERIOD (owner rule 2026-09-11, Task 4 rev. 2).
       // Two conditions, both required: the server confirms no more pages exist (`!hasMoreNow`) AND
@@ -1774,7 +2282,7 @@ export default function Agent() {
   // for "a refine question is already on screen awaiting an answer" — `send()`'s REFINE INTERCEPT and
   // `runRefine()` both already treat it that way (only ONE pending refine is ever a valid state). Nothing
   // previously stopped a second startRefine() call while one was already pending: both call sites route
-  // through this ONE function via «خلّنا نحدد الطلب أكثر» (the fallback when the AF plan has 0 useful
+  // through this ONE function via «🎯 دقّق مع الذكاء» (the fallback when the AF plan has 0 useful
   // questions — see startAgeFlow) and the outline «نتائج أدق» button, and NEITHER call site disables
   // itself while its own async work is in flight. A rapid double-tap on either (or the AF entry re-showing
   // its CTA the instant `setAgeFlow(null)` fires, one tick before this runs) fired startRefine() twice and
@@ -1795,13 +2303,13 @@ export default function Agent() {
         // city choice on the AI-agent path (the system prompt explicitly prefers English for known
         // cities) — arLabel() (already used elsewhere in this file for the same reason) falls back
         // to the unresolved placeholder instead of interpolating raw English into this Arabic chip.
-        ask = ar ? `أي حي تفضّل في ${arLabel(q.location)}؟` : `Which district in ${q.location}?`;
+        ask = ar ? nextVariant(REFINE_DISTRICT_AR, { c: arLabel(q.location) }) : nextVariant(REFINE_DISTRICT_EN, { c: q.location });
         options = ds.map((d) => ({ label: d, value: d }));
       }
     }
     if (!dim && !q.priceInput && !q.priceBand) {
       dim = 'budget';
-      ask = ar ? 'كم ميزانيتك تقريباً؟' : 'What is your approximate budget?';
+      ask = ar ? nextVariant(REFINE_BUDGET_AR) : nextVariant(REFINE_BUDGET_EN);
       const ceil = q.deal === 'Buy' ? [500_000, 1_000_000, 2_000_000, 5_000_000] : [30_000, 50_000, 80_000, 150_000];
       options = ceil.map((c) => ({ label: budgetLabel(c, ar), value: String(c) }));
     }
@@ -1814,22 +2322,21 @@ export default function Agent() {
       : (detailForContext(q.category ?? 'Residential', effectiveGroups(q))?.showBeds ?? true);
     if (!dim && !q.detail && bedsApplicable) {
       dim = 'beds';
-      ask = ar ? 'كم غرفة نوم تبغى؟' : 'How many bedrooms?';
+      ask = ar ? nextVariant(REFINE_BEDS_AR) : nextVariant(REFINE_BEDS_EN);
       options = ['1', '2', '3', '4', '5'].map((n) => ({ label: bedsLabel(n, ar), value: n }));
     }
     // THE LEGACY TYPE QUESTION IS DELETED (owner 2026-08-23). It hardcoded four labels
     // (شقة/فيلا/دور/أرض) that were NOT the canonical taxonomy — no group tier, no Studio/Room/
     // Residential Building/Rest House/Duplex, nothing commercial — and wrote only the scalar
     // `q.type`, bypassing the typeGroups/types multi-select the whole app is built on. It was
-    // reachable from the same «خلّنا نحدد الطلب أكثر» button as the interview, so which type
+    // reachable from the same «🎯 دقّق مع الذكاء» button as the interview, so which type
     // question a user got depended on live counts. Property type is now asked in exactly ONE place,
     // the Advanced Filter's scope prefix, always from HIERARCHY. `applyRefinement`'s 'type' branch
     // is deliberately kept: an in-flight `pendingRefineRef` from before this change, and the
     // free-text path, can still deliver a typed type answer.
     if (!dim) { // everything already specified → open free-form question (typed answer)
       dim = 'free';
-      ask = ar ? 'وش تحب نضيّق فيه أكثر؟ (الميزانية، الحي، عدد الغرف، نوع العقار…)'
-               : 'What would you like to narrow further? (budget, district, bedrooms, type…)';
+      ask = ar ? nextVariant(REFINE_FREE_AR) : nextVariant(REFINE_FREE_EN);
     }
     pendingRefineRef.current = { q, dim }; // typed-answer fallback; chips are the primary path
     const refine = options.length ? { dim, baseQ: q, options } : undefined;
@@ -1901,6 +2408,12 @@ export default function Agent() {
   // turn is in flight (busy) so a half-rendered turn is never what a return restores; content-keyed
   // (lastCapturedRef) so re-renders and restores never rewrite an unchanged transcript.
   const lastCapturedRef = useRef('');
+  // THE SAVED CHAT BEING DOWNLOADED RIGHT NOW (owner 2026-10-23: «when i click on the side … English
+  // shows only my message»). While openSaved() waits for the server copy it paints a stand-in (just the
+  // user's question, a snapshot or a stale local copy). Saving that stand-in wrote a "question only"
+  // transcript over the full chat, and every later open showed only the question. Nothing is saved for
+  // this chat id until its real copy has landed.
+  const hydratingIdRef = useRef<string | null>(null);
   // The debounced capture that has not fired yet. WITHOUT this, the effect cleanup's clearTimeout
   // silently dropped the newest settled state whenever the user left the chat inside the 600ms
   // window (tapping another chat while the new turn's cards were still cascading was enough) — and
@@ -1918,7 +2431,8 @@ export default function Agent() {
   useEffect(() => {
     const id = chatIdRef.current;
     if (!id) return;
-    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed });
+    if (hydratingIdRef.current === id) return; // a stand-in is on screen, never the chat itself
+    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow });
     if (!t) return;
     const j = JSON.stringify(t);
     if (j === lastCapturedRef.current) return;
@@ -1940,7 +2454,7 @@ export default function Agent() {
     // `completed` was missing from these deps: a chat that ENDED (Advanced Filter narrowed it to the
     // final set) could keep a transcript that never recorded the ending, so it reopened with a live
     // composer on a finished search.
-  }, [busy, msgs, revealCount, afReceipt, guidedPills, completed]);
+  }, [busy, msgs, revealCount, afReceipt, guidedPills, completed, afCanNarrow]);
   // A refresh/close inside the debounce window must not lose the last settled state either.
   // saveTranscript writes localStorage synchronously up front (store.tsx), so this flush lands on
   // disk even during unload. pagehide, not beforeunload: it also covers bfcache navigations.
@@ -2093,7 +2607,7 @@ export default function Agent() {
       // owner 2026-09-12: reverses the 2026-09-04 decision to narrate "nothing left" as a chat
       // bubble — too dense/confusing in practice. Silent now: afCanNarrow alone still correctly
       // hides «تحديد أكثر» when exhausted (line ~3418); «عرض المزيد» is untouched by this verdict.
-      setAfCanNarrow((c) => ({ ...c, [m.id]: verdict === 'yes' }));
+      setAfCanNarrow((c) => ({ ...c, [m.id]: offersNarrowing(verdict) }));   // unknown offers (backlog 317)
     });
   }, [lastResultsMsg, guidedPills]);
 
@@ -2103,7 +2617,7 @@ export default function Agent() {
   // `opts.guided` attaches the interview's facets to the results turn for the removable pills.
   const runRefine = async (
     baseQ: SearchQuery, dim: string, value: string, label: string,
-    opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] } },
+    opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] }; afRound?: { items: string[]; pools?: Array<number | null> } },
   ) => {
     pendingRefineRef.current = null;
     finalizeReveal();
@@ -2118,8 +2632,19 @@ export default function Agent() {
     refineMsgIdRef.current = statusId;
     // Guaranteed search → the searching loader (roster + wave) starts IMMEDIATELY, no thinking beat.
     searchingAtRef.current[statusId] = Date.now();
-    setMsgs((m) => [...m, { id: uid(), role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined }]);
+    const echoId = uid();
+    setMsgs((m) => [...m, { id: echoId, role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined, afRound: opts?.afRound }]);
     toBottom();
+    // STAY IN THE SECTION YOU ARE IN (owner 2026-10-03). The round just closed on the old turn's
+    // «تحديد أكثر» button, so the new answers bubble and the loader are appended directly below it —
+    // but a viewport parked at the old bottom would show none of it and the user would have to scroll
+    // to find their own search. Ease down to that bubble (one short glide, 80 px under the top):
+    // everything above is still there, one scroll up. Measured at scroll time, like the landing.
+    // Three passes, not one: the loader is short on the first frame and grows as its platform grid
+    // renders, so the first glide can be clamped by the end of the content and leave the bubble low
+    // on screen; the later passes settle it ~80 px under the top with the loader below it. All land
+    // within the first 1.5 s, long before the user has had reason to scroll.
+    for (const d of [80, 700, 1500]) easeToMsgTop(echoId, d);
     const result = await runQuery(refined, true, run.ac.signal, ensureChatId());
     if (run.cancelled) return;
     prefetchNarrowing(result.query ?? refined, opts?.guided?.asked ?? []);  // AFTER the search — see prefetchNarrowing
@@ -2146,7 +2671,11 @@ export default function Agent() {
       // through this one call — one writer, so the store can never hold a round this screen never ran.
       writeFilterStore({ ...refined, afFacets: opts.guided.facets });
     }
-    await playListings(run, statusId, buildScrapeIntro(result.query ?? refined), result, label, !!opts?.guided);
+    // A round of the Advanced Filter reads the ORIGINAL summary plus every committed answer (owner
+    // 2026-10-03); any other refine keeps summarising the query it ran.
+    await playListings(run, statusId,
+      opts?.guided ? guidedSearchSummary(opts.guided.baseQ, opts.guided.facets) : buildScrapeIntro(result.query ?? refined),
+      result, label, !!opts?.guided);
     if (run.cancelled) return;
     void promptSignupSoon(run);
     // NO toBottom() here (owner 2026-08-24). It fired while the new turn's cards were still
@@ -2158,75 +2687,15 @@ export default function Agent() {
     setBusy(false); runRef.current = null;
   };
 
-  // Remove one interview facet from the results pills (owner 2026-08-16: «The user can remove any
-  // advanced choice and results should immediately update»). Pure recomputation: rebuild the query
-  // from the interview's baseQ by re-applying every REMAINING facet in order via its own question's
-  // apply() — never a hand-written inverse — then re-search through the same guided path so the
-  // pills row carries over minus the removed one. No mining beat here; removal is instant.
-  const removeGuidedFacet = (facetIndex: number) => {
-    if (!guidedPills || busy) return;
-    const removed = guidedPills.facets[facetIndex];
-    const remaining = guidedPills.facets.filter((_, i) => i !== facetIndex);
-    // A ROUND ON SCREEN IS PRICED ON A COHORT THIS REMOVAL JUST DESTROYED — CLOSE IT
-    // (ops_incident #242, measured on production 2026-09-13, reproduced 3/3).
-    //
-    // The owner's 2026-09-11 decision (#155) put the committed pills INTO the round overlay, so a
-    // user can delete an answer while a question is on screen. The removal widened the search
-    // correctly — but the round itself was never told: its plan, its header total, its option counts
-    // and its own facet list all still belonged to the pre-removal query, and nothing re-derived
-    // them. Measured live on جدة/الفلل والبيوت/فيلا/شراء, 390x844: round 1 committed four answers
-    // (125 results); removing «جديد» widened the search to 295 (headline 295, anon replay 295, DB
-    // truth 295) and 60s later the card still read «125 نتيجة», still drew FOUR committed pills
-    // including the deleted one, and was asking «وش الاتجاه اللي تفضله؟» priced on the 125 set —
-    // شمال 27 / جنوب 27 / شرق 27 / غرب 19 where the real set has 62 / 49 / 67 / 47. Tapping a
-    // number the user can read off the screen would have returned 2.3x that many listings, which is
-    // the one thing every AF count rule forbids (§2.5, §7: visible count = count RPC = request = DB
-    // truth), and R9.2.1 was false ON SCREEN while being true on the wire.
-    //
-    // So the round is ABANDONED, exactly as ✕ and «رجوع» from question one abandon it: bump the
-    // token first so any in-flight resolveOptions/rankQuestions probe for the dead cohort is
-    // discarded rather than painting over the close, then drop the card. Nothing is lost that was
-    // not already invalid — the committed ANSWERS live in `guidedPills`, which this function rebuilds
-    // and hands to runRefine below, and the asked-carry rides with them. What comes back is the
-    // «خلّنا نحدد الطلب أكثر» offer on the new, wider turn, and a fresh round priced on the set the
-    // user actually has (startAgeFlow re-seeds every round ref, so the next round is clean).
-    ageFlowTokenRef.current++;
-    setAgeFlow(null);
-    let q = guidedPills.baseQ;
-    for (const f of remaining) {
-      // SCOPE questions live outside ADVANCED_QUESTIONS, so the lookup must span BOTH pools: a
-      // surviving group/type facet whose question could not be resolved would be silently dropped
-      // from the rebuild and quietly widen the search (owner 2026-08-23).
-      const question = ADVANCED_QUESTIONS.find((x) => x.id === f.id) ?? SCOPE_QUESTIONS.find((x) => x.id === f.id);
-      if (question) q = question.apply(q, f.keys);
-    }
-    const label = t('Without: {label}', { label: removed.labels.join('، ') });
-    // The guided record is passed even when the LAST pill is removed (owner 2026-08-24): the pills
-    // row is gated on facets.length so nothing renders, but the carried asked-set survives — dropping
-    // it here would resurrect every question an earlier round already asked or skipped.
-    //
-    // …MINUS the removed question itself (review 2026-08-25). The carry exists to stop RE-asking what
-    // the user already RESOLVED; a facet the user just deleted is by definition unresolved again, and
-    // keeping its id in `asked` burned that dimension for the rest of the chat — remove «عمر ٣-٥
-    // سنوات» to pick a different bucket and property_age could never be offered again, and once the
-    // pool was spent that way «تحديد أكثر» disappeared entirely with no way back but a new search.
-    void runRefine(q, '__guided__', '', label,
-      { guided: { baseQ: guidedPills.baseQ, facets: remaining, asked: guidedPills.asked.filter((id) => id !== removed.id) } });
-  };
-
   // THE COMMITTED PILLS THE ROUND CARD MUST NOT COVER (owner decision 2026-09-11, #155).
-  // One source of truth: the SAME facets the transcript row renders and the SAME removal handler,
-  // handed to the overlay so it can draw them above its own scrim. A copy here would be a second
-  // place for the user's committed selections to live, and the two would drift.
-  // Declared HERE, after removeGuidedFacet: the useMemo factory runs during render, so referencing
-  // that `const` from above its declaration is a temporal-dead-zone throw, not a lint nit.
+  // One source of truth: the SAME facets the transcript row renders, handed to the overlay so it can
+  // draw them above its own scrim. A copy here would be a second place for the user's committed
+  // selections to live, and the two would drift.
+  // READ-ONLY (owner 2026-10-03: «we should not show any X button on this»). There is no removal
+  // handler any more: a committed answer is changed by going back through the round, never by a ✕.
   const afCardPills: ShellPills = useMemo(() => ({
     facets: guidedPills?.facets ?? [],
-    onRemove: removeGuidedFacet,
-    disabled: busy,
-    isScope: isScopeQuestionId,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [guidedPills, busy]);
+  }), [guidedPills]);
 
 
   // Present the step at `stepIndex`. A step the user has already seen (walked Back to, or one
@@ -2444,7 +2913,12 @@ export default function Agent() {
   const finishGuided = (token: number) => {
     if (ageFlowTokenRef.current !== token) return;
     const q = ageFlowQueryRef.current;
-    if (!(q && ageFlowChangedRef.current)) { setAgeFlow(null); return; }
+    if (!(q && ageFlowChangedRef.current)) {
+      const from = afCarryRef.current?.msgId;
+      if (from) afSkippedByMsgRef.current[from] = [...ageFlowAskedRef.current];
+      setAgeFlow(null);
+      return;
+    }
     const startedAt = Date.now();
     // CUMULATIVE, ANCHORED TO THE TRUE PRE-AF ORIGIN (owner 2026-08-24). `ageFlowBaseQRef` stays the
     // ROUND's own start — deriveGuided rebuilds this round's query from it, and anchoring it to the
@@ -2502,11 +2976,20 @@ export default function Agent() {
     // nothing — same query, same cards — so the turn keeps its buttons and the user can open the
     // interview again from it; replacing them with a receipt would strand them with no way back in.
     const askedThisRound = [...ageFlowAskedRef.current].filter((id) => !(carry?.asked ?? []).includes(id));
-    const roundLog = buildAfRoundLog(askedThisRound, ageFlowFacetsRef.current);
+    const roundLog = buildAfRoundLog(askedThisRound, ageFlowFacetsRef.current, locale);
     const roundCommitted = buildAfSummary(ageFlowFacetsRef.current);
     if (carry && roundCommitted) setAfReceipt((r) => ({ ...r, [carry.msgId]: roundLog }));
-    void runRefine(q, '__guided__', '', ageFlowLabelsRef.current.join('، '), {
+    // Each language opens with its rotating courtesy + request (owner 2026-10-14).
+    const roundLabel = ageFlowLabelsRef.current.join(locale === 'ar' ? '، ' : ', ');
+    void runRefine(q, '__guided__', '', roundLabel ? pickAfCourtesyOpening(Math.random, locale) + roundLabel : roundLabel, {
       guided,
+      // The picks in the chips' own words, without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات») — clearer than the raw labels.
+      // One beat per answered question, in the chips' own words without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات»),
+      // each with the size of the set it was checked against — the beat reads «نفحص 1,425 عقار…» → «نفحص 830 عقار…».
+      afRound: (() => {
+        const steps = buildAfBeatSteps(ageFlowFacetsRef.current).map((x) => ({ label: stripEmoji(x.label).trim(), pool: x.pool })).filter((x) => x.label);
+        return { items: steps.map((x) => x.label), pools: steps.map((x) => x.pool) };
+      })(),
       onFetched: (total) => {
         const msgId = refineMsgIdRef.current;
         if (!stillMining()) return;
@@ -2530,7 +3013,8 @@ export default function Agent() {
         // every-setCompleted-is-gated ratchet still means something: the defect that check exists for
         // is a "nothing left to ask" VERDICT silently locking the chat (2026-09-12), which this is
         // not — this fires on a round that actually landed results, never on a probe's opinion.
-        const afRoundEndsChat = true;
+        // OFF since 2026-10-05 (owner: re-offer «🎯 دقّق مع الذكاء» while >25 + a useful question; a tap, never a timer).
+        const afRoundEndsChat = false;
         if (afRoundEndsChat || searchIsFinishedAtThreshold(total, INTERVIEW_STOP_AT)) setCompleted(true);
         // A ROUND NEVER RE-OPENS ITSELF (owner 2026-09-20 — REVERSES the 2026-09-04 "rounds continue
         // automatically" rule quoted below in git history). That rule popped a brand-new round of
@@ -2560,7 +3044,7 @@ export default function Agent() {
     });
   };
 
-  // Entry point for «خلّنا نحدد الطلب أكثر» (and the auto-open after an eligible Filter search). Build
+  // Entry point for «🎯 دقّق مع الذكاء» (and the auto-open after an eligible Filter search). Build
   // the PLAN once — the eligible questions whose initial options clear the floor — so the progress bar
   // reflects reality, then present them select-then-confirm. Nothing qualifies → fall through to the
   // pre-existing refine chips so a manual TAP is never a no-op. The AUTO path passes fallbackToRefine=
@@ -2581,7 +3065,7 @@ export default function Agent() {
     // AUTO entry (owner 2026-08-16, supersedes the 2026-08-03 results-first rule): an eligible
     // Filter search with > 25 results opens on the calm INTRO — the count + invitation — never a
     // question. The plan resolves in the background while the intro is on screen, so «يلا نبدأ»
-    // feels instant. A manual «خلّنا نحدد الطلب أكثر» tap skips the intro (the user already opted in).
+    // feels instant. A manual «🎯 دقّق مع الذكاء» tap skips the intro (the user already opted in).
     setAgeFlow(opts?.auto ? { phase: 'intro', total: opts?.total ?? null } : { phase: 'loading' });
     // SEEDED FROM THE CARRY (owner 2026-08-24), not emptied. The opening rank happens BEFORE the
     // first syncGuidedFromSteps, so starting from an empty set here made round 2 rank — and then ask
@@ -2723,16 +3207,35 @@ export default function Agent() {
     }
   };
 
-  const onAgeConfirm = (keys: string[]) => { void commitGuidedStep(keys); };
+  const onAgeConfirm = (keys: string[]) => commitGuidedStep(keys);
+
+  // THE NEXT STEP IS READY BEFORE THE TAP (owner 2026-10-03: «when a user clicks المتابعة, it feels a
+  // bit stuck»). Committing an answer runs presentGuided → rankQuestions over the NEW scope, which is
+  // exactly `question.apply(current, keys)` with this question added to the asked set (deriveGuided).
+  // So the moment the footer has its count for a tick — and once at open, for the skip path (keys []) —
+  // the same rankQuestions call is made in the background; every count it learns is remembered
+  // (fetchApartmentGuidedCounts / fetchPropertyAgeOptionCounts), so the tap finds them ready. Serial by
+  // construction (it follows the footer's own call, one per tick) and de-duplicated by key, so it can
+  // never recreate the #3420 burst. A scope tier next is skipped: its counts are already remembered.
+  const nextStepPrefetchRef = useRef('');
+  const prefetchNextStep = (question: AdvancedQuestion, q: SearchQuery, keys: string[]) => {
+    const next = keys.length ? question.apply(q, keys) : q;
+    const asked = new Set([...ageFlowAskedRef.current, question.id]);
+    if (nextScopeTier(next, asked)) return;
+    const key = JSON.stringify([next, [...asked].sort()]);
+    if (nextStepPrefetchRef.current === key) return;
+    nextStepPrefetchRef.current = key;
+    rankQuestions(next, asked).catch(() => {});
+  };
 
   // Skip THIS question → next; skip-all → finish now; X (close) → abandon the flow.
   // Skip = NO PREFERENCE (owner): nothing is filtered, no false is written, the question is just
   // marked answered-as-open for this session — and walking Back to it restores it as skipped.
-  const onAgeSkip = () => { void commitGuidedStep([]); };
+  const onAgeSkip = () => commitGuidedStep([]);
 
   // «رجوع» — one question back (owner 2026-08-22). From the FIRST question it leaves the interview
   // entirely: the record is dropped and ageFlow goes null, which is exactly what the pre-AF CTA row
-  // is gated on, so «خلّنا نحدد الطلب أكثر» + «عرض المزيد» come straight back. Nothing was searched
+  // is gated on, so «🎯 دقّق مع الذكاء» + «عرض المزيد» come straight back. Nothing was searched
   // during the interview, so there is nothing else to undo.
   const onAgeBack = () => {
     if (ageFlow?.phase !== 'asking') return;
@@ -2766,10 +3269,71 @@ export default function Agent() {
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
-    // The user SENT something (typed or voice — sendVoice funnels in here): the small sign-in
-    // card retires for the rest of this load (owner 2026-08-29). After the guard, so an empty or
-    // busy-refused submit is not a send.
+    setFilterOrigin(false);
+    const selectedSourcesForTurn = pickerSourceSlugs(selectedSources);
+    const sourceChoiceForTurn = pickerSourceExplicit;
+    // Every accepted send, including pagination, dismisses the sign-in card.
     dismissSignInCard();
+    const latestResult = [...msgs].reverse().find((m): m is Extract<ChatMsg, {role:'results'}> => m.role === 'results');
+    if (latestResult && !pendingRefineRef.current && (msgs[msgs.length - 1]?.role === 'results' || lastPaginationResultRef.current === latestResult.id)) {
+      const shown = revealCount[latestResult.id] ?? initialReveal(latestResult.result, latestResult.afCompleted);
+      const target = agentResultRequest(v, Math.max(shown, initialReveal(latestResult.result, latestResult.afCompleted)), latestResult.result.query?.count ?? 100, !!latestResult.result.query?.count);
+      if (target != null) {
+        lastPaginationResultRef.current = latestResult.id;
+        const quantity = resultQuantityChange(v, !!latestResult.result.query?.count);
+        if (quantity != null && latestResult.result.query) {
+          const updatedQuery = {...latestResult.result.query, count:quantity};
+          lastQueryRef.current = updatedQuery;
+          setMsgs((m) => m.map(message => message.id === latestResult.id && message.role === 'results'
+            ? {...message, result:{...message.result, query:updatedQuery}} : message));
+        }
+        setTyped('');
+        recordChatTurn(v);
+        setMsgs((m) => [...m, {id:uid(),role:'user',text:v}]);
+        await loadMore(latestResult, target);
+        return;
+      }
+    }
+    lastPaginationResultRef.current = null;
+    const historyAll = msgs
+      .filter((m) => m.role === 'user' || m.role === 'agent' || m.role === 'results')
+      .map((m) => {
+        const role = m.role === 'user' ? ('user' as const) : ('model' as const);
+        // For a results turn, hand the agent the FACTS of the cards it showed (numbered #1..#N) so it
+        // can resolve later references like "the 2nd one", "#3", "the cheapest", "the Al Malqa one" —
+        // restating only what's on the card, never inventing. (user training decision.)
+        if (m.role === 'results') {
+          // JUNK_LOCATION_TOKENS guard, own display path (2026-07-10 location-data-quality audit):
+          // this text feeds straight into the AGENT's conversation memory (so it can later resolve
+          // "the Al Malqa one" etc.). l.city/l.district already went through remote.ts's junk guard,
+          // so a sentinel can't arrive as a literal string here, but an honestly-unresolved '' still
+          // needs a neutral label — otherwise this would show "in , " for a fully-unresolved location.
+          const cards = (m.result?.listings ?? []).flatMap((l, i) => {
+            // Keep initial examples and a specifically referenced card, never the whole broad search.
+            const referenced = new RegExp(`(?:#|رقم\\s*)${i + 1}(?![0-9])`).test(v);
+            if (i >= 12 && !referenced) return [];
+            const locationLabel = l.district && l.city ? `${l.district}, ${l.city}`
+              : (l.district || l.city || LOCATION_UNRESOLVED_AR);
+            return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel}${listingPrice(l, 'en') ? ` — ${listingPrice(l, 'en')}` : ''}` +
+              `${l.area ? `, ${l.area} m²` : ''}${l.beds ? `, ${l.beds} bed` : ''}, on ${l.source}`;
+          });
+          const text = cards.length ? `${m.text}\n${cards.join('\n')}` : m.text;
+          return { role, text };
+        }
+        return { role, text: (m as { text?: string }).text ?? '' };
+      })
+      .filter((h) => !!h.text.trim());
+    // HISTORY TRIMMING (owner-approved consolidation, 2026-08-30). describeKnownState()'s ~150-token
+    // knownState snapshot (built from lastQueryRef.current below) already carries every FACT from
+    // older turns, so sending the full window a second time as raw prose was pure token cost with no
+    // new information. Trimmed to the last 2 raw entries — in this alternating user/model list that
+    // is always the immediately-preceding user message and the model's immediately-preceding reply,
+    // KEPT VERBATIM (never paraphrased): pronoun resolution ("that one") and exact-phrase-triggered
+    // behavior (e.g. «خلها شهري» flipping the rent period) both depend on the model seeing the
+    // literal prior exchange, not a summary of it.
+    const history = historyAll.slice(-2);
+    const replyLocale = resolveReplyLocale(v, history, locale);
+    const t = (key: string, vars?: Record<string, string | number>) => translate(replyLocale, key, vars);
     // The CHAT agent accepts English as an input convenience: it normalizes any English place to the
     // canonical ARABIC location, searches in Arabic, and shows every location/result in Arabic (never an
     // English place name). The agent_notes location rules enforce the Arabic-canonical output. The FILTER
@@ -2780,12 +3344,19 @@ export default function Agent() {
     finalizeReveal(); // stop the previous search's cards from drip-revealing now that the user moved on
     stopReadAloud(); // a new turn starting is "another response" — stop any read-aloud from the last one
     setStopped(false); // new turn — re-enable the refine CTA and clear the stopped state
+    setCompleted(false); // a finished search never locks the chat: the next message reopens it (owner 2026-10-13)
     setBusy(true);
     // REFINE INTERCEPT: if we just asked a «نتائج أدق» clarifying question, read THIS message as the answer,
     // merge it into the SAME filter, and re-search — never run it through the normal agent path. (user 2026-06-27.)
     if (pendingRefineRef.current) {
+      { const rid = recordChatTurn(v); if (rid) chatIdRef.current = rid; }
       const { q: baseQ, dim } = pendingRefineRef.current;
-      await runRefine(baseQ, dim, v, v);
+      await runRefine(
+        applyPickerSources(baseQ, selectedSourcesForTurn, sourceChoiceForTurn),
+        dim,
+        v,
+        v,
+      );
       return;
     }
     // Sidebar Recent entry: title = the user's exact message. First send in a new chat creates the
@@ -2794,11 +3365,6 @@ export default function Agent() {
     { const rid = recordChatTurn(v); if (rid) chatIdRef.current = rid; } // keep this screen's conversation id aligned with the store's entry
     const run = makeRun();
     runRef.current = run;
-    // Switch the whole app to the language of THIS message — on Send, not per keystroke. An English
-    // message flips the UI to English and the reply comes back in English; an Arabic message to
-    // Arabic. (setLocale syncs the data-layer locale immediately, so respond() answers in kind.)
-    const loc = detectLocale(v);
-    if (loc && loc !== locale) setLocale(loc);
     pinModeRef.current = 'bottom';
     // First beat: "Ezhalah is thinking…" — the real respond() round-trip fills this pause.
     const statusId = uid();
@@ -2817,50 +3383,27 @@ export default function Agent() {
     const userMessageId = uid();
     // Build the conversation MEMORY from prior turns (before this new message) so the agent can
     // reason across the chat and never re-ask what was already said. The greeting (text:'') drops out.
-    const historyAll = msgs
-      .filter((m) => m.role === 'user' || m.role === 'agent' || m.role === 'results')
-      .map((m) => {
-        const role = m.role === 'user' ? ('user' as const) : ('model' as const);
-        // For a results turn, hand the agent the FACTS of the cards it showed (numbered #1..#N) so it
-        // can resolve later references like "the 2nd one", "#3", "the cheapest", "the Al Malqa one" —
-        // restating only what's on the card, never inventing. (user training decision.)
-        if (m.role === 'results') {
-          // JUNK_LOCATION_TOKENS guard, own display path (2026-07-10 location-data-quality audit):
-          // this text feeds straight into the AGENT's conversation memory (so it can later resolve
-          // "the Al Malqa one" etc.). l.city/l.district already went through remote.ts's junk guard,
-          // so a sentinel can't arrive as a literal string here, but an honestly-unresolved '' still
-          // needs a neutral label — otherwise this would show "in , " for a fully-unresolved location.
-          const cards = (m.result?.listings ?? []).map((l, i) => {
-            const locationLabel = l.district && l.city ? `${l.district}, ${l.city}`
-              : (l.district || l.city || LOCATION_UNRESOLVED_AR);
-            return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel} — ${l.price}` +
-              `${l.area ? `, ${l.area} m²` : ''}${l.beds ? `, ${l.beds} bed` : ''}, on ${l.source}`;
-          });
-          const text = cards.length ? `${m.text}\n${cards.join('\n')}` : m.text;
-          return { role, text };
-        }
-        return { role, text: (m as { text?: string }).text ?? '' };
-      })
-      .filter((h) => !!h.text.trim());
-    // HISTORY TRIMMING (owner-approved consolidation, 2026-08-30). describeKnownState()'s ~150-token
-    // knownState snapshot (built from lastQueryRef.current below) already carries every FACT from
-    // older turns, so sending the full window a second time as raw prose was pure token cost with no
-    // new information. Trimmed to the last 2 raw entries — in this alternating user/model list that
-    // is always the immediately-preceding user message and the model's immediately-preceding reply,
-    // KEPT VERBATIM (never paraphrased): pronoun resolution ("that one") and exact-phrase-triggered
-    // behavior (e.g. «خلها شهري» flipping the rent period) both depend on the model seeing the
-    // literal prior exchange, not a summary of it.
-    const history = historyAll.slice(-2);
     // Pass auth state: a guest searches on any property query; a logged-in user only gets listings
     // when their message is a direct order, otherwise Ezhalah replies conversationally. (user request.)
     // The conversation's accumulated canonical state. Without it a clarification turn resets
     // everything the user already said — «شهرية» came back as RentAnnual and a 9.5 rating vanished
     // after one more question (owner-reported 2026-08-29). Explicit changes in the new turn still win.
     let turn = await respond(v, {
-      loggedIn: !!user, history, attemptTexts: saidRef.current, prevQuery: lastQueryRef.current,
+      locale: replyLocale, loggedIn: !!user, history, attemptTexts: saidRef.current, prevQuery: lastQueryRef.current ? applyPickerSources(lastQueryRef.current, selectedSourcesForTurn, sourceChoiceForTurn) : null,
       askCount: askCountRef.current, userMessageId, historyTurnsRaw: historyAll.length,
     });
     if (run.cancelled) return;
+    // The website picker is a presentation layer over the existing canonical `sources` query field.
+    // Apply it after the agent has parsed the user's message so the model cannot widen the user's
+    // explicit choice, and so every downstream path (search, summary, history) sees one query.
+    if (turn.kind !== 'interview' && turn.query) {
+      if (turn.query.sourceSelectionChanged) {
+        setPickerSourceExplicit(false);
+        setSelectedSources([]);
+      } else {
+        turn = { ...turn, query: applyPickerSources(turn.query, selectedSourcesForTurn, sourceChoiceForTurn) };
+      }
+    }
     // The server is the single decision authority for askCount too (decide.ts) — store whatever it
     // last echoed back. Never reset mid-chat by the client (owner-confirmed default); a brand new
     // chat starts askCountRef at 0 by construction (a fresh screen mount / New Chat, not a reset here).
@@ -2946,10 +3489,10 @@ export default function Agent() {
       const result = await runQuery(turn.query, true, run.ac.signal, ensureChatId());
       if (!run.cancelled) prefetchNarrowing(result.query ?? turn.query);  // AFTER the search — see prefetchNarrowing
       const reply = forcedBroad
-        ? `${getLocale() !== 'en'
+        ? `${replyLocale !== 'en'
             ? 'ما قدرت أحدد الموقع بدقة، فبحثت في نطاق أوسع — هذي اللي لقيتها.'
-            : "I couldn't narrow the location, so I searched a broader scope — here's what I found."}\n\n${buildScrapeIntro(result.query ?? turn.query)}`
-        : buildScrapeIntro(result.query ?? turn.query);
+            : "I couldn't narrow the location, so I searched a broader scope — here's what I found."}\n\n${buildScrapeIntro(result.query ?? turn.query, replyLocale)}`
+        : buildScrapeIntro(result.query ?? turn.query, replyLocale);
       // A rejection/honesty caveat (turn.notice) is a SEPARATE channel from turn.reply on purpose —
       // this deterministic `reply` headline can only ever say what actually ran (anti-hallucination:
       // buildScrapeIntro reflects result.query, never the model's own words) — but a real caveat the
@@ -2965,9 +3508,12 @@ export default function Agent() {
       // zero-result turn (see `introZeroResult ? m.result.suggestion` below), so overriding it HERE
       // scopes the change to exactly this call site — a fresh, free-text AI-Agent search — rather
       // than rewriting the shared module every other surface (Filter, AF) also depends on.
-      const zeroMatch = result.listings.length === 0
+      // A FAILED FETCH IS NOT AN EMPTY ANSWER (owner 2026-10-05: «we should never get this — is this true?»
+      // — a «حي الملك» search that timed out was told «ما لقينا نتائج» while the same search returns
+      // 16,874). runSearch already words a failure as «try again in a few seconds»; never overwrite it.
+      const zeroMatch = result.listings.length === 0 && !result.fetchFailed
         ? { ...result, suggestion: t('Sorry, no listings currently match your request. Try using the Filter to widen your search.') }
-        : result;
+        : result.fetchFailed ? { ...result, suggestion: t('Loading listings — please try again in a few seconds.') } : result;
       await playListings(run, statusId, withNotice, zeroMatch, v);
       if (run.cancelled) return;
       void promptSignupSoon(run);
@@ -3009,6 +3555,8 @@ export default function Agent() {
       if (turn.locationQuestion && turn.query) {
         const probe = await fetchListingsForQuery(buildLocationProbeQuery(turn.query), { signal: run.ac.signal });
         if (run.cancelled) return;
+        // This «no results» is shown too — the notebook notes it like any other (owner 2026-10-05).
+        if (probe.listings && probe.listings.length === 0) logZeroResult(buildLocationProbeQuery(turn.query), null, false);
         reply = replyAfterLocationProbe(
           turn.reply,
           t('Sorry, no listings currently match your request. Try using the Filter to widen your search.'),
@@ -3104,11 +3652,11 @@ export default function Agent() {
         if (run.cancelled) return;
         // REMOVED (owner 2026-08-19): the auto-open AF intro popup after a filter search is killed.
         // The advanced filter interview must ONLY appear inline below the result cards when the user
-        // manually taps «خلّنا نحدد الطلب أكثر». No popup, no overlay, no auto-open — ever.
+        // manually taps «🎯 دقّق مع الذكاء». No popup, no overlay, no auto-open — ever.
         void promptSignupSoon(run); // guest used their free search (filter) → prompt sign-up
       } catch {
         if (!run.cancelled) {
-          setMsgs((m) => m.filter((x) => x.id !== statusId).concat({ id: uid(), role: 'agent', text: 'تعذّر البحث، حاول مرة أخرى' } as ChatMsg));
+          setMsgs((m) => m.filter((x) => x.id !== statusId).concat({ id: uid(), role: 'agent', text: locale === 'en' ? nextVariant(SEARCH_FAILED_EN) : nextVariant(SEARCH_FAILED_AR) } as ChatMsg));
         }
       } finally {
         if (!run.cancelled) { setBusy(false); runRef.current = null; }
@@ -3142,22 +3690,30 @@ export default function Agent() {
   const resetConversationState = () => {
     setBusy(false);
     setStopped(false);
+    setPlatformPickerOpen(false);
+    setPlatformPickerSearch('');
+    setSelectedSources([]);
+    setPickerSourceExplicit(false);
     setMsgs([]);
+    liveTurnsRef.current = new Set(); // a reopened chat's turns are restored, never live — they mount still
+    setRestoringId(null);
     setCompleted(false);      // terminality is per-conversation — never inherited (see openStatic/openSaved)
     chatIdRef.current = null; // new conversation → new sidebar chat (a restore re-sets it)
     afCarryRef.current = null;   // the AF answered-set belongs to the conversation being left
+    afSkippedByMsgRef.current = {}; // …and so do its skip-everything rounds
     pendingScopeRef.current = null; // …and so does a half-answered clarifying question
     pendingCityRef.current = null;  // …including the plain-city question's subject
     lastQueryRef.current = null;    // …and the accumulated filters it narrowed
+    lastPaginationResultRef.current = null;
     // THE THIRD RECURRENCE (routine #8, 2026-09-18, ops_incident #319). The list above was itself
     // enumerated by hand — from the two defects in hand on 2026-09-14 — so it ended the class for
     // the fields it named and for nothing else. Measured on main: `send()` reads NINE refs and this
     // list cleared FOUR. The three below are the rest of what `send()` consumes.
     //   • pendingRefineRef is the exact sibling of pendingScopeRef/pendingCityRef and the worst of
-    //     the three: send()'s REFINE INTERCEPT reads it BEFORE recordChatTurn and returns, so with a
+    //     the three: send()'s REFINE INTERCEPT returns before the ordinary agent path, so with a
     //     «نتائج أدق» question left unanswered in the chat being abandoned, the FIRST message typed
     //     in the next conversation is swallowed — merged into the OLD chat's SearchQuery, re-searched
-    //     under the old filter, no sidebar entry created, and the agent never called at all.
+    //     under the old filter instead of reaching the ordinary agent path.
     //   • saidRef/askCountRef are the attempt's accumulated context, sent to the agent as
     //     `attemptTexts`/knownState: without this, the next conversation's first message is
     //     interpreted on top of everything the user said in the one they just left.
@@ -3219,8 +3775,37 @@ export default function Agent() {
     // capture effect) and pushed that truncated view over the server's longer one — permanently.
     // Treating stale as "not held" hands the decision to hydrateTranscript, which owns it.
     const heldStale = !!(entry as { txStale?: boolean } | undefined)?.txStale;
-    let t: PersistedChat | null = heldStale ? null : (entry?.transcript ?? null);
-    if (!t && entryId) t = await hydrateTranscript(entryId).catch(() => null);
+    const local: PersistedChat | null = entry?.transcript ?? null;
+    let t: PersistedChat | null = heldStale ? null : local;
+    // NEVER AN EMPTY SCREEN WHILE THE SERVER ANSWERS (owner 2026-10-10, iPhone on LTE: «when I click on
+    // the side chat history and choose a chat, this pops up» — the hero header over a blank page). The
+    // page turn fades the chat in after 180 ms whether or not its messages exist yet, and this hydrate
+    // is a real round trip, so a held-but-stale copy (or a snapshot) used to sit unshown behind an
+    // empty transcript for seconds. Paint what this device already holds NOW; the server's answer
+    // below replaces it when it lands. lastCapturedRef is set to the painted copy, so nothing is
+    // written back until the hydrated one has taken its place.
+    if (!t && entryId) {
+      hydratingIdRef.current = entryId; // the stand-in painted below must never be saved
+      const early = local ? restoreChat(local) : null;
+      if (early) {
+        setMsgs(early.msgs as unknown as ChatMsg[]);
+        setDoneTyping(early.doneTyping);
+        setRevealCount(early.revealCount);
+        setCompleted(early.completed === true);
+        lastCapturedRef.current = JSON.stringify(local);
+        landAtLatest();
+      } else if (entry?.snapshot) {
+        void openStatic(q, override, entry.snapshot); // synchronous snapshot branch — zero network
+      } else if (q?.deal || q?.location || q?.category || q?.type || override) {
+        // Nothing held at all (a chat from another device): at least the request the user made.
+        const { bubble } = override ?? filterToChat(q);
+        setMsgs([{ id: replayMsgIds(entryId, uid).userId, role: 'user', text: bubble }]);
+      }
+      t = await hydrateTranscript(entryId).catch(() => null);
+      if (hydratingIdRef.current === entryId) hydratingIdRef.current = null;
+      // A failed hydrate keeps the pre-existing fallback below (snapshot/replay) on purpose: adopting the
+      // stale copy as THE transcript would let the next turn write it over the server's longer one.
+    }
     // THE USER OPENED SOMETHING ELSE WHILE THIS ONE WAS HYDRATING (ops_incident #599, the same
     // mechanism as loadMore's guard). This is the path that reaches the network — a pruned cache, a
     // new browser, a re-login or a second device — so the window is a real round trip, and the
@@ -3232,26 +3817,49 @@ export default function Agent() {
     // re-hydrates when it is opened again.
     if (conversationEpochRef.current !== epoch) return;
     const restored = t ? restoreChat(t) : null;
-    if (restored) {
+    const hasSearch = !!(q?.deal || q?.location || q?.category || q?.type || q?.detail || (q as any)?.priceBand || (q as any)?.priceInput);
+    // A SEARCH CHAT SAVED BEFORE ITS ANSWER LANDED (owner 2026-10-23: a saved chat reopened as his
+    // request alone, no listings — «this should never ever happen»). The capture effect stores the
+    // screen as it is, so a chat left mid-search (or whose search failed) ends on the user's own
+    // request. Restoring that verbatim is a dead end; the search re-runs instead (snapshot first),
+    // and the capture effect then saves the answered conversation over the half one.
+    const unansweredSearch = !!restored && hasSearch && restored.msgs[restored.msgs.length - 1]?.role === 'user';
+    if (restored && !unansweredSearch) {
+      let restoringDone: Promise<void> = Promise.resolve();
       setMsgs(restored.msgs as unknown as ChatMsg[]);
+      {
+        // The same asked-set the passive «تحديد أكثر» effect will key on, so it claims this probe.
+        const rgp0 = restored.guidedPills as { msgId?: string; asked?: string[] } | null | undefined;
+        const lastRes = [...(restored.msgs as unknown as ChatMsg[])].reverse().find((mm) => mm.role === 'results');
+        prefetchNextPage(restored.msgs as unknown as ChatMsg[], rgp0 && lastRes && rgp0.msgId === lastRes.id ? rgp0.asked ?? [] : []);
+        restoringDone = restoreLeftState(restored.msgs as unknown as ChatMsg[]);
+      }
       setDoneTyping(restored.doneTyping);
       setRevealCount(restored.revealCount);
       setAfReceipt(restored.afReceipt);
+      // The «تحديد أكثر» verdict this chat already earned shows its button at once (owner 2026-10-07);
+      // the offer probe still re-runs for the restored turn and overwrites it with today's answer.
+      if (restored.afCanNarrow) setAfCanNarrow((c) => ({ ...c, ...restored.afCanNarrow }));
       setCompleted(restored.completed === true);
       // Dedup on restore too (owner audit, 2026-08-27): a chat saved before this fix shipped could
       // have a stray duplicate pill baked into its serialized transcript — restoring it verbatim
       // would resurrect exactly the bug this fix closes everywhere else. Deduping HERE (not just at
-      // render) keeps the array index-consistent for removeGuidedFacet's index-based removal.
+      // render) keeps the saved array and the chips drawn from it identical.
       const rgp = restored.guidedPills as { facets?: GuidedFacet[] } | null | undefined;
       setGuidedPills((rgp && rgp.facets ? { ...rgp, facets: dedupeFacetsByLabel(rgp.facets) } : rgp) as any);
       lastCapturedRef.current = JSON.stringify(t); // what's on screen IS what's stored — no echo write
+      // NEVER BLANK, NEVER A BUTTON THAT THEN VANISHES (owner 2026-10-07/08). The chat shows at once;
+      // while its remaining cards come back, its closing line and buttons wait behind a quiet loading
+      // line (restoringId), and it lands again once they are in.
+      landAtLatest();
+      await restoringDone;
+      if (conversationEpochRef.current !== epoch) return;
       landAtLatest();
       return;
     }
     // No transcript anywhere. A search chat falls back to the legacy snapshot/replay view; a
     // chat-only entry (empty query — its conversation predates transcripts) has nothing to replay,
     // so it opens as the greeting screen, exactly as it always did.
-    const hasSearch = !!(q?.deal || q?.location || q?.category || q?.type || q?.detail || (q as any)?.priceBand || (q as any)?.priceInput);
     if (!hasSearch) { greetedRef.current = true; sendGreeting(); return; }
     openStatic(q, override, entry?.snapshot);
   };
@@ -3270,10 +3878,12 @@ export default function Agent() {
     // no "searching…" beat of any kind (owner 2026-08-14: "it should already show him the property
     // because he already listed it. This is just saved."). «عرض المزيد» still pages live from here.
     if (snapshot) {
-      setMsgs([
+      const snapMsgs: ChatMsg[] = [
         { id: userId, role: 'user', text: bubble },
         { id: resultsId, role: 'results', text: sub, result: snapshot },
-      ]);
+      ];
+      setMsgs(snapMsgs);
+      prefetchNextPage(snapMsgs);
       setDoneTyping((d) => ({ ...d, [resultsId]: true }));
       // NOT afCompleted-aware on purpose: a snapshot restored from the sidebar carries no record of
       // whether an AF round produced it (afCompleted lives on the live ChatMsg, not in the saved
@@ -3336,20 +3946,11 @@ export default function Agent() {
     toTop();
   };
 
-  // Ezhalah greets a fresh chat itself: after a short beat (~1.2s) it drops its opening message as a
-  // normal agent bubble that types itself out, with the quick-suggestion chips underneath. Only fires
-  // when the chat is still empty (a filter/seed/history open never gets the greeting on top).
+  // A fresh chat shows the complete welcome immediately, without a typing timer.
   const sendGreeting = () => {
     if (greetTimerRef.current) clearTimeout(greetTimerRef.current);
-    // Stay pinned to the TOP while the greeting types and the "Click here to start" cards pop in one
-    // by one — never glide the user downward as each box appears (web + phone). (user request.)
     pinModeRef.current = 'top';
-    // Drop the greeting almost immediately so the FIRST sentence starts typing right away — no blank
-    // screen on entering the agent. The example chips wait until this greeting finishes typing, then
-    // pop in one by one. (user request.)
-    greetTimerRef.current = setTimeout(() => {
-      setMsgs((m) => (m.length === 0 ? [{ id: uid(), role: 'agent', text: '', greeting: true, typing: true }] : m));
-    }, 150);
+    setMsgs((m) => (m.length === 0 ? [{ id: uid(), role: 'agent', text: '', greeting: true }] : m));
     // A genuinely fresh empty chat re-arms the rotating composer examples (owner brief §6) — the
     // ONLY re-arm point, so they can never restart while the user is mid-interaction.
     setIntroInteracted(false);
@@ -3455,10 +4056,14 @@ export default function Agent() {
         // FULL q — the replay needs the AF predicates to reproduce the conversation.
         writeFilterStore(q);
         const override = chatBubble && chatSub ? { bubble: chatBubble, sub: chatSub } : undefined;
-        startFresh();
-        setFilterOrigin(true); // this whole screen instance came from «بحث» — no composer (see the flag's own comment above)
-        if (replay === '0') void openSaved(hid, q, override);
-        else sendFilter(q, override);
+        const open = () => {
+          startFresh();
+          setFilterOrigin(true); // this whole screen instance came from «بحث» — no composer (see the flag's own comment above)
+          if (replay === '0') void openSaved(hid, q, override);
+          else sendFilter(q, override);
+        };
+        if (replay !== '0') open();
+        else turnToSavedChat(open);
         // Intent consumed — including for a sidebar replay, so refreshing a REOPENED chat also lands
         // on a new blank chat rather than reopening it again (owner requirement 6).
         consumeSearchParams();
@@ -3487,12 +4092,46 @@ export default function Agent() {
   // if we were already on the agent screen (where the component doesn't remount). (user request.)
   // The wipe is a "fresh page turn", not a hard cut (owner 2026-08-14: the New Chat moment should
   // FEEL like a new chat): the old conversation breathes out (~110ms fade), the clean chat rises
-  // softly back in, and the greeting starts typing as it settles. The wipe itself rides
+  // softly back in, and the static welcome appears as it settles. The wipe itself rides
   // runAfterAnimation — the animation is decoration, the fresh chat is the function, so a frozen
   // rAF (hidden tab) can never leave the user stuck on the old conversation.
   const freshFade = useRef(new Animated.Value(1)).current;
   const freshRise = useRef(new Animated.Value(0)).current;
   const freshMountRef = useRef(true);
+  const savedOpenTokenRef = useRef(0); // counts sidebar chat-opens; only the latest may swap/fade in (see the replay branch)
+  const turnToSavedChat = (open: () => void) => {
+    // OPENING A SAVED CHAT FROM THE SIDEBAR IS A PAGE TURN, NOT A HARD CUT (owner 2026-10-03: «the
+    // animation feels too tough, it doesn't feel smooth»). It used to wipe the old chat in one
+    // frame, paint the new one at its TOP, then jump to the bottom up to five times while its
+    // cards measured. Now the old chat fades out (110 ms, like New Chat), the swap and the landing
+    // at the latest message happen while the view is invisible, and the opened chat fades and
+    // rises in once landAtLatest's first re-bottom (150 ms) has run. Decoration only:
+    // runAfterAnimation drives the swap from a timer too, and the fade-in is a plain timer.
+    // A second sidebar tap (savedOpenTokenRef) or New Chat (it bumps conversationEpochRef) during
+    // the fade drops this open instead of loading it over the newer screen.
+    const token = ++savedOpenTokenRef.current;
+    const epochAtTap = conversationEpochRef.current;
+    setOpeningSaved(true);
+    runAfterAnimation(
+      (onFinished) => Animated.timing(freshFade, { toValue: 0, duration: 110, useNativeDriver: true }).start(onFinished),
+      () => {
+        // stale: the newer open / New Chat runs its own fade on freshFade and brings the view back
+        if (token !== savedOpenTokenRef.current || epochAtTap !== conversationEpochRef.current) return;
+        open(); // startFresh bumps conversationEpochRef; this open owns the new value
+        const mine = conversationEpochRef.current;
+        freshRise.setValue(8);
+        setTimeout(() => {
+          if (token !== savedOpenTokenRef.current || mine !== conversationEpochRef.current) return;
+          setOpeningSaved(false);
+          Animated.parallel([
+            Animated.timing(freshFade, { toValue: 1, duration: 220, useNativeDriver: true }),
+            Animated.timing(freshRise, { toValue: 0, duration: 220, useNativeDriver: true }),
+          ]).start();
+        }, 180);
+      },
+      180,
+    );
+  };
   useEffect(() => {
     if (freshMountRef.current) { freshMountRef.current = false; return; }
     if (fresh === undefined) return;
@@ -3513,6 +4152,7 @@ export default function Agent() {
         // opened its first round already believing those questions were resolved — the exact bug
         // startFresh's own comment describes, live on the other path. (routine #8, 2026-09-14.)
         resetConversationState();
+        setOpeningSaved(false); // New Chat supersedes a saved chat still opening — its landing is real
         // Forget the last-handled filter/seed so a re-search AFTER New Chat re-runs even if it's
         // identical to a previous one (otherwise the change-detection would skip it and leave just
         // the greeting).
@@ -3559,9 +4199,39 @@ export default function Agent() {
   // replayed history are all excluded structurally), the composer is empty, the user hasn't
   // interacted, no recording, no turn in flight. Filter mode is a different screen (index.tsx) and
   // never renders this component at all.
-  const introLanding = msgs.every((m) => m.role === 'agent' && !!m.greeting);
+  const introLanding = !openingSaved && msgs.every((m) => m.role === 'agent' && !!m.greeting);
   const showIntroExamples =
     introLanding && !introInteracted && !typed && voiceState === 'idle' && !busy;
+  const pickerProgress = useRef(new Animated.Value(0)).current;
+  const [pickerVisible, setPickerVisible] = useState(false);
+  useEffect(() => {
+    if (platformPickerOpen) setPickerVisible(true);
+    // Calm and mirrored: the sheet eases OUT on the way up and IN on the way down — the same path
+    // both ways, no overshoot (nothing here carried a flick). Reduced motion: no motion at all.
+    const animation = Animated.timing(pickerProgress, {
+      toValue: platformPickerOpen ? 1 : 0,
+      duration: reducedMotion ? 0 : platformPickerOpen ? 240 : 170,
+      easing: platformPickerOpen ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    });
+    animation.start(({ finished }) => { if (finished && !platformPickerOpen) setPickerVisible(false); });
+    return () => animation.stop();
+  }, [platformPickerOpen, pickerProgress, reducedMotion]);
+  const openPlatformPicker = () => {
+    setPlatformPickerSearch('');
+    setPlatformPickerOpen(true);
+  };
+  const closePlatformPicker = () => {
+    setPlatformPickerOpen(false);
+    setPlatformPickerSearch('');
+  };
+  const choosePlatform = (source: string | null) => {
+    setPickerSourceExplicit(true);
+    setSelectedSources(names => source === null ? [] : togglePickerSource(names, source));
+    // Lighting a site keeps the sheet open so several can be picked in one visit; only «كل المواقع», the ✕
+    // or a tap outside closes it (owner 2026-10-10: «it doesn't take him out … till he clicks x»).
+    if (source === null) { setPickerRegion(null); closePlatformPicker(); }
+  };
 
   return (
     // DARK MODE IS GLOBAL AND STICKY (owner 2026-08-30, reverses the 2026-08-29 "white by design"
@@ -3572,12 +4242,16 @@ export default function Agent() {
     // color on this screen already flows through the `colors.*` CSS-var tokens (theme/tokens.ts),
     // which are dark-reactive by construction, so this screen was always dark-CAPABLE; only the
     // ForceLightTheme wrapper was overriding it back to light. See verify-theme-contract.ts.
-    <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      {/* Sketch backdrop behind the chat. The bottom fade is pushed all the way down (0.8→1, same as
-          Home) so the landmarks fill the whole frame — including the center, which used to wash out
-          to plain white during "Ezhalah is searching…". A light opacity + paper scrim keep it faint
-          enough that message text stays readable: the user sees the same sketch, just light. */}
-      <HeroBackground imageOpacity={0.55} scrim={0.2} fadeStart={0.8} fadeEnd={1} />
+    // Owner 2026-10-03: «beside me on my right is the tabs» — the ad pane sits on the PHYSICAL right
+    // in BOTH languages (his explicit word, even in Arabic RTL; his reference is the Claude desktop
+    // app's layout). Under dir=rtl a plain 'row' flows right→left and would put the second child on
+    // the LEFT, so the direction cancels the document's ACTUAL dir (src/lib/useDocumentRtl.ts, owner 2026-10-21) —
+    // keyed on the language instead, a moment where the two disagree moved the pane to the left.
+    <View style={{ flex: 1, flexDirection: firstChildLeftRow(docRtl), backgroundColor: colors.paper }}>
+    {/* The results column. A row so the in-app ad viewer can sit BESIDE it, full height (split). */}
+    <View style={{ flex: 1 }}>
+      {/* The landing foreground fades when searching; results retain the calm sky. */}
+      <HeroBackground landscape={introLanding && !busy} />
       {/* Header */}
       <View ref={setLtr} style={[s.topBar, { paddingTop: insets.top + 8 }]}>
         {/* Mobile only: a plain hamburger that opens the existing sidebar — same clean style as the
@@ -3589,7 +4263,7 @@ export default function Agent() {
             // hitSlop is a NO-OP on react-native-web; the 44px floor comes from
             // TAP_TARGET_CSS via this marker (ops_incident #17).
             // @ts-expect-error web-only DOM props on the RNW host node
-            dataSet={{ ...TAP44 }}
+            dataSet={{ ...TAP44, consentKeep: '1' }}
             onPress={() => setSidebarOpen(true)}
           >
             <Ionicons name="menu" size={22} color={colors.ink} />
@@ -3601,35 +4275,58 @@ export default function Agent() {
             identifies the screen, so the old collapsing "✨ Ezhalah AI Agent"→"Ezhalah" title and the
             small تصفية button are both replaced by the shared two-tab control (same spot as home's,
             so switching reads as one continuous control). (owner top-nav redesign, 2026-07-24.) */}
-        <Text ref={noTranslateRef} style={s.title}>{t('Ezhalah')}</Text>
+        {/* PHONE ONLY (owner 2026-10-04: «for a phone show this ezhalah but laptop just show the ezhalah
+            near the logo»). On a laptop the docked sidebar already carries the logo + name. */}
+        {!docked ? <Text ref={noTranslateRef} style={s.title}>{t('Ezhalah')}</Text> : null}
         <View style={{ flex: 1 }} />
         {/* Logged-out sign-in (mobile only — desktop has the docked sidebar CTA). Owner 2026-08-19. */}
-        {!user && !docked && (
+        {/* NEVER FOR A SIGNED-IN USER, NOT EVEN FOR A MOMENT (owner 2026-10-18: «when I open Ezhalah logged in, the sign up / log in button shows then goes away»). During the session restore `user` is null, so `!user` alone drew it for every signed-in visitor; it waits for authChecked (store.tsx), exactly like SignInCard. */}
+        {authChecked && !user && !docked && (
           <Pressable
-            style={s.topSignIn}
+            style={[s.topSignIn, !topBarRoomy && s.topSignInNarrow]}
             onPress={openAuth}
             hitSlop={6}
             // @ts-expect-error web-only DOM props on the RNW host node
             dataSet={{ ...TAP44 }}
           >
-            <Ionicons name="person-outline" size={15} color="#fff" />
-            <Text style={s.topSignInText}>{t('Sign up / Log in')}</Text>
+            {topBarRoomy ? <Ionicons name="person-outline" size={15} color="#fff" /> : null}
+            <Text style={s.topSignInText}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
           </Pressable>
         )}
+        {/* Language for a guest — between sign-in and share, all three screens (owner 2026-10-31). */}
+        <TopBarLanguage />
         {/* Note #5 — Share is ALWAYS visible the moment the user is in AI Agent mode. Not gated on
             results, not gated on a completed search. Throughout the entire experience. (user request.) */}
         {/* Redesigned to match the home screen's share button (design review 2026-07-24) — same
             tint fill/hairline/height/radius as ModeSwitch's own track, so the pill + share cluster
             reads as one continuous control across both screens, not just within one. */}
+        {/* The SAME labelled «مشاركة» pill as the Filter screen (owner 2026-10-17: the bare box-arrow
+            glyph here was not read as "share"). Same icon, label, breakpoint and styles as index.tsx. */}
+        {/* The phone's OWN share menu first, exactly like the Filter screen (owner 2026-10-18: our drawn
+            WhatsApp/X/Telegram sheet looked «fake»). Our sheet stays only as the fallback where the
+            device has no usable share menu (desktop — see shareNative()). */}
+        {/* THE NORMAL SHARE, never the chat (owner 2026-10-20: «the share button on top shouldn't be
+            sharing properties, it should be the normal share»): this pill shares the Ezhalah link with
+            the home sentence, exactly like index.tsx. Sharing THIS chat is the share icon under each
+            reply (FeedbackRow → shareFor below). */}
         <Pressable
-          onPress={() => setShareOpen(true)}
-          style={({ pressed }) => [s.shareIcon, pressed && s.shareIconPressed]}
+          onPress={async () => { if (!(await shareNative())) setShareOpen(true); }}
+          style={({ pressed, hovered }: any) => [
+            s.shareIcon,
+            s.shareIconWide,
+            !topBarRoomy && s.shareIconNarrow,
+            hovered && s.shareIconHover,
+            pressed && s.shareIconPressed,
+          ]}
           hitSlop={8}
           onPressIn={() => shareSpring(0.94)}
           onPressOut={() => shareSpring(1)}
+          accessibilityRole="button"
+          accessibilityLabel={t('Share')}
         >
-          <Animated.View style={{ transform: [{ scale: shareScale }] }}>
-            <Ionicons name="share-outline" size={19} color={colors.chipIcon} />
+          <Animated.View style={[s.shareInner, { transform: [{ scale: shareScale }] }]}>
+            <Ionicons name="share-social-outline" size={17} color={colors.primary} />
+            <Text style={s.shareText}>{t('Share')}</Text>
           </Animated.View>
         </Pressable>
       </View>
@@ -3637,13 +4334,178 @@ export default function Agent() {
           pill, owner 2026-08-16: "it stays in the middle, not far right"). Fades + collapses away
           the moment a search happens, in either mode; the wrapper's animated height keeps the chat
           area from snapping up when it leaves. */}
-      {!modeGone && (
+      {/* The SAME website strip as the Filter home, in the same spot under the header, on the EMPTY landing
+          only — it leaves with the landing title (introLanding). Its phase comes from the wall clock, so
+          Filter ⇄ الوسيط الذكي reads as one strip that never stopped (owner 2026-10-09 round 3). */}
+      {introLanding ? <View style={s.landingStrip}><HomeWebsiteStrip /></View> : null}
+      {shouldRenderModeSwitch(modeGone, replay, openingSaved) && (
         <View style={[s.modeWrap, MODE_EASE, modeSearched && s.modeWrapHidden]}>
-          <ModeSwitch active="agent" onSwitch={() => router.replace('/')} t={t} />
+          <ModeSwitch active="agent" onSwitch={(to) => (to === 'map' ? router.replace('/map') : router.replace('/'))} t={t} />
         </View>
       )}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
+      {pickerVisible && (
+        <Animated.View style={[s.platformPickerOverlay, !pickerSheet && s.platformPickerOverlayCard, { opacity: pickerProgress }]} testID="platform-picker" pointerEvents="box-none">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('Close')}
+            onPress={closePlatformPicker}
+            style={s.platformPickerBackdrop}
+          />
+          {/* Perplexity-style mode menu (owner 2026-10-09): a bottom sheet on a phone, a compact floating
+              card on a laptop. Rows are logo + name (+ the measured coverage line, one quiet line) + a
+              check at the far end; the user may light several — each tap closes, the next opens again. */}
+          <Animated.View
+            style={[
+              s.platformPickerCard,
+              pickerSheet ? [s.platformPickerCardSheet, { paddingBottom: insets.bottom + 12 }] : s.platformPickerCardFloating,
+              {
+                opacity: pickerProgress,
+                transform: pickerSheet
+                  ? [{ translateY: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [36, 0] }) }]
+                  : [
+                      { translateY: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) },
+                      { scale: Platform.OS === 'web' ? 1 : pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) },
+                    ],
+              },
+            ]}
+          >
+            {pickerSheet ? <View style={s.platformPickerGrabber} /> : null}
+            <View style={[s.platformPickerHeader, locale === 'ar' && { flexDirection: 'row-reverse' }]}>
+              <View style={s.platformPickerHeading}>
+                <Text style={s.platformPickerTitle}>{t('Deep search across websites')}</Text>
+                <Text style={s.platformPickerSubtitle}>{t('Focus your search on one or more specific websites. We show only their listings.')}</Text>
+                <Text testID="platform-picker-limit" style={[s.platformPickerSubtitle, selectedSources.length >= MAX_PICKER_SOURCES && { color: colors.primary }]}>
+                  {t('You can choose up to 5 websites')}
+                </Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('Close')}
+                onPress={closePlatformPicker}
+                hitSlop={8}
+                style={({ pressed }: any) => [s.platformPickerClose, pressed && s.platformPickerClosePressed]}
+              >
+                <Ionicons name="close" size={18} color={colors.body} />
+              </Pressable>
+            </View>
+
+            <ScrollView
+              style={s.platformPickerList}
+              contentContainerStyle={s.platformPickerListContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={true}
+            >
+              <PickerRegionsMap
+                locale={locale}
+                t={t}
+                fontFamily={CHAT_FONT}
+                selectedRegion={pickerRegion}
+                coveredRegions={pickerCoveredRegions}
+                counts={pickerRegionCounts}
+                listings={pickerRegionListings}
+                totalCount={offeredPlatforms.length}
+                onSelectRegion={(id) => setPickerRegion((current) => (current === id ? null : id))}
+                compact={pickerSheet}
+              />
+
+              {/* Step 2 (owner 2026-10-10): the websites — searched by name or picked from the list below. */}
+              <Text accessibilityRole="header" style={[s.platformPickerStep, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>{t('Step 2 · Choose the websites')}</Text>
+              <View style={s.platformPickerSearchBox}>
+                <Ionicons name="search-outline" size={17} color={colors.muted} />
+                <TextInput
+                  value={platformPickerSearch}
+                  onChangeText={setPlatformPickerSearch}
+                  placeholder={t('Search websites…')}
+                  placeholderTextColor={colors.muted}
+                  style={s.platformPickerSearchInput}
+                  accessibilityLabel={t('Search websites…')}
+                  returnKeyType="search"
+                />
+                {platformPickerSearch ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('Clear all')}
+                    onPress={() => setPlatformPickerSearch('')}
+                    hitSlop={8}
+                  >
+                    <Ionicons name="close-circle" size={17} color={colors.muted} />
+                  </Pressable>
+                ) : null}
+              </View>
+              <Pressable
+                testID="platform-picker-all"
+                accessibilityRole="button"
+                accessibilityLabel={t('All websites')}
+                onPress={() => choosePlatform(null)}
+                style={({ pressed }: any) => [s.platformPickerItem, pressed && s.platformPickerItemPressed]}
+              >
+                <View style={s.platformPickerLogoFrame}>
+                  <Image source={require('../../assets/icons/eagle-search.svg')} style={{ width: 24, height: 24 }} contentFit="contain" tintColor={colors.primary} accessible={false} />
+                </View>
+                <View style={s.platformPickerItemCopy}>
+                  <Text style={[s.platformPickerItemName, !selectedSources.length && s.platformPickerItemNameOn]}>{t('All websites')}</Text>
+                  <Text style={s.platformPickerItemHint}>{t('Search across Saudi Arabia')}</Text>
+                </View>
+                {!selectedSources.length ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
+              </Pressable>
+
+              <View style={s.platformPickerRule} />
+              {pickerPlatforms.map((platform, index) => {
+                const selected = selectedSources.includes(platform.name);
+                // At the limit, a site not already chosen cannot be added: the row is dimmed and inert, so the
+                // tap neither closes the sheet nor silently does nothing (togglePickerSource refuses it too).
+                const atLimit = !selected && selectedSources.length >= MAX_PICKER_SOURCES;
+                const profile = PLATFORM_PICKER_PROFILES[platform.name];
+                // What the site is and where it covers — the measured coverage sentence, one quiet line
+                // under the name, never truncated (owner 2026-10-09 round 2: «it had a sentence and
+                // regions — I don't like how you removed it»). Regions head the sections: the nationwide
+                // sites first, then one section per region for the offices that cover one place.
+                const description = profile[locale];
+                const group = profile.group[locale];
+                // A tapped map region is the one heading (owner 2026-10-10: «say the region title, then the
+                // websites»); otherwise the measured-coverage sections.
+                const startsGroup = pickerRegion !== null ? index === 0 : index === 0 || PLATFORM_PICKER_PROFILES[pickerPlatforms[index - 1].name].group[locale].key !== group.key;
+                const sectionLabel = pickerRegion !== null ? t('Websites covering {region}', { region: regionLabel(pickerRegion, locale) }) : group.label;
+                // The reviewed 96×48 logo layout, drawn into a 56×28 slot.
+                const k = 28 / 48;
+                return (
+                  <View key={platform.name} style={{ width: '100%' }}>
+                    {startsGroup ? <Text accessibilityRole="header" style={[s.platformPickerSectionTitle, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>{sectionLabel}</Text> : null}
+                    <Pressable
+                      testID={`platform-picker-${platform.name}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${t(platform.i18nKey)}. ${description}`}
+                      accessibilityState={{ selected, disabled: atLimit }}
+                      aria-pressed={selected}
+                      disabled={atLimit}
+                      onPress={() => choosePlatform(platform.name)}
+                      style={({ pressed }: any) => [s.platformPickerItem, selected && s.platformPickerItemOn, pressed && s.platformPickerItemPressed, atLimit && { opacity: 0.4 }]}
+                    >
+                      <View style={s.platformPickerLogoFrame}>
+                        <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width * k, height: profile.layout.height * k, left: profile.layout.left * k, top: profile.layout.top * k }} contentFit="contain" accessible={false} />
+                      </View>
+                      <View style={s.platformPickerItemCopy}>
+                        <Text style={[s.platformPickerItemName, selected && s.platformPickerItemNameOn, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>
+                          {t(platform.i18nKey)}
+                        </Text>
+                        <Text style={[s.platformPickerItemHint, { textAlign: locale === 'ar' ? 'right' : 'left', writingDirection: locale === 'ar' ? 'rtl' : 'ltr' }]}>
+                          {description}
+                        </Text>
+                      </View>
+                      {/* While a region is tapped: this site's measured listings there (owner: real numbers). */}
+                      {pickerRegion !== null ? <Text style={s.platformPickerItemCount}>{t('{count} listings', { count: platformRegionListings(platform.name, pickerRegion).toLocaleString('en-US') })}</Text> : null}
+                      {selected ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
+                    </Pressable>
+                  </View>
+                );
+              })}
+              {!pickerPlatforms.length ? <Text style={s.platformPickerEmpty}>{t('No matching websites')}</Text> : null}
+            </ScrollView>
+          </Animated.View>
+        </Animated.View>
+      )}
 
       <KeyboardAvoidingView
         // iOS-NATIVE does its own lifting and still needs this. On WEB the root is pinned to the
@@ -3660,23 +4522,22 @@ export default function Agent() {
         <ScrollView
           ref={scrollRef}
           style={{ flex: 1 }}
-          contentContainerStyle={[s.scroll, { paddingBottom: 16 }]}
+          contentContainerStyle={[s.scroll, { paddingBottom: 16 }, introLanding && s.introScroll]}
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={onGrow}
           onScroll={maybeRevealOnScroll}
           scrollEventThrottle={64}
         >
           <View style={s.col}>
-            {(() => { const lastId = msgs[msgs.length - 1]?.id; return msgs.map((m) => {
+            {(() => { const lastId = msgs[msgs.length - 1]?.id; const latestResult = msgs.filter(x => x.role === 'results').slice(-1)[0]; return msgs.map((m) => {
               if (m.role === 'user') {
-                // User messages ALWAYS sit on the user side (alignSelf: 'flex-end') regardless of the
-                // message language — the page direction (RTL/LTR) decides which screen edge that is.
-                // Only the TEXT inside the bubble follows its own writingDirection so Arabic still reads
-                // right-to-left and English left-to-right. The bubble never jumps sides because the
-                // message language changed. (user request.)
+                // The user's own bubble sits on the RIGHT in both languages (owner 2026-10-23, Perplexity
+                // reference: «for English it should be like this», then «Arabic leave it how it is»). The
+                // reply and its action rows still follow the reply's language. Text direction inside the
+                // bubble still follows the message.
                 const rtl = msgRTL(m.text);
                 return (
-                  <View key={m.id} style={s.userBubble}>
+                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={[s.userBubble, { alignSelf: 'flex-end' }]}>
                     <Text style={[s.userText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
                       {m.typing ? <Typer text={m.text} onDone={onBubbleDone} /> : m.text}
                     </Text>
@@ -3689,24 +4550,38 @@ export default function Agent() {
                 // The branded slogan + search summary are NOT shown here anymore (owner: keep loading
                 // clean/focused); they still appear in the RESULTS bubble below, unchanged. RTL is
                 // handled inside SearchLoader (the message column is LTR-pinned).
-                return <SearchLoader key={m.id} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} />;
+                // An Advanced Filter round: one sentence of the user's picks, each landing in turn (owner 2026-10-11).
+                if (m.afRound) return <AfRoundLoader key={m.id} items={m.afRound.items} pools={m.afRound.pools} exiting={m.exiting} fontFamily={CHAT_FONT} />;
+                // The loader speaks the language of the message that started it (owner 2026-10-23: typed «hi» → the
+                // «thinking» line said «إزهله يفكر…» on the right). Same per-turn rule the result card uses below.
+                const asked = msgs.slice(0, msgs.indexOf(m)).reverse().find((x): x is Extract<typeof x, { role: 'user' }> => x.role === 'user');
+                const loaderLocale: Locale = asked?.text ? (msgRTL(asked.text) ? 'ar' : 'en') : locale;
+                return <View key={m.id} ref={m.id === loaderId ? loaderNodeRef : undefined} collapsable={false}><LocaleScope locale={loaderLocale}><SearchLoader bottomInset={loaderBottomInset} settleTop={loaderSettleTop} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} /></LocaleScope></View>;
               }
               if (m.role === 'agent') {
-                // Per-message direction: each AI reply renders in its OWN language's direction and
-                // stays put even if the next message flips. ARABIC reply → the whole row is RTL and
-                // anchored to the RIGHT (sparkle on far right, Arabic text flows right → left to its
-                // left). ENGLISH reply → row is LTR and anchored to the LEFT (sparkle on far left,
-                // English text flows left → right to its right). Earlier rows never move when a new
-                // message in the other language arrives. (user request.)
-                const txt = m.greeting ? greetingText(locale) : m.text;
+                if (m.greeting) {
+                  if (!introLanding) return null;
+                  const [title, subtitle] = greetingText(locale).split('\n');
+                  return (
+                    <View key={m.id} testID="intro-greeting" style={s.greeting}>
+                      <Text style={[s.greetingText, locale === 'en' && s.greetingEn]}>{title}</Text>
+                      {!!subtitle && <Text style={[s.greetingSubtitle, locale === 'en' && s.greetingEn]}>{subtitle}</Text>}
+                    </View>
+                  );
+                }
+                // Per-message direction: each reply follows its own language: Arabic on the right with the sparkle on the right; English on the left.
+                // The last gate (owner 2026-10-11): no dash mark in any message, and every message ends with an emoji.
+                const txt = botMessage(m.text);
                 const rtl = msgRTL(txt);
+                // Stop's quiet line: muted, no sparkle, the reply's own side (ChatGPT «Stopped searching»).
+                if (m.stopNote) {
+                  return <Text key={m.id} testID="chat-stop-note" style={[s.stopNote, { alignSelf: rtl ? 'flex-end' : 'flex-start', writingDirection: rtl ? 'rtl' : 'ltr' }]}>{txt}</Text>;
+                }
                 return (
-                  <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: '88%' }}>
-                    <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row' }]}>
-                      <View style={s.replyIcon}>
-                        <Ionicons name="sparkles" size={14} color={colors.primary} />
-                      </View>
-                      <Text testID={m.greeting ? 'intro-greeting' : undefined} style={[s.replyText, m.greeting && s.greetingText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
+                  <View key={m.id} testID="agent-reply" style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', width: '100%' }}>
+                    <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row', width: '100%' }]}>
+                      <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
+                      <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
                         {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
                       </Text>
                     </View>
@@ -3721,13 +4596,17 @@ export default function Agent() {
                         ))}
                       </View>
                     ) : null}
+                    {/* 👍👎 + Share under a plain reply too (owner 2026-10-23): its Share is the invitation to join. */}
+                    {!m.refine && (!m.typing || doneTyping[m.id]) ? (
+                      <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={buildResultsReadAloudSegments(txt, [], undefined, locale)} {...inviteFor()} />
+                    ) : null}
                   </View>
                 );
               }
               // results — STRICT ORDER (user request, repeated as a bug fix): slogan → summary →
               // result intro → sort line → property cards. Slogan + summary persist from the searching
               // status into the same bubble (no duplicate slogan/summary block, no out-of-order intro).
-              const rtl = msgRTL(m.text);
+              const rtl = msgRTL(m.summary || m.text);
               // Hoisted out of the RESULT INTRO block below (§3) so Read Aloud speaks the EXACT
               // same sentence the reply types on screen — one computation, never a second copy that
               // could drift from what's actually shown.
@@ -3753,19 +4632,24 @@ export default function Agent() {
               // the guest pool and no name substitution runs. The retired fixed sentence
               // «لقينا {n} إعلان يطابق طلبك.» has no baked/DB fallback: the picker rotates from
               // search #1.
-              const rfLang: 'ar' | 'en' = getLocale() === 'en' ? 'en' : 'ar';
-              const rfName = rfLang === 'ar' ? (user?.nameAr ?? user?.name) : (user?.nameEn ?? user?.name);
+              const rfLang: 'ar' | 'en' = msgRTL(m.summary || m.text) ? 'ar' : 'en';
+              const replyT = (key: string, vars?: Record<string, string | number>) => translate(rfLang, key, vars);
+              // pickName = the SAME function the sidebar and account menu print the name with. The
+              // old fallback (nameAr, else the raw name) printed the Latin name whenever nameAr was not filled
+              // yet, so an Arabic sentence greeted «يا Yusuf Saleh …» while the sidebar said «يوسف» (owner
+              // screenshot 2026-10-03). pickName never returns Latin letters for Arabic.
+              const rfName = user ? pickName(user, rfLang) : null;
               // No-Results rotation (owner rule 2026-09-26): noResultsSuggestion() in src/data/search.ts
               // has ~9 branches — 8 give an EARNED, specific diagnosis ("this district has other
               // types", "did you mean X city") and stay exactly as they render today. Only its LAST
               // branch — the true generic catch-all, tagged by NO_RESULTS_GENERIC_FALLBACK_EN — is a
               // rotation across the owner's 80 messages, same (lang, hasName) shape as
               // pickResultsFoundSentence above.
-              const isGenericNoResults = introZeroResult && m.result.suggestion === t(NO_RESULTS_GENERIC_FALLBACK_EN);
-              const introText = introZeroResult
+              const isGenericNoResults = introZeroResult && m.result.suggestion === replyT(NO_RESULTS_GENERIC_FALLBACK_EN);
+              const introTextRaw = introZeroResult
                 ? (isGenericNoResults
                     ? pickNoResultsSentence({ lang: rfLang, name: rfName ?? null, stableKey: m.id })
-                    : (m.result.suggestion ?? t('No exact matches — try broadening your search.')))
+                    : (m.result.suggestion ?? replyT('No exact matches — try broadening your search.')))
                 : introTotal != null
                   ? pickResultsFoundSentence({
                       lang: rfLang,
@@ -3777,35 +4661,31 @@ export default function Agent() {
                       stableKey: m.id,
                     })
                   : m.text;
+              const introText = botMessage(introTextRaw); // same last gate as every agent bubble
               return (
-                // ARABIC: the whole assistant response (slogan + summary + intro) sits on the RIGHT,
-                // directly under the user's right-aligned message — so alignItems flex-end clusters the
-                // text blocks to the right edge with the sparkle on the right. ENGLISH: flex-start (left).
-                // The property-cards View below opts back out with alignSelf:'stretch' so cards stay
-                // full-width regardless. (user request: Arabic assistant reply on the right, not left.)
+                // Assistant text follows each message language; cards remain full width.
                 <View
                   key={m.id}
                   ref={(n: any) => { msgNodeRef.current[m.id] = n; }}
                   onLayout={(e) => { msgYRef.current[m.id] = e.nativeEvent.layout.y; }}
+                  // NEVER REMOVED, NEVER DIMMED. Removed (owner 2026-10-03: «he shouldn't go up — he's still in
+                  // that same screen»): #5400 hid every earlier results turn (`display:'none'`) while a search
+                  // loaded, which collapsed an 8,800 px thread to one screen and threw the browser to the top.
+                  // Dimmed (the fix after that) read as a washed-out ghost over the whole turn — image, text,
+                  // buttons — every time an Advanced Filter round started (owner 2026-10-11: «I don't like this
+                  // highlight … fix it»). Now an earlier turn is simply left alone: no layout change, no fade. What
+                  // marks the NEW answer is the new turn itself — the answers bubble, then its own loader and count.
                   style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%' }}
                 >
-                  {/* 1) BRANDED SLOGAN — sparkle icon + Ezhalah's personality line. The row sizes to its
+                  {/* 1) BRANDED SLOGAN — the Ezhalah mark + its personality line. The row sizes to its
                       content and is pushed to the correct edge by the parent's alignItems. ENGLISH →
-                      icon then text (reads left-to-right, clustered left). ARABIC → text then icon
-                      (icon on the far right, clustered right). */}
+                      mark then text (reads left-to-right, clustered left). ARABIC → reversed row
+                      (sparkle on the far right). */}
                   {m.slogan ? (
-                    <View style={[s.reply, { flexDirection: 'row', alignItems: 'center' }]}>
-                      {!msgRTL(m.slogan) && (
-                        <View style={s.replyIcon}>
-                          <Ionicons name="sparkles" size={14} color={colors.primary} />
-                        </View>
-                      )}
+                    <View style={[s.reply, { flexDirection: msgRTL(m.slogan) ? 'row-reverse' : 'row', alignItems: 'center' }]}>
+                      <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
                       <Text style={[s.sloganText, { writingDirection: msgRTL(m.slogan) ? 'rtl' : 'ltr', textAlign: msgRTL(m.slogan) ? 'right' : 'left' }]}>{m.slogan}</Text>
-                      {msgRTL(m.slogan) && (
-                        <View style={s.replyIcon}>
-                          <Ionicons name="sparkles" size={14} color={colors.primary} />
-                        </View>
-                      )}
+
                     </View>
                   ) : null}
                   {/* 2) SEARCH SUMMARY — what Ezhalah understood, directly under the slogan. */}
@@ -3821,33 +4701,19 @@ export default function Agent() {
                       {m.typing ? <Typer text={introText} onDone={() => markTyped(m.id)} /> : introText}
                     </Text>
                   ))()}
-                  {/* GUIDED SUMMARY + REMOVABLE PILLS (owner 2026-08-16): after the interview, briefly
-                      show what Ezhalah understood — «بناءً على: …» — and each committed answer as a
-                      removable pill. Removing one rebuilds the query from the interview's baseQ with
-                      the remaining facets and re-searches immediately. */}
+                  {/* COMMITTED ANSWERS AS CHIPS (owner 2026-10-03). The «بناءً على: …» sentence that used
+                      to sit here is now part of the summary above — «ملخص البحث» continues with one
+                      labelled line per answer — so it is not said twice. The chips stay, read-only. */}
                   {guidedPills && guidedPills.msgId === m.id && guidedPills.facets.length ? (
                     <View style={{ alignSelf: 'stretch', gap: 7, marginTop: 2 }}>
-                      <Text style={[s.guidedBasedOn, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
-                        {buildAfSummary(guidedPills.facets)}
-                      </Text>
                       <View style={[s.guidedPillRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
+                        {/* Plain chips, never pressable and never a ✕ (owner 2026-10-03). The same chip
+                            for every answer, scope or not: nothing on this row removes anything. */}
                         {guidedPills.facets.map((f, i) => (
-                          // SCOPE facets (group/type) are deliberately NOT removable (owner
-                          // 2026-08-23). Every other advanced answer only ever NARROWS, so removing
-                          // its pill widens back to a scope the user already had; removing a TYPE
-                          // pill would instead broaden the search past anything they ever asked for,
-                          // with no re-interview and no control to get it back. It renders as a plain
-                          // chip — same row, no «×», not pressable.
-                          isScopeQuestionId(f.id) ? (
-                            <View key={`${f.id}-${i}`} style={s.guidedPill}>
-                              <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
-                            </View>
-                          ) : (
-                            <Pressable key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill} onPress={() => removeGuidedFacet(i)} disabled={busy}>
-                              <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
-                              <Ionicons name="close" size={13} color={colors.primary} />
-                            </Pressable>
-                          )
+                          <View key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill}>
+                            {/* Dark pill with a check mark (owner 2026-11-01): the answers the user GOT. */}
+                            <Text style={s.guidedPillTx}>{`✓ ${buildAfSummaryItems([f], rfLang).join(rfLang === 'ar' ? '، ' : ', ')}`}</Text>
+                          </View>
                         ))}
                       </View>
                     </View>
@@ -3861,7 +4727,7 @@ export default function Agent() {
                     // but the RESPONSE-level feedback row still belongs to this turn (owner 2026-08-30: thumbs
                     // must not vanish merely because listing count = 0; the user is rating the answer, and
                     // "nothing matched" IS an answer). Read-aloud reads the zero-result intro alone.
-                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined)} />
+                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined, locale)} {...inviteFor()} />
                   ) : (
                     <>
                       {/* The default "مرتبة حسب الأقرب لطلبك" note was removed per owner request (2026-07-07).
@@ -3872,9 +4738,12 @@ export default function Agent() {
                       ) : null}
                       {/* All result cards render AT ONCE — the per-card pop-in animation was removed
                           per user request ("remove that, not nice"). The cards just appear, no fade,
-                          no scale, no stagger. Cards stay FULL-WIDTH via alignSelf:stretch even though
-                          the parent clusters text to the right for Arabic. */}
-                      <View style={{ gap: 12, marginTop: 12, alignSelf: 'stretch' }}>
+                          no scale, no stagger. The responsive grid fills the available result width
+                          while keeping the original card order in either language. */}
+                      {/* THE CARDS FOLLOW THE REPLY'S LANGUAGE (owner 2026-10-17: «the property cards should follow the language»):
+                          an English message in the Arabic app gets English cards, an Arabic one in the English app Arabic cards. */}
+                      <LocaleScope locale={(m.summary || m.text) ? (msgRTL(m.summary || m.text) ? 'ar' : 'en') : locale}>
+                      <ResultCardGrid wide={viewerSplit} cols={cardCols}>
                         {/* Live typed turn: default to 0 visible until startReveal begins the one-by-one
                             drip (prevents a full-grid flash if setDoneTyping flushes a render before
                             setRevealCount(0)). History/replay turns (not typing) show all immediately. */}
@@ -3882,17 +4751,21 @@ export default function Agent() {
                           // CardIn = soft mount-in (fade + slight rise). Keyed by source:id (ids are
                           // only unique per source table — matches the de-dup identity), so cards
                           // already on screen NEVER re-animate — only newly-revealed ones enter softly.
-                          <CardIn key={`${l.source}:${l.id}`}>
+                          <CardIn key={`${l.source}:${l.id}`} {...cardInMotion(m.id, i)}>
+                            <DeadCardShade dead={goneKeys.has(cardKey(l) ?? '')}>
                             <MemoResultCard
                               listing={l}
                               variant="compact"
                               rank={i + 1}
+                              row={cardRow}
                               activeAf={activeAf}
-                              onOpen={() => { trackOpen(l); void openListing(l); }}
+                              onOpen={() => { trackOpen(l); openAd(l); }}
                             />
+                            </DeadCardShade>
                           </CardIn>
                         ))}
-                      </View>
+                      </ResultCardGrid>
+                      </LocaleScope>
                       {/* MORE-RESULTS message + actions (user 2026-06-27, paging owner 2026-07-08): a NORMAL
                           assistant message shown once the first 10 are on screen and MORE matches exist.
                           Correctness: the RPC filtered the FULL matching set before any cap, so we page it —
@@ -3920,6 +4793,14 @@ export default function Agent() {
                         // `[data-testid="results-load-more"]` matched zero elements anywhere. 20 cards, no way
                         // to reach the other 6,703. The decision now lives in one pure, exhaustively-tested
                         // predicate that withholds only while THIS turn's cascade is genuinely still running.
+                        if (restoringId === m.id) {
+                          return (
+                            <View testID="results-restoring" style={{ flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 8, marginTop: 14 }}>
+                              <ActivityIndicator size="small" color={colors.muted} />
+                              <Text style={[s.replyText, { color: colors.muted }]}>{replyT('Loading the rest of your listings…')}</Text>
+                            </View>
+                          );
+                        }
                         if (!resultsRowIsReady({
                           introStillTyping: !!(m.typing && !doneTyping[m.id]),
                           shown,
@@ -3998,7 +4879,7 @@ export default function Agent() {
                         // "once user finishes with the advanced filter … let this message immediately
                         // show"). The receipt string is written the instant finishGuided runs, but it
                         // renders in the `else` of this flag — so until today the origin turn kept its
-                        // «عرض المزيد / خلّنا نحدد الطلب أكثر» row for the whole ~10s the new search
+                        // «عرض المزيد / 🎯 دقّق مع الذكاء» row for the whole ~10s the new search
                         // took, because `chatCompleted` only flips in runRefine's onFetched. The wait
                         // was never a timer to tune; it was this gate resolving late.
                         //
@@ -4038,7 +4919,7 @@ export default function Agent() {
                         const offersNarrow = canNarrowFurther && showActionsRow;
                         // The KEY comes from the pure module that already owns the counts, so the gate and
                         // the sentence can never disagree and one exhaustive test locks both.
-                        const moreNoteText = t(
+                        const moreNoteText = replyT(
                           // `chatClosed` is the ONE fact here that is about the conversation rather
                           // than this turn: with the composer locked this turn will never gain a
                           // button, so a button-less note is the end of the road and must name the
@@ -4064,13 +4945,13 @@ export default function Agent() {
                         // Read Aloud closing note (owner request, 2026-08-23: "read the note... and say the
                         // button also") — names the SAME button label(s) actually rendered below, in the same
                         // order, so it can never mention an action that isn't on screen to tap.
-                        const spokenActionLabels = [hasMore && t('Load more'), canNarrowFurther && t('Let’s narrow it down')].filter(Boolean) as string[];
+                        const spokenActionLabels = [hasMore && replyT('Load more'), canNarrowFurther && replyT('🎯 Refine with AI')].filter(Boolean) as string[];
                         const spokenActionsNote = !showActionsRow ? ''
                           : spokenActionLabels.length === 2
-                            ? t('You can tap {a} or {b}.', { a: spokenActionLabels[0], b: spokenActionLabels[1] })
-                            : t('You can tap {a}.', { a: spokenActionLabels[0] });
+                            ? replyT('You can tap {a} or {b}.', { a: spokenActionLabels[0], b: spokenActionLabels[1] })
+                            : replyT('You can tap {a}.', { a: spokenActionLabels[0] });
                         const readAloudClosingNote = [moreNoteText, spokenActionsNote].filter(Boolean).join(' ');
-                        const readAloudSegments = buildResultsReadAloudSegments(introText, m.result.listings.slice(0, shown), readAloudClosingNote);
+                        const readAloudSegments = buildResultsReadAloudSegments(introText, m.result.listings.slice(0, shown), readAloudClosingNote, locale);
                         return (
                           <>
                             <View style={{ gap: 8, marginTop: 14, alignSelf: 'stretch' }}>
@@ -4081,10 +4962,10 @@ export default function Agent() {
                                   when far fewer matched (owner 2026-08-20). Removed: with the browse cap one «عرض
                                   المزيد» reveals everything up to the cap, so the button needs no count caption. */}
                               {/* «عرض المزيد» ALWAYS pages the next 100 (buffer reveal, then real DB fetch when spent);
-                                  «خلّنا نحدد الطلب أكثر» asks ONE clarifying question then re-searches — but only
+                                  «🎯 دقّق مع الذكاء» asks ONE clarifying question then re-searches — but only
                                   when there is genuinely more than INTERVIEW_STOP_AT=25 left to narrow. */}
                               {/* HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21). Once the
-                                  user taps «خلّنا نحدد الطلب أكثر», the AF interview owns this moment —
+                                  user taps «🎯 دقّق مع الذكاء», the AF interview owns this moment —
                                   the old CTA row must not sit behind it competing for the same decision.
                                   `ageFlow` covers every AF phase (loading → intro → asking), so
                                   the row is gone from the tap until the flow closes, and returns by itself
@@ -4104,7 +4985,7 @@ export default function Agent() {
                                     >
                                       {fetching || cascading
                                         ? <LoadingDots color={colors.primary} />
-                                        : <Text style={s.mBtnAltTx}>{t('Load more')}</Text>}
+                                        : <Text style={s.mBtnAltTx}>{replyT('Load more')}</Text>}
                                     </Pressable>
                                   ) : null}
                                   {/* SEED THE CARRY (owner 2026-08-24) before the round opens: this
@@ -4123,7 +5004,7 @@ export default function Agent() {
                                           const q = m.result.query;
                                           const carried = guidedPills?.msgId === m.id ? guidedPills : null;
                                           afCarryRef.current = q
-                                            ? { msgId: m.id, originQ: carried?.baseQ ?? q, facets: carried?.facets ?? [], asked: carried?.asked ?? [] }
+                                            ? { msgId: m.id, originQ: carried?.baseQ ?? q, facets: carried?.facets ?? [], asked: [...new Set([...(carried?.asked ?? []), ...(afSkippedByMsgRef.current[m.id] ?? [])])] }
                                             : null;
                                           if (q && anyGuidedEligible(q)) void startAgeFlow(q);
                                           else startRefine(q);
@@ -4131,7 +5012,7 @@ export default function Agent() {
                                         style={s.mBtnPrimary}
                                         disabled={busy}
                                       >
-                                        <Text style={s.mBtnPrimaryTx}>{t('Let’s narrow it down')}</Text>
+                                        <Text style={s.mBtnPrimaryTx}>{replyT('🎯 Refine with AI')}</Text>
                                       </GoldShineButton>
                                     </GoldPulse>
                                   ) : null}
@@ -4146,14 +5027,13 @@ export default function Agent() {
                                    the pills use, so skipped answers can never appear here. */
                                 <View style={s.afReceipt} testID="af-round-receipt">
                                   <Text style={[s.afReceiptHead, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
-                                    {`✓ ${t('Continued with the advanced filter')}`}
+                                    {`✓ ${replyT('Continued with 🎯 Refine with AI')}`}
                                   </Text>
                                   {/* The round, in the order it happened — answers and skips in ONE
                                       sentence (see finishGuided). No «اخترت:» label any more: the line now
                                       mixes both, and the head above already says what this card is.
-                                      Untranslated by design, exactly as buildAfSummary's output always
-                                      was — the builder writes finished Arabic. A receipt stored before
-                                      2026-09-20 is a plain committed-only sentence and still renders. */}
+                                      New receipts use the interface language, including skip labels.
+                                      Older stored receipts remain verbatim as conversation history. */}
                                   <Text
                                     testID="af-round-receipt-choices"
                                     style={[s.afReceiptTx, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}
@@ -4174,7 +5054,7 @@ export default function Agent() {
                                 closing note + available actions above (owner 2026-08-23). Sliced to `shown`
                                 — never past what's actually rendered right now ("no hidden listing should be
                                 spoken") — but otherwise reads every visible card (owner 2026-08-22: no further cap). */}
-                            <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={readAloudSegments} />
+                            <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} rtl={rtl} readAloudSegments={readAloudSegments} {...shareFor(m.result.query)} />
                           </>
                         );
                       })()}
@@ -4202,16 +5082,12 @@ export default function Agent() {
             bottom edge as the box grows, and the input keeps paddingEnd so text never reaches it. */}
         {/* When the keyboard is open (web), the home-indicator safe area sits behind it, so drop
             insets.bottom and keep the composer tight above the keyboard instead of double-padding. */}
-        {/* COMPLETED SEARCH (owner 2026-08-30, composer restored 2026-09-05): Advanced Filter reached
-            the final set (R11.1) or no useful question remained (R11.2). The conversation is DONE, but
-            the composer keeps its normal look — no separate replacement card. The input goes inert
-            with an explanatory placeholder, the mic disappears, and the send arrow becomes a lock
-            (see the `completed` branches below). The real "start over" action is the hamburger, top
-            left, not a button inside the composer. The saved transcript stays readable; Back / reopen
-            restore this same state from `completed`. */}
-        <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
+        {/* COMPLETED SEARCH (owner 2026-08-30): Advanced Filter reached the final set (R11.1), or every match is
+            shown. `completed` still ends THAT search (no «عرض المزيد», the closing note), but since 2026-10-13 it
+            never locks the composer (owner: «remove the lock»): the user keeps typing, and send() reopens. */}
+        <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]} testID="agent-footer" onLayout={e => setLoaderBottomInset(Math.ceil(e.nativeEvent.layout.height))}>
           <View style={[s.col, s.composerCol]}>
-            {/* FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11; tightened 2026-09-12): the free-text
+            {/* FILTER RESULTS: after completion the composer is available below the final note (owner, 2026-10-13; supersedes the prior no-chat rule for completed searches): the free-text
                 composer never shows for a Filter-origin conversation — the disclaimer below stays
                 always-on regardless of origin (it's a listings-source legal notice, not part of
                 "the chat"). See filterOrigin's own comment above.
@@ -4224,8 +5100,11 @@ export default function Agent() {
                 undressed as a composer — no input, no pill, no placeholder — while the AI-Agent path
                 keeps its full composer (input + Stop while busy/revealing, input + mic/send once
                 idle) exactly as before. */}
-            {!filterOrigin ? (
-            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
+            {/* THE CHAT NEVER LOCKS (owner 2026-10-13: «remove the lock», superseding 2026-10-05 «hide it completely»): a
+                finished search keeps the box, and the next message simply starts the next search (send() clears
+                `completed`). ☰ still starts a clean chat. */}
+            {!filterOrigin || completed ? (
+            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused, modeSearched && s.composerNoModel]} ref={composerRef}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size
                   never jumps during the morph — one physical object changing state, not a component
@@ -4240,39 +5119,102 @@ export default function Agent() {
                   mid-transition heights and ratchets an empty box to max — observed live). The
                   textarea keeps the pre-redesign numeric-height contract; the wrapper eases to the
                   same target and clips the single frame of difference. */}
-              <View style={[s.inputGrow, INPUT_EASE, { height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) }]}>
+              {/* ONE ROW (owner 2026-10-05: «this box is still big» → «One row»): «بحث» at the far left,
+                  the text in the middle, mic + Send on the right. The chip is a flex SIBLING of the input,
+                  never laid over it, so English text starting at the left can't run into it.
+                  SHOWS ONLY AT THE START (owner 2026-10-17: «when a user sends a message, remove this search
+                  button, it just shows at the start» — supersedes 2026-10-10). While a search runs it is already
+                  gone, so nothing in the row moves mid-turn; the mic and Send/Stop keep their places. */}
+                {!modeSearched ? (
+                <Pressable
+                  testID="initial-chat-search"
+                  accessibilityRole="button"
+                  accessibilityLabel={selectedPlatforms.length ? `${t('Search')}: ${selectedPlatforms.map(p => t(p.i18nKey)).join('، ')}` : t('Search')}
+                  onPress={openPlatformPicker}
+                  hitSlop={5}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
+                  style={({ pressed }: any) => [s.initialSearch, selectedPlatforms.length > 0 && s.initialSearchSelected, pressed && s.initialSearchPressed]}
+                >
+                  {selectedPlatforms.length ? (
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={s.chipStack}
+                      contentContainerStyle={s.chipStackContent}
+                      accessible={false}
+                      importantForAccessibility="no-hide-descendants"
+                    >
+                      {/* EVERY picked site's logo, never a «+N» (owner 2026-10-09 round 2: «always show those
+                          small websites»). The strip keeps its width so the text box keeps its own; the logos
+                          shrink to fit it side by side (owner 2026-10-10: «try small … very small») — five fit
+                          at 14 px; only past the 12 px floor does it scroll sideways. */}
+                      {selectedPlatforms.map((platform, i) => {
+                        const { logo, layout } = PLATFORM_PICKER_PROFILES[platform.name];
+                        // ONE site: its logo fills the pill (owner 2026-10-10: «make it big; small only when
+                        // more than 1»). More share the strip: 22 px for two or three, smaller as more are lit.
+                        const n = selectedPlatforms.length;
+                        const single = n === 1;
+                        const W = single ? 74 : Math.max(12, Math.min(22, Math.floor((CHIP_STRIP_W - (n - 1) * CHIP_GAP) / n)));
+                        const H = single ? 24 : W;
+                        const k = Math.min((H - 2) / layout.height, (W - 2) / layout.width);
+                        return (
+                          <View key={platform.name} style={[s.chipBadge, { width: W, height: H }, i > 0 && s.chipBadgeOverlap]}>
+                            <Image source={logo} tintColor={layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: layout.width * k, height: layout.height * k, left: W / 2 - (48 - layout.left) * k, top: H / 2 - (24 - layout.top) * k }} contentFit="contain" accessible={false} />
+                          </View>
+                        );
+                      })}
+                    </ScrollView>
+                  ) : (
+                    <>
+                      <Image source={require('../../assets/icons/eagle-search.svg')} style={s.initialSearchIcon} contentFit="contain" tintColor={colors.ink} accessible={false} />
+                      <Text style={s.initialSearchText}>{t('Search')}</Text>
+                    </>
+                  )}
+                  <Ionicons name="chevron-down" size={13} color={colors.muted} />
+                </Pressable>
+                ) : null}
+              <View style={s.composerInputColumn}>
+              <View style={[s.inputGrow, INPUT_EASE, { height: composerH }]}>
               <TextInput
                 ref={inputRef}
                 // writingDirection RTL for Arabic (the parent col is LTR-pinned, so without this the
                 // placeholder's trailing «...» lands on the wrong side — it must read «…السعودية»). (owner 2026-07-09)
-                style={[s.input, { textAlign: locale === 'ar' ? 'right' : 'left', writingDirection: locale === 'ar' ? 'rtl' : 'ltr', height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) } as any]}
+                style={[s.input, { flex: 1, alignSelf: 'stretch', textAlign: typed.trim() ? (msgRTL(typed) ? 'right' : 'left') : (locale === 'en' ? 'left' : 'right'), writingDirection: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : (locale === 'en' ? 'ltr' : 'rtl'), direction: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : (locale === 'en' ? 'ltr' : 'rtl'), paddingRight: 0, paddingLeft: 0, height: composerH } as any]}
                 // While the rotating examples occupy the placeholder slot, the input's own static
                 // placeholder yields (empty string) so the two never overlap; the moment the
                 // rotation stops (any interaction) the familiar static placeholder returns.
                 // COMPLETED (owner request 2026-09-05): the box stays, it just goes inert — the
                 // placeholder explains why instead of inviting a message that can never send.
-                placeholder={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : (showIntroExamples ? '' : t("Type the property you're looking for in Saudi Arabia..."))}
+                placeholder={showIntroExamples ? '' : (modeSearched ? t("Type your property and Ezhalah...") : t("Type the property you're looking for in Saudi Arabia..."))}
                 placeholderTextColor={colors.muted}
                 selectionColor={colors.primary}
-                editable={!completed}
                 // Stable Arabic label (owner brief §11): a screen reader always hears this one
                 // sentence for the field — never the rotating examples (those are aria-hidden).
                 accessibilityLabel={t('Describe the property you are looking for')}
-                value={completed ? '' : typed}
+                value={typed}
                 onChangeText={(v: string) => { setIntroInteracted(true); setTyped(v); if (!v) setInputH(COMPOSER_MIN_H); }}
                 // Grows only as text wraps, capped at COMPOSER_MAX_H (then scrolls internally); the
                 // TARGET comes from RN's own line metrics (native + web), the MOTION from INPUT_EASE.
                 // (owner 2026-07-08 metrics; owner 2026-08-16 smooth growth.)
-                onContentSizeChange={(e: any) => setInputH(Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, e.nativeEvent.contentSize.height)))}
+                onContentSizeChange={(e: any) => setInputH(typed ? Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, e.nativeEvent.contentSize.height)) : COMPOSER_MIN_H)}
                 // Clicking/tapping into the composer counts as interaction — the rotating examples
                 // stop cleanly and the static placeholder takes over (owner brief §6).
                 onFocus={() => { setComposerFocused(true); setIntroInteracted(true); }}
                 onBlur={() => setComposerFocused(false)}
                 // The language does NOT flip while typing a chat message — it switches only when the
-                // message is SENT (see send(): an English message → English UI, Arabic → Arabic).
+                // message is SENT: replies follow its language while the interface stays unchanged.
                 // Live per-character switching is reserved for the Home filter's location field.
                 // (user request.)
                 multiline
+                // ONE line when empty (owner 2026-10-04: «when I write هلا it gets plugged in … I want the
+                // box smaller»). A <textarea> with no rows attribute is TWO lines tall, so RNW measured
+                // a 44px empty box and one word sat on the top line over a blank one. rows=1 makes the
+                // measured content height a single 22px line; growth with wrapping is unchanged.
+                // Web-only host props (RNW forwards both to the <textarea>): rows=1 and the one-line hint
+                // marker (COMPOSER_PLACEHOLDER_CSS, src/theme/palette.ts). Spread as one object because
+                // TypeScript reports two unknown props on the element itself, not per line.
+                {...({ rows: 1, dataSet: COMPOSER_INPUT } as any)}
                 // Desktop-web Enter handling lives in a raw DOM keydown listener (see the effect by
                 // inputRef): RNW's onKeyPress normalization delivered key: "" for Enter here, so the
                 // send shortcut binds below the framework. Native keeps the platform submit path.
@@ -4285,50 +5227,57 @@ export default function Agent() {
                   composer, push the mic/Send, or overflow horizontally (owner brief §7/§9). */}
               {showIntroExamples ? <IntroExampleRotator reducedMotion={reducedMotion} /> : null}
               </View>
+              </View>
+              {/* Mic — enters recording mode (owner brief §2): immediate press feedback, then the
+                  composer itself morphs. Sits immediately left of Send, same 34px control family.
+                  Hidden ONLY where isVoiceInputSupported() is false — a LIVE, capability-only
+                  runtime check with NO browser-name exclusion of any kind (owner ruling,
+                  2026-08-25: capability-based detection, never a UA guess — iOS Safari shows the
+                  mic like every other capable browser; a runtime failure there gets its own
+                  honest, specific message instead — see voiceInput.ts's own comment for the full
+                  evidence trail). Showing a mic that can only ever flash a failure toast and
+                  revert reads as broken — but hiding a mic the runtime genuinely supports, on a
+                  guess about the browser's name, is the same mistake in the other direction.
+                  While Ezhalah searches it stays in place, dimmed and inert (owner 2026-10-10: the row
+                  never rearranges mid-turn — «شاهين 2.2» sits under it). */}
+              {isVoiceInputSupported() ? (
+              <Pressable
+                testID="voice-mic"
+                onPress={() => { void startVoice(); }}
+                disabled={busy || revealing}
+                hitSlop={8}
+                // @ts-expect-error web-only DOM props on the RNW host node
+                dataSet={{ ...TAP44 }}
+                accessibilityLabel={t('Voice input')}
+                style={({ pressed }: any) => [s.micBtn, s.micLift, pressed && s.micBtnPressed, (busy || revealing) && s.sendDisabled]}
+              >
+                <Ionicons name="mic-outline" size={19} color={colors.body} />
+              </Pressable>
+              ) : null}
               {busy || revealing ? (
-                // While Ezhalah is thinking/searching OR the cards are still popping in, the Send button
-                // is a Stop box — tap it to cancel the search and freeze the cards shown. (user request.)
+                // While Ezhalah is thinking/searching OR the cards are still popping in, Send becomes Stop IN
+                // ITS OWN SLOT — same circle, same size, dark with a white square, like ChatGPT (owner
+                // 2026-10-10). Tap it to cancel the search and freeze the cards shown.
                 <Pressable
                   onPress={stop}
-                  style={s.stopBtn}
-                  hitSlop={8}
+                  style={s.rowBtnLift}
+                  hitSlop={6}
                   // @ts-expect-error web-only DOM props on the RNW host node
                   dataSet={{ ...TAP44 }}
                   accessibilityLabel={t('Stop')}
                 >
-                  <Ionicons name="stop" size={15} color="#fff" />
+                  <View style={[s.sendBtn, s.stopCircle]}>
+                    <Ionicons name="stop" size={14} color="#fff" />
+                  </View>
                 </Pressable>
               ) : (
                 <>
-                  {/* Mic — enters recording mode (owner brief §2): immediate press feedback, then the
-                      composer itself morphs. Sits immediately left of Send, same 34px control family.
-                      Hidden ONLY where isVoiceInputSupported() is false — a LIVE, capability-only
-                      runtime check with NO browser-name exclusion of any kind (owner ruling,
-                      2026-08-25: capability-based detection, never a UA guess — iOS Safari shows the
-                      mic like every other capable browser; a runtime failure there gets its own
-                      honest, specific message instead — see voiceInput.ts's own comment for the full
-                      evidence trail). Showing a mic that can only ever flash a failure toast and
-                      revert reads as broken — but hiding a mic the runtime genuinely supports, on a
-                      guess about the browser's name, is the same mistake in the other direction. */}
-                  {isVoiceInputSupported() && !completed ? (
-                  <Pressable
-                    testID="voice-mic"
-                    onPress={() => { void startVoice(); }}
-                    hitSlop={8}
-                    // @ts-expect-error web-only DOM props on the RNW host node
-                    dataSet={{ ...TAP44 }}
-                    accessibilityLabel={t('Voice input')}
-                    style={({ pressed }: any) => [s.micBtn, pressed && s.micBtnPressed]}
-                  >
-                    <Ionicons name="mic-outline" size={19} color={colors.body} />
-                  </Pressable>
-                  ) : null}
                   {/* COMPLETED (owner request 2026-09-05): the send arrow becomes a lock — same
                       composer, same button, no separate card. It never fires (the real "start
                       over" action is the hamburger, top left), so it always renders disabled. */}
                   <Pressable
                     onPress={() => send()}
-                    disabled={completed || !typed.trim()}
+                    disabled={!typed.trim()}
                     onPressIn={() => sendSpring(0.9)}
                     onPressOut={() => sendSpring(1)}
                     onHoverIn={() => { setSendHover(true); sendSpring(1.06); }}
@@ -4336,11 +5285,11 @@ export default function Agent() {
                     hitSlop={6}
                     // @ts-expect-error web-only DOM props on the RNW host node
                     dataSet={{ ...TAP44 }}
-                    accessibilityLabel={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : t('Search')}
-                    style={completed || !typed.trim() ? s.sendDisabled : undefined}
+                    accessibilityLabel={t('Search')}
+                    style={[s.rowBtnLift, !typed.trim() && s.sendDisabled]}
                   >
-                    <Animated.View style={[s.sendBtn, sendHover && !completed && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
-                      <Ionicons name={completed ? 'lock-closed' : 'arrow-up'} size={completed ? 15 : 17} color="#fff" />
+                    <Animated.View style={[s.sendBtn, sendHover && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
+                      <Ionicons name="arrow-up" size={17} color="#fff" />
                     </Animated.View>
                   </Pressable>
                 </>
@@ -4403,6 +5352,14 @@ export default function Agent() {
                   </Animated.View>
                 </Pressable>
               </View>
+              {/* «شاهين 2.2» ON ITS OWN LINE INSIDE THE BOX, under the mic (owner 2026-10-09: «the search button,
+                  the microphone and send all in the same line — the model only below»). A zero-width anchor
+                  centred on the mic (the row is LTR-pinned, so the same offset holds in both locales); the box's
+                  bottom padding makes the room, so the one-line row above it never moves. */}
+              {/* ALWAYS (owner 2026-10-23, reversing #7229's «only at the start»: «this model disappears … must show»). */}
+              <View pointerEvents="box-none" style={s.composerModelAnchor}>
+                <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />
+              </View>
             </View>
             ) : null}
             {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY (owner, 2026-09-12, second tightening:
@@ -4445,7 +5402,7 @@ export default function Agent() {
           self-positions fixed/top regardless of scroll. See src/components/ReadAloudPlayer.tsx. */}
       <ReadAloudPlayer />
       {/* عمر العقار advanced-question overlay (owner 2026-07-13) — a transient card over the CURRENT
-          results, reached only via «خلّنا نحدد الطلب أكثر» in an apartment-only scope. Absolutely
+          results, reached only via «🎯 دقّق مع الذكاء» in an apartment-only scope. Absolutely
           positioned over the whole screen, same visual language as the interview overlay (dimmed
           backdrop + centered card), but rendered inline here rather than as a separate route, so
           answering can hand off directly to runRefine and update THIS same conversation in place. */}
@@ -4470,9 +5427,31 @@ export default function Agent() {
               unknownCount={ageFlow.unknownCount}
               progressCur={ageFlow.progressCur}
               progressTotal={ageFlow.progressTotal}
-              liveCount={(keys) => (ageFlowQueryRef.current
-                ? liveResultCount(ageFlow.question.apply(ageFlowQueryRef.current, keys))
-                : Promise.resolve(null))}
+              liveCount={(keys) => {
+                const q = ageFlowQueryRef.current;
+                if (!q) return Promise.resolve(null);
+                const question = ageFlow.question;
+                // A COUNT THAT FAILS IS RETRIED, NEVER LEFT AS NOTHING (owner 2026-10-08, screenshot: the header
+                // chip and «متابعة · N نتيجة» both vanished). The 4 s card budget trips whenever the database is
+                // busy (robots, cron), and null means «no number». Two quiet retries with the longer background
+                // budget bring the number back; a retry only ever returns THIS selection's count, so the old
+                // «never show another selection's number» rule still holds (the effect clears it first).
+                // ONE COUNT, THE LONG BUDGET, FROM THE START (🔬 2026-10-09, backlog 281 root cause): the 4 s card
+                // budget aborted a count that was merely in the slow tenth (search p90 is 4.3-6.5 s at every hour,
+                // ops_search_latency_sample) and the retry then asked the busy database for the SAME count again.
+                // Asking once with the background budget shows the number as soon as it exists, with no rerun.
+                const scoped = question.apply(q, keys);
+                const p = (async () => {
+                  let n = await primeLiveResultCount(scoped);
+                  for (let i = 0; n === null && i < 2; i++) {
+                    await new Promise((r) => setTimeout(r, 700));
+                    n = await primeLiveResultCount(scoped);
+                  }
+                  return n;
+                })();
+                p.then(() => prefetchNextStep(question, q, keys), () => {});
+                return p;
+              }}
               initialKeys={ageFlow.initialKeys}
               onConfirm={onAgeConfirm}
               onSkip={onAgeSkip}
@@ -4503,20 +5482,40 @@ export default function Agent() {
         </View>
       ) : null}
     </View>
+    {adPane.tabs.length > 0 && (
+      <AdViewer
+        tabs={adPane.tabs}
+        active={adPane.active}
+        split={viewerSplit}
+        hidden={adPane.hidden}
+        hint={adHint}
+        onSelect={(i) => commitAdPane({ ...adPaneRef.current, active: i })}
+        onCloseTab={(i) => commitAdPane(closeAdTab(adPaneRef.current, i))}
+        onCloseAll={() => commitAdPane({ ...EMPTY_AD_PANE, seq: adPaneRef.current.seq })}
+        onHide={() => commitAdPane(hideAdPane(adPaneRef.current))}
+        onShow={() => commitAdPane(showAdPane(adPaneRef.current))}
+      />
+    )}
+    {/* The party confetti over EVERYTHING — the ad sheet/pane included (owner 2026-10-17). Last child, so
+        it paints above the viewer; pointerEvents none, so it never intercepts a tap. */}
+    <ConfettiOverlay />
+    </View>
   );
 }
 
+// The composer chip's picked-logo strip: its width, and the gap between logos (see the chip's render).
+const CHIP_STRIP_W = 78;
+const CHIP_GAP = 2;
 const s = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.screenSide, paddingBottom: 8 },
   // Guided-interview summary + removable pills on the results turn (owner 2026-08-16). fontWeight
   // (not fontFamily) matches the idiom of every other text style in this sheet.
-  guidedBasedOn: { fontSize: 12.5, fontWeight: '500', color: colors.muted },
   guidedPillRow: { flexWrap: 'wrap', gap: 8, alignItems: 'center' },
   guidedPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.tint,
+    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.primary,
     borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5,
   },
-  guidedPillTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
+  guidedPillTx: { fontSize: 12.5, fontWeight: '600', color: '#fff' },
   // Completed-round receipt (owner 2026-08-24): a quiet record where the buttons used to be — same
   // tinted surface as the pills, no border emphasis, nothing that reads as pressable.
   afReceipt: { gap: 3, marginTop: 4, alignSelf: 'stretch', backgroundColor: colors.tint, borderRadius: radius.chip, paddingHorizontal: 12, paddingVertical: 9 },
@@ -4532,12 +5531,13 @@ const s = StyleSheet.create({
   fbToastText: { fontSize: 12.5, fontWeight: '600', color: colors.ink },
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
-  title: { fontSize: 14, fontWeight: '700', color: colors.ink },
+  title: { fontSize: 22, fontWeight: '800', color: colors.ink },
   // Note #5 — share icon sits beside the Filter pill in the agent header.
   // Matches the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius, soft lift) so
   // the pill + share read as one cluster across both screens (owner redesign 2026-07-24 r2).
   shareIcon: {
-    width: 46,
+    // minWidth, not width — the labelled pill grows sideways (RNW won't release a fixed width; see index.tsx).
+    minWidth: 46,
     height: 46,
     borderRadius: radius.pill,
     alignItems: 'center',
@@ -4553,6 +5553,14 @@ const s = StyleSheet.create({
     elevation: 2,
   },
   shareIconPressed: { opacity: 0.85 },
+  shareIconWide: { paddingHorizontal: 15 },
+  // Small phones (<380px): the header holds menu + name + sign-in + «مشاركة»; tighten so nothing is cut off.
+  shareIconNarrow: { paddingHorizontal: 11, marginLeft: 0 },
+  topSignInNarrow: { marginRight: 0, paddingHorizontal: 11 },
+  shareIconHover: { backgroundColor: colors.tintFill, borderColor: colors.primary },
+  shareInner: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  shareText: { fontSize: 13.5, fontWeight: '700', color: colors.primary, includeFontPadding: false },
+  // Reopen chip for a hidden ad pane — the share button's own tint/hairline idiom, beside it.
   topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   preciseBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12, marginRight: 6 },
@@ -4561,9 +5569,8 @@ const s = StyleSheet.create({
   // Tight, connected vertical rhythm — the whole search flow (summary → phrase → searching →
   // results header → ranking → cards) reads as ONE section, not separated blocks. (user request.)
   // Chat column is LTR-pinned so flex alignment is consistent regardless of the UI language: user
-  // bubbles (alignSelf: 'flex-end') always end up on the RIGHT, AI replies (alignSelf: 'flex-start')
-  // always on the LEFT. Only the text INSIDE each bubble follows its own writingDirection. (user
-  // request: bubble position never changes per language; only text direction does.)
+  // bubbles always end up on the RIGHT. Assistant replies follow their own text: Arabic on the
+  // RIGHT, English on the LEFT, independently of the interface language or later messages.
   // LOAD-BEARING: the whole message column is pinned to LTR cross-axis so `alignSelf:'flex-end'` reliably
   // resolves to the RIGHT (user bubble + Arabic agent replies), regardless of the app's RTL root. RN-web
   // DROPS a raw `direction` style (it only warns), so we use `writingDirection:'ltr'`, which RN-web maps
@@ -4574,14 +5581,14 @@ const s = StyleSheet.create({
   aiex: { marginTop: 12, gap: 11 },
   greet: { marginBottom: 6 },
   greetTag: { fontSize: 20, fontWeight: '800', color: colors.primary },
-  greetBody: { fontSize: 14, color: colors.dark, fontWeight: '600', marginTop: 6, lineHeight: 21 },
+  greetBody: { fontSize: 14, color: colors.ink, fontWeight: '600', marginTop: 6, lineHeight: 21 },
   startHead: { flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 4 },
-  startT: { fontSize: 18, fontWeight: '700', color: colors.dark },
-  startS: { fontSize: 12, color: colors.dark, fontWeight: '600', marginTop: 1 },
+  startT: { fontSize: 18, fontWeight: '700', color: colors.ink },
+  startS: { fontSize: 12, color: colors.ink, fontWeight: '600', marginTop: 1 },
   // On the website the chips are deliberately BIG — tall blocks with large text that fill the screen
   // and pop in one by one; on phone they stay the snug original size. (user request.)
   suggest: { gap: IS_WEB ? 14 : 10, marginTop: IS_WEB ? 18 : 14 },
-  suggestLead: { fontSize: IS_WEB ? 15 : 13.5, fontWeight: '700', color: colors.dark, marginBottom: IS_WEB ? 4 : 1 },
+  suggestLead: { fontSize: IS_WEB ? 15 : 13.5, fontWeight: '700', color: colors.ink, marginBottom: IS_WEB ? 4 : 1 },
   // Centered onboarding header above the example cards — icon, bold heading, lighter description.
   onbWrap: { alignItems: 'center', gap: 7, marginBottom: IS_WEB ? 14 : 10, paddingHorizontal: 12 },
   onbHeading: { fontSize: IS_WEB ? 19 : 16.5, fontWeight: '700', color: colors.ink, textAlign: 'center' },
@@ -4608,7 +5615,7 @@ const s = StyleSheet.create({
   // The two actions under the «more than 25» message (owner 2026-09-20: gold primary + white
   // secondary — see the JSX above for which button wears which now).
   mBtnRow: { flexWrap: 'wrap', gap: 8, marginTop: 2 },
-  // PRIMARY = «خلّنا نحدد الطلب أكثر». Layout only — GoldShineButton (CardReveal.tsx) paints the
+  // PRIMARY = «🎯 دقّق مع الذكاء». Layout only — GoldShineButton (CardReveal.tsx) paints the
   // actual gold gradient + shine sweep + hover/press darken; no flat backgroundColor here anymore.
   mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}) },
   mBtnPrimaryTx: { fontSize: 13, fontWeight: '700', color: colors.goldOnFill, lineHeight: 18 },
@@ -4643,35 +5650,44 @@ const s = StyleSheet.create({
   promptSecondary: { paddingVertical: 8 },
   promptSecondaryTx: { color: colors.muted, fontSize: 13.5, fontWeight: '600' },
 
-  // marginTop adds breathing room above each user message so it isn't cramped against the property
-  // cards / reply text above it (on top of the column's 8px gap). (user request.)
-  // User message bubble — deliberately STRONGER light-green so it pops against the cream paper bg,
-  // like the selected recent-chat row in the sidebar. Dark green text for contrast. (user request.)
-  // User message bubble — soft light green pill, normal text weight (not heavy/black). (user request.)
-  userBubble: { alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: colors.userBubble, borderColor: colors.tintLine, borderWidth: 1, borderRadius: 16, borderBottomRightRadius: 5, paddingVertical: 10, paddingHorizontal: 14, marginTop: 10 },
-  userText: { color: colors.userBubbleText, fontSize: 14, lineHeight: 19, fontWeight: '500' },
+  // Conversation turns use a typographic transcript instead of repeated rounded chatbot tiles.
+  // The green edge keys the user's request to Ezhalah's identity while leaving the paper open.
+  // CHAT TEXT LIKE CHATGPT (owner 2026-10-04: «the font … not nice, we want text like ChatGPT»): the
+  // system UI face at regular weight, ~16px with an airy line height, and the user's turn in a soft
+  // rounded bubble — not bold, not a green-edged quote.
+  userBubble: { alignSelf: 'flex-end', maxWidth: IS_WEB ? '76%' : '88%', backgroundColor: colors.userBubble, borderRadius: 20, paddingVertical: 10, paddingHorizontal: 16, marginTop: 12 },
+  userText: { fontFamily: CHAT_FONT, color: colors.userBubbleText, fontSize: IS_WEB ? 16 : 15.5, lineHeight: IS_WEB ? 26 : 24, fontWeight: '400' },
 
   status: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 2 },
   statusText: { fontSize: 12.5, color: colors.muted },
   // The Ezhalah slogan during search — plain text, prominent, with the summary beneath it. No icon.
   sloganWrap: { gap: 8, paddingVertical: 2 },
-  sloganText: { fontSize: 15.5, fontWeight: '700', color: colors.dark, flexShrink: 1 },
+  sloganText: { fontFamily: CHAT_FONT, fontSize: IS_WEB ? 16 : 15.5, lineHeight: IS_WEB ? 28 : 26, fontWeight: '500', color: colors.ink, flexShrink: 1 },
   // The search summary shown under the results header (not with the slogan).
-  summaryText: { fontSize: 12.5, color: colors.muted, lineHeight: 18, marginTop: 2 },
+  summaryText: { fontFamily: CHAT_FONT, fontSize: IS_WEB ? 15 : 14, color: colors.body, lineHeight: IS_WEB ? 26 : 24, marginTop: 4 },
 
   reply: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
-  replyIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  replyText: { flex: 1, fontSize: 14, lineHeight: 20, color: colors.ink },
-  // The opening greeting is larger and a touch heavier than a normal reply so it reads as a proper
-  // welcome, not just another line. (user request: make it bigger.) 17/27 since the 2026-08-23 copy
-  // became a full marketing sentence — still clearly the welcome, without turning into a wall.
-  greetingText: { fontSize: 17, lineHeight: 27, fontWeight: '600', color: colors.dark },
+  replyBrandMark: { marginTop: 3, flexShrink: 0 },
+  // NO flex here (owner 2026-10-05: «the sentences that say تم — sometimes no emoji shows»). Two of the
+  // three users sit in COLUMNS (the results sentence, the closing note), where flex: 1 is a vertical
+  // flex-basis 0% that iOS Safari resolves to 0 — the box collapsed, and a wrapped second line (often
+  // just the emoji: «…حسب مواصفات بحثك 🏡») slid under the cards. The one ROW user (reply bubble beside
+  // the eagle mark) passes flex: 1 itself. Same iOS class as s.inputGrow.
+  replyText: { fontFamily: CHAT_FONT, minWidth: 0, fontSize: IS_WEB ? 16 : 15.5, lineHeight: IS_WEB ? 28 : 26, color: colors.ink },
+  introScroll: { flexGrow: 1, justifyContent: 'center' },
+  greeting: { width: '100%', alignItems: 'center', gap: 8, paddingVertical: 24 },
+  greetingText: { fontSize: 24, lineHeight: 36, fontWeight: '600', color: colors.ink, textAlign: 'center', writingDirection: 'rtl' as any },
+  greetingSubtitle: { fontSize: 16, lineHeight: 26, color: colors.body, textAlign: 'center', writingDirection: 'rtl' as any },
   // Rotating composer examples (owner brief 2026-08-23): the absolute overlay fills the input's own
   // clipped wrapper (inputGrow), so it is structurally unable to move the mic/Send or overflow; the
   // text mirrors the input's placeholder metrics exactly (16px web / muted / RTL right-aligned) so
   // it reads as the placeholder, not as a second element.
   introRotator: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, justifyContent: 'center' },
   introRotatorText: { fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.muted, paddingHorizontal: 2, textAlign: 'right', writingDirection: 'rtl' as any },
+  // English UI (owner 2026-10-10): the examples sit on the LEFT like any English placeholder, and the
+  // centred greeting reads left-to-right (otherwise the «?» lands at the start of the line).
+  introRotatorTextEn: { textAlign: 'left', writingDirection: 'ltr' as any },
+  greetingEn: { writingDirection: 'ltr' as any },
   brand: { fontWeight: '700', color: colors.primary },
 
   emptyRes: { fontSize: 14, color: colors.muted },
@@ -4684,48 +5700,109 @@ const s = StyleSheet.create({
   refineBtnTx: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   composerWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
-  // The send/stop button is pinned to the PHYSICAL right (right:4) and never mirrors — it stays on the
-  // right in Arabic too, so paddingRight leaves room for it regardless of text direction. (user request.)
-  // Inline row (no absolute button): input flexes, the send/stop button sits at the end, vertically
-  // centered with comfortable edge padding. flexDirection is set per language at the call site so the
-  // button lands on the correct side in both LTR and RTL. (user request: balanced, centered send button.)
-  // ChatGPT-style bar (owner 2026-07-08): single row, send button anchored on the far right (16px from
-  // the edge, vertically centered), thinner single-line input that grows on wrap. paddingRight 16 places
-  // the button; the input + button are flex siblings so text always stops before the button (never under).
-  // The composer sits inside the LTR-pinned `col`, so `row` (not row-reverse) is what puts the send
-  // button on the FAR RIGHT here; the input (flex:1) fills to its left and right-aligns its Arabic
-  // text next to the button. (owner 2026-07-09: send button must be far right.)
-  // Composer redesign (2026-08-16). The chat column is 940 wide on desktop — a full-width composer
-  // there reads as a search bar, not a place to talk. 720 keeps it a deliberate, centered object.
-  composerCol: { maxWidth: 720, alignSelf: 'center' },
-  // alignItems flex-end pins the send arrow to the BOTTOM edge as the box grows (the ChatGPT/Claude
-  // composer contract); the input's own marginVertical re-centers a single line against the 34px
-  // button, so idle still reads as one compact pill. borderColor/shadowOpacity/shadowRadius are
-  // ANIMATED inline (focus glow) — only the static halves live here.
-  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 24, paddingVertical: 8, paddingLeft: 18, paddingRight: 8, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.1, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 3 },
+  // The LTR-pinned column keeps mic/send on the physical right in either locale.
+  // Desktop welcome and composer share one compact column; messages still use MAX_W.
+  composerCol: { maxWidth: 620, alignSelf: 'center' },
+  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 16, paddingTop: 6, paddingBottom: 30, paddingHorizontal: 10, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
   // Focus glow target — COMPOSER_EASE (web) glides border-color and box-shadow between these two.
   // Carries the FULL shadow set: RNW compiles box-shadow per-style, so a partial override here
   // would win wholesale and drop the green tint + offset (observed live).
+  // «شاهين 2.2» is gone after the first message (owner 2026-10-17): the 24 px that made room for it go with it.
+  // Kept as a no-op: «شاهين 2.2» now shows in every state, so the box keeps its room for it (owner 2026-10-23).
+  composerNoModel: {},
   composerFocused: { borderColor: colors.primary, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.2, shadowRadius: 18, shadowOffset: { width: 0, height: 6 } },
   // The wrapper owns the glide (INPUT_EASE) and the row position; marginVertical 6 =
   // (34 send-button − 22 line) / 2, the single-line centering trick above.
-  inputGrow: { flex: 1, overflow: 'hidden', marginVertical: 6 },
+  // NO flex: 1 here (owner 2026-10-04, real iPhone: «I can type but I don't see what I type»). Since #6009
+  // this wrapper lives inside composerInputColumn — a COLUMN — where flex: 1 means flex-basis 0% on the
+  // VERTICAL axis. iOS Safari resolves that 0% against the column's indefinite height as 0, so the row
+  // collapsed to 0px: keyboard up, text typed, nothing drawn (pill measured 53px on the phone, 82px in
+  // desktop WebKit, which treats the basis as content). The explicit height below is the only size.
+  inputGrow: { overflow: 'hidden', marginVertical: 3, minWidth: 0, alignSelf: 'stretch', flexShrink: 0 },
   // 15/22 breathes better for Arabic script than the old 14/20. Height is the same numeric target
   // as the wrapper's — set state-wise, never transitioned (see the JSX note on measurement).
   // fontSize MUST be >=16 on web: mobile Safari/Chrome auto-zoom the page when focusing an input under
   // 16px and never zoom back out — the single worst mobile-web chat bug. overflowY:'auto' gives the
   // internal scroll once the textarea reaches COMPOSER_MAX_H. (owner 2026-08-19)
-  input: { width: '100%', fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any, overflowY: 'auto' as any } : {}) },
-  sendBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
+  input: { width: '100%', fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any, overflowY: 'auto' as any, cursor: 'text' as any, position: 'relative' as any, zIndex: 2 } : {}) },
+  // A clear, compact search target: large enough to read and tap, small enough to leave the
+  // composer feeling like a focused property-search field rather than a chat card.
+  sendBtn: { width: 38, height: 38, borderRadius: radius.pill, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   sendBtnHover: { backgroundColor: colors.dark },
   sendDisabled: { opacity: 0.35 },
   // ── Voice recording composer (owner brief 2026-08-23) ──
   // composerInner keeps the normal controls' exact pre-voice layout (it owns the composer's size at
   // all times); the recording row overlays it absolutely so the morph never changes the surface.
-  composerInner: { flex: 1, flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
+  // Nudged left of the mic (owner 2026-10-10: «move it a bit left — too much on the right»).
+  composerModelAnchor: { position: 'absolute', bottom: 3, right: 92, width: 0, alignItems: 'center' },
+  composerInner: { flex: 1, flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'flex-end', alignItems: 'flex-end', minHeight: 44, gap: 6 },
   composerInnerHidden: { opacity: 0 },
+  // alignSelf center: one line of text sits on the same middle line as «بحث», mic and Send; taller
+  // (wrapped) text simply fills the row, and the buttons stay bottom-aligned.
+  composerInputColumn: { flex: 1, minWidth: 0, alignItems: 'stretch', position: 'relative', alignSelf: 'center' },
+  // One pill, one width, whatever is picked: «بحث» + eagle, or every picked site's logo disc in a
+  // strip capped at five (22px discs on a 14px pitch) that scrolls sideways past the cap. minWidth 118
+  // = the capped strip's width, so the text box keeps ONE width from 0 to 20 picks; minWidth (not
+  // width) so an English «Search» can never be squeezed. (owner 2026-10-09)
+  initialSearch: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, height: 30, minWidth: 118, paddingHorizontal: 9, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
+  // Picked sites: the pill keeps the plain box fill — no tinted background behind the logos (owner 2026-10-10).
+  initialSearchSelected: { backgroundColor: colors.surface, borderColor: colors.fieldLine },
+  initialSearchPressed: { backgroundColor: colors.segTrack },
+  initialSearchIcon: { width: 17, height: 17 },
+  initialSearchText: { color: colors.ink, fontSize: 14, lineHeight: 20, maxWidth: 148, flexShrink: 1 },
+  // flexGrow 0: the strip hugs its discs (a ScrollView grows by default) so the pill stays centred.
+  chipStack: { maxWidth: CHIP_STRIP_W, flexGrow: 0, flexShrink: 1 },
+  chipStackContent: { flexDirection: 'row', alignItems: 'center' },
+  // A 22px disc with a 1.5px ring in the pill's own fill, so overlapping marks stay separated.
+  // No disc behind the logo (owner 2026-10-10: «I don't like how the logo has a background behind it») — the mark
+  // sits straight on the pill; with at most 3 picks they stand side by side instead of overlapping.
+  chipBadge: { width: 22, height: 22, overflow: 'hidden' },
+  // The FIRST pick sits on top (zIndex inline), the rest peek out from behind it.
+  chipBadgeOverlap: { marginLeft: CHIP_GAP },
+  // The row is 44 px and its buttons hug the bottom, so the 38 px Send/Stop circle sat 3 px (the 34 px mic 5 px) below the
+  // text's centre line — «it doesn't feel like it's in the same sentence» (owner 2026-10-17). Lift them onto it.
+  rowBtnLift: { marginBottom: 3 },
+  micLift: { marginBottom: 5 },
   micBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   micBtnPressed: { backgroundColor: colors.segTrack, transform: [{ scale: 0.96 }] },
+
+  // Website picker (owner reference 2026-10-09: Perplexity's mode sheet): an off-white panel with large
+  // rounded top corners and a thin ✕; rows are a small logo slot + the name + the measured coverage
+  // sentence (what the site is, where it covers — one quiet line, never truncated) + a thin green ✓ on
+  // a lit row; region section headers, nationwide first. One hairline under «كل المواقع».
+  // platformPickerItem may reference colors.* ONLY — verify-platform-picker-profiles.ts evaluates it in isolation.
+  platformPickerOverlay: { ...StyleSheet.absoluteFill, zIndex: 80, alignItems: 'center', justifyContent: 'flex-end' },
+  platformPickerOverlayCard: { padding: 16 },
+  platformPickerBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: colors.scrim },
+  platformPickerCard: { width: '100%', backgroundColor: colors.paper, paddingHorizontal: 16, ...cardShadow, shadowOpacity: 0.18, shadowRadius: 28, shadowOffset: { width: 0, height: -4 }, elevation: 12 },
+  platformPickerCardSheet: { maxHeight: '84%', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingTop: 8 },
+  platformPickerCardFloating: { maxWidth: 400, maxHeight: '74%', borderRadius: 24, paddingTop: 16, paddingBottom: 14 },
+  platformPickerGrabber: { alignSelf: 'center', width: 36, height: 5, borderRadius: 3, backgroundColor: colors.line, marginBottom: 12 },
+  platformPickerHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12, paddingLeft: 4 },
+  platformPickerHeading: { flex: 1, minWidth: 0, paddingTop: 6 },
+  platformPickerTitle: { fontFamily: CHAT_FONT, fontSize: 18, lineHeight: 25, fontWeight: '600', color: colors.ink, textAlign: 'right' },
+  platformPickerSubtitle: { fontFamily: CHAT_FONT, fontSize: 13, lineHeight: 19, color: colors.muted, marginTop: 3, textAlign: 'right' },
+  platformPickerClose: { width: 44, height: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', marginRight: -10 },
+  platformPickerClosePressed: { backgroundColor: colors.segTrack },
+  platformPickerSearchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 38, borderRadius: 12, backgroundColor: colors.segTrack, paddingHorizontal: 12, marginBottom: 8 },
+  platformPickerSearchInput: { flex: 1, minWidth: 0, fontFamily: CHAT_FONT, fontSize: 16, lineHeight: 22, color: colors.ink, paddingVertical: 6, textAlign: 'right', writingDirection: 'rtl', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  platformPickerList: { minHeight: 0 },
+  platformPickerListContent: { paddingBottom: 4 },
+  platformPickerItem: { width: '100%', minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: colors.paper },
+  platformPickerItemPressed: { backgroundColor: colors.segTrack },
+  platformPickerItemOn: { backgroundColor: colors.tint },
+  platformPickerLogoFrame: { width: 56, height: 28, alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
+  // A column (name over sentence) — no flex: 1 on either Text (iOS collapses a column child to 0px).
+  platformPickerItemCopy: { flex: 1, minWidth: 0 },
+  // Names in body ink, the lit row (and «كل المواقع» when nothing is picked) in full ink; the sentence muted.
+  platformPickerItemName: { fontFamily: CHAT_FONT, color: colors.body, fontSize: 17, lineHeight: 24, fontWeight: '400', textAlign: 'right' },
+  platformPickerItemNameOn: { color: colors.ink, fontWeight: '500' },
+  platformPickerItemHint: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 1, textAlign: 'right' },
+  platformPickerItemCount: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 16, flexShrink: 0 },
+  platformPickerStep: { fontFamily: CHAT_FONT, color: colors.ink, fontSize: 13, lineHeight: 18, fontWeight: '600', paddingHorizontal: 10, paddingTop: 14, paddingBottom: 8 },
+  platformPickerSectionTitle: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 16, fontWeight: '500', paddingHorizontal: 10, paddingTop: 14, paddingBottom: 4 },
+  platformPickerRule: { height: 1, backgroundColor: colors.line, marginVertical: 6, marginHorizontal: 10 },
+  platformPickerEmpty: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: 'center', paddingVertical: 28 },
   // The LTR pin that fixes the physical order lives INLINE on the row (Sidebar's LTR_PIN idiom —
   // RNW rejects `direction` inside StyleSheet.create but honours it as an inline style).
   voiceRow: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 8, paddingRight: 8 },
@@ -4736,9 +5813,16 @@ const s = StyleSheet.create({
   // fixed-width controls, whatever the amplitude (owner brief §1/§4).
   voiceWaveWrap: { flex: 1, alignSelf: 'stretch', minHeight: 34, overflow: 'hidden' },
   stopBtn: { width: 34, height: 34, borderRadius: 12, backgroundColor: colors.dark, alignItems: 'center', justifyContent: 'center' },
-  disc: { fontSize: 11, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 10, paddingHorizontal: 12 },
+  // Send's own circle in Stop's colour (the composer's Stop shares sendBtn's size, so nothing moves).
+  stopCircle: { backgroundColor: colors.dark },
+  stopNote: { fontSize: 13, lineHeight: 18, color: colors.muted, paddingHorizontal: 4 },
+  // marginTop 2: the model label above is already the breathing room (owner 2026-10-09: no «big space»).
+  disc: { fontSize: 11, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 2, paddingHorizontal: 12 },
   // Centered Filter/AI pill band under the header (see the JSX note). Explicit height on BOTH ends
   // so MODE_EASE can glide it to 0; overflow hidden so the collapse clips instead of squashing.
+  // The landing's website strip in the Filter home's exact box: the home's side gutter, and −4 so the
+  // strip's top lands on the same y under this screen's taller header (measured 66px on both).
+  landingStrip: { paddingHorizontal: space.screenSide, marginTop: -4 },
   modeWrap: { alignSelf: 'center', alignItems: 'center', justifyContent: 'center', height: 58, overflow: 'hidden' },
   modeWrapHidden: { opacity: 0, height: 0, transform: [{ scale: 0.96 }] },
 });

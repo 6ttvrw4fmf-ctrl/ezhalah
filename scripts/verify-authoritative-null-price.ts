@@ -165,6 +165,61 @@ check(R.evidence_flag_true && R.evidence_flag_defaults_false,
 // enricher that names AUTHORITATIVE_NULL unguarded and watch it go red — until 2026-09-14 this half
 // had no proof at all, and it is the gate that stops a FAILED FETCH from blanking a known price.
 
+/** Split `expr` on a top-level boolean operator (outside brackets and string literals). */
+function splitTop(expr: string, op: 'and' | 'or'): string[] {
+  const parts: string[] = []; let depth = 0; let quote = ''; let cur = '';
+  const tok = ` ${op} `;
+  for (let i = 0; i < expr.length; i++) {
+    const c = expr[i];
+    if (quote) { cur += c; if (c === quote && expr[i - 1] !== '\\') quote = ''; continue; }
+    if (c === '"' || c === "'") { quote = c; cur += c; continue; }
+    if ('([{'.includes(c)) depth++;
+    if (')]}'.includes(c)) depth--;
+    if (depth === 0 && expr.startsWith(tok, i)) { parts.push(cur.trim()); cur = ''; i += tok.length - 1; continue; }
+    cur += c;
+  }
+  parts.push(cur.trim());
+  return parts;
+}
+/** `(x)` → `x` when the outer parens enclose the whole expression. */
+function unwrap(expr: string): string {
+  let e = expr.trim();
+  while (e.startsWith('(') && e.endsWith(')')) {
+    let depth = 0; let whole = true;
+    for (let i = 0; i < e.length; i++) {
+      if (e[i] === '(') depth++;
+      if (e[i] === ')') depth--;
+      if (depth === 0 && i < e.length - 1) { whole = false; break; }
+    }
+    if (!whole) break;
+    e = e.slice(1, -1).trim();
+  }
+  return e;
+}
+/** Names assigned exactly once as `bool(... and s_authoritative and ...)` — settled by a successful source read. */
+export function authoritativeFlags(src: string): Set<string> {
+  const flags = new Set<string>();
+  for (const m of src.matchAll(/^\s*(\w+)\s*=\s*bool\(/gm)) {
+    const name = m[1];
+    let depth = 0; let j = (m.index ?? 0) + m[0].length - 1; const open = j;
+    for (; j < src.length; j++) { if (src[j] === '(') depth++; if (src[j] === ')') { depth--; if (depth === 0) break; } }
+    const body = src.slice(open + 1, j).replace(/\s+/g, ' ').trim();
+    const assignedOnce = (src.match(new RegExp(`^\\s*${name}\\s*=(?!=)`, 'gm')) ?? []).length === 1;
+    const conj = splitTop(body, 'or').length === 1 ? splitTop(body, 'and').map(unwrap) : [];
+    if (assignedOnce && conj.includes('s_authoritative')) flags.add(name);
+  }
+  return flags;
+}
+/** A gate is source-settled when every OR branch is a flag, or some AND conjunct is (AND only narrows). */
+export function isSourceSettled(expr: string, flags: Set<string>): boolean {
+  const e = unwrap(expr);
+  const ors = splitTop(e, 'or');
+  if (ors.length > 1) return ors.every((d) => isSourceSettled(d, flags));
+  const ands = splitTop(e, 'and');
+  if (ands.length > 1) return ands.some((c) => isSourceSettled(c, flags));
+  return flags.has(e);
+}
+
 /** Violations of the who-may-name-the-sentinel rule, as a pure function of the enricher source. */
 export function sentinelGateProblems(enrich: string): string[] {
   const out: string[] = [];
@@ -174,22 +229,33 @@ export function sentinelGateProblems(enrich: string): string[] {
       "_structured_price()'s authoritative flag — it could now blank a price on a read failure");
   }
 
-  // Every AUTHORITATIVE_NULL use in the scraper tree must sit behind that flag. Count CODE only —
-  // a mention inside a `#` comment is prose, and counting prose as a use is exactly the mistake this
-  // repo's other barriers keep having to unlearn.
-  const codeLines = enrich
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('#'))
-    .filter((l) => l.includes('AUTHORITATIVE_NULL'));
-  const importLines = codeLines.filter((l) => /^\s*from\s+scrapers\.common\.db\s+import\b/.test(l));
-  const assignments = codeLines.filter((l) => !importLines.includes(l));
-  const guarded = assignments.filter((l) => /AUTHORITATIVE_NULL if authoritative_no_price/.test(l));
+  // Every AUTHORITATIVE_NULL use in the scraper tree must sit behind a flag the SOURCE settled. Count
+  // CODE only — a mention inside a `#` comment is prose, and counting prose as a use is exactly the
+  // mistake this repo's other barriers keep having to unlearn.
+  //
+  // 2026-10-18: a second source-settled flag joined authoritative_no_price — rate_headline (aqar
+  // publishes its per-metre RATE in the headline slot, so the stored total must clear). A flag counts
+  // as source-settled only when it is assigned exactly once, as `bool(...)`, with s_authoritative as a
+  // top-level AND conjunct (never inside an OR). The gate may OR such flags together and may AND on
+  // further narrowing conditions; an OR with anything else is ungated (it was silently accepted before).
+  const flags = authoritativeFlags(enrich);
+  const lines = enrich.split('\n');
+  const assignments: string[] = [];
+  const guarded: string[] = [];
+  lines.forEach((l, i) => {
+    if (l.trimStart().startsWith('#') || !l.includes('AUTHORITATIVE_NULL')) return;
+    if (/^\s*from\s+scrapers\.common\.db\s+import\b/.test(l)) return;
+    assignments.push(l);
+    const joined = `${l} ${lines[i + 1] ?? ''}`.replace(/\s+/g, ' ');
+    const m = joined.match(/AUTHORITATIVE_NULL if (.*?) else /);
+    if (m && isSourceSettled(m[1], flags)) guarded.push(l);
+  });
   // `assignments.length > 0` is the FAIL-CLOSED half: an enricher that names the sentinel nowhere
   // means this guard is no longer reading the code it protects, and must read as MISSING — never as
   // "0 of 0 gated, all clear".
   if (!(assignments.length > 0 && guarded.length === assignments.length)) {
     out.push('an AUTHORITATIVE_NULL in scrapers/aqar/enrich_residential.py is NOT gated on ' +
-      `authoritative_no_price (${guarded.length}/${assignments.length} gated) — it could blank a price ` +
+      `a source-settled flag (${guarded.length}/${assignments.length} gated; flags: ${[...flags].join(', ') || 'none'}) — it could blank a price ` +
       'the source never retracted');
   }
 
@@ -249,6 +315,22 @@ mustCatch('the per-metre price being blanked by a decision about the TOTAL (سع
 
 mustCatch('the enricher naming the sentinel NOWHERE — an unreadable subject reads as MISSING, never as "0 of 0 gated, all clear"',
   sentinelGateProblems(enrich.replace(/AUTHORITATIVE_NULL/g, 'None')).length > 0);
+
+const rateDef = /rate_headline\s*=\s*bool\(transaction_type == "Buy" and s_authoritative/;
+mustCatch('a second flag (rate_headline) that stops requiring the source to have been READ: a failed fetch could then clear a total',
+  sentinelGateProblems(enrich.replace(rateDef, 'rate_headline = bool(transaction_type == "Buy"')).length > 0);
+
+mustCatch('…or that keeps s_authoritative only inside an OR (one branch skips the read)',
+  sentinelGateProblems(enrich.replace(rateDef, 'rate_headline = bool(transaction_type == "Buy" or s_authoritative')).length > 0);
+
+mustCatch('…or that is re-assigned after its source-settled definition',
+  sentinelGateProblems(enrich.replace(/(\n\s*)(if rate_headline and price_per_meter is None:)/, '$1rate_headline = True$1$2')).length > 0);
+
+mustCatch('a gate OR-ing a source-settled flag with a made-up one',
+  sentinelGateProblems(enrich.replace(/AUTHORITATIVE_NULL if \(authoritative_no_price or rate_headline\)/, 'AUTHORITATIVE_NULL if (authoritative_no_price or fetch_failed)')).length > 0);
+
+mustCatch('the old blind spot: a gate that starts with the flag but ORs on anything (`authoritative_no_price or True`)',
+  sentinelGateProblems(enrich.replace(gatedLine, gatedLine.replace(/if authoritative_no_price and/, 'if authoritative_no_price or True and'))).length > 0);
 
 mustCatch('…while a COMMENT mentioning AUTHORITATIVE_NULL is still prose, not an ungated assignment (the predicate is not over-broad)',
   sentinelGateProblems(`${enrich}\n        # AUTHORITATIVE_NULL must never be written on a read failure\n`).length === 0);

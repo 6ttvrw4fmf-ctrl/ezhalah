@@ -107,7 +107,9 @@ deals), air-conditioner removed from بيع forms (both types). Proof: the SAME 
 age ~100% / private_entrance ~83% / rent-side AC 84% on the same code path, and raw == index
 byte-for-byte — the payload is read; only those keys stopped arriving. These columns are
 structured-only by design (prose is NOT a source field), so the honest value is UNKNOWN and the
-correct backfill from published fields is ZERO rows. Old TRUE values (June bulk era, e.g. دور/بيع
+correct backfill from published fields is ZERO rows. (2026-10-25: under Rule B the ad's own quoted
+sentence now answers these at the search index — `listing_text_facts`, never the raw column; see
+docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md.) Old TRUE values (June bulk era, e.g. دور/بيع
 kitchen 43% all-time) predate the form change and stand as captured; they will decay out
 naturally and the affected chips gate out honestly. Acknowledged per (platform, field, segment)
 in `ops_amenity_capture_verified` (evidence in each row's note). Readiness check B is now
@@ -433,3 +435,29 @@ RPC — the oracle now covers the published spellings; `p_rent_period='كلاه�
 cells have truth coverage); `verify-af-independent-oracle.ts` left the required `npm test` for the live
 workflow. Deferred for the owner: the `p_has_license=false` clause arm reads a missing licence as
 «unlicensed» (no sender today, pinned); whether the card should offer the 8 rich tokens.
+
+### أرض خام / Raw Land — BUY — ✅ CERTIFIED 2026-10-09 (owner: «make an advanced filter for أرض خام»)
+- A FILTER box under تجاري → «الأراضي», not a stored type: raw lands keep their source type_ar and carry
+  the tag `unit_subtype_ar = 'أرض خام'` (sync_raw_land_subtype, source evidence only). The type token
+  'أرض خام' matches the tag inside af_eligibility_clause (20261009235607), so every surface reads it.
+- Questions: street_width · direction. n = 5,939 Buy (Rent 69 → not certified). Street known 92%
+  (p25 15 m / p75 25 m), direction known 84% over 8 values. No utility chips (raw = no services).
+- Parity, RPC vs SQL: street ≥ 20 m 2,816 = 2,816; Riyadh + شمال 220 = 220. Registry row 20261010000246.
+- **Owner rule 2026-10-10 (20261010014915):** raw = the source CLEARLY says «no» for every service, or «no
+  services», or «أرض خام». Wasalt's meter-only rows (≈1,129) and «غير مطور» left the set → 4,905 tagged
+  (4,645 «no for all» + 260 «no services» / «خام»). The cohort's questions are unchanged.
+- **Owner STRICT rule 2026-10-10 (20261010015307) — supersedes the line above:** words only. Aqar's unticked
+  service boxes were measured to be ordinary plots, so «all three false» is no longer evidence. Raw = the
+  ad/site says «خام», «غير مطور», «غير مخدوم» / «بدون خدمات» / «خالية من الخدمات» / aqarcity «لايوجد خدمات»,
+  «أرض بكر», «غير مخطط» / «غير مقسم», and no source field says a service exists. → 309 tagged (Buy 303;
+  ialqarawi 145 · aqarcity 61 · aqar 48 · dealapp 29 · others). Coverage on this set: street 50%, direction
+  35% — the live usefulness gates (>25 scope, option floors) decide when each is actually asked.
+
+### أرض / Other Land (أرض أخرى) — BUY — ✅ CERTIFIED 2026-10-11 UTC (owner 2026-10-10: land with no stated type)
+- A real stored type: an Aqar plot whose page shows no «نوع العقار» AND whose seller's own description states
+  no usage is stored as the source's category word «أرض» → clean type Other Land, a box in تجاري → «الأراضي».
+- Questions: street_width · direction — only what every land type already shares (true of any plot, whatever
+  its usage). n = 4,040 Buy. Street known 99% (p25 15 m / p75 30 m; ≥ 20 m 2,249), direction known 88%
+  (شمال 716 · شرق 671 · جنوب 605 · غرب 595 · diagonals 142–195 · 3/4 شوارع 154/96). Riyadh + شمال 177.
+- Registry row 20261011022451. Keeps «Commercial & Industrial Plots» / Buy reachable (the group intersects
+  every box's cohort; an uncertified box would zero it).

@@ -65,6 +65,27 @@ export function shouldShowCookieBanner(a: {
   authChecked: boolean;
   user: unknown;
   consent: CookieConsent | null;
+  /** The visitor already tapped the app before the card could rise (owner 2026-10-16). */
+  tappedBeforeShown?: boolean;
 }): boolean {
-  return a.isWeb && a.authChecked && a.user == null && a.consent == null;
+  return a.isWeb && a.authChecked && a.user == null && a.consent == null && !a.tappedBeforeShown;
+}
+
+/**
+ * A TAP BEFORE THE CARD ROSE IS THE SAME AGREEMENT AS A TAP WHILE IT IS UP (owner 2026-10-16).
+ * The card waits for the session restore (authChecked) so a signed-in user never sees it flash; a
+ * visitor who taps «English» in that window used to switch the language and THEN get the card, which
+ * stayed until their next tap (usually a filter). Now such a tap counts as 'all' — but only once the
+ * restore settles and proves the visitor is signed out, so a signed-in user's taps record nothing.
+ */
+export function earlyTapConsent(a: {
+  isWeb: boolean;
+  authChecked: boolean;
+  user: unknown;
+  consent: CookieConsent | null;
+  tappedBeforeShown: boolean;
+}): CookieConsent | null {
+  return a.isWeb && a.authChecked && a.user == null && a.consent == null && a.tappedBeforeShown
+    ? 'all'
+    : null;
 }

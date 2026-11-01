@@ -88,6 +88,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
     city_ar_for,
@@ -185,8 +186,10 @@ _NOT_PRICE_GAP = re.compile(r"رقم|عمر|\bسن[ةه]\b|\bسنوات\b|شار
 
 def session() -> cc.Session:
     # impersonate owns the User-Agent — setting one here would contradict the TLS fingerprint.
-    s = cc.Session(impersonate="chrome")
-    s.headers.update({"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"})
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(BASE, headers={"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"}, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     return s
 
 
@@ -758,6 +761,13 @@ def main() -> int:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
                 else:
                     pruned += n
+            # EVERY AD WE SHOW GETS A DIRECT CHECK (owner 2026-10-26). The crawl reads only the posts
+            # LIST, and a nightly full re-read lets no row reach grace, so the oracle above was never
+            # asked about one listing (0 verified, ever). Ask it about the rows this crawl SAW: a live
+            # answer (200, this post id, publish, not an auction, not closed) is stamped; nothing else
+            # writes anything — this cannot hide a listing.
+            for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                db.stamp_seen_alive(tbl, {r["ad_number"] for r in rows}, verify_gone, source=SOURCE)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(posts),
                             rows_upserted=len(res) + len(com),
                             check_tables=["alsidra_residential_listings",

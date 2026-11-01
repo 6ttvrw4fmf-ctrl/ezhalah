@@ -1,0 +1,34 @@
+# DEALAPP LIVENESS ON pg_cron, EVERY 2 HOURS (♻️ Lifecycle Engineer, 2026-10-10).
+#
+# dealapp-liveness.yml carried a GitHub `schedule:` (40 */2 * * *) and GitHub fired it 2-5 times a
+# day instead of 12 (scrape_runs dealapp_liveness, 10-02..10-10: 1,200-3,000 ads a day for ~20,900
+# active rows), so dealapp's checked-in-time share rode on the crawl re-reading pages and fell
+# 96.0% -> 82.8% in one day when five crawl shards hit their time budget. A workflow's own schedule
+# is not a schedule here: every lifecycle job is dispatched by a pg_cron trigger_gh_workflow() row
+# (LIFECYCLE_ENGINEER.md), and trigger_gh_workflow cannot pass inputs, which is why this wrapper
+# exists (the same reason gathern-recheck-dead.yml is its own file): it calls the real workflow with
+# apply=true, so the pg_cron path writes exactly as the GitHub schedule did, while a bare manual
+# dispatch of dealapp-liveness.yml stays a dry run.
+#
+# Same job, same code, same 600-ad limit and view-quota pacing. NO concurrency block here: the
+# called workflow's own `concurrency: dealapp-liveness` already serialises every sweep, and a caller
+# holding the SAME group deadlocks against its callee — GitHub fails the run before any job starts
+# (measured 2026-10-11: all 12 pg_cron dispatches 10-10 12:40 → 10-11 10:40 UTC failed with zero
+# jobs, so no dealapp_liveness scrape_runs row was written for 26 h). Pinned by
+# scripts/verify-reusable-workflow-concurrency-no-deadlock.ts.
+name: Dealapp liveness (pg_cron, apply)
+
+on:
+  workflow_dispatch:
+
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  sweep:
+    uses: ./.github/workflows/dealapp-liveness.yml
+    with:
+      apply: true
+    secrets: inherit

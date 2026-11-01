@@ -3,8 +3,8 @@
 // the button melts into calm pulsing dots while Ezhalah prepares the next batch). Motion is
 // MOUNT-ONLY: existing cards never re-animate, transforms only → zero layout shift, no bounce.
 // Reduced motion → fade only / static dots.
-import { useEffect } from 'react';
-import { Pressable, StyleSheet, View, type GestureResponderEvent, type StyleProp, type ViewStyle } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Platform, Pressable, StyleSheet, View, type GestureResponderEvent, type StyleProp, type ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,
@@ -17,25 +17,49 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useReducedMotion } from '@/lib/useReducedMotion';
+import { GLINT_PROPS } from '@/lib/scrollCalm';
 import { useThemePalette } from '@/lib/appearance';
 
 const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1);
 
-// Soft entry for a newly-mounted property card: fade + ~10px rise over 260ms. The reveal drip mounts
-// cards ~55ms apart, so the cadence itself provides the stagger the owner asked for (40–80ms).
-export function CardIn({ children }: { children: React.ReactNode }) {
+// Soft entry for a newly-mounted property card: fade + ~10px rise over 260ms. `delayMs` staggers a
+// batch mounted in ONE render (the 40–80ms cascade the owner asked for, without one re-render of
+// the whole list per card); `stillHeight` mounts a card with no animation — «عرض المزيد» uses it
+// for the cards placed below the fold, which nobody sees arrive. Both are read once, at mount.
+type CardInProps = { children: React.ReactNode; delayMs?: number; stillHeight?: number };
+
+// WEB = a CSS keyframe (owner 2026-10-05: «عرض المزيد takes time»). Reanimated on web drives every
+// frame from JS, so 400 cards meant 400 mappers per frame plus a reduce-motion listener each, and
+// the fade froze whenever React was busy mounting. CSS runs on the compositor and costs no JS.
+const prefersReducedMotion = () =>
+  typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+// A still card skips layout + paint until it nears the viewport (content-visibility), holding
+// `stillHeight` until then; once rendered its real height is remembered (`auto`). Cards have no
+// shadow or overflow, so the paint containment this implies clips nothing.
+function CardInWeb({ children, delayMs = 0, stillHeight }: CardInProps) {
+  const [style] = useState(() => (stillHeight
+    ? ({ contentVisibility: 'auto', containIntrinsicSize: `auto ${stillHeight}px` } as object)
+    : [prefersReducedMotion() ? s.cardFade : s.cardRise, delayMs > 0 ? { animationDelay: `${delayMs}ms` } : null]));
+  return <View style={style}>{children}</View>;
+}
+
+function CardInNative({ children, delayMs = 0, stillHeight }: CardInProps) {
   const reduced = useReducedMotion();
-  const v = useSharedValue(0);
+  const [mount] = useState({ delayMs, still: !!stillHeight });
+  const v = useSharedValue(mount.still ? 1 : 0);
   useEffect(() => {
-    v.value = withTiming(1, { duration: reduced ? 150 : 260, easing: EASE_OUT });
+    if (mount.still) return;
+    v.value = withDelay(mount.delayMs, withTiming(1, { duration: reduced ? 150 : 260, easing: EASE_OUT }));
     return () => cancelAnimation(v);
-  }, [v, reduced]);
+  }, [v, reduced, mount]);
   const a = useAnimatedStyle(() => ({
     opacity: v.value,
     transform: reduced ? [] : [{ translateY: (1 - v.value) * 10 }],
   }));
   return <Animated.View style={a}>{children}</Animated.View>;
 }
+
+export const CardIn = Platform.OS === 'web' ? CardInWeb : CardInNative;
 
 // Three calm pulsing dots — the «عرض المزيد» button's active state (replaces a static text swap).
 // Same breathe pattern as the search loader's thinking dots; premium, not a generic spinner.
@@ -118,6 +142,24 @@ function ShineSweep() {
   );
 }
 
+// The same glint as ShineSweep, driven entirely by a CSS keyframe: it runs on the compositor, so a grid of
+// hundreds of cards can each carry a shining button without a worklet per card. Web only; reduced motion
+// draws nothing (a still gradient still reads as gold).
+export function CssShine() {
+  const reduced = useReducedMotion();
+  if (reduced || Platform.OS !== 'web') return null;
+  return (
+    <View pointerEvents="none" {...GLINT_PROPS} style={[s.shineBand, s.shineCss]}>
+      <LinearGradient
+        colors={['rgba(255,255,255,0)', 'rgba(255,255,255,0.7)', 'rgba(255,255,255,0)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0.4 }}
+        style={StyleSheet.absoluteFill}
+      />
+    </View>
+  );
+}
+
 // The encouraged-action gold CTA's own paint (owner 2026-09-20): a diagonal metallic gradient
 // (light highlight → deep base, literal hex via useThemePalette — CSS var() strings can't feed
 // LinearGradient, same rule HeroBackground.tsx already follows) with ShineSweep's glint on top.
@@ -125,12 +167,16 @@ function ShineSweep() {
 // so the call site's behavior is unchanged — only the paint is now three layers instead of one flat
 // color. `style` still owns layout (padding/radius/minWidth); this component adds `overflow:hidden`
 // so the gradient and the sweep both respect the pill's rounded corners.
-export function GoldShineButton({ children, style, onPress, disabled, testID }: {
+export function GoldShineButton({ children, style, onPress, disabled, testID, shine = 'sweep' }: {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   onPress?: (e: GestureResponderEvent) => void;
   disabled?: boolean;
   testID?: string;
+  // 'sweep' (default) = the reanimated glint; 'css' = the same glint as a pure CSS keyframe (web only, no JS
+  // per frame — what a results grid of hundreds of cards uses, owner 2026-10-11: «the gold button must be
+  // shining on all of them»); 'none' = a still gradient.
+  shine?: 'sweep' | 'css' | 'none';
 }) {
   const pal = useThemePalette();
   return (
@@ -143,11 +189,32 @@ export function GoldShineButton({ children, style, onPress, disabled, testID }: 
             end={{ x: 1, y: 1 }}
             style={StyleSheet.absoluteFill}
           />
-          <ShineSweep />
+          {shine === 'sweep' ? <ShineSweep /> : shine === 'css' ? <CssShine /> : null}
           {children}
         </>
       )}
     </Pressable>
+  );
+}
+
+// A NON-pressable gold surface with the same metallic gradient and the same CSS glint as the gold
+// button (owner 2026-10-17: «make the frame and this golden shining like a buzzer … for all»): the
+// card's «اضغط هنا» photo strip and the thin ring around every card are painted with it. `style` owns
+// layout (position/padding/radius); this adds the clip so the gradient and the sweep respect the
+// corners. Web: one compositor keyframe per surface, no JS per frame. Reduced motion: a still gold.
+// `tone` (owner 2026-10-17: «the golden frame only with the 76 … the rest silver»): 'gold' for a listing
+// that opens inside Ezhalah, 'silver' for every other card — same gradient shape, same glint.
+export function GoldSurface({ children, style, pointerEvents, testID, tone = 'gold' }: {
+  children?: React.ReactNode; style?: StyleProp<ViewStyle>; pointerEvents?: 'none' | 'auto' | 'box-none'; testID?: string; tone?: 'gold' | 'silver';
+}) {
+  const pal = useThemePalette();
+  const stops: [string, string] = tone === 'silver' ? [pal.silverLight, pal.silverDeep] : [pal.goldLight, pal.goldDeep];
+  return (
+    <View style={[s.goldClip, style]} pointerEvents={pointerEvents} testID={testID}>
+      <LinearGradient colors={stops} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+      <CssShine />
+      {children}
+    </View>
   );
 }
 
@@ -164,4 +231,28 @@ const s = StyleSheet.create({
   // animated translateX travel distance is itself a fixed px figure — the two must agree in the same
   // unit for the parked/off-screen positions to land where the comment above claims they do.
   shineBand: { position: 'absolute', top: -20, bottom: -20, left: -70, width: 34 },
+  // One pass (~1s) across the button, then a long rest before the next — a glint, not a marquee.
+  shineCss: {
+    animationKeyframes: [{
+      '0%': { transform: 'translateX(0px) rotate(20deg)' },
+      '28%': { transform: 'translateX(300px) rotate(20deg)' },
+      '100%': { transform: 'translateX(300px) rotate(20deg)' },
+    }],
+    animationDuration: '3.6s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
+  } as object,
+  // CardInWeb's keyframes — the same 260ms fade + 10px rise (150ms fade only on reduced motion).
+  // Fill BACKWARDS, not both: the `from` state holds through a stagger delay, and once the rise ends
+  // nothing stays pinned on the card — hundreds of finished cards no longer each hold an animated
+  // opacity/transform (a compositing layer apiece on iPhone Safari).
+  // The transform is a CSS STRING: react-native-web compiles a transform array inside
+  // animationKeyframes to `transform:[object Object]`, which the browser drops — the cards only faded
+  // until 2026-10-10. Pinned repo-wide by scripts/verify-keyframe-transforms-are-css-strings.ts.
+  cardRise: {
+    animationKeyframes: [{ from: { opacity: 0, transform: 'translateY(10px)' }, to: { opacity: 1, transform: 'translateY(0px)' } }],
+    animationDuration: '260ms', animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)', animationFillMode: 'backwards',
+  } as object,
+  cardFade: {
+    animationKeyframes: [{ from: { opacity: 0 }, to: { opacity: 1 } }],
+    animationDuration: '150ms', animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)', animationFillMode: 'backwards',
+  } as object,
 });

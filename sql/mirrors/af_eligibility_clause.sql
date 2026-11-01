@@ -1,4 +1,99 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-11-01 (migration 20261101100930, the Apartments & Co-living group — owner handoff 2026-10-31):
+--   CHANGED — the amenity whitelist gains the 45 group tokens between ''majlis'' and ''furnished'' (39 boolean
+--   text-fact columns roof … families + 6 derived: separate_meters = (separate_electricity_meter or
+--   separate_water_meter), apts4/8/12/20 = apartments_count >= n, has_shops = shops_count >= 1), and one predicate
+--   arm per token after the majlis arm, each `and (not (''<token>'' = any(p_amenities)) or <pred>)` exactly as the
+--   migration's format('           and (not (%L = any(p_amenities)) or %s)', token, pred) wrote it. Rebuilt by
+--   rebuild_af_filter_rpcs(); top_cities_by_deal_ar carries the byte-identical copy. Body below = the previous body
+--   plus exactly those edits, applied to this file with the same replace the migration ran on production:
+--   Recorded md5 of pg_get_functiondef: 126242b981111b6879a3f27c162478b7
+--   (length 15,487; the previous text hashed 62539dd9f79949bfbb7842182e72e4f7, 11,546.) NOT YET registered in ops_sql_mirror_expected —
+--   af_eligibility_clause.sql sits in verify-mirror-md5-is-registered.ts UNREGISTERED_MIRROR_BASELINE.
+-- Re-verified 2026-10-26 (migration 20261026011638_majlis_advanced_filter_amenity):
+--   CHANGED — the amenity whitelist gains ''majlis'' and the predicate arm `and (not (''majlis'' = any(p_amenities)) or s.majlis)`
+--   (owner decision #3: the first filter question born from the stored text facts; search_listings_ar.majlis =
+--   af_rule_b(the site''s majlis count > 0, the ad''s own quoted «مجلس»)). Rebuilt by rebuild_af_filter_rpcs(); parity 0;
+--   chip == referee == direct at apply time. Body below = the previous body plus exactly those two edits, applied to
+--   this file with the same replace the migration ran on production, and PROVEN equal to production:
+--   Recorded md5 of pg_get_functiondef: 62539dd9f79949bfbb7842182e72e4f7
+--   (length 11,546; the previous text hashed 34abb6adfc2654cdbd83fb255c0be7b3, 11,448.)
+-- Re-verified 2026-10-25 (migration 20261025072931_six_sites_open_age_bucket_never_answers_up_to):
+--   CHANGED — the open-bucket condition moves from the two aqar tables to seven platforms (aqar, aqarcity,
+--   haraj, muhaysini, reinvest, tuba, wasalt), each proven on its own published age field to store an
+--   open «more than 10» as 10. Rebuilt by rebuild_af_filter_rpcs(); «up to 15» buy 168,663 → 163,374.
+--   Body below = the previous body plus exactly that edit, PROVEN against production:
+--   Recorded md5 of pg_get_functiondef: 34abb6adfc2654cdbd83fb255c0be7b3
+--   (length 11,448; the previous text hashed 3379f3308b6790c0d8f3b1a70cf5ac11, 11,295.)
+-- Re-verified 2026-10-25 (migration 20261025065509_aqar_open_age_bucket_never_answers_up_to):
+--   CHANGED — the age-range arm gains one condition: with p_age_max set, a row of
+--   aqar_residential_listings / aqar_commercial_listings stored at 10 or more is excluded. aqar's own
+--   field dictionary renders «أكثر من 10 سنوات» for every raw age above 10 and the scraper floors it to 10,
+--   so the stored 10 has no upper end (16 of 20 live stored-10 pages read «أكثر من 10 سنوات»). Rebuilt by
+--   rebuild_af_filter_rpcs(); unchanged surfaces asserted identical; «up to 15» buy 179,932 → 168,662.
+--   Body below = the previous body plus exactly that edit, and the rendering's own spacing
+--   («$function$ select E'» / «'::text $function$»), PROVEN against production:
+--   Recorded md5 of pg_get_functiondef: 3379f3308b6790c0d8f3b1a70cf5ac11
+--   (length 11,295; the previous text hashed 0e7153e98f68fa6aa26b7a00fb6e4334, 10,998.)
+-- Re-verified 2026-10-17 (migration 20261017103017_af_rail_catches_up_to_district_fold): UNCHANGED.
+--   That migration only CALLS af_eligibility_clause() inside rebuild_af_filter_rpcs(); production's
+--   md5(pg_get_functiondef) read 0e7153e98f68fa6aa26b7a00fb6e4334 after it, the md5 recorded below.
+-- Re-verified 2026-10-09 (migration 20261009235607_raw_land_type_token_in_af_clause):
+--   CHANGED — two edits, rebuilt twice by rebuild_af_filter_rpcs() in one migration.
+--   (1) The category block is the 20261003222926 semi-join (`s.type_ar in (select k.type_ar from
+--       known_type_ar k where k.macro = p_category) or (… macro = 'both' and <table kind>)`), ported from
+--       the two hand-edited RPCs so the rail renders them again (backlog 323; af_rebuild_would_revert
+--       was asserted empty before the first rebuild). Same rows as the EXISTS it replaces.
+--   (2) «أرض خام» (owner 2026-10-09): the type token 'أرض خام' in p_types / p_types2 also matches a row
+--       tagged unit_subtype_ar = 'أرض خام' (sync_raw_land_subtype, 20261009235145), and such a row passes
+--       the category gate when that token was asked for. Dry run in a rolled-back transaction: Riyadh
+--       rent شقة 43,332 → 43,332, Riyadh أرض تجارية 6,670 → 6,670, all lands under تجاري 26,818 → 26,818,
+--       raw land Riyadh 1,338 (157 ms), country 5,968; would_revert 0 afterwards.
+--   Body below rebuilt offline from the previous body by the same two edits and PROVEN against production:
+--   Recorded md5 of pg_get_functiondef: 0e7153e98f68fa6aa26b7a00fb6e4334
+--   (length 10,998; the previous text hashed 8d9c9312948bd90aaef0001e1701fbe6, 10,787.)
+-- Re-verified 2026-10-03 (migration 20261003211448_af_every_question_multi_select_unions):
+--   CHANGED — three lines appended after the p_unit_subtypes line (owner 2026-10-03: «never force the
+--   user to select one thing»): p_furnished_in / p_age_buckets / p_rating_buckets, each the union of
+--   exactly the picked options, absent or empty ⇒ no constraint, NULL in no bucket. Needle-edited on
+--   the live definition (guarded by the previous md5 in the same step), rebuild_af_filter_rpcs()
+--   re-rendered all six templated RPCs; the migration asserted six existing counts unchanged and each
+--   union equal to its parts measured with the old params.
+--   Body below = the previous body plus exactly those lines, PROVEN against production:
+--   Recorded md5 of pg_get_functiondef: 8d9c9312948bd90aaef0001e1701fbe6
+--   (length 10,787; the previous text hashed cbfa562eb5d75efc4180f2d20f64def7, 9,663.)
+-- Re-verified 2026-09-28 (migration 20260928100046_price_on_request_shows_under_every_rent_period):
+--   CHANGED — one line in the rent-period block: `or (s.price_annual is null and p_rent_period in
+--   ('شهري','سنوي','كلاهما'))`. Owner rule 2026-09-28: «For سعر عند الطلب, we put it both monthly and
+--   yearly» — a rental with no published rent has no figure a period could misstate, so it is shown
+--   under every period; a budget still excludes it. rebuild_af_filter_rpcs() re-rendered the six
+--   templated RPCs; in the same migration 36 priced cohorts (4 types × 3 cities × 3 periods,
+--   price_min 1) were asserted unchanged and one price-on-request row of each period shape
+--   (سنوي / شهري / none) was found under all three periods.
+--   Body below = the previous body plus that one line, PROVEN against production:
+--   Recorded md5 of pg_get_functiondef: cbfa562eb5d75efc4180f2d20f64def7
+--   (length 9,663; the previous text hashed 3aa7830a2349f607963774799d7ece84, 9,497 — the +166 is
+--   exactly this line, which is itself a check on the edit being the only change.)
+-- Re-verified 2026-09-27 (migration 20260927111536_af_rail_catches_up_to_shipped_perf_edits):
+--   CHANGED — one line, the read-side sanity predicate. `coalesce(s.col, 0) >= 0` hides the column
+--   from Postgres's per-column statistics, so the planner fell back to a generic ~33% selectivity
+--   guess for area_m2, price_total and price_annual. Rewritten to `col is null or col >= 0`, which
+--   is an ALGEBRAIC identity, not a property of today's rows: for every x, coalesce(x,0) >= 0 and
+--   (x is null or x >= 0) agree — null true both ways, 0 and positives true both ways, negatives
+--   false both ways. Re-measured anyway: 0 mismatches across all 269,789 rows on all three
+--   columns, and 0 negative values in any of them. Semantics of the comment above it are unchanged
+--   (Ezhalah-side impossible states only; no magnitude check; 0 stays legal).
+--   Two Trending count surfaces already carried this exact text after four output-preserving
+--   performance edits on 2026-09-26 evening; the clause had not caught up, which is what left
+--   af_parity_empirical / af_rebuild_would_revert / af_count_surfaces_carry_af standing P1 open.
+--   rebuild_af_filter_rpcs() re-rendered all six templated RPCs, and a 13-surface probe run BEFORE
+--   and AFTER the rebuild in ONE transaction was byte-identical (also re-checked against a baseline
+--   taken before the migration existed: 175,516 / 29,399 / 1,156 and every result-set hash).
+--   Body below is production's text VERBATIM — regenerated by applying the SAME one-line edit to
+--   this file and then PROVING it against production rather than transcribing 9.5KB:
+--   Recorded md5 of pg_get_functiondef: 3aa7830a2349f607963774799d7ece84
+--   (length 9,497; the previous text hashed f195840b6f1812da87ab6951b4126259, 9,458 — the +39 is
+--   exactly this edit's length delta, which is itself a check on the edit being the only change.)
 -- Re-verified 2026-09-26 (migration 20260926073334_rotation_picks_which_listing_per_platform):
 --   UNCHANGED. That migration edits af_rpc_templates' location_search_candidates_ar row and runs
 --   rebuild_af_filter_rpcs(); it only CALLS af_eligibility_clause() — inside its byte-for-byte
@@ -160,39 +255,35 @@ AS $function$ select E'
     where (s.production_ready or ((p_cities is null or cardinality(p_cities) = 0) and (p_districts is null or cardinality(p_districts) = 0) and p_region_ids is null and not public.search_row_price_gated(s.deal_ar, s.price_total) and (s.region_id is null or s.city_id is null)))
       -- read-side defense-in-depth (2026-08): block only Ezhalah-side impossible/invalid states;
       -- never hides a source price (no magnitude check; 0 legal); production_ready must have a location.
-      and coalesce(s.area_m2, 0) >= 0 and coalesce(s.price_total, 0) >= 0 and coalesce(s.price_annual, 0) >= 0
+      and (s.area_m2 is null or s.area_m2 >= 0) and (s.price_total is null or s.price_total >= 0) and (s.price_annual is null or s.price_annual >= 0)
       and s.deal_ar is not null
       and (not s.production_ready or (s.city_id is not null and s.region_id is not null))
       and (p_deal       is null or s.deal_ar = p_deal)
       and (p_rent_period is null
            or s.deal_ar <> ''إيجار''
+           or (s.price_annual is null and (p_rent_period in (''سنوي'',''كلاهما'') or (p_rent_period = ''شهري'' and s.platform in (''gathern'',''aqarmonthly''))))  -- price on request: no figure a period could misstate (owner 2026-09-28)
            or (p_rent_period = ''شهري'' and s.payment_monthly = true and not coalesce(s.rent_now_pay_later, false))
            or (p_rent_period = ''سنوي'' and (s.rent_period_ar = ''سنوي'' or (s.rent_period_ar = ''شهري'' and coalesce(s.rent_now_pay_later, false))))
            or (p_rent_period = ''كلاهما'' and (s.payment_monthly = true or s.rent_period_ar = ''سنوي'' or (s.rent_period_ar = ''شهري'' and coalesce(s.rent_now_pay_later, false))))
            or (p_rent_period not in (''شهري'',''سنوي'',''كلاهما'') and s.rent_period_ar = p_rent_period))
       and (
             ((p_tables is null or s.source_table = any(p_tables))
-             and (p_types is null or s.type_ar = any(p_types)))
+             and (p_types is null or s.type_ar = any(p_types)
+                  or (s.unit_subtype_ar = ''أرض خام'' and ''أرض خام'' = any(p_types))))
          or (p_tables2 is not null and p_types2 is not null
              and s.source_table = any(p_tables2)
-             and s.type_ar = any(p_types2))
+             and (s.type_ar = any(p_types2)
+                  or (s.unit_subtype_ar = ''أرض خام'' and ''أرض خام'' = any(p_types2))))
       )
       and (p_category is null
-           or exists (
-             select 1 from known_type_ar k
-             where k.type_ar = s.type_ar
-               and (
-                 k.macro = p_category
-                 or (
-                   k.macro = ''both''
-                   and (case p_category
-                          when ''Residential'' then s.source_table like ''%\\_residential\\_listings''
-                          when ''Commercial''  then s.source_table like ''%\\_commercial\\_listings''
-                          else true
-                        end)
-                 )
-               )
-           ))
+           or (s.unit_subtype_ar = ''أرض خام'' and ''أرض خام'' = any(coalesce(p_types, ''{}''::text[]) || coalesce(p_types2, ''{}''::text[])))
+           or (s.type_ar in (select k.type_ar from known_type_ar k where k.macro = p_category)
+           or (s.type_ar in (select k.type_ar from known_type_ar k where k.macro = ''both'')
+               and (case p_category
+                      when ''Residential'' then s.source_table like ''%\\_residential\\_listings''
+                      when ''Commercial''  then s.source_table like ''%\\_commercial\\_listings''
+                      else true
+                    end))))
       and (p_cities is null or cardinality(p_cities) = 0
            or normalize_ar(s.city_ar) = any (array(select tok from city_tokens))
            or s.city_id = any (array(select city_id from city_ids))
@@ -234,7 +325,11 @@ AS $function$ select E'
       and (p_furnished  is null or s.furnished = p_furnished)
       and ((p_age_min is null and p_age_max is null)
            or (s.property_age is not null
-               and s.property_age >= coalesce(p_age_min, 0) and s.property_age <= coalesce(p_age_max, 32767)))
+               and s.property_age >= coalesce(p_age_min, 0) and s.property_age <= coalesce(p_age_max, 32767)
+               -- an OPEN top bucket stored as its floor 10 («أكثر من 10 سنوات», «اكثر من عشر سنوات», «10+ years», REGA «Ten Year»)
+               -- has no upper end, so on these platforms it never answers «up to N» (aqar + six proven siblings, 2026-10-25)
+               and (p_age_max is null or s.property_age < 10
+                    or s.platform not in (''aqar'', ''aqarcity'', ''haraj'', ''muhaysini'', ''reinvest'', ''tuba'', ''wasalt''))))
       and (p_age_unknown is null or (s.property_age is null) = p_age_unknown)
       and (p_is_new_construction is null or (s.property_age = 0) = p_is_new_construction)
       and (p_tenant     is null or s.tenant_ar = p_tenant)
@@ -242,7 +337,7 @@ AS $function$ select E'
       and (p_has_license is null or (p_has_license and s.license_number is not null))
       and (p_amenities is null or (
                not exists (select 1 from unnest(p_amenities) tok
-                           where tok not in (''elevator'',''parking'',''kitchen'',''ac'',''maid_room'',''driver_room'',''private_entrance'',''car_entrance'',''sanitation'',''electricity'',''water_supply'',''gym'',''pool'',''garden'',''balcony'',''laundry_room'',''optical_fibers'',''separate_electricity_meter'',''separate_water_meter'',''furnished'',''rnpl'',''rent_now_pay_later''))
+                           where tok not in (''elevator'',''parking'',''kitchen'',''ac'',''maid_room'',''driver_room'',''private_entrance'',''car_entrance'',''sanitation'',''electricity'',''water_supply'',''gym'',''pool'',''garden'',''balcony'',''laundry_room'',''optical_fibers'',''separate_electricity_meter'',''separate_water_meter'',''majlis'',''roof'',''two_entrances'',''annex'',''yard'',''garage'',''grill'',''storage'',''water_tank'',''warranty'',''electronic_deed'',''basement'',''self_checkin'',''wifi'',''bills_included'',''jacuzzi'',''smart_tv'',''billiards'',''cleaning_service'',''soundproof'',''cameras'',''guard'',''smart_entry'',''smart_home'',''central_gas'',''sauna'',''kids_play_area'',''nursery'',''free_maintenance'',''intercom'',''fire_system'',''ev_charger'',''central_vacuum'',''insulation'',''dining_majlis'',''own_bathroom'',''fridge'',''whole_floor'',''singles'',''families'',''separate_meters'',''apts4'',''apts8'',''apts12'',''apts20'',''has_shops'',''furnished'',''rnpl'',''rent_now_pay_later''))
            and (not (''elevator''         = any(p_amenities)) or s.elevator)
            and (not (''parking''          = any(p_amenities)) or s.parking)
            and (not (''kitchen''          = any(p_amenities)) or s.kitchen)
@@ -262,6 +357,52 @@ AS $function$ select E'
            and (not (''optical_fibers''                = any(p_amenities)) or s.optical_fibers)
            and (not (''separate_electricity_meter''    = any(p_amenities)) or s.separate_electricity_meter)
            and (not (''separate_water_meter''          = any(p_amenities)) or s.separate_water_meter)
+           and (not (''majlis''                       = any(p_amenities)) or s.majlis)
+           and (not (''roof'' = any(p_amenities)) or s.roof)
+           and (not (''two_entrances'' = any(p_amenities)) or s.two_entrances)
+           and (not (''annex'' = any(p_amenities)) or s.annex)
+           and (not (''yard'' = any(p_amenities)) or s.yard)
+           and (not (''garage'' = any(p_amenities)) or s.garage)
+           and (not (''grill'' = any(p_amenities)) or s.grill)
+           and (not (''storage'' = any(p_amenities)) or s.storage)
+           and (not (''water_tank'' = any(p_amenities)) or s.water_tank)
+           and (not (''warranty'' = any(p_amenities)) or s.warranty)
+           and (not (''electronic_deed'' = any(p_amenities)) or s.electronic_deed)
+           and (not (''basement'' = any(p_amenities)) or s.basement)
+           and (not (''self_checkin'' = any(p_amenities)) or s.self_checkin)
+           and (not (''wifi'' = any(p_amenities)) or s.wifi)
+           and (not (''bills_included'' = any(p_amenities)) or s.bills_included)
+           and (not (''jacuzzi'' = any(p_amenities)) or s.jacuzzi)
+           and (not (''smart_tv'' = any(p_amenities)) or s.smart_tv)
+           and (not (''billiards'' = any(p_amenities)) or s.billiards)
+           and (not (''cleaning_service'' = any(p_amenities)) or s.cleaning_service)
+           and (not (''soundproof'' = any(p_amenities)) or s.soundproof)
+           and (not (''cameras'' = any(p_amenities)) or s.cameras)
+           and (not (''guard'' = any(p_amenities)) or s.guard)
+           and (not (''smart_entry'' = any(p_amenities)) or s.smart_entry)
+           and (not (''smart_home'' = any(p_amenities)) or s.smart_home)
+           and (not (''central_gas'' = any(p_amenities)) or s.central_gas)
+           and (not (''sauna'' = any(p_amenities)) or s.sauna)
+           and (not (''kids_play_area'' = any(p_amenities)) or s.kids_play_area)
+           and (not (''nursery'' = any(p_amenities)) or s.nursery)
+           and (not (''free_maintenance'' = any(p_amenities)) or s.free_maintenance)
+           and (not (''intercom'' = any(p_amenities)) or s.intercom)
+           and (not (''fire_system'' = any(p_amenities)) or s.fire_system)
+           and (not (''ev_charger'' = any(p_amenities)) or s.ev_charger)
+           and (not (''central_vacuum'' = any(p_amenities)) or s.central_vacuum)
+           and (not (''insulation'' = any(p_amenities)) or s.insulation)
+           and (not (''dining_majlis'' = any(p_amenities)) or s.dining_majlis)
+           and (not (''own_bathroom'' = any(p_amenities)) or s.own_bathroom)
+           and (not (''fridge'' = any(p_amenities)) or s.fridge)
+           and (not (''whole_floor'' = any(p_amenities)) or s.whole_floor)
+           and (not (''singles'' = any(p_amenities)) or s.singles)
+           and (not (''families'' = any(p_amenities)) or s.families)
+           and (not (''separate_meters'' = any(p_amenities)) or (s.separate_electricity_meter or s.separate_water_meter))
+           and (not (''apts4'' = any(p_amenities)) or s.apartments_count >= 4)
+           and (not (''apts8'' = any(p_amenities)) or s.apartments_count >= 8)
+           and (not (''apts12'' = any(p_amenities)) or s.apartments_count >= 12)
+           and (not (''apts20'' = any(p_amenities)) or s.apartments_count >= 20)
+           and (not (''has_shops'' = any(p_amenities)) or s.shops_count >= 1)
            and (not (''furnished''        = any(p_amenities)) or s.furnished)
            and (not (''rnpl''             = any(p_amenities) or ''rent_now_pay_later'' = any(p_amenities)) or s.rent_now_pay_later)))
       and ((p_street_width_min is null and p_street_width_max is null)
@@ -273,4 +414,17 @@ AS $function$ select E'
       and (p_rating_min is null or s.rating >= p_rating_min)
       and (p_reviews_min is null or s.reviews_count >= p_reviews_min)
       and (p_unit_subtypes is null or cardinality(p_unit_subtypes) = 0 or s.unit_subtype_ar = any(p_unit_subtypes))
+      -- MULTI-PICK UNIONS (owner 2026-10-03: never force the user to select one thing). Each is the
+      -- union of exactly the picked options; absent or empty means no constraint; NULL is in no bucket.
+      and (p_furnished_in is null or cardinality(p_furnished_in) = 0 or s.furnished = any(p_furnished_in))
+      and (p_age_buckets is null or cardinality(p_age_buckets) = 0 or (s.property_age is not null and (
+            (''new'' = any(p_age_buckets) and s.property_age = 0)
+         or (''1_2'' = any(p_age_buckets) and s.property_age between 1 and 2)
+         or (''3_5'' = any(p_age_buckets) and s.property_age between 3 and 5)
+         or (''6_9'' = any(p_age_buckets) and s.property_age between 6 and 9)
+         or (''10p'' = any(p_age_buckets) and s.property_age >= 10))))
+      and (p_rating_buckets is null or cardinality(p_rating_buckets) = 0 or (s.rating is not null and (
+            (''9.5'' = any(p_rating_buckets) and s.rating >= 9.5)
+         or (''9.0'' = any(p_rating_buckets) and s.rating >= 9.0)
+         or (''9.0_rc10'' = any(p_rating_buckets) and s.rating >= 9.0 and s.reviews_count >= 10))))
 '::text $function$

@@ -63,12 +63,15 @@ check('the orchestrator re-ranks after every answer and tracks asked questions (
 // scoreQuestion, and scoreQuestion still returns null on every gate.
 check('installments is ask-first via a TIER applied in the sort, never by bypassing the gates',
   /ASK_FIRST_TIER/.test(advSrc)
-  && /askTier\(b\.question\.id\) - askTier\(a\.question\.id\) \|\| b\.score - a\.score/.test(advSrc)
+  // 2026-10-31: `tier` is askTier everywhere but short stays, where it is the owner's fixed order (shortStaysAskTier);
+  // 2026-11-01: and the Apartments & Co-living scopes (hasCards), where it is the owner's numbered order (groupAskTier).
+  && /const tier = isShortStaysScope\(q\) \? shortStaysAskTier : hasCards\(q\) \? groupAskTier : askTier;/.test(advSrc)
+  && /tier\(b\.question\.id\) - tier\(a\.question\.id\) \|\| b\.score - a\.score/.test(advSrc)
   && !/ASK_FIRST_TIER|askTier/.test(advSrc.slice(advSrc.indexOf('export function scoreQuestion'), advSrc.indexOf('export type RankedQuestion'))));
 // NARROWING GATE — UPDATED 2026-08-25 (owner decision of that date; it supersedes the 2026-08-22
 // `count < N` wording this check used to pin, which had itself superseded the 2026-08-11 8%-90%
 // band). The gate now includes an option only when answering it can actually move the set —
-// `optionNarrowsMeaningfully(count, N)`: removes ≥10% of the scope, or lands at/under the target.
+// `optionNarrowsMeaningfully(count, N)`: removes ≥2.5% of the scope (10% until 2026-11-01), or lands at/under the target.
 // The owner's case: at N=100 an option matching 100 or 98 listings is not worth a tap. It is
 // ONE-SIDED — a SMALL slice (8 of 100) is still an excellent question and is never dropped, which is
 // what the 2026-08-22 rule was protecting. scripts/verify-af-narrowing-gate.ts mutation-proves the
@@ -92,7 +95,9 @@ check('the installment question stays a single binary source-confirmed chip (no 
 // deal to its source-justified question list; cohortAllows() is the ONLY eligibility gate for the
 // config-driven questions. The old per-question hardcoded gates are superseded, but their
 // INVARIANTS survive as data shape and are pinned below.
-check('furnished question is single-select, cohort-gated, true tri-state via furnishedPref',
+// 2026-10-05, owner approving the one-tap plan (R7.2.4, supersedes R7.2.3): one tap where a second pick
+// would widen — scripts/verify-af-selection-policy.ts executes what each pick sends.
+check('furnished question is one tap, cohort-gated, true tri-state via furnishedPref',
   /FURNISHED_QUESTION[\s\S]{0,400}selection:\s*'single'/.test(advSrc)
   && /FURNISHED_QUESTION[\s\S]{0,420}cohortAllows\(q, 'furnished'\)/.test(advSrc)
   && /furnishedPref:\s*true/.test(advSrc) && /furnishedPref:\s*false/.test(advSrc));
@@ -104,13 +109,16 @@ check('furnished question is single-select, cohort-gated, true tri-state via fur
 // The DB half of the same contract is the af_registry_monthly_uncertified P1 guard.
 const cohortBlock = cohortSrc.slice(cohortSrc.indexOf('export const COHORT_QUESTIONS'), cohortSrc.indexOf('export function scopeCleanTypes'));
 const monthlyLists = [...cohortBlock.matchAll(/RentMonthly:\s*\[([^\]]*)\]/g)].map((m) => m[1]);
-const MONTHLY_ALLOWED = ['rating', 'unit_subtype', 'amenities', 'bathrooms'];
-check('COHORT_QUESTIONS exists, Monthly keys exist ONLY for the certified cohorts (شقة/غرفة/فيلا)',
+// 2026-10-31 / 11-01: the short-stays cards (comfort · space · fun) are Monthly-certified too, and Studio gained a
+// Monthly list (the owner's Apartments & Co-living lists) — four Monthly lists: Apartment, Room, Studio, Villa.
+const MONTHLY_ALLOWED = ['rating', 'unit_subtype', 'amenities', 'bathrooms', 'comfort', 'space', 'fun'];
+check('COHORT_QUESTIONS exists, Monthly keys exist ONLY for the certified cohorts (شقة/غرفة/استديو/فيلا)',
   /export const COHORT_QUESTIONS/.test(cohortSrc)
-  && monthlyLists.length === 3
-  && /Apartment:\s*\{[\s\S]{0,900}RentMonthly:/.test(cohortBlock)
-  && /Room:\s*\{[\s\S]{0,400}RentMonthly:/.test(cohortBlock)
-  && /Villa:\s*\{[\s\S]{0,700}RentMonthly:/.test(cohortBlock));
+  && monthlyLists.length === 4
+  && /Apartment:\s*\{[\s\S]{0,1400}RentMonthly:/.test(cohortBlock)
+  && /Room:\s*\{[\s\S]{0,500}RentMonthly:/.test(cohortBlock)
+  && /Studio:\s*\{[\s\S]{0,600}RentMonthly:/.test(cohortBlock)
+  && /Villa:\s*\{[\s\S]{0,800}RentMonthly:/.test(cohortBlock));
 check('every Monthly question list draws ONLY from the Monthly-certified set (no Annual copy-paste)',
   monthlyLists.length > 0 && monthlyLists.every((l) =>
     [...l.matchAll(/'([^']+)'/g)].every((m) => MONTHLY_ALLOWED.includes(m[1]))));
@@ -119,7 +127,7 @@ check('no Monthly list carries a fresh-dead Annual staple (age/furnished/rnpl/st
 check('no Buy list contains a rent-only question',
   !/Buy:\s*\[[^\]]*'furnished'/.test(advSrc)
   && !/Buy:\s*\[[^\]]*'rnpl'/.test(advSrc));
-check('the rating question is cohort-gated, single-select, monotone, and review-confidence rides WITH a rating floor',
+check('the rating question is cohort-gated, one tap, monotone, and review-confidence rides WITH a rating floor',
   /RATING_QUESTION[\s\S]{0,500}selection:\s*'single'/.test(advSrc)
   && /RATING_QUESTION[\s\S]{0,600}cohortAllows\(q, 'rating'\)/.test(advSrc)
   && /ratingMin:\s*Math\.max\(9\.5/.test(advSrc)
@@ -129,11 +137,11 @@ check('the rating question is cohort-gated, single-select, monotone, and review-
 check('the unit-subtype question is strict Gathern vocabulary and never rewrites the canonical taxonomy',
   /UNIT_SUBTYPE_QUESTION[\s\S]{0,600}cohortAllows\(q, 'unit_subtype'\)/.test(advSrc)
   && /'استديو'/.test(advSrc) && /'شقق مخدومة'/.test(advSrc)
-  && /unitSubtypes:\s*\[keys\[0\]\]/.test(advSrc));
+  && /unitSubtypes:\s*\[\.\.\.keys\]/.test(advSrc));
 check('the pool carries the two new data-justified questions (street_width + direction)',
   /STREET_WIDTH_QUESTION, DIRECTION_QUESTION,/.test(advSrc)
   && /cnt_stw15/.test(advSrc) && /cnt_dir_n/.test(advSrc));
-check('RNPL + amenities are multi; age + bathrooms are single',
+check('several picks only where they narrow (features) or name the type; age and bathrooms are one tap',
   /RNPL_QUESTION[\s\S]{0,400}selection:\s*'multi'/.test(advSrc)
   && /AMENITIES_QUESTION[\s\S]{0,500}selection:\s*'multi'/.test(advSrc)
   && /AGE_QUESTION[\s\S]{0,400}selection:\s*'single'/.test(advSrc)
@@ -158,7 +166,9 @@ check('one shared per-option floor (MIN_REAL_OPTION_COUNT via meaningful()); the
 // Residential-only), no commercial list carries rnpl/furnished-question on Buy, no NEW cohort
 // carries the fresh-dead 'ac' chip, and mapped types render EXACTLY their COHORT_CHIPS list.
 check('cohortAllows matches the clean type macro and COHORT_CHIPS scopes commercial chips',
-  /q\.category !== \(CLEAN_MACRO\[type\] \?\? 'Residential'\)/.test(cohortSrc)
+  // 2026-10-03: macro equality became reachability (offeredUnder = home macro OR a group on this side lists
+  // the type) so Residential Land, offered under the commercial land group, is gated on that side too.
+  /if \(!q\.category \|\| !offeredUnder\(q\.category, type\)\) return false;/.test(cohortSrc)
   && /export const COHORT_CHIPS/.test(cohortSrc)
   && !/COHORT_CHIPS[\s\S]{0,900}'ac'/.test(cohortSrc.slice(cohortSrc.indexOf('export const COHORT_CHIPS'), cohortSrc.indexOf('export const COHORT_CHIPS') + 1200))
   && /chipAllow\.includes\(d\.key\)/.test(advSrc));
@@ -176,14 +186,15 @@ check('RNPL + amenities + bathrooms are cohort-gated through cohortAllows',
   /RNPL_QUESTION[\s\S]{0,420}cohortAllows\(q, 'rnpl'\)/.test(advSrc)
   && /cohortAllows\(q, 'amenities'\)/.test(advSrc)
   && /cohortAllows\(q, 'bathrooms'\)/.test(advSrc)
-  && /export function cohortAllows[\s\S]{0,900}q\.rentPeriod === 'monthly'\) return \(cfg\.RentMonthly/.test(cohortSrc));
+  && /export function cohortAllows[\s\S]{0,2600}q\.rentPeriod === 'monthly'\) return \(cfg\.RentMonthly/.test(cohortSrc));
 
 // Mixed period ('both', owner 2026-08-19): cohortAllows must require BOTH RentAnnual and RentMonthly
 // membership — union would let a period-specific question fire against the other period's rows.
 // Full behavioral coverage lives in scripts/verify-mixed-period-af-gating.ts (mutation-tested); this
 // is a lighter structural check that the contract-level pool still routes 'both' through that gate.
 check("cohortAllows has an explicit 'both' branch (intersection of RentAnnual and RentMonthly), never aliasing to Annual",
-  /q\.rentPeriod === 'both'\) return \(cfg\.RentAnnual \?\? \[\]\)\.includes\(id\) && \(cfg\.RentMonthly \?\? \[\]\)\.includes\(id\)/.test(cohortSrc));
+  // 2026-10-31: a block — a group type without a monthly cohort reads its Annual list first (afCohorts.ts), then the intersection
+  /q\.rentPeriod === 'both'\) \{[\s\S]{0,400}?return \(cfg\.RentAnnual \?\? \[\]\)\.includes\(id\) && \(cfg\.RentMonthly \?\? \[\]\)\.includes\(id\)/.test(cohortSrc));
 check('Furnished chip is cohort-gated — never offered where the cohort config withholds it',
   /cohortAllows\(q, 'furnished'\)\)\s*defs\.push\(\{\s*key:\s*'furnished'/.test(advSrc));
 
@@ -236,13 +247,11 @@ check('the in-question «عرض النتائج» escape stays removed (no onSkip
 check('the primary reads Continue · {count} results with the live count, for every arity',
   /Continue · \{count\} results/.test(cardSrc));
 // §11: one tiny plain-language availability line; the technical unknown-count phrasing is gone.
-// COPY CHANGE (owner 2026-08-29): TWO quiet lines now — (1) a listing not mentioning a detail is
-// never a «no» (unknown-data protection), (2) options/counts belong to the CURRENT result set and
-// follow the narrowing. Still natural language, still no database/unknown-count phrasing, and the
-// copy is NOT an excuse for a wrong number — the count-honesty barriers keep owning that.
+// Owner-approved 2026-10-01: one notice above the choices explains published-source limits.
+// Count-honesty checks remain independent of this presentation-only wording.
 check('availability is explained naturally (no database language, no unknown-count phrasing)',
-  /Some listings do not mention this detail, so the options reflect what the listings actually state/.test(cardSrc)
-  && /Options and counts are based on your current search results and update as you narrow down/.test(cardSrc)
+  /Your search options and counts use published listing details; unmentioned features may still be available, so check the original listing/.test(cardSrc)
+  && /af-source-note/.test(cardSrc)
   && !/Age unknown for \{count\}/.test(cardSrc));
 // §2: the opening state is its own calm card — count, invitation, soft supporting line, opt-in
 // begin + «عرض النتائج» — and it lives in the SAME shell as the questions (one visual language).
@@ -414,14 +423,14 @@ check('the results pills are fed by the deduped facet set (one label per committ
   /const dedupedFacets = dedupeFacetsByLabel\(/.test(agentSrc)
   && /facets: dedupedFacets,/.test(agentSrc));
 
-// ── Results summary + removable pills (owner 2026-08-16 §10) ────────────────────────────────────
-// Removal is PURE recomputation — rebuild from the interview's baseQ by re-applying the remaining
-// facets through each question's own apply(), never a hand-written inverse per question id.
-check('removable pills rebuild the query from baseQ via the questions’ own apply()',
-  /removeGuidedFacet/.test(agentSrc)
-  && /for \(const f of remaining\)/.test(agentSrc)
-  && /question\.apply\(q, f\.keys\)/.test(agentSrc)
-  && /buildAfSummary\(guidedPills\.facets\)/.test(agentSrc));
+// ── Results summary + READ-ONLY pills (owner 2026-10-03; supersedes the 2026-08-16 §10 removable pills) ─
+// The turn's summary is the ORIGINAL summary (built from baseQ, the query before the first round) plus
+// one labelled line per committed answer (no heading), rebuilt from baseQ + ALL facets each time. The
+// chips below the intro stay, but nothing on them removes anything: no ✕, no handler, no rebuild path.
+check('a guided round’s summary is the original summary plus every committed answer',
+  /guidedSearchSummary\(opts\.guided\.baseQ, opts\.guided\.facets\)/.test(agentSrc));
+check('the pills are read-only: removeGuidedFacet is gone and no pill takes a press',
+  !/removeGuidedFacet/.test(agentSrc) && !/<Pressable[^>]*af-pill/.test(agentSrc));
 
 // ── Count RPCs must never receive p_sort_by (bug-hunt 2026-07-30) ────────────────────────────────
 // PostgREST resolves RPCs by exact param-name match; leaking p_sort_by 404s BOTH counts calls the

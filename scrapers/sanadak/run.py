@@ -46,6 +46,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.pii import redact_pii
 
 # PDPL: seller identity + contact — never stored. (sellerLicenseNumber is a REGA licence, kept.)
 _PII_SANADAK = {"sellerId", "sellerName", "sellerUsername", "sellerPhonenumber",
@@ -61,11 +62,11 @@ WORKERS = int(os.environ.get("SANADAK_WORKERS", "4"))
 TYPE_MAP = {
     "Apartment": "Apartment", "Villa": "Villa", "Floor": "Floor", "Building": "Building",
     # Duplex + Studio are their OWN clean types since the 2-macro filter split — no longer folded
-    # into Villa/Apartment. Townhouse/Palace/House stay Villa-folds per the locked canon rule.
+    # into Villa/Apartment. Palace/House stay Villa-folds per the locked canon rule; Townhouse keeps its own name (owner 2026-10-12).
     # (canon unification, audit item 7d, 2026-07-27.)
     "Duplex": "Duplex", "Palace": "Villa", "Room": "Room", "RestHouse": "Rest House",
     "Chalet": "Chalet", "Farm": "Farm", "Land": "Residential Land", "House": "House",
-    "Townhouse": "Villa", "Studio": "Studio", "Penthouse": "Apartment",
+    "Townhouse": "تاون هاوس", "Studio": "Studio", "Penthouse": "Apartment",
     # commercial
     "Office": "Office", "Shop": "Shop", "Showroom": "Showroom", "Warehouse": "Warehouse",
     "CommercialLand": "Commercial Land", "CommercialBuilding": "Commercial Building",
@@ -265,6 +266,15 @@ def _verify_gone(ad_number: str, url: Optional[str] = None) -> tuple[str, str]:
             return decided
         time.sleep(1.2 * (attempt + 1))
     return "unknown", f"no answer after 2 attempts ({last})"
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The same oracle for a caller with no crawl of its own (the daily direct check,
+    scrapers/common/fleet_liveness.py). A crawl hands the oracle listings it has just parsed as its
+    canaries; here the caller's known-live control row is that canary. Called bare, `_verify_gone`
+    had no canary and withheld every removal, so the daily check could stamp but never strike."""
+    set_liveness_canaries([control.get("listing_url")] if control else [])
+    return _verify_gone
 
 
 def _listing_url_for(ad_number: str) -> Optional[str]:
@@ -581,6 +591,23 @@ def _all_images(body: str) -> list[str]:
     return out
 
 
+# «امارة منطقة الرياض - الدرعيه» (6696714, 12586935): the emirate's name, then the city it governs. The
+# city is the part after the dash; the whole label resolves to nothing, so both ads sat with no city and
+# no customer could find them in a city search (owner 10-17, 24 sanadak ads with no city). The other 22
+# name villages and farms the catalog does not hold («قريه ديراب», «مزارع وادى العماريه»): honest unknown.
+_EMIRATE = re.compile(r"^\s*[اإأ]مار[ةه]\s+منطق[ةه]\s+\S+(?:\s+\S+)?\s*[-–]\s*(.+?)\s*$")
+
+
+def _emirate_city(raw: str) -> str:
+    m = _EMIRATE.match(raw)
+    return m.group(1) if m else raw
+
+
+def ad_description(raw: Any) -> Optional[str]:
+    """The listing's own published prose, verbatim minus contact details, or None when it says nothing."""
+    return (redact_pii(raw) or None) if isinstance(raw, str) else None
+
+
 def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
     if not o.get("isPublished", True):
         return None, "residential"
@@ -596,7 +623,7 @@ def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
     is_rent = (o.get("listingType") or "").strip().lower() == "rent" or "إيجار" in (o.get("listingTypeText") or "")
 
-    raw_city = (o.get("city") or "").strip()
+    raw_city = _emirate_city((o.get("city") or "").strip())
     # Forward-fix (2026-07-10 location-data-quality audit): an honest None beats the literal "Other"
     # sentinel on this legacy column — the additive city_ar/city_id columns below already resolve
     # most rows independently; this just closes the remaining leak on the raw-column read path.
@@ -677,6 +704,10 @@ def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
         "region": region,
         "neighborhood": o.get("district") or None,
         "title": o.get("title") or None,
+        # The broker's own prose, published under «الوصف» (2026-10-30: 403 of 710 active residential ads
+        # carried it in the RSC object and source_capture, while `description` was empty on all 710 because
+        # it was never mapped). Verbatim, phones/emails redacted (PDPL); silence stays NULL, never ''.
+        "description": ad_description(o.get("description")),
         "photo_urls": _images(body),
         "rega_location_verified": bool(o.get("sellerLicenseNumber")),
         "additional_info": extra,

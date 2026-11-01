@@ -72,6 +72,13 @@ _UNSTATED = {"غير محدد", "بدون", "لا يوجد", "لايوجد", ""}
 _OFFPLAN_RE = re.compile(r"تحت\s*ال[إا]نشاء|قيد\s*ال[إا]نشاء|على\s*الخارطة|على\s*المخطط")
 _SERVICES = {"كهرباء": "electricity", "مياه": "water_supply", "صرف صحي": "sanitation",
              "ألياف ضوئية": "optical_fibers", "الياف ضوئية": "optical_fibers", "مصعد": "elevator"}
+# The «خدمات العقار» chips are maqrat's only structured amenity field, and their whole vocabulary (measured over every
+# stored row, 🔬 2026-10-23) is utilities plus «مصعد»: elevator is the one Advanced Filter column they can express.
+# Every other column has no structured field, so the ad's own words are its only statement (law §2), read by the
+# shared prose reader: 13605174 «مطبخ راكب مكيفات اسبلت», 19039930 «شقة مؤثثة». Backlog 790: 213 active, 2 answered.
+# Prose never answers elevator. Only columns both maqrat tables carry.
+PROSE_COLS = ("furnished", "kitchen", "air_conditioner", "parking", "maid_room", "driver_room", "laundry_room",
+              "balcony_terrace", "private_entrance")
 _PAIR_A = re.compile(r'class="pd-overview-label">(.*?)</span>.*?class="pd-overview-value[^"]*">(.*?)</span>', re.S)
 _PAIR_B = re.compile(r'class="ap-ro-field-label">([^<]*)</span>\s*<span class="ap-ro-field-value[^"]*">(.*?)</span>', re.S)
 _CHIPS = re.compile(r'class="ap-ro-field-label">خدمات العقار</span>\s*<div class="pd-chip-row">(.*?)</div>', re.S)
@@ -158,6 +165,23 @@ def parse_detail(page: str, pid: str) -> dict[str, Any]:
             "photos": photos}
 
 
+# Two shapes in maqrat's stored text that name a fixture which is not this unit's (replayed over every active row,
+# 2026-10-23): a distance phrase names a PLACE («يبعد 3 دقائق عن مواقف كدي», 13605218), and «نفس المشروع» / «شقق
+# مفروشة» speak of ANOTHER unit or a suggested use («يوجد شقة في نفس المشروع داخليه مؤثثة» 13605205, a plot whose
+# uses list «شقق مفروشة» 13605199). The distance clause is dropped before reading; the other-unit shapes make
+# furnished unknown.
+_ELSEWHERE = re.compile(r"(?:يبعد|تبعد|على\s*بعد)[^،.\n]*")
+_OTHER_UNIT = re.compile(r"نفس\s*المشروع|شقق\s*مفروشة")
+
+
+def prose_answers(title: Optional[str], desc: Optional[str]) -> dict[str, bool]:
+    text = "\n".join(x for x in (title, desc) if x)
+    said = normalize.amenities_from_text(_ELSEWHERE.sub(" ", text))
+    if _OTHER_UNIT.search(text):
+        said.pop("furnished", None)
+    return {c: v for c, v in said.items() if c in PROSE_COLS}
+
+
 def map_listing(pid: str, card: dict, d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
     kv, title, desc = d["kv"], d["title"], d["description"]
     if _OFFPLAN_RE.search(title) or _OFFPLAN_RE.search(desc):
@@ -225,6 +249,7 @@ def map_listing(pid: str, card: dict, d: dict[str, Any]) -> tuple[Optional[tuple
     for word, col in _SERVICES.items():
         if word in d["services"]:
             row[col] = True
+    row.update(prose_answers(title, desc))
     stored = row.get("price_total") if deal == "Buy" else row.get("price_annual")
     field = "إجمالي سعر بيع الأرض" if (deal == "Buy" and is_land and land_total) else "سعر الوحدة"
     row["price_evidence"] = normalize.price_evidence(
@@ -252,7 +277,23 @@ def map_listing(pid: str, card: dict, d: dict[str, Any]) -> tuple[Optional[tuple
     cap = {k: v for k, v in kv.items() if k not in _NEVER_STORE}
     row["source_capture"] = strip_pii_fields({"schema": "maqrat.details.v1", "fields": cap,
                                               "title": row["title"], "services": d["services"]})
+    if normalize.ad_expiry_state(row["license_expiry"]) == "expired":
+        # Its own ad licence ended. Still written (the gate is PR #5103's, the owner's call), but the
+        # list sighting does not certify it as checked-alive (2026-10-03).
+        db.mark_presence_unproven(row)
     return (row, category), ""
+
+
+# ── NO OWN-PAGE REMOVAL SIGNAL EXISTS (measured 2026-10-07, ♻️) ─────────────────────────────────
+# prune_unseen ran without verify_gone, so an ad missing from three complete walks was hidden on
+# absence alone (P1 unknown_treated_as_dead: MQR36, MQR78, MQR51). Measured from CI the same day
+# (oracle-feasibility-probe run 37618176662, 10 live + the 3 hidden, interleaved): every page answers
+# 200 with its own title and size, no marker separates them — the hidden ads' pages still render.
+# LISTING_LIVENESS.md §1: absence never kills. Until the source publishes a status (an API record,
+# a feed membership test, the licence end date), absence only counts strikes and nothing is hidden.
+def no_removal_signal(ad_number: str):
+    return ("unknown", "maqrat has no own-page removal signal (probe 37618176662: removed and live "
+                       "pages indistinguishable); absence never hides")
 
 
 def main() -> int:
@@ -309,7 +350,8 @@ def main() -> int:
         complete = unreadable == 0 and not a.limit and declared is not None and len(ids) >= declared
         for tbl, rr in (("maqrat_residential_listings", res), ("maqrat_commercial_listings", com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE,
+                                    verify_gone=no_removal_signal)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:

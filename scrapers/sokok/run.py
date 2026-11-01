@@ -291,6 +291,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://sokok.sa"
 PLOTS_API = f"{BASE}/api/v1/plots"
@@ -533,7 +534,12 @@ def map_listing(piece: dict[str, Any], plot: dict[str, Any]) -> tuple[Optional[d
         "count": 0,                       # stored count: presigned URLs are never kept (trap 6)
         "source_count": len(images), "not_stored_reason": "presigned_url_expires_3600s"}
 
+    # The plot's OWN pin (owner 2026-10-20 night: «if there is a pin the mistake can be ours»). The piece
+    # page's data carries `map: {latitude, longitude}` per piece (234328341 / 340 / 346 differ by metres),
+    # distinct from the subdivision's `plot.coordinates`, which is never read. 0 of 400 had a pin.
+    _map = piece.get("map") if isinstance(piece.get("map"), dict) else {}
     info = {
+        **pin_dict(_map.get("latitude"), _map.get("longitude")),
         "source_id": pid,
         "purpose_ar": purpose,
         "system_ar": _clean(piece.get("system")),        # the permitted BUILDING system, NOT a type

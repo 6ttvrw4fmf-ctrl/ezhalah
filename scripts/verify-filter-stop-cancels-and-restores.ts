@@ -57,8 +57,8 @@ check('stop() reads run.origin captured before runRef is cleared', /const wasFil
 // The real stop-in-place bubble text (as opposed to a comment that merely quotes the same phrase,
 // e.g. the pre-existing "must NOT claim ... or hide CTAs" note above) — anchored on the actual
 // rendered-string call shape so it can't be fooled by prose mentioning the same words.
-const bubbleTextIdx = stopFn.search(/text:\s*tr\("I've stopped the search/);
-check('the filter branch is reached BEFORE the generic "I\'ve stopped the search" bubble',
+const bubbleTextIdx = stopFn.search(/text:\s*tr\('Search stopped'\), typing: false, stopNote: true/);
+check('the filter branch is reached BEFORE the generic «وقفت البحث» stop line',
   bubbleTextIdx > 0 && stopFn.indexOf('if (wasFilterOrigin)') < bubbleTextIdx);
 // THE BRANCH IS EXTRACTED BY BRACE MATCHING, NOT BY A CHARACTER BUDGET (routine #6, 2026-09-20).
 // This used to be `[\s\S]{0,2200}?` on both the return check and the extraction below. A 2200-char
@@ -119,8 +119,8 @@ check('6. …and that reset never leaves busy=true (no infinite spinner) once th
 
 // 4) The chat path is UNCHANGED — same message, same screen, no navigation.
 const chatBranch = stopFn.slice(stopFn.indexOf('setStopped(true)'));
-check("chat-originated Stop keeps the existing stop-in-place message and does NOT navigate",
-  /I've stopped the search/.test(chatBranch) && !/router\.replace/.test(chatBranch));
+check("chat-originated Stop keeps its stop-in-place line («وقفت البحث», ChatGPT-style, owner 2026-10-10) and does NOT navigate",
+  /tr\('Search stopped'\), typing: false, stopNote: true/.test(chatBranch) && !/router\.replace/.test(chatBranch));
 
 // 5) CANCELLATION IS REAL, not just "stop waiting on it" — traced end to end from the Stop button
 //    down to the actual HTTP layer, and independently down to the write-guard that survives a race.
@@ -131,7 +131,9 @@ check('bounded() accepts an external AbortSignal and forwards it into the SAME c
 check('an already-aborted signal aborts immediately, before the network call even starts',
   /if \(signal\.aborted\) ctrl\.abort\(\);/.test(remote));
 check('fetchRawByIds checks the signal between chunked requests, not only at the start',
-  /for \(let i = 0; i < ids\.length; i \+= ID_CHUNK\) \{\s*\n\s*if \(signal\?\.aborted\)/.test(remote));
+  // The chunk loop became a bounded worker pool on 2026-10-10 (verify-raw-card-chunks-run-concurrently);
+  // every worker still checks the signal before EACH chunk request it starts.
+  /while \(!failed && next \* ID_CHUNK < ids\.length\) \{\s*\n\s*if \(signal\?\.aborted\)/.test(remote));
 check('fetchListingsForQuery threads the SAME signal into both the main RPC call and the raw-card fetch',
   /opts\?\.signal/.test(remote) && /fetchRawByIds\(q, tbl, ids, signal\)/.test(remote)
   // Budget widened 400->900 (2026-08-29, controlled-rotation change), then 900->1400 (2026-09-26,

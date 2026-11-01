@@ -1,3 +1,16 @@
+> **⛔ RETIRED 2026-09-27 — READ THIS FIRST.** The owner deleted all eleven routines described below
+> to start a smaller, clearer team. **Do NOT recreate them**, and ignore this file's instruction to
+> "restore the routine to match this file". The new team is being built one engineer at a time:
+>
+> | Engineer | Rulebook | Status |
+> |---|---|---|
+> | ⚡ Scraping Engineer | **`docs/ops/SCRAPING_ENGINEER.md`** | live, daily 2:00 AM Arizona |
+> | 🆕 New Listings Engineer | **`docs/ops/NEW_LISTINGS_ENGINEER.md`** | live, daily 3:00 AM Arizona |
+> | ♻️ Lifecycle Engineer | **`docs/ops/LIFECYCLE_ENGINEER.md`** | live, daily 4:00 AM Arizona |
+>
+> Everything below is kept as history (and because barriers still read its roster) until this file is
+> rewritten for the new team. The GLOBAL ENGINEERING POLICY (§G) remains good guidance.
+
 # ENGINEER ROUTINES — THE ELEVEN DAILY ENGINEERS (canonical, owner-locked 2026-08-11; extended 2026-08-23, 2026-08-26, and 2026-09-04)
 
 > Owner rule: there are **exactly ELEVEN separate cloud routines, all DAILY** (the fourth added by
@@ -462,22 +475,27 @@ not help — routines #8 through #11 are guests too.**
 
 ## 1. ⚡ Daily JUNIOR SCRAPING Engineer (original, unmodified)
 Canonical spec: **`docs/ops/JUNIOR_SCRAPING_ENGINEER.md`** (file wins over the live prompt on any
-divergence). Written 2026-09-05 by RECONSTRUCTION from repo evidence, because this routine had no
-spec file at all and its instructions existed only in a cloud prompt outside this repo — the state
-the owner's audit called unauditable. Every claim in it carries a citation. Its
-`## UNRECOVERED — owner must supply` section lists what could NOT be recovered — roughly 9,700 of
-the prompt's 9,971 characters, the run procedure, the pass/fail thresholds, and the `[DEEP AUDIT]`
-escalation schema. **Until the owner pastes those in, that file is a partial spec and the live
-prompt is still the only complete copy.**
+divergence). First written 2026-09-05 as a RECONSTRUCTION from repo evidence (the routine's
+instructions had only ever lived in a cloud prompt), with an UNRECOVERED list of what could not be
+found. **Rewritten in full 2026-09-26 by owner instruction** ("I don't mind changing the junior
+scraping engineer routine instruction fully, just to make it better"): it is now the complete
+rulebook — daily run order, pass/fail thresholds, the revival ladder, the amended DOWN rule (a
+down site's listings AND logo leave, the platform count drops, and it is re-probed daily until it
+returns), the `[DEEP AUDIT]` handoff template, and the report shape. Nothing binding lives only in
+the cloud prompt any more. `daily-metrics.jsonl` (below) is retired — `ops_daily_engineer_run` is
+the only per-run record.
 
 
-Original owner prompt (9,971 chars), untouched since creation. Runs on branch `ops/daily-engineer`,
-writes `docs/ops/daily-metrics.jsonl`, escalates via `[DEEP AUDIT]` GitHub issues.
+History (superseded by the spec above): the original owner prompt (9,971 chars) ran on branch
+`ops/daily-engineer`, wrote `docs/ops/daily-metrics.jsonl` (dead since 2026-08-13, retired
+2026-09-26), and escalated via `[DEEP AUDIT]` GitHub issues (still the channel — the spec now fixes
+its template).
 
-Scope — the daily scraping layer, exactly as originally defined:
-scraper execution + health for every active platform, collection results, failures, missing runs,
-new-listing discovery, reachability. It does NOT do deep production audits, filter parity, or data
-integrity sweeps — it detects and escalates to the senior.
+Scope — the daily scraping layer: scraper execution + health for every active platform, collection
+results, failures, missing runs, new-listing discovery, reachability. It does NOT do deep production
+audits, filter parity, or data integrity sweeps. It FIXES every scraper failure it can in the same
+run (owner, 2026-09-24: "responsible for FIXING that, not just reporting") and escalates only a
+genuinely multi-system investigation to the senior.
 
 ## 2. 🎖️ Daily SENIOR PRODUCTION Engineer — Deep Audit (original prompt, made daily)
 Canonical spec: **`docs/ops/SENIOR_PRODUCTION_ENGINEER.md`** (file wins over the live prompt on any

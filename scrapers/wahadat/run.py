@@ -36,7 +36,7 @@ A project whose units are all reserved/sold contributes nothing rather than cont
 *** THE TYPE FIELD IS ARABIC, AND «ڤيلا» IS SPELLED WITH ڤ (U+06A4) ***
 The owner warned the property type would be "in english" with «تاون هاوس» written in Arabic inside
 it. Measured, it is Arabic throughout: «دور» ×90, «تاون هاوس» ×30, «ڤيلا» ×10, «شقة» ×10. Two traps:
-  · «تاون هاوس» IS already in `src/data/propertyTypes.ts` (→ Villa), so it needs no new mapping.
+  · «تاون هاوس» IS already in `src/data/propertyTypes.ts` (→ Duplex in search, own name kept), so it needs no new mapping.
   · «ڤيلا» uses ڤ (FEH WITH THREE DOTS ABOVE), NOT the standard «فيلا» our taxonomy knows. Left
     alone it would resolve to nothing and those units would land type-less. `_norm_type` rewrites
     ڤ→ف so the source's own word reaches the taxonomy unchanged in meaning.
@@ -84,10 +84,10 @@ TIMEOUT = 40
 READY_STATUS = "available"
 
 # «تاون هاوس» is NOT in the scrapers' own map_type_exact table, but the SHIPPED APP already maps it
-# (src/data/propertyTypes.ts:180 — «تاون هاوس»: 'Villa', and Villa's rawTypes list includes it). So
+# (src/data/propertyTypes.ts:180 — «تاون هاوس»: 'Duplex', and Duplex's rawTypes list includes it). So
 # this override does not invent a classification; it closes a backend/frontend gap that would
 # otherwise skip every townhouse on this source (30 of 128 units measured 2026-09-26).
-_TYPE_OVERRIDES = {"تاون هاوس": "Villa"}
+_TYPE_OVERRIDES = {"تاون هاوس": "تاون هاوس"}
 
 _FLIGHT = re.compile(r'self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)', re.S)
 
@@ -201,6 +201,92 @@ def resolve_type(proj: dict[str, Any]) -> tuple[Optional[str], str]:
     return en, ""
 
 
+def unit_uid(u: dict) -> str:
+    """The unit id our ad_number carries (PREFIX + this)."""
+    return str(u.get("id") or "").replace("-", "")[:12]
+
+
+# ── PRUNE ORACLE: the unit's OWN status (2026-10-07, ♻️) ─────────────────────────────────────────
+# prune_unseen ran without verify_gone, so a unit missing from three crawls was hidden on absence
+# alone (P1 unknown_treated_as_dead; 4 hides in 30 days, one on 2026-10-07 with no GONE row). But
+# the source states every unit's status in its project's own record (available / reserved / sold,
+# measured 2026-09-26), and a unit it marks sold or reserved is an affirmative statement about THAT
+# unit, not an absence. So a kill now needs this run to have read the unit's own record, in a
+# project whose is_active is true, saying sold or reserved; a unit that merely vanished is UNKNOWN
+# and stays. A unit that turns available again is re-upserted active by the next crawl.
+OFF_MARKET_STATUSES = ("sold", "reserved")
+
+
+def off_market_oracle(off_market: dict[str, str]):
+    """verify_gone for prune_unseen: gone only for units this run read as sold/reserved."""
+    def verify_gone(ad_number: str):
+        st = off_market.get(ad_number)
+        if st:
+            return "gone", f"the unit's own record in its project page states status={st}"
+        return "unknown", "not read as sold/reserved this run (absence is never a death)"
+    return verify_gone
+
+
+def read_unlisted_projects(sess, read_urls: set[str], struck: list[dict]) -> dict[str, str]:
+    """Off-market statuses for struck units whose project page the sitemap no longer lists (2026-10-13).
+
+    14 active units of two projects (دام-101, هيو فلورز تنال) sat at 5-8 strikes on screen: their
+    project left the 100-project sitemap, so no crawl read their own record again and the off-market
+    oracle could only say «not read this run» (unknown) every night. Each such project page still
+    answers 200 (lifecycle-spot-check 38392426679), so it is read here, once per page, and a unit its
+    own record marks sold/reserved in a project whose is_active is true is off market exactly as in
+    the main walk. Anything else stays unknown."""
+    out: dict[str, str] = {}
+    for url in sorted({r.get("listing_url") for r in struck if r.get("listing_url")} - read_urls):
+        try:
+            r = sess.get(url, impersonate=IMPERSONATE, timeout=TIMEOUT)
+            if r.status_code != 200:
+                continue
+            proj, units = parse_project(r.text, url)
+        except Exception:                               # noqa: BLE001 — unread is unknown
+            continue
+        if proj is None or proj.get("is_active") is not True:
+            continue
+        for unit in units:
+            st = (unit.get("status") or "").strip().lower()
+            if st in OFF_MARKET_STATUSES and unit_uid(unit):
+                out[f"{PREFIX}{unit_uid(unit)}"] = st
+    return out
+
+
+def struck_unlisted_projects(sitemap_urls: list[str]) -> list[str]:
+    """Project pages of active, struck units that the sitemap no longer lists (2026-10-16, ♻️).
+
+    read_unlisted_projects (10-13) read those pages only for a «sold/reserved» answer, so a unit
+    its own record still states `available` stayed UNKNOWN for ever: 57 such units at 4-11 strikes
+    on 10-16, all six projects is_active=true, and unit 504dc5f5 (دام 101) read «available» on its
+    own page from CI (source-reread 38893210922). Live ads were never re-seen and never stamped.
+    These pages now join the main walk, so each unit is decided exactly as a sitemap unit is:
+    available → upserted (seen, strikes cleared), sold/reserved → off market, anything else → held
+    by the walk's own rules. An unread page stays unknown. Nothing here can hide a unit."""
+    listed = set(sitemap_urls)
+    out: set[str] = set()
+    for tbl in ("wahadat_residential_listings", "wahadat_commercial_listings"):
+        try:
+            rows = (db.sb().table(tbl).select("listing_url").eq("source", SOURCE).eq("active", True)
+                    .gt("missing_count", 0).limit(2000).execute().data or [])
+        except Exception:                               # noqa: BLE001 — unread stays unknown
+            continue
+        out |= {r["listing_url"] for r in rows
+                if isinstance(r.get("listing_url"), str) and "/project/" in r["listing_url"]}
+    return sorted(out - listed)
+
+
+def project_description(proj: dict[str, Any]) -> Optional[str]:
+    """The project's own about text, tags stripped, PII redacted; None when the page has none."""
+    raw = proj.get("about_ar")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    text = normalize.html_block_lines(raw) if "<" in raw else raw
+    text = re.sub(r"[ \t]+", " ", text).strip()
+    return redact_pii(text) or None
+
+
 def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[str, Any], str]:
     """(row, category) for ONE unit already proven `status == available` and type-resolved."""
     category = normalize.category_for_type(ptype).lower()
@@ -220,7 +306,7 @@ def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[
     area = u.get("area")
     area = area if isinstance(area, (int, float)) and area > 0 else None
 
-    uid = str(u.get("id") or "").replace("-", "")[:12]
+    uid = unit_uid(u)
     title = redact_pii(" ".join(x for x in [proj.get("name_ar") or proj.get("name"),
                                             u.get("name_ar") or u.get("name")] if x)) or None
 
@@ -249,6 +335,12 @@ def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[
         # The PROJECT's own gallery (see _main_project). Units carry no images of their own on
         # this source, so every unit of a project shows that project's photos.
         "photo_urls": proj.get("images") or None,
+        # The project's own «about» text (`about_ar`), whole and verbatim (redacted, PDPL). It was
+        # parsed into `proj` since onboarding and never written: 2026-10-31, 0 of 998 active units
+        # stored a description, so the AI facts reader had nothing to read (backlog 892). Units carry
+        # no text of their own on this source, so every unit of a project carries that project's
+        # text — the same scope as its photos. No text → NULL, never ''.
+        "description": project_description(proj),
     }
     if deal == "Buy":
         row["price_total"] = price
@@ -304,11 +396,19 @@ def main() -> int:
     if a.limit:
         urls = urls[: a.limit]
     print(f"{SOURCE}: {len(urls)} project(s) in sitemap", flush=True)
+    if not a.limit:
+        extra = struck_unlisted_projects(urls)
+        if extra:
+            print(f"  + {len(extra)} unlisted project page(s) of struck units, read like the sitemap's",
+                  flush=True)
+            urls = urls + extra
 
     run_id = None if dry else db.begin_run(SLUG)
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
+    held: set[str] = set()      # units of a project whose own is_active is not True — see below
+    off_market: dict[str, str] = {}   # ad_number -> sold/reserved, read from the unit's own record
     seen_projects = 0
     try:
         for u in urls:
@@ -334,16 +434,32 @@ def main() -> int:
                 if st != READY_STATUS:                  # owner rule: ready units only
                     k = f"not_ready_{st or 'unstated'}"
                     skipped[k] = skipped.get(k, 0) + 1
+                    if st in OFF_MARKET_STATUSES and proj.get("is_active") is True and unit_uid(unit):
+                        off_market[f"{PREFIX}{unit_uid(unit)}"] = st
                     continue
                 row, cat = map_unit(proj, unit, ptype)
                 if not row["ad_number"].strip(PREFIX):
                     skipped["no_unit_id"] = skipped.get("no_unit_id", 0) + 1
+                    continue
+                if proj.get("is_active") is not True:
+                    # The PROJECT's own flag (crawler audit 2026-10-02). Measured on 72 of the 100
+                    # sitemap projects: is_active is true on all 72, so true is the one value known
+                    # to mean "on the market". false / missing has never been observed and nobody
+                    # can say what it means, so the unit is HELD: not written (never re-asserted
+                    # alive), kept in the prune's seen-set (never aged out on an unread value), and
+                    # counted below for a human to classify.
+                    k = f"held_project_is_active_{proj.get('is_active')!r}"
+                    skipped[k] = skipped.get(k, 0) + 1
+                    held.add(row["ad_number"])
                     continue
                 (com if cat == "commercial" else res).append(row)
 
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
+        if held and not (res or com):
+            # fail closed: no project states is_active=true → the flag is unreadable → write nothing.
+            raise RuntimeError(f"no project carries is_active=true — status unreadable: {skipped}")
         if dry:
             print(f"DRY: {len(res)} residential + {len(com)} commercial from {seen_projects} projects")
             for row in (res[:3] + com[:1]):
@@ -363,13 +479,24 @@ def main() -> int:
         for tbl, rows in (("wahadat_residential_listings", res),
                           ("wahadat_commercial_listings", com)):
             if rows:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE)
+                seen_ads = {r["ad_number"] for r in rows} | held
+                try:
+                    struck = [r for r in (db.sb().table(tbl).select("ad_number,listing_url")
+                                          .eq("source", SOURCE).eq("active", True).gt("missing_count", 0)
+                                          .limit(1000).execute().data or [])
+                              if r.get("ad_number") not in seen_ads]
+                except Exception:                       # noqa: BLE001 — unread stays unknown
+                    struck = []
+                off_market.update(read_unlisted_projects(sess, set(urls), struck))
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows} | held, source=SOURCE,
+                                    verify_gone=off_market_oracle(off_market))
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=seen_projects,
                              rows_upserted=len(res) + len(com),
+                             notes=f"held_project_not_active={len(held)}" if held else None,
                              check_tables=["wahadat_residential_listings", "wahadat_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()", flush=True)

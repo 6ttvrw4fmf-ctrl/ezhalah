@@ -248,6 +248,7 @@ def test_the_skip_tally_reaches_end_run(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["run.py"])
     monkeypatch.setattr(R, "PAUSE", 0)
     monkeypatch.setattr(R, "session", lambda: _FakeSession(pages))
+    monkeypatch.setattr(R, "walk_session", lambda: R.session())   # no live probe offline
     monkeypatch.setattr(R, "fetch_project_urls", lambda s, limit=0: list(pages))
     monkeypatch.setattr(R.db, "begin_run", lambda src: 1)
     monkeypatch.setattr(R.db, "_wasalt_batch", lambda t, rows: written.__setitem__(t, list(rows)))
@@ -270,6 +271,7 @@ def test_a_page_that_did_not_load_blocks_the_prune(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["run.py"])
     monkeypatch.setattr(R, "PAUSE", 0)
     monkeypatch.setattr(R, "session", lambda: _FakeSession(pages))
+    monkeypatch.setattr(R, "walk_session", lambda: R.session())   # no live probe offline
     monkeypatch.setattr(R, "fetch_project_urls", lambda s, limit=0: [URL_8404, "https://hasaadestate.com/projects/missing/"])
     monkeypatch.setattr(R.db, "begin_run", lambda src: 1)
     monkeypatch.setattr(R.db, "_wasalt_batch", lambda t, rows: None)

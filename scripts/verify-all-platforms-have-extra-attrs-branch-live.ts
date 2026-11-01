@@ -11,6 +11,14 @@
 // DATA that is already anon-selectable: does listing_extra_attrs carry ANY row for this exact
 // source_table? Both listing_extra_attrs and search_listings_ar already grant anon SELECT.
 //
+// READS THE SAVED COPY, listing_extra_attrs_mv (2026-09-27). Counting the live view once per table
+// made PostgREST plan its ~260-arm UNION (~22 MB each) about 260 times in two minutes, and the
+// scheduled runs of this workflow lined up with four production restarts (09-26 11:38, 21:23;
+// 09-27 05:35, 12:18). The copy holds the same rows, unique on (source_table, listing_id), and is
+// refreshed hourly by jobid 17 just before the search sync. So "has rows in the copy" is also what
+// listing_native_location_v2 (and therefore search) actually joins: a table with searchable rows
+// but none in the copy IS a gap in what users get.
+//
 // A table that is genuinely wired but momentarily holds zero rows would read as "absent" by
 // data-presence alone — measured live 2026-09-12 while building this file: 10 tables
 // (alta/fursaghyr/gathern/jazwtn/jurash/october/ramzalqasim/satel/shmoualshmal_commercial_listings and
@@ -87,13 +95,17 @@ const SEARCHABLE_TABLES = lifted.SEARCHABLE_TABLES as string[];
 check('SEARCHABLE_TABLES lifted and is plausibly the fleet', SEARCHABLE_TABLES.length >= 50,
   `got ${SEARCHABLE_TABLES.length}`);
 
+// listing_extra_attrs_mv is closed to the public key (20261021003001); extra_attrs_tables_present() (20261021035736)
+// answers the one question this check asks — which tables have at least one row — and nothing else. Fails CLOSED.
+const present = await fetch(`${REST}/rpc/extra_attrs_tables_present`, {
+  method: 'POST', headers: { ...H, 'content-type': 'application/json' }, body: JSON.stringify({ p_tables: SEARCHABLE_TABLES }),
+}).catch(() => null);
+if (!present || !present.ok) die(`could not read extra_attrs_tables_present — ${present ? present.status : 'network error'}`);
+const inExtra = new Set<string>(await present!.json().catch(() => die('extra_attrs_tables_present returned no JSON')) as string[]);
 const rows: ExtraAttrsTableRow[] = [];
 for (const table of SEARCHABLE_TABLES) {
-  const [searchable_rows, extra] = await Promise.all([
-    countRows('search_listings_ar', table, true),
-    countRows('listing_extra_attrs', table, false),
-  ]);
-  rows.push({ table, searchable_rows, in_extra_attrs: extra > 0 });
+  const searchable_rows = await countRows('search_listings_ar', table, true);
+  rows.push({ table, searchable_rows, in_extra_attrs: inExtra.has(table) });
 }
 
 // die() above already exits on any unreachable count, so reaching here means every table measured.

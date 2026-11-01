@@ -45,6 +45,12 @@ This section describes the shape; read the file for the table.
     first.
 - Unmatched → **routine #2 (🎖️ Senior Production)**, which holds the triage mandate. A fallback is
   a real owner, not a bin.
+- **Liveness-coverage alarms → #11 ♻️ Lifecycle (owner, 2026-10-27).** `liveness_checking_shortfall`,
+  `liveness_verification_sla`, `liveness_checking_stalled`, `liveness_coverage_*`, `oracle_never_retires`
+  and `oracle_chain_never_observed` measure the owner's rule «every ad we keep is checked; if we add more,
+  we check more». They had no pattern and fell to #2 — a routine retired on 2026-09-27 — so for a month
+  they reached nobody while DealApp (40% unchecked), Haraj (a 1,000-row slice) and 17 small sites
+  (0% checked) went unnoticed. The open ones were re-owned to `routine-11-lifecycle` the same day.
 
 ### Distribution over the 103 kinds present in `alert_event` on 2026-08-28
 
@@ -78,6 +84,16 @@ Routing keys on the alert's **`kind`**, not its `dedup_key`: the key carries the
 (platform, id, table), the kind names the failing surface, and ownership is a property of the
 surface. If the `alert_event` row no longer exists, the issue title is used instead — worse input,
 still an owner.
+
+**RESOLVING is the opposite: key on the `dedup_key`, never on the kind (routine-8, 2026-09-27).**
+`mon_resolve(kind, platform)` closes EVERY open alert of that kind on that platform; only
+`mon_resolve_key(kind, dedup_key)` closes one. A `kind` is shared by design — four detectors raise
+`blind_guard` — so a detector that self-heals with the broad form silences a SIBLING's open alert
+on its own CLEAN run, which is the run nobody reads. Neither detector is wrong alone, so testing
+either in isolation passes. Enforced, not remembered: `mon_detect_detector_self_heal_too_broad()`
+computes "shared" as *raised by more than one `mon_detect_*`*, so a broad resolver on a kind only it
+uses today goes red the day a second raiser appears. Full evidence:
+`supabase/migrations/20260927152204_a_detector_self_heal_may_only_clear_its_own_alarm.sql`.
 
 ## §3 — What each routine does with its label
 

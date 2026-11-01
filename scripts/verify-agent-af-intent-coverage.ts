@@ -51,7 +51,7 @@ check("every registry entry's id matches its key (no question can impersonate an
 console.log("\n── the agent can never exceed AF, on any cohort ──");
 const SAMPLE: Record<string, string> = {
   property_age: "new", street_width: "20", direction: "شمال", bathrooms: "3",
-  rating: "9.0", rnpl: "rnpl", unit_subtype: "شقة", furnished: "yes",
+  rating: "9.0", rnpl: "rnpl", unit_subtype: "شقة", furnished: "yes", apartments: "apts8", shops: "has_shops",
 };
 let violations = 0, appliedSomewhere = 0;
 for (const [type, cfg] of Object.entries(COHORT_QUESTIONS)) {

@@ -298,6 +298,38 @@ const INVENTED = ['tg', 'no', 'such', 'object', 'exists', 'anywhere', '404'].joi
 check('treeMentionTest is not vacuously true — an invented name resolves to false',
   mention(INVENTED) === false);
 
+// ── THE RED SENTENCE MUST BE TRUE OF THE TREE (routine #10, 2026-09-27) ──────────────────────────
+//
+// Every existence test here reads the COMMITTED CHECKOUT, so a red line means "no committed artefact
+// defines this" — a strict superset of "this does not exist". Two citations measured that day
+// (#839 mon_detect_price_drift_predicate_is_blind, #858 mon_detect_cron_abort_classifier_selftest)
+// named functions that are ALIVE in production and merely never mirrored to supabase/migrations, and
+// the old wording told their authors the barrier DOES NOT EXIST. The verdict was right; the sentence
+// sent them hunting for a barrier they knew they had written, when the real repair was the drift.
+// A guard whose red sentence is not true of the tree is a guard people learn to scroll past — this
+// same file spent six days red for that reason in 2026-09-14.
+{
+  const row = (citation: string) => [{ id: 1, state: 'resolved', owner_routine: 'r', citation }];
+  const say = (citation: string) =>
+    citationProblems(row(citation), () => false)[0] ?? '';
+  check('a missing DB-function citation blames the MIGRATION, not the object\'s existence',
+    say('mon_detect_nothing_at_all').includes('NO COMMITTED MIGRATION')
+    && say('mon_detect_nothing_at_all').includes('migration drift')
+    && !say('mon_detect_nothing_at_all').includes('DOES NOT EXIST'));
+  check('…and it still says the incident is not covered (the verdict is unchanged, nothing weakened)',
+    say('mon_detect_nothing_at_all').includes('reads as covered and is not')
+    && citationProblems(row('mon_detect_nothing_at_all'), () => false).length === 1);
+  check('a missing FILE citation says it is not in the checkout',
+    say('scripts/verify-not-a-real-file-at-all.ts').includes('NOT IN THE CHECKOUT'));
+  check('a missing SYMBOL citation says it is mentioned nowhere in the checkout',
+    say('some_invented_symbol_name').includes('MENTIONED NOWHERE'));
+  check('an UNKNOWN verdict still reads as UNKNOWN, never as either answer',
+    citationProblems(row('mon_detect_nothing_at_all'), () => null)[0]
+      .includes('COULD NOT BE DETERMINED'));
+  check('a resolvable citation produces no sentence at all (the wording change is not a new red)',
+    citationProblems(row('mon_detect_nothing_at_all'), () => true).length === 0);
+}
+
 console.log(failed === 0
   ? '\n✅ citation predicate proven in both directions\n'
   : `\n❌ ${failed} failure(s)\n`);

@@ -29,6 +29,7 @@
 //   node --experimental-strip-types scripts/verify-search-loader-shows-every-platform.ts   (npm test)
 
 import { readFileSync } from 'node:fs';
+import { windowBetween } from './lib/sourceWindow.ts';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -62,30 +63,40 @@ const floorMatch = agentSrc.match(/^const SEARCH_MIN_MS = (\d+);/m);
 const SEARCH_MIN_MS = Number(floorMatch?.[1]);
 check('SEARCH_MIN_MS is readable from agent.tsx (a floor nobody can find is a floor nobody maintains)',
   Number.isFinite(SEARCH_MIN_MS) && SEARCH_MIN_MS > 0, String(floorMatch?.[1]));
+const capMatch = agentSrc.match(/^const SEARCH_MAX_HOLD_MS = (\d+);/m);
+const SEARCH_MAX_HOLD_MS = Number(capMatch?.[1]);
+check('SEARCH_MAX_HOLD_MS is readable from agent.tsx (the cap is a real constant, not a comment)',
+  Number.isFinite(SEARCH_MAX_HOLD_MS) && SEARCH_MAX_HOLD_MS > 0, String(capMatch?.[1]));
 
-console.log('\n── A. the owner\'s ten seconds ──');
-check(`the searching beat lasts at least 10s (owner 2026-09-06) — SEARCH_MIN_MS = ${SEARCH_MIN_MS}`,
-  SEARCH_MIN_MS >= 10000,
-  'the roster is the trust signal; at 2.2s it was gone before it could be read');
+// OWNER 2026-10-17 — this section REVERSES the 2026-09-06 "wait ten seconds" floor: «less than 10
+// seconds, that's the max … results as soon as they are ready». The floor is now a short minimum so
+// the roster is never a flash, and a hard cap bounds every artificial hold. The "every platform gets
+// its moment" arithmetic still holds — against the CAP: on a slow search the whole wave fits inside it.
+console.log('\n── A. the owner\'s ten seconds — now a MAXIMUM, not a floor (2026-10-17) ──');
+check(`the artificial hold never exceeds ten seconds — SEARCH_MAX_HOLD_MS = ${SEARCH_MAX_HOLD_MS}`,
+  SEARCH_MAX_HOLD_MS <= 10000, 'the owner\'s goal is "less than 10 seconds, that\'s the max"');
+check(`the minimum beat keeps the roster from being a flash and sits under the cap — SEARCH_MIN_MS = ${SEARCH_MIN_MS}`,
+  SEARCH_MIN_MS >= 2500 && SEARCH_MIN_MS <= SEARCH_MAX_HOLD_MS,
+  'at 2.2s (pre-2026-09-06) the pills landed and were gone before any could be read');
 
 console.log('\n── B. the arithmetic that makes "all the platforms show clearly" true ──');
 // everyPlatformSeen() is the SHIPPED predicate, imported — not a replica. Section D feeds it the
 // pre-fix numbers and the pre-fix MODEL to prove it rejects both.
 const appeared = lastPillAppearedMs(ROSTER);
 const litBy = lastPillLitMs(ROSTER);
-check(`every one of the ${ROSTER} pills has appeared by ${appeared}ms and been lit by ${litBy}ms, inside the ${SEARCH_MIN_MS}ms floor`,
-  everyPlatformSeen(SEARCH_MIN_MS, ROSTER),
-  `the last pill needs ${Math.max(appeared, litBy)}ms but the loader may leave at ${SEARCH_MIN_MS}ms`);
+check(`every one of the ${ROSTER} pills has appeared by ${appeared}ms and been lit by ${litBy}ms, inside the ${SEARCH_MAX_HOLD_MS}ms cap (a slow search still shows them all)`,
+  everyPlatformSeen(SEARCH_MAX_HOLD_MS, ROSTER),
+  `the last pill needs ${Math.max(appeared, litBy)}ms but the loader must leave by ${SEARCH_MAX_HOLD_MS}ms`);
 
 // The wave's tail is the binding deadline, and it grows with the roster. MAX_ROSTER is the largest
-// catalogue this floor can serve; onboarding past it is a real product decision (a longer wait, or a
+// catalogue this cap can serve; onboarding past it is a real product decision (a longer cap, or a
 // wave that lights more than one pill per step), never a nudged constant.
-check(`the catalogue (${ROSTER}) is inside the ceiling this floor can serve (${MAX_ROSTER})`,
+check(`the catalogue (${ROSTER}) is inside the ceiling this cap can serve (${MAX_ROSTER})`,
   ROSTER <= MAX_ROSTER,
-  `at step ${highlightStepMs(ROSTER)}ms/pill a ${ROSTER}-roster needs ${litBy}ms; the floor is ${SEARCH_MIN_MS}ms`);
-// …and MAX_ROSTER must itself be honest about that floor, or the check above is theatre.
-check(`MAX_ROSTER (${MAX_ROSTER}) is the TRUE ceiling of the ${SEARCH_MIN_MS}ms floor, not a round number`,
-  lastPillLitMs(MAX_ROSTER) <= SEARCH_MIN_MS && lastPillLitMs(MAX_ROSTER + 1) > SEARCH_MIN_MS,
+  `at step ${highlightStepMs(ROSTER)}ms/pill a ${ROSTER}-roster needs ${litBy}ms; the cap is ${SEARCH_MAX_HOLD_MS}ms`);
+// …and MAX_ROSTER must itself be honest about that cap, or the check above is theatre.
+check(`MAX_ROSTER (${MAX_ROSTER}) is the TRUE ceiling of the ${SEARCH_MAX_HOLD_MS}ms cap, not a round number`,
+  lastPillLitMs(MAX_ROSTER) <= SEARCH_MAX_HOLD_MS && lastPillLitMs(MAX_ROSTER + 1) > SEARCH_MAX_HOLD_MS,
   `roster ${MAX_ROSTER} lit by ${lastPillLitMs(MAX_ROSTER)}ms, roster ${MAX_ROSTER + 1} by ${lastPillLitMs(MAX_ROSTER + 1)}ms`);
 
 // Per-pill dwell: the sweep must be slow enough to read, not a strobe across a big roster.
@@ -144,7 +155,7 @@ mustCatch('a floor one millisecond short of the real last-pill deadline',
 const oldModel = (floorMs: number, roster: number) =>
   (roster - 1) * 60 + 260 <= LOADER_REVEAL_MS && floorMs >= LOADER_REVEAL_MS + LOADER_SWEEP_MS;
 mustCatch('the pre-2026-09-19 model (phases added, nominal sweep) — it must no longer be what we ship',
-  oldModel(SEARCH_MIN_MS, ROSTER) !== everyPlatformSeen(SEARCH_MIN_MS, ROSTER)
+  oldModel(SEARCH_MAX_HOLD_MS, ROSTER) !== everyPlatformSeen(SEARCH_MAX_HOLD_MS, ROSTER)
   || oldModel(lastPillLitMs(ROSTER) - 1, ROSTER) !== everyPlatformSeen(lastPillLitMs(ROSTER) - 1, ROSTER));
 
 // A pill that is technically "reached" but never actually held lit is not seen. The envelope is part
@@ -155,16 +166,39 @@ mustCatch('the pre-2026-09-19 model (phases added, nominal sweep) — it must no
 const ungroupedLit = (roster: number) =>
   Math.max(0, roster - 1) * highlightStepMs(roster) + WAVE_LIT_MS;
 mustCatch('a wave that reverts to ONE pill per step (the 56-platform ceiling returning)',
-  ungroupedLit(MAX_ROSTER) > SEARCH_MIN_MS);
+  ungroupedLit(MAX_ROSTER) > SEARCH_MAX_HOLD_MS);
 
 mustCatch('a deadline that forgets the wave still has to RISE and HOLD on the last pill',
   !everyPlatformSeen(waveDelayMs(ROSTER - 1, highlightStepMs(ROSTER)) + WAVE_LIT_MS - 1, ROSTER));
 
 // A roster that outgrows the reveal budget.
 mustCatch('a catalogue that outgrows the reveal budget',
-  !everyPlatformSeen(SEARCH_MIN_MS, 200));
+  !everyPlatformSeen(SEARCH_MAX_HOLD_MS, 200));
+
+// THE CAP MUST BE REAL (owner 2026-10-17). The page-dwell gate used to wait for every logo page with no
+// upper bound — that is what pushed a live Filter search past 11 s on 2026-10-17. The gate must carry
+// the cap in its own condition; a gate without it is the old unbounded wait.
+const gateRe = /loaderPresentedRef\.current\[statusId\] !== true && Date\.now\(\) - since < SEARCH_MAX_HOLD_MS\) await waitRun/;
+check('the page-dwell gate is bounded by SEARCH_MAX_HOLD_MS (results are never held past the cap)', gateRe.test(agentSrc));
+mustCatch('the old unbounded page-dwell gate',
+  !gateRe.test(agentSrc.replace(' && Date.now() - since < SEARCH_MAX_HOLD_MS', '')));
+
+// AN ADVANCED FILTER ROUND HOLDS A 5-SECOND ONE-SENTENCE BEAT (owner 2026-10-11; 10-10 was 10 s of logos,
+// 10-05 skipped it). The 10.6 s floor + page-dwell gate are for a NEW search; an AF round waits a plain
+// AF_LOADER_MS = 5000 from when its beat appeared, never more, and renders AfRoundLoader, not the logos.
+{
+  const play = windowBetween(agentSrc, 'const playListings = async', '// 2) RESULTS: ONE consolidated bubble', 'src/app/agent.tsx playListings');
+  check('a NEW search still waits the minimum beat and the (capped) page-dwell gate', /if \(!afCompleted\) \{[\s\S]{0,200}SEARCH_MIN_MS - \(Date\.now\(\) - since\)[\s\S]{0,600}loaderPresentedRef\.current\[statusId\] !== true && Date\.now\(\) - since < SEARCH_MAX_HOLD_MS/.test(play));
+  check('…and only an Advanced Filter round (afCompleted) skips them — no other condition widens the skip',
+    (play.match(/if \(!afCompleted\) \{/g) ?? []).length === 1 && !/if \(!afCompleted \|\|/.test(play) && !/if \(!afCompleted &&/.test(play));
+  const afTen = (src: string, body: string) => /const AF_LOADER_MS = 5000;/.test(src) && /if \(m\.afRound\) return <AfRoundLoader /.test(src) && /\} else \{[\s\S]{0,400}const remaining = AF_LOADER_MS - \(Date\.now\(\) - since\);\s*if \(remaining > 0\) await waitRun\(run, remaining\);\s*\}/.test(body);
+  check('an Advanced Filter round holds its one-sentence beat for 5 seconds (owner 2026-10-11)', afTen(agentSrc, play));
+  mustCatch('an AF round that skips the animation again', !afTen(agentSrc, play.replace(/\} else \{[\s\S]{0,400}?await waitRun\(run, remaining\);\s*\}/, '}')));
+  mustCatch('an AF beat that is not 5 seconds', !afTen(agentSrc.replace('const AF_LOADER_MS = 5000;', 'const AF_LOADER_MS = 10000;'), play));
+  mustCatch('an AF round showing the logo loader again', !afTen(agentSrc.replace('if (m.afRound) return <AfRoundLoader ', 'if (false) return <AfRoundLoader '), play));
+}
 
 console.log(failures === 0
-  ? '\n✓ ten seconds, and every platform both appears and is highlighted before the loader may leave\n'
+  ? '\n✓ results as soon as ready, never held past ten seconds; on a slow search every platform still appears and is highlighted inside the cap; an AF round holds a 5 s one-sentence beat\n'
   : `\n✗ ${failures} check(s) FAILED — a search could hide platforms the owner asked to be shown\n`);
 process.exit(failures === 0 ? 0 : 1);

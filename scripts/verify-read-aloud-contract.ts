@@ -7,6 +7,7 @@
 //
 //   node --experimental-strip-types scripts/verify-read-aloud-contract.ts   (wired into `npm test`)
 import { readFileSync } from 'node:fs';
+import { windowBetween, windowUpTo } from './lib/sourceWindow.ts';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { pickBestArabicVoice, QUALITY_ENHANCED, type ArabicVoiceCandidate } from '../src/lib/readAloudVoice.ts';
@@ -68,9 +69,9 @@ check('a shared "who is speaking" id is exposed for callers to derive their own 
 check('FeedbackRow calls speakReadAloud only from its onReadAloud handler, itself only wired to onPress', /const onReadAloud = \(\) => \{[\s\S]{0,200}?speakReadAloud\(/.test(feedbackRow) && /onPress=\{onReadAloud\}/.test(feedbackRow));
 check('no speak call sits inside a bare useEffect (would autoplay without a tap)', !/useEffect\(\(\) => \{[\s\S]{0,200}?speakReadAloud\(/.test(feedbackRow) && !/useEffect\(\(\) => \{[\s\S]{0,400}?speakReadAloud\(/.test(agent));
 
-// ── LANGUAGE: Arabic ONLY (owner 2026-08-19) — every utterance speaks as ar-SA, no English branch,
+// ── LANGUAGE: Displayed language (owner 2026-10-14) — every utterance speaks as ar-SA, no English branch,
 //    no per-message language detection to keep in sync with anything else. ──────────────────────────
-check("every speak() call is hardcoded to ar-SA — no English/other-language branch", /const AR_LANG = 'ar-SA';/.test(readAloud) && /language: AR_LANG/.test(readAloud) && !/en-US/.test(readAloud));
+check("every speak uses the selected display language and an explicitly matched voice", /sessionLanguage = locale === 'en' \? 'en-US' : AR_LANG;/.test(readAloud) && /language: sessionLanguage/.test(readAloud) && /utterance.lang = sessionLanguage/.test(readAloud));
 check('msgRTL (bubble RTL layout) has ONE definition (src/lib/textDirection.ts) — read-aloud no longer needs or imports it', /export const msgRTL = /.test(rd('src/lib/textDirection.ts')) && /import \{ msgRTL \} from '@\/lib\/textDirection'/.test(agent) && !/textDirection/.test(readAloud));
 
 // ── VOICE QUALITY (owner feedback 2026-08-19 — "sounds robotic"; root-cause voice-selection fix,
@@ -114,9 +115,9 @@ check('speakReadAloud() itself has no await before Speech.speak() (stays synchro
 // ── ROOT-CAUSE FIX (owner report 2026-08-22, "sounds English"): NEVER call Speech.speak() without an
 //    explicitly confirmed matching Arabic voice — this is what the old code got wrong (fell through
 //    to language-only, which most engines resolve to the SYSTEM DEFAULT voice, not an Arabic one).
-check('speakReadAloud() refuses to speak (returns false) when no Arabic voice has been confirmed — never falls through to a language-only (wrong-voice) call', /if \(!bestArabicVoice\) return false;/.test(readAloud));
-check('every actual Speech.speak() call passes an explicit .voice (the confirmed Arabic voice identifier), never language-only', /voice: bestArabicVoice!\.identifier,/.test(readAloud));
-check('speakReadAloud has a boolean return type so callers can react to "genuinely unavailable" (FeedbackRow shows a graceful Arabic message, never silently speaks wrong-language)', /export function speakReadAloud\(id: string, segments: ReadAloudSegment\[\]\): boolean \{/.test(readAloud));
+check('speakReadAloud() refuses to speak (returns false) when no Arabic voice has been confirmed — never falls through to a language-only (wrong-voice) call', /if \(!sessionVoice\) return false;/.test(readAloud));
+check('every actual Speech.speak() call passes an explicit .voice (the confirmed Arabic voice identifier), never language-only', /voice: sessionVoice!\.identifier,/.test(readAloud));
+check('speakReadAloud has a boolean return type so callers can react to "genuinely unavailable" (FeedbackRow shows a graceful Arabic message, never silently speaks wrong-language)', /export function speakReadAloud\(id: string, segments: ReadAloudSegment\[\], locale: 'ar' \| 'en' = 'ar'\): boolean \{/.test(readAloud));
 // RETARGETED 2026-09-25, routine #6 — THIS CHECK HAD PINNED THE DEFECT AS CORRECT.
 // It required the literal `setUnavailable(true)`, and that single boolean WAS the bug: a refusal
 // that only meant "the voice list has not finished loading" was rendered as
@@ -131,7 +132,7 @@ check('speakReadAloud has a boolean return type so callers can react to "genuine
 // no-op, which is what this check was always for. (b) WHICH message is asked of the shared verdict
 // rather than assumed, so the device line can only be reached from the state it is true in. The
 // verdict itself is EXECUTED by verify-read-aloud-voice-logic.ts §6; this pins the wiring.
-check('FeedbackRow shows a refusal message only when speakReadAloud reports it did not start — never as a silent no-op', /const started = speakReadAloud\(feedbackKey, readAloudSegments\);/.test(feedbackRow) && /if \(!started\) \{/.test(feedbackRow) && /readAloudRefusal\(\)/.test(feedbackRow));
+check('FeedbackRow shows a refusal message only when speakReadAloud reports it did not start — never as a silent no-op', /const started = speakReadAloud\(feedbackKey, readAloudSegments, locale\);/.test(feedbackRow) && /if \(!started\) \{/.test(feedbackRow) && /readAloudRefusal\(locale\)/.test(feedbackRow));
 check('…and WHICH refusal message is decided by the shared verdict, never a single boolean that cannot tell "no voice on this device" from "still looking"', /readAloudRefusalMessageKey\(/.test(feedbackRow) && !/setUnavailable\(/.test(feedbackRow));
 // CHATGPT-LIKE PACING (owner 2026-08-19): rate is a MEASURED value (real playback timing against the
 // documented ~4.5 syllable/second natural-Arabic-speech benchmark), not a guess — pinned distinctly
@@ -141,19 +142,19 @@ check('default speech rate is the measured, documented value (1.3 — natural-pa
 
 // ── STRUCTURE (owner 2026-08-19): إزهله -> pause -> summary -> pause -> visible property cards, in
 //    the SAME order shown on screen, capped, never reading raw/internal fields. ─────────────────────
-check("script opens with the intro word 'إزهله' followed by a pause before anything else", /const INTRO_WORD = 'إزهله';/.test(readAloudScript) && /segments: ReadAloudSegment\[\] = \[\{ text: INTRO_WORD, pauseAfterMs: PAUSE_MS \}\];/.test(readAloudScript));
+check("script opens with the intro word 'إزهله' followed by a pause before anything else", /const INTRO_WORD = 'إزهله';/.test(readAloudScript) && /segments: ReadAloudSegment\[\] = \[\{ text: locale === 'en' \? 'Ezhalah' : INTRO_WORD, pauseAfterMs: PAUSE_MS \}\];/.test(readAloudScript));
 check('the summary is spoken next (second segment), also followed by a pause', /if \(summary\) segments\.push\(\{ text: summary, pauseAfterMs: PAUSE_MS \}\);/.test(readAloudScript));
-check('cards are appended AFTER intro+summary, via Array.forEach over the listings array (preserves on-screen order — never re-sorted)', /visibleListings\.forEach\(\(listing, i\) => \{[\s\S]{0,120}?segments\.push\(\{ text: cardSpeech\(listing\)/.test(readAloudScript));
+check('cards are appended AFTER intro+summary, via Array.forEach over the listings array (preserves on-screen order — never re-sorted)', /visibleListings\.forEach\(\(listing, i\) => \{[\s\S]{0,120}?segments\.push\(\{ text: cardSpeech\(listing, locale\)/.test(readAloudScript));
 check('no pause trails the LAST card when there is no closing note; a pause DOES separate the last card from a closing note when one is supplied', /pauseAfterMs: isLast && !note \? 0 : PAUSE_MS/.test(readAloudScript));
 // NO CAP (owner request, 2026-08-22: "it doesn't do it for all the cards... do it all" — the old
 // READ_ALOUD_CARD_CAP=5 stopped short). Every visible card is spoken now; the only bound left is the
 // caller's own reveal-count slice (checked next), never a second, stricter one in the script itself.
 check('no card cap remains in the script — every visibleListings entry is spoken, not a .slice()-bounded subset', !/READ_ALOUD_CARD_CAP/.test(readAloudScript) && !/visibleListings\.slice\(/.test(readAloudScript));
-check('the caller passes the VISIBLE (reveal-count-sliced) listings, never the full fetched set — no hidden listing can be spoken', /buildResultsReadAloudSegments\(introText, m\.result\.listings\.slice\(0, shown\), readAloudClosingNote\)/.test(agent));
+check('the caller passes the VISIBLE (reveal-count-sliced) listings, never the full fetched set — no hidden listing can be spoken', /buildResultsReadAloudSegments\(introText, m\.result\.listings\.slice\(0, shown\), readAloudClosingNote, locale\)/.test(agent));
 // CLOSING NOTE (owner request, 2026-08-23 — "read the note... and say the button also"): the
 // «عرضت لك أول N إعلانات...» text + an available-actions sentence, spoken as the FINAL segment —
 // appended, never re-derived, from the exact same variables agent.tsx's visible Text/buttons use.
-check('buildResultsReadAloudSegments() accepts an optional closingNote and appends it as the final segment, trimmed and only when non-empty', /export function buildResultsReadAloudSegments\(summaryText: string, visibleListings: Listing\[\], closingNote\?: string\)/.test(readAloudScript) && /const note = closingNote\?\.trim\(\);/.test(readAloudScript) && /if \(note\) segments\.push\(\{ text: note, pauseAfterMs: 0 \}\);/.test(readAloudScript));
+check('buildResultsReadAloudSegments() accepts an optional closingNote and appends it as the final segment, trimmed and only when non-empty', /export function buildResultsReadAloudSegments\(summaryText: string, visibleListings: Listing\[\], closingNote\?: string, locale: 'ar' \| 'en' = 'ar'\)/.test(readAloudScript) && /const note = closingNote\?\.trim\(\);/.test(readAloudScript) && /if \(note\) segments\.push\(\{ text: note, pauseAfterMs: 0 \}\);/.test(readAloudScript));
 check('agent.tsx builds the closing note from the SAME moreNoteText the visible <Text> renders, never a re-derived copy', /<Text style=\{\[s\.replyText,[\s\S]{0,120}?\{moreNoteText\}/.test(agent) && /const readAloudClosingNote = \[moreNoteText, spokenActionsNote\]\.filter\(Boolean\)\.join\(' '\);/.test(agent));
 // The call gained a local `!afReceipt[m.id] &&` conjunct on 2026-09-20 so a spent turn swaps its
 // buttons for the completed-round receipt at once, instead of waiting for `chatCompleted` to land a
@@ -161,7 +162,7 @@ check('agent.tsx builds the closing note from the SAME moreNoteText the visible 
 // `resultsActionsRowVisible` and still carries the interview phase — so the pattern tolerates that
 // one conjunct and nothing else.
 check('the spoken available-actions sentence names only button(s) that are ACTUALLY on screen (gated by the same showActionsRow used for the visible buttons row, incl. the Advanced-Filter-open hide)', /const showActionsRow = (?:!afReceipt\[m\.id\] && )?resultsActionsRowVisible\(\{[\s\S]{0,240}?afPhase: ageFlow\?\.phase \?\? null/.test(agent) && /const spokenActionsNote = !showActionsRow \? ''/.test(agent) && /\{showActionsRow \? \(/.test(agent));
-check('the spoken action label(s) are the exact SAME t(\'Load more\')/t(\'Let’s narrow it down\') strings the visible buttons render — never a separately-worded copy', /const spokenActionLabels = \[hasMore && t\('Load more'\), canNarrowFurther && t\('Let’s narrow it down'\)\]\.filter\(Boolean\) as string\[\];/.test(agent));
+check('the spoken action label(s) are the exact SAME t(\'Load more\')/t(\'🎯 Refine with AI\') strings the visible buttons render — never a separately-worded copy', /const spokenActionLabels = \[hasMore && replyT\('Load more'\), canNarrowFurther && replyT\('🎯 Refine with AI'\)\]\.filter\(Boolean\) as string\[\];/.test(agent));
 // No raw/internal fields anywhere in the card-speech builder: id, source_url, free-text
 // description/title, or a raw JSON dump. Platform name IS spoken (owner request, 2026-08-22) but only
 // via the shared listingPlatformAr() display helper, never a raw listing.source read in this file.
@@ -181,7 +182,23 @@ check('sourceName() (the platform-slug-to-label mapping) lives in ONE place, lis
 // ── CLEANUP: never leaves a dangling utterance playing after the row unmounts (page navigation), or
 //    across a new search on the same screen. ───────────────────────────────────────────────────────
 check('FeedbackRow stops its own speech on unmount (ref-based, mount/unmount only — no redundant stop on every idle transition)', /useEffect\(\(\) => \(\) => \{ if \(speakingRef\.current\) stopReadAloud\(\); \}, \[\]\);/.test(feedbackRow));
-check('starting a new search/turn stops any read-aloud left over from the previous response', /stopReadAloud\(\); \/\/ a new turn starting is "another response"/.test(agent));
+// STRUCTURALLY LOCATED, not located by prose (routine #10, 2026-09-27, ops_incident #727).
+// This read `/stopReadAloud\(\); \/\/ <that line's trailing comment>/` — the COMMENT was the only
+// thing telling this stopReadAloud() from the two in FeedbackRow and the player. Measured that day:
+// rewording that one comment in agent.tsx, with the call untouched, took this file to 98/99 AND made
+// two of its own mutation proofs report themselves BLIND, because the negative control ("the REAL
+// shipped tree is NOT flagged") stopped holding. Prose is not behaviour.
+//
+// The property is «every new turn stops the previous turn's read-aloud», and what makes it TRUE is
+// that the call sits in send()'s UNCONDITIONAL prologue — before the refine intercept and every other
+// branch. So window send() between its own signature and the first `setBusy(true)` and assert the
+// call is in THERE. Strictly stronger than the old pin: it additionally catches the call being moved
+// below a branch (where it would no longer run on every turn), which the text pin could not see.
+// windowBetween() THROWS on a marker that moved, so a refactor is a loud red naming the marker — never
+// a silently widened window (scripts/lib/sourceWindow.ts; AGENTS.md R4).
+check('starting a new search/turn stops any read-aloud left over from the previous response — in send()\'s UNCONDITIONAL prologue, so it runs before every branch',
+  windowBetween(agent, 'const send = async (override?: string) => {', 'setBusy(true);', 'src/app/agent.tsx send() prologue')
+    .includes('stopReadAloud();'));
 
 // ── UI: no fabricated fallback voice/provider on error — the OS/browser's own behavior is the whole
 //    story, per owner instruction ("do not switch to a paid service"). ─────────────────────────────
@@ -199,7 +216,7 @@ check('a unit error just ends the session cleanly (finishSession) — never fall
 // unaffected by this bug — only actual playback moves).
 check('web playback bypasses expo-speech\'s buggy Speech.speak()/pause()/resume(), using window.speechSynthesis directly instead', /window\.speechSynthesis\.speak\(utterance\)/.test(readAloud) && /window\.speechSynthesis\.pause\(\)/.test(readAloud) && /window\.speechSynthesis\.resume\(\)/.test(readAloud) && /window\.speechSynthesis\.cancel\(\)/.test(readAloud));
 check('voice RESOLUTION is untouched by the playback-engine rewrite — still expo-speech\'s getAvailableVoicesAsync via the same bounded poll', /Speech\.getAvailableVoicesAsync\(\)/.test(readAloud) && /const POLL_TIMEOUTS_MS = \[/.test(readAloud));
-check('the raw web utterance still gets the exact confirmed Arabic voice object (resolved back from bestArabicVoice.identifier), never left unset', /function resolveWebVoiceObject\(\)/.test(readAloud) && /v\.voiceURI === bestArabicVoice!\.identifier/.test(readAloud) && /if \(voice\) utterance\.voice = voice;/.test(readAloud));
+check('the raw web utterance still gets the exact confirmed Arabic voice object (resolved back from bestArabicVoice.identifier), never left unset', /function resolveWebVoiceObject\(\)/.test(readAloud) && /v\.voiceURI === sessionVoice!\.identifier/.test(readAloud) && /if \(voice\) utterance\.voice = voice;/.test(readAloud));
 check('native (iOS) pause/resume still go through expo-speech\'s Speech.pause()/Speech.resume() directly — no such remapping bug exists there', /void Speech\.pause\(\); \} \/\/ iOS only/.test(readAloud) && /void Speech\.resume\(\); \} \/\/ iOS only/.test(readAloud));
 check('Android (no native pause/resume in expo-speech) never silently no-ops a pause tap — it cancels the current unit and restarts it on resume, an honest degraded behavior, not a fake pause', /else if \(isAndroid\(\)\) \{/.test(readAloud) && /pendingRestart = true;/.test(readAloud));
 
@@ -441,15 +458,54 @@ mustCatch('the floating player learning to fetch() — a network call on the spe
 mustCatch('a paid speech SDK added to package.json',
   breaks('package.json', (src) => src.replace('"expo-speech":', '"elevenlabs": "^1.0.0",\n    "expo-speech":')));
 
-// — ARABIC ONLY (owner 2026-08-19): no per-message language branch —
-mustCatch('an English language branch reappearing in readAloud.ts',
-  breaks('src/lib/readAloud.ts', (src) => src.replace("language: AR_LANG", "language: isArabic ? AR_LANG : 'en-US'")));
+// — THE STRUCTURAL LOCATOR (replaces a comment pin, 2026-09-27): prove BOTH directions —
+//
+// These proofs locate the call STRUCTURALLY too. The first draft of them matched the product's
+// trailing comment to find the line to delete, which reintroduced the very defect this conversion
+// removes: with the comment reworded the main assertion held at 99/99 while proof #1 reported itself
+// BLIND. A proof that depends on prose is no better than an assertion that does.
+const SEND_OPEN = 'const send = async (override?: string) => {';
+/** The `stopReadAloud();` statement inside send()'s prologue, found by POSITION, never by prose. */
+const prologueCall = (src: string): string => {
+  const open = src.indexOf(SEND_OPEN);
+  if (open < 0) throw new Error('send() signature moved — the proof cannot locate its subject');
+  const at = src.indexOf('stopReadAloud();', open);
+  const eol = src.indexOf('\n', at);
+  return src.slice(src.lastIndexOf('\n', at) + 1, eol);   // the whole line, comment and all
+};
+mustCatch('the new-turn stopReadAloud() being deleted from send()',
+  breaks('src/app/agent.tsx', (src) => src.replace(`${prologueCall(src)}\n`, '')));
+mustCatch('the call being MOVED below a branch, where it no longer runs on every turn (the text pin could not see this)',
+  breaks('src/app/agent.tsx', (src) => {
+    const line = prologueCall(src);
+    return src.replace(`${line}\n`, '')
+      .replace('    if (pendingRefineRef.current) {', `${line}\n    if (pendingRefineRef.current) {`);
+  }));
+mustCatch('send() being renamed out from under the window — a moved marker is a loud red, never a silent pass',
+  (() => { try { return breaks('src/app/agent.tsx', (src) =>
+    src.replace(SEND_OPEN, 'const submitTurn = async (override?: string) => {')); }
+    catch { return true; } })());
+// …and the control that this conversion exists for: a COMMENT-ONLY reword no longer moves the verdict
+// at all. Before it, this exact edit produced `98 of 99` plus two self-reported-blind proofs.
+mustCatch('…while a comment-only reword of that same line is NOT flagged (the false RED is gone)',
+  contractProblems(mutate('src/app/agent.tsx', (src) => {
+    const line = prologueCall(src);
+    // windowUpTo, never `line.slice(0, line.indexOf('//'))`: a bare indexOf returns -1 when the
+    // comment is already gone and slice(0, -1) would silently chop the call's last character instead
+    // of failing. R4's own ratchet caught exactly this line when it was first written that way.
+    const code = windowUpTo(line, '//', 'the shipped prologue line');
+    return src.replace(line, `${code}// reworded prose that says the same thing in different words`);
+  })).length === 0);
+
+// — DISPLAYED LANGUAGE (owner 2026-10-14): no per-message language branch —
+mustCatch('speech language reverting to Arabic in English UI',
+  breaks('src/lib/readAloud.ts', (src) => src.replace("language: sessionLanguage", "language: AR_LANG")));
 
 // — «SOUNDS ENGLISH» (owner 2026-08-22): never speak without a CONFIRMED Arabic voice —
 mustCatch('THE ROOT CAUSE: speakReadAloud() no longer refusing when no Arabic voice is confirmed, so it falls through to a language-only call the engine resolves to the system default',
-  breaks('src/lib/readAloud.ts', (src) => src.replace('if (!bestArabicVoice) return false;', '')));
+  breaks('src/lib/readAloud.ts', (src) => src.replace('if (!sessionVoice) return false;', '')));
 mustCatch('a Speech.speak() call that stops passing the confirmed voice identifier (language-only again)',
-  breaks('src/lib/readAloud.ts', (src) => src.replace(/voice: bestArabicVoice!\.identifier,/g, '')));
+  breaks('src/lib/readAloud.ts', (src) => src.replace(/voice: sessionVoice!\.identifier,/g, '')));
 mustCatch('the 45s background retry window deleted, so a device is called "genuinely unavailable" right after the fast poll',
   breaks('src/lib/readAloud.ts', (src) => src.replace('const RETRY_WINDOW_MS = 45000;', 'const RETRY_WINDOW_MS = 0;')));
 

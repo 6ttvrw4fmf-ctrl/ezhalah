@@ -145,6 +145,7 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   { routine: 1, test: /^(liveness_cap_degraded|source_limited_contradicted|unprobed_source_waiver)/ },
   { routine: 1, test: /^gathern_liveness/ },
   { routine: 1, test: /^ingestion_check_failed$/ },
+  { routine: 1, test: /^moj_district_sales_stale$/ },   // the weekly MoJ job stopped running (its red runs arrive as ingestion_check_failed)
 
   // 6 👣 Journey & Persistence — chat/session/auth state, never matching itself.
   { routine: 6, test: /^(transcript_|filter_state_lost|chat_|session_|auth|sidebar)/ },
@@ -158,6 +159,14 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   { routine: 11, test: /^(inactive_still_searchable|inactive_still_counted|false_resurrection)$/ },
   { routine: 11, test: /^(unknown_treated_as_dead|deletion_clock_|orphan_after_delete)/ },
   { routine: 11, test: /^lifecycle_/ },
+  // «Every ad we keep is checked, and if we add more we check more» (owner 2026-10-26/27). These are the
+  // alarms that measure exactly that: a platform not re-checking fast enough for its own SLA
+  // (liveness_checking_shortfall), most active rows with no fresh live proof (liveness_verification_sla),
+  // a checker that stopped (liveness_checking_stalled), an oracle that never ran or never retires
+  // anything (oracle_*). They fell through to the #2 fallback, a routine the owner retired on
+  // 2026-09-27, so they reached nobody for a month while DealApp, Haraj and 17 small sites went
+  // unchecked. They belong to ♻️ Lifecycle.
+  { routine: 11, test: /^(liveness_checking_shortfall|liveness_verification_sla|liveness_checking_stalled|liveness_coverage_|oracle_never_retires|oracle_chain_never_observed)/ },
 
   // 10 🧱 Bug Prevention & Barrier — the VERIFICATION APPARATUS, never the product. A barrier that
   // asserts the bug, a check with no mutation proof, a test that passes while production is wrong.

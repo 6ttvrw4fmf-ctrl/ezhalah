@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, I18nManager, Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Image as XImage } from 'expo-image'; // SVG logo: a vector drawing, not a photo (owner 2026-10-24)
 import Animated, {
   Easing,
   interpolate,
@@ -21,11 +22,10 @@ import {
 import { centredDialogBox, useForeignPromptInsets } from '@/lib/bottomPromptInset';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { useAtLeast } from '@/lib/useAtLeast';
-import { ABOUT_ART_BREAKPOINT, DOCK_BREAKPOINT } from '@/lib/responsive';
+import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { canDragAuthPopup } from '@/lib/authPopupBehavior';
 import { attachCardDrag, clampOffsetOnScreen } from '@/lib/cardDrag';
-import { LEGAL_DOCS, hasLegalDocs } from '@/data/legal';
-import { PLATFORM_META } from '@/data/loaderPlatforms';
+import { getLegalDocs, hasLegalDocs } from '@/data/legal';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const IN = { duration: 240, easing: Easing.bezier(0.22, 1, 0.36, 1) };
@@ -63,17 +63,7 @@ const ABOUT_MAX_W = 760;
 const LEGAL_MAX_W = 640;
 const ABOUT_MAX_H = 700;
 
-const EAGLE = require('../../assets/images/eagle-mark.png');
-// «من نحن» artwork (owner 2026-08-30): the EXISTING Ezhalah eagle looking over the Kingdom's
-// properties — assets/images/eagle-night.jpg, 900×1317 (portrait). Owner 2026-09-03: it lives in
-// its OWN box now — never a background under text, never zoomed, cropped or stretched.
-const ABOUT_ART = require('../../assets/images/eagle-night.jpg');
-const ABOUT_ART_RATIO = 900 / 1317;
-
-// The only number «من نحن» shows. Derived from the shipped partner roster at compile time — never a
-// hardcoded count that goes stale, and never a dynamic listings/cities figure we'd have to fake.
-const PLATFORM_COUNT = PLATFORM_META.length;
-
+const EAGLE = require('../../assets/images/logo-cloud-green-static.svg'); // About/Terms always show the green-lit cloud eagle (owner 2026-10-24)
 type Kind = 'support' | 'about' | 'legal';
 
 // In-app popup that hosts the Support / About / Terms & Privacy content as a centered dialog over a
@@ -98,7 +88,9 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
   const about = kind === 'about';
   // «من نحن» has NO close button (owner 2026-09-03): the backdrop closes it, and its header is the
   // drag grip. Support and the legal reader keep the × — they are forms and long reads.
-  const hasClose = kind !== 'about';
+  // EVERY info popup carries the × (owner 2026-10-23: «all those information popups must show x» — reverses
+  // 2026-09-03's About-without-×). It sits top-RIGHT in both languages, never mirrored (owner 2026-10-24).
+  const hasClose = true;
 
   const progress = useSharedValue(0);
   useEffect(() => {
@@ -133,8 +125,6 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
   // transform. No position memory: every open starts perfectly centered; only a move changes it.
   const docked = useAtLeast(DOCK_BREAKPOINT);
   const drag = about && canDragAuthPopup({ isWeb: IS_WEB, docked });
-  // Side-by-side art box vs stacked — an SSR-safe flag (useAtLeast), never a raw width compare.
-  const wide = useAtLeast(ABOUT_ART_BREAKPOINT);
   const hostRef = useRef<View | null>(null);
   const gripRef = useRef<View | null>(null);
   useEffect(() => {
@@ -202,16 +192,16 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
               testID="info-modal-close"
               accessibilityRole="button"
               accessibilityLabel={t('Close')}
-              style={({ hovered, pressed }: any) => [s.xBtn, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
+              style={({ hovered, pressed }: any) => [s.xBtn, s.xBtnRight, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
             >
               {({ hovered, pressed }: any) => (
-                <Ionicons name="close" size={20} color={hovered || pressed ? colors.ink : colors.muted} />
+                <Ionicons name="close" size={20} color={colors.ink} />
               )}
             </Pressable>
           )}
           <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
             {kind === 'support' ? <SupportBody t={t} />
-              : kind === 'about' ? <AboutBody t={t} reduced={reduced} gripRef={gripRef} drag={drag} wide={wide} />
+              : kind === 'about' ? <AboutBody t={t} reduced={reduced} gripRef={gripRef} drag={drag} />
               : <LegalBody t={t} initial={legalTab} />}
           </ScrollView>
         </Animated.View>
@@ -225,12 +215,13 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
 // with room to breathe — title band, the support form, then partnerships and the response promise
 // as quieter secondary sections. VISUAL ONLY — same strings, same fields, same actions, same icons.
 function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => string }) {
+  const { isRTL } = useI18n();
   return (
     <View>
       {/* Style `h` keeps its CLOSE_CLEAR physical-right padding so the title can never slide under
           the floating × (verify-info-modal-header-clearance pins that arithmetic). */}
       <View style={s.head}>
-        <Text style={s.h}>{t('Support')}</Text>
+        <Text style={[s.h, !isRTL && s.textLtr]}>{t('Support')}</Text>
       </View>
 
       <View style={s.bodyPad}>
@@ -247,7 +238,7 @@ function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => stri
         <View style={s.rt}>
           <View style={s.rtHead}>
             <Ionicons name="time-outline" size={15} color={colors.primary} />
-            <Text style={s.rtH}>{t('Response Time')}</Text>
+            <Text style={[s.rtH, !isRTL && s.textLtr]}>{t('Response Time')}</Text>
           </View>
           <RtRow text={t('Typical response time: {h}.', { h: t('72 hours') })} />
           <RtRow text={t('Some inquiries may take up to {d}.', { d: t('1 week') })} />
@@ -262,18 +253,18 @@ function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => stri
 // on screen so «حاول مرة أخرى» resends exactly what the user wrote. Nothing is cleared on failure —
 // losing someone's typed problem report is the one outcome this form must never produce.
 function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => string }) {
-  const { locale } = useI18n();
+  const { locale, isRTL } = useI18n();
   const { user } = useApp();
   // Closing this dialog UNMOUNTS the form, and its backdrop closes on a tap — so an in-progress
   // draft is restored from the session-scoped cache rather than starting empty. See the long note
   // in lib/supportDraft.ts for the measured loss and why the cache is memory, never disk.
   // Lazy initialisers: `recallSupportDraft()` must run on MOUNT, not on every render.
-  const [email, setEmail] = useState(
-    // Signed-in users authenticate with Google/Apple, so `sub` IS their email — prefill it rather
-    // than making them type an address we already know. Signed-out users type their own. A recalled
-    // address wins: the user may have deliberately typed a different one before being interrupted.
-    () => recallSupportDraft()?.email || (user?.sub && user.sub.includes('@') ? user.sub : ''),
-  );
+  // LOCKED FOR A SIGNED-IN USER (owner 2026-10-23: «lock the email … that's his logged-in email»): Google/Apple
+  // sign-in means `sub` IS their address, so the reply goes to the account itself and the field cannot be
+  // edited. A signed-out user types their own (a recalled draft address is kept for them).
+  const accountEmail = user?.sub && user.sub.includes('@') ? user.sub : '';
+  const [typedEmail, setEmail] = useState(() => (accountEmail ? '' : recallSupportDraft()?.email || ''));
+  const email = accountEmail || typedEmail;
   const [subject, setSubject] = useState(() => recallSupportDraft()?.subject ?? '');
   const [message, setMessage] = useState(() => recallSupportDraft()?.message ?? '');
   const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
@@ -335,8 +326,8 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
       <View style={s.formHead}>
         <View style={s.cardIc}><Ionicons name="headset-outline" size={19} color={colors.primary} /></View>
         <View style={s.supBody}>
-          <Text style={s.mail}>{t('Contact support')}</Text>
-          <Text style={s.desc}>{t('Questions about your account, searches, or technical issues.')}</Text>
+          <Text style={[s.mail, !isRTL && s.textLtr]}>{t('Contact support')}</Text>
+          <Text style={[s.desc, !isRTL && s.textLtr]}>{t('Questions about your account, searches, or technical issues.')}</Text>
         </View>
       </View>
 
@@ -350,7 +341,7 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
           maxLength={SUBJECT_MAX}
           placeholder={t('What is this about?')}
           placeholderTextColor={colors.muted}
-          style={s.input}
+          style={[s.input, !isRTL && s.inputLtr]}
         />
       </Field>
 
@@ -367,7 +358,7 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
           textAlignVertical="top"
           placeholder={t('Tell us what happened.')}
           placeholderTextColor={colors.muted}
-          style={[s.input, s.area]}
+          style={[s.input, s.area, !isRTL && s.inputLtr]}
         />
       </Field>
 
@@ -377,20 +368,22 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
           onChangeText={setEmail}
           onFocus={() => setFocus('email')}
           onBlur={() => setFocus(null)}
-          editable={!sending}
+          editable={!sending && !accountEmail}
+          accessibilityHint={accountEmail ? t('Your signed-in email') : undefined}
           keyboardType="email-address"
           autoCapitalize="none"
           autoComplete="email"
           placeholder="name@example.com"
           placeholderTextColor={colors.muted}
-          style={[s.input, s.inputLtr]}
+          style={[s.input, s.inputLtr, !!accountEmail && s.inputLocked]}
         />
+        {accountEmail ? <Ionicons name="lock-closed" size={14} color={colors.muted} style={s.lockIcon} accessible={false} /> : null}
       </Field>
 
       {state === 'error' ? (
         <View style={s.errRow}>
           <Ionicons name={failure === 'rate_limited' ? 'time-outline' : 'alert-circle-outline'} size={15} color={colors.danger} />
-          <Text style={s.errTx}>
+          <Text style={[s.errTx, !isRTL && s.textLtr]}>
             {failure === 'rate_limited'
               ? t('You have sent several messages already. Please wait about an hour before sending another.')
               : t("Couldn't send your message. Check your connection and try again.")}
@@ -417,9 +410,10 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
 }
 
 function Field({ label, invalid, focused, children }: { label: string; invalid: boolean; focused: boolean; children: React.ReactNode }) {
+  const { isRTL } = useI18n();
   return (
     <View style={s.field}>
-      <Text style={s.fieldLabel}>{label}</Text>
+      <Text style={[s.fieldLabel, !isRTL && s.textLtr]}>{label}</Text>
       <View style={[s.fieldBox, WEB_SMOOTH, focused && s.fieldBoxFocus, invalid && s.fieldBoxBad]}>{children}</View>
     </View>
   );
@@ -472,104 +466,38 @@ function Reveal({ shown, animate, delay, fadeOnly, style, children }: {
   );
 }
 
-function AboutBody({ t, reduced, gripRef, drag, wide }: {
-  t: Tr; reduced: boolean; gripRef: React.MutableRefObject<View | null>; drag: boolean; wide: boolean;
+function AboutBody({ t, reduced, gripRef, drag }: {
+  t: Tr; reduced: boolean; gripRef: React.MutableRefObject<View | null>; drag: boolean;
 }) {
-  // Literal palette for the themed surfaces (the About sheet is a factory, see makeAbout).
+  // A reading page, not a dashboard: one restrained column with the same rhythm as the legal
+  // reader. The copy is already approved in the dictionary; this component only controls hierarchy.
   const pal = useThemePalette();
   const dark = useResolvedTheme() === 'dark';
   const animate = IS_WEB && !reduced;
   const shown = useShown(!animate);
   const rev = { shown, animate };
-  const a = useMemo(() => makeAbout(pal, dark), [pal, dark]);
+  const { isRTL: aboutRtl } = useI18n();
+  const a = useMemo(() => makeAbout(pal, dark, aboutRtl), [pal, dark, aboutRtl]);
 
-  const values: { icon: keyof typeof Ionicons.glyphMap; label: string; line: string }[] = [
-    { icon: 'albums-outline', label: t('We gather'), line: t('Property listings from the licensed platforms in the Kingdom, in one place.') },
-    { icon: 'grid-outline', label: t('We organize'), line: t('One organized screen that makes comparing fast and easy.') },
-    { icon: 'sparkles-outline', label: t('We help'), line: t('AI-powered search instead of browsing dozens of sites.') },
-    { icon: 'open-outline', label: t('We point you to the source'), line: t('We take you to the listing so you contact its original platform directly.') },
-  ];
-  const legal: { icon: keyof typeof Ionicons.glyphMap; label: string; text: string }[] = [
-    { icon: 'compass-outline', label: t('Our role'), text: t('Ezhalah is a search platform only. We do not own, list, sell, or rent properties, and we run no transactions and take no commission.') },
-    { icon: 'document-text-outline', label: t('Listing licensing'), text: t('Every listing is published by its source platform and remains subject to its licensing. Ezhalah does not issue or own listings.') },
-    { icon: 'alert-circle-outline', label: t('Disclaimer'), text: t('Listings come from external platforms and we do not verify them. Confirm the details with the original platform before any decision.') },
-    { icon: 'lock-closed-outline', label: t('Data & privacy'), text: t('We collect only what the service needs, and we do not sell user data.') },
-  ];
-
-  // The intro column: eyebrow + lockup are the drag grip (desktop) — the "safe upper area" — then
-  // the thesis sentence and the one statistic. On desktop the art box sits beside this column.
-  const intro = (
-    <View style={a.introCol}>
+  return (
+    <View style={a.body}>
       <View ref={gripRef} style={[a.head, drag && ({ cursor: 'grab', touchAction: 'none', userSelect: 'none' } as any)]}>
         <Reveal {...rev} delay={40}>
           <Text style={a.eyebrow}>{t('About Us')}</Text>
           <View style={a.lockup}>
-            <RNImage source={EAGLE} style={a.eagle} resizeMode="contain" />
+            <XImage source={EAGLE} style={a.eagle} contentFit="contain" />
             <Text style={a.wordmark}>{t('Ezhalah')}</Text>
-            <View style={a.wordDot} />
           </View>
         </Reveal>
       </View>
-      <Reveal {...rev} delay={90}>
+
+      <Reveal {...rev} delay={90} style={a.readingColumn}>
         <Text style={a.heroLine}>{t('Smarter property search, bringing the Saudi market together in one place.')}</Text>
-      </Reveal>
-      {/* One quiet statistic — the number leads, the sentence explains. */}
-      <Reveal {...rev} delay={130} style={a.statBand}>
-        <Text style={a.statNum}>+{String(PLATFORM_COUNT)}</Text>
-        <Text style={a.statLabel}>{t('Real-estate platforms, searched as one.')}</Text>
-      </Reveal>
-    </View>
-  );
-
-  // The artwork in its own box: the real image, its real aspect ratio, contained — never a
-  // wallpaper, never a crop, no text on top. (verify-about-premium-contract pins this.)
-  const art = (
-    <Reveal {...rev} delay={70} fadeOnly style={[a.artBox, wide ? a.artBoxWide : a.artBoxNarrow]}>
-      <RNImage source={ABOUT_ART} style={a.artImg} resizeMode="contain" />
-    </Reveal>
-  );
-
-  return (
-    <View style={a.body}>
-      {wide ? (
-        <View style={a.topRow}>
-          {intro}
-          {art}
-        </View>
-      ) : (
-        <>
-          {intro}
-          {art}
-        </>
-      )}
-
-      {/* The four verbs as a 2×2 of feature cards — short, scannable, never a wall of text. */}
-      <View style={a.vGrid}>
-        {values.map((v, i) => (
-          <Reveal key={v.label} {...rev} delay={170 + i * 30} style={a.vCard}>
-            <View style={a.vIcon}><Ionicons name={v.icon} size={16} color={pal.primary} /></View>
-            <Text style={a.vLabel}>{v.label}</Text>
-            <Text style={a.vLine}>{v.line}</Text>
-          </Reveal>
-        ))}
-      </View>
-
-      {/* Trust — present, readable, designed: one quiet card, four icon-led rows. */}
-      <Reveal {...rev} delay={310} fadeOnly style={a.trustCard}>
-        <Text style={a.trustTitle}>{t('Trust & transparency')}</Text>
-        {legal.map((l) => (
-          <View key={l.label} style={a.trustRow}>
-            <View style={a.trustIcon}><Ionicons name={l.icon} size={13} color={pal.primary} /></View>
-            <Text style={a.trustText}>
-              <Text style={a.trustLead}>{l.label + ': '}</Text>
-              {l.text}
-            </Text>
-          </View>
-        ))}
-      </Reveal>
-
-      <Reveal {...rev} delay={360} fadeOnly style={a.footer}>
-        <Text style={a.brandLine}>{t('Ezhalah, and may your luck be good.')}</Text>
+        <Text style={a.paragraph}>{t('Ezhalah is a Saudi, AI-powered property search platform. We help people find properties faster by searching Aqar, Wasalt, Aldarim and more in one place, and help those platforms reach more users by driving traffic directly to their listings.')}</Text>
+        <Text style={a.paragraph}>{t('Ezhalah is a search platform only. We do not own, list, sell, or rent properties, and we run no transactions and take no commission.')}</Text>
+        <View style={a.rule} />
+        <Text style={a.note}>{t('Every listing is published by its source platform and remains subject to its licensing. Ezhalah does not issue or own listings.')}</Text>
+        <Text style={a.note}>{t('We collect only what the service needs, and we do not sell user data.')}</Text>
       </Reveal>
     </View>
   );
@@ -580,8 +508,9 @@ function AboutBody({ t, reduced, gripRef, drag, wide }: {
 // invented, and the dialog is unreachable until both documents exist (hasLegalDocs gates the
 // account-menu row and the login popup's link).
 function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
+  const { locale, isRTL } = useI18n();
   const [tab, setTab] = useState<'terms' | 'privacy'>(initial);
-  const docs = hasLegalDocs() ? LEGAL_DOCS[tab] : [];
+  const docs = hasLegalDocs() ? getLegalDocs(locale)[tab] : [];
   const tabs: { key: 'terms' | 'privacy'; label: string }[] = [
     { key: 'terms', label: t('Terms of Use') },
     { key: 'privacy', label: t('Privacy Policy') },
@@ -590,8 +519,8 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
     <View>
       <View style={s.head}>
         <View style={s.legalLockup}>
-          <RNImage source={EAGLE} style={s.legalEagle} resizeMode="contain" />
-          <Text style={[s.h, s.legalTitle]}>{t('Terms & Privacy')}</Text>
+          <XImage source={EAGLE} style={s.legalEagle} contentFit="contain" />
+          <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr]}>{t('Terms & Privacy')}</Text>
         </View>
       </View>
       <View style={s.bodyPad}>
@@ -615,11 +544,15 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
             both: partners@ (Terms) for business/support-shaped inquiries, admin@ (Privacy, owner
             2026-09-04) for data-rights/PDPL requests — a normal split, not a drift risk, since both
             literals still live only here. */}
-        {docs.map((p, i) => (
-          <Text key={i} style={s.legalP}>
-            {p.replace('{{CONTACT_EMAIL}}', tab === 'privacy' ? 'admin@ezhalah.com' : 'partners@ezhalah.com')}
-          </Text>
-        ))}
+        {docs.map((p, i) => {
+          const [heading, ...paragraphs] = p.replace('{{CONTACT_EMAIL}}', tab === 'privacy' ? 'admin@ezhalah.com' : 'partners@ezhalah.com').split('\n\n');
+          return (
+            <View key={i}>
+              <Text accessibilityRole={i === 0 ? undefined : 'header'} style={[i === 0 ? s.legalDate : s.legalSectionTitle, !isRTL && s.textLtr]}>{heading}</Text>
+              {paragraphs.map((paragraph, j) => <Text key={j} style={[s.legalP, !isRTL && s.textLtr]}>{paragraph}</Text>)}
+            </View>
+          );
+        })}
       </View>
     </View>
   );
@@ -628,22 +561,24 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
 // One channel = one RTL row: a distinct glyph names the audience, the address is the hero line
 // (kept LTR internally — it's latin), the purpose sentence sits beneath.
 function SupCard({ icon, email, desc }: { icon: keyof typeof Ionicons.glyphMap; email: string; desc: string }) {
+  const { isRTL } = useI18n();
   return (
     <View style={s.supCard}>
       <View style={s.cardIc}><Ionicons name={icon} size={19} color={colors.primary} /></View>
       <View style={s.supBody}>
-        <Text style={s.mail}>{email}</Text>
-        <Text style={s.desc}>{desc}</Text>
+        <Text style={[s.mail, !isRTL && s.textLtr]}>{email}</Text>
+        <Text style={[s.desc, !isRTL && s.textLtr]}>{desc}</Text>
       </View>
     </View>
   );
 }
 
 function RtRow({ text }: { text: string }) {
+  const { isRTL } = useI18n();
   return (
     <View style={s.rtRow}>
       <View style={s.dot} />
-      <Text style={s.rtText}>{text}</Text>
+      <Text style={[s.rtText, !isRTL && s.textLtr]}>{text}</Text>
     </View>
   );
 }
@@ -668,13 +603,15 @@ const s = StyleSheet.create({
   // Close, pinned to the PHYSICAL top-right (RN `right` is physical — RTL never flips it): a
   // quiet neutral glyph at rest, a soft fill on hover, hitSlop widening the target to ≥ 44.
   xBtn: {
-    // Physical top-right under BOTH directions: RTL (forced app-wide for Arabic) flips `right:` to
-    // the physical left, so the physical right is spelled `left:` there. (owner 2026-08-29)
-    position: 'absolute', top: CLOSE_INSET, ...(I18nManager.isRTL ? { left: CLOSE_INSET } : { right: CLOSE_INSET }), zIndex: 5,
+    // Top-RIGHT in both languages (owner 2026-10-24), on a soft circle so it reads clearly, apart from the words.
+    position: 'absolute', top: CLOSE_INSET, zIndex: 5, backgroundColor: colors.surface2,
     width: CLOSE_SIZE, height: CLOSE_SIZE, borderRadius: CLOSE_SIZE / 2,
     alignItems: 'center', justifyContent: 'center',
     ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
   },
+  // Measured 2026-10-23: on the web physical sides are NOT mirrored under Arabic, so the × side is chosen by
+  // language. Both sides spelled so a merge never leaves the other one set.
+  xBtnRight: { right: CLOSE_INSET, left: 'auto' as any },
   xBtnHover: { backgroundColor: colors.surface2 },
   scroll: { paddingTop: 0, paddingBottom: 0 },
   bodyPad: { paddingHorizontal: BODY_PAD, paddingTop: 4, paddingBottom: BODY_PAD },
@@ -692,7 +629,7 @@ const s = StyleSheet.create({
   // the ROW, not the text: `h`'s own paddingRight (still asserted by that barrier, untouched) is
   // cancelled back to 0 on this specific usage so the clearance is never reserved twice.
   legalLockup: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: CLOSE_CLEAR },
-  legalEagle: { width: 20, height: 20 },
+  legalEagle: { width: 44, height: 44 }, // big and sharp enough to read as our logo (owner 2026-10-25; was 20 px)
   legalTitle: { paddingRight: 0, flexShrink: 1 },
 
   // ——— «تواصل مع الدعم» form (owner 2026-09-02; spacing/inputs 2026-09-03) ———
@@ -715,21 +652,24 @@ const s = StyleSheet.create({
     fontSize: IS_WEB ? 16 : 14, color: colors.ink, textAlign: 'right', paddingVertical: 12, minHeight: 48,
     ...(IS_WEB ? ({ outlineStyle: 'none' } as any) : {}),
   },
+  textLtr: { textAlign: 'left', writingDirection: 'ltr' as any },
   inputLtr: { textAlign: 'left', writingDirection: 'ltr' as any },
+  inputLocked: { color: colors.muted, paddingRight: 30 },
+  lockIcon: { position: 'absolute', right: 12, top: '50%', marginTop: -7 } as any,
   area: { minHeight: 132, paddingTop: 12, lineHeight: 22 },
   errRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 12 },
   errTx: { flex: 1, fontSize: 12.5, color: colors.danger, textAlign: 'right', lineHeight: 18 },
   // Send: full width, the brand green, the same radius as the inputs, spaced from the email field.
   sendBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: colors.primary, borderRadius: 12, height: 50, marginTop: 6,
+    backgroundColor: colors.selFill, borderRadius: 12, height: 50, marginTop: 6,
     ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
   },
   sendBtnHover: { backgroundColor: colors.dark },
   sendBtnBusy: { opacity: 0.75 },
   sendTx: { fontSize: 15, fontWeight: '800', color: colors.onFill },
   sentCard: { alignItems: 'center', paddingVertical: 28, paddingHorizontal: 18 },
-  sentIc: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  sentIc: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   sentH: { fontSize: 17, fontWeight: '800', color: colors.ink, textAlign: 'center' },
   sentTx: { fontSize: 13.5, color: colors.body, textAlign: 'center', marginTop: 6, lineHeight: 20 },
   againBtn: { marginTop: 16, paddingVertical: 8, paddingHorizontal: 14, ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}) },
@@ -751,55 +691,31 @@ const s = StyleSheet.create({
   segBtnHover: { backgroundColor: colors.surface2 },
   segTx: { fontSize: 13.5, fontWeight: '700', color: colors.muted },
   segTxOn: { color: colors.ink },
+  legalDate: { fontSize: 13, lineHeight: 22, color: colors.muted, textAlign: 'right', marginBottom: 20 },
+  legalSectionTitle: { fontSize: 16, lineHeight: 26, fontWeight: '700', color: colors.ink, textAlign: 'right', marginTop: 6, marginBottom: 8 },
   legalP: { fontSize: 14.5, lineHeight: 26, color: colors.body, textAlign: 'right', marginBottom: 14 },
 });
 
 // «من نحن» styles. Arabic typography rules: NO letterSpacing anywhere (Latin tracking mangles
 // Arabic script), weights carry the hierarchy, body leading stays generous (~1.7).
-// Palette-driven About styles: the dialog themes fully — dark mode gets a real dark composition,
-// not a light card in a dark app. (pinned by verify-about-premium-contract)
-function makeAbout(pal: Record<string, string>, dark: boolean) {
+// Keep this page intentionally close to the legal reader: one calm reading column, clear hierarchy,
+// and no decorative panels competing with the explanation.
+// English reads left-to-right (owner 2026-10-23, English screenshot: the About text sat on the right).
+function makeAbout(pal: Record<string, string>, dark: boolean, rtl = true) {
+  const start = rtl ? 'right' : 'left';
+  void dark;
   return StyleSheet.create({
     body: { paddingHorizontal: BODY_PAD + 4, paddingTop: BODY_PAD, paddingBottom: BODY_PAD },
-    topRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 28 },
-    introCol: { flex: 1, minWidth: 0 },
-    head: { paddingBottom: 6 },
+    head: { paddingBottom: 12, paddingRight: CLOSE_CLEAR }, // keeps «من نحن» clear of the top-right × (owner 2026-10-24)
     eyebrow: { fontSize: 12.5, lineHeight: 18, fontWeight: '700', color: pal.muted, marginBottom: 8 },
     lockup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    eagle: { width: 30, height: 30, opacity: 0.9 },
+    eagle: { width: 64, height: 64 }, // still dark-green eagle, lights on, big and sharp (owner 2026-10-25)
     wordmark: { fontSize: 34, lineHeight: 42, fontWeight: '800', color: pal.ink },
-    wordDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: pal.accentLeaf ?? pal.primary, alignSelf: 'flex-end', marginBottom: 8 },
-    heroLine: { fontSize: 16.5, lineHeight: 27, fontWeight: '500', color: pal.body, marginTop: 12 },
-
-    // The artwork's own box: rounded, hairline edge, a quiet ground, the image CONTAINED at its
-    // real aspect ratio (900×1317). Desktop: a fixed-width portrait card beside the intro; mobile:
-    // a centered portrait card. No opacity, no gradient, nothing painted on top.
-    artBox: { borderRadius: 16, borderWidth: 1, borderColor: pal.line, backgroundColor: dark ? pal.surface2 : pal.tint, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
-    artBoxWide: { width: 212, aspectRatio: ABOUT_ART_RATIO, marginTop: 4 },
-    artBoxNarrow: { alignSelf: 'center', width: '60%', maxWidth: 220, aspectRatio: ABOUT_ART_RATIO, marginTop: 20 },
-    artImg: { width: '100%', height: '100%' },
-
-    // The statistic: the number leads at display size, the sentence explains, hairlines frame it.
-    statBand: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 20, paddingVertical: 14, borderTopWidth: 1, borderBottomWidth: 1, borderColor: pal.line },
-    statNum: { fontSize: 36, lineHeight: 42, fontWeight: '800', color: pal.primary, fontVariant: ['tabular-nums'] },
-    statLabel: { flex: 1, fontSize: 14, lineHeight: 21, fontWeight: '600', color: pal.ink },
-
-    // Feature cards: real cards — padding, an icon well, a title, a line — light and simple.
-    vGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 24 },
-    vCard: { flexGrow: 1, flexBasis: '44%', minWidth: 200, backgroundColor: dark ? pal.surface2 : pal.tint, borderRadius: 14, borderWidth: 1, borderColor: dark ? pal.line : pal.tintLine, padding: 16 },
-    vIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: dark ? pal.tint : pal.surface, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-    vLabel: { fontSize: 15, lineHeight: 22, fontWeight: '800', color: pal.ink },
-    vLine: { fontSize: 13, lineHeight: 20, fontWeight: '400', color: pal.body, marginTop: 4 },
-
-    trustCard: { backgroundColor: dark ? pal.surface2 : pal.surface, borderRadius: 14, borderWidth: 1, borderColor: pal.line, padding: 16, marginTop: 20, gap: 12 },
-    trustTitle: { fontSize: 13.5, lineHeight: 20, fontWeight: '800', color: pal.dark ?? pal.ink },
-    trustRow: { flexDirection: 'row', gap: 10 },
-    trustIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: pal.tint, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-    trustText: { flex: 1, fontSize: 12.5, lineHeight: 20, fontWeight: '400', color: pal.body },
-    trustLead: { fontWeight: '800', color: pal.dark ?? pal.ink },
-
-    footer: { alignItems: 'center', marginTop: 20 },
-    brandLine: { fontSize: 13, fontWeight: '700', color: pal.dark ?? pal.ink },
+    readingColumn: { maxWidth: 640, width: '100%', alignSelf: 'center' },
+    heroLine: { fontSize: 19, lineHeight: 31, fontWeight: '700', color: pal.ink, textAlign: start as any, marginTop: 8, marginBottom: 18 },
+    paragraph: { fontSize: 15, lineHeight: 28, fontWeight: '400', color: pal.body, textAlign: start as any, marginBottom: 16 },
+    rule: { height: 1, backgroundColor: pal.line, marginTop: 4, marginBottom: 18 },
+    note: { fontSize: 13.5, lineHeight: 24, fontWeight: '400', color: pal.muted, textAlign: start as any, marginBottom: 12 },
   });
 }
 

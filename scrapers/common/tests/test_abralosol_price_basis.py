@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from scrapers.abralosol import run as R  # noqa: E402
+from scrapers.common import db  # noqa: E402
 
 # nid 4687 — «السعر» 4,000,000 total. The trailing "11" after the eye icon is a VIEW COUNTER.
 CELL_TOTAL = """<strong>
@@ -77,13 +78,13 @@ def _row(nid, price_cell, title_lines, detail=None):
 def test_per_sqm_never_lands_in_price_total():
     row = _row("7779", CELL_PER_SQM, "أرض\n\nللبيع")
     assert row["price_per_meter"] == 1500
-    assert row["price_total"] is None
+    assert row["price_total"] is db.AUTHORITATIVE_NULL       # a rate, no total — and a stored total is cleared
 
 
 def test_per_sqm_is_never_multiplied_by_area_into_a_total():
     row = _row("7779", CELL_PER_SQM, "أرض\n\nللبيع")
     assert row["area_m2"] == 511
-    assert row["price_total"] is None and row["price_annual"] is None   # 511 × 1,500 = 766,500
+    assert row["price_total"] is db.AUTHORITATIVE_NULL and row["price_annual"] is None   # 511 × 1,500 = 766,500
 
 
 def test_total_lands_in_price_total_only():
@@ -123,7 +124,7 @@ def test_unlabelled_amount_is_not_placed_in_either_price_column():
 
 def test_detail_label_recovers_a_missing_index_label():
     row = _row("7766", CELL_UNLABELLED, "أرض\n\nللبيع", detail={"label": "المتر"})
-    assert row["price_per_meter"] == 22000 and row["price_total"] is None
+    assert row["price_per_meter"] == 22000 and row["price_total"] is db.AUTHORITATIVE_NULL
 
 
 # ── a TOTAL label the body itself contradicts (real nid 7729) ───────────────────────────────────
@@ -140,7 +141,7 @@ CELL_SAWM_1600 = "<strong>السوم\n1,600<br>\n<i class='fa fa-eye'></i>\n4\n<
 def test_body_per_metre_statement_beats_a_total_label_on_the_same_figure():
     row = _row("7729", CELL_SAWM_1600, "أرض\n\nللبيع", detail={"blocks": BLOCKS_7729})
     assert row["price_per_meter"] == 1600
-    assert row["price_total"] is None                       # NOT 1,600 SAR for a 500 m² plot
+    assert row["price_total"] is db.AUTHORITATIVE_NULL      # NOT 1,600 SAR for a 500 m² plot
     assert row["additional_info"]["price_basis_from"] == "body_states_per_metre"
 
 
@@ -247,3 +248,33 @@ if __name__ == "__main__":
                 print(f"✗ {name}: {e!r}")
     print("FAILED" if fails else "all green")
     sys.exit(1 if fails else 0)
+
+
+
+# ── 2026-10-18, read live for the under-the-city-floor alarm ─────────────────────────────────────
+# nid 7132 prints «🟡 على السوم | -2 ريال»: a NEGATIVE figure is the open-to-offers placeholder, not a 2 SAR plot.
+CELL_SAWM_MINUS_2 = "<strong>على السوم\n-2<br>\n<i class='fa fa-eye'></i>\n5\n</strong>"
+
+
+def test_a_negative_figure_is_no_price_and_clears_a_stored_one():
+    assert R._price(CELL_SAWM_MINUS_2)["amount"] is None
+    row = _row("7132", CELL_SAWM_MINUS_2, "أرض\n\nللبيع")
+    assert row["price_total"] is db.AUTHORITATIVE_NULL and row["price_per_meter"] is None
+
+
+# nid 7472: index «الحد 1,650», body «… بسعر 1,650 ريال للمتر» — the marker AFTER the figure (recorded text).
+BLOCKS_7472 = ["🟡 رقم الأرض 15 / 2", "🟨 المساحة 415.63 م", "🟡 الحد", "1,650 ريال",
+               "أرض للبيع في جوهرة النزهة - بو سحبل 1، رقم الأرض 15 / 2، بمساحة 415.63 م²، ركنية، على شارعين 20 × 30 متر، "
+               "بواجهتين شرقية وجنوبية، بسعر 1,650 ريال للمتر"]
+CELL_HAD_1650 = "<strong>الحد\n1,650<br>\n<i class='fa fa-eye'></i>\n9\n</strong>"
+
+
+def test_a_rate_stated_after_the_figure_beats_a_total_label():
+    row = _row("7472", CELL_HAD_1650, "أرض\n\nللبيع", detail={"blocks": BLOCKS_7472})
+    assert row["price_per_meter"] == 1650 and row["price_total"] is db.AUTHORITATIVE_NULL
+
+
+def test_mutation_the_same_wording_about_another_figure_keeps_the_total():
+    blocks = BLOCKS_7472[:-1] + [BLOCKS_7472[-1].replace("بسعر 1,650 ريال للمتر", "بسعر 1,700 ريال للمتر")]
+    row = _row("7472", CELL_HAD_1650, "أرض\n\nللبيع", detail={"blocks": blocks})
+    assert row["price_total"] == 1650 and row["price_per_meter"] is None

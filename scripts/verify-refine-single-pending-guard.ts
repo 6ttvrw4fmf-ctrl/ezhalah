@@ -2,7 +2,7 @@
 //
 // Reproduced LIVE on production (ezhalah-app.vercel.app): شقة/3 غرف نوم/الصفاء، جدة (405 matches,
 // correctly < the AF plan's 2-useful-question floor, so startAgeFlow fell through to the legacy
-// refine chips per its own comment). Tapping «خلّنا نحدد الطلب أكثر» twice in quick succession —
+// refine chips per its own comment). Tapping «🎯 دقّق مع الذكاء» twice in quick succession —
 // once via the AF entry point, once via the reappeared CTA the instant `setAgeFlow(null)` re-showed
 // it — called startRefine(q) twice. startRefine had no guard against a second call while a refine
 // question was already pending, so BOTH calls appended their own copy of «كم ميزانيتك تقريباً؟»

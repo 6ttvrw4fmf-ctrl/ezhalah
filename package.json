@@ -9,6 +9,7 @@
     "@sentry/browser": "^8.55.2",
     "@sentry/react-native": "^8.24.0",
     "@supabase/supabase-js": "^2.108.0",
+    "botid": "1.5.11",
     "expo": "~56.0.9",
     "expo-clipboard": "~56.0.4",
     "expo-constants": "~56.0.17",
@@ -33,6 +34,7 @@
     "react-native-reanimated": "4.3.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "4.25.2",
+    "react-native-svg": "15.15.4",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "0.8.3",
     "vercel": "^54.18.0"

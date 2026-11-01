@@ -37,6 +37,7 @@
 //
 // Run: node --experimental-strip-types scripts/verify-active-platform-image-coverage-not-blind.ts
 
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 const SUPABASE_URL = 'https://aannarbkwcymrotzwdbo.supabase.co';
 // The anon key real browsers use — pinned (matches scripts/safe-deploy.sh LOCK_ANON_KEY and the
 // sibling live barriers). If it rotates, safe-deploy.sh is the one truth source and this moves with it.

@@ -18,20 +18,19 @@
 # immune to data movement; the landed count stays only as a finite-liveness check. Full story in
 # the ORACLE CHANGE comment at the [E] resubmit check in the script.
 #
-# Kept OUT of the required `npm test` on purpose (that suite is hermetic and runs in seconds; a
-# 2-minute build + browser would slow every unrelated PR and add flake to a required check) — same
-# precedent as the live migration-drift check in AGENTS.md.
+# Kept OUT of `npm test` (that suite is hermetic and runs in seconds); since 2026-10-23 it is its OWN
+# required status check instead, running on every PR — see the `on:` note below.
 name: Web runtime smoke
 
 on:
+  # EVERY PR, no path filter (owner 2026-10-23, step 1 of the self-healing proposal): this is the one
+  # check that renders the app, and it is becoming a REQUIRED status check on main. A path filter on
+  # a required check stalls every PR that does not match it (the check never reports), and the two
+  # 2026-10-23 app-screen bugs showed that "which paths can break a screen" is not a list anyone keeps
+  # right. 8 minutes on a PR is the price of never shipping a blank page again.
   pull_request:
-    paths:
-      - 'src/**'
-      - 'app.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'scripts/verify-web-runtime-smoke.mjs'
-      - '.github/workflows/web-runtime-smoke.yml'
+  # The queued merge commit must carry the check too, or the merge queue waits forever (owner 2026-10-22).
+  merge_group:
   push:
     branches: [main]
     paths:
@@ -40,6 +39,7 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'scripts/verify-web-runtime-smoke.mjs'
+      - 'scripts/verify-web-scroll-smooth.mjs'
   workflow_dispatch:
   # SCHEDULED 2026-09-04. This is the richest browser suite in the repo — journeys A-J0 over both
   # viewports, ~52 product assertions — and it had no schedule at all: it ran only on a PR or push
@@ -56,10 +56,15 @@ concurrency:
   group: web-runtime-smoke-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
+  # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   smoke:
     name: built app runs («بحث» → results → refresh)
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -98,8 +103,19 @@ jobs:
           export EXPO_PUBLIC_SUPABASE_KEY="${SECRET_KEY:-$PUBLIC_KEY}"
           npx expo export --platform web
 
+      # ALWAYS FAST (owner 2026-10-27): the first download stays under its size budget. scripts/web-bundle-budget.mjs
+      - name: Web bundle size budget
+        run: node scripts/web-bundle-budget.mjs dist
+
       - name: Drive the built app in a real browser
         run: node scripts/verify-web-runtime-smoke.mjs
+
+      # THE SCROLL ROBOT (owner 2026-10-24: laptop scrolling was slow — «let's make a robot that checks this»). Same
+      # build, same Chromium, a laptop-size screen: counts the never-ending animations at rest / mid-scroll (page one
+      # and a 500-card list) and times a real wheel-scroll against the same page with its animations off. See the
+      # header of the script and src/lib/scrollCalm.ts. One search + two taps of «عرض المزيد» (no extra network).
+      - name: Scroll smoothness on a laptop (the live-animation budget, measured)
+        run: node scripts/verify-web-scroll-smooth.mjs
 
       # Now that this runs unattended on a schedule, a red run has to reach a human. One open P1 per
       # workflow file, self-healing on the next green run. `always()` so a failing run still gets here.

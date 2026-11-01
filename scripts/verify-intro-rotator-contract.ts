@@ -10,6 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { join as __join } from 'node:path';
 import { npmTestRuns } from './lib/testRegistry.ts';
+import { windowBetween } from './lib/sourceWindow.ts';
 
 // "Is this guard actually wired in?" — asked of the test registry, which is what `npm test`
 // resolves its run set from (scripts/lib/testRegistry.ts). String-matching package.json used to
@@ -32,21 +33,33 @@ const ex = await import(new URL('../src/data/introExamples.ts', import.meta.url)
 
 console.log('\nIntro greeting + rotating examples contract (owner brief 2026-08-23)\n');
 
-// ── 1. Greeting: owner's FINAL copy, byte-exact, rendered as the typed greeting ─────────────────
-const GREETING =
-  'ارحب، أنا إزهله. قلّي وش العقار اللي تدور عليه، وأنا أبحث لك بين المنصات العقارية وأطابق الخيارات مع طلبك لين نلقى اللي يناسبك… إزهلها وفالك الطيب.';
-const greetingExact = (src: string) => src.includes(`'${GREETING}'`);
+// ── 1. Owner-approved static welcome (2026-10-03) ─────────────────────────────────────────────
+const GREETING = 'وش العقار اللي في بالك؟\nقل لنا مواصفاته، وإزهله.';
+const greetingExact = (src: string) => src.includes(JSON.stringify(GREETING).slice(1, -1));
 check('1a. greeting is the owner FINAL copy, byte-exact, in greetingText()', greetingExact(agent));
-check(
-  '1b. greeting renders through the existing typed-greeting path with testID intro-greeting',
-  /testID=\{m\.greeting \? 'intro-greeting' : undefined\}/.test(agent) &&
-    /m\.greeting \? greetingText\(locale\) : m\.text/.test(agent),
-);
+const staticWelcome = (src: string) => {
+  const start = src.indexOf('if (m.greeting) {');
+  const end = src.indexOf('// Per-message direction:', start);
+  const branch = src.slice(start, end);
+  return start >= 0 && branch.includes('if (!introLanding) return null;') &&
+    branch.includes('testID="intro-greeting"') && !branch.includes('<Typer');
+};
+check('1b. complete static welcome only renders on the empty chat', staticWelcome(agent));
+// English UI (owner 2026-10-10: «it didn't just say ezhalah»): the English greeting is the Arabic's
+// meaning, not the bare brand name, and reads left-to-right.
+const GREETING_EN = 'What property are you after?\nDescribe it and Ezhalah';
+const greetingEnOk = (src: string) => src.includes(JSON.stringify(GREETING_EN).slice(1, -1)) &&
+  /<Text style=\{\[s\.greetingText, locale === 'en' && s\.greetingEn\]\}>\{title\}<\/Text>/.test(src) &&
+  /greetingEn: \{ writingDirection: 'ltr'/.test(src);
+check('1d. the English greeting mirrors the Arabic (not «Ezhalah» alone) and is left-to-right', greetingEnOk(agent));
+check('1c. fresh greeting is created without typing',
+  /greeting: true \}\] : m/.test(agent));
 
 // ── 2. Rotation ONLY on the empty AI landing screen ─────────────────────────────────────────────
 // The predicate is the single gate: greeting-only chat AND untouched AND empty AND idle AND no turn.
 const predicateOk = (src: string) =>
-  /const introLanding = msgs\.every\(\(m\) => m\.role === 'agent' && !!m\.greeting\);/.test(src) &&
+  // `!openingSaved &&` only narrows it: a saved chat mid-open is never the clean entry screen (2026-10-08).
+  /const introLanding = !openingSaved && msgs\.every\(\(m\) => m\.role === 'agent' && !!m\.greeting\);/.test(src) &&
   /introLanding && !introInteracted && !typed && voiceState === 'idle' && !busy/.test(src);
 check('2. visibility predicate = greeting-only chat ∧ untouched ∧ empty ∧ mic idle ∧ not busy', predicateOk(agent));
 check(
@@ -96,7 +109,7 @@ check(
 check(
   '8b. overlay is absolute inside the CLIPPED input wrapper (inputGrow overflow hidden) with one-line ellipsis — overflow = 0 by construction',
   /introRotator: \{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0/.test(agent) &&
-    /inputGrow: \{ flex: 1, overflow: 'hidden'/.test(agent) &&
+    /inputGrow: \{ overflow: 'hidden'/.test(agent) && !/inputGrow: \{[^}]*\bflex: 1\b/.test(agent) &&
     /<Text numberOfLines=\{1\} ellipsizeMode="tail"/.test(rotatorBody),
 );
 
@@ -106,10 +119,9 @@ check('9a. every shipped example is Arabic-only (no Latin letters)', list.length
 check('9b. the greeting is Arabic-only', !/[A-Za-z]/.test(GREETING));
 check(
   '9c. the placeholder swap keeps the Arabic static placeholder for the interacted state, and the a11y label has an Arabic dictionary entry',
-  // The expression gained an outer `completed ?` branch on 2026-09-05 (the locked composer explains
-  // itself via the placeholder). The contract THIS check protects is unchanged and still asserted:
-  // in a live chat, the interacted state must fall back to the familiar Arabic static placeholder.
-  /\(showIntroExamples \? '' : t\("Type the property you're looking for in Saudi Arabia\.\.\."\)\)/.test(agent) &&
+  // The outer `completed ?` branch (2026-09-05, the locked composer) is gone since 2026-10-13 (the chat never locks). The contract
+  // THIS check protects is unchanged: in a live chat, the interacted state falls back to the familiar Arabic static placeholder.
+  /placeholder=\{showIntroExamples \? '' : \(modeSearched \? t\("Type your property and Ezhalah\.\.\."\) : t\("Type the property you're looking for in Saudi Arabia\.\.\."\)\)\}/.test(agent) &&
     /'Describe the property you are looking for': 'اكتب وصف العقار اللي تبحث عنه'/.test(i18n),
 );
 
@@ -151,6 +163,23 @@ check('12c. no three consecutive examples share the same property-type dimension
 const BANNED = [/عمره?ا?\s/, /مفروش/, /حمام/, /دوبلكس/, /مسبح/, /عرضه/, /بين\s+\S+\s+و/, /من\s+\S+\s+إلى/, /سكن عمال/];
 check('12d. no shipped example re-promises a capability the truth test rejected (age/furnished/baths/duplex/pool/street-width/ranges)', list.every((s: string) => !BANNED.some((re) => re.test(s))));
 
+// ── 12e–h. The English UI's examples: English words, the same proof, left-aligned ──────────────
+const listEn: readonly string[] = ex.INTRO_EXAMPLES_EN;
+const provenEn = windowBetween(proof, '## English UI — PROVEN', '## English UI — FAILED', 'docs/ops/INTRO_EXAMPLES_PROOF.md');
+const unprovenEn = (l: readonly string[]) => l.filter((s: string) => !provenEn.includes(`| ${s} |`));
+check('12e. every INTRO_EXAMPLES_EN entry appears VERBATIM in the English PROVEN table', unprovenEn(listEn).length === 0,
+  `unproven English examples: ${unprovenEn(listEn).join(' | ')}`);
+check('12f. the English pool is English-only, ≥ 8 examples, no duplicates',
+  listEn.length >= 8 && new Set(listEn).size === listEn.length && listEn.every((s: string) => /[A-Za-z]/.test(s) && !/[؀-ۿ]/.test(s)));
+// «m²» is read as «million» on the English agent path (proof doc, English FAILED) — never promise a size there.
+const BANNED_EN = [/m²|m2\b|sqm|square|meter|metre/i, /furnish/i, /bath/i, /duplex/i, /pool/i, /between|from .* to /i, /years? old/i];
+check('12g. no English example re-promises a rejected capability (sizes in m², furnished, baths, duplex, pool, ranges, age)',
+  listEn.every((s: string) => !BANNED_EN.some((re) => re.test(s))));
+const rotatorLocaleOk = (body: string) => /introExamplesForWidth\(w, locale\)/.test(body) &&
+  /style=\{\[s\.introRotatorText, locale === 'en' && s\.introRotatorTextEn,/.test(body) &&
+  /introRotatorTextEn: \{ textAlign: 'left', writingDirection: 'ltr'/.test(agent);
+check('12h. the rotator shows the English pool in the English UI, on the left', rotatorLocaleOk(rotatorBody));
+
 // ── 13. Width adaptation + hold time are pure and sane (owner brief §3/§9) ──────────────────────
 const wide = ex.introExamplesForWidth(2000);
 const narrow = ex.introExamplesForWidth(240);
@@ -161,6 +190,14 @@ check(
     narrow.length >= 3 && narrow.every((s: string) => s.length <= Math.floor(240 / ex.INTRO_EXAMPLE_CHAR_PX) || narrow.length === 5) &&
     zero.length === 0,
 );
+const wideEn = ex.introExamplesForWidth(2000, 'en');
+check('13c. the English width filter draws from the English pool only (never the Arabic one)',
+  wideEn.length === listEn.length && wideEn.every((s: string, i: number) => s === listEn[i]) &&
+    ex.introExamplesForWidth(240, 'en').every((s: string) => listEn.includes(s)));
+// The phone slot measured 124px (390px iPhone, 2026-10-10): ≥ 3 English examples must fit it whole.
+const phoneEn = ex.introExamplesForWidth(124, 'en');
+check('13d. a phone shows whole English examples (≥ 3 fit the 124px slot), never «Shop for rent i…»',
+  phoneEn.length >= 3 && phoneEn.every((s: string) => s.length <= Math.floor(124 / ex.INTRO_EXAMPLE_CHAR_PX)), phoneEn.join(' | '));
 check(
   '13b. hold time is readable and clamped to the owner window (~2.6–4s)',
   ex.introExampleHoldMs('') >= 2600 && ex.introExampleHoldMs('x'.repeat(300)) <= 4000,
@@ -181,7 +218,15 @@ const mutations: Array<[string, boolean]> = [
   ['M6 an unproven example added to the pool → check 12a fails',
     ![...list, 'أبي قصر على البحر بمسبح'].every((s) => provenSection.includes(s))],
   ['M7 greeting copy altered by one character → check 1a fails',
-    !greetingExact(agent.replace('وفالك الطيب', 'وفالك طيب'))],
+    !greetingExact(agent.replace('في بالك؟', 'في بالك'))],
+  ['M7b typing injected into welcome → check 1b fails',
+    !staticWelcome(agent.replace("<Text style={[s.greetingText, locale === 'en' && s.greetingEn]}>{title}</Text>", "<Text style={[s.greetingText, locale === 'en' && s.greetingEn]}><Typer text={title} /></Text>"))],
+  ['M7c the English greeting back to the bare brand name → check 1d fails',
+    !greetingEnOk(agent.replace(JSON.stringify(GREETING_EN).slice(1, -1), 'Ezhalah'))],
+  ['M7d an English example that failed its proof (m² read as million) → check 12e fails',
+    unprovenEn([...listEn, 'Office for rent in Riyadh, around 150 m²']).length > 0],
+  ['M7e the rotator without the locale (Arabic examples in the English UI) → check 12h fails',
+    !rotatorLocaleOk(rotatorBody.replace('introExamplesForWidth(w, locale)', 'introExamplesForWidth(w)'))],
   ['M8 reduced-motion gate removed → check 10 fails',
     !reducedOk(rotatorBody.replace("if (reducedMotion || pool.length <= 1 || phase !== 'shown') return;", "if (pool.length <= 1 || phase !== 'shown') return;"))],
 ];

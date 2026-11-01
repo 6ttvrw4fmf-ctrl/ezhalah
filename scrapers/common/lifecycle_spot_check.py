@@ -1,0 +1,455 @@
+"""The ♻️ Lifecycle Engineer's double-check: open a sample of one website's HIDDEN and LIVE ads and
+report how many answers were wrong (docs/ops/LIFECYCLE_ENGINEER.md, "How often each website is
+checked" and protection 1).
+
+READ-ONLY. It never writes a strike, a hide, a verification stamp or anything else: it only tells the
+engineer whether the site's hiding is right. The verdict for every page comes from the one shared
+judge, `liveness_contract.classify_response()`, fetched through the deletion tier's own
+transport (`cleanup._probe`, so wasalt goes through the real browser), and the run is only believed when known-live
+controls (listings the crawl saw in the last 24 hours) come back alive — `liveness_trust`'s canary
+gate. An untrusted run reports "void", never "all dead".
+
+A site with no registered dead-check in cleanup.PLATFORMS is judged by HTTP status alone
+(method "status-only"): a 404/410 is gone, anything else it can read is live. That is weaker (a
+soft-closed ad serving 200 reads live), and the report says so, so the engineer knows the site still
+needs a real "gone" check (backlog B/C).
+
+  python -m scrapers.common.lifecycle_spot_check --platform gathern --n 100
+  python -m scrapers.common.lifecycle_spot_check --platform aqar --ids aqar_residential_listings:123,…
+
+`--ids` checks exactly the listings a customer clicked on Ezhalah tonight (the engineer's browser
+check collects them from first-screen cards). They are all visible, so they are judged as "live":
+any one the source says is gone is a dead ad a customer can see.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import random
+import sys
+from datetime import datetime, timedelta, timezone
+
+from scrapers.common.cleanup import PLATFORMS, _probe
+from scrapers.common.db import sb
+from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN, classify_response
+from scrapers.common.liveness_trust import canary_environment_ok
+
+CANARIES = 5
+COLS = "id,ad_number,listing_url,active,deactivated_at,last_seen_at"
+
+
+def judge(side: str, verdict: str) -> str:
+    """'right', 'wrong' or 'unknown' for one opened ad. A hidden ad that answers ALIVE was wrongly
+    hidden; a live ad that answers DEAD is wrongly still shown. UNKNOWN is never wrong or right."""
+    if verdict == UNKNOWN:
+        return "unknown"
+    if side == "hidden":
+        return "wrong" if verdict == ALIVE else "right"
+    return "wrong" if verdict == DEAD else "right"
+
+
+def pick_controls(client, tables, rng) -> list[dict]:
+    """Known-live controls: ads the crawl saw in the last 24h, else the ones it saw most recently."""
+    day_ago = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    ctl = []
+    for t in tables:
+        rows = (client.table(t).select(COLS).eq("active", True).gte("last_seen_at", day_ago)
+                .filter("listing_url", "not.is", "null").limit(50).execute().data or [])
+        ctl += [dict(r, table=t) for r in rows]
+    if len(ctl) < CANARIES:
+        # The crawl saw too few ads in 24h (its crawl is failing — dwelleo/muhaysini 2026-10-02):
+        # use the ads it saw most recently instead of voiding the check. A stale control that is
+        # really gone still fails the gate, so this can only void more runs, never fewer.
+        for t in tables:
+            rows = (client.table(t).select(COLS).eq("active", True).lt("last_seen_at", day_ago)
+                    .filter("listing_url", "not.is", "null").order("last_seen_at", desc=True)
+                    .limit(CANARIES).execute().data or [])
+            ctl += [dict(r, table=t) for r in rows]
+    ctl = rng.sample(ctl, min(CANARIES, len(ctl)))
+    return ctl
+
+
+def summarize(platform: str, method: str, canary: dict, results: list[dict]) -> dict:
+    out = {"platform": platform, "method": method, "canaries": canary, "trusted": canary["ok"]}
+    for side in ("hidden", "live"):
+        rows = [r for r in results if r["side"] == side]
+        out[side] = {
+            "opened": len(rows),
+            "right": sum(r["judged"] == "right" for r in rows),
+            "wrong": sum(r["judged"] == "wrong" for r in rows),
+            "unknown": sum(r["judged"] == "unknown" for r in rows),
+            "wrong_examples": [f"{r['table']}:{r['id']} {r['url']}" for r in rows if r["judged"] == "wrong"][:20],
+            # WHY each ad got no answer (2026-10-17): without it a second reader of a struck-but-shown
+            # ad reads "unknown 5" and nobody can tell a 401 unpublished post from a block.
+            "unknown_examples": [f"{r['table']}:{r['id']} {r.get('evidence') or 'no evidence'}"
+                                 for r in rows if r["judged"] == "unknown"][:20],
+        }
+    if not canary["ok"]:
+        out["verdict"] = "void: known-live controls did not come back alive, so nothing here may be believed"
+    else:
+        wrong = out["hidden"]["wrong"] + out["live"]["wrong"]
+        out["verdict"] = "clean" if wrong == 0 else f"{wrong} wrong answer(s)"
+    return out
+
+
+def tables_for(client, platform: str) -> list[str]:
+    names = {f"{platform}_residential_listings", f"{platform}_commercial_listings"}
+    names.update(PLATFORMS.get(platform, {}).get("tables", []))
+    rows = (client.table("search_listings_ar").select("source_table").eq("platform", platform)
+            .limit(1000).execute().data or [])
+    names.update(r["source_table"] for r in rows if r.get("source_table"))
+    found = []
+    for t in sorted(names):
+        try:
+            client.table(t).select("id").limit(1).execute()
+            found.append(t)
+        except Exception:
+            pass
+    return found
+
+
+def sample(client, table: str, *, active: bool, n: int, since: str | None, rng: random.Random) -> list[dict]:
+    """Up to n rows from a random window of the table (PostgREST has no ORDER BY random())."""
+    def q(cols: str, **kw):
+        x = client.table(table).select(cols, **kw).eq("active", active).filter("listing_url", "not.is", "null")
+        return x.gte("deactivated_at", since) if since else x
+    total = q("id", count="exact").limit(1).execute().count or 0
+    if total == 0 or n <= 0:
+        return []
+    window = min(total, n * 5)
+    off = rng.randrange(0, max(1, total - window + 1))
+    rows = q(COLS).order("id").range(off, off + window - 1).execute().data or []
+    return rng.sample(rows, min(n, len(rows)))
+
+
+def live_in_sibling(client, tables: list[str], row: dict) -> bool:
+    """A hidden row whose ad_number is ACTIVE in another of the site's tables was retired as
+    superseded (a category flip), not as dead: its URL is live because the sibling row serves it.
+    Opening it and calling the hide "wrong" is a false alarm (abralosol 10301747, 2026-10-06)."""
+    ad = row.get("ad_number")
+    if not ad:
+        return False
+    for t in tables:
+        if t == row.get("table"):
+            continue
+        try:
+            if client.table(t).select("id").eq("ad_number", ad).eq("active", True).limit(1).execute().data:
+                return True
+        except Exception:  # noqa: BLE001 — a failed lookup keeps the row in the sample
+            continue
+    return False
+
+
+def parse_ids(spec: str) -> list[tuple[str, int]]:
+    """'table:id,table:id' → [(table, id)]. Anything malformed is refused, never guessed."""
+    out = []
+    for part in filter(None, (p.strip() for p in spec.split(","))):
+        table, _, rid = part.partition(":")
+        if not table or not rid.isdigit():
+            raise ValueError(f"bad --ids entry {part!r}; expected table:id")
+        out.append((table, int(rid)))
+    return out
+
+
+def open_ad(url: str, dead_marker) -> str:
+    # The deletion tier's own transport: it keeps the real status (a 404 vs a block) and reaches
+    # wasalt only through the browser (WASALT_BROWSER), which curl_cffi can no longer do.
+    status, body = _probe(url)
+    _LAST_READ[url] = f"HTTP {status if status is not None else 'none (network error)'}, {len(body or '')} bytes"
+    return classify_response(status, body or "", dead_marker=dead_marker)
+
+
+# What open_ad last saw per URL, so a control that did not read live says WHY (2026-10-18: almuteb and
+# senan read «controls 0/5» four nights running with nothing to say what their pages answered).
+_LAST_READ: dict[str, str] = {}
+
+
+def control_misses(ctl: list[dict], verdicts: list[str]) -> list[str]:
+    """One line per control that did not read live: its URL and what its own page answered."""
+    return [f"{r.get('listing_url')}: {v}" + (f" ({_LAST_READ[r['listing_url']]})" if r.get("listing_url") in _LAST_READ else "")
+            for r, v in zip(ctl, verdicts) if v != ALIVE][:5]
+
+
+def _ashab_session():
+    from curl_cffi import requests as _cc
+    return _cc.Session(impersonate="chrome124")
+
+
+def _reader_for(platform: str):
+    """The site's OWN reader where the generic status judge cannot tell dead from live, else None.
+
+    dealapp serves a 200 shell (and its view-quota wall) for a removed ad AND for a live one read
+    unpaced, so "status-only" read every hidden dealapp ad as live: 30 of 30 on 2026-10-02, a
+    verdict that could not have come out any other way. gathern answers a block with 404 and is
+    read by its checker through its own detail session; a different session read two ads live that
+    the checker had read 404 eight times. The double-check must read a site the way its hiding job
+    does, or the two cannot be compared. Each reader returns ALIVE / DEAD / UNKNOWN."""
+    if platform == "dealapp":
+        from scrapers.dealapp import liveness_run
+        session = liveness_run._session()
+        return lambda url: liveness_run.probe_listing(session, url)[0]
+    if platform == "gathern":
+        from scrapers.gathern import liveness as gl
+        session = gl.proxied_session(False)
+
+        def read(url: str):
+            status = gl.probe(session, url, home_status=gl.HOME_LANDED)
+            if status == 200:
+                return ALIVE, "HTTP 200 on the unit's own page"
+            if status == gl.HOME_LANDED:
+                return UNKNOWN, "landed on gathern's home page (no verdict)"
+            return (DEAD if gl.looks_dead(status) else UNKNOWN), f"HTTP {status or 'none after retries'}"
+        return read
+    if platform == "muktamel":
+        # A withdrawn ad is a 200 hollow shell and a removed one 302s to a 200 /404 page, so a status
+        # read can only ever say "live" (2026-10-09: 10/10 live three nights while 512 shown rows were
+        # hollow). Read it the way its crawl and oracle do.
+        from scrapers.muktamel import run as mk
+        return mk.page_verdict
+    if platform == "almuteb":
+        # 2026-10-18: its HTML pages answer HTTP 503 (a 4 KB stub) to every CI read, so the status
+        # reader voided the dead-visible score four nights running (10-15..10-18), while its crawl reads
+        # all 10 ads through WordPress REST. Read it as its crawl's oracle does: the post's own REST
+        # record (publish = live, expired / closed status / rest_post_invalid_id = gone).
+        from scrapers.almuteb import run as mt
+        from scrapers.common.db import sb as _sb
+        oracle = mt._verify_gone_with(mt.fetch_taxonomies(mt.session()))
+        client = _sb()
+
+        def read_almuteb(url: str):
+            ad = None
+            for t in ("almuteb_residential_listings", "almuteb_commercial_listings"):
+                rows = client.table(t).select("ad_number").eq("listing_url", url).limit(1).execute().data or []
+                if rows:
+                    ad = rows[0]["ad_number"]
+                    break
+            if not ad:
+                return UNKNOWN, "no ad_number on file for this url"
+            v, why = oracle(ad)
+            return {"live": ALIVE, "gone": DEAD}.get(v, UNKNOWN), why
+        return read_almuteb
+    if platform == "ashab":
+        # 2026-10-17: a rented/sold ashab unit keeps a 200 page and says so only in its own status
+        # badge, so a status read called 11 of 12 struck-but-shown units "live". Read the badge the
+        # way its crawl does (scrapers/ashab/run.py::map_page).
+        from scrapers.ashab import run as ash
+        from scrapers.common.db import _SOLD_OR_RENTED
+        session = _ashab_session()
+
+        def read_ashab(url: str):
+            try:
+                badges = ash.parse_page(ash.get(session, url))["badges"]
+            except Exception as e:  # noqa: BLE001 — an unread page is no answer, never a death
+                return UNKNOWN, f"unread: {type(e).__name__}: {str(e)[:80]}"
+            status = badges[1] if len(badges) > 1 else ""
+            if status == ash.AVAILABLE:
+                return ALIVE, f"own badge «{status}»"
+            if any(w in status for w in _SOLD_OR_RENTED):
+                return DEAD, f"own badge «{status}»"
+            return UNKNOWN, f"own badge «{status or 'none'}»"
+        return read_ashab
+    if platform == "abralosol":
+        # 2026-10-12: the shared status reader got no live answer from any of 5 known-live abralosol
+        # pages (dead-visible void at 09:05 and on a re-run, spot-check 38245017303) while its crawl
+        # read all 2,811 ads that morning through its own session. Read it as its crawl and oracle do:
+        # its own session, 404/410 = DEAD, 200 whose <article> carries THIS node id = ALIVE.
+        import re as _re
+        from scrapers.abralosol import run as ab
+        session = ab._session()
+
+        def read_abralosol(url: str) -> str:
+            m = _re.search(r"/(\d+)/?$", url or "")
+            status, page = ab._fetch(session, url)
+            if status in ab.GONE_STATUSES:
+                return DEAD
+            art = ab._ARTICLE.search(page or "") if status == 200 else None
+            return ALIVE if (art and m and art.group(1) == m.group(1)) else UNKNOWN
+        return read_abralosol
+    if platform in _SOFT_404_OWN_PAGE:
+        # 2026-10-31 (♻️): a removed albukaeri ad answers 200 as an empty shell («  | البكيري», no
+        # property block) and a booked superoffice office 200 with offer availability OutOfStock, so
+        # the status reader could only ever say "live": both were scored status-only every night
+        # (ops_dead_visible_score 10-31) while 6 albukaeri and 14 superoffice shown ads had no
+        # reading for days. Read them the way their crawls' own oracles do (run.read_own_page).
+        return _own_page_reader(platform)
+    if platform == "azdad":
+        # 2026-10-31 (♻️): a removed azdad ad answers 200 «غير موجود», so it was scored status-only every
+        # night like albukaeri/superoffice. Its crawl asks the site's own API per ad (run.read_api); read it
+        # the same way. An empty API answer counts as gone only while the API's catalogue is non-empty.
+        return _azdad_reader()
+    return None
+
+
+def _azdad_reader():
+    from scrapers.azdad import run as az
+    from scrapers.common.db import sb as _sb
+    session = az.session()
+    client = _sb()
+    state: dict = {}
+
+    def catalogue_n() -> int:
+        if "n" not in state:
+            try:
+                r = session.get(az.API, params={"select": "ad_number", "limit": "1"}, timeout=30)
+                state["n"] = len(r.json()) if r.status_code == 200 and isinstance(r.json(), list) else 0
+            except Exception:  # noqa: BLE001 — an unreadable catalogue makes «no row» UNKNOWN, never gone
+                state["n"] = 0
+        return state["n"]
+
+    def read_azdad(url: str):
+        ad = None
+        for t in ("azdad_residential_listings", "azdad_commercial_listings"):
+            try:
+                rows = client.table(t).select("ad_number").eq("listing_url", url).limit(1).execute().data or []
+            except Exception:  # noqa: BLE001
+                rows = []
+            if rows:
+                ad = rows[0]["ad_number"]
+                break
+        if not ad:
+            return UNKNOWN, "no ad_number on file for this url"
+        v, why = az.read_api(session, ad, catalogue_n())
+        return {"live": ALIVE, "gone": DEAD}.get(v, UNKNOWN), why
+    return read_azdad
+
+
+# Sites whose crawl reads an ad's own page with a measured live AND gone answer
+# (`run.read_own_page(session, ad_number) -> (live|gone|unknown, why)`), keyed by the session factory.
+_SOFT_404_OWN_PAGE = ("albukaeri", "superoffice")
+
+
+def _own_page_reader(platform: str):
+    import importlib
+    from scrapers.common.db import sb as _sb
+    from scrapers.common.http import retry_smarter_session
+    mod = importlib.import_module(f"scrapers.{platform}.run")
+    session, _tried = retry_smarter_session(mod.BASE, timeout=40)
+    client = _sb()
+    tables = (f"{platform}_residential_listings", f"{platform}_commercial_listings")
+
+    def read_own(url: str):
+        ad = None
+        for t in tables:
+            try:
+                rows = client.table(t).select("ad_number").eq("listing_url", url).limit(1).execute().data or []
+            except Exception:  # noqa: BLE001 — a table this site does not have
+                rows = []
+            if rows:
+                ad = rows[0]["ad_number"]
+                break
+        if not ad:
+            return UNKNOWN, "no ad_number on file for this url"
+        v, why = mod.read_own_page(session, ad)
+        return {"live": ALIVE, "gone": DEAD}.get(v, UNKNOWN), why
+    return read_own
+
+
+def _oracle_reader_for(platform: str, control: dict | None):
+    """A site on the daily direct check (fleet_liveness.SITES) is read by the oracle its own scraper
+    hands to prune_unseen, keyed by ad_number, or None for any other site.
+
+    WHY (2026-10-03): judged by HTTP status alone, sanadak's 8 of 8 hidden ads read "live" — its
+    removed ads answer the app's own 200 shell with no listing, which only its oracle can tell from a
+    live page (scrapers/sanadak/run.py::_gone_verdict). A status read of such a site can only ever
+    say "live", so it cannot double-check a hide; it can only raise a false alarm."""
+    from scrapers.common import fleet_liveness as FL
+    spec = FL.SITES.get(platform)
+    if spec is None:
+        return None
+    oracle = FL.oracle_for(spec, control)
+
+    def read_by_oracle(row: dict) -> str:
+        if not row.get("ad_number"):
+            row["evidence"] = "no ad_number"
+            return UNKNOWN
+        verdict, row["evidence"] = FL.read(oracle, row["ad_number"])
+        return verdict
+    return read_by_oracle
+
+
+def pick_reader(platform: str, dead_marker, control: dict | None):
+    """(method, read(row) -> ALIVE/DEAD/UNKNOWN): the way the site's hiding job reads it, first."""
+    site_reader = _reader_for(platform)
+    if site_reader:
+        def read_by_site(row: dict) -> str:
+            out = site_reader(row["listing_url"])
+            verdict, row["evidence"] = out if isinstance(out, tuple) else (out, None)
+            return verdict
+        return "site-reader", read_by_site
+    oracle_reader = _oracle_reader_for(platform, control)
+    if oracle_reader:
+        return "site-oracle", oracle_reader
+    if dead_marker:
+        return "registered-marker", lambda row: open_ad(row["listing_url"], dead_marker)
+    return "status-only", lambda row: open_ad(row["listing_url"], dead_marker)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--platform", required=True)
+    ap.add_argument("--n", type=int, default=30, help="ads per side")
+    ap.add_argument("--which", choices=("hidden", "live", "both"), default="both")
+    ap.add_argument("--hidden-days", type=int, default=30, help="only ads hidden within this many days")
+    ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--ids", default="", help="table:id,… — exactly these (visible) listings")
+    a = ap.parse_args()
+
+    client = sb()
+    rng = random.Random(a.seed)
+    reg = PLATFORMS.get(a.platform, {})
+    dead_marker = reg.get("dead_marker")
+    tables = tables_for(client, a.platform)
+    if not tables:
+        print(json.dumps({"platform": a.platform, "verdict": "void: no listing tables found"}))
+        return 1
+
+    # Controls first: listings the crawl saw in the last 24 hours must come back alive, or the
+    # environment (a block, a proxy failure) is lying and the run is void.
+    ctl = pick_controls(client, tables, rng)
+    method, read = pick_reader(a.platform, dead_marker, ctl[0] if ctl else None)
+    ctl_verdicts = [read(r) for r in ctl]
+    ctl_alive = sum(v == ALIVE for v in ctl_verdicts)
+    canary = {"probed": len(ctl), "alive": ctl_alive, "ok": canary_environment_ok(ctl_alive, len(ctl)),
+              "misses": control_misses(ctl, ctl_verdicts)}
+
+    since = (datetime.now(timezone.utc) - timedelta(days=a.hidden_days)).isoformat()
+    results = []
+    if canary["ok"] and a.ids:
+        for table, rid in parse_ids(a.ids):
+            rows = client.table(table).select(COLS).eq("id", rid).limit(1).execute().data or []
+            for r in rows:
+                if not r.get("listing_url"):
+                    continue
+                v = read(r)
+                results.append({"side": "live", "table": table, "id": rid, "url": r["listing_url"],
+                                "verdict": v, "judged": judge("live", v), "evidence": r.get("evidence")})
+    elif canary["ok"]:
+        per_table = max(1, a.n // len(tables))
+        for side, active, win in (("hidden", False, since), ("live", True, None)):
+            if a.which not in (side, "both"):
+                continue
+            picked = []
+            for t in tables:
+                picked += [dict(r, table=t) for r in sample(client, t, active=active, n=per_table, since=win, rng=rng)]
+            if side == "hidden":
+                picked = [r for r in picked if not live_in_sibling(client, tables, r)]
+            for r in picked[: a.n]:
+                v = read(r)
+                results.append({"side": side, "table": r["table"], "id": r["id"], "url": r["listing_url"],
+                                "verdict": v, "judged": judge(side, v), "evidence": r.get("evidence")})
+
+    out = summarize(a.platform, method, canary, results)
+    text = json.dumps(out, ensure_ascii=False, indent=2)
+    print(text)
+    with open("spot-check.json", "w", encoding="utf-8") as f:
+        f.write(text)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as f:
+            f.write(f"### ♻️ spot check: {a.platform}\n\n```json\n{text}\n```\n")
+    return 0 if out["verdict"] == "clean" else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

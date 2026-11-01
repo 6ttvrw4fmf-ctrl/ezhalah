@@ -93,8 +93,9 @@ check('the full detail list is still available to callers that want it',
 
 // ── A5. ANNUAL RENT IS THE DEFAULT AND IS NOT NOISE, BUT MONTHLY IS SHOWN ───────────────────────
 check('annual rent (the default) adds no chip', autoTitleForQuery(base) === 'شقق للإيجار في الرياض');
-check('monthly rent IS called out', autoTitleForQuery({ ...base, rentPeriod: 'monthly' }).includes('شهري'));
-check('«كلاهما» is called out', autoTitleForQuery({ ...base, rentPeriod: 'both' }).includes('شهري وسنوي'));
+// «شهري» became «إقامات قصيرة» (owner 2026-10-25, src/lib/rentPool.ts) — the title says the pool's real name.
+check('short-stays rent IS called out', autoTitleForQuery({ ...base, rentPeriod: 'monthly' }).includes('إقامات قصيرة'));
+check('«كلاهما» is called out', autoTitleForQuery({ ...base, rentPeriod: 'both' }).includes('إقامات قصيرة وسنوي'));
 
 // ── A6. ARABIC READS LIKE A PERSON WROTE IT ─────────────────────────────────────────────────────
 check('2 bathrooms → «حمامين» (dual), not «2 حمامات»', autoTitleForQuery({ ...base, bathMin: 2 }).includes('حمامين'));
@@ -178,7 +179,7 @@ check('B6. clearing the name hands the row back to auto-titling', /autoTitleForQ
 // The other half of owner rule 4: a re-run must not revert a user's name.
 check('B7. recordHistory consults canAutoRetitle before titling', /canAutoRetitle\(prior\)/.test(storeCode));
 check('B8. recordHistory keeps the prior title when it is manual',
-  /keepTitle \? prior!\.title : autoTitleForQuery/.test(storeCode));
+  /keepTitle \? prior!\.title :/.test(storeCode));
 check('B9. a chat turn is titled with a SUMMARY, not the raw message',
   /autoTitleForPrompt\(v,/.test(storeCode));
 check('B10. a chat turn also respects a manual title', /canAutoRetitle\(prev\)/.test(storeCode));

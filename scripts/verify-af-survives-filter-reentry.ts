@@ -1,8 +1,18 @@
 // A COMMITTED ADVANCED FILTER MUST SURVIVE A RETURN TO THE FILTER SCREEN — Trending included.
 //
+// AMENDED 2026-10-03 — READ THIS FIRST. The owner ruled that coming back to the Filter after a search
+// always opens a CLEAN form: no carried answers, no chips, no «مسح الكل» (the last search lives in the
+// sidebar history when signed in, and is not saved for a guest). The carry below is therefore no
+// longer SHOWN on the Filter screen — src/app/index.tsx resets the form (src/lib/searchLeftBehind.ts)
+// and renders no chip row. What this file still holds, and why it stays: the library that carries and
+// re-certifies an answer (afCarry.ts, sanitizeForFilterRestore, every question's apply(),
+// rpcAdvancedFilterParams) is executed here against the real functions, and the store write in
+// agent.tsx still funnels through one place. If a return-with-answers behaviour is ever wanted again,
+// this is the proof it must keep passing. The defect described next is the history that produced it.
+//
 // THE DEFECT (owner P0, reproduced live on production 2026-09-01, six ways out of six):
 //   الرياض / إيجار / سنوي / تجاري / محل  →  566 listings
-//   «خلّنا نحدد الطلب أكثر» → «كم عمر العقار؟» → «جديد»  →  243
+//   «🎯 دقّق مع الذكاء» → «كم عمر العقار؟» → «جديد»  →  243
 //   back to «تصفية», press «بحث»  →  566 again, and the captured request body differs from the
 //   committed one by EXACTLY one key: `p_is_new_construction` is simply gone.
 // It reproduced through a Trending city card, a Trending district card, a Trending card for a
@@ -35,7 +45,7 @@ import { liftSymbols } from './lib/liftSymbols.ts';
 import { stripComments } from './lib/stripComments.ts';
 import { sanitizeForFilterRestore, AF_PREDICATE_FIELDS, toggleGroup, setCategory } from '../src/lib/searchDefaults.ts';
 import { reconcileCommittedAf, certifiedFacets, stripCommittedAf, withoutFacet } from '../src/lib/afCarry.ts';
-import { COHORT_QUESTIONS, certifiedAmenityKeys, cohortAllows } from '../src/lib/afCohorts.ts';
+import { COHORT_QUESTIONS, certifiedAmenityKeys, cohortAllows, AMENITY_BAG_QUESTION_IDS } from '../src/lib/afCohorts.ts';
 import { CLEAN_MACRO, groupsOf } from '../src/data/propertyTypes.ts';
 import type { SearchQuery } from '../src/data/search.ts';
 
@@ -55,22 +65,20 @@ const assert = (cond: boolean, msg: string) => {
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 // ── the real code, lifted ────────────────────────────────────────────────────────────────────────
-const QUESTION_CONSTS = [
-  'RNPL_QUESTION', 'AGE_QUESTION', 'AMENITIES_QUESTION', 'BATHROOMS_QUESTION', 'FURNISHED_QUESTION',
-  'STREET_WIDTH_QUESTION', 'DIRECTION_QUESTION', 'RATING_QUESTION', 'UNIT_SUBTYPE_QUESTION',
-];
+// The pool's consts and the lift prelude are shared with every lifter (scripts/lib/afMatrix.ts).
+import { QUESTION_CONSTS, QUESTION_HELPER_SYMBOLS, afLiftImports } from './lib/afMatrix.ts';
 const lifted = await liftSymbols(
   join(ROOT, 'src/data/advancedFilters.ts'),
   // addAmenities is a plain function two questions use as their whole apply(); the rest are object
   // literals whose members are all lazily evaluated, so apply() needs no prelude at all.
-  [{ header: 'function addAmenities' }, ...QUESTION_CONSTS.map((header) => ({ header: `const ${header}` }))],
+  [{ header: 'function addAmenities' }, { header: 'const AGE_LADDER', endsWith: /^\];$/ }, ...QUESTION_HELPER_SYMBOLS, ...QUESTION_CONSTS.map((header) => ({ header: `const ${header}` }))],
   ['addAmenities', ...QUESTION_CONSTS],
   // §12 also CALLS AMENITIES_QUESTION.resolveOptions, to read the token set the card can offer from
   // the question itself rather than hand-listing it here. Its cohort logic is imported REAL; only
   // the count path is shimmed — counts decide how many offered options are worth SHOWING, never
   // which tokens may be offered, so the identity shim yields the superset (the fail-closed side).
   [
-    `import { cohortAllows, scopeCleanTypes, intersectChips } from ${JSON.stringify(pathToFileURL(join(ROOT, 'src/lib/afCohorts.ts')).href)};`,
+    afLiftImports(ROOT),
     'type GuidedCounts = Record<string, number>;',
     'const fetchApartmentGuidedCounts = async (_q: unknown) => ({} as GuidedCounts);',
     'const guidedOptions = (_c: unknown, defs: Array<{ key: string }>) => ({ options: defs.map((d) => ({ key: d.key })) });',
@@ -107,6 +115,7 @@ const LOADED: SearchQuery = {
   ageMin: 3, ageMax: 5, isNewConstruction: true, amenities: ['elevator', 'parking'], bathMin: 3,
   ratingMin: 9, reviewsMin: 10, unitSubtypes: ['استديو'], furnishedPref: false,
   streetWidthMin: 20, directions: ['شمال', 'غرب'],
+  ageBuckets: ['new', '6_9'], ratingBuckets: ['9.5', '9.0_rc10'], furnishedIn: [true, false],
 };
 const loadedParams = rpcAdvancedFilterParams(LOADED);
 // THE SET IS DERIVED FROM THE BUILDER, NOT COUNTED OFF A FIXTURE. This used to be
@@ -175,8 +184,14 @@ console.log('\n── 3. EVERY question, on a cohort the registry itself certifi
 // draft used the Arabic display name «محل» where the code holds the clean key `Shop`, so
 // cohortAllows() refused everything and eight of these checks failed for the wrong reason).
 const ANSWER_KEYS: Record<string, string[]> = {
-  property_age: ['3_5'], amenities: ['elevator'], rnpl: ['rnpl'], bathrooms: ['3'],
+  property_age: ['upto5'], amenities: ['elevator'], rnpl: ['rnpl'], bathrooms: ['3'],
   furnished: ['no'], street_width: ['20'], direction: ['شمال'], rating: ['9.0_rc10'], unit_subtype: ['استديو'],
+  // The themed cards (owner 2026-10-31 / 11-01) — certified by their CHIPS (cardKeys), not by a COHORT_QUESTIONS
+  // leg, so certifiedScopeFor() names a group scope whose plan carries each card; and the two Residential
+  // Building ladders, which write one p_amenities token each.
+  comfort: ['elevator'], space: ['majlis'], fun: ['pool'], safety: ['cameras'], perks: ['gym'], build: ['warranty'],
+  extras: ['storage'], who: ['singles'], features: ['basement'], services: ['sanitation'],
+  apartments: ['apts8'], shops: ['has_shops'],
 };
 const LEGS = {
   Buy: { deal: 'Buy' as const, rentPeriod: 'annual' as const },
@@ -184,7 +199,20 @@ const LEGS = {
   RentMonthly: { deal: 'Rent' as const, rentPeriod: 'monthly' as const },
 };
 /** The first (type, deal-leg) the registry certifies this question for. */
+// Where each card is certified (cardKeys non-empty), on a single type × deal of the Apartments & Co-living lists.
+const CARD_SCOPES: Record<string, [string, keyof typeof LEGS]> = {
+  comfort: ['Apartment', 'RentMonthly'], space: ['Apartment', 'RentMonthly'], fun: ['Apartment', 'RentMonthly'],
+  safety: ['Apartment', 'RentAnnual'], perks: ['Apartment', 'RentAnnual'], build: ['Apartment', 'Buy'],
+  extras: ['Floor', 'RentAnnual'], who: ['Room', 'RentAnnual'], features: ['Residential Building', 'Buy'],
+  services: ['Residential Building', 'RentAnnual'],
+};
 function certifiedScopeFor(id: string): SearchQuery | null {
+  if (CARD_SCOPES[id]) {
+    const [type, leg] = CARD_SCOPES[id];
+    const scope = { ...SHOP, ...LEGS[leg], category: 'Residential', typeGroups: groupsOf([type]), types: [type] } as SearchQuery;
+    if (!cohortAllows(scope, id)) throw new Error(`CARD_SCOPES is stale: ${id} is not certified on ${type}/${leg}`);
+    return scope;
+  }
   for (const [type, cfg] of Object.entries(COHORT_QUESTIONS)) {
     for (const leg of ['RentAnnual', 'Buy', 'RentMonthly'] as const) {
       if (!(cfg[leg] ?? []).includes(id)) continue;
@@ -363,13 +391,13 @@ assert(spreadName === 'query'
 assert(spreadName === 'query'
   || !new RegExp(`const ${spreadName}\\b[^=\\n]*=[^;\\n]*\\bstoreQuery\\b`).test(indexTsx),
   `«بحث» must NOT be built from the raw store («${spreadName}» derives from storeQuery)`);
-// THE CHIP ROW MAPS THE FACET LIST ITSELF, so the index it renders is the index withoutFacet() takes.
-// It used to map with a `null` hole for scope facets, and the obvious tidy-up — filter first, then
-// map — silently re-indexed: tapping the «×» on «جديد» deleted a DIFFERENT facet while the chip and
-// its predicate stayed. The hole is gone because scope facets are no longer carried at all (§6), so
-// there is nothing to skip; this pins that the row still renders the list one-to-one.
-assert(/query\.afFacets\.map\(\(f, i\) =>/.test(indexTsx),
-  'the chip row maps query.afFacets one-to-one, so chip index i IS facet index i');
+// RETIRED 2026-10-03: there is no chip row on the Filter screen to map. It used to render
+// query.afFacets one-to-one so chip index i was facet index i, which is what a «×» handed to
+// withoutFacet(). The owner ruled that coming back to the Filter always opens a CLEAN form (no chips,
+// no ✕, no «مسح الكل»), so nothing is rendered from the facet list here at all. This pins the absence:
+// a chip row coming back would need that indexing re-proven.
+assert(!/query\.afFacets/.test(indexTsx.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n')),
+  'the Filter screen renders no chip row from query.afFacets (a return to the Filter is a clean form)');
 // rpcAllNarrowingParams is what turns that object into the Trending request; it must keep spreading
 // the AF half, or the reconciliation above would be feeding a builder that throws the answers away.
 assert(/rpcAllNarrowingParams[\s\S]{0,1400}rpcAdvancedFilterParams\(q\)/.test(read('src/data/remote.ts')),
@@ -545,12 +573,16 @@ assert(same(reconcileCommittedAf({ ...amenQ.apply(VILLA, ['car_entrance']), afFa
 // list, so filtering it would drop a certified answer and WIDEN. Its own 1:1 question gate is its
 // per-token gate. A THIRD question learning to write `amenities` must force that decision again,
 // so the writers are discovered by EXECUTING every apply(), never assumed.
-const amenityWriters = ADVANCED.filter((q) => {
+// (two consts carry id 'space' — the short-stays and the yearly wording — so the ids are de-duplicated)
+const amenityWriters = [...new Set(ADVANCED.filter((q) => {
   const probe: SearchQuery = { ...SHOP };
   return !same(q.apply(probe, ANSWER_KEYS[q.id]).amenities, probe.amenities);
-}).map((q) => q.id).sort();
-assert(same(amenityWriters, ['amenities', 'rnpl']),
-  `exactly two questions write amenity tokens, and afCarry handles both by name (found: ${amenityWriters.join(', ')})`);
+}).map((q) => q.id))].sort();
+// The pinned writer set: the amenities card, the ten themed cards and the two Residential Building ladders — every
+// id afCarry token-filters (AMENITY_BAG_QUESTION_IDS) — plus rnpl, which is gated on its own id instead.
+const PINNED_WRITERS = [...AMENITY_BAG_QUESTION_IDS, 'rnpl'].sort();
+assert(same(amenityWriters, PINNED_WRITERS),
+  `exactly ${PINNED_WRITERS.length} questions write amenity tokens — the bag questions (token-filtered by afCarry's AMENITY_BAG_QUESTION_IDS) and rnpl (found: ${amenityWriters.join(', ')})`);
 assert(!certifiedAmenityKeys(certifiedScopeFor('rnpl')!).includes('rnpl'),
   '«rnpl» is deliberately absent from certifiedAmenityKeys — token-filtering it would drop a certified answer');
 assert(certifiedFacets(certifiedScopeFor('rnpl')!, [rnplFacet]).length === 1,
@@ -584,6 +616,9 @@ for (const [type, cfg] of Object.entries(COHORT_QUESTIONS)) {
       category: (CLEAN_MACRO[type] ?? 'Residential') as SearchQuery['category'],
       typeGroups: groupsOf([type]), types: [type],
     };
+    // Short stays (owner 2026-10-31): the generic card is not ASKED there — its two halves are (comfort /
+    // space / fun, pinned by verify-short-stays-one-cohort.ts) — so an unasked card's option list is no offer.
+    if (!(lifted.AMENITIES_QUESTION as { eligibility: (q: SearchQuery) => boolean }).eligibility(scope)) continue;
     const offered = await offeredKeys(scope);
     const certified = new Set(certifiedAmenityKeys(scope));
     const orphans = offered.filter((k) => !certified.has(k));

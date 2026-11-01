@@ -204,6 +204,33 @@ function driveTurn(opts: { bounded: boolean; churnFor: number; thenIdle: number 
   check('…and the per-turn ceiling never fires — it is an upper bound, not the driver', r.viaCeiling === 0);
 }
 
+// ── 4b. THE FALLBACK STOPS THE INTERVAL (owner 2026-10-04: «sometimes doesn't show an emoji»). The
+//        live condition is a SLOWED interval, not a dead one: the fallback pays out first, then the
+//        interval ticks again. Pre-fix it kept calling setN(i) — rewinding the finished sentence —
+//        and its last tick hit finish()'s `done` guard, so the reveal stayed one tick short forever
+//        and the Results-Found emoji (always the last glyph) never appeared. ───────────────────────
+{
+  const slowThenResume = (rt: typeof runTypewriter) => {
+    const clock = makeClock();
+    let n = 0;
+    withClock(clock, () => {
+      rt(TOTAL, (v) => { n = v; });
+      clock.advance(4000, /* starved */ true);   // the fallback comes due while the interval is starved
+      clock.advance(5000, /* starved */ false);  // …then the main thread frees up and it ticks again
+    });
+    return n;
+  };
+  // The pre-fix body, rebuilt in memory from the REAL lifted function with the one line removed —
+  // no file is written, so nothing can be left mutated if this process is killed.
+  const preFixSrc = runTypewriter.toString().replace(/\n\s*clearInterval\(id\);\n(\s*setN\(total\);)/, '\n$1');
+  const preFix = new Function('TYPE_TICK_MS', 'TYPE_CHARS', `return ${preFixSrc};`)(24, 2) as typeof runTypewriter;
+  check('the pre-fix rebuild really removed finish()\'s clearInterval (so the mutation below is the right one)', preFixSrc !== runTypewriter.toString());
+  const before = slowThenResume(preFix);
+  mustCatch(`the pre-fix runTypewriter ending one tick short (${before}/${TOTAL} glyphs) once a starved interval resumes after the fallback — the missing emoji`, before < TOTAL);
+  const after = slowThenResume(runTypewriter);
+  check(`the shipped runTypewriter keeps the WHOLE sentence (${after}/${TOTAL}) after the fallback, however the interval resumes`, after === TOTAL);
+}
+
 // ── 5. THE WIRING IS REAL: both shipped components must arm the bound in a MOUNT-ONLY effect.
 //       An effect keyed on the text is the defect itself, so this is asserted by shape — a future
 //       edit that re-keys it to [text]/[full] fails here. ──────────────────────────────────────────

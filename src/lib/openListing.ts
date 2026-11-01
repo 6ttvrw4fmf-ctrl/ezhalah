@@ -3,6 +3,8 @@ import * as WebBrowser from 'expo-web-browser';
 import type { Listing } from '@/data/listings';
 import { getLocale } from '@/i18n';
 import { gathernClickThroughUrl } from '@/lib/gathernUrl';
+import { localizeAdUrl } from '@/lib/adLocale';
+import { safeHttpUrl } from '@/lib/safeUrl';
 
 // Open a listing on its source platform in the way that "views it normally" for the user:
 //   • WEB  → a new browser tab (real Aqar page in their own Chrome; can't be an iframe — Aqar sends
@@ -32,11 +34,20 @@ function localizeAqarUrl(url: string | null | undefined, locale: string): string
 // anyone comparing the click-through page's price against the stored one. See src/lib/gathernUrl.ts
 // for the full evidence trail. Until a real deep link to Gathern's priced monthly view is found, we
 // open the bare URL rather than dress it up as something it isn't.
-export async function openListing(listing: Listing): Promise<void> {
+// The exact URL a listing opens at — shared with the in-app ad viewer (components/AdViewer.tsx) so
+// an embedded page and a new tab always show the same address.
+export function listingOpenUrl(listing: Listing): string | undefined {
   const raw = listing.source_url;
   const url = raw?.includes('gathern.co')
     ? gathernClickThroughUrl(raw)
     : localizeAqarUrl(raw, getLocale());
+  // Deal App / Gathern follow the app's language too (Arabic app → Arabic ad). Frame and new tab agree.
+  // Only a real web page ever opens (safeUrl.ts): a stored javascript:/data: address returns undefined.
+  return safeHttpUrl(localizeAdUrl(url, getLocale()));
+}
+
+export async function openListing(listing: Listing): Promise<void> {
+  const url = listingOpenUrl(listing);
   if (!url) return;
   if (Platform.OS === 'web') {
     if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer');

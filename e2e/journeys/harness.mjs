@@ -27,6 +27,8 @@
 // The seeded token is not a valid credential, so server sync legitimately no-ops; every assertion
 // here is about client state, never about server truth.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
+import '../../scripts/lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
+import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium, webkit, firefox, devices } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { isHydrationNoticePageError, hydrationNoticeNote } from '../lib/pageErrors.mjs';
@@ -196,6 +198,31 @@ const sessionObj = () => ({
 });
 
 /**
+ * A SESSION THAT HAS EXPIRED — the PART 1 auth surface ("token expiry") that had no journey at all
+ * until 2026-09-27. Two shapes, because they fail through two DIFFERENT paths in @supabase/auth-js
+ * and only one of them is self-healing:
+ *
+ *   'empty-refresh'  expired, `refresh_token: ''`. _isValidSession() tests key PRESENCE only, so the
+ *                    slot passes as valid; _callRefreshToken('') then THROWS AuthSessionMissingError
+ *                    BEFORE the try/catch that converts errors into `{ error }`, and neither
+ *                    __loadSession nor _useSession carries a catch — so getSession() REJECTS.
+ *   'server-rejects' expired with a refresh_token the server will refuse. Pair it with
+ *                    `abort: '**\/auth/v1/token**'` to model the request FAILING instead (offline,
+ *                    captive portal, blocking extension, 5xx), which auth-js retries for up to
+ *                    AUTO_REFRESH_TICK_DURATION_MS (30_000) — so getSession() simply never settles.
+ *
+ * Measured on production 2026-09-27 (Chromium 1440x900, 2/2 fresh contexts per arm): the first arm
+ * left the gate closed at 20s, 40s AND 75s; the second at 20s and 40s, recovering by 75s.
+ */
+export const expiredSession = (kind = 'empty-refresh') => ({
+  access_token: 'x.y.z', token_type: 'bearer',
+  refresh_token: kind === 'empty-refresh' ? '' : 'rt-the-server-will-refuse',
+  expires_in: 0, expires_at: Math.floor(Date.now() / 1000) - 3600,
+  user: { id: 'qa-user', aud: 'authenticated', email: SUB,
+          app_metadata: { provider: 'google' }, user_metadata: { name: 'QA', full_name: 'QA' } },
+});
+
+/**
  * One journey, one FRESH browser + context (PART 11.4: a reproduction is a new context, never a
  * retry inside the same page). Collects page errors, failed requests, and the RPC bodies the app
  * actually sent, so a journey can assert on the request rather than on a live count the world is
@@ -263,7 +290,13 @@ export const seedInitScript = ([sess, hist, sub, wantAuth]) => {
 export const ENGINE = process.env.JOURNEY_ENGINE || 'chromium';
 
 export async function withPage(opts, fn) {
-  const { engine = ENGINE, mobile = false, signedIn = false, history = null, path = '/' } = opts;
+  const { engine = ENGINE, mobile = false, signedIn = false, history = null, path = '/',
+          // TOKEN EXPIRY NEEDS A SESSION THE DEFAULT FIXTURE CANNOT EXPRESS. `session` replaces the
+          // seeded object wholesale (an EXPIRED one, a refresh_token the server will reject, a
+          // malformed slot) and `abort` fails matching requests, which is how a blocked token refresh
+          // is reproduced without waiting for a real outage. Both default to today's behaviour, so
+          // every existing journey is untouched.
+          session = null, abort = null } = opts;
   const browser = await ENGINES[engine].launch(launchOpts(engine));
   const device = mobile ? devices['iPhone 13'] : devices['Desktop Chrome'];
   // FIREFOX REJECTS `isMobile` OUTRIGHT — `browser.newContext: options.isMobile is not supported in
@@ -288,7 +321,8 @@ export async function withPage(opts, fn) {
     // WebKit/Firefox reject Chromium's UA string from the device profile; let them use their own.
     ...(engine === 'chromium' ? {} : { userAgent: undefined }),
   });
-  await ctx.addInitScript(seedInitScript, [sessionObj(), history, SUB, signedIn]);
+  if (abort) await ctx.route(abort, (r) => r.abort('failed'));
+  await ctx.addInitScript(seedInitScript, [session ?? sessionObj(), history, SUB, signedIn]);
 
   // A SEEDED SESSION MUST NOT SUMMON A PROMPT A REAL SIGNED-IN USER NEVER SEES.
   //
@@ -829,11 +863,24 @@ export const isTransportError = (err) => {
 // of disappearing.
 const TRANSPORT_PAGE_ERROR_SHAPES = [
   /Fetch API cannot load [\s\S]*due to access control checks/i, // WebKit's wording for a dead fetch
+  // WebKit's wording for a dead XHR — measured 2026-10-19 (sweep 39236332307, webkit mobile): Google's own
+  // One Tap status call «XMLHttpRequest cannot load https://accounts.google.com/gsi/status?… due to access
+  // control checks» (ITP, has_opted_out_fedcm=true) was filed as an Ezhalah defect on two journeys. It is the
+  // same class as the fetch line above (a third-party request the engine blocked), and the same class as
+  // Sentry REACT-NATIVE-D/E (a bare NetworkError DOMException, code 19, from our own Firefox sweep).
+  /XMLHttpRequest cannot load [\s\S]*due to access control checks/i,
   /\bLoad failed\b/,                                            // WebKit's generic fetch failure
   /The network connection was lost/i,                           // WebKit/CFNetwork
   /Failed to fetch/i,                                           // Blink
   /NetworkError when attempting to fetch resource/i,            // Gecko
   /\bERR_[A-Z_]+\b/,                                            // net:: codes, wherever they surface
+  // A third-party frame's own cross-origin SecurityError. Measured 2026-10-23 (sweep 39932772747, webkit desktop AND
+  // mobile, 2/2 on auth-overlay-clears-controls and both-edges-docked-clears-controls): «Blocked a frame with origin
+  // "https://challenges.cloudflare.com" from accessing a frame with origin "https://ezhalah-app.vercel.app"» — the
+  // Cloudflare challenge frame touching its parent, which WebKit reports as an uncaught page error. No Ezhalah code
+  // ran; same class as the One Tap XHR above (a third-party page the engine refused). Only THAT origin is excused:
+  // a bare «SecurityError: The operation is insecure.» from our own code stays a product defect.
+  /Blocked a frame with origin "https:\s*\/*challenges\.cloudflare\.com"/i,
 ];
 
 /** Is this page error a NETWORK failure rather than an application exception? */

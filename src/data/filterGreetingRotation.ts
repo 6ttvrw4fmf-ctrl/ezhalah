@@ -4,10 +4,11 @@
 // a rotation between one of those." The previous shape shipped a first-search fallback that showed
 // the retired text on every first search of a session and looked broken to the user.)
 //
-// The 60 rows here are the owner's trimmed list from 2026-09-26 (originally 100, authored
-// 2026-09-18) — the owner cut Gulf-wide/Emirati-leaning entries («مرحبا الساع») and phrases that
-// read forced or unnatural in Saudi Arabic («أرحب وأسهِل», «مرحبتين كبار», endings tacked on with a
-// bare «يا»), on the reasoning that 60 natural openings beat 100 with filler. Also stored
+// The 11 rows here are the owner's list from 2026-10-11, with rows 3 and 10 updated on
+// 2026-10-24 to remove «الله» (20261024071112_filter_greetings_without_allah.sql).
+// «there is a lot of cringe … just 2 words with an emoji» — short, natural Saudi greetings, calm emojis,
+// nothing over the top. The 2026-09-26 cut had already removed Gulf-wide/Emirati-leaning entries
+// («مرحبا الساع») and phrases that read forced in Saudi Arabic («أرحب وأسهِل», «مرحبتين كبار»). Also stored
 // server-side in public.ui_filter_greetings for future editability — see
 // supabase/migrations/20260918214451_ui_filter_greetings_rotation.sql (original 100) and
 // supabase/migrations/20260926_filter_greetings_trimmed_to_60.sql (the 2026-09-26 replacement) —
@@ -22,72 +23,22 @@
 
 export type FilterGreeting = { greeting: string; emoji: string };
 
-// Baked-in list: 60 Arabic openings, the owner's 2026-09-26 trim of the original 100 (authored
-// 2026-09-18). Immediately available at import time so the picker never has to wait on a network
+// Baked-in list: 11 Arabic openings, the owner's 2026-10-11 cut (60 on 2026-09-26, 100 originally). Immediately available at import time so the picker never has to wait on a network
 // request, so the very first Filter search of a fresh session already reads a random one. Order
 // matches the DB rows byte-for-byte, and the DB mirror is asserted equal by
 // scripts/verify-filter-greeting-rotation.ts so the two can never drift.
 const BAKED: FilterGreeting[] = [
   { greeting: 'هلا', emoji: '👋' },
-  { greeting: 'يا هلا', emoji: '🙌' },
-  { greeting: 'هلا والله', emoji: '💚' },
-  { greeting: 'مرحبا', emoji: '😊' },
+  { greeting: 'يا هلا', emoji: '🤍' },
+  { greeting: 'حياك', emoji: '☕' },
+  { greeting: 'هلا ومسهلا', emoji: '🌿' },
+  { greeting: 'مرحبا بك', emoji: '😊' },
+  { greeting: 'أهلًا بك', emoji: '🌤️' },
+  { greeting: 'السلام عليكم', emoji: '🌿' },
+  { greeting: 'هلا فيك', emoji: '🤍' },
+  { greeting: 'يا مرحبا', emoji: '🏡' },
+  { greeting: 'سلامات', emoji: '🌴' },
   { greeting: 'أرحب', emoji: '✨' },
-  { greeting: 'يا مرحبا', emoji: '🤝' },
-  { greeting: 'حياك', emoji: '😎' },
-  { greeting: 'أهلين', emoji: '🌟' },
-  { greeting: 'هلا وغلا', emoji: '🤍' },
-  { greeting: 'يا هلا والله', emoji: '🔥' },
-  { greeting: 'مرحبتين', emoji: '😄' },
-  { greeting: 'أرحب والله', emoji: '🫡' },
-  { greeting: 'حيا الله', emoji: '🙏' },
-  { greeting: 'يا حي', emoji: '🌴' },
-  { greeting: 'هلا هلا', emoji: '🎉' },
-  { greeting: 'يا مرحبا والله', emoji: '💫' },
-  { greeting: 'أهلًا', emoji: '🌿' },
-  { greeting: 'أهلين وسهلين', emoji: '😁' },
-  { greeting: 'يا هلا وغلا', emoji: '🏡' },
-  { greeting: 'حياك الله', emoji: '☀️' },
-  { greeting: 'أرحب مليون', emoji: '🚀' },
-  { greeting: 'هلا بالزين', emoji: '😉' },
-  { greeting: 'يا مرحبتين', emoji: '🌹' },
-  { greeting: 'يالله حيه', emoji: '⚡' },
-  { greeting: 'يا هلا فيك', emoji: '🥳' },
-  { greeting: 'هلا بك', emoji: '🏠' },
-  { greeting: 'يا حيّك', emoji: '😌' },
-  { greeting: 'أرحب وألف هلا', emoji: '💯' },
-  { greeting: 'يا مرحبا مليون', emoji: '🌧️' },
-  { greeting: 'هلا بالطلة', emoji: '🌞' },
-  { greeting: 'حيا الله هالطلة', emoji: '🍃' },
-  { greeting: 'أهلًا وسهلًا', emoji: '🔎' },
-  { greeting: 'هلا من جديد', emoji: '🔄' },
-  { greeting: 'يا مرحبا تراحيب', emoji: '🌸' },
-  { greeting: 'حياك ربي', emoji: '👌' },
-  { greeting: 'هلا فيك', emoji: '🧭' },
-  { greeting: 'يا هلا بك', emoji: '💪' },
-  { greeting: 'حي الله من جانا', emoji: '🏘️' },
-  { greeting: 'أهلين والله', emoji: '😄' },
-  { greeting: 'يا حي من لفانا', emoji: '🛬' },
-  { greeting: 'مرحبا مليون', emoji: '💎' },
-  { greeting: 'هلا والله ومرحبا', emoji: '🎈' },
-  { greeting: 'حي الله', emoji: '😊' },
-  { greeting: 'يا مرحبا بك', emoji: '🧡' },
-  { greeting: 'أهلين فيك', emoji: '🪄' },
-  { greeting: 'يا مرحبا', emoji: '🥰' },
-  { greeting: 'أرحب تراحيب', emoji: '🌊' },
-  { greeting: 'يا هلا بالطلة', emoji: '📍' },
-  { greeting: 'حيّاك الله', emoji: '🏙️' },
-  { greeting: 'هلا ومرحبا', emoji: '🛋️' },
-  { greeting: 'يا مرحبا بالزين', emoji: '🌺' },
-  { greeting: 'أهلًا ومرحبًا', emoji: '🎯' },
-  { greeting: 'يا حي الله', emoji: '🍀' },
-  { greeting: 'أهلًا أهلًا', emoji: '🙋' },
-  { greeting: 'يا هلا مليون', emoji: '⭐' },
-  { greeting: 'يالله حيّك', emoji: '🎊' },
-  { greeting: 'هلا ومرحبتين', emoji: '🧩' },
-  { greeting: 'يا هلا يا هلا', emoji: '🎵' },
-  { greeting: 'أرحب وألف مرحبا', emoji: '🏅' },
-  { greeting: 'هلا بك والله', emoji: '🛎️' },
 ];
 
 // Live cache: starts equal to BAKED so the very first pick already rotates. The server-side loader
@@ -131,3 +82,18 @@ export function pickFilterGreetingOpening(): string {
 
 // Test-only export: the baked list itself, so a barrier can assert its exact size and shape.
 export const __testing = { BAKED };
+
+// One natural English translation for each approved Arabic row, with its original emoji.
+const ENGLISH_GREETINGS = [
+  'Hi', 'Hello', 'Welcome', 'A warm welcome', 'Welcome', 'Welcome',
+  'Peace be upon you', 'Hello there', 'Hello', 'You’re welcome here', 'Welcome aboard',
+] as const;
+const ENGLISH_OPENINGS = BAKED.map(({ emoji }, i) => `${ENGLISH_GREETINGS[i]} Ezhalah ${emoji}, `);
+export const __englishTesting = { ENGLISH_OPENINGS };
+let lastEnglishIndex = -1;
+export function pickEnglishFilterGreetingOpening(): string {
+  let index = Math.floor(Math.random() * ENGLISH_OPENINGS.length);
+  if (index === lastEnglishIndex) index = (index + 1) % ENGLISH_OPENINGS.length;
+  lastEnglishIndex = index;
+  return ENGLISH_OPENINGS[index];
+}

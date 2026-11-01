@@ -148,7 +148,7 @@ const RESULTCARD_NOWS = stripWs(RESULTCARD_TS);
 // matched — in scripts/verify-additional-info-labels-are-arabic.ts, which also pins this wiring.
 check(
   "ResultCard.tsx's AdditionalInformationPanel resolves the row label via attrDisplayLabel(..., ATTRIBUTE_UNRESOLVED_AR)",
-  RESULTCARD_NOWS.includes('attrDisplayLabel(t(r.label),r.key,locale,ATTRIBUTE_UNRESOLVED_AR)'),
+  RESULTCARD_NOWS.includes("attrDisplayLabel(locale==='en'?englishCatalogText(r.label):t(r.label),r.key,locale,ATTRIBUTE_UNRESOLVED_AR)"),
 );
 check(
   'the placeholder is still the FINAL fallback for an unresolvable label (no English leak)',
@@ -236,7 +236,7 @@ const AGENT_TSX = readFileSync(new URL('../src/app/agent.tsx', import.meta.url),
 const AGENT_NOWS = stripWs(AGENT_TSX);
 check(
   'agent.tsx\'s district refine-chip question wraps q.location in arLabel() on the Arabic branch (was raw — could render "أي حي تفضّل في Riyadh؟")',
-  AGENT_NOWS.includes('ask=ar?`أيحيتفضّلفي${arLabel(q.location)}؟`:`Whichdistrictin${q.location}?`;'),
+  AGENT_NOWS.includes('ask=ar?nextVariant(REFINE_DISTRICT_AR,{c:arLabel(q.location)}):nextVariant(REFINE_DISTRICT_EN,{c:q.location});'),
 );
 
 console.log('');

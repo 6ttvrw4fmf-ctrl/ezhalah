@@ -1,8 +1,7 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
--- Re-verified 2026-09-27 (migration 20260921073600_stale_sweep_exclusion_parse_ignores_comments): UNCHANGED.
---   md5(pg_get_functiondef) in production = 8a7e43fbf25479b558a69473a0fae7b6, identical to this file.
---   Stamped for verify-sql-mirrors-not-stale (B2): the previous same-day stamp named no version at or
---   after this migration, so nothing proved it was re-checked AFTER it. Nothing in the body was edited.
+-- Re-verified 2026-11-01 (migration 20260921073600_stale_sweep_exclusion_parse_ignores_comments): UNCHANGED.
+--   md5(pg_get_functiondef) in production = 8a7e43fbf25479b558a69473a0fae7b6, identical to this file. Stamped for
+--   verify-sql-mirrors-not-stale (B2): no earlier same-day stamp named a version at or after this migration.
 -- Refreshed 2026-08-29 (first capture) by the Senior Production Engineer routine, in the same
 --   change that fixed the coverage gate (migration 20260829142111, owner-directed).
 --   mark_stale_listings_inactive() is the daily stale sweep (pg_cron jobid 13, 04:00 UTC). Two

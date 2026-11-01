@@ -41,6 +41,7 @@
 // states: `npm test` is a required check on every PR, and a live check there would fail unrelated
 // PRs whenever production momentarily disagreed.
 
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 const SUPABASE_URL = 'https://aannarbkwcymrotzwdbo.supabase.co';
 // The anon key real users' browsers use — pinned here (matches scripts/safe-deploy.sh
 // LOCK_ANON_KEY). If it ever rotates, safe-deploy.sh is the one truth source and this moves with it.

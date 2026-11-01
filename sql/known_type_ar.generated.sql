@@ -3,16 +3,22 @@
 -- after any change to the clean-type map, then re-apply so detect_novel_property_types() (pg_cron
 -- jobid 33) and the trust checks stay in sync with what the app can actually reach.
 -- macro = which category owns the label: Residential | Commercial | both («عمارة» only — resolved by
--- source-table kind at read time). 55 covered type_ar labels.
+-- source-table kind at read time). 65 covered type_ar labels.
 create table if not exists public.known_type_ar (type_ar text primary key, macro text);
 alter table public.known_type_ar add column if not exists macro text;  -- upgrade path from 1-col shape
 -- Full re-sync: the generated set is authoritative.
 truncate public.known_type_ar;
 insert into public.known_type_ar (type_ar, macro) values
-  ('أرض', 'Residential'),
+  ('أرض', 'Commercial'),
+  ('أرض تجاري', 'Commercial'),
   ('أرض تجارية', 'Commercial'),
+  ('أرض خام', 'Commercial'),
+  ('أرض زراعي', 'Residential'),
   ('أرض زراعية', 'Residential'),
+  ('أرض سكني', 'Residential'),
+  ('أرض سكني تجاري', 'Commercial'),
   ('أرض سكنية', 'Residential'),
+  ('أرض صناعي', 'Commercial'),
   ('أرض صناعية', 'Commercial'),
   ('إستراحة', 'Residential'),
   ('استراحة', 'Residential'),
@@ -22,10 +28,12 @@ insert into public.known_type_ar (type_ar, macro) values
   ('بنك', 'Commercial'),
   ('بيت', 'Residential'),
   ('تاون هاوس', 'Residential'),
+  ('تخزين ذاتي', 'Commercial'),
   ('حوش', 'Residential'),
   ('درايف ثرو', 'Commercial'),
   ('دوبلكس', 'Residential'),
   ('دور', 'Residential'),
+  ('ساحة تخزين', 'Commercial'),
   ('ستوديو', 'Residential'),
   ('سكن عمال', 'Commercial'),
   ('سينما', 'Commercial'),
@@ -35,9 +43,11 @@ insert into public.known_type_ar (type_ar, macro) values
   ('صالة', 'Commercial'),
   ('عمارة', 'both'),
   ('غرفة', 'Residential'),
+  ('غرفة اجتماعات', 'Commercial'),
   ('غير معروف', 'both'),
   ('فندق', 'Commercial'),
   ('فيلا', 'Residential'),
+  ('قاعة', 'Commercial'),
   ('كشك', 'Commercial'),
   ('مبنى تجاري', 'Commercial'),
   ('مبنى شقق مخدومة', 'Residential'),

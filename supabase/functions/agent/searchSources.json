@@ -1,0 +1,577 @@
+{
+  "Aqar": [
+    "aqar",
+    "aqarmonthly"
+  ],
+  "Wasalt": [
+    "wasalt"
+  ],
+  "Aldarim": [
+    "aldarim"
+  ],
+  "Aqargate": [
+    "aqargate"
+  ],
+  "Alhoshan": [
+    "alhoshan"
+  ],
+  "Hajer": [
+    "hajer"
+  ],
+  "Sanadak": [
+    "sanadak"
+  ],
+  "Eastabha": [
+    "eastabha"
+  ],
+  "Aqarcity": [
+    "aqarcity"
+  ],
+  "Raghdan": [
+    "raghdan"
+  ],
+  "Eaqartabuk": [
+    "eaqartabuk"
+  ],
+  "Satel": [
+    "satel"
+  ],
+  "Sadin": [
+    "sadin"
+  ],
+  "Mustqr": [
+    "mustqr"
+  ],
+  "Ramzalqasim": [
+    "ramzalqasim"
+  ],
+  "Fursaghyr": [
+    "fursaghyr"
+  ],
+  "Jazwtn": [
+    "jazwtn"
+  ],
+  "Mizlaj": [
+    "mizlaj"
+  ],
+  "Aqaratikom": [
+    "aqaratikom"
+  ],
+  "Al Khaas": [
+    "alkhaas"
+  ],
+  "Abeea": [
+    "abeea"
+  ],
+  "Jurash": [
+    "jurash"
+  ],
+  "Gathern": [
+    "gathern"
+  ],
+  "Deal App": [
+    "dealapp"
+  ],
+  "24 Souq": [
+    "souq24"
+  ],
+  "Era Pulse": [
+    "erapulse"
+  ],
+  "Al Nowaisiry": [
+    "nowaisiry"
+  ],
+  "1 October": [
+    "october"
+  ],
+  "Muktamel": [
+    "muktamel"
+  ],
+  "Arkaan": [
+    "arkaan"
+  ],
+  "Abralosol": [
+    "abralosol"
+  ],
+  "THERC": [
+    "therc"
+  ],
+  "Rawasi Dark": [
+    "rawasidark"
+  ],
+  "Aouj": [
+    "aouj"
+  ],
+  "Bahadhabab": [
+    "bahadhabab"
+  ],
+  "Alobid": [
+    "alobid"
+  ],
+  "Abwbna": [
+    "abwbna"
+  ],
+  "Remal": [
+    "remal"
+  ],
+  "Amaall": [
+    "amaall"
+  ],
+  "AqarAlSaudia": [
+    "aqaralsaudia"
+  ],
+  "Amlakalahsa": [
+    "amlakalahsa"
+  ],
+  "Alta": [
+    "alta"
+  ],
+  "Shmou Al Shmal": [
+    "shmoualshmal"
+  ],
+  "Awal": [
+    "awal"
+  ],
+  "Azdad": [
+    "azdad"
+  ],
+  "Suwar": [
+    "suwar"
+  ],
+  "Rakez": [
+    "rakez"
+  ],
+  "Akariyoun": [
+    "akariyoun"
+  ],
+  "KSA Aqar": [
+    "ksaaqar"
+  ],
+  "Sadiq Eltajer": [
+    "sadiqeltajer"
+  ],
+  "Toor": [
+    "toor"
+  ],
+  "Gudai": [
+    "gudai"
+  ],
+  "Safera": [
+    "safera"
+  ],
+  "Al Humaidan": [
+    "alhumaidan"
+  ],
+  "Aqar Najran": [
+    "aqarnajran"
+  ],
+  "Maqam Al Wisam": [
+    "fahadalshahri"
+  ],
+  "CompoundIn": [
+    "compoundin"
+  ],
+  "Waslna": [
+    "wslnaa"
+  ],
+  "Al Sidra": [
+    "alsidra"
+  ],
+  "Moftah": [
+    "moftah"
+  ],
+  "مسار المستقبل": [
+    "masar"
+  ],
+  "منصات": [
+    "gomenassat"
+  ],
+  "Sakan Saudi": [
+    "sakan"
+  ],
+  "مكتب بوصبيح": [
+    "bossbih"
+  ],
+  "Al Shawaf": [
+    "alshawaf"
+  ],
+  "Ibrahim Alqarawi": [
+    "ialqarawi"
+  ],
+  "Al Jassim": [
+    "aljassim"
+  ],
+  "Almotmkenah": [
+    "almotmkenah"
+  ],
+  "نفوذ": [
+    "nufouth"
+  ],
+  "دويليو": [
+    "dwelleo"
+  ],
+  "مكتب أقاليم هجر للخدمات العقارية": [
+    "aqalemhajer"
+  ],
+  "سكني": [
+    "sakani"
+  ],
+  "الشاطري للتطوير العقاري": [
+    "shatri"
+  ],
+  "القاسم العقارية": [
+    "alqasem"
+  ],
+  "فكر الإعمار": [
+    "fkralemar"
+  ],
+  "ودود العقارية": [
+    "wadod"
+  ],
+  "آل متعب العقارية": [
+    "almuteb"
+  ],
+  "البراك للعقارات": [
+    "aalbarrak"
+  ],
+  "الرفاعي للعقار": [
+    "alrifai"
+  ],
+  "سداسيات العقارية": [
+    "sodasyat"
+  ],
+  "حصاد الاقتصادية للعقارات": [
+    "hasaad"
+  ],
+  "عقار الرياض": [
+    "aqaralriyadh"
+  ],
+  "فقط نقطة العقارية": [
+    "justsa"
+  ],
+  "سنام العقارية": [
+    "snam"
+  ],
+  "جواهر للوساطة والتسويق العقاري": [
+    "jawher"
+  ],
+  "مقر المعتمد": [
+    "m3tmd"
+  ],
+  "سنان العقارية": [
+    "senan"
+  ],
+  "الصفقة الذهبية العقارية": [
+    "goldendeal"
+  ],
+  "1000 العقارية": [
+    "thousand"
+  ],
+  "يمين العقارية": [
+    "yameen"
+  ],
+  "إبريزة العقارية": [
+    "ebriza"
+  ],
+  "علم الريادة الإدارية": [
+    "eilmalriyada"
+  ],
+  "دار يوسف العقارية": [
+    "daryusuf"
+  ],
+  "البداح للعقارات": [
+    "albdah"
+  ],
+  "الإيضاح": [
+    "eydah"
+  ],
+  "تمايز العقارية": [
+    "tamyaz"
+  ],
+  "حازم": [
+    "hazim"
+  ],
+  "فلل": [
+    "villassa"
+  ],
+  "مار العقارية": [
+    "marksa"
+  ],
+  "RightCompound": [
+    "rightcompound"
+  ],
+  "LivingCompound": [
+    "livingcompound"
+  ],
+  "Azure": [
+    "azure"
+  ],
+  "Expat Trusted Housing": [
+    "expattrusted"
+  ],
+  "Flow": [
+    "flow"
+  ],
+  "أبعاد": [
+    "abaad"
+  ],
+  "آل سعيدان": [
+    "alsaedan"
+  ],
+  "إيجو عقار": [
+    "ego"
+  ],
+  "أحمد المحيسني العقارية": [
+    "muhaysini"
+  ],
+  "نفوذ للاستثمار العقاري": [
+    "nofodh"
+  ],
+  "راز العقارية": [
+    "razre"
+  ],
+  "ري إنفست": [
+    "reinvest"
+  ],
+  "صفا للاستثمار": [
+    "safa"
+  ],
+  "صكوك العقارية": [
+    "sokok"
+  ],
+  "سكنة": [
+    "sukna"
+  ],
+  "طوبة العقارية": [
+    "tuba"
+  ],
+  "آي باكس": [
+    "ibaax"
+  ],
+  "RE/MAX": [
+    "remaxsa"
+  ],
+  "قمرا للتطوير العقاري": [
+    "qmra"
+  ],
+  "العجلان للتسويق العقاري": [
+    "alajlan"
+  ],
+  "وحدات": [
+    "wahadat"
+  ],
+  "شركة المربعات العقارية": [
+    "squares"
+  ],
+  "رواف": [
+    "rawaf"
+  ],
+  "المسوق الافتراضي": [
+    "vmksa"
+  ],
+  "مكسب العقارية": [
+    "macsaib"
+  ],
+  "MAQRAT": [
+    "maqrat"
+  ],
+  "عرش العقارية": [
+    "arsh"
+  ],
+  "سوبر أوفيس": [
+    "superoffice"
+  ],
+  "شموع العقار": [
+    "shomou"
+  ],
+  "حراج": [
+    "haraj"
+  ],
+  "منصة مكتب": [
+    "maktab"
+  ],
+  "سرداب": [
+    "sirdab"
+  ],
+  "عشاب العقارية": [
+    "ashab"
+  ],
+  "منافع العقارية": [
+    "manafe"
+  ],
+  "وجف العقارية": [
+    "wajaf"
+  ],
+  "البكيري العقارية": [
+    "albukaeri"
+  ],
+  "ريادة العقارية": [
+    "ryadah"
+  ],
+  "مجموعة صالح القرشي العقارية": [
+    "sqcc"
+  ],
+  "دارا للتطوير العقاري": [
+    "daraa"
+  ],
+  "مكتب طوية للعقار": [
+    "tawia"
+  ],
+  "مانزو": [
+    "manzo"
+  ],
+  "الطابق الثامن": [
+    "eightfloor"
+  ],
+  "حلول": [
+    "holoul"
+  ],
+  "السوق المفتوح": [
+    "opensooq"
+  ],
+  "معرض نافذة": [
+    "nafithh"
+  ],
+  "مباشر": [
+    "mobasher"
+  ],
+  "مؤاجرة": [
+    "muajarh"
+  ],
+  "دلّالي": [
+    "dallali"
+  ],
+  "شركة مقام للتطوير العقاري": [
+    "maqam"
+  ],
+  "تطبيق أرض": [
+    "earthapp"
+  ],
+  "نوافذ الوطن": [
+    "nawafeth"
+  ],
+  "عقار": [
+    "aqar",
+    "aqarmonthly"
+  ],
+  "وصلت": [
+    "wasalt"
+  ],
+  "الدارم": [
+    "aldarim"
+  ],
+  "Aqar Gate": [
+    "aqargate"
+  ],
+  "بوابة العقار": [
+    "aqargate"
+  ],
+  "Al Hoshan": [
+    "alhoshan"
+  ],
+  "الحوشان": [
+    "alhoshan"
+  ],
+  "هجر": [
+    "hajer"
+  ],
+  "سندك": [
+    "sanadak"
+  ],
+  "East Abha": [
+    "eastabha"
+  ],
+  "شرق ابها": [
+    "eastabha"
+  ],
+  "Aqar City": [
+    "aqarcity"
+  ],
+  "مدينة العقار": [
+    "aqarcity"
+  ],
+  "رغدان": [
+    "raghdan"
+  ],
+  "Candles": [
+    "eaqartabuk"
+  ],
+  "شموع": [
+    "eaqartabuk"
+  ],
+  "ساتل": [
+    "satel"
+  ],
+  "سادن": [
+    "sadin"
+  ],
+  "تور": [
+    "toor"
+  ],
+  "Mustaqarr": [
+    "mustqr"
+  ],
+  "مستقر": [
+    "mustqr"
+  ],
+  "Ramz Al Qassim": [
+    "ramzalqasim"
+  ],
+  "رمز القصيم": [
+    "ramzalqasim"
+  ],
+  "Fursa Ghyr": [
+    "fursaghyr"
+  ],
+  "فرصة غير": [
+    "fursaghyr"
+  ],
+  "Jazan Watan": [
+    "jazwtn"
+  ],
+  "جازان وطن": [
+    "jazwtn"
+  ],
+  "مزلاج": [
+    "mizlaj"
+  ],
+  "مكتمل": [
+    "muktamel"
+  ],
+  "عقاراتكم": [
+    "aqaratikom"
+  ],
+  "أوال": [
+    "awal"
+  ],
+  "الخاص": [
+    "alkhaas"
+  ],
+  "ابيعا": [
+    "abeea"
+  ],
+  "جرش": [
+    "jurash"
+  ],
+  "Al Nokhba": [
+    "alnokhba"
+  ],
+  "النخبة": [
+    "alnokhba"
+  ],
+  "ديل": [
+    "dealapp"
+  ],
+  "نبض": [
+    "erapulse"
+  ],
+  "النويصري": [
+    "nowaisiry"
+  ],
+  "١ أكتوبر": [
+    "october"
+  ],
+  "جاذرين": [
+    "gathern"
+  ]
+}

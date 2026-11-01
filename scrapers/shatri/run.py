@@ -62,8 +62,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import city_ar_for, find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
+
+# THE PIN IS ON THE AD PAGE, NOT IN THE REST POST (owner 2026-10-30: 50 ads, 0 pins). Houzez prints the listing's
+# own map as <div id="houzez-single-listing-map" data-map='{"latitude":"21.6037976","longitude":"39.2128789",…}'>
+# (html-escaped), the same pair as its JSON-LD geo. One extra GET per row; a page that cannot be read writes nothing.
+_DATA_MAP = re.compile(r'houzez-single-listing-map"[^>]*?data-map=\'\{"latitude":"(-?\d{1,2}\.\d{3,})","longitude":"(-?\d{1,3}\.\d{3,})')
+
+
+def ad_pin(page_html: str) -> dict:
+    m = _DATA_MAP.search(ihtml.unescape(page_html or ""))
+    return (pin_dict(m.group(1), m.group(2)) if m else {}) or {"pin_absent": True}
+
+
+def page_pin(s, url: str) -> dict:
+    try:
+        r = s.get(url, timeout=45)
+    except Exception:  # noqa: BLE001 — not read ≠ no pin
+        return {}
+    return ad_pin(r.text) if r.status_code == 200 and r.text else {}
 
 BASE = "https://shatrirealestate.com"
 SOURCE = "الشاطري للتطوير العقاري"
@@ -96,10 +116,13 @@ _CURRENCY_RE = re.compile(r"ريـ?ال|ر\.س|SAR|﷼|sar", re.I)
 _PAUSE = 0.6
 
 
+HEADERS = {"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"}
+
+
 def session() -> cc.Session:
     # impersonate owns the User-Agent — never set one here.
     s = cc.Session(impersonate="chrome")
-    s.headers.update({"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"})
+    s.headers.update(HEADERS)
     return s
 
 
@@ -358,13 +381,41 @@ def _make_verify_gone(terms: dict[str, dict[int, str]]):
     return verify_gone
 
 
+def _fleet_verify_gone(control: Optional[dict] = None):
+    """The one-argument oracle the daily direct check calls (fleet_liveness.SITES, 2026-10-08).
+
+    `_make_verify_gone(terms)` needs the label taxonomy only the crawl had read, so the daily check
+    could not call it and 50 ads were never checked. This reads that taxonomy once, lazily, the way
+    the crawl does, and hands back the crawl's own oracle. A taxonomy that cannot be read, or that no
+    longer names «تم البيع», makes every answer UNKNOWN: a sold label we cannot resolve would
+    otherwise read as live. The daily check brings its own controls (`control` is not needed)."""
+    cache: dict[str, Any] = {}
+
+    def verify(ad_number: str) -> tuple[str, str]:
+        if "v" not in cache:
+            try:
+                s, _ = retry_smarter_session(f"{BASE}/wp-json/wp/v2/property_type?per_page=1", headers=HEADERS)
+                terms = fetch_terms(s)
+            except Exception as e:  # noqa: BLE001 — an unread taxonomy is no verdict, never a death
+                return "unknown", f"shatri label taxonomy unreadable ({type(e).__name__}: {str(e)[:100]})"
+            if SOLD_LABEL not in (terms.get("property_label") or {}).values():
+                return "unknown", f"shatri label taxonomy no longer names «{SOLD_LABEL}»"
+            cache["v"] = _make_verify_gone(terms)
+        return cache["v"](ad_number)
+    return verify
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
-    s = session()
+    # 2026-10-02: the WP REST answered HTTP 403 to the runner's datacenter IP on the pinned
+    # chrome profile (09-28..10-01 served 200). Probe 3 profiles DIRECT, then through the
+    # residential proxy (`proxy: true` → WASALT_PROXY_URL), and keep the session that is served.
+    s, tried = retry_smarter_session(f"{BASE}/wp-json/wp/v2/property_type?per_page=1", headers=HEADERS)
+    print(f"{SOURCE}: probe {' '.join(tried)}", flush=True)
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run("shatri")
     res: list[dict] = []
@@ -384,6 +435,7 @@ def main() -> int:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
+            row["additional_info"].update(page_pin(s, row["listing_url"]))
             (com if cat == "commercial" else res).append(row)
         notes = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
         if skipped:

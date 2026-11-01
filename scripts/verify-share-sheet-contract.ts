@@ -79,19 +79,34 @@ check('all four share targets were extracted (WhatsApp / X / Telegram / Mail)',
 // The sheet's wording now lives in lib/share.ts, so the extracted statements reference imported
 // names. Feed the REAL exported values into the sandbox — extracted from share.ts, never retyped —
 // so this still executes the component's own template literals rather than a paraphrase of them.
-const shareConst = (name: string) => {
+const shareConst = (name: string): string => {
+  const alias = new RegExp(`export const ${name} = (SHARE_BLURB_AR|SHARE_BLURB_EN);`).exec(shareSrc);
+  if (alias) return shareConst(alias[1]);
   const m = new RegExp(`export const ${name} = '([\\s\\S]*?)';`).exec(shareSrc)
     ?? new RegExp(`export const ${name} = \`([\\s\\S]*?)\`;`).exec(shareSrc);
   if (!m) check(`lib/share.ts exports ${name}`, false, 'not found');
   return m?.[1] ?? '';
 };
-const AR_LEAD = shareConst('SHARE_LEAD_AR'), EN_LEAD = shareConst('SHARE_LEAD_EN');
+// The sentence is now BUILT (owner 2026-10-20: «ليش تدوّر في 148 موقع؟ إزهله يدوّر عنك», the count
+// live): the real shareLead/shareMessage functions and their template constants are lifted out of
+// share.ts verbatim; only liveSiteCount() is stubbed (it reads the platform registry at runtime).
+const fn = (name: string): string => {
+  const m = new RegExp(`export function ${name}\\([\\s\\S]*?\\n\\}`).exec(shareSrc);
+  if (!m) check(`lib/share.ts exports function ${name}`, false, 'not found');
+  // new Function() runs plain JavaScript: drop the TypeScript annotations from the signature line only.
+  const src = (m?.[0] ?? `function ${name}() { return ''; }`).replace(/^export /, '');
+  const nl = src.indexOf('\n');
+  const sig = src.slice(0, nl).replace(/\): [^{]+\{$/, ') {').replace(/: [^,)]+(?=[,)])/g, '');
+  return sig + src.slice(nl);
+};
 const preamble = [
   `const SHARE_LINK = ${JSON.stringify(shared)};`,
-  `const SHARE_LEAD_AR = ${JSON.stringify(AR_LEAD.replace(/\\n/g, '\n'))};`,
-  `const SHARE_LEAD_EN = ${JSON.stringify(EN_LEAD.replace(/\\n/g, '\n'))};`,
-  'const SHARE_MESSAGE_AR = `${SHARE_LEAD_AR}\n${SHARE_LINK}`;',
-  'const SHARE_MESSAGE_EN = `${SHARE_LEAD_EN}\n${SHARE_LINK}`;',
+  `const SHARE_LINK_EN = ${JSON.stringify(`${shared}/?lang=en`)};`,
+  ...['SHARE_LEAD_AR_TEMPLATE', 'SHARE_LEAD_AR_NO_COUNT', 'SHARE_LEAD_EN_TEMPLATE', 'SHARE_LEAD_EN_NO_COUNT']
+    .map((n) => `const ${n} = ${JSON.stringify(shareConst(n))};`),
+  fn('shareLead'), fn('shareMessage'),
+  'const liveSiteCount = () => 148;',
+  stmt('count'),
 ].join('\n');
 
 const body = [
@@ -125,7 +140,8 @@ for (const locale of ['ar', 'en'] as const) {
   for (const name of ['X', 'Telegram'] as const) {
     const u = new URL(out.urls[name]);
     check(`[${locale}] ${name}: url= is the link and text= is the sentence WITHOUT it`,
-      u.searchParams.get('url') === LINK && !(u.searchParams.get('text') ?? '').includes(LINK),
+      // the English share sends the English-card link (owner 2026-10-29), the Arabic the plain one
+      u.searchParams.get('url') === (locale === 'en' ? `${LINK}/?lang=en` : LINK) && !(u.searchParams.get('text') ?? '').includes(LINK),
       `text=${u.searchParams.get('text')}`);
   }
   // The property is LOCALE, not word order: the English post must be English and must name the

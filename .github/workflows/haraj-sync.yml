@@ -1,0 +1,72 @@
+# Haraj LIVE ingest (owner 2026-10-16; all offers since 10-17) + the licensed catch-up of older hours (10-17). Reads the last N COMPLETE hourly sitemap
+# files of haraj.com.sa with our honest bot user-agent (≤ 1 request a second), keeps only real-estate
+# OFFERS that carry REGA's ad-licence block with an in-date licence (scrapers/haraj/run.py), and upserts
+# them into haraj_{residential,commercial}_listings. A STREAM: nothing is ever pruned on absence; removal
+# is own-page proof through fleet_liveness (scrapers/haraj/run.py:_verify_gone).
+#
+# Scheduled by pg_cron (job gh-haraj-sync, every 2 hours at :05 — clear of the :20/:22 search sync),
+# like every other crawl here: pg_cron dispatches with NO inputs, so the defaults are the schedule's.
+name: Haraj sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      files:
+        description: "Complete hourly sitemap files to read (2 = the 2-hour schedule)"
+        default: "2"
+      skip_hours:
+        description: "Skip the newest N complete hours (a backfill window)"
+        default: "0"
+      ids:
+        description: "Re-read exactly these post ids (comma list) — a parser repair; blank = the sitemap"
+        default: ""
+      catchup_minutes:
+        description: "After the live hours, walk older hour files for LICENSED offers this long (0 = off)"
+        default: "70"
+
+concurrency:
+  group: haraj-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  sync:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    # ~700 property-titled candidates an hour at ~2 s a read (1 req/s + the page): 2 files ≈ 45 min.
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Haraj tests (offer gate, licence block, seller-text facts)
+        run: >-
+          pip install pytest && python -m pytest -q scrapers/common/tests/test_haraj_classify.py
+          scrapers/common/tests/test_haraj_parse.py scrapers/common/tests/test_haraj_live_licensed_only.py
+          scrapers/common/tests/test_haraj_prose_offers.py
+      - name: Sync Haraj
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # inputs reach the shell as env values, never spliced into the script text
+          FILES: ${{ github.event.inputs.files || '2' }}
+          SKIP_HOURS: ${{ github.event.inputs.skip_hours || '0' }}
+          IDS: ${{ github.event.inputs.ids || '' }}
+          # owner 2026-10-17: the licensed catch-up rides every scheduled run (one crawler, still ≤ 1 req/s);
+          # live ~35 min + 70 min ends before the next 2-hourly dispatch. It stops by itself when Haraj's
+          # ~3-month sitemap is walked (the cursor «catchup_before» lives in scrape_runs.notes).
+          CATCHUP_MINUTES: ${{ github.event.inputs.catchup_minutes || '70' }}
+        run: >-
+          exec python -m scrapers.haraj.run --files "$FILES" --skip-hours "$SKIP_HOURS" --ids "$IDS"
+          --catchup-minutes "$CATCHUP_MINUTES"

@@ -32,6 +32,7 @@
 // question without a def here, and on any AF_PREDICATE_FIELDS member not owned by exactly one def.
 import type { SearchQuery } from '@/data/search';
 import { AF_PREDICATE_FIELDS, RNPL_TOKENS } from './searchDefaults.ts';
+import { CHIP_DEFS } from './afChips.ts';
 
 type AfField = (typeof AF_PREDICATE_FIELDS)[number];
 export type T = (en: string, vars?: Record<string, string | number>) => string;
@@ -61,6 +62,49 @@ export const AMENITY_COL: Record<string, string> = {
   water_supply: 'water_supply', furnished: 'furnished', gym: 'gym', pool: 'pool', garden: 'garden',
   balcony: 'balcony', laundry_room: 'laundry_room', optical_fibers: 'optical_fibers',
   separate_electricity_meter: 'separate_electricity_meter', separate_water_meter: 'separate_water_meter',
+  majlis: 'majlis',
+  // Apartments & Co-living group (owner handoff 2026-10-31, migration 20261101100930): 39 text-fact booleans,
+  // column name = token. The 6 derived tokens (separate_meters, apts4/8/12/20, has_shops) have no column of
+  // their own — DERIVED_TOKEN_HOLDS below.
+  roof: 'roof',
+  two_entrances: 'two_entrances',
+  annex: 'annex',
+  yard: 'yard',
+  garage: 'garage',
+  grill: 'grill',
+  storage: 'storage',
+  water_tank: 'water_tank',
+  warranty: 'warranty',
+  electronic_deed: 'electronic_deed',
+  basement: 'basement',
+  self_checkin: 'self_checkin',
+  wifi: 'wifi',
+  bills_included: 'bills_included',
+  jacuzzi: 'jacuzzi',
+  smart_tv: 'smart_tv',
+  billiards: 'billiards',
+  cleaning_service: 'cleaning_service',
+  soundproof: 'soundproof',
+  cameras: 'cameras',
+  guard: 'guard',
+  smart_entry: 'smart_entry',
+  smart_home: 'smart_home',
+  central_gas: 'central_gas',
+  sauna: 'sauna',
+  kids_play_area: 'kids_play_area',
+  nursery: 'nursery',
+  free_maintenance: 'free_maintenance',
+  intercom: 'intercom',
+  fire_system: 'fire_system',
+  ev_charger: 'ev_charger',
+  central_vacuum: 'central_vacuum',
+  insulation: 'insulation',
+  dining_majlis: 'dining_majlis',
+  own_bathroom: 'own_bathroom',
+  fridge: 'fridge',
+  whole_floor: 'whole_floor',
+  singles: 'singles',
+  families: 'families',
 };
 // Amenity token → the AF chip's OWN labelKey (advancedFilters.ts AMENITIES_QUESTION defs) — one voice
 // for the chip and its evidence (owner decision 6). The barrier asserts each pair equals the def.
@@ -78,10 +122,86 @@ export const AMENITY_LABEL: Record<string, string> = {
   car_entrance: 'Car entrance', sanitation: 'Sewage connection', electricity: 'Electricity',
   water_supply: 'Water supply', furnished: 'Furnished',
   gym: 'Gym', pool: 'Pool', garden: 'Garden', balcony: 'Balcony',
-  laundry_room: 'Laundry room', optical_fibers: 'Optical fibers',
+  laundry_room: 'Laundry room', optical_fibers: 'Optical fibers', majlis: 'Majlis room',
   separate_electricity_meter: 'Separate electricity meter',
   separate_water_meter: 'Separate water meter',
+  // Apartments & Co-living group — each equals CHIP_DEFS[token].labelKey (src/lib/afChips.ts) verbatim.
+  roof: 'Private roof',
+  two_entrances: 'Two entrances',
+  annex: 'Annex',
+  yard: 'Yard',
+  garage: 'Garage',
+  grill: 'Grill',
+  storage: 'Storage room',
+  water_tank: 'Private water tank',
+  warranty: 'Warranty',
+  electronic_deed: 'Electronic deed',
+  basement: 'Basement',
+  self_checkin: 'Self check-in',
+  wifi: 'Wi-Fi',
+  bills_included: 'Bills included',
+  jacuzzi: 'Jacuzzi',
+  smart_tv: 'Smart TV / cinema room',
+  billiards: 'Billiards table',
+  cleaning_service: 'Cleaning service',
+  soundproof: 'Soundproof',
+  cameras: 'Cameras',
+  guard: 'Guard',
+  smart_entry: 'Smart entry',
+  smart_home: 'Smart home',
+  central_gas: 'Central gas',
+  sauna: 'Sauna',
+  kids_play_area: "Kids' play area",
+  nursery: 'Nursery',
+  free_maintenance: 'Free maintenance',
+  intercom: 'Intercom',
+  fire_system: 'Fire system',
+  ev_charger: 'EV charger',
+  central_vacuum: 'Central vacuum',
+  insulation: 'Heat & water insulation',
+  dining_majlis: 'Dining majlis',
+  own_bathroom: 'Own bathroom',
+  fridge: 'Fridge',
+  whole_floor: 'Whole floor',
+  singles: 'Singles',
+  families: 'Families',
+  // the derived tokens (no column; DERIVED_TOKEN_HOLDS decides)
+  separate_meters: 'Separate meters', apts4: '4+ apartments', apts8: '8+ apartments', apts12: '12+ apartments',
+  apts20: '20+ apartments', has_shops: 'Has shops',
 };
+// DERIVED TOKENS (migration 20261101100930): a p_amenities slug whose SQL predicate reads a column that is NOT
+// the token's own name. `reads` names the columns; `holds` re-runs the predicate on the row and answers null
+// when any of them is null (UNKNOWN stays UNKNOWN — rule 1 above), so a listing whose source said nothing
+// about its meters or its apartment count earns no chip. Same text as the migration's pred:
+//   separate_meters = (s.separate_electricity_meter or s.separate_water_meter)
+//   apts4/8/12/20   = s.apartments_count >= 4 / 8 / 12 / 20
+//   has_shops       = s.shops_count >= 1
+export type DerivedToken = { reads: readonly string[]; holds: (canon: AfCanon) => boolean | null };
+const numOrNull = (v: unknown): number | null => (typeof v === 'number' ? v : null);
+const atLeast = (col: string, n: number): DerivedToken => ({
+  reads: [col],
+  holds: (r) => { const v = numOrNull(r[col]); return v == null ? null : v >= n; },
+});
+export const DERIVED_TOKEN: Record<string, DerivedToken> = {
+  separate_meters: {
+    reads: ['separate_electricity_meter', 'separate_water_meter'],
+    holds: (r) => (r.separate_electricity_meter == null || r.separate_water_meter == null) ? null
+      : r.separate_electricity_meter === true || r.separate_water_meter === true,
+  },
+  apts4: atLeast('apartments_count', 4), apts8: atLeast('apartments_count', 8),
+  apts12: atLeast('apartments_count', 12), apts20: atLeast('apartments_count', 20),
+  has_shops: atLeast('shops_count', 1),
+};
+/** token → true/false when the row can answer, null when a column it needs is null (unknown). */
+export const DERIVED_TOKEN_HOLDS: Record<string, (canon: AfCanon) => boolean | null> = Object.fromEntries(
+  Object.entries(DERIVED_TOKEN).map(([k, d]) => [k, d.holds]),
+);
+/** The canonical columns a token's predicate reads — its own column, or the derived token's inputs. */
+export const amenityReads = (token: string): string[] =>
+  DERIVED_TOKEN[token] ? [...DERIVED_TOKEN[token].reads] : [AMENITY_COL[token] ?? `__unknown_amenity__${token}`];
+/** The token's predicate on a row where no read is null (afEvidence() null-guards first). */
+export const amenityHolds = (token: string, row: AfCanon): boolean =>
+  DERIVED_TOKEN[token] ? DERIVED_TOKEN[token].holds(row) === true : row[AMENITY_COL[token]] === true;
 // Canonical direction value (after normalisation) → the AF option labelKey (DIRECTION_DEFS).
 export const DIRECTION_LABEL: Record<string, string> = {
   'شمال': 'North', 'جنوب': 'South', 'شرق': 'East', 'غرب': 'West',
@@ -111,27 +231,39 @@ const num = (v: unknown): number => (typeof v === 'number' ? v : Number.NaN);
 // Age option key ⇄ range. The AF's own keys ('new' | '1_2' | '3_5' | '6_9' | '10p') round-trip
 // exactly; any other ageMin/ageMax combination the chat path can set («أقل من 3 سنوات» → ageMax only)
 // encodes the same way, so no combination is invisible.
+// The one-tap «up to» ladder (owner 2026-10-05) sends its rung as the buckets under it; read it back
+// as the rung so the key the user tapped round-trips.
+const AGE_LADDER_KEY: Record<string, string> = { 'new,1_2': 'upto2', 'new,1_2,3_5': 'upto5', 'new,1_2,3_5,6_9': 'upto9' };
 function ageKey(q: SearchQuery): string[] | null {
+  if (q.ageBuckets?.length) { const rung = AGE_LADDER_KEY[q.ageBuckets.join(',')]; return rung ? [rung] : q.ageBuckets; }
   if (q.isNewConstruction === true) return ['new'];
   if (q.ageMin == null && q.ageMax == null) return null;
   return [q.ageMax == null ? `${q.ageMin}p` : `${q.ageMin ?? ''}_${q.ageMax}`];
 }
 function ageOk(key: string, v: number): boolean {
   if (key === 'new') return v === 0;
+  const upto = /^upto(\d+)$/.exec(key);
+  if (upto) return v >= 0 && v <= Number(upto[1]);
   const m = /^(\d*)(?:_(\d+)|p)$/.exec(key);
   if (!m) return false;
   const lo = m[1] === '' ? null : Number(m[1]);
   const hi = m[2] == null ? null : Number(m[2]);
   return (lo == null || v >= lo) && (hi == null || v <= hi);
 }
-// Owner decision 5: canonical 10 is exact for aqar but the «10+» bucket for wasalt — «١٠ سنوات فأكثر»
-// is the one rendering truthful under both codings.
+// Owner decision 5: a stored 10 renders «١٠ سنوات فأكثر». (Its old premise «canonical 10 is exact for aqar»
+// was disproved 2026-10-25: aqar, wasalt, muhaysini, haraj, tuba, aqarcity and reinvest all store an open
+// «more than 10» as 10 — migrations 20261025065509 / 20261025072931 — so a 10 means «10 or more».)
 function ageText(v: number, t: T): string {
   if (v === 0) return t('New construction');
   if (v === 1) return t('Age: one year');
   if (v === 2) return t('Age: two years');
   if (v === 10) return t('10+ years');
   return v < 10 ? t('Age: {n} years', { n: v }) : t('Age: {n} years (over ten)', { n: v });
+}
+
+function ratingRungOk(key: string, r: Record<string, unknown>): boolean {
+  const [min, rc] = key.split('_rc');
+  return num(r.rating) >= Number(min) && (rc == null || num(r.reviews_count) >= Number(rc));
 }
 
 // Registry order = ADVANCED_QUESTIONS order, so the same query yields the same chip order on every
@@ -145,17 +277,18 @@ export const AF_EVIDENCE: Record<string, EvidenceDef> = {
     chips: (_k, _r, t) => [t('Offers installments')],
   },
   property_age: {
-    fields: ['ageMin', 'ageMax', 'isNewConstruction'],
+    fields: ['ageMin', 'ageMax', 'isNewConstruction', 'ageBuckets'],
     active: ageKey,
     reads: () => ['property_age'],
-    ok: (k, r) => ageOk(k[0], num(r.property_age)),
+    ok: (k, r) => k.some((x) => ageOk(x, num(r.property_age))),   // a mixture: the bucket it is IN
     chips: (_k, r, t) => [ageText(num(r.property_age), t)],
   },
   amenities: {
     fields: ['amenities'],
     active: (q) => { const k = (q.amenities ?? []).filter((x) => !RNPL_TOKENS.includes(x)); return k.length ? k : null; },
-    reads: (k) => k.map((x) => AMENITY_COL[x] ?? `__unknown_amenity__${x}`),
-    ok: (k, r) => k.every((x) => r[AMENITY_COL[x]] === true),           // AND — every token must hold
+    // A derived token reads the columns its predicate needs (amenityReads); a column token reads its own.
+    reads: (k) => [...new Set(k.flatMap(amenityReads))],
+    ok: (k, r) => k.every((x) => amenityHolds(x, r)),                    // AND — every token must hold
     // R12A.5 is enforced STATICALLY by scripts/verify-af-card-evidence.ts (T5), which fails CI if any
     // token in AMENITY_COL lacks a label — so in shipped code this lookup never misses. The `?? null`
     // is the fail-SAFE, not the rule: a module-scope throw here would crash the whole results screen
@@ -172,10 +305,11 @@ export const AF_EVIDENCE: Record<string, EvidenceDef> = {
     chips: (_k, r, t) => [`${r.bathrooms} ${t(r.bathrooms === 1 ? 'Bath' : 'Baths')}`],
   },
   furnished: {
-    fields: ['furnishedPref'],
-    active: (q) => (q.furnishedPref == null ? null : [q.furnishedPref ? 'yes' : 'no']),
+    fields: ['furnishedPref', 'furnishedIn'],
+    active: (q) => (q.furnishedIn?.length ? q.furnishedIn.map((b) => (b ? 'yes' : 'no'))
+      : q.furnishedPref == null ? null : [q.furnishedPref ? 'yes' : 'no']),
     reads: () => ['furnished'],
-    ok: (k, r) => r.furnished === (k[0] === 'yes'),
+    ok: (k, r) => (r.furnished === true && k.includes('yes')) || (r.furnished === false && k.includes('no')),
     // false is a value the SOURCE stated («غير مفروشة»); null never reaches here.
     chips: (_k, r, t) => [t(r.furnished === true ? 'Furnished' : 'Unfurnished')],
   },
@@ -195,16 +329,17 @@ export const AF_EVIDENCE: Record<string, EvidenceDef> = {
     chips: (_k, r, t) => [t(DIRECTION_LABEL[normDirectionAr(r.direction_ar) as string])],
   },
   rating: {
-    fields: ['ratingMin', 'reviewsMin'],
+    fields: ['ratingMin', 'reviewsMin', 'ratingBuckets'],
     // Key = the AF's own option keys ('9.5' | '9.0' | '9.0_rc10'): one decimal, so a query built by
     // RATING_QUESTION.apply() round-trips exactly (the barrier asserts apply → active → [key]).
-    active: (q) => (q.ratingMin == null ? null : [q.reviewsMin != null ? `${q.ratingMin.toFixed(1)}_rc${q.reviewsMin}` : q.ratingMin.toFixed(1)]),
-    reads: (k) => (k[0].includes('_rc') ? ['rating', 'reviews_count'] : ['rating']),
-    ok: (k, r) => {
-      const [min, rc] = k[0].split('_rc');
-      return num(r.rating) >= Number(min) && (rc == null || num(r.reviews_count) >= Number(rc));
-    },
-    chips: (k, r, t) => [k[0].includes('_rc') ? `★ ${r.rating} (${t('{n} reviews', { n: r.reviews_count as number })})` : `★ ${r.rating}`],
+    // A mixture (owner 2026-10-03) carries the picked keys; the listing satisfies the rung it is in.
+    active: (q) => (q.ratingBuckets?.length ? q.ratingBuckets
+      : q.ratingMin == null ? null : [q.reviewsMin != null ? `${q.ratingMin.toFixed(1)}_rc${q.reviewsMin}` : q.ratingMin.toFixed(1)]),
+    reads: (k) => (k.some((x) => x.includes('_rc')) ? ['rating', 'reviews_count'] : ['rating']),
+    ok: (k, r) => k.some((x) => ratingRungOk(x, r)),
+    // Reviews are shown when the rung that MATCHED is the review rung (a 9.5+ listing proves 9.5 alone).
+    chips: (k, r, t) => [k.some((x) => !x.includes('_rc') && ratingRungOk(x, r)) || !k.some((x) => x.includes('_rc'))
+      ? `★ ${r.rating}` : `★ ${r.rating} (${t('{n} reviews', { n: r.reviews_count as number })})`],
   },
   unit_subtype: {
     fields: ['unitSubtypes'],

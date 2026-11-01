@@ -6,6 +6,7 @@ canonical names the app's search engine knows.
 """
 from __future__ import annotations
 
+import html
 import re
 from typing import Any, Optional
 
@@ -73,6 +74,9 @@ TYPE_MAP_AR = {
     "دوبليكس":  "Duplex",
     "استوديو":  "Studio",
     "ستوديو":   "Studio",
+    # Owner 2026-10-12: «town house is under Duplex, but don't change its name». The stored type stays the
+    # source's own word; the app's search files it under Duplex (src/data/propertyTypes.ts RAW_TO_CLEAN).
+    "تاون هاوس":  "تاون هاوس",
 }
 
 # Aqar URL slug → canonical English property type (matches Ezhalah's taxonomy).
@@ -305,7 +309,7 @@ TYPE_MAP_EN = {
     # 'Studio'/'Small apartment (studio)'→'Studio' (both clean types searchable in res+com
     # post-#98). The historical Villa/Apartment folds pre-dated Duplex/Studio existing as clean
     # types and blocked the type filter from finding these rows under their real type.
-    'Apartment': 'Apartment', 'Villa': 'Villa', 'Townhouse': 'Villa', 'Duplex': 'Duplex',
+    'Apartment': 'Apartment', 'Villa': 'Villa', 'Townhouse': 'تاون هاوس', 'Duplex': 'Duplex',
     'Floor': 'Floor', 'Building': 'Building', 'Residential Building': 'Building',
     'Land': 'Residential Land', 'Residential Land': 'Residential Land', 'Plot': 'Residential Land',
     'Rest House': 'Rest House', 'Resthouse': 'Rest House', 'Chalet': 'Chalet', 'Farm': 'Farm',
@@ -319,7 +323,7 @@ TYPE_MAP_EN = {
     # ── Aldarim API `type` (lowercased) → canonical taxonomy type (moved verbatim from
     # scrapers/aldarim/run.py). Land's residential/commercial split stays decided by the listing's
     # category AT THE CALL SITE in the scraper (not here).
-    'land': 'Residential Land', 'villa': 'Villa', 'townhouse': 'Villa',
+    'land': 'Residential Land', 'villa': 'Villa', 'townhouse': 'تاون هاوس',  # owner 2026-10-12: a town house keeps its own name (search files it under Duplex)
     'duplex': 'Duplex',  # 2026-07-16 mapping standardization: was folded to Villa (see Wasalt note above)
     'mansion': 'Villa', 'apartment': 'Apartment', 'tower_apartment': 'Apartment',
     'building_apartment': 'Apartment', 'villa_apartment': 'Apartment', 'floor': 'Floor',
@@ -405,7 +409,7 @@ def category_for_type(t: str) -> str:
     """Residential vs Commercial — same split the app's filter uses."""
     residential = {
         "Apartment", "Villa", "Floor", "Room", "Building",
-        "Rest House", "Chalet", "Camp", "Residential Land",
+        "Rest House", "Chalet", "Camp", "Residential Land", "تاون هاوس",
     }
     return "Residential" if t in residential else "Commercial"
 
@@ -462,6 +466,32 @@ def to_int_numeric(v) -> Optional[int]:
     except (TypeError, ValueError):
         return None
 
+# The aldarim SaaS (aldarim, abwbna, alobid, bahadhabab) publishes a ROOM BLOCK of counts — bedrooms,
+# bathrooms, living_rooms, kitchens, maid_rooms, driver_rooms, balconies — that defaults to 0 when the
+# advertiser never fills it in. Measured 2026-10-05 (🔬 AF engineer) over stored source_capture: an
+# all-zero block sits on a 21M-SAR, six-bedroom villa whose own description lists «2 غرفة خادمة»,
+# «2غرفة سائق», «مطبخ» (aldarim 53104); 45 aldarim, 13 alobid and 6 bahadhabab non-land rows with an
+# all-zero block name a maid room / kitchen / driver room in their own prose. A villa with 0 bedrooms AND
+# 0 bathrooms has not stated anything — so when the block is untouched, its counts are SILENCE (NULL),
+# never «no». A block with any non-zero count was filled in, and its zeros stay real negatives.
+ROOM_BLOCK_KEYS = ("bedrooms", "bathrooms", "living_rooms", "kitchens")
+ROOM_BLOCK_COLUMNS = ("kitchen", "maid_room", "driver_room", "balcony_terrace")
+
+
+def room_block_unfilled(payload: dict) -> bool:
+    return all(str(payload.get(k) if payload.get(k) is not None else "0").strip() in ("0", "", "0.0")
+               for k in ROOM_BLOCK_KEYS)
+
+
+def silence_unfilled_room_block(row: dict, payload: dict) -> dict:
+    """Turn the room-block columns of `row` into UNKNOWN when the source never filled the block in."""
+    if room_block_unfilled(payload):
+        for c in ROOM_BLOCK_COLUMNS:
+            if c in row:
+                row[c] = None
+    return row
+
+
 def count_flag(v) -> Optional[bool]:
     """A source COUNT ("how many balconies?") → an amenity tri-state, never a manufactured negative.
 
@@ -495,6 +525,26 @@ def count_flag(v) -> Optional[bool]:
         return int(float(v)) > 0
     except (TypeError, ValueError):
         return None
+
+
+_AR_DIGIT_MAP = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+_RATE_AFTER = r"(?:للمتر|بالمتر|لل?متر\s*المربع|/\s*م[²2]|/\s*متر)"
+_RATE_BEFORE = r"(?:للمتر|لل?متر\s*المربع|سعر\s*المتر|المتر)"
+
+
+def stated_per_metre(text: Optional[str], n: int) -> bool:
+    """The ad's OWN text states THIS figure per square metre — «550 ريال للمتر», «السوم للمتر 1100»,
+    «سعر المتر: 750» (owner 2026-10-18: a rate needs the source's own marker on that ad; no marker = the
+    figure stays a total, PRICE = SOURCE). The marker must sit right before or right after the same figure;
+    a per-metre phrase about another number, or a number that only contains this one, never counts. A bare
+    «متر» after a figure is an area, not a rate."""
+    if not text or not n:
+        return False
+    # tatweel is decoration («1060 ريـــال للمتر», sadiqeltajer 2026-10-18), never part of a word
+    flat = re.sub(r"(?<=\d),(?=\d)", "", text.translate(_AR_DIGIT_MAP).replace("\u0640", ""))
+    fig = rf"(?<![\d.]){int(n)}(?![\d.])"
+    return bool(re.search(rf"{fig}\s*(?:ريال(?:\s*سعودي)?|ر\.س|﷼)?\s*\(?\s*{_RATE_AFTER}", flat)
+                or re.search(rf"{_RATE_BEFORE}\s*(?:ب|:|=)?\s*{fig}", flat))
 
 
 def annualize_rent(price: Optional[int], period: Optional[str]) -> Optional[int]:
@@ -593,6 +643,35 @@ def rent_period_from_ad(price: Optional[int], text: Optional[str], card_period: 
     return rent_period_and_annual(price, {"monthly": "شهري", "annual": "سنوي"}.get(period or ""))
 
 
+# ── The ad's OWN end date is a gate, not a caption (owner 2026-09-28) ────────────────────────────
+# Shomou (shomoalaqar.com.sa) prints «تاريخ إنتهاء الإعلان» on every ad and never takes an expired one
+# down: 835 of 1,028 listed ads were past their own date. The owner: «build the 155» (the in-date ones)
+# «add barriers so dont have it again». Every scraper that reads such a date routes it through here
+# (scrapers/common/tests/test_ad_end_date_is_a_gate.py enforces it): 'expired' → never a listing.
+# Only a Gregorian year 2015-2100 is a date; a Hijri year or a build year typed into the field
+# («1433-02-11», «1983-02-16») is 'unknown' — the source did not state an end date we can read.
+_END_DATE_RE = re.compile(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})|(\d{1,2})[-/](\d{1,2})[-/](\d{4})")
+
+
+def ad_expiry_state(raw: Optional[str], today: Any = None) -> str:
+    """'live' (end date today or later) · 'expired' (before today) · 'unknown' (no readable date).
+    `today` defaults to the Saudi calendar date (UTC+3) — an ad valid «until 2026-09-28» is live all
+    of that Saudi day."""
+    from datetime import date, datetime, timedelta, timezone
+    m = _END_DATE_RE.search((raw or "").translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")))
+    if not m:
+        return "unknown"
+    y, mo, d = (m.group(1), m.group(2), m.group(3)) if m.group(1) else (m.group(6), m.group(5), m.group(4))
+    try:
+        end = date(int(y), int(mo), int(d))
+    except ValueError:
+        return "unknown"
+    if not 2015 <= end.year <= 2100:
+        return "unknown"
+    today = today or datetime.now(timezone(timedelta(hours=3))).date()
+    return "live" if end >= today else "expired"
+
+
 # ── Property age: the SHARED Saudi Arabic age vocabulary ──────────────────────────────────────────
 # WHY THIS EXISTS (2026-07-17): every scraper parsed «عمر العقار» with an int-only regex of the shape
 # `عمر\s*العقار[\s:]*?(\d+)`. That regex can only ever match a LATIN DIGIT, so the three non-numeric
@@ -623,6 +702,8 @@ _AGE_VOCAB_AR = {
     "ثلاث سنوات": 3, "اربع سنوات": 4, "أربع سنوات": 4, "خمس سنوات": 5, "ست سنوات": 6,
     "سبع سنوات": 7, "ثمان سنوات": 8, "ثماني سنوات": 8, "تسع سنوات": 9, "عشر سنوات": 10,
     # Open-ended -> FLOOR (see fidelity rules above). Both the numeric and the spelled-out forms.
+    # A floored 10 has NO upper end: on the 7 platforms storing it the AF clause keeps it out of every «up to N»
+    # (20261025065509 aqar, 20261025072931 aqarcity/haraj/muhaysini/reinvest/tuba/wasalt).
     "اكثر من عشر سنوات": 10, "أكثر من عشر سنوات": 10,
     "اكثر من 10 سنوات": 10, "أكثر من 10 سنوات": 10,
 }
@@ -766,16 +847,37 @@ def one_direction(raw, *, diagonal: bool = False) -> Optional[str]:
     return None
 
 
+# The Nuzul SaaS (aldarim, abwbna, alobid, bahadhabab) publishes the facade as an English slug cell — «south»,
+# «north_west», «north_south_east_west» — and up to five width cells (street_width + one per side). Until
+# 2026-10-11 all four filed them only in additional_info: on 308 active ads with a facade and 299 with a width,
+# direction and street_width_m were NULL, so the Advanced Filter's direction and street-width questions never
+# found them (🔬 AF engineer; aldarim 576280: facade west, street_width_west 30). One slug = one facade; a
+# compound slug lists several facades (it reaches four), i.e. a corner plot, never a diagonal → None. Widths:
+# exactly one stated cell → that width; two streets → None, the same rule as one_street_width.
+_FACADE_SLUG = {"north": "شمال", "south": "جنوب", "east": "شرق", "west": "غرب"}
+
+
+def facade_from_slug(raw) -> Optional[str]:
+    return _FACADE_SLUG.get(str(raw or "").strip().lower())
+
+
+def one_street_width_of(*cells) -> Optional[int]:
+    stated = [c for c in cells if c not in (None, "", 0, "0")]
+    return one_street_width(stated[0]) if len(stated) == 1 else None
+
+
 # «شمالية شارع 15», «الواجهة شمالية الشارع 20 متر», «شارع 15 م شمالي», «جنوبية شارع : 18» — ONE street
 # stated in prose (masar, almotmkenah 2026-09-21). A number after «شارع» counts only with a unit or a
 # bearing beside it («شارع 15» alone can be a street's NAME), and a second street → (None, None):
 # «شمالاً: عرض شارع 15 متر … غرباً: عرض شارع 15 متر» is a corner plot, not one facade.
 _BEARING = r"(?:ال)?(?:شمال|جنوب|شرق|غرب)(?:ي(?:ة|ه)?|ا|أ)?"
 _PROSE_STREET_RE = re.compile(
-    rf"(?:(?<![ء-ي])(?P<d1>{_BEARING})\s+)?(?:ال)?شارع\s*:?\s*(?P<w>[\d٠-٩]{{1,3}})(?![\d٠-٩.,٫])"
+    rf"(?:(?<![ء-ي])و?(?P<d1>{_BEARING})\s+)?(?:ال)?شارع\s*:?\s*(?P<w>[\d٠-٩]{{1,3}})(?![\d٠-٩.,٫])"
     rf"\s*(?P<u>م(?![ء-ي])|متر)?(?:\s*(?P<d2>{_BEARING})(?![ء-ي]))?")
 
 
+# «شمالية شارع 15 وغربية شارع 20»: the second bearing carries the conjunction «و», and without «و?» above it was
+# not a bearing, so that street went uncounted and a corner plot read as ONE north street of 15 (🔬 2026-10-11).
 def street_from_prose(text) -> tuple[Optional[int], Optional[str]]:
     hits = [m for m in _PROSE_STREET_RE.finditer(str(text or "")) if m["d1"] or m["u"] or m["d2"]]
     if len(hits) != 1:
@@ -805,7 +907,9 @@ def ad_licence_from_prose(text) -> Optional[str]:
 # is never turned into a "no" (that would publish a claim the source never made). An explicit
 # negation («غير مؤثثة», «بدون مصعد», «لا يوجد مصعد») is itself a source statement, so it sets False.
 _AMENITY_TOKENS: dict[str, tuple[str, ...]] = {
-    "elevator":         ("مصعد", "المصعد", "elevator", "lift"),
+    # «مصاعد» is the plural, and «مصعد» is not a substring of it: rakez's own spec list says «مصاعد» /
+    # «مصاعد إيطالية» on 209 floor units that read elevator = NULL (🔬 2026-10-18, ops_af_score rakez 0 of 7).
+    "elevator":         ("مصعد", "المصعد", "مصاعد", "elevator", "lift"),
     "kitchen":          ("مطبخ", "المطبخ", "kitchen"),
     "air_conditioner":  ("مكيف", "مكيفات", "تكييف", "مكيفة", "air conditioning", "air conditioner", "a/c"),
     "parking":          ("موقف", "مواقف", "مواقف سيارات", "كراج", "جراج", "parking", "car park"),
@@ -820,13 +924,19 @@ _AMENITY_TOKENS: dict[str, tuple[str, ...]] = {
 }
 
 # «غير مؤثثة» / «بدون مصعد» / «لا يوجد مصعد» — the negator sits BEFORE the token.
-_NEGATORS = ("غير", "بدون", "لا يوجد", "لايوجد", "un", "no ")
+# «لا يتوفر موقف خاص للشقة» (aqar) and «لا توجد أية مفروشات داخل المنزل» (dwelleo 13129552), both stored 2026-10-25,
+# are «لا يوجد» in other words.
+_NEGATORS = ("غير", "بدون", "لا يوجد", "لايوجد", "لا توجد", "لاتوجد", "لا يتوفر", "لا تتوفر", "un", "no ")
 
 # …and some qualifiers sit AFTER it and mean the thing is NOT there. «مصعد مؤسس» is an elevator
 # SHAFT that has been prepared — there is no elevator (seen on fahadalshahri, 2026-09-20). Reading
 # that as elevator=True publishes a fixture the listing does not have, so these suppress the token
 # entirely: the source has not said yes and has not said no, so the column stays NULL.
 _PREPARED_ONLY = ("مؤسس", "مؤسسة", "مهيأ", "مهيا", "تأسيس", "prepared for", "roughed")
+# …and a fixture that can be added LATER is not there now either: «تصميم يستوعب … إضافة مصعد لاحقًا» (aouj
+# 10283198, 🔬 2026-10-25) read elevator = yes. «لاحق» after the token, «إمكانية» before it: NULL.
+_LATER_AFTER = ("لاحق", "مستقبلا", "later")
+_LATER_BEFORE = ("امكانية", "إمكانية", "امكانيه", "possibility")
 
 # …and a third case that is neither yes nor no: the amenity belongs to the NEIGHBOURHOOD, not to
 # the property. Listing prose is full of «قريب من مستشفى السرطان», «مقابل كمباوند معهد الإدارة»,
@@ -834,6 +944,14 @@ _PREPARED_ONLY = ("مؤسس", "مؤسسة", "مهيأ", "مهيا", "تأسيس"
 # would read «قريب من مواقف» as "this unit has parking", which is a claim about someone else's
 # building. A proximity phrase before the token suppresses it: the source has told us about the
 # street, not about the unit, so the column stays NULL.
+# …and two more that are neither yes nor no, for «furnished» (🔬 2026-10-16, backlog 593). «مفروشه جزئيا» /
+# «نصف مفروشة» is PARTLY furnished, which the yes/no furnished answer cannot state (wasalt's structured
+# «نصف مفروشة» already reads NULL), and «سطح مفروش نجيلة» / «مفروش بالرخام» is a FLOOR COVERING, not
+# furniture (eaqartabuk 598600, a turf roof, read furnished = yes). Both suppress the token: NULL.
+_PARTIAL_ONLY = ("جزئي", "جزئيا", "جزئيه", "جزئية", "partially", "partly", "semi")
+_PARTIAL_BEFORE = ("نصف", "شبه", "semi")
+_FLOOR_COVERING = ("نجيل", "عشب", "بلاط", "رخام", "سيراميك", "موكيت", "باركيه", "بورسلان", "انترلوك")
+
 _PROXIMITY = ("قريب من", "قريبة من", "بالقرب من", "مقابل", "بجوار", "بجانب", "أمام",
               "close to", "near ", "next to", "opposite")
 
@@ -857,7 +975,86 @@ def amenities_from_text(raw: Optional[str]) -> dict[str, bool]:
         for col, val in _amenities_in_clause(clause).items():
             seen.setdefault(col, set()).add(val)
     # Two clauses that disagree («مصعد، بدون مصعد») have not stated the fact: NULL, not line order.
-    return {col: vals.pop() for col, vals in seen.items() if len(vals) == 1}
+    out = {col: vals.pop() for col, vals in seen.items() if len(vals) == 1}
+    if _says_partly_furnished(raw):
+        out.pop("furnished", None)
+    _veto_not_installed(raw, out)
+    return out
+
+
+# «المطابخ: 1» — a labelled kitchen COUNT, printed per floor in the «تفاصيل الدور …» block of one broker
+# template that both sakan and tuba carry («دورات المياه: 2 ، الصالات: 1 ، … ، المطابخ: 1»). The plural
+# shares no substring with «مطبخ», so amenities_from_text never saw it: 2,619 sakan and 273 tuba ads
+# stated a kitchen while storing NULL (🔬 AF engineer 2026-10-07). A count is a statement both ways:
+# any floor with ≥1 → True; every stated count 0 → False; no count → None (silence).
+_KITCHEN_COUNT_RE = re.compile(r"المطابخ\s*:\s*(\d{1,2})")
+
+
+def kitchen_from_count(raw: Optional[str]) -> Optional[bool]:
+    counts = [int(n) for n in _KITCHEN_COUNT_RE.findall(str(raw or ""))]
+    if not counts:
+        return None
+    return any(n > 0 for n in counts)
+
+
+def amenities_from_lines(raw: Optional[str]) -> dict[str, bool]:
+    """amenities_from_text() per LINE of the source's own text, merged. The matcher's negation window
+    reaches ~12 characters back, so across a line break «الشقة غير مؤثثة\nمطبخ مغلق» read kitchen=False
+    (bossbih, 2026-09-20). Two lines that disagree have not stated the fact: NULL."""
+    if not raw:
+        return {}
+    seen: dict[str, set[bool]] = {}
+    for line in re.split(r"[\n\r]+", str(raw)):
+        for col, val in amenities_from_text(line).items():
+            seen.setdefault(col, set()).add(val)
+    out = {col: next(iter(vals)) for col, vals in seen.items() if len(vals) == 1}
+    if _says_partly_furnished(raw):
+        out.pop("furnished", None)
+    _veto_not_installed(raw, out)
+    return out
+
+
+def _veto_not_installed(raw: Optional[str], out: dict[str, bool]) -> None:
+    """«مطبخ مستقل … المطبخ غير راكب» (muhaysini 17578176): the not-installed statement is the more specific one, so a
+    plain mention elsewhere in the ad may not turn it back into a yes. A stated no («بدون مكيفات») stays."""
+    t = _norm_ar(str(raw or "")).lower()
+    for col in _NOT_INSTALLED_COLS:
+        if out.get(col) is True and any(_NOT_INSTALLED_RE.match(t, m.end(), m.end() + 40)
+                                        for tok in _AMENITY_TOKENS[col]
+                                        for m in re.finditer(re.escape(_norm_ar(tok).lower()), t)):
+            out.pop(col)
+
+
+def _says_partly_furnished(raw: Optional[str]) -> bool:
+    """«فيلا مفروشه … الفيلا مفروشه جزئيا» (eaqartabuk 598379): a PARTLY-furnished statement anywhere is the
+    more specific one, so it outranks a plain «مفروشة» elsewhere in the ad and the yes/no answer is unknown."""
+    t = _norm_ar(str(raw or "")).lower()
+    for tok in _AMENITY_TOKENS["furnished"]:
+        k = _norm_ar(tok).lower()
+        for m in re.finditer(re.escape(k), t):
+            after = t[m.end():m.end() + 14]
+            before = t[max(0, m.start() - 6):m.start()]
+            if any(_norm_ar(q).lower() in after for q in _PARTIAL_ONLY) or \
+               any(_norm_ar(q).lower() in before for q in _PARTIAL_BEFORE):
+                return True
+    return False
+
+
+def prose_amenities(raw: Optional[str], skip: tuple[str, ...] = ()) -> dict[str, bool]:
+    """Amenities an ad's own PROSE states, for a site with NO structured field for them: YES, NO only on an
+    explicit negation tied to the token («لا يوجد مصعد», «مفروشة: لا»), or nothing — silence, «تأسيس»/prepared,
+    «قريب من»/nearby, partly and a contradiction all stay NULL (owner 2026-10-24; the 2026-09-20 four outcomes of
+    amenities_from_text; ADVANCED_FILTER_SOURCE_TRUTH §2). It replaced the yes-only reader, which could never take
+    a yes back. `skip` = columns the site publishes structurally: prose never touches those, not even as a fallback."""
+    return {k: v for k, v in amenities_from_lines(raw).items() if k not in skip}
+
+
+def html_block_lines(fragment: Optional[str]) -> str:
+    """An HTML fragment (an ad's own description block) as plain text, one line per <br>/<p>/<li>, so a
+    negation never crosses into the next statement when it is read by amenities_from_lines()."""
+    raw = re.sub(r"(?i)<br\s*/?>|</(?:p|li|div|h\d)>", "\n", str(fragment or ""))
+    txt = html.unescape(re.sub(r"<[^>]+>", " ", raw))
+    return "\n".join(x.strip() for x in re.split(r"[\n•▪️✅]+", txt) if x.strip())
 
 
 # A clause break ends a fact. «الشقة غير مؤثثة\nمطبخ مغلق» is two statements, and the «غير» of the
@@ -867,7 +1064,82 @@ _CLAUSE_BREAK_RE = re.compile(r"[\n\r،,.;؛|•▫▪+]+|\s-\s")
 # A negator counts only as its own word: `_norm_ar` folds «صغيرة» to «صغيره», whose letters ARE «غير»,
 # so «بركة صغيرة موقف خاص» read parking=False (moftah ids 30274/30247, 2026-09-20). It may abut the
 # token («unfurnished», «غيرمؤثث»), so the right edge is a non-word char OR the end of the window.
-_NEGATOR_RES = tuple(re.compile(rf"(?<!\w){re.escape(n.strip())}(?=\W|$)") for n in _NEGATORS)
+# An Arabic negator also stands as its own word with the conjunction «و» attached: «فيلا … ، وغير مؤثثة» is
+# «and NOT furnished», and without the optional «و» it read furnished = YES (dealapp 16155289, 🔬 2026-10-12).
+# «الغير مفروش» is «غير» with the article attached (eaqartabuk 598341 read furnished = YES, 🔬 2026-10-16).
+_NEGATOR_RES = tuple(re.compile(rf"(?<!\w){'(?:و|ال|وال)?' if re.match(r'[ء-ي]', n) else ''}{re.escape(n.strip())}(?=\W|$)")
+                     for n in _NEGATORS)
+
+# …and the negator must be TIED to the token (owner 2026-10-24: «an explicit negation tied to the token»): only a
+# filler word («أي», «به», «فيها» …) or the token's own article may stand between them. Another word between them
+# owns the negation — measured on stored haraj ads 2026-10-25: «مطبخ غير راكب 🏠 مكيفات اسبلت راكبة» (AC is
+# installed), «شقق غير مؤثثة مطبخ راكب» (the kitchen is there), «بدون صاله مكيفات راكبه» (the ACs are there). The
+# yes-only readers hid those false NOs; storing a stated no would have published them.
+# «غير متوفر مصعد» / «غير موجود مصعد» is one negation (moftah emits its spec pairs that way, value first), so is
+# «غير مجهز بالمكيفات» (dwelleo 13138657); an OPENING mark may stand between («#لايوجد (مدخل سياره)», dealapp) but a
+# closing one ends the negation («مساحه خارجيه (لا يوجد) موقف سيارات خاص» — the parking is there, muhaysini).
+# A generated text can also break the word and restart it: «وغير مُ مؤثثة» (tuba 13261239), «غير الم furnished»
+# (muhaysini 17577122) — the stray «م» / «الم» is the same word's first letters, so the negation is still tied.
+_TIED_FILLERS = r"اي|ايه|به|بها|فيه|فيها|له|لها|متوفر|متوفره|موجود|موجوده|متاح|متاحه|مجهز|مجهزه|مزود|مزوده|م|الم"
+_TIED_TAIL_RE = re.compile(rf"^(?:[^\w)»\]]*(?:{_TIED_FILLERS})(?!\w))*[^\w)»\]]*(?:ال|لل|وال|بال)?$")
+# «المكيفات غير راكبه», «مصعد غير مركب» — the fixture is NOT installed: never a yes (wasalt's _NOT_INSTALLED rule, now
+# for every site). Measured 2026-10-25 on 7 dwelleo / muhaysini ads. «مطبخ غير راكب» is the same: a kitchen ROOM whose
+# cabinets are not fitted is a prepared space, not a kitchen — unknown, like «مصعد مؤسس» (coordinator for the owner's
+# four outcomes, 2026-10-25; 101 active ads on dealapp, haraj, muhaysini, dwelleo, reinvest … were served as kitchen = yes).
+# «غير» must be its own word — «مطبخ صغير راكب» is a small FITTED kitchen (dealapp 18171902, therc 12405530). Up to two
+# describing words or an opening bracket may stand between («مطبخ كبير مغلق غير راكب», «مطبخ ( الدولاب غير راكب )»,
+# «مكيفات اسبلت غير راكبة»), or a «و»-joined co-subject that shares the verdict («المكيفات والمطبخ: غير راكبة», «مصعد
+# ولكن غير راكب»); a comma list does not («مطبخ، مكيفات غير راكبة» — the kitchen is there), and neither does another
+# fixture's word without «و» / «او» — that verdict is the other fixture's: «متوفر مصعد تكيفات شباك غير راكبه» (the lift is
+# there, dealapp 18563443), «راكب مكيفات شباك مطبخ غير راكب» (the ACs are, muhaysini 17578178), «بدون مكيفات مطبخ غير
+# راكب» (no ACs stays no, muhaysini 17434418), «المطبخ واكب المكيفات غير راكبة» (muhaysini 17578179).
+_FIXTURE_WORD = "|".join(sorted({re.escape(_norm_ar(t).lower()) for toks in _AMENITY_TOKENS.values() for t in toks if not t.isascii()}
+                                | {"تكيف", "مكف", "راكب", "مركب"}, key=len, reverse=True))
+_NOT_INSTALLED_RE = re.compile(rf"\w*(?:(?:[^\S\n]|\()+(?:(?:او\s+|و\s*)\w+|(?!(?:ال)?(?:{_FIXTURE_WORD}))\w+)){{0,2}}"
+                               r"[^\w\n]+غير\s+(?:راكب|مركب)")
+_NOT_INSTALLED_COLS = ("air_conditioner", "elevator", "kitchen")
+
+
+def _negated_before(before: str) -> bool:
+    return any(_TIED_TAIL_RE.match(before[m.end():]) for r in _NEGATOR_RES for m in r.finditer(before))
+
+# «مفروشة: لا», «**مفروش:** لا», «مؤثثة: لا (غير مؤثثة)», «المفروشات: لا يوجد» — the token is a LABEL and the answer
+# is the value after the colon. The matcher only looked BEFORE a token, so every labelled «لا» read YES: muhaysini's
+# generated «أبرز ملامح العقار» list served ~1,060 active ads as furnished over «مفروشة: لا» (facts test 2026-10-24;
+# tuba prints the same template). A value opening with a negator is a stated NO; a value that names the fact again
+# («مفروشة: هذه الشقة غير مفروشة») is read from that restatement; «غير محدد» / «غير مذكور» / «لا توجد تفاصيل» answers
+# nothing (NULL).
+#
+# A label may also carry the vehicle qualifier («موقف السيارات:», «مواقف سيارات:», «موقف للسيارات:») or ONE
+# «و»-joined co-subject («موقف سيارات ومساحة خارجية: غير موضحة», «مكيفات والمطبخ: غير راكبة»). Any OTHER word before
+# the colon starts a new label whose value is not this fact's answer — measured on stored rows 2026-10-25: «مطبخ
+# ملاحظة: بدون مصعد», «موقف خاص الحقوق: لا يوجد», «غسيل عمولة نقل الملكية: لا يوجد», «موقف خاص: لا تفوت». A co-subject
+# label is weaker, so only an explicit «not specified» answers it as unknown («مطبخ وسطح ملاحظة : غير شامل» stays yes).
+# «غير متوفرة» / «غير موجود» is a stated NO (dwelleo «مواقف السيارات: غير متوفرة», aqar «تكييف: غير متوفر»).
+_LABEL_RE = re.compile(r"\w{0,4}(?:\s+(?:ال|لل|ل)?(?:سيار|مركب)\w*)?(?P<co>\s+و\w+(?:\s+(?!ملاحظ)\w+)?)?[\s*]*[:：][\s*]*")
+_LABEL_NO_DETAILS_RE = re.compile(r"لا\s*[يت]وجد\s+(?:تفاصيل|معلومات|بيانات)")
+_LABEL_NO_RE = re.compile(r"(?:لا|لايوجد|لاتوجد|بدون|no|none|not|غير\s+(?:متوفر|موجود)\w{0,2})(?!\w)")
+_LABEL_UNSAID_RE = re.compile(r"غير(?!\w)")
+_LABEL_UNSPECIFIED_RE = re.compile(r"غير\s+(?:محدد|مذكور|موضح|معروف|مطبق|مرفق)\w{0,2}(?!\w)")
+
+# A stated NO the 12-character negator window cannot see, both verified on stored ads 2026-10-25:
+#   «عدم وجود مصعد», «لعدم توفر مصعد», «حالة عدم المفروشات», «غياب المفروشات» (aqar, gathern, muhaysini, tuba: 20 ads)
+#   «لا تأتي هذه الشقة مفروشة», «لا يأتي هذا الشقة مفروشة», «لا تأتي مفروشة» (muhaysini: 7 ads), «ولا تأتي مفروشة» (dwelleo)
+# Anchored to the token (≤ 3 words between), on the normalised text («تأتي» → «تاتي»).
+_ABSENT_BEFORE_RE = re.compile(
+    r"(?:(?<!\w)(?:و|ل|ول)?(?:عدم|غياب)\s+(?:(?:وجود|توفر|توافر)\s+)?"
+    r"|(?<!\w)و?لا\s+[تي]اتي(?:\s+[^\s،,.]+){0,3}\s+)(?:ال)?$")
+
+
+# A token can sit inside a PLACE NAME: «شرفة» is the tail of Jeddah's district «مشرفة», and every ad there read
+# balcony = yes (🔬 2026-10-20: muhaysini 110 and dwelleo 34 active rows, ~127 with no balcony word at all). Only the
+# measured collision is refused: a general word-start rule would also drop real glued typos the sites print
+# («منبلكونه», «ماستروبلكونة», dwelleo/muhaysini 10-20). token (normalised) → letters that may not stand before it.
+_EMBEDDED_IN_NAME = {"شرفه": ("م",)}
+
+
+def _inside_a_name(t: str, start: int, tok: str) -> bool:
+    return start > 0 and t[start - 1] in _EMBEDDED_IN_NAME.get(tok, ())
 
 
 def _amenities_in_clause(raw: str) -> dict[str, bool]:
@@ -877,18 +1149,60 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
         for tok in tokens:
             k = _norm_ar(tok).lower()
             for m in re.finditer(re.escape(k), t):
+                if _inside_a_name(t, m.start(), k):
+                    continue
                 before = t[max(0, m.start() - 12):m.start()]
                 after = t[m.end():m.end() + 14]
                 if any(_norm_ar(q) in after for q in _PREPARED_ONLY):
                     break          # "prepared for X" is not X — leave the column NULL
+                # …and the same qualifier BEFORE the token: «تأسيس مصعد», «مؤسس مصعد», «تأسيس
+                # مكيفات» are a prepared shaft / wiring, not the fixture (sakan 15854735, 2026-10-07:
+                # «* تأسيس مصعد» was served as elevator = yes). Same 12-char window as the negators.
+                if any(_norm_ar(q).lower() in before for q in _PREPARED_ONLY):
+                    break
+                if (any(_norm_ar(q).lower() in after for q in _LATER_AFTER)
+                        or any(_norm_ar(q).lower() in t[max(0, m.start() - 22):m.start()] for q in _LATER_BEFORE)):
+                    break          # can be added later — not there now: NULL
+                if col in _NOT_INSTALLED_COLS and _NOT_INSTALLED_RE.match(t, m.end(), m.end() + 40):
+                    break          # not installed — unknown, never a yes
+                if col == "furnished" and (
+                        any(_norm_ar(q).lower() in after for q in _PARTIAL_ONLY + _FLOOR_COVERING)
+                        or any(_norm_ar(q).lower() in before[-6:] for q in _PARTIAL_BEFORE)):
+                    break          # partly furnished, or a floor covering — neither yes nor no: NULL
                 near = t[max(0, m.start() - 22):m.start()]
                 if any(_norm_ar(q) in near for q in _PROXIMITY):
                     break          # the NEIGHBOURHOOD has it, not this property — stay NULL
-                out[col] = not any(r.search(before) for r in _NEGATOR_RES)
+                negated = (_negated_before(before)
+                           or bool(_ABSENT_BEFORE_RE.search(t[max(0, m.start() - 40):m.start()])))
+                lab = None if negated else _LABEL_RE.match(t, m.end())
+                if lab:
+                    v = t[lab.end():]
+                    if _LABEL_NO_DETAILS_RE.match(v):
+                        break      # «المطبخ: لا توجد تفاصيل» — no details is not «no kitchen»: NULL
+                    if _LABEL_NO_RE.match(v):
+                        out[col] = False
+                        break
+                    if any(_norm_ar(x).lower() in v for x in tokens):
+                        if (said := _amenities_in_clause(v).get(col)) is not None:
+                            out[col] = said    # the value restates the fact: the restatement is the answer
+                        break
+                    if (_LABEL_UNSPECIFIED_RE if lab.group("co") else _LABEL_UNSAID_RE).match(v):
+                        break      # «غير محدد» — the label was answered with nothing: NULL
+                out[col] = not negated
                 break
             if col in out:
                 break
     return out
+
+
+# «4 غرف + 3 دورات مياه + مطبخ» — the bathroom count written BEFORE the noun (مياه / مياة / المياه). A page that
+# states several different counts (a project listing several layouts) has stated no one count: None, never a pick.
+_BATHS_LEADING_RE = re.compile(r"([\d٠-٩]{1,2})\s*(?:دورات|دورة|حمامات)\s*(?:ال)?مي[اآ][هة]")
+
+
+def baths_from_leading_count(raw: Optional[str]) -> Optional[int]:
+    counts = {n for g in _BATHS_LEADING_RE.findall(str(raw or "")) if (n := to_int(g)) and 1 <= n <= 15}
+    return counts.pop() if len(counts) == 1 else None
 
 
 # «3 غرف وصالة ومطبخ», «غرفتين وصالة» — the Saudi listing idiom for a unit's layout. The leading

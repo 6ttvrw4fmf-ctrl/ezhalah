@@ -69,6 +69,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, http_liveness, normalize  # noqa: E402
 from scrapers.common.arabic_location import to_catalog  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 
 BASE = "https://24.com.sa"
 SITEMAP = f"{BASE}/sitemap.xml"
@@ -833,8 +834,25 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
         "photo_urls": photos,
         "additional_info": info,
     }
+    row["additional_info"].update(ad_pin(body) or {"pin_absent": True})
     row.update(_services(body))
     return row, category
+
+
+# The ad's own map pin (owner 2026-10-09 / backlog 1111). Every ad page prints its marker twice:
+#   <input type="hidden" id="lat" value="18.2139"> <input type="hidden" id="lng" value="42.5001">
+#   <a href="https://www.google.com/maps/search/?api=1&query=18.2139,42.5001">الحصول على الإتجاه</a>
+# measured per ad on 2026-11-01 (CI source-reread 41276289583: Abha 18.2139,42.5001 · Riyadh/العارض
+# 24.8747,46.6173 · Dammam 26.5559,49.8875). The page's map script falls back to 24.7136 (Riyadh centre)
+# when the input is empty, so that latitude is the site's default, never a pin → NULL.
+_SITE_DEFAULT_LAT = 24.7136
+
+
+def ad_pin(body: str) -> dict:
+    pin = pin_from_html(body)
+    if pin and abs(float(pin["latitude"]) - _SITE_DEFAULT_LAT) < 1e-6:
+        return {}
+    return pin
 
 
 # ── Main ────────────────────────────────────────────────────────────────────────

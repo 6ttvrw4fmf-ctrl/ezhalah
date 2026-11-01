@@ -24,6 +24,7 @@
 // `TypeError: undefined is not an object (evaluating 'x.y')` is a defect and stays one.
 //
 // Run: node --experimental-strip-types scripts/verify-journey-page-error-discriminator.ts
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { appPageErrors, isTransportPageError } from '../e2e/journeys/harness.mjs';
@@ -41,6 +42,13 @@ const TRANSPORT = [
   // The exact WebKit string measured on production, including its odd `https: /` spacing.
   'Fetch API cannot load https: /aannarbkwcymrotzwdbo.supabase.co/rest/v1/rpc/top_cities_by_deal_ar due to access control checks.',
   'Fetch API cannot load https://example.com/x due to access control checks.',
+  // WebKit's XHR wording for the same class — Google One Tap's status call under ITP (sweep 39236332307)
+  'XMLHttpRequest cannot load https://accounts.google.com/gsi/status?client_id=x&has_opted_out_fedcm=true&is_itp=true due to access control checks.',
+  // The Cloudflare challenge frame touching its parent — WebKit files it as an uncaught page error (sweep 39932772747,
+  // 2026-10-23, webkit desktop + mobile 2/2 on two journeys). Third-party, not ours; the odd `https: /` spacing is how
+  // the sweep log prints it, so both spellings are covered.
+  'Blocked a frame with origin "https://challenges.cloudflare.com" from accessing a frame with origin "https://ezhalah-app.vercel.app". Protocols, domains, and ports must match.',
+  'Blocked a frame with origin "https: /challenges.cloudflare.com" from accessing a frame with origin "https://ezhalah-app.vercel.app". Protocols, domains, and ports must match.',
   'Load failed',
   'TypeError: Load failed',
   'The network connection was lost.',
@@ -68,6 +76,8 @@ const APP = [
   'ReferenceError: Can\'t find variable: loadFailedBanner',
   'Error: Minified React error #310',
   'SecurityError: The operation is insecure.', // storage/DOM, not a dead request
+  // The same frame-access wording from ANY other origin is ours to answer for — only the challenge frame is excused.
+  'SecurityError: Blocked a frame with origin "https://ezhalah-app.vercel.app" from accessing a frame with origin "https://accounts.google.com". Protocols, domains, and ports must match.',
 ];
 for (const e of APP) {
   check(`APP DEFECT (never excused): «${e.slice(0, 62)}${e.length > 62 ? '…' : ''}»`, isTransportPageError(e) === false);

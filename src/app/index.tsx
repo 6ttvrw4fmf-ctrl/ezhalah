@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image as XImage } from 'expo-image'; // SVG logo: a vector drawing, not a photo (owner 2026-10-24)
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -8,6 +9,9 @@ import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
+import HeroFalconer from '@/components/HeroFalconer';
+import CloudWisp from '@/components/CloudWisp';
+import { useReducedMotion } from '@/lib/useReducedMotion';
 import { HERO_TAGLINE_KEYS, nextHeroTaglineIndex } from '@/data/heroTaglineRotation';
 import { OptionBox, FieldLabel, Tappable, Reveal, DropdownReveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -15,20 +19,32 @@ import { useAtLeast } from '@/lib/useAtLeast';
 import { SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
+import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
+import TopBarLanguage from '@/components/TopBarLanguage';
 import { CATEGORIES, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
-import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
+import { cityNameEn, regionNameEn, districtNameEn, ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
-import { buildAfSummary, grouped, type SearchQuery } from '@/data/search';
+import { grouped, emptyQuery, type SearchQuery } from '@/data/search';
+import { scopeCrossesMacro } from '@/lib/searchDefaults';
 import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams, searchTableScope, rentPeriodParam } from '@/data/remote';
-import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
+import { HOME_DEFAULT_QUERY, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
 import { AF_ALL_QUESTIONS } from '@/data/advancedFilters';
-import { reconcileCommittedAf, withoutFacet, AF_PREDICATE_FIELDS } from '@/lib/afCarry';
+import { reconcileCommittedAf, AF_PREDICATE_FIELDS } from '@/lib/afCarry';
+import { takeSearchLeftBehind } from '@/lib/searchLeftBehind';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
+import { useFilterWelcome } from '@/lib/useFilterWelcome';
+import { NAME_PARTY_EVENT, SHINE_MS } from '@/lib/nameParty';
+import { InsightHowItWorks } from '@/components/InsightHowItWorks';
+import { decodeSharePayload, decodeInvitePayload, shareJoinNote, shareLandingTitle, shareInviteNote, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
+import { fetchSharedChat, fetchSharedChatCard } from '@/lib/sharedChat';
+import { isProbeFailure } from '@/lib/afProbe';
+import { sentenceName } from '@/lib/nameSync';
+import { typedDir } from '@/lib/typedDir';
 import { useI18n, tDetailOption, tPriceTab, isLatinOnlyInput, ARABIC_ONLY_MSG, CITY_REQUIRED_MSG, DISTRICT_UNCONFIRMED_MSG } from '@/i18n';
 
 const MAX_W = 560; // desktop-web: keep the mobile-first column centered
@@ -101,11 +117,182 @@ const AREA_HINT: RangeHintCfg = {
 // HOME_DEFAULT_QUERY / hasActiveFilters moved to src/lib/searchDefaults.ts (zero-dependency, so a
 // plain Node test can execute them — imported above).
 
+// The city-pool scope a query produces: the SAME expressions the Home component derives its own scope with (a barrier,
+// verify-trending-pools-warm-at-open.ts, holds the two in lockstep). Used only to WARM the pools one deal press away.
+function cityPoolScopeOf(query: SearchQuery) {
+  const rentPeriod: 'monthly' | 'annual' | 'both' = validRentPeriod(query.rentPeriod) ?? 'annual';
+  const effDeal = query.dealCombined ? null : query.deal;
+  const queryForPeriod: SearchQuery = effDeal === 'Rent' ? { ...query, rentPeriod } : query;
+  const rentPeriodTok: string | null = rentPeriodParam(queryForPeriod);
+  const effCategory: Category | null = scopeCrossesMacro(query) ? null : (query.category ?? IMPLIED_CATEGORY_DEFAULT);
+  const cohortTypes = cohortTypesAr(queryForPeriod);
+  const { isBroadCommercial: _scopeFlag, ...tableScope } = searchTableScope(queryForPeriod) ?? {};
+  const af = { ...rpcAllNarrowingParams(queryForPeriod), ...tableScope };
+  return { effDeal, rentPeriodTok, effCategory, cohortTypes, af };
+}
+
+/** The headline's emoji (👋 🌙 ☀️ …) in its own span (owner 2026-10-28: «the emoji after the name doesn't show»). The
+ *  shine paints the text see-through over a gradient, and on iPhone an emoji painted see-through simply vanishes; the
+ *  nameParty CSS gives [data-ezh-emoji] its own fill, so the emoji stays visible through the shine. */
+const EMOJI_RE = /([☀-➿]️?|[\uD83C-\uD83E][\uDC00-\uDFFF]️?)/;
+const PARTY_EMOJI = '🥳';
+function withVisibleEmoji(text: string) {
+  const parts = text.split(EMOJI_RE);
+  if (parts.length === 1) return text;
+  return parts.map((p, i) => (i % 2 === 1
+    // 🥳 keeps shaking and blowing while the welcome is up (owner 2026-10-30, CSS in lib/nameParty.ts)
+    ? <Text key={i} {...({ dataSet: { ezhEmoji: p === PARTY_EMOJI ? 'party' : '' } } as any)}>{p}</Text>
+    : p));
+}
+
 export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, locale, isRTL } = useI18n();
-  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard } = useApp();
+  const x: Partial<typeof E> = locale === 'en' ? E : {}; // English-only type + direction (see E)
+  const heroWide = useAtLeast(700);
+  // Latin letters are the WRONG script only in the Arabic UI, which keeps its Arabic-only hint, unchanged. In the
+  // English UI they are the user's language and match English place names (owner 2026-10-09).
+  const wrongScript = (v: string) => locale === 'ar' && isLatinOnlyInput(v);
+  // Place names as the reader sees them: the official English names in the English UI. Display only — every pick
+  // and every search still carries the Arabic name.
+  const cityLabel = (o: { cityId: number; cityAr: string }) => (locale === 'en' ? cityNameEn(o.cityId, o.cityAr) : o.cityAr);
+  const regionLabel = (o: { regionId: number | null; regionAr: string | null }) => (locale === 'en' ? regionNameEn(o.regionId, o.regionAr) : o.regionAr);
+  const districtLabel = (cityId: number, ar: string) => (locale === 'en' ? districtNameEn(cityId, ar) : ar);
+  // A «حي X · City» row in the city box (owner decision 2026-10-19, backlog 522/566) names the district AND its city.
+  const cityRowLabel = (o: CityOption) => (o.districtAr ? `${districtLabel(o.cityId, o.districtAr)} · ${cityLabel(o)}` : cityLabel(o));
+  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history, importSharedChat, authChecked } = useApp();
+  // A SHARED SEARCH LANDS HERE (owner 2026-10-17). `/?share=<payload>` (src/lib/shareSearch.ts) shows a
+  // card «عقارات من {name} لك على إزهله» with «اضغط وشوف العقارات». The TAP is what runs the search
+  // (a pasted link never runs one by itself — appSession gate). Owner: the recipient signs in to open a
+  // shared search so it is saved to their own list; a visitor who isn't signed in sees the sign-in
+  // screen right after the tap, and the search opens once they're in — including across an OAuth
+  // redirect, via a short-lived pending record. Ordinary «بحث» is untouched and stays free for everyone.
+  // A /s/<code> link is a whole SHARED CHAT (src/lib/sharedChat.ts): the card's facts are read from the
+  // database, and the tap copies the conversation into the recipient's own history and opens it there.
+  const [sharedSearch, setSharedSearch] = useState<{ q: SearchQuery | null; name: string; code?: string } | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const raw = new URLSearchParams(window.location.search).get(SHARE_PARAM);
+    if (raw) { try { window.history.replaceState(null, '', window.location.pathname); } catch { /* cosmetic */ } }
+    if (isShareCode(raw)) {
+      let alive = true;
+      const load = async (tries: number) => {
+        const card = await fetchSharedChatCard(raw!);
+        if (!alive) return;
+        if (isProbeFailure(card)) { if (tries > 0) setTimeout(() => void load(tries - 1), 1500); return; }
+        if (card) setSharedSearch({ q: card.q, name: card.name, code: raw! });
+      };
+      void load(2);
+      return () => { alive = false; };
+    }
+    const s = decodeSharePayload(raw);
+    if (s) { setSharedSearch(s); return; }
+    // An invitation to join (owner 2026-10-23): no search, no chat — the welcome popup for a guest, nothing
+    // for someone already signed in.
+    const inv = decodeInvitePayload(raw);
+    if (inv) setSharedJoin(inv);
+  }, []);
+  const [sharedJoin, setSharedJoin] = useState<{ name: string; locale: 'ar' | 'en' } | null>(null);
+  useEffect(() => {
+    if (!sharedJoin || !authChecked) return;
+    if (!user) openAuth(shareJoinNote(sharedJoin.name, locale === 'en' ? 'en' : 'ar') ?? undefined);
+    setSharedJoin(null);
+  }, [sharedJoin, authChecked, user, openAuth, locale]);
+  const openSharedSearch = useCallback(async (s: { q: SearchQuery | null; code?: string }) => {
+    try { localStorage.removeItem(SHARED_PENDING_KEY); } catch { /* per-device only */ }
+    setSharedSearch(null);
+    if (s.code) {
+      // The same link opened again opens the same copy, never a second one.
+      let done: Record<string, string> = {};
+      try { done = JSON.parse(localStorage.getItem(SHARED_IMPORTED_KEY) ?? '{}') ?? {}; } catch { done = {}; }
+      const prior = done[s.code];
+      if (prior && history.some((h) => h.id === prior)) {
+        router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q ?? emptyQuery()), replay: '0', hid: prior } });
+        return;
+      }
+      const chat = await fetchSharedChat(s.code);
+      if (chat && !isProbeFailure(chat)) {
+        const hid = importSharedChat(chat.q, chat.transcript);
+        try { localStorage.setItem(SHARED_IMPORTED_KEY, JSON.stringify({ ...done, [s.code]: hid })); } catch { /* per-device only */ }
+        setTimeout(() => router.push({ pathname: '/agent', params: { filter: JSON.stringify(chat.q ?? emptyQuery()), replay: '0', hid } }), 0);
+        return;
+      }
+      // The copy could not be read: the shared SEARCH still opens (never a dead tap). A chat with no
+      // search has nothing to run — Home stays.
+    }
+    if (s.q) router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q) } });
+  }, [router, history, importSharedChat]);
+  // OPENING A SHARED LINK (owner 2026-10-18: «the pop up should be the log in and sign up … with a message
+  // of what the user wants to send him … when user clicks sign up / log in the screen shows the history
+  // and it gets saved in the side»). Once the session is known: a visitor who is not signed in gets the
+  // normal sign-in popup with «يوسف شاركك: …» on top, and the chat opens — copied into their own list —
+  // the moment they are in (the pending record below survives the OAuth redirect). A signed-in person
+  // goes straight into the shared chat. Opening a saved copy runs no search (appSession gate holds).
+  const sharedHandledRef = useRef(false);
+  useEffect(() => {
+    if (!sharedSearch || !authChecked || sharedHandledRef.current) return;
+    sharedHandledRef.current = true;
+    if (!user) {
+      try {
+        localStorage.setItem(SHARED_PENDING_KEY, JSON.stringify({ q: sharedSearch.q, name: sharedSearch.name, code: sharedSearch.code, at: Date.now() }));
+      } catch { /* without storage the chat still opens if sign-in finishes in this page */ }
+      openAuth(shareInviteNote(sharedSearch.name, sharedSearch.q, locale === 'en' ? 'en' : 'ar') ?? undefined);
+      return;
+    }
+    if (sharedSearch.code) void openSharedSearch(sharedSearch);
+  }, [sharedSearch, authChecked, user, openAuth, openSharedSearch, locale]);
+  const onSharedTap = () => {
+    if (!sharedSearch) return;
+    if (user) { void openSharedSearch(sharedSearch); return; }
+    try {
+      localStorage.setItem(SHARED_PENDING_KEY, JSON.stringify({ q: sharedSearch.q, name: sharedSearch.name, code: sharedSearch.code, at: Date.now() }));
+    } catch { /* without storage the search still opens if sign-in finishes in this page */ }
+    openAuth();
+  };
+  // The tap's continuation once the visitor is signed in (same page, or back from an OAuth redirect).
+  useEffect(() => {
+    if (!user || Platform.OS !== 'web') return;
+    let pending: { q: SearchQuery | null; code?: string; at: number } | null = null;
+    try { pending = JSON.parse(localStorage.getItem(SHARED_PENDING_KEY) ?? 'null'); } catch { pending = null; }
+    if (!(pending?.q || pending?.code) || !(Date.now() - pending!.at < SHARED_PENDING_TTL_MS)) {
+      try { localStorage.removeItem(SHARED_PENDING_KEY); } catch { /* per-device only */ }
+      return;
+    }
+    const q = pending.q;
+    const code = isShareCode(pending.code) ? pending.code : undefined;
+    const t = setTimeout(() => void openSharedSearch({ q, code }), 0); // after the app session has started
+    return () => clearTimeout(t);
+  }, [user, openSharedSearch]);
+  // ROTATING WELCOME (owner 2026-10-17): a signed-in user sometimes sees a personal line with a live
+  // fact IN PLACE OF THE BIG HEADLINE (owner: «i meant the big text»); the subtitle below never changes. lib/filterWelcome.ts holds the approved lines
+  // and the truth rules; null keeps the normal subtitle.
+  const lastSearched = useMemo(() => {
+    let best: { ts: number; loc: string; district: string | null } | null = null;
+    for (const h of history ?? []) {
+      const q = h?.query;
+      if (q?.location && (!best || h.ts > best.ts)) {
+        // The district the user PICKED (one district only — an area nickname expands to many and names none).
+        const district = q.districtLabel || (q.districts?.length === 1 ? q.districts[0] : null);
+        best = { ts: h.ts, loc: q.location, district: district || null };
+      }
+    }
+    return best;
+  }, [history]);
+  // `welcomeSettled` gates the headline's ENTRANCE (owner 2026-10-17: it must never visibly change
+  // after it appears): the title stays at opacity 0 until the session restore knows the visitor and,
+  // signed in, until the line's numbers are in — then it rises once and is final for this load.
+  // «كيف تشتغل؟» opens when the user taps a market fact in the headline (owner 2026-10-22).
+  const [howOpen, setHowOpen] = useState(false);
+  const { line: welcomeLine, settled: welcomeSettled, swapKey: welcomeSwapKey, isInsight: welcomeIsInsight, celebrate: welcomeCelebrate } = useFilterWelcome(!!user, sentenceName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
+  // «حفظ» in the «وش نناديك؟» box: while its party plays, the welcome headline shines (2 passes, owner-approved demo).
+  const [heroShine, setHeroShine] = useState(false);
+  useEffect(() => {
+    let id: ReturnType<typeof setTimeout> | undefined;
+    const on = () => { setHeroShine(true); if (id) clearTimeout(id); id = setTimeout(() => setHeroShine(false), SHINE_MS); };
+    globalThis.addEventListener?.(NAME_PARTY_EVENT, on);
+    return () => { globalThis.removeEventListener?.(NAME_PARTY_EVENT, on); if (id) clearTimeout(id); };
+  }, []);
   // THE ONE QUERY THIS SCREEN DERIVES EVERYTHING FROM (owner P0 2026-09-01).
   //
   // The store may now carry Advanced Filter answers committed in the chat — that is the whole fix:
@@ -136,6 +323,7 @@ export default function Home() {
     () => reconcileCommittedAf(storeQuery, AF_ALL_QUESTIONS),
     [storeQuery],
   );
+  const reducedSceneMotion = useReducedMotion();
   const docked = useDocked(); // website: sidebar is a permanent column, so hide the menu button
   // CITY-ONLY FIELD (owner spec 2026-07-17): citySuggestions holds either the Top-6-by-listings
   // (focus, empty text) or the Arabic-matched typed results — never a mix, and never a
@@ -165,6 +353,13 @@ export default function Home() {
   const [districtMsg, setDistrictMsg] = useState('');
   const districtRef = useRef<TextInput>(null);
   const districtTextRef = useRef('');
+  // The Arabic-only note belongs to the Arabic UI. Switching to English, where Latin typing is the user's own
+  // language, must not leave «هذا التطبيق يدعم اللغة العربية فقط» standing under «Riyadh» (seen live 2026-10-29).
+  useEffect(() => {
+    if (locale === 'ar') return;
+    setLocMsg((m) => (m === ARABIC_ONLY_MSG ? '' : m));
+    setDistrictMsg((m) => (m === ARABIC_ONLY_MSG ? '' : m));
+  }, [locale]);
   // One place to wipe all district state — called wherever the city changes/clears.
   const clearDistrict = () => {
     districtTextRef.current = '';
@@ -204,6 +399,8 @@ export default function Home() {
   // unexpected value here (e.g. from some future code path that bypasses TypeScript's own type)
   // must still fall back to the safe default rather than leaving both buttons unselected.
   const rentPeriod: 'monthly' | 'annual' | 'both' = validRentPeriod(query.rentPeriod) ?? 'annual';
+  // only «إقامات قصيرة» picked (Rent, not شراء+إيجار): the price box is hidden — see the PRICE range block
+  const shortStaysOnly = query.deal === 'Rent' && !query.dealCombined && rentPeriod === 'monthly';
   // Buy+Rent combined multi-select (owner feature 2026-08-20): every Trending/pool call below reads
   // effDeal instead of query.deal directly — null tells top_cities_by_deal_ar/district_options_ar
   // (and every locations.ts pool wrapping them) to scope to the combined Buy ∪ Rent(any period) set,
@@ -257,7 +454,9 @@ export default function Home() {
   // Before this, pools counted ALL categories while a bare search implied Residential: district
   // counts overstated up to 86%, and commercial-only districts presented as alive yet searched to 0
   // — silently defeating the PR#384 zero-mark.
-  const effCategory: Category = query.category ?? IMPLIED_CATEGORY_DEFAULT;
+  // null for a cross-macro scope (Residential Land under تجاري): the results RPC sends no category there,
+  // so the city/district pools must not either — count == search (owner 2026-10-03).
+  const effCategory: Category | null = scopeCrossesMacro(query) ? null : (query.category ?? IMPLIED_CATEGORY_DEFAULT);
   // The cohort's Arabic types — the EXACT array the search RPC receives (one shared definition in
   // remote.ts), so Trending cities/districts, their counts, and their percentages always describe
   // the same inventory pressing Search returns.
@@ -365,7 +564,7 @@ export default function Home() {
   const writeCitySuggestionsForCohort = (cohort: string, showTopWhenEmpty: boolean) => {
     if (cityCohortRef.current !== cohort) return; // the user left this cohort while it was loading
     if (cityTextRef.current) {
-      const latin = isLatinOnlyInput(cityTextRef.current);
+      const latin = wrongScript(cityTextRef.current);
       setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, cityTextRef.current, cohortTypes, cityAfParams));
     } else if (showTopWhenEmpty) {
       setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
@@ -374,7 +573,7 @@ export default function Home() {
   const writeDistrictSuggestionsForCohort = (cityId: number, cohort: string, showTopWhenEmpty: boolean) => {
     if (districtCohortRef.current !== cohort) return;
     if (districtTextRef.current) {
-      const latin = isLatinOnlyInput(districtTextRef.current);
+      const latin = wrongScript(districtTextRef.current);
       setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cityId, effDeal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes, cityTableScope));
     } else if (showTopWhenEmpty) {
       setDistrictSuggestions(topDistrictsForCityId(cityId, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope));
@@ -539,6 +738,37 @@ export default function Home() {
   // City in this form, so it's always known here; Category is picked AFTER City/District, so a
   // Category-aware ranking can't reach this field without moving Category earlier in the flow — a
   // bigger UX change the owner declined (2026-07-20). Deal-only is what this data can support today.
+  // WARM THE NEXT TAP (owner 2026-10-03: «once the user opens it, the timer is already on»). The current scope's pool
+  // starts loading at mount (the effect below). Once it lands, the pools ONE deal press away (Rent only, Buy + Rent,
+  // Buy only) load one after another, never in a burst on the shared database, so a user who switches the deal and
+  // taps the city field finds the counts already there. A scope already cached resolves at once; a failure is ignored
+  // (the field loads it on demand exactly as before).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).catch(() => null);
+      // Then the trending DISTRICTS of the six trending cities (owner 2026-10-04: «the moment the user opens Ezhalah it
+      // loads, not when he clicks»): most users pick one of them, and its district list is then already there.
+      // TOGETHER, not one after another (P1 2026-10-23): each call is ~40-60 ms of database time since the AF RPCs plan
+      // per call, but ~0.6 s of round trip through the front door, so six in a row kept city #6's list ~4 s away.
+      // Same six calls, same arguments, same cache keys — only the waiting changed.
+      // scripts/verify-trending-pools-warm-at-open.ts
+      if (cancelled) return;
+      const warm: number[] = [];
+      for (const c of topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams)) {
+        if (c.scopeKnown === false) break; // provisional names only: the pool did not load, nothing honest to warm
+        warm.push(c.cityId);
+      }
+      await Promise.all(warm.map((cid) => ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).catch(() => null)));
+      for (const sel of ['Rent', 'Both', 'Buy'] as const) {
+        if (cancelled) return;
+        const sc = cityPoolScopeOf({ ...query, ...dealSelectionToQuery(sel, query.deal) });
+        await ensureCityFieldIndex(sc.effDeal, sc.rentPeriodTok, sc.effCategory, sc.cohortTypes, sc.af).catch(() => null);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     const cohort = cityCohortSig;
     void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then((pool) => {
@@ -770,7 +1000,10 @@ export default function Home() {
   // listing-bearing districts were all the same invisible box. Each now shows ONE small muted
   // Arabic row. English typing is excluded on purpose: that case already has its own message
   // (ARABIC_ONLY_MSG under the field) and must keep it, unchanged.
-  const cityLatin = !!query.location && isLatinOnlyInput(query.location);
+  // What the city field SHOWS: a picked city carries its Arabic name for the search but reads in English in the
+  // English UI. Its side follows what is shown — reading the hidden Arabic put «Riyadh» on the right (owner 2026-10-30).
+  const cityShown = locale === 'en' && citySelected && query.location === citySelected.cityAr ? cityLabel(citySelected) : query.location;
+  const cityLatin = !!query.location && wrongScript(query.location);
   const cityStatus = cityPoolStatus(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams);
   // A NON-EMPTY LIST IS NOT EVIDENCE THAT THIS COHORT HAS LOADED (routine #8, 2026-09-23, #648).
   // The status test used to sit BELOW the length test, so any rows already on screen suppressed the
@@ -798,11 +1031,17 @@ export default function Home() {
       : status !== 'ready' ? status   // THIS cohort has not loaded — rows on screen are another cohort's
       : rows > 0 ? null
       : whenEmpty;
-  const cityZeroRow = zeroRowFor(cityLatin, cityStatus, citySuggestions.length, query.location ? 'empty' : null);
-  const districtLatin = !!districtText && isLatinOnlyInput(districtText);
+  // ROWS FLAGGED scopeKnown:false ARE NAMES WITHOUT COUNTS (borrowed from another scope or the built-in list), shown so
+  // the user never waits on a slow counting RPC (owner 2026-10-03); they carry no number, so they are not another
+  // cohort's claim and may stay on screen while this cohort loads. Real rows from another cohort still may not.
+  const provisionalOnly = (rows: { scopeKnown?: boolean }[]) => rows.length > 0 && rows.every((r) => r.scopeKnown === false);
+  const cityZeroRow = cityStatus === 'loading' && provisionalOnly(citySuggestions) ? null
+    : zeroRowFor(cityLatin, cityStatus, citySuggestions.length, query.location ? 'empty' : null);
+  const districtLatin = !!districtText && wrongScript(districtText);
   const districtStatus = citySelected ? districtPoolStatus(citySelected.cityId, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope) : 'loading';
   // covers both "no districts with listings" (empty focus) and a typed no-match
   const districtZeroRow = !citySelected ? null
+    : districtStatus === 'loading' && provisionalOnly(districtSuggestions) ? null
     : zeroRowFor(districtLatin, districtStatus, districtSuggestions.length, 'empty');
   // Tap-to-retry for the error row: re-run the ensure (the failed promise was evicted, so this is a
   // real refetch), and keep the box open across the tap — the row press blurs the input, so cancel
@@ -903,7 +1142,9 @@ export default function Home() {
       // speak when it has no category-scoped number to speak from: `undefined` makes
       // noResultsSuggestion fall through to its generic probes, which re-count against the real pool
       // and are correct in both cases. A message we cannot ground is worse than the general one.
+      // A borrowed count (scopeKnown:false) is a name without a number — never sent as one.
       districtListingCount: districtsSelected.length && !(cohortTypes && cohortTypes.length)
+        && districtsSelected.every((d) => d.scopeKnown !== false)
         ? districtsSelected.reduce((sum, d) => sum + d.listingCount, 0)
         : undefined,
     };
@@ -942,7 +1183,7 @@ export default function Home() {
     runAfterAnimation(
       (onFinished) => RNAnimated.timing(heroAnim, {
         toValue: 1,
-        duration: 300,
+        duration: reducedSceneMotion ? 0 : 300,
         easing: RNEasing.out(RNEasing.cubic),
         useNativeDriver: true,
       }).start(onFinished),
@@ -967,12 +1208,13 @@ export default function Home() {
     const shared = await shareNative();
     if (!shared) setShareOpen(true);
   };
-  // Below this the top bar carries the logo, a sign-in pill and this button; the label is the first
-  // thing that has to give, not the button. Through useAtLeast(), never an inline width compare:
+  // Below this the top bar is too narrow for the long sign-in label, so the SIGN-IN pill shortens to
+  // «تسجيل الدخول» and «مشاركة» always keeps its word (owner 2026-10-17: a bare icon isn't read as
+  // share, even on a small phone). Through useAtLeast(), never an inline width compare:
   // the inline read (`shareBarWidth >= 380`) rendered the label on every ≥380px client while the
   // served HTML (width 0) had none — React #418 on every desktop/tablet visit, and every production
   // deploy failed the post-deploy hydration gate from 2026-09-05 21:33Z until this line.
-  const shareLabelled = useAtLeast(SHARE_LABEL_BREAKPOINT);
+  const topBarRoomy = useAtLeast(SHARE_LABEL_BREAKPOINT);
 
   const detail = query.type ? detailFor(query.type) : null;
   // Context-level detail: shown at category/group level when no specific type is selected.
@@ -1074,23 +1316,58 @@ export default function Home() {
   // hero entrance, even when we're already on Home (so a docked New Chat tap visibly "refreshes"
   // the screen). (user request: New Chat should feel like a refresh.)
   const { fresh } = useLocalSearchParams<{ fresh?: string }>();
+  // Bumped by every entrance so the title's own rise (effect below) re-arms with it.
+  const [entranceKey, setEntranceKey] = useState(0);
   const playEntrance = useCallback(() => {
+    // NO ENTRANCE ANIMATION (owner 2026-10-17: «same with the animation on top … the share button,
+    // the Ezhalah logo and everything» — the page must look built in, not load in). The card, the
+    // mode toggle and the subtitle are simply THERE: their values go straight to 1. The headline is
+    // the one exception — it stays hidden until its text is settled (owner: never a visible swap),
+    // then appears at once in the effect below. The backdrop's search-time dim (heroAnim) is not an
+    // entrance and keeps its own animation in navigateWithQuery.
     heroAnim.setValue(0);
-    entrance.setValue(0);
-    badgeAnim.setValue(0);
+    entrance.setValue(1);
+    badgeAnim.setValue(1);
     titleAnim.setValue(0);
-    subAnim.setValue(0);
-    RNAnimated.timing(entrance, {
-      toValue: 1,
-      duration: 440,
-      easing: RNEasing.out(RNEasing.cubic),
-      useNativeDriver: Platform.OS !== 'web',
-    }).start();
-    const rise = (v: RNAnimated.Value, delay: number) =>
-      RNAnimated.timing(v, { toValue: 1, duration: 520, delay, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: Platform.OS !== 'web' });
-    RNAnimated.parallel([rise(badgeAnim, 80), rise(titleAnim, 230), rise(subAnim, 400)]).start();
+    subAnim.setValue(1);
+    setEntranceKey((k) => k + 1);
   }, [heroAnim, entrance, badgeAnim, titleAnim, subAnim]);
   useFocusEffect(playEntrance);
+  // THE HEADLINE RISES ONCE ITS TEXT IS FINAL. Re-armed by every entrance (entranceKey) and released by
+  // welcomeSettled: for a guest that is right after the session restore; for a signed-in visitor once
+  // the personal line's numbers are in (or the cap passed). Until then the title holds at opacity 0,
+  // so the visitor never sees one headline turn into another.
+  useEffect(() => {
+    if (!welcomeSettled) return;
+    // Instant, not a rise (owner 2026-10-17): the text is final, so it is simply there.
+    titleAnim.setValue(1);
+  }, [welcomeSettled, entranceKey, titleAnim]);
+  // THE SIGN-IN WELCOME HANDS OVER TO A MARKET INSIGHT, VISIBLY (owner 2026-10-22: «so they are aware on the
+  // spot the message changes»). The one headline change the owner asked to SEE: the new line rises in.
+  useEffect(() => {
+    if (!welcomeSwapKey) return;
+    titleAnim.setValue(0);
+    RNAnimated.timing(titleAnim, { toValue: 1, duration: 650, useNativeDriver: Platform.OS !== 'web' }).start();
+  }, [welcomeSwapKey, titleAnim]);
+  // A RETURN TO THE FILTER IS A CLEAN FILTER (owner 2026-10-03). Coming back from a search — the
+  // toggle, the browser's Back, a new visit — always opens an empty form: the previous search is NOT
+  // kept here and there is no «مسح الكل» to undo it. Signed in, that search is in the sidebar history,
+  // like any chat product; as a guest it is simply gone, never saved. Same reset the old Clear-all
+  // button ran (store query, city and district state, scroll), run when a search was left behind
+  // (src/lib/searchLeftBehind.ts) instead of on a tap — and ONLY then, so a first focus after load
+  // can never wipe a form the user has already started to fill.
+  const resetFilterForm = useCallback(() => {
+    setQuery(() => HOME_DEFAULT_QUERY());
+    cityTextRef.current = '';
+    setCitySuggestions([]);
+    setCitySelected(null);
+    setLocMsg('');
+    setCityFocus(false);
+    clearDistrict();
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useFocusEffect(useCallback(() => { if (takeSearchLeftBehind()) resetFilterForm(); }, [resetFilterForm]));
   useEffect(() => { if (fresh) playEntrance(); }, [fresh, playEntrance]);
   // fade + lift; the title lifts a touch further for emphasis.
   const reveal = (v: RNAnimated.Value, lift = 16) => ({
@@ -1111,30 +1388,19 @@ export default function Home() {
       { scale: Platform.OS === 'web' ? 1 : entrance.interpolate({ inputRange: [0, 1], outputRange: [0.965, 1] }) },
     ],
   };
-  const heroOpacity = heroAnim.interpolate({
-    inputRange: [0, 1],
-    // idle → searching. Web idles a bit darker; both lighten to the same soft level on Search.
-    outputRange: [Platform.OS === 'web' ? 0.92 : 0.82, 0.3],
-  });
-
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      {/* Hand-drawn Saudi landmarks sketch — soft full-bleed backdrop. On phones it shows in full
-          ('contain'); on wide web it fills ('cover'). It dims when idle and lightens while searching. */}
-      <HeroBackground
-        imageOpacity={heroOpacity}
-        resizeMode={Platform.OS === 'web' ? 'cover' : 'contain'}
-        fadeStart={0.8}
-        fadeEnd={1}
-      />
+      {/* Filter: the sky only, no desert landscape below (owner 2026-10-24). */}
+      <HeroBackground />
 
       <ScrollView
         ref={scrollRef}
         style={{ flex: 1, zIndex: 1 }}
-        contentContainerStyle={[s.scroll, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 28 }]}
+        contentContainerStyle={[s.scroll, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}
         keyboardShouldPersistTaps="handled"
       >
-        <RNAnimated.View style={[s.col, entranceStyle]}>
+        <RNAnimated.View style={[s.page, entranceStyle]}>
+          <View style={s.col}>
           {/* Top bar is pinned LTR (see s.top) so the menu always sits on the physical LEFT — it does
               NOT mirror to the right under Arabic. Matches the docked side menu, which is left in both
               languages per product decision. */}
@@ -1153,19 +1419,20 @@ export default function Home() {
                   // hitSlop is a NO-OP on react-native-web; the 44px floor comes from
                   // TAP_TARGET_CSS via this marker (ops_incident #17).
                   // @ts-expect-error web-only DOM props on the RNW host node
-                  dataSet={{ ...TAP44 }}
+                  dataSet={{ ...TAP44, consentKeep: '1' }}
                   onPress={() => setSidebarOpen(true)}
                 >
                   <Ionicons name="menu" size={22} color={colors.ink} />
                 </Pressable>
-                <Text ref={noTranslateRef} style={s.topBrand}>{t('Ezhalah')}</Text>
+                <Text ref={noTranslateRef} style={[s.topBrand, x.topBrand]}>{t('Ezhalah')}</Text>
               </View>
             ) : null}
             <View style={s.topRight}>
               {/* Logged-out users always see a sign-in action in the top bar (owner 2026-08-19).
                   On desktop the docked sidebar already shows it; on mobile the sidebar is a drawer,
                   so without this the sign-in CTA is invisible until the hamburger is tapped. */}
-              {!user && !docked && (
+              {/* NEVER FOR A SIGNED-IN USER, NOT EVEN FOR A MOMENT (owner 2026-10-18: «when I open Ezhalah logged in, the sign up / log in button shows then goes away»). During the session restore `user` is null, so `!user` alone drew it for every signed-in visitor; it waits for authChecked (store.tsx), exactly like SignInCard. */}
+              {authChecked && !user && !docked && (
                 <Pressable
                   style={s.topSignIn}
                   onPress={openAuth}
@@ -1174,9 +1441,11 @@ export default function Home() {
                   dataSet={{ ...TAP44 }}
                 >
                   <Ionicons name="person-outline" size={15} color="#fff" />
-                  <Text style={s.topSignInText}>{t('Sign up / Log in')}</Text>
+                  <Text style={[s.topSignInText, x.topSignInText]}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
                 </Pressable>
               )}
+              {/* Language for a guest — between sign-in and share, all three screens (owner 2026-10-31). */}
+              <TopBarLanguage />
               {/* Share — a labelled pill, not a bare glyph (owner 2026-09-05). An unlabelled icon in a
                   corner reads as decoration; «مشاركة» beside it states the action, which is what every
                   major platform does with the one control it wants people to use. The label is hidden
@@ -1185,7 +1454,7 @@ export default function Home() {
               <Pressable
                 style={({ pressed, hovered }: any) => [
                   s.shareBtn,
-                  shareLabelled && s.shareBtnWide,
+                  s.shareBtnWide,
                   hovered && s.shareBtnHover,
                   pressed && s.shareBtnPressed,
                 ]}
@@ -1198,18 +1467,38 @@ export default function Home() {
               >
                 <RNAnimated.View style={[s.shareInner, { transform: [{ scale: shareScale }] }]}>
                   <Ionicons name="share-social-outline" size={17} color={colors.primary} />
-                  {shareLabelled ? <Text style={s.shareBtnText}>{t('Share')}</Text> : null}
+                  <Text style={s.shareBtnText}>{t('Share')}</Text>
                 </RNAnimated.View>
               </Pressable>
             </View>
           </View>
 
+          </View>
+
+          {/* Logos use the available page width; the form keeps its readable column. */}
+          <HomeWebsiteStrip />
+          <View style={s.col}>
           {/* Hero — title then subtitle rise in, staggered (user request). */}
           <View style={s.hero}>
-            <RNAnimated.Text style={[s.heroTitle, reveal(titleAnim, 20)]}>{t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
-            <RNAnimated.Text style={[s.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>
-            {/* Note #1 — tagline below the description. */}
-            <RNAnimated.Text style={[s.heroTagline, reveal(subAnim, 10)]}>{t('Ezhalah, and may your luck be good.')}</RNAnimated.Text>
+            <CloudWisp variant={1} width={100} height={34} opacity={0.38} style={{ left: -40, top: 12 }} />
+            <CloudWisp variant={2} width={90} height={28} opacity={0.32} style={{ right: -35, bottom: 18 }} />
+            <View style={heroWide ? s.heroTitleBlockWide : s.heroTitleBlock}>
+              <Pressable disabled={!welcomeIsInsight} onPress={() => setHowOpen(true)} accessibilityRole={welcomeIsInsight ? 'button' : undefined} testID="hero-insight">
+                <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]} {...({ dataSet: { ezhShine: heroShine ? 'on' : 'off' }, dir: locale === 'ar' ? 'rtl' : 'ltr' } as any)}>{withVisibleEmoji(welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline]))}</RNAnimated.Text>
+              </Pressable>
+            </View>
+            <InsightHowItWorks visible={howOpen} locale={locale} onClose={() => setHowOpen(false)} />
+            {/* The falconer ENDS THE EZHALAH LINE, ONE FIXED SPOT (owner 2026-10-27: «for the falconer sign in sign out I want
+                them to always be in the same position … without changing its location»). This line is the same words for
+                everyone, so he stands in the same place signed in or out, whatever the headline says (he moved with the
+                headline's words when he ended it). Small, inline after the last word, on the text line, no clouds over
+                the words. His box is held from the first frame (an empty box until sign-in is known), so the line never
+                re-wraps when he appears. A guest sees the plain falconer whose falcon takes off on every open; a signed-in
+                user sees the green bearded falconer with his hooded gold falcon and a golden bulb lit inside his head, and
+                the moment they sign in the whole story plays once (HeroFalconer). In Arabic the drawing is flipped. */}
+            <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}{' '}<View testID="hero-falconer" pointerEvents="none" accessible={false} style={[heroWide ? s.heroFalconerWide : s.heroFalconer, s.heroFalconerInline]}>
+              {authChecked ? <HeroFalconer size={heroWide ? s.heroFalconerWide : s.heroFalconer} flip={locale === 'ar'} signedIn={!!user} celebrate={welcomeCelebrate} inline /> : null}
+            </View></RNAnimated.Text>
           </View>
 
           {/* Filter / AI Agent — the hero's focal choice: centered between the headline and the search
@@ -1224,76 +1513,15 @@ export default function Home() {
               halves of the toggle replace, so toggling costs no history and mounts no duplicates.
               (Search «بحث» still PUSHES — results ARE a child of the form; see onSearch above.) */}
           <RNAnimated.View style={[s.modeWrap, reveal(badgeAnim, 12)]}>
-            <ModeSwitch active="filter" onSwitch={() => router.replace('/agent')} t={t} />
+            <ModeSwitch active="filter" onSwitch={(to) => (to === 'map' ? router.replace('/map') : router.replace('/agent'))} t={t} />
           </RNAnimated.View>
 
           {/* Search card */}
           <View style={s.card}>
-            {hasActiveFilters(query) && (
-              <Reveal>
-                <Pressable
-                  style={s.clearAllBtn}
-                  hitSlop={8}
-                  onPress={() => {
-                    setQuery(() => HOME_DEFAULT_QUERY());
-                    cityTextRef.current = '';
-                    setCitySuggestions([]);
-                    setCitySelected(null);
-                    setLocMsg('');
-                    setCityFocus(false);
-                    clearDistrict();
-                    // The collapsing Property-type/Refine sections can leave the user stranded mid-page —
-                    // scroll back to the top so the reset filter form is what they actually see.
-                    scrollRef.current?.scrollTo({ y: 0, animated: true });
-                  }}
-                >
-                  <Ionicons name="refresh-outline" size={14} color={colors.muted} />
-                  <Text style={s.clearAllText}>{t('Clear all')}</Text>
-                </Pressable>
-              </Reveal>
-            )}
-            {/* THE ADVANCED FILTER ANSWERS CARRIED IN FROM THE CHAT (owner P0 2026-09-01).
-                THIS IS NOT DECORATION — it is what licenses the carry to exist at all.
-                sanitizeForFilterRestore is a strict allowlist of "what the Filter UI can actually
-                show", written for a measured P1: an AF predicate active with no on-screen control
-                silently amputated an unrelated search (a leaked ratingMin returned 0 of 11,552 on
-                الرياض/شراء/فيلا). The owner's requirement — every committed AF predicate must survive
-                a return to this screen — is only reconcilable with that rule by SHOWING them here and
-                letting the user remove any of them. Removing one rebuilds the query from the
-                remaining facets through each question's own apply(), exactly like the chat's pills.
-                Same «بناءً على» summary text the user already read in the chat, so the two screens
-                describe one search in one voice.
-                SCOPE facets (group/type) are absent because reconcileCommittedAf does not carry
-                them at all — the group boxes and type boxes below already ARE their control, and a
-                receipt whose predicate has a live control is not a receipt, it is a second writer
-                fighting the user (it re-applied itself over every scope edit; see @/lib/afCarry).
-                So `query.afFacets` here is exactly the advanced answers, and chip index i is facet
-                index i — which is what lets the «×» below hand `i` straight to withoutFacet(). */}
-            {query.afFacets?.length ? (
-              <Reveal>
-                <View style={s.afCarryWrap}>
-                  <Text style={[s.afCarryLead, { textAlign: isRTL ? 'right' : 'left' }]}>{buildAfSummary(query.afFacets)}</Text>
-                  <View style={[s.afCarryRow, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                    {query.afFacets.map((f, i) => (
-                      <Pressable
-                        key={`${f.id}-${i}`}
-                        testID={`filter-af-chip-${i}`}
-                        style={s.afCarryChip}
-                        hitSlop={6}
-                        // Removed from the RECONCILED list this row is rendered from, never from the
-                        // raw store list — a facet the cohort already retired would otherwise shift
-                        // the indexes and a «×» would delete somebody else's answer. Writing the
-                        // reconciled query back is the same commit the user just made on screen.
-                        onPress={() => setQuery(() => withoutFacet(query, i, AF_ALL_QUESTIONS))}
-                      >
-                        <Text style={s.afCarryChipTx}>{f.labels.join('، ')}</Text>
-                        <Ionicons name="close" size={13} color={colors.primary} />
-                      </Pressable>
-                    ))}
-                  </View>
-                </View>
-              </Reveal>
-            ) : null}
+            {/* NO «مسح الكل» AND NO CARRIED ANSWERS HERE (owner 2026-10-03). The filter form is always
+                clean when you arrive — see resetFilterForm above — so there is nothing to clear and no
+                committed Advanced Filter answer to show or remove. The last search lives in the
+                sidebar history for a signed-in user, and nowhere at all for a guest. */}
             {/* شراء / إيجار — TWO independent toggle buttons, not a radio (owner feature 2026-08-20,
                 mirrors the already-shipped سنوي+شهري pattern exactly): both can be on at once, which
                 means "match either Buy or Rent — Rent side accepts both Annual and Monthly." No third
@@ -1301,7 +1529,7 @@ export default function Home() {
                 togglePeriodButton does for the period pair. */}
             <View style={s.row}>
               {(['Buy', 'Rent'] as const).map((which) => (
-                <OptionBox
+                <OptionBox compact
                   key={which}
                   label={t(which)}
                   img={DEAL_IMG[which]}
@@ -1340,7 +1568,7 @@ export default function Home() {
                 keep SEPARATE budgets (Buy budget + Rent budget boxes below), and that is said once,
                 calmly, in muted helper type — never as an error. The clearing LOGIC is unchanged. */}
             {query.dealCombined ? (
-              <Text style={s.rangeNote}>{t('When you choose Buy and Rent together, each one has its own budget.')}</Text>
+              <Text style={[s.rangeNote, x.rangeNote]}>{t('When you choose Buy and Rent together, each one has its own budget.')}</Text>
             ) : null}
 
             <View ref={withAnchor(cityAnchorRef)} />
@@ -1359,9 +1587,9 @@ export default function Home() {
               <Reveal style={{ marginTop: 12 }}>
                 <View style={s.row}>
                   {(['annual', 'monthly'] as const).map((which) => (
-                    <OptionBox
+                    <OptionBox compact
                       key={which}
-                      label={t(which === 'monthly' ? 'Monthly' : 'Yearly')}
+                      label={t(which === 'monthly' ? 'Short stays' : 'Yearly')}
                       img={PERIOD_IMG[which === 'monthly' ? 'Monthly' : 'Yearly']}
                       selected={which === 'monthly' ? rentPeriod === 'monthly' || rentPeriod === 'both'
                                                      : rentPeriod === 'annual' || rentPeriod === 'both'}
@@ -1383,7 +1611,7 @@ export default function Home() {
                   ))}
                 </View>
                 <Text style={s.rentHint}>
-                  {t(rentPeriod === 'monthly' ? 'Monthly: the displayed price is the monthly price.'
+                  {t(rentPeriod === 'monthly' ? 'Short stays: stays shorter than a year, priced by length of stay.'
                     // Owner feedback (2026-08-22): drop the "this means you want both, so you get
                     // both" framing — selecting both buttons is already self-explanatory. Keep only
                     // the one genuinely non-obvious fact: mixed results show mixed price units.
@@ -1391,7 +1619,7 @@ export default function Home() {
                     : 'Yearly: the displayed price is the yearly price.')}
                 </Text>
                 {periodPriceCleared && !query.priceMin && !query.priceMax && !query.priceInput ? (
-                  <Text style={[s.rangeNote, s.rangeNoteWarn]}>{t('Price limits were cleared because the price unit changed (monthly ↔ yearly) — please re-enter them.')}</Text>
+                  <Text style={[s.rangeNote, x.rangeNote, s.rangeNoteWarn]}>{t('Price limits were cleared because the price unit changed (monthly ↔ yearly) — please re-enter them.')}</Text>
                 ) : null}
               </Reveal>
             )}
@@ -1400,7 +1628,7 @@ export default function Home() {
                 ONLY, never regions/districts/landmarks/areas. The label sits ABOVE the field, far-right
                 (RTL) — a static header, not a floating placeholder. (owner UI request 2026-07-18.)
                 The whole box is a tap target — tapping anywhere inside focuses the input. */}
-            <Text style={[s.fieldLabelAbove, { marginTop: 12 }]}>{t('Which city?')}</Text>
+            <Text style={[s.fieldLabelAbove, x.fieldLabelAbove, { marginTop: 12 }]}>{t('Which city?')}</Text>
             <AnimatedPressable style={[s.field, confirmFieldStyle(cityPop, citySel)]} onPress={() => cityRef.current?.focus()}>
               {/* Selected-value identity (2026-08-14): once a city is confirmed the leading glyph is
                   the SAME designed city art the suggestion rows carry (LOC_IMG.city) — the pick
@@ -1414,8 +1642,10 @@ export default function Home() {
                 <TextInput
                   ref={cityRef}
                   testID="city-input"
-                  style={s.flInput}
-                  value={query.location}
+                  placeholder={t('Choose a city')}
+                  placeholderTextColor={colors.muted}
+                  style={[s.flInput, x.flInput, typedDir(cityShown)]}
+                  value={cityShown}
                   autoCorrect={false}
                   onFocus={() => {
                     clearBlurTimer(cityBlurTimer); // P3: a pending close from a just-blurred state must not outlive the refocus
@@ -1449,6 +1679,7 @@ export default function Home() {
                     // key and were the one captured value nobody re-checked (2026-09-23, #648).
                     if (!query.location) {
                       const cohort = cityCohortSig;
+                      setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
                       void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then(() => {
                         writeCitySuggestionsForCohort(cohort, true);
                       });
@@ -1458,7 +1689,7 @@ export default function Home() {
                       // Suggestions only otherwise arrive via onChangeText, so a tap on a prefilled
                       // field used to show an empty box until a keystroke. English text keeps the
                       // existing behavior exactly (no autocomplete; the Arabic-only hint stands).
-                      if (!isLatinOnlyInput(query.location)) {
+                      if (!wrongScript(query.location)) {
                         setCitySuggestions(matchCitiesByText(effDeal, rentPeriodTok, effCategory, query.location, cohortTypes, cityAfParams));
                       }
                     }
@@ -1477,9 +1708,9 @@ export default function Home() {
                       setLocMsg('');
                       return;
                     }
-                    // Arabic-only product: English typing gets NO autocomplete and an Arabic hint —
-                    // there is nothing to match against, since every city name here is Arabic. (user rule)
-                    const latin = isLatinOnlyInput(v);
+                    // Arabic UI: English typing gets NO autocomplete and an Arabic hint (user rule). English UI: it
+                    // matches the official English city names (wrongScript, above).
+                    const latin = wrongScript(v);
                     setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, v, cohortTypes, cityAfParams));
                     setLocMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
@@ -1499,7 +1730,7 @@ export default function Home() {
             </AnimatedPressable>
 
             {locMsg ? (
-              <Text style={{ color: colors.danger, fontSize: 13, marginTop: 6, textAlign: 'right' }}>{locMsg}</Text>
+              <Text style={[{ color: colors.danger, fontSize: 13, marginTop: 6, textAlign: 'right' }, x.msg]}>{locMsg}</Text>
             ) : null}
 
             {/* Merge note (2026-07-20): outer open/close wrapper is PR #156's DropdownReveal; inner
@@ -1522,6 +1753,12 @@ export default function Home() {
                   // New city → drop any prior district; the [query.deal, effCategory, citySelected]
                   // effect above warms THIS city's district catalog so District shows its Top-6 instantly.
                   clearDistrict();
+                  // A «حي X · City» row (owner decision 2026-10-19, backlog 522/566): the customer typed a district
+                  // into the city box, so the tap selects the city AND that district, with every spelling the index
+                  // serves for it. Its count is unmeasured (scopeKnown:false) until the city's own pool answers.
+                  if (opt.districtAr) {
+                    setDistrictsSelected([{ districtAr: opt.districtAr, listingCount: 0, matchValues: opt.districtMatchValues ?? [opt.districtAr], totalInCity: 0, scopeKnown: false }]);
+                  }
                   scrollDown(districtAnchorRef); // carry them down to the next step (district)
                 };
                 return (
@@ -1530,11 +1767,11 @@ export default function Home() {
                       // ONE muted Arabic row — never an invisible box (findings P1). Error taps retry.
                       cityZeroRow === 'error' ? (
                         <Tappable style={s.suggRow} onPress={retryCityPool}>
-                          <Text style={s.suggStatusText}>{t('Could not load the list — tap to retry')}</Text>
+                          <Text style={[s.suggStatusText, x.suggStatusText]}>{t('Could not load the list — tap to retry')}</Text>
                         </Tappable>
                       ) : (
                         <View style={s.suggRow}>
-                          <Text style={s.suggStatusText}>
+                          <Text style={[s.suggStatusText, x.suggStatusText]}>
                             {cityZeroRow === 'loading' ? t('Loading…') : t('No matching city — pick from the list')}
                           </Text>
                         </View>
@@ -1545,12 +1782,14 @@ export default function Home() {
                         <TrendingRows
                           items={citySuggestions.map((opt) => ({
                             key: String(opt.cityId),
-                            label: opt.cityAr,
+                            label: cityLabel(opt),
                             // count + honest cohort share (owner, 2026-08-15); region only on a real
                             // display-name collision (e.g. الهفوف ×2), prepended so it stays visible.
                             sublabel: [
-                              hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
-                              cohortCountLabel(opt.listingCount),
+                              hasNameCollision(citySuggestions, opt.cityAr) ? regionLabel(opt) ?? undefined : undefined,
+                              // «…» while this scope's count is loading (owner 2026-10-04: a name with no number looked
+                              // broken); never another scope's number.
+                              opt.scopeKnown === false ? '…' : cohortCountLabel(opt.listingCount),
                             ].filter(Boolean).join(' · ') || undefined,
                             icon: LOC_IMG.city, // restored designed art (see TrendingList.tsx note)
                           }))}
@@ -1558,30 +1797,41 @@ export default function Home() {
                         />
                       </>
                     ) : (
-                      citySuggestions.map((opt, i) => (
+                      citySuggestions.map((opt, i) => {
+                        // A real city with no listings in THIS scope stays findable and selectable (owner,
+                        // 2026-10-03) and says so, like a zero-listing district. scopeKnown:false = the count is
+                        // not measured yet (pool still loading): no claim either way.
+                        const cityEmpty = opt.scopeKnown !== false && !(opt.listingCount > 0);
+                        return (
                         <Tappable
-                          key={opt.cityId}
+                          key={opt.districtAr ? `${opt.cityId}:${opt.districtAr}` : String(opt.cityId)}
                           dip={0.03}
-                          style={[s.suggRow, i < citySuggestions.length - 1 && s.suggDivider]}
+                          style={[s.suggRow, i < citySuggestions.length - 1 && s.suggDivider, cityEmpty && s.suggRowEmpty]}
                           onPress={() => cityOnPress(opt)}
                         >
-                          <Image source={LOC_IMG.city} style={s.suggLocIcon} />
+                          <Image source={opt.districtAr ? LOC_IMG.district : LOC_IMG.city} style={[s.suggLocIcon, cityEmpty && s.suggIconEmpty]} />
                           <View style={{ flex: 1 }}>
-                            <Text style={s.suggCity}>{opt.cityAr}</Text>
+                            <Text style={[s.suggCity, x.suggCity, cityEmpty && s.suggCityEmpty]}>{cityRowLabel(opt)}</Text>
                             {/* Region stays hidden per spec ("use the confirmed hidden region internally")
                                 UNLESS two results in this exact list share a display name — a real,
                                 verified case (e.g. الهفوف exists as two distinct real cities) — in which
                                 case showing it is the only way the user can tell them apart. */}
                             {(() => {
                               const parts = [
-                                hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
-                                cohortCountLabel(opt.listingCount),
+                                hasNameCollision(citySuggestions, opt.cityAr) ? regionLabel(opt) ?? undefined : undefined,
+                                cityEmpty || opt.scopeKnown === false ? undefined : cohortCountLabel(opt.listingCount),
                               ].filter(Boolean);
-                              return parts.length ? <Text style={s.suggDist}>{parts.join(' · ')}</Text> : null;
+                              return (
+                                <>
+                                  {parts.length ? <Text style={[s.suggDist, x.suggDist]}>{parts.join(' · ')}</Text> : null}
+                                  {cityEmpty ? <Text style={s.suggEmptyNote}>{t('No listings here right now')}</Text> : null}
+                                </>
+                              );
                             })()}
                           </View>
                         </Tappable>
-                      ))
+                        );
+                      })
                     )}
                   </ScrollView>
                 );
@@ -1595,14 +1845,14 @@ export default function Home() {
             {/* Static label above, far-right (RTL): "أي حي؟" with a lighter "اختياري" beside it — the
                 optional-ness is its own label, not baked into the field placeholder. (owner UI request.) */}
             <View ref={withAnchor(districtAnchorRef)} />
-            <Text style={[s.fieldLabelAbove, { marginTop: 12 }]}>
-              {t('Which neighborhood?')}
+            <Text style={[s.fieldLabelAbove, x.fieldLabelAbove, { marginTop: 12 }]}>
+              {t('District')}
               {'  '}
-              <Text style={s.fieldLabelOptional}>{t('Optional')}</Text>
+              <Text style={[s.fieldLabelOptional, x.fieldLabelOptional]}>{t('Optional')}</Text>
             </Text>
             {/* Multi-select capability line (owner copy, 2026-08-10) — shown once the field is usable. */}
             {citySelected ? (
-              <Text style={s.districtMultiHint}>{t('You can pick more than one neighborhood')}</Text>
+              <Text style={[s.districtMultiHint, x.districtMultiHint]}>{t('You can pick more than one neighborhood')}</Text>
             ) : null}
             <AnimatedPressable
               style={[s.field, confirmFieldStyle(districtPop, districtSel), !citySelected && { opacity: 0.5 }]}
@@ -1617,7 +1867,7 @@ export default function Home() {
                   ref={districtRef}
                   testID="district-input"
                   editable={!!citySelected}
-                  style={s.flInput}
+                  style={[s.flInput, x.flInput, typedDir(districtText)]}
                   placeholder={citySelected ? '' : t('Select a city first')}
                   placeholderTextColor={colors.muted}
                   value={districtText}
@@ -1640,10 +1890,11 @@ export default function Home() {
                     if (!districtTextRef.current) {
                       const cid = citySelected.cityId;
                       const cohort = districtCohortSigOf(cid);
+                      setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope)); // at once, like the city field
                       void ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).then(() => {
                         writeDistrictSuggestionsForCohort(cid, cohort, true);
                       });
-                    } else if (!isLatinOnlyInput(districtTextRef.current)) {
+                    } else if (!wrongScript(districtTextRef.current)) {
                       // P2 — refocusing mid-typing shows the current matches, not an empty box.
                       setDistrictSuggestions(matchDistrictsByCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes, cityTableScope));
                     }
@@ -1659,9 +1910,9 @@ export default function Home() {
                     // since districtText itself is never sent anywhere.)
                     if (!citySelected) return;
                     if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope)); setDistrictMsg(''); return; }
-                    // Arabic-only product: English typing gets NO autocomplete and the same Arabic hint the
-                    // City field shows — every district name here is Arabic, so there is nothing to match. (owner UI request.)
-                    const latin = isLatinOnlyInput(v);
+                    // Arabic UI: English typing gets NO autocomplete and the same Arabic hint the City field shows
+                    // (owner UI request). English UI: it matches the official English district names.
+                    const latin = wrongScript(v);
                     setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, v, cohortTypes, cityTableScope));
                     setDistrictMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
@@ -1699,7 +1950,7 @@ export default function Home() {
                         14px; the TEXT is what shrinks at narrow widths (flexShrink on the style), so
                         the image can never be the thing that overflows the chip row. */}
                     <Image source={LOC_IMG.district} style={s.districtChipIcon} />
-                    <Text style={s.districtChipText} numberOfLines={1}>{d.districtAr}</Text>
+                    <Text style={s.districtChipText} numberOfLines={1}>{citySelected ? districtLabel(citySelected.cityId, d.districtAr) : d.districtAr}</Text>
                     <Pressable onPress={() => toggleDistrict(d)} hitSlop={8}>
                       <Ionicons name="close-circle" size={16} color={colors.chipIcon} />
                     </Pressable>
@@ -1709,7 +1960,7 @@ export default function Home() {
             ) : null}
 
             {districtMsg ? (
-              <Text style={{ color: colors.danger, fontSize: 13, marginTop: 6, textAlign: 'right' }}>{districtMsg}</Text>
+              <Text style={[{ color: colors.danger, fontSize: 13, marginTop: 6, textAlign: 'right' }, x.msg]}>{districtMsg}</Text>
             ) : null}
 
             {/* Merge note (2026-07-20): outer open/close wrapper is PR #156's DropdownReveal; inner
@@ -1744,22 +1995,22 @@ export default function Home() {
                       // ONE muted Arabic row — the district mirror of the city zero-states above.
                       districtZeroRow === 'error' ? (
                         <Tappable style={s.suggRow} onPress={retryDistrictPool}>
-                          <Text style={s.suggStatusText}>{t('Could not load the list — tap to retry')}</Text>
+                          <Text style={[s.suggStatusText, x.suggStatusText]}>{t('Could not load the list — tap to retry')}</Text>
                         </Tappable>
                       ) : (
                         <View style={s.suggRow}>
-                          <Text style={s.suggStatusText}>
+                          <Text style={[s.suggStatusText, x.suggStatusText]}>
                             {districtZeroRow === 'loading' ? t('Loading…') : t('No districts available in this city right now')}
                           </Text>
                         </View>
                       )
                     ) : isTop6 && citySelected ? (
                       <>
-                        <TrendingHeader title={`${t('Trending districts in')} ${citySelected.cityAr}`} />
+                        <TrendingHeader title={`${t('Trending districts in')} ${cityLabel(citySelected)}`} />
                         <TrendingRows
                           items={districtSuggestions.map((opt, i) => ({
                             key: `${opt.districtAr}#${i}`,
-                            label: opt.districtAr,
+                            label: districtLabel(citySelected.cityId, opt.districtAr),
                             // Honest zero under the CURRENT filter state (owner 2026-08-13): when a
                             // narrower filter is active and this district's LIVE eligible count is 0,
                             // say so in Arabic — same message the typed list already uses — instead of
@@ -1780,6 +2031,8 @@ export default function Home() {
                             // "no count beats a wrong count" rule the city pool already follows.
                             sublabel: districtLiveCounts?.[opt.districtAr] === 0
                               ? t('No listings here right now')
+                              // «…» = this scope's count is still loading (owner 2026-10-04), never a blank row
+                              : opt.scopeKnown === false ? '…'
                               : hasDistrictNarrowing
                                 ? (districtLiveCounts?.[opt.districtAr] != null
                                     ? cohortCountLabel(districtLiveCounts[opt.districtAr]) : '')
@@ -1802,7 +2055,7 @@ export default function Home() {
                         // count exists it is the truth for this row's empty-marking: the number/signal
                         // beside a district must equal what selecting it returns (owner, 2026-08-13).
                         const live = districtLiveCounts?.[opt.districtAr];
-                        const isEmpty = live != null ? live === 0 : opt.listingCount === 0;
+                        const isEmpty = opt.scopeKnown === false ? false : live != null ? live === 0 : opt.listingCount === 0;
                         const isPicked = selectedLabels.has(opt.districtAr);
                         return (
                         <Tappable
@@ -1813,7 +2066,7 @@ export default function Home() {
                         >
                           <Image source={LOC_IMG.district} style={[s.suggLocIcon, isEmpty && s.suggIconEmpty]} />
                           <View style={{ flex: 1 }}>
-                            <Text style={[s.suggCity, isEmpty && s.suggCityEmpty]}>{opt.districtAr}</Text>
+                            <Text style={[s.suggCity, x.suggCity, isEmpty && s.suggCityEmpty]}>{citySelected ? districtLabel(citySelected.cityId, opt.districtAr) : opt.districtAr}</Text>
                             {/* Same rule as the trending rows above: show the count the user will
                                 actually land on (live, under the full filter state) whenever it has
                                 been fetched, never the wider deal/category scope count. */}
@@ -1823,7 +2076,7 @@ export default function Home() {
                               if (isEmpty) return <Text style={s.suggEmptyNote}>{t('No listings here right now')}</Text>;
                               const n = hasDistrictNarrowing ? live : (live ?? opt.listingCount);
                               const label = n != null ? cohortCountLabel(n) : '';
-                              return label ? <Text style={s.suggDist}>{label}</Text> : null;
+                              return label ? <Text style={[s.suggDist, x.suggDist]}>{label}</Text> : null;
                             })()}
                           </View>
                           {isPicked ? <Ionicons name="checkmark-circle" size={18} color={colors.primary} /> : null}
@@ -1836,13 +2089,18 @@ export default function Home() {
               })()}
             </DropdownReveal>
 
+            <Tappable testID="home-search-button" style={s.searchBtn} onPress={onSearch} dip={0.025}>
+              <Ionicons name="search" size={20} color="#fff" />
+              <Text style={[s.searchBtnText, x.searchBtnText]}>{t('Search')}</Text>
+            </Tappable>
+
             <View ref={withAnchor(catAnchorRef)} />
             {/* Category — Residential / Commercial (macro) */}
             <View style={s.pick}>
               <FieldLabel>{t('Category')}</FieldLabel>
               <View style={s.row}>
                 {CATEGORIES.map((cat) => (
-                  <OptionBox
+                  <OptionBox compact
                     key={cat}
                     label={t(cat)}
                     img={categoryImg(cat)}
@@ -1909,12 +2167,12 @@ export default function Home() {
             {(ctx?.showBeds || ctx?.showSize) && (
               <Reveal style={s.pick}>
                 <View style={s.ctxBox}>
-                  <Text style={s.ctxTitle}>{t('Refine your search')}</Text>
-                  <Text style={s.ctxSub}>{t('Select bedrooms and/or area, or leave both empty to see all options')}</Text>
+                  <Text style={[s.ctxTitle, x.ctxTitle]}>{t('Refine your search')}</Text>
+                  <Text style={[s.ctxSub, x.ctxSub]}>{t('Select bedrooms and/or area, or leave both empty to see all options')}</Text>
 
                   {ctx.showBeds && (
                     <>
-                      <Text style={s.ctxSubLabel}>{t('Bedrooms')}</Text>
+                      <Text style={[s.ctxSubLabel, x.ctxSubLabel]}>{t('Bedrooms')}</Text>
                       <View style={[s.wrap, { marginBottom: 4 }]}>
                         {((roomOnly ? ['1'] : ['any', '1', '2', '3', '4', '5+']) as readonly ('any' | '1' | '2' | '3' | '4' | '5+')[]).map((opt) => (
                           <OptionBox
@@ -1941,14 +2199,14 @@ export default function Home() {
                       min only → ≥, max only → ≤. */}
                   {ctx?.showSize && (
                     <>
-                      <View style={[s.rangeHead, ctx.showBeds ? { marginTop: 14 } : null]}>
+                      <View style={[s.rangeHead, x.rangeHead, ctx.showBeds ? { marginTop: 14 } : null]}>
                         <Image source={RANGE_ICON.areaHead} style={s.rangeHeadIcon} />
-                        <Text style={[s.ctxSubLabel, s.rangeHeadLabel]}>{t('Area (m²)')}</Text>
+                        <Text style={[s.ctxSubLabel, x.ctxSubLabel, s.rangeHeadLabel]}>{t('Area (m²)')}</Text>
                       </View>
                       <View style={s.rangeRow}>
                         <Pressable style={[s.field, s.rangeBox, query.areaMin ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(areaMinRef)}>
                           <Image source={RANGE_ICON.areaFrom} style={s.rangeBoxIcon} accessibilityLabel={t('From')} />
-                          <Text style={s.rangeLabel}>{t('From')}</Text>
+                          <Text style={[s.rangeLabel, x.rangeLabel]}>{t('From')}</Text>
                           {/* Sanity caps (real-iPhone finding 2026-07-11: the field accepted 1,008,000,000,000 م²):
                               area ≤ 7 digits (9,999,999 م²), price ≤ 10 digits (9,999,999,999 ر.س). maxLength counts
                               the GROUPED display (digits + commas) and stops TYPING early; the .slice() in onChangeText
@@ -1956,80 +2214,87 @@ export default function Home() {
                           <TextInput testID="area-min-input" ref={mergeLtrRef(areaMinRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={9}
                             value={areaMinValue}
                             onKeyPress={wholeNumberKeyGuard('areaMin')} onFocus={() => clearFracLock('areaMin')} onSelectionChange={() => clearFracLock('areaMin')} onChangeText={(v) => { clearFracLock('areaMin'); const d = toWholeNumberDigits(v).slice(0, 7); setQuery((q) => ({ ...q, areaMin: d || null, contextSize: null, priceBand: null })); }} />
-                          <Text style={s.sizeUnit}>{t('م²')}</Text>
+                          <Text style={[s.sizeUnit, x.sizeUnit]}>{t('m²')}</Text>
                         </Pressable>
                         <Pressable style={[s.field, s.rangeBox, query.areaMax ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(areaMaxRef)}>
                           <Image source={RANGE_ICON.areaTo} style={s.rangeBoxIcon} accessibilityLabel={t('To')} />
-                          <Text style={s.rangeLabel}>{t('To')}</Text>
+                          <Text style={[s.rangeLabel, x.rangeLabel]}>{t('To')}</Text>
                           <TextInput testID="area-max-input" ref={mergeLtrRef(areaMaxRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={9}
                             value={areaMaxValue}
                             onKeyPress={wholeNumberKeyGuard('areaMax')} onFocus={() => clearFracLock('areaMax')} onSelectionChange={() => clearFracLock('areaMax')} onChangeText={(v) => { clearFracLock('areaMax'); const d = toWholeNumberDigits(v).slice(0, 7); setQuery((q) => ({ ...q, areaMax: d || null, contextSize: null, priceBand: null })); }} />
-                          <Text style={s.sizeUnit}>{t('م²')}</Text>
+                          <Text style={[s.sizeUnit, x.sizeUnit]}>{t('m²')}</Text>
                         </Pressable>
                       </View>
                       {areaHint && (
-                        <Text style={[s.rangeNote, areaHint.warn ? s.rangeNoteWarn : null]}>{areaHint.text}</Text>
+                        <Text style={[s.rangeNote, x.rangeNote, areaHint.warn ? s.rangeNoteWarn : null]}>{areaHint.text}</Text>
                       )}
                     </>
                   )}
 
+                  {/* NO PRICE BOX FOR SHORT STAYS (owner 2026-11-01: «remove price for short stays»). Their stays are
+                      priced by length (the guest picks dates on the platform) and every card already shows no price
+                      (listingPrice → ''), so a من/إلى budget there filters on a figure the user never sees. Hidden only when
+                      «إقامات قصيرة» is the ONLY period; «سنوي» alone or both keep it. The period toggle already clears
+                      typed bounds when the period changes. */}
+                  {!shortStaysOnly && (<>
                   {/* PRICE range (من / إلى ريال) — always available, independent of beds/area. HARD filter.
                       When شراء+إيجار are BOTH selected (owner feature 2026-08-20), this box is the BUY
                       budget and a SECOND, independent Rent budget box renders right below it — owner
                       decision (asked and answered): two ranges shown together, never one shared/naive
                       range that would misleadingly mix a sale price with a rent price. */}
-                  <View style={[s.rangeHead, { marginTop: 14 }]}>
+                  <View style={[s.rangeHead, x.rangeHead, { marginTop: 14 }]}>
                     <Image source={RANGE_ICON.priceHead} style={s.rangeHeadIcon} />
-                    <Text style={[s.ctxSubLabel, s.rangeHeadLabel]}>{t(query.dealCombined ? 'Buy budget' : 'Price')}</Text>
+                    <Text style={[s.ctxSubLabel, x.ctxSubLabel, s.rangeHeadLabel]}>{t(query.dealCombined ? 'Buy budget' : 'Price')}</Text>
                   </View>
                   <View style={s.rangeRow}>
                     <Pressable style={[s.field, s.rangeBox, query.priceMin ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(priceMinRef)}>
                       <Image source={RANGE_ICON.priceFrom} style={s.rangeBoxIcon} accessibilityLabel={t('From')} />
-                      <Text style={s.rangeLabel}>{t('From')}</Text>
+                      <Text style={[s.rangeLabel, x.rangeLabel]}>{t('From')}</Text>
                       <TextInput testID="price-min-input" ref={mergeLtrRef(priceMinRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={13}
                         value={priceMinValue}
                         onKeyPress={wholeNumberKeyGuard('priceMin')} onFocus={() => clearFracLock('priceMin')} onSelectionChange={() => clearFracLock('priceMin')} onChangeText={(v) => { clearFracLock('priceMin'); const d = toWholeNumberDigits(v).slice(0, 10); setQuery((q) => ({ ...q, priceMin: d || null, priceInput: '', priceBand: null })); }} />
-                      <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
+                      <Text style={[s.sizeUnit, x.sizeUnit]}>{t('SAR currency')}</Text>
                     </Pressable>
                     <Pressable style={[s.field, s.rangeBox, query.priceMax ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(priceMaxRef)}>
                       <Image source={RANGE_ICON.priceTo} style={s.rangeBoxIcon} accessibilityLabel={t('To')} />
-                      <Text style={s.rangeLabel}>{t('To')}</Text>
+                      <Text style={[s.rangeLabel, x.rangeLabel]}>{t('To')}</Text>
                       <TextInput testID="price-max-input" ref={mergeLtrRef(priceMaxRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={13}
                         value={priceMaxValue}
                         onKeyPress={wholeNumberKeyGuard('priceMax')} onFocus={() => clearFracLock('priceMax')} onSelectionChange={() => clearFracLock('priceMax')} onChangeText={(v) => { clearFracLock('priceMax'); const d = toWholeNumberDigits(v).slice(0, 10); setQuery((q) => ({ ...q, priceMax: d || null, priceInput: '', priceBand: null })); }} />
-                      <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
+                      <Text style={[s.sizeUnit, x.sizeUnit]}>{t('SAR currency')}</Text>
                     </Pressable>
                   </View>
                   {priceHint && (
-                    <Text style={[s.rangeNote, priceHint.warn ? s.rangeNoteWarn : null]}>{priceHint.text}</Text>
+                    <Text style={[s.rangeNote, x.rangeNote, priceHint.warn ? s.rangeNoteWarn : null]}>{priceHint.text}</Text>
                   )}
+                  </>)}
 
                   {query.dealCombined && (
                     <Reveal>
-                      <View style={[s.rangeHead, { marginTop: 14 }]}>
+                      <View style={[s.rangeHead, x.rangeHead, { marginTop: 14 }]}>
                         <Image source={RANGE_ICON.priceHead} style={s.rangeHeadIcon} />
-                        <Text style={[s.ctxSubLabel, s.rangeHeadLabel]}>{t('Rent budget (yearly basis)')}</Text>
+                        <Text style={[s.ctxSubLabel, x.ctxSubLabel, s.rangeHeadLabel]}>{t('Rent budget (yearly basis)')}</Text>
                       </View>
                       <View style={s.rangeRow}>
                         <Pressable style={[s.field, s.rangeBox, query.priceMinRent ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(priceMinRentRef)}>
                           <Image source={RANGE_ICON.priceFrom} style={s.rangeBoxIcon} accessibilityLabel={t('From')} />
-                          <Text style={s.rangeLabel}>{t('From')}</Text>
+                          <Text style={[s.rangeLabel, x.rangeLabel]}>{t('From')}</Text>
                           <TextInput ref={mergeLtrRef(priceMinRentRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={13}
                             value={priceMinRentValue}
                             onKeyPress={wholeNumberKeyGuard('priceMinRent')} onFocus={() => clearFracLock('priceMinRent')} onSelectionChange={() => clearFracLock('priceMinRent')} onChangeText={(v) => { clearFracLock('priceMinRent'); const d = toWholeNumberDigits(v).slice(0, 10); setQuery((q) => ({ ...q, priceMinRent: d || null })); }} />
-                          <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
+                          <Text style={[s.sizeUnit, x.sizeUnit]}>{t('SAR currency')}</Text>
                         </Pressable>
                         <Pressable style={[s.field, s.rangeBox, query.priceMaxRent ? s.sizeFieldOn : null]} onPress={() => focusIfNotAlready(priceMaxRentRef)}>
                           <Image source={RANGE_ICON.priceTo} style={s.rangeBoxIcon} accessibilityLabel={t('To')} />
-                          <Text style={s.rangeLabel}>{t('To')}</Text>
+                          <Text style={[s.rangeLabel, x.rangeLabel]}>{t('To')}</Text>
                           <TextInput ref={mergeLtrRef(priceMaxRentRef)} style={s.rangeInput} keyboardType="number-pad" placeholder="—" placeholderTextColor={colors.muted} maxLength={13}
                             value={priceMaxRentValue}
                             onKeyPress={wholeNumberKeyGuard('priceMaxRent')} onFocus={() => clearFracLock('priceMaxRent')} onSelectionChange={() => clearFracLock('priceMaxRent')} onChangeText={(v) => { clearFracLock('priceMaxRent'); const d = toWholeNumberDigits(v).slice(0, 10); setQuery((q) => ({ ...q, priceMaxRent: d || null })); }} />
-                          <Text style={s.sizeUnit}>{t('SAR currency')}</Text>
+                          <Text style={[s.sizeUnit, x.sizeUnit]}>{t('SAR currency')}</Text>
                         </Pressable>
                       </View>
                       {priceRentHint && (
-                        <Text style={[s.rangeNote, priceRentHint.warn ? s.rangeNoteWarn : null]}>{priceRentHint.text}</Text>
+                        <Text style={[s.rangeNote, x.rangeNote, priceRentHint.warn ? s.rangeNoteWarn : null]}>{priceRentHint.text}</Text>
                       )}
                     </Reveal>
                   )}
@@ -2077,7 +2342,7 @@ export default function Home() {
                         setQuery((q) => ({ ...q, detail: digits ? digits : null, priceBand: null }));
                       }}
                     />
-                    <Text style={s.sizeUnit}>{t('m²')}</Text>
+                    <Text style={[s.sizeUnit, x.sizeUnit]}>{t('m²')}</Text>
                   </Pressable>
                 )}
               </Reveal>
@@ -2088,11 +2353,11 @@ export default function Home() {
                 block below, so the user knows which period their price/size answers apply to BEFORE
                 they type them. */}
 
-            <Tappable style={s.searchBtn} onPress={onSearch} dip={0.025}>
-              <Text style={s.searchBtnText}>{t('Search')}</Text>
+            <Tappable testID="home-filter-search-button" style={s.searchBtn} onPress={onSearch} dip={0.025}>
+              <Ionicons name="search" size={20} color="#fff" />
+              <Text style={[s.searchBtnText, x.searchBtnText]}>{t('Search with these filters')}</Text>
             </Tappable>
-            {/* Scroll target: each selection brings this (just below Search) into view so the user is
-                carried down through the form without scrolling. (user request.) */}
+            {/* Existing selection scroll target stays beside the final in-form search action. */}
             <View ref={withAnchor(endAnchorRef)} style={{ height: 1 }} />
           </View>
 
@@ -2102,19 +2367,97 @@ export default function Home() {
               behind — `git revert` of that commit restores the whole block. The styles (onbWrap/
               onbHeading/onbDesc/suggGrid/chip*) are deliberately KEPT so a restore needs no re-authoring.
               The AI Agent page still shows its own version of this block to guests. */}
+          </View>
         </RNAnimated.View>
       </ScrollView>
 
       {/* Drawer overlays the home content (dimmed behind) instead of replacing it. */}
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
+      {/* Only an older search link (no chat code) opened while signed in still asks for a tap — a pasted
+          link never runs a SEARCH by itself. Shared chats and signed-out visitors never see this card. */}
+      {sharedSearch && user && !sharedSearch.code && (
+        <View style={s.sharedBackdrop} accessibilityViewIsModal>
+          <View style={s.sharedCard}>
+            <Pressable onPress={() => setSharedSearch(null)} hitSlop={10} style={[s.sharedClose, { right: 12 }]} accessibilityRole="button" accessibilityLabel={t('Close')}>
+              <Ionicons name="close" size={20} color={colors.muted} />
+            </Pressable>
+            <XImage source={require('../../assets/images/logo-cloud-green-static.svg')} style={s.sharedEagle} contentFit="contain" />
+            <Text style={[s.sharedTitle, { writingDirection: isRTL ? 'rtl' : 'ltr' }]}>
+              {shareLandingTitle(sharedSearch.name, sharedSearch.q, locale === 'en' ? 'en' : 'ar')}
+            </Text>
+            <Pressable onPress={onSharedTap} style={({ pressed }) => [s.sharedButton, pressed && { opacity: 0.9 }]} accessibilityRole="button">
+              <Text style={s.sharedButtonText}>{SHARE_COPY[locale === 'en' ? 'en' : 'ar'].button}</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
 
+// ENGLISH TYPE (owner 2026-10-09: «the same text size as Claude and ChatGPT … not too big … just a translation»).
+// Layered on `s` in the English UI only (`x` in Home), so the Arabic is untouched. Latin reads larger and heavier
+// than Arabic at the same size and weight, so English steps down a weight; and every text pinned right-to-left for
+// the Arabic reads left-to-right. Values from the 2026-10-09 design pass (phone 390 / laptop 1440).
+const LTR = { textAlign: 'left', writingDirection: 'ltr' } as const;
+const E = StyleSheet.create({
+  topBrand: { fontWeight: '700', letterSpacing: -0.2 },
+  topSignInText: { fontSize: 12.5, fontWeight: '600' },
+  heroTitle: { fontSize: 20, fontWeight: '600', lineHeight: 26, letterSpacing: -0.2 },
+  heroTitleWide: { fontSize: 24, lineHeight: 30, letterSpacing: -0.3 },
+  heroSub: { fontSize: 14, fontWeight: '400', lineHeight: 20, color: colors.body },
+  fieldLabelAbove: { fontWeight: '500', ...LTR },
+  fieldLabelOptional: { fontWeight: '400' },
+  flInput: LTR,
+  suggStatusText: LTR,
+  districtMultiHint: LTR,
+  msg: LTR,
+  suggCity: { fontWeight: '500' },
+  suggDist: { fontSize: 12 },
+  searchBtnText: { fontSize: 15, fontWeight: '500' },
+  ctxTitle: { fontWeight: '600', textAlign: 'left' },
+  ctxSub: { fontSize: 13, textAlign: 'left' },
+  ctxSubLabel: { fontSize: 13, fontWeight: '500', textAlign: 'left' },
+  rangeHead: { justifyContent: 'flex-start' },
+  rangeLabel: { fontWeight: '500' },
+  sizeUnit: { fontSize: 13, fontWeight: '500' },
+  rangeNote: { textAlign: 'left' },
+});
+
+// A shared search waits at most this long for the visitor to finish signing in after the tap.
+const SHARED_PENDING_KEY = 'ezhalah:sharedSearch:pending';
+const SHARED_PENDING_TTL_MS = 30 * 60 * 1000;
+// code → the history id its copy became on this device, so reopening the link never duplicates the chat.
+const SHARED_IMPORTED_KEY = 'ezhalah:sharedChat:imported';
+
 const s = StyleSheet.create({
+  heroTitleBlock: { width: '100%' },
+  // a laptop title runs a little wider than the 560 px form column (owner 2026-10-26: «make the text wide a bit»)
+  heroTitleBlockWide: { alignSelf: 'stretch', marginHorizontal: -60 },
+  heroFalconer: { width: 40, height: 46 },
+  heroFalconerWide: { width: 50, height: 58 },
+  // web: an inline box on the text line, its feet a little under the baseline so he stands with the words
+  heroFalconerInline: { display: 'inline-flex', verticalAlign: 'middle', marginBottom: -4, overflow: 'visible' } as any,
+  sharedBackdrop: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60,
+    backgroundColor: 'rgba(18, 37, 27, 0.35)', alignItems: 'center', justifyContent: 'center', padding: 20,
+  },
+  sharedCard: {
+    width: '100%', maxWidth: 380, backgroundColor: colors.surface, borderRadius: radius.card,
+    paddingTop: 28, paddingBottom: 22, paddingHorizontal: 22, alignItems: 'center', ...cardShadow,
+  },
+  sharedClose: { position: 'absolute', top: 12 },
+  sharedEagle: { width: 36, height: 36, marginBottom: 10 },
+  sharedTitle: { fontSize: 16, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 24 },
+  sharedButton: {
+    marginTop: 20, alignSelf: 'stretch', backgroundColor: colors.selFill, borderRadius: 14,
+    paddingVertical: 14, alignItems: 'center',
+  },
+  sharedButtonText: { color: colors.onFill, fontSize: 16, fontWeight: '700' },
 
   scroll: { paddingHorizontal: space.screenSide, alignItems: 'center' },
+  page: { width: '100%', alignItems: 'center' },
   col: { width: '100%', maxWidth: MAX_W },
 
   // Force LTR for the top bar so it never mirrors under Arabic: the hamburger stays pinned to the
@@ -2123,12 +2466,12 @@ const s = StyleSheet.create({
   top: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 4 },
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   // Note #4 — mobile brand text next to the hamburger.
-  topBrand: { fontSize: 18, fontWeight: '800', color: colors.primary, letterSpacing: -0.4 },
+  topBrand: { fontSize: 22, fontWeight: '800', color: colors.ink }, // same size as الوسيط الذكي's title (owner 2026-10-31: «ezhalah must all be the same size, big»)
   // AI Agent badge + Share icon, grouped and pushed to the far-right edge (marginStart:auto) so they
   // sit together in the top-right corner in BOTH languages. (user request.)
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginStart: 'auto' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  word: { fontSize: 12, fontWeight: '700', letterSpacing: 1.2, color: colors.ink },
+  word: { fontSize: 12, fontWeight: '700', color: colors.ink },
   // The bar is forced LTR (see s.top), so `marginStart: 'auto'` pushes the badge away from the
   // left-pinned hamburger toward the share button on the right.
   // Redesigned to match the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius,
@@ -2164,32 +2507,20 @@ const s = StyleSheet.create({
   topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
-  hero: { alignItems: 'center', marginTop: 12, marginHorizontal: 4 },
+  hero: { alignItems: 'center', marginTop: 8, marginHorizontal: 4 },
   // The Filter / AI Agent control, centered in the hero flow between the tagline and the card.
-  modeWrap: { alignSelf: 'center', marginTop: 20 },
-  heroTitle: { fontSize: 31, fontWeight: '700', color: colors.primary, letterSpacing: -0.6, textAlign: 'center', lineHeight: 34 },
-  heroSub: { fontSize: 13.5, fontWeight: '600', color: colors.dark, textAlign: 'center', marginTop: 5, lineHeight: 20 },
+  modeWrap: { alignSelf: 'center', marginTop: 8 },
+  // NO letter-spacing on Arabic: it breaks joining and ligatures («الله» lost its ligature in the welcome
+  // headline, owner 2026-10-24). Latin tracking lives in the English-only layer E. Guard:
+  // scripts/verify-no-letter-spacing-on-arabic.ts
+  heroTitle: { fontSize: 24, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 28 },
+  heroSub: { fontSize: 12, fontWeight: '600', color: colors.ink, textAlign: 'center', marginTop: 4, lineHeight: 17 },
   heroTagline: { fontSize: 12.5, fontWeight: '700', color: colors.primary, textAlign: 'center', marginTop: 8, fontStyle: 'italic' },
   // Small inline hint under the Rent Monthly/Yearly toggle — explains the period the user picked.
   rentHint: { fontSize: 11.5, color: colors.muted, marginTop: 6, paddingHorizontal: 4, lineHeight: 16 },
 
-  card: { marginTop: 22, backgroundColor: colors.surface, borderRadius: radius.sheet, borderWidth: 1, borderColor: colors.fieldLine, padding: space.card, ...cardShadow },
-  // "مسح الكل" (Clear All) — only rendered when hasActiveFilters(query), so an already-empty filter
-  // never shows a clear control with nothing to clear (mirrors the location field's own per-field
-  // clear icon, which is likewise conditional on query.location.length > 0).
-  clearAllBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-end', marginBottom: 10 },
-  clearAllText: { fontSize: 13, color: colors.muted, fontWeight: '600' },
-  // Carried Advanced Filter answers — same tinted pill the chat's removable pills use, so one
-  // committed answer looks like itself on whichever screen the user is standing on.
-  afCarryWrap: { alignSelf: 'stretch', gap: 7, marginBottom: 12 },
-  afCarryLead: { fontSize: 12.5, fontWeight: '500', color: colors.muted },
-  afCarryRow: { flexWrap: 'wrap', gap: 8, alignItems: 'center' },
-  afCarryChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.tint,
-    borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5,
-  },
-  afCarryChipTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
-  field: { flexDirection: 'row', alignItems: 'center', gap: 10, height: 52, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, paddingHorizontal: 14, backgroundColor: colors.surface, ...(Platform.OS === 'web' ? { cursor: 'text' as any } : {}) },
+  card: { marginTop: 10, backgroundColor: colors.surface, borderRadius: radius.sheet, borderWidth: 1, borderColor: colors.fieldLine, padding: 12, ...cardShadow },
+  field: { flexDirection: 'row', alignItems: 'center', gap: 10, height: 46, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, paddingHorizontal: 14, backgroundColor: colors.surface, ...(Platform.OS === 'web' ? { cursor: 'text' as any } : {}) },
   sizeField: { marginTop: 8, height: 46 },
   sizeFieldOn: { borderColor: colors.primary },
   // fontSize 16 (not 14) on the numeric inputs is deliberate: iOS Safari AUTO-ZOOMS the whole page
@@ -2251,7 +2582,7 @@ const s = StyleSheet.create({
     borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10,
   },
   // flexShrink so the NAME truncates at narrow widths — the fixed 14px art and the ✕ never overflow.
-  districtChipText: { fontSize: 12.5, fontWeight: '700', color: colors.dark, flexShrink: 1 },
+  districtChipText: { fontSize: 12.5, fontWeight: '700', color: colors.ink, flexShrink: 1 },
   districtChipIcon: { width: 14, height: 14, resizeMode: 'contain' },
   suggIconEmpty: { opacity: 0.5 },
   suggCityEmpty: { color: colors.muted, fontWeight: '500' },
@@ -2269,7 +2600,7 @@ const s = StyleSheet.create({
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   wrapCell: { flexGrow: 1, flexBasis: '30%', minWidth: 90, flex: 0 },
 
-  searchBtn: { marginTop: 11, height: 51, borderRadius: radius.field, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
+  searchBtn: { marginTop: 12, height: 48, flexDirection: 'row', gap: 8, borderRadius: radius.field, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   searchBtnText: { color: '#fff', fontSize: 15.5, fontWeight: '600' },
 
   startHead: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 9, marginHorizontal: 2 },

@@ -3,6 +3,8 @@ import type { AfCanon } from '@/lib/afEvidence';
 
 // A normalized listing. (PRD §8.2) In production the ingestion pipeline maps every partner feed
 // onto this shape; here we ship curated placeholders ported from the prototype.
+export type ListingDiscount = { original: number; pct: number };
+
 export type Listing = {
   id: number;
   type: string;
@@ -22,6 +24,12 @@ export type Listing = {
   // whenever there was no total.) MUST NOT be folded into `price` — that string is parsed back to a
   // number by listingPriceValue() and drives the hard price filter and the cheapest/priciest sort.
   pricePerMeter?: number | null;
+  // A SOURCE-PUBLISHED DISCOUNT (owner 2026-10-19): the struck-through pre-discount price and the
+  // badge percentage, exactly as the platform printed them. `price` is ALREADY the discounted figure
+  // (PRICE = SOURCE; aqar_parse takes the second, real asking price), so search, filters and sort
+  // already work on the final price — this only lets the card show «~~old~~ خصم X٪» next to it.
+  // Null whenever the source shows no discount; built by listingDiscountFrom() (src/lib/listingDisplay.ts).
+  discount?: ListingDiscount | null;
   // True when `price` is OUR per-metre x area arithmetic, not a figure the advertiser published.
   // The card MUST label it; nothing may present it as source-published. (owner rule 2026-09-03)
   priceIsDerived?: boolean;
@@ -37,6 +45,10 @@ export type Listing = {
   // figure; when 'annual', the yearly one. Drives the per-month filter + the /mo vs /yr label.
   // NEVER defaulted — an unpublished period stays null. See listingPriceString().
   rentPeriod?: string | null;
+  // The period the SITE published, verbatim ('monthly' | 'annual' | null). `rentPeriod` above is the POOL
+  // (src/lib/rentPool.ts): a per-month figure on a non-short-stay site pools as 'annual' at ×12, and the card
+  // prints the site's own words from this field («السعر المعلن 3,000 شهرياً»). (owner 2026-10-25)
+  sourceRentPeriod?: string | null;
   // price_annual EXACTLY as the row carries it — the number the RPC's rent budget was compared
   // against (location_search_candidates_ar filters rent rows on price_annual). Set on real fetched
   // Rent rows; null/undefined on Buy and on the bundled mock catalog. It exists because `price` is
@@ -63,6 +75,10 @@ export type Listing = {
   // Real URL on the source platform — when present, the in-app browser redirects the
   // user OUT to this page. Absent for the bundled mock catalog (synthetic preview only).
   source_url?: string;
+  // The raw table this row came from (e.g. 'wasalt_residential_listings'): with `id` it names ONE
+  // row of search_listings_ar, which is how the in-app ad page reads the source's own pin and finds
+  // the same ad on other sites (src/data/adPageData.ts). Set on every fetched listing; undefined on mocks.
+  sourceTable?: string;
   // Rich extras for the new residential card design — all optional. Mock listings don't carry them;
   // real Aqar listings populate them from the rich `aqar_residential_listings` table. (user request.)
   ad_number?: string;
@@ -120,6 +136,7 @@ export type Listing = {
     sanitation?: boolean;
     private_entrance?: boolean;
     optical_fibers?: boolean;
+    majlis?: boolean;
     laundry_room?: boolean;
     balcony_terrace?: boolean;
   };

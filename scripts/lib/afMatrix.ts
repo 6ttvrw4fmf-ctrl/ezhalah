@@ -23,8 +23,8 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { liftSymbols } from './liftSymbols.ts';
-import { COHORT_QUESTIONS } from '../../src/lib/afCohorts.ts';
-import { CLEAN_MACRO, ALL_CLEAN_TYPES, HIERARCHY, groupsOf, groupMembers } from '../../src/data/propertyTypes.ts';
+import { COHORT_QUESTIONS, COHORT_CARDS, shortStaysAsks, cardPlan, cardKeys, isCardId, AMENITY_BAG_QUESTION_IDS } from '../../src/lib/afCohorts.ts';
+import { CLEAN_MACRO, ALL_CLEAN_TYPES, HIERARCHY, UNBOXED_TYPES, groupsOf, groupMembers } from '../../src/data/propertyTypes.ts';
 import type { SearchQuery } from '../../src/data/search.ts';
 
 export type Leg = 'Buy' | 'RentAnnual' | 'RentMonthly';
@@ -52,18 +52,50 @@ export const MODES: Mode[] = [
 
 /** The certification TABLE's answer (data, not the gate): is `id` certified for this type in this mode? */
 export function tableAllows(type: string, mode: Mode, id: string): boolean {
+  // Short stays (owner 2026-10-31): ONE pool, so every residential type certifies exactly the asked
+  // set (SHORT_STAYS_QUESTIONS) in the plain monthly mode — rating / unit_subtype are chat-only there.
+  if (mode.mode === 'RentMonthly' && CLEAN_MACRO[type] === 'Residential') return shortStaysAsks(id);
   const cfg = COHORT_QUESTIONS[type];
   if (!cfg) return false;
-  return mode.legs.every((leg) => (cfg[leg] ?? []).includes(id));
+  // Apartments & Co-living (owner 2026-10-31): a group type (one with COHORT_CARDS) ignores a deal it has no cohort
+  // for in a mixed mode — Floor with Rent + Buy asks its Rent ∩ Buy lists although Floor has no short-stay market.
+  const legs = COHORT_CARDS[type] ? mode.legs.filter((leg) => cfg[leg]) : mode.legs;
+  return legs.length > 0 && legs.every((leg) => (cfg[leg] ?? []).includes(id));
 }
+
+/**
+ * The TABLE's answer for a whole scope: which question ids the pool must offer on `query` in `mode`.
+ * Non-card ids are the per-type intersection above. The themed CARDS (owner 2026-10-31) are certified by their
+ * chips, not by a list: a card is offered iff cardPlan() leaves it a chip every leg certifies, and a mixed scope
+ * pools small cards under new ids («extras»), so their ids are read from the real cardPlan() — whose worked
+ * examples verify-af-apartments-group-cards.ts pins against the owner's lists. Two asking rules ride on top:
+ * the generic amenities card is not asked where cards exist, and the furnished question is not asked where the
+ * comfort card carries the «furnished» chip (the typed sentence keeps both certified through cohortAllows).
+ */
+export function tableOffers(types: string[], mode: Mode, query: SearchQuery, ids: Iterable<string>, view: 'asked' | 'certified' = 'asked'): Set<string> {
+  const out = new Set<string>();
+  for (const id of ids) if (!isCardId(id) && types.every((t) => tableAllows(t, mode, id))) out.add(id);
+  const plan = cardPlan(query);
+  for (const c of plan) out.add(c.id);
+  // the asking rules only: a committed «furnished» or amenities answer stays CERTIFIED (and is carried) on a scope
+  // where the card absorbed the question — `view: 'certified'` is what a re-entry / transition must be judged by.
+  if (view === 'asked') {
+    if (plan.length) out.delete('amenities');
+    if (cardKeys(query, 'comfort').includes('furnished')) out.delete('furnished');
+  }
+  return out;
+}
+export const BAG_IDS: ReadonlySet<string> = AMENITY_BAG_QUESTION_IDS;
 
 export type Scope = { kind: 'type' | 'group'; label: string; types: string[]; category: 'Residential' | 'Commercial'; query: SearchQuery };
 
-/** Every clean type and every group, each as the SearchQuery the Filter screen would hold. */
+/** Every clean type and every group, each as the SearchQuery the Filter screen would hold. A type offered as no box
+ *  (UNBOXED_TYPES — «أرض», owner 2026-10-11: «not searchable by property type») is no scope: the Filter cannot hold it,
+ *  so no user can open an Advanced Filter round on it. */
 export function allScopes(): Scope[] {
   const base = { location: 'الرياض', type: null, detail: null, priceInput: '', priceBand: null } as Partial<SearchQuery>;
   const out: Scope[] = [];
-  for (const type of ALL_CLEAN_TYPES) {
+  for (const type of ALL_CLEAN_TYPES.filter((t) => !UNBOXED_TYPES.includes(t))) {
     const category = CLEAN_MACRO[type];
     out.push({ kind: 'type', label: type, types: [type], category,
       query: { ...base, deal: 'Buy', category, typeGroups: groupsOf([type]), types: [type] } as SearchQuery });
@@ -110,27 +142,46 @@ export function recorder(): { row: Record<string, unknown>; reads: Set<string> }
   return { row, reads };
 }
 
-const QUESTION_CONSTS = [
+/** Every `*_QUESTION` const in src/data/advancedFilters.ts, in file order — the pool is assembled from these.
+ *  verify-af-matrix-truth.ts asserts the list is complete against the file (a new const nobody lifted is RED). */
+export const QUESTION_CONSTS = [
   'RNPL_QUESTION', 'AGE_QUESTION', 'AMENITIES_QUESTION', 'BATHROOMS_QUESTION', 'FURNISHED_QUESTION',
   'STREET_WIDTH_QUESTION', 'DIRECTION_QUESTION', 'RATING_QUESTION', 'UNIT_SUBTYPE_QUESTION',
+  // the themed cards (owner 2026-10-31 / 11-01): two consts carry id 'space' (short stays / yearly wording)
+  'COMFORT_QUESTION', 'SPACE_QUESTION', 'SPACE_YEARLY_QUESTION', 'SAFETY_QUESTION', 'PERKS_QUESTION', 'BUILD_QUESTION',
+  'EXTRAS_QUESTION', 'WHO_QUESTION', 'FEATURES_QUESTION', 'SERVICES_QUESTION', 'FUN_QUESTION',
+  'APARTMENTS_QUESTION', 'SHOPS_QUESTION',   // the Residential Building ladders
 ];
+/** The helpers the question consts close over, lifted beside them (cardOptions reads CHIP_DEFS + cardKeys). */
+export const QUESTION_HELPER_SYMBOLS = [
+  { header: 'const CHIP_LABEL_FLOOR', endsWith: /\};$/ },
+  { header: 'async function cardOptions', endsWith: /^\}$/ },
+];
+/** The real cohort + chip modules the lifted pool imports — one line, shared by every lifter. */
+export const afLiftImports = (root: string): string => {
+  const href = (p: string) => JSON.stringify(pathToFileURL(join(root, p)).href);
+  return [
+    `import { cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope, shortStaysAskTier, cardKeys, groupAskTier, hasCards, isCardId } from ${href('src/lib/afCohorts.ts')};`,
+    `import { CHIP_DEFS } from ${href('src/lib/afChips.ts')};`,
+  ].join('\n');
+};
 
 export async function loadLifted(root: string): Promise<Lifted> {
-  const href = (p: string) => JSON.stringify(pathToFileURL(join(root, p)).href);
   const counts = { guided: null as unknown, age: null as unknown };
   (globalThis as Record<string, unknown>).__afMatrixCounts = counts;
   const lifted = await liftSymbols(
     join(root, 'src/data/advancedFilters.ts'),
     [
-      { header: 'const AGE_BUCKETS', endsWith: /^\];$/ },
+      { header: 'const AGE_LADDER', endsWith: /^\];$/ },
       { header: 'const DIRECTION_DEFS', endsWith: /^\];$/ },
       { header: 'function addAmenities' },
+      ...QUESTION_HELPER_SYMBOLS,
       ...QUESTION_CONSTS.map((h) => ({ header: `const ${h}` })),
       { header: 'export const ADVANCED_QUESTIONS', endsWith: /^\];$/ },
     ],
     ['ADVANCED_QUESTIONS'],
     [
-      `import { cohortAllows, scopeCleanTypes, intersectChips } from ${href('src/lib/afCohorts.ts')};`,
+      afLiftImports(root),
       'type GuidedCounts = any; type AgeOptionCounts = any; type SearchQuery = any; type AdvancedQuestion = any; type AdvancedQuestionResult = any;',
       'const t = (k: string) => k;',
       'const isProbeFailure = (_c: unknown) => false;',
@@ -192,6 +243,9 @@ export type FieldMeaning = {
   paramsBoth: (a: Record<string, unknown>, b: Record<string, unknown>) => Record<string, unknown>;
   /** fields whose options + unknown PARTITION the scope (options are disjoint and exhaustive over known) */
   partition: boolean;
+  /** a NESTED «up to» ladder (each option contains the one before it): the options are not disjoint, so the
+   *  scope is the WIDEST rung + the rows past the top rung (`beyond`, a PostgREST filter) + unknown */
+  nested?: { beyond: string };
   /** the count columns the card's "did not mention" caption must derive from (null = no caption) */
   unknownCols: string[] | null;
   totalCol: string;
@@ -204,17 +258,46 @@ const AMENITY_COL: Record<string, string> = {
   kitchen: 'kitchen', parking: 'parking', elevator: 'elevator', ac: 'air_conditioner', private_entrance: 'private_entrance',
   maid_room: 'maid_room', driver_room: 'driver_room', car_entrance: 'car_entrance', sanitation: 'sanitation',
   electricity: 'electricity', water_supply: 'water_supply', furnished: 'furnished', gym: 'gym', pool: 'pool',
-  garden: 'garden', balcony: 'balcony', laundry_room: 'laundry_room', optical_fibers: 'optical_fibers',
+  garden: 'garden', balcony: 'balcony', laundry_room: 'laundry_room', optical_fibers: 'optical_fibers', majlis: 'majlis',
   separate_electricity_meter: 'separate_electricity_meter', separate_water_meter: 'separate_water_meter',
   rnpl: 'rent_now_pay_later',
+  // The 39 column-backed chips of the Apartments & Co-living cards (owner handoff 2026-10-31, migration
+  // 20261101100930): token = column, each a boolean IS TRUE on search_listings_ar, counted as cnt_<token>.
+  roof: 'roof', two_entrances: 'two_entrances', annex: 'annex', yard: 'yard', garage: 'garage', grill: 'grill',
+  storage: 'storage', water_tank: 'water_tank', warranty: 'warranty', electronic_deed: 'electronic_deed', basement: 'basement',
+  self_checkin: 'self_checkin', wifi: 'wifi', bills_included: 'bills_included', jacuzzi: 'jacuzzi', smart_tv: 'smart_tv',
+  billiards: 'billiards', cleaning_service: 'cleaning_service', soundproof: 'soundproof', cameras: 'cameras', guard: 'guard',
+  smart_entry: 'smart_entry', smart_home: 'smart_home', central_gas: 'central_gas', sauna: 'sauna', kids_play_area: 'kids_play_area',
+  nursery: 'nursery', free_maintenance: 'free_maintenance', intercom: 'intercom', fire_system: 'fire_system', ev_charger: 'ev_charger',
+  central_vacuum: 'central_vacuum', insulation: 'insulation', dining_majlis: 'dining_majlis', own_bathroom: 'own_bathroom',
+  fridge: 'fridge', whole_floor: 'whole_floor', singles: 'singles', families: 'families',
 };
+// The 6 DERIVED tokens (same migration): one p_amenities slug standing for a predicate over other columns.
+//   separate_meters → (separate_electricity_meter OR separate_water_meter) — SQL three-valued: a row is KNOWN-NOT only
+//   when both meters are false; one false beside a NULL is UNKNOWN (the OR is NULL) and must never be served.
+//   apts4/8/12/20 → apartments_count >= n (a nested «at least» ladder, single-select); has_shops → shops_count >= 1.
+const METERS = ['separate_electricity_meter', 'separate_water_meter'];
+const separateMeters = (): Meaning => ({
+  params: { p_amenities: ['separate_meters'] }, cntCol: 'cnt_separate_meters', cols: METERS,
+  rest: `or=(${METERS.map((c) => `${c}.is.true`).join(',')})`,
+  notMatching: METERS.map((c) => `${c}=is.false`).join('&'),
+  unknown: `or=(and(${METERS[0]}.is.null,${METERS[1]}.not.is.true),and(${METERS[1]}.is.null,${METERS[0]}.not.is.true))`,
+  satisfies: (r) => METERS.some((c) => r[c] === true),
+});
+const APTS_RUNG: Record<string, number> = { apts4: 4, apts8: 8, apts12: 12, apts20: 20 };
 const DIR_COL: Record<string, string> = {
   'شمال': 'cnt_dir_n', 'جنوب': 'cnt_dir_s', 'شرق': 'cnt_dir_e', 'غرب': 'cnt_dir_w',
   'شمال شرق': 'cnt_dir_ne', 'شمال غرب': 'cnt_dir_nw', 'جنوب شرق': 'cnt_dir_se', 'جنوب غرب': 'cnt_dir_sw',
 };
 const SUBTYPE_COL: Record<string, string> = { 'استديو': 'cnt_sub_studio', 'شقق مخدومة': 'cnt_sub_serviced', 'شقة': 'cnt_sub_regular' };
-const AGE: Record<string, { params: Record<string, unknown>; lo: number | null; hi: number | null; exact?: number }> = {
+// The age question is a one-tap cumulative «up to» ladder (owner 2026-10-05): new · upto2 · upto5 · upto9.
+// A rung's count is the SUM of its bucket columns; the recording proxy hands back column NAMES, so the
+// sum reads as their concatenation — `cntCols.join('')` is that exact recorded value.
+const AGE: Record<string, { params: Record<string, unknown>; lo: number | null; hi: number | null; exact?: number; cntCols?: string[] }> = {
   new: { params: { p_is_new_construction: true }, lo: null, hi: null, exact: 0 },
+  upto2: { params: { p_age_buckets: ['new', '1_2'] }, lo: 0, hi: 2, cntCols: ['cnt_new', 'cnt_1_2'] },
+  upto5: { params: { p_age_buckets: ['new', '1_2', '3_5'] }, lo: 0, hi: 5, cntCols: ['cnt_new', 'cnt_1_2', 'cnt_3_5'] },
+  upto9: { params: { p_age_buckets: ['new', '1_2', '3_5', '6_9'] }, lo: 0, hi: 9, cntCols: ['cnt_new', 'cnt_1_2', 'cnt_3_5', 'cnt_6_9'] },
   '1_2': { params: { p_age_min: 1, p_age_max: 2 }, lo: 1, hi: 2 },
   '3_5': { params: { p_age_min: 3, p_age_max: 5 }, lo: 3, hi: 5 },
   '6_9': { params: { p_age_min: 6, p_age_max: 9 }, lo: 6, hi: 9 },
@@ -236,7 +319,15 @@ const ladder = (col: string, cnt: string, params: Record<string, unknown>, n: nu
 export function optionMeaning(field: string, key: string): Meaning | null {
   switch (field) {
     case 'rnpl': return key === 'rnpl' ? bool('rent_now_pay_later', 'cnt_rnpl', { p_amenities: ['rnpl'] }) : null;
-    case 'amenities': return AMENITY_COL[key] ? bool(AMENITY_COL[key], `cnt_${key}`, { p_amenities: [key] }) : null;
+    // The themed cards (owner 2026-10-31 / 11-01) are the amenities card split by theme — same tokens, same meaning,
+    // plus the one derived chip (separate_meters) a card may carry.
+    case 'comfort': case 'space': case 'safety': case 'perks': case 'build': case 'extras': case 'who': case 'features': case 'services': case 'fun':
+    case 'amenities':
+      if (key === 'separate_meters') return separateMeters();
+      return AMENITY_COL[key] ? bool(AMENITY_COL[key], `cnt_${key}`, { p_amenities: [key] }) : null;
+    // The Residential Building ladders (owner 2026-10-31): one token per rung, the predicate on the ad's own number.
+    case 'apartments': return APTS_RUNG[key] ? ladder('apartments_count', `cnt_${key}`, { p_amenities: [key] }, APTS_RUNG[key]) : null;
+    case 'shops': return key === 'has_shops' ? ladder('shops_count', 'cnt_has_shops', { p_amenities: ['has_shops'] }, 1) : null;
     case 'bathrooms': return /^[1-4]$/.test(key) ? ladder('bathrooms', `cnt_bath${key}`, { p_bath_min: Number(key) }, Number(key)) : null;
     case 'street_width': return /^(15|20|25|30)$/.test(key) ? ladder('street_width_m', `cnt_stw${key}`, { p_street_width_min: Number(key) }, Number(key)) : null;
     case 'furnished':
@@ -285,12 +376,28 @@ export function optionMeaning(field: string, key: string): Meaning | null {
         : a.hi == null
           ? { rest: `property_age=gte.${a.lo}`, notMatching: `property_age=lt.${a.lo}`, ok: (v: number) => v >= (a.lo as number) }
           : { rest: `property_age=gte.${a.lo}&property_age=lte.${a.hi}`, notMatching: `or=(property_age.lt.${a.lo},property_age.gt.${a.hi})`, ok: (v: number) => v >= (a.lo as number) && v <= (a.hi as number) };
-      return { params: a.params, cntCol: `cnt_${key}`, cols: ['property_age'], rest: range.rest, notMatching: range.notMatching,
+      return { params: a.params, cntCol: a.cntCols ? a.cntCols.join('') : `cnt_${key}`, cols: ['property_age'], rest: range.rest, notMatching: range.notMatching,
         unknown: 'property_age=is.null', satisfies: (r) => typeof r.property_age === 'number' && range.ok(r.property_age) };
     }
     default: return null;
   }
 }
+
+// Helpers for the union of two options of one field (owner 2026-10-03, every question multi-select).
+const RATING: Record<string, Record<string, unknown>> = {
+  '9.5': { p_rating_min: 9.5 }, '9.0': { p_rating_min: 9 }, '9.0_rc10': { p_rating_min: 9, p_reviews_min: 10 },
+};
+const sameParams = (x: Record<string, unknown>, y: Record<string, unknown>) => {
+  const kx = Object.keys(x).sort(), ky = Object.keys(y).sort();
+  return kx.length === ky.length && kx.every((k, i) => k === ky[i] && JSON.stringify(x[k]) === JSON.stringify(y[k]));
+};
+/** PostgREST union of two single-option filters: `or=(and(a…),and(b…))`. */
+const orBoth = (a: string, b: string) => {
+  const inner = (r: string) => `and(${r.split('&').map((c) => c.replace('=', '.')).join(',')})`;
+  return `or=(${inner(a)},${inner(b)})`;
+};
+/** Two «at least» rungs: the lower one IS their union. */
+const lowerRung = (a: string, b: string) => (Number(a.split('gte.')[1]) <= Number(b.split('gte.')[1]) ? a : b);
 
 export function fieldMeaning(field: string): FieldMeaning | null {
   const single = (totalCol = 'cnt_total_base', unknownCols: string[] | null = null, partition = false): FieldMeaning => ({
@@ -299,7 +406,14 @@ export function fieldMeaning(field: string): FieldMeaning | null {
     paramsBoth: (a, b) => ({ ...a, ...b }),
   });
   switch (field) {
-    case 'amenities': return { ...single(), combine: 'and',
+    case 'comfort': case 'space': case 'safety': case 'perks': case 'build': case 'extras': case 'who': case 'features': case 'services': case 'fun':
+    case 'amenities': return { ...single('cnt_total_base', ['cnt_amen_unknown']), combine: 'and',
+      paramsBoth: (a, b) => ({ p_amenities: [...(a.p_amenities as string[]), ...(b.p_amenities as string[])] }) };
+    // «How many apartments?» is a single-select «at least» ladder like bathrooms (its apply keeps the first key);
+    // «has shops» is one chip. Each reads its own IS NULL column (cnt_apts_unknown / cnt_shops_unknown).
+    case 'apartments': return { ...single('cnt_total_base', ['cnt_apts_unknown']), combine: 'or', restBoth: lowerRung,
+      paramsBoth: (a, b) => ({ p_amenities: [[...(a.p_amenities as string[]), ...(b.p_amenities as string[])].sort((x, y) => APTS_RUNG[x] - APTS_RUNG[y])[0]] }) };
+    case 'shops': return { ...single('cnt_total_base', ['cnt_shops_unknown']), combine: 'and',
       paramsBoth: (a, b) => ({ p_amenities: [...(a.p_amenities as string[]), ...(b.p_amenities as string[])] }) };
     case 'direction': return {
       combine: 'or', partition: true, totalCol: 'cnt_total_base',
@@ -308,9 +422,30 @@ export function fieldMeaning(field: string): FieldMeaning | null {
       restBoth: (a, b) => `direction_ar=in.(${a.slice('direction_ar=in.('.length, -1)},${b.slice('direction_ar=in.('.length, -1)})`,
       paramsBoth: (a, b) => ({ p_directions: [...(a.p_directions as string[]), ...(b.p_directions as string[])] }),
     };
-    case 'furnished': return single('cnt_total_base', ['cnt_total_base', 'cnt_furnished', 'cnt_unfurnished'], true);
-    case 'property_age': return single('cnt_total', ['cnt_unknown'], true);
-    case 'rnpl': case 'bathrooms': case 'street_width': case 'rating': case 'unit_subtype': return single();
+    // EVERY QUESTION TAKES SEVERAL ANSWERS = their exact UNION (owner 2026-10-03: «never force the user to
+    // select one thing»). «At least» ladders union to the LOWEST pick; buckets with no single-range form
+    // carry the picked keys (p_age_buckets / p_rating_buckets / p_furnished_in); subtypes were an array.
+    case 'furnished': return { ...single('cnt_total_base', ['cnt_total_base', 'cnt_furnished', 'cnt_unfurnished'], true), combine: 'or',
+      restBoth: () => 'furnished=not.is.null',
+      paramsBoth: (a, b) => ({ p_furnished_in: [a.p_furnished, b.p_furnished].sort((x, y) => Number(y) - Number(x)) }) };
+    // A NESTED LADDER since the owner's 2026-10-05 rule (src/data/advancedFilters.ts AGE_LADDER: جديد ⊂ حتى سنتين ⊂
+    // حتى ٥ ⊂ حتى ٩). Summing its options counted one flat up to four times: af-live-truth-check run 38215288912
+    // read «70441 + 3318 vs 23048» on Riyadh apartments/Buy while the RPC's own disjoint buckets summed exactly
+    // (16043 + 1072 + 1256 + 541 + 818 + 3317 = 23047 = search total). A check bug, not a product bug.
+    case 'property_age': return { ...single('cnt_total', ['cnt_unknown'], true), combine: 'or', restBoth: orBoth,
+      nested: { beyond: 'property_age=gte.10' },
+      paramsBoth: (a, b) => ({ p_age_buckets: Object.keys(AGE).filter((k) => sameParams(AGE[k].params, a) || sameParams(AGE[k].params, b)) }) };
+    // «😔 on every question» (owner 2026-10-03): these read a DB IS NULL column (migration 20261003184909),
+    // so «did not mention» means exactly that column — never a subtraction over the rungs.
+    case 'rnpl': return single('cnt_total_base', ['cnt_rnpl_unknown']);
+    case 'bathrooms': return { ...single('cnt_total_base', ['cnt_bath_unknown']), combine: 'or', restBoth: lowerRung,
+      paramsBoth: (a, b) => ({ p_bath_min: Math.min(Number(a.p_bath_min), Number(b.p_bath_min)) }) };
+    case 'street_width': return { ...single('cnt_total_base', ['cnt_stw_unknown']), combine: 'or', restBoth: lowerRung,
+      paramsBoth: (a, b) => ({ p_street_width_min: Math.min(Number(a.p_street_width_min), Number(b.p_street_width_min)) }) };
+    case 'rating': return { ...single('cnt_total_base', ['cnt_rating_unknown']), combine: 'or', restBoth: orBoth,
+      paramsBoth: (a, b) => ({ p_rating_buckets: Object.keys(RATING).filter((k) => sameParams(RATING[k], a) || sameParams(RATING[k], b)) }) };
+    case 'unit_subtype': return { ...single('cnt_total_base', ['cnt_sub_unknown']), combine: 'or', restBoth: orBoth,
+      paramsBoth: (a, b) => ({ p_unit_subtypes: [...(a.p_unit_subtypes as string[]), ...(b.p_unit_subtypes as string[])] }) };
     default: return null;
   }
 }

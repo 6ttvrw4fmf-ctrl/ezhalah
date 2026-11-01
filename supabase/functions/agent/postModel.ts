@@ -193,9 +193,13 @@ const FRAC_ALT = Object.keys(AR_FRACTION).sort((a, b) => b.length - a.length).jo
 const UNIT_ALT = AR_UNITS.map(([w]) => w).join("|");
 
 // [count|fraction]? UNIT [ونص|وربع]?   e.g. «مليون ونص», «نص مليون», «ثلاثة ملايين», «مليونين»
+// WHOLE WORDS ONLY (found live 2026-10-11): «ابغى شقة قريبة من الافنيوز» (the Avenues mall) was read as «الاف»
+// = 1,000 and silently became a price filter of 1,000 — the same for «الألفية» (الف) and «مليونير» (مليون).
+// A unit must start a word — optionally after ONE attached particle (بـ لـ وـ فـ: «بالف ريال», «بمليون ونص») —
+// and must not run on into more letters.
 const AR_AMOUNT_RE = new RegExp(
-  String.raw`(?:(${COUNT_ALT}|${FRAC_ALT})\s+)?(${UNIT_ALT})(?:\s*و\s*(${FRAC_ALT}))?`,
-  "g",
+  String.raw`(?<![\p{L}])[بلوف]?(?:(${COUNT_ALT}|${FRAC_ALT})\s+)?(${UNIT_ALT})(?![\p{L}])(?:\s*و\s*(${FRAC_ALT}))?`,
+  "gu",
 );
 
 /**
@@ -338,4 +342,73 @@ export function fillBathroomsIfAbsent(af: unknown, text: string): Record<string,
   if (base.bathrooms !== undefined && base.bathrooms !== null && base.bathrooms !== "") return base;
   if (stated !== null) base.bathrooms = stated;
   return base;
+}
+
+/**
+ * «أبشر» IS RETIRED AS AN OPENER (owner 2026-10-11, rulebook chapter 11). The model keeps reaching for it out of
+ * its "Saudi friend" persona (about 4 replies in 10 in the 2026-10-11 DeepInfra test even after the prompt said
+ * never), so the opener is removed deterministically: «أبشر، أدور لك…» → «أدور لك…», «ارحب! أبشر، …» → «ارحب! …».
+ * Only a whole word at the very start («أبشرك» is a different word and stays), and never leaves an empty reply.
+ */
+export function dropAbshirOpener(s: string): string {
+  const text = String(s ?? "");
+  const m = text.match(/^(\s*ارحب[\s,!.،؛\-–—]*)?\s*أبشر(?![\p{L}])[\s,!.،؛\-–—]*/u);
+  if (!m) return text;
+  const rest = text.slice(m[0].length).trim();
+  if (!rest) return text;
+  const greet = (m[1] ?? "").trim();
+  return greet ? `${greet} ${rest}` : rest;
+}
+
+/**
+ * Put an addition (the «(150 م²)» size note) BEFORE the reply's closing emoji, so the reply still ENDS with its
+ * one emoji (owner 2026-10-11: every message ends with an emoji). Found live: «… بحدود ١٥٠ متر 🏢 (150 م²)».
+ */
+export function insertBeforeTrailingEmoji(reply: string, extra: string): string {
+  const text = String(reply ?? "").trimEnd();
+  const m = text.match(/^(.*?)\s*((?:\p{Extended_Pictographic}\uFE0F?)+)$/su);
+  return m ? `${m[1]} ${extra} ${m[2]}` : `${text} ${extra}`;
+}
+
+/**
+ * THE RENT PERIOD THE USER WROTE IN THIS MESSAGE WINS (found live 2026-10-11: «شقة شهرية في الخبر» then «بحدود ٥٠ ألف بالسنة» came
+ * back `monthly` one time in eight — the model carried the old period over the new words). The user's own words are the
+ * source: «بالسنة / سنوي / per year» is annual, «بالشهر / شهري / per month» is monthly; a message that says BOTH, or neither,
+ * decides nothing and the model's reading stands.
+ */
+export function statedRentPeriod(text: string): "monthly" | "annual" | null {
+  const s = String(text ?? "");
+  const annual = /بالسنة|بالسنه|سنوي|سنويا|سنوياً|في\s*السنة|كل\s*سنة|\byearly\b|\bannual(?:ly)?\b|\bper\s*year\b|\ba\s*year\b|\/\s*(?:year|yr)\b/i.test(s);
+  const monthly = /بالشهر|شهري|شهريا|شهرياً|في\s*الشهر|كل\s*شهر|\bmonthly\b|\bper\s*month\b|\ba\s*month\b|\/\s*(?:month|mo)\b/i.test(s);
+  return annual === monthly ? null : annual ? "annual" : "monthly";
+}
+
+/** A model basis that contradicts the period the user just wrote is replaced by the matching one (daily/weekly/quarterly/sale bases are left alone). */
+export function alignBasisWithStatedPeriod(basis: string, said: "monthly" | "annual" | null): string {
+  if (said === "annual" && basis === "monthly_rent") return "annual_rent";
+  if (said === "monthly" && basis === "annual_rent") return "monthly_rent";
+  return basis;
+}
+
+/**
+ * A SEARCH REPLY THAT BREAKS THE OWNER'S RULES IS REPLACED BY ONE THE CODE WRITES (owner 2026-10-11; found by the live battery).
+ * The model, told «never state a price», still wrote «… with an annual rent around 60,000 SAR» (2 in 250), asked «وش نوع العقار؟» while
+ * already searching, and asked «كم غرفة نوم تحتاجون؟» of someone who had just said «5 غرف» (the family-size rule over-firing).
+ * A reply that states a price / budget / conversion, asks about the property type, or asks about bedrooms the user already gave is
+ * not edited (surgery on prose breaks sentences): the caller swaps it for a short line built from the parsed search.
+ */
+const MONEY_IN_REPLY = /(?:\d[\d,.٠-٩،]*\s*(?:ألف|الف|آلاف|مليون|ملايين|k|m|million|thousand)?\s*(?:ريال|ر\.?س|﷼|sar|sr|riyals?|دينار|دولار|درهم|usd|aed|kwd|bhd|eur|dollars?|dinars?|dirhams?))|(?:مليون|ملايين)\s*(?:ريال|دينار|دولار)|(?:ميزانية|الميزانية|بميزانية|ميزانيتك|budget)\s*(?:\S+\s+){0,2}(?:\d|مليون|ألف|الف|million|thousand)/i;
+const TYPE_QUESTION = /(?:وش|ايش|إيش|أي|اي)\s*نوع\s*(?:ال)?(?:عقار|مبنى|سكن)|what\s+(?:kind|type)\s+of\s+(?:property|home|place)|which\s+(?:kind|type)\s+of\s+(?:property|home|place)/i;
+const CITY_QUESTION_WHILE_SEARCHING = /(?:أي|اي|وش)\s*(?:ال)?مدينة[^؟?]*[؟?]|which\s+city[^?]*\?/i;
+const BUDGET_QUESTION_WHILE_SEARCHING = /(?:وش|ايش|إيش|كم)\s*(?:هي\s*)?(?:ال)?ميزانية|(?:ميزانيتك|ميزانية)[^؟?]{0,25}[؟?]|what(?:'s|\s+is)\s+your\s+budget|(?:budget|price\s+range)[^?]{0,25}\?/i;
+const BEDROOM_QUESTION = /(?:كم|how\s+many)[^؟?]{0,30}(?:غرف|غرفة|bedrooms?|rooms?)[^؟?]*[؟?]/i;
+const BEDROOMS_GIVEN = /(?:[0-9٠-٩]+\s*(?:غرف|غرفة|bedrooms?|beds?|br)(?![\p{L}]))|(?:غرفتين|غرفتان|(?:ثلاث|اربع|أربع|خمس|ست|سبع)\s*غرف|\b(?:one|two|three|four|five)\s*(?:bed)?rooms?\b)/iu;
+export function replyBreaksSearchRules(reply: string, userText: string): boolean {
+  const r = String(reply ?? "");
+  if (MONEY_IN_REPLY.test(r)) return true;
+  if (TYPE_QUESTION.test(r)) return true;
+  if (BUDGET_QUESTION_WHILE_SEARCHING.test(r)) return true;  // only the PLACE may be asked about (owner rule 2026-09-11), never the budget
+  if (CITY_QUESTION_WHILE_SEARCHING.test(r)) return true;   // the search is running, so asking «which city?» in the same breath contradicts itself
+  if (BEDROOMS_GIVEN.test(String(userText ?? "")) && BEDROOM_QUESTION.test(r)) return true;
+  return false;
 }

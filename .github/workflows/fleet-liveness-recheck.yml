@@ -1,0 +1,54 @@
+# Recheck between the daily runs of fleet-liveness.yml: re-reads ONLY the listings already carrying a
+# strike, so an ad its site removed is hidden 24 hours after its first "gone" reading instead of
+# three days later (owner, 2026-10-02: «whenever someone removes a listing on those websites, it gets
+# removed from ours»). Same oracle, same known-live controls, same per-site cap, same three readings
+# — only sooner (scrapers/common/fleet_liveness.py, RECHECK). A site with no struck row is not touched.
+#
+# Triggered by pg_cron twice a day (jobs gh-fleet-liveness-recheck 14:17 UTC and
+# gh-fleet-liveness-recheck-2 20:47 UTC, since 2026-10-10): seven hours after the daily run starts and
+# six and a half hours later, so a row the daily run read dead takes its second reading at 14:17 and its
+# third at 20:47 and is hidden the same day (about 13 h); a row the daily run reached after 08:17 is
+# read at 20:47 and hidden at the next 07:17 (about 23 h). Until 2026-10-10 the single 19:17 recheck
+# left a reinvest ad its own API answered 404 for on a customer's screen all day (dead-visible score
+# 2026-10-10). A row read less than 6 hours ago is left for the next run. pg_cron dispatches with NO
+# inputs. Shares the daily run's concurrency group so the two never write at once.
+name: Fleet liveness recheck (struck rows)
+
+on:
+  workflow_dispatch:
+    inputs:
+      shadow:
+        description: "true = decide and report, write nothing"
+        required: false
+        default: "false"
+
+concurrency:
+  group: fleet-liveness
+  cancel-in-progress: false
+
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  recheck:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Recheck struck rows (every site)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SHADOW: ${{ inputs.shadow }}
+        run: |
+          exec python -m scrapers.common.fleet_liveness --struck-only \
+            $([ "$SHADOW" = "true" ] && echo --shadow)

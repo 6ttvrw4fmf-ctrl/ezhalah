@@ -102,8 +102,9 @@ check(
   // city ("حي X، جدة") — both the city and the district value must still pass through arabicOrUnresolved()
   // so an out-of-catalog English place can never leak into the Arabic summary.
   'placeText() wraps BOTH the city and the district in arabicOrUnresolved(tPlace(...))',
-  SEARCH_NOWS.includes('constcityText=arabicOrUnresolved(tPlace(city))')
-    && SEARCH_NOWS.includes('district:arabicOrUnresolved(tPlace(dist))'),
+  SEARCH_NOWS.includes("constdisplayPlace=(name:string)=>getLocale()==='en'?translitPlace(name):arabicOrUnresolved(tPlace(name))")
+    && SEARCH_NOWS.includes('constcityText=displayPlace(city)')
+    && SEARCH_NOWS.includes('district:displayPlace(dist)'),
 );
 check(
   'querySummaryLine() wraps tPlace() in arabicOrUnresolved()',

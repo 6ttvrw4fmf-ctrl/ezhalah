@@ -86,7 +86,7 @@ check('the allowlist does not contain an expensive tier',
 // 99% cache hit is what makes an 18k-token prompt cost $0.00025/message. Anything dynamic ahead of
 // SYSTEM breaks every cache entry and the same traffic costs 17x.
 check('the system message is SYSTEM first, then per-turn text',
-  /\{ role: "system", content: SYSTEM \+ sysExtra \+ JSON_SHAPE_HINT \}/.test(agent),
+  /\{ role: "system", content: SYSTEM \+ sysExtra \+ JSON_SHAPE_HINT \+ \(chapterOne \? LOCATION_PLAN_SCHEMA : ""\) \}/.test(agent),
   'per-turn content must come AFTER SYSTEM, never before or inside it');
 const sysMsgIdx = agent.indexOf('{ role: "system", content: SYSTEM');
 const messagesIdx = agent.indexOf('const messages = [', runModelIdx);

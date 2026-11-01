@@ -27,7 +27,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-sys.modules.setdefault("scrapers.common.db", types.ModuleType("scrapers.common.db"))
+# The real db module when it imports (it needs no credentials until a call): map_listing names db.AUTHORITATIVE_NULL,
+# and an empty stub made this file's zero-bid case — and any later file — fail whenever it ran first (2026-10-18).
+try:
+    import scrapers.common.db  # noqa: E402,F401
+except ImportError:
+    sys.modules.setdefault("scrapers.common.db", types.ModuleType("scrapers.common.db"))
 
 from scrapers.ialqarawi import run as R  # noqa: E402
 from scrapers.common.tests.test_scraper_rows_only_use_real_columns import (  # noqa: E402
@@ -170,6 +175,20 @@ def test_a_small_or_odd_published_figure_is_stored_never_hidden(raw, total):
 def test_a_price_the_source_does_not_state_is_silence_not_a_defect():
     for raw in ("لا يوجد", "على السوم", "ع السوم", "تحت السوم", "لايوجد حد", ""):
         assert R.parse_money(raw) == (None, None, "")
+
+
+def test_a_zero_bid_beside_an_open_floor_is_no_price_not_zero_riyals():
+    """Live ids 556 / 557 (🦅 Falcon 2026-10-16): «سعر السوم 0» + «سعر الحد: على السوم» was served at «0 ر.س».
+    A 0 bid is no bid: the row clears its stored total (AUTHORITATIVE_NULL), never 0. Mutation: without
+    the zero-bid guard price_total is 0."""
+    row, _, why = mapped(som="0", limit="على السوم")
+    assert row is not None, why
+    assert row["price_total"] is R.db.AUTHORITATIVE_NULL
+    # a real bid, and a real floor under a 0 bid, are still the source's figures
+    row, _, _ = mapped(som="350.000", limit="على السوم")
+    assert row["price_total"] == 350000
+    row, _, _ = mapped(som="0", limit="420.000")
+    assert row["price_total"] == 420000
 
 
 def test_a_per_metre_rate_is_stored_as_a_rate_and_never_multiplied_here():
@@ -519,3 +538,13 @@ def test_the_price_grammar_is_deliberately_untouched_by_the_area_rule():
     the abstention above must not leak across and start nulling prices."""
     assert R.parse_money("3850.000")[0] == 3_850_000
     assert R.parse_money("1.600.000 الف")[0] == 1_600_000
+
+
+# ── this office's own spellings of two catalogued عنيزة districts (owner 2026-10-17) ──────────────
+def test_known_spellings_map_to_the_catalogued_district():
+    from scrapers.ialqarawi.run import _known_spelling
+    assert "الاشرفية" in _known_spelling("للبيع فيلا دورين مفصولات بحي الأشرافية بعنيزة")
+    assert "الاشرفية" in _known_spelling("للبيع أرض بحي الاشرافيه")
+    assert "اشبيلية" in _known_spelling("للبيع أرض بحي إشبيليا بعنيزة")
+    # exact words only: a longer word that merely contains the letters is left alone
+    assert _known_spelling("الأشرافيات") == "الأشرافيات"

@@ -29,7 +29,8 @@ SOURCE SHAPE (measured live 2026-09-24, nothing below is assumed):
   · ONE POST CARRIES A HOUZEZ MULTI-UNIT (19957: «دور أرضي», price 992000, 3/3, 150 m²) — a second
     advertised unit with its own price inside the same page. Owner rule (compound sites): each
     unit type is one listing → ad_number MTB19957-U0, listing_url = the post's page.
-  · GEOLOCATION is a real Riyadh pin on 10/10 but is not stored (no column); the reverse-geocoded
+  · GEOLOCATION is a real Riyadh pin on 10/10; stored as additional_info latitude/longitude since
+    2026-10-22 (the border robot found it published and unsaved). The reverse-geocoded
     fave_property_map_address («إبراهيم الكوارني, الشرق, محافظة رماح») is a geocoder string, not
     the ad's district, and is never used for location.
   · PHOTOS: fave_property_images holds the gallery attachment ids (36 across the 10); resolved via
@@ -62,6 +63,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
@@ -71,10 +73,10 @@ SOURCE = "آل متعب العقارية"
 PREFIX = "MTB"
 REST = f"{BASE}/wp-json/wp/v2"
 
-# The site's exact spellings that the shared map does not know. «تاون هاووس» folds into Villa the
-# way the fleet's canonical fold does (normalize: Townhouse → Villa); «أدوار» is the plural of دور.
+# The site's exact spellings that the shared map does not know. «تاون هاووس» (the site's misspelling) maps to the
+# canonical name «تاون هاوس» (owner 2026-10-12: kept under its own name, searched under Duplex); «أدوار» is the plural of دور.
 TYPE_OVERRIDES = {"أدوار": "Floor", "دور أرضي": "Floor", "دور أول": "Floor", "دور ثاني": "Floor",
-                  "تاون هاووس": "Villa", "فلل": "Villa"}
+                  "تاون هاووس": "تاون هاوس", "فلل": "Villa"}
 TAXONOMIES = ("property_type", "property_status", "property_city", "property_area",
               "property_feature")
 
@@ -118,6 +120,11 @@ def _meta(post: dict, key: str) -> Optional[str]:
     if isinstance(v, list):
         v = v[0] if v else None
     return str(v).strip() if v not in (None, "") else None
+
+
+def _location_pin(post: dict) -> dict:
+    parts = (_meta(post, "fave_property_location") or "").split(",")
+    return pin_dict(parts[0], parts[1]) if len(parts) >= 2 else {}
 
 
 def _names(post: dict, tax: dict, key: str) -> list[str]:
@@ -164,6 +171,12 @@ def map_listing(post: dict, tax: dict, photos: list[str]) -> tuple[Optional[dict
     if _AUCTION_RE.search(words):
         return None, "residential", "auction"
 
+    # Same law per post: a status id the fetched map cannot name is an UNREAD status (_names()
+    # drops it silently), so the run stops rather than guess the deal from the title.
+    unread = [i for i in (post.get("property_status") or []) if not tax.get("property_status", {}).get(i)]
+    if unread:
+        raise RuntimeError(f"post {post.get('id')}: property_status id(s) {unread} are not in the "
+                           "fetched taxonomy — status unreadable, refusing to upsert")
     status_ar = _names(post, tax, "property_status")
     if any(_CLOSED_RE.search(s) for s in status_ar) or _CLOSED_RE.search(words):
         return None, "residential", "sold_or_rented"
@@ -233,6 +246,9 @@ def map_listing(post: dict, tax: dict, photos: list[str]) -> tuple[Optional[dict
         "published_at": post.get("date_gmt"), "modified_at": post.get("modified_gmt"),
         "photo_count": len(photos) or None,
     }.items() if v is not None}
+    # The ad's own pin: Houzez fave_property_location «LAT,LNG,ZOOM» (measured 2026-10-22: 24.9019,46.6226
+    # on «فلل بحي العارض» — inside Al Arid; the border robot flagged it as a pin we never saved).
+    row["additional_info"].update(_location_pin(post))
     return row, category, ""
 
 
@@ -273,6 +289,14 @@ def fetch_taxonomies(s: cc.Session) -> dict[str, dict[int, str]]:
     for t in TAXONOMIES:
         terms, _ = _json(s, f"{REST}/{t}", per_page=100, _fields="id,name")
         tax[t] = {x["id"]: _strip(x["name"]) for x in (terms or [])}
+    # FAIL CLOSED (audit 2026-10-02). property_status carries the deal AND the source's only
+    # sold/rented flag, here and in the removal oracle (_signal_for). _json answers None for a
+    # non-200 / non-JSON body, which used to leave this map {} silently: a «تم البيع» term then
+    # stopped matching and the deal was taken from the title instead. "Could not read the status"
+    # is not "available" — the run fails, writes nothing, prunes nothing.
+    if not tax["property_status"]:
+        raise RuntimeError("property_status taxonomy could not be read — refusing to upsert: "
+                           "without it a sold/rented post would be written active")
     return tax
 
 
@@ -369,6 +393,11 @@ def main() -> int:
         photos = fetch_photos(s, posts)
         for p in posts:
             row, cat, why = map_listing(p, tax, photos.get(p["id"], []))
+            # Measured 2026-10-02: «للبيع» 10 · «للإيجار» 0 — two terms, no sold term exists on this site. Any OTHER status
+            # name keeps the treatment it always had and is counted into the notes, never guessed.
+            for n in _names(p, tax, "property_status"):
+                if n not in _DEAL and not _CLOSED_RE.search(n):
+                    skipped[f"status_not_measured:{n}"] = skipped.get(f"status_not_measured:{n}", 0) + 1
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue

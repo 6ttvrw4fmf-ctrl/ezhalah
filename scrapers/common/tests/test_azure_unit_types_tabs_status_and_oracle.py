@@ -105,7 +105,7 @@ def test_every_unit_type_is_its_own_row():
     assert [r["ad_number"] for r in rows] == [
         "AZRal-reem-studio-apartment", "AZRal-reem-1-bedroom-apartment", "AZRal-reem-2-bedroom-apartment",
         "AZRal-reem-3-bedroom-apartment", "AZRal-reem-3-bedroom-townhouse", "AZRal-reem-4-bedroom-villa"]
-    assert [r["property_type"] for r in rows] == ["Studio", "Apartment", "Apartment", "Apartment", "Villa", "Villa"]
+    assert [r["property_type"] for r in rows] == ["Studio", "Apartment", "Apartment", "Apartment", "تاون هاوس", "Villa"]
     assert [r["bedrooms"] for r in rows] == [None, 1, 2, 3, 3, 4]
     assert {r["listing_url"] for r in rows} == {REEM} and rows[0]["title"] == "Al Reem – Studio Apartment"
     assert rows[0]["source"] == "Azure" and rows[0]["transaction_type"] == "Rent"
@@ -165,7 +165,7 @@ def test_bare_bedroom_names_are_refused_and_duplexes_map():
     assert [r["ad_number"] for r in rows] == ["AZRkafd-2-bedroom-duplex", "AZRkafd-3-bedroom-duplex", "AZRkafd-4-bedroom-duplex"]
     assert {r["property_type"] for r in rows} == {"Duplex"}
     assert A.unit_type_ar("4 Bedroom Triplex") is None and A.unit_type_ar("1 Bedroom") is None
-    assert A.unit_type_ar("4 Bedroom Villas") == "فيلا" and A.unit_type_ar("3 Bedroom Townhouse") == "فيلا"
+    assert A.unit_type_ar("4 Bedroom Villas") == "فيلا" and A.unit_type_ar("3 Bedroom Townhouse") == "تاون هاوس"
     assert A.unit_type_ar("4 Bedroom Penthouse") == "شقة"
     assert A.map_units("https://azure.sa/compounds/palma-ii", page(PALMA2_TITLE, PALMA2_ANN))[0][0]["property_type"] == "Villa"
 

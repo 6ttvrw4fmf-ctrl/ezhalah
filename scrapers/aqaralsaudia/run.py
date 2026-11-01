@@ -57,6 +57,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize
+from scrapers.common.http import retry_smarter_session
 from scrapers.common.arabic_location import to_catalog
 
 REST = "https://aqaralsaudia.com/wp-json/wp/v2"
@@ -423,6 +424,12 @@ def map_listing(post: dict) -> tuple[Optional[dict], str]:
 
     features = tax.get("property-feature", [])
     feature_cols = {col: True for name, col in _FEATURE_COLUMNS.items() if name in features}
+    # RealHomes' garage count is the site's own parking field (shatri reads fave_property_garage the same
+    # way). A count above 0 is yes; empty or «0» is silence, never «no» (ADVANCED_FILTER_SOURCE_TRUTH §2).
+    # 11 of 16 active ads carry «1» and parking was stored on none (ops_af_score 2026-10-25, parking we_miss 3).
+    garage = _to_int(pm.get("REAL_HOMES_property_garage"))
+    if garage and garage > 0:
+        feature_cols["parking"] = True
 
     category = "Residential" if normalize.category_for_type(property_type) == "Residential" else "Commercial"
 
@@ -463,7 +470,10 @@ def main() -> int:
                    help="If >0, only process this many posts and DON'T upsert (dry run).")
     args = p.parse_args()
 
-    s = session()
+    # Retry smarter (2026-09-27): 3 browser profiles direct, then through the proxy, so a failure
+    # is recorded as "every route tried" rather than "chrome124 once".
+    s, tried = retry_smarter_session(f"{REST}/properties?per_page=1", headers=HEADERS)
+    print(f"AqarAlSaudia: probe {' '.join(tried)}", flush=True)
     run_id = None if args.limit_test else db.begin_run("aqaralsaudia")
     res_rows: list[dict] = []
     com_rows: list[dict] = []
@@ -524,6 +534,12 @@ def main() -> int:
                 print(f"⚠ {tbl}: prune guard tripped — kept existing active")
             else:
                 pruned += n
+            # The rows this crawl SAW get the same direct read of their own REST record
+            # (2026-10-27): the list is re-read in full every run, so no row ever reached grace and
+            # _verify_gone had never been asked — 16 active rows, 0 ever verified. stamp_seen_alive
+            # records only its LIVE answer (HTTP 200, this id, status=publish); it can never strike
+            # or hide, and an UNKNOWN read writes nothing.
+            db.stamp_seen_alive(tbl, {r["ad_number"] for r in rows}, _verify_gone, source="AqarAlSaudia")
 
         print(f"✓ AqarAlSaudia: {len(res_rows)} residential + {len(com_rows)} commercial upserted, "
               f"{pruned} stale pruned, {superseded} superseded sibling(s) retired")
@@ -535,7 +551,7 @@ def main() -> int:
             print(f"  fetch failures: {fail_summary}", flush=True)
         notes = f"pruned={pruned} superseded={superseded} skipped_not_built={skipped_not_built}"
         if fail_summary:
-            notes += f" | fetch failures: {fail_summary}"
+            notes += f" | fetch failures: {fail_summary} | probe {' '.join(tried)}"
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res_rows) + len(com_rows),
                              notes=notes[:300],
                              check_tables=["aqaralsaudia_residential_listings",

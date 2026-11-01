@@ -44,7 +44,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { replayFunction } from './lib/rpcReplay.ts';
+import { replayFunction, looksLikeUninterpretedChange } from './lib/rpcReplay.ts';
 
 const MIGRATIONS_DIR = join(import.meta.dirname, '..', 'supabase', 'migrations');
 const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
@@ -121,6 +121,30 @@ const iWord = code.indexOf('aqar_word_price');
 const iLabeled = code.search(floorGuard);
 ok('word-price fallback still runs before the labeled-total rule',
   iWord > -1 && iLabeled > -1 && iWord < iLabeled, `word@${iWord} labeled@${iLabeled}`);
+
+// (7) MUTATION PROOFS for the replayer's target recognition (2026-10-18). A migration that rewrites
+//     ANOTHER function through a regprocedure lookup must not blind this guard ("unrecognised change"
+//     on aqar_parse because «trg_aqar_parse» contains it), and the same shape aimed at aqar_parse
+//     itself must still be flagged, so the widening cannot hide a real rewrite.
+const regprocPatch = (target: string) =>
+  `do $$\ndeclare src text;\nbegin\n  src := pg_get_functiondef('public.${target}()'::regprocedure);\n` +
+  `  execute replace(src, 'a', 'b');\nend $$;\n`;
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) ${caught ? 'catches' : 'BLIND to'} ${label}`);
+  if (!caught) mutFail++;
+};
+mustCatch('a regprocedure rewrite of aqar_parse ITSELF is still reported as an unrecognised change',
+  looksLikeUninterpretedChange(regprocPatch('aqar_parse'), 'aqar_parse'));
+mustCatch('…and the same rewrite with a schema-less cast (\'aqar_parse(text)\'::regproc) too',
+  looksLikeUninterpretedChange(regprocPatch('aqar_parse').replace("'public.aqar_parse()'::regprocedure", "'aqar_parse(text)'::regproc"), 'aqar_parse'));
+mustCatch('a regprocedure rewrite of trg_aqar_parse is NOT mistaken for a change to aqar_parse (the predicate is not over-broad)',
+  !looksLikeUninterpretedChange(regprocPatch('trg_aqar_parse'), 'aqar_parse'));
+mustCatch('…while it IS still a change to trg_aqar_parse (target recognition is not vacuous)',
+  looksLikeUninterpretedChange(regprocPatch('trg_aqar_parse'), 'trg_aqar_parse'));
+mustCatch('…and a rewrite of aqar_parse hidden beside a regprocedure READ of another function is still flagged',
+  looksLikeUninterpretedChange(regprocPatch('aqar_parse').replace('begin\n', "begin\n  perform pg_get_functiondef('public.trg_aqar_parse()'::regprocedure);\n"), 'aqar_parse'));
+if (mutFail) failed += mutFail;
 
 console.log(
   failed === 0

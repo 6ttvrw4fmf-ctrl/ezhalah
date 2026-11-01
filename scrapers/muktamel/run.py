@@ -10,6 +10,13 @@ again; scrapers/muktamel/diag_page_structure.py is the tool for it. MIN_ID_DEFAU
 deliberately (never silently narrow the space you enumerate) -- callers (the sharded workflow)
 pass the evidenced range explicitly instead.
 
+THE TOP OF THE RANGE IS READ FROM THE SOURCE EVERY RUN (find_ceiling, 2026-09-28). --max-id is only
+a FLOOR: main() walks upward from it until the site stops assigning ids. The workflow's constant
+32300 had become a ceiling -- our highest active id was exactly 32300 while the site's ids ran to
+~34310, so ~890 live listings were never fetched. Measured the same day: 32301-32664 assigned, then
+a ~1,000-id /404 gap (32665-~33671), then assigned again to ~34311 -- so the walk's give-up window
+must be wider than any gap, or it stops in the hole and misses the newest band.
+
 Data path — the page is Nuxt 2: every field is server-rendered into a `window.__NUXT__=(function(...){
 ...}(...))` IIFE. That payload is NOT plain JSON (Nuxt 2's minified-arg format), so we evaluate the
 IIFE in a tiny Node subprocess (`node` ships on the runners) and read back clean JSON:
@@ -44,7 +51,7 @@ Field map (Muktamel → our schema):
   offer.photos[].path /OffersImages/<uuid>       → Azure blob -md.jpg URLs → photo_urls
 
 Usage:  python -m scrapers.muktamel.run [--type residential|commercial|all] [--limit N]
-        [--min-id 1] [--max-id 32000]
+        [--min-id 1] [--max-id 32000]   (--max-id is a floor; the top is probed each run)
 """
 from __future__ import annotations
 
@@ -58,7 +65,8 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
+from urllib.parse import urlparse
 
 from curl_cffi import requests as cc
 
@@ -67,6 +75,8 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, http_liveness, normalize  # noqa: E402
+from scrapers.common.arabic_location import to_catalog  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://www.muktamel.com"
 WORKERS = int(os.environ.get("MUKTAMEL_WORKERS", "8"))
@@ -332,6 +342,16 @@ def _note(reason: str) -> None:
         _outcomes[reason] = _outcomes.get(reason, 0) + 1
 
 
+# Ids whose OWN page this run answered 404/410 or redirected to /404 (the measured removal signal).
+_read_gone_ids: set[int] = set()
+
+
+def _note_gone(listing_id: int, reason: str) -> None:
+    _note(reason)
+    with _outcome_lock:
+        _read_gone_ids.add(listing_id)
+
+
 # ── Fetch ─────────────────────────────────────────────────────────────────────────
 def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
     """Fetch + eval one listing id. Returns (id, parsed_nuxt, own) for LIVE listings, else None.
@@ -351,14 +371,14 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
             continue
         if r.status_code != 200:
             if r.status_code in (404, 410):
-                _note("dead_404")
+                _note_gone(listing_id, "dead_404")
                 return None
             last_exc = None
             _note(f"http_{r.status_code}")
             time.sleep(1.0 * (attempt + 1))
             continue
         if "/404" in str(r.url):
-            _note("redirect_404")
+            _note_gone(listing_id, "redirect_404")
             return None
         html = r.text
         landed = re.search(r"/real-estates/(\d+)", str(r.url))
@@ -381,7 +401,15 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
     offer = parsed["offer"]
     # Liveness gate: only fully-hydrated, available listings carry real data.
     if not offer.get("isAvailable") or offer.get("price") in (None, 0):
-        _note("not_available_or_zero_price")
+        # The measured dead shape (module docstring) is counted on its own, so each run's notes say
+        # how many own pages read as the hollow shell; the rest of the disjunction stays UNKNOWN.
+        # Armed (2026-10-09): the hollow shell on THIS id's own page is a direct removal reading, so it
+        # strikes like redirect_404 even when the coverage guard trips (_strike_read_gone). A shell on
+        # another listing's page, or the rest of the disjunction, says nothing about this id.
+        if HOLLOW_SHELL_KILLS and own and _is_hollow_offer(offer):
+            _note_gone(listing_id, "hollow_shell")
+        else:
+            _note("hollow_shell" if _is_hollow_offer(offer) else "not_available_or_zero_price")
         return None
     _note("live")
     return listing_id, parsed, own
@@ -410,9 +438,12 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
 # THE MEASURED SIGNAL. muktamel expresses removal as a REDIRECT, not a status: across all four
 # 2026-09-21 shard runs `redirect_404` fired 84-98 times per shard while `dead_404` (a bare 404/410
 # status) fired ZERO times. The module docstring records the same fact from the 2026-09-03
-# re-verification — "or redirect to /404". A listing URL here is `/real-estates/<id>` with no slug,
-# so the path cannot change for any benign reason; 404/410 is kept as well because it costs nothing
-# and the shipped fetch path already treats it as terminal.
+# re-verification — "or redirect to /404". A redirect is NOT by itself a removal: since 2026-09-28
+# an assigned id 302s to its own `/real-estates/<id>/<arabic-slug>` (measured on 32320, 34000,
+# 31999, 25816), and only a removed or unassigned id 302s to `/404` (id 1, 999999) — which then
+# answers 200, so the status alone cannot see it. `_landed_on_404` is that one fact, shared by the
+# probe and its canary. 404/410 is kept as well because it costs nothing and the shipped fetch path
+# already treats it as terminal.
 #
 # `not_available_or_zero_price` is deliberately NOT a kill. The docstring's measured dead shape is
 # the CONJUNCTION (`isAvailable === false` AND `price === null`), while `fetch_one`'s skip gate is a
@@ -427,20 +458,59 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
 # already resets `missing_count` to 0 and sets `active = true`. Self-heal exists for platforms whose
 # discovery index is incomplete (the aqarcity sitemap window); muktamel has no index to be missing
 # from. Returning an unmeasured 'live' would instead risk making a genuinely removed row immortal.
-def _liveness_signal(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
-    """muktamel's affirmative removal signal, and nothing else. None == no opinion."""
+def _landed_on_404(landed: str) -> bool:
+    """True only when the read ended on muktamel's `/404` page — its one measured removal redirect.
+    A landing on this id's own slugged URL is the listing; anywhere else is no opinion, never gone."""
+    return http_liveness._path_of(landed) == "/404"
+
+
+# THE HOLLOW SHELL (2026-10-08). The module docstring's measured dead shape, «HTTP 200 with a hollow
+# shell where isAvailable === false and price === null», was never read by this oracle: it saw only a
+# status and a /404 landing. So every ad muktamel withdrew in place stayed shown for weeks: 603 active
+# rows at 3+ strikes on 2026-10-08, and all 1,433 grace re-reads of the previous 3 days ended
+# "HTTP 200, but this platform's signal had no opinion". The CONJUNCTION is the signal; an available
+# offer with a zero price, or anything unparseable, stays no-opinion.
+# SHADOW FIRST (LIFECYCLE_ENGINEER.md protection 2): while HOLLOW_SHELL_KILLS is False the probe
+# records «SHADOW hollow_shell … would be gone» on the evidence row and still answers UNKNOWN.
+# ARMED 2026-10-09 after the shadow: 517 SHADOW readings (10-09 05:04-09:54 UTC) fell on 517 rows, every
+# one active at 3-20 strikes and unseen by the crawl since 09-05..09-24; none on a row the crawl read
+# live. Each kill still needs grace (3 strikes) and the in-run live control (_canary).
+HOLLOW_SHELL_KILLS = True
+
+
+def _is_hollow_offer(offer: dict) -> bool:
+    return offer.get("isAvailable") is False and offer.get("price") is None
+
+
+def _hollow_shell(body: str) -> Optional[bool]:
+    """True: this page's hydrated offer is the measured dead shape. False: an offer that is not.
+    None: no offer could be read (never evidence either way)."""
+    src = _extract_nuxt(body or "")
+    parsed = _nuxt_via_node(src) if src else None
+    offer = (parsed or {}).get("offer")
+    if not isinstance(offer, dict):
+        return None
+    return _is_hollow_offer(offer)
+
+
+def _liveness_signal(status: Optional[int], body: str, landed_on_404: bool) -> Optional[str]:
+    """muktamel's affirmative removal signal, and nothing else. None == no opinion.
+    The third argument is `_landed_on_404`, NOT the shared law's "the path changed" (see _MuktamelProbe)."""
     if status in (404, 410):
         return "gone"
-    if path_changed:
-        # The slugless canonical URL redirected: the site sent this id to /404.
+    if landed_on_404:
+        return "gone"
+    if HOLLOW_SHELL_KILLS and status == 200 and _hollow_shell(body) is True:
         return "gone"
     return None
 
 
-# IN-RUN POSITIVE CONTROL (LISTING_LIVENESS.md §5.4). The signal above rests on "a path change means
-# /404". If the site ever started canonicalising `/real-estates/<id>` to a slugged URL, that premise
-# would invert and every probe would read as a removal — so before any kill, re-fetch an id THIS RUN
-# just confirmed live and require that it does NOT read as gone. A source that cannot testify
+# IN-RUN POSITIVE CONTROL (LISTING_LIVENESS.md §5.4). The signal above rests on "a redirect to /404
+# means removed". When the site began canonicalising `/real-estates/<id>` to a slugged URL
+# (2026-09-28), an oracle that read ANY path change as /404 saw every live id as gone — and this
+# control is what caught it: 1,975 removals withheld over 10 days, zero live rows killed. So before
+# any kill, re-fetch an id THIS RUN just confirmed live and require that it does NOT read as gone.
+# A source that cannot testify
 # correctly about a listing we know is alive is not allowed to testify against any other.
 # Fails CLOSED: no control id (validation run, empty crawl) means no removal.
 #
@@ -471,15 +541,47 @@ def _canary() -> tuple[bool, str]:
                 except Exception:  # noqa: BLE001 — an unreachable control proves nothing either way
                     continue
                 landed = str(getattr(r, "url", url) or url)
-                if _liveness_signal(r.status_code, r.text or "",
-                                    landed.rstrip("/") != url.rstrip("/")) != "gone":
+                if _liveness_signal(r.status_code, r.text or "", _landed_on_404(landed)) != "gone":
                     ok, why = True, f"control id {listing_id} still reads live"
                     break
         _canary_state["verdict"], _canary_state["reason"] = ok, why
         return ok, why
 
 
-_probe = http_liveness.LivenessProbe(
+class _MuktamelProbe(http_liveness.LivenessProbe):
+    """The shared direct read, except its third value is `_landed_on_404` instead of "the path
+    changed" — on muktamel every live id's path changes (it gains a slug). The law is untouched."""
+
+    def fetch(self, url: str) -> tuple[Optional[int], str, bool]:
+        self.last_hollow = False
+        try:
+            r = self.session().get(url, timeout=self.timeout, allow_redirects=True)
+            landed = str(getattr(r, "url", url) or url)
+            status, body = r.status_code, (r.text or "")
+        except Exception:  # noqa: BLE001 — an unreachable source is never proof of death
+            return None, "", False
+        if status == 200 and not HOLLOW_SHELL_KILLS and _same_listing(url, landed):
+            self.last_hollow = _hollow_shell(body) is True
+        if HOLLOW_SHELL_KILLS and status == 200 and not _same_listing(url, landed) \
+                and not _landed_on_404(landed):
+            return None, "", False      # landed on another listing: its shell says nothing of this one
+        return status, body, _landed_on_404(landed)
+
+    def verify_gone(self, ad_number: str):
+        verdict, why = super().verify_gone(ad_number)
+        if verdict == "unknown" and getattr(self, "last_hollow", False):
+            why = ("SHADOW hollow_shell (isAvailable false, price null) — would be gone; " + why)[:300]
+        return verdict, why
+
+
+def _same_listing(url: str, landed: str) -> bool:
+    """The read landed on THIS id's own page (/real-estates/<id>, with or without its slug)."""
+    want = re.search(r"/real-estates/(\d+)", url)
+    got = re.search(r"/real-estates/(\d+)", landed)
+    return bool(want and got and want.group(1) == got.group(1))
+
+
+_probe = _MuktamelProbe(
     platform="muktamel",
     signal=_liveness_signal,
     session=_session,
@@ -513,6 +615,10 @@ def _photo_urls(parsed: dict) -> list[str]:
     return out[:30]
 
 
+# A metro-zone label («شمال الرياض») names a part of its region's main city, not a town of its own.
+_ZONE_LABEL = re.compile(r"^(شمال|جنوب|شرق|غرب|وسط)\s+")
+
+
 def _resolve_location(offer: dict, addr_json: Optional[dict]) -> tuple[Optional[str], Optional[str], Optional[str], dict]:
     """Return (city_en, region_en, district_ar, raw_names) from the numeric address ids."""
     a = offer.get("address") or {}
@@ -528,12 +634,20 @@ def _resolve_location(offer: dict, addr_json: Optional[dict]) -> tuple[Optional[
     # City: the Cities dict mixes real city names with metro-zone labels ("شمال الرياض").
     # Try a direct map first; if that misses, derive from the region's anchor city.
     city_en = normalize.map_city(city_ar) if city_ar else None
-    if not city_en and region_en:
+    catalog_city_id = None
+    if not city_en and city_ar and not _ZONE_LABEL.match(city_ar.strip()):
+        # A real town the English map lacks («بحرة», «ضمد», «سراة عبيدة»). It is NEVER the region's
+        # capital: that fallback filed 36 Bahrah listings under Makkah city (2026-10-06, muktamel
+        # 15741395). Resolve the town in the catalog, inside its published region, or leave it unknown;
+        # resolve_small_platform_cities() reads catalog_city_id when the city column is unresolved.
+        catalog_city_id, _ = to_catalog(city_ar, region_hint=region_ar or region_en)
+    elif not city_en and region_en:
         # zone labels like "شمال/غرب/شرق/وسط/جنوب الرياض" → the region's main city
         city_en = normalize.map_city(region_ar.replace("منطقة", "").strip()) if region_ar else None
     if not region_en and city_en:
         region_en = normalize.region_for_city(city_en)
-    raw = {"region_ar": region_ar, "city_ar": city_ar, "district_ar": district_ar}
+    raw = {"region_ar": region_ar, "city_ar": city_ar, "district_ar": district_ar,
+           "catalog_city_id": catalog_city_id}
     return city_en or "Other", region_en, district_ar, raw
 
 
@@ -645,7 +759,12 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
     age = offer.get("age")
     property_age = 0 if age == 0 else (_int(age) if age not in (None,) else None)
 
+    # Owner 2026-10-20: the ad's own pin is offer.location {lat,lng} in the NUXT payload (measured on
+    # real-estates/28626 → 24.841171549022395,46.89082470062314); offer.agency.location is the OFFICE
+    # (24.68,46.70 on the same page) and is never read. 4,077 ads were on the district border for nothing.
+    _loc = offer.get("location") or {}
     info: dict[str, Any] = {
+        **pin_dict(_loc.get("lat") if isinstance(_loc, dict) else None, _loc.get("lng") if isinstance(_loc, dict) else None),
         "rega_ad_license_number": rega_ad_no,
         "agency_name": agency_company_name,
         "agency_official_name": agency.get("officialName") if is_company_agency else None,
@@ -671,6 +790,7 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
         "city_ar": raw["city_ar"],
         "region_ar": raw["region_ar"],
         "district_ar": raw["district_ar"],
+        "catalog_city_id": raw.get("catalog_city_id"),
         "created_date": offer.get("createDate"),
         "updated_date": offer.get("lastUpdateDate"),
         "publisher_type": offer.get("publisherType"),
@@ -735,6 +855,74 @@ def shard_ids(min_id: int, max_id: int, shards: int, shard: int) -> list[int]:
     return [i for i in range(min_id, max_id + 1) if i % shards == shard]
 
 
+# ── Ceiling: where the site's ids currently end, asked of the source each run ───────
+# An unassigned or removed id 302s to /404; an assigned one 302s to its slugged /real-estates/<id>/…
+# (measured 2026-09-28). Reading only the redirect (allow_redirects=False) costs a 0-byte response,
+# not the 1.4 MB page. Sampled every CEILING_STRIDE ids, sequentially -- one request at a time, far
+# gentler than the crawl's own 8 workers. CEILING_GIVE_UP is 3x the widest measured /404 gap
+# (~1,000 ids); CEILING_BOUND is a runaway backstop only, never reached by a sane walk.
+CEILING_STRIDE = 100
+CEILING_GIVE_UP = 3000
+CEILING_BOUND = 50_000
+_NEVER_ASSIGNED_ID = 999_999_999  # negative control: must read as absent or the signal is broken
+
+
+def _id_exists(listing_id: int) -> bool:
+    """True ONLY on the source's affirmative word that this id is assigned. /404, 5xx and network
+    errors are all False: they are not evidence of an id, so they never raise the ceiling."""
+    for attempt in range(3):
+        try:
+            r = _session().get(f"{BASE}/real-estates/{listing_id}", timeout=45, allow_redirects=False)
+        except Exception:  # noqa: BLE001 — unreachable is not evidence either way
+            time.sleep(1.0 * (attempt + 1))
+            continue
+        if r.status_code == 200:
+            return True
+        if r.status_code in (301, 302, 303, 307, 308):
+            loc = urlparse(r.headers.get("location") or "").path.rstrip("/")
+            return loc == f"/real-estates/{listing_id}" or loc.startswith(f"/real-estates/{listing_id}/")
+        if r.status_code < 500:
+            return False
+        time.sleep(1.0 * (attempt + 1))
+    return False
+
+
+# The walk used to probe one id at a time. Each probe costs ~55 s when the source is slow (a page
+# that exists answers 200 with the full page), so the ~50 probes ate 46 of the shard's 120 minutes
+# on 2026-10-02 and 74 on 2026-10-03, when every shard was killed at its cap with the sweep
+# unfinished. Probing CEILING_BATCH ids at once (the crawl itself runs 8 workers) gives the same
+# answer: results are read back in id order under the same stop rule, so ids probed past the stop
+# point are never read.
+CEILING_BATCH = 8
+
+
+def find_ceiling(floor: int, exists: Callable[[int], bool], *, stride: int = CEILING_STRIDE,
+                 give_up: int = CEILING_GIVE_UP, bound: int = CEILING_BOUND,
+                 batch: int = CEILING_BATCH) -> int:
+    """Highest id worth sweeping: walk up from `floor` every `stride` ids until `give_up` ids pass
+    with no assigned id, and return the last hit + (stride-1) -- the unsampled ids just above it.
+    Never below `floor`. If the negative control reads as assigned, the /404 signal cannot be
+    trusted this run, so the walk is skipped and `floor` is swept exactly as before."""
+    if exists(_NEVER_ASSIGNED_ID):
+        print(f"⚠ Muktamel ceiling: id {_NEVER_ASSIGNED_ID} reads as assigned — "
+              f"the /404 signal is broken; sweeping to the floor {floor} only", flush=True)
+        return floor
+    top, i = floor, floor + stride
+    with ThreadPoolExecutor(max_workers=max(1, batch)) as ex:
+        while i <= floor + bound and i - top <= give_up:
+            chunk = [i + k * stride for k in range(max(1, batch))]
+            hits = list(ex.map(exists, chunk))
+            for cid, hit in zip(chunk, hits):
+                if not (i <= floor + bound and i - top <= give_up):
+                    break
+                if hit:
+                    top = cid
+                i += stride
+    if i > floor + bound:
+        print(f"⚠ Muktamel ceiling: walk hit its {bound}-id backstop above {floor}", flush=True)
+    return top + stride - 1
+
+
 # ── Main ────────────────────────────────────────────────────────────────────────
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -742,7 +930,9 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0,
                     help="validation run: upsert only the first N LIVE listings, NO prune")
     ap.add_argument("--min-id", type=int, default=MIN_ID_DEFAULT)
-    ap.add_argument("--max-id", type=int, default=MAX_ID_DEFAULT)
+    ap.add_argument("--max-id", type=int, default=MAX_ID_DEFAULT,
+                    help="FLOOR of the sweep's top: the real ceiling is probed from the source "
+                         "each run (find_ceiling) and is never below this")
     ap.add_argument("--shards", type=int, default=1,
                      help="split the id range across N parallel crawls (same convention as dealapp)")
     ap.add_argument("--shard", type=int, default=0,
@@ -751,8 +941,11 @@ def main() -> int:
     if not (0 <= args.shard < max(1, args.shards)):
         ap.error(f"--shard must be in 0..{max(0, args.shards - 1)} for --shards {args.shards}")
 
-    ids = shard_ids(args.min_id, args.max_id, args.shards, args.shard)
-    print(f"Muktamel: sweeping ids {args.min_id}..{args.max_id}"
+    t0 = time.monotonic()
+    max_id = find_ceiling(args.max_id, _id_exists)
+    print(f"Muktamel ceiling: {max_id} found in {(time.monotonic() - t0) / 60:.1f} min", flush=True)
+    ids = shard_ids(args.min_id, max_id, args.shards, args.shard)
+    print(f"Muktamel: sweeping ids {args.min_id}..{max_id} (floor {args.max_id}, ceiling from source)"
           f"{f' shard {args.shard}/{args.shards}' if args.shards > 1 else ''} "
           f"({len(ids)} candidates, {WORKERS} workers)"
           f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
@@ -834,8 +1027,8 @@ def main() -> int:
                                  verify_gone=_probe.verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
-            else:
-                pruned += n
+                n = _strike_read_gone(tbl, set(_read_gone_ids), args.shards, args.shard)
+            pruned += max(n, 0)
         print(f"✓ Muktamel: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
         print(f"  fetch outcomes: {dict(sorted(_outcomes.items(), key=lambda kv: -kv[1]))}", flush=True)
         healthy = db.end_run(
@@ -853,6 +1046,79 @@ def main() -> int:
         traceback.print_exc()
         return 1
 
+
+def split_read_gone(active_ads: list[str], gone_ids: set[int]) -> tuple[list[str], set[str]]:
+    """(struck, kept): the active ad_numbers this run read gone on their own page, and the rest."""
+    def _id(ad: str) -> Optional[int]:
+        return int(ad[2:]) if ad.startswith("MK") and ad[2:].isdigit() else None
+    struck = [a for a in active_ads if _id(a) in gone_ids]
+    return struck, {a for a in active_ads if _id(a) not in gone_ids}
+
+
+def _strike_read_gone(tbl: str, gone_ids: set[int], shards: int, shard: int) -> int:
+    """Strike ONLY the ids whose own page this run read as removed, when the absence prune is guarded.
+
+    WHY (2026-10-07, the dealapp lesson of 2026-10-06 on a second site). prune_unseen's coverage
+    guard counts every active row this crawl did not upsert as LIVE as "not re-seen", and the dead
+    ones are exactly those: each run read ~212 pages as redirect_404 and ~575 as not-available, so
+    it "re-saw 488 of 618" (79% < 80%) and threw the whole prune away. ~575 active rows sat at 3-19
+    strikes, unseen since as early as 2026-09-03, still shown. A redirect to /404 is a DIRECT
+    reading, not absence. So the prune runs again with every active row counted as seen EXCEPT the
+    ones read gone: unread rows stay untouched (UNKNOWN), not-available stays UNKNOWN, a read-gone
+    row takes a strike and at grace verify_gone re-reads it behind the in-run canary. Every guard of
+    prune_unseen (collapse, grace, canary, evidence rows) still applies."""
+    if not gone_ids:
+        return 0
+    rows: list[str] = []
+    start = 0
+    while True:   # PostgREST caps a select at 1000 rows — page explicitly
+        page = db._execute(
+            db.sb().table(tbl).select("ad_number").eq("active", True).eq("source", "Muktamel")
+              .range(start, start + 999), what=tbl + ".read_gone_slice").data or []
+        rows += [r["ad_number"] for r in page if r.get("ad_number")]
+        if len(page) < 1000:
+            break
+        start += 1000
+    struck, kept = split_read_gone(rows, gone_ids)
+    if not struck:
+        return 0
+    print(f"  {tbl}: guard tripped, striking only the {len(struck)} row(s) whose own page read "
+          f"removed this run", flush=True)
+    # min_coverage=0: every row missing from `kept` was READ gone, so the absence floor has nothing to
+    # measure (2026-10-09: with the hollow shell armed, ~130 of a 622-row slice read gone and the floor
+    # would discard the rerun too). The collapse guard (30%) still holds.
+    return db.prune_unseen(tbl, kept, source="Muktamel", shards=shards, shard=shard,
+                           verify_gone=_probe.verify_gone, min_coverage=0.0)
+
+
+
+def page_verdict(url: str) -> str:
+    """ALIVE / DEAD / UNKNOWN for one muktamel ad URL, read the way this crawl and its oracle read it.
+
+    WHY (2026-10-09): the nightly dead-visible score and the spot-check judged muktamel by HTTP status
+    alone. A withdrawn ad answers 200 with a hollow shell, and a removed one 302s to /404 which then
+    answers 200, so status-only read every dead muktamel ad as live: 10/10 "live" three nights running
+    while 512 shown rows read hollow on their own page. ALIVE needs this id's own page with an
+    available, priced offer; anything unread or ambiguous is UNKNOWN."""
+    from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN
+    try:
+        r = _session().get(url, timeout=45, allow_redirects=True)
+    except Exception:  # noqa: BLE001 — unreachable is never evidence
+        return UNKNOWN
+    landed = str(getattr(r, "url", url) or url)
+    if r.status_code in (404, 410) or (r.status_code == 200 and _landed_on_404(landed)):
+        return DEAD
+    if r.status_code != 200 or not _same_listing(url, landed):
+        return UNKNOWN
+    src = _extract_nuxt(r.text or "")
+    offer = ((_nuxt_via_node(src) if src else None) or {}).get("offer")
+    if not isinstance(offer, dict):
+        return UNKNOWN
+    if _is_hollow_offer(offer):
+        return DEAD if HOLLOW_SHELL_KILLS else UNKNOWN
+    if offer.get("isAvailable") and offer.get("price") not in (None, 0):
+        return ALIVE
+    return UNKNOWN
 
 if __name__ == "__main__":
     raise SystemExit(main())

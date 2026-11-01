@@ -78,7 +78,9 @@ const str = (v: unknown, max: number): string =>
 const IP_SALT = "ezhalah-support-v1";
 
 async function hashIp(req: Request): Promise<string | null> {
-  const raw = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim();
+  // Prefer the address Cloudflare sets at the edge (a caller cannot supply it); the first x-forwarded-for entry is
+  // whatever the caller wrote, so a script could rotate it to dodge the hourly limit (security plan, 2026-10-21).
+  const raw = (req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? (req.headers.get("x-forwarded-for") ?? "").split(",")[0]).trim();
   if (!raw) return null;
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(IP_SALT + raw));
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");

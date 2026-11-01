@@ -46,7 +46,7 @@ TREE = {
 def _seed(monkeypatch):
     """Catalog slice keyed the way PRODUCTION keys it (norm_district_tok), scoped per test."""
     monkeypatch.setitem(_al._CITY, "_stub_", [(1, 1)])
-    for cid, districts in ((_RIYADH, ["حي الياسمين", "حي العليا"]),
+    for cid, districts in ((_RIYADH, ["حي الياسمين", "حي العليا", "حي العارض"]),
                            (_KHOBAR, ["حي البندرية"])):
         monkeypatch.setitem(_al._DISTRICT_BY_CITY, cid,
                             {_al.norm_district_tok(d) for d in districts})
@@ -207,18 +207,49 @@ def test_a_region_root_does_not_become_a_city():
     row, _ = _map(proj=_project(city_terms=(4620,), title="شقق ألين 152 - البندرية الخبر"))
     assert row is not None
     assert row["city_ar"] != "الشرقية", "a region must never be stored as the city"
-    assert row["city_id"] is None and row["district_ar"] is None, (
-        "nothing in the chain validates as a catalog city, so location stays NULL — never guessed")
+
+
+def test_when_the_tree_skips_the_city_the_projects_own_title_places_it():
+    """2026-10-14: ~400 available units (ألين 152 «– البندرية الخبر» 66, برج جوان «– التحلية الخبر»
+    55, مشيد 18 «– الفردوس جدة» 44, مزية «– العارض الرياض» 6 …) were unsearchable with city NULL
+    although the project title states district and city. The title's tail is the source's words."""
+    row, _ = _map(proj=_project(city_terms=(4620,), title="شقق ألين 152 – البندرية الخبر"))
+    assert (row["city_ar"], row["city_id"], row["district_ar"]) == ("الخبر", _KHOBAR, "حي البندرية")
+    row, _ = _map(proj=_project(city_terms=(), title="تاون هاوس مزية – العارض الرياض"))
+    assert (row["city_id"], row["district_ar"]) == (_RIYADH, "حي العارض")
+    row, _ = _map(proj=_project(city_terms=(), title="أدوار هيو فلورز رواح- الياسمين الرياض"))
+    assert (row["city_id"], row["district_ar"]) == (_RIYADH, "حي الياسمين")
+
+
+def test_the_title_never_overrules_the_region_the_tree_named(monkeypatch):
+    # tree says الشرقية (region 5); a title naming a Riyadh city must not place it in Riyadh
+    monkeypatch.setattr(R, "_REGION_AR_FOR", {1: "منطقة الرياض", 5: "المنطقة الشرقية"})
+    row, _ = _map(proj=_project(city_terms=(4620,), title="شقق – العليا الرياض"))
+    assert row["city_id"] is None and row["district_ar"] is None
+
+
+def test_a_title_tail_that_is_only_a_region_stays_null():
+    # «الشبيلي الشرقية»: الشرقية is the region, the title names no catalog city → NULL, never guessed
+    row, _ = _map(proj=_project(city_terms=(), title="شقق برج ويف ( wave ) – الشبيلي الشرقية"))
+    assert row["city_id"] is None and row["district_ar"] is None
+
+
+def test_the_title_fills_a_district_the_tree_did_not_name():
+    row, _ = _map(proj=_project(city_terms=(443,), title="شقق ألين 130 – العليا الرياض"))
+    assert (row["city_id"], row["district_ar"]) == (_RIYADH, "حي العليا")
 
 
 def test_a_district_not_in_our_catalog_stays_null():
     row, _ = _map(proj=_project(city_terms=(9999,)))
-    assert row["city_ar"] == "الرياض" and row["city_id"] == _RIYADH
-    assert row["district_ar"] is None, "an unrecognised place is never invented"
+    # Owner 2026-10-18 (reverses «never invented» here): the tree's OWN leaf is the source naming a district;
+    # it is kept as written, marked tree_leaf, never a catalogue spelling it does not have.
+    assert row["city_id"] == _RIYADH
+    assert row["district_ar"] == "مكان مخترع" and row["neighborhood"] == "مكان مخترع"
+    assert row["additional_info"]["district_source"] == "tree_leaf"
 
 
 def test_no_location_terms_at_all_yields_nulls_not_a_default():
-    row, _ = _map(proj=_project(city_terms=()))
+    row, _ = _map(proj=_project(city_terms=(), title="أدوار إرث ( اي كيو )"))
     assert row["city_ar"] is None and row["city_id"] is None and row["district_ar"] is None
 
 
@@ -412,7 +443,7 @@ def test_verify_gone_treats_a_bare_404_as_unknown_not_gone(monkeypatch):
         status_code = 404
         def json(self): return {"code": "waf_blocked"}
     monkeypatch.setattr(R.cc, "get", lambda *a, **k: _R())
-    verdict, why = R._verify_gone("RKZ1")
+    verdict, why = R._verify_gone("RKZ1", {}, {})
     assert verdict == "unknown", f"a 404 without rest_post_invalid_id is not proof of removal: {why}"
 
 
@@ -421,12 +452,29 @@ def test_verify_gone_reads_a_status_flip_as_gone(monkeypatch):
         status_code = 200
         def json(self): return {"id": 1, "acf": {"unit_status": "sold-out"}}
     monkeypatch.setattr(R.cc, "get", lambda *a, **k: _R())
-    assert R._verify_gone("RKZ1")[0] == "gone"
+    assert R._verify_gone("RKZ1", {}, {})[0] == "gone"
 
 
 def test_verify_gone_says_live_while_the_unit_is_still_available(monkeypatch):
     class _R:
         status_code = 200
-        def json(self): return {"id": 1, "acf": {"unit_status": "Available"}}
+        def json(self): return {"id": 1, "acf": {"unit_status": "Available", "unit_project": 66800}}
     monkeypatch.setattr(R.cc, "get", lambda *a, **k: _R())
-    assert R._verify_gone("RKZ1")[0] == "live", "the capital-A variant must not read as dead"
+    assert R._verify_gone("RKZ1", {66800: _project()}, {66800: _project(66825)})[0] == "live", \
+        "the capital-A variant must not read as dead"
+
+
+# ── prose amenities: the unit's own description, YES-only (2026-10-17) ──────────────────────────────
+@pytest.mark.parametrize("desc,want", [
+    ("4غرف نوم +صالة +مجلس +حديقة +غرفة خادمة +2مطبخ+2موقف", {"kitchen", "parking", "maid_room"}),  # 17542523
+    ("شقة ١ / ٢ يسار المصعد ٣ غرف أمامية", {"elevator"}),                                            # 11747807
+    ("مجلس • دورة مياه", set()),
+])
+def test_amenities_the_description_states_are_captured(desc, want):
+    row, _ = _map(_unit(desc=desc))
+    assert {c for c in R._PROSE_COLS if row.get(c) is True} == want
+
+
+def test_a_denied_amenity_is_stored_as_no():
+    row, _ = _map(_unit(desc="لا يوجد مصعد"))
+    assert row["elevator"] is False          # owner 2026-10-24: an explicit negation is a stated no

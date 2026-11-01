@@ -55,6 +55,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 SITE = "https://nawafethalwatan.com"
 SOURCE = "نوافذ الوطن"
@@ -123,6 +125,17 @@ def _num(raw: Optional[str]):
     except ValueError:
         return None
     return None if f <= 0 else int(f) if f.is_integer() else f
+
+
+_PLAT = re.compile(r"propertyLat\s*=\s*parseFloat\('(-?\d+\.\d+)'\)")
+_PLNG = re.compile(r"propertyLng\s*=\s*parseFloat\('(-?\d+\.\d+)'\)")
+
+
+def _own_pin(page: str) -> dict:
+    """The pin the ad page draws: `propertyLat = parseFloat('27.0196')` / `propertyLng` (a different pair per
+    ad, measured on 156/160/176). {} when absent."""
+    la, lo = _PLAT.search(page or ""), _PLNG.search(page or "")
+    return pin_dict(la.group(1), lo.group(1)) if la and lo else {}
 
 
 def map_listing(ad_id: int, page: str, today: date) -> tuple[Optional[tuple[dict, str]], str]:
@@ -208,6 +221,7 @@ def map_listing(ad_id: int, page: str, today: date) -> tuple[Optional[tuple[dict
         kind="per_meter" if is_land else ("total" if deal == "Buy" else (row.get("rent_period") or "annual")),
         unit="per_meter" if is_land else "total", origin="structured", authoritative_absent=False)
     info = {
+        **(_own_pin(page) or pin_from_html(page)),   # owner 2026-10-20 night: the ad page's own pin
         "source_id": ad_id,
         "type_ar": kv.get("نوع العقار"),
         "usage_ar": usage,

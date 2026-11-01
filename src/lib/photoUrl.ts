@@ -38,3 +38,19 @@ export function photoDisplayUrl(raw: string): string {
   }
   return raw;
 }
+
+// Aqar rows scraped before the 2026-10-10 extractor fix carry JSON-escape junk ending in a backslash
+// («https://images.aqar.fm\») and up to 7 CDN size variants (/webp/750x0/, /300x0/, /50x0/ …) of
+// every photo. Drop the junk and keep the FIRST URL per photo file (on those rows the 750px copy
+// comes first). It never judges WHICH photos belong to the ad — the scraper and the re-scrape own
+// that, a client-side guess would hide real photos. Guarded by scripts/verify-aqar-photos-are-the-ads-own.ts.
+export function dedupePhotoUrls(urls: string[]): string[] {
+  const seen = new Set<string>();
+  return urls.filter((u) => {
+    if (u.endsWith('\\')) return false;
+    const key = u.replace(/^(https:\/\/images\.aqar\.fm\/webp\/)\d+x\d+\//, '$1');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}

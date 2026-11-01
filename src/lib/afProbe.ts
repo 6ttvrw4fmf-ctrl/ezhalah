@@ -74,3 +74,12 @@ export const mayAssertNothingToNarrow = (v: ProbeVerdict): boolean => v === 'kno
  */
 export const shouldRetryProbes = (v: ProbeVerdict, attempt: number): boolean =>
   v === 'unknown' && attempt === 0;
+
+/**
+ * Does a results turn OFFER «تحديد أكثر» on the narrowing probe's verdict (agent.tsx assessNarrowing:
+ * 'yes' | 'no' | 'unknown')? Everything but a decided 'no'. 'unknown' — the counts timed out under
+ * load — offers, and the tap re-probes through the interview's own bounded retry (shouldRetryProbes).
+ * Falcon 2026-10-09 (backlog 317): the offer read `verdict === 'yes'`, so inside the :20 refresh window
+ * a 26,869-result Riyadh apartment scope showed no Advanced Filter at all — our outage, their verdict.
+ */
+export const offersNarrowing = (v: 'yes' | 'no' | 'unknown'): boolean => v !== 'no';

@@ -41,12 +41,83 @@ freeze: refuse to act on evidence the run itself shows is unreliable.
 """
 from __future__ import annotations
 
+import collections
+import os
 import re
+import threading
+import time
 from typing import Optional
 
 from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN
 
+# THE «SHELL» OF 2026-08 WAS DEALAPP'S VIEW QUOTA, NOT OUR EGRESS (measured 2026-09-28, home IP).
+# dealapp renders about ten ads per minute for one anonymous visitor IP. Past that its own API
+# answers 429 `error.tooManyAdsViewed` then 401 `error.user.blocked`, and the server renders the
+# REGISTRATION page («صفحة التسجيل», 86,728 bytes) in place of the ad — HTTP 200, same URL. Every
+# failed sample of the 2026-09-28 12-shard crawl was that page. Worse, CloudFront caches it under
+# the ad's own URL for days (Age up to ~237,000 s, query strings not in the key), so one over-quota
+# burst hides live ads from us AND from dealapp's own visitors on that edge until it expires.
+# Edge HITs never reach the origin and cost nothing; only origin renders count. So every dealapp
+# fetcher spends ONE rolling-minute budget of origin renders and reads the wall as «wait».
+RENDERS_PER_MIN = int(os.environ.get("DEALAPP_RENDERS_PER_MIN", "9"))
+
+
+def is_registration_wall(body: str) -> bool:
+    """dealapp's «you have viewed too many ads» page — never a statement about the ad."""
+    return "<title>صفحة التسجيل</title>" in (body or "")
+
+
+def from_edge(resp) -> bool:
+    """True when CloudFront answered from its cache (the origin never saw the request)."""
+    headers = getattr(resp, "headers", None) or {}
+    return str(headers.get("x-cache") or "").startswith("Hit")
+
+
+class OriginBudget:
+    """At most `per_min` requests may be in flight to, or have reached, dealapp's origin within any
+    rolling `window` seconds. A request takes a slot BEFORE it is sent (so concurrent workers
+    cannot overshoot together) and gets it back if the edge answered it."""
+
+    def __init__(self, per_min: int = RENDERS_PER_MIN, window: float = 60.0,
+                 clock=time.monotonic, sleep=time.sleep):
+        self.per_min, self.window, self.clock, self.sleep = per_min, window, clock, sleep
+        self._slots: collections.deque = collections.deque()
+        self._lock = threading.Lock()
+        self._pause_until = 0.0
+
+    def acquire(self) -> float:
+        while True:
+            with self._lock:
+                now = self.clock()
+                while self._slots and now - self._slots[0] >= self.window:
+                    self._slots.popleft()
+                if now >= self._pause_until and len(self._slots) < self.per_min:
+                    self._slots.append(now)
+                    return now
+                wait = max(self._pause_until - now,
+                           self._slots[0] + self.window - now if len(self._slots) >= self.per_min else 0)
+            self.sleep(max(wait, 0.05))
+
+    def refund(self, slot: float) -> None:
+        with self._lock:
+            try:
+                self._slots.remove(slot)
+            except ValueError:
+                pass
+
+    def back_off(self) -> None:
+        """The origin walled us anyway (the quota is smaller than we think): sit out a window."""
+        with self._lock:
+            self._pause_until = max(self._pause_until, self.clock() + self.window + 10)
+
 AD_PATH = "/ad-details/"
+# The oldest CloudFront copy that may count as a CURRENT read of an ad, for BOTH readers: the
+# liveness sweep (liveness_run.probe) and the crawl's alive stamp (run.fetch_one → mark_direct_alive).
+# 2026-10-11: the crawl accepted copies up to 24 h old while the sweep accepted 1 h, so a removed
+# ad's day-old cached page stamped it «alive now» — resetting the strikes the sweep's fresh reads
+# had earned, and since #6678 holding the kill outright (dealapp 9252915: sweep read gone 3x fresh,
+# crawl stamped alive at 02:44:16 10-10; its own page reads gone again 10-11). One rule, one place.
+FRESH_MAX_AGE_S = 3600
 
 # A run must positively verify at least this share of its probes before any deactivation is
 # trusted. Healthy runs sit far above it; a shelled environment sits at ~0.
@@ -62,7 +133,11 @@ def listing_schema_present(body: str, adid: str) -> bool:
     shell page could be mistaken for a verified one."""
     if not body or not adid:
         return False
-    return bool(re.search(rf"real-estate-listing-schema-{re.escape(str(adid))}\b", body))
+    # dealapp's URL keeps a leading zero its schema drops: /ad-details/089639 renders
+    # real-estate-listing-schema-89639 (2026-10-25). Matching the literal URL id made such an ad
+    # unreadable forever, alive or sold: 1143135 sat at 11 strikes, served, while its page was live.
+    core = str(adid).lstrip("0") or "0"
+    return bool(re.search(rf"real-estate-listing-schema-0*{re.escape(core)}\b", body))
 
 
 def sold_or_rented(body: str) -> bool:

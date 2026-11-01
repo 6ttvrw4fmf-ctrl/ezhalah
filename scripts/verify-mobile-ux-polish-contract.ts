@@ -70,14 +70,16 @@ check('the active-chat highlight renders ONLY on the agent screen',
 // ── 4. dialog dismissal ─────────────────────────────────────────────────────────────────────────
 check('every centered account dialog carries the top-right × (account / logout / delete)',
   /'account-popup-close' : view === 'signout' \? 'logout-popup-close' : 'delete-popup-close'/.test(account));
-check('the chat-delete dialog carries the top-right × — PHYSICAL right under RTL',
+check('the chat-delete dialog carries the top-right × in both languages',
   /testID="chat-delete-close"/.test(sidebar)
-  && /dcClose: \{ position: 'absolute', top: 12, \.\.\.\(I18nManager\.isRTL \? \{ left: 12 \} : \{ right: 12 \}\)/.test(sidebar));
+  && /dcClose: \{ position: 'absolute', top: 12, right: 12,/.test(sidebar));
 // The class rule across all three dialog files: a centered dialog's × must never use a bare
 // direction-flipped `right:` — Arabic's forced RTL would land it on the physical LEFT.
-check('every centered dialog × is direction-aware (AccountMenu + Sidebar + InfoModal)',
-  /centerClose: \{ position: 'absolute', top: 12, \.\.\.\(I18nManager\.isRTL/.test(account)
-  && /\.\.\.\(I18nManager\.isRTL \? \{ left: CLOSE_INSET \} : \{ right: CLOSE_INSET \}\)/.test(strip(readFileSync(join(root, 'src', 'components', 'InfoModal.tsx'), 'utf8'))));
+// Owner 2026-10-24 (supersedes 10-23 «Arabic left»): every × sits where English puts it — top-RIGHT — in both
+// languages, never mirrored. Full rule + mutation proofs: scripts/verify-close-x-same-side.ts.
+check('every centered account/info dialog × is top-right in both languages (owner 2026-10-24)',
+  /centerClose: \{ position: 'absolute', top: 12, right: 12,/.test(account)
+  && /\[s\.xBtn, s\.xBtnRight, WEB_SMOOTH/.test(strip(readFileSync(join(root, 'src', 'components', 'InfoModal.tsx'), 'utf8'))));
 
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
 console.log('\n  mutation proof — each guard must FAIL on its own defect\n');

@@ -11,6 +11,23 @@
 # THE FIX IS windowBetween() / windowUpTo() in scripts/lib/sourceWindow.ts — they THROW on a
 # marker that has moved, so the failure is a loud red naming the marker instead of a silent green.
 #
+# FOUR OF THESE ANCHORS ARE PROSE, WHICH IS STRICTLY WORSE (routine #10, 2026-09-27, ops_incident
+# #727). A code marker moves when someone changes behaviour; a COMMENT moves when someone rewords a
+# sentence, which happens more often and for reasons nobody connects to a barrier. Measured that day:
+# rewording `// auto_select` in src/components/GoogleOneTap.tsx — zero behavioural change — left
+# verify-google-onetap.ts at a full 14/14 GREEN with its catch-branch window running to one character
+# before end-of-file. It caught the real defect anyway, but only because the sibling openAuth() it
+# would have swallowed happens to sit ABOVE the window's start. That is luck, not design. Convert
+# these four first:
+#
+#   scripts/verify-google-onetap.ts                          (2, the `// auto_select` end marker)
+#   scripts/verify-saved-search-identity.ts                  (1, `// Persist chats`)
+#   scripts/verify-transcript-capture-survives-navigation.ts (1, `// A refresh/close inside …`)
+#
+# The sibling class — a predicate that requires a comment WITHOUT narrowing a window — is counted
+# separately in scripts/comment-pinned-predicate-baseline.txt, so neither ledger can shrink on the
+# other's progress.
+#
 # Format: <file> | <number of raw sites>. Counts, not line numbers, because line numbers drift on
 # every unrelated edit above them and a baseline that goes stale for innocent reasons is a
 # baseline someone deletes. A count that RISES is RED (a new blind window). A count that FALLS

@@ -7,6 +7,7 @@
 // calling our RPC again, NOT by re-running our SQL — translating only the specific params the
 // captured request actually carried. Diffs exact (source_table,listing_id) sets: missing / extra /
 // duplicate, not just counts.
+import './lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard or bot checks (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
 import { openAfOffer } from './lib/afOfferLive.ts';
 import { pairCountForSelection, isResultsRequest } from './lib/afCountPairing.ts';
@@ -24,6 +25,7 @@ import { pairCountForSelection, isResultsRequest } from './lib/afCountPairing.ts
 import { AGENT_TURN_MS, PACE_BUDGET_MS, PACE_POLL_MS, describeLoad, paceUntilHealthy, readSearchLoad } from './lib/afJourneyPacing.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
+import { missingVerdict } from './lib/searchDeepPageCap.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { resultsFoundCount } from '../e2e/lib/resultsSentence.mjs';
@@ -195,6 +197,8 @@ function diffIds(rpcList, oracleSet) {
 async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal = [], category = null,
   group = null, type = null, city, district = null, answerAmenityIndex = null, answerBathrooms = null,
   answerFurnished = null, expectZero = false, skipFirst = false, backAndChange = false }) {
+  // AF_LT_ONLY: reproduce ONE journey by name (substring) instead of reading the whole run's summary (Falcon trap 18).
+  if (process.env.AF_LT_ONLY && !name.includes(process.env.AF_LT_ONLY)) return;
   console.log(`\n════════ JOURNEY: ${name} ════════`);
   const ctx = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'ar-SA', viewport });
   const page = await ctx.newPage();
@@ -495,6 +499,31 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       while (Date.now() < until && lastSearchBody === null) await page.waitForTimeout(250);
       await page.waitForTimeout(600);   // let the count/render settle once the body has landed
     }
+    // A SCOPE TIER IS NOT THE END OF THE ROUND (contract R3.1.1, 2026-10-23). With no نوع picked the first question
+    // is the GROUP; confirming it must open the EXACT TYPE question, not a results search. Reproduced on production
+    // with AF_LT_ONLY: after «الشقق والسكن المشترك» the app sent five `p_limit: 1` probes for the sub-types and the
+    // card asked for the type, so «final search request was captured = null» was this journey stopping early, not a
+    // search that never fired. Answer at most two more questions (first option, deterministic): measured 10-23, both
+    // NO-type journeys needed the EXACT TYPE tier and then one ordinary round question before the round's search fired.
+    // The capture is judged exactly as before: a search that never fires still leaves it null and still fails.
+    // NOT on the BACK journey (2026-10-31, 🔬): R8.2.1 is «Back restores the PREVIOUS question», and this loop answered
+    // two more round questions first (features → bathrooms → age), so Back correctly returned to «age» while the check
+    // expected «features» (run 41178264864: expected=وش المميزات المهمة لك؟ got=كم عمر العقار تقريباً؟, count 14142 vs 4719).
+    // The Back journey needs the card on question TWO; its own `advanced` poll below proves the round moved there.
+    for (let tier = 0; tier < 2 && lastSearchBody === null && !backAndChange; tier++) {
+      const next = await readCardUntil((s) => s.hasCard, AGENT_TURN_MS);
+      const opts3 = next.hasCard
+        ? await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')))
+        : [];
+      if (!opts3[0]) break;
+      console.log(`      [round] ${name}: confirm opened another question «${next.q}» (a scope tier, R3.1.1, or the round's next question) — answering its first option`);
+      await page.click(`[data-testid="${opts3[0]}"]`);
+      await page.waitForTimeout(400);
+      await page.click('[data-testid="af-confirm"]');
+      const until3 = Date.now() + AGENT_TURN_MS;
+      while (Date.now() < until3 && lastSearchBody === null) await page.waitForTimeout(250);
+      await page.waitForTimeout(600);
+    }
 
     if (backAndChange) {
       // WHICH RULE A BACK CLICK MEANS IS DECIDED BY THE STEP THE CARD IS ON, so this journey must
@@ -600,7 +629,10 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
         oracleIds(lastSearchBody),
       ]);
       const d = diffIds(rIds, oIds);
-      check(`${name}: MISSING eligible IDs == 0`, d.missing.length === 0, `missing=${d.missing.length} sample=${d.missing.slice(0, 5).join(',')}`);
+      // Cap-aware (scripts/lib/searchDeepPageCap.ts): above ~26k rows the RPC stops paging, so MISSING must equal
+      // exactly the unreachable tail and the walk must return every reachable row — never «missing == 0».
+      const mv = missingVerdict(d.missing.length, d.rpcCount, rpcTotal, 1000);
+      check(`${name}: MISSING eligible IDs == 0${mv.tail ? ' (beyond the RPC\'s offset cap: == the unreachable tail)' : ''}`, mv.ok, `${mv.detail} sample=${d.missing.slice(0, 5).join(',')}`);
       check(`${name}: EXTRA ineligible IDs == 0`, d.extra.length === 0, `extra=${d.extra.length} sample=${d.extra.slice(0, 5).join(',')}`);
       check(`${name}: DUPLICATE IDs == 0`, d.duplicates.length === 0, `duplicates=${d.duplicates.length}`);
     }
@@ -640,7 +672,10 @@ await runJourney('Residential/Rent-Monthly/Apartment/Riyadh — rating', {
   // ONLY one selected, so tapping سنوي first is a rejected no-op (can't deselect the last one) — it
   // stays on, and adding شهري on top just gives "both" (كلاهما). Add شهري FIRST (now both selected,
   // removing either is safe), THEN tap سنوي to drop it — order matters for an at-least-one toggle.
-  deal: ['إيجار', 'شراء', 'شهري', 'سنوي'], city: 'الرياض', group: 'الشقق والسكن المشترك', type: 'شقة',
+  // The button's LABEL is «إقامات قصيرة» since 2026-10-25 (src/i18n.tsx 'Short stays'); the period it
+  // sends is still p_rent_period='شهري'. Tapping the old word failed every run from 10-25 to 10-31
+  // («control never rendered: شهري»), so the Gathern subtype journey proved nothing for six days.
+  deal: ['إيجار', 'شراء', 'إقامات قصيرة', 'سنوي'], city: 'الرياض', group: 'الشقق والسكن المشترك', type: 'شقة',
 });
 await runJourney('Commercial/Rent-Annual/Shop/Riyadh — amenity', {
   deal: ['إيجار', 'شراء', 'سنوي'], category: 'تجاري', city: 'الرياض', group: 'التجزئة والمكاتب', type: 'محل',

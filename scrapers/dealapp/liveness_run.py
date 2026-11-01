@@ -41,13 +41,14 @@ from typing import Optional
 
 from curl_cffi import requests as cc
 
-from scrapers.common.db import begin_run, end_run, sb
+from scrapers.common.db import _execute, begin_run, end_run, sb
 from scrapers.common.liveness_contract import (
     ALIVE, DEAD, UNKNOWN, EvidenceKind, decide, verification_patch,
 )
 from scrapers.common.liveness_policies import policy_for
-from scrapers.dealapp.liveness import (
-    classify_dealapp, environment_is_trustworthy, sitemap_candidate_rank,
+from scrapers.dealapp.liveness import (  # FRESH_MAX_AGE_S: one rule, shared with the crawl's alive stamp
+    FRESH_MAX_AGE_S, OriginBudget, classify_dealapp, environment_is_trustworthy, from_edge, is_registration_wall,
+    sitemap_candidate_rank,
 )
 
 BASE = "https://dealapp.sa"
@@ -62,6 +63,12 @@ MIN_INTERVAL = 0.35
 # incident (failure 0.1% -> 66.7%) is what it costs.
 RUN_NAME_CI = "dealapp_liveness"
 RUN_NAME_PROXY = "dealapp_liveness_proxy"
+
+
+_ORIGIN = OriginBudget()
+_LAST_EDGE = [False]   # did probe()'s last response come from CloudFront (not an origin render)?
+_RENDERS: list[tuple[str, str]] = []   # this run's fresh reads in order (adid, render_kind)
+_DEADLINE = time.monotonic() + 50 * 60   # pacing must never outlast the 60-min job
 
 
 class RequestBudget:
@@ -134,33 +141,233 @@ def _adid(listing_url: str) -> str:
 
 
 def _collect_candidates(client, limit: int) -> list[dict]:
-    """Active rows, never-verified first. Ordering by last_verified_alive_at NULLS FIRST is the
-    point of the column: rows nobody has ever proved alive are exactly the ones to probe first."""
-    rows = (client.table(TABLE)
-            .select("id, ad_number, listing_url, missing_count, last_verified_alive_at")
-            .eq("active", True)
-            .order("last_verified_alive_at", desc=False, nullsfirst=True)
-            .limit(max(limit * 4, limit) if limit else 20000)
-            .execute().data or [])
+    """Active rows, least-recently LOOKED AT first (LISTING_LIFECYCLE_ENGINEER.md §4.1d).
+
+    This used to order by last_verified_alive_at NULLS FIRST. A row dealapp answers with a shell
+    never gets that stamp, so it stayed at the head forever: over 2026-09-21..28, 312 rows were
+    probed on all 8 runs and 159 on 7, every one UNKNOWN, and from an ordinary network all 16
+    sampled render the same listing-less page as bogus id 999999999. The run re-read the same
+    unresolvable rows daily and reported "560 of 600 UNKNOWN". last_liveness_probe_at moves on
+    every verdict, so a probed row goes to the back for a full cycle."""
+    cols = ("id, ad_number, listing_url, missing_count, last_verified_alive_at, "
+            "last_liveness_probe_at")
+    rows = (_execute(client.table(TABLE).select(cols)
+                     .eq("active", True)
+                     .order("last_liveness_probe_at", desc=False, nullsfirst=True)
+                     .limit(max(limit * 4, limit) if limit else 20000),
+                     what="dealapp candidates").data or [])
+    # STRUCK ROWS ARE NEVER STARVED (2026-10-12). The crawl's prune re-reads every at-grace row
+    # each night, holds it UNKNOWN and stamps last_liveness_probe_at, so a struck row is always
+    # "just looked at" and never falls into this oldest-first window of a ~21k rotation: 9 shown
+    # rows at 3-5 strikes (served_after_source_gone:dealapp) had no sweep reading for days, and
+    # this sweep is the only reader whose fresh render can decide a dealapp page. Struck rows head
+    # the list; the kill rule (decide(), 3 strikes, trust gate, held-alive) is unchanged.
+    # NEAR-KILL ROWS MUST FIT IN THE WINDOW (2026-10-25). Ordered by probe age alone, the window of
+    # `limit` struck rows was always the 1-strike ones: the crawl re-stamps every row at >= 2 strikes
+    # nightly, so on 10-25 the 10:47 run read 17 struck rows and none at >= 2, while 117 served ads sat
+    # at 3-11 strikes with no alive reading in 48 h (76 of them read gone twice that morning).
+    struck = (_execute(client.table(TABLE).select(cols)
+                       .eq("active", True).gt("missing_count", 0)
+                       .order("missing_count", desc=True)
+                       .order("last_liveness_probe_at", desc=False, nullsfirst=True)
+                       .limit(limit or 20000),
+                       what="dealapp struck candidates").data or [])
+    ids = {r["id"] for r in struck}
+    rows = struck + [r for r in rows if r["id"] not in ids]
     return [r for r in rows if (r.get("listing_url") or "").strip()]
+
+
+def _probe_order(r: dict, sitemap) -> tuple:
+    """Struck rows first (see _collect_candidates), then never-probed, then sitemap-present."""
+    return (not (r.get("missing_count") or 0),
+            r.get("last_liveness_probe_at") is not None,
+            -sitemap_candidate_rank(_adid(r["listing_url"]), sitemap) if sitemap else 0)
+
+
+# A QUARTER OF THE BUDGET FOR STRUCK ROWS, NEVER ALL OF IT (2026-10-16, ♻️). Struck-first (10-12)
+# had no ceiling: once more struck rows existed than one run reads (959 on 10-16 > --limit 600),
+# every run re-read the same 600 struck rows two hours after the last read (all UNKNOWN: dealapp
+# serves a removed ad the bogus-id shell), and the 28,203 unstruck rows got no sweep reading from
+# 10-08 on — alive 3,508/day on 10-11 → 0 on 10-16, checked-in-time 96% → 56.5%. Struck rows still
+# lead, inside their share; any share they do not use goes to the rotation, and vice versa.
+STRUCK_SHARE = 0.25
+# One more DEAD reading kills a row at this many strikes (grace 3).
+NEAR_KILL = 2
+
+
+def _plan_worklist(cands: list[dict], limit: int) -> list[dict]:
+    """Take at most STRUCK_SHARE of `limit` from struck rows (in their sorted order), fill the rest
+    from the rotation, and give any unused share to whichever side still has rows. Order only:
+    nothing is added, nothing is decided."""
+    if not limit or len(cands) <= limit:
+        return cands
+    struck = [r for r in cands if (r.get("missing_count") or 0) > 0]
+    rest = [r for r in cands if not (r.get("missing_count") or 0) > 0]
+    k = min(len(struck), max(1, int(limit * STRUCK_SHARE)))
+    take_rest = min(len(rest), limit - k)
+    k = min(len(struck), limit - take_rest)
+    # Half the struck share goes to rows one DEAD reading from a kill (2026-10-25), oldest-probed
+    # first among them; the other half to 1-strike rows, and either side's unused half to the other.
+    near = sorted((r for r in struck if (r.get("missing_count") or 0) >= NEAR_KILL),
+                  key=lambda r: (r.get("last_liveness_probe_at") is not None,
+                                 r.get("last_liveness_probe_at") or ""))
+    far = [r for r in struck if (r.get("missing_count") or 0) < NEAR_KILL]
+    kn = min(len(near), max((k + 1) // 2, k - len(far)))
+    struck = near[:kn] + far[:k - kn]
+    # INTERLEAVED, struck first (2026-10-23): a struck ad's own page is usually dealapp's no-listing
+    # render, which counts only between two live-ad renders (bracketed_none). Read as one block, struck
+    # rows had only each other as neighbours, so the bracket could almost never close around them.
+    picked_struck, picked_rest = struck[:k], rest[:take_rest]
+    out: list[dict] = []
+    for i in range(max(len(picked_struck), len(picked_rest))):
+        out += picked_struck[i:i + 1] + picked_rest[i:i + 1]
+    return out
+
+
+BOGUS_ADID = "999999999"
+
+
+def _canaries(client, s, budget: Optional[RequestBudget]) -> dict:
+    """Positive: the 3 rows most recently proved alive; at least one must still read ALIVE.
+    Negative: an id that cannot exist must NOT read ALIVE. Charged to the request budget."""
+    rows = (_execute(client.table(TABLE).select("listing_url, last_verified_alive_at")
+                     .eq("active", True).not_.is_("last_verified_alive_at", "null")
+                     .order("last_verified_alive_at", desc=True).limit(3),
+                     what="dealapp canaries").data or [])
+    live = sum(probe_listing(s, r["listing_url"], budget)[0] == ALIVE for r in rows)
+    bogus_alive = probe_listing(s, f"{BASE}/ar/ad-details/{BOGUS_ADID}", budget)[0] == ALIVE
+    return {"live": live, "live_n": len(rows), "live_ok": live > 0, "bogus_alive": bogus_alive}
+
+
+# ── A CDN copy is not the source's answer (2026-09-28) ─────────────────────────────────────────
+# dealapp.sa sits behind CloudFront, which caches the rendered ad page for DAYS and keys it on the
+# path only (a query string is ignored). Measured from one POP: the bare /ar/ad-details/{id} of a
+# live ad came back as dealapp's registration wall (the view-quota page, see liveness.py) with
+# `Age: 130553` (36 h), while /ar/ad-details/{id}/ (a different cache key, so a fresh origin render)
+# carried that ad's schema. CloudFront freezes whichever page the origin gave — which is why retrying
+# the bare URL never recovered (dealapp-fetch-diagnostic retry mode: 0/49 up to 120 s). So: never
+# read an old cached copy as an answer; when the copy we got is stale, ask the next cache key (an
+# edge hit is refunded to the quota). A fresh render is final.
+
+
+def _variants(listing_url: str) -> list[str]:
+    base = listing_url.rstrip("/")
+    en = base.replace("/ar/ad-details/", "/en/ad-details/", 1)
+    return [base + "/", en + "/", en]
+
+
+def render_kind(verdict: str, status: Optional[int], body: str, edge: bool) -> str:
+    """What one fresh read rendered, for the bracket below: 'ad' (read ALIVE), 'none' (an ORIGIN
+    render of dealapp's own page with no listing in it: ng-state present, no listing schema, not
+    the view-quota wall), else 'other'. Pure."""
+    if verdict == ALIVE:
+        return "ad"
+    if (not edge and status == 200 and 'id="ng-state"' in (body or "")
+            and "real-estate-listing" not in body and not is_registration_wall(body)):
+        return "none"
+    return "other"
+
+
+def bracketed_none(log: list[tuple[str, str]]) -> list[str]:
+    """adids whose render was 'none' with a live ad rendered immediately before AND after it on
+    this runner ('other' breaks nothing, a wall breaks the bracket by not being 'ad'). The same
+    rule as the crawl's confirmed_absent (scrapers/dealapp/run.py, oracle
+    dealapp.crawl_fresh_render_no_listing.bracketed.ci). Pure."""
+    out: list[str] = []
+    for i, (adid, kind) in enumerate(log):
+        if kind != "none":
+            continue
+        before = next((k for _, k in reversed(log[:i]) if k != "none"), None)
+        after = next((k for _, k in log[i + 1:] if k != "none"), None)
+        if before == "ad" and after == "ad":
+            out.append(adid)
+    return out
+
+
+def promote_bracketed(pending: list, bracketed: set, policy) -> tuple[list, int]:
+    """A struck row this run read UNKNOWN whose render was a bracketed no-listing page becomes a DIRECT
+    DEAD reading (2026-10-24, backlog 766): one strike, the 3-strike grace and the trust gate unchanged.
+
+    Shadow evidence first (10-23 13:00 → 10-24 09:30, runs 40046091086…40078921277): 124 struck ads read
+    bracketed-none; 0 of them read alive by any reader since, and 8 were hidden meanwhile by the crawl's
+    own confirmed_absent (the same rule). Only rows ALREADY struck (missing_count >= 1) qualify, the way
+    the shadow counted them. Pure."""
+    out, n = [], 0
+    for row, action, strikes, status, read_iso in pending:
+        mc = int(row.get("missing_count") or 0)
+        if action == "none" and mc >= 1 and _adid(row["listing_url"]) in bracketed:
+            d = decide(DEAD, strikes=mc, policy=policy, evidence=EvidenceKind.DIRECT)
+            out.append((row, d.action, d.strikes, status, read_iso))
+            n += 1
+        else:
+            out.append((row, action, strikes, status, read_iso))
+    return out, n
+
+
+def probe_listing(s: cc.Session, listing_url: str, budget: Optional[RequestBudget] = None
+                  ) -> tuple[str, Optional[int]]:
+    """(verdict, http_status) for one ad: the first variant that is not UNKNOWN, else UNKNOWN.
+    Each fresh read also lands in _RENDERS as (adid, render_kind), for the shadow bracket."""
+    adid = _adid(listing_url)
+    for url in _variants(listing_url):
+        status, body, final = probe(s, url, budget)
+        if status is None:
+            continue          # a stale CDN copy (or no answer): ask the next cache key
+        # A fresh render is final — every extra key is one more render against dealapp's
+        # per-visitor quota (liveness.OriginBudget). requested_url without the trailing slash: a
+        # slash-stripping redirect must not read as "moved off the ad path" (DEAD).
+        verdict = classify_dealapp(status, body=body, adid=adid, final_url=final,
+                                   requested_url=url.rstrip("/"))
+        _RENDERS.append((adid, render_kind(verdict, status, body, _LAST_EDGE[0])))
+        return verdict, status
+    return UNKNOWN, None
 
 
 def probe(s: cc.Session, url: str, budget: Optional[RequestBudget] = None
           ) -> tuple[Optional[int], str, str]:
     """(status, body, final_url). An exception is (None, '', '') → UNKNOWN, never a death.
+    A CloudFront copy older than FRESH_MAX_AGE_S is also (None, '', ''): not a current answer.
 
     A retry costs the pool another request, so retries are charged to the budget too.
     """
     for attempt in range(3):
         if budget is not None and not budget.spend():
             return None, "", ""      # out of budget => UNKNOWN, which writes nothing
+        if time.monotonic() > _DEADLINE:
+            return None, "", ""      # out of time => UNKNOWN, which writes nothing
         try:
-            _throttle()
+            # dealapp's anonymous view quota (liveness.py): an unpaced sweep walls itself after
+            # ~10 renders and leaves the wall cached under each ad's URL for days.
+            slot = _ORIGIN.acquire()
             r = s.get(url, timeout=45, allow_redirects=True)
+            _LAST_EDGE[0] = bool(from_edge(r))
+            if _LAST_EDGE[0]:
+                _ORIGIN.refund(slot)
+            try:
+                age = int((r.headers or {}).get("age") or 0)
+            except (TypeError, ValueError):
+                age = 0
+            if age > FRESH_MAX_AGE_S:
+                return None, "", ""
             return r.status_code, (r.text or ""), str(getattr(r, "url", "") or "")
         except Exception:
             time.sleep(1.0 * (attempt + 1))
     return None, "", ""
+
+
+def alive_since_read(stamp, read_iso: str) -> bool:
+    """True when the row's last_verified_alive_at is NEWER than the moment this sweep read it.
+
+    Pure, so a barrier can execute it. A missing or unparsable stamp is False: the sweep's own
+    reading stands. Both values are ISO-8601 timestamps with a UTC offset, as the DB returns them.
+    """
+    if not stamp or not read_iso:
+        return False
+    try:
+        return datetime.fromisoformat(str(stamp).replace("Z", "+00:00")) > \
+            datetime.fromisoformat(str(read_iso).replace("Z", "+00:00"))
+    except ValueError:
+        return False
 
 
 def main() -> int:
@@ -197,51 +404,115 @@ def main() -> int:
         sitemap = harvest_sitemap_ids(s, budget)
         stats["sitemap_ids"] = len(sitemap)
 
-        cands = _collect_candidates(client, args.limit)
-        # Sitemap-absent first — probe order only, never a verdict.
-        cands.sort(key=lambda r: sitemap_candidate_rank(_adid(r["listing_url"]), sitemap)
-                   if sitemap else 1)
-        cands = cands[:args.limit] if args.limit else cands
+        # Canaries first: one row we proved alive most recently must still read ALIVE, and a bogus
+        # id must NOT. The second is the one that matters — if a page that cannot exist reads
+        # ALIVE, the classifier or the transport is lying and nothing this run sees is written.
+        canary = _canaries(client, s, budget)
+        stats["canary"] = canary
+        if canary["bogus_alive"]:
+            print(f"✗ CANARY: bogus id {BOGUS_ADID} read ALIVE — nothing will be written", flush=True)
 
-        pending: list[tuple[dict, str, int, int]] = []   # (row, action, strikes, http_status)
+        cands = _collect_candidates(client, args.limit)
+        # Within the least-recently-probed window, sitemap-PRESENT first. dealapp gives no death
+        # signal on the ad URL (a removed ad renders the same shell as a bogus id, which is
+        # UNKNOWN), so leading with sitemap-absent rows only spent the budget on answers that can
+        # never come. Probe order only, never a verdict; the rotation still reaches every row.
+        # NEVER-PROBED FIRST, then sitemap-present (2026-10-06). Sorting sitemap-present first alone
+        # cut the same never-probed rows off the end of every window: they keep a NULL
+        # last_liveness_probe_at, so they head every window and are dropped again — 567 active rows
+        # had never been opened once (backlog #84, unchanged 10-05 → 10-06).
+        cands.sort(key=lambda r: _probe_order(r, sitemap))
+        cands = _plan_worklist(cands, args.limit)
+
+        # Every write goes through db._execute: a dropped HTTP/2 connection (ConnectionTerminated)
+        # on ONE update killed the 2026-10-06 06:49 run after 600 reads, so none of its verdicts
+        # landed. The updates are idempotent, so retrying them is safe (aqar learned it 2026-10-02).
+        writes_ok = args.apply and not canary["bogus_alive"]
+        # (row, action, strikes, http_status, read_iso): read_iso is WHEN this sweep read the ad,
+        # kept per row because the sweep reads for up to 50 minutes and applies at the end.
+        pending: list[tuple[dict, str, int, int, str]] = []
+        # The crawl's bracketed no-listing render, read here too (backlog 766): 60 shown dealapp ads at
+        # 3+ strikes read UNKNOWN to every reader (a removed ad renders the bogus-id shell). Shadow from
+        # 10-23 13:00; promoted to a DIRECT reading 10-24 (promote_bracketed) after 124 shadow ads read
+        # alive 0 times since.
+        _RENDERS.clear()   # the canaries' reads are not part of the worklist's sequence
+        struck_adids = {_adid(r["listing_url"]) for r in cands if int(r.get("missing_count") or 0) >= 1}
         for row in cands:
             adid = _adid(row["listing_url"])
             if budget.exhausted:
                 break        # stop cleanly on the boundary; a partial sweep is a normal outcome
-            status, body, final_url = probe(s, row["listing_url"], budget)
-            verdict = classify_dealapp(status, body=body, adid=adid,
-                                       final_url=final_url, requested_url=row["listing_url"])
+            read_iso = datetime.now(timezone.utc).isoformat()
+            verdict, status = probe_listing(s, row["listing_url"], budget)
             stats["scanned"] += 1
             stats[{ALIVE: "alive", DEAD: "dead", UNKNOWN: "unknown"}[verdict]] += 1
 
             d = decide(verdict, strikes=int(row.get("missing_count") or 0),
                        policy=policy, evidence=EvidenceKind.DIRECT)
-            pending.append((row, d.action, d.strikes, status))
+            pending.append((row, d.action, d.strikes, status, read_iso))
 
-            if args.apply and d.action == "reset":
+            if writes_ok and d.action == "reset":
                 # last_liveness_probe_at = "we LOOKED", whatever the verdict. It is what lets
                 # this sweep's own worklist rotate fairly instead of re-reading the rows it can
                 # never resolve (migration 20260924). Never evidence of life on its own.
                 patch = {"missing_count": 0, "last_liveness_probe_at": now_iso,
                          **verification_patch(d, now_iso=now_iso)}
-                client.table(TABLE).update(patch).eq("id", row["id"]).execute()
+                _execute(client.table(TABLE).update(patch).eq("id", row["id"]), what="dealapp verify")
                 stats["verified"] += 1
 
+        bracketed = [a for a in bracketed_none(_RENDERS) if a in struck_adids]
+        pending, stats["bracketed_dead"] = promote_bracketed(pending, set(bracketed), policy)
+        stats["dead"] += stats["bracketed_dead"]
+        stats["unknown"] -= stats["bracketed_dead"]
+
         # A run that verified almost nothing is being served shells; its deaths are not evidence.
-        trusted = environment_is_trustworthy(stats["alive"], stats["scanned"])
+        trusted = (environment_is_trustworthy(stats["alive"], stats["scanned"])
+                   and canary["live_ok"] and not canary["bogus_alive"])
         if not trusted:
             stats["quarantined"] = True
 
-        if args.apply and trusted:
-            for row, action, strikes, _status in pending:
+        if writes_ok:
+            # "We LOOKED", for every row this run read that no branch below writes: UNKNOWNs, and
+            # strikes/kills the trust gate held back. Never evidence — only the rotation key.
+            looked = [row["id"] for row, action, _s, _st, _r in pending
+                      if action not in ("reset",) and not (trusted and action in ("strike", "deactivate"))]
+            for i in range(0, len(looked), 200):
+                _execute(client.table(TABLE).update({"last_liveness_probe_at": now_iso})
+                         .in_("id", looked[i:i + 200]), what="dealapp looked")
+
+        # A LIVE ANSWER BETWEEN STRIKES RESETS THEM — even one written by another reader while this
+        # sweep was still reading (2026-10-10). The crawl shards and this sweep run at the same
+        # hour: on 2026-10-10 dealapp 9252915 was read dead here (run 01:54-02:44), the crawl read
+        # its own page ALIVE at 02:44:16 and stamped last_verified_alive_at, and the kill below
+        # landed at 02:44:31 over that fresher answer — the one unverified hide of the day
+        # (mon_unverified_inactivations_24h = 1). So before a strike or a kill is written, the row's
+        # current stamp is re-read and a row proven alive after this sweep read it is HELD: nothing
+        # written (the alive writer already reset its strikes), applied=false in the evidence.
+        held_alive: set = set()
+        if writes_ok and trusted:
+            to_write = [(row, read_iso) for row, action, _s, _st, read_iso in pending
+                        if action in ("strike", "deactivate")]
+            stamps: dict = {}
+            ids = [row["id"] for row, _r in to_write]
+            for i in range(0, len(ids), 200):
+                res = _execute(client.table(TABLE).select("id, last_verified_alive_at")
+                               .in_("id", ids[i:i + 200]), what="dealapp recheck-alive")
+                for r in (getattr(res, "data", None) or []):
+                    stamps[r["id"]] = r.get("last_verified_alive_at")
+            held_alive = {row["id"] for row, read_iso in to_write
+                          if alive_since_read(stamps.get(row["id"]), read_iso)}
+            stats["held_alive"] = len(held_alive)
+            for row, action, strikes, _status, _read in pending:
+                if row["id"] in held_alive:
+                    continue
                 if action == "strike":
-                    client.table(TABLE).update({"missing_count": strikes,
-                                                "last_liveness_probe_at": now_iso}).eq("id", row["id"]).execute()
+                    _execute(client.table(TABLE).update({"missing_count": strikes,
+                                                         "last_liveness_probe_at": now_iso})
+                             .eq("id", row["id"]), what="dealapp strike")
                     stats["struck"] += 1
                 elif action == "deactivate":
-                    client.table(TABLE).update(
+                    _execute(client.table(TABLE).update(
                         {"missing_count": strikes, "active": False,
-                         "last_liveness_probe_at": now_iso}).eq("id", row["id"]).execute()
+                         "last_liveness_probe_at": now_iso}).eq("id", row["id"]), what="dealapp kill")
                     stats["deactivated"] += 1
 
         # ── Per-row evidence (dealapp_liveness_detail, migration 20260831004139) ──────────────────
@@ -273,9 +544,10 @@ def main() -> int:
                 "verdict": {"strike": "strike", "deactivate": "kill"}.get(action, "unknown"),
                 "missing_count_before": int(row.get("missing_count") or 0),
                 "missing_count_after": strikes,
-                "applied": bool(args.apply and trusted and action in ("strike", "deactivate")),
+                "applied": bool(writes_ok and trusted and action in ("strike", "deactivate")
+                                and row["id"] not in held_alive),
             }
-            for row, action, strikes, st in pending
+            for row, action, strikes, st, _read in pending
             if action != "reset"
         ]
         for i in range(0, len(detail_rows), 500):
@@ -286,14 +558,20 @@ def main() -> int:
                 print(f"⚠ detail-log insert failed (non-fatal, {len(chunk)} rows): "
                       f"{str(exc)[:160]}", flush=True)
 
+        print(f"BRACKETED no-listing renders among struck rows ({len(bracketed)}): "
+              f"{' '.join(bracketed)}", flush=True)
         note = (f"{'APPLY' if args.apply else 'DRY-RUN'} "
                 f"egress={'proxy' if proxy_url else 'ci'} "
                 f"requests={budget.used}{f'/{budget.cap}' if budget.cap else ''} "
                 f"scanned={stats['scanned']} "
                 f"alive={stats['alive']} dead={stats['dead']} unknown={stats['unknown']} "
                 f"verified={stats['verified']} strike={stats['struck']} "
-                f"inactivated={stats['deactivated']} sitemap_ids={stats['sitemap_ids']}"
-                + ("" if trusted else " | QUARANTINED: verified-rate too low, no deactivation written"))
+                f"inactivated={stats['deactivated']} held_alive={stats.get('held_alive', 0)} "
+                f"sitemap_ids={stats['sitemap_ids']} "
+                f"canary_live={canary['live']}/{canary['live_n']} "
+                f"canary_bogus={'ALIVE!' if canary['bogus_alive'] else 'not-alive'} "
+                f"bracketed_none={len(bracketed)} bracketed_dead={stats['bracketed_dead']}"
+                + ("" if trusted else " | QUARANTINED: verified-rate or canary failed, no deactivation written"))
         print(note, flush=True)
         end_run(run_id, ok=True, rows_seen=stats["scanned"],
                 rows_upserted=stats["verified"] + stats["deactivated"],

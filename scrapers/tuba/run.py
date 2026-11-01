@@ -265,8 +265,8 @@ DETAIL, MEASURED
     a published 0 as False and a silent field as None (29 rows publish a count).
   · `land_area`, `size_prefix`, `land_area_size_postfix`, `virtual_tour`, `video_url` and
     `bedrooms` are null on all 4,424 and are not read.
-  · Coordinates are published (`address_latitude`/`address_longitude` on every row) but the
-    listing tables carry no coordinate columns, so they are not stored.
+  · Coordinates are published (`address_latitude`/`address_longitude` on every row). Since
+    2026-10-10 (backlog 312) they travel in additional_info.latitude/longitude, which the index reads.
 """
 from __future__ import annotations
 
@@ -286,6 +286,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://tuba.com.sa"
 API = f"{BASE}/test/properties"          # the site's own ajax url — see the docstring
@@ -394,6 +395,17 @@ def _pos(v) -> Optional[int]:
     return n if n and n > 0 else None
 
 
+def _area(v) -> Optional[int]:
+    """The source's m² to the nearest whole metre (area_m2 is an integer column, backlog #123), as the rest
+    of the fleet rounds. `_pos` truncates: 18258569's «232.8 م²» was stored 232, below a customer's 233."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    n = int(f + 0.5)
+    return n if f > 0 and n > 0 else None
+
+
 def _num(v) -> Optional[int]:
     """A source-published number, 0 INCLUDED. Used for `bathrooms`, which the source RENDERS at 0
     («0 حمامات» on the card, «الحمامات : 0» in the detail table) — so 0 is its published answer."""
@@ -445,6 +457,19 @@ def rega(rec: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         return {}
     return out if isinstance(out, dict) else {}
+
+
+def _prose_amenities(utilities: list[str], desc: Optional[str]) -> dict[str, bool]:
+    """amenities_from_text over the utilities + ad body, plus the floor-details block's labelled
+    «المطابخ: N» count (normalize.kitchen_from_count); prose that contradicts a count drops the key."""
+    out = normalize.amenities_from_text(f"{'، '.join(utilities)}\n{desc or ''}")
+    kc = normalize.kitchen_from_count(desc)
+    if kc is not None:
+        if "kitchen" in out and out["kitchen"] != kc:
+            out.pop("kitchen")
+        else:
+            out["kitchen"] = kc
+    return out
 
 
 def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
@@ -521,7 +546,7 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "title": _scrub(title, names),
         "description": desc,
         # Prose amenities FIRST so the structured REGA utilities below always win.
-        **normalize.amenities_from_text(f"{'، '.join(utilities)}\n{desc or ''}"),
+        **_prose_amenities(utilities, desc),
         # Positive-only: a utility the source omits stays NULL. «لايوجد خدمات» names no specific
         # service, so it sets nothing False (open question).
         **{_UTILITY_COLS[w]: True for w in utilities if w in _UTILITY_COLS},
@@ -536,7 +561,7 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "region_id": region_id,
         "district_ar": district_ar,
         "neighborhood": district_raw,
-        "area_m2": _pos(rec.get("property_area")),
+        "area_m2": _area(rec.get("property_area")),
         # `bedrooms` is DELIBERATELY absent: `property_rooms` is REGA's numberOfRooms — total rooms
         # (trap 3). It is kept in additional_info and raised as an open question.
         "bathrooms": _num(rec.get("bathrooms")),
@@ -610,6 +635,11 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "source_rent_type": _clean(rec.get("rent_type")),
         "source_status": _clean(rec.get("status")),
         "popularity": rec.get("popularity"),                   # NOT read as views_count
+        # The ad's OWN map pin (backlog 312), via the one shared gate; the index reads these keys.
+        # Measured 2026-10-10: the pin is the REGA licence's location.latitude/longitude (all 3,850
+        # stored captures carry it); the listing's address_latitude/longitude is the fallback.
+        **(pin_dict((ar.get("location") or {}).get("latitude"), (ar.get("location") or {}).get("longitude"))
+           or pin_dict(rec.get("address_latitude"), rec.get("address_longitude"))),
     }
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v is not None})
     # The capture is PRIVATE, but "private" is not "may accumulate contact details". Both payloads
@@ -703,9 +733,12 @@ def _signal(status, body, _moved) -> Optional[str]:
 
 def _make_verify_gone(control: Optional[dict]):
     url_for = stored_listing_url((RES_TABLE, COM_TABLE))
+    # ONE session for every read of this run: session() per read paid a fresh TLS handshake per
+    # listing, which is what kept tuba's 4,345 ads from fitting the daily direct check's budget.
+    s = session()
 
     def probe(ad_number: str, canary=None):
-        return LivenessProbe(platform=SLUG, signal=_signal, session=session,
+        return LivenessProbe(platform=SLUG, signal=_signal, session=lambda: s,
                              url_for=url_for, canary=canary).verify_gone(ad_number)
 
     def canary() -> tuple[bool, str]:

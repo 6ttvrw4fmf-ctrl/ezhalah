@@ -22,6 +22,7 @@
 //
 //   node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-loc-classify-postgrest-latency.ts
 
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL || "https://aannarbkwcymrotzwdbo.supabase.co";
 // Public by design (same key hardcoded in scripts/agent-surface.sh's `smoke` verb and shipped in
 // the app bundle) — used only as a fallback so this check can never be skipped for want of a

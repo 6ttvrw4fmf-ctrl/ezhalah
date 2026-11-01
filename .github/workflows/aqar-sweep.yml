@@ -17,10 +17,15 @@ concurrency:
   group: aqar-sweep
   cancel-in-progress: true
 
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   sweep:
     name: Sweep ${{ matrix.city }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 50
     strategy:
       fail-fast: false   # one city failing doesn't kill the others
@@ -143,6 +148,10 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_WORKERS: "10"
           SCRAPE_MIN_INTERVAL: "0.15"
+          # Opt-in for http.get()'s block escape (2026-09-28): used ONLY after chrome124, safari17_0,
+          # firefox133 and edge101 have all been refused direct, then pinned per host for the run.
+          # Run 36360844470 fetched 0 pages on all 95 cities with the direct route alone.
+          SCRAPE_PROXY_FALLBACK_URL: ${{ secrets.WASALT_PROXY_URL }}
         run: |
           exec python -m scrapers.aqar.run_residential \
             --all-residential \

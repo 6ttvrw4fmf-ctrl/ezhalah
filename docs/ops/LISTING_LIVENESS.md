@@ -74,8 +74,12 @@ by `scripts/verify-liveness-contract.ts`.
 - **`ADJUDICATED`** — a human or a recorded adjudication decided. Never auto-reactivates.
 
 A `DEAD` verdict on DIRECT evidence adds **one strike**. Deactivation happens only when strikes
-reach the platform's `grace` (3 everywhere today) — i.e. **three consecutive direct dead readings**,
-never one. `decide()` is the single origin of every deactivation, and it writes an auditable reason
+reach the platform's `grace` (3 almost everywhere) — i.e. **three consecutive direct dead readings**,
+never one. **Exception — remove on first sight (owner 2026-10-20: «once we see it, remove it»):** a
+platform whose own page/record states the removal affirmatively for THIS listing runs `grace = 1` —
+today `sakan` («هذا العقار لم يعد متاحاً» on the ad's own page). `aldarim` stays at 3: it is a
+FLEET_DAILY_DIRECT site, whose daily revisit hides on three direct readings by design. Absence still never kills and UNKNOWN still holds; only the
+wait for a second and third identical reading is dropped. Migration `20261020183753`. `decide()` is the single origin of every deactivation, and it writes an auditable reason
 string (`source_confirmed_dead:direct:strikes=3/3`).
 
 ## 3. "Seen by the crawler" and "proven alive" are different facts, stored in different columns
@@ -97,8 +101,20 @@ added to remove: it puts a confident, recent-looking timestamp on inventory nobo
 `scripts/verify-liveness-registry-mirror.ts` fails on any hand-written stamp under `scrapers/`.
 
 `presence_patch()` exists for the one case where a platform's source presence is *explicitly
-defined* as positive evidence. No platform declares that today, and `LivenessPolicy` raises if
-`absence_is_candidate_only` is disabled.
+defined* as positive evidence. **Two owner decisions declare it, both 2026-10-02.** (1) Wasalt: a row
+Wasalt's own search results serve is stamped verified-alive by the crawl. (2) The
+`SOURCE_LIST_PRESENCE` tier («yes do that for all 60 sites … check them every single day»): for a
+small site admitted BY NAME in `liveness_policies.SOURCE_LIST_DAILY`, whose crawl re-reads the site's
+own complete list every day, a row that list serves is stamped verified-alive, 48 h window. A site
+is admitted only after its crawler was read twice (the second reader trying to break the verdict)
+and found unable to upsert an active row it did not observe at the source in that run, or one the
+source marks unavailable; 33 were admitted that day and the rest carry their reason in
+`scrapers/lifecycle-gaps.txt`. A site with an oracle is never moved there. For Wasalt: The
+measurement behind the decision is in `liveness_policies.py`, and every enum-strike run re-tests it
+with 30 directly-read in-feed controls (flips abort under 90% live). It changes what counts as
+*verified*, never what counts as *dead*: removal still needs a DIRECT gone reading, and
+`LivenessPolicy` raises if `absence_is_candidate_only` is disabled. No other platform may declare
+it without an owner decision recorded here.
 
 ## 4. Every production-searchable platform must declare a strategy
 
@@ -111,6 +127,7 @@ directory has no policy.
 |---|---|---|
 | `DIRECT_REVISIT` | we periodically re-fetch each listing's own URL | **yes**, if coverage keeps up |
 | `CANDIDATE_PLUS_DIRECT` | an absence signal picks candidates cheaply; each gets a DIRECT confirm before anything is deactivated | **yes** |
+| `SOURCE_LIST_PRESENCE` | the crawl re-reads the site's own complete list every day; a row that list serves is stamped verified (48 h). Admitted by name, owner decision 2026-10-02 | **yes for "is it still offered"**; removal still needs three complete-crawl misses |
 | `CRAWL_PRESENCE_ONLY` | we only know the ad was in the crawl | **no — recorded as a KNOWN GAP** |
 
 `CRAWL_PRESENCE_ONLY` is not an approved design. It is an honest label on 25 small platforms
@@ -160,6 +177,20 @@ consumer to it is an owner decision, not a code change.
 
 Until then the ramp monitor is what keeps this honest: dealapp coverage will not increase, the
 monitor will say so, and nobody has to remember.
+
+**Correction, 2026-09-28 (measured from a home IP): it was never egress — it is dealapp's view
+quota.** An anonymous IP gets ~10 fresh ad renders a minute; past that dealapp renders its
+registration page («صفحة التسجيل», 86,728 bytes) in place of the ad (its API: 429
+`error.tooManyAdsViewed`, then 401 `error.user.blocked`), and CloudFront keeps that page under the
+ad's own URL for days. A home IP at the same burst rate gets the same walls; a CI runner at the
+same pace gets real pages. Every failed sample of the 2026-09-28 12-shard crawl was that page, so
+~75% of the catalogue went unseen and the prune guard tripped nightly. The removed ad is a different
+page — dealapp's generic shell, byte-identical to a made-up id, which a browser bounces to the home
+page (API 403 `error.ad.unauthorized` / 410 `error.ad.notFound`). So: every fetcher now spends one
+rolling-minute budget of origin renders (`liveness.OriginBudget`), reads past a cached wall through
+another spelling of the URL, and the crawl counts the no-listing page as a removal only when the
+same runner rendered a live ad just before and just after it (`run.confirmed_absent`). A lone shell
+is still never a death.
 
 ### 5.2 The proxy was measured, not assumed — and it is not the answer
 
@@ -590,6 +621,10 @@ recorded every sweep (`aqar_liveness_detail.verdict = 'unknown_soft_closed'`, mi
 `20260925072159`) and counted in the run summary, so the disarmed oracle cannot be mistaken for a
 silent one. `AQAR_SOFT_CLOSE_ARMED=1` lets it strike and kill under aqar's declared 3-strike / 48h
 grace once the owner has approved the volume.
+
+**ARMED 2026-09-28 (owner: «yes if they are removed»).** 9,133 rows read `unknown_soft_closed` in the
+prior 48 h; 6/6 sampled pages showed «محذوفة» (5) or «مغلق» (1) in a real browser. Both aqar-liveness.yml
+jobs set `AQAR_SOFT_CLOSE_ARMED=1`.
 
 **The general rule this platform paid for: a liveness oracle that parses RENDERED MARKUP has a
 silent expiry date set by someone else's frontend team.** Prefer the source's own state field.

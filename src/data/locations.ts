@@ -6,9 +6,11 @@
 // first with English fallbacks. (PRD §5.1, prototype matchLocations — extended to nationwide data.)
 
 import raw from './sa-locations.json';
+import { norm, catalogCityExtras, catalogDistrictExtras, isLatinQuery, latinRank, populatedDistrictRows, orderCityBoxRows, cityOutweighsDistricts, liveDistrictKey, type CatalogCity, type CatalogDistrict, type LiveDistrictRow } from '../lib/locationSuggest';
 import { supabase } from '@/lib/supabase';
 import { CITY_AR_DISPLAY, CITY_TOKENS, cityTokensReverseLookup } from '@/lib/cityDisplay';
 import { arabicOrPlaceholder, cutPlaceName } from '@/lib/arabicText';
+import { translitPlace } from '@/lib/translitPlace';
 import { LOCATION_UNRESOLVED_AR } from '@/i18n';
 import type { Category, Deal } from './taxonomy';
 
@@ -73,6 +75,64 @@ for (const [id, en, ar] of DATA.regions) REGION_BY_ID.set(id, { en, ar });
 const CITY_BY_ID = new Map<number, { en: string; ar: string; regionId: number }>();
 for (const [id, regionId, en, ar] of DATA.cities) CITY_BY_ID.set(id, { en, ar, regionId });
 
+// The built-in catalog as plain arrays for the instant typed matchers (src/lib/locationSuggest.ts): every city and
+// every district of every city, in memory, so typing never waits for a pool and never hides a real place.
+const CATALOG_CITIES: CatalogCity[] = DATA.cities.map(([id, regionId, en, ar]) => ({
+  cityId: id, cityAr: ar, regionId, regionAr: REGION_BY_ID.get(regionId)?.ar ?? null, cityEn: en,
+}));
+const AMBIGUOUS_CITY_NAMES: ReadonlySet<string> = (() => {
+  const seen = new Set<string>();
+  const dup = new Set<string>();
+  for (const c of CATALOG_CITIES) { const n = norm(c.cityAr); if (seen.has(n)) dup.add(n); else seen.add(n); }
+  return dup;
+})();
+const CATALOG_DISTRICTS_BY_CITY = new Map<number, CatalogDistrict[]>();
+// The official English district names end in " Dist."; the English District field shows the bare name, as the
+// Arabic one shows «النرجس», not «حي النرجس».
+const bareDistEn = (en: string) => en.replace(/\s*\bDist\.?$/i, '').trim();
+for (const [cityId, , en, ar] of DATA.districts) {
+  const d: CatalogDistrict = { cityId, districtAr: ar, districtEn: bareDistEn(en) };
+  const list = CATALOG_DISTRICTS_BY_CITY.get(cityId);
+  if (list) list.push(d);
+  else CATALOG_DISTRICTS_BY_CITY.set(cityId, [d]);
+}
+
+// ENGLISH NAMES for the English UI (owner 2026-10-09): the official names above, by id. Display only — a picked
+// row still carries its Arabic name into the search, so English changes what the user reads, never what is found.
+// A place the catalog does not carry falls back to the transliteration the result cards already use.
+export const cityNameEn = (cityId: number, cityAr: string): string => CITY_BY_ID.get(cityId)?.en ?? translitPlace(cityAr);
+export const regionNameEn = (regionId: number | null, regionAr: string | null): string | null =>
+  (regionId != null ? REGION_BY_ID.get(regionId)?.en : undefined) ?? (regionAr ? translitPlace(regionAr) : null);
+let _districtEn: Map<string, string> | null = null;
+const districtEnKey = (cityId: number, ar: string) => `${cityId}:${stripAl(stripDistrictWord(norm(ar)))}`;
+let _districtKeys: Set<string> | null = null;
+/** Every catalog district, keyed per city exactly like districtEnMap (folded, «حي» and «ال» dropped). */
+function districtEnKeys(): Set<string> {
+  if (!_districtKeys) {
+    _districtKeys = new Set();
+    for (const list of CATALOG_DISTRICTS_BY_CITY.values()) for (const d of list) _districtKeys.add(districtEnKey(d.cityId, d.districtAr));
+  }
+  return _districtKeys;
+}
+function districtEnMap(): Map<string, string> {
+  if (!_districtEn) {
+    _districtEn = new Map();
+    for (const list of CATALOG_DISTRICTS_BY_CITY.values()) {
+      for (const d of list) if (d.districtEn) _districtEn.set(districtEnKey(d.cityId, d.districtAr), d.districtEn);
+    }
+  }
+  return _districtEn;
+}
+export function districtNameEn(cityId: number, districtAr: string): string {
+  return districtEnMap().get(districtEnKey(cityId, districtAr)) ?? translitPlace(districtAr.replace(/^حي\s+/, ''));
+}
+// OFFICIAL English names only — null where the catalog has none (no transliteration). For sentences a person
+// reads as English (the home headline's facts, owner 2026-10-22): «Drh Al Arws» is not English; such a fact
+// is skipped instead.
+export const cityNameEnOfficial = (cityId: number): string | null => CITY_BY_ID.get(cityId)?.en ?? null;
+export const districtNameEnOfficial = (cityId: number, districtAr: string): string | null =>
+  districtEnMap().get(districtEnKey(cityId, districtAr)) ?? null;
+
 // ---------------------------------------------------------------------------------------------
 // Normalization + search keys
 // ---------------------------------------------------------------------------------------------
@@ -82,26 +142,8 @@ for (const [id, regionId, en, ar] of DATA.cities) CITY_BY_ID.set(id, { en, ar, r
 // stripAl/stripDistrictWord downstream + this fold, so every match-time comparison a user's
 // typing hits (district picker, city picker, chat resolver, listing safety-net) tolerates the
 // same spellings the DB does. Display text is never routed through this. Latin preserved.
-const norm = (s: string) =>
-  s
-    .toLowerCase()
-    .replace(/[ً-ٟ]/g, '')
-    .replace(/ـ/g, '')
-    .replace(/[أإآٱ]/g, 'ا')
-    .replace(/ة/g, 'ه')
-    .replace(/[ىي]/g, 'ي')
-    .replace(/ئ/g, 'ي')
-    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
-    .replace(/ء/g, '')
-    .replace(/[^\p{L}\p{N}]/gu, '')
-    // Number fold, EITHER END — mirrors norm_district_tok (migration 20260914204035, owner
-    // 2026-09-14: «in our district catalog… we don't include numbers. We just match it with ours»).
-    // Our picker now offers «المحمدية» for المحمدية 1/2/3, so a user who types the «المحمدية 2» they
-    // read off a card — in the picker box or to the agent — must still land on it. Separators are
-    // already gone by this line, so the DB's space-separated number is a digit run here. Leading
-    // matters: «1النرجس» is real production data (city 67, 9 listings).
-    .replace(/^[0-9]+/, '')
-    .replace(/[0-9]+$/, '');
+// `norm` lives in the pure module so a barrier can execute it (src/lib/locationSuggest.ts).
+
 // Drop a leading definite article so "narjis" matches "Al Narjis" / "النرجس".
 const stripAl = (s: string) => s.replace(/^al/, '').replace(/^ال/, '');
 // Drop the district word ("حي" / "District" / "Dist") wherever it sits in a NORMALIZED query —
@@ -142,6 +184,8 @@ type Key = { k: string; lead: boolean };
 
 const ARTICLE = new Set(['al', 'ال']);
 const DISTRICT_WORD = new Set(['district', 'dist', 'حي']);
+// The user SAID it is a district («حي X», «X district») — X must not be read as a town.
+const DISTRICT_MARKER = /(?:^|\s)(?:حي|district|dist\.?|neighbou?rhood)(?:\s|$)/i;
 
 function pushKey(map: Map<string, boolean>, k: string, lead: boolean) {
   if (!k) return;
@@ -700,6 +744,14 @@ export type CityOption = {
   // Set at pool-build by applyClusterUnion(); Trending collapses a cluster to ONE row while
   // autocomplete keeps every member. See the cluster block below.
   clusterKey?: string;
+  // false = this row came from the built-in catalog while the scoped pool is not loaded (or does not carry
+  // the place): its count is UNKNOWN, so the UI prints no number and no «nothing here» claim (2026-10-03).
+  scopeKnown?: boolean;
+  // Set on a «حي X · City» row (owner decision 2026-10-19, backlog 522/566): the customer typed a DISTRICT name into the
+  // city box and this served district carries it; tapping the row selects the city AND the district. `districtMatchValues`
+  // = every raw spelling the index serves for it (twin-safe recall, like DistrictOption). Never set on a plain city row.
+  districtAr?: string;
+  districtMatchValues?: string[];
 };
 
 // Keyed by Deal ('Buy'/'Rent') — the Top-6 + typed-autocomplete pool is scoped to the deal the user
@@ -1016,6 +1068,25 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
   return p;
 }
 
+// The six cities every scope ranks at the top; only their NAMES are used, as a stand-in until the real pool loads.
+const PROVISIONAL_TOP_CITY_NAMES = ['الرياض', 'جدة', 'مكة المكرمة', 'المدينة المنورة', 'الدمام', 'الخبر'];
+function provisionalTopCities(k: number): CityOption[] {
+  let biggest: CityOption[] | undefined;
+  for (const v of CITY_FIELD_POOLS.values()) if (v.length > (biggest?.length ?? 0)) biggest = v;
+  // Another scope's pool, in that scope's order (so the rows do not re-order much when the exact pool arrives).
+  // A name two real cities share (الهفوف) is held back, exactly as in matchCitiesByText: the first row a user taps
+  // must never be the wrong city.
+  const rows = biggest
+    ? collapseClustersForTrending(biggest).filter((c) => c.listingCount > 0 && !AMBIGUOUS_CITY_NAMES.has(norm(c.cityAr)))
+    : PROVISIONAL_TOP_CITY_NAMES.flatMap((name) => {
+        const n = norm(name);
+        if (AMBIGUOUS_CITY_NAMES.has(n)) return [];
+        const c = CATALOG_CITIES.find((x) => norm(x.cityAr) === n);
+        return c ? [{ ...c, listingCount: 0, totalInCohort: 0 }] : [];
+      });
+  return rows.slice(0, k).map((o) => ({ ...o, listingCount: 0, scopeKnown: false }));
+}
+
 // Shown immediately when the City field is focused with no text typed yet.
 // `types` (and every param before it) is REQUIRED, not defaulted — a compile-time barrier
 // (owner P1, 2026-08-18) against the exact bug class found live: 7 call sites in index.tsx silently
@@ -1025,7 +1096,11 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
 // call site must now pass its cohortTypesAr(query) explicitly; TypeScript refuses to compile a caller
 // that forgets it, so this class of drift can never silently reappear. [[cohortTypesAr]]
 export function topCitiesByListings(deal: Deal | null, periodTok: string | null, category: Category | null, k: number, types: string[] | null, af: AfParams | null): CityOption[] {
-  const pool = CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af)) ?? [];
+  const pool = CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af));
+  // THE SCOPED POOL IS NOT LOADED (first tap on a cold page, or a filter just changed; the counting RPC took 6-14 s
+  // while the hourly jobs ran): show city names NOW and let the numbers pop in when the pool arrives, like the typed
+  // list (owner 2026-10-03). Counts are zero and scopeKnown:false so the UI prints no number and no "nothing here".
+  if (pool === undefined) return provisionalTopCities(k);
   // Trending: one row per cluster (via its representative), each already carrying the union count
   // it clicks to; autocomplete (matchCitiesByText) still offers every member.
   return collapseClustersForTrending(pool).filter((c) => c.listingCount > 0).slice(0, k);
@@ -1044,6 +1119,7 @@ export type DistrictOption = {
   totalInCity: number;   // ALL eligible listings in this city+cohort, INCLUDING no-district rows —
                          // the % means "share of what clicking the CITY returns", so the honest
                          // denominator counts the unknown-district remainder too (owner, 2026-08-15)
+  scopeKnown?: boolean;  // false = borrowed from another scope's pool or the built-in catalog: count UNKNOWN (2026-10-03)
 };
 
 // Keyed by `${cityId}:${deal}:${category}` — District is category-aware (unlike the City pool
@@ -1151,24 +1227,54 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal | null, c
 // `types` (and every param before it) is REQUIRED — same compile-time barrier as topCitiesByListings
 // above, guarding the district pool's read-back cache key. [[cohortTypesAr]]
 export function topDistrictsForCityId(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, k: number, types: string[] | null, scope: AfParams | null): DistrictOption[] {
-  return (_districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types, scope)) ?? []).filter((d) => d.listingCount > 0).slice(0, k);
+  const exact = _districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types, scope));
+  if (exact !== undefined) return exact.filter((d) => d.listingCount > 0).slice(0, k);
+  // Scoped pool not loaded: the district NAMES of this city do not depend on the scope, so show them from any pool
+  // already cached for the city, count-unknown, and let the numbers pop in on arrival (owner 2026-10-03). A city
+  // nobody has loaded yet still waits: there is no honest ranking to show before the first load.
+  for (const [key, v] of _districtCache) {
+    if (key.startsWith(`${cityId}:`) && v.length) {
+      return v.filter((d) => d.listingCount > 0).slice(0, k).map((d) => ({ ...d, listingCount: 0, scopeKnown: false }));
+    }
+  }
+  return [];
 }
 
 // Typing: search the COMPLETE canonical catalog for THIS city (incl. zero-listing districts) by Arabic
 // substring, using the SAME norm() folding as the city field. Empty query → the Top-6 suggestions.
 // `types` REQUIRED — same compile-time barrier as topCitiesByListings above. [[cohortTypesAr]]
 export function matchDistrictsByCityId(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, query: string, types: string[] | null, scope: AfParams | null): DistrictOption[] {
-  const all = _districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types, scope)) ?? [];
+  const key = districtCacheKey(cityId, deal, category, periodTok, types, scope);
+  const exact = _districtCache.get(key);
   const q = norm(query);
-  if (!q) return all.filter((d) => d.listingCount > 0).slice(0, 6);
+  if (!q) return (exact ?? []).filter((d) => d.listingCount > 0).slice(0, 6);
+  // THE SCOPED POOL IS NOT LOADED YET (a filter just changed, or the city was just picked): do not make the user
+  // wait for it. The district NAMES do not depend on the scope, only the counts do, so borrow the names (and their
+  // spelling variants) from any pool already cached for this city and flag them count-unknown; the catalog below
+  // covers a city nobody has loaded yet. Both swap for the real counts the moment the pool arrives (2026-10-03).
+  let all: DistrictOption[] = exact ?? [];
+  if (exact === undefined) {
+    for (const [k, v] of _districtCache) {
+      if (k.startsWith(`${cityId}:`) && v.length) { all = v.map((d) => ({ ...d, listingCount: 0, scopeKnown: false })); break; }
+    }
+  }
   const scored: { opt: DistrictOption; rank: number }[] = [];
+  const latin = isLatinQuery(query); // English UI: match the English name (Arabic UI never sends Latin here)
   for (const opt of all) {
+    if (latin) { const r = latinRank(query, districtNameEn(cityId, opt.districtAr)); if (r !== null) scored.push({ opt, rank: r }); continue; }
     const n = norm(opt.districtAr);
     if (n.startsWith(q)) scored.push({ opt, rank: 0 });
     else if (n.includes(q)) scored.push({ opt, rank: 1 });
   }
   scored.sort((a, b) => a.rank - b.rank || b.opt.listingCount - a.opt.listingCount);
-  return scored.slice(0, 30).map((s) => s.opt);
+  const fromPool = scored.slice(0, 30).map((s) => s.opt);
+  // Every district of the city stays findable: catalog names the pool does not carry are appended (zero listings
+  // in this scope when the pool is loaded; count unknown otherwise), inside the same 30-row render cap the live-count
+  // fetch covers (verify-district-counts-honest).
+  const extras = catalogDistrictExtras(query, CATALOG_DISTRICTS_BY_CITY.get(cityId) ?? [], cityId, new Set(all.map((d) => norm(d.districtAr))), 30 - fromPool.length).map((d): DistrictOption => ({
+    districtAr: d.districtAr, listingCount: 0, matchValues: [d.districtAr], totalInCity: 0, scopeKnown: exact !== undefined,
+  }));
+  return [...fromPool, ...extras];
 }
 
 // Arabic-only prefix/substring match against city names, for the typed-autocomplete state. Reuses
@@ -1177,17 +1283,92 @@ export function matchDistrictsByCityId(cityId: number, deal: Deal | null, catego
 // normalize_ar() applies — so "الري" matches "الرياض" exactly like a DB-side search would. Ranks
 // exact-prefix matches before substring matches, then by listing count (bigger cities first).
 // `types` REQUIRED — same compile-time barrier as topCitiesByListings above. [[cohortTypesAr]]
+// location_index_live rows as the city box's «حي X · City» candidates (owner decision 2026-10-19, backlog 522/566): the
+// index names the city by its English DB label («Khobar», «Riyadh»), which is mapped to the catalog id the same way
+// placeHasInventory does (the label itself, else CITY_AR_DISPLAY → the Arabic name). A label that lands on two catalog
+// cities (the الهفوف twins) or on none contributes no row: a district row must never select the wrong city.
+// Memoised against the index array itself: ensureLocationIndex replaces LIVE_DISTRICTS on every (re)load, so the rows
+// follow it without that function having to know about this one (its failure-path barrier lifts it on its own).
+let _liveDistrictRows: { src: LiveDistrict[]; rows: LiveDistrictRow[] } | null = null;
+function liveDistrictRows(): LiveDistrictRow[] {
+  if (_liveDistrictRows && _liveDistrictRows.src === LIVE_DISTRICTS) return _liveDistrictRows.rows;
+  const byEn = new Map<string, number[]>();
+  const byAr = new Map<string, number[]>();
+  for (const [id, c] of CITY_BY_ID) {
+    const ke = flatLoc(c.en); byEn.set(ke, [...(byEn.get(ke) ?? []), id]);
+    const ka = norm(c.ar); byAr.set(ka, [...(byAr.get(ka) ?? []), id]);
+  }
+  const idFor = new Map<string, number | null>();
+  const out: LiveDistrictRow[] = [];
+  for (const d of LIVE_DISTRICTS) {
+    const k = flatLoc(d.city);
+    let id = idFor.get(k);
+    if (id === undefined) {
+      const ids = byEn.get(k) ?? byAr.get(norm(CITY_AR_DISPLAY[k] ?? '')) ?? [];
+      id = ids.length === 1 ? ids[0] : null;
+      idFor.set(k, id);
+    }
+    if (id === null) continue;
+    const n = Number(d.n) || 0;
+    // Only a district our catalog knows for THAT city becomes a row (owner 2026-10-24): an address the advertiser
+    // typed («مكة المكرمة السعودية», «… شارع 60 مخطط ولي العهد») is not a district and is never offered.
+    if (n > 0 && d.district && districtEnKeys().has(districtEnKey(id, d.district))) out.push({ districtAr: d.district, cityId: id, n, key: liveDistrictKey(d.district) });
+  }
+  _liveDistrictRows = { src: LIVE_DISTRICTS, rows: out };
+  return out;
+}
+
 export function matchCitiesByText(deal: Deal | null, periodTok: string | null, category: Category | null, query: string, types: string[] | null, af: AfParams | null): CityOption[] {
   const q = norm(query);
   if (!q) return [];
+  const exactPool = CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af));
+  // THE SCOPED POOL IS NOT LOADED (cold start, or a filter just changed): the city NAMES do not depend on the scope,
+  // only the counts do, so borrow the biggest pool already cached under any other scope. Its order (by that scope's
+  // count) puts the cities that really have listings first, so the rows do not re-order when the exact pool arrives;
+  // its counts are hidden (scopeKnown:false) because they belong to another scope.
+  let basePool: CityOption[] | undefined = exactPool;
+  if (basePool === undefined) {
+    for (const v of CITY_FIELD_POOLS.values()) if (v.length > (basePool?.length ?? 0)) basePool = v;
+  }
+  const borrowed = exactPool === undefined && basePool !== undefined;
   const scored: { opt: CityOption; rank: number }[] = [];
-  for (const opt of CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af)) ?? []) {
+  const latin = isLatinQuery(query); // English UI: match the English name (Arabic UI never sends Latin here)
+  for (const opt of basePool ?? []) {
     const n = norm(opt.cityAr);
+    // A name two real cities share (الهفوف) ranks differently in every scope: while the exact pool is not loaded it
+    // is held back entirely, so the first row a user can tap is never the wrong one (a real-browser test caught it).
+    if (borrowed && AMBIGUOUS_CITY_NAMES.has(n)) continue;
+    if (latin) { const r = latinRank(query, cityNameEn(opt.cityId, opt.cityAr)); if (r !== null) scored.push({ opt, rank: r }); continue; }
     if (n.startsWith(q)) scored.push({ opt, rank: 0 });
     else if (n.includes(q)) scored.push({ opt, rank: 1 });
   }
   scored.sort((a, b) => a.rank - b.rank || b.opt.listingCount - a.opt.listingCount);
-  return scored.map((s) => s.opt);
+  const fromPool = scored.map((s) => (borrowed ? { ...s.opt, listingCount: 0, scopeKnown: false } : s.opt));
+  // EVERY real city stays findable (owner, 2026-10-03): the places the scoped pool does not carry come from the
+  // built-in catalog, instantly, after the pool's own ranked matches. When the pool is loaded the place simply has
+  // no listings in this scope (the UI says so); when it is not loaded yet its count is UNKNOWN (scopeKnown:false:
+  // no number, no «nothing here» claim) and fills in the moment the pool arrives.
+  // A city that carries the SAME NAME as one already listed (another الهفوف in another region, with no listings) adds no
+  // choice the user can tell apart, and renders as a twin row (a real-browser test tapped the wrong twin): it is not added.
+  const poolNames = new Set(fromPool.map((o) => norm(o.cityAr)));
+  const skipNames = exactPool === undefined ? new Set([...AMBIGUOUS_CITY_NAMES, ...poolNames]) : poolNames;
+  const extras = catalogCityExtras(query, CATALOG_CITIES, new Set(fromPool.map((o) => o.cityId)), 30, skipNames).map((c): CityOption => ({
+    cityId: c.cityId, cityAr: c.cityAr, regionId: c.regionId, regionAr: c.regionAr,
+    listingCount: 0, totalInCohort: 0, scopeKnown: exactPool !== undefined,
+  }));
+  // A typed DISTRICT name offers its populated «حي X · City» rows, ranked above the 0-served homonym cities (owner
+  // decision 2026-10-19, backlog 522/566: «البديعة» → حي البديعة · الرياض, «الراكة» → حي الراكة الجنوبية · الخبر).
+  const liveRows = populatedDistrictRows(query, liveDistrictRows(), 4);
+  const typedCity = cityOutweighsDistricts(scored.filter((sc) => sc.rank === 0).map((sc) => sc.opt.listingCount), liveRows);
+  const districtRows = (typedCity ? [] : liveRows).flatMap((r): CityOption[] => {
+    const cat = CITY_BY_ID.get(r.cityId);
+    if (!cat) return [];
+    return [{
+      cityId: r.cityId, cityAr: cat.ar, regionId: cat.regionId, regionAr: REGION_BY_ID.get(cat.regionId)?.ar ?? null,
+      listingCount: 0, totalInCohort: 0, scopeKnown: false, districtAr: r.districtAr, districtMatchValues: r.matchValues ?? [r.districtAr],
+    }];
+  });
+  return orderCityBoxRows(fromPool, districtRows, extras);
 }
 
 // True when two-or-more results in the given result set share the same display name — the ONLY
@@ -1195,7 +1376,8 @@ export function matchCitiesByText(deal: Deal | null, periodTok: string | null, c
 // duplicate city names, use the confirmed hidden region internally so the wrong city is never
 // selected." Most results are unambiguous and need no extra label.
 export function hasNameCollision(results: CityOption[], cityAr: string): boolean {
-  return results.filter((r) => r.cityAr === cityAr).length > 1;
+  // A «حي X · City» row names its city on purpose; it is not a second city of that name.
+  return results.filter((r) => !r.districtAr && r.cityAr === cityAr).length > 1;
 }
 
 // Converts a selected CityOption into the exact same LocationResolution shape resolveLocation()
@@ -1305,6 +1487,22 @@ export function cityHasListings(cityEn: string): boolean {
   return LIVE_CITIES.some((v) => v.city.toLowerCase() === lc && v.n > 0);
 }
 
+/** The location index's own count (ALL deals, ALL types) for exactly the place a search sent — the
+ *  «shelf» src/lib/shelfCheck.ts weighs a zero against. null = the index can't say. A mapping miss
+ *  (city label spelled differently) only UNDER-counts, which can never raise a false alarm. */
+export function liveShelfCount(lm: LocationResolution, districts?: string[]): number | null {
+  if (!_liveLoaded) return null;
+  const cities = new Set((lm.cities?.length ? lm.cities : [lm.city]).filter(Boolean).map((c) => c.toLowerCase()));
+  if (lm.kind === 'district' && districts?.length) {
+    const want = new Set(districts);
+    let n = 0;
+    for (const d of LIVE_DISTRICTS) if (want.has(d.district) && (!cities.size || cities.has(d.city.toLowerCase()))) n += Number(d.n) || 0;
+    return n;
+  }
+  if (lm.kind === 'city' && cities.size === 1) return LIVE_CITIES.find((c) => cities.has(c.city.toLowerCase()))?.n ?? null;
+  return null;
+}
+
 // A close city that DOES have inventory and the user might have meant — to offer an honest "did you
 // mean X?" when the place they named is real but empty (e.g. "القرص" = Al Qars, Tabuk, 0 listings; the
 // likely intent is "الرس" = Ar Rass, Qassim, 213). We SUGGEST a real alternative, never silently swap
@@ -1393,6 +1591,25 @@ function districtBridge(): Map<string, Set<string>> {
 // removed — so "Al Doha District, Yanbu" probes "al doha" (not the city). A bare city name probes to
 // empty → no district match (stays a city search). When a city is named we scope to it; otherwise a
 // district name shared by several cities returns all of them (the ambiguity case).
+// A district WORD's stem: the article is not part of the word (see the note in liveDistrictLookup).
+const districtStem = (w: string) => w.replace(/^(?:ال|al)/, '');
+/** Typo recovery for ONE district word, both sides already fuzzyFold-ed: same first letter, similar
+ *  length (±1), a small edit distance — compared on the STEMS, and only for a stem of 4+ letters.
+ *  Exported so scripts/verify-district-typo-never-floods.ts can execute it on real district names. */
+export function districtWordIsTypo(probeF: string, tf: string): boolean {
+  const ps = districtStem(probeF), ts = districtStem(tf);
+  if (ps.length < 4 || ts.length < 4) return false;
+  const maxD = ps.length <= 4 ? 1 : 2;
+  return ts[0] === ps[0] && Math.abs(ts.length - ps.length) <= 1 && editDistance(ts, ps) <= maxD;
+}
+
+// Live districts literally NAMED what the user typed (normDist equality — never a word inside a longer
+// name), strongest first. See «THE NAME AS TYPED WINS» in liveDistrictLookup.
+function liveNamedExactly(raw: string): LiveDistrict[] {
+  const typed = normDist(raw);
+  return typed.length < 2 ? [] : LIVE_DISTRICTS.filter((d) => normDist(d.district) === typed).sort((a, b) => b.n - a.n);
+}
+
 function liveDistrictLookup(raw: string): LiveDistrict[] {
   if (!LIVE_DISTRICTS.length) return [];
   const cityHit = matchLocations(raw).find((p) => p.kind === 'city');
@@ -1421,7 +1638,26 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   // 22 where 770 exist). 27 city spellings Kingdom-wide resolved to a district the same way.
   // (defect abha-city-rescope, 2026-08-23; barrier verify-city-never-rescoped-to-district.ts.)
   probe = cutPlaceName(cutPlaceName(probe, cityKey), cityKeyAr);
-  if (probe.length < 2) return []; // input is just a city (or nothing district-specific)
+  // THE NAME AS TYPED WINS (owner 2026-10-05, «never get this issue — or anything like it»). Typing every
+  // real district name into this resolver lost 538 of 3,297 (16,509 listings): a town's name hidden INSIDE
+  // the district's own name became the scope — «حي العقيق» (Riyadh, 1,545) searched the town العقيق,
+  // «حي العريجاء الغربية» (453) and «حي الشامية الجديد» found nothing. A district literally NAMED what the
+  // user wrote (EXACT name, never a word inside a longer one — «حي الرياض» must not pull «العليا الرياض»)
+  // is that district, so when the town-scoped path finds nothing — or the «town» swallowed the whole
+  // input after an explicit «حي» — fall back to those exactly-named districts, in whatever city they are.
+  // A bare city name with no «حي» still stays that city (EXACT LOCATION ONLY, defect abha-city-rescope).
+  const namedExactly = () => liveNamedExactly(raw);
+  if (probe.length < 2) return DISTRICT_MARKER.test(raw) ? namedExactly() : []; // input is just a city (or nothing district-specific)
+  if (cityKey) {
+    // The town was READ OUT OF the text — if the exact name typed lives only in OTHER cities, the town
+    // was part of the district's own name, not a scope («حي ام الحمام الغربي» is Riyadh's).
+    const named = namedExactly();
+    const inTown = (d: LiveDistrict) => {
+      const dc = flatLoc(d.city);
+      return dc === cityKey || dc === cityKeyAr || (!!cityKeyAr && flatLoc(CITY_AR_DISPLAY[dc] || '') === cityKeyAr);
+    };
+    if (named.length && !named.some(inTown)) return named;
+  }
   // Add the OTHER-script equivalents of the probe so a Latin query reaches Arabic-tagged districts and
   // vice-versa (the catalog provides the en↔ar pairing). (user: Al Olaya missed its Arabic listings.)
   const probeAlts = [probe, ...(districtBridge().get(probe) || [])];
@@ -1430,21 +1666,25 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   // or partial district token still hits — "Rakk" ≈ the "Rakah" in "Al Rakah Al Shamaliyah". Shared
   // first letter + a small edit distance keeps it tight. CAP at 2: a 3-edit gap on a short district
   // token is a different word, not a typo (the ±1 length guard below already rules most of them out).
-  const tokenMaxD = probeF.length <= 3 ? 1 : 2;
-  const fuzzyTokenHit = (district: string): boolean => {
-    if (probeF.length < 4) return false;
+  // THE ARTICLE IS NOT PART OF THE WORD (owner 2026-10-05, «حي الملك» → «لا نتائج»). The probe and every
+  // district token used to be compared WITH their «ال»: nearly every district word is «ال» + 3–4 letters,
+  // so «الملك» sat within 2 edits of الملقا, الملز, السلي, الأمل, المها, المجد, العمل… and ~40 unrelated
+  // districts Kingdom-wide were searched as «typos» of it (never substitute a different place —
+  // project_exact-location-only-rule). Typo recovery now compares the STEMS (article stripped) and only
+  // for a stem of 4+ letters — «الياسمن» still reaches «الياسمين»; a 3-letter stem like «ملك» never
+  // fuzzes (it still matches every district that really CONTAINS «الملك» through districtMatchesProbe).
+  // Returns the district WORD the typo was recovered to (its stem), or null.
+  const fuzzyTokenHit = (district: string): string | null => {
+    if (districtStem(probeF).length < 4) return null;
     for (const tok of district.split(/[^\p{L}\p{N}]+/u)) {
       const tf = fuzzyFold(tok);
       if (tf.length < 4 || ARTICLE.has(tf) || DISTRICT_WORD.has(tf)) continue;
-      if (tf === probeF) return true;
-      // Typo recovery: same first letter, SIMILAR length (±1), small edit distance. The length guard
-      // stops a longer DIFFERENT word from passing as a typo — «البلد»(5) vs «البلدية»(7) is a +2 suffix,
-      // a different word, not a typo, so it must NOT match. (paired with the word-aligned exact match.)
-      if (tf[0] === probeF[0] && Math.abs(tf.length - probeF.length) <= 1 && editDistance(tf, probeF) <= tokenMaxD) return true;
+      if (tf === probeF || districtWordIsTypo(probeF, tf)) return districtStem(tf);
     }
-    return false;
+    return null;
   };
   const out: LiveDistrict[] = [];
+  const typoHits: Array<{ d: LiveDistrict; word: string }> = [];
   for (const d of LIVE_DISTRICTS) {
     const nd = normDist(d.district);
     if (nd.length < 2) continue;
@@ -1453,7 +1693,9 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
     // query is matched on its Arabic form) OR fuzzy-match a word (typo recovery). Do NOT match the
     // reverse (probe contains raw) — that let a long English probe pull a SHORTER, different district
     // ("assafarat" ⊃ "assafa"). Raw Arabic is the source of truth; English is a helper alias. (user.)
-    if (!(probeAlts.some((p) => districtMatchesProbe(d.district, p)) || fuzzyTokenHit(d.district))) continue;
+    const exact = probeAlts.some((p) => districtMatchesProbe(d.district, p));
+    const typoWord = exact ? null : fuzzyTokenHit(d.district);
+    if (!exact && !typoWord) continue;
     if (cityKey) {
       // Bug-fix #11 (audit `liveDistrictLookup-canonical-mismatch`): the live index stores d.city in
       // English DB labels while the picker / catalog may pass cityKeyAr in Arabic. Route through
@@ -1464,8 +1706,15 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
       const dcAr = CITY_AR_DISPLAY[dc] || '';
       if (dc !== cityKey && dc !== cityKeyAr && flatLoc(dcAr) !== cityKeyAr) continue;
     }
-    out.push(d);
+    if (exact) out.push(d); else typoHits.push({ d, word: typoWord! });
   }
+  // SPELL-CHECK ONLY FIXES A WORD THAT DOESN'T EXIST, AND ONLY TO ONE WORD (owner 2026-10-05: «never get
+  // this issue — or anything like it»). Whatever districtWordIsTypo's thresholds become, a typo search can
+  // never fan out to several different districts: (1) a word that really exists as typed is searched
+  // exactly, never "corrected"; (2) a correction that could be two different words is a guess, not a fix
+  // — search nothing extra rather than a different place (project_exact-location-only-rule).
+  if (!out.length && new Set(typoHits.map((h) => h.word)).size === 1) out.push(...typoHits.map((h) => h.d));
+  if (!out.length && cityKey) return namedExactly(); // the «city» we scoped to was part of the district's own name
   out.sort((a, b) => b.n - a.n); // strongest (most listings) first
   return out;
 }
@@ -1574,8 +1823,13 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
   //    geography/lifestyle so a genuine place always wins over a loose keyword. Districts rank above
   //    the city in the matcher when the typed name IS a district, satisfying the priority order.
   const hit = matchLocations(raw)[0];
-  // A catalog DISTRICT wins (clean names + region context).
-  if (hit && hit.kind === 'district') {
+  // A catalog DISTRICT wins (clean names + region context) — unless it is only the catalog's nearest
+  // GUESS at a name that really exists, exactly as typed, in live inventory (owner 2026-10-05 sweep:
+  // «حي ام الحمام الغربي» (Riyadh) matched the catalog's «ذهبان الغربي» in خميس مشيط). Then the live
+  // merge below searches the name the user actually wrote.
+  const catalogGuessed = !!hit && hit.kind === 'district' && normDist(hit.nameAr) !== normDist(raw)
+    && normDist(hit.nameEn) !== normDist(raw) && liveNamedExactly(raw).length > 0;
+  if (hit && hit.kind === 'district' && !catalogGuessed) {
     // Bare-district ambiguity: if this district name recurs across SEVERAL cities in real inventory and
     // the user did NOT pin a city, ASK which city (inventory-first) instead of silently picking the
     // biggest. liveDistrictLookup already scopes to a city the user named — so «الروضة، جدة» stays
@@ -1586,12 +1840,22 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
       for (const d of liveCat) { const e = byCity.get(d.city) ?? { region: d.region, n: 0 }; e.n += d.n; byCity.set(d.city, e); }
       const entries = Array.from(byCity.entries()).sort((a, b) => b[1].n - a[1].n);
       const maxN = entries[0][1].n;
-      const strong = entries.filter(([, e]) => e.n >= Math.max(3, maxN * 0.15)).slice(0, 6);
+      const strong = entries.filter(([, e]) => e.n >= Math.max(Math.min(3, maxN), maxN * 0.15)).slice(0, 6);
       if (strong.length >= 2) {
         // Multi-city → the engine searches ALL `cities` (+ "multiple locations" notice) and the agent's
         // deterministic backstop asks «أي مدينة؟», listing these cities inventory-first.
         const allDistricts = Array.from(new Set(liveCat.map((d) => d.district)));
         return { raw, kind: 'district', city: strong[0][0], region: strong[0][1].region, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: allDistricts, cities: strong.map(([c]) => c), ambiguous: true, exact: true };
+      }
+      // THE INVENTORY OUTRANKS THE CATALOG'S FIRST GUESS (owner 2026-10-05 sweep). The catalog's first
+      // match is just one of several towns' «حي الصفا»; when the name as typed lives in ONE other city's
+      // inventory, that city's district is what the user named («الصفاء» → جدة's 369, not تبوك's الصفا;
+      // «حي العريض» → المدينة, not الرياض's «عريض»).
+      const [only, e] = strong[0];
+      const onlyAr = flatLoc(CITY_AR_DISPLAY[flatLoc(only)] || '');
+      if (flatLoc(only) !== flatLoc(hit.cityEn ?? '') && (!onlyAr || onlyAr !== flatLoc(hit.cityAr ?? ''))) {
+        const ds = Array.from(new Set(liveCat.filter((d) => d.city === only).map((d) => d.district)));
+        return { raw, kind: 'district', city: only, region: e.region, label: ds[0], districts: ds, cities: [], exact: true };
       }
     }
     // Single, unambiguous district. city/region are ENGINE-FACING (the engine's cityFilterFor only
@@ -1620,7 +1884,7 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
     }
     const entries = Array.from(byCity.entries()).sort((a, b) => b[1].n - a[1].n);
     const maxN = entries[0][1].n;
-    const strong = entries.filter(([, e]) => e.n >= Math.max(3, maxN * 0.15)).slice(0, 6);
+    const strong = entries.filter(([, e]) => e.n >= Math.max(Math.min(3, maxN), maxN * 0.15)).slice(0, 6);
     const allDistricts = Array.from(new Set(live.map((d) => d.district)));
     if (strong.length === 1) {
       const [cityName, e] = strong[0];

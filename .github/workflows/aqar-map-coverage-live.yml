@@ -1,0 +1,45 @@
+name: Aqar ad map — daily new-ad check
+
+# Owner 2026-10-18: «make sure automatically it knows if we have the pin — perfect; if not, we do the
+# boundaries». Every day this checks every Aqar / Aqar Monthly ad first seen in the last 26 hours and
+# sorts it into the map its ad page will show: pin → district border → city border → town named by the
+# ad's own sa.aqar.fm link. Any new ad that would show NO map turns this red and raises an alert.
+# Read-only, anon key, a handful of small requests.
+
+on:
+  schedule:
+    - cron: '41 6 * * *' # once a day
+  workflow_dispatch:
+
+concurrency:
+  group: aqar-map-coverage-live
+  cancel-in-progress: false
+
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  coverage:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Every new Aqar ad gets a map (pin, district, city or town)
+        run: node --experimental-strip-types scripts/check-aqar-map-coverage-live.ts --hours 26
+
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind journey_live_check_failed
+          --workflow aqar-map-coverage-live.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

@@ -16,7 +16,7 @@ area, rooms, REGA licence line). MEASURED 2026-09-24 (live API, every id fetched
   · Apex senanrealestate.sa 301s to www AND drops the path (/projects → /); BASE is the www host.
   · All 82 purpose=sell, product=office. Statuses: 75 available, 3 sold, 4 unavailable (a sold
     unit stays published with a «مباعة» badge → skipped `status_sold`). is_wafi_ad 1/82.
-  · Types: building_apartment 47 («شقة في عمارة» → Apartment), townhouse 26 (→ Villa, the fleet's
+  · Types: building_apartment 47 («شقة في عمارة» → Apartment), townhouse 26 (→ «تاون هاوس», the fleet's
     Townhouse fold), villa 5, floor 4. bedrooms 81/82, bathrooms 82/82, area 79/82 (+9 built_up_
     area, used as the printed م² when `area` is null — unit 44630 prints 438 م² from it).
   · PRICE: selling_price 82/82 (the unit price the page prints, e.g. 44630 «1,280,000 سعر البيع»).
@@ -51,6 +51,7 @@ from typing import Any, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.jawher.run import (  # noqa: E402
     API_PATH, ORACLE, fetch_detail, fetch_ids, make_verify_gone, nuzul_fields, session,
 )
@@ -76,6 +77,15 @@ def map_listing(d: dict[str, Any]) -> tuple[Optional[dict[str, Any]], str, str]:
     return row, category, ""
 
 
+def walk_session() -> tuple[Any, list[str]]:
+    """3 browser profiles DIRECT, then the residential proxy (when the job has it), each a fresh
+    session; the first the catalogue answers 200 is kept. 2026-10-20 (Scraping Engineer): the one
+    pinned chrome session read «no properties» on 4 runs from 10-19 while jawher/m3tmd (same engine,
+    same runner) were served — and the note never said what the host answered."""
+    return retry_smarter_session(f"{BASE}{API_PATH}?page=1&per_page=1",
+                                 headers=dict(session().headers))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -84,7 +94,8 @@ def main() -> int:
     ap.add_argument("--delay", type=float, default=0.4)
     args = ap.parse_args()
 
-    s = session()
+    s, route = walk_session()
+    print(f"{SOURCE}: route {' · '.join(route)}", flush=True)
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run(SLUG)
     res: list[dict] = []
@@ -93,7 +104,7 @@ def main() -> int:
     try:
         ids, complete = fetch_ids(s, BASE, limit=args.limit)
         if not ids:
-            raise RuntimeError(f"{BASE}{API_PATH} returned no properties")
+            raise RuntimeError(f"{BASE}{API_PATH} returned no properties (route {' '.join(route)})")
         print(f"{SOURCE}: {len(ids)} units discovered (complete={complete})", flush=True)
         for i, pid in enumerate(ids, 1):
             d, verdict = fetch_detail(s, BASE, pid)

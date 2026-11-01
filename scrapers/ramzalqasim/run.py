@@ -117,8 +117,28 @@ _PHONE_RE = re.compile(
 )
 _PHONE_LOOSE = re.compile(r"[\(\[\{«]{1,3}\s*0?5[\d\s\.\-]{7,}\s*[\)\]\}»]{1,3}")
 
-# Listing "gone" markers — sold/under_construction we mark inactive.
-GONE_AVAL = {"sold"}
+# Listing "gone" markers — sold/under_construction we mark inactive. The source's `avalible` enum is
+# available · sold · under_construction · in_prograss (measured 2026-09-28: 151 · 42 · 3 · 2).
+# under_construction is the office saying the unit is NOT BUILT YET (174: «الدبلوكسات تحت الانشاء»,
+# 95/173: «توثيق مراحل البناء», «بادر بحجز فلتك») — off-plan, which the product excludes (owner
+# 2026-09-13: only not-yet-built inventory is out). It was named in this comment but missing from the
+# set, so 3 off-plan units sat active. in_prograss is NOT here: neither page says what is in
+# progress (a sale? the build? the ad?) — both carry price 0 — so it is left for the owner.
+# 2026-10-20 (Scraping Engineer, owner order 10-19 for backlog 654: «show them as available ONLY if
+# the page itself offers them for sale/rent, otherwise keep them hidden»): the source's only
+# availability statement says NOT «available», the own /x/<id> page prints no availability and no
+# price (price 0), so nothing offers the unit → gone, through the same sold pin. HELD had left the two
+# old rows (RQ226, RQ262) ACTIVE and served at price 0 since 10-02 — held never removes a row.
+GONE_AVAL = {"sold", "under_construction", "in_prograss"}
+# ALLOWLIST (crawler audit 2026-10-02; re-measured the same day: available 151 · sold 42 ·
+# under_construction 3 · in_prograss 2, and the marker's `active`/`enabled` are 1 on all 198 —
+# furniture). GONE_AVAL alone was a denylist: in_prograss, a blank, or any new state (rented,
+# reserved) was upserted ACTIVE every run. The listing's own /x/<id> page prints no availability at
+# all (10 pages read: sold, available and in_prograss render the same), so `avalible` is the only
+# statement the source makes. A value that is neither available nor a confirmed gone state is HELD:
+# not written (never re-asserted alive), kept in the prune's seen-set (never aged out on a value
+# nobody can read), and counted in the run notes. in_prograss was classified 2026-10-20 (GONE_AVAL).
+AVAILABLE_AVAL = {"available"}
 
 _last = 0.0
 
@@ -243,6 +263,36 @@ def fetch_markers(s: cc.Session, max_pages: int = 12) -> list[dict]:
     return out
 
 
+def rooms(rec: dict, category: str, property_type: Optional[str]) -> tuple[Optional[int], Optional[int], Optional[int]]:
+    """(bedrooms, bathrooms, master_bedrooms) from the marker record.
+
+    The API's `bedrooms` counts the bedrooms that are NOT master suites; `master_room` counts the
+    masters. The page's own description states the TOTAL, and it equals the sum on every row read
+    on 2026-10-16 (🆕, backlog #582): /x/268 bedrooms 1 + master 1 = «غرفة نوم ماستر … غرفة نوم
+    إضافية» (2); 9336255 2 + 1 = «3 غرف نوم (منها غرفة ماستر)»; 1033414 1 + 2 = «3 غرف نوم (٢ منها
+    ماستر)»; 10547051 2 + 3 = «5 غرف نوم، منها 3 غرف ماستر»; 1800149 0 + 5 = «خمس غرف نوم ماستر».
+    Storing `bedrooms` alone filed every villa with a master suite under too few bedrooms. Measured
+    over the 14 newest active non-land rows: the sum equals the description on 10, `bedrooms` alone
+    on 3; one advertiser (615907, «جناح رئيسي … ماستر … غرفتان نوم إضافية» = 4) typed the total into
+    `bedrooms` as well, so the sum overstates that one. The sum is the reading the source's form means.
+
+    `bathroom` is 0 on all 107 land rows and on villas whose page lists several «دورة مياه»
+    (/x/268: 0 stored, three on the page): 0 is the form's blank, not a published zero. Silent
+    means unknown, so 0 is NULL. Same for a 0 + 0 room count.
+    """
+    def cap(v: Optional[int]) -> Optional[int]:
+        return v if v is not None and 0 <= v <= 20 else None
+
+    plain, master = cap(_int(rec.get("bedrooms"))), cap(_int(rec.get("master_room")))
+    bathrooms = cap(_int(rec.get("bathroom"))) or None
+    if category == "commercial" or property_type in ("Residential Land",):
+        return None, bathrooms, master
+    if plain is None and master is None:
+        return None, bathrooms, master
+    total = (plain or 0) + (master or 0)
+    return (total if 0 < total <= 20 else None), bathrooms, master
+
+
 def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
     """Return (row, category, gone). Skips records lacking a workable price/type."""
     rid = rec.get("id")
@@ -271,19 +321,12 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
         area_f = None
     area = int(round(area_f)) if area_f is not None else None
 
-    bedrooms = _int(rec.get("bedrooms"))
-    if category == "commercial" or property_type in ("Residential Land",):
-        bedrooms = None
-    if bedrooms is not None and bedrooms > 20:
-        bedrooms = None
-
-    bathrooms = _int(rec.get("bathroom"))
-    if bathrooms is not None and bathrooms > 20:
-        bathrooms = None
-
-    master = _int(rec.get("master_room"))
-    if master is not None and master > 20:
-        master = None
+    bedrooms, bathrooms, master = rooms(rec, category, property_type)
+    if bathrooms is None and _int(rec.get("bathroom")) == 0:
+        # The form's 0 is the source SETTLING the field as blank, not a failed read. A plain None is
+        # dropped by db._unknown_must_not_overwrite_known, so every row stored before 2026-10-16 kept
+        # its 0 (17943237 re-crawled 10-17 04:24: still 0). AUTHORITATIVE_NULL writes the NULL.
+        bathrooms = db.AUTHORITATIVE_NULL
 
     # No magnitude gate (removed 2026-08-09): a source-published price is stored at ANY magnitude
     # per the standing PRICE = SOURCE rule. Nulling "implausibly low" prices is a judgement call
@@ -424,7 +467,35 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
         "description": description,
         "additional_info": ai,
     }
+    labels = content_labels(rec.get("content"))
+    if labels:
+        ai["features_ar"] = labels
+    row.update(content_answers(labels))
     return row, category, gone
+
+
+# ── the marker's own «المحتويات» chip list (🔬 AF engineer, 2026-10-14, backlog 248) ─────────────────────────
+# Each marker carries `content`, a JSON list of letters, and the ad page renders each letter as one chip under
+# «المحتويات:». Measured on 3 live ads 10-14: /x/264 content M,N,K,L,J,G,H,I,F,E,A,C renders «توفير صرف صحي،
+# صالة، توفير الماء، توفير الكهرباء، غرفة خادمة، حوش، سطح، درج داخلي، مدخل سيارة، ملحق، مجلس رجال، مطبخ», /x/265
+# M,L,K,G and /x/263 A..N agree letter for letter. Kitchen was 0 of 153 stored. A listed chip → True; an unlisted
+# one is silence. «مدخل سيارة» (a car entrance) is not mapped to parking: it is not the same fact.
+CONTENT_LETTERS = {"A": "مجلس رجال", "B": "مجلس نساء", "C": "مطبخ", "D": "مقلط", "E": "ملحق", "F": "مدخل سيارة",
+                   "G": "حوش", "H": "سطح", "I": "درج داخلي", "J": "غرفة خادمة", "K": "توفير الماء",
+                   "L": "توفير الكهرباء", "M": "توفير صرف صحي", "N": "صالة"}
+_CONTENT_COLS = {"مطبخ": "kitchen", "غرفة خادمة": "maid_room"}
+
+
+def content_labels(raw: Any) -> list[str]:
+    try:
+        letters = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except ValueError:
+        return []
+    return [CONTENT_LETTERS[x] for x in letters if isinstance(x, str) and x in CONTENT_LETTERS]
+
+
+def content_answers(labels: list[str]) -> dict[str, bool]:
+    return {_CONTENT_COLS[x]: True for x in labels if x in _CONTENT_COLS}
 
 
 def _pin_sold_inactive(table: str, ad_numbers: list[str],
@@ -483,6 +554,10 @@ def main() -> int:
     sold_com: list[str] = []
     gone_ct = 0
     seen = 0
+    held: dict[str, int] = {}          # unclassified `avalible` → count (not upserted, not pruned)
+    # Held ids are kept PER CATEGORY: each table's prune seen-set gets only its own. A held
+    # residential id in the commercial seen-set would defeat prune_unseen's 0-seen breaker.
+    held_ads: dict[str, set[str]] = {"residential": set(), "commercial": set()}
 
     try:
         for rec in markers:
@@ -490,6 +565,11 @@ def main() -> int:
             if not row:
                 continue
             if args.type != "all" and cat != args.type:
+                continue
+            aval = str(rec.get("avalible") or "").strip().lower()
+            if not gone and aval not in AVAILABLE_AVAL:
+                held[aval or "(blank)"] = held.get(aval or "(blank)", 0) + 1
+                held_ads["commercial" if cat == "commercial" else "residential"].add(row["ad_number"])
                 continue
             (com if cat == "commercial" else res).append(row)
             seen += 1
@@ -500,6 +580,11 @@ def main() -> int:
                 break
 
         print(f"  mapped: {len(res)} residential + {len(com)} commercial ({gone_ct} sold/inactive)")
+        if held:
+            print(f"  held, availability not a measured value (not upserted, not pruned): {held}")
+            if not (res or com):
+                # fail closed: `avalible` is unreadable on the whole feed → write nothing.
+                raise RuntimeError(f"no marker carries a known availability — field unreadable: {held}")
 
         if res:
             db.upsert_ramzalqasim_residential_batch(res)
@@ -531,9 +616,10 @@ def main() -> int:
             if superseded:
                 print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
-            for tbl, rows_seen in (("ramzalqasim_residential_listings", res),
-                                    ("ramzalqasim_commercial_listings", com)):
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Ramzalqasim")
+            for tbl, rows_seen, kind in (("ramzalqasim_residential_listings", res, "residential"),
+                                          ("ramzalqasim_commercial_listings", com, "commercial")):
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen} | held_ads[kind],
+                                    source="Ramzalqasim")
                 if n < 0:
                     print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
                 else:
@@ -545,7 +631,7 @@ def main() -> int:
         healthy = True
         if run_id:
             healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
-                        notes=f"gone={gone_ct} pruned={pruned}", check_tables=["ramzalqasim_residential_listings", "ramzalqasim_commercial_listings"])
+                        notes=f"gone={gone_ct} pruned={pruned}" + (f" held_unknown_availability={held}" if held else ""), check_tables=["ramzalqasim_residential_listings", "ramzalqasim_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

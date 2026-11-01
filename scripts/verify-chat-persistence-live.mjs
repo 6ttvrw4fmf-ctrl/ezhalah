@@ -11,6 +11,8 @@
 //      curl -s "$SUPABASE_URL/auth/v1/token?grant_type=password" -H "apikey: $ANON_KEY" \
 //        -H 'Content-Type: application/json' -d '{"email":"<e2e user>","password":"<pw>"}'
 //   3. node scripts/verify-chat-persistence-live.mjs
+import './lib/robotPass.mjs'; // robot pass + secret handshake for our own browser robots (docs/ops/SCRAPE_GUARD.md)
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { chromium } from 'playwright';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -102,7 +104,7 @@ check('search lands with a real count', await waitFor(async () => (await counts(
 const startCount = (await counts())[0];
 console.log('  start:', startCount);
 
-// AF round via the latest turn's «خلّنا نحدد الطلب أكثر» (testID results-narrow)
+// AF round via the latest turn's «🎯 دقّق مع الذكاء» (testID results-narrow)
 const narrow = page.locator('[data-testid="results-narrow"]');
 check('narrow CTA renders on the newest turn', await waitFor(async () => (await narrow.count()) > 0 && await narrow.first().isVisible(), 20000));
 await narrow.first().click(); await page.waitForTimeout(2500);
@@ -262,14 +264,14 @@ await closeRoundIfOpen();
 check('P2: round 1 lands a narrowed turn + receipt', await waitFor(async () => (await counts()).length >= 2 && (await page.locator('[data-testid="af-round-receipt"]').count()) >= 1, 60000));
 const countsAfterR1 = await counts();
 
-// CHANGE-ANSWER — remove the first committed pill; a NEW turn must land BELOW (never rewrite above).
+// COMMITTED ANSWERS ARE READ-ONLY CHIPS (owner 2026-10-03: «we should not show any X button on this»).
+// This step used to remove the first pill to prove a change-answer lands a NEW turn below; there is no
+// removal any more, so it now proves the chips render and carry no ✕ and no press target.
 const pill = page.locator('[data-testid^="af-pill-"]:visible').first();
-check('P2: committed answers render as removable pills', await waitFor(async () => (await pill.count()) > 0, 30000));
-if ((await pill.count()) > 0) {
-  await pill.click();
-  check('P2: change-answer lands a NEW turn below (transcript grows, order preserved)',
-    await waitFor(async () => (await counts()).length >= countsAfterR1.length + 1, 45000));
-}
+check('P2: committed answers render as chips', await waitFor(async () => (await pill.count()) > 0, 30000));
+check('P2: …and the chips carry no ✕ (no svg inside, not pressable)',
+  (await page.locator('[data-testid^="af-pill-"] svg').count()) === 0
+  && (await page.locator('[data-testid^="af-pill-"][role="button"], button[data-testid^="af-pill-"]').count()) === 0);
 await page.waitForTimeout(2500);
 
 // AF ROUND 2 — if the offer gate still finds narrowing value, run a second round.

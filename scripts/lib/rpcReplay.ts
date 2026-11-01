@@ -140,7 +140,7 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
  * A body rewrite we cannot model has a specific signature: it reads the live definition
  * (pg_get_functiondef) and re-executes it, or it drops/alters the function outright.
  */
-function looksLikeUninterpretedChange(sql: string, fn: string): boolean {
+export function looksLikeUninterpretedChange(sql: string, fn: string): boolean {
   if (!sql.includes(fn)) return false;
 
   const dropsOrAlters =
@@ -176,6 +176,19 @@ function looksLikeUninterpretedChange(sql: string, fn: string): boolean {
   // tracked RPC it only MENTIONED in prose). Widening cannot hide a real rewrite: a bare-proname
   // edit that names a TRACKED function still sets definesTracked and stays flagged.
   for (const m of sql.matchAll(/(?:\w+\.)?proname\s*=\s*'([a-z0-9_]+)'/gi)) definedHere.push(m[1].toLowerCase());
+  // 2026-10-18: the other common target declaration is a regprocedure/regproc cast —
+  //     src := pg_get_functiondef('public.trg_aqar_parse()'::regprocedure);
+  // (20261018234721). Without it that migration declared no target, and every tracked function whose
+  // name is a SUBSTRING of the real target (aqar_parse inside trg_aqar_parse) was reported
+  // uninterpretable. Only OTHER functions are added: a regprocedure read of the TRACKED function may be
+  // an inspection (mon_* detectors do this) or a rewrite, and that call keeps exactly its old outcome —
+  // with no literal target it is flagged, as before; with literal targets the dynamic-rebuild check
+  // below decides, as before. So this can only clear a migration that rewrites some OTHER function.
+  const literalTargets = definedHere.length;
+  const regprocTargets = [...sql.matchAll(/pg_get_functiondef\(\s*'(?:public\.)?([a-z0-9_]+)\s*(?:\([^']*\))?'\s*::\s*regproc(?:edure)?\b/gi)]
+    .map((m) => m[1].toLowerCase());
+  if (literalTargets === 0 && regprocTargets.includes(fn.toLowerCase())) return true;
+  for (const t of regprocTargets) if (t !== fn.toLowerCase()) definedHere.push(t);
   const definesTracked = definedHere.includes(fn.toLowerCase());
   if (!definesTracked && definedHere.length > 0) {
     // Guard the loophole: a dynamic rebuild names the target in the EXECUTE string rather than in a

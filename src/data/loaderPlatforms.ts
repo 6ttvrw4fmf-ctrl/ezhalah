@@ -9,14 +9,16 @@
 // fairness to users (no logos they cannot reach) AND to platforms (no advertising a platform we
 // cannot deliver).
 //
-// TWO-LAYER HONESTY. The static PLATFORM_META list below is the CATALOG (every platform we have a
-// logo asset for AND that we consider a real scraping target). At runtime, SearchLoader calls
-// `fetchActivePlatformNames()` — an RPC over `search_listings_ar` — and filters PLATFORM_META down
-// to platforms that currently have any active row. If the RPC fails, SearchLoader falls back to
-// the full PLATFORM_META (safe degradation — the user might see one platform they cannot reach
-// during that outage, never fewer). `scripts/verify-loader-platforms-match-active.ts` enforces at
-// CI time that PLATFORM_META, when mapped through SOURCE_TOKENS, equals the production active set —
-// so the two lists cannot silently drift.
+// TWO-LAYER HONESTY, AS AMENDED (owner 2026-09-20 + 2026-09-26). The static PLATFORM_META list below
+// is the CATALOG, and the strip shows ALL of it — a scraper going cold does NOT hide a logo (2026-09-20:
+// "show 59 … even if it's dead, till I manually [remove it]"). The ONE runtime exception is a website
+// that is DOWN ON ITS SIDE (platform_registry.status 'dormant', or 'retired'): its logo leaves the
+// strip and the «Reviewing N platforms» count drops, and both return by themselves when the site is
+// flipped back to 'active' (2026-09-26). The statuses arrive ONCE per app session
+// (loaderActivePlatforms.ts → loader_platform_status_ar()); hiddenLoaderNames() below turns them into
+// logos to hide. If that read fails, nothing is hidden — the full catalog, never a guess.
+// `scripts/verify-loader-platforms-match-active.ts` still checks the catalog against production at CI
+// time, and `scripts/verify-loader-hides-down-sites.ts` executes the hide rule in `npm test`.
 //
 // The logo require() map is deliberately DUPLICATED from ResultCard.tsx rather than shared, so the
 // result-card rendering path is never touched by this feature. If a logo asset is renamed, update it
@@ -40,56 +42,56 @@ export type LoaderPlatform = { name: string; i18nKey: string; logo: number; logo
 // `aqarmonthly` source resolves to the single Aqar tile via SOURCE_TOKENS, so its listings still
 // show the Aqar logo.
 export const PLATFORM_META: LoaderPlatform[] = [
-  { name: 'Aqar',         i18nKey: 'AQAR',                                    logo: require('../../assets/images/aqar-logo.png') },
-  { name: 'Wasalt',       i18nKey: 'Wasalt',                                  logo: require('../../assets/images/wasalt-logo.png') },
-  { name: 'Aldarim',      i18nKey: 'Aldarim Real Estate',                     logo: require('../../assets/images/aldarim.png') },
-  { name: 'Aqargate',     i18nKey: 'Aqar Gate',                               logo: require('../../assets/images/aqargate-logo.png') },
-  { name: 'Alhoshan',     i18nKey: 'Al Hoshan',                               logo: require('../../assets/images/alhoshan.png') },
-  { name: 'Hajer',        i18nKey: 'Hajer Houses Real Estate',                logo: require('../../assets/images/hajer-logo.png') },
-  { name: 'Sanadak',      i18nKey: 'Sanadak',                                 logo: require('../../assets/images/sanadak-logo.png') },
-  { name: 'Eastabha',     i18nKey: 'East Abha Real Estate',                   logo: require('../../assets/images/eastabha-logo.png') },
+  { name: 'Aqar',         i18nKey: 'AQAR',                                    logo: require('../../assets/images/platform-logos/sa-aqar-fm.png') },
+  { name: 'Wasalt',       i18nKey: 'Wasalt',                                  logo: require('../../assets/images/platform-logos/wasalt-sa.png') },
+  { name: 'Aldarim',      i18nKey: 'Aldarim Real Estate',                     logo: require('../../assets/images/platform-logos/aldarim-sa.png') },
+  { name: 'Aqargate',     i18nKey: 'Aqar Gate',                               logo: require('../../assets/images/platform-logos/aqargate-com.png') },
+  { name: 'Alhoshan',     i18nKey: 'Al Hoshan',                               logo: require('../../assets/images/platform-logos/alhoshan-sa.png') },
+  { name: 'Hajer',        i18nKey: 'Hajer Houses Real Estate',                logo: require('../../assets/images/platform-logos/hajerhouses-com.png') },
+  { name: 'Sanadak',      i18nKey: 'Sanadak',                                 logo: require('../../assets/images/platform-logos/sanadak-sa.png') },
+  { name: 'Eastabha',     i18nKey: 'East Abha Real Estate',                   logo: require('../../assets/images/platform-logos/eastabha-sa.png') },
   { name: 'Aqarcity',     i18nKey: 'Aqar City',                               logo: require('../../assets/images/aqarcity-logo.png') },
-  { name: 'Raghdan',      i18nKey: 'Raghdan Real Estate',                     logo: require('../../assets/images/raghdan.png') },
-  { name: 'Eaqartabuk',   i18nKey: 'Eqar Tabuk',                              logo: require('../../assets/images/eaqartabuk.png') },
-  { name: 'Satel',        i18nKey: 'Satel',                                   logo: require('../../assets/images/satel.png') },
+  { name: 'Raghdan',      i18nKey: 'Raghdan Real Estate',                     logo: require('../../assets/images/platform-logos/raghdan-sa.png') },
+  { name: 'Eaqartabuk',   i18nKey: 'Eqar Tabuk',                              logo: require('../../assets/images/platform-logos/eaqartabuk-com.png') },
+  { name: 'Satel',        i18nKey: 'Satel',                                   logo: require('../../assets/images/platform-logos/satel-sa.png') },
   { name: 'Sadin',        i18nKey: 'Sadin for Real Estate',                   logo: require('../../assets/images/sadin.png') },
-  { name: 'Mustqr',       i18nKey: 'Mustaqarr Real Estate',                   logo: require('../../assets/images/mustaqr.png') },
+  { name: 'Mustqr',       i18nKey: 'Mustaqarr Real Estate',                   logo: require('../../assets/images/platform-clean/mustqr.png') },
   { name: 'Ramzalqasim',  i18nKey: 'Ramz Al Qassim Real Estate Investment',  logo: require('../../assets/images/ramzalqassim.png') },
-  { name: 'Fursaghyr',    i18nKey: 'Fursa Ghyr Real Estate',                  logo: require('../../assets/images/fursaghyr.png') },
-  { name: 'Jazwtn',       i18nKey: 'Jazan Watan',                             logo: require('../../assets/images/jazan-watan.png') },
-  { name: 'Mizlaj',       i18nKey: 'Mizlaj Real Estate',                      logo: require('../../assets/images/mizlaj.png') },
-  { name: 'Aqaratikom',   i18nKey: 'Nawait',                                  logo: require('../../assets/images/aqaratikom.png') },
-  { name: 'Al Khaas',     i18nKey: 'Al Khaas',                                logo: require('../../assets/images/alkhaas.png') },
-  { name: 'Abeea',        i18nKey: 'Abeea Real Estate',                       logo: require('../../assets/images/abeea.png') },
-  { name: 'Jurash',       i18nKey: 'Jurash Real Estate',                      logo: require('../../assets/images/jurash.png') },
-  { name: 'Gathern',      i18nKey: 'Gathern',                                 logo: require('../../assets/images/gathern.png') },
+  { name: 'Fursaghyr',    i18nKey: 'Fursa Ghyr Real Estate',                  logo: require('../../assets/images/platform-logos/fursaghyr-com.png') },
+  { name: 'Jazwtn',       i18nKey: 'Jazan Watan',                             logo: require('../../assets/images/platform-logos/jazwtn-sa.png') },
+  { name: 'Mizlaj',       i18nKey: 'Mizlaj Real Estate',                      logo: require('../../assets/images/platform-logos/mizlaj-com-sa.png') },
+  { name: 'Aqaratikom',   i18nKey: 'Nawait',                                  logo: require('../../assets/images/platform-logos/nawait-sa.png') },
+  { name: 'Al Khaas',     i18nKey: 'Al Khaas',                                logo: require('../../assets/images/platform-logos/alkhaas-net.png') },
+  { name: 'Abeea',        i18nKey: 'Abeea Real Estate',                       logo: require('../../assets/images/platform-logos/abeea-com-sa.png') },
+  { name: 'Jurash',       i18nKey: 'Jurash Real Estate',                      logo: require('../../assets/images/platform-logos/jurash-sa.png') },
+  { name: 'Gathern',      i18nKey: 'Gathern',                                 logo: require('../../assets/images/platform-logos/gathern-co.png') },
   { name: 'Deal App',     i18nKey: 'Deal App',                                logo: require('../../assets/images/dealapp.png') },
-  { name: '24 Souq',      i18nKey: '24 Souq',                                 logo: require('../../assets/images/souq24.png') },
-  { name: 'Era Pulse',    i18nKey: 'Era Pulse',                               logo: require('../../assets/images/erapulse.png') },
+  { name: '24 Souq',      i18nKey: '24 Souq',                                 logo: require('../../assets/images/platform-logos/24-com-sa.png') },
+  { name: 'Era Pulse',    i18nKey: 'Era Pulse',                               logo: require('../../assets/images/platform-logos/erapulse-sa.png') },
   { name: 'Al Nowaisiry', i18nKey: 'Al Nowaisiry Real Estate',               logo: require('../../assets/images/nowaisiry.png') },
-  { name: '1 October',    i18nKey: '1 October Real Estate',                   logo: require('../../assets/images/october.png') },
-  { name: 'Muktamel',     i18nKey: 'Muktamel',                                logo: require('../../assets/images/muktamel.png') },
-  { name: 'Arkaan',       i18nKey: 'Arkaan Al Aqar',                          logo: require('../../assets/images/arkaan.png') },
-  { name: 'Abralosol',    i18nKey: 'Abr Al Osol Real Estate',                 logo: require('../../assets/images/abralosol.png') },
-  { name: 'THERC',        i18nKey: 'The Right Choice Real Estate',            logo: require('../../assets/images/therc.png') },
-  { name: 'Rawasi Dark',  i18nKey: 'Rawasi Dark Real Estate',                 logo: require('../../assets/images/rawasidark.png') },
-  { name: 'Aouj',         i18nKey: 'Aouj Estates',                            logo: require('../../assets/images/aouj.png') },
-  { name: 'Bahadhabab',     i18nKey: 'Bahadhabab Real Estate',    logo: require('../../assets/images/bahadhabab.png') },
-  { name: 'Alobid',         i18nKey: 'Alobid Office Real Estate', logo: require('../../assets/images/alobid.png') },
-  { name: 'Abwbna',         i18nKey: 'Abwbna Real Estate',              logo: require('../../assets/images/abwbna.png') },
-  { name: 'Remal',          i18nKey: 'Remal Real Estate',              logo: require('../../assets/images/remal.png') },
+  { name: '1 October',    i18nKey: '1 October Real Estate',                   logo: require('../../assets/images/platform-logos/1october-com-sa.png') },
+  { name: 'Muktamel',     i18nKey: 'Muktamel',                                logo: require('../../assets/images/platform-logos/muktamel-com.png') },
+  { name: 'Arkaan',       i18nKey: 'Arkaan Al Aqar',                          logo: require('../../assets/images/platform-logos/arkaanalaqar-com.png') },
+  { name: 'Abralosol',    i18nKey: 'Abr Al Osol Real Estate',                 logo: require('../../assets/images/platform-logos/abralosol-com.png') },
+  { name: 'THERC',        i18nKey: 'The Right Choice Real Estate',            logo: require('../../assets/images/platform-logos/therc-sa.png') },
+  { name: 'Rawasi Dark',  i18nKey: 'Rawasi Dark Real Estate',                 logo: require('../../assets/images/platform-logos/rawasi-dark-com.png') },
+  { name: 'Aouj',         i18nKey: 'Aouj Estates',                            logo: require('../../assets/images/platform-logos/aoujestates-com.png') },
+  { name: 'Bahadhabab',     i18nKey: 'Bahadhabab Real Estate',    logo: require('../../assets/images/platform-logos/bahadhabab-res-com.png') },
+  { name: 'Alobid',         i18nKey: 'Alobid Office Real Estate', logo: require('../../assets/images/platform-logos/alobidoffice-com.png') },
+  { name: 'Abwbna',         i18nKey: 'Abwbna Real Estate',              logo: require('../../assets/images/platform-logos/abwbna-com.png') },
+  { name: 'Remal',          i18nKey: 'Remal Real Estate',              logo: require('../../assets/images/platform-logos/remalre-com.png') },
   { name: 'Amaall',         i18nKey: 'Amaall Real Estate Services',    logo: require('../../assets/images/amaall.png') },
   { name: 'AqarAlSaudia',   i18nKey: 'Aqar Al Saudia Real Estate',    logo: require('../../assets/images/aqaralsaudia.png') },
-  { name: 'Amlakalahsa',    i18nKey: 'Amlak Al-Ahsa Real Estate',      logo: require('../../assets/images/amlakalahsa.png') },
+  { name: 'Amlakalahsa',    i18nKey: 'Amlak Al-Ahsa Real Estate',      logo: require('../../assets/images/platform-logos/amlakalahsa-com.png') },
   { name: 'Alta',           i18nKey: 'Alta Real Estate Services',      logo: require('../../assets/images/alta.png') },
-  { name: 'Shmou Al Shmal', i18nKey: 'Shmou Al Shmal Real Estate',     logo: require('../../assets/images/shmoualshmal.png') },
+  { name: 'Shmou Al Shmal', i18nKey: 'Shmou Al Shmal Real Estate',     logo: require('../../assets/images/platform-logos/shmoua-alshmal-com.png') },
   { name: 'Awal',         i18nKey: 'Awal United for Real Estate',             logo: require('../../assets/images/awal.png') },
-  { name: 'Azdad',        i18nKey: 'Azdad Al Aqariah',                        logo: require('../../assets/images/azdad.png') },
-  { name: 'Suwar',        i18nKey: 'Suwar Real Estate',                       logo: require('../../assets/images/suwar.png') },
-  { name: 'Rakez',        i18nKey: 'Rakez Real Estate',                       logo: require('../../assets/images/rakez.png') },
-  { name: 'Akariyoun',    i18nKey: 'Akariyoun',                               logo: require('../../assets/images/akariyoun.png') },
-  { name: 'KSA Aqar',     i18nKey: 'KSA Aqar Real Estate',                    logo: require('../../assets/images/ksaaqar.png') },
-  { name: 'Sadiq Eltajer', i18nKey: 'Sadiq Eltajer Real Estate',              logo: require('../../assets/images/sadiq-eltajer.png') },
+  { name: 'Azdad',        i18nKey: 'Azdad Al Aqariah',                        logo: require('../../assets/images/platform-logos/azdadalaqaria-com.png') },
+  { name: 'Suwar',        i18nKey: 'Suwar Real Estate',                       logo: require('../../assets/images/platform-logos/suwar-sa.png') },
+  { name: 'Rakez',        i18nKey: 'Rakez Real Estate',                       logo: require('../../assets/images/platform-logos/rakez-sa.png') },
+  { name: 'Akariyoun',    i18nKey: 'Akariyoun',                               logo: require('../../assets/images/platform-logos/akariyoun-sa.png') },
+  { name: 'KSA Aqar',     i18nKey: 'KSA Aqar Real Estate',                    logo: require('../../assets/images/platform-logos/ksaaqar-com.png') },
+  { name: 'Sadiq Eltajer', i18nKey: 'Sadiq Eltajer Real Estate',              logo: require('../../assets/images/platform-logos/sadiq-eltajer-sa.png') },
   // توور — OWNER DECISION 2026-09-19, made with the trade-off stated. toor currently returns ZERO
   // searchable listings (its site self-declares «نسخة تجريبية … المعلومات … ليست حقيقية» — a beta
   // serving dummy data, one sample listing repeated across every PropertyId), so it does NOT meet
@@ -97,6 +99,8 @@ export const PLATFORM_META: LoaderPlatform[] = [
   // toor's brand on the list anyway. It is listed LAST and called out here so the exception is
   // visible rather than looking like drift, and so that whoever reads
   // verify-loader-platforms-match-active.ts next finds the reason instead of a mystery.
+  // NOTE (2026-09-28): toor is 'retired' in platform_registry. HIDDEN_STATUSES hides only 'dormant'
+  // (down on its side), so the owner's 2026-09-19 decision to keep this logo still holds.
   { name: 'Toor',         i18nKey: 'Toor',                                    logo: require('../../assets/images/toor.png') },
   // ── onboarded 2026-09-20 ──────────────────────────────────────────────────────────────────────
   // These seven share the NEUTRAL placeholder asset while the owner supplies their real marks.
@@ -104,106 +108,117 @@ export const PLATFORM_META: LoaderPlatform[] = [
   // under-claim what Ezhalah searches, and reusing ANOTHER platform's logo is the misattribution
   // the owner called a legal problem. Swap each require() as a real file lands; nothing else here
   // or in ResultCard.tsx needs to change.
-  { name: 'Gudai',                 i18nKey: 'Gudai Real Estate',                       logo: require('../../assets/images/gudai.png') },
-  { name: 'Safera',                i18nKey: 'Safera Real Estate',                      logo: require('../../assets/images/safera.png') },
+  { name: 'Gudai',                 i18nKey: 'Gudai Real Estate',                       logo: require('../../assets/images/platform-logos/gudai-inblaj-net.png') },
+  { name: 'Safera',                i18nKey: 'Safera Real Estate',                      logo: require('../../assets/images/platform-logos/safera-inblaj-net.png') },
   { name: 'Al Humaidan',           i18nKey: 'Al Humaidan Real Estate Office',        logo: require('../../assets/images/alhumaidan.png') },
-  { name: 'Aqar Najran',           i18nKey: 'Aqar Najran',                             logo: require('../../assets/images/aqarnajran.png') },
-  { name: 'Maqam Al Wisam',        i18nKey: 'Maqam Al Wisam Real Estate',              logo: require('../../assets/images/fahadalshahri.png') },
-  { name: 'CompoundIn',            i18nKey: 'CompoundIn',                              logo: require('../../assets/images/compoundin.png') },
+  { name: 'Aqar Najran',           i18nKey: 'Aqar Najran',                             logo: require('../../assets/images/platform-logos/aqarnajran-com.png') },
+  { name: 'Maqam Al Wisam',        i18nKey: 'Maqam Al Wisam Real Estate',              logo: require('../../assets/images/platform-clean/maqam.png') },
+  { name: 'CompoundIn',            i18nKey: 'CompoundIn',                              logo: require('../../assets/images/platform-logos/compoundin-com.png') },
   { name: 'Waslna',                i18nKey: 'Waslna Real Estate',                      logo: require('../../assets/images/wslnaa.png') },
   // ── onboarded 2026-09-21 ──────────────────────────────────────────────────────────────────────
-  // All eleven wear the SAME neutral placeholder until the owner supplies their real marks — never
-  // another company's logo. `name` is the stored db `source` value (the scraper's SOURCE constant),
-  // the same convention as 'Al Khaas' / 'KSA Aqar' / 'Rawasi Dark' above.
-  { name: 'Al Sidra', i18nKey: 'Al Sidra Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Moftah', i18nKey: 'Moftah Al Aqar', logo: require('../../assets/images/moftah.png') },
-  { name: 'مسار المستقبل', i18nKey: 'Masar Al Mustaqbal Real Estate', logo: require('../../assets/images/masar.png') },
-  { name: 'منصات', i18nKey: 'Menassat Real Estate', logo: require('../../assets/images/gomenassat.png') },
-  { name: 'Sakan Saudi', i18nKey: 'Sakan', logo: require('../../assets/images/sakan.png') },
-  { name: 'مكتب بوصبيح', i18nKey: 'Bossbih Real Estate Office', logo: require('../../assets/images/bossbih.png') },
-  { name: 'Al Shawaf', i18nKey: 'Al Shawaf Real Estate Office', logo: require('../../assets/images/alshawaf.png') },
-  { name: 'Ibrahim Alqarawi', i18nKey: 'Ibrahim Alqarawi Real Estate Investments', logo: require('../../assets/images/ialqarawi.png') },
-  { name: 'Al Jassim', i18nKey: 'Al Jassim Real Estate Services', logo: require('../../assets/images/aljassim.png') },
-  { name: 'Almotmkenah', i18nKey: 'Almotmkenah Real Estate', logo: require('../../assets/images/almotmkenah.png') },
+  // These brands use the trimmed, transparent marks collected from their official headers or social
+  // profiles. `name` is the stored db `source` value (the scraper's SOURCE constant), the same
+  // convention as 'Al Khaas' / 'KSA Aqar' / 'Rawasi Dark' above.
+  { name: 'Al Sidra', i18nKey: 'Al Sidra Real Estate', logo: require('../../assets/images/platform-logos/alsidra.png') },
+  { name: 'Moftah', i18nKey: 'Moftah Al Aqar', logo: require('../../assets/images/platform-logos/moftah-aleaqar-com.png') },
+  { name: 'مسار المستقبل', i18nKey: 'Masar Al Mustaqbal Real Estate', logo: require('../../assets/images/platform-logos/masaraqarat-com.png') },
+  { name: 'منصات', i18nKey: 'Menassat Real Estate', logo: require('../../assets/images/platform-clean/menassat.png') },
+  { name: 'Sakan Saudi', i18nKey: 'Sakan', logo: require('../../assets/images/platform-logos/sa-sakan-co.png') },
+  { name: 'مكتب بوصبيح', i18nKey: 'Bossbih Real Estate Office', logo: require('../../assets/images/platform-logos/bossbihoffice-com-sa.png') },
+  { name: 'Al Shawaf', i18nKey: 'Al Shawaf Real Estate Office', logo: require('../../assets/images/platform-logos/alshawaf-com-sa.png') },
+  { name: 'Ibrahim Alqarawi', i18nKey: 'Ibrahim Alqarawi Real Estate Investments', logo: require('../../assets/images/platform-logos/ialqarawi-com.png') },
+  { name: 'Al Jassim', i18nKey: 'Al Jassim Real Estate Services', logo: require('../../assets/images/platform-logos/aljassimaqar-com.png') },
+  { name: 'Almotmkenah', i18nKey: 'Almotmkenah Real Estate', logo: require('../../assets/images/platform-logos/almotmkenah-com.png') },
   { name: 'نفوذ', i18nKey: 'Nufouth Development Real Estate', logo: require('../../assets/images/nufouth.png') },
   // ── onboarded 2026-09-24 (batch 36) ─────────────────────────────────────────────────────────────
-  // All 35 wear the SAME neutral placeholder until the owner supplies their real marks — never
-  // another company's logo. `name` is the stored db `source` (the scraper's SOURCE constant).
-  { name: 'دويليو', i18nKey: 'Dwelleo', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'مكتب أقاليم هجر للخدمات العقارية', i18nKey: 'Aqalem Hajer Real Estate Services Office', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'سكني', i18nKey: 'Sakani', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'الشاطري للتطوير العقاري', i18nKey: 'Shatri Real Estate Development', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'القاسم العقارية', i18nKey: 'Alqasem Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'فكر الإعمار', i18nKey: 'Fkr Alemar', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'ودود العقارية', i18nKey: 'Wadod Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'آل متعب العقارية', i18nKey: 'Al Muteb Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'البراك للعقارات', i18nKey: 'Al Barrak Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'الرفاعي للعقار', i18nKey: 'Al Rifai Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'سداسيات العقارية', i18nKey: 'Sodasyat Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'حصاد الاقتصادية للعقارات', i18nKey: 'Hasaad Economic Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'عقار الرياض', i18nKey: 'Aqar Alriyadh', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'فقط نقطة العقارية', i18nKey: 'Just Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'سنام العقارية', i18nKey: 'Snam Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'جواهر للوساطة والتسويق العقاري', i18nKey: 'Jawher Real Estate Brokerage', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'مقر المعتمد', i18nKey: 'Maqar Al Motamad', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'سنان العقارية', i18nKey: 'Senan Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'الصفقة الذهبية العقارية', i18nKey: 'Golden Deal Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: '1000 العقارية', i18nKey: '1000 Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'يمين العقارية', i18nKey: 'Yameen Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'إبريزة العقارية', i18nKey: 'Ebriza Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'علم الريادة الإدارية', i18nKey: 'Eilm Alriyada', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'دار يوسف العقارية', i18nKey: 'Dar Yusuf Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'البداح للعقارات', i18nKey: 'Albdah Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'الإيضاح', i18nKey: 'Eydah', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'تمايز العقارية', i18nKey: 'Tamyaz Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'حازم', i18nKey: 'Hazim', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'فلل', i18nKey: 'Villas SA', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'مار العقارية', i18nKey: 'Mar Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'RightCompound', i18nKey: 'RightCompound', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'LivingCompound', i18nKey: 'LivingCompound', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Azure', i18nKey: 'Azure', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Expat Trusted Housing', i18nKey: 'Expat Trusted Housing', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Flow', i18nKey: 'Flow', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'أبعاد', i18nKey: 'Abaad', logo: require('../../assets/images/platform-placeholder.png') },
+  // These brands use the trimmed, transparent marks collected from their official headers or social
+  // profiles. `name` is the stored db `source` (the scraper's SOURCE constant).
+  { name: 'دويليو', i18nKey: 'Dwelleo', logo: require('../../assets/images/platform-logos/dwelleo-sa.png') },
+  { name: 'مكتب أقاليم هجر للخدمات العقارية', i18nKey: 'Aqalem Hajer Real Estate Services Office', logo: require('../../assets/images/platform-clean/aqalemhajer.png') },
+  { name: 'سكني', i18nKey: 'Sakani', logo: require('../../assets/images/sakani.png') },
+  { name: 'الشاطري للتطوير العقاري', i18nKey: 'Shatri Real Estate Development', logo: require('../../assets/images/platform-logos/shatri.png') },
+  { name: 'القاسم العقارية', i18nKey: 'Alqasem Real Estate', logo: require('../../assets/images/platform-logos/alqasem.png') },
+  { name: 'فكر الإعمار', i18nKey: 'Fkr Alemar', logo: require('../../assets/images/platform-logos/fkralemar.png') },
+  { name: 'ودود العقارية', i18nKey: 'Wadod Real Estate', logo: require('../../assets/images/platform-logos/wadod.png') },
+  { name: 'آل متعب العقارية', i18nKey: 'Al Muteb Real Estate', logo: require('../../assets/images/platform-clean/almuteb.png') },
+  { name: 'البراك للعقارات', i18nKey: 'Al Barrak Real Estate', logo: require('../../assets/images/platform-logos/aalbarrak.png') },
+  { name: 'الرفاعي للعقار', i18nKey: 'Al Rifai Real Estate', logo: require('../../assets/images/platform-clean/alrifai-small.png') },
+  { name: 'سداسيات العقارية', i18nKey: 'Sodasyat Real Estate', logo: require('../../assets/images/platform-logos/sodasyat.png') },
+  { name: 'حصاد الاقتصادية للعقارات', i18nKey: 'Hasaad Economic Real Estate', logo: require('../../assets/images/platform-logos/hasaad.png') },
+  { name: 'عقار الرياض', i18nKey: 'Aqar Alriyadh', logo: require('../../assets/images/platform-logos/aqaralriyadh.png') },
+  { name: 'فقط نقطة العقارية', i18nKey: 'Just Real Estate', logo: require('../../assets/images/platform-logos/just-sa.png') },
+  { name: 'سنام العقارية', i18nKey: 'Snam Real Estate', logo: require('../../assets/images/platform-logos/snam.png') },
+  { name: 'جواهر للوساطة والتسويق العقاري', i18nKey: 'Jawher Real Estate Brokerage', logo: require('../../assets/images/platform-logos/jawher.png') },
+  { name: 'مقر المعتمد', i18nKey: 'Maqar Al Motamad', logo: require('../../assets/images/platform-logos/m3tmd.png') },
+  { name: 'سنان العقارية', i18nKey: 'Senan Real Estate', logo: require('../../assets/images/platform-logos/senan.png') },
+  { name: 'الصفقة الذهبية العقارية', i18nKey: 'Golden Deal Real Estate', logo: require('../../assets/images/platform-logos/goldendeal-sa.png') },
+  { name: '1000 العقارية', i18nKey: '1000 Real Estate', logo: require('../../assets/images/platform-logos/1000-com-sa.png') },
+  { name: 'يمين العقارية', i18nKey: 'Yameen Real Estate', logo: require('../../assets/images/platform-logos/yameen.png') },
+  { name: 'إبريزة العقارية', i18nKey: 'Ebriza Real Estate', logo: require('../../assets/images/platform-logos/ebriza-com-sa.png') },
+  { name: 'علم الريادة الإدارية', i18nKey: 'Eilm Alriyada', logo: require('../../assets/images/eilmalriyada.png') },
+  { name: 'دار يوسف العقارية', i18nKey: 'Dar Yusuf Real Estate', logo: require('../../assets/images/platform-logos/daryusuf-com.png') },
+  { name: 'البداح للعقارات', i18nKey: 'Albdah Real Estate', logo: require('../../assets/images/platform-logos/albdah.png') },
+  { name: 'الإيضاح', i18nKey: 'Eydah', logo: require('../../assets/images/platform-logos/eydah.png') },
+  { name: 'تمايز العقارية', i18nKey: 'Tamyaz Real Estate', logo: require('../../assets/images/platform-logos/tamyaz.png') },
+  { name: 'حازم', i18nKey: 'Hazim', logo: require('../../assets/images/platform-logos/hazim.png') },
+  { name: 'فلل', i18nKey: 'Villas SA', logo: require('../../assets/images/platform-logos/villassa.png') },
+  { name: 'مار العقارية', i18nKey: 'Mar Real Estate', logo: require('../../assets/images/platform-logos/marksa.png') },
+  { name: 'RightCompound', i18nKey: 'RightCompound', logo: require('../../assets/images/platform-logos/rightcompound-com.png') },
+  { name: 'LivingCompound', i18nKey: 'LivingCompound', logo: require('../../assets/images/platform-logos/livingcompound.png') },
+  { name: 'Azure', i18nKey: 'Azure', logo: require('../../assets/images/platform-logos/azure.png') },
+  { name: 'Expat Trusted Housing', i18nKey: 'Expat Trusted Housing', logo: require('../../assets/images/platform-logos/expattrusted.png') },
+  { name: 'Flow', i18nKey: 'Flow', logo: require('../../assets/images/platform-clean/flow.png') },
+  { name: 'أبعاد', i18nKey: 'Abaad', logo: require('../../assets/images/platform-logos/app-abaadapp-sa.png') },
   // WAVE 1, 2026-09-25 — the ten crawled and are reachable, so this barrier's HIDES-NO-LIVE
-  // direction demands a tile for each. Placeholder artwork until the owner supplies logos.
-  { name: 'آل سعيدان', i18nKey: 'Al Saedan', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'إيجو عقار', i18nKey: 'Ego Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'أحمد المحيسني العقارية', i18nKey: 'Ahmed Almuhaysini', logo: require('../../assets/images/platform-placeholder.png') },
-  // NO TILE for نفوذ للاستثمار العقاري yet: its first crawl was CANCELLED on the workflow timeout
-  // (2026-09-25, 2,601 listings against a 45-minute budget), so it has zero reachable rows and this
-  // barrier refuses a logo nobody can reach. Its SOURCE_TOKENS entry stays below, so the moment the
-  // crawl lands the HIDES-NO-LIVE direction goes red and names it — which is how the tile arrives.
-  { name: 'راز العقارية', i18nKey: 'Razre', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'ري إنفست', i18nKey: 'Reinvest', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'صفا للاستثمار', i18nKey: 'Safa Investment', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'صكوك العقارية', i18nKey: 'Sokok', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'سكنة', i18nKey: 'Sukna', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'طوبة العقارية', i18nKey: 'Tuba', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'آي باكس', i18nKey: 'iBaax', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'RE/MAX', i18nKey: 'RE/MAX Saudi', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'قمرا للتطوير العقاري', i18nKey: 'Qmra', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'العجلان للتسويق العقاري', i18nKey: 'Al Ajlan', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'وحدات', i18nKey: 'Wahadat', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'شركة المربعات العقارية', i18nKey: 'Squares', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'رواف', i18nKey: 'Rawaf', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'المسوق الافتراضي', i18nKey: 'Virtual Marketer', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'مكسب العقارية', i18nKey: 'Macsaib', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'MAQRAT', i18nKey: 'MAQRAT', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'مانزو', i18nKey: 'Manzo', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'الطابق الثامن', i18nKey: '8Floor', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'حلول', i18nKey: 'Holoul', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'السوق المفتوح', i18nKey: 'OpenSooq', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'معرض نافذة', i18nKey: 'Nafithh', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'مباشر', i18nKey: 'Mobasher', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'مؤاجرة', i18nKey: 'Muajarh', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'دلّالي', i18nKey: 'Dallali', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'شركة مقام للتطوير العقاري', i18nKey: 'Maqam Development', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'تطبيق أرض', i18nKey: 'Earth App', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'نوافذ الوطن', i18nKey: 'Nawafeth Alwatan', logo: require('../../assets/images/platform-placeholder.png') },
+  // direction demands a tile for each. Their marks are kept in the collected logo pack.
+  { name: 'آل سعيدان', i18nKey: 'Al Saedan', logo: require('../../assets/images/alsaedan.png') },
+  { name: 'إيجو عقار', i18nKey: 'Ego Real Estate', logo: require('../../assets/images/platform-logos/ego.png') },
+  { name: 'أحمد المحيسني العقارية', i18nKey: 'Ahmed Almuhaysini', logo: require('../../assets/images/platform-logos/aqaralmuhaysini-com.png') },
+  { name: 'نفوذ للاستثمار العقاري', i18nKey: 'Nofodh Investment', logo: require('../../assets/images/platform-logos/nofodh-sa.png') },
+  { name: 'راز العقارية', i18nKey: 'Razre', logo: require('../../assets/images/platform-clean/raz.png') },
+  { name: 'ري إنفست', i18nKey: 'Reinvest', logo: require('../../assets/images/platform-logos/reinvest-sa.png') },
+  { name: 'صفا للاستثمار', i18nKey: 'Safa Investment', logo: require('../../assets/images/platform-logos/safa.png') },
+  { name: 'صكوك العقارية', i18nKey: 'Sokok', logo: require('../../assets/images/platform-logos/sokok-sa.png') },
+  { name: 'سكنة', i18nKey: 'Sukna', logo: require('../../assets/images/platform-logos/sukna-app.png') },
+  { name: 'طوبة العقارية', i18nKey: 'Tuba', logo: require('../../assets/images/platform-logos/tuba-com-sa.png') },
+  { name: 'آي باكس', i18nKey: 'iBaax', logo: require('../../assets/images/platform-logos/ibaax-sa.png') },
+  { name: 'RE/MAX', i18nKey: 'RE/MAX Saudi', logo: require('../../assets/images/platform-logos/remaxsa.png') },
+  { name: 'قمرا للتطوير العقاري', i18nKey: 'Qmra', logo: require('../../assets/images/platform-logos/qmra.png') },
+  { name: 'العجلان للتسويق العقاري', i18nKey: 'Al Ajlan', logo: require('../../assets/images/platform-logos/alajlan.png') },
+  { name: 'وحدات', i18nKey: 'Wahadat', logo: require('../../assets/images/platform-logos/wahadat-sa.png') },
+  { name: 'شركة المربعات العقارية', i18nKey: 'Squares', logo: require('../../assets/images/platform-logos/squares.png') },
+  { name: 'رواف', i18nKey: 'Rawaf', logo: require('../../assets/images/platform-logos/rawaf.png') },
+  { name: 'المسوق الافتراضي', i18nKey: 'Virtual Marketer', logo: require('../../assets/images/platform-logos/vm-ksa-com.png') },
+  { name: 'مكسب العقارية', i18nKey: 'Macsaib', logo: require('../../assets/images/platform-logos/macsaib.png') },
+  { name: 'MAQRAT', i18nKey: 'MAQRAT', logo: require('../../assets/images/platform-clean/maqrat.png') },
+  { name: 'عرش العقارية', i18nKey: 'Arsh', logo: require('../../assets/images/platform-logos/arsh.png') },
+  { name: 'سوبر أوفيس', i18nKey: 'SuperOffice', logo: require('../../assets/images/platform-logos/superoffice.png') },
+  { name: 'شموع العقار', i18nKey: 'Shomou', logo: require('../../assets/images/platform-logos/shomoalaqar-com-sa.png') },
+  { name: 'حراج', i18nKey: 'Haraj', logo: require('../../assets/images/platform-logos/haraj.png') },
+  { name: 'منصة مكتب', i18nKey: 'Maktab', logo: require('../../assets/images/platform-logos/maktab.png') },
+  { name: 'سرداب', i18nKey: 'Sirdab', logo: require('../../assets/images/platform-logos/marketplace-sirdab-co.png') },
+  { name: 'عشاب العقارية', i18nKey: 'Ashab', logo: require('../../assets/images/platform-logos/ashab-sa.png') },
+  { name: 'منافع العقارية', i18nKey: 'Manafe', logo: require('../../assets/images/platform-logos/manafe-com-sa.png') },
+  { name: 'وجف العقارية', i18nKey: 'Wajaf', logo: require('../../assets/images/platform-logos/wajaf.png') },
+  { name: 'البكيري العقارية', i18nKey: 'AlBukairi', logo: require('../../assets/images/platform-logos/albukaeri.png') },
+  { name: 'ريادة العقارية', i18nKey: 'Ryadah', logo: require('../../assets/images/platform-logos/ryadah.png') },
+  { name: 'مجموعة صالح القرشي العقارية', i18nKey: 'SQCC', logo: require('../../assets/images/platform-logos/sqcc.png') },
+  { name: 'دارا للتطوير العقاري', i18nKey: 'Dara', logo: require('../../assets/images/platform-logos/daraa.png') },
+  { name: 'مكتب طوية للعقار', i18nKey: 'Tawia', logo: require('../../assets/images/platform-logos/tawia.png') },
+  { name: 'مانزو', i18nKey: 'Manzo', logo: require('../../assets/images/platform-logos/manzo.png') },
+  { name: 'الطابق الثامن', i18nKey: '8Floor', logo: require('../../assets/images/platform-logos/eightfloor.png') },
+  { name: 'حلول', i18nKey: 'Holoul', logo: require('../../assets/images/platform-logos/holoul.png') },
+  { name: 'السوق المفتوح', i18nKey: 'OpenSooq', logo: require('../../assets/images/platform-logos/sa-opensooq-com.png') },
+  { name: 'معرض نافذة', i18nKey: 'Nafithh', logo: require('../../assets/images/platform-logos/nafithh.png') },
+  { name: 'مباشر', i18nKey: 'Mobasher', logo: require('../../assets/images/platform-logos/mobasher.png') },
+  { name: 'مؤاجرة', i18nKey: 'Muajarh', logo: require('../../assets/images/platform-logos/muajarh.png') },
+  { name: 'دلّالي', i18nKey: 'Dallali', logo: require('../../assets/images/platform-logos/dallali.png') },
+  { name: 'شركة مقام للتطوير العقاري', i18nKey: 'Maqam Development', logo: require('../../assets/images/platform-logos/maqam.png') },
+  { name: 'تطبيق أرض', i18nKey: 'Earth App', logo: require('../../assets/images/platform-logos/earthapp.png') },
+  { name: 'نوافذ الوطن', i18nKey: 'Nawafeth Alwatan', logo: require('../../assets/images/platform-logos/nawafeth.png') },
   // LOGO-ONLY (owner decision 2026-09-24): brand shown in the strip, no scraper, no tables, never searchable.
-  { name: 'Maskanre', i18nKey: 'Maskan United', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },
-  { name: 'Wetheaddress', i18nKey: 'The Address', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },
+  { name: 'Maskanre', i18nKey: 'Maskan United', logo: require('../../assets/images/platform-logos/maskanre.png'), logoOnly: true },
+  { name: 'Wetheaddress', i18nKey: 'The Address', logo: require('../../assets/images/platform-logos/wetheaddress.png'), logoOnly: true },
 ];
 
 // Ordered SPECIFIC-first token → platform name map, mirroring ResultCard's SourceBadge matching so a
@@ -402,6 +417,37 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['macsaib', 'مكسب العقارية'],
   ['مكسب العقارية', 'مكسب العقارية'],
   ['maqrat', 'MAQRAT'],
+  ['عرش العقارية', 'عرش العقارية'],
+  ['arshglobal', 'عرش العقارية'],
+  ['arsh', 'عرش العقارية'],
+  ['سوبر أوفيس', 'سوبر أوفيس'],
+  ['superoffice', 'سوبر أوفيس'],
+  ['super office', 'سوبر أوفيس'],
+  ['شموع العقار', 'شموع العقار'],
+  ['shomou', 'شموع العقار'],
+  ['حراج', 'حراج'],
+  ['haraj', 'حراج'],
+  ['منصة مكتب', 'منصة مكتب'],
+  ['maktab', 'منصة مكتب'],
+  ['سرداب', 'سرداب'],
+  ['sirdab', 'سرداب'],
+  ['عشاب العقارية', 'عشاب العقارية'],
+  ['ashab.sa', 'عشاب العقارية'],
+  ['ashab', 'عشاب العقارية'],
+  ['منافع العقارية', 'منافع العقارية'],
+  ['manafe', 'منافع العقارية'],
+  ['وجف العقارية', 'وجف العقارية'],
+  ['wajaf', 'وجف العقارية'],
+  ['البكيري العقارية', 'البكيري العقارية'],
+  ['albukaeri', 'البكيري العقارية'],
+  ['ريادة العقارية', 'ريادة العقارية'],
+  ['ryadah', 'ريادة العقارية'],
+  ['مجموعة صالح القرشي العقارية', 'مجموعة صالح القرشي العقارية'],
+  ['sqcc', 'مجموعة صالح القرشي العقارية'],
+  ['دارا للتطوير العقاري', 'دارا للتطوير العقاري'],
+  ['daraa', 'دارا للتطوير العقاري'],
+  ['مكتب طوية للعقار', 'مكتب طوية للعقار'],
+  ['tawia', 'مكتب طوية للعقار'],
   ['مانزو', 'مانزو'],
   ['manzo', 'مانزو'],
   ['الطابق الثامن', 'الطابق الثامن'],
@@ -439,7 +485,42 @@ export function normalizeSource(raw: string | null | undefined): string | null {
 // RUNTIME truth source lives in a separate file (loaderActivePlatforms.ts) so this file has zero
 // dependency on the Supabase client — the barrier (scripts/verify-loader-platforms-match-active.ts)
 // can import PLATFORM_META and normalizeSource without pulling Metro-only path aliases into a
-// plain-Node test process. See loaderActivePlatforms.ts for fetchActivePlatformNames().
+// plain-Node test process. See loaderActivePlatforms.ts for loadHiddenPlatformNames().
+
+// A website that is DOWN ON ITS SIDE ('dormant') leaves the strip and the count (owner rule
+// 2026-09-26). 'retired' is deliberately NOT here: the search gate hides only dormant listings, so a
+// retired site's listings are still searchable and its logo stays; the owner also chose on
+// 2026-09-19 to keep Toor's (retired) logo.
+export const HIDDEN_STATUSES: ReadonlySet<string> = new Set(['dormant']);
+
+// Registry rows (slug + status, from loader_platform_status_ar()) → the PLATFORM_META names to hide.
+//
+// A slug is mapped with normalizeSource(), the same matcher the rest of the strip uses. A logo hides
+// only when NO slug behind it is up, because slugs share logos: 'deal' is retired while 'dealapp' is
+// active, and both are Deal App; 'aqarmonthly' is Aqar. Hiding per slug would take Deal App's logo
+// off the strip today, and Aqar's the day aqarmonthly went down. A slug that maps to nothing hides
+// nothing.
+// THE ONE RULE (owner 2026-10-27): «we hide their listings → we hide their logos, and the wording changes».
+// A logo shows only while at least one platform behind it has ads a user can see — the same list the site
+// count reads (loader_active_platforms_ar(): active in the registry AND a production_ready row). Down
+// (dormant), retired (toor) and logo-only brands (Maskanre, Wetheaddress) have no visible ads, so their logos
+// leave every strip and the count drops with them; a site that comes back returns on its own.
+export function hiddenFromVisibleSlugs(slugs: ReadonlyArray<string>): Set<string> {
+  const up = new Set<string>();
+  for (const s of slugs) { const n = normalizeSource(s); if (n) up.add(n); }
+  return new Set(PLATFORM_META.map((p) => p.name).filter((n) => !up.has(n)));
+}
+
+export function hiddenLoaderNames(rows: ReadonlyArray<{ platform: string; status: string }>): Set<string> {
+  const down = new Set<string>();
+  const up = new Set<string>();
+  for (const r of rows) {
+    const name = normalizeSource(r.platform);
+    if (name) (HIDDEN_STATUSES.has(r.status) ? down : up).add(name);
+  }
+  for (const name of up) down.delete(name);
+  return down;
+}
 
 // A rotating cursor so each search shows a DIFFERENT mix and, over many searches, every platform
 // eventually appears (instead of replaying the same handful). Seeded from localStorage on web so the
@@ -469,22 +550,21 @@ function rotate<T>(arr: T[], by: number): T[] {
 
 // Choose which platforms the searching strip shows for THIS search.
 //
-// If `activeNames` is provided (from fetchActivePlatformNames), the roster is FILTERED to just
-// platforms that currently have reachable rows in production — a scraper that went cold today
-// stops advertising within one page-load without a deploy. If undefined (RPC not yet resolved, or
-// the request failed), the full PLATFORM_META is used — safe degradation, never fewer than reality.
+// The full PLATFORM_META minus `hiddenNames` (hiddenLoaderNames() — websites down on their side). If
+// `hiddenNames` is null (statuses not loaded yet, or the read failed) nothing is hidden: the full
+// catalog, never a guess.
 //
 // `resultSources` (raw source values from the listings that actually came back, once known) only
 // REORDERS the display — platforms that truly contributed lead the strip — it never removes a
-// platform. `offset` rotates the rest per search so repeat searches don't always show the same
-// visual order.
+// platform, and never brings a hidden one back. `offset` rotates the rest per search so repeat
+// searches don't always show the same visual order.
 export function pickLoaderPlatforms(
   resultSources: string[] | undefined,
   offset: number,
-  activeNames?: Set<string> | null,
+  hiddenNames?: ReadonlySet<string> | null,
 ): LoaderPlatform[] {
-  const catalog = activeNames && activeNames.size
-    ? PLATFORM_META.filter((p) => activeNames.has(p.name))
+  const catalog = hiddenNames && hiddenNames.size
+    ? PLATFORM_META.filter((p) => !hiddenNames.has(p.name))
     : PLATFORM_META;
   const inResults = new Set((resultSources ?? []).map((s) => normalizeSource(s)).filter(Boolean) as string[]);
   const pri = catalog.filter((p) => inResults.has(p.name));

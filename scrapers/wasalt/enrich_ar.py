@@ -113,6 +113,119 @@ def _extract(pdv: dict) -> tuple[dict, Optional[str], Optional[str]]:
     return d, pi.get("city"), pi.get("district")
 
 
+# ── amenities the ad's OWN description states (🦅 Falcon, 2026-10-16) ─────────────────────────────
+# wasalt publishes NO structured field for these three anywhere in propertyDetailsV3: measured over the
+# 62,491 active residential rows whose payload we keep in ar_data, neither `attributes`,
+# `additionalAttributes` nor `propertyInfo` carries an elevator, air-conditioning or private-entrance key,
+# and run.py deliberately maps none of them (scripts/verify-wasalt-amenity-vocabulary.ts). So the column
+# was NULL on 100% of rows while 3,222 descriptions say «مصعد», 2,817 «مكيف/تكييف» and 547 «مدخل خاص» —
+# and a customer asking the Advanced Filter for an elevator could never find one wasalt ad
+# (ops_af_score 10-16: wasalt 0 of 5 findable).
+#
+# ADVANCED_FILTER_SOURCE_TRUTH §2 allows prose for exactly this case (no structured counterpart anywhere on
+# the platform): yes, NO only on an explicit negation tied to the word («لا يوجد مصعد»; owner 2026-10-24), or
+# nothing — «تأسيس مصعد», «قريب من …» and a contradiction stay NULL. The fields wasalt DOES publish structurally (furnishingType, the
+# featureAmenities vocabulary run.py reads: parking, kitchen, maid, driver, laundry, balcony) are never
+# read from prose here: PROSE_ONLY is the whole list.
+PROSE_ONLY = ("elevator", "air_conditioner", "private_entrance")
+
+
+# Two shapes measured on the first backfill (2,849 elevator YES, 4 wrong, 2026-10-16):
+#  · some descriptions carry the two CHARACTERS «\\n» instead of a line break, so html_block_lines() saw one long
+#    line and a «تأسيس مصعد» bullet shared a clause with the next bullet (442940, 526753);
+#  · a LABELLED line, «المصعد: لا يوجد مصعد» / «المصعد: غير راكب، ويوجد تأسيس للمصعد», let the label word itself vote
+#    YES (9313822, 11923578). When the value after a short label says no / not installed / prepared, the label is
+#    not a statement: only the value is read, so the line resolves to NULL.
+_LITERAL_NL = "\\n"
+_LABEL_LINE = re.compile(r"^\s*([^:\n]{1,24}):\s*(.+)$")
+_NO_WORDS = re.compile(r"(?<![ء-ي\w])(?:و?غير|لا|بدون|تأسيس|مؤسس)(?![ء-ي])")
+
+
+_NOT_INSTALLED = {
+    "elevator": re.compile(r"(?:تأسيس|مؤسس|مهيأ|غير\s+راكب)\S*\s*(?:ل|لل|ال)?مصعد|مصعد\s*(?:مؤسس|غير\s+راكب)"),
+    "air_conditioner": re.compile(r"(?:تأسيس|مؤسس)\S*\s*(?:ل|لل|ال)?(?:مكيف|تكييف)|(?:مكيفات|تكييف)\s*(?:مؤسس|غير\s+راكب)"),
+}
+
+
+def _statement_lines(text: str) -> str:
+    out = []
+    for line in text.split("\n"):
+        m = _LABEL_LINE.match(line)
+        out.append(m.group(2) if m and _NO_WORDS.search(m.group(2)) else line)
+    return "\n".join(out)
+
+
+def prose_amenities(d: Any) -> dict[str, bool]:
+    """{column: True|False} for the PROSE_ONLY amenities this ad's own description states — yes, or no only on an
+    explicit negation tied to the word («لا يوجد مصعد»); silence / prepared / nearby leave the column out."""
+    if not isinstance(d, dict) or "_err" in d:
+        return {}
+    desc = (d.get("propertyInfo") or {}).get("description")
+    if not isinstance(desc, str) or not desc.strip():
+        return {}
+    # Imported here, not at module top: the enrich barriers stub `scrapers.common` with only `db`.
+    from scrapers.common import normalize
+    lines = _statement_lines(normalize.html_block_lines(desc.replace(_LITERAL_NL, "\n")))
+    found = normalize.prose_amenities(lines)
+    # An ad that ANYWHERE calls the fixture prepared-only or not installed has not stated YES, whatever another
+    # line implies («مدخل مرورا بالمصعد» beside «مؤسس مصعد», 526753): unknown, never YES.
+    for col, rx in _NOT_INSTALLED.items():
+        if found.get(col) is True and rx.search(lines):
+            found.pop(col)
+    return {k: found[k] for k in PROSE_ONLY if k in found}
+
+
+# The rows enriched BEFORE prose_amenities existed are never fetched again (ar_fetched stays true), so
+# every run first sweeps them from the payload we already hold: no proxy, no page fetch, the ad's own
+# stored words. Only rows whose column is still NULL and whose description carries the word are read,
+# so after the first pass each run re-reads only the few the matcher declined (a negation, «تأسيس»).
+# «مصاعد» is the plural and shares no substring with «مصعد»: 199 active ads say only the plural (🔬 2026-10-18).
+_PROSE_SCAN = {"elevator": ("مصعد", "مصاعد"), "air_conditioner": ("مكيف", "تكييف"), "private_entrance": ("مدخل",)}
+_DESC = "ar_data->propertyInfo->>description"
+
+
+def prose_backfill(c: Any, table: str, page: int = 500, cap: int = 20000) -> dict[str, int]:
+    """Write the answers (yes, or an explicit no) the stored descriptions state into still-NULL columns, then
+    re-judge every answer an earlier reader wrote. Returns per-column counts."""
+    out: dict[str, int] = {}
+    for col, words in _PROSE_SCAN.items():
+        written, last, read = 0, 0, 0
+        while read < cap:
+            q = (c.table(table).select(f"id,desc:{_DESC}").eq("active", True).is_(col, "null")
+                 .or_(",".join(f"{_DESC}.ilike.*{w}*" for w in words)).gt("id", last).order("id").limit(page))
+            rows = q.execute().data or []
+            if not rows:
+                break
+            read += len(rows)
+            last = rows[-1]["id"]
+            for r in rows:
+                said = prose_amenities({"propertyInfo": {"description": r.get("desc")}}).get(col)
+                if said is not None:
+                    # .is_(col, null) again: never overwrite a value another writer set meanwhile.
+                    c.table(table).update({col: said}).eq("id", r["id"]).is_(col, "null").execute()
+                    written += 1
+        out[col] = written
+        # RE-CHECK what an earlier reader wrote: an answer its own description no longer gives under the current
+        # reader moves to what it gives now (a stated no, or unknown). Only this module writes these three wasalt
+        # columns (run.py maps none of them), so a value here is always one of ours to re-judge.
+        unset = 0
+        for was in (True, False):
+            last = 0
+            while True:
+                rows = (c.table(table).select(f"id,desc:{_DESC}").eq("active", True).eq(col, was)
+                        .gt("id", last).order("id").limit(page).execute().data or [])
+                if not rows:
+                    break
+                last = rows[-1]["id"]
+                for r in rows:
+                    now = prose_amenities({"propertyInfo": {"description": r.get("desc")}}).get(col)
+                    if now is not was:
+                        c.table(table).update({col: now}).eq("id", r["id"]).eq(col, was).execute()
+                        unset += 1
+        out[f"{col}_unset"] = unset
+    return out
+
+
 _local = threading.local()
 
 
@@ -327,8 +440,75 @@ def fetch_ar(slug: str) -> tuple[bool, Optional[dict], Optional[str], Optional[s
     return True, d_en, None, None
 
 
+# Proxy-spend SAFETY cap (owner decision 2026-10-05): 15,000 pending rows. It exists only to stop a
+# runaway re-crawl (a flag reset re-queuing ~57k rows), not to throttle ordinary new listings: on
+# 2026-10-05 ~13k genuinely new rows were pending, which the old 5,000 would have refused.
+MAX_PENDING_DEFAULT = 15000
+# Over the cap, only rows scraped this recently (plus every no-city row) are fetched: see enrich_table.
+ARRIVALS_WINDOW_H = 48
+
+
+def pending_count(c, table: str, flag: str, sel: str) -> int:
+    """Active rows still waiting on `flag`. Counted as a GET with .limit(1), never a HEAD: on the pinned client
+    (supabase 2.10 / postgrest 0.18) a HEAD count reads 0, which left this breaker blind from the
+    day it was written (scrapers/common/tests/test_head_count_reads_zero.py). A count that cannot be
+    read is not zero: it raises, so the run stops before spending proxy bandwidth."""
+    res = (c.table(table).select(sel, count="exact")
+           .eq("active", True).eq(flag, False).limit(1).execute())
+    if res.count is None:
+        raise RuntimeError(f"circuit breaker: pending count for {table} unreadable — refusing to spend proxy")
+    return int(res.count)
+
+
+def _no_district_rows(c, table: str, base, limit: int) -> list[dict]:
+    """Un-fetched rows of `table` that the search index serves with NO district (production_ready).
+    Best effort: a failed read answers [] and the run keeps its normal order — never a crashed crawl."""
+    try:
+        idx = (c.table("search_listings_ar").select("listing_id").eq("source_table", table)
+               .eq("production_ready", True).is_("district_ar", "null").limit(5000).execute().data or [])
+        ids = [r["listing_id"] for r in idx if r.get("listing_id") is not None]
+        out: list[dict] = []
+        for i in range(0, len(ids), 200):
+            if len(out) >= limit:
+                break
+            out += base().in_("id", ids[i:i + 200]).execute().data or []
+        return out[:limit]
+    except Exception as e:  # noqa: BLE001
+        print(f"   ⚠ no-district priority read failed ({str(e)[:120]}) — normal order", flush=True)
+        return []
+
+
+# A per-m² RATE typed into the price field serves as a «total» of a few thousand riyals for a plot (wasalt 5813546: «6,500»
+# for 467 m², its own description says «Price: 3041220 SAR»). Real land never sells under this many SAR per m² in a city
+# we serve, so a SALE row below it is read FIRST: its Arabic payload carries the description whose stated total lets
+# trg_wrm_rate_is_not_the_total prove the unit. Reading it changes nothing by itself — the source's text decides.
+RATE_SUSPECT_PPM = 50
+
+
+def _rate_suspect_rows(c, table: str, base, limit: int) -> list[dict]:
+    """Un-fetched rows of `table` the index serves as a SALE under RATE_SUSPECT_PPM SAR/m² (2026-10-18: 54 of 108 such
+    wasalt plots had never had their Arabic page read, so the stored proof did not exist). Best effort like
+    _no_district_rows: a failed read answers [] and the run keeps its normal order."""
+    try:
+        idx = (c.table("search_listings_ar").select("listing_id,price_total_effective,area_m2").eq("source_table", table)
+               .eq("production_ready", True).eq("deal_ar", "بيع").lt("price_total_effective", 100000)
+               .limit(5000).execute().data or [])
+        ids = [r["listing_id"] for r in idx
+               if r.get("listing_id") is not None and (r.get("area_m2") or 0) > 0
+               and 0 < (r.get("price_total_effective") or 0) < RATE_SUSPECT_PPM * r["area_m2"]]
+        out: list[dict] = []
+        for i in range(0, len(ids), 200):
+            if len(out) >= limit:
+                break
+            out += base().in_("id", ids[i:i + 200]).execute().data or []
+        return out[:limit]
+    except Exception as e:  # noqa: BLE001
+        print(f"   ⚠ rate-suspect priority read failed ({str(e)[:120]}) — normal order", flush=True)
+        return []
+
+
 def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: int = 1,
-                 max_pending: int = 5000, allow_backfill: bool = False,
+                 max_pending: int = MAX_PENDING_DEFAULT, allow_backfill: bool = False,
                  retry_errs: int = 100, err_backoff_hours: float = 24.0,
                  max_seconds: float = 0.0) -> dict[str, int]:
     _load_catalog()
@@ -348,20 +528,76 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
     # un-fetched backlog means ar_fetched was reset or a bulk backfill is in play — auto-crawling all of
     # it through the metered Saudi proxy is exactly what exhausted the free tier (25-26 Jun). Refuse
     # unless explicitly authorised, so a stray flag reset can never silently re-crawl ~57k rows.
-    pending = ((c.table(table).select("id", count="exact", head=True)
-                .eq("active", True).eq("ar_fetched", False).execute().count) or 0)
+    pending = pending_count(c, table, "ar_fetched", "id")
+    # ARRIVALS MODE (New Listings Engineer, 2026-10-10). Over the cap this used to refuse the WHOLE
+    # run, which also starved the one thing it exists for — today's arrivals. From 10-08 the
+    # residential queue sat at 19-27k (wasalt re-lists ~8k ads a day), every run refused in 0 s, and
+    # 137 of 7,552 arrivals in 24 h had NO city (the English list payload carried none; the Arabic
+    # page is where it comes from), so they were unsearchable, plus ~140 with an unbridged English
+    # neighbourhood and no district. Over the cap we now take only (1) rows with no city — they are
+    # invisible to every customer — and (2) rows scraped in the last ARRIVALS_WINDOW_H hours. A flag
+    # reset re-queues OLD rows, which this window excludes, so the breaker still blocks the runaway
+    # re-crawl it was written for; and if even the fresh window exceeds the cap, the run refuses.
+    arrivals_since = None
     if pending > max_pending and not allow_backfill:
-        print(f"⚠ CIRCUIT BREAKER: {pending} un-fetched rows in {table} (> {max_pending}). Steady state "
-              f"is a few/day — this looks like a flag reset or a backfill. Refusing to crawl the backlog "
-              f"through the metered proxy. Re-run with --allow-backfill to override.", flush=True)
-        return {"ok": 0, "empty": 0, "fail": 0, "aborted": pending, "pending_before": pending}
-    q = (c.table(table).select("id,ad_number,listing_url")
-         .eq("active", True).eq("ar_fetched", False))
-    # Cloud matrix sharding: 10 parallel jobs, each claims a disjoint slice by the last digit of
-    # ad_number (WST…N). Server-side, ~even, zero overlap → no duplicate proxy fetches.
-    if shards == 10:
-        q = q.like("ad_number", f"%{shard}")
-    rows = q.order("id").limit(limit).execute().data or []
+        arrivals_since = (datetime.now(timezone.utc) - timedelta(hours=ARRIVALS_WINDOW_H)).isoformat()
+        fresh = (c.table(table).select("id", count="exact").eq("active", True).eq("ar_fetched", False)
+                 .gte("scraped_at", arrivals_since).limit(1).execute())
+        if fresh.count is None or int(fresh.count) > max_pending:
+            print(f"⚠ CIRCUIT BREAKER: {pending} un-fetched rows in {table} (> {max_pending}), and the "
+                  f"last {ARRIVALS_WINDOW_H}h alone holds {fresh.count}. This looks like a flag reset or a "
+                  f"backfill. Refusing to crawl through the metered proxy. Re-run with --allow-backfill "
+                  f"to override.", flush=True)
+            return {"ok": 0, "empty": 0, "fail": 0, "aborted": pending, "pending_before": pending}
+        print(f"⚠ {pending} un-fetched rows (> {max_pending}): arrivals mode — no-city rows first, then "
+              f"the {fresh.count} scraped in the last {ARRIVALS_WINDOW_H}h, then the old backlog drains "
+              f"newest first in the run's remaining budget.",
+              flush=True)
+
+    def _base():
+        q = (c.table(table).select("id,ad_number,listing_url")
+             .eq("active", True).eq("ar_fetched", False))
+        # Cloud matrix sharding: 10 parallel jobs, each claims a disjoint slice by the last digit of
+        # ad_number (WST…N). Server-side, ~even, zero overlap → no duplicate proxy fetches.
+        if shards == 10:
+            q = q.like("ad_number", f"%{shard}")
+        return q
+    # NEWEST FIRST (New Listings Engineer, 2026-10-07). The pending queue holds ~12k rows and a run
+    # clears ~380 before its time budget, so `order("id")` (oldest first) meant a listing that
+    # arrived today waited behind thousands of older ones: 985 of 985 wasalt rows scraped in the
+    # last 3 days had ar_fetched=false, and the Arabic page is where their city/district come from
+    # (9 of 463 arrivals unsearchable for no city, 28 with no district). Today's arrivals go first;
+    # older pending rows drain behind them.
+    if arrivals_since is None:
+        rows = _base().order("id", desc=True).limit(limit).execute().data or []
+    else:
+        rows = _base().is_("city", "null").order("id", desc=True).limit(limit).execute().data or []
+        seen = {r["id"] for r in rows}
+        if len(rows) < limit:
+            more = (_base().gte("scraped_at", arrivals_since).order("id", desc=True)
+                    .limit(limit).execute().data or [])
+            rows += [r for r in more if r["id"] not in seen][: limit - len(rows)]
+            seen = {r["id"] for r in rows}
+        # DRAIN, never wait forever (owner 2026-10-10 «drain in batches under the cap»; 2026-10-13
+        # Scraping Engineer). With only no-city rows and the 48 h window, the old backlog never moved:
+        # 25,750 rows pending on 10-12 and 10-13 while each run fetched 0-1 rows. The run's unused
+        # budget now takes the old backlog, newest first, still bounded by `limit` — the same spend
+        # bound a run under the cap already has, so a flag reset still costs at most `limit` a run.
+        if len(rows) < limit:
+            older = (_base().order("id", desc=True).limit(limit).execute().data or [])
+            rows += [r for r in older if r["id"] not in seen][: limit - len(rows)]
+    # NO-DISTRICT FIRST (2026-10-18, owner «fix everything»). A live row whose English zone the
+    # source-attested EN→AR bridge cannot place is served with NO district until its Arabic page is read —
+    # 312 such rows sat up to 23,861 deep in a newest-first queue. Their Arabic page is the source's own
+    # word (it beats any transliteration), so they go to the FRONT of this run, inside the same `limit`.
+    nd = _no_district_rows(c, table, _base, limit)
+    rs = _rate_suspect_rows(c, table, _base, limit)
+    if nd or rs:
+        first = nd + [r for r in rs if r["id"] not in {x["id"] for x in nd}]
+        ids = {r["id"] for r in first}
+        rows = (first + [r for r in rows if r["id"] not in ids])[:limit]
+        print(f"   ⓘ {len(nd)} live rows served with no district + {len(first) - len(nd)} sale rows served under "
+              f"{RATE_SUSPECT_PPM} SAR/m² go first", flush=True)
     print(f"── {table} shard {shard}/{shards}: {len(rows)} un-fetched rows (cap {limit})", flush=True)
     stats = {"ok": 0, "empty": 0, "fail": 0, "skipped": 0}
     lock = threading.Lock()
@@ -417,6 +653,7 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
         if "_err" in d:
             d = bump_err(d, row.get("ar_data"))
         upd: dict[str, Any] = {"ar_fetched": True, "ar_fetched_at": _now_iso(), "ar_data": d}
+        upd.update(prose_amenities(d))   # yes / an explicit no; a silent description writes nothing
         if city_ar:
             upd["city_ar"] = city_ar
         if dist_ar:
@@ -505,7 +742,7 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--shard", type=int, default=0, help="This job's shard index (0..shards-1).")
     ap.add_argument("--shards", type=int, default=1, help="Total shards (10 = cloud matrix by ad_number last digit).")
-    ap.add_argument("--max-pending", type=int, default=5000,
+    ap.add_argument("--max-pending", type=int, default=MAX_PENDING_DEFAULT,
                     help="Circuit breaker: abort (no proxy fetches) if more than this many un-fetched rows "
                          "exist — a mass backlog means a flag reset, not the normal daily trickle.")
     ap.add_argument("--allow-backfill", action="store_true",
@@ -533,6 +770,11 @@ def main() -> int:
     platform = f"wasalt_enrich_ar_{suffix}"
     run_id = db.begin_run(platform)
     try:
+        try:
+            prose = prose_backfill(db.sb(), args.table)
+            print(f"  prose amenities written from stored descriptions: {prose}", flush=True)
+        except Exception as e:  # noqa: BLE001 — the backfill never blocks the enrich run itself
+            print(f"  ✗ prose backfill skipped: {str(e)[:120]}", flush=True)
         stats = enrich_table(args.table, args.limit, args.workers, args.shard, args.shards,
                              args.max_pending, args.allow_backfill,
                              args.retry_errs, args.err_backoff_hours, args.max_seconds)
@@ -567,6 +809,11 @@ def main() -> int:
         # wrongly flip every healthy "fully caught up" run to ok=False.
         allow_empty=True,
     )
+    # A refusal is a run that did not do its job (same rule as enrich.py, 2026-10-10): fail where
+    # people look instead of reporting success.
+    if aborted:
+        print(f"✗ circuit breaker refused this run: {aborted} rows pending — nothing was enriched", flush=True)
+        return 2
     return 0
 
 

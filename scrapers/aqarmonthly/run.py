@@ -24,6 +24,7 @@ Usage (from ezhalah-app/ with the venv):
 from __future__ import annotations
 
 import argparse
+from functools import lru_cache
 import os
 import re
 import sys
@@ -44,6 +45,7 @@ from scrapers.common import db
 from scrapers.common import normalize as N
 from scrapers.common import arabic_location as AL
 from scrapers.common.arabic_location import resolve_slug
+from scrapers.common.source_pin import pin_dict
 
 GQL = "https://sa.aqar.fm/graphql"
 WORKERS = int(os.environ.get("SCRAPE_WORKERS", "6"))
@@ -53,6 +55,12 @@ MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 # apartments/studios; 104 chalet; 105/107 rest-house/farm stays; 106 caravan/camp. Default Apartment.
 CATEGORY_TYPE = {101: "Apartment", 102: "Apartment", 103: "Apartment",
                  104: "Chalet", 105: "Rest House", 106: "Camp", 107: "Rest House"}
+# 108 is Aqar's own «قاعة للحجز» (event/meeting halls; the site's category name, measured 2026-09-28).
+# Owner rule 2026-09-28: a commercial space we cannot place goes in مرافق خدمية under the source's word
+# («قاعة» = Event Hall), MONTHLY, and PRICE ON REQUEST — a hall is booked by the hour or night (ad
+# 6834468: «السعر للساعه 200 ريال»), so Aqar's 30-day booking calculator is not a monthly rent anyone
+# publishes. The price is stored NULL (authoritatively, so an older calculated figure is cleared).
+HALL_CATEGORY = 108
 
 # ── polite per-host throttle (spaces request STARTS, like common/http) ──────────────────────────
 _last = [0.0]
@@ -71,33 +79,126 @@ def _throttle() -> None:
 
 _local = threading.local()
 
+# ── Retry smarter on a BLOCK (2026-09-28, Scraping Engineer) ──────────────────────────────────────
+# aqarmonthly-sync run 36384691494: all 16 shards discovered 0 ids ("page stream failed mid-flight")
+# after nine straight green days — the same site-wide aqar wall that took aqar-sweep to 0 pages
+# earlier that day (run 36360844470, fixed in common/http.py by #5055). _gql was pinned to ONE
+# fingerprint (chrome124) on ONE route, swallowed every failure silently, and so could neither get
+# past a handshake block nor say what the host answered. Now: a request that does not come back as
+# a JSON object (403 page, challenge HTML, refused connection) walks the other browser profiles
+# DIRECT, then — only when the workflow sets SCRAPE_PROXY_FALLBACK_URL — every profile through the
+# residential proxy. The first leg that answers JSON is pinned for every thread for the rest of the
+# process. When no leg answers EXHAUST_AFTER escapes in a row the host is marked exhausted and later
+# calls fail fast (None, False) exactly as before, so a real ban cannot become a probe storm or a
+# proxy bill. The caller's UNKNOWN-coverage path (no prune, ok=False) is unchanged.
+FALLBACK_PROFILES = ("chrome124", "safari17_0", "firefox133", "edge101")
+EXHAUST_AFTER = 3
+_route: list[tuple[str, bool]] = [("chrome124", False)]   # the pinned (profile, via_proxy) leg
+_route_lock = threading.Lock()
+_escape = {"failures": 0, "exhausted": False}
+
+
+def _proxy_fallback() -> dict | None:
+    purl = os.environ.get("SCRAPE_PROXY_FALLBACK_URL", "").strip()
+    return {"http": purl, "https": purl} if purl else None
+
+
+def _new_session(profile: str, via_proxy: bool) -> cc.Session:
+    s = cc.Session(impersonate=profile, proxies=_proxy_fallback() if via_proxy else None)
+    # impersonate OWNS the User-Agent — never set one here
+    s.headers.update({"Content-Type": "application/json", "Origin": "https://sa.aqar.fm",
+                      "Accept": "application/json"})
+    return s
+
 
 def _sess() -> cc.Session:
-    s = getattr(_local, "s", None)
-    if s is None:
-        s = cc.Session(impersonate="chrome124")
-        s.headers.update({"Content-Type": "application/json", "Origin": "https://sa.aqar.fm",
-                          "Accept": "application/json"})
-        _local.s = s
-    return s
+    leg = _route[0]
+    if getattr(_local, "leg", None) != leg:
+        _local.s = _new_session(*leg)
+        _local.leg = leg
+    return _local.s
+
+
+def _post(s: cc.Session, body: dict) -> tuple[dict | None, str]:
+    """(json_object, outcome). json_object is None unless the host answered a JSON object."""
+    try:
+        r = s.post(GQL, json=body, timeout=30)
+    except Exception as e:                     # noqa: BLE001 — transport error, recorded by name
+        return None, type(e).__name__
+    try:
+        d = r.json()
+    except Exception:                          # noqa: BLE001 — a block page is HTML, not JSON
+        return None, f"HTTP {r.status_code} non-JSON"
+    if not isinstance(d, dict):
+        return None, f"HTTP {r.status_code} non-object"
+    return d, f"HTTP {r.status_code}"
+
+
+def _escape_block(body: dict, reason: str, used: tuple[str, bool]) -> dict | None:
+    """Try every other leg with a fresh session; pin the first one that answers JSON."""
+    with _route_lock:   # one thread probes; the others then reuse its verdict
+        if _escape["exhausted"]:
+            return None
+        cur = _route[0]
+        if cur != used:
+            # Another thread already found a working route while we waited — use it.
+            _throttle()
+            return _post(_new_session(*cur), body)[0]
+        tried = [f"{'proxy' if cur[1] else 'direct'}/{cur[0]}:{reason}"]
+        legs = [(p, False) for p in FALLBACK_PROFILES]
+        if _proxy_fallback() is not None:
+            legs += [(p, True) for p in FALLBACK_PROFILES]
+        for leg in legs:
+            if leg == cur:
+                continue
+            _throttle()
+            d, outcome = _post(_new_session(*leg), body)
+            tried.append(f"{'proxy' if leg[1] else 'direct'}/{leg[0]}:{outcome}")
+            if d is not None:
+                _route[0] = leg
+                _escape["failures"] = 0
+                print(f"   ↻ aqar graphql blocked, escaped via {tried[-1]} "
+                      f"(tried {', '.join(tried)}) — pinned for this run", flush=True)
+                return d
+        _escape["failures"] += 1
+        final = _escape["failures"] >= EXHAUST_AFTER
+        if final:
+            _escape["exhausted"] = True
+        print(f"   ✗ aqar graphql BLOCKED on every route (tried {', '.join(tried)}"
+              f"{'' if _proxy_fallback() else '; proxy fallback not enabled'})"
+              + (f" — {EXHAUST_AFTER} in a row, failing fast for the rest of this run" if final else ""),
+              flush=True)
+        return None
 
 
 def _gql(query: str, variables: dict, tries: int = 3):
     """Returns (data, gql_errored). Retries ONLY transient failures (network error / no response).
     A valid JSON response that carries GraphQL `errors` (e.g. "dates already reserved", INVALID_INPUT)
     is a deterministic business error — return immediately so the caller can move on (NOT retry it;
-    retrying booked-date errors is what made the crawl crawl)."""
+    retrying booked-date errors is what made the crawl crawl).
+
+    When every try on the pinned route fails, the other browser profiles and then the residential
+    proxy are tried once (see _escape_block) before giving up with (None, False)."""
+    body = {"query": query, "variables": variables}
+    outcome = "no attempt"
+    used = _route[0]
     for i in range(tries):
+        if _escape["exhausted"]:
+            return None, False
         _throttle()
-        try:
-            r = _sess().post(GQL, json={"query": query, "variables": variables}, timeout=30)
-            d = r.json()
+        used = _route[0]
+        d, outcome = _post(_sess(), body)
+        if d is not None:
             # Return PARTIAL data even on errors: when only the price field errors ("dates reserved"),
             # the response still carries Listing.get, so the caller keeps the detail and just retries
             # the price on the next window. Business errors are NOT retried (deterministic).
+            with _route_lock:
+                _escape["failures"] = 0
             return d.get("data"), bool(d.get("errors"))
-        except Exception:
-            time.sleep(0.6 * (i + 1))        # transient (network) → back off and retry
+        time.sleep(0.6 * (i + 1))            # transient (network/block) → back off and retry
+    d = _escape_block(body, outcome, used)
+    if d is not None:
+        return d.get("data"), bool(d.get("errors"))
     return None, False
 
 
@@ -116,12 +217,141 @@ def _month_windows_ms(offsets=(1, 31, 61, 91, 121, 151)) -> list[tuple[int, int]
 
 FIND_Q = ("query($drf:DailyRentingFilter,$size:Int,$from:Int){ Search{ "
           "find(daily_renting_filter:$drf, size:$size, from:$from){ total listings{ id } } } }")
+# Parking lives in aqar's `extended_details` (special_parking), and Listing.get does NOT expose it — only
+# `has_extended_details` (introspected 2026-10-06; the detail query's schema probe dropped it, so aqarmonthly
+# stored parking for 0 units). The search result type (ElasticListing) DOES carry it, so discovery asks for
+# it alongside the id: live sample of 210 available units, special_parking true 40 / false 22 / null 148.
+# If the schema ever refuses it, discovery falls back to FIND_Q on the first page — never fewer ids.
+FIND_Q_EXT = ("query($drf:DailyRentingFilter,$size:Int,$from:Int){ Search{ "
+              "find(daily_renting_filter:$drf, size:$size, from:$from){ total listings{ id "
+              "extended_details { special_parking laundry_room } } } } }")
+_ext_by_id: dict[int, dict] = {}
 
-DETAIL_Q = ("query($id:Int!,$s:Float!,$e:Float!){ "
+# Aqar's structured amenity flags (2026-10-05, 🔬 AF engineer). The same Listing object the aqar page
+# embeds — and scrapers/aqar/enrich_residential.py already reads for the annual inventory — carries
+# `lift` / `ketchen` / `ac` / `maid` / `driver` / `car_entrance` (0/1/null), the two entrance flags and
+# `extended_details` (special_parking, laundry_room). This query fetched `furnished` and nothing else, so
+# all 3,675 searchable Aqar Monthly units stored NULL for every Advanced Filter amenity while their own
+# pages render «مطبخ · مصعد · مكيف · موقف خاص» (source-reread run 37288862098, ad 6570974) — invisible
+# to every customer who ticks an amenity on a Monthly search (ops_af_score 2026-10-05: find 0/10).
+AMENITY_GQL_FIELDS: tuple[str, ...] = ("lift", "ketchen", "ac", "maid", "driver", "car_entrance",
+                                       "special_entrance", "two_entrances", "extended_details", "wc",
+                                       "location { lat lng }")
+# `location { lat lng }` (owner 2026-10-20 night, «most of them have a real pin, we're just missing it»):
+# the unit page draws a Leaflet map with Aqar's own pin, and the page data carries it as
+# Listing.location {lat, lng} (ad 5993983 → 24.887617, 46.60416). 0 of 3,693 Monthly units were served
+# with a pin because this query never asked for it. Settled like the flags: a schema that rejects it
+# drops it alone and the crawl runs exactly as before.
+# `wc` (2026-10-10, 🔬): the same Listing's bathroom count — the «دورات المياه» row of the unit page.
+# The Monthly apartment interview asks «كم دورة مياه», and 0 of 3,073 searchable Monthly apartments
+# carried one (ops_af_score 2026-10-10 aqarmonthly bathrooms we_miss 4/4). Settled against the live
+# schema like the flags above, so a schema that does not know it drops it and the crawl is unchanged.
+# The subset the live schema accepted this run (see settle_amenity_fields); () = today's query exactly.
+_amenity_fields: tuple[str, ...] = ()
+
+
+def detail_query(extra: tuple[str, ...] = ()) -> str:
+    return ("query($id:Int!,$s:Float!,$e:Float!){ "
             "Listing{ get(id:$id){ id category beds area rooms capacity furnished content content_en uri imgs "
-            "address location_city location_district location_region location_street city_id district_id } } "
+            "address location_city location_district location_region location_street city_id district_id"
+            + "".join(" " + f for f in extra) + " } } "
             "DailyRenting{ getCalculatedBookingPriceWithDiscount(listing_id:$id, start_date:$s, end_date:$e){ "
             "discounted_price total_price } } }")
+
+
+DETAIL_Q = detail_query()
+
+
+def settle_amenity_fields(answer, fields: tuple[str, ...] = AMENITY_GQL_FIELDS) -> tuple[str, ...]:
+    """The amenity fields the live GraphQL schema accepts, proven by asking it once before the crawl.
+
+    `answer(query) -> dict | None` sends one detail query and returns the parsed JSON. A GraphQL
+    VALIDATION error (an unknown field, an object field without a selection) answers with no data at
+    all — sent on every unit, it would drop the whole catalogue. So a field the schema names in an error
+    is removed and the query re-asked; an answer that cannot be read, or an error that names none of
+    our fields, falls back to () — exactly the query this scraper ran before. Fail-safe both ways."""
+    fields = tuple(fields)
+    for _ in range(len(fields) + 1):
+        if not fields:
+            return ()
+        d = answer(detail_query(fields))
+        if not isinstance(d, dict):
+            return ()
+        if ((d.get("data") or {}).get("Listing") or {}).get("get") is not None:
+            return fields
+        msgs = " ".join(str((e or {}).get("message", "")) for e in (d.get("errors") or []))
+        # A field is named in the error by its NAME — «location», never «location { lat lng }».
+        bad = {f for f in fields if re.search(r'"' + re.escape(f.split()[0]) + r'"', msgs)}
+        if not bad:
+            return ()
+        fields = tuple(f for f in fields if f not in bad)
+    return ()
+
+
+# 3 → 8 (owner 2026-10-20 night): 2 of 16 shards per run settled to () on three unreadable first units and so
+# never asked for Listing.location — 197 Monthly units re-crawled without their pin. Still bounded; still falls back.
+SETTLE_TRIES = 8
+
+
+def settle_across_units(answer_for, ids, tries: int = SETTLE_TRIES) -> tuple[str, ...]:
+    """settle_amenity_fields() on up to `tries` units, first non-empty answer wins (🔬 AF engineer,
+    2026-10-06). One unit is not proof: a unit that is gone, or a transient error, answers unreadable,
+    which settles to () — and that shard then crawled with no amenity fields at all (2026-10-05: 1,835
+    of ~2,368 fresh rows carried them; aqarmonthly_residential_listings:13906613 refreshed without).
+    `answer_for(query, unit_id)`. All `tries` failing still falls back to () — the old query."""
+    for lid in list(ids)[:tries]:
+        got = settle_amenity_fields(lambda q, lid=lid: answer_for(q, lid))
+        if got:
+            return got
+    return ()
+
+
+def aqar_pin(g: dict) -> dict | None:
+    """{"latitude","longitude"} from Listing.location, or {} when Aqar gave none / an unusable pair.
+
+    None when this crawl never ASKED for the location (no `location` key in the answer): that is not
+    knowing, and None makes the upsert keep the stored pin. Returning {} there used to erase it — on
+    2026-10-21 three of sixteen shards settled to the old query and blanked ~690 real pins (ad 6182428:
+    its page shows 24.839914, 46.682392; we stored {} and served the district border)."""
+    if not isinstance(g, dict) or "location" not in g:
+        return None
+    loc = g.get("location")
+    if not isinstance(loc, dict):
+        return {}
+    return pin_dict(loc.get("lat"), loc.get("lng"))
+
+
+def wc_bathrooms(raw) -> int | None:
+    """aqar's `wc` → a bathroom count: a whole number 1..15, else None (0, junk and absence are silence)."""
+    n = N.to_int(raw) if raw is not None else None
+    return n if n is not None and 1 <= n <= 15 else None
+
+
+def map_amenities(g: dict) -> dict:
+    """aqar's 0/1/null flags → our tri-state columns, through the SAME tables and _tri_state the annual
+    aqar parser uses (one reading of one payload). A key the payload does not carry is not emitted, and
+    None is UNKNOWN (the upsert drops it, so it never overwrites a known value). Only columns
+    aqarmonthly_residential_listings has are emitted (it has no `furnished` column: that stays NULL)."""
+    from scrapers.aqar.enrich_residential import (
+        _EXTENDED_DETAIL_KEYS, _PRIVATE_ENTRANCE_KEYS, _STRUCTURED_AMENITY_KEYS, _extended_details, _tri_state,
+    )
+    out: dict = {}
+    for key, col in _STRUCTURED_AMENITY_KEYS.items():
+        if col in AMENITY_COLUMNS and key in g:
+            out[col] = _tri_state(g.get(key))
+    ext = _extended_details(g)
+    for key, col in _EXTENDED_DETAIL_KEYS.items():
+        if col in AMENITY_COLUMNS and key in ext:
+            out[col] = _tri_state(ext.get(key))
+    vals = [_tri_state(g.get(k)) for k in _PRIVATE_ENTRANCE_KEYS if k in g]
+    if vals:
+        out["private_entrance"] = True if any(v is True for v in vals) else (
+            False if all(v is False for v in vals) else None)
+    return out
+
+
+AMENITY_COLUMNS = frozenset({"elevator", "kitchen", "air_conditioner", "maid_room", "driver_room",
+                             "car_entrance", "parking", "laundry_room", "private_entrance"})
 
 
 ES_FROM_CAP = 9500          # ES refuses from+size past ~10k; the vertical is smaller, but pin the bound.
@@ -200,11 +430,15 @@ def discover_ids(max_listings: int | None = None) -> Discovery:
     declared: int | None = None
     truncated = capped = False
 
+    find_q = FIND_Q_EXT
     for _pass in range(MAX_PASSES):
         before = len(ids)
         frm, size = 0, 50
         while True:
-            d, _ = _gql(FIND_Q, {"drf": {"availability": {"eq": 1}}, "size": size, "from": frm})
+            d, errored = _gql(find_q, {"drf": {"availability": {"eq": 1}}, "size": size, "from": frm})
+            if find_q is FIND_Q_EXT and (errored or not d) and not ids:
+                find_q = FIND_Q        # the schema refused the extra block: discovery must not suffer
+                d, _ = _gql(find_q, {"drf": {"availability": {"eq": 1}}, "size": size, "from": frm})
             if not d:
                 truncated = True      # transport gave up: UNKNOWN, never "that was the last page"
                 break
@@ -213,6 +447,9 @@ def discover_ids(max_listings: int | None = None) -> Discovery:
             if declared is None:
                 declared = int(total)
             batch = [l["id"] for l in (fr.get("listings") or []) if l.get("id")]
+            for l in (fr.get("listings") or []):
+                if l.get("id") and isinstance(l.get("extended_details"), dict):
+                    _ext_by_id[int(l["id"])] = l["extended_details"]
             if not batch:
                 # An empty page BEFORE the declared total is a source-side hiccup, not the end of
                 # the catalogue — indistinguishable on the wire, so say UNKNOWN rather than guess.
@@ -278,15 +515,197 @@ def _district_from_address(address: str | None, city_id: int | None) -> str | No
     return candidate
 
 
+# ── THE DISTRICT BY AQAR'S OWN ID (2026-10-18) ───────────────────────────────────────────────────
+# 281 live rows had no district: their slug has no «حي» and their address ends «…، جدة ، جدة» (district ==
+# city), yet the listing record carries Aqar's own district_id (3494) and the rendered page redirects to
+# «/جدة/شمال-جدة/حي-الزمرد/…». Aqar names that id itself: Web.districts(category, city_id) → {district_id,
+# name}. The name is Aqar's own district entity — never a street, never a guess — kept as Aqar writes it.
+# One query per (city, category) per run; a failed read answers nothing (the row stays as before).
+_DISTRICTS_Q = ("query($c:Int!,$k:Int!){ Web{ districts(category:$k, city_id:$c){ district_id name } } }")
+
+
+@lru_cache(maxsize=None)
+def _aqar_districts(city_id: int, category: int) -> dict[int, str]:
+    """Aqar's own district list for one of ITS city ids: {district_id: name}; {} when unreadable."""
+    try:
+        data, errored = _gql(_DISTRICTS_Q, {"c": int(city_id), "k": int(category)})
+    except Exception as e:  # noqa: BLE001 — degrade: no district from the id this run
+        print(f"⚠ Web.districts unreadable for city {city_id}/{category}: {str(e)[:120]}", flush=True)
+        return {}
+    rows = (((data or {}).get("Web") or {}).get("districts")) or []
+    out = {}
+    for r in rows:
+        try:
+            did, name = int(r.get("district_id")), str(r.get("name") or "").strip()
+        except (TypeError, ValueError):
+            continue
+        if did and name:
+            out[did] = name
+    return out
+
+
+def _district_from_aqar_id(city_id, district_id, category) -> str | None:
+    """Aqar's own name for the listing's district_id, as written («حي الزمرد»), else None. The
+    listing's own category is asked first; category 1 (Aqar's fullest list) second."""
+    try:
+        cid, did = int(city_id or 0), int(district_id or 0)
+    except (TypeError, ValueError):
+        return None
+    if not cid or not did:
+        return None
+    cats = [c for c in (category, 1) if c is not None]
+    for k in dict.fromkeys(cats):
+        try:
+            name = _aqar_districts(cid, int(k)).get(did)
+        except (TypeError, ValueError):
+            continue
+        if name:
+            return name
+    return None
+
+
+# Aqar's OWN city id → our catalog region, used ONLY to break a same-name tie the slug cannot.
+#
+# Owner 2026-10-18 («make the small-town ads findable»): 13 active ads named a real catalog town in
+# their own slug — «الدرب-الدرب», «…-العقيق-العقيق», «…-البديعة» — and still had NO city, so they were
+# never production_ready and no search could reach them. The resolver was right to refuse: الدرب is
+# catalogued in Asir AND Jazan, العقيق in four places, and the slug names no «منطقة». But every ad
+# also carries Aqar's own city_id, and that id sits in one region. Measured over every resolved
+# aqarmonthly row (2026-10-18): each id below is ≥ 96% one region across ≥ 5 rows (21 → Riyadh in
+# 2,002 of 2,004). 56 has only 3 resolved rows: two «عتود ، الدرب» in Jazan, and one «… الكدرة ،
+# الدرب» resolved to a Riyadh-region الكدرة — the same «، الدرب» address, i.e. a mis-resolution,
+# not counter-evidence; Ad Darb is a Jazan governorate.
+#
+# A HINT, never a verdict: it is consulted only when the plain parse found no city, and the town must
+# still be a whole catalog name in the slug inside that region. Aqar's ids are not region-pure (id 1,
+# Abha, also carries «الكدارة ، الدرب» in Jazan), so it never overrides a city the slug resolved.
+AQAR_CITY_REGION: dict[int, int] = {
+    1: 6, 4: 6, 5: 12, 12: 5, 13: 1, 16: 1, 18: 5, 21: 1, 26: 2, 27: 5, 28: 3, 39: 6, 41: 3, 43: 1,
+    46: 5, 52: 4, 56: 10, 59: 7, 65: 10, 66: 2, 67: 8, 68: 5, 70: 6, 91: 4, 94: 2,
+}
+
+
+_STREET_SEG = re.compile(r"^\s*(?:شارع|طريق)(?:\s|$)")
+
+
+def _address_segments(address) -> list[str]:
+    """Aqar's own comma-delimited address, «[street?, district?, city]», as trimmed segments."""
+    return [x.strip() for x in re.split(r"[،,]", str(address or "")) if x.strip()]
+
+
+def _has_name(segment: str, name: str) -> bool:
+    return f" {AL.norm_ar(name)} " in f" {AL.norm_ar(segment)} "
+
+
+def _city_only_in_street(city_ar, address) -> bool:
+    """True when the city we picked appears in the ad's address ONLY inside a «شارع …» / «طريق …»
+    segment — i.e. a street named after a town, not the ad's town. Measured 2026-10-18: «شارع
+    الاحساء, العيينة» was filed under الاحساء, «شارع سكاكا, العيينة» under سكاكا, «شارع بدر ، … ،
+    المجمعة ، المجمعة» under بدر. «شارع 44 تمنية ، تمنية ، …» names the town outside the street too and
+    is left alone."""
+    segs = _address_segments(address)
+    if not city_ar or not segs:
+        return False
+    street = [x for x in segs if _STREET_SEG.match(x)]
+    other = [x for x in segs if not _STREET_SEG.match(x)]
+    return any(_has_name(x, city_ar) for x in street) and not any(_has_name(x, city_ar) for x in other)
+
+
+@lru_cache(maxsize=1)
+def _city_region() -> dict[int, int]:
+    AL._load()
+    return {cid: rid for lst in AL._CITY.values() for cid, rid in lst if rid is not None}
+
+
+def _city_for_district(name, region_id) -> tuple[int, str] | None:
+    """(city_id, catalog district spelling) when `name` is a catalog DISTRICT of exactly ONE city
+    inside `region_id`; else None. «الفرعاء» in منطقة عسير is a district of أبها — the town an
+    Aqar ad names is often a district of a catalog city. No region → never (a district name alone is
+    too common to place)."""
+    if not name or region_id is None:
+        return None
+    AL._load()
+    key = AL.norm_district_tok(name)
+    if not key:
+        return None
+    reg = _city_region()
+    hits = {cid for (cid, k) in AL._DISTRICT_AR_BY_CITY if k == key and reg.get(cid) == region_id}
+    if len(hits) != 1:
+        return None
+    cid = hits.pop()
+    return cid, AL._DISTRICT_AR_BY_CITY[(cid, key)]
+
+
+def _placed(cid: int, rid, district_ar) -> dict:
+    return {"city_ar": AL._CID_AR.get(cid), "city_id": cid, "region_id": _city_region().get(cid, rid),
+            "district_ar": district_ar, "confidence": "address"}
+
+
+def _resolve_location(uri: str, aqar_city_id, address=None, aqar_district=None) -> dict:
+    """The ad's city, from the strongest evidence the source gives, in this order:
+      1. the slug (resolve_slug) — unless that city appears only as a street name in the address;
+      2. the slug again, a same-name twin tie-broken by Aqar's own city id (AQAR_CITY_REGION);
+      3. the address's LAST segment (Aqar ends the address with the town) as a catalog city, then as
+         a catalog district of exactly one city in the region («الفرعاء ، منطقة عسير» → أبها);
+      4. Aqar's own district name for the ad as a catalog district of exactly one city in the region.
+    Every step is catalog-validated; nothing is guessed. Unresolved stays unresolved."""
+    loc = resolve_slug(uri)
+    if loc.get("city_id") and not _city_only_in_street(loc.get("city_ar"), address):
+        return loc
+    if loc.get("city_id"):
+        loc = {**loc, "city_ar": None, "city_id": None, "confidence": "unresolved", "street_city_dropped": True}
+    try:
+        hint = AQAR_CITY_REGION.get(int(aqar_city_id or 0))
+    except (TypeError, ValueError):
+        hint = None
+    if hint is not None:
+        hinted = resolve_slug(uri, region_hint=hint)
+        if hinted.get("city_id") and not _city_only_in_street(hinted.get("city_ar"), address):
+            return hinted
+
+    segs = [x for x in _address_segments(address) if not _STREET_SEG.match(x)]
+    rid = hint
+    rest: list[str] = []
+    for x in segs:
+        cid, r = AL.to_catalog(re.sub(r"^\s*(?:امارة|إمارة)\s+", "", x))   # «امارة منطقة عسير» is a region
+        if cid is None and r is not None:      # an explicit «منطقة X» in the source beats the hint
+            rid = r
+        elif not _has_name(x, "المملكة العربية السعودية"):
+            rest.append(x)
+    if rest:
+        last = rest[-1].replace("عبد الله", "عبدالله")
+        cid, r = AL.to_catalog(last, region_hint=rid)
+        if cid and (rid is None or r == rid) and not _city_only_in_street(AL._CID_AR.get(cid), address):
+            return _placed(cid, r, loc.get("district_ar"))
+        hit = _city_for_district(last, rid)
+        if hit:
+            return _placed(hit[0], rid, hit[1])
+    if rid is not None and callable(aqar_district):   # lazy: Aqar's district list is a network read
+        aqar_district = aqar_district()
+    hit = _city_for_district(aqar_district if isinstance(aqar_district, str) else None, rid)
+    if hit:
+        return _placed(hit[0], rid, hit[1])
+    return {**loc, "region_id": loc.get("region_id") or rid}
+
+
 def map_listing(g: dict, price: dict) -> dict | None:
     uri = g.get("uri") or ""
     if not uri:
         return None
+    # Out of scope, not "type unknown" (2026-09-28, run 36385996203): Aqar's DailyRenting vertical
+    # began serving category 108 — an event hall, a meeting room and a pallet warehouse on the first
+    # day. This is the FURNISHED RESIDENTIAL monthly product (the table is *_residential_listings), so
+    # a category with no residential mapping is not written at all. Writing it with property_type
+    # NULL is what tripped mon_check_run_field_ranges and failed 13 of 16 shards. Never default a
+    # type (source is truth) and never invent a commercial one here (taxonomy is an owner decision).
+    # A MISSING category stays what it always was (type unknown → NULL); only a category the source
+    # names and we have no residential mapping for is out of scope.
+    hall = g.get("category") == HALL_CATEGORY
+    if g.get("category") is not None and g.get("category") not in CATEGORY_TYPE and not hall:
+        return None
     place = uri.rsplit("-", 1)[0].replace("-", " ")  # drop trailing -id, dashes → spaces
     city = N.map_city(place)
     region = N.region_for_city(city) if city else None
-    dm = re.search(r"حي\s+(\S+(?:\s+\S+){0,2})", place)
-    district = dm.group(1) if dm else None
 
     monthly = price.get("discounted_price") or price.get("total_price")
     try:
@@ -295,7 +714,7 @@ def map_listing(g: dict, price: dict) -> dict | None:
         return None
     if monthly <= 0:
         return None
-    price_annual_val = round(monthly * 12)
+    price_annual_val = None if hall else round(monthly * 12)
     area_m2_val = N.to_int(g.get("area"))
 
     imgs = ["https://images.aqar.fm/" + k for k in (g.get("imgs") or []) if k][:30]
@@ -307,10 +726,13 @@ def map_listing(g: dict, price: dict) -> dict | None:
     # unresolved stays null, never guessed). This FIXES the live false-positives (street «مكة المكرمة»
     # or district «المدينة» no longer mis-map the city). source_capture = the full detail minus PII
     # (descriptions phone-redacted; the detail exposes no broker contact field). Numbers unchanged.
-    loc = resolve_slug(uri)
+    # A same-name town the slug cannot place is tie-broken by Aqar's own city id (AQAR_CITY_REGION).
+    loc = _resolve_location(uri, g.get("city_id"), g.get("address"),
+                            lambda: _district_from_aqar_id(g.get("city_id"), g.get("district_id"), g.get("category")))
     # Fallback ONLY — the slug's «حي X» capture wins when present (unchanged behavior); the
     # address-derived, catalog-validated candidate fills the gap when the slug had no «حي» at all.
-    district_ar_val = loc["district_ar"] or _district_from_address(g.get("address"), loc["city_id"])
+    district_ar_val = (loc["district_ar"] or _district_from_address(g.get("address"), loc["city_id"])
+                       or _district_from_aqar_id(g.get("city_id"), g.get("district_id"), g.get("category")))
     capture = {k: (_redact(v) if k in ("content", "content_en") else v) for k, v in g.items()}
     return {
         "ad_number":        f"AQM{g['id']}",
@@ -319,11 +741,11 @@ def map_listing(g: dict, price: dict) -> dict | None:
         # An UNKNOWN category id must not default to Apartment (that fabricates a type). None →
         # normalize maps it to the honest «غير معروف» sentinel and the novel-type alarm quarantines
         # the new id for review. (audit item 7, owner rule 2026-07-27.)
-        "property_type":    CATEGORY_TYPE.get(g.get("category")),
+        "property_type":    "Event Hall" if hall else CATEGORY_TYPE.get(g.get("category")),
         "transaction_type": "Rent",
         "rent_period":      "monthly",
         "source":           "Aqar Monthly",
-        "price_annual":     price_annual_val,  # app shows price_annual / 12 = the monthly figure
+        "price_annual":     db.AUTHORITATIVE_NULL if hall else price_annual_val,  # app shows price_annual / 12
         # PRICE = SOURCE evidence (owner invariant 2026-08-04, alert_event 523). Previously every
         # aqarmonthly row was written with NO price_evidence at all — the sibling scrapers
         # (dealapp, wasalt) already record this; aqarmonthly was the one gap.
@@ -334,6 +756,7 @@ def map_listing(g: dict, price: dict) -> dict | None:
             kind="monthly",
             unit="total",
             origin="api",
+            authoritative_absent=hall,
         ),
         "area_m2":          area_m2_val,
         # "beds" is a furnished/short-stay field (this is a daily-rental vertical) — conventionally
@@ -342,21 +765,48 @@ def map_listing(g: dict, price: dict) -> dict | None:
         # exists in the same API response but is never read either — no bedroom-specific signal
         # exists here. Owner decision 2026-07-28: null rather than store an unverifiable figure.
         "bedrooms":         None,
+        # «دورات المياه» — a positive count only; 0 / missing is silence, never «no bathroom».
+        "bathrooms":        wc_bathrooms(g.get("wc")),
         # Forward-fix (2026-07-10 location-data-quality audit): an honest None beats the literal
         # "Other" sentinel — the additive resolve_slug()-derived columns already cover most rows.
         "city":             city,
         "region":           region,
-        "neighborhood":     district,
+        # THE CARD'S OWN DISTRICT LINE. ResultCard shows the RAW scraped district whenever it is
+        # already Arabic (owner 2026-07-06, src/data/remote.ts: `l.district = /[ء-ي]/.test(rawDistrict)
+        # ? rawDistrict : …`), so this column — not the catalog-canonical index value — is what a user
+        # reads. It used to be its own naive slug parse, `re.search(r"حي\s+(\S+(?:\s+\S+){0,2})")`,
+        # which swallows up to 3 words after «حي» and therefore glued the city and the word «منطقة»
+        # onto the district: 1,352 of 1,801 active rows rendered as «الفرسان الدمام الدمام» or «الرمال
+        # الرياض منطقة» while district_ar (and the search index built from it) correctly said «حي
+        # الفرسان» / «حي الرمال». One parse, one answer: this is resolve_slug()'s district, which
+        # strips the trailing catalog city by name, plus the address fallback. Unresolved stays None.
+        "neighborhood":     district_ar_val,
         "title":            _redact((g.get("content") or "").split("\n")[0][:120]),
         "description":      _redact(g.get("content")),
         "photo_urls":       imgs,
         # ── Arabic-native (additive, shadow) + complete-source capture ──────────
-        "city_ar":          loc["city_ar"],
+        # A city we PROVED wrong (a street named after a town) must be cleared, not kept: a plain None
+        # means "unknown this fetch" and would leave the stored wrong city in place (db's
+        # unknown-must-not-overwrite-known rule). Only the street guard sets this.
+        "city_ar":          loc["city_ar"] if loc["city_ar"] or not loc.get("street_city_dropped") else db.AUTHORITATIVE_NULL,
         "district_ar":      district_ar_val,
-        "city_id":          loc["city_id"],
+        "city_id":          loc["city_id"] if loc["city_id"] or not loc.get("street_city_dropped") else db.AUTHORITATIVE_NULL,
         "region_id":        loc["region_id"],
         "source_capture":   capture,
+        # Aqar's own pin for this unit (Listing.location), through the one KSA gate; {} → the district
+        # border, never a guess. listing_rich_attrs reads additional_info.latitude/longitude.
+        "additional_info":  aqar_pin(g),
+        **map_amenities(g),
     }
+
+
+def with_search_extended_details(g: dict | None, listing_id) -> dict | None:
+    """The detail object plus the `extended_details` discovery read for this unit (see FIND_Q_EXT). The
+    detail's own block wins if the schema ever serves one; a unit discovery saw no block for is unchanged."""
+    if not isinstance(g, dict) or "extended_details" in g:
+        return g
+    ext = _ext_by_id.get(int(listing_id))
+    return {**g, "extended_details": ext} if ext is not None else g
 
 
 def fetch_row(listing_id: int, windows: list[tuple[int, int]]) -> dict | None:
@@ -364,10 +814,10 @@ def fetch_row(listing_id: int, windows: list[tuple[int, int]]) -> dict | None:
     so we only re-issue the cheap price query per window until one is free."""
     g = None
     for (s_ms, e_ms) in windows:
-        d, errored = _gql(DETAIL_Q, {"id": int(listing_id), "s": s_ms, "e": e_ms})
+        d, errored = _gql(detail_query(_amenity_fields), {"id": int(listing_id), "s": s_ms, "e": e_ms})
         if d:
             if g is None:
-                g = (d.get("Listing") or {}).get("get")
+                g = with_search_extended_details((d.get("Listing") or {}).get("get"), listing_id)
             p = (d.get("DailyRenting") or {}).get("getCalculatedBookingPriceWithDiscount")
             if g and p:
                 return map_listing(g, p)
@@ -440,6 +890,16 @@ def main() -> int:
             ids.sort()
             ids = ids[si::sn]
             print(f"  shard {si}/{sn} → {len(ids)} ids")
+
+        global _amenity_fields
+        s0, e0 = windows[0]
+
+        def _answer(q: str, lid) -> dict | None:
+            _throttle()
+            return _post(_sess(), {"query": q, "variables": {"id": int(lid), "s": s0, "e": e0}})[0]
+
+        _amenity_fields = settle_across_units(_answer, ids)
+        print(f"  amenity fields accepted by the schema: {list(_amenity_fields) or 'none (query unchanged)'}")
 
         rows: list[dict] = []
         seen_ads: set[str] = set()

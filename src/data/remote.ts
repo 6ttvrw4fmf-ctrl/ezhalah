@@ -1,19 +1,24 @@
+import { selectSourceTables } from '@/lib/agentSourceSelection';
 import { supabase } from '@/lib/supabase';
 import { PROBE_FAILED, isProbeFailure, type ProbeFailed } from '@/lib/afProbe';
 import { listingPriceString, isDerivedTotal, type Listing } from './listings';
+import { rentPool, cardFetchPeriodOr, cheapYearlyIsMonthly } from '@/lib/rentPool';
 import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
-import { normalizeType, queryForSelection, queryForTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
+import { scopeCrossesMacro } from '@/lib/searchDefaults';
+import { normalizeType, queryForSelection, queryForTypes, storedRawTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
 import { effectiveTypes, effectiveGroups, bedroomTokens } from './search';
 import { scoreListingProximity } from './proximity';
 import { cityDisplay } from './locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { decodeEntities } from '@/lib/htmlEntities';
-import { photoDisplayUrl } from '@/lib/photoUrl';
+import { dedupePhotoUrls, photoDisplayUrl } from '@/lib/photoUrl';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
-import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
+import { listingDiscountFrom } from '@/lib/listingDisplay';
+import { servedSaleFigures } from '@/lib/meterBoxPrice';
+import { orderByScope, scopeForDistricts, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import { rotationSeed } from '@/lib/rotationSeed';
 import { truncateGlyphs } from '@/lib/typedReveal';
 import saLocations from './sa-locations.json';
@@ -318,7 +323,7 @@ function effectiveCleanQuery(q: SearchQuery): CleanQuery | null {
 // spelling a clean type came from (e.g. Shop ⊇ {Shop, Kiosk}; Studio ⊇ {Studio, ستوديو, …}).
 function dbTypesFor(q: SearchQuery): string[] | null {
   const cq = effectiveCleanQuery(q);
-  return cq && cq.rawTypes.length ? cq.rawTypes : null;
+  return cq && cq.rawTypes.length ? storedRawTypes(cq.rawTypes) : null;   // «أرض خام» → the land types its rows carry
 }
 
 // FILTER-FIRST (owner 2026-07-08): the search RPC applies these BEFORE the per-platform/limit cap, so the
@@ -431,6 +436,10 @@ export function rpcAdvancedFilterParams(q: SearchQuery) {
     ...(q.ageMin != null ? { p_age_min: q.ageMin } : {}),
     ...(q.ageMax != null ? { p_age_max: q.ageMax } : {}),
     ...(q.isNewConstruction != null ? { p_is_new_construction: q.isNewConstruction } : {}),
+    // Several answers to one question = their exact union (owner 2026-10-03); sent only when picked.
+    ...(q.ageBuckets?.length ? { p_age_buckets: q.ageBuckets } : {}),
+    ...(q.ratingBuckets?.length ? { p_rating_buckets: q.ratingBuckets } : {}),
+    ...(q.furnishedIn?.length ? { p_furnished_in: q.furnishedIn } : {}),
   };
 }
 const RPC_SORT_KEYS = new Set(['oldest', 'price_asc', 'price_desc', 'area_asc', 'area_desc', 'beds_desc']);
@@ -545,9 +554,7 @@ export function searchTableScope(q: SearchQuery): SearchTableScope | null {
   // table in this particular scope (e.g. Gathern + Buy) — that fallback bug let a platform filter
   // silently widen back to every platform.
   const platformScope = (tbls: string[]): string[] => {
-    if (!(q.sources && q.sources.length)) return tbls;
-    const wanted = new Set(q.sources);
-    return tbls.filter((t) => wanted.has(t.replace(/_(residential|commercial)_listings$/, '')));
+    return selectSourceTables(tbls, q.sources, q.excludedSources);
   };
   const mainTables = isBroadCommercial ? platformScope(resTables(q)) : tables;
 
@@ -608,9 +615,12 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   const tableScope = searchTableScope(q);
   if (!tableScope) return null;
 
+  if (q.geographicScope === 'REGION' && (!q.regionPin || !REGION_TO_ID[q.regionPin])) return PROBE_FAILED;
   const lm = q.locationMatch;
   let cities: string[] | null = null;
-  if (q.regionPin && (q.location || '').trim()) {
+  if (q.geographicScope === 'REGION' || q.geographicScope === 'NATIONWIDE') {
+    cities = null;
+  } else if (q.regionPin && (q.location || '').trim()) {
     cities = [arCity(q.location) || q.location];
   } else if (lm?.exact && lm.kind === 'city' && lm.city) {
     cities = [arCity(lm.city) || lm.city];
@@ -671,7 +681,7 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
     // RPC call will correctly return an honest zero on its own.
   }
 
-  if ((!cities || !cities.length) && !countryWide && !(q.districts && q.districts.length) && (q.location || '').trim()) {
+  if ((!cities || !cities.length) && !countryWide && q.geographicScope !== 'REGION' && !(q.districts && q.districts.length) && (q.location || '').trim()) {
     return null;
   }
   if (lm?.kind === 'district' && !(q.districts && q.districts.length)) return null;
@@ -685,7 +695,7 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
     p_cities: cities && cities.length ? cities : null,
     p_districts: q.districts && q.districts.length ? q.districts : null,
     p_platforms: q.sources && q.sources.length ? q.sources : null,
-    p_region_ids: q.regionPin
+    p_region_ids: q.geographicScope === 'NATIONWIDE' ? null : q.regionPin
       ? (REGION_TO_ID[q.regionPin] ? [REGION_TO_ID[q.regionPin]] : null)
       : regionIdsFor(lm),
     // CATEGORY PURITY — owner PERMANENT rule 2026-07-16, merged from PR#86. Independent RPC-layer
@@ -762,14 +772,23 @@ function withTimeout<T>(p: PromiseLike<T>, ms: number): Promise<T | { timedOut: 
 // so the un-narrowed buckets are the correct thing to price: the pick replaces the old answer.
 // Same contract as apartment_guided_counts_ar, whose per-option counts also ignore their own dimension.
 function ageAgnostic<T extends Record<string, unknown>>(params: T) {
-  const { p_age_min: _min, p_age_max: _max, p_is_new_construction: _new, ...rest } = params;
+  const { p_age_min: _min, p_age_max: _max, p_is_new_construction: _new, p_age_buckets: _buckets, ...rest } = params;
   return rest;
 }
 
 const inFlightAgeCounts = new Map<string, Promise<AgeOptionCounts | null>>();
 
+// REMEMBERED like settledGuidedCounts (same COUNT_MEMORY_TTL_MS, learned answers only) — added
+// 2026-10-03 for «متابعة feels stuck»: every commit re-ranks the pool, and the age question's counts were
+// the one probe nothing remembered, so each tap paid ~1.2 s for an answer the next-step prefetch
+// (agent.tsx) had already fetched seconds earlier.
+const settledAgeCounts = new Map<string, { at: number; c: AgeOptionCounts }>();
+
 export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeOptionCounts | null | ProbeFailed> {
   if (!supabase) return null;
+  const ageKey = JSON.stringify(q);
+  const ageHit = settledAgeCounts.get(ageKey);
+  if (ageHit && Date.now() - ageHit.at < COUNT_MEMORY_TTL_MS) return ageHit.c;
   const scope = await resolveSearchScope(q);
   if (isProbeFailure(scope)) return PROBE_FAILED;   // scope resolution failed = never learned the answer
   if (!scope) {
@@ -804,7 +823,9 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
     const { data, error } = result;
     if (error) return PROBE_FAILED;               // transport/DB error = never learned the answer
     if (!data || !(data as AgeOptionCounts[]).length) return null;   // the source answered: nothing
-    return (data as AgeOptionCounts[])[0];
+    const c = (data as AgeOptionCounts[])[0];
+    settledAgeCounts.set(ageKey, { at: Date.now(), c });   // ONLY a learned answer is ever remembered
+    return c;
   });
 }
 
@@ -850,11 +871,30 @@ export type GuidedCounts = {
   // chips, so they need counts. Same template row, same committed scope (migration 20260902220000).
   cnt_gym: number; cnt_pool: number; cnt_garden: number; cnt_balcony: number; cnt_laundry_room: number;
   cnt_optical_fibers: number; cnt_separate_electricity_meter: number; cnt_separate_water_meter: number;
+  cnt_majlis: number;
   cnt_selected: number;
   // Monthly (2026-08-18): Gathern rating thresholds + unit-subtype chips. Data-derived cuts on the
   // source-declared 1-10 scale — the only ones that split the distribution (<=8.0 keeps ~94%).
   cnt_rating95: number; cnt_rating90: number; cnt_rating90_rc10: number;
   cnt_sub_studio: number; cnt_sub_serviced: number; cnt_sub_regular: number;
+  // «😔 N لم يذكر» on every question (owner 2026-10-03, migration 20261003184909): the DB counts the
+  // listings whose source left the field NULL, inside the same committed scope. Amenities = every
+  // amenity column NULL (the listing stated no amenity at all).
+  cnt_rnpl_unknown: number; cnt_amen_unknown: number; cnt_bath_unknown: number;
+  cnt_stw_unknown: number; cnt_rating_unknown: number; cnt_sub_unknown: number;
+  // Apartments & Co-living group (owner handoff 2026-10-31, migration 20261101100930): one cnt_<token> per
+  // chip in src/lib/afChips.ts CHIP_DEFS — 39 boolean columns + 6 derived predicates (separate_meters,
+  // apts4/8/12/20 on apartments_count, has_shops on shops_count) — plus the two «لم يذكر» counts.
+  cnt_roof: number; cnt_two_entrances: number; cnt_annex: number; cnt_yard: number; cnt_garage: number;
+  cnt_grill: number; cnt_storage: number; cnt_water_tank: number; cnt_warranty: number; cnt_electronic_deed: number;
+  cnt_basement: number; cnt_self_checkin: number; cnt_wifi: number; cnt_bills_included: number; cnt_jacuzzi: number;
+  cnt_smart_tv: number; cnt_billiards: number; cnt_cleaning_service: number; cnt_soundproof: number; cnt_cameras: number;
+  cnt_guard: number; cnt_smart_entry: number; cnt_smart_home: number; cnt_central_gas: number; cnt_sauna: number;
+  cnt_kids_play_area: number; cnt_nursery: number; cnt_free_maintenance: number; cnt_intercom: number; cnt_fire_system: number;
+  cnt_ev_charger: number; cnt_central_vacuum: number; cnt_insulation: number; cnt_dining_majlis: number; cnt_own_bathroom: number;
+  cnt_fridge: number; cnt_whole_floor: number; cnt_singles: number; cnt_families: number;
+  cnt_separate_meters: number; cnt_apts4: number; cnt_apts8: number; cnt_apts12: number; cnt_apts20: number; cnt_has_shops: number;
+  cnt_apts_unknown: number; cnt_shops_unknown: number;
 };
 
 // De-duped per the comment above fetchPropertyAgeOptionCounts — this is the function RNPL/amenities/
@@ -1132,9 +1172,8 @@ const ADDL_FIELDS: Array<[string, string]> = [
   //    NO other platform's panel can change). Order = display priority within the Gathern panel.
   ['unit_type_ar', 'Sub-type'],                          // شقة / استديو / غرفة
   ['furnished', 'Furnished'],                            // boolean true → "Yes"/"نعم"
-  ['discount_label', 'Discount'],                        // "خصم 20%" (Arabic, shown as-is)
-  ['monthly_price_before_discount', 'Monthly before discount (SAR)'],
-  ['nightly_price', 'Nightly rate (SAR)'],
+  // No discount / pre-discount monthly / nightly rows: Gathern shows NO price, only the stay-length
+  // note (owner rule 2026-10-02, src/lib/listingDisplay.ts::listingPrice).
   ['amenities', 'Amenities'],                            // real Arabic labels only (see gate below)
   ['suitability', 'Suitable for'],                       // Gathern detail page: عوائل و عزاب (families / singles)
   ['guest_capacity', 'Guest capacity'],                  // int → "4"
@@ -1146,11 +1185,15 @@ const ADDL_FIELDS: Array<[string, string]> = [
 // source is Gathern, so a future/other platform that happened to store one of these keys would NOT get
 // a new field — guaranteeing every non-Gathern card stays byte-identical. (Gathern Tier-1.)
 const GATHERN_ONLY_ADDL_KEYS = new Set<string>([
-  'unit_type_ar', 'furnished', 'discount_label', 'monthly_price_before_discount', 'nightly_price', 'amenities', 'suitability',
+  'unit_type_ar', 'furnished', 'amenities', 'suitability',
   'guest_capacity', 'check_in', 'check_out', 'house_rules',
 ]);
 function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; label: string; value: string }> | null {
   if (!raw) return null;
+  // LEGACY rows carried under "rows" (owner 2026-10-20): the office sites whose additional_info was the bare
+  // rows array (aldarim, abwbna, alobid, bahadhabab, alhoshan) now store {rows, latitude, longitude} so the
+  // index can read the ad's pin from the object. The panel is exactly the rows it always was.
+  if (typeof raw === 'object' && !Array.isArray(raw) && Array.isArray(raw.rows)) raw = raw.rows;
   if (Array.isArray(raw)) {
     // TYPE COERCION (P0 fix 2026-08-18, Search & Matching QA run): the LEGACY array shape is stored
     // by the source scraper verbatim, and Wasalt publishes NUMERIC values for noOfParkings /
@@ -1247,7 +1290,7 @@ function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; la
 // A retired platform that starts serving rows again does NOT quietly disappear: the live barrier's
 // MISSING direction reads production's own live platform list, so it goes red and names the table.
 // GENERATED — do not edit by hand.
-const SEARCHABLE_TABLES = ['aalbarrak_commercial_listings', 'aalbarrak_residential_listings', 'abaad_commercial_listings', 'abaad_residential_listings', 'abeea_commercial_listings', 'abeea_residential_listings', 'abralosol_commercial_listings', 'abralosol_residential_listings', 'abwbna_commercial_listings', 'abwbna_residential_listings', 'akariyoun_commercial_listings', 'akariyoun_residential_listings', 'alajlan_commercial_listings', 'alajlan_residential_listings', 'albdah_commercial_listings', 'albdah_residential_listings', 'aldarim_commercial_listings', 'aldarim_residential_listings', 'alhoshan_commercial_listings', 'alhoshan_residential_listings', 'alhumaidan_commercial_listings', 'alhumaidan_residential_listings', 'aljassim_commercial_listings', 'aljassim_residential_listings', 'alkhaas_commercial_listings', 'alkhaas_residential_listings', 'almotmkenah_commercial_listings', 'almotmkenah_residential_listings', 'almuteb_commercial_listings', 'almuteb_residential_listings', 'alobid_commercial_listings', 'alobid_residential_listings', 'alqasem_commercial_listings', 'alqasem_residential_listings', 'alrifai_commercial_listings', 'alrifai_residential_listings', 'alsaedan_commercial_listings', 'alsaedan_residential_listings', 'alshawaf_commercial_listings', 'alshawaf_residential_listings', 'alsidra_commercial_listings', 'alsidra_residential_listings', 'alta_commercial_listings', 'alta_residential_listings', 'amaall_commercial_listings', 'amaall_residential_listings', 'amlakalahsa_commercial_listings', 'amlakalahsa_residential_listings', 'aouj_commercial_listings', 'aouj_residential_listings', 'aqalemhajer_commercial_listings', 'aqalemhajer_residential_listings', 'aqar_commercial_listings', 'aqar_residential_listings', 'aqaralriyadh_commercial_listings', 'aqaralriyadh_residential_listings', 'aqaralsaudia_commercial_listings', 'aqaralsaudia_residential_listings', 'aqaratikom_commercial_listings', 'aqaratikom_residential_listings', 'aqarcity_commercial_listings', 'aqarcity_residential_listings', 'aqargate_commercial_listings', 'aqargate_residential_listings', 'aqarmonthly_residential_listings', 'aqarnajran_commercial_listings', 'aqarnajran_residential_listings', 'arkaan_commercial_listings', 'arkaan_residential_listings', 'awal_commercial_listings', 'awal_residential_listings', 'azdad_commercial_listings', 'azdad_residential_listings', 'azure_commercial_listings', 'azure_residential_listings', 'bahadhabab_commercial_listings', 'bahadhabab_residential_listings', 'bossbih_commercial_listings', 'bossbih_residential_listings', 'compoundin_commercial_listings', 'compoundin_residential_listings', 'dallali_commercial_listings', 'dallali_residential_listings', 'daryusuf_commercial_listings', 'daryusuf_residential_listings', 'dealapp_commercial_listings', 'dealapp_residential_listings', 'dwelleo_commercial_listings', 'dwelleo_residential_listings', 'eaqartabuk_commercial_listings', 'eaqartabuk_residential_listings', 'earthapp_commercial_listings', 'earthapp_residential_listings', 'eastabha_commercial_listings', 'eastabha_residential_listings', 'ebriza_commercial_listings', 'ebriza_residential_listings', 'ego_commercial_listings', 'ego_residential_listings', 'eightfloor_commercial_listings', 'eightfloor_residential_listings', 'eilmalriyada_commercial_listings', 'eilmalriyada_residential_listings', 'erapulse_commercial_listings', 'erapulse_residential_listings', 'expattrusted_commercial_listings', 'expattrusted_residential_listings', 'eydah_commercial_listings', 'eydah_residential_listings', 'fahadalshahri_commercial_listings', 'fahadalshahri_residential_listings', 'fkralemar_commercial_listings', 'fkralemar_residential_listings', 'flow_commercial_listings', 'flow_residential_listings', 'fursaghyr_commercial_listings', 'fursaghyr_residential_listings', 'gathern_commercial_listings', 'gathern_residential_listings', 'goldendeal_commercial_listings', 'goldendeal_residential_listings', 'gomenassat_commercial_listings', 'gomenassat_residential_listings', 'gudai_commercial_listings', 'gudai_residential_listings', 'hajer_commercial_listings', 'hajer_residential_listings', 'hasaad_commercial_listings', 'hasaad_residential_listings', 'hazim_commercial_listings', 'hazim_residential_listings', 'holoul_commercial_listings', 'holoul_residential_listings', 'ialqarawi_commercial_listings', 'ialqarawi_residential_listings', 'ibaax_commercial_listings', 'ibaax_residential_listings', 'jawher_commercial_listings', 'jawher_residential_listings', 'jazwtn_commercial_listings', 'jazwtn_residential_listings', 'jurash_commercial_listings', 'jurash_residential_listings', 'justsa_commercial_listings', 'justsa_residential_listings', 'ksaaqar_commercial_listings', 'ksaaqar_residential_listings', 'livingcompound_commercial_listings', 'livingcompound_residential_listings', 'm3tmd_commercial_listings', 'm3tmd_residential_listings', 'macsaib_commercial_listings', 'macsaib_residential_listings', 'manzo_commercial_listings', 'manzo_residential_listings', 'maqam_commercial_listings', 'maqam_residential_listings', 'maqrat_commercial_listings', 'maqrat_residential_listings', 'marksa_commercial_listings', 'marksa_residential_listings', 'masar_commercial_listings', 'masar_residential_listings', 'mizlaj_commercial_listings', 'mizlaj_residential_listings', 'mobasher_commercial_listings', 'mobasher_residential_listings', 'moftah_commercial_listings', 'moftah_residential_listings', 'muajarh_commercial_listings', 'muajarh_residential_listings', 'muhaysini_commercial_listings', 'muhaysini_residential_listings', 'muktamel_commercial_listings', 'muktamel_residential_listings', 'mustqr_commercial_listings', 'mustqr_residential_listings', 'nafithh_commercial_listings', 'nafithh_residential_listings', 'nawafeth_commercial_listings', 'nawafeth_residential_listings', 'nofodh_commercial_listings', 'nofodh_residential_listings', 'nowaisiry_commercial_listings', 'nowaisiry_residential_listings', 'nufouth_commercial_listings', 'nufouth_residential_listings', 'october_commercial_listings', 'october_residential_listings', 'opensooq_commercial_listings', 'opensooq_residential_listings', 'qmra_commercial_listings', 'qmra_residential_listings', 'raghdan_commercial_listings', 'raghdan_residential_listings', 'rakez_commercial_listings', 'rakez_residential_listings', 'ramzalqasim_commercial_listings', 'ramzalqasim_residential_listings', 'rawaf_commercial_listings', 'rawaf_residential_listings', 'rawasidark_commercial_listings', 'rawasidark_residential_listings', 'razre_commercial_listings', 'razre_residential_listings', 'reinvest_commercial_listings', 'reinvest_residential_listings', 'remal_commercial_listings', 'remal_residential_listings', 'remaxsa_commercial_listings', 'remaxsa_residential_listings', 'rightcompound_commercial_listings', 'rightcompound_residential_listings', 'sadin_commercial_listings', 'sadin_residential_listings', 'sadiqeltajer_commercial_listings', 'sadiqeltajer_residential_listings', 'safa_commercial_listings', 'safa_residential_listings', 'safera_commercial_listings', 'safera_residential_listings', 'sakan_commercial_listings', 'sakan_residential_listings', 'sakani_commercial_listings', 'sakani_residential_listings', 'sanadak_commercial_listings', 'sanadak_residential_listings', 'satel_commercial_listings', 'satel_residential_listings', 'senan_commercial_listings', 'senan_residential_listings', 'shatri_commercial_listings', 'shatri_residential_listings', 'shmoualshmal_commercial_listings', 'shmoualshmal_residential_listings', 'snam_commercial_listings', 'snam_residential_listings', 'sodasyat_commercial_listings', 'sodasyat_residential_listings', 'sokok_commercial_listings', 'sokok_residential_listings', 'souq24_commercial_listings', 'souq24_residential_listings', 'squares_commercial_listings', 'squares_residential_listings', 'sukna_commercial_listings', 'sukna_residential_listings', 'suwar_commercial_listings', 'suwar_residential_listings', 'tamyaz_commercial_listings', 'tamyaz_residential_listings', 'therc_commercial_listings', 'therc_residential_listings', 'thousand_commercial_listings', 'thousand_residential_listings', 'tuba_commercial_listings', 'tuba_residential_listings', 'villassa_commercial_listings', 'villassa_residential_listings', 'vmksa_commercial_listings', 'vmksa_residential_listings', 'wadod_commercial_listings', 'wadod_residential_listings', 'wahadat_commercial_listings', 'wahadat_residential_listings', 'wasalt_commercial_listings', 'wasalt_residential_listings', 'wslnaa_commercial_listings', 'wslnaa_residential_listings', 'yameen_commercial_listings', 'yameen_residential_listings'];
+const SEARCHABLE_TABLES = ['aalbarrak_commercial_listings', 'aalbarrak_residential_listings', 'abaad_commercial_listings', 'abaad_residential_listings', 'abeea_commercial_listings', 'abeea_residential_listings', 'abralosol_commercial_listings', 'abralosol_residential_listings', 'abwbna_commercial_listings', 'abwbna_residential_listings', 'akariyoun_commercial_listings', 'akariyoun_residential_listings', 'alajlan_commercial_listings', 'alajlan_residential_listings', 'albdah_commercial_listings', 'albdah_residential_listings', 'albukaeri_commercial_listings', 'albukaeri_residential_listings', 'aldarim_commercial_listings', 'aldarim_residential_listings', 'alhoshan_commercial_listings', 'alhoshan_residential_listings', 'alhumaidan_commercial_listings', 'alhumaidan_residential_listings', 'aljassim_commercial_listings', 'aljassim_residential_listings', 'alkhaas_commercial_listings', 'alkhaas_residential_listings', 'almotmkenah_commercial_listings', 'almotmkenah_residential_listings', 'almuteb_commercial_listings', 'almuteb_residential_listings', 'alobid_commercial_listings', 'alobid_residential_listings', 'alqasem_commercial_listings', 'alqasem_residential_listings', 'alrifai_commercial_listings', 'alrifai_residential_listings', 'alsaedan_commercial_listings', 'alsaedan_residential_listings', 'alshawaf_commercial_listings', 'alshawaf_residential_listings', 'alsidra_commercial_listings', 'alsidra_residential_listings', 'alta_commercial_listings', 'alta_residential_listings', 'amaall_commercial_listings', 'amaall_residential_listings', 'amlakalahsa_commercial_listings', 'amlakalahsa_residential_listings', 'aouj_commercial_listings', 'aouj_residential_listings', 'aqalemhajer_commercial_listings', 'aqalemhajer_residential_listings', 'aqar_commercial_listings', 'aqar_residential_listings', 'aqaralriyadh_commercial_listings', 'aqaralriyadh_residential_listings', 'aqaralsaudia_commercial_listings', 'aqaralsaudia_residential_listings', 'aqaratikom_commercial_listings', 'aqaratikom_residential_listings', 'aqarcity_commercial_listings', 'aqarcity_residential_listings', 'aqargate_commercial_listings', 'aqargate_residential_listings', 'aqarmonthly_residential_listings', 'aqarnajran_commercial_listings', 'aqarnajran_residential_listings', 'arkaan_commercial_listings', 'arkaan_residential_listings', 'arsh_commercial_listings', 'arsh_residential_listings', 'ashab_commercial_listings', 'ashab_residential_listings', 'awal_commercial_listings', 'awal_residential_listings', 'azdad_commercial_listings', 'azdad_residential_listings', 'azure_commercial_listings', 'azure_residential_listings', 'bahadhabab_commercial_listings', 'bahadhabab_residential_listings', 'bossbih_commercial_listings', 'bossbih_residential_listings', 'compoundin_commercial_listings', 'compoundin_residential_listings', 'dallali_commercial_listings', 'dallali_residential_listings', 'daraa_commercial_listings', 'daraa_residential_listings', 'daryusuf_commercial_listings', 'daryusuf_residential_listings', 'dealapp_commercial_listings', 'dealapp_residential_listings', 'dwelleo_commercial_listings', 'dwelleo_residential_listings', 'eaqartabuk_commercial_listings', 'eaqartabuk_residential_listings', 'earthapp_commercial_listings', 'earthapp_residential_listings', 'eastabha_commercial_listings', 'eastabha_residential_listings', 'ebriza_commercial_listings', 'ebriza_residential_listings', 'ego_commercial_listings', 'ego_residential_listings', 'eightfloor_commercial_listings', 'eightfloor_residential_listings', 'eilmalriyada_commercial_listings', 'eilmalriyada_residential_listings', 'erapulse_commercial_listings', 'erapulse_residential_listings', 'expattrusted_commercial_listings', 'expattrusted_residential_listings', 'eydah_commercial_listings', 'eydah_residential_listings', 'fahadalshahri_commercial_listings', 'fahadalshahri_residential_listings', 'fkralemar_commercial_listings', 'fkralemar_residential_listings', 'flow_commercial_listings', 'flow_residential_listings', 'fursaghyr_commercial_listings', 'fursaghyr_residential_listings', 'gathern_commercial_listings', 'gathern_residential_listings', 'goldendeal_commercial_listings', 'goldendeal_residential_listings', 'gomenassat_commercial_listings', 'gomenassat_residential_listings', 'gudai_commercial_listings', 'gudai_residential_listings', 'hajer_commercial_listings', 'hajer_residential_listings', 'haraj_commercial_listings', 'haraj_residential_listings', 'hasaad_commercial_listings', 'hasaad_residential_listings', 'hazim_commercial_listings', 'hazim_residential_listings', 'holoul_commercial_listings', 'holoul_residential_listings', 'ialqarawi_commercial_listings', 'ialqarawi_residential_listings', 'ibaax_commercial_listings', 'ibaax_residential_listings', 'jawher_commercial_listings', 'jawher_residential_listings', 'jazwtn_commercial_listings', 'jazwtn_residential_listings', 'jurash_commercial_listings', 'jurash_residential_listings', 'justsa_commercial_listings', 'justsa_residential_listings', 'ksaaqar_commercial_listings', 'ksaaqar_residential_listings', 'livingcompound_commercial_listings', 'livingcompound_residential_listings', 'm3tmd_commercial_listings', 'm3tmd_residential_listings', 'macsaib_commercial_listings', 'macsaib_residential_listings', 'maktab_commercial_listings', 'maktab_residential_listings', 'manafe_commercial_listings', 'manafe_residential_listings', 'manzo_commercial_listings', 'manzo_residential_listings', 'maqam_commercial_listings', 'maqam_residential_listings', 'maqrat_commercial_listings', 'maqrat_residential_listings', 'marksa_commercial_listings', 'marksa_residential_listings', 'masar_commercial_listings', 'masar_residential_listings', 'mizlaj_commercial_listings', 'mizlaj_residential_listings', 'mobasher_commercial_listings', 'mobasher_residential_listings', 'moftah_commercial_listings', 'moftah_residential_listings', 'muajarh_commercial_listings', 'muajarh_residential_listings', 'muhaysini_commercial_listings', 'muhaysini_residential_listings', 'muktamel_commercial_listings', 'muktamel_residential_listings', 'mustqr_commercial_listings', 'mustqr_residential_listings', 'nafithh_commercial_listings', 'nafithh_residential_listings', 'nawafeth_commercial_listings', 'nawafeth_residential_listings', 'nofodh_commercial_listings', 'nofodh_residential_listings', 'nowaisiry_commercial_listings', 'nowaisiry_residential_listings', 'nufouth_commercial_listings', 'nufouth_residential_listings', 'october_commercial_listings', 'october_residential_listings', 'opensooq_commercial_listings', 'opensooq_residential_listings', 'qmra_commercial_listings', 'qmra_residential_listings', 'raghdan_commercial_listings', 'raghdan_residential_listings', 'rakez_commercial_listings', 'rakez_residential_listings', 'ramzalqasim_commercial_listings', 'ramzalqasim_residential_listings', 'rawaf_commercial_listings', 'rawaf_residential_listings', 'rawasidark_commercial_listings', 'rawasidark_residential_listings', 'razre_commercial_listings', 'razre_residential_listings', 'reinvest_commercial_listings', 'reinvest_residential_listings', 'remal_commercial_listings', 'remal_residential_listings', 'remaxsa_commercial_listings', 'remaxsa_residential_listings', 'rightcompound_commercial_listings', 'rightcompound_residential_listings', 'ryadah_commercial_listings', 'ryadah_residential_listings', 'sadin_commercial_listings', 'sadin_residential_listings', 'sadiqeltajer_commercial_listings', 'sadiqeltajer_residential_listings', 'safa_commercial_listings', 'safa_residential_listings', 'safera_commercial_listings', 'safera_residential_listings', 'sakan_commercial_listings', 'sakan_residential_listings', 'sakani_commercial_listings', 'sakani_residential_listings', 'sanadak_commercial_listings', 'sanadak_residential_listings', 'satel_commercial_listings', 'satel_residential_listings', 'senan_commercial_listings', 'senan_residential_listings', 'shatri_commercial_listings', 'shatri_residential_listings', 'shmoualshmal_commercial_listings', 'shmoualshmal_residential_listings', 'shomou_commercial_listings', 'shomou_residential_listings', 'sirdab_commercial_listings', 'sirdab_residential_listings', 'snam_commercial_listings', 'snam_residential_listings', 'sodasyat_commercial_listings', 'sodasyat_residential_listings', 'sokok_commercial_listings', 'sokok_residential_listings', 'souq24_commercial_listings', 'souq24_residential_listings', 'sqcc_commercial_listings', 'sqcc_residential_listings', 'squares_commercial_listings', 'squares_residential_listings', 'sukna_commercial_listings', 'sukna_residential_listings', 'superoffice_commercial_listings', 'superoffice_residential_listings', 'suwar_commercial_listings', 'suwar_residential_listings', 'tamyaz_commercial_listings', 'tamyaz_residential_listings', 'tawia_commercial_listings', 'tawia_residential_listings', 'therc_commercial_listings', 'therc_residential_listings', 'thousand_commercial_listings', 'thousand_residential_listings', 'tuba_commercial_listings', 'tuba_residential_listings', 'villassa_commercial_listings', 'villassa_residential_listings', 'vmksa_commercial_listings', 'vmksa_residential_listings', 'wadod_commercial_listings', 'wadod_residential_listings', 'wahadat_commercial_listings', 'wahadat_residential_listings', 'wajaf_commercial_listings', 'wajaf_residential_listings', 'wasalt_commercial_listings', 'wasalt_residential_listings', 'wslnaa_commercial_listings', 'wslnaa_residential_listings', 'yameen_commercial_listings', 'yameen_residential_listings'];
 
 // Gathern + Aqar Monthly are MONTHLY-ONLY sources: every listing is a monthly rental. On a monthly
 // search we therefore include ALL their rows — even ones whose raw rent_period is null — because the
@@ -1391,7 +1434,10 @@ function kindsFor(q: SearchQuery): SourceKind[] {
 // duplicate this string at a call site.
 export const IMPLIED_CATEGORY_DEFAULT = 'Residential' as const;
 function impliedCategory(q: SearchQuery): Macro | null {
-  if (q.category) return q.category;
+  // A cross-macro scope (Residential Land under the commercial land group, owner 2026-10-03) drops the
+  // gate: the row's home macro is Residential, the user's pill says Commercial, and the type_ar list is
+  // already exact. See scopeCrossesMacro.
+  if (q.category) return scopeCrossesMacro(q) ? null : q.category;
   return effectiveCleanQuery(q) ? null : IMPLIED_CATEGORY_DEFAULT;
 }
 
@@ -1425,7 +1471,7 @@ function tablesFor(q: SearchQuery): string[] {
     const wanted = new Set(q.sources);
     tables = tables.filter((tbl) => wanted.has(tbl.replace(/_(residential|commercial)_listings$/, '')));
   }
-  return tables;
+  return selectSourceTables(tables, q.sources, q.excludedSources);
 }
 
 // Round-robin interleave so cards alternate between Aqar and Wasalt instead of front-loading one.
@@ -1466,7 +1512,7 @@ export type FetchListingsResult = { listings: Listing[] | null; pageCandidates: 
 // on the strict-contract fields. (filter contract.)
 function keptFiltersReq(q: SearchQuery, table?: string) {
   const tbl = table ?? tableFor(q);
-  let req = supabase!.from(tbl).select(LIST_SELECT).eq('active', true);
+  let req = supabase!.from(tbl).select(listSelectFor(tbl)).eq('active', true);
   if (!q.bothDeals && !q.dealCombined) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
   const types = dbTypesFor(q);
   if (types && types.length) req = req.in('property_type', types);
@@ -1482,12 +1528,16 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
   //    wholesale exactly as they do on a monthly search. (owner feature 2026-08-14.)
   // dealCombined (2026-08-20): same as bothDeals — Rent rows in combined mode have no period filter
   // at all (accepts both known periods AND unpublished-period rows), so none of these branches apply.
-  if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'monthly') {
-    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.eq('rent_period', 'monthly');
-  } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'annual') {
-    req = req.eq('rent_period', 'annual');
-  } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'both') {
-    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.in('rent_period', ['monthly', 'annual']);
+  //  • PRICE ON REQUEST (owner 2026-09-28): a rental with no price (price_annual NULL) passes EVERY
+  //    period branch — it has no figure a period could misstate, and the card prints «سعر عند الطلب»
+  //    with no period suffix. Mirrors the one line af_eligibility_clause() gained, so the rows the
+  //    results RPC returns are never dropped here. A PRICED null-period row is still in neither.
+  //  • «إقامات قصيرة» POOL (owner 2026-10-25): the clause per pool lives in src/lib/rentPool.ts — Short stays =
+  //    Gathern + Aqar Monthly only; a per-month figure on any other site is a YEARLY listing (×12), so the
+  //    yearly branch accepts it. Executed with mutation proofs by scripts/verify-short-stays-pool.ts.
+  if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && (q.rentPeriod === 'monthly' || q.rentPeriod === 'annual' || q.rentPeriod === 'both')) {
+    const clause = cardFetchPeriodOr(q.rentPeriod, tbl);
+    if (clause) req = req.or(clause);
   }
   return req;
 }
@@ -1545,7 +1595,8 @@ function scopeOf(q: SearchQuery, cities: string[] | null, countryWide: boolean):
   // all of them → diversify by city like a region. (user: search all matches, balanced.)
   if (lm?.ambiguous && lm.cities && lm.cities.length > 1) return 'region';
   if (cities && cities.length > 1) return 'region';
-  if (q.districts && q.districts.length) return 'district';
+  // 2+ districts spread across the chosen districts (owner 2026-10-31); 1 district stays 'district'.
+  if (q.districts && q.districts.length) return scopeForDistricts(q.districts.length);
   return 'city';
 }
 
@@ -1583,19 +1634,36 @@ async function bounded<T = any>(builder: any, ms = RPC_TIMEOUT_MS, signal?: Abor
   }
 }
 
+// CHUNKS RUN CONCURRENTLY, ≤ RAW_CHUNK_CONCURRENCY IN FLIGHT PER TABLE (2026-10-10). Each chunk is its
+// own `.in('id', slice)` over ids the RPC already returned — no cursor, nothing read from the previous
+// response — so awaiting them one at a time bought nothing. Measured: an Advanced Filter round on
+// الرياض/إيجار/شقة sent 1,500 aqar ids as 8 back-to-back ~0.9 s requests (0.99 → 8.27 s), past the
+// owner's 7 s round ceiling. Same 8 requests now, in two waves. Kept from the sequential loop: the
+// request budget (one request per chunk), chunk ORDER (each page lands in its own slot), Stop between
+// chunks, and fail-closed — any chunk error rejects the table (caller → null → retry UI, never a short
+// grid) and no NEW chunk starts after it. Pinned by scripts/verify-raw-card-chunks-run-concurrently.ts.
+const RAW_CHUNK_CONCURRENCY = 4;
 async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[], signal?: AbortSignal): Promise<Listing[]> {
   const kind: SourceKind = tbl.includes('_commercial') ? 'com' : 'res';
-  const out: Listing[] = [];
-  for (let i = 0; i < ids.length; i += ID_CHUNK) {
-    if (signal?.aborted) throw new DOMException('cancelled', 'AbortError'); // Stop pressed between chunks
-    // RC-A: capture the error (was silently dropped → a chunk that 500s produced a blank/partial grid
-    // that contradicted the «لقينا N إعلان» headline). On any chunk failure, surface it so the caller
-    // returns null → retry, rather than showing a misleadingly-short result set.
-    const { data, error } = await bounded(keptFiltersReq(q, tbl).in('id', ids.slice(i, i + ID_CHUNK)).limit(ID_CHUNK), RPC_TIMEOUT_MS, signal);
-    if (error) throw new Error(`fetchRawByIds(${tbl}): ${error.message}`);
-    if (data) out.push(...finalize(data, kind));
-  }
-  return out;
+  const pages: Listing[][] = [];
+  let next = 0;
+  let failed = false;
+  const worker = async () => {
+    while (!failed && next * ID_CHUNK < ids.length) {
+      if (signal?.aborted) throw new DOMException('cancelled', 'AbortError'); // Stop pressed between chunks
+      const n = next++;
+      // RC-A: capture the error (was silently dropped → a chunk that 500s produced a blank/partial grid
+      // that contradicted the «لقينا N إعلان» headline). On any chunk failure, surface it so the caller
+      // returns null → retry, rather than showing a misleadingly-short result set.
+      // A timeout/abort THROWS out of bounded() rather than returning `error` — it must stop new chunks too.
+      const { data, error } = await bounded(keptFiltersReq(q, tbl).in('id', ids.slice(n * ID_CHUNK, (n + 1) * ID_CHUNK)).limit(ID_CHUNK), RPC_TIMEOUT_MS, signal)
+        .catch((e: unknown) => { failed = true; throw e; });
+      if (error) { failed = true; throw new Error(`fetchRawByIds(${tbl}): ${error.message}`); }
+      pages[n] = data ? finalize(data, kind) : [];
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(RAW_CHUNK_CONCURRENCY, Math.ceil(ids.length / ID_CHUNK)) }, worker));
+  return pages.flat();
 }
 
 // Per-search fetch — ROUTING LAYER (Phase 1.5). The buy/rent location index (a materialized view over
@@ -1762,7 +1830,7 @@ export async function fetchListingsForQuery(
     return { listings: null, pageCandidates, pageTotal };   // RC-A: a raw-card chunk failed or timed out → retry UI, not a misleadingly-partial grid (incl. Stop-cancelled)
   }
   const map = new Map<string, Listing>();
-  entries.forEach(([tbl], i) => { for (const l of fetched[i]) map.set(`${tbl}:${l.id}`, l); });
+  entries.forEach(([tbl], i) => { for (const l of fetched[i]) { l.sourceTable = tbl; map.set(`${tbl}:${l.id}`, l); } });
 
   // 4) Rebuild in newest-first order (dropping rows the raw filters / index↔raw drift removed), attach
   //    each row's city + region, then DIVERSIFY by geography according to the search scope so broad
@@ -1899,12 +1967,24 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
     // did, and on the 60 tables with no retention policy there is no hard delete to eventually end it.
     // Proven with the production ANON key, not privileged SQL: ids 585260 / 629782 / 4744698 each
     // returned a full card payload carrying "active": false.
-    const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).eq('active', true).limit(1);
+    const { data, error } = await supabase.from(table).select(listSelectFor(table)).eq('id', id).eq('active', true).limit(1);
     if (error || !data || !data.length) continue;
     const [row] = finalize(data, table.includes('_commercial') ? 'com' : 'res');
-    if (row) { LISTING_CACHE.set(row.id, row); return row; }
+    if (row) { row.sourceTable = table; LISTING_CACHE.set(row.id, row); return row; }
   }
   return null;
+}
+
+// The in-app ad page's «same ad on other sites» row (owner 2026-10-10) loads each sibling's REAL card
+// through the same finalize() path, by its own (table, id) — never fetchListingById, whose id walk
+// across DEEPLINK_TABLES could hand back another table's row that merely shares the id.
+export async function fetchListingCards(table: string, ids: number[]): Promise<Listing[]> {
+  if (!supabase || !ids.length || !SEARCHABLE_TABLES.includes(table)) return [];
+  const { data, error } = await bounded(supabase.from(table).select(listSelectFor(table)).in('id', ids).eq('active', true).limit(ids.length));
+  if (error || !data) return [];
+  const rows = finalize(data, table.includes('_commercial') ? 'com' : 'res');
+  for (const r of rows) r.sourceTable = table;
+  return rows;
 }
 
 // Fetches the REAL Aqar listings + every column the new card design needs (rank/photo/title/
@@ -1937,6 +2017,18 @@ const LIST_SELECT = [
   'title', 'description',
 ].join(', ');
 
+// Source-published discount columns (owner 2026-10-19): the struck-through original and the badge %.
+// ONLY the aqar tables carry them. 65 platform tables (wasalt, dealapp, gathern, aqarmonthly, …) have no
+// such column, and PostgREST fails the WHOLE select over an unknown column — the CI smoke measured that
+// as count=null on every search when these two names sat in LIST_SELECT (PR #7689, run 2795). So the
+// select is built per table: the discount columns are asked for only where they exist. A table without
+// them yields no `price_original` on the row, and finalize() builds no discount — the card as before.
+const DISCOUNT_COLUMN_TABLES = new Set(['aqar_residential_listings', 'aqar_commercial_listings']);
+const DISCOUNT_COLUMNS = 'price_original, discount_pct';
+function listSelectFor(table: string): string {
+  return DISCOUNT_COLUMN_TABLES.has(table) ? `${LIST_SELECT}, ${DISCOUNT_COLUMNS}` : LIST_SELECT;
+}
+
 // Map raw DB rows → in-app `Listing` shape. `kind` = which table-kind the rows came from (res/com),
 // needed to normalize the ambiguous "Building" type (residential vs commercial) into the clean type.
 function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
@@ -1953,9 +2045,26 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     // listing can never match a budget the card then fails to show. It renders with a '≈' and
     // the card adds an explicit «محتسب من سعر المتر» note; the source per-metre figure is kept
     // untouched in pricePerMeter below. (owner rule 2026-09-03)
-    const priceStr = listingPriceString(deal, r.rent_period, r.price_annual, r.price_total,
-                                        r.price_per_meter, r.area_m2);
-    const priceIsDerived = isDerivedTotal(deal, r.price_total, r.price_annual, r.price_per_meter, r.area_m2);
+    // THE POOL, not the site's word (owner 2026-10-25, src/lib/rentPool.ts): Gathern + Aqar Monthly are
+    // «إقامات قصيرة»; any other site's per-month figure is a YEARLY listing at ×12 (price_annual already is),
+    // so its card prints «/سنوياً» — and `sourceRentPeriod` below keeps the site's own word for the
+    // «السعر المعلن 3,000 شهرياً» line. An unpublished period still pools as null, never 'annual'.
+    // (2026-10-31: a SILENT period is judged from the figure and the clean type — src/lib/rentPool.ts::judgeSilentRentPeriod,
+    //  the same rule the index applied when it put the row in the yearly pool.)
+    const pool = deal === 'Rent' ? rentPool(r.source ?? '', r.rent_period, r.price_annual, norm.clean) : null;
+    // A «yearly» rent under 8,000 SAR on a home/business unit is a per-month price (owner 2026-10-26,
+    // src/lib/rentPool.ts::cheapYearlyIsMonthly; the index serves it ×12 through rent_price_annual_ar()):
+    // served ×12 here too, and the site's word becomes 'monthly' so the card says «السعر المعلن 3,300 شهرياً».
+    const cheapYearly = deal === 'Rent' && cheapYearlyIsMonthly(r.source ?? '', r.rent_period, r.price_annual, norm.clean);
+    const servedAnnual: unknown = cheapYearly ? (r.price_annual as number) * 12 : r.price_annual;
+    const servedSourcePeriod = cheapYearly ? 'monthly' : (r.rent_period ?? null);
+    // A sale total typed into the per-meter box prints the seller's figure, exactly as the index serves it
+    // (src/lib/meterBoxPrice.ts): the card AND the client budget net read this, so they agree with the count.
+    const sale = deal === 'Buy' ? servedSaleFigures(r.price_total, r.price_annual, r.area_m2, r.price_per_meter, { city: r.city, commercial: kind === 'com' })
+                                : { priceTotal: r.price_total, pricePerMeter: r.price_per_meter };
+    const priceStr = listingPriceString(deal, pool, servedAnnual, sale.priceTotal,
+                                        sale.pricePerMeter, r.area_m2);
+    const priceIsDerived = isDerivedTotal(deal, sale.priceTotal, r.price_annual, sale.pricePerMeter, r.area_m2);
     // Aqar (both residential & commercial) scrapes its own "no photo" placeholder graphic
     // (villa-default.png, at one of a couple CDN sizes, sometimes with a corrupted trailing
     // backslash) as a literal photo_urls entry - filter it out so a listing with only this
@@ -1965,8 +2074,8 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     // index 0. Confirmed live 2026-07-26: ~6.7% of active aqar_residential_listings had this
     // as their displayed photo; 0 occurrences on any other platform.
     const realPhotoUrls = Array.isArray(r.photo_urls)
-      ? r.photo_urls
-          .filter((u: unknown): u is string => typeof u === 'string' && !u.includes('/props/villa-default.png'))
+      ? dedupePhotoUrls(r.photo_urls
+          .filter((u: unknown): u is string => typeof u === 'string' && !u.includes('/props/villa-default.png')))
           // CANONICAL DISPLAY URL — routes CORP-blocked hosts (Sadin) through the same-origin proxy so
           // the browser can actually render them; a no-op for every other host. See src/lib/photoUrl.ts.
           .map((u: string) => photoDisplayUrl(u))
@@ -2000,7 +2109,9 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // Passed through VERBATIM — no rounding, no unit conversion, no derivation. The decision of
       // whether to SHOW it (and the «سعر المتر 1» placeholder rule) lives in ResultCard, so this
       // field always means "what the source published", nothing else.
-      pricePerMeter: typeof r.price_per_meter === 'number' ? r.price_per_meter : null,
+      pricePerMeter: typeof sale.pricePerMeter === 'number' ? sale.pricePerMeter : null,
+      // Shown as «~~old~~ خصم X٪» under the (already discounted) price. Null = no line at all.
+      discount: priceIsDerived ? null : listingDiscountFrom(deal, r.source ?? 'Aqar', r.price_total, r.price_original, r.discount_pct),
       priceIsDerived,
       area: r.area_m2 ?? 0,
       beds: r.bedrooms ?? 0,
@@ -2008,7 +2119,8 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // and click-through hostname all derive from it. Wasalt rows have source='Wasalt'.
       source: r.source ?? 'Aqar',
       // Same rule as priceStr above: an unpublished period stays NULL, it never becomes 'annual'.
-      rentPeriod: deal === 'Rent' ? (r.rent_period ?? null) : null,
+      rentPeriod: pool,
+      sourceRentPeriod: deal === 'Rent' ? servedSourcePeriod : null,
       // THE NUMBER THE SERVER FILTERED ON, carried rather than reconstructed (2026-09-06, regression
       // hunter). `price` prints a source-MONTHLY rent at Math.round(price_annual / 12), so ×12-ing
       // the printed figure recovers price_annual only when it divides by 12 — it is short by up to
@@ -2017,7 +2129,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // 12,583/mo, reconstructs to 150,996, and vanished from a search with a 151,000 yearly floor
       // the RPC had matched it against. Carrying the real figure removes the rounding step from
       // every price comparison at once. VERBATIM, like pricePerMeter above.
-      priceAnnual: deal === 'Rent' && typeof r.price_annual === 'number' ? r.price_annual : null,
+      priceAnnual: deal === 'Rent' && typeof servedAnnual === 'number' ? servedAnnual : null,
       // UNKNOWN IS NOT «مؤخراً» (P2, 107,254 active listings — 54.3% of inventory). This used to be
       // `?? 'recently'`, manufacturing a positive FRESHNESS CLAIM out of a date the source never
       // published, one layer above any display guard that could have caught it: ResultCard already
@@ -2069,6 +2181,10 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
         sanitation: !!r.sanitation,
         private_entrance: !!r.private_entrance,
         optical_fibers: !!r.optical_fibers,
+        // The card's own majlis chip comes from the site's majlis COUNT (the source tables have no `majlis`
+        // column — LIST_SELECT reads source tables, not search_listings_ar). The AF proof chip for a majlis
+        // search comes from af_canon (afEvidence), which carries the Rule B value incl. the seller's words.
+        majlis: r.reception_rooms_majlis != null ? Number(r.reception_rooms_majlis) > 0 : undefined,
         laundry_room: !!r.laundry_room,
         balcony_terrace: !!r.balcony_terrace,
       },

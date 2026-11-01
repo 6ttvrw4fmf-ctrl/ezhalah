@@ -17,15 +17,26 @@ on:
       dry_run:
         description: "true = fetch+parse+report only, write nothing"
         default: "false"
+      plot_code_districts:
+        description: "true = re-parse the rows whose stored district is a plot/plan code, instead of the legacy set"
+        default: "false"
+      ambiguous_towns:
+        description: "true = re-parse the rows with no city whose town is a city in several regions (placed by own pin)"
+        default: "false"
 
 concurrency:
   group: dealapp-repair
   cancel-in-progress: false
 
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   repair:
     name: Re-fetch + re-parse legacy dealapp rows
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -47,4 +58,6 @@ jobs:
           exec python -m scrapers.dealapp.repair \
             --limit ${{ github.event.inputs.limit || '0' }} \
             --workers 6 \
-            $([ "${{ github.event.inputs.dry_run }}" = "true" ] && echo --dry-run)
+            $([ "${{ github.event.inputs.dry_run }}" = "true" ] && echo --dry-run) \
+            $([ "${{ github.event.inputs.plot_code_districts }}" = "true" ] && echo --plot-code-districts) \
+            $([ "${{ github.event.inputs.ambiguous_towns }}" = "true" ] && echo --ambiguous-towns)

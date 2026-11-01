@@ -1,12 +1,12 @@
-"""Nafithh (nafithh.sa, «معرض نافذة») — REGA-licensed listings gallery. Onboarding 2026-09-26 (wave 3, b4).
+"""Nafithh (nafithh.com — moved from nafithh.sa, which stopped resolving 2026-10-06; «معرض نافذة») — REGA-licensed listings gallery. Onboarding 2026-09-26 (wave 3, b4).
 
 SOURCE SHAPE (measured live 2026-09-26)
 =======================================
 Server-rendered HTML only (Yii2 + pjax), no JSON anywhere:
-  list    https://nafithh.sa/web/gallery/index?page=N&per-page=12  — page N past the end CLAMPS to the
+  list    https://nafithh.com/web/gallery/index?page=N&per-page=12  — page N past the end CLAMPS to the
           last page, so the walk stops on the first page that adds no new id (30 ids: 12 + 12 + 6,
           matching the site's own filter buckets 22 sale + 8 rent).
-  detail  https://nafithh.sa/web/gallery/<id>  — the REGA licence block as `lableShow` / `showData`
+  detail  https://nafithh.com/web/gallery/<id>  — the REGA licence block as `lableShow` / `showData`
           pairs, read BY LABEL. An unknown id returns HTTP 404.
 
 TRAP 1 — the site's own footer text («السماح بنشر الاعلان اضافة الاعلان شركة نافذة الرقمية …») is
@@ -42,7 +42,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
-BASE = "https://nafithh.sa"
+BASE = "https://nafithh.com"
 SOURCE = "معرض نافذة"
 PREFIX = "NFH"
 SLUG = "nafithh"
@@ -189,6 +189,10 @@ def map_listing(pid: str, d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]]
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v not in (None, "", "-", [])})
     cap = {k: v for k, v in kv.items() if k not in _NEVER_STORE}
     row["source_capture"] = strip_pii_fields({"schema": "nafithh.gallery.v1", "fields": cap, "title": row["title"]})
+    if normalize.ad_expiry_state(row["license_expiry"]) == "expired":
+        # Its own ad licence ended. Still written (the gate is PR #5103's, the owner's call), but the
+        # list sighting does not certify it as checked-alive (2026-10-03).
+        db.mark_presence_unproven(row)
     return (row, category), ""
 
 

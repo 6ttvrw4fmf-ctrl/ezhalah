@@ -31,7 +31,7 @@ from curl_cffi import requests as cc
 
 from scrapers.common import db
 from scrapers.common import normalize as N
-from scrapers.wasalt.run import _yes_no
+from scrapers.wasalt.run import _yes_no, land_service_fields
 
 BASE = "https://wasalt.sa"
 NEXT_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
@@ -139,21 +139,46 @@ def meter_fields_from_deep(deep: list[dict[str, Any]]) -> dict[str, bool]:
     return out
 
 
+# Proxy-spend SAFETY cap (owner decision 2026-10-05): 15,000 pending rows. It exists only to stop a
+# runaway re-crawl (a flag reset re-queuing ~57k rows), not to throttle ordinary new listings: on
+# 2026-10-05 ~13k genuinely new rows were pending, which the old 5,000 would have refused.
+MAX_PENDING_DEFAULT = 15000
+# Over the cap a run fetches at most this many rows (newest first) instead of refusing: see enrich_table.
+DRAIN_BATCH = 2000
+
+
+def pending_count(c, table: str, flag: str, sel: str) -> int:
+    """Active rows still waiting on `flag`. Counted as a GET with .limit(1), never a HEAD: on the pinned client
+    (supabase 2.10 / postgrest 0.18) a HEAD count reads 0, which left this breaker blind from the
+    day it was written (scrapers/common/tests/test_head_count_reads_zero.py). A count that cannot be
+    read is not zero: it raises, so the run stops before spending proxy bandwidth."""
+    res = (c.table(table).select(sel, count="exact")
+           .eq("active", True).eq(flag, False).limit(1).execute())
+    if res.count is None:
+        raise RuntimeError(f"circuit breaker: pending count for {table} unreadable — refusing to spend proxy")
+    return int(res.count)
+
+
 def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: int = 1,
-                 max_pending: int = 5000, allow_backfill: bool = False) -> dict[str, int]:
+                 max_pending: int = MAX_PENDING_DEFAULT, allow_backfill: bool = False) -> dict[str, int]:
     c = db.sb()
     # Circuit breaker (owner 2026-07-07): steady state is a few brand-new rows/day. A sudden large
     # un-enriched backlog means detail_enriched was reset or a bulk backfill is in play — auto-crawling
     # all of it through the metered Saudi proxy is exactly what exhausted the free tier (25-26 Jun). Refuse
     # unless explicitly authorised, so a stray flag reset can never silently re-crawl ~57k rows.
-    pending = ((c.table(table).select("ad_number", count="exact", head=True)
-                .eq("active", True).eq("detail_enriched", False).execute().count) or 0)
-    if pending > max_pending and not allow_backfill:
-        print(f"⚠ CIRCUIT BREAKER: {pending} un-enriched rows in {table} (> {max_pending}). Steady state "
-              f"is a few/day — this looks like a flag reset or a backfill. Refusing to crawl the backlog "
-              f"through the metered proxy. Re-run with --allow-backfill to override.", flush=True)
-        return {"deep": 0, "empty": 0, "fail": 0, "aborted": pending}
-    q = (c.table(table).select("ad_number,listing_url")
+    pending = pending_count(c, table, "detail_enriched", "ad_number")
+    # DRAIN, don't refuse (owner, 2026-10-10: «fix the root — drain in batches under the cap»). From
+    # 10-08 the backlog sat at 27,119 > 15,000 and every run refused, so NO new wasalt ad got its detail
+    # fields for three nights while the backlog only grew. The spend a run can make was never the
+    # backlog: it is `limit` rows (2,000/day by default), far under the 15,000 cap. Over the cap a run
+    # now fetches at most DRAIN_BATCH rows, NEWEST FIRST so today's arrivals get their fields before the
+    # old backlog; a flag reset of ~57k therefore costs at most DRAIN_BATCH fetches per run, never 57k.
+    draining = pending > max_pending and not allow_backfill
+    if draining:
+        limit = min(limit, DRAIN_BATCH)
+        print(f"⚠ {pending} un-enriched rows in {table} (> {max_pending}): drain mode — newest first, at most "
+              f"{limit} rows this run; the rest drains on later runs.", flush=True)
+    q = (c.table(table).select("ad_number,listing_url,property_type")
          .eq("active", True).eq("detail_enriched", False))
     # Cloud matrix sharding: 10 parallel jobs, each claims a DISJOINT slice by the last digit of
     # ad_number (WST…N). Server-side, ~even, zero overlap → no duplicate proxy fetches. Only valid
@@ -162,6 +187,8 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
         q = q.like("ad_number", f"%{shard}")
     # Fair drain: least-recently-attempted first (NULLs = never tried). Prevents new high-id rows
     # from permanently starving older un-enriched rows when daily inflow exceeds the cap.
+    if draining:
+        q = q.order("scraped_at", desc=True)
     rows = (q.order("enrich_attempted_at", desc=False, nullsfirst=True)
             .limit(limit).execute().data) or []
     print(f"── {table} shard {shard}/{shards}: {len(rows)} un-enriched rows to process (cap {limit})")
@@ -197,6 +224,8 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
             cy = next((r.get("value") for r in deep if r.get("key") == "completionYear"), None)
             upd["property_age"] = N.parse_property_age(cy)
             upd.update(meter_fields_from_deep(deep))
+            # Backlog 326: a LAND's meters are its electricity / water service (run.land_service_fields).
+            upd.update(land_service_fields(row.get("property_type"), deep))
         try:
             db.sb().table(table).update(upd).eq("ad_number", row["ad_number"]).execute()
             with lock: stats["deep" if deep else "empty"] += 1
@@ -218,14 +247,26 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--shard", type=int, default=0, help="This job's shard index (0..shards-1).")
     ap.add_argument("--shards", type=int, default=1, help="Total shards (10 = cloud matrix by ad_number last digit).")
-    ap.add_argument("--max-pending", type=int, default=5000,
+    ap.add_argument("--max-pending", type=int, default=MAX_PENDING_DEFAULT,
                     help="Circuit breaker: abort (no proxy fetches) if more than this many un-enriched rows "
                          "exist — a mass backlog means a flag reset, not the normal daily trickle.")
     ap.add_argument("--allow-backfill", action="store_true",
                     help="Override the circuit breaker to deliberately crawl a large backlog through the proxy.")
     args = ap.parse_args()
-    enrich_table(args.table, args.limit, args.workers, args.shard, args.shards,
-                 args.max_pending, args.allow_backfill)
+    stats = enrich_table(args.table, args.limit, args.workers, args.shard, args.shards,
+                         args.max_pending, args.allow_backfill)
+    return exit_code(stats)
+
+
+def exit_code(stats: dict) -> int:
+    """Non-zero when the circuit breaker refused the run (2026-10-10). From 10-08 the residential job
+    refused every night (27,119 pending > 15,000) in 0 s and reported SUCCESS, so no new wasalt ad got
+    its detail fields (facade, meters, street width) for three nights and nothing turned red. A refusal
+    is a run that did not do its job: the workflow must fail where people look."""
+    if stats.get("aborted"):
+        print(f"✗ circuit breaker refused this run: {stats['aborted']} rows pending — nothing was enriched",
+              flush=True)
+        return 2
     return 0
 
 

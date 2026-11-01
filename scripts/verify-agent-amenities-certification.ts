@@ -54,10 +54,17 @@ const RICH_TOKENS = [
   "gym", "pool", "garden", "balcony", "laundry_room",
   "optical_fibers", "separate_electricity_meter", "separate_water_meter",
 ];
+// 2026-10-31: Apartment/RentAnnual certifies EXACTLY the chips of the owner's cards (cardPlan — pinned by
+// verify-af-apartments-group-cards.ts), so the rich-set sweep is held on Villa/RentAnnual, the residential base
+// cohort that still carries all eight (separate_*_meter ride the Apartment cards as the derived «separate_meters»).
 for (const tok of RICH_TOKENS) {
-  check(`Apartment/RentAnnual certifies "${tok}"`, aptAnnual.includes(tok), `got ${JSON.stringify(aptAnnual)}`);
+  check(`Villa/RentAnnual (the residential base) certifies "${tok}"`, villa.includes(tok), `got ${JSON.stringify(villa)}`);
   check(`"${tok}" is NOT certified for Office (residential-only token)`, !office.includes(tok));
 }
+check('Apartment/RentAnnual certifies the gym-bug tokens its cards carry (gym, pool, garden, balcony, optical_fibers) and the derived separate_meters',
+  ['gym', 'pool', 'garden', 'balcony', 'optical_fibers', 'separate_meters'].every((t) => aptAnnual.includes(t)), `got ${JSON.stringify(aptAnnual)}`);
+check('…and NOT a token no card of that cohort offers (laundry_room, separate_electricity_meter): the typed sentence is held to the cards\' vocabulary',
+  !aptAnnual.includes('laundry_room') && !aptAnnual.includes('separate_electricity_meter'));
 // "bathrooms" is a separate AF intent (afIntents.ts + applyAfIntents), never an amenities-array
 // token — it is deliberately NOT passed here; partitionRequestedAmenities only knows the amenity
 // vocabulary, so mixing it in would test a rejection this function is SUPPOSED to produce.
@@ -71,8 +78,13 @@ console.log("\n── UNKNOWN stays UNKNOWN: an uncertified cohort is EMPTY, nev
 // comment; Monthly AF shipped 2026-08-18 and that cohort IS certified. Test the data, not the prose.)
 eq("Office/Buy certifies NOTHING (certified for RentAnnual only)",
   certifiedAmenityKeys(Q({ type: "Office", category: "Commercial", deal: "Buy", rentPeriod: undefined })), []);
-eq("Residential Building/Buy certifies NOTHING",
-  certifiedAmenityKeys(Q({ type: "Residential Building", deal: "Buy", rentPeriod: undefined })), []);
+// Residential Building/Buy gained the features + build cards (owner 2026-10-31); Duplex/Buy (bathrooms only) is now
+// the residential cohort that genuinely lists no amenities — the gate must return EMPTY there, never the base set.
+eq("Duplex/Buy certifies NOTHING (bathrooms is its only certified question)",
+  certifiedAmenityKeys(Q({ type: "Duplex", deal: "Buy", rentPeriod: undefined })), []);
+check("Residential Building/Buy certifies exactly its two cards' chips (features · build), e.g. basement and electronic_deed",
+  ['basement', 'electronic_deed', 'elevator'].every((t) => certifiedAmenityKeys(Q({ type: "Residential Building", deal: "Buy", rentPeriod: undefined })).includes(t))
+  && !certifiedAmenityKeys(Q({ type: "Residential Building", deal: "Buy", rentPeriod: undefined })).includes('kitchen'));
 eq("an unknown/uncertified type certifies NOTHING", certifiedAmenityKeys(Q({ type: "Nonexistent Type" })), []);
 eq("no type at all certifies NOTHING", certifiedAmenityKeys(Q({ type: null })), []);
 // Cross-category scope must match nothing rather than falling through to one side.
@@ -89,7 +101,7 @@ eq("...and surfaced for the clarification path, not swallowed", p2.rejected, ["c
 const p3 = partitionRequestedAmenities(Q({ type: "Apartment" }), ["elevatorr", "ELEVATOR", "  parking  "]);
 eq("a near-miss is NEVER fuzzy-matched into a real token", p3.rejected, ["elevatorr"]);
 eq("case and whitespace normalise (that is not fuzzy matching)", p3.certified, ["elevator", "parking"]);
-const p4 = partitionRequestedAmenities(Q({ type: "Residential Building", deal: "Buy", rentPeriod: undefined }), ["elevator"]);
+const p4 = partitionRequestedAmenities(Q({ type: "Duplex", deal: "Buy", rentPeriod: undefined }), ["elevator"]);
 eq("an uncertified COHORT rejects even a real token", p4.certified, []);
 eq("...and routes it to clarification", p4.rejected, ["elevator"]);
 eq("empty request stays empty", partitionRequestedAmenities(Q({ type: "Apartment" }), []).certified, []);

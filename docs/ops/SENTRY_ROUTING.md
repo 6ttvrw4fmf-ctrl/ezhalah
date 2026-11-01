@@ -1,3 +1,8 @@
+> **2026-10-04 — the five night-shift engineers replace the old seven routines in this file.** Ownership today: ⚡ Scraping =
+> scrapers and crawl jobs · 🆕 New Listings = results, cards, city/district fields · 🔬 Advanced Filter = the AF files in row 5 ·
+> ♻️ Lifecycle = liveness/cleanup · 🔧 Quality & Repair = everything else, and it checks every morning that each open error has an
+> owner. Each rulebook's «🛰️ SENTRY, EVERY NIGHT» block is the working rule; this table is history for the file paths.
+
 # SENTRY ROUTING (canonical, owner 2026-08-28)
 
 **This file is the single source of truth for which routine owns which class of Sentry error.**

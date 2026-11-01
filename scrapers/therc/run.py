@@ -56,6 +56,8 @@ from curl_cffi import requests as cc
 
 from scrapers.common import db
 from scrapers.common import normalize as N
+from scrapers.common.page_pin import pin_from_page
+from scrapers.common.pii import redact_pii
 
 BASE = "https://therc.aqar.digital"
 SITEMAP = f"{BASE}/sitemap.xml"
@@ -76,17 +78,47 @@ def _deobf(s: str) -> str:
     return _OBF.sub(lambda m: m.group(0).translate(_AR2EN).replace("o", "0").replace("O", "0"), s)
 
 
+# The site's own «((رقم المعلن يظهر عند التواصل))» — where it hides the agent's number. Not the ad's text.
+_PLACEHOLDER = re.compile(r"\(\([^()]*\)\)")
+
+
 def _redact(text: Optional[str]) -> Optional[str]:
+    """The ad's «الوصف» text with every CONTACT LINE removed — never the text after it.
+
+    It used to cut the whole description at the FIRST contact marker. This office's ads OPEN with the contact
+    block («📞 للتواصل واتساب:» / the agent's name / «((رقم المعلن يظهر عند التواصل))») and the property only
+    starts below it, so 133 of 447 active rows stored NULL and the AI facts reader could not read them
+    (measured 2026-10-30, e.g. /properties/shk-llaygar-fy-hy-thhr-lbn-mdyn-alryad-mntk-alryad-3: «شقه تتكون من
+    غرفتين و صاله … ٢٧ الف ريال» below «للتواصل واتس / فاطمه»); and an ad with a marker mid-text kept only what
+    came before it. Now: a line carrying a marker goes whole, and when the marker ENDS its line (nothing but a
+    channel word after it) the next non-blank, digit-free short line — the agent's name — goes too. PDPL first:
+    phones are dropped and the shared redactor runs over every line; losing a line beats storing a name."""
     if not text:
         return None
-    t = _deobf(text)
-    m = _CUT.search(t)
-    if m:
-        t = t[:m.start()]
-    t = _PHONE.sub(" ", t)
-    t = re.sub(r"[ \t]+", " ", t).strip()
-    # Some ads OPEN with «📞 للتواصل …», so the cut leaves a lone emoji or a two-letter stub. That is
-    # not a description — return NULL rather than store punctuation as the ad's text.
+    kept: list[str] = []
+    name_next = False
+    for line in _deobf(text).split("\n"):
+        had_placeholder = bool(_PLACEHOLDER.search(line))
+        bare = _PLACEHOLDER.sub(" ", line)
+        if not bare.strip():
+            if not had_placeholder:
+                kept.append("")
+            continue
+        m = _CUT.search(bare)
+        if m:
+            name_next = len(re.sub(r"[\W_]+", " ", bare[m.end():]).split()) <= 2
+            continue
+        if name_next:
+            name_next = False
+            if not re.search(r"[0-9٠-٩]", bare) and len(bare.split()) <= 10:
+                continue
+        if had_placeholder and not re.search(r"\w", bare):
+            continue
+        clean = redact_pii(_PHONE.sub(" ", bare))
+        if clean:
+            kept.append(clean)
+    t = re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+    # Nothing but emoji or a two-letter stub left: not a description — NULL, never punctuation as the ad's text.
     return t if len(re.sub(r"\W+", "", t)) >= 8 else None
 
 
@@ -126,7 +158,22 @@ _REF = re.compile(r"رقم المرجع:\s*([A-Z0-9]+)")
 _PRICE_BLOCK = re.compile(
     r'<div class="text-3xl font-bold" style="color: var\(--color-primary\);">(.*?)</div>', re.S)
 _SPEC = re.compile(r'text-sm text-gray-500">([^<]+)</div>\s*<div class="font-bold text-gray-900">([^<]+)</div>')
-_DESC = re.compile(r'>الوصف</h2>\s*<div class="prose[^"]*">(.*?)</div>', re.S)
+# The «الوصف» prose box's OPENING tag. Its text runs to the box's OWN closing </div> (nesting counted): a
+# «<div>▪️ مطبخ راكب</div>» inside the prose (therc 10283456) used to end the stored text there.
+_DESC = re.compile(r'>الوصف</h2>\s*<div class="prose[^"]*">', re.S)
+_DIV_TAG = re.compile(r"<(/?)div\b", re.I)
+
+
+def _desc_box(body: str) -> Optional[str]:
+    m = _DESC.search(body or "")
+    if not m:
+        return None
+    depth = 1
+    for t in _DIV_TAG.finditer(body, m.end()):
+        depth += -1 if t.group(1) else 1
+        if depth == 0:
+            return body[m.end():t.start()]
+    return None
 _IMAGES = re.compile(r"images\s*:\s*(\[[^\]]*\])")
 _INTERNAL_ID = re.compile(r"/properties/950/(\d+)/")
 # «<type> للبيع|للإيجار في …» — identical to JSON-LD `name`; the ONLY reliable type source here.
@@ -146,6 +193,34 @@ def _text(fragment: str) -> str:
     t = re.sub(r"<br\s*/?>", "\n", fragment)
     t = re.sub(r"<[^>]+>", " ", t)
     return re.sub(r"[ \t]+", " ", html_mod.unescape(t)).strip()
+
+
+# The office publishes NO amenity field (see «NOT PUBLISHED» above), so the ad's own «الوصف» block is the
+# only statement of kitchen / lift / parking / maid room and prose is lawful there — YES or nothing, never
+# no (ADVANCED_FILTER_SOURCE_TRUTH §2). Its bullets («*», «•», «✔️», «✅») are statements of their own, so a
+# negation in one never reaches the next. 236 of 447 live descriptions name a kitchen; 0 were stored
+# (ops_af_score 2026-10-08 therc 0 of 5 findable, 🔬 AF engineer).
+_BULLETS = re.compile(r"\s[*•]\s|[✔✅☑]\ufe0f?")
+
+
+# The amenities are read from the WHOLE «الوصف» card, before redaction (🔬 2026-10-12, backlog 460). The stored
+# description is cut at the first contact marker (_redact), so an ad that OPENS with «للتواصل واتس :» stored
+# NULL and one with a marker after line one stored that line only — and the amenity reader, fed the stored
+# text, lost every «مصعد متوفر» / «مطبخ راكب» / «مؤثثة بالكامل» below it (therc 11241522, 10283456;
+# source-reread 38231173123). Reading for yes/no stores no text, so no contact detail is ever kept.
+# It ends at the next card, the next header, or the «عقارات مشابهة» strip (another listing's text).
+_DESC_CARD = re.compile(r'>الوصف</h2>(.*?)(?:<div class="bg-white|<h2|عقارات مشابهة|$)', re.S)
+
+
+def card_amenities(body: str) -> dict[str, bool]:
+    m = _DESC_CARD.search(body)
+    return description_amenities(_text(m.group(1))) if m else {}
+
+
+def description_amenities(description: Optional[str]) -> dict[str, bool]:
+    if not description:
+        return {}
+    return N.prose_amenities(_BULLETS.sub("\n", description))
 
 
 def _jsonld_listing(page: str) -> dict:
@@ -266,7 +341,9 @@ def map_listing(url: str, page: str, lastmod: Optional[str]) -> Optional[tuple[d
     else:
         price_total = price
 
-    description = _redact(_text(_DESC.search(body).group(1))) if _DESC.search(body) else None
+    box = _desc_box(body)
+    description = _redact(_text(box)) if box is not None else None
+    said = card_amenities(body)
     photos = _gallery(body)
     if not photos and isinstance(ld.get("image"), str):
         photos = [ld["image"]]
@@ -329,7 +406,10 @@ def map_listing(url: str, page: str, lastmod: Optional[str]) -> Optional[tuple[d
         "photo_urls": photos,
         "title": _redact(title),
         "description": description,
-        "additional_info": extra,
+        **said,
+        # Owner 2026-10-20 night: the ad's own «الموقع» link (Maps ?q=LAT,LNG or a goo.gl link) — 5 of 10
+        # border ads carried one. Rows keep their legacy shape under "rows" (buildAdditionalInfo unwraps it).
+        "additional_info": {"rows": extra, **pin_from_page(page)},
         "source_capture": capture,
         "price_evidence": N.price_evidence(
             field="offers.price",
@@ -358,11 +438,81 @@ def crawl(limit: int = 0) -> tuple[list[dict], list[dict], int]:
         if not mapped:
             continue
         row, cat = mapped
+        if page_reads_live(page, row["ad_number"]):
+            # Built from a DIRECT 200 read of its OWN page that printed its own reference code and
+            # no non-InStock availability — the strongest evidence this crawl gathers, recorded.
+            db.mark_direct_alive(row, oracle="therc.detail_fetch.reference_code")
         (com if cat == "commercial" else res).append(row)
         seen += 1
         if limit and seen >= limit:
             break
     return res, com, seen
+
+
+# ── LIVENESS (measured 2026-10-27) ────────────────────────────────────────────────────────────────
+# Owner 2026-10-26: every ad we show gets a direct dead-ad check. This crawl already opens EVERY ad's
+# own page every night (sitemap → detail), so that read IS the check — zero extra requests.
+# MEASURED 2026-10-27 from a browser UA: a live ad (AQ410257) answers 200 printing
+# «رقم المرجع: AQ410257» with JSON-LD offers.availability https://schema.org/InStock; a slug the
+# platform does not serve answers HTTP 404 (<title>404 - الصفحة غير موجودة). No sold/rented badge
+# exists on the site; an availability other than InStock is UNMEASURED → no opinion, never live.
+_INSTOCK = ("", "https://schema.org/InStock", "http://schema.org/InStock", "InStock")
+
+
+def page_reads_live(page: str, ad_number: str) -> bool:
+    """True only when this page is THIS listing (its own «رقم المرجع», read above the
+    similar-properties strip) and its JSON-LD does not call it anything but InStock."""
+    if not page or not ad_number:
+        return False
+    body = page.split(_SIMILAR)[0]
+    ref = _REF.search(body)
+    if not ref or ref.group(1) != ad_number:
+        return False
+    avail = str((_jsonld_listing(body).get("offers") or {}).get("availability") or "")
+    return avail in _INSTOCK
+
+
+def _make_signal(ad_number: str):
+    def _signal(status, body, path_changed):
+        if status in (404, 410) and not path_changed:
+            return "gone"                     # the platform's own 404 for a slug it no longer serves
+        if status == 200 and page_reads_live(body, ad_number):   # its own ref proves the page
+            return "live"
+        return None                           # anything else: no opinion → UNKNOWN
+    return _signal
+
+
+def _stored_url(ad_number: str) -> Optional[str]:
+    from scrapers.common.http_liveness import stored_listing_url
+    return stored_listing_url(("therc_residential_listings", "therc_commercial_listings"))(ad_number)
+
+
+def _make_verify_gone(control_ad: Optional[str], url_by_ad: dict[str, str]):
+    """verify_gone for prune_unseen. The URL comes from THIS run's rows or the row's own stored
+    listing_url (the slug is a transliteration — never rebuilt from the ad_number). Every removal
+    is gated on a positive control: an ad this crawl just read must still answer live."""
+    from scrapers.common.http_liveness import LivenessProbe
+    sess = _session()
+
+    def probe(ad_number: str, canary=None):
+        url = url_by_ad.get(ad_number) or _stored_url(ad_number)
+        if not url:
+            return "unknown", f"{ad_number!r}: no stored listing_url to probe"
+        return LivenessProbe(platform="therc", signal=_make_signal(ad_number), session=lambda: sess,
+                             url_for=lambda _ad: url, canary=canary).verify_gone(ad_number)
+
+    state: dict[str, tuple[bool, str]] = {}
+
+    def canary() -> tuple[bool, str]:
+        if "v" not in state:
+            if not control_ad:
+                state["v"] = (False, "no row from this run to use as a positive control")
+            else:
+                verdict, why = probe(control_ad)
+                state["v"] = (verdict == "live", f"positive control {control_ad}: {why}")
+        return state["v"]
+
+    return lambda ad_number: probe(ad_number, canary=canary)
 
 
 def main() -> int:
@@ -414,9 +564,12 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
+        url_by_ad = {r["ad_number"]: r["listing_url"] for r in res + com}
+        verify_gone = _make_verify_gone(next(iter(sorted(url_by_ad)), None), url_by_ad)
         for tbl, rows_seen in (("therc_residential_listings", res),
                                ("therc_commercial_listings", com)):
-            nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE)
+            nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE,
+                                 verify_gone=verify_gone)
             if nn < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

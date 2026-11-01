@@ -1,0 +1,69 @@
+// THE AI READER CAN ONLY PICK CHEAP, NON-THINKING MODELS (owner 2026-10-28: «we don't want thinking model for
+// description, always use the cheapest model … let's try mistral small»).
+//
+// A run may name a model on the OpenRouter reader key (scrapers/facts/extract.py --model, facts-extract.yml `model`).
+// The proxy (supabase/functions/facts-extract/index.ts) must refuse any model outside its closed OPENROUTER_MODELS
+// list, the list must hold no reasoning / premium model, and the workflow may only offer models from that list.
+// Each guard is proven by a mutation it must catch.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const root = process.cwd();
+let failed = 0;
+const check = (label: string, ok: boolean, detail = '') => {
+  console.log(`${ok ? '  PASS' : '  FAIL'}  ${label}${ok || !detail ? '' : ` — ${detail}`}`);
+  if (!ok) failed++;
+};
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
+
+const PREMIUM_OR_THINKING = /(^|[\/-])(r1|o1|o3|o4|gpt-4o(?!-mini)|gpt-5|opus|sonnet|claude|gemini-2\.5-pro|thinking|reason|grok)/i;
+
+export const allowedModels = (ts: string): string[] | null => {
+  const m = /const OPENROUTER_MODELS: Record<string, string\[\]> = \{([\s\S]*?)\n\};/.exec(ts);
+  if (!m) return null;
+  return [...m[1].matchAll(/^\s*"([^"]+)":/gm)].map((x) => x[1]);
+};
+
+export const proxyRefusesUnlisted = (ts: string): boolean =>
+  /if \(provider !== "openrouter" \|\| !\(body\.model in OPENROUTER_MODELS\)\) return json\(\{ error: `model not allowed/.test(ts) &&
+  /const model = provider === "openrouter" \? \(requestedModel \|\| OPENROUTER_MODEL\) : MODEL;/.test(ts);
+
+export const listIsCheap = (models: string[] | null): boolean =>
+  !!models && models.length > 0 && models.every((m) => !PREMIUM_OR_THINKING.test(m));
+
+export const workflowOffersOnlyListed = (yml: string, models: string[] | null): boolean => {
+  const m = /\n      model:\n[\s\S]*?options: \[([^\]]*)\]/.exec(yml);
+  if (!m || !models) return false;
+  const opts = m[1].split(',').map((s) => s.trim().replace(/^"|"$/g, '')).filter(Boolean);
+  return opts.length > 0 && opts.every((o) => models.includes(o));
+};
+
+// THE BACKUP READER (owner 2026-10-28: «a strong model, not for all, only some, as backup»): it must be one of the
+// allowed cheap non-thinking models, and capped to a small share of each run.
+export const backupIsCapped = (py: string, models: string[] | null): boolean => {
+  const m = /^FALLBACK_MODEL = "([^"]+)"/m.exec(py), share = /^FALLBACK_SHARE = ([0-9.]+)/m.exec(py);
+  return !!m && !!share && !!models && models.includes(m[1]) && listIsCheap([m[1]]) && Number(share[1]) > 0 && Number(share[1]) <= 0.1 && /^FALLBACK_MONTH_USD = ([0-9.]+)/m.test(py) && Number(/^FALLBACK_MONTH_USD = ([0-9.]+)/m.exec(py)![1]) <= 5 &&
+    /if not fallback and args\.fallback_model:\n\s+fallback_queue\.extend\(batch\)/.test(py);
+};
+const PYX = readFileSync(join(root, "scrapers", "facts", "extract.py"), "utf8");
+const TS = readFileSync(join(root, 'supabase', 'functions', 'facts-extract', 'index.ts'), 'utf8');
+const WF = readFileSync(join(root, '.github', 'workflows', 'facts-extract.yml'), 'utf8');
+const models = allowedModels(TS);
+
+console.log('The AI reader can only pick cheap, non-thinking models');
+check('the proxy refuses a model outside OPENROUTER_MODELS', proxyRefusesUnlisted(TS));
+check(`the allowed list holds no reasoning or premium model (${(models ?? []).join(', ')})`, listIsCheap(models));
+check('facts-extract.yml offers only models from that list', workflowOffersOnlyListed(WF, models));
+
+check("the backup reader is an allowed cheap model, used for at most 10% of a run, only for ads the main model could not answer", backupIsCapped(PYX, models));
+mustCatch("the backup share raised to every ad", !backupIsCapped(PYX.replace(/^FALLBACK_SHARE = [0-9.]+/m, "FALLBACK_SHARE = 1.0"), models));
+mustCatch("the backup monthly cap raised past 5 USD", !backupIsCapped(PYX.replace(/^FALLBACK_MONTH_USD = [0-9.]+/m, "FALLBACK_MONTH_USD = 50.0"), models));
+mustCatch("a premium backup model", !backupIsCapped(PYX.replace(/^FALLBACK_MODEL = "[^"]+"/m, 'FALLBACK_MODEL = "anthropic/claude-sonnet-4.5"'), models));
+mustCatch('the refusal removed', !proxyRefusesUnlisted(TS.replace('|| !(body.model in OPENROUTER_MODELS)', '')));
+mustCatch('a reasoning model added to the list', !listIsCheap([...(models ?? []), 'deepseek/deepseek-r1']));
+mustCatch('a premium model added to the list', !listIsCheap([...(models ?? []), 'anthropic/claude-sonnet-4.5']));
+mustCatch('the workflow offering an unlisted model',
+  !workflowOffersOnlyListed(WF.replace('qwen/qwen3-235b-a22b-2507]', 'qwen/qwen3-235b-a22b-2507, openai/gpt-5]'), models));
+
+if (failed) { console.error(`\n❌ ${failed} check(s) failed`); process.exit(1); }
+console.log('\n✓ the AI reader can only pick cheap, non-thinking models');

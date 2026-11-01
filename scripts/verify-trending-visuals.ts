@@ -34,8 +34,10 @@ check('hide-on-error fallback (onError → render nothing)', /const \[failed, se
 // ── index.tsx passes the kind-keyed art to BOTH Top-6 lists… ──
 check('city Top-6 rows get LOC_IMG.city', /icon: LOC_IMG\.city,/.test(indexSrc));
 check('district Top-6 rows get LOC_IMG.district', /icon: LOC_IMG\.district,/.test(indexSrc));
-// …while the typed rows keep the art they always had.
-check('typed city rows keep LOC_IMG.city', /<Image source=\{LOC_IMG\.city\} style=\{s\.suggLocIcon\} \/>/.test(indexSrc));
+// …while the typed rows keep the art they always had. A typed city row carries LOC_IMG.city; the one typed row that
+// is NOT a city — the «حي X · City» row the city box offers for a typed district name (owner decision 2026-10-19,
+// backlog 522/566, `opt.districtAr`) — carries LOC_IMG.district, the art of the thing it selects.
+check('typed city rows keep LOC_IMG.city (a «حي X · City» row carries LOC_IMG.district)', /<Image source=\{opt\.districtAr \? LOC_IMG\.district : LOC_IMG\.city\} style=\{\[s\.suggLocIcon, cityEmpty && s\.suggIconEmpty\]\} \/>/.test(indexSrc));
 check('typed district rows keep LOC_IMG.district', /<Image source=\{LOC_IMG\.district\} style=\{\[s\.suggLocIcon, isEmpty && s\.suggIconEmpty\]\} \/>/.test(indexSrc));
 
 // ── Selected-value identity: the confirmed pick shows the SAME art it was picked from. ──

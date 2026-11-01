@@ -27,6 +27,7 @@
 //
 //   node --experimental-strip-types scripts/verify-agent-scope-answer.ts   (wired into `npm test`)
 
+import { REGION_OR_CITY_ASK_AR } from '../src/data/questionExamples.ts';
 import { readFileSync } from 'node:fs';
 import { regionOrCityChoice, scopedLocation } from '../src/lib/regionOrCityAnswer.ts';
 import { resetCallSitesOk, resetCallSiteProblem, RESET_EXITS } from './lib/conversationExits.ts';
@@ -77,7 +78,7 @@ check('the region-vs-city branch STOPS asking once the user named one of the two
 // Arabic phrase and must NOT be read as "they already chose the whole region".
 check('the whole-region branch stops asking ONLY when the user named «منطقة X» for that twin',
   /scopeNamedForTwin\(userText, regionOrCityTwin\(loc\)\) === 'region'/.test(clarifyFn));
-check('the twin question itself still exists for a user who has NOT answered it', /اسم مدينة واسم منطقة في نفس الوقت/.test(clarifyFn));
+check('the twin question itself still exists for a user who has NOT answered it (now a rotating pool)', /return regionOrCityQuestion\(label, userText\);/.test(clarifyFn) && REGION_OR_CITY_ASK_AR.every((p) => /\{n\}/.test(p) && /مدينة/.test(p) && /منطقة/.test(p)));
 
 const sendFn = (() => {
   const start = src.indexOf('let turn = await respond(');

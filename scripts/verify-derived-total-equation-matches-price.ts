@@ -100,7 +100,7 @@ mustCatch('an inline multiply with no bound, which would print «= 1,540,200,000
 mustCatch('an equation that shows a rounded per-metre rate instead of the source figure',
   (derivedTotalEquation(1403.5, 900)?.perMeter ?? 0) !== Math.round(1403.5));
 // A card that forgot the gate would show working on a published price.
-const noGateCard = card.replace(/\{listing\.priceIsDerived \? \(\(\) => \{/, '{(() => {');
+const noGateCard = card.replace(/\{listing\.priceIsDerived \? \(\(\) => \{/g, '{(() => {');
 mustCatch('dropping the priceIsDerived gate',
   !/\{listing\.priceIsDerived \? \(\(\) => \{[\s\S]*?derivedTotalEquation/.test(noGateCard));
 

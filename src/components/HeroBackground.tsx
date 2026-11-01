@@ -1,65 +1,57 @@
-import { Animated, ImageResizeMode, StyleSheet, View } from 'react-native';
-import { useResolvedTheme, useThemePalette } from '@/lib/appearance';
-import { alpha0 } from '@/theme/palette';
+import { useEffect, useState } from 'react';
+import { Animated as RNAnimated, Image, StyleSheet, View, useWindowDimensions } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
-import { colors } from '@/theme/tokens';
+import { useResolvedTheme, useThemePalette } from '@/lib/appearance';
+import { useReducedMotion } from '@/lib/useReducedMotion';
+import { SKY_CALM_PROPS } from '@/lib/scrollCalm';
+import { skyScene } from '@/theme/skyScene';
+import CloudWisp from './CloudWisp';
 
-// The hand-drawn Saudi skyline + falcon sketch, used as a soft full-bleed backdrop behind the home
-// filter, the AI Agent chat, and (faintly) the sidebar. It's a light pencil illustration, so even at
-// moderate opacity the foreground UI stays readable; a `scrim` (flat paper wash) and a bottom
-// gradient fade keep text crisp where content is dense.
-const HERO = require('../../assets/images/hero-bg.png');
-// Pre-rendered dark variant (chalk-on-night: the same drawing inverted and blended onto the dark
-// paper — generated offline, NOT a CSS filter, so it renders identically everywhere).
-const HERO_DARK = require('../../assets/images/hero-bg-dark.png');
+const HERO = require('../../assets/images/desert-day.webp');
+const HERO_DARK = require('../../assets/images/desert-dusk.webp');
 
-export default function HeroBackground({
-  imageOpacity = 0.55,
-  scrim = 0,
-  // Where the bottom fade-to-paper begins / completes (fractions of height). Lower = more sketch.
-  fadeStart = 0.12,
-  fadeEnd = 0.82,
-  // 'contain' shows the WHOLE sketch (used on phones so every landmark is visible, letterboxed onto
-  // the paper); 'cover' fills the frame (used on wide web where the portrait image can't fit fully).
-  resizeMode = 'cover',
-}: {
-  // Accepts a plain number OR an Animated value/interpolation so callers can fade the backdrop
-  // (e.g. the home screen lightens it while the user is typing a search).
-  imageOpacity?: number | Animated.AnimatedInterpolation<number> | Animated.Value;
-  scrim?: number;
-  fadeStart?: number;
-  fadeEnd?: number;
-  resizeMode?: ImageResizeMode;
+/** One continuous sky. Only the separate foreground leaves when a search begins. */
+/** One slow side-to-side drift per cloud, each on its own clock so they never move in step. Same CSS-animation
+ *  shape SidebarSky uses (reanimated keyframes); skipped entirely under «reduce motion». */
+const cloudDrift = (i: number) => ({
+  animationName: { from: { transform: [{ translateX: -skyScene.heroDriftPx[i] }] }, to: { transform: [{ translateX: skyScene.heroDriftPx[i] }] } },
+  animationDuration: skyScene.heroDriftMs[i],
+  animationIterationCount: 'infinite',
+  animationDirection: 'alternate',
+  animationTimingFunction: 'ease-in-out',
+} as const);
+
+export default function HeroBackground({ landscape = false, clouds = true, imageOpacity = 1 }: {
+  landscape?: boolean;
+  clouds?: boolean;
+  imageOpacity?: number | RNAnimated.AnimatedInterpolation<number> | RNAnimated.Value;
 }) {
-  // Dark theme: the pencil sketch sinks into the night — much fainter, and the bottom fade melts
-  // into the DARK paper. Gradient colors are parsed (expo-linear-gradient), so literals via the
-  // resolved palette, never the var() tokens.
   const theme = useResolvedTheme();
   const pal = useThemePalette();
-  const artOpacity =
-    theme === 'dark'
-      ? typeof imageOpacity === 'number'
-        ? imageOpacity * 0.35
-        : Animated.multiply(imageOpacity as Animated.Value, 1.4)
-      : imageOpacity;
+  const reduced = useReducedMotion();
+  const { width } = useWindowDimensions();
+  const [sceneWidth, setSceneWidth] = useState(width);
+  const ground = useSharedValue(landscape ? 1 : 0);
+  useEffect(() => {
+    ground.value = withTiming(landscape ? 1 : 0, { duration: reduced ? 0 : skyScene.fadeMs });
+  }, [ground, landscape, reduced]);
+  const fade = useAnimatedStyle(() => ({ opacity: ground.value }));
   return (
-    <View style={[StyleSheet.absoluteFill, { overflow: 'hidden' }]} pointerEvents="none">
-      {/* Explicit 100%×100% (not just absoluteFill insets) so react-native-web gives the image a
-          concrete box to size against; without it RNW lays the image out at its intrinsic pixel
-          width, which overflows the screen and blows the page layout up. `overflow:hidden` clips it. */}
-      <Animated.Image
-        source={theme === 'dark' ? HERO_DARK : HERO}
-        style={{ width: '100%', height: '100%', opacity: artOpacity as any }}
-        resizeMode={resizeMode}
-      />
-      {scrim > 0 && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.paper, opacity: scrim }]} />
-      )}
-      <LinearGradient
-        colors={[alpha0(pal.paper), pal.paper]}
-        locations={[fadeStart, fadeEnd]}
-        style={StyleSheet.absoluteFill}
-      />
+    <View onLayout={(event) => setSceneWidth(event.nativeEvent.layout.width)} testID="sky-backdrop" pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[StyleSheet.absoluteFill, { overflow: 'hidden' }]}>
+      <LinearGradient colors={[pal.skyTop, pal.skyBottom]} style={StyleSheet.absoluteFill} />
+      {clouds && <>
+      <Animated.View pointerEvents="none" {...SKY_CALM_PROPS} style={[StyleSheet.absoluteFill, !reduced && cloudDrift(0)]}><CloudWisp variant={0} width={Math.min(sceneWidth * 0.7, 760)} height={180} opacity={0.48} style={{ top: '5%', left: '-16%' }} /></Animated.View>
+      <Animated.View pointerEvents="none" {...SKY_CALM_PROPS} style={[StyleSheet.absoluteFill, !reduced && cloudDrift(1)]}><CloudWisp variant={1} width={Math.min(sceneWidth * 0.6, 620)} height={150} opacity={0.4} style={{ top: '20%', right: '-15%' }} /></Animated.View>
+      <Animated.View pointerEvents="none" {...SKY_CALM_PROPS} style={[StyleSheet.absoluteFill, !reduced && cloudDrift(2)]}><CloudWisp variant={2} width={Math.min(sceneWidth * 0.62, 670)} height={160} opacity={0.3} style={{ top: '55%', left: '-24%' }} /></Animated.View>
+      <Animated.View pointerEvents="none" {...SKY_CALM_PROPS} style={[StyleSheet.absoluteFill, !reduced && cloudDrift(3)]}><CloudWisp variant={3} width={Math.min(sceneWidth * 0.5, 540)} height={130} opacity={0.32} style={{ top: '72%', right: '-18%' }} /></Animated.View>
+      </>}
+      <Animated.View testID="desert-foreground" style={[StyleSheet.absoluteFill, fade]}>
+        <RNAnimated.View style={[StyleSheet.absoluteFill, { opacity: imageOpacity }]}>
+          <Image source={theme === 'dark' ? HERO_DARK : HERO} resizeMode="stretch" accessible={false}
+            style={{ position: 'absolute', bottom: 0, width: '100%', height: sceneWidth / 3 }} />
+        </RNAnimated.View>
+      </Animated.View>
     </View>
   );
 }

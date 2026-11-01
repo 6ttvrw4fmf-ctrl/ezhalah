@@ -1,0 +1,65 @@
+# Network guard lists (security plan Phase 4.4, owner 2026-10-21: no VPN, like Aqar). Daily: downloads the Tor exit
+# list and the X4BNet VPN + datacenter range lists and replaces each in ops_network_block through the service-role-only
+# ops_replace_network_block(), which refuses a list that shrank to almost nothing (a failed download never empties the
+# guard). A download that fails FAILS the job; yesterday's list stays in force. docs/ops/SCRAPE_GUARD.md.
+name: Network guard lists
+
+on:
+  schedule:
+    - cron: '41 3 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: network-block-lists
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  refresh:
+    name: Refresh Tor / VPN / datacenter lists
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and store
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          fail=0
+          store() {
+            src="$1"; url="$2"
+            if ! curl -fsSL --max-time 60 "$url" -o "/tmp/$src.txt"; then echo "::error::$src download failed ($url)"; fail=1; return; fi
+            jq -R -s --arg s "$src" '{p_source: $s, p_cidrs: (split("\n") | map(select(test("^[0-9.]+(/[0-9]{1,2})?$"))))}' "/tmp/$src.txt" > "/tmp/$src.json"
+            code=$(curl -s -o /tmp/out -w '%{http_code}' -X POST "$SUPABASE_URL/rest/v1/rpc/ops_replace_network_block" \
+              -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+              -H 'content-type: application/json' --data-binary "@/tmp/$src.json")
+            if [ "$code" != "200" ]; then echo "::error::$src store failed: HTTP $code $(head -c 300 /tmp/out)"; fail=1; return; fi
+            echo "$src: $(cat /tmp/out) ranges stored"
+          }
+          store tor        https://check.torproject.org/torbulkexitlist
+          store vpn        https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/vpn/ipv4.txt
+          store datacenter https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/datacenter/ipv4.txt
+          exit $fail
+
+      # ── Failure→alert bridge (issue #1349): this runs unattended, so a red run must reach alert_event to reach a
+      # human. One open alert per workflow file; the next green run resolves it. `always()` so a failing run gets here.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind ingestion_check_failed
+          --workflow network-block-lists.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

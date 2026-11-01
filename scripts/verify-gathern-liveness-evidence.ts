@@ -23,8 +23,8 @@
 //                                                                     break or roll back a sweep
 //   4. it is NOT gated behind `if args.apply`                       — a dry-run's evidence is the
 //                                                                     entire point of a dry-run
-//   5. a kill's `applied` is resolved AFTER the anomaly cap gate    — a quarantined batch records
-//                                                                     real evidence with applied=false
+//   5. a kill's `applied` is resolved AFTER the anomaly cap gate    — a quarantined or carried kill
+//                                                                     records real evidence, applied=false
 //
 // Deliberately OFFLINE (tracked repo files only), like the other verifiers in `npm test`. The LIVE
 // half is mon_detect_liveness_evidence_gap(), which asks whether a gathern sweep that inactivated
@@ -134,7 +134,9 @@ check(
 // the literal no longer appears. Broadening to the call keeps every guarantee that matters — the cap
 // must still be computed from THIS run's real batch and THIS run's real cap — while not pinning the
 // gate to one enclosing shape. The `applied`/flush assertions below are unchanged and still specific.
-const anomalyMatch = /anomaly\s*=\s*(?:args\.apply\s+and\s+)?is_anomaly\(\s*len\(kill_pending\)\s*,\s*kill_cap\s*\)/.exec(src);
+// 2026-09-28 (drain mode): the cap's result is `over_cap`, and `anomaly` now names only the SPIKE
+// that is quarantined — an over-cap backlog drains `kill_cap` rows (plan_kills).
+const anomalyMatch = /over_cap\s*=\s*(?:args\.apply\s+and\s+)?is_anomaly\(\s*len\(kill_pending\)\s*,\s*kill_cap\s*\)/.exec(src);
 const anomalyIdx = anomalyMatch ? anomalyMatch.index : -1;
 check(
   anomalyIdx !== -1,
@@ -158,11 +160,12 @@ if (anomalyIdx !== -1) {
   // Deliberately specific. A loose `/applied/ && /not anomaly/` passes on the PRE-FIX file, whose
   // `applied_kills` and `if not anomaly` both sit after the gate for unrelated reasons — a check
   // that green-lights the bug it exists to catch is worse than no check (run #34d).
+  // Since drain mode the answer is PER ROW: only the rows plan_kills chose were inactivated.
   check(
-    /\[\s*["']applied["']\s*\]\s*=\s*[^\n]*\bnot\s+anomaly\b/.test(afterGate),
+    /\[\s*["']applied["']\s*\]\s*=\s*[^\n]*\[\s*["']listing_id["']\s*\]\s+in\s+kill_ids\b/.test(afterGate),
     "kill evidence resolves `applied` from the cap gate's outcome",
-    `${SRC} does not set the kill batch's \`applied\` from the anomaly outcome after the gate. A ` +
-      `quarantined batch must record applied=false, not applied=true.`,
+    `${SRC} does not set each kill's \`applied\` from the rows the gate actually inactivated. A ` +
+      `quarantined or carried kill must record applied=false, not applied=true.`,
   );
   // The kill buffer must be flushed after the gate, not inside the probe loop.
   const killFlushAfter = /_flush_detail\(\s*kill_detail\s*\)/.test(afterGate);

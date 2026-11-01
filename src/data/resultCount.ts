@@ -205,7 +205,7 @@ export function closingNoteKey(args: {
   quoteTotal: boolean;
   /** A «عرض المزيد» button is ACTUALLY RENDERED right now. */
   offersMore: boolean;
-  /** A «خلّنا نحدد الطلب أكثر» button is ACTUALLY RENDERED right now. */
+  /** A «🎯 دقّق مع الذكاء» button is ACTUALLY RENDERED right now. */
   offersNarrow: boolean;
   /** The «عرض المزيد» currently shown is the FINAL one (up to 500) — see ResultCounts.lastTapOffer. */
   lastTapOffer: boolean;
@@ -277,6 +277,6 @@ export function closingNoteKey(args: {
 
 /** Does this key ask the user to tap «عرض المزيد»? */
 export const keyOffersMore = (k: ClosingNoteKey): boolean => k.includes('Want me to show more');
-/** Does this key ask the user to tap «خلّنا نحدد الطلب أكثر»? */
+/** Does this key ask the user to tap «🎯 دقّق مع الذكاء»? */
 export const keyOffersNarrow = (k: ClosingNoteKey): boolean =>
   k.includes('help you find more precise ones') || k.includes('Want help finding more precise ones');

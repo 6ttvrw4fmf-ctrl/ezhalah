@@ -35,9 +35,15 @@ CATEGORIES = {
     ("rest_house", "rent"): "استراحة-للإيجار",
     ("rest_house", "buy"):  "استراحة-للبيع",
     ("chalet",     "rent"): "شاليه-للإيجار",
-    ("chalet",     "buy"):  "شاليه-للبيع",
+    # No ("chalet", "buy"): aqar serves no «شاليه-للبيع» page. It failed with a non-200 in every city
+    # of every sweep, so no 0-row town could ever prove its emptiness and the sweep stayed red
+    # (2026-09-28; test_aqar_sweep_requests_only_pages_aqar_serves.py).
     ("camp",       "rent"): "مخيم-للإيجار",
     ("land",       "buy"):  "أراضي-للبيع",
+    # 2026-10-25 (owner: every side the site shows): aqar serves «أراضي-للإيجار» — 2,044 ads nationally,
+    # 0 ever held. Land usage still comes from aqar's own «نوع العقار» (enrich_residential.py). Not added,
+    # measured the same day: «غرف-للبيع» (1 ad nationally) and any camp-for-sale page (404).
+    ("land",       "rent"): "أراضي-للإيجار",
     # ── Commercial categories (verified against Aqar's own menu). Written to the
     #    aqar_commercial_listings table by run_commercial.py. Slugs are Aqar's exact spelling. ──
     ("shop",                "rent"): "محلات-للإيجار",
@@ -57,7 +63,10 @@ CATEGORIES = {
     ("health_center",       "rent"): "مستشفيات-ومراكز-صحية-للإيجار",
     ("health_center",       "buy"):  "مستشفيات-ومراكز-صحية-للبيع",
     ("farm",                "rent"): "مزارع-للإيجار",
-    ("farm",                "buy"):  "مزارع-للبيع",
+    # «مزرعة-للبيع», SINGULAR — aqar answers the plural «مزارع-للبيع» with a 404 in every city (measured
+    # 2026-10-02, all 95 + national), so farm-for-sale had never been read: 0 rows ever held, while
+    # aqar publishes 844 (3/3 sampled live, priced, status 0). Rent is still the plural.
+    ("farm",                "buy"):  "مزرعة-للبيع",
     ("commercial_building", "rent"): "مجمعات-للإيجار",
     ("commercial_building", "buy"):  "مجمعات-للبيع",
     # ── Niche commercial categories (Aqar's own menu slugs) ──
@@ -212,6 +221,23 @@ CITY_AR = {
 # A listing URL is anything that ends with a hyphen + 6+ digit numeric ID.
 LISTING_RE = re.compile(r"-(\d{6,})/?$")
 
+#: aqar's own result count for a slice, from the ItemList JSON-LD it serves on EVERY page of the
+#: slice (measured 2026-10-02 on pages 1, 500, 1100, 1122 of Riyadh apartments-for-rent).
+_ITEMS_RE = re.compile(r'"numberOfItems":(\d+)')
+#: Listings per results page. Measured 2026-10-02: numberOfItems 22,413 -> page 1,121 carries the
+#: last 13 ads and page 1,122 renders aqar's own «لا توجد نتائج», i.e. last page = ceil(n / 20).
+PAGE_SIZE = 20
+#: Only used when the page stops publishing numberOfItems AND the caller asked for every page
+#: (max_pages <= 0). The walk still ends at the first page with nothing new; this is the backstop.
+#: The largest slice measured 2026-10-02 was ~1,250 pages.
+SAFETY_MAX_PAGES = 2500
+
+
+def source_items(html: str) -> Optional[int]:
+    """aqar's own count of ads in this slice, or None when the page does not publish it."""
+    m = _ITEMS_RE.search(html or "")
+    return int(m.group(1)) if m else None
+
 
 #: Below this many listing links a page is simply a small town's short result set — aqar's
 #: nationwide fallback always returns a FULL page (20 on every page measured 2026-08-22), so a
@@ -258,6 +284,11 @@ def discover(
     scraping, e.g. start_page=26, max_pages=50 → pages 26–50), so deeper batches don't
     re-walk pages already covered by an earlier batch.
 
+    max_pages <= 0 means EVERY page: the walk ends at the source's own last page,
+    ceil(numberOfItems / PAGE_SIZE), read off the first page fetched. A positive max_pages is still a
+    cap, and the walk never goes past the source's own last page either way (2026-10-02: the deep
+    fill's fixed 150-page cap left Riyadh apartments-for-rent at 4,888 of 22,413 ads).
+
     Pass `outcome` (a SliceOutcome) to learn WHY a slice produced nothing. Yielding zero URLs is
     ambiguous on its own — a blocked fetch and a genuinely empty city look identical from out here —
     and that ambiguity is what kept the aqar sweep permanently red (see scrapers/common/emptiness.py).
@@ -267,7 +298,11 @@ def discover(
     seen: set[str] = set()
     yielded = 0
 
-    for page in range(start_page, max_pages + 1):
+    cap = max_pages if max_pages > 0 else SAFETY_MAX_PAGES
+    last_page = cap
+    page = start_page - 1
+    while page < last_page:
+        page += 1
         path = f"/{cat_slug}/{city_ar}" + (f"/{page}" if page > 1 else "")
         url = BASE + path
         r = get(url)
@@ -279,13 +314,22 @@ def discover(
                 outcome.note_fetch_failure()
             break
         html = r.text
+        n_items = source_items(html)
+        if n_items is not None:
+            # The source's own page count bounds the walk. Re-read on every page, so an ad
+            # published mid-walk that pushes the slice onto one more page is still read.
+            last_page = min(cap, max(start_page, -(-n_items // PAGE_SIZE)))
+            if outcome is not None and outcome.source_items is None:
+                outcome.source_items = n_items
         # Cheap-and-effective: collect every href that looks like a listing URL.
         # We don't need a full HTML parser for this — a regex is enough.
         page_links: list[str] = []
+        n_links = 0
         for m in re.finditer(r'href="([^"]+)"', html):
             href = m.group(1)
             if not LISTING_RE.search(href):
                 continue
+            n_links += 1
             full = urljoin(BASE, href).split("?")[0].split("#")[0]
             if full in seen or full in page_links:
                 continue
@@ -324,5 +368,10 @@ def discover(
         # Exhausted: once a page yields no NEW listings, the city has no more depth in this
         # slice. Stop instead of hammering empty pages all the way to max_pages — this is what
         # lets us safely set --pages very high (e.g. 150) and let each city stop where it ends.
-        if new_on_page == 0:
+        # EXCEPT when the source published its own count: aqar's ordering is unstable between page
+        # requests (2026-10-02: one full walk of Jeddah land-for-sale, 157 pages, returned 3,121 links
+        # but 2,546 distinct ads; a second walk a minute later shared only 2,210 of them), so a page
+        # made only of ads already seen is a reshuffle, not the end. Then only an EMPTY page, or the
+        # source's own last page, ends the walk.
+        if new_on_page == 0 and (n_items is None or n_links == 0):
             break

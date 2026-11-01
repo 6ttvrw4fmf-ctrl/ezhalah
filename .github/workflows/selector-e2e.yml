@@ -23,21 +23,30 @@ on:
   schedule:
     - cron: '23 */6 * * *'   # every 6h, offset to avoid the :00/:15 cron rush
   workflow_dispatch: {}
+  # ONE AFTER ANOTHER (P1 2026-10-23): post-deploy production robots no longer all start the second a deploy
+  # finishes — 4 at once plus PR robots choked real users' searches at 19:58 UTC. This one runs when Guardian
+  # journeys finishes; Ad viewer speed runs after this one. scripts/verify-post-deploy-robots-run-in-turn.ts.
   workflow_run:
-    workflows: ["Deploy frontend (production)"]
+    workflows: ["Guardian journeys (production)"]
     types: [completed]
 
 concurrency:
   group: selector-e2e
   cancel-in-progress: true
 
+env:
+  # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
+  # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   selector-e2e:
     name: Drive the live selector end-to-end
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 20
-    # A workflow_run trigger also fires for FAILED deploys — nothing new is live then, so skip.
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    # Chained behind Guardian: run only when Guardian itself ran for a deploy (event workflow_run) and was not
+    # skipped (Guardian skips when the deploy failed — nothing new is live then). A RED Guardian still runs this.
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'workflow_run' && github.event.workflow_run.conclusion != 'skipped')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

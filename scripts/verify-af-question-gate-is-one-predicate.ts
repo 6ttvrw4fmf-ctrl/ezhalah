@@ -50,7 +50,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { COHORT_QUESTIONS, cohortAllows } from '../src/lib/afCohorts.ts';
+import { COHORT_QUESTIONS, cohortAllows, SHORT_STAYS_QUESTIONS, SHORT_STAYS_CHAT_ONLY } from '../src/lib/afCohorts.ts';
 import { CLEAN_MACRO } from '../src/data/propertyTypes.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -123,7 +123,11 @@ for (const cleanType of Object.keys(CLEAN_MACRO)) {
       const allowed = cohortAllows(q, id);
       if (!allowed) continue;
       // R2.1.1: whatever is offered MUST be in this exact cohort's certified list.
-      const certified = (COHORT_QUESTIONS[cleanType] as any)?.[LEG_KEY[legName]] ?? [];
+      // Short stays (owner 2026-10-31): the residential RentMonthly leg is ONE pool, certified by
+      // SHORT_STAYS_QUESTIONS + SHORT_STAYS_CHAT_ONLY for every residential type, not per type.
+      const certified = legName === 'RentMonthly' && CLEAN_MACRO[cleanType] === 'Residential'
+        ? [...SHORT_STAYS_QUESTIONS, ...SHORT_STAYS_CHAT_ONLY]
+        : (COHORT_QUESTIONS[cleanType] as any)?.[LEG_KEY[legName]] ?? [];
       if (!certified.includes(id)) violations.push(`${cleanType}/${legName} offers '${id}' — not in COHORT_QUESTIONS`);
       // The shared predicate is what BOTH surfaces call, so agreement is structural; assert that the
       // narrowing direction still holds (never wider than the raw cohort gate).

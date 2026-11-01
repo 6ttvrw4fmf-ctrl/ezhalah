@@ -6,16 +6,29 @@
 name: Wasalt residential sweep
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      pages:
+        # 3 for the scheduled light pass. A deeper value is for proving the deep walk without
+        # running the enum-liveness workflow (2026-10-16, backlog 532): ~894 KB a page through the
+        # browser, so 20 slices x 25 pages is ~450 MB of proxy.
+        description: "Max pages per slice (default 3)"
+        required: false
+        default: "3"
 
 concurrency:
   group: wasalt-residential-sweep
   cancel-in-progress: true
 
+env:
+  # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
+  # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   sweep:
     name: Wasalt res ${{ matrix.slug }} ${{ matrix.deal }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -85,4 +98,4 @@ jobs:
             --type residential \
             --slug ${{ matrix.slug }} \
             --deal ${{ matrix.deal }} \
-            --pages 3
+            --pages ${{ github.event.inputs.pages || 3 }}

@@ -3,12 +3,13 @@
 //   each separated by a short pause -> short pause -> the closing "showed you N, want more?" note
 //   and its available actions (owner request, 2026-08-23), when the caller supplies one. Never reads
 //   raw JSON, ids, URLs, source-table names, or any other internal field — every card fact comes
-//   from the SAME Arabic display helpers ResultCard.tsx itself uses (src/lib/listingDisplay.ts), and
+//   from the SAME localized display helpers ResultCard.tsx itself uses (src/lib/listingDisplay.ts), and
 //   `closingNote` is text the CALLER already renders on screen (agent.tsx) — never re-derived here
 //   — so what's spoken can never disagree with what's shown.
 import type { Listing } from '@/data/listings';
 import { translate } from '@/i18n';
 import { listingTypeAr, listingLocationAr, listingPriceAr, listingPlatformAr } from './listingDisplay';
+import { listingTypeEn, listingLocationEn, listingPlatformEn, listingPrice } from './listingDisplay';
 import type { ReadAloudSegment } from './readAloud';
 
 const INTRO_WORD = 'إزهله';
@@ -20,14 +21,23 @@ const PAUSE_MS = 450; // short, natural — long enough to read as a beat, not a
 // "مستضاف على X" badge via listingPlatformAr, so it can never say a different platform than what's
 // shown). Still NOT spoken: id, source_url, description/title free text, amenity badges,
 // discount/RNPL panels, "recently added" — matches the owner's "keep it concise" instruction.
-function cardSpeech(listing: Listing): string {
+function cardSpeech(listing: Listing, locale: 'ar' | 'en' = 'ar'): string {
+  if (locale === 'en') {
+    // A stay-length platform has no price line (owner 2026-10-26): listingPrice() is '' and nothing is spoken for it.
+    const facts = [`${listingTypeEn(listing)} in ${listingLocationEn(listing)}`, listingPrice(listing, 'en')].filter(Boolean);
+    if (listing.beds > 0) facts.push(`${listing.beds} ${translate('en', listing.beds === 1 ? 'Bed' : 'Beds')}`);
+    if ((listing.bathrooms ?? 0) > 0) facts.push(`${listing.bathrooms} ${translate('en', listing.bathrooms === 1 ? 'Bath' : 'Baths')}`);
+    if (listing.area > 0) facts.push(`${translate('en', 'Area')} ${listing.area} ${translate('en', 'm²')}`);
+    facts.push(listingPlatformEn(listing));
+    return facts.join('. ');
+  }
   const headline = `${listingTypeAr(listing)} في ${listingLocationAr(listing)}`;
   const price = listingPriceAr(listing);
   const stats: string[] = [];
   if (listing.beds > 0) stats.push(`${listing.beds} ${translate('ar', listing.beds === 1 ? 'Bed' : 'Beds')}`);
   if ((listing.bathrooms ?? 0) > 0) stats.push(`${listing.bathrooms} ${translate('ar', listing.bathrooms === 1 ? 'Bath' : 'Baths')}`);
   if (listing.area > 0) stats.push(`${translate('ar', 'Area')} ${listing.area} ${translate('ar', 'm²')}`);
-  const sentences = [headline, price];
+  const sentences = [headline, price].filter(Boolean);
   if (stats.length) sentences.push(stats.join('، '));
   sentences.push(listingPlatformAr(listing));
   return sentences.join('. ');
@@ -45,14 +55,14 @@ function cardSpeech(listing: Listing): string {
 // function only ever appends it, verbatim, as the final spoken segment. Omit/empty when that block
 // isn't rendered (e.g. an Advanced Filter interview is open) — never speak an action that isn't on
 // screen to tap.
-export function buildResultsReadAloudSegments(summaryText: string, visibleListings: Listing[], closingNote?: string): ReadAloudSegment[] {
-  const segments: ReadAloudSegment[] = [{ text: INTRO_WORD, pauseAfterMs: PAUSE_MS }];
+export function buildResultsReadAloudSegments(summaryText: string, visibleListings: Listing[], closingNote?: string, locale: 'ar' | 'en' = 'ar'): ReadAloudSegment[] {
+  const segments: ReadAloudSegment[] = [{ text: locale === 'en' ? 'Ezhalah' : INTRO_WORD, pauseAfterMs: PAUSE_MS }];
   const summary = summaryText.trim();
   if (summary) segments.push({ text: summary, pauseAfterMs: PAUSE_MS });
   const note = closingNote?.trim();
   visibleListings.forEach((listing, i) => {
     const isLast = i === visibleListings.length - 1;
-    segments.push({ text: cardSpeech(listing), pauseAfterMs: isLast && !note ? 0 : PAUSE_MS });
+    segments.push({ text: cardSpeech(listing, locale), pauseAfterMs: isLast && !note ? 0 : PAUSE_MS });
   });
   if (note) segments.push({ text: note, pauseAfterMs: 0 });
   return segments;

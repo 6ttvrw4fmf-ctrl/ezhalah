@@ -15,7 +15,7 @@ live check, never passes silently. The barriers are the lock; this list is the k
 | # | Box | What "done" means | Enforced by |
 |---|-----|-------------------|-------------|
 | 1 | **Raw tables exist** | `<platform>_residential_listings` / `_commercial_listings` present and populated by the scraper | scraper run + `scrape_runs` |
-| 2 | **Liveness strategy declared** | an entry in `scrapers/common/liveness_policies.py` (or CI fails) — never `CRAWL_PRESENCE_ONLY` by omission | `verify-liveness-registry-mirror.ts`, `verify-liveness-claims-are-earned.ts` |
+| 2 | **Liveness strategy declared** | an entry in `scrapers/common/liveness_policies.py` (or CI fails) — never `CRAWL_PRESENCE_ONLY` by omission; a site with no per-listing checker whose crawl re-reads its complete list daily may be admitted to `SOURCE_LIST_PRESENCE` by name, after its crawler is audited | `verify-liveness-registry-mirror.ts`, `verify-liveness-claims-are-earned.ts` |
 | 3 | **Search index arms** | rows in `listing_location_index` (feeds `listing_location_canonical` and the name bridges) | `verify-location-index-covers-every-searchable-platform.ts` (+ live half) |
 | 4 | **Searchable** | rows in `search_listings_ar`, and the client scope (`p_tables`/`p_tables2`) sends its tables | `verify-searchable-scope-matches-inventory.ts` |
 | 5 | **Monitored** | the per-platform detectors read it — i.e. its registry row is genuinely `active`+`source`, not `dormant` | `verify-searchable-platforms-are-monitored.ts` |
@@ -23,6 +23,7 @@ live check, never passes silently. The barriers are the lock; this list is the k
 | 7 | **Image coverage declared** | an entry in `scripts/image-coverage-baseline.json` (a real `floor_pct`, or `imageless_at_source` with a reason) | `verify-image-coverage-ratchet.ts` (+ live half) |
 | 8 | **AF attribute views cover it** | present in both Advanced-Filter attribute views | `verify-af-attribute-views-cover-every-platform.ts` (+ live half) |
 | 9 | **Loader roster** | appears in `loader_active_platforms_ar()` so the SearchLoader advertises it | `verify-loader-platforms-match-active.ts` |
+| 10 | **Pin capture proven (publishes / proven-silent) with URL** | a row in `data/pin-sources.json`: `pin_source` ∈ ad-page · page-json · feed · project-page · partial · none, the proof URL (the page that shows the pin, or the page proven silent after looking in ALL FOUR places — the ad page, its embedded JSON / data attributes / network calls, a site-wide map or list feed, the parent project/compound page), the date, and a coverage floor (`none` ⇒ 0; anything else ≥ 1). The same row is seeded into `ops_pin_source_declared` by a `*_pin_source*` migration, and `mon_detect_pin_coverage_below_floor()` holds the served index to it hourly (P1) | `verify-pin-capture-declared.ts` (offline, mutation-proven) + the detector ← the rakez gap (3,660 ads, 0 pins for 6 weeks, 2026-10-30) |
 
 ## Why boxes 6 and 7 are separate
 

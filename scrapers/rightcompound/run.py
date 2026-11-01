@@ -20,6 +20,11 @@ SOURCE SHAPE (measured live 2026-09-24, nothing below is assumed):
     not monthly». That is the source's statement about every price it prints, so rent_period is
     'annual' and the figure is stored unconverted in price_annual. A price whose label is not
     «Rent» (none seen in 254 pages, guarded anyway) is skipped as deal_not_rent — never parked.
+    EXCEPT (measured 2026-09-28, owner rule 2026-09-26 «never use a generic card label when it
+    conflicts with the actual listing»): some unit NAMES state their own period — «Apartment - One
+    Bedroom (Monthly Rate)» 12,000, «Flat 1 ( Monthly)» 3,700 — and «Two bedroom fully furnished
+    apartment» at 7,000 cannot be a year's rent. The unit's own word wins, then a price ≤ 10,000 is
+    monthly, and only then the platform's annual statement (unit_period below). Monthly is ×12.
   · AREA: «300 sqm» is m². Star Compound prints «245 sqf» — a different unit (or a typo), which is
     not converted or guessed: area_m2 NULL, the raw text kept in additional_info.area_raw.
   · LANGUAGE: English only. hreflang="ar" points at the same URL and Accept-Language: ar still
@@ -52,6 +57,7 @@ import json
 import re
 import sys
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
@@ -61,6 +67,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.district_bridge import bridge_rows, bridge_unique  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 
@@ -124,16 +131,107 @@ _DISTRICT_EN_AR = {
     ("dhahran", "doha"): "حي الدوحة", ("dammam", "doha"): "حي الدوحة",
     ("jubail", "fanateer"): "حي الفناتير", ("jubail", "deffi"): "حي الدفي",
     ("al-ahsaa", "salam"): "حي السلام",
+    # 2026-10-18 (New Listings, #658): the English names left NULL on live rows, each catalogued for that city.
+    # NOT mapped, on purpose: «King Abdullah Financial» (site template text), «Al Khobar» (the city), «Doha» /
+    # street names, «Exit 8», postcodes. («Aziziyah» under khobar: mapped below since 2026-10-18.)
+    ("khobar", "jawhara"): "حي الجوهرة", ("khobar", "qurtoba"): "حي قرطبة",
+    ("khobar", "tahliyah"): "حي التحلية", ("khobar", "bustan"): "حي البستان",
+    ("khobar", "sadafah"): "حي الصدفة", ("riyadh", "sulaimaniah"): "حي السليمانية",
+    ("riyadh", "deplomatic quarter"): "حي السفارات", ("riyadh", "diplomatic quarter"): "حي السفارات",
+    ("riyadh", "ghoroub"): "حي الغروب", ("riyadh", "qayrawan"): "حي القيروان",
+    ("riyadh", "ishbilia"): "حي اشبيلية", ("riyadh", "rafiah"): "حي الرفيعة",
+    ("jeddah", "rabwah"): "حي الربوة", ("jeddah", "bawadi"): "حي البوادي",
+    # 2026-10-18 (unexplained-district residue): spellings live rows print, each catalogued for that city. Still NOT
+    # mapped: «Rakah»/«Rakaa» under khobar (الراكة الشمالية AND الجنوبية), «Khaldiya»/«Fanateer» (not in
+    # الخبر's / الجبيل's catalogue), «Al Qashlah»/«Al Douha» (الظهران's), «Dana Bay», compound and landmark names.
+    ("riyadh", "rahmaniah"): "حي الرحمانية", ("riyadh", "monisya"): "حي المونسية",
+    ("riyadh", "monsyah"): "حي المونسية", ("riyadh", "qirawan"): "حي القيروان",
+    ("riyadh", "yasameen"): "حي الياسمين", ("riyadh", "safarat"): "حي السفارات",
+    ("riyadh", "nafel"): "حي النفل", ("riyadh", "masif"): "حي المصيف",
+    ("riyadh", "sulaimaniya"): "حي السليمانية", ("riyadh", "hada"): "حي الهدا",
+    ("riyadh", "olya"): "حي العليا", ("riyadh", "second industrial zone"): "المدينة الصناعية الثانية",
+    ("khobar", "qutuba"): "حي قرطبة", ("khobar", "olya"): "حي العليا", ("khobar", "cornish"): "حي الكورنيش",
+    ("jeddah", "shatieh"): "حي الشاطئ", ("khobar", "aqrabia"): "حي العقربية", ("khobar", "safa"): "حي الصفا",
+    ("riyadh", "janadiriyah"): "حي الجنادرية", ("riyadh", "rahmaniya"): "حي الرحمانية", ("taif", "qarahin"): "حي القراحين",
+    # 2026-10-18: الخبر's «العزيزية» admitted to the catalogue (migration 20261018235112); 14 units print it.
+    ("khobar", "aziziyah"): "حي العزيزية", ("khobar", "azzizyah"): "حي العزيزية",
+    # 2026-10-23 (New Listings, contract G): the two names unknown_named_districts(3) still listed for this site that
+    # the city's catalogue holds: le-ruya «Ishbilia» (الخبر: حي اشبيليا) ×6, jeddah-view «Al Nakhil» (جدة: حي النخيل)
+    # ×5, «Al Andalus» (الخبر: حي الاندلس) ×4. Still NOT mapped: «Rakaa» (الراكة الشمالية/الجنوبية), «Fanateer» (not in الجبيل's catalogue), «Dariyah»
+    # (الدرعية is its own town, not a Riyadh district), «Dana Bay» (a compound name).
+    ("khobar", "ishbilia"): "حي اشبيليا", ("jeddah", "nakhil"): "حي النخيل",
+    ("khobar", "andalus"): "حي الاندلس",
 }
+
+
+# ── THE DISTRICT THE PAGE STATES IN ENGLISH (2026-10-18) ────────────────────────────────────────
+# The JSON-LD streetAddress names the place in English in several shapes: «Near Al Thoumamah Rd. Al
+# Munsiyah, Riyadh», a bare «Al Malaz», «Dana Bay», «Al Douha Neighborhood », «Yasmeen Area - Near Prince
+# Salman Road». Only the «…, City» shape used to be read, so 242 live rows carried no English name at all
+# while their page printed one. Every place-like segment is now offered, in order, to the EXACT EN→AR
+# step: the hand dictionary below, else the source-attested bridge (public.district_name_bridge, one
+# city, keys with exactly ONE Arabic answer), then THIS city's catalogue. Two segments naming two
+# districts, an ambiguous bridge key («Al Malaz» → حي الملز AND حي الضباط), the site's template line
+# or the city's own name → NULL. The English word still sits in `neighborhood` as before.
+_SEG_SPLIT = re.compile(r"\s*(?:,|\.|\s-\s|–|—|/)\s*")
+_NEAR = re.compile(r"^(?:near|next to|behind|opposite|beside|off|close to|in front of|across)\b", re.I)
+_PLACE_TAIL = re.compile(r"\s+(?:neighbou?rhood|area|district|dist\.?)$", re.I)
+_ROAD_TAIL = re.compile(r"\b(?:rd|road|st|street|hwy|highway|ring)\.?$", re.I)
+_COUNTRY = re.compile(r"^(?:ksa|k\.s\.a\.?|saudi arabia|kingdom of saudi arabia)$", re.I)   # «KSA» ×55 live, 2026-10-18
+_TEMPLATE_EN = frozenset({"king abdullah financial"})   # printed by every compound without an address (#658)
+
+
+def district_en_candidates(street: str, city_en: Optional[str] = None) -> list[str]:
+    """English place segments of a streetAddress, as written minus a trailing «Neighborhood/Area/District»,
+    skipping directions («Near …»), roads and the city itself. Order kept; nothing is chosen here."""
+    out: list[str] = []
+    cn = _norm_dist(city_en) if city_en else None
+    for seg in _SEG_SPLIT.split(street or ""):
+        seg = _PLACE_TAIL.sub("", seg.strip()).strip(" -")
+        if not seg or _NEAR.match(seg) or _ROAD_TAIL.search(seg) or _COUNTRY.match(seg):
+            continue
+        if cn and _norm_dist(seg) == cn:
+            continue
+        if seg not in out:
+            out.append(seg)
+    return out
+
+
+_DIRECTION_WORD = re.compile(r"\b(?:north|south|east|west|northern|southern|eastern|western|central|new|old)\b", re.I)
+
+
+def _name_and_tails(name: str) -> list[str]:
+    """The normalised name, then its last two and last one words: «Muhammad Masud As Salamah District» (a street
+    glued to the district, j-one-compound-jeddah 2026-10-18) → … «salamah». A dropped direction («South Obhur» is
+    not «Obhur», «New Ad Diriyah» not «Ad Diriyah») stops the shortening; every key is still dictionary-exact."""
+    words = name.split()
+    out = [_norm_dist(name)]
+    for k in (2, 1):
+        if len(words) > k and not _DIRECTION_WORD.search(" ".join(words[:-k])):
+            out.append(_norm_dist(" ".join(words[-k:])))
+    return [k for i, k in enumerate(out) if k and k not in out[:i]]
+
+
+def _bridge_unique(rows) -> dict[str, str]:
+    """This site's view of the shared bridge: keys normalised with _norm_dist, unique answers only."""
+    return bridge_unique(rows, _norm_dist)
+
+
+@lru_cache(maxsize=None)
+def _bridge_en_ar(city_en: str) -> dict[str, str]:
+    """The source-attested EN→AR district bridge for one city, unique keys only (scrapers/common/district_bridge)."""
+    return _bridge_unique(bridge_rows(city_en))
 
 
 def _norm_dist(name: Optional[str]) -> Optional[str]:
     """«Al Munsiyah District» / «An Narjis» / «Al-Arid» → «munsiyah» / «narjis» / «arid»."""
     if not name:
         return None
-    n = re.sub(r"\bdistrict\b", " ", name.strip().lower())
+    n = re.sub(r"\b(?:district|dist)\b\.?", " ", name.strip().lower())   # the bridge writes «… Dist.»
     n = re.sub(r"[^a-z\s-]", " ", n)
-    n = re.sub(r"^\s*(?:al|an|ar|as|ad|ash|at)[\s-]+", "", n)
+    n = re.sub(r"^\s*(?:the\s+)?(?:al|an|ar|as|ad|ash|at)[\s-]+", "", n)
+    n = re.sub(r"^\s*the\s+", "", n)                       # «The Olya»
+    n = re.sub(r"^\s*al(?=[a-z]{4})", "", n)                # «Almonisya», «Alsulaimaniya», «AlNafel»: the article glued on
     n = re.sub(r"\s+", " ", n).strip()
     return n or None
 
@@ -154,7 +252,7 @@ _AREA_RE = re.compile(r"([\d,\.]+)\s*(sq\s*m|sqm|m2|m²|sqf|sq\s*ft|sqft)", re.I
 # «Rent - (SR)247,000» — the label, then the figure. Anything else is not a rent price.
 _RENT_PRICE_RE = re.compile(r"^\s*Rent\s*-\s*\(SR\)\s*([\d,]+)\s*$", re.I)
 
-# The unit NAME carries the type word; the fleet folds townhouse→Villa and penthouse→Apartment.
+# The unit NAME carries the type word; a town house keeps its own name (owner 2026-10-12) and penthouse→Apartment.
 # «NBHK» (bedroom-hall-kitchen, «FAMILY TYPE 3BHK», 2026-09-24 first crawl) is the flat
 # configuration by definition → شقة. «condominium» added 2026-09-24 (owner review of the live
 # Rilam Al Raed compound page: "Two bedroom furnished Condominium…" is an ordinary apartment, not a
@@ -162,11 +260,16 @@ _RENT_PRICE_RE = re.compile(r"^\s*Rent\s*-\s*\(SR\)\s*([\d,]+)\s*$", re.I)
 # («DELUXE SUITE», «Suite Type 1») and a name with no type word at all («Two Bedroom Fully
 # Furnished Unit Type A») still stay unmapped and are skipped — a suite may be a hotel-style room,
 # which this product excludes (owner confirmed 2026-09-24: leave those out).
-_TYPE_WORDS = (("studio", "استوديو"), ("townhouse", "فيلا"), ("town house", "فيلا"),
-               ("villa", "فيلا"), ("penthouse", "شقة"), ("apartment", "شقة"), ("apt", "شقة"),
+# 2026-09-28 coverage audit: «Flat 1», «Family two bedroom flat Type A» (flat IS the apartment),
+# «Villa1»/«villa3» (a unit number glued to the noun), «Garden Vila» / «Appartment» / «Aprtment»
+# (the source's own misspellings of the noun) and «EXECUTIVE 3.5( BHK)» were real units skipped
+# type_unmapped.
+_TYPE_WORDS = (("studio", "استوديو"), ("townhouse", "تاون هاوس"), ("town house", "تاون هاوس"),
+               ("villa", "فيلا"), ("vila", "فيلا"), ("penthouse", "شقة"), ("apartment", "شقة"),
+               ("appartment", "شقة"), ("aprtment", "شقة"), ("apt", "شقة"), ("flat", "شقة"),
                ("condominium", "شقة"), ("condo", "شقة"),
                ("chalet", "شاليه"), ("duplex", "دوبلكس"))
-_BHK_RE = re.compile(r"\d\s*bhk\b", re.I)
+_BHK_RE = re.compile(r"\d(?:\.\d)?\s*\(?\s*bhk\b", re.I)
 
 
 def unit_type_ar(name: str) -> Optional[str]:
@@ -181,7 +284,7 @@ def unit_type_ar(name: str) -> Optional[str]:
     for word, ar in _TYPE_WORDS:
         if word in ("studio", "duplex"):
             continue
-        for m in re.finditer(r"\b" + re.escape(word) + r"s?\b", low):   # «Apartments with …»
+        for m in re.finditer(r"\b" + re.escape(word) + r"s?\d*\b", low):   # «Apartments», «villa3»
             if last is None or m.start() > last[0]:
                 last = (m.start(), ar)
     if last:
@@ -229,6 +332,15 @@ def rent_price(price_raw: str) -> tuple[Optional[int], str]:
     return (n if n else None), ""
 
 
+def unit_period(name: str, amount: int) -> str:
+    """The owner's period order (2026-09-26): the unit's own period word → a price ≤ 10,000 is
+    monthly → the platform's annual statement."""
+    own = re.search(r"\b(month|annual|year)", name, re.I)
+    if own:
+        return "monthly" if own.group(1).lower() == "month" else "annual"
+    return "monthly" if amount <= normalize.MONTHLY_LOOKING_MAX else "annual"
+
+
 def _ld_blocks(page_html: str) -> list[dict]:
     out = []
     for raw in re.findall(r'<script type="application/ld\+json">(.*?)</script>', page_html, re.S):
@@ -255,7 +367,11 @@ def compound_facts(url: str, page_html: str) -> dict[str, Any]:
     if am:
         about = plain(am.group(1))
     district_en = None
-    dm = re.search(r"\b([A-Z][A-Za-z\-]+(?: [A-Z][A-Za-z\-]+){0,2}) [Dd]istrict\b", page_html)
+    # The first «X District» sentence that is not the site's template one (tuwaiq-gate prints «King Abdullah
+    # Financial District» and then «Ar Rahmaniya District»; only the first was ever looked at, 2026-10-18).
+    dm = next((m for m in re.finditer(r"\b([A-Z][A-Za-z\-]+(?: [A-Z][A-Za-z\-]+){0,2}) [Dd]istrict\b", page_html)
+               if _norm_dist(m.group(1)) not in _TEMPLATE_EN), None) or \
+        re.search(r"\b([A-Z][A-Za-z\-]+(?: [A-Z][A-Za-z\-]+){0,2}) [Dd]istrict\b", page_html)
     if dm:
         district_en = dm.group(1).strip()
     elif addr.get("streetAddress"):
@@ -263,10 +379,25 @@ def compound_facts(url: str, page_html: str) -> dict[str, Any]:
         parts = [p.strip() for p in re.split(r"[,.]", str(addr["streetAddress"])) if p.strip()]
         if len(parts) >= 2:
             district_en = parts[-2]
+    # An explicit «X District» sentence is the page's own statement: it alone is offered (a JSON-LD
+    # segment naming another place is a conflict, not a second chance). Otherwise every address segment.
+    # The site's TEMPLATE sentence («King Abdullah Financial District», printed on compounds that never
+    # filled a district) is not a statement: it must not mask the JSON-LD address — al-ghadeer-compound
+    # prints it while its streetAddress says «4100 Northern Ring Rd, Al Ghadir» (rendered 2026-10-18).
+    if dm and _norm_dist(district_en) in _TEMPLATE_EN:
+        dm, district_en = None, None
+    if dm:
+        candidates = [district_en]
+    else:
+        candidates = district_en_candidates(str(addr.get("streetAddress") or ""), addr.get("addressLocality"))
+        if district_en and district_en not in candidates:
+            candidates.insert(0, district_en)
+        if not district_en and candidates:
+            district_en = candidates[0]       # the English word the card shows, as before
     features = [str(f.get("name", "")).strip() for f in (place.get("amenityFeature") or [])
                 if isinstance(f, dict) and f.get("value") is True]
     return {
-        "name": name, "about": about, "district_en": district_en,
+        "name": name, "about": about, "district_en": district_en, "district_en_candidates": candidates,
         "city_slug": url.rstrip("/").split("/")[-2] if url.count("/") >= 5 else None,
         "postal": str(addr.get("postalCode") or "").strip() or None,
         "lat": geo.get("latitude"), "lng": geo.get("longitude"),
@@ -302,12 +433,25 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str, dict[str, int]
     if not blocks:
         return [], "no_units", {}
 
-    district_ar = None
-    nd = _norm_dist(facts["district_en"])
-    if nd:
-        cand = _DISTRICT_EN_AR.get((facts["city_slug"], nd))
-        if cand:
-            district_ar = find_district_in_text(cand, city_id)
+    district_ar, district_source = None, None
+    city_en = normalize.map_city(city_ar)
+    found: dict[str, str] = {}                          # catalogued district_ar → how it was found
+    for cand_en in facts["district_en_candidates"]:
+        nd = _norm_dist(cand_en)
+        if not nd or nd in _TEMPLATE_EN:
+            continue
+        ar, how = None, None
+        for key in _name_and_tails(cand_en):
+            ar, how = _DISTRICT_EN_AR.get((facts["city_slug"], key)), "dictionary"
+            if not ar and city_en:
+                ar, how = _bridge_en_ar(city_en).get(key), "bridge"
+            if ar:
+                break
+        got = find_district_in_text(ar, city_id) if ar else None
+        if got:
+            found.setdefault(got, how)
+    if len(found) == 1:                                 # two segments, two districts → no district
+        district_ar, district_source = next(iter(found.items()))
 
     rows: list[dict] = []
     skips: dict[str, int] = {}
@@ -332,6 +476,8 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str, dict[str, int]
         if why:
             skip(why)
             continue
+        period = unit_period(u["name"], amount) if amount is not None else None
+        annual = normalize.annualize_rent(amount, period)
         a_m2, a_raw = area_m2(u["meta"])
         bm, hm = _BED_RE.search(u["meta"]), _BATH_RE.search(u["meta"])
         row: dict[str, Any] = {
@@ -354,20 +500,24 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str, dict[str, int]
             "bathrooms": normalize.to_int(hm.group(1)) if hm else None,
             # A unit the site prices «0» has no price and therefore no period; the NULL is
             # authoritative so a value stored by an earlier read is cleared, never frozen.
-            "price_annual": amount if amount is not None else db.AUTHORITATIVE_NULL,
-            # The platform's own statement, not a per-unit token: see the module header.
-            "rent_period": "annual" if amount is not None else db.AUTHORITATIVE_NULL,
+            "price_annual": annual if annual is not None else db.AUTHORITATIVE_NULL,
+            # unit_period(): the unit's own word, else ≤ 10,000 → monthly, else the platform's.
+            "rent_period": period or db.AUTHORITATIVE_NULL,
             "zip_code": facts["postal"],
             "photo_urls": photos(page_html),
             "price_evidence": normalize.price_evidence(
-                field="rc-cd-unit__price", raw=u["price_raw"] or None, stored=amount,
-                kind="annual", origin="structured"),
+                field="rc-cd-unit__price", raw=u["price_raw"] or None, stored=annual,
+                kind=period or "annual", origin="structured"),
             "additional_info": {k: v for k, v in {
                 "unit_name": u["name"], "unit_id": u["villa_id"], "compound": facts["name"],
+                "district_source": district_source,     # "dictionary" | "bridge" when district_ar is set
                 "latitude": facts["lat"], "longitude": facts["lng"],
                 "area_raw": a_raw, "unit_meta": u["meta"],
-                "period_statement": "platform: /api/v1/compounds rentPeriod=year; /llms.txt "
-                                    "«Prices are ANNUAL rent in Saudi Riyals (SAR), not monthly»",
+                "period_statement": (
+                    "platform: /api/v1/compounds rentPeriod=year; /llms.txt «Prices are ANNUAL rent "
+                    "in Saudi Riyals (SAR), not monthly»" if period != "monthly" else
+                    "owner rule 2026-09-26: the unit's own «month» word, or a price ≤ 10,000, is "
+                    "monthly — over the platform's annual statement"),
                 "compound_facilities_en": ", ".join(facts["features"]) or None,
             }.items() if v is not None},
         }

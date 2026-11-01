@@ -116,6 +116,6 @@ def test_map_listing_land_is_ageless_even_with_year():
 
 def test_provenance_kv_still_verbatim():
     row, _ = map_listing(_payload(year_built="2013"))
-    kv = [e for e in row["additional_info"] if e.get("key") == "year_built"]
+    kv = [e for e in row["additional_info"]["rows"] if e.get("key") == "year_built"]   # rows live under "rows" since the pin joined (2026-10-20)
     assert kv and kv[0]["value"] == "2013"
     assert row["source_capture"]["year_built"] == "2013"

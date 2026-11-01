@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { I18nManager, Image as RNImage, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { I18nManager, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { OPEN_DELAY_MS, armOpen, cancelOpen, openShouldFire, type ArmedOpen } from '@/lib/rowClick';
 import Animated, {
   Easing,
@@ -17,6 +17,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, darkColors, radius, space, cardShadow } from '@/theme/tokens';
 import { useTheme } from '@/theme/theme';
 import HeroBackground from '@/components/HeroBackground';
+import { SidebarClouds, SkyEagleMark } from '@/components/SidebarSky';
+import TopBarLanguage from '@/components/TopBarLanguage';
 import AccountMenu from '@/components/AccountMenu';
 import { useApp, type HistoryItem } from '@/store';
 import { sanitizeArabicSearch, isSearchableQuery, filterChats, arabicHintAfterInput, boldSpans } from '@/lib/chatSearch';
@@ -117,7 +119,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const pathname = usePathname();
   const onAgentScreen = pathname?.startsWith('/agent') ?? false;
   const { t, isRTL, locale, setLocale } = useI18n();
-  const { user, history, setQuery, toggleStar, deleteHistory, renameHistory, openModal, openAuth, activeChatId, setActiveChat, newChat } = useApp();
+  const { user, authChecked, history, setQuery, toggleStar, deleteHistory, renameHistory, openModal, openAuth, activeChatId, setActiveChat, newChat } = useApp();
   // APPEARANCE (owner 2026-08-28): the sidebar is a THEMED surface — it re-skins in dark mode via
   // the dark override sheet (dks) below. TC carries the resolved palette for inline icon colors.
   const { resolved, colors: TC } = useTheme();
@@ -624,7 +626,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
           openAccountMenu()/openSignIn() above, but a guest never gets that far. Single tap toggles
           ar<->en directly via the now-bilingual setLocale(); the label names the language a tap
           switches TO, same convention as AccountMenu's two Language rows. */}
-      <Pressable testID="sidebar-language-toggle" style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => setLocale(locale === 'ar' ? 'en' : 'ar')}>
+      {/* data-consent-keep: switching language is not agreement to cookies (owner 2026-10-17), the guest card stays up. */}
+      <Pressable testID="sidebar-language-toggle" style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => setLocale(locale === 'ar' ? 'en' : 'ar')}
+        // @ts-expect-error web-only DOM props on the RNW host node
+        dataSet={{ consentKeep: '1' }}>
         {(st) => (<>
           <Ionicons name="globe-outline" size={19} color={isOn(st) ? colors.onFill : TC.ink} />
           <Text style={[s.navText, dark && dks.navText, isOn(st) && s.navTextOn]}>{locale === 'ar' ? 'English' : 'العربية'}</Text>
@@ -661,8 +666,8 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                 reveals the field below. While search is open the header icon steps aside so
                 there is exactly ONE search affordance on screen at a time. */}
             <View style={s.brandRow}>
-              <RNImage source={require('../../assets/images/eagle-mark.png')} style={s.logo} resizeMode="contain" />
-              <Text ref={noTranslateRef} style={[s.word, dark && dks.word]}>{t('EZHALAH')}</Text>
+              <SkyEagleMark lit={!!user} />
+              <Text ref={noTranslateRef} style={[s.word, !isRTL && s.wordLatin, dark && dks.word]}>{t('EZHALAH')}</Text>
               {!searching && (
                 <Pressable
                   style={(st) => [s.searchTopBtn, WEB_SMOOTH, isOn(st) && s.searchTopBtnHover]}
@@ -671,7 +676,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                   accessibilityLabel={t('Search chats')}
                   testID="sidebar-search-btn"
                 >
-                  {(st) => <Ionicons name="search" size={18} color={isOn(st) ? colors.onFill : dark ? '#a9c9b4' : colors.dark} />}
+                  {(st) => <Ionicons name="search" size={18} color={isOn(st) ? colors.onFill : colors.ink} />}
                 </Pressable>
               )}
             </View>
@@ -702,7 +707,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                       {/* Dark appearance lightens only the RESTING glyph; the light-mode contract
                           (rest = dark green, interaction = white) is untouched and still pinned by
                           verify-sidebar-light-green-interaction.ts. */}
-                      <Ionicons name="add" size={18} color={dark && !on ? '#cfe0d5' : on ? colors.onFill : colors.dark} />
+                      <Ionicons name="add" size={18} color={on ? colors.onFill : colors.ink} />
                       <Text style={[s.newChatText, dark && dks.newChatText, on && s.newChatTextOn]}>{t('New Chat')}</Text>
                     </>
                   );
@@ -762,7 +767,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                         // the drop commits.
                         ((drag?.cross === 'star' && g.key === 'Starred') || (drag?.cross === 'unstar' && g.key === 'Recent')) && s.groupHeadTarget]}>
                         {g.key === 'Starred' && <Ionicons name="star" size={11} color={GOLD} />}
-                        <Text style={[s.groupTitle, dark && dks.groupTitle]}>{t(g.key)}</Text>
+                        <Text style={[s.groupTitle, !isRTL && s.groupTitleEn, dark && dks.groupTitle]}>{t(g.key)}</Text>
                       </View>
                     )}
                     {/* Note #8 — chat row layout is IDENTICAL in both languages: icon → title → star → ⋯
@@ -875,21 +880,23 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
               {(st) => { const on = isOn(st) || acctOpen; return (<>
                 <View style={s.userAv}><Text style={s.userAvText}>{initialsOf(pickName(user, locale))}</Text></View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[s.userName, dark && dks.userName, on && s.userTextOn]} numberOfLines={1}>{pickName(user, locale)}</Text>
+                  <Text style={[s.userName, dark && dks.userName, !pickName(user, locale) && { color: TC.primary }, on && s.userTextOn]} numberOfLines={1}>{pickName(user, locale) || t('Ezhalah Guest')}</Text>
                   {!!user.sub && <Text style={[s.userSub, dark && dks.userSub, on && s.userSubOn]} numberOfLines={1}>{user.sub}</Text>}
                 </View>
                 <Ionicons name="ellipsis-horizontal" size={15} color={on ? colors.onFill : dark ? darkColors.muted : '#9aa6a0'} />
               </>); }}
             </Pressable>
           </>
-        ) : (
-          // Guest sidebar — wrapped in a ScrollView so it SCROLLS when the content is taller than a
+        ) : !authChecked ? null : (
+          // (NEVER FOR A SIGNED-IN USER, NOT EVEN FOR A MOMENT (owner 2026-10-18: «when I open Ezhalah logged in, the sign up / log i…) Guest sidebar — wrapped in a ScrollView so it SCROLLS when the content is taller than a
           // short phone screen (it had a fixed flex layout that clipped on mobile). flexGrow:1 keeps
           // the sign-up CTA pinned to the bottom on tall screens. (user request 2026-06-22.)
           <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
             <View style={s.brandRow}>
-              <RNImage source={require('../../assets/images/eagle-mark.png')} style={s.logo} resizeMode="contain" />
-              <Text ref={noTranslateRef} style={[s.word, dark && dks.word]}>{t('EZHALAH')}</Text>
+              <SkyEagleMark lit={!!user} />
+              <Text ref={noTranslateRef} style={[s.word, !isRTL && s.wordLatin, dark && dks.word]}>{t('EZHALAH')}</Text>
+              {/* Guest: the small «ENG» pill top-right, where a signed-in user's header has its controls (owner 2026-10-31). */}
+              <TopBarLanguage inSidebar />
             </View>
 
             {/* The upper guest CTA card that used to sit here was the OLD auth prompt (removed
@@ -1001,9 +1008,9 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       // a sibling stacking context later in the DOM otherwise paints over it). Closed → back to
       // z-auto ordering so the root overlays (Support/About/Auth) keep painting above the sidebar.
       <View ref={panelRef} style={[s.dockPanel, dark && dks.dockPanel, acctOpen && ({ zIndex: 30 } as any), { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, LTR_PIN]}>
-        {/* Dark appearance drops the light pencil-sketch backdrop: the deep green paper IS the
-            dark surface (the sketch and its fade-to-light-paper gradient assume light ground). */}
-        {!dark && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
+        {/* Continue the sky, with sparse column-sized clouds behind the controls. */}
+        <HeroBackground clouds={false} />
+        <SidebarClouds />
         {body}
         {dropAnnounce ? (
           <Text accessibilityLiveRegion="polite" style={s.srOnly}>{dropAnnounce}</Text>
@@ -1018,9 +1025,13 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // Mobile / native: tap-to-open overlay drawer that slides in over the dimmed page.
   return (
     <View style={s.overlay}>
-      <AnimatedPressable style={[s.backdrop, backdropStyle]} onPress={close} />
+      {/* Closing the menu is not agreement to cookies either (owner 2026-10-17): the guest card stays up after a language switch. */}
+      <AnimatedPressable style={[s.backdrop, backdropStyle]} onPress={close}
+        // @ts-expect-error web-only DOM props on the RNW host node
+        dataSet={{ consentKeep: '1' }} />
       <Animated.View ref={panelRef as any} style={[s.panel, dark && dks.panel, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, panelStyle, LTR_PIN]}>
-        {!dark && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
+        <HeroBackground clouds={false} />
+        <SidebarClouds />
         {body}
         {menuOverlay}
         {deleteConfirmOverlay}
@@ -1052,14 +1063,16 @@ const s = StyleSheet.create({
   // neutral by default, a soft green wash on hover/press. Never a big outlined button.
   searchTopBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', marginLeft: 'auto' },
   searchTopBtnHover: { backgroundColor: colors.hoverRow },
-  logo: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  word: { fontSize: 15, fontWeight: '800', letterSpacing: 2, color: colors.ink },
+  // Bigger brand name (owner 2026-10-04: «make Ezhalah big»). Letter-spacing only on the Latin wordmark —
+  // it pulls Arabic letters apart and breaks their joining.
+  word: { fontSize: 22, fontWeight: '800', color: colors.ink },
+  wordLatin: { letterSpacing: 2 },
 
   // Owner 2026-08-24: LIGHT green default (dark-green text) → DARK green with white text only on
   // hover/focus/press. The dark green is the interaction color, never the resting color.
   newChat: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: colors.tint, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 13, marginTop: 12, borderWidth: 1, borderColor: colors.tintLine },
   newChatHover: { backgroundColor: colors.hoverRow, borderColor: colors.hoverRow },
-  newChatText: { fontSize: 14, fontWeight: '600', color: colors.dark },
+  newChatText: { fontSize: 14, fontWeight: '600', color: colors.ink },
   newChatTextOn: { color: colors.onFill },
   // Chat search (owner 2026-08-24). The button mirrors the nav-link language (quiet, discoverable);
   // the input row keeps the exact same footprint so the sidebar never jumps when it morphs.
@@ -1075,7 +1088,8 @@ const s = StyleSheet.create({
   groupHead: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 6, paddingBottom: 6 },
   // Drag-to-Favorites target glow (drop-would-star/unstar here) — calm, matches the gold star.
   groupHeadTarget: { backgroundColor: 'rgba(227, 160, 8, 0.14)', borderRadius: 6 },
-  groupTitle: { fontSize: 11, fontWeight: '700', color: '#9aa6a0', textTransform: 'uppercase', letterSpacing: 0.5 },
+  groupTitle: { fontSize: 11, fontWeight: '700', color: '#9aa6a0', textTransform: 'uppercase' },
+  groupTitleEn: { letterSpacing: 0.5 }, // Latin only — tracking breaks Arabic joining
   histRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 10 },
   // Interaction color for rows (owner 2026-08-24): dark-green fill with white label on hover/press.
   // DISTINCT from histRowActive below — the current chat keeps its persistent light-green highlight
@@ -1088,7 +1102,7 @@ const s = StyleSheet.create({
   histLabelHot: { color: colors.onFill },
   histRowOpen: { backgroundColor: '#f3f5f3' },
   // The chat the user is currently in — a light green wash so it's obvious which conversation is open.
-  histRowActive: { backgroundColor: '#dcefe1' },
+  histRowActive: { backgroundColor: colors.userBubble },
   histItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 8 },
   histLabel: { flex: 1, fontSize: 13.5, fontWeight: '500', color: colors.ink },
   histLabelMatch: { fontWeight: '800' },
@@ -1130,7 +1144,7 @@ const s = StyleSheet.create({
 
   lang: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: colors.segTrack, borderRadius: radius.pill, padding: 4, gap: 4, marginBottom: 18 },
   langBtn: { paddingVertical: 8, paddingHorizontal: 22, borderRadius: radius.pill },
-  langBtnOn: { backgroundColor: colors.primary },
+  langBtnOn: { backgroundColor: colors.selFill },
   langText: { fontSize: 13.5, fontWeight: '600', color: colors.muted },
   langTextOn: { color: '#fff' },
 
@@ -1139,7 +1153,7 @@ const s = StyleSheet.create({
   userRowHover: { backgroundColor: colors.hoverRow },
   userTextOn: { color: colors.onFill },
   userSubOn: { color: 'rgba(255,255,255,0.78)' },
-  userAv: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  userAv: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   userAvText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   // Name + email both ALIGN LEFT (same left edge) and use writingDirection 'auto' so the Arabic name
   // still reads right-to-left INTERNALLY but its block starts flush against the avatar. Keeps the
@@ -1152,7 +1166,7 @@ const s = StyleSheet.create({
   dcRoot: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, ...(Platform.OS === 'web' ? ({ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 } as any) : null) },
   dcBack: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(8,18,12,0.5)' },
   dcCard: { width: '100%', maxWidth: 320, backgroundColor: '#fff', borderRadius: 22, padding: 24, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 12 },
-  dcClose: { position: 'absolute', top: 12, ...(I18nManager.isRTL ? { left: 12 } : { right: 12 }), zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  dcClose: { position: 'absolute', top: 12, right: 12, zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   dcIc: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#fbeaea', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   dcT: { fontSize: 18, fontWeight: '700', color: colors.ink, textAlign: 'center' },
   dcS: { fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 8, lineHeight: 19 },
@@ -1161,7 +1175,7 @@ const s = StyleSheet.create({
   dcCancel: { width: '100%', paddingVertical: 12, alignItems: 'center', marginTop: 4 },
   dcCancelText: { fontSize: 14, fontWeight: '500', color: colors.muted },
   srOnly: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 },
-  cta: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 13, ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : null) },
+  cta: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.selFill, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 13, ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : null) },
   ctaHover: { backgroundColor: colors.hoverRow },
   ctaTitle: { fontSize: 13, fontWeight: '700', color: '#fff' },
   ctaSub: { fontSize: 10.5, color: 'rgba(255,255,255,0.75)', marginTop: 1 },
@@ -1176,22 +1190,22 @@ const dks = StyleSheet.create({
   dockPanel: { backgroundColor: darkColors.paper, borderRightColor: darkColors.line },
   word: { color: darkColors.ink },
   newChat: { backgroundColor: darkColors.tint, borderColor: darkColors.tintLine },
-  newChatText: { color: '#cfe0d5' },
+  newChatText: { color: darkColors.ink },
   searchRow: { backgroundColor: darkColors.surface, borderColor: darkColors.primary },
-  searchClose: { backgroundColor: '#1d2620' },
+  searchClose: { backgroundColor: darkColors.surface2 },
   searchInput: { color: darkColors.ink },
   searchHint: { color: darkColors.muted },
   empty: { color: darkColors.muted },
   groupTitle: { color: darkColors.muted },
-  histRowActive: { backgroundColor: '#1f3a2c' },
-  histRowOpen: { backgroundColor: '#1d2620' },
+  histRowActive: { backgroundColor: darkColors.userBubble },
+  histRowOpen: { backgroundColor: darkColors.surface2 },
   histLabel: { color: darkColors.ink },
   histInput: { backgroundColor: darkColors.surface, borderColor: darkColors.primary },
   rowMenu: { backgroundColor: darkColors.surface, borderColor: darkColors.fieldLine },
   rowMenuText: { color: darkColors.ink },
   divider: { backgroundColor: darkColors.fieldLine },
   navText: { color: darkColors.ink },
-  userRow: { borderTopColor: '#1d2620' },
+  userRow: { borderTopColor: darkColors.line },
   userName: { color: darkColors.ink },
   userSub: { color: darkColors.muted },
 });

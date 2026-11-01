@@ -47,9 +47,11 @@ export function initialReveal(args: {
   platforms?: number;
   /** TRUE when this results turn was produced by a completed Advanced Filter round. */
   afCompleted?: boolean;
+  requestedCount?: number;
 }): number {
   const fetched = Math.max(0, Math.floor(args.fetched));
   const { honestTotal, stopAt } = args;
+  if (args.requestedCount && args.requestedCount > 0) return Math.min(fetched, 500, Math.floor(args.requestedCount));
   if (honestTotal != null && honestTotal <= stopAt) return fetched;
   if (args.afCompleted) return Math.min(fetched, AF_REVEAL_MAX);
   // THE FIRST SCREEN SHOWS EXACTLY ONE CARD PER MATCHING PLATFORM, NO PADDING (owner PERMANENT

@@ -19,9 +19,9 @@ on:
         required: false
         default: "2000"
       max_pending:
-        description: "Circuit breaker: abort with no proxy fetches if the un-fetched backlog exceeds this many rows (default 5000)"
+        description: "Circuit breaker: abort with no proxy fetches if the un-fetched backlog exceeds this many rows (default 15000 — owner safety cap 2026-10-05)"
         required: false
-        default: "5000"
+        default: "15000"
       allow_backfill:
         description: "Override the circuit breaker to deliberately drain a large backlog through the proxy (true/false)"
         required: false
@@ -39,10 +39,15 @@ concurrency:
   group: wasalt-enrich-ar
   cancel-in-progress: false
 
+env:
+  # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
+  # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   enrich-ar:
     name: Enrich AR ${{ matrix.table }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # BACKSTOP ONLY. The job now carries its own 2700s (45 min) budget via --max-seconds and stops
     # cleanly inside this wall; reaching 60 minutes again means the budget itself failed, and should
     # be investigated rather than raised. Until 2026-09-18 this timeout was the ONLY limit, so the
@@ -95,7 +100,7 @@ jobs:
             --table ${{ matrix.table }} \
             --limit ${{ github.event.inputs.limit || 2000 }} \
             --workers 1 \
-            --max-pending ${{ github.event.inputs.max_pending || 5000 }} \
+            --max-pending ${{ github.event.inputs.max_pending || 15000 }} \
             --retry-errs ${{ github.event.inputs.retry_errs || 100 }} \
             --err-backoff-hours ${{ github.event.inputs.err_backoff_hours || 24 }} \
             --max-seconds 2700 \

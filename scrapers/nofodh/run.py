@@ -260,6 +260,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 
 BASE = "https://www.nofodh.sa"
 SITEMAP = f"{BASE}/sitemap.xml"
@@ -442,6 +443,9 @@ def parse_listing_page(body: str, listing_id: str) -> dict[str, Any]:
         "min_price": booking.get("min_price"),
         "max_price": booking.get("max_price"),
         "code": _clean(codes[0]) if codes else None,
+        # The JSON-LD GeoCoordinates block — never the selector map's `center: {lat, lng}` default,
+        # which is the same number on every ad (owner 2026-10-19).
+        "pin": pin_from_html(body),
         "photos": sorted(set(_photo_re(listing_id).findall(body))),
         # THIS LISTING's own published words only — never the document. See _AUCTION_RE.
         "has_auction_word": bool(_AUCTION_RE.search(" ".join(
@@ -654,6 +658,7 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
                               "key_present": bool(photos), "count": len(photos or [])}
 
     info = {
+        **(rec.get("pin") or {}),
         "source_id": lid,
         "type_raw": type_raw,
         "sale_status_raw": status,
@@ -946,6 +951,9 @@ def crawl(s: cc.Session, ids: list[str], workers: int = 3,
                 if detail and len(examples.setdefault(key, [])) < 5:
                     examples[key].append(f"{PREFIX}{listing_id}: {detail}")
                 continue
+            # A row exists only when THIS listing's own page printed «للبيع»/«للإيجار» — the oracle's
+            # exact "live" read of the same URL, so the daily direct check need not repeat it.
+            db.mark_direct_alive(row, oracle="nofodh.listing_page.status_open")
             (com if cat == "commercial" else res).append(row)
     for key, shown in sorted(examples.items()):
         print(f"  {key} e.g. " + "; ".join(shown))

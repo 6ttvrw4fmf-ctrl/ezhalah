@@ -78,6 +78,7 @@ import json
 import re
 import sys
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote, unquote
@@ -88,8 +89,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
-from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
+from scrapers.common.district_bridge import bridge_rows, bridge_unique, norm_en  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
+from scrapers.common.page_pin import pin_from_html  # noqa: E402
 
 BASE = "https://daryusuf.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -102,8 +106,10 @@ FIELDS = "id,link,slug,status,title,content,excerpt,date_gmt,modified_gmt,portfo
 # ── transport ─────────────────────────────────────────────────────────────────────────────────────
 def session() -> cc.Session:
     # impersonate OWNS the User-Agent — only Accept-* are ours.
-    s = cc.Session(impersonate="chrome")
-    s.headers.update({"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"})
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(BASE, headers={"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"}, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     return s
 
 
@@ -392,6 +398,45 @@ _CITY_WORDS = {
 _CITY_RE = re.compile("|".join(re.escape(w) for w in sorted(_CITY_WORDS, key=len, reverse=True)))
 _DISTRICT_AR_RE = re.compile(r"حي\s+([ء-ي]+(?:\s+[ء-ي]+){0,2})")
 _DISTRICT_EN_RE = re.compile(r"((?:Al[\s\-]?)?[A-Z][A-Za-z\-']+(?:\s+[A-Z][A-Za-z\-']+){0,2})\s+[Dd]istrict")
+_EN_DIRECTION = re.compile(r"\b(?:north|south|east|west|new|old)\b", re.I)
+
+
+# Names the bridge holds no unique pair for, each in THIS city's catalogue (2026-10-23, New Listings, contract G:
+# unknown_named_districts(3) listed «Al Ranoonah district» ×3 and «Al-Aridh District» ×3 under المدينة المنورة).
+# Still confirmed against the catalogue by find_district_in_text, so a wrong city writes NULL.
+_HAND_EN_AR = {
+    ("medina", "ranoonah"): "حي الرانوناء", ("medina", "aridh"): "حي العريض",
+}
+
+
+@lru_cache(maxsize=None)
+def _bridge_en_ar(city_en: str) -> dict[str, str]:
+    """The source-attested EN→AR district bridge for one city, unique keys only (scrapers/common/district_bridge)."""
+    return bridge_unique(bridge_rows(city_en), norm_en)
+
+
+def english_district(hood: Optional[str], city_ar: str, city_id: Optional[int]) -> Optional[str]:
+    """An English post's «Al Difaa District» → «حي الدفاع» through the shared bridge (dealapp's bilingual pairs),
+    confirmed against THIS city's catalogue. 2026-10-20: ~190 Madinah/Jeddah ads named their district only in
+    English and were stored with none. Tried: the whole name, then its last two and last one words unless a
+    direction word is dropped («Furnished Apartment Al Salam» → «Al Salam»). No unique key → None, never a guess."""
+    if not hood or not city_id:
+        return None
+    city_en = normalize.map_city(city_ar)
+    if not city_en:
+        return None
+    bridge = _bridge_en_ar(city_en)
+    words = re.sub(r"\s+[Dd]istrict\b.*$", "", hood.strip()).split()
+    names = [" ".join(words)]
+    for k in (2, 1):
+        if len(words) > k and not _EN_DIRECTION.search(" ".join(words[:-k])):
+            names.append(" ".join(words[-k:]))
+    for name in names:
+        key = norm_en(name) or ""
+        ar = bridge.get(key) or _HAND_EN_AR.get((city_en.lower(), key))
+        if ar:
+            return find_district_in_text(ar, city_id)
+    return None
 
 
 def city_in_title(title: str) -> Optional[str]:
@@ -403,6 +448,16 @@ def city_in_title(title: str) -> Optional[str]:
 _AUCTION_TITLE_RE = re.compile(r"مزاد|\bauction\b", re.I)
 _CLOSED_TITLE_RE = re.compile(r"تم\s*البيع|تم\s*الإيجار|تم\s*الايجار|مباع(?![ء-ي])|مؤجر(?![ء-ي])|\bsold\b|\brented\b", re.I)
 _OFFPLAN_TITLE_RE = re.compile(r"على\s*الخارطة|(?<![ء-ي])قريب[اً]+(?![ء-ي])|off[\s\-]plan|coming\s*soon", re.I)
+
+
+_URL_DEAL_RE = re.compile(r"-for-(sale|rent)(?:-|/|$)|-لل(بيع|إيجار|ايجار)(?:-|/|$)", re.I)
+
+
+def url_slug_deal(link: str) -> Optional[str]:
+    """«Buy» / «Rent» from the post's own URL slug (/villa-for-sale-on-…/), None when it names neither or both."""
+    found = {("Buy" if (m.group(1) or "").lower() == "sale" or m.group(2) == "بيع" else "Rent")
+             for m in _URL_DEAL_RE.finditer(unquote(link.rstrip("/").rsplit("/", 1)[-1] + "/"))}
+    return found.pop() if len(found) == 1 else None
 
 
 def map_listing(post: dict, terms: dict[int, str]) -> tuple[Optional[dict], str, str]:
@@ -425,6 +480,17 @@ def map_listing(post: dict, terms: dict[int, str]) -> tuple[Optional[dict], str,
         deal, property_type = deal or d, property_type or t
     if not slugs:
         deal, property_type = deal_and_type_from_title(title)
+    elif deal:
+        # The editor sometimes files a sale under a «…-for-rent» category: 13109421 «Villa for sale in Al
+        # Matar», /villa-for-sale-on-…/, «1,480,000 SAR», sits in villas-for-rent and was stored as a
+        # 1.48 M yearly rent no sale search could find (2026-10-31). When the category and the title
+        # disagree, the post's own URL slug decides; with no tie-breaker the ad is skipped, never guessed.
+        title_deal, _ = deal_and_type_from_title(title)
+        if title_deal and title_deal != deal:
+            url_deal = url_slug_deal(post.get("link") or "")
+            if url_deal not in (deal, title_deal):
+                return None, "residential", "deal_conflict"
+            deal = url_deal
     if not deal:
         return None, "residential", "deal_unknown"
     content = (post.get("content") or {}).get("rendered") or ""
@@ -448,6 +514,8 @@ def map_listing(post: dict, terms: dict[int, str]) -> tuple[Optional[dict], str,
     dm = _DISTRICT_AR_RE.search(title) or _DISTRICT_EN_RE.search(title)
     hood = dm.group(0).strip() if dm else None
     district_ar = find_district_in_text(dm.group(0), city_id) if dm and not is_en else None
+    if dm and not district_ar and _DISTRICT_EN_RE.fullmatch(dm.group(0).strip()):
+        district_ar = english_district(dm.group(0), city_ar, city_id)
 
     amount, period_tok, price_text = parse_price_heading(content)
     description, source_ad = parse_description(content)
@@ -515,6 +583,9 @@ def map_listing(post: dict, terms: dict[int, str]) -> tuple[Optional[dict], str,
         "featured_media": post.get("featured_media") or None,
         "photo_count": len(photos) or None,
     }.items() if v is not None}
+    # The post's own Elementor map: <iframe src="https://maps.google.com/maps?q=24°27'59.8"N 39°39'44.9"E&output=embed">,
+    # a DMS pair per ad (owner 2026-10-30: 258 ads, 0 pins); page_pin reads it after unescape + unquote.
+    row["additional_info"].update(pin_from_html(content) or {"pin_absent": True})
     return row, category, ""
 
 
@@ -553,12 +624,39 @@ def _signal_for(pid: int):
     return _signal
 
 
+def _page_signal(status, body, moved):
+    """The ad's OWN web page: a 404/410 is gone; anything else is no opinion (the REST route stays
+    the only source of a "live" answer). The fleet's default own-page rule, nothing looser."""
+    if moved:
+        return None
+    return "gone" if status in (404, 410) else None
+
+
+_stored_url = stored_listing_url(("daryusuf_residential_listings", "daryusuf_commercial_listings"))
+
+
 def _verify_gone(ad_number: str) -> tuple[str, str]:
+    """REST first; when REST answers 401, the ad's own web page decides (2026-10-12).
+
+    WordPress answers GET /wp/v2/portfolio/<id> with 401 rest_forbidden for a post that is no longer
+    public, and the law reads a 401 as "about our access" (UNKNOWN), correctly — so DYS6824, DYS6511,
+    DYS9414 and DYS7846 sat at 3-17 strikes, shown, read UNKNOWN on every run since 09-26. The 401
+    stays UNKNOWN; the fallback reads the listing's own stored URL, where only a 404/410 is a removal."""
     pid = ad_number[len(PREFIX):]
     if not pid.isdigit():
         return "unknown", f"{ad_number!r} is not a {PREFIX}<post id> ad number"
-    return LivenessProbe(platform="daryusuf", signal=_signal_for(int(pid)), session=session,
+    rest = LivenessProbe(platform="daryusuf", signal=_signal_for(int(pid)), session=session,
                          url_for=lambda _a: f"{REST}/portfolio/{pid}?_fields=id,status").verify_gone(ad_number)
+    if rest[0] != "unknown" or "HTTP 401" not in (rest[1] or ""):
+        return rest
+    url = _stored_url(ad_number)
+    if not url:
+        return rest
+    page = LivenessProbe(platform="daryusuf", signal=_page_signal, session=session,
+                         url_for=lambda _a: url).verify_gone(ad_number)
+    if page[0] == "gone":
+        return "gone", f"REST 401 (post not public); its own page: {page[1]}"
+    return "unknown", f"{rest[1]}; its own page: {page[1]}"
 
 
 def _controls_live(ad_numbers: list[str]) -> bool:

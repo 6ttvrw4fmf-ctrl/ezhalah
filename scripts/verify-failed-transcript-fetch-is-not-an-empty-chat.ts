@@ -225,10 +225,11 @@ const TRANSCRIPT = { v: 1, msgs: [{ id: 'm1' }, { id: 'm2' }, { id: 'm3' }] };
 {
   const agent = readFileSync(join(ROOT, 'src/app/agent.tsx'), 'utf8');
   check('REACHABILITY openSaved treats a STALE held transcript as not-held, so the server is consulted',
-    /const heldStale = [^\n]*txStale[\s\S]{0,200}?heldStale \? null : \(entry\?\.transcript/.test(agent),
+    // 2026-10-10: the held copy is named `local` (it is painted early while the hydrate runs).
+    /const heldStale = [^\n]*txStale[\s\S]{0,200}?const local[^\n]*= entry\?\.transcript \?\? null;[\s\S]{0,80}?heldStale \? null : local;/.test(agent),
     'openSaved short-circuits on a present-but-stale transcript — the txStale mechanism never engages');
   check('REACHABILITY …and it still hydrates when there is no local copy at all',
-    /if \(!t && entryId\) t = await hydrateTranscript\(entryId\)/.test(agent));
+    /if \(!t && entryId\) \{[\s\S]{0,1600}?t = await hydrateTranscript\(entryId\)/.test(agent));
 }
 
 // ── 4. WIRING — the fix has to be the one production actually runs ───────────────────────────────

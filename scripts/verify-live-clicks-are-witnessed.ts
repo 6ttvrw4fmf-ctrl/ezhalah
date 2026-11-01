@@ -4,7 +4,7 @@
 // the next. The Ezhalah chat reflows between the two, so the click can land on whatever slid under
 // it — and because nothing checks, the journey's NEXT assertion ("…and then the app did X") fails and
 // is written down as a PRODUCT defect. Measured on production 2026-09-24: 11 of 24 taps on
-// «خلّنا نحدد الطلب أكثر» landed on a listing card, each reported as a broken Advanced Filter
+// «🎯 دقّق مع الذكاء» landed on a listing card, each reported as a broken Advanced Filter
 // (`ops_incident` #340, five days of a P1 spent on a click that never happened).
 //
 // `scripts/lib/liveClick.ts` is the repair: measure, require the point to have held still, arm a

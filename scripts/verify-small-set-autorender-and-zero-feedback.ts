@@ -55,7 +55,7 @@ check("the local wrapper feeds it quotableTotal (the honest total) and INTERVIEW
   // was dropped in favour of exactly one card per platform (src/lib/initialReveal.ts has the full
   // history). The guarantee this check exists for is unchanged: the wrapper must still feed the
   // HONEST total and the canonical stopAt.
-  /initialRevealPure\(\{ fetched: r\?\.listings\?\.length \?\? 0, honestTotal: r \? quotableTotal\(r\) : null, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount\(r\?\.listings\), afCompleted \}\)/.test(agent));
+  /initialRevealPure\(\{ fetched: r\?\.listings\?\.length \?\? 0, honestTotal: r \? quotableTotal\(r\) : null, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount\(r\?\.listings\), requestedCount: r\?\.query\?\.count, afCompleted \}\)/.test(agent));
 const raw = (agent.match(/Math\.min\(FIRST_PAGE, [^)]*\)/g) ?? []);
 check(`no raw Math.min(FIRST_PAGE, …) reveal remains (found ${raw.length})`, raw.length === 0, raw.slice(0, 3).join(" | "));
 check("the initial drip, the restore path and the render path all use initialReveal",
@@ -66,9 +66,11 @@ const zero = agent.slice(agent.indexOf("m.result.listings.length === 0 ? ("), ag
 check("the zero-result branch renders the FeedbackRow (not null)",
   /<FeedbackRow feedbackKey=\{m\.id\} onFeedback=\{showFbToast\}/.test(zero) && !/\n\s*null\n\s*\) : \(/.test(zero));
 check("its read-aloud reads the zero-result intro alone (no phantom listings)",
-  /buildResultsReadAloudSegments\(introText, \[\], undefined\)/.test(zero));
-check("the non-zero branch still has its own FeedbackRow (two sites total)",
-  (agent.match(/<FeedbackRow feedbackKey=\{m\.id\}/g) ?? []).length === 2);
+  /buildResultsReadAloudSegments\(introText, \[\], undefined, locale\)/.test(zero));
+check("the non-zero branch still has its own FeedbackRow (three sites: results, zero results, and — owner 2026-10-23 — a plain reply's invitation Share)",
+  (agent.match(/<FeedbackRow feedbackKey={m.id}/g) ?? []).length === 3);
+
+
 
 if (failed) { console.error(`\n✗ ${failed} check(s) FAILED`); process.exit(1); }
 console.log("\nOK — small final sets render in full at the canonical stop line; thumbs survive zero results");

@@ -145,9 +145,16 @@ check('the monthly-only sources stay OUT of Buy and of an annual Rent search',
   && monthlyIn({ deal: 'Rent', rentPeriod: 'annual' }).length === 0,
   `Buy → [${monthlyIn({ deal: 'Buy' }).join(', ')}], annual → [${monthlyIn({ deal: 'Rent', rentPeriod: 'annual' }).join(', ')}]`);
 
+// A PRICED row must carry a published monthly|annual period; a row with NO price (price on request,
+// owner 2026-09-28) is admitted under every period — it has no figure a period could misstate.
+// The clause itself now lives in src/lib/rentPool.ts (owner 2026-10-25, «إقامات قصيرة» pool) and is EXECUTED here;
+// remote.ts must still route every period branch through it.
+const { cardFetchPeriodOr } = await import('../src/lib/rentPool.ts');
 check("candidate-level period filter has an explicit 'both' branch",
-  /rentPeriod\s*===\s*'both'\s*\)\s*\{[\s\S]{0,220}?\.in\(\s*'rent_period',\s*\[\s*'monthly',\s*'annual'\s*\]/.test(remote),
-  "mixed platforms must still require a PUBLISHED monthly|annual period — a null one is neither");
+  cardFetchPeriodOr('both', 'aqar_residential_listings') === 'rent_period.in.(monthly,annual),rent_period.is.null,price_annual.is.null'
+  && cardFetchPeriodOr('both', 'gathern_residential_listings') === null
+  && /const clause = cardFetchPeriodOr\(q\.rentPeriod, tbl\);\s*\n\s*if \(clause\) req = req\.or\(clause\);/.test(remote),
+  "mixed platforms must still require a PUBLISHED monthly|annual period for a priced row — a null one is neither");
 
 // Buy+Rent COMBINED (owner feature 2026-08-20) is the THIRD way into the monthly pool, and until
 // 2026-08-27 nothing pinned it — the two checks above only cover 'monthly'/'both', so deleting the
@@ -240,7 +247,7 @@ check("the old boolean-scoped 'both → null' Trending gap is gone",
 // you get both" framing — selecting both buttons is already self-explanatory. Kept only the one
 // genuinely non-obvious fact: mixed results carry mixed price units.
 for (const [label, key] of [
-  ['monthly', 'Monthly: the displayed price is the monthly price.'],
+  ['monthly', 'Monthly: includes short stays, priced by length of stay.'],
   ['yearly', 'Yearly: the displayed price is the yearly price.'],
   ['both', 'Each listing shows its own price basis (monthly or yearly).'],
 ] as const) {
@@ -254,8 +261,8 @@ check("period hints never assert a contract/lease length (owner 2026-08-14)",
   !/عقد لمدة 12 شهر|عقد من 1 إلى 11 شهر|من شهر إلى 11/.test(codeOnly(i18n)),
   'no source publishes the lease term — say what the displayed price means instead');
 
-check('the Monthly note is the OWNER-EXACT wording (2026-08-18): «الأسعار معروضة بالشهر» — price basis only, never a contract-length claim',
-  /'الأسعار معروضة بالشهر'/.test(i18n));
+check('the Monthly note is the OWNER wording (2026-10-24, supersedes 2026-08-18 «الأسعار معروضة بالشهر»): short stays included, priced by length of stay — price basis only, never a lease-term claim',
+  /'شهري: يشمل الإقامات القصيرة، وأسعارها حسب مدة الإقامة\.'/.test(i18n));
 check("'Both' and the both-verb are translated", /'Both':\s*'كلاهما'/.test(i18n) && /'to rent monthly or yearly':/.test(i18n));
 
 // ─────────────────────────────────────────────────────────────────────────────

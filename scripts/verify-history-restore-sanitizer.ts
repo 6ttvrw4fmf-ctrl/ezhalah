@@ -5,7 +5,7 @@
 // EXECUTES the real sanitizer (not a source grep).
 //   node --experimental-strip-types scripts/verify-history-restore-sanitizer.ts   (wired into `npm test`)
 import { readFileSync } from 'node:fs';
-import { sanitizeForFilterRestore, HOME_DEFAULT_QUERY, hasActiveFilters } from '../src/lib/searchDefaults.ts';
+import { sanitizeForFilterRestore, HOME_DEFAULT_QUERY } from '../src/lib/searchDefaults.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); };
@@ -62,8 +62,13 @@ check('restored Buy query searches Buy only (no bothDeals)', out.deal === 'Buy' 
 const rentOut: any = sanitizeForFilterRestore({ ...agentQuery, deal: 'Rent' });
 check('restored Rent query searches Rent only', rentOut.deal === 'Rent' && rentOut.bothDeals === undefined);
 
-// 4) Sanitizing a pure default query stays default (no phantom "active filters").
-check('sanitize(HOME_DEFAULT_QUERY) has no active filters', !hasActiveFilters(sanitizeForFilterRestore(HOME_DEFAULT_QUERY())));
+// 4) Sanitizing a pure default query stays default (no phantom selections appear from nowhere).
+{
+  const d: any = sanitizeForFilterRestore(HOME_DEFAULT_QUERY());
+  check('sanitize(HOME_DEFAULT_QUERY) stays the default: Buy, no place, no group/type/price, no Advanced Filter answer',
+    d.deal === 'Buy' && d.location === '' && d.category === 'Residential' && !d.dealCombined
+      && !(d.typeGroups?.length) && !(d.types?.length) && !d.priceInput && !d.priceBand && !(d.afFacets?.length));
+}
 
 // 5) The injection point actually uses the sanitizer.
 const SB = readFileSync(new URL('../src/components/Sidebar.tsx', import.meta.url), 'utf8');

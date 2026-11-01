@@ -68,6 +68,7 @@ from curl_cffi import requests as cc
 from scrapers.common import db
 from scrapers.common import normalize as N
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.http_liveness import LivenessProbe
 
 BASE = "https://arkaanalaqar.com"
 SOURCE = "Arkaan"
@@ -108,6 +109,13 @@ _STYLE = re.compile(r"<(style|script)\b.*?</\1>", re.S | re.I)
 _TYPE_TEXT = re.compile(r'نوع العقار:\s*</span>\s*<span[^>]*>(.*?)</span>', re.S)
 # ONLY the map box's own node — some pages carry a second maps?q= pair on an unrelated action button.
 _COORDS = re.compile(r'id="box-map"[^>]*data-map-url="[^"]*maps\?q=(-?[\d.]+),(-?[\d.]+)')
+# A plot ad with NO map box still publishes its subdivision's location as the «لوكيشن المخطط» button
+# (owner 2026-10-20: sampled 25/25 of arkaan's 359 pin-less ads carried it, e.g. property/1758 →
+# 25.371765,49.594828). It is the source's own published location for that plot, read only when the
+# exact box is absent — on property/1267 the box (25.342466,49.744928) and the scheme button
+# (25.352035,49.742286) differ, and the box always wins. «الاتجاهات» repeats the box pair; never read.
+_SCHEME = re.compile(
+    r'href="https://www\.google\.com/maps\?q=(-?[\d.]+),(-?[\d.]+)[^"]*"[^>]*>(?:(?!</a>).)*?لوكيشن المخطط', re.S)
 _ADTEXT = re.compile(r'detail-order-adtext[^>]*>(.*?)</div>', re.S)
 # The price CARD — a dedicated labelled DOM element, not prose. It is strictly richer than the
 # JSON-LD: reconciled over 92 live listings (2026-09-02), `offers.price` was null on 11 of them
@@ -115,6 +123,32 @@ _ADTEXT = re.compile(r'detail-order-adtext[^>]*>(.*?)</div>', re.S)
 # and the per-square-metre rate appears ONLY here, on 69 of 92. Where all three sources exist
 # (card / JSON-LD / index price cell) they agreed on 92 of 92 — zero disagreements.
 _PRICE_CARD = re.compile(r'detail-order-price[^>]*>(.*?)(?=<!--)', re.S)
+# The ad's OWN feature chips (🔬 AF engineer 2026-10-17): the detail page's description section lists them as
+# `<div class="property-description-feature-list"> <span class="property-description-feature"><i …></i>
+# <span>مطبخ مغلق مؤثث</span></span> …` (CI source-reread 39021280625 on /property/1895: «ثلاث غرف نوم»,
+# «ثلاث دورات مياه», «مطبخ مغلق مؤثث», «مصعد»). arkaan scored kitchen we-miss 3 and 0 of 3 findable: none of
+# them was read. Only the FIRST list is this ad's; a chip names a fact (yes), a negated chip («بدون مصعد») says
+# no, and a fact no chip names stays unknown (never «no»).
+_FEATURE_LIST = re.compile(r'<div class="property-description-feature-list[^"]*">(.*?)</div>', re.S)
+_FEATURE = re.compile(r'class="property-description-feature"[^>]*>(.*?)</span>\s*</span>', re.S)
+_FEATURE_COLS = (
+    ("kitchen", r"مطبخ"), ("elevator", r"مصعد|اسانسير"), ("parking", r"موقف|مواقف|كراج|جراج"),
+    ("air_conditioner", r"مكيف|تكييف"), ("maid_room", r"غرف[ةه] (?:خادم|عامل)"), ("driver_room", r"غرف[ةه] سائق"),
+    ("private_entrance", r"مدخل خاص"),
+)
+_FEATURE_NEG = r"(?:بدون|لا يوجد|لايوجد|غير متوفر)\s*"
+
+
+def feature_answers(chips: list[str]) -> dict[str, bool]:
+    out: dict[str, bool] = {}
+    for chip in chips:
+        for col, kw in _FEATURE_COLS:
+            if col in out or not re.search(kw, chip):
+                continue
+            out[col] = not re.search(_FEATURE_NEG + "(?:" + kw + ")", chip)
+    return out
+
+
 _CARD_TOTAL = re.compile(r'(السعر|السوم)\s*([\d,٬]+)\s*ريال')
 _CARD_PPM = re.compile(r'(?:سعر|سوم)\s*المتر\s*([\d,٬]+)\s*ريال')
 
@@ -216,6 +250,10 @@ def _listing_node(body: str) -> Optional[dict]:
     return None
 
 
+GONE_STATUSES = (404, 410)
+MEASURED_STATUS = "active"
+
+
 def fetch_detail(s: cc.Session, pid: str) -> dict[str, Any]:
     """One detail page → {ld, type_text, lat, lng, ad_text}. Empty dict if it did not answer 200."""
     status, body = _get(s, f"{BASE}/property/{pid}")
@@ -224,10 +262,17 @@ def fetch_detail(s: cc.Session, pid: str) -> dict[str, Any]:
     clean = _STYLE.sub(" ", body)          # or the CSS block naming .detail-order-adtext matches first
     tt = _TYPE_TEXT.findall(clean)
     co = _COORDS.findall(clean)
+    if not co:
+        sm = _SCHEME.search(clean)
+        if sm:
+            co = [(sm.group(1), sm.group(2))]
     ad = [_text(b) for b in _ADTEXT.findall(clean)]
     ad = [a for a in ad if a]
     pc = _PRICE_CARD.search(clean)
+    fl = _FEATURE_LIST.search(clean)
+    chips = [c for c in (_text(x) for x in _FEATURE.findall(fl.group(1))) if c] if fl else []
     return {
+        "feature_chips": chips,
         "http_status": 200,
         "ld": _listing_node(body),          # NOT `clean` — _STYLE strips the JSON-LD <script> too
         "type_text": _text(tt[0]) if tt else None,
@@ -236,6 +281,43 @@ def fetch_detail(s: cc.Session, pid: str) -> dict[str, Any]:
         "ad_text": ad[0] if ad else None,
         "price_card": _text(pc.group(1)) if pc else None,
     }
+
+
+# ── LIVENESS ORACLE (wired 2026-10-06, ♻️) ─────────────────────────────────────────────────────
+# Measured from CI (oracle-feasibility-probe run 37456672928, 2026-10-06): 12 of 12 ads this site
+# removed answered HTTP 410 at their own /property/{id} URL, 12 of 12 live ads answered 200 with
+# distinct titles. Until now prune_unseen ran WITHOUT a verify_gone here, so an ad was hidden after
+# three crawls without it (absence alone: P1 unknown_treated_as_dead). Now only its own page hides
+# it: 404/410 → gone; 200 that renders this site's listing JSON-LD → live; anything else → no answer.
+def _signal(status, body, moved) -> Optional[str]:
+    if status in GONE_STATUSES:
+        return "gone"
+    if status == 200 and not moved and _listing_node(html.unescape(body or "")):
+        return "live"
+    return None
+
+
+def _url_for(ad_number: str) -> Optional[str]:
+    m = re.fullmatch(r"AK(\d+)", ad_number or "")
+    return f"{BASE}/property/{m.group(1)}" if m else None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """verify_gone for db.prune_unseen. A 410 is believed only while a known-live ad from this run
+    (`control`) still reads live through the same session."""
+    s = _session()
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="arkaan", signal=_signal, session=lambda: s,
+                             url_for=_url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
 
 
 def _price_card(text: Optional[str]) -> dict[str, Any]:
@@ -434,6 +516,13 @@ def map_listing(item: dict[str, Any], detail: dict[str, Any]) -> Optional[tuple[
         "bedrooms": N.to_int(specs.get("غرف النوم")),
         "reception_rooms_majlis": N.to_int(specs.get("المجلس")),
         "street_width_m": _street_width(specs.get("الشارع")),
+        # The facade is stated ONLY in the ad's own text («شارع 15 م شمالًا»): the spec cell «الشارع» holds
+        # the width alone and the site has no facade field, so the prose bearing is the source's statement.
+        # One street only — a corner plot («15 × 15 م», or two streets in the text) stays NULL. 1,079 of
+        # 1,482 live ads state a bearing and 0 were stored (🔬 AF engineer 2026-10-08, ops_af_score
+        # arkaan direction we_miss 8/10).
+        "direction": (N.street_from_prose(detail.get("ad_text"))[1]
+                      if "×" not in (specs.get("الشارع") or "") else None),
         # db.AUTHORITATIVE_NULL is deliberately falsy, so it must be selected by an explicit
         # conditional — `absent or price` would silently fall through to the price.
         "price_total": (db.AUTHORITATIVE_NULL if on_request else price)
@@ -463,6 +552,10 @@ def map_listing(item: dict[str, Any], detail: dict[str, Any]) -> Optional[tuple[
                        "http_status": detail.get("http_status")},
         },
     }
+    # The ad's own feature chips: a named fact only. An absent key never clobbers a stored value.
+    row.update(feature_answers(detail.get("feature_chips") or []))
+    if detail.get("feature_chips"):
+        info["feature_chips"] = detail["feature_chips"]
     # bathrooms / halls / property_age / rega_location_verified are DELIBERATELY ABSENT: this
     # source publishes none of them, and an absent key stores NULL without clobbering a known value.
     return row, ("commercial" if category == "Commercial" else "residential")
@@ -474,15 +567,34 @@ def crawl(limit: int = 0, dry_run: bool = False) -> tuple[list[dict], list[dict]
     print(f"Arkaan: {len(items)} listings enumerated from the index", flush=True)
     res: list[dict] = []
     com: list[dict] = []
+    gone = unproven = 0
     for i, item in enumerate(items, 1):
         detail = fetch_detail(s, item["id"])
+        # The ad's OWN page said gone (404/410) in this very run: never write it active from the
+        # index card (crawler audit 2026-10-02, scrapers/lifecycle-gaps.txt). Leaving it out of the
+        # seen set lets prune_unseen's 3-strike guard age it out; one reading hides nothing. A 5xx or
+        # no answer is UNKNOWN and keeps the old behaviour (LISTING_LIVENESS.md §1).
+        if detail.get("http_status") in GONE_STATUSES:
+            gone += 1
+            continue
         mapped = map_listing(item, detail)
         if not mapped:
             continue
         row, cat = mapped
+        # Written as before, but not certified by the list sighting (2026-10-03): its own page did
+        # not answer 200 this run, or its card's data-status is not «active», the only value this
+        # site has ever served (1,996 of 1,996 stored rows, measured 2026-10-03).
+        if detail.get("http_status") != 200 or item.get("status") != MEASURED_STATUS:
+            db.mark_presence_unproven(row)
+            unproven += 1
         (com if cat == "commercial" else res).append(row)
         if not dry_run and i % 100 == 0:
             print(f"  …{i}/{len(items)}", flush=True)
+    if unproven:
+        print(f"Arkaan: {unproven} listing(s) written but not stamped — own page unread or status "
+              f"not «{MEASURED_STATUS}»", flush=True)
+    if gone:
+        print(f"Arkaan: {gone} listing(s) skipped — their own page answered 404/410 this run", flush=True)
     return res, com, len(res) + len(com)
 
 
@@ -534,9 +646,11 @@ def main() -> int:
             source=SOURCE)
 
         pruned = 0
+        verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
         for tbl, rows_seen in (("arkaan_residential_listings", res),
                                ("arkaan_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE)
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE,
+                                verify_gone=verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

@@ -34,7 +34,9 @@ deleted /property/ post. A 200 without the «تفاصيل العقار» block i
 from __future__ import annotations
 
 import argparse
+import functools
 import html as ihtml
+import os
 import re
 import sys
 import time
@@ -48,12 +50,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
 
-def session() -> cc.Session:
-    s = cc.Session(impersonate="chrome124")
+def session(profile: str = "chrome124", proxies: Optional[dict] = None) -> cc.Session:
+    s = cc.Session(impersonate=profile, proxies=proxies)   # impersonate OWNS the User-Agent — never set one here
     s.headers.update({"Accept": "text/html,application/xhtml+xml",
                       "Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
     return s
@@ -404,36 +407,114 @@ def map_listing(url: str, page_html: str, *, source: str, prefix: str) -> tuple[
     return row, category, ""
 
 
-def fetch_catalogue(s: cc.Session, base: str, limit: int = 0) -> list[str]:
+# Browser profiles tried for the sitemap, one per attempt, each on a FRESH session. The first is the
+# run's own session; the rest are what scrapers/common/http.py's IMPERSONATE_ORDER measured hosts
+# answer when they refuse a specific Chrome handshake.
+CATALOGUE_PROFILES = ("chrome124", "safari17_0", "firefox133")
+
+# THE STALL CLASS (gudai, 2026-09-30 and 2026-10-04). Every DIRECT attempt — 3 profiles × 2 sitemap
+# spellings — hit the full 40 s timeout (04:25:17 → 04:29:26), while safera and alhumaidan, the SAME
+# host and code, were served in the same minute, and gudai itself was served in ~10 s on the re-run
+# three hours later. That is a host that stalls for a few minutes, not a site that is down and not a
+# handshake block: rotating the profile inside one 4-minute window cannot outlast it. So, ONLY when an
+# attempt died on the transport (an HTTP answer such as 404 is the source speaking and is believed):
+#   1. the residential proxy (`proxy: true` → WASALT_PROXY_URL), a different egress; then
+#   2. a LATE round after a pause long enough to outlast the stall, with a longer timeout.
+CATALOGUE_PROXY_PROFILES = ("chrome124", "safari17_0")
+
+# THE REFUSAL CLASS (gudai, 2026-10-29 04:52, Actions job 123263440592). Every DIRECT profile got HTTP 403
+# on both sitemap spellings, so the run ended «sitemap returned no /property/ urls» with 12 live listings
+# at source — the same sitemap answered 200 with 12 /property/ URLs from a residential egress that morning,
+# and safera + alhumaidan (same host, same code) were served from the runners minutes later. A 403 / 429 /
+# 5xx is the host refusing THIS egress, not the tenant saying it has no listings, so — like the stall —
+# it earns the residential proxy (`proxy: true`) before the run gives up. A 404, or a 200 without
+# /property/ locs, is still the source speaking and is still believed (no proxy spend).
+REFUSAL_STATUSES = frozenset({401, 403, 407, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524})
+LATE_ROUND_BACKOFF_S = 120
+LATE_ROUND_TIMEOUT_S = 90
+
+
+def _proxies_from_env(env: str = "WASALT_PROXY_URL") -> Optional[dict]:
+    # The VALUE lives only in the secret and must never be written here.
+    purl = os.environ.get(env, "").strip()
+    return {"http": purl, "https": purl} if purl else None
+
+
+def _read_sitemaps(sess, base: str, label: str, timeout: int, trace: list[str],
+                   refused: Optional[list[bool]] = None) -> tuple[set[str], bool]:
+    """One pass over both sitemap spellings. Returns (urls, whether any attempt died on the transport).
+    When `refused` is given, refused[0] becomes True if any attempt got a REFUSAL_STATUSES answer."""
+    seen: set[str] = set()
+    stalled = False
+    for sm in (f"{base}/property-sitemap.xml", f"{base}/wp-sitemap-posts-property-1.xml"):
+        try:
+            r = sess.get(sm, timeout=timeout)
+        except Exception as e:  # noqa: BLE001 — any transport error → next sitemap / route
+            trace.append(f"{label}:{sm.rsplit('/', 1)[-1]}:{type(e).__name__}")
+            stalled = True
+            continue
+        if refused is not None and r.status_code in REFUSAL_STATUSES:
+            refused[0] = True
+        if r.status_code == 200 and "<loc" in r.text:
+            seen |= {u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if "/property/" in u}
+        trace.append(f"{label}:{sm.rsplit('/', 1)[-1]}:HTTP {r.status_code}"
+                     + ("" if seen else " no /property/ loc"))
+        if seen:
+            break
+    return seen, stalled
+
+
+def fetch_catalogue(s: cc.Session, base: str, limit: int = 0, *,
+                    make_session=session) -> tuple[list[str], cc.Session, list[str]]:
     """Discover every listing URL from the tenant's own sitemap.
 
     RETRIED, because an empty catalogue is fatal: `run_platform` raises on it (correctly — a
     silent zero would look like "the site has no listings" and is exactly how a blocked crawl
     would present). gudai failed twice on 2026-09-20 with «sitemap returned no /property/ urls»
     while safera and alhumaidan — the same code, the same host — succeeded in the same minute, so
-    the fetch is intermittently flaky rather than the site being down. One attempt turned that
-    flake into a failed run and a day of stale data.
+    the fetch is intermittently flaky rather than the site being down.
 
-    Three passes with growing backoff over BOTH sitemap spellings. Only a genuinely empty result
-    after all of them raises, so the fail-loud guard keeps its meaning."""
-    for attempt in range(3):
-        seen: set[str] = set()
-        for sm in (f"{base}/property-sitemap.xml", f"{base}/wp-sitemap-posts-property-1.xml"):
-            try:
-                r = s.get(sm, timeout=40)
-            except Exception:
-                continue
-            if r.status_code == 200 and "<loc" in r.text:
-                seen |= {u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if "/property/" in u}
-            if seen:
-                break
+    Each attempt used to REUSE the one chrome124 session, so three retries inside ~10 s replayed
+    the same handshake on the same connection: alhumaidan failed exactly that way on 2026-09-27
+    04:25 (Actions job 108549602049) and crawled cleanly on a re-run at 21:52. A block or a wedged
+    connection is usually the handshake, not the site (docs/ops/SCRAPING_ENGINEER.md step 5a), so
+    every retry now opens a FRESH session with the NEXT browser profile, and the listing pages then
+    ride whichever session actually served the sitemap.
+
+    Returns (urls, the session that served them, a per-attempt trace). The trace names what every
+    profile got, so a genuinely empty result says WHY in the run ledger instead of just "empty"."""
+    trace: list[str] = []
+    stalled = False
+    refused = [False]
+    for attempt, prof in enumerate(CATALOGUE_PROFILES):
+        sess = s if attempt == 0 else make_session(prof)
+        seen, st = _read_sitemaps(sess, base, prof, 40, trace, refused)
+        stalled |= st
         if seen:
             out = sorted(seen)
-            return out[:limit] if limit else out
-        if attempt < 2:
-            print(f"  sitemap empty (attempt {attempt + 1}/3) — retrying", flush=True)
+            return (out[:limit] if limit else out), sess, trace
+        if attempt < len(CATALOGUE_PROFILES) - 1:
+            print(f"  sitemap empty with {prof} (attempt {attempt + 1}/{len(CATALOGUE_PROFILES)}) — "
+                  f"retrying on a fresh session", flush=True)
             time.sleep(3 * (attempt + 1))
-    return []
+    if not stalled and not refused[0]:
+        return [], s, trace          # the source ANSWERED every time: believe it, fail loud upstream
+    late: list[tuple[str, str, Optional[dict], int]] = []
+    proxies = _proxies_from_env()
+    if proxies:
+        late += [(f"proxy/{p}", p, proxies, 60) for p in CATALOGUE_PROXY_PROFILES]
+    if stalled:  # a refusal is about the egress; waiting on the same egress does not change it
+        late.append((f"late/{CATALOGUE_PROFILES[0]}", CATALOGUE_PROFILES[0], None, LATE_ROUND_TIMEOUT_S))
+    for label, prof, prx, tmo in late:
+        if label.startswith("late/"):
+            print(f"  sitemap stalled on every route — waiting {LATE_ROUND_BACKOFF_S}s to outlast it", flush=True)
+            time.sleep(LATE_ROUND_BACKOFF_S)
+        sess = make_session(prof, prx) if prx else make_session(prof)
+        seen, _st = _read_sitemaps(sess, base, label, tmo, trace)
+        if seen:
+            out = sorted(seen)
+            return (out[:limit] if limit else out), sess, trace
+    return [], s, trace
 
 
 def skip_note(skipped: dict[str, int]) -> Optional[str]:
@@ -449,6 +530,66 @@ def skip_note(skipped: dict[str, int]) -> Optional[str]:
     return ("skipped: " + body)[:300]
 
 
+# ── REMOVAL (measured 2026-10-02). Until then this module never called prune_unseen: an ad the
+# office deleted, or re-titled «تم البيع», stayed active here for good.
+#
+# No tenant has a row our crawl stopped seeing (21 active rows, every one re-seen that day), so there
+# is no dead cohort to measure a removal on. What each host answers on the ad's OWN /property/ url:
+#   gudai       12 of 12 catalogue pages: 200 with «تفاصيل العقار»
+#   safera       9 of 9  catalogue pages: 200 with «نظرة عامة» (and no «تفاصيل العقار»)
+#   alhumaidan   3 of 3  catalogue pages: 200 with «تفاصيل العقار», all titled «تم الإيجار»/«تم البيع»
+#   every host: a slug that never existed, a real slug with a mangled tail and two wrong ids → 404
+#               (4 of 4), on a page that carries neither block.
+# So a hard 404/410 is GONE, and a 200 carrying THIS tenant's block is LIVE — unless its own title
+# says the deal is done (_TRANSACTED_RE, the rule that already keeps such an ad out of the crawl:
+# 3 of 3 transacted pages, 0 of 21 offered ones), which is GONE: reading it live would re-stamp an
+# ad map_listing refuses to write. Every other answer is UNKNOWN. A tenant with no marker measured
+# here gets no removal at all.
+_LIVE_MARKER = {"gudai": "تفاصيل العقار", "alhumaidan": "تفاصيل العقار", "safera": "نظرة عامة"}
+
+# Title words that MAY mean a closed ad but were on no page of any tenant on 2026-10-02, so nothing
+# is filtered on them: the ad is kept exactly as before and COUNTED in the run notes, and the
+# prune-time oracle reads its page UNKNOWN — never gone, never verified-alive. («مؤجر» is
+# deliberately absent — alhumaidan's own «عمارة للبيع» describes a building sold WITH its tenants.)
+_UNMEASURED_STATUS_RE = re.compile(r"تم\s*الت[أا]جير|مباع|محجوز")
+
+
+def _signal(status, body, moved, *, marker: str) -> Optional[str]:
+    """'live' | 'gone' | None — only what this ad's own URL affirmatively answers."""
+    if status in (404, 410):
+        return "gone"
+    if status != 200 or moved:
+        return None
+    title = parse_title(body)
+    if not title or marker not in visible_text(body):
+        return None
+    if _TRANSACTED_RE.search(title):
+        return "gone"
+    # An unmeasured status word is neither a removal nor a certificate of life: a 'live' verdict
+    # would stamp the ad verified-alive. UNKNOWN keeps it active, with its strike and an evidence row.
+    return None if _UNMEASURED_STATUS_RE.search(title) else "live"
+
+
+def _make_verify_gone(slug: str, control: Optional[dict], s: Optional[cc.Session] = None):
+    """The removal oracle for db.prune_unseen. A removal is believed only while a known-live ad from
+    this run (`control`) still reads live through the same session."""
+    signal = functools.partial(_signal, marker=_LIVE_MARKER[slug])
+    url_for = stored_listing_url((f"{slug}_residential_listings", f"{slug}_commercial_listings"))
+    s = s or session()
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform=slug, signal=signal, session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def run_platform(*, slug: str, base: str, source: str, prefix: str) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -462,9 +603,9 @@ def run_platform(*, slug: str, base: str, source: str, prefix: str) -> int:
     res: list[dict] = []
     com: list[dict] = []
     try:
-        urls = fetch_catalogue(s, base, limit=args.limit)
+        urls, s, trace = fetch_catalogue(s, base, limit=args.limit)
         if not urls:
-            raise RuntimeError("sitemap returned no /property/ urls")
+            raise RuntimeError(("sitemap returned no /property/ urls | " + "; ".join(trace))[:300])
         print(f"{source}: {len(urls)} listings discovered", flush=True)
         skipped: dict[str, int] = {}
         for u in urls:
@@ -506,6 +647,27 @@ def run_platform(*, slug: str, base: str, source: str, prefix: str) -> int:
             source=source)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
+        # REMOVAL. An ad this walk did not write is only a CANDIDATE: at three misses its own URL is
+        # re-read, and it is hidden only on that page's own answer (_signal); a page that still
+        # offers the ad heals the row. No prune when a page of this walk could not be read (anything
+        # but 200/404/410), on a single-vertical run, or for a tenant with no measured marker.
+        pruned = 0
+        unread = sorted(k for k in skipped if k == "unreachable"
+                        or (k.startswith("http_") and k not in ("http_404", "http_410")))
+        if unread:
+            print(f"  ⚠ walk incomplete ({', '.join(unread)}) — no prune")
+        elif args.type == "all" and slug in _LIVE_MARKER:
+            verify_gone = _make_verify_gone(slug, (res + com)[0] if (res or com) else None, s)
+            for tbl, rows in ((f"{slug}_residential_listings", res),
+                              (f"{slug}_commercial_listings", com)):
+                k = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=source,
+                                    verify_gone=verify_gone)
+                if k < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += k
+        unmeasured = sum(1 for r in res + com if _UNMEASURED_STATUS_RE.search(r["title"]))
         n = len(res) + len(com)
         # PERSIST THE SKIP BREAKDOWN — it is the only thing separating an honest empty run from a
         # parser that quietly dropped everything, and printing it to stdout threw it away.
@@ -515,7 +677,10 @@ def run_platform(*, slug: str, base: str, source: str, prefix: str) -> int:
         # database, which is what every dashboard and every later investigation actually reads, it was
         # indistinguishable from a broken parser, and it cost a full investigation to tell apart.
         # `ok` deliberately stays True: a site whose whole catalogue is sold out is healthy, not failing.
-        note = skip_note(skipped)
+        note = "; ".join(x for x in (
+            f"pruned={pruned}" if pruned else None,
+            f"kept_active_unmeasured_status_word_in_titlex{unmeasured}" if unmeasured else None,
+            skip_note(skipped)) if x)[:300] or None
         healthy = db.end_run(run_id, ok=True, rows_seen=len(urls), rows_upserted=n,
                              notes=note,
                              check_tables=[f"{slug}_residential_listings",

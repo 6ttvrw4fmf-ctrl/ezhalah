@@ -51,6 +51,8 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import city_ar_for, find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.page_pin import pin_from_embed, pin_from_html  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 BASE = "https://wadod.sa"
 SOURCE = "ودود العقارية"
@@ -75,8 +77,10 @@ CARD_SPLIT = re.compile(r'(?=<(?:a|div) wire:key="property-\d+")')
 
 def session() -> cc.Session:
     # impersonate owns the User-Agent — never set one here.
-    s = cc.Session(impersonate="chrome")
-    s.headers.update({"Accept-Language": "ar,en;q=0.7"})
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(BASE, headers={"Accept-Language": "ar,en;q=0.7"}, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     return s
 
 
@@ -156,7 +160,9 @@ def parse_detail(page_html: str) -> dict[str, Any]:
             loc = None
     return {"title": html_text(h1.group(1)) if h1 else None, "location": loc,
             "price_raw": pm.group(1) if pm else None, "payment_terms": pm.group(2).strip() if pm else None,
-            "info": info, "features": feats, "age_raw": age, "description": desc}
+            "info": info, "features": feats, "age_raw": age, "description": desc,
+            # Owner 2026-10-20 night: the ad page's own Maps embed (7/7 sampled, a different centre each).
+            "pin": pin_from_html(page_html) or pin_from_embed(page_html)}
 
 
 def resolve_city(loc: Optional[str]) -> tuple[Optional[int], Optional[int], Optional[str]]:
@@ -231,6 +237,7 @@ def map_listing(card: dict[str, Any], detail: dict[str, Any]) -> tuple[Optional[
     else:
         row["price_total"] = price
     row["additional_info"] = {k: v for k, v in {
+        **(detail.get("pin") or {}),
         "type_ar": type_ar, "offer_ar": info.get("نوع العرض"), "floor_raw": info.get("الطابق"),
         "age_raw": detail["age_raw"], "payment_terms": detail["payment_terms"],
         "price_raw": detail["price_raw"] or card.get("price_raw"),

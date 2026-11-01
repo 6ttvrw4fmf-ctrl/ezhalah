@@ -31,22 +31,45 @@ const check = (label: string, ok: boolean, detail = '') => {
 };
 const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
 
-console.log('\n── 1. buildSearchLoaderTitles: preparing is ALWAYS last ──');
-const { buildSearchLoaderTitles } = await import('../src/lib/searchLoaderTitles.ts');
+console.log('\n── 1. buildSearchLoaderTitles: the funnel order, optional lines omitted, preparing ALWAYS last ──');
+const { buildSearchLoaderTitles, countWording } = await import('../src/lib/searchLoaderTitles.ts');
 
-const partsNoCoverage = { search: 'S', checking: 'C', matchFilters: 'M', reviewing: 'R', coverage: null, preparing: 'P' };
-const partsWithCoverage = { ...partsNoCoverage, coverage: 'COV' };
+const base = { search: 'S', checking: 'K', city: null, district: null, matching: 'M', preparing: 'P' };
+const bare = buildSearchLoaderTitles(base);
+const withCity = buildSearchLoaderTitles({ ...base, city: 'CITY' });
+const withBoth = buildSearchLoaderTitles({ ...base, city: 'CITY', district: 'DIST' });
+const districtOnly = buildSearchLoaderTitles({ ...base, district: 'DIST' });
 
-const withoutCoverage = buildSearchLoaderTitles(partsNoCoverage as any);
-const withCoverage = buildSearchLoaderTitles(partsWithCoverage as any);
+check('no known place: 4 lines in funnel order, preparing last', JSON.stringify(bare) === JSON.stringify(['S', 'K', 'M', 'P']), JSON.stringify(bare));
+check('known city: its line sits after the Kingdom line, before the request', JSON.stringify(withCity) === JSON.stringify(['S', 'K', 'CITY', 'M', 'P']), JSON.stringify(withCity));
+check('known city + district: websites → Kingdom → city → district → request → results',
+  JSON.stringify(withBoth) === JSON.stringify(['S', 'K', 'CITY', 'DIST', 'M', 'P']), JSON.stringify(withBoth));
+check('a district line can stand without a city line (and preparing is still last)', districtOnly.at(-1) === 'P' && districtOnly.includes('DIST'));
+check('an unknown place line is OMITTED — never shown empty, null or "null"',
+  [bare, withCity, districtOnly].every((t) => !t.includes(null as any) && !t.includes('') && !t.includes('null')));
+mustCatch('a builder that appends after preparing', (() => {
+  const broken = (p: typeof base) => [...buildSearchLoaderTitles(p), 'EXTRA'];
+  return broken(base).at(-1) !== 'P';
+})());
 
-check('without coverage: 5 lines, preparing last', withoutCoverage.length === 5 && withoutCoverage.at(-1) === 'P',
-  JSON.stringify(withoutCoverage));
-check('with coverage: 6 lines, coverage second-to-last, preparing still last',
-  withCoverage.length === 6 && withCoverage.at(-2) === 'COV' && withCoverage.at(-1) === 'P',
-  JSON.stringify(withCoverage));
-check('coverage line is OMITTED (not shown empty/null) when not yet resolved',
-  !withoutCoverage.includes(null as any) && !withoutCoverage.includes('null'));
+console.log('\n── 1b. countWording: the EXACT count in digits (owner 2026-10-17), never word-form rounding, unknown → omitted ──');
+const asNum = (s: string) => Number(s.replace(/,/g, ''));
+const exactDigits = (w: typeof countWording) => {
+  for (const n of [1, 42, 300, 1000, 1001, 11_385, 88_241, 162_312, 372_889]) {
+    for (const loc of ['ar', 'en'] as const) {
+      const r = w(n, loc);
+      if (!r || r.kind !== 'exact' || asNum(r.text) !== n || /ألف|thousand|k$/i.test(r.text)) return false;
+    }
+  }
+  return w(0, 'ar') === null && w(undefined, 'ar') === null && w(null, 'en') === null && w(Number.NaN, 'ar') === null;
+};
+check('countWording is the exact count in digits across real production counts, and omits unknown/zero', exactDigits(countWording));
+check("today's numbers read as the owner asked: 372,889 · 162,312 · 11,385 (digits, thousands separators)",
+  countWording(372_889, 'ar')?.text === '372,889' && countWording(162_312, 'en')?.text === '162,312' && countWording(11_385, 'ar')?.text === '11,385');
+mustCatch('a wording that rounds into word form («370 ألف» — what the owner rejected)',
+  !exactDigits((n, loc) => (typeof n === 'number' && n > 0 ? { kind: 'exact', text: n >= 1000 ? `${Math.floor(n / 1000)} ألف` : String(n) } : null)));
+mustCatch('a wording that prints a zero for an unknown count',
+  !exactDigits((n, loc) => countWording(typeof n === 'number' && Number.isFinite(n) ? n : 0, loc) ?? { kind: 'exact', text: '0' }));
 
 console.log('\n── 2. fetchLoaderScaleStats fails CLOSED, never fabricates a number ──');
 const dataSrc = join(root, 'src/data/loaderScaleStats.ts');
@@ -162,19 +185,29 @@ mustCatch('a thrown network error resolves to null (never rejects — the caller
   check('…bounded by the configured ceiling, not by luck', ms < 4_000, `took ${ms}ms`);
 }
 
-console.log('\n── 3. the copy uses the SAME platform count the pills render, never a second count ──');
+console.log('\n── 3. the copy uses the ONE shared site count (owner 2026-10-20: «make it 148»), never a second count ──');
 const loaderSrc = readFileSync(join(root, 'src/components/SearchLoader.tsx'), 'utf8');
-check('PhaseTitle is called with platformCount={platforms.length} (the roster actually on screen)',
-  /<PhaseTitle[^>]*platformCount=\{platforms\.length\}/.test(loaderSrc));
-check('the reviewing line keys off that same platformCount prop, not a separate fetch/count',
-  /platformCount > 0 \? t\('Reviewing \{count\} real-estate platforms…', \{ count: platformCount \}\)/.test(loaderSrc));
+// Owner 2026-10-20: the WhatsApp card, the share sentence and this line must all say the same number —
+// src/data/siteCount.ts — with the on-screen roster only as the fallback before that count is read.
+check('PhaseTitle is called with platformCount={siteCountNow() ?? platforms.length} (the shared count, roster as fallback)',
+  /<PhaseTitle[^>]*platformCount=\{siteCountNow\(\) \?\? platforms\.length\}/.test(loaderSrc));
+check('the loader starts the shared count read at app load (the fallback is for the first seconds only)',
+  /void loadSiteCount\(\);/.test(loaderSrc) && /import \{ loadSiteCount, siteCountNow \} from '@\/data\/siteCount';/.test(loaderSrc));
+check('the websites line keys off that same platformCount prop, not a separate fetch/count',
+  /platformCount > 0 \? t\('Searching \{count\} real-estate platforms…', \{ count: platformCount \}\)/.test(loaderSrc));
+check('PhaseTitle receives THIS search (query), which drives the city/district lines',
+  /<PhaseTitle[^>]*query=\{query\}/.test(loaderSrc));
 
-console.log('\n── source shape: the three new i18n keys exist with their placeholders, both languages ──');
+console.log('\n── source shape: the funnel i18n keys exist with their placeholders, both languages ──');
 const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
 for (const [key, placeholders] of [
-  ['Checking more than {count} properties…', ['{count}']],
-  ['Reviewing {count} real-estate platforms…', ['{count}']],
-  ['Covering more than {count} places across Saudi Arabia…', ['{count}']],
+  ['Searching {count} real-estate platforms…', ['{count}']],
+  ['Checking {count} listings across the Kingdom…', ['{count}']],
+  ['Reviewing more than {count} listings in {city}…', ['{count}', '{city}']],
+  ['Reviewing {count} listings in {city}…', ['{count}', '{city}']],
+  ['Going through more than {count} listings in {district}…', ['{count}', '{district}']],
+  ['Going through {count} listings in {district}…', ['{count}', '{district}']],
+  ['Matching your request: {what}…', ['{what}']],
 ] as const) {
   check(`EN key referenced from SearchLoader/i18n: "${key}"`, loaderSrc.includes(key) || i18n.includes(`'${key}'`));
   const arMatch = i18n.match(new RegExp(`'${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}':\\s*'([^']*)'`));
@@ -182,19 +215,31 @@ for (const [key, placeholders] of [
   check(`AR translation exists and carries every placeholder (${placeholders.join(', ')})`,
     !!arLine && placeholders.every((p) => arLine.includes(p)), `got: "${arLine}"`);
 }
-check('coverage is ONE combined number (cityCount + districtCount), not a separate cities/districts pair',
-  /coverage: scaleStats \? t\('Covering more than \{count\} places across Saudi Arabia…', \{ count: grouped\(scaleStats\.cityCount \+ scaleStats\.districtCount\) \}\) : null/.test(loaderSrc));
+// THE FUNNEL'S HONESTY IS WIRED, NOT JUST AVAILABLE (owner 2026-10-17). The Kingdom line may only
+// say «أكثر من» through countWording (the old line printed the EXACT total after "more than"); the
+// city/district lines go through placeLine, which omits an unknown place and never puts an Arabic
+// name inside an English sentence; and the loader adds no per-search round trip of its own.
+check('the Kingdom line is worded by countWording (exact digits), not formatted by hand',
+  /checking: kingdom \? t\('Checking \{count\} listings across the Kingdom…', \{ count: kingdom\.text \}\)/.test(loaderSrc)
+  && !/grouped\(scaleStats\.listingCount\)/.test(loaderSrc));
+check('the city and district lines both go through placeLine (omit-when-unknown, no Arabic mid-English)',
+  /city: placeLine\(funnel\.city,/.test(loaderSrc) && /district: placeLine\(funnel\.district,/.test(loaderSrc));
+check('the old coverage line is gone from the loader (replaced by the city/district lines)', !loaderSrc.includes('Covering more than'));
+check('the loader makes no supabase.rpc call of its own for the funnel (session caches only — the 2026-09-21 lesson)',
+  !/supabase\.rpc\(/.test(loaderSrc) && /loadSearchFunnelFacts\(query\)/.test(loaderSrc));
 
-console.log('\n── 4. reading-pace rotation: every line gets time proportional to its length, not one fixed window ──');
-const { readingDurationMs } = await import('../src/lib/searchLoaderTitles.ts');
+console.log('\n── 4. reading-pace rotation: proportional to length, and the whole six-line funnel fits the 10 s cap ──');
+const { readingDurationMs, FUNNEL_BUDGET_MS } = await import('../src/lib/searchLoaderTitles.ts');
 
-check('a short line lands close to the old fixed 2400ms (no perceptible pace change for existing short copy)',
-  Math.abs(readingDurationMs('نطابق الفلاتر…') - 2400) < 700,
-  `got ${readingDurationMs('نطابق الفلاتر…')}ms`);
-check('a long live-number line gets MORE time than a short line — the whole point of this fix',
-  readingDurationMs('نغطي أكثر من 4,027 موقع في جميع أنحاء المملكة…') > readingDurationMs('نطابق الفلاتر…'));
-check('duration is floored — even an empty/near-empty string never flashes by instantly', readingDurationMs('') >= 1900);
-check('duration is ceilinged — an extreme length never stalls the rotation for many seconds', readingDurationMs('غ'.repeat(500)) <= 4200);
+// The six lines a Riyadh + district search really shows (live 2026-10-17 numbers). Owner 2026-10-17:
+// results are never held past ten seconds, so if these six do not fit, the personal lines are never seen.
+const FUNNEL_AR = ['نبحث في 148 منصة عقارية…', 'نفحص 372,889 إعلان في المملكة…', 'نراجع 162,312 إعلان في الرياض…', 'ندقق في 11,385 إعلان في حي النرجس…', 'نطابق طلبك: شقة للإيجار…', 'نجهز النتائج…'];
+const funnelTotal = FUNNEL_AR.reduce((a, l) => a + readingDurationMs(l), 0);
+check(`the six funnel lines fit inside the ${FUNNEL_BUDGET_MS}ms cap (sum ${funnelTotal}ms)`, funnelTotal <= FUNNEL_BUDGET_MS && FUNNEL_BUDGET_MS <= 10_000);
+check('a long live-number line still gets MORE time than a short line (reading pace, not a fixed window)',
+  readingDurationMs(FUNNEL_AR[3]) > readingDurationMs('نجهز النتائج…'));
+check('duration is floored — even an empty/near-empty string never flashes by instantly', readingDurationMs('') >= 1200);
+check('duration is ceilinged — no single line can hog the ten seconds', readingDurationMs('غ'.repeat(500)) <= 2500);
 
 mustCatch('a mutant that makes ALL lines the same duration regardless of length (the exact regression)',
   (() => {

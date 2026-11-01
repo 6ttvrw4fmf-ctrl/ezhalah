@@ -37,11 +37,15 @@ import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from scrapers.common.db import begin_run, end_run, sb
+from scrapers.aqar.enrich_residential import (_html_to_text, _listing_json, _structured_price, headline_is_rate,
+                                              parse_price_per_meter)
+from scrapers.common.db import _TRANSIENT_MARKERS, begin_run, end_run, sb
 from scrapers.common.http import get
+from scrapers.common.liveness_trust import canary_environment_ok
 from scrapers.common.liveness_contract import direct_alive_patch
 from scrapers.common.shard_partition import shard_worklist
 
@@ -90,12 +94,21 @@ def evidence_row(source_table: str, listing_id: int, http_status: Optional[int],
 
 def _run_with_retry(fn, tries: int = 5):
     """Run a DB call, retrying on Postgres statement-timeout (57014) — these come from transient
-    lock contention when the 4h sweep is mid-upsert on the same table. Back off and try again."""
+    lock contention when the 4h sweep is mid-upsert on the same table. Back off and try again.
+
+    Also retries every transport-level transient that `db._execute` already treats as one
+    (`_TRANSIENT_MARKERS`: a terminated HTTP/2 connection, 5xx gateway, PGRST002, …). Before
+    2026-10-02 only 57014 was retried, so one `httpx.RemoteProtocolError: <ConnectionTerminated>`
+    on a single `update ... eq(id)` killed a whole shard mid-sweep (aqar_residential shard 7 on
+    2026-10-02 after 500 reads, aqar_commercial shard 12 on 2026-09-30) and its remaining rows went
+    unchecked for the night. Every call routed here is a select or an idempotent update by id."""
     for i in range(tries):
         try:
             return fn()
         except Exception as e:  # noqa: BLE001
-            if "57014" in str(e) and i < tries - 1:
+            msg = str(e).lower()
+            transient = "57014" in msg or any(m in msg for m in _TRANSIENT_MARKERS)
+            if transient and i < tries - 1:
                 time.sleep(2.0 * (i + 1))
                 continue
             raise
@@ -244,6 +257,37 @@ _LD_PRICE_RE = re.compile(r'"price"\s*:\s*"?(\d+(?:\.\d+)?)"?')
 # Cap price writes per sweep. The first run after this lands could touch tens of thousands of
 # rows (43,112 aqar rows had never been re-read since capture); a bounded trickle keeps a sweep
 # from turning into a mass-write, and the remainder is simply picked up by the next day's run.
+# PARALLEL PAGE READS (backlog 1140, 2026-11-01). The sweep read one page at a time. Through
+# 2026-10-30 sa.aqar.fm answered in well under the 0.3 s per-host spacing (http.MIN_INTERVAL), so
+# the sweep ran at the throttle's ~2.9 reads/s and a 10.8k-row shard took ~64 min. From 10-31 the
+# same pages take ~1.4 s each (same route, same fingerprints; measured from the job logs: 2.8/s on
+# 10-30 -> 0.6-0.8/s on 11-01), so a shard needed ~4 h and all 16 were SIGINT-killed at the 120-min
+# cap, leaving roughly half of every shard unread. Reading a chunk's pages on a few threads puts
+# the overlap back WITHOUT asking aqar for more: http._throttle still spaces request STARTS 0.3 s
+# apart per host across all threads, so the ceiling stays the ~3 starts/s the sweep always ran at.
+# Only the fetch is parallel; every verdict, strike, hide and write below stays sequential, in id
+# order, exactly as before. 1 restores the old one-at-a-time behaviour.
+READ_WORKERS = max(1, int(os.environ.get("AQAR_LIVENESS_READ_WORKERS", "4")))
+
+
+def prefetch_pages(urls: list[str], fetch, workers: int = READ_WORKERS) -> dict:
+    """Read every distinct non-empty url once, `workers` at a time; return {url: response|None}.
+
+    A fetch that raises is recorded as None (no answer = UNKNOWN downstream), never dropped, so
+    the caller sees exactly the outcome a sequential get() returning None would have produced."""
+    todo = list(dict.fromkeys(u for u in urls if u))
+
+    def _one(u: str):
+        try:
+            return u, fetch(u)
+        except Exception:  # noqa: BLE001 — an exception is no answer, never a verdict
+            return u, None
+    if workers <= 1 or len(todo) <= 1:
+        return dict(_one(u) for u in todo)
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        return dict(ex.map(_one, todo))
+
+
 PRICE_REFRESH_CAP = int(os.environ.get("AQAR_LIVENESS_PRICE_CAP", "500"))
 
 
@@ -306,6 +350,53 @@ def is_price_refresh_artifact(new_price: int, area_m2, price_per_meter) -> bool:
     return False
 
 
+def refresh_decision(body: str, old_price, area_m2, stored_ppm) -> tuple[str, Optional[int]]:
+    """What the price refresh does with the page it already holds: ('write', P) | ('clear', None) |
+    ('reject', None) | ('keep', None).
+
+    aqar's RSC payload is read FIRST — the same reader the enricher trusts (`_structured_price`), not the first
+    «"price":N» in the body. Read live 2026-10-18 (aqar-price-probe 39148998971): 6903628 publishes price 1,575,000
+    with meter_price 3,500, while we still held 3,500 as its TOTAL — the source moved from a rate to a total and
+    the refresh never followed. The reverse move is handled too: a headline that IS the rate (`headline_is_rate`)
+    clears the stored total instead of keeping a figure the page no longer calls a total. aqar stating no price
+    at all is the enricher's retraction to make, never this refresh's. The body regex stays the fallback for a
+    page whose payload we could not read, behind the artifact guard as before."""
+    obj = _listing_json(body)
+    s_price, s_auth = _structured_price(obj)
+    if s_auth and s_price is None:
+        return "keep", None
+    if s_auth:
+        if headline_is_rate(obj, s_price, parse_price_per_meter(_html_to_text(body))):
+            return ("clear", None) if old_price is not None else ("keep", None)
+        new_price: Optional[int] = s_price
+    else:
+        new_price = price_from_body(body)
+    if new_price is None:
+        return "keep", None
+    if is_price_refresh_artifact(new_price, area_m2, stored_ppm):
+        return "reject", None
+    if old_price is not None and int(old_price) != new_price:
+        return "write", new_price
+    return "keep", None
+
+
+CONTROLS = 5
+# The recheck (--min-strikes) reads a struck row only if nothing looked at it for this long, so the
+# three strikes stay three SEPARATE readings (the fleet recheck uses 6 h too).
+RECHECK_MIN_GAP_HOURS = 6
+
+
+def _known_live_controls(client, tbl: str) -> list[dict]:
+    """Candidate known-live controls: the most recently seen UNSTRUCK active ads. Deliberately NOT
+    the sweep cohort (_cohort): under --only-struck the cohort is struck rows, and a control must be
+    an ad we have reason to believe is live. READ-ONLY by contract (no update/insert); the
+    scoped-verification barrier excludes only this body from its sweep-read count and pins that."""
+    return _run_with_retry(lambda: client.table(tbl)
+                           .select("id, listing_url, last_seen_at, missing_count")
+                           .eq("active", True).eq("missing_count", 0)
+                           .order("last_seen_at", desc=True).limit(40).execute()).data or []
+
+
 def looks_dead(status: int, body: str) -> bool:
     """True iff the response confirms this listing is gone (vs a transient hiccup)."""
     if status in (404, 410):
@@ -327,6 +418,9 @@ def main() -> None:
                     help="Consecutive sweeps a listing must be missing before we kill it.")
     ap.add_argument("--table", default="aqar_residential_listings",
                     choices=["aqar_residential_listings", "aqar_commercial_listings",
+                             # Aqar Monthly's ads ARE sa.aqar.fm pages: same site, same checker,
+                             # same markers, same 3 strikes (owner, 2026-09-28).
+                             "aqarmonthly_residential_listings",
                              "wasalt_residential_listings", "wasalt_commercial_listings"],
                     help="Which listings table to sweep. Run once per table to cover both verticals.")
     ap.add_argument("--shards", type=int, default=1,
@@ -345,6 +439,12 @@ def main() -> None:
                          "which is why wasalt-liveness.yml is unscheduled (cost guard, 2026-06). "
                          "The struck backlog is ~3.4k rows, roughly 1.3 GB, which answers 'are "
                          "these actually dead?' without the full sweep's cost.")
+    ap.add_argument("--min-strikes", type=int, default=0,
+                    help="RECHECK: examine only active rows already carrying at least this many "
+                         "direct strikes (missing_count >= N). Strictly NARROWING, like "
+                         "--only-struck: the same reader, the same known-live controls, the same "
+                         "3-strike grace. It lets the second and third readings of an ad aqar "
+                         "removed land ~12 h apart instead of a day apart (fast confirm, 2026-10-06).")
     ap.add_argument("--report-only", action="store_true",
                     help="VERIFY without deactivating. Suppresses the dead path entirely — no "
                          "active=false, no missing_count increment — and reports the verdicts it "
@@ -355,7 +455,10 @@ def main() -> None:
     args = ap.parse_args()
 
     table = args.table
-    platform = f"aqar_liveness:{table}:{args.shard}/{args.shards}"
+    # A recheck gets its OWN run label (LISTING_LIVENESS.md §9: a liveness job needs its own label,
+    # or its silence hides inside the daily sweep's rows).
+    kind = "aqar_liveness_recheck" if args.min_strikes > 0 and not args.only_struck else "aqar_liveness"
+    platform = f"{kind}:{table}:{args.shard}/{args.shards}"
     client = sb()
     # Before opening our own run row: finalize any stub WE left behind on a previous day —
     # a timeout-killed job never reaches end_run, so its ok=NULL stub would sit silent forever.
@@ -365,8 +468,14 @@ def main() -> None:
 
     # --only-struck narrows the cohort. The id walk below and the row fetch must apply the
     # IDENTICAL filter, or the worklist is built over one population and probed over another.
+    recheck_cut = (datetime.now(timezone.utc) - timedelta(hours=RECHECK_MIN_GAP_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     def _cohort(q):
         q = q.eq("active", True)
+        if args.min_strikes > 0 and not args.only_struck:
+            # Three SEPARATE readings: a row looked at in the last RECHECK_MIN_GAP_HOURS waits.
+            q = (q.gte("missing_count", args.min_strikes)
+                 .or_(f"last_liveness_probe_at.is.null,last_liveness_probe_at.lt.{recheck_cut}"))
         return q.gte("missing_count", args.grace) if args.only_struck else q
 
     # ── PHASE 1: this shard's worklist, by id modulo (fix 2026-09-24, see shard_partition.py) ────
@@ -405,11 +514,54 @@ def main() -> None:
     price_updated = 0   # prices re-read from the page we already fetched (owner-approved 2026-08-04)
     price_capped = 0    # changes seen past PRICE_REFRESH_CAP — next sweep picks them up
     price_artifact_rejected = 0  # refresh matched a proven artifact class (P1 2026-08-11) — skipped
+    price_rate_cleared = 0       # the headline is the rate: a stored total cleared (2026-10-18)
     # aqar only: aqar's JSON-LD offers.price is the published sale price. wasalt rows are swept by
     # this same script but their price comes from the wasalt API payload, so JSON-LD is not their
     # source of truth and must not overwrite it.
     price_refresh_on = table.startswith("aqar_")
+    # http.get() turns every 4xx into None, so without `keep` a 404/410 reached this sweep as "no
+    # answer" (transient) and looks_dead()'s 404 branch could never fire (found 2026-09-28: 1 of 15
+    # visible aqarmonthly ads answered 404 to lifecycle-spot-check). sa.aqar.fm tables only: wasalt
+    # rows run through here too, and their dead check is measured on their own transport.
+    gone_statuses = () if table.startswith("wasalt_") else (404, 410)
     started = time.time()
+
+    # ── OPENING CONTROLS (2026-10-05, Lifecycle Engineer) ───────────────────────────────────────
+    # This sweep hid ads inline with no known-live control at all (LIFECYCLE_ENGINEER.md,
+    # protection 1: every big site's run carries controls, and one wrong control means the run
+    # hides nothing). The controls are the freshest ads its crawl saw in the last 24 h with no
+    # strike; each is read through the SAME get() + looks_dead() as the worklist. If they do not
+    # read live (canary_environment_ok), the shard runs REPORT-ONLY: no strike, no hide, the alive
+    # refresh still lands (restorative). Strictly tightening: it can only stop a hide. A table with
+    # no fresh control (a crawl outage) keeps today's behaviour and says so in the run notes.
+    controls_note = ""
+    if not args.report_only and gone_statuses:
+        day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
+
+        def _fresh(r) -> bool:
+            try:
+                return datetime.fromisoformat(str(r.get("last_seen_at")).replace("Z", "+00:00")) >= day_ago
+            except ValueError:
+                return False
+        try:
+            cands = _known_live_controls(client, table)
+        except Exception as exc:  # noqa: BLE001 — unreadable controls hide nothing
+            cands, controls_note = [], f"controls unreadable ({str(exc)[:80]}) "
+            args.report_only = True
+        ctl = [r for r in cands if r.get("listing_url") and r.get("last_seen_at") and _fresh(r)][:CONTROLS]
+        if ctl:
+            alive_ctl = 0
+            for r in ctl:
+                c = get(r["listing_url"], max_retries=2, keep=gone_statuses)
+                if c is not None and c.status_code == 200 and not looks_dead(200, c.text or ""):
+                    alive_ctl += 1
+            controls_note = f"controls={alive_ctl}/{len(ctl)} "
+            if not canary_environment_ok(alive_ctl, len(ctl)):
+                args.report_only = True
+                controls_note = f"CONTROLS-QUARANTINED {controls_note}(report-only: nothing struck or hidden) "
+                print(f"✗ {controls_note}", flush=True)
+        elif not controls_note:
+            controls_note = "controls=none-fresh "
 
     # ── Per-row evidence (aqar_liveness_detail, migration 20260831003901) ─────────────────────────
     # That migration created the table, the ops_aqar_recent_kills view over it, and four arms of
@@ -430,17 +582,22 @@ def main() -> None:
     # flush is best-effort for the same reason gathern's is — an audit-log write must never fail or
     # roll back a liveness sweep. `applied` is False under --report-only, where the row is
     # untouched, so a verify run can never be read back as a real deactivation.
-    detail_on = table.startswith("aqar_")  # wasalt rows swept by this same script have their own
+    detail_on = table.startswith(("aqar_", "aqarmonthly_"))  # wasalt rows swept by this same script have their own
     detail_buf: list[dict] = []            # ledger (wasalt_liveness_pilot_detail); never cross them
 
     def _flush_detail() -> None:
-        """Best-effort: an audit-log write must never fail or roll back a liveness sweep."""
+        """Best-effort: an audit-log write must never fail or roll back a liveness sweep.
+
+        Retried like every other statement: the hide after it IS retried, so a transient on the
+        insert alone (the 2026-10-02 ConnectionTerminated shape) would drop the kill row and let
+        the hide land anyway — an orphaned hide, the exact thing evidence-before-hide prevents."""
         if not detail_buf:
             return
         for i in range(0, len(detail_buf), 500):
             chunk = detail_buf[i:i + 500]
             try:
-                client.table("aqar_liveness_detail").insert(chunk).execute()
+                _run_with_retry(lambda c=chunk: client.table("aqar_liveness_detail")
+                                .insert(c).execute())
             except Exception as exc:  # noqa: BLE001 — logging must not break the lifecycle
                 print(f"⚠ detail-log insert failed (non-fatal, {len(chunk)} rows): "
                       f"{str(exc)[:160]}", flush=True)
@@ -475,6 +632,8 @@ def main() -> None:
                 .limit(len(ids))
                 .execute())
             rows = res.data or []
+            pages = prefetch_pages([(row.get("listing_url") or "").strip() for row in rows],
+                                   lambda u: get(u, max_retries=2, keep=gone_statuses))
 
             for row in rows:
                 seen += 1
@@ -482,7 +641,7 @@ def main() -> None:
                 if not url:
                     continue  # no URL → can't check, skip
 
-                r = get(url, max_retries=2)
+                r = pages.get(url)
                 status = r.status_code if r is not None else 0
                 body = r.text if r is not None else ""
 
@@ -513,12 +672,21 @@ def main() -> None:
                         else:
                             pending_kill += 1
                     else:
-                        upd: dict = {"missing_count": new_missing}
+                        # last_liveness_probe_at = "we LOOKED" (never evidence of life); on a strike
+                        # it is what keeps the recheck's readings >= 6 h apart (--min-strikes).
+                        upd: dict = {"missing_count": new_missing, "last_liveness_probe_at": now_iso}
                         if new_missing >= args.grace:
                             upd["active"] = False
                             killed += 1
                         else:
                             pending_kill += 1
+                        # EVIDENCE BEFORE THE HIDE. The ledger row lands before the row changes, so
+                        # a shard that dies on a later statement leaves no hide without its reason.
+                        # 2026-10-02 01:07 UTC: aqar_residential shard 7 hid 66 rows, then died on
+                        # a dropped connection with those 66 kill rows still buffered — evidence
+                        # written AFTER the hide is evidence written never. Same end state when
+                        # nothing fails; only the order of two writes differs.
+                        _flush_detail()
                         _run_with_retry(lambda u=upd, i=row["id"]:
                                         client.table(table).update(u).eq("id", i).execute())
                 elif r is not None and status == 200:
@@ -536,25 +704,24 @@ def main() -> None:
                     # Scope is deliberately narrow: aqar BUY rows only. aqar's JSON-LD offers.price
                     # is the sale price (verified against the visible badge on 150+ pages during the
                     # 2026-08-04 repair); for rentals the same field's period is ambiguous, so those
-                    # are left to the enricher, which knows سنوي/شهري. Never writes NULL over an
-                    # existing price, and never writes when unchanged.
+                    # are left to the enricher, which knows سنوي/شهري. Writes NULL over an existing
+                    # price only when the page's own headline is its per-metre rate (refresh_decision),
+                    # and never writes when unchanged.
                     if price_refresh_on and (row.get("transaction_type") == "Buy"):
-                        new_price = price_from_body(body)
-                        old_price = row.get("price_total")
-                        if (new_price is not None
-                                and is_price_refresh_artifact(new_price, row.get("area_m2"),
-                                                               row.get("price_per_meter"))):
+                        verdict, new_price = refresh_decision(body, row.get("price_total"),
+                                                              row.get("area_m2"), row.get("price_per_meter"))
+                        if verdict == "reject":
                             # Proven-live artifact class (P1 2026-08-11, see is_price_refresh_
                             # artifact docstring) — reject the write, keep the old value, count it
                             # so a spike is visible in scrape_runs.notes.
                             price_artifact_rejected += 1
-                            new_price = None
-                        if new_price and old_price is not None and int(old_price) != new_price:
+                        elif verdict in ("write", "clear"):
                             if price_updated < PRICE_REFRESH_CAP:
                                 _run_with_retry(lambda i=row["id"], p=new_price:
                                                 client.table(table)
                                                 .update({"price_total": p}).eq("id", i).execute())
                                 price_updated += 1
+                                price_rate_cleared += verdict == "clear"
                             else:
                                 price_capped += 1
 
@@ -595,6 +762,13 @@ def main() -> None:
         pass
     except KeyboardInterrupt:
         print("\nInterrupted — finalizing run row.")
+    finally:
+        # Flush the remaining per-row evidence (transient / unknown / report-only readings; every
+        # applied strike or kill already flushed before its own write). A `finally` so the trail is
+        # durable for a shard that ended on StopIteration, Ctrl-C OR an unhandled exception — the
+        # plain call that used to sit after this block was skipped on the third, which is how the
+        # 66 orphaned hides of 2026-10-02 happened. Best-effort, so it can never mask the error.
+        _flush_detail()
 
     # Flush any remaining batched "alive" refreshes.
     if alive_ids:
@@ -604,16 +778,12 @@ def main() -> None:
                                  **direct_alive_patch(now_iso=now_iso)})
                         .in_("id", ids).execute())
 
-    # Flush the remaining per-row evidence. Runs after the alive flush and before end_run so the
-    # audit trail is durable even for a shard that ended on StopIteration or Ctrl-C.
-    _flush_detail()
-
     notes = (
-        f"refreshed={refreshed} killed={killed} "
+        f"{controls_note}refreshed={refreshed} killed={killed} "
         f"pending_kill={pending_kill} transient={transient} "
         f"unknown_soft_closed={unknown_soft_closed} "
         f"price_updated={price_updated} price_capped={price_capped} "
-        f"price_artifact_rejected={price_artifact_rejected}"
+        f"price_artifact_rejected={price_artifact_rejected} price_rate_cleared={price_rate_cleared}"
     )
     print(f"\n✓ Liveness sweep done. scanned={seen} {notes}")
     end_run(run_id, ok=True, rows_seen=seen, rows_upserted=killed, notes=notes)

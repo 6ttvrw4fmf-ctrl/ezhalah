@@ -48,6 +48,9 @@ Accept-Language: ar is sent; city/area/type names come back Arabic («الريا
 «شقة»). The public page https://www.dwelleo.sa/ar/properties/<slug> renders the listing
 (verified: title, «السعر 1,400,000», «227 م²», the ad licence «7200899466» all on the page).
 /ar/properties itself client-redirects to the homepage, so listing_url is ALWAYS the detail page.
+2026-10-07 the site moved its pages to /ar/properties/for-{rent|sale}/{type}/{city}/{district}/{slug}
+and the old /ar/properties/<slug> answers 404: listing_url now comes from sitemaps/properties.xml
+(the site's own list of live pages) and a record with no page there is skipped (no_public_page).
 
 Catalogue on 2026-09-24 (second walk, 479 s): 11,480 rows / 11,480 ids, site total 11,481.
 listing_type.key: for-sale + re-sale → Buy, for-rent → Rent, short-term-rental 1 (→ skipped,
@@ -63,7 +66,7 @@ the site's own «قريباً/على الخارطة» flags; sold/rented are its
 property_type.name: شقة 5,581 · فيلا 2,815 · ارض 1,159 · دور 736 · مبني 287 · استوديو 202 ·
 غير محدد 186 · تاون هاوس 182 · سطح 130 · مكتب 63 · بنتهاوس 53 · محل 52 · مزرعة 13 · شاليه 13.
   · «مبني» is the site's spelling of مبنى (titles: «مبنى تجاري», «عمارة 12 شقة») → Building.
-  · «تاون هاوس» → Villa and «بنتهاوس» → Apartment follow the fleet's existing overrides.
+  · «تاون هاوس» keeps its own name (owner 2026-10-12) and «بنتهاوس» → Apartment follows the fleet override.
   · «ارض» is split by the site's own land_type: residential/blank → Residential Land,
     commercial → Commercial Land, agricultural → Farm (the canon's «أرض زراعية»); raw_land,
     industrial, shovel_ready, institutional, touristic (23 rows) have no honest bucket → skipped.
@@ -162,13 +165,19 @@ from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 BASE = "https://www.dwelleo.sa"
 API = "https://api.dwelleo.sa/api/v1/properties"
+# The site's own list of public listing pages. Since 2026-10-07 a listing lives at
+# /ar/properties/for-{rent|sale}/{type}/{city}/{district}/{slug}; the old /ar/properties/{slug}
+# answers 404 (8/8 sampled). The path parts are the site's own English slugs, which the API does
+# not hand us, so the URL is TAKEN from the sitemap, never assembled: a card must open a live page.
+SITEMAP = f"{BASE}/sitemaps/properties.xml"
+_LOC_RE = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>")
 SOURCE = "دويليو"
 PREFIX = "DWL"
 _PAUSE = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 
 _DEAL = {"for-sale": "Buy", "re-sale": "Buy", "for-rent": "Rent"}
 # The site's exact spellings where they differ from the shared map (contract: map_type_exact).
-_TYPE_OVERRIDES = {"مبني": "Building", "تاون هاوس": "Villa", "بنتهاوس": "Apartment"}
+_TYPE_OVERRIDES = {"مبني": "Building", "تاون هاوس": "تاون هاوس", "بنتهاوس": "Apartment"}
 _LAND_BY_USE = {None: "Residential Land", "": "Residential Land", "residential": "Residential Land",
                 "commercial": "Commercial Land", "agricultural": "Farm"}
 # Types whose bedrooms/bathrooms are the UNIT's; a Building's counts are its whole room stock.
@@ -199,16 +208,21 @@ _SUB_MONTHLY_RE = re.compile(
     r"|لليلة|بالليلة|الليلة الواحدة|باليوم|لليوم|/\s*(?:يوم|ليلة)|نصف\s*سنوي|ربع\s*سنوي")
 
 
+_CATALOGUE_ATTEMPTS = 6
+_MAX_DEFERRED_PAGES = 10   # more failing pages than this is an outage, not a blip
+
+
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome")   # impersonate OWNS the User-Agent; never set one
     s.headers.update({"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"})
     return s
 
 
-def _get_json(s: cc.Session, url: str, *, params: Optional[dict] = None) -> tuple[Optional[int], Any]:
-    """(status, parsed json | None) with 3 attempts on transport errors / 5xx / 429."""
+def _get_json(s: cc.Session, url: str, *, params: Optional[dict] = None,
+              attempts: int = 3) -> tuple[Optional[int], Any]:
+    """(status, parsed json | None) with `attempts` tries on transport errors / 5xx / 429."""
     status, data = None, None
-    for attempt in range(3):
+    for attempt in range(attempts):
         try:
             r = s.get(url, params=params, timeout=40)
             status = r.status_code
@@ -218,35 +232,105 @@ def _get_json(s: cc.Session, url: str, *, params: Optional[dict] = None) -> tupl
                 return status, None
         except Exception:  # noqa: BLE001 — retried below
             status = None
-        time.sleep(1.5 * (attempt + 1))
+        if attempt + 1 < attempts:
+            time.sleep(1.5 * (attempt + 1))
     return status, data
 
 
 def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[dict[int, dict], int, bool]:
     """Walk ?page=1..total_pages. Returns ({id: list item}, site_total, complete) where `complete`
-    is True only when the walk reached total_pages with rows on every page (an early empty page →
-    False; never True under --limit). A page with no data raises."""
+    is True only when every page up to total_pages was read with rows on it (an early empty page or
+    a page that never answered → False; never True under --limit).
+
+    A page that still fails after its retries is set aside and read again once the walk is done,
+    instead of throwing the whole run away: one HTTP 500 on one of ~650 pages lost four whole
+    crawls in a row (2026-09-29 … 10-02, pages 120 / 87 / 88 / 102, each fine minutes later), which
+    also left the site with no fresh rows for the daily liveness check. Page 1 failing, or more
+    than _MAX_DEFERRED_PAGES failing, still raises — that is the source being down."""
     items: dict[int, dict] = {}
-    total, page, complete = 0, 1, True
-    while True:
-        status, payload = _get_json(s, API, params={"page": page})
+    total, page, total_pages, complete = 0, 1, 0, True
+    deferred: list[int] = []
+
+    def read(pg_no: int) -> Optional[list]:
+        nonlocal total, total_pages
+        # 6 tries (~22 s of backoff), not 3 (~9 s): the catalogue API throws short bursts of HTTP 500.
+        status, payload = _get_json(s, API, params={"page": pg_no}, attempts=_CATALOGUE_ATTEMPTS)
         data = (payload or {}).get("data") if isinstance(payload, dict) else None
         if not isinstance(data, dict):
-            raise RuntimeError(f"catalogue page {page} answered HTTP {status} with no data")
+            read.status = status
+            return None
         pg, rows = data.get("pagination") or {}, data.get("properties") or []
         total = int(pg.get("total") or total or 0)
+        total_pages = int(pg.get("total_pages") or total_pages or pg_no)
         for it in rows:
             if isinstance(it, dict) and it.get("id") is not None:
                 items[int(it["id"])] = it
-        if limit and len(items) >= limit:
+        return rows
+
+    while True:
+        rows = read(page)
+        if rows is None:
+            if page == 1 or len(deferred) >= _MAX_DEFERRED_PAGES:
+                raise RuntimeError(f"catalogue page {page} answered HTTP {read.status} with no data")
+            deferred.append(page)
+        elif limit and len(items) >= limit:
             return dict(list(items.items())[:limit]), total, False
-        total_pages = int(pg.get("total_pages") or page)
-        if not rows or page >= total_pages:
+        elif not rows:
             complete = page >= total_pages      # an early empty page is an INCOMPLETE walk
+            break
+        if page >= total_pages:
             break
         page += 1
         time.sleep(_PAUSE)
+    for pg_no in deferred:                      # second chance, minutes after the burst
+        if read(pg_no) is None:
+            print(f"  ⚠ catalogue page {pg_no} never answered (HTTP {read.status}) — walk incomplete, "
+                  "no prune this run", flush=True)
+            complete = False
     return items, total, complete
+
+
+def parse_sitemap(xml: str) -> tuple[dict[str, str], list[str]]:
+    """({slug: public page URL}, [child sitemap URLs]) from one sitemap document.
+
+    A listing page is any <loc> under /properties/ with a slug after it; the Arabic page wins over
+    the English one for the same slug. A <sitemapindex> yields its children instead."""
+    locs = _LOC_RE.findall(xml or "")
+    if "<sitemapindex" in (xml or ""):
+        return {}, locs
+    urls: dict[str, str] = {}
+    for loc in locs:
+        path = loc.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+        if "/properties/" not in path:
+            continue
+        slug = path.rsplit("/", 1)[-1]
+        if slug and (slug not in urls or "/ar/" in path and "/ar/" not in urls[slug]):
+            urls[slug] = path
+    return urls, []
+
+
+def fetch_public_urls(s: cc.Session) -> dict[str, str]:
+    """{slug: public page URL} for every listing page the site publishes. Raises when the sitemap
+    cannot be read: without it no listing has a known page, and a guessed URL is a dead card."""
+    def get(url: str) -> str:
+        for attempt in range(_CATALOGUE_ATTEMPTS):
+            try:
+                r = s.get(url, timeout=40, headers={"Accept": "application/xml,text/xml,*/*"})
+                if r.status_code == 200 and "<loc>" in r.text:
+                    return r.text
+                if r.status_code < 500 and r.status_code != 429:
+                    break
+            except Exception:  # noqa: BLE001 — retried below
+                pass
+            time.sleep(1.5 * (attempt + 1))
+        raise RuntimeError(f"the properties sitemap {url} did not answer with listing pages")
+
+    urls, children = parse_sitemap(get(SITEMAP))
+    for child in children[:50]:
+        found, _ = parse_sitemap(get(child))
+        for slug, url in found.items():
+            urls.setdefault(slug, url)
+    return urls
 
 
 def fetch_detail(s: cc.Session, key: Any) -> Optional[dict]:
@@ -296,17 +380,25 @@ def _photo_urls(rec: dict) -> list[str]:
 
 def _amenities(rec: dict, description: Optional[str]) -> dict[str, Any]:
     """Prose < the site's named amenity/tag chips < its labelled fields."""
-    out: dict[str, Any] = dict(normalize.amenities_from_text(description))
+    prose = normalize.amenities_from_text(description)
     names = [a.get("name") for a in (rec.get("amenities") or []) + (rec.get("tags") or [])
              if isinstance(a, dict) and a.get("name")]
-    out.update(normalize.amenities_from_text("، ".join(names)))
+    chips = normalize.amenities_from_text("، ".join(names))
+    out: dict[str, Any] = {**prose, **chips}
     for col in ("maid_room", "driver_room"):
         if _pos(rec.get(col)):
             out[col] = True
     if _pos(rec.get("parking_space")):
         out["parking"] = True
-    if rec.get("furnishing_status") in _FURNISHED:
-        out["furnished"] = _FURNISHED[rec["furnishing_status"]]
+    # furnished has THREE source statements: the furnishing_status field, the tag chips («مفروش») and the ad's own
+    # words. They agree on 1,326 active ads and disagree on ~20 (measured 2026-10-25): «غير مفروشة» / «مفروشة: لا»
+    # under status «furnished» (served as YES), «شقة مفروشة» under «unfurnished» — and on 3 ads status + chip
+    # «مفروش» say yes while the text says «مفروشة: لا», where letting the chip outvote the words put the yes back.
+    # Any disagreement is unknown, written authoritatively (the upsert drops a plain None, so a stale yes stays).
+    stated = {v for v in (prose.get("furnished"), chips.get("furnished"),
+                          _FURNISHED.get(rec.get("furnishing_status"))) if v is not None}
+    if stated:
+        out["furnished"] = stated.pop() if len(stated) == 1 else db.AUTHORITATIVE_NULL
     for key in rec.get("utility_availability") or []:
         if key in _UTILITY:
             out[_UTILITY[key]] = True
@@ -327,8 +419,12 @@ def _clean_info(d: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def map_listing(rec: dict, *, this_year: Optional[int] = None) -> tuple[Optional[dict], str, str]:
-    """One API record (list item, or list item merged with its detail) → (row|None, category, why)."""
+def map_listing(rec: dict, *, this_year: Optional[int] = None,
+                public_urls: Optional[dict[str, str]] = None) -> tuple[Optional[dict], str, str]:
+    """One API record (list item, or list item merged with its detail) → (row|None, category, why).
+
+    `public_urls` is the sitemap's {slug: page}. A record whose slug has no public page is skipped
+    (no_public_page): the card would open a 404. None (tests only) keeps the record's slug path."""
     this_year = this_year or datetime.now(timezone.utc).year
     dwl_id = _pos(rec.get("id"))
     if not dwl_id:
@@ -336,6 +432,8 @@ def map_listing(rec: dict, *, this_year: Optional[int] = None) -> tuple[Optional
     slug = (rec.get("slug") or "").strip()
     if not slug:
         return None, "residential", "no_slug"
+    if public_urls is not None and slug not in public_urls:
+        return None, "residential", "no_public_page"
     owner_name = str((rec.get("owner") or {}).get("name") or "") if isinstance(rec.get("owner"), dict) else ""
     if slug.startswith("test-") or _TEST_TITLE in (rec.get("title") or "") or _TEST_OWNER_RE.search(owner_name):
         return None, "residential", "site_test_row"
@@ -384,7 +482,7 @@ def map_listing(rec: dict, *, this_year: Optional[int] = None) -> tuple[Optional
 
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{dwl_id}",
-        "listing_url": f"{BASE}/ar/properties/{slug}",
+        "listing_url": public_urls[slug] if public_urls is not None else f"{BASE}/ar/properties/{slug}",
         "source": SOURCE,
         "active": True,
         "title": title,
@@ -425,12 +523,26 @@ def map_listing(rec: dict, *, this_year: Optional[int] = None) -> tuple[Optional
             row["rent_period"], row["price_annual"] = normalize.rent_period_and_annual(
                 price, "سنوي" if period == "annual" else "شهري")
         else:
-            row["price_annual"] = price                          # silent/mixed: figure as printed
-            # rent_period = AUTHORITATIVE_NULL (not absent): the site publishes no period field at
-            # all for rent prices, so "we found no period word" is the source's own settled state,
-            # not a read failure — it must overwrite a stale 'monthly'/'annual' from an earlier
-            # crawl on re-crawl (RENT PERIOD = SOURCE), matching the sub_monthly fix above.
-            row["rent_period"] = db.AUTHORITATIVE_NULL
+            # Silent or mixed: the owner's rule of 2026-09-26 (normalize.rent_period_from_ad, «check the price —
+            # if it looks monthly, put it monthly») — a period word tied to THIS price wins, else a price of at
+            # most MONTHLY_LOOKING_MAX is monthly (no Saudi unit rents for under 10,000 a year). Re-applied to
+            # dwelleo 2026-10-21 (owner: «based on the price u make a judgement»): 854 rents had no period, and
+            # figures like 1,700 / 3,500 for a flat — whose own rental_prediction is 29,600 / 36,400 a year —
+            # were served as YEARLY rents. Above the line the figure stays as printed with a NULL period.
+            text = f"{rec.get('title') or ''}\n{rec.get('description') or ''}"
+            judged = normalize.stated_rent_period(price, text) or (
+                "monthly" if price and price <= normalize.MONTHLY_LOOKING_MAX else None)
+            if judged:
+                period, note = judged, "judged_by_price"
+                row["rent_period"], row["price_annual"] = normalize.rent_period_and_annual(
+                    price, "سنوي" if judged == "annual" else "شهري")
+            else:
+                row["price_annual"] = price                      # figure as printed
+                # rent_period = AUTHORITATIVE_NULL (not absent): the site publishes no period field at
+                # all for rent prices, so "we found no period word" is the source's own settled state,
+                # not a read failure — it must overwrite a stale 'monthly'/'annual' from an earlier
+                # crawl on re-crawl (RENT PERIOD = SOURCE), matching the sub_monthly fix above.
+                row["rent_period"] = db.AUTHORITATIVE_NULL
         kind = {"annual": "annual", "monthly": "monthly"}.get(period, "total")
     else:
         row["price_total"] = price
@@ -544,6 +656,8 @@ def main() -> int:
         if not items:
             raise RuntimeError("the catalogue API answered with no properties")
         print(f"{SOURCE}: {len(items)} listings enumerated (site total {site_total})", flush=True)
+        public_urls = fetch_public_urls(s)
+        print(f"{SOURCE}: {len(public_urls)} public listing pages in {SITEMAP}", flush=True)
         for dwl_id, item in items.items():
             seen += 1
             detail = None
@@ -553,7 +667,7 @@ def main() -> int:
                 if detail is None or _pos(detail.get("id")) != dwl_id:
                     skipped["detail_miss"] = skipped.get("detail_miss", 0) + 1   # the card still maps
                     detail = None
-            row, cat, why = map_listing({**item, **(detail or {})})
+            row, cat, why = map_listing({**item, **(detail or {})}, public_urls=public_urls)
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue

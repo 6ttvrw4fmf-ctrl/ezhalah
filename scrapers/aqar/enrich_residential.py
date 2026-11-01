@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json as _json
 import re
+import sys
 from typing import Any, Optional
 from urllib.parse import urlparse, unquote
 
@@ -139,6 +140,49 @@ _PRIVATE_ENTRANCE_KEYS = ("special_entrance", "two_entrances")
 _LISTING_OBJ_RE = re.compile(r'"listing"\s*:\s*\{')
 
 
+# Saudi Arabia's bounding box (generous). A pin outside it, or at 0,0, is not a real location.
+_SA_LAT = (16.0, 32.5)
+_SA_LNG = (34.0, 56.0)
+_LD_JSON_RE = re.compile(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', re.S)
+
+
+def source_pin(html: str) -> Optional[dict[str, float]]:
+    """The map pin aqar ITSELF publishes for this ad, or None.
+
+    Backlog 312 (owner, 2026-10-09: every crawler captures the source's own pin). A live aqar ad page
+    embeds a schema.org RealEstateListing in <script type="application/ld+json"> whose
+    offers.itemOffered.geo is a GeoCoordinates {latitude, longitude} (scrapers/aqar/testdata/
+    aqar_live_page.excerpt.html, ad 6541629: 24.594493, 46.715077). Source pin only: nothing is
+    geocoded. A pin outside Saudi Arabia or at 0,0 is rejected (None), never stored.
+    """
+    if not html or "GeoCoordinates" not in html:
+        return None
+    for blob in _LD_JSON_RE.findall(html):
+        if "GeoCoordinates" not in blob:
+            continue
+        try:
+            data = _json.loads(blob)
+        except ValueError:
+            continue
+        stack = [data]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                if node.get("@type") == "GeoCoordinates":
+                    try:
+                        lat = float(node.get("latitude"))
+                        lng = float(node.get("longitude"))
+                    except (TypeError, ValueError):
+                        return None
+                    if _SA_LAT[0] <= lat <= _SA_LAT[1] and _SA_LNG[0] <= lng <= _SA_LNG[1]:
+                        return {"lat": lat, "lng": lng}
+                    return None
+                stack.extend(node.values())
+            elif isinstance(node, list):
+                stack.extend(node)
+    return None
+
+
 def _listing_json(html: str) -> Optional[dict[str, Any]]:
     """The listing object aqar embeds in its RSC flight payload, or None if it is not present.
 
@@ -162,25 +206,142 @@ def _listing_json(html: str) -> Optional[dict[str, Any]]:
             blob = blob.encode("latin-1", "ignore").decode("utf-8", "ignore")
         except UnicodeError:      # already clean on some payload shapes — keep what we have
             pass
+    # raw_decode, not a brace counter: the counter ignored strings, so an ad whose own text holds a
+    # «{» or «}» closed the object mid-string, failed to parse, and the WHOLE payload read as None —
+    # photos, pin, price and amenities all unknown. Live 2026-10-10: ad 6753755 and 42 more rows kept
+    # other ads' photos through every re-scrape that way.
+    dec = _json.JSONDecoder()
     for m in _LISTING_OBJ_RE.finditer(blob):
         start = blob.index("{", m.start() + len('"listing"'))
-        depth = 0
-        for i in range(start, min(len(blob), start + 200_000)):
-            ch = blob[i]
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    try:
-                        obj = _json.loads(blob[start:i + 1])
-                    except Exception:  # noqa: BLE001
-                        break
-                    # The first `"listing":{` in the payload is an i18n label bundle with no id.
-                    if isinstance(obj, dict) and obj.get("id") is not None:
-                        return obj
-                    break
+        try:
+            obj, _ = dec.raw_decode(blob, start)
+        except ValueError:
+            continue
+        # The first `"listing":{` in the payload is an i18n label bundle with no id.
+        if isinstance(obj, dict) and obj.get("id") is not None:
+            return obj
     return None
+
+
+# Aqar's «نوع العقار» on a plot: listing.specs[name="type"], dictionary 1 سكني · 2 تجاري · 3 سكني/تجاري
+# (the only three values Aqar defines for land — it has no industrial or agricultural land usage).
+# «سكني/تجاري» = Commercial Land: owner's mixed-use rule (2026-09-27, Mobasher «أرض سكني تجاري»).
+AQAR_LAND_USAGE = {"سكني": "Residential Land", "تجاري": "Commercial Land", "سكني/تجاري": "Commercial Land"}
+
+# When Aqar's field is silent (owner 2026-10-10): the seller's OWN description (listing.content — never
+# the page's menus, district lists or similar-ads strip) may state the usage, as the adjacent phrase
+# أرض|ارض|الأرض|الارض (a leading و/ب/ف allowed) + سكني/ة · تجاري/ة · صناعي/ة · زراعي/ة (ة also typed ه). One
+# usage → that type, stored as the seller's own word («أرض صناعي») so the card shows it; «سكني تجاري» →
+# Commercial Land (mixed-use rule); two different usages → unknown. «قريبة من المنطقة الصناعية», «مزرعه», «للسكن والاستثمار» never
+# match. No usage anywhere → «أرض» (Other Land, owner: «don't show it in a specific property type»).
+_USAGE_KIND = {"سكني": "res", "سكنية": "res", "تجاري": "com", "تجارية": "com",
+               "صناعي": "ind", "صناعية": "ind", "زراعي": "agri", "زراعية": "agri"}
+_USAGE_WORD = "سكنية|سكنيه|سكني|تجارية|تجاريه|تجاري|صناعية|صناعيه|صناعي|زراعية|زراعيه|زراعي"
+_LAND_PHRASE_RE = re.compile(
+    rf"(?<![\u0621-\u064A])[وبف]?(?:ال)?[أا]رض\s+({_USAGE_WORD})(?![\u0621-\u064A])(?:\s*[/-]?\s*(\S+))?")
+LAND_MIXED = "أرض سكني تجاري"
+LAND_OTHER = "أرض"
+# Every type the description path can store → its clean type (mirrors RAW_TO_CLEAN in propertyTypes.ts).
+LAND_DESCRIPTION_TYPES = {f"أرض {w}": c for w, c in (
+    ("سكني", "Residential Land"), ("سكنية", "Residential Land"), ("تجاري", "Commercial Land"),
+    ("تجارية", "Commercial Land"), ("صناعي", "Industrial Land"), ("صناعية", "Industrial Land"),
+    ("زراعي", "Agriculture Plot"), ("زراعية", "Agriculture Plot"))}
+LAND_DESCRIPTION_TYPES[LAND_MIXED] = "Commercial Land"
+
+
+def _usage_from_description(content: Any) -> Optional[str]:
+    """The seller's own stated usage as a stored type («أرض صناعي»), or None when the description states
+    none, or states two different ones."""
+    if not isinstance(content, str):
+        return None
+    kinds: dict[str, str] = {}
+    for m in _LAND_PHRASE_RE.finditer(content):
+        # «سكنيه» is «سكنية» typed with ه: same word, stored in its standard spelling.
+        word = re.sub("ه$", "ة", m.group(1))
+        nxt = re.sub("ه$", "ة", re.match(r"[\u0621-\u064A]*", m.group(2) or "").group(0))
+        kind, stored = _USAGE_KIND[word], f"أرض {word}"
+        if re.match(r"(سكن|تجار|صناع|زراع)", nxt):          # a second usage word right after the first
+            k2 = _USAGE_KIND.get(nxt)
+            if k2 is not None and {kind, k2} == {"res", "com"}:
+                kind, stored = "mix", LAND_MIXED
+            elif k2 != kind:
+                return None                                   # «تجارية صناعية», «سكني تجاريه» → unknown
+        kinds.setdefault(kind, stored)
+    return next(iter(kinds.values())) if len(kinds) == 1 else None
+
+
+def _land_type(obj: Optional[dict[str, Any]], ad_number: str) -> tuple[Optional[str], Optional[str]]:
+    """(type, provenance) for a plot. SOURCE IS TRUTH — never a default:
+    payload unread, or no spec list at all (a closed ad shows none) → (None, None): unknown, the upsert
+    keeps the stored value · Aqar's own «نوع العقار» → ("Residential Land"/"Commercial Land", "aqar_field")
+    — it always wins · Aqar silent (incl. payload `type: 4`, unlabelled by Aqar and not shown) → the
+    seller's own description: (e.g. "أرض صناعي", "description") · neither → ("أرض", "none") · a field
+    word we do not map → (None, None), loudly."""
+    specs = obj.get("specs") if isinstance(obj, dict) else None
+    if not isinstance(specs, list) or not specs:
+        return None, None
+    spec = next((s for s in specs if isinstance(s, dict) and s.get("name") == "type"), None)
+    word = spec.get("value") if spec else None
+    word = "".join(word.split()) if isinstance(word, str) and not word.startswith("$") else ""
+    if word:
+        if word not in AQAR_LAND_USAGE:
+            print(f"⚠ aqar: UNMAPPED land usage «{word}» (ad {ad_number}) — type left unknown; owner to place it",
+                  file=sys.stderr, flush=True)
+            return None, None
+        return AQAR_LAND_USAGE[word], "aqar_field"
+    stated = _usage_from_description(obj.get("content"))
+    return (stated, "description") if stated else (LAND_OTHER, "none")
+
+
+AQAR_PHOTO_BASE = "https://images.aqar.fm/webp/750x0/props/"
+
+
+def _own_photos(obj: Optional[dict[str, Any]]) -> Optional[list[str]]:
+    """The ad's OWN photos, from aqar's own `listing.imgs` — one 750px URL per photo, in aqar's order.
+
+    LISTING FIDELITY (owner rule): a listing shows only its own photos. The old extractor swept every
+    `images.aqar.fm` URL in the raw page, which also holds the «إعلانات مشابهة» thumbnails of OTHER
+    ads, every CDN size variant of each photo, and JSON-escaped junk ending in a backslash — on
+    2026-10-10 all 160,450 live residential rows carried it (ad 6815040: 86 entries for 21 photos,
+    5 of them another villa; ad 6438846 has no photos at all and showed only other ads' houses).
+
+      list  → aqar's listing payload names the gallery; `imgs: null` / `[]` is the source saying
+              «no photos», so the row really is emptied.
+      None  → payload unreadable, or it has no `imgs` key: UNKNOWN. The upsert drops a None, so the
+              stored photos survive a failed fetch — never blank a row on a bad read.
+    """
+    if not isinstance(obj, dict) or "imgs" not in obj:
+        return None
+    imgs = obj["imgs"]
+    if imgs is None:
+        return []
+    if not isinstance(imgs, list):
+        return None
+    out = [x if x.startswith("https://") else AQAR_PHOTO_BASE + x.lstrip("/")
+           for x in (str(i).strip() for i in imgs if isinstance(i, str))
+           if x and "\\" not in x]
+    return list(dict.fromkeys(out))
+
+
+def _own_coordinates(obj: Optional[dict[str, Any]]) -> Optional[dict[str, float]]:
+    """The pin aqar itself shows for the ad: `listing.location {lat, lng}` (ld+json `geo` carries the
+    same). `precise_location` is null on most ads, so it is not required — `location` IS aqar's pin.
+
+    Written as `additional_info = {"latitude", "longitude"}`, the shape listing_rich_attrs already
+    reads for every generic platform. None (→ the upsert keeps what is stored) when the payload is
+    unreadable, the pin is absent, (0,0), or outside Saudi Arabia (lat 16–33, lng 34–56) — which
+    also rejects a swapped pair instead of guessing which number is which.
+    """
+    loc = obj.get("location") if isinstance(obj, dict) else None
+    if not isinstance(loc, dict):
+        return None
+    lat, lng = loc.get("lat"), loc.get("lng")
+    if isinstance(lat, bool) or isinstance(lng, bool) or not isinstance(lat, (int, float)) \
+            or not isinstance(lng, (int, float)):
+        return None
+    if not (16 <= lat <= 33 and 34 <= lng <= 56):
+        return None
+    return {"latitude": float(lat), "longitude": float(lng)}
 
 
 def _structured_price(obj: Optional[dict[str, Any]]) -> tuple[Optional[int], bool]:
@@ -214,6 +375,21 @@ def _structured_price(obj: Optional[dict[str, Any]]) -> tuple[Optional[int], boo
     return (v if v > 0 else None), True
 
 
+def headline_is_rate(obj: Optional[dict[str, Any]], s_price: Optional[int], text_ppm: Optional[int]) -> bool:
+    """aqar's published `price` IS the per-metre rate, not a total (owner rule 2026-10-18: a rate needs the ad's own
+    per-metre marker tied to that figure). Two shapes, both read live 2026-10-18:
+      • the payload's own `meter_price` equals `price` (the price slot prints «600 ريال» and «سعر المتر 600»);
+      • the page's «سعر المتر N» equals `price` — unless REGA's declared total (`rega_total_price`) is that same
+        figure: then the licence itself states it as the total (6896329: price 3,500 = rega_total_price 3,500).
+    A rate of 1 is aqar's placeholder («سعر المتر 1 §») and is never read this way (those rows are left as they are)."""
+    if not s_price or s_price <= 1:
+        return False
+    num = lambda v: int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None  # noqa: E731
+    if num((obj or {}).get("meter_price")) == s_price:
+        return True
+    return text_ppm == s_price and num((obj or {}).get("rega_total_price")) != s_price
+
+
 # aqar's rent-period enum. Only values PROVEN against a rendered page are mapped; an unmapped value
 # falls through to the rendered word rather than guessing a period.
 #   3 → annual  (77/150 live listings, every one rendering «N سنوي»)
@@ -226,6 +402,12 @@ _RENT_PERIOD_ENUM: dict[int, str] = {2: "monthly", 3: "annual"}
 
 # The period word aqar prints next to a specific figure, matched with and without thousands commas.
 _PERIOD_WORDS = (("سنوي", "annual"), ("شهري", "monthly"))
+
+# What aqar prints between a figure and its period word. Since ~2026-10-18 the price slot renders
+# «3,700 § ريال /سنوي» — a hidden «§» glyph, then the word «ريال», then «/سنوي» — and aqar's payload
+# now sends `rent_period: null`. A one-character currency slot stopped matching, so 95% → ~55% of new
+# aqar rentals lost their period and fell out of the «سنوي» filter (~7,200 priced rows by 10-30).
+_CUR = r"(?:\s*(?:§|﷼|ريال|ر\.\s?س\.?|ر))*"
 
 
 def _period_beside(price: Optional[int], text: str, is_rnpl_page: bool = False) -> Optional[str]:
@@ -255,7 +437,7 @@ def _period_beside(price: Optional[int], text: str, is_rnpl_page: bool = False) 
         if period == "monthly" and is_rnpl_page:
             continue          # on a financing page every «شهري» is an instalment, never the rent
         for num in {str(price), grouped}:
-            if re.search(rf"{re.escape(num)}\s*[§ر﷼]?\s*/?\s*{pattern}", text):
+            if re.search(rf"{re.escape(num)}{_CUR}\s*/?\s*{pattern}", text):
                 return period
     return None
 
@@ -400,6 +582,18 @@ _SPEC_LABELS = (
 _SPEC_BOUNDARY_RE = re.compile("|".join(re.escape(s) for s in _SPEC_LABELS))
 
 
+# aqar's facade is a CLOSED choice (2026-10-18): the value must be one of these, longest first, else nothing — the
+# label was followed by the next spec fields, the seller's prose or the advertiser block on 14 live rows (6921061's
+# re-read wanted «على شارع بعرض 20 متر وحديقة خلفية …» over its «شمال»). Same list as SQL public.aqar_facade().
+AQAR_FACADES = ("شمال شرقي", "شمال غربي", "جنوب شرقي", "جنوب غربي", "شرق غربي", "شمال جنوبي",
+                "3 شوارع", "4 شوارع", "شمال", "جنوب", "شرق", "غرب")
+
+
+def aqar_facade(raw: Optional[str]) -> Optional[str]:
+    v = (raw or "").strip()
+    return next((f for f in AQAR_FACADES if v == f or v.startswith(f + " ")), None)
+
+
 def _text_after_label(html: str, *labels: str, max_len: int = 80) -> Optional[str]:
     """The value aqar prints after `label`, cut at the next spec label.
 
@@ -535,16 +729,13 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
               flush=True)
     transaction_type = "Rent" if deal_slug == "rent" else "Buy"
 
-    # Land ZONING split: Aqar lumps every plot under one أراضي category (→ "Residential Land"). Read the
-    # listing text to tag the real zoning so commercial/industrial/agricultural plots aren't all labelled
-    # residential. Most-specific wins; no keyword → residential (Aqar's default). (user: split the land.)
+    # Land USAGE is Aqar's own field — never a guess. This used to keyword-scan the WHOLE page text,
+    # where the nav menu always says «مكتب تجاري» and the city's district list often says «حي الصناعية»:
+    # on 2026-10-10 every live Aqar plot was typed commercial/industrial/agricultural and 0 residential,
+    # while Aqar's own «نوع العقار» said سكني on 18,522 of 26,889 of them (ad 6772165: «سكني»).
+    land_usage_from = None
     if property_type == "Residential Land":
-        if re.search(r"صناعي", text):
-            property_type = "Industrial Land"
-        elif re.search(r"زراعي|مزرع", text):
-            property_type = "Agriculture Plot"
-        elif re.search(r"تجاري", text):
-            property_type = "Commercial Land"
+        property_type, land_usage_from = _land_type(obj, ad_number)
 
     # ─── Basic info ──────────────────────────────────────────────────────────
     # AREA IS SPEC-TABLE-ONLY — the same anchoring the room counts already use, and for the same
@@ -576,7 +767,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     reception_majlis  = _int_after_label_in_spec_table(text, r"مجالس", r"مجلس")
     property_age      = _property_age_from_text(text)
     street_width_m    = _int_after_label(text, r"عرض\s*الشارع")
-    direction         = _text_after_label(text, r"الواجهة", r"واجهة\s*العقار")
+    direction         = aqar_facade(_text_after_label(text, r"الواجهة", r"واجهة\s*العقار"))
     residence_type    = _text_after_label(text, r"نوع\s*السكن")
     project_name      = _text_after_label(text, r"اسم\s*المشروع")
 
@@ -610,7 +801,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # evidence can never claim a source it did not come from (see the evidence block below).
     price_ev_raw: Any = None          # str window (prose) or int (structured payload)
     price_ev_origin = "spec_table"
-    price_text = re.sub(r"ابتداء\S*\s*من\s*\d[\d,]*\s*[§ر﷼]?\s*شهري\w*", " ", price_text)
+    price_text = re.sub(rf"ابتداء\S*\s*من\s*\d[\d,]*{_CUR}\s*شهري\w*", " ", price_text)
     # PRICE = SOURCE, layer 2+4 (owner invariant 2026-08-04). Everything below scans price_text,
     # and price_text is NOT the price element — it is the whole pre-«تفاصيل الإعلان» prefix, which
     # carries the seller's free-text blurb. Two real classes were repaired live on 2026-08-04
@@ -638,8 +829,8 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # `/rnpl/` is the bulletproof signal (Aqar embeds it only when financing is enabled).
     is_rnpl_page = "/rnpl/" in html
 
-    mp_yr = re.search(r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*سنوي", price_text)
-    mp_mo = re.search(r"(\d[\d,]{2,})\s*[§ر﷼]?\s*/?\s*شهري", price_text)
+    mp_yr = re.search(rf"(\d[\d,]{{2,}}){_CUR}\s*/?\s*سنوي", price_text)
+    mp_mo = re.search(rf"(\d[\d,]{{2,}}){_CUR}\s*/?\s*شهري", price_text)
 
     # PRICE = SOURCE, primary path (2026-08-09). aqar publishes the price as a STRUCTURED field in
     # its RSC payload; everything above is a regex over rendered prose, kept only as the fallback for
@@ -697,6 +888,13 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # Anchored to the سعر المتر label — the old any-"N م²" pattern grabbed the AREA token and
     # caused the daily hide/recover flap on big-area land (see parse_price_per_meter above).
     price_per_meter = parse_price_per_meter(text)
+    # The source MOVED between a rate and a total (6903628: stored 3,500 as the total while aqar now publishes
+    # price 1,575,000 with meter_price 3,500), or publishes its rate as the headline: the headline is then not a
+    # total, and the stored one clears (AUTHORITATIVE_NULL below) instead of riding along.
+    rate_headline = bool(transaction_type == "Buy" and s_authoritative
+                         and headline_is_rate(obj, s_price, price_per_meter))
+    if rate_headline and price_per_meter is None:
+        price_per_meter = s_price
 
     # PRECEDENCE NOTE (observed 2026-09-19, NOT changed here). This block runs OUTSIDE the
     # `if s_authoritative:` branch above, so on a Buy listing that has BOTH a readable RSC payload
@@ -840,11 +1038,9 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     features = _amenities(html, text, obj)
 
     # ─── Media & Metadata ────────────────────────────────────────────────────
-    # ALL listing photos (no cap). Scoped to images.aqar.fm — the gallery CDN — so the broker
-    # avatar on cdn.aqar.fm/users/* (PII) and the REGA s3 license icons are NOT swept in.
-    # (capture-complete contract: store every photo URL the source exposes; the old [:30] cap was
-    # silently dropping galleries — observed up to 65 distinct image URLs on a single listing.)
-    photos = list(dict.fromkeys(re.findall(r'https://images\.aqar\.fm[^"\'\s]+', html)))
+    # The ad's OWN gallery only — see _own_photos(). None = could not read it on this fetch, and the
+    # upsert then keeps the stored photos (a failed read never blanks a row).
+    photos = _own_photos(obj)
     mv = re.search(r'https://[^"\'\s]+\.(?:mp4|webm|mov)', html, re.IGNORECASE)
     video_url = mv.group(0) if mv else None
     mt = re.search(r"<title>(.*?)</title>", html, re.DOTALL)
@@ -858,7 +1054,8 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # Stored in the DEDICATED `source_capture` column — NOT `additional_info` (which the app selects
     # on every search and renders as the {key,label,value} panel; Aqar keeps that NULL). source_capture
     # is never selected by the client, so this adds zero query weight to live search.
-    # Aqar pages carry no clean JSON-LD/__NEXT_DATA__ blob and expose no coordinates; the de-tagged
+    # Aqar pages carry no clean __NEXT_DATA__ blob; their one coordinate source is the JSON-LD geo read
+    # by source_pin() below (2026-10-10 — the older note here said «no coordinates», wrong). The de-tagged
     # visible `text` already holds every field the page shows (title, description, all specs, location
     # text, features, dates). Store it verbatim — minus Saudi phone numbers (PDPL) — so any field we
     # don't promote to a dedicated column today stays recoverable from stored data WITHOUT a re-scrape.
@@ -869,8 +1066,15 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
         "schema": "aqar.v2-fulltext",
         "source_text": _redact_pii(text),
         "url_path": unquote(urlparse(url).path),
-        "image_count": len(photos),
+        "image_count": len(photos) if photos is not None else None,
     }
+    # The ad's own map pin (JSON-LD GeoCoordinates), backlog 312. Absent -> no key (silent, never guessed).
+    pin = source_pin(html)
+    if pin:
+        source_capture["pin"] = pin
+    # Where a plot's type came from (owner 2026-10-10 audit): aqar_field · description · none.
+    if land_usage_from:
+        source_capture["land_usage_from"] = land_usage_from
 
     return {
         "ad_number":               ad_number,
@@ -898,8 +1102,8 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
         # published field and aqar's non-publication of a TOTAL says nothing about it.
         "price_annual":            (AUTHORITATIVE_NULL if authoritative_no_price and transaction_type == "Rent"
                                     else price_annual),
-        "price_total":             (AUTHORITATIVE_NULL if authoritative_no_price and transaction_type != "Rent"
-                                    else price_total),
+        "price_total":             (AUTHORITATIVE_NULL if (authoritative_no_price or rate_headline)
+                                    and transaction_type != "Rent" else price_total),
         "price_per_meter":         price_per_meter,
         "rent_period":             rent_period,
         # PRICE = SOURCE evidence (owner invariant 2026-08-04). Evidence exists so a stored price can
@@ -922,9 +1126,9 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
             field=("aqar RSC payload price field" if price_ev_origin == "structured"
                    else "price slot (rendered text)"),
             raw=price_ev_raw,
-            stored=price_total if price_total is not None else price_annual,
-            kind="total" if price_total is not None else "annual",
-            unit="total",
+            stored=price_per_meter if rate_headline else (price_total if price_total is not None else price_annual),
+            kind="per_meter" if rate_headline else ("total" if price_total is not None else "annual"),
+            unit="per_meter" if rate_headline else "total",
             origin=price_ev_origin,
             authoritative_absent=authoritative_no_price,
         ),
@@ -943,6 +1147,10 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
         **features,
         # media
         "photo_urls":              photos,
+        "additional_info":         _own_coordinates(obj),
+        "images_evidence":         {"observed": obj is not None, "container_present": obj is not None,
+                                    "key_present": isinstance(obj, dict) and "imgs" in obj,
+                                    "count": len(photos) if photos is not None else None},
         "video_url":               video_url,
         "title":                   title,
         "description":             description,

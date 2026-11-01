@@ -36,7 +36,7 @@
 // safe: assertChain only fires INTENT→UI on a NON-null field, so a missing summary can never invent a
 // defect — while the old fallback («use the whole document») is what read a card in the first place.
 
-import { resultsFoundCount, ZERO_RE } from '../lib/resultsSentence.mjs';
+import { resultsFoundCount, zeroRendered } from '../lib/resultsSentence.mjs';
 
 /** Labels are matched at line start only; the value is the rest of that one line. */
 const FIELD_MAX = 120;
@@ -73,7 +73,9 @@ export function parseVisibleState(all) {
     // pinned here. Pinning «لقينا N إعلان» is what darkened this field — and with it the whole
     // RPC→RENDERED layer — on every journey of 2026-09-19. See e2e/lib/resultsSentence.mjs.
     headline: resultsFoundCount(all),
-    zero: ZERO_RE.test(all),
+    // ONE zero vocabulary, shared with the settle clock — see zeroRendered()’s header for why
+    // a hand-written subset here made a healthy honest zero read as zero:false.
+    zero: zeroRendered(all),
     entities: (all.match(/&(?:bull|quot|amp|ndash|mdash|nbsp|lt|gt|#\d+);/g) || []).slice(0, 5),
     latinInCards: (all.match(/\b(?:undefined|NaN|\[object)\b/g) || []).slice(0, 5),
   };

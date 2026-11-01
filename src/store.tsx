@@ -1,6 +1,7 @@
+import { markEagleLightUp } from '@/lib/eagleLightUp';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } from '@/i18n';
+import { useI18n, LOCALE_KEY, getLocale, getLocaleRevision, detectLocale, setLocalePersistence, languageOnAuth, hasStoredAuthSession, type Locale } from '@/i18n';
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
 import { HOME_DEFAULT_QUERY, migrateGroups } from '@/lib/searchDefaults';
 import { isSameSavedSearch } from '@/lib/savedSearchIdentity';
@@ -10,22 +11,31 @@ import { dismissalOutlivesTransition } from '@/lib/authPopupBehavior';
 import { buildPools, type Listing } from '@/data/listings';
 import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
 import { newSearchSeed } from '@/lib/rotationSeed';
-import { resolveLocation, ensureLocationIndex } from '@/data/locations';
+import { resolveLocation, ensureLocationIndex, liveShelfCount } from '@/data/locations';
+import { shelfCount, zeroContradictsShelf } from '@/lib/shelfCheck';
+import { logZeroResult } from '@/data/zeroResultLog';
 import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
-import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/auth';
+import { mapSupabaseUser, signOutBackend, deleteAccountBackend, persistNameSpellings, persistUiLocale } from '@/lib/auth';
 import { setThemeAuthState, resetThemeForSignOut } from '@/theme/theme';
-import { restoreChat, persistedOnly, LOCAL_TRANSCRIPT_ENTRIES, type PersistedChat } from '@/lib/chatTranscript';
+import { restoreChat, persistedOnly, pickLocalTranscripts, type PersistedChat } from '@/lib/chatTranscript';
 import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, chatsToDelete, type ChatMeta } from '@/lib/chatSync';
+import { beginSessionRestore } from '@/lib/sessionRestore';
 import { mergeOne, pickTranscript, mayPromoteTranscript, withFreshTranscript } from '@/lib/chatMerge';
 import { PROBE_FAILED, isProbeFailure } from '@/lib/afProbe';
 import { buildSyncedName, type BilingualName } from '@/lib/nameSync';
-import { identifyUser } from '@/lib/observability';
+import { identifyUser, reportMessage } from '@/lib/observability';
 import { forgetSupportDraft } from '@/lib/supportDraft';
 import { LOAD_MORE_PAGE_SIZE } from '@/data/resultCount';
 import { truncateGlyphs } from '@/lib/typedReveal';
 
 type DataSource = 'local' | 'supabase';
+
+/** The re-mapped user, keeping the in-memory spellings of the same name when the session has none yet. */
+export function keepSpellings(prev: AuthUser | null, next: AuthUser): AuthUser {
+  if (!prev || prev.name !== next.name || next.nameAr || next.nameEn) return next;
+  return { ...next, ...(prev.nameAr ? { nameAr: prev.nameAr } : {}), ...(prev.nameEn ? { nameEn: prev.nameEn } : {}) };
+}
 
 export type AuthUser = {
   method: 'google' | 'apple'; // phone sign-in removed (owner 2026-09-01)
@@ -36,6 +46,10 @@ export type AuthUser = {
   nameAr?: string;
   initials: string;
   sub: string; // phone or email
+  namePromptSeen?: boolean; // user_metadata.name_prompt_seen — «وش نناديك؟» already shown to this account
+  createdAt?: string; // auth user created_at / last_sign_in_at — a fresh SIGN-UP gets «وش نناديك؟» (lib/loginWelcome isFreshSignUp)
+  lastSignInAt?: string;
+  uiLocale?: 'ar' | 'en'; // user_metadata.ui_locale — the account's interface language, the same on every device
 };
 
 // snapshot = the results the search actually returned, saved WITH the entry so reopening a saved
@@ -84,6 +98,10 @@ type AppState = {
   runQuery: (q: SearchQuery, record?: boolean, signal?: AbortSignal, chatId?: string | null) => Promise<SearchResult>;
   // Persist the serialized conversation for a chat (agent.tsx captures it after each settled turn).
   saveTranscript: (id: string, transcript: PersistedChat) => void;
+  // A chat someone SHARED with this user (owner 2026-10-17): becomes a NEW entry in their own history,
+  // holding the copied conversation — theirs from now on, never synced back. Returns the new entry id.
+  // q = null: a shared chat with no search in it — saved like any chat-only row (emptyQuery, titled from its first message).
+  importSharedChat: (q: SearchQuery | null, transcript: PersistedChat) => string;
   // Fetch a transcript this device no longer holds locally (pruned cache / fresh sign-in) from the
   // server, validate it, and attach it to the entry. Resolves to the transcript or null.
   hydrateTranscript: (id: string) => Promise<PersistedChat | null>;
@@ -170,8 +188,11 @@ type AppState = {
   // closeModal above — never a route, so the screen underneath (the Filter page, wherever the user
   // actually is) is never navigated away from or unmounted. See src/components/AuthModal.tsx.
   authOpen: boolean;
-  openAuth: () => void;
+  // `note` (owner 2026-10-18): a line shown on top of the sign-in popup — a shared-chat link opens the
+  // popup with «يوسف شاركك: …» so the visitor knows what they will see once they are in.
+  openAuth: (note?: unknown) => void; // non-string (a press event when passed as onPress) = no note
   closeAuth: () => void;
+  authNote: string | null;
   // Read-only exposure for the popup's auto-show gate (shouldAutoShowAuthPopup, owner 2026-08-28):
   // null = the hasSeenIntro flag is still being read, false = the intro is pending/playing, true =
   // done. The popup may only auto-raise on `true`, so it never covers the intro film.
@@ -207,9 +228,19 @@ const historyKey = (sub: string) => 'history:' + sub;
 // hydrateTranscript() refetches a pruned one when its chat is opened. Pruning happens ONLY at the
 // serialization boundary — in-memory state keeps every transcript, so switching between chats in
 // one session never loses anything regardless of age.
+// A BYTE BUDGET ON TOP OF THE COUNT (2026-10-08). A saved chat now keeps everything the user saw — up to 500
+// cards, ~1.3 MB — and a browser gives localStorage ~5 MB for the WHOLE history. One write over the quota
+// fails for ALL of it (the catch below swallows it), so the heavy part must never be able to take the chat
+// list down with it: pickLocalTranscripts keeps transcripts newest-first until the budget is spent (the
+// newest is always kept), the rest stay on the server and hydrate on open. Metas are never pruned.
+const transcriptSize = new WeakMap<object, number>();
+const sizeOfTranscript = (t: object): number => {
+  let n = transcriptSize.get(t);
+  if (n === undefined) { n = JSON.stringify(t).length; transcriptSize.set(t, n); }
+  return n;
+};
 const serializeHistoryForDisk = (items: HistoryItem[]): string => {
-  const byActivity = items.slice().sort((a, b) => (b.tRev ?? b.ts) - (a.tRev ?? a.ts));
-  const keep = new Set(byActivity.filter((it) => it.transcript).slice(0, LOCAL_TRANSCRIPT_ENTRIES).map((it) => it.id));
+  const keep = pickLocalTranscripts(items, sizeOfTranscript);
   return JSON.stringify(items.map((it) => (it.transcript && !keep.has(it.id) ? { ...it, transcript: undefined } : it)));
 };
 
@@ -272,6 +303,7 @@ const removeKeysSync = (keys: string[]) => {
 // The old shared key. We proactively purge it so its stale, cross-account contents never reappear.
 const LEGACY_HISTORY_KEY = 'history';
 
+
 export function AppProvider({ children }: { children: ReactNode }) {
   // The FILTER (home) defaults to Buy highlighted (user request). emptyQuery() stays Rent-default for
   // the agent/chat base — this override is only the filter form's starting state. Single source of
@@ -300,6 +332,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [modal, setModal] = useState<'support' | 'about' | 'legal' | 'privacy' | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
+  const [authNote, setAuthNote] = useState<string | null>(null);
   const [pendingMessage, setPendingMessageState] = useState<string | null>(null);
   // `null` while the saved flag is still being read from storage; the intro stays hidden until then.
   const [introSeen, setIntroSeen] = useState<boolean | null>(null);
@@ -310,6 +343,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Adoption enables the stored preference; a COMPLETED signed-in→signed-out transition (incl.
   // external revocation observed via onAuthStateChange) resets to Light and clears the stored
   // preference. Boot-as-guest is NOT a transition — nothing to clear, the gate already gives Light.
+  const signedInNowRef = useRef(false);
+  useEffect(() => { signedInNowRef.current = !!user; }, [user]);
   const themeWasSignedInRef = useRef(false);
   useEffect(() => {
     if (!authChecked) return;
@@ -357,18 +392,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (nameSyncRef.current === nm) return;
     nameSyncRef.current = nm;
     let cancelled = false;
-    buildSyncedName(nm).then((synced) => { if (!cancelled) applySyncedName(synced); });
+    // Written ONCE to user_metadata (the queue in lib/auth.ts), so the next load starts with both spellings.
+    buildSyncedName(nm).then((synced) => { if (!cancelled) { applySyncedName(synced); persistNameSpellings(synced); } });
     return () => { cancelled = true; };
   }, [user?.name, user?.nameEn, user?.nameAr, applySyncedName]);
 
-  // Language persistence is auth-gated. A SIGNED-IN user keeps their chosen/detected language across a
-  // refresh. A GUEST is ALWAYS Arabic-first on a fresh load — typing an English letter in the filter,
-  // or sending an English message to the agent, flips the UI live for that session, but a refresh /
-  // leaving resets to the Arabic default (nothing is saved). On WEB the signed-in language is applied
-  // synchronously at first paint (i18n readSavedLocale, no flash); the effects below cover NATIVE and
-  // enforce the guest reset. (user request.)
+  // Only an explicit UI choice is saved for a signed-in user. Chat language never changes it.
+  // Guests start in Arabic on a fresh load; web restores signed-in preference at first paint.
   const { locale, setLocale } = useI18n();
-  const localeInitRef = useRef(false);
+  const localeInitRef = useRef<string | null>(null);
+  const localeRestoredRef = useRef(false); // this load's saved language has been applied (account or device)
   // WHICH account's history is currently loaded — not merely "did we load once". A boolean here was
   // a real bug: the hydrate effect is one-shot, so a user who signed in DURING a session (the guard
   // already having run while they were a guest) never had their own saved history read, and the
@@ -380,29 +413,47 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // disable persistence, clear any saved value, and snap back to the Arabic default for this load.
   useEffect(() => {
     if (!authChecked) return;
+    let cancelled = false;
+    // languageOnAuth (i18n.tsx): a slow sign-in is not a guest — never erase a signed-in user's language.
+    const step = languageOnAuth({ signedIn: !!user, storedSession: hasStoredAuthSession(), accountLocale: user?.uiLocale ?? null });
+    if (step.action === 'wait') return () => { cancelled = true; };
     if (user) {
       setLocalePersistence(true);
-      if (!localeInitRef.current) {
-        localeInitRef.current = true;
+      if (localeInitRef.current !== user.sub) {
+        localeInitRef.current = user.sub;
+        localeRestoredRef.current = false;
+        const revisionBeforeRead = getLocaleRevision();
         AsyncStorage.getItem(LOCALE_KEY)
-          .then((v) => { if (v === 'en' || v === 'ar') setLocale(v as Locale); })
-          .catch(() => {});
+          .then((v) => {
+            const device = v === 'en' || v === 'ar' ? (v as Locale) : null;
+            const pick = languageOnAuth({ signedIn: true, storedSession: true, accountLocale: user.uiLocale ?? null, deviceLocale: device });
+            if (!cancelled && getLocaleRevision() === revisionBeforeRead && pick.action === 'restore' && pick.locale && pick.locale !== getLocale()) setLocale(pick.locale);
+          })
+          .catch(() => {})
+          .finally(() => { if (!cancelled) localeRestoredRef.current = true; });
       }
     } else {
       setLocalePersistence(false); // guest → never remember the language
-      localeInitRef.current = false;
+      localeInitRef.current = null;
       AsyncStorage.removeItem(LOCALE_KEY).catch(() => {});
       // Fresh guest load (or just logged out): start in Arabic. This runs only when auth state changes,
       // not on every locale change, so a guest's in-session switch to English is left untouched.
       if (getLocale() !== 'ar') setLocale('ar');
     }
-  }, [authChecked, user, setLocale]);
+    return () => {
+      cancelled = true;
+      if (localeInitRef.current === user?.sub) localeInitRef.current = null;
+    };
+  }, [authChecked, user?.sub, setLocale]);
 
   // Persist the active language ONLY for a signed-in user (native; web persists synchronously via the
   // auth-gated persistLocale in setLocale). A guest never writes their language.
   useEffect(() => {
     if (!user) return;
     AsyncStorage.setItem(LOCALE_KEY, locale).catch(() => {});
+    // …and on the ACCOUNT, so every device shows it (owner 2026-10-27). Only after this load's restore has run,
+    // so the first paint's default can never overwrite the language another device saved.
+    if (localeRestoredRef.current && user.uiLocale !== locale) persistUiLocale(locale);
   }, [locale, user]);
 
   // Restore saved chats. SIGNED-IN only — see the persistence effect below for why a guest's
@@ -748,7 +799,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // name: canAutoRetitle() is the single place that rule lives, so re-running a renamed search
       // refreshes its results and timestamp WITHOUT reverting the title the user chose.
       const keepTitle = prior && !canAutoRetitle(prior);
-      const title = keepTitle ? prior!.title : autoTitleForQuery(q, getLocale());
+      const title = keepTitle ? prior!.title : chatId && prior?.title ? prior.title
+        : autoTitleForQuery(q, getLocale());
       const titleSource: TitleSource = keepTitle ? 'manual' : 'auto';
       const next: HistoryItem = {
         id, label, query: q, ts: Date.now(), starred,
@@ -778,29 +830,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setAuthChecked(true); // no backend → there is no session to wait for
       return;
     }
-    let cancelled = false;
-    supabase.auth.getSession().then(({ data }) => {
-      const su = data.session?.user;
-      if (!cancelled && su) {
+    // BOUNDED AND CAUGHT, in src/lib/sessionRestore.ts — which carries the production measurement
+    // this shape exists for. In one line: getSession() makes a NETWORK refresh call on an expired
+    // session, so an unbounded, un-caught wait here leaves the app in a state no gate in this file
+    // expects (`user === null && authChecked === false`) — rendering as a guest while withholding
+    // every guest affordance, with no error emitted. `onChecked` fires exactly once on all four
+    // paths: session, no session, rejection, timeout.
+    const cancelRestore = beginSessionRestore({
+      getSession: () => supabase!.auth.getSession(),
+      onUser: (su) => {
         // Apple stays Apple; everything else (Google, and the two internal email test accounts) reads as
         // Google — the only other provider the product offers since phone sign-in was removed.
         const method = su.app_metadata?.provider === 'apple' ? 'apple' : 'google';
-        setUser(mapSupabaseUser(su, method));
-      }
-      if (!cancelled) setAuthChecked(true);
+        setUser(mapSupabaseUser(su as never, method));
+      },
+      onChecked: () => setAuthChecked(true),
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       const su = session?.user;
       if (su) {
         // Apple stays Apple; everything else (Google, and the two internal email test accounts) reads as
         // Google — the only other provider the product offers since phone sign-in was removed.
         const method = su.app_metadata?.provider === 'apple' ? 'apple' : 'google';
-        setUser(mapSupabaseUser(su, method));
+        // A re-map (token refresh, tab focus) must not drop spellings this tab already has for the SAME name
+        // before they are stored — that drop flipped «Yusuf» back to «يوسف» on an English screen.
+        // A real log-in / sign-up (signed out → signed in here, not a token refresh or a restored session):
+        // the sidebar eagle lights up once (lib/eagleLightUp.ts, owner 2026-10-24).
+        if (event === 'SIGNED_IN' && !signedInNowRef.current) markEagleLightUp();
+        setUser((prev) => keepSpellings(prev, mapSupabaseUser(su, method)));
       } else {
         setUser(null);
       }
     });
-    return () => sub.subscription.unsubscribe();
+    return () => { cancelRestore(); sub.subscription.unsubscribe(); };
   }, []);
 
   const value = useMemo<AppState>(
@@ -970,8 +1032,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // owed unfetched behind an advancing cursor. The seed belongs to the SET, so it travels with it.
         searchSeedRef.current = newSearchSeed();
         const searchSeed = searchSeedRef.current;
-        const { listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal, rotationSeed: searchSeedRef.current });
-        const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null });
+        let { listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal, rotationSeed: searchSeedRef.current });
+        // CHECK THE SHELF BEFORE SAYING «NONE» (owner 2026-10-05 — src/lib/shelfCheck.ts). A zero for a
+        // place-only search whose place we KNOW holds listings is our failure, not an answer: ask once
+        // more, and if it is still zero, word it as a failure («try again»), report it, note it.
+        let shelfClash = false;
+        let shelf: number | null = null;
+        if (rows && rows.length === 0 && !signal?.aborted) {
+          const lm = q.locationMatch;
+          shelf = shelfCount(q, lm ? liveShelfCount(lm, q.districts) : null);
+          if (zeroContradictsShelf(shelf)) {
+            ({ listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal, rotationSeed: searchSeed }));
+            shelfClash = !!rows && rows.length === 0;
+            if (shelfClash) reportMessage('zero_contradicts_shelf', { place: lm?.label, kind: lm?.kind, districts: q.districts?.length ?? 0, shelf });
+          }
+        }
+        const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null || shelfClash });
+        // THE NOTEBOOK records the zero the USER SEES — measured live 2026-10-05: «فيلا … بسعر 5000» came
+        // back from the server with rows and the client's own filters emptied it, so a fetch-level hook
+        // never wrote it. A network failure is not «no results» (it reads «try again») and is not noted.
+        if (rows !== null && r.listings.length === 0 && !signal?.aborted) logZeroResult(q, shelf, shelfClash);
         // Attach the RESOLVED query so the caller renders the Search Summary from what actually ran
         // (the corrected city/region), not the raw pre-resolution text. (one-engine summary parity.)
         const result: SearchResult = { ...r, query: q, pageOffset: pageCand, hasMore: pageCand >= 1500, matchTotal: pageTotal, rotationSeed: searchSeed };
@@ -1026,6 +1106,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
           } catch {}
           return next;
         });
+      },
+      importSharedChat: (q, transcript) => {
+        const id = 'h' + Date.now();
+        const tRev = Date.now();
+        const firstAsk = String((transcript.msgs.find((m) => m.role === 'user') as { text?: unknown } | undefined)?.text ?? '').trim();
+        const next: HistoryItem = q
+          ? { id, label: queryLabel(q), query: q, ts: Date.now(), starred: false,
+              title: autoTitleForQuery(q, getLocale()), titleSource: 'auto', transcript, tRev }
+          : { id, label: firstAsk, query: emptyQuery(), ts: Date.now(), starred: false,
+              title: firstAsk ? autoTitleForPrompt(firstAsk, getLocale()) : (getLocale() === 'ar' ? 'محادثة' : 'Chat'),
+              titleSource: 'auto', transcript, tRev };
+        // Same direct-then-state write as saveTranscript, so the entry is on disk before the chat opens.
+        const merged = [next, ...historyRef.current].slice(0, 50);
+        historyRef.current = merged;
+        if (user) try {
+          if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(merged));
+        } catch {}
+        setHistory((h) => [next, ...h.filter((it) => it.id !== id)].slice(0, 50));
+        setActiveChatId(id);
+        return id;
       },
       // Transcript pruned locally (older than LOCAL_TRANSCRIPT_ENTRIES) or absent on this device —
       // pull the server's copy, validate it, attach it. Returns null when the server has none
@@ -1149,9 +1249,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const clean = truncateGlyphs((title ?? '').replace(/\s+/g, ' ').trim(), 120, '');
           const next = h.map((it) => {
             if (it.id !== id) return it;
+            const lastText = it.transcript?.msgs.filter(m => m.role === 'user').at(-1)?.text;
+            const prompt = typeof lastText === 'string' ? lastText : it.label;
             return clean
               ? { ...it, title: clean, titleSource: 'manual' as TitleSource, titleUpdatedAt: Date.now() }
-              : { ...it, title: autoTitleForQuery(it.query, getLocale()), titleSource: 'auto' as TitleSource, titleUpdatedAt: Date.now() };
+              : { ...it, title: autoTitleForPrompt(prompt, detectLocale(prompt) ?? getLocale()) || autoTitleForQuery(it.query, getLocale()), titleSource: 'auto' as TitleSource, titleUpdatedAt: Date.now() };
           });
           if (user) try {
             if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(next));
@@ -1210,7 +1312,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // message (owner 2026-08-21: «ابي شقة بالرياض قريبة من المترو وتكون تحت 5000 بالشهر» →
           // «شقة بالرياض قرب المترو»). `label` keeps the raw text so nothing that reads the legacy
           // field loses information; only the displayed title is summarized.
-          const auto = autoTitleForPrompt(v, getLocale());
+          const auto = autoTitleForPrompt(v, detectLocale(v) ?? getLocale());
           if (idx >= 0) {
             const prev = h[idx];
             const keep = !canAutoRetitle(prev);
@@ -1243,10 +1345,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       openModal: (m) => setModal(m),
       closeModal: () => setModal(null),
       authOpen,
-      openAuth: () => setAuthOpen(true),
+      openAuth: (note?: unknown) => { setAuthNote(typeof note === 'string' && note.trim() ? note.trim() : null); setAuthOpen(true); },
+      authNote,
       // Plain close again (2026-08-29): the centered modal no longer auto-raises, so a close
       // needs no memory — reopening is always an explicit control away.
-      closeAuth: () => setAuthOpen(false),
+      closeAuth: () => setAuthOpen(false), // the note is reset by the next openAuth (always sets or clears it)
       signInCardDismissed,
       dismissSignInCard: () => setSignInCardDismissed(true),
       introSeen,
@@ -1256,7 +1359,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!INTRO_DEMO_MODE) AsyncStorage.setItem('hasSeenIntro', '1').catch(() => {});
       },
     }),
-    [query, dataSource, user, searchCount, history, modal, authOpen, introSeen, signInCardDismissed, authChecked, pendingMessage, activeChatId, setActiveChatId],
+    [query, dataSource, user, searchCount, history, modal, authOpen, authNote, introSeen, signInCardDismissed, authChecked, pendingMessage, activeChatId, setActiveChatId],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -1,3 +1,6 @@
+> **RETIRED (owner, 2026-10-04).** This routine no longer runs. The Advanced Filter now has its own engineer: read
+> `docs/ops/ADVANCED_FILTER_ENGINEER.md`. This file stays only as history.
+
 # 🎯 SENIOR ADVANCED FILTER + TRENDING DATA INTEGRITY ENGINEER (canonical, owner 2026-08-23)
 
 **This file is the source of truth for this routine — the file wins over the live routine prompt
@@ -459,7 +462,7 @@ Things that cost a previous run real time, and are NOT product defects:
    when the period scope includes Monthly (شهري or كلاهما, or combined deal). A "no non-AF key moved
    under a deal/period change" rule must assert that derivation, not equality — asserting equality
    reports a phantom regression on a correct production (`verify-af-scope-change-live.ts`
-   `tablesFollowPeriod`).
+   `tablesFollowPeriod` — that journey was retired 2026-10-03 with the Filter's carried answers; the lesson stands).
 10. **A CANCELLED GitHub job reports neither `success` nor `failure`, and `if: ${{ !cancelled() }}`
    skips every step behind it** (2026-09-03). That step guard exists so a FAILING step cannot hide
    the ones after it, and it does that well — but when the JOB is cancelled (its `timeout-minutes`
@@ -524,7 +527,7 @@ Things that cost a previous run real time, and are NOT product defects:
 5. **Advanced Filter lives in the «الوكيل الذكي» (agent) flow, not the Normal Filter «بحث» flow.**
    Reaching it: send an Arabic request, answer the agent's disambiguation (a city that is also a
    region needs «مدينة …»; «تقصد المدينة كاملة، أو حي معيّن؟» needs «المدينة كاملة»), then click
-   «خلّنا نحدد الطلب أكثر». A selected AF option shows a checkmark child at `opacity:1/scale(1)` and a
+   «🎯 دقّق مع الذكاء». A selected AF option shows a checkmark child at `opacity:1/scale(1)` and a
    bolder label — the option container's own background does NOT change, so a background-colour probe
    reports every option unselected.
 
@@ -670,7 +673,15 @@ Never modify data to make a test pass. Never manufacture attributes, turn UNKNOW
 widen a search secretly, remove a platform to "improve" diversity, or delete unusual listings. Fix
 the ROOT CAUSE and the bug CLASS, not the one example. Deployment safety overrides autonomy: the
 deploy lock, the migration-drift guard, `--head`/`--base` + double file-list check, no deploys
-while Supabase is unhealthy, never hand-edit the 4 AF shared-eligibility RPCs (go through the
-shared clause + `rebuild_af_filter_rpcs()`), verify user-facing truth via the anon REST path (MCP
+while Supabase is unhealthy, never hand-edit the **SIX** AF shared-eligibility RPCs (go through the
+shared clause + `rebuild_af_filter_rpcs()`) — `af_rpc_templates`/`af_rpc_build_state` hold
+`location_search_candidates_ar`, `apartment_guided_counts_ar`, `property_age_option_counts_ar`,
+`af_eligible_count`, **`district_options_ar`** and **`top_cities_by_deal_ar`**; this line said
+"4" from 2026-09-05 (when `20260905183033` brought the two Trending count surfaces under the
+rebuild) until 2026-09-27, and the same stale count sat in `verify-af-rpcs-not-hand-edited.ts`,
+whose §4 *asserted* the protected set was four. The two the number omitted are exactly the two
+that were hand-edited on 2026-09-26 and left three P1s standing while the check read green —
+**a count repeated in prose and in an assertion is how a gap acquires a clean bill of health**,
+verify user-facing truth via the anon REST path (MCP
 SQL bypasses RLS), verify the actual served bundle after a deploy (not job status alone). If
 Supabase degrades, stop heavy testing and diagnose first.

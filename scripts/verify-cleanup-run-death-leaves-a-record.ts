@@ -116,8 +116,8 @@ const mustCatch = (label: string, caught: boolean) => {
 // a line the failure path never reaches, so a real destruction is reported as deleted=0.
 {
   const m = run(mutate(
-    '                            stats["deleted"] += len(chunk)\n                else:\n                    stats["deleted"] = sum(len(v) for v in to_delete.values())',
-    '                            pass\n                stats["deleted"] = sum(len(v) for v in to_delete.values())'));
+    '                            _delete_chunk(client, t, chunk, stats)\n                else:\n                    stats["deleted"] = sum(len(v) for v in to_delete.values())',
+    '                            _delete_chunk(client, t, chunk, {"deleted": 0})\n                stats["deleted"] = sum(len(v) for v in to_delete.values())'));
   mustCatch('a partial delete being reported as deleted=0 while the run row still gets written',
     m[TESTS[1]].startsWith('RED'));
   if (m[TESTS[0]].startsWith('RED')) {

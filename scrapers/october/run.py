@@ -1,418 +1,195 @@
-"""1 October Real Estate (1october.com.sa / 1 أكتوبر العقارية) scraper — Saudi Jeddah brokerage.
+"""1 October Real Estate (www.1october.com.sa / 1 أكتوبر العقارية) — Jeddah/Makkah brokerage.
 
-Small boutique brokerage on the Nuzul SaaS platform (tenant 6269). Reachable DIRECT from any IP —
-no proxy. Two data sources on every page, both server-rendered:
-  • a clean JSON-LD ItemList on /properties (each item: name, type+deal in description, url, image,
-    address {locality=district, region=city}, offers.price/priceCurrency) — the catalog enumerator.
-  • the escaped RSC flight payload on each /properties/{id} detail page, carrying "area","bedrooms",
-    "bathrooms" and the full JSON-LD image[] — the per-listing enrichment.
+A Nuzul SaaS tenant (tenant 6269), the same product as jawher/m3tmd/senan. The platform reading —
+catalogue walk, detail record, the `available` gate, the removal oracle — lives ONCE in
+scrapers/jawher/run.py and is imported here; this file adds only october's identity, the columns
+its OLDER tables lack, and its main().
 
-Realness-verified (2026-06): ~13 distinct, varied Jeddah listings, real REGA districts, real SAR
-prices, created dates spread over months — not a seeded/prototype catalog.
+WHY THIS WAS REWRITTEN (coverage audit 2026-09-28). The old reader walked the JSON-LD ItemList on
+the /properties HTML page. Nuzul ignores ?page= on that route, so it only ever saw the first 9 of
+the API's meta.total = 18, and it never read availability_status. Result, that day: 8 of 12 active
+rows were rented/sold/reserved at the source (44240 sold; 46582 46362 46338 46023 45996 44471
+rented; 45830 reserved), and the available 44236 was never seen. The API lists sold/rented units
+with their status (18 = 5 available + 11 rented + 1 reserved + 1 sold), so:
+  · a status other than `available` is SKIPPED (the shared gate), and
+  · because this run just fetched THAT unit's own record and read the status, the row is pinned
+    inactive through the shared sold-pin law (positive source evidence, not absence), and
+  · prune_unseen gets make_verify_gone() for anything that leaves the catalogue altogether.
 
-  python -m scrapers.october.run --type all            # full crawl + prune
-  python -m scrapers.october.run --type all --limit 8  # validation: first N, NO prune, print samples
+IDENTITY IS UNCHANGED: ad_number = OCT<id>, listing_url = BASE/properties/<id>, source «1 October»,
+same tables — every existing row keeps its key.
+
+OCTOBER-ONLY DIFFERENCES FROM THE PLATFORM READING
+  · Types «كشك» → Kiosk and «صراف آلي» → ATM Site (the 2026-09-28 decision that took 52959/52960
+    off «غير معروف»); every other Nuzul tenant still skips them ask-first.
+  · bedrooms stays NULL (owner decision 2026-07-28 for this platform). Measured on the API
+    2026-09-28: 45056 carries bedrooms=5 while its own description says «3 غرف نوم», and the page
+    labels that counter «غرفة» / «عدد الغرف» — a total-room count, not bedrooms.
+  · october_*_listings predate the fleet's Arabic/location columns: city_ar, city_id, region_id,
+    district_ar, floor_number, license_number, furnished (and 11 more) do not exist there
+    (information_schema, 2026-09-28). A key PostgREST cannot place kills the whole upsert
+    (PGRST204), so those keys are dropped here; the raw record stays in source_capture.
+    `region` (which these tables DO have) is filled from the city, as before.
+  · No mark_direct_alive(): october is registered CRAWL_PRESENCE_ONLY (ops_liveness_registry), and
+    a verified-alive stamp on that tier is a false claim. Re-tiering it to CANDIDATE_PLUS_DIRECT
+    like m3tmd is a registry migration, then this call can be added.
+
+  python -m scrapers.october.run --dry-run     # fetch + map, nothing written
+  python -m scrapers.october.run --type all    # full run: upsert, pin, prune
 """
 from __future__ import annotations
 
 import argparse
-import json
-import re
 import sys
 import time
+from pathlib import Path
 from typing import Any, Optional
 
-from curl_cffi import requests as cc
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scrapers.common import db
-from scrapers.common import normalize as N
+from scrapers.common import db, normalize, sold_pin  # noqa: E402
+from scrapers.jawher.run import (  # noqa: E402
+    API_PATH, fetch_detail, fetch_ids, make_verify_gone, nuzul_fields, session,
+)
 
 BASE = "https://www.1october.com.sa"
 SOURCE = "1 October"
+PREFIX = "OCT"
+SLUG = "october"
 
-# type token (from the index "<type> <deal>" description) → English canonical
-TYPE_MAP = {
-    "villa": "Villa", "tower_apartment": "Apartment", "building_apartment": "Apartment",
-    "apartment": "Apartment", "duplex": "Duplex", "building": "Building", "floor": "Floor",
-    "land": "Residential Land", "residential_land": "Residential Land",
-    "commercial_land": "Commercial Land", "office": "Office", "shop": "Shop",
-    "showroom": "Showroom", "warehouse": "Warehouse", "rest_house": "Rest House",
-    "istraha": "Rest House", "farm": "Farm", "chalet": "Chalet", "station": "Other",
-}
-
-# PDPL: drop phones (incl. leetspeak o5o→050) and truncate at broker/contact markers.
-_PHONE = re.compile(r"(?:\+?9665\d{7,}|\b0?5\d{8}\b|\b9[02]0\d{6,}\b|\b800\d{6,}\b|wa\.me/\S+)")
-_OBF = re.compile(r"[oO0٠-٩]{8,}")
-_CUT = re.compile(r"(للتواصل|للحجز|للاستفسار|اتصل|تواصل|واتساب|واتس|جوال|الجوال|للبيع والشراء عبر|المعلن|"
-                  r"الوسيط|المسوق|اسم المعلن|رقم الاعلان|رقم الإعلان|hotline|whatsapp|call us)", re.I)
+_TYPE_OVERRIDES = {"كشك": "Kiosk", "صراف آلي": "ATM Site"}
+# LISTING_COLUMNS (test_scraper_rows_only_use_real_columns) minus october's real columns.
+_NOT_ON_OCTOBER_TABLES = frozenset({
+    "ad_source", "city_ar", "city_id", "deed_area_m2", "discount_pct", "district_ar",
+    "floor_number", "fullparse_done", "furnished", "license_expiry", "license_number",
+    "num_apartments", "plan_parcel", "price_original", "region_id", "reparsed_v2",
+    "tenant_category", "views_count",
+})
 
 
-def _deobf(s: str) -> str:
-    return _OBF.sub(lambda m: m.group(0).translate(str.maketrans("oO٠١٢٣٤٥٦٧٨٩",
-                                                                 "00٠١٢٣٤٥٦٧٨٩".translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")))), s)
-
-
-def _redact(text: Optional[str]) -> Optional[str]:
-    if not text:
-        return text
-    t = _deobf(text)
-    m = _CUT.search(t)
-    if m:
-        t = t[:m.start()]
-    t = _PHONE.sub(" ", t)
-    return re.sub(r"\s+", " ", t).strip() or None
-
-
-def _session() -> cc.Session:
-    return cc.Session(impersonate="chrome124", timeout=30)
-
-
-def _itemlist(html: str) -> list[dict]:
-    """Pull the JSON-LD ItemList items off a /properties index page."""
-    for m in re.findall(r'<script type="application/ld\+json">(.*?)</script>', html, re.S):
-        try:
-            j = json.loads(m)
-        except Exception:
-            continue
-        if isinstance(j, dict) and j.get("itemListElement"):
-            return [it.get("item") or {} for it in j["itemListElement"] if isinstance(it, dict)]
-    return []
-
-
-_AREA = re.compile(r'"area"\s*:\s*(\d+(?:\.\d+)?)')
-_BEDS = re.compile(r'"bedrooms"\s*:\s*(\d+)')
-_BATHS = re.compile(r'"bathrooms"\s*:\s*(\d+)')
-_PRICE = re.compile(r'"price"\s*:\s*(\d{3,})')   # numeric only → skips the "price":"السعر" label
-
-
-# ── labelled rent price in the ad body ────────────────────────────────────────────────────────
-# 1october publishes SOME rent ads with no price in JSON-LD offers.price and no numeric "price" in
-# the RSC payload — the figure appears only in the ad body, always as an explicit labelled line:
-#   «💰 الإيجار السنوي: 85,000 ريال»   «💰 الإيجار: 65,000 ريال سنوياً»   «💰 الإيجار الشهري: 2,500 ريال»
-# Measured 2026-08-12: 7 of october's 8 active Rent listings were being SERVED PRICELESS AND
-# PERIODLESS (production_ready, in search) while their own page stated both. Fleet-wide the same
-# check finds 24 such rows in 2,632 priceless active rents — october is 7/7 of its own, aqar 1/2032
-# — so this is a 1october capture gap, not a general "price on request" population.
-#
-# WHY THIS IS A SOURCE READ AND NOT A GUESS. The 2026-08-11 rent-period lesson (a detector keyed on
-# `source_capture ~ شهري` matched RNPL lines, the similar-listings strip and seller prose, and was
-# killed for producing confident wrong numbers) applies to TOKEN PRESENCE anywhere in a blob. This
-# is the opposite shape, and matches the accepted 2026-08-10 aqar precedent (labelled «السعر: N ريال»
-# beats an unlabelled document-order pick): the label, the amount and the currency must be adjacent
-# in that order, so «🔒 تأمين مسترد: 2,000 ريال» (a deposit, id 665337, sits right after the rent
-# line) and «💳 طريقة الدفع: دفعتين» cannot match — a different label, and no amount+ريال pair.
-#
-# The period is taken ONLY from the same labelled phrase, before or after the amount. If the source
-# states an amount but no period, we return nothing at all rather than assume annual: storing the
-# figure would force a period choice the source never made, and honest NULL beats a guess.
-_RENT_PROSE = re.compile(
-    r'ال[إا]يجار'                                  # the rent label itself
-    r'(?:\s*(?P<pre>السنوي|الشهري))?'              # «الإيجار السنوي: …»
-    r'\s*[:：]\s*'
-    r'(?P<amt>\d[\d,٫٬\.]*\d|\d)'        # 85,000 / 2500 (Arabic thousands seps too)
-    r'\s*ريال'
-    r'(?:\s*(?P<post>سنوي(?:ا|اً|ًا)?|شهري(?:ا|اً|ًا)?))?'   # «… 65,000 ريال سنوياً»
-)
-
-
-def _rent_from_prose(text: Optional[str]) -> tuple[Optional[int], Optional[str]]:
-    """(annualised_price, rent_period) from an explicit «الإيجار …: N ريال» line, else (None, None).
-
-    Returns the ANNUALISED figure in the first slot to match how every platform stores rent
-    (verified 2026-08-12: dealapp 8,000/month is stored price_annual=96,000 with
-    rent_period='monthly'), and the source's own stated period in the second — the period is
-    recorded as read, never inferred from the amount.
-    """
-    if not text:
-        return None, None
-    m = _RENT_PROSE.search(text)
-    if not m:
-        return None, None
-    raw = re.sub(r'[,٫٬\.]', '', m.group('amt'))
-    if not raw.isdigit():
-        return None, None
-    amount = int(raw)
-    if amount < 100:                      # same floor the structured path already applies
-        return None, None
-    word = m.group('pre') or m.group('post') or ''
-    if word.startswith('الشهري') or word.startswith('شهري'):
-        return amount * 12, 'monthly'
-    if word.startswith('السنوي') or word.startswith('سنوي'):
-        return amount, 'annual'
-    return None, None                     # amount without a stated period → store nothing
-
-
-def _detail_specs(s: cc.Session, url: str, pid: str) -> dict:
-    """Fetch a detail page; return {area_m2, bedrooms, bathrooms, price, photo_urls, description}.
-
-    Specs live in the RSC flight payload where JSON quotes are backslash-escaped (\\"area\\":189),
-    so un-escape before matching. The page also embeds a "similar properties" block, so anchor on the
-    listing's own id ("id":<pid>) and read specs from that object's window — not the first global match.
-    The JSON-LD block (photos/description) is NOT escaped — parse raw.
-    """
-    out: dict[str, Any] = {}
-    try:
-        r = s.get(url)
-    except Exception:
-        return out
-    if r.status_code != 200:
-        return out
-    t = r.text
-
-    # Primary: the clean (unescaped) JSON-LD RealEstate block — authoritative for this listing.
-    for m in re.findall(r'<script type="application/ld\+json">(.*?)</script>', t, re.S):
-        try:
-            j = json.loads(m)
-        except Exception:
-            continue
-        if isinstance(j, dict) and j.get("@type") == "RealEstate":
-            img = j.get("image")
-            if isinstance(img, list):
-                out["photo_urls"] = [u for u in img if isinstance(u, str)]
-            elif isinstance(img, str):
-                out["photo_urls"] = [img]
-            out["description"] = _redact(j.get("description"))
-            rooms = N.to_int(j.get("numberOfRooms"))
-            if rooms:
-                out["bedrooms"] = rooms
-            baths = N.to_int(j.get("numberOfBathroomsTotal"))
-            if baths:
-                out["bathrooms"] = baths
-            fs = j.get("floorSize")
-            if isinstance(fs, dict):
-                v = N.to_int(fs.get("value"))
-                if v:
-                    out["area_m2"] = v
-            offers = j.get("offers") or {}
-            pv = N.to_int(offers.get("price"))
-            if pv:
-                out["price"] = pv
-            unit = ((offers.get("priceSpecification") or {}).get("unitCode") or "").strip().upper()
-            if unit:
-                out["price_unit_code"] = unit
-            break
-
-    # Fallback: mine the escaped RSC object (anchored on this listing's id) for anything JSON-LD lacked.
-    if "area_m2" not in out or "price" not in out:
-        tu = t.replace('\\"', '"')
-        anchor = re.search(r'"id"\s*:\s*' + re.escape(pid) + r'\b', tu)
-        win = tu[max(0, anchor.start() - 1300): anchor.start() + 2600] if anchor else tu
-        if "area_m2" not in out:
-            a = _AREA.search(win)
-            if a:
-                out["area_m2"] = round(float(a.group(1)))
-        if "price" not in out:
-            p = _PRICE.search(win)
-            if p:
-                out["price"] = int(p.group(1))
-    return out
-
-
-# schema.org unitCode → periods-per-year, for annualizing a Rent price. This scraper previously had
-# NO period concept at all — every Rent price went straight into price_annual un-annualized (found
-# live 2026-07-28: ad OCT44471 is priced 4,000 SAR with the source's own JSON-LD
-# `priceSpecification.unitCode: "MON"` — i.e. 4,000 SAR/MONTH — but was stored as price_annual=4,000,
-# understating the true ~48,000 SAR/year rent by ~12x; this was 100% of october's currently-priced
-# Rent catalog, not an edge case).
-_UNIT_PERIODS_PER_YEAR = {"DAY": 365, "WEE": 52, "MON": 12, "ANN": 1}
-
-
-def _rent_annualize(price: Optional[int], unit_code: str) -> Optional[int]:
-    periods = _UNIT_PERIODS_PER_YEAR.get(unit_code)
-    if price is None or periods is None:
-        return price
-    return round(price * periods)
-
-
-def map_item(item: dict, s: cc.Session) -> Optional[tuple[dict, str]]:
-    url = (item.get("url") or "").strip()
-    m = re.search(r"/properties/(\d+)", url)
-    if not m:
-        return None
-    pid = m.group(1)
-
-    desc = (item.get("description") or "").strip()       # "<type_token> <deal_arabic>"
-    name = (item.get("name") or "").strip()
-    tok = desc.split(" ")[0].lower() if desc else ""
-    property_type = TYPE_MAP.get(tok) or N.map_type(name) or N.map_type(desc) or "Other"
-
-    blob = name + " " + desc
-    if any(k in blob for k in ("للإيجار", "للايجار", "إيجار", "ايجار", "rent")):
-        transaction_type = "Rent"
-    else:
-        transaction_type = "Buy"
-
-    addr = item.get("address") or {}
-    city = N.map_city(addr.get("addressRegion") or "")
-    region = N.region_for_city(city)
-    neighborhood = (addr.get("addressLocality") or "").strip() or None
-
-    img = item.get("image")
-    photos = [img] if isinstance(img, str) and img else ([u for u in img if isinstance(u, str)] if isinstance(img, list) else [])
-
-    specs = _detail_specs(s, url, pid)
-
-    offers = item.get("offers") or {}
-    price = N.to_int(offers.get("price")) or specs.get("price")   # index has sale prices; rent prices come from detail
-    if price is not None and price < 100:
-        price = None
-    price_annual = price
-    rent_period = None
-    if transaction_type == "Rent" and specs.get("price") is not None:
-        # unit_code only applies when `price` actually came from the detail page (specs) — the
-        # index-level offers.price is a sale price by convention (see comment above) and never
-        # carries this scraper's rent-period signal.
-        price_annual = _rent_annualize(price, specs.get("price_unit_code", ""))
-        unit = (specs.get("price_unit_code") or "").strip().upper()
-        rent_period = {"MON": "monthly", "ANN": "annual"}.get(unit)
-    if transaction_type == "Rent" and price_annual is None:
-        # Structured price absent — fall back to the ad body's own labelled rent line. Never
-        # overrides a structured read; only fills a row that would otherwise be served priceless.
-        price_annual, rent_period = _rent_from_prose(specs.get("description"))
-    if specs.get("photo_urls"):
-        photos = specs["photo_urls"]
-
-    # .lower() is LOAD-BEARING: category_for_type answers "Residential"/"Commercial" capitalized,
-    # and both readers below — the `== "commercial"` test here and crawl()'s res/com split — compare
-    # against the lowercase word. Returning the capitalized form made every comparison False, so
-    # every row landed in the residential table and october_commercial_listings was never written.
-    category = N.category_for_type(property_type).lower()
-    # specs["bedrooms"] is schema.org's numberOfRooms — a generic total-room count, not
-    # bedroom-specific ("excluding bathrooms and closets" per the spec, but majlis/living rooms are
-    # NOT excluded). No source field on this platform is bedroom-scoped. Owner decision 2026-07-28:
-    # null rather than store an unverifiable total-room figure.
-    beds = None
-    baths = specs.get("bathrooms")
-    if category == "commercial" or property_type in ("Residential Land", "Commercial Land", "Building"):
-        baths = None
-
+def map_listing(d: dict[str, Any]) -> tuple[Optional[dict[str, Any]], str, str]:
+    """(row, category, skip_reason). row is None exactly when skip_reason is set."""
+    fields, category, why = nuzul_fields(d, _TYPE_OVERRIDES)
+    if not fields:
+        return None, category, why
     row = {
-        "ad_number": f"OCT{pid}",
-        "listing_url": url,
+        "ad_number": f"{PREFIX}{d['id']}",
+        "listing_url": f"{BASE}/properties/{d['id']}",
         "source": SOURCE,
-        "active": True,
-        "property_type": property_type,
-        "transaction_type": transaction_type,
-        "city": city,
-        "region": region,
-        "neighborhood": neighborhood,
-        "area_m2": specs.get("area_m2"),
-        "bedrooms": beds,
-        "bathrooms": baths,
-        "price_total": price if transaction_type == "Buy" else None,
-        "price_annual": price_annual if transaction_type == "Rent" else None,
-        "rent_period": rent_period if transaction_type == "Rent" else None,
-        "photo_urls": photos,
-        "title": _redact(name),
-        "description": specs.get("description"),
+        "transaction_type": "Rent" if d.get("purpose") == "rent" else "Buy",
+        **{k: v for k, v in fields.items() if k not in _NOT_ON_OCTOBER_TABLES},
+        "region": normalize.region_for_city(fields["city"]),
+        "bedrooms": None,
     }
-    return row, category
+    return row, category, ""
 
 
-def crawl(limit: int = 0) -> tuple[list[dict], list[dict], int]:
-    s = _session()
-    seen_ids: set[str] = set()
-    res: list[dict] = []
-    com: list[dict] = []
-    n = 0
-    for page in range(1, 8):  # tiny catalog; a handful of pages max
-        try:
-            r = s.get(f"{BASE}/properties?page={page}")
-        except Exception:
-            break
-        if r.status_code != 200:
-            break
-        items = _itemlist(r.text)
-        if not items:
-            break
-        new_this_page = 0
-        for item in items:
-            url = (item.get("url") or "")
-            m = re.search(r"/properties/(\d+)", url)
-            if not m or m.group(1) in seen_ids:
-                continue
-            seen_ids.add(m.group(1))
-            new_this_page += 1
-            mapped = map_item(item, s)
-            if not mapped:
-                continue
-            row, cat = mapped
-            (com if cat == "commercial" else res).append(row)
-            n += 1
-            time.sleep(0.2)
-            if limit and n >= limit:
-                return res, com, n
-        if new_this_page == 0:
-            break
-    return res, com, n
+def _pin_sold_inactive(table: str, gone: dict[str, str], seen_ad_numbers: list[str]) -> None:
+    """Pin rows whose OWN record this run read as not `available` (rented/sold/reserved/…).
+
+    Only ids still ACTIVE in this table are pinned: a unit is enumerated every run while it stays
+    listed as rented, and re-pinning an inactive row would file a fresh GONE evidence row each time.
+    The table is looked up rather than derived from the type because legacy rows sit where the old
+    reader put them (46023 Duplex in commercial, 45830 Warehouse in residential)."""
+    active = set()
+    if gone:
+        q = db.sb().table(table).select("ad_number").eq("active", True).in_("ad_number", sorted(gone))
+        active = {r["ad_number"] for r in (db._execute(q, what=table + ".sold_pin_select").data or [])}
+    sold_pin.pin_source_confirmed_gone(
+        table, sorted(active), oracle="october.sold_pin.availability_status",
+        notes={a: gone[a] for a in active}, seen_ad_numbers=seen_ad_numbers)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
-    ap.add_argument("--limit", type=int, default=0,
-                    help="validation run: upsert only the first N parsed listings, NO prune")
+    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--delay", type=float, default=0.4)
     args = ap.parse_args()
 
-    run_id = None if args.limit else db.begin_run("october")
-    seen = 0
+    s = session()
+    dry = args.dry_run or bool(args.limit)
+    run_id = None if dry else db.begin_run(SLUG)
+    res: list[dict] = []
+    com: list[dict] = []
+    gone: dict[str, str] = {}          # ad_number → the status its own record stated this run
+    skipped: dict[str, int] = {}
     try:
-        res, com, seen = crawl(limit=args.limit)
-        if args.type != "all":
-            keep_com = args.type == "commercial"
-            res, com = ([] if keep_com else res), (com if keep_com else [])
+        ids, complete = fetch_ids(s, BASE, limit=args.limit)
+        if not ids:
+            raise RuntimeError(f"{BASE}{API_PATH} returned no properties")
+        print(f"{SOURCE}: {len(ids)} listings discovered (complete={complete})", flush=True)
+        for pid in ids:
+            d, verdict = fetch_detail(s, BASE, pid)
+            if d is None:
+                skipped[f"fetch_{verdict}"] = skipped.get(f"fetch_{verdict}", 0) + 1
+                continue
+            row, cat, why = map_listing(d)
+            if not row:
+                skipped[why] = skipped.get(why, 0) + 1
+                if why.startswith("status_"):
+                    gone[f"{PREFIX}{pid}"] = f"availability_status={why[len('status_'):]}"
+                continue
+            if args.type != "all" and cat != args.type:
+                continue
+            (com if cat == "commercial" else res).append(row)
+            if args.delay:
+                time.sleep(args.delay)
 
-        if res:
-            db.upsert_october_residential_batch(res)
-        if com:
-            db.upsert_october_commercial_batch(com)
-
-        if args.limit:
-            print(f"✓ 1 October VALIDATION: {len(res)} residential + {len(com)} commercial upserted (no prune)")
-            for r in (res + com)[:8]:
-                print("  ", {k: r.get(k) for k in (
-                    "ad_number", "property_type", "transaction_type", "city", "region",
-                    "neighborhood", "area_m2", "bedrooms", "price_total", "price_annual")})
-                print("     title:", (r.get("title") or "")[:60])
-                print("     photo:", (r["photo_urls"] or ["(none)"])[0][:74], f"({len(r['photo_urls'])} imgs)")
+        notes = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
+        if skipped:
+            print(f"  skipped (not guessed): {notes}")
+        if dry:
+            print(f"✓ {SOURCE} VALIDATION: {len(res)} residential + {len(com)} commercial "
+                  f"(nothing written)")
+            for r0 in res + com:
+                print(f"   {r0['ad_number']:>9} {r0['transaction_type']:4} {str(r0['property_type']):12} "
+                      f"{str(r0['city']):8} {str(r0['neighborhood'])[:14]:14} a={str(r0['area_m2']):>6} "
+                      f"pt={r0.get('price_total')} pa={r0.get('price_annual')} "
+                      f"rp={r0.get('rent_period')} ph={len(r0.get('photo_urls') or [])}")
+            if gone:
+                print(f"   would pin inactive (own record not available): {sorted(gone)}")
             return 0
-
-        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
-        # prune_unseen because it reasons from positive evidence (we parsed and classified the ad
-        # this run), not from absence — prune's guards protect an orphan rather than age it out,
-        # and verify_gone's 'live' verdict then makes it immortal. Required here from the run that
-        # fixed the category split: every row this platform ever wrote went to the residential
-        # table, so the first corrected run flips every commercial ad across and would otherwise
-        # leave its residential twin live forever (one URL, two cards).
+        db.upsert_october_residential_batch(res)
+        db.upsert_october_commercial_batch(com)
+        # An ad whose category flipped this run is superseded in the table it LEFT. BEFORE the
+        # prune: it reasons from positive evidence, and prune's guards would protect the orphan.
         superseded = db.retire_superseded_siblings(
             res_table="october_residential_listings", com_table="october_commercial_listings",
             res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
             source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
-
-        # Full run: prune unseen via the shared guarded helper (0-scrape/collapse → skip).
+        for tbl, rows in (("october_residential_listings", res), ("october_commercial_listings", com)):
+            _pin_sold_inactive(tbl, gone, [r["ad_number"] for r in rows])
         pruned = 0
-        for tbl, rows_seen in (("october_residential_listings", res),
-                               ("october_commercial_listings", com)):
-            nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE)
-            if nn < 0:
-                print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
-            else:
-                pruned += nn
-        print(f"✓ 1 October: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com), notes=f"pruned={pruned}", check_tables=["october_residential_listings", "october_commercial_listings"])
+        if args.type == "all" and complete:
+            verify_gone = make_verify_gone(BASE, PREFIX, SLUG, (res + com)[0] if (res or com) else None)
+            for tbl, rows in (("october_residential_listings", res), ("october_commercial_listings", com)):
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=verify_gone)
+                if n < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += n
+        healthy = db.end_run(run_id, ok=True, rows_seen=len(ids),
+                             rows_upserted=len(res) + len(com),
+                             notes=f"pruned={pruned} {notes}"[:300],
+                             check_tables=["october_residential_listings", "october_commercial_listings"])
         if not healthy:
-            print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
-        return 0 if healthy else 1
+            print("✗ run demoted to unhealthy by end_run()'s RC-B guard", flush=True)
+            return 1
+        print(f"✓ {SOURCE}: {len(res)} residential + {len(com)} commercial upserted, {pruned} pruned")
+        return 0
     except Exception as e:
         if run_id:
-            db.end_run(run_id, ok=False, rows_seen=seen, rows_upserted=0, notes=str(e)[:300])
-        print(f"✗ {e}")
-        import traceback
-        traceback.print_exc()
+            tally = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0,
+                       notes=f"{e} | skips: {tally}"[:300])
+        print(f"✗ {SOURCE}: {e}", flush=True)
         return 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

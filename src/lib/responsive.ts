@@ -29,7 +29,7 @@
 export const DOCK_BREAKPOINT = 900;
 /** Width of that docked column. */
 export const DOCK_WIDTH = 300;
-/** A result card switches from the stacked/compact row to the wide desktop layout at/above this. */
+/** Photo-first result cards use the larger desktop photo at/above this viewport width. */
 export const CARD_WIDE_BREAKPOINT = 820;
 
 export type ViewportGate = {
@@ -61,14 +61,21 @@ export function atLeast({ mounted, isWeb, width, min }: ViewportGate): boolean {
 // in a component — so SSR (width 0) and the client agree through useAtLeast().
 export const ABOUT_ART_BREAKPOINT = 640;
 
-// Share pill label (owner 2026-09-05, PR #1893): at/above this width the «مشاركة» label renders
-// beside the icon; below it the button drops back to the 46px icon-only circle (keeping its
-// accessible name). #1893 originally compared useWindowDimensions().width inline — the renamed
+// Top-bar width gate (owner 2026-09-05, PR #1893; changed 2026-10-17): «مشاركة» now ALWAYS shows
+// beside the share icon; below this width the sign-in pill shortens to «تسجيل الدخول» instead. #1893 originally compared useWindowDimensions().width inline — the renamed
 // destructure (`shareBarWidth`) slipped past the fleet scan's `\bwidth` pattern, and the label's
 // Text node existed on every ≥380px client while the served HTML (width 0) had none: React #418 on
 // every deploy's post-deploy hydration gate from 2026-09-05 21:33Z onward. Routed through
 // useAtLeast() like every other width-gated flag; the scan now also catches renamed width reads.
-export const SHARE_LABEL_BREAKPOINT = 380;
+// At 390px the English Agent header exceeded the viewport by 13px; keep both labels inside.
+export const SHARE_LABEL_BREAKPOINT = 420;
+
+// AI-chat site picker (owner 2026-10-09, Perplexity-style): below this width it is a bottom sheet
+// with a drag-handle look; at/above it a compact floating card. Same SSR rule as every gate above.
+export const PICKER_SHEET_BREAKPOINT = 768;
+
+// «نماذج إزهله» popup (owner 2026-10-23): at/above this width it is the bigger centered laptop card.
+export const MODELS_POPUP_WIDE_BREAKPOINT = 768;
 
 // RETIRED 2026-09-12 (same day, a few hours later): LOADER_PILL_LABEL_BREAKPOINT drove a logo-only
 // compact tile on the search-loading strip below 640px. Owner reversed it — "put the name also,
@@ -78,3 +85,10 @@ export const SHARE_LABEL_BREAKPOINT = 380;
 
 /** Platform logos and their loader rows use the larger laptop size at this width. */
 export const PLATFORM_LOGO_BREAKPOINT = 720;
+
+// In-app ad viewer (owner 2026-10-03): at/above this width an allowlisted listing opens in a panel
+// BESIDE the results (split view); below it, a full-screen sheet over them. Lives here, never
+// inline, so SSR (width 0) and the client agree through useAtLeast().
+export const VIEWER_SPLIT_BREAKPOINT = 1024;
+/** Laptop result cards sit 3 across (nothing open beside them) at/above this width; below it, 2 across. */
+export const CARDS_THREE_ACROSS_BREAKPOINT = 1360;

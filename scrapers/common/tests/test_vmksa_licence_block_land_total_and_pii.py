@@ -74,3 +74,11 @@ def test_a_deal_conflict_between_enum_and_licence_is_skipped():
     raw = _flight("أرض", opts, _ad())
     got, why = R.map_ad(R.main_ad(raw, 844), R.rows_of(raw))
     assert got is None and why.startswith("deal_conflict")
+
+
+def test_the_ads_own_description_reaches_the_amenity_columns():
+    # 🔬 2026-10-18: vmksa has no structured kitchen / parking field; its description is the statement.
+    raw = _flight("أرض مع ملحق فيه مطبخ ويوجد موقف سيارة مستقل", LAND, _ad())
+    (row, _), _ = R.map_ad(R.main_ad(raw, 844), R.rows_of(raw))
+    assert row.get("kitchen") is True and row.get("parking") is True
+    assert "elevator" not in row, "silence is never an answer"

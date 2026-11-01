@@ -25,9 +25,14 @@ concurrency:
   group: platform-cleanup-${{ github.event.inputs.platform }}
   cancel-in-progress: false
 
+env:
+  # Robot pass (docs/ops/SCRAPE_GUARD.md): scripts/lib/robotPass.mjs sends it only to our own front door, so our
+  # browser robots are never refused by the network guard or the bot checks. Empty on fork PRs = no pass, no change.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   cleanup:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # 180 min, matching wasalt-cleanup.yml: a wasalt dispatch drives a real browser per candidate
     # (~15-20s each), so a drain batch needs ~2.5h. 60 min cancelled wasalt-cleanup's first drain
     # dry-run mid-recheck (2026-09-20) — the same ceiling would do the same here.

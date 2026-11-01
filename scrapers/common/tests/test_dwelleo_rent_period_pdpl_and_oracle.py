@@ -107,7 +107,7 @@ def test_a_silent_rent_keeps_the_figure_and_states_no_period():
 def test_a_stated_annual_rent_is_annual_and_the_figure_is_verbatim():
     row, _, _ = _map(R1378)
     assert row["rent_period"] == "annual" and row["price_annual"] == 150000
-    assert row["property_type"] == "Villa"      # «تاون هاوس», the fleet's existing override
+    assert row["property_type"] == "تاون هاوس"      # «تاون هاوس» keeps its own name (owner 2026-10-12)
 
 
 def test_a_stated_monthly_rent_is_monthly_and_annualised_by_the_shared_helper():
@@ -414,6 +414,9 @@ def _run_main(monkeypatch, items, *, complete, total, argv=("run.py",)):
     monkeypatch.setattr(sys, "argv", list(argv))
     monkeypatch.setattr(R, "session", lambda: None)
     monkeypatch.setattr(R, "fetch_catalogue", lambda s, limit=0: (items, total, complete))
+    # The site's own sitemap names every listing's public page (new path shape since 2026-10-07).
+    monkeypatch.setattr(R, "fetch_public_urls", lambda s: {
+        it["slug"]: f"{R.BASE}/ar/properties/for-sale/x/y/z/{it['slug']}" for it in items.values() if it.get("slug")})
     monkeypatch.setattr(R, "fetch_detail", lambda s, key: {**D18630, "id": 18630} if key == R18630["slug"] else None)
     monkeypatch.setattr(R.time, "sleep", lambda *_: None)
     monkeypatch.setattr(R.db, "begin_run", lambda src: 1)
@@ -435,6 +438,7 @@ def test_the_skip_tally_reaches_end_run_and_prune_waits_for_a_complete_walk(monk
     assert calls["prune"] == []                              # an incomplete walk never prunes
     res = calls["batches"]["dwelleo_residential_listings"]
     assert res[0]["ad_number"] == "DWL18630" and res[0].get("_direct_alive_oracle")   # detail read
+    assert res[0]["listing_url"] == f"{R.BASE}/ar/properties/for-sale/x/y/z/{R18630['slug']}"
     assert calls["batches"]["dwelleo_commercial_listings"][0]["property_type"] == "Commercial Land"
 
 
@@ -444,3 +448,25 @@ def test_a_complete_walk_that_collected_the_sites_total_prunes_both_tables(monke
     assert calls["prune"] == ["dwelleo_residential_listings", "dwelleo_commercial_listings"]
     calls = _run_main(monkeypatch, items, complete=True, total=3)      # 2 of 3 < 98 %
     assert calls["prune"] == []
+
+
+# ============================ SILENT PERIOD, JUDGED BY PRICE (owner 2026-09-26 / 2026-10-21) =====
+def test_a_silent_rent_that_looks_monthly_is_monthly():
+    # 2026-10-21: «1-bedroom-apartment-for-rent-in-al-rimal-riyadh-1» prints «السعر 1,700» with no period;
+    # its own rental_prediction is 29,600 a year. Owner: «based on the price u make a judgement».
+    rec = {**R18630, "price": 1700, "description": "شقة مستقلة للإيجار في حي الرمال"}
+    row, _, _ = _map(rec, **D18630)
+    assert row["rent_period"] == "monthly" and row["price_annual"] == 1700 * 12
+    assert row["additional_info"]["rent_period_note"] == "judged_by_price"
+
+
+def test_monthly_or_yearly_on_a_monthly_looking_figure_is_monthly():
+    # «… ومتاح للتأجير الشهري أو السنوي» on a 3,500 figure (king-abdulaziz-riyadh-1, 2026-10-21).
+    rec = {**R18630, "price": 3500, "description": "الإيجار شامل لاستهلاك الكهرباء والماء، ومتاح للتأجير الشهري أو السنوي."}
+    row, _, _ = _map(rec, **D18630)
+    assert row["rent_period"] == "monthly" and row["price_annual"] == 3500 * 12
+
+
+def test_a_silent_rent_above_the_monthly_line_still_states_no_period():
+    row, _, _ = _map(R18630, **D18630)          # 60,000, silent: stays as printed, period NULL
+    assert row["price_annual"] == 60000 and row.get("rent_period") is R.db.AUTHORITATIVE_NULL

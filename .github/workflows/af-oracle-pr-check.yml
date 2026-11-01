@@ -30,6 +30,8 @@
 name: AF independent oracle (live)
 
 on:
+  # GitHub merge queue (owner 2026-10-22): required checks must also run on the queued merge commit, or the queue waits forever.
+  merge_group:
   pull_request:
   push:
     branches: [main]
@@ -42,12 +44,17 @@ concurrency:
   group: af-oracle-pr-check-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   oracle:
     # NOTE: this job name is the branch-protection required-status-check context. Renaming it
     # silently drops the gate — change both together (same rule as full-verification-ci.yml).
     name: AF predicates vs an independent oracle (live)
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4

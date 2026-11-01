@@ -20,7 +20,17 @@ SOURCE SHAPE (probed live before any code):
     strip of OTHER compounds as recommendations. That is this source's death signal — a 200, not a
     404 — and the recommendation cards carry their own bedrooms/bathrooms/sqm/price, so they are
     exactly the neighbour-contamination shape. They cannot leak here because a UNIT is only read
-    from a block carrying `cin-unit-card__title`, which recommendation cards never have.
+    from an <article> whose class is `cin-unit-card`, which recommendation cards never have.
+  · ONE CARD, ONE UNIT, READ INSIDE ITS OWN <article>. Measured 2026-09-28 over the 130 sitemap
+    compounds: of 270 unit cards, 68 have no `cin-unit-card__subtitle` and 9 have neither a price
+    nor a `data-cin-contact-unit` id. A page-wide regex that REQUIRED a subtitle matched 0 units on
+    14 compounds (canary-vista 5 cards, mena-house-compound 2, hada-villas, sulimania-villas …),
+    and on 16 more it stitched one card's fields onto the next card's id: 14 published units
+    carried a neighbour's type («Studio» for an Apartment) or bedrooms/area (olaris CIN800: 1 bed
+    75 m² instead of 2 beds 97 m²). Every field is now optional and read within its own card; a
+    card without the source's own unit id has no identity and is skipped.
+  · REMOVAL: prune_unseen after a COMPLETE crawl only (sitemap read, every compound page a 200),
+    with a per-unit oracle on the row's stored listing_url — see _unit_signal.
   · LANGUAGE: this source is ENGLISH. Under the no-English-leaks rule a district is only written
     when an English name maps to a catalogued Arabic district of the SAME city with certainty;
     otherwise district_ar stays NULL and the card shows «الحي غير محدد». The raw English is kept
@@ -31,6 +41,7 @@ from __future__ import annotations
 import argparse
 import html as ihtml
 import re
+from functools import lru_cache
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -41,6 +52,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.district_bridge import bridge_rows, bridge_unique  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
+
+# THE COMPOUND'S OWN MAP MARKER (owner 2026-10-30: 286 ads, 0 pins). The page draws a Leaflet map from an
+# inline script — `cinMapMarkers = [ {marker: {…, position: {lat: 24.8397, lng: 46.7507}}, title: "Azure Al
+# Reem"} ]` — one marker, the compound itself (measured on azure-al-reem, satel-at-opal, salwa-garden-village).
+# Every unit of the compound sits at that marker, so each unit row carries it, marked pin_scope=compound.
+_MARKER = re.compile(r"cinMapMarkers\s*=\s*\[\s*\{\s*marker:\s*\{[^{}]*?position:\s*\{\s*lat:\s*(-?\d{1,2}\.\d{3,})\s*,\s*lng:\s*(-?\d{1,3}\.\d{3,})")
+
+
+def compound_pin(page_html: str) -> dict:
+    """{latitude, longitude} from the page's own marker, else {} (a page with no marker, or one outside KSA)."""
+    m = _MARKER.search(page_html or "")
+    return pin_dict(m.group(1), m.group(2)) if m else {}
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://compoundin.com"
 SOURCE = "CompoundIn"
@@ -88,32 +114,98 @@ _DISTRICT_EN_AR = {
     ("khobar", "aqrabiyah"): "حي العقربية", ("khobar", "ulaya"): "حي العليا",
     ("khobar", "sadafa"): "حي الصدفة", ("khobar", "corniche"): "حي الكورنيش",
     ("dammam", "faisaliah"): "حي الفيصلية", ("dammam", "faisaliyah"): "حي الفيصلية",
+    # 2026-10-06 (Scraping Engineer): the spellings the source used on rows left NULL — the weekly
+    # field-fill check saw compoundin's new rows at 1 district in 18. Same rule: unambiguous
+    # transliteration, then find_district_in_text() against THIS city's catalog.
+    ("riyadh", "ishbilia"): "حي اشبيلية", ("riyadh", "ishbiliyah"): "حي اشبيلية",
+    ("riyadh", "qurtoba"): "حي قرطبة", ("riyadh", "qurtubah"): "حي قرطبة",
+    ("riyadh", "ghirnatah"): "حي غرناطة", ("riyadh", "mursalat"): "حي المرسلات",
+    ("riyadh", "rawabi"): "حي الروابي", ("riyadh", "muruj"): "حي المروج",
+    ("jeddah", "rehab"): "حي الرحاب", ("jeddah", "khalidiyah"): "حي الخالدية",
+    # measured on the live NULL rows by the city in their own /compounds/<city>/ address:
+    ("khobar", "rawabi"): "حي الروابي", ("riyadh", "rabwah"): "حي الربوة",
+    ("riyadh", "safa"): "حي الصفا", ("riyadh", "sulimania"): "حي السليمانية",
+    # NOT mapped, on purpose: «King Abdullah Financial» (114 rows in riyadh, khobar AND makkah — the
+    # site's own template text, not each compound's district), «Saudi Arabia», «Al Khobar».
 }
+
+
+# ── THE DISTRICT THE PAGE STATES IN ITS JSON-LD ADDRESS (2026-10-18) ────────────────────────────
+# «living in X» / «X District» was the only district source, and on 127 live rows that line is the site's
+# template «King Abdullah Financial» while the JSON-LD streetAddress names the real place — often in
+# Arabic: «RRMA3815, 3815 Hajar Valley, 7410، حي الملقا، Riyadh 13524, Saudi Arabia» (rendered 2026-10-18,
+# al-malqa-compound). Every address segment is offered to the EXACT step: an Arabic «حي X» segment straight
+# to this city's catalogue; an English segment through the dictionary, else the source-attested bridge
+# (keys with ONE Arabic answer, scrapers/common/district_bridge), then the catalogue; the legacy line last.
+# A road, a province, the country, the city, the template line, two segments naming two districts → NULL.
+_SEG_SPLIT = re.compile(r"\s*(?:،|,|\s-\s|–|—)\s*")
+_HAYY_AR = re.compile(r"^حي\s+\S")
+_NOT_A_PLACE = re.compile(r"(?:\broad\b|\brd\.?$|\bstreet\b|\bst\.?$|\bhighway\b|\bprovince\b|saudi arabia|^\d[\d\s]*$|^[A-Z0-9]{4,8}\+?[A-Z0-9]*$)", re.I)
+_TEMPLATE_EN = frozenset({"king abdullah financial"})   # the site's placeholder line (10-06, #658)
+
+
+def address_segments(page_html: str) -> list[str]:
+    """The JSON-LD streetAddress split on commas/dashes, as written, minus roads, numbers, the country."""
+    m = re.search(r'"streetAddress":\s*"([^"]*)"', page_html or "")
+    out: list[str] = []
+    for seg in _SEG_SPLIT.split(m.group(1) if m else ""):
+        seg = seg.strip()
+        if seg and not _NOT_A_PLACE.search(seg) and seg not in out:
+            out.append(seg)
+    return out
+
+
+@lru_cache(maxsize=None)
+def _bridge_en_ar(city_en: str) -> dict[str, str]:
+    """The shared EN→AR bridge for one canonical English city, keys normalised with _norm_dist, unique only."""
+    return bridge_unique(bridge_rows(city_en), _norm_dist)
+
+
+def _dict_ar(ck: str, nd: str) -> Optional[str]:
+    cand = _DISTRICT_EN_AR.get((ck, nd))
+    if cand is None and nd.startswith("al") and " " not in nd:   # «AlRehab» written as one word
+        cand = _DISTRICT_EN_AR.get((ck, nd[2:]))
+    return cand
 
 
 def _norm_dist(name: Optional[str]) -> Optional[str]:
     """«Al Narjis District» / «An Narjis» / «Al-Arid» → «narjis» / «narjis» / «arid»."""
     if not name:
         return None
-    n = re.sub(r"\bdistrict\b", " ", name.strip().lower())
+    n = re.sub(r"\b(?:district|dist)\b\.?", " ", name.strip().lower())   # the bridge writes «… Dist.»
     n = re.sub(r"[^a-z\s-]", " ", n)
+    n = re.sub(r"^\s*(?:well\s+)?located\s+in\s+", "", n)        # «Well located in AlRehab»
     n = re.sub(r"^\s*(?:al|an|ar|as|ad|ash)[\s-]+", "", n)
     n = re.sub(r"\s+", " ", n).strip()
     return n or None
 
-_UNIT_RE = re.compile(
-    r'cin-unit-card__title">([^<]*)<'          # 1 unit type
-    r'.*?cin-unit-card__subtitle">([^<]*)<'    # 2 unit subtitle
-    r'.*?cin-compound-card__specs">(.*?)</p>'  # 3 specs blob
-    r'.*?cin-compound-card__amount-value">([^<]*)<'  # 4 price
-    r'.*?data-cin-contact-unit="(\d+)"',       # 5 unit id
-    re.S)
+_CARD_RE = re.compile(r'<article\b[^>]*\bcin-unit-card\b[^>]*>(.*?)</article>', re.S)
+_CARD_FIELDS = {
+    "type": r'cin-unit-card__title">([^<]*)<',
+    "subtitle": r'cin-unit-card__subtitle">([^<]*)<',
+    "specs": r'cin-compound-card__specs">(.*?)</p>',
+    "price": r'cin-compound-card__amount-value">([^<]*)<',
+    "uid": r'data-cin-contact-unit="(\d+)"',
+    "chips": r'cin-unit-card__amenities">([^<]*)<',
+}
+
+
+def unit_cards(page_html: str) -> list[dict[str, Optional[str]]]:
+    """Every unit card's fields, each read INSIDE its own <article> — a field a card omits is None,
+    never borrowed from the next card (see the module header)."""
+    out = []
+    for card in _CARD_RE.findall(page_html):
+        found = {k: re.search(pat, card, re.S) for k, pat in _CARD_FIELDS.items()}
+        out.append({k: (m.group(1) if m else None) for k, m in found.items()})
+    return out
+
+
 _BED_RE = re.compile(r"(\d+)\s*Bedroom", re.I)
 _BATH_RE = re.compile(r"(\d+)\s*Bathroom", re.I)
 _SQM_RE = re.compile(r"([\d,\.]+)\s*sqm", re.I)
 
 _TYPE_EN_AR = {
-    "apartment": "شقة", "studio": "استوديو", "villa": "فيلا", "townhouse": "فيلا",
+    "apartment": "شقة", "studio": "استوديو", "villa": "فيلا", "townhouse": "تاون هاوس",
     "duplex": "دوبلكس", "penthouse": "شقة", "chalet": "شاليه", "room": "غرفة",
 }
 
@@ -172,6 +264,9 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
     if is_delisted(page_html):
         return [], "delisted"
     city_en, district_en = compound_location(page_html)
+    um = re.search(r"/compounds/([a-z\-]+)/[^/]+/?$", url)
+    if um:      # the page's own address names its city (/compounds/<city>/<slug>, since 2026-10-02)
+        city_en = um.group(1).replace("-", " ")
     if not city_en:
         return [], "no_city"
     city_ar = _CITY_EN_AR.get(city_en.strip().lower())
@@ -181,27 +276,31 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
     if not city_id:
         return [], "city_not_in_catalog"
 
-    district_ar = None
-    nd = _norm_dist(district_en)
-    if nd:
-        cand = _DISTRICT_EN_AR.get((city_en.strip().lower(), nd))
-        # Only write a district our own catalog already attests for THIS city.
-        if cand:
-            district_ar = find_district_in_text(cand, city_id)
+    district_ar, district_source = None, None
+    ck = city_en.strip().lower()
+    city_canon = normalize.map_city(city_ar) or ""          # the bridge is keyed by the canonical English city
+    found: dict[str, str] = {}                              # catalogued district_ar → how it was found
+    for seg in address_segments(page_html) + ([district_en] if district_en else []):
+        legacy = seg == district_en and seg not in address_segments(page_html)
+        if _HAYY_AR.match(seg):                             # the source wrote the district in Arabic
+            got, how = find_district_in_text(seg, city_id), "address_ar"
+        else:
+            nd = _norm_dist(seg)
+            if not nd or nd in _TEMPLATE_EN or nd == _norm_dist(city_en):
+                continue
+            cand = _dict_ar(ck, nd)
+            how = "dictionary" if cand else "bridge"
+            cand = cand or _bridge_en_ar(city_canon).get(nd)
+            got = find_district_in_text(cand, city_id) if cand else None
+        if got:
+            found.setdefault(got, "legacy_line" if legacy else how)
+    if len(found) == 1:                                     # two segments naming two districts → no district
+        district_ar, district_source = next(iter(found.items()))
 
     compound_name = None
     cm = re.search(r'<h1[^>]*>(.*?)</h1>', page_html, re.S)
     if cm:
         compound_name = plain(cm.group(1))
-
-    # PER-UNIT amenity chips. The old code searched the WHOLE page with one un-anchored regex, so
-    # every unit on a compound was stamped with unit #1's amenities. The chips appear once per unit
-    # card in document order, so they pair with _UNIT_RE's matches BY POSITION — and only when the
-    # two counts agree. If they ever disagree the page layout has changed, and the honest response
-    # is to write no amenities at all rather than risk attaching them to the wrong unit.
-    units = _UNIT_RE.findall(page_html)
-    chips = re.findall(r'cin-unit-card__amenities">([^<]*)<', page_html)
-    unit_chips = chips if len(chips) == len(units) else [None] * len(units)
 
     # Compound-level facilities, published as schema.org LocationFeatureSpecification. These are
     # genuinely shared by every unit in the compound, so they may be written onto each unit row.
@@ -212,17 +311,19 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
     compound_ac = True if any("air condition" in f for f in ld_features) else None
     pcm = re.search(r'"postalCode":\s*"?(\d{4,6})', page_html)
     postal = pcm.group(1) if pcm else None
+    pin = compound_pin(page_html)      # the page WAS read: no marker → pin_absent, so a stale pair may leave
 
     rows: list[dict] = []
-    for idx, (utype, subtitle, specs, price, uid) in enumerate(units):
-        spec = plain(specs)
+    for card in unit_cards(page_html):
+        utype, subtitle, uid, chip = card["type"], card["subtitle"], card["uid"], card["chips"]
+        spec = plain(card["specs"])
         type_ar = _TYPE_EN_AR.get(plain(utype).lower())
-        if not type_ar:
-            continue
+        if not type_ar or not uid:
+            continue            # no mappable type, or no source unit id to be this row's identity
         property_type = normalize.map_type_exact(type_ar)
         if not property_type:
             continue
-        amount = _int(price)
+        amount = _int(card["price"])
         rows.append({
             "ad_number": f"{PREFIX}{uid}",
             "listing_url": url,
@@ -246,14 +347,15 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
             "photo_urls": photos(page_html),
             "zip_code": postal,
             "additional_info": {k: v for k, v in {
-                "type_en": plain(utype), "unit_subtitle": plain(subtitle),
+                "district_source": district_source,   # address_ar | dictionary | bridge | legacy_line
+                "type_en": plain(utype), "unit_subtitle": plain(subtitle) or None,
                 "compound": compound_name, "unit_id": uid,
-                "amenities_en": plain(unit_chips[idx]) if unit_chips[idx] else None,
+                "amenities_en": plain(chip) or None,
                 "compound_facilities_en": ", ".join(sorted(ld_features)) or None,
+                **({**pin, "pin_scope": "compound"} if pin else {"pin_absent": True}),
             }.items() if v is not None},
         })
 
-        chip = unit_chips[idx]
         if chip:
             # «Furnished · Kitchen · Living Room» — the unit's OWN statement about itself.
             for col, val in normalize.amenities_from_text(chip).items():
@@ -286,11 +388,53 @@ def photos(page_html: str) -> Optional[list[str]]:
     return (full + [u for u in urls if u not in full])[:20] or None
 
 
+# ── removal oracle ──────────────────────────────────────────────────────────────────────────────
+# Absence from the crawl only SELECTS candidates; the row's own compound page decides, under the
+# shared law. A delisted compound answers HTTP 200 with «This compound is no longer listed» in its
+# <h1> (CIN703/CIN704, ayanna-olaya-compound, 2026-09-28: gone from the sitemap, page delisted, rows
+# still active since 09-22) → GONE for every unit it had. A listed page carrying this unit's own
+# `data-cin-contact-unit` card → LIVE. Anything else — including a listed page without this unit,
+# which has not been measured — is no opinion, so the row holds.
+_AD_RE = re.compile(rf"^{PREFIX}(\d+)$")
+
+
+def _unit_signal(uid: str):
+    def signal(status, body, _moved):
+        if status != 200:
+            return None
+        if is_delisted(body):
+            return "gone"
+        return "live" if any(c["uid"] == uid for c in unit_cards(body)) else None
+    return signal
+
+
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    m = _AD_RE.match(ad_number)
+    if not m:
+        return "unknown", f"{ad_number!r} is not a {PREFIX}<unit id> ad number"
+    return LivenessProbe(platform="compoundin", signal=_unit_signal(m.group(1)), session=session,
+                         url_for=stored_listing_url(("compoundin_residential_listings",))
+                         ).verify_gone(ad_number)
+
+
+_COMPOUND_URL_RE = re.compile(r"/rent/show/|/compounds/[^/]+/[^/]+/?$")
+
+
 def fetch_compounds(s: cc.Session, limit: int = 0) -> list[str]:
-    r = s.get(f"{BASE}/sitemap.xml", timeout=40)
-    if r.status_code != 200:
-        return []
-    urls = sorted({u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if "/rent/show/" in u})
+    """Compound page URLs from the sitemap. On 2026-10-02 the site turned /sitemap.xml into an INDEX
+    (child sitemap-compounds.xml) and moved compounds from /rent/show/<id>/<slug> to
+    /compounds/<city>/<slug>; the flat sitemap then held no /rent/show/ url and every crawl failed.
+    Both layouts are read: the top file's own urls, plus every child sitemap it names."""
+    def locs(url: str) -> list[str]:
+        r = s.get(url, timeout=40)
+        return re.findall(r"<loc>([^<]+)</loc>", r.text) if r.status_code == 200 else []
+
+    top = locs(f"{BASE}/sitemap.xml")
+    found = set(top)
+    for child in top:
+        if child.endswith(".xml") and "compound" in child.rsplit("/", 1)[-1]:
+            found |= set(locs(child))   # only the compounds file: area pages share the url shape
+    urls = sorted(u for u in found if _COMPOUND_URL_RE.search(u))
     return urls[:limit] if limit else urls
 
 
@@ -308,17 +452,20 @@ def main() -> int:
     try:
         urls = fetch_compounds(s, limit=args.limit)
         if not urls:
-            raise RuntimeError("sitemap returned no /rent/show/ urls")
+            raise RuntimeError("sitemap returned no compound urls")
         print(f"{SOURCE}: {len(urls)} compounds discovered", flush=True)
         skipped: dict[str, int] = {}
+        complete = True         # every compound page answered 200 — the only crawl that may prune
         for i, u in enumerate(urls, 1):
             try:
                 r = s.get(u, timeout=45)
             except Exception:
                 skipped["unreachable"] = skipped.get("unreachable", 0) + 1
+                complete = False
                 continue
             if r.status_code != 200:
                 skipped[f"http_{r.status_code}"] = skipped.get(f"http_{r.status_code}", 0) + 1
+                complete = False
                 continue
             rows, why = map_units(u, r.text)
             if not rows:
@@ -341,7 +488,16 @@ def main() -> int:
         # Compounds are residential by definition on this source; nothing is written commercial.
         if res:
             db.upsert_compoundin_residential_batch(res)
+        # PRUNE — only after a COMPLETE crawl, and only with the source's own verdict per row.
+        # prune_unseen's own breakers (0 seen, >30% vanished, <80% re-seen, 3 strikes) sit on top.
+        pruned = 0
+        if args.type == "all" and complete:
+            pruned = db.prune_unseen("compoundin_residential_listings", {r["ad_number"] for r in res},
+                                     source=SOURCE, verify_gone=_verify_gone)
+            if pruned < 0:
+                print("  ⚠ prune guard tripped — kept existing active rows")
         healthy = db.end_run(run_id, ok=True, rows_seen=len(urls), rows_upserted=len(res),
+                             notes=f"pruned={pruned} complete={complete}",
                              check_tables=["compoundin_residential_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard", flush=True)

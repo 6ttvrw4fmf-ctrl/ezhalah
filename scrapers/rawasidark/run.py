@@ -66,13 +66,13 @@ RSC_UNDEFINED = "$undefined"
 #   «عمارة تجارية» — the shared map's substring pass reads the «عمارة» inside it and returns
 #       Building (residential). The source says تجارية, so it is the canonical Commercial Building.
 #   «محطة وقود»   — same station the shared map already knows as «محطة بنزين» → Gas Station.
-#   «تاون هاوس»   — the fleet-wide Townhouse fold (TYPE_MAP_EN 'Townhouse': 'Villa').
+#   «تاون هاوس»   — kept under its own name, fleet wide (TYPE_MAP_EN 'Townhouse': «تاون هاوس»; owner 2026-10-12).
 #   «شقق مفروشة»  — resolves to Apartment by substring anyway; pinned so a future map edit can't
 #       silently move it. Furnishing itself is NOT captured as a field (the source has no such flag).
 TYPE_OVERRIDES = {
     "عمارة تجارية": "Commercial Building",
     "محطة وقود": "Gas Station",
-    "تاون هاوس": "Villa",
+    "تاون هاوس": "تاون هاوس",
     "شقق مفروشة": "Apartment",
 }
 
@@ -303,6 +303,11 @@ def map_object(o: dict) -> Optional[tuple[dict, str]]:
         "photo_urls": _photos(o),
         "title": _redact(o.get("title")),
         "description": _redact(o.get("description")),
+        # The catalog object carries no amenity key (source_capture: area / city / location / price /
+        # streetWidth / title / type / description), so the ad's own words are the only statement of
+        # kitchen / lift / parking / rooms: YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2). 36 of 101
+        # active ads named one and all were NULL (🔬 2026-10-12, «12 شقة من غرفتين وصاله وحمام ومطبخ»).
+        **N.prose_amenities(o.get("description")),
         "additional_info": info,
         "source_capture": capture,
         "price_evidence": N.price_evidence(

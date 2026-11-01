@@ -58,12 +58,20 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.http_liveness import decide  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
-    _REGION_AR_FOR, find_district_in_text, norm_ar, to_catalog,
+    _REGION_AR_FOR, catalog_district, city_ar_for, find_district_in_text, norm_ar, only_city_with_district, to_catalog,
 )
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 SITE = "https://rakez.sa"
 REST = f"{SITE}/wp-json/wp/v2"
+# THE MAP PIN LIVES ON THE SITE'S MAP PAGE, NOT ON THE PROJECT PAGE (owner 2026-10-30: 3,660 ads, 0 pins).
+# /ar/project/<id>/ draws no map, but /ar/projects-map/ calls this feed: one JSON with every mapped
+# project's `id, permalink, lat, lng, city_path, status`. `?lang=en` keys it by the ENGLISH post id —
+# the id every unit names in `unit_project` — while `?lang=ar` keys the same pins by the Arabic twin
+# (measured 2026-10-30 on 27454/66800/75805: identical pairs). A unit's pin is its project's pin.
+MAP_FEED = f"{SITE}/ar/wp-json/hs-map/v1/projects?lang=en"
 PER_PAGE = 100
 # NO User-Agent HERE, deliberately. curl_cffi's `impersonate=` sets a COMPLETE, internally
 # consistent browser header set at the C layer (UA, sec-ch-ua, Accept, …) to match the TLS/JA3
@@ -77,6 +85,7 @@ HEADERS = {
 }
 
 INGESTIBLE_UNIT_STATUS = "available"
+AREA_PROBE_UNIT_IDS = {68221, 14631}     # backlog #507: RKZ68221 (project 67515), RKZ14631 (26260)
 
 
 def _unit_status(acf: dict) -> str:
@@ -132,6 +141,11 @@ _FLOOR_ORDINALS = {
 }
 
 LAST_FETCH_NOTE = "no pages attempted"
+# Every collection walk that did NOT reach its natural end this run. Non-empty → no prune: a unit
+# missing from a truncated walk is missing from OUR read, not from the source (the walk used to stop
+# at page 199 and break silently on a failed page, and hand prune_unseen the short list).
+INCOMPLETE: list[str] = []
+MAX_PAGES = 1000  # 14,319 units = 144 pages on 2026-09-14; hitting this is reported, never trusted
 
 
 def session() -> cc.Session:
@@ -146,6 +160,26 @@ def _clean(s: Optional[str]) -> Optional[str]:
     t = ihtml.unescape(re.sub(r"<[^>]+>", " ", str(s)))
     t = re.sub(r"\s+", " ", t).strip()
     return t or None
+
+
+def _to_num(v: Any) -> Optional[float]:
+    if v is None or v is False or v is True:
+        return None
+    s = re.sub(r"[,\s]", "", str(v).translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")))
+    return float(s) if re.match(r"^\d+(?:\.\d+)?$", s) else None
+
+
+def unit_area(acf: dict) -> Optional[int]:
+    """The unit's size as its project page prints it: `area` + `private_area` (owner ruling 2026-10-16,
+    backlog #541). The unit API splits the built area from the private courtyard/roof; the page's unit
+    table shows their SUM (unit 14631: 144 + 32 = «176 م²»; unit 68221: 169.42 + 102.15). Storing the
+    built part alone put every unit with a private area under a smaller size than its page states.
+    Nearest whole metre (area_m2 is an integer column, #123); a unit with no private area is unchanged."""
+    built = _to_num(acf.get("area"))
+    if not built or built <= 0:
+        return None
+    private = _to_num(acf.get("private_area")) or 0.0
+    return int(built + (private if private > 0 else 0.0) + 0.5)
 
 
 def _to_int(v: Any) -> Optional[int]:
@@ -164,7 +198,8 @@ def _paged(s: cc.Session, path: str, note: str, extra: str = "") -> list[dict]:
     """Every page of a REST collection, with the retry every sibling scraper learned to need."""
     global LAST_FETCH_NOTE
     out: list[dict] = []
-    for page in range(1, 200):
+    fail: Optional[str] = f"{note} still had full pages at the {MAX_PAGES}-page cap"
+    for page in range(1, MAX_PAGES + 1):
         r = None
         last_exc: Optional[Exception] = None
         for attempt in range(3):
@@ -176,24 +211,30 @@ def _paged(s: cc.Session, path: str, note: str, extra: str = "") -> list[dict]:
                 if attempt < 2:
                     time.sleep(3 * (attempt + 1))
         if r is None:
-            LAST_FETCH_NOTE = (f"{note} page {page} raised {type(last_exc).__name__} on all 3 "
-                               f"attempts: {str(last_exc)[:100]}")
+            fail = (f"{note} page {page} raised {type(last_exc).__name__} on all 3 "
+                    f"attempts: {str(last_exc)[:100]}")
             break
         if r.status_code == 400:           # WP answers 400 past the last page
+            fail = None
             break
         if r.status_code != 200:
-            LAST_FETCH_NOTE = f"{note} page {page} returned HTTP {r.status_code}"
+            fail = f"{note} page {page} returned HTTP {r.status_code}"
             break
         try:
             batch = r.json()
         except Exception:
-            LAST_FETCH_NOTE = f"{note} page {page} body was not JSON"
+            fail = f"{note} page {page} body was not JSON"
             break
-        if not isinstance(batch, list) or not batch:
+        if not isinstance(batch, list):
+            fail = f"{note} page {page} was not a list"
             break
         out.extend(x for x in batch if isinstance(x, dict))
-        if len(batch) < PER_PAGE:
+        if len(batch) < PER_PAGE:          # a short (or empty) page is the natural end
+            fail = None
             break
+    if fail:
+        LAST_FETCH_NOTE = fail
+        INCOMPLETE.append(fail)
     return out
 
 
@@ -210,6 +251,36 @@ def fetch_projects(s: cc.Session, lang: str = "") -> dict[int, dict]:
     extra = "&_embed=wp:term,wp:featuredmedia" + (f"&lang={lang}" if lang else "")
     return {p["id"]: p for p in _paged(s, "project", f"project[{lang or 'en'}]", extra)
             if isinstance(p.get("id"), int)}
+
+
+def pins_from_feed(body: Any) -> dict[int, dict]:
+    """{english project id: {latitude, longitude}} from the map feed's body; a project whose pair is
+    missing or outside Saudi Arabia maps to {} (sa_pin), never to a guess."""
+    projects = body.get("projects") if isinstance(body, dict) else body
+    if not isinstance(projects, list):
+        return {}
+    return {p["id"]: pin_dict(p.get("lat"), p.get("lng"))
+            for p in projects if isinstance(p, dict) and isinstance(p.get("id"), int)}
+
+
+def fetch_project_pins(s: cc.Session) -> Optional[dict[int, dict]]:
+    """The site's map feed, once per crawl. None when it could not be read: then no unit carries a pin
+    OR a `pin_absent` this run, so keep_stored_pin keeps yesterday's pair (a failed fetch is not the
+    source saying «no pin»)."""
+    for attempt in range(3):
+        try:
+            r = s.get(MAP_FEED, timeout=60)
+            if r.status_code == 200:
+                return pins_from_feed(r.json())
+            LAST_FETCH_NOTE_PINS[0] = f"map feed HTTP {r.status_code}"
+        except Exception as e:  # noqa: BLE001
+            LAST_FETCH_NOTE_PINS[0] = f"map feed raised {type(e).__name__}: {str(e)[:80]}"
+        if attempt < 2:
+            time.sleep(3 * (attempt + 1))
+    return None
+
+
+LAST_FETCH_NOTE_PINS = ["map feed not attempted"]
 
 
 def fetch_city_terms(s: cc.Session) -> dict[int, dict]:
@@ -306,7 +377,8 @@ def _city_or_region_homonym(name: str) -> tuple[Optional[int], Optional[int]]:
     return cid, rid
 
 
-def resolve_location(term_ids: list[int], tree: dict[int, dict]) -> tuple[Optional[str], Optional[int],
+def resolve_location(term_ids: list[int], tree: dict[int, dict], title: Optional[str] = None
+                     ) -> tuple[Optional[str], Optional[int],
                                                                          Optional[int], Optional[str]]:
     """(city_ar, city_id, region_id, district_ar) from the taxonomy TREE.
 
@@ -322,14 +394,13 @@ def resolve_location(term_ids: list[int], tree: dict[int, dict]) -> tuple[Option
         return d
 
     tagged = [t for t in term_ids if t in tree]
-    if not tagged:
-        return None, None, None, None
-    leaf = max(tagged, key=depth)
-
-    # ancestry, leaf first
-    chain, tid, seen = [], leaf, set()
-    while tid in tree and tid not in seen:
-        seen.add(tid); chain.append(tree[tid]["name"]); tid = tree[tid]["parent"]
+    chain: list[str] = []
+    if tagged:
+        leaf = max(tagged, key=depth)
+        # ancestry, leaf first
+        tid, seen = leaf, set()
+        while tid in tree and tid not in seen:
+            seen.add(tid); chain.append(tree[tid]["name"]); tid = tree[tid]["parent"]
 
     city_ar = city_id = region_id = None
     for name in chain[1:] or chain:            # a city is never the leaf unless the leaf is all we have
@@ -337,11 +408,105 @@ def resolve_location(term_ids: list[int], tree: dict[int, dict]) -> tuple[Option
         if cid:
             city_ar, city_id, region_id = name, cid, rid
             break
+
+    if not city_id and len(tagged) > 1:
+        # The district and its city tagged SIDE BY SIDE, both children of the region: /ar/project/1908/ prints
+        # «المدينة: الحمراء , الخبر» — الحمراء (734) → الشرقية, الخبر (1049) → الشرقية — so the leaf's own chain never
+        # reaches the city (7 live units with no city, 2026-10-18). Exactly one tagged city, in the chain's region.
+        regions = {r for r in (_bare_region_labels().get(norm_ar(n)) for n in chain) if r is not None}
+        cities = {}
+        for t in tagged:
+            cid, rid = _city_or_region_homonym(tree[t]["name"])
+            if cid and (not regions or rid in regions):
+                cities[cid] = (tree[t]["name"], cid, rid)
+        if len(cities) == 1:
+            city_ar, city_id, region_id = next(iter(cities.values()))
+            others = [tree[t]["name"] for t in sorted(tagged, key=depth, reverse=True) if tree[t]["name"] != city_ar]
+            chain = others[:1] + [city_ar]     # the district candidate first, as the tree walk leaves it
+
+    if not city_id and chain and len(chain) >= 2:
+        # «المدينة: الخور , الشرقية» (/ar/project/56418/, 28 live units with no city, 2026-10-18): a district and its
+        # REGION, no city. Placed only when that district belongs to exactly ONE catalogue city of the region (owner
+        # 2026-10-18, the المبرز pattern) — «الخور» is الخبر's alone; a district two cities share places nothing.
+        rid = _bare_region_labels().get(norm_ar(chain[-1]))
+        cid = only_city_with_district(chain[0], rid) if rid is not None else None
+        if cid:
+            city_ar, city_id, region_id = city_ar_for(cid), cid, rid
+            return city_ar, city_id, region_id, catalog_district(cid, chain[0])
+
     if not city_id:
-        return None, None, None, None
+        # The tree skipped the city (البندرية → الشرقية, no الخبر): the project's OWN title states it.
+        # A region the tree did name must agree with the title's city, or nothing is placed.
+        regions = {r for r in (_bare_region_labels().get(norm_ar(n)) for n in chain) if r is not None}
+        city_ar, city_id, region_id, district_ar = location_from_title(title)
+        if not city_id or (regions and region_id not in regions):
+            return None, None, None, None
+        return city_ar, city_id, region_id, district_ar
 
     district_ar = find_district_in_text(chain[0], city_id) if chain else None
+    tree_named_a_district = bool(chain) and chain[0] != city_ar and not _ZONE.match(chain[0])
+    if not district_ar and title and not tree_named_a_district:
+        # The tree stopped at the city (or a zone): the title's own district words, catalog-scoped.
+        # A district the tree DID name but our catalog lacks stays NULL — the title never overrules it.
+        t_city, t_cid, _, t_dist = location_from_title(title)
+        if t_cid in (None, city_id):
+            district_ar = t_dist if t_cid else find_district_in_text(_title_tail(title), city_id)
     return city_ar, city_id, region_id, district_ar
+
+
+_ZONE = re.compile(r"(شمال|جنوب|شرق|غرب|وسط)\s")
+
+
+def tree_leaf_district(term_ids: list[int], tree: dict[int, dict], city_ar: Optional[str]) -> Optional[str]:
+    """The tree's OWN leaf term when it names a district — the source's word, as written. 255 live
+    units stayed without a district because the leaf («العنبرية» under المدينة المنورة, 56204) is not in
+    our catalogue and the old rule dropped it entirely (owner 2026-10-18: a source-named district is
+    shown, as written, attested or not). Never a district: the city itself, a zone («شمال الرياض»), a
+    root term (a city or a region)."""
+    tagged = [t for t in term_ids if t in tree]
+    if not tagged:
+        return None
+
+    def depth(tid: int) -> int:
+        d, seen = 0, set()
+        while tid in tree and tid not in seen and tree[tid]["parent"]:
+            seen.add(tid); tid = tree[tid]["parent"]; d += 1
+        return d
+
+    leaf = tree[max(tagged, key=depth)]
+    name = (leaf.get("name") or "").strip()
+    if not name or not leaf.get("parent") or name == (city_ar or "") or _ZONE.match(name):
+        return None
+    return name
+_DASH = re.compile(r"\s*[–—-]\s*")
+
+
+def _title_tail(title: Optional[str]) -> str:
+    """The location part of a rakez project title: everything after its first dash
+    («شقق ألين 152 – البندرية الخبر» → «البندرية الخبر», «شقق تلال فيلج – النسيم – مكة المكرمة» →
+    «النسيم مكة المكرمة»). A title with no dash states no location this way → ''."""
+    parts = _DASH.split(title or "", maxsplit=1)
+    return " ".join(_DASH.split(parts[1])) if len(parts) == 2 else ""
+
+
+def location_from_title(title: Optional[str]) -> tuple[Optional[str], Optional[int], Optional[int],
+                                                        Optional[str]]:
+    """(city_ar, city_id, region_id, district_ar) from the project title's tail «<district> <city>».
+
+    The city is the tail's LAST one or two words (two first, so «مكة المكرمة» is not «المكرمة»),
+    validated against our catalog with the same region-homonym guard as the tree walk («الشبيلي
+    الشرقية» stays NULL: الشرقية is the region, never the village of that name). The district is
+    only ever a catalog-attested district of THAT city named in the remaining words."""
+    words = re.findall(r"[\u0621-\u064A]+", _title_tail(title))
+    for n in (2, 1):
+        if len(words) < n:
+            continue
+        name = " ".join(words[-n:])
+        cid, rid = _city_or_region_homonym(name)
+        if cid:
+            rest = " ".join(words[:-n])
+            return name, cid, rid, (find_district_in_text(rest, cid) if rest else None)
+    return None, None, None, None
 
 
 def _floor_number(raw: Any) -> Optional[int]:
@@ -353,8 +518,35 @@ def _floor_number(raw: Any) -> Optional[int]:
     return _FLOOR_ORDINALS.get(str(raw).strip())
 
 
+def _project_exclusion(en_project: Optional[dict], ar_project: Optional[dict]) -> Optional[str]:
+    """Why the source's own project terms put its units out of our catalogue, or None.
+
+    ONE reading, used by the crawl (map_unit) AND by the removal oracle (_verify_gone). While only
+    the crawl applied it, a unit still «available» inside a «قريبا»/«تم البيع»/off-plan project was
+    skipped by the crawl and then certified LIVE by the oracle — self-healed every run, never retired.
+    """
+    # the project's own status gates the whole project
+    statuses = {_clean(t.get("name")) for t in _terms_of(ar_project, "property-status")}
+    statuses |= {_clean(t.get("name")) for t in _terms_of(en_project, "property-status")}
+    statuses.discard(None)
+    if statuses and not (statuses & PROJECT_STATUS_OK):
+        return f"project status {sorted(statuses)}"
+    # …and so does an off-plan tag, on EITHER language's record. Checked separately from status
+    # because a project can be «متاح» (available to buy) AND «البيع على الخارطة» (not built yet) at
+    # the same time — which is exactly how the 99 got through.
+    offers = {_clean(t.get("name")) for t in _terms_of(ar_project, "offer-group")}
+    offers |= {_clean(t.get("name")) for t in _terms_of(en_project, "offer-group")}
+    if offers & OFFER_GROUP_EXCLUDED:
+        return f"project offer-group {sorted(offers & OFFER_GROUP_EXCLUDED)}"
+    return None
+
+
 def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
-             tree: dict[int, dict]) -> tuple[Optional[dict], str]:
+             tree: dict[int, dict], pins: Optional[dict[int, dict]] = None) -> tuple[Optional[dict], str]:
+    """`pins` is the map feed read this crawl (fetch_project_pins): the unit inherits its project's pin,
+    marked `pin_scope: project` (one pair shared by every unit of the building is the source's truth,
+    not a default pin — the pin-district loader keeps treating a shared pair as shared). A project the
+    read feed does not map writes `pin_absent: true`; a feed that was not read (None) writes neither."""
     uid = unit.get("id")
     acf = unit.get("acf") or {}
     if not isinstance(uid, int) or not isinstance(acf, dict):
@@ -365,18 +557,7 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
     if not isinstance(en_id, int):
         return None, ""
 
-    # the project's own status gates the whole project
-    statuses = {_clean(t.get("name")) for t in _terms_of(ar_project, "property-status")}
-    statuses |= {_clean(t.get("name")) for t in _terms_of(en_project, "property-status")}
-    if statuses and not (statuses & PROJECT_STATUS_OK):
-        return None, ""
-
-    # …and so does an off-plan tag, on EITHER language's record. Checked separately from status
-    # because a project can be «متاح» (available to buy) AND «البيع على الخارطة» (not built yet) at
-    # the same time — which is exactly how the 99 got through.
-    offers = {_clean(t.get("name")) for t in _terms_of(ar_project, "offer-group")}
-    offers |= {_clean(t.get("name")) for t in _terms_of(en_project, "offer-group")}
-    if offers & OFFER_GROUP_EXCLUDED:
+    if _project_exclusion(en_project, ar_project):
         return None, ""
 
     raw_type = next((_clean(t.get("name")) for t in _terms_of(ar_project, "property-type")), None)
@@ -385,10 +566,15 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
         return None, ""                       # unmapped type → skipped, never assumed
 
     city_term_ids = [t["id"] for t in _terms_of(ar_project, "city") if isinstance(t.get("id"), int)]
-    city_ar, city_id, region_id, district_ar = resolve_location(city_term_ids, tree)
+    ar_title = _clean(((ar_project or {}).get("title") or {}).get("rendered"))
+    city_ar, city_id, region_id, district_ar = resolve_location(city_term_ids, tree, ar_title)
+    district_source = "catalogue" if district_ar else None
+    leaf = tree_leaf_district(city_term_ids, tree, city_ar) if city_id else None
+    if not district_ar and leaf:
+        district_ar, district_source = leaf, "tree_leaf"      # the source's own term, kept as written
 
     price = _to_int(acf.get("price"))
-    area = _to_int(acf.get("area"))
+    area = unit_area(acf)
     bedrooms = _to_int(acf.get("rooms_count"))
     floor_number = _floor_number(acf.get("floor"))
 
@@ -398,6 +584,7 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
 
     category = ("Residential" if normalize.category_for_type(property_type) == "Residential"
                 else "Commercial")
+    pin = (pins.get(en_id) or {}) if pins is not None else None
 
     row = {
         "ad_number": f"RKZ{uid}",
@@ -423,20 +610,78 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
         "city_id": city_id,
         "region_id": region_id,
         "additional_info": {k: v for k, v in {
+            "district_source": district_source,     # catalogue | tree_leaf (the taxonomy's own word, uncatalogued)
             "unit_code": _clean(acf.get("code")),
             "project_id": en_id,
             "project_title_ar": project_title,
             "floor_raw": _clean(acf.get("floor")),
             "features_ar": features or None,
             "source_unit_status": acf.get("unit_status"),
+            **({**pin, "pin_scope": "project"} if pin else {}),
+            **({"pin_absent": True} if pin == {} else {}),
         }.items() if v not in (None, "", [], {})},
     }
+    # rakez publishes NO structured amenity field per unit, but its own description lists them («مطبخ»,
+    # «موقف خاص», «يسار المصعد»): 1,660 / 385 / 85 of 3,535 active units on 2026-10-17 while every amenity
+    # column was NULL. Prose says yes, an explicit no, or nothing (owner 2026-10-24; ADVANCED_FILTER_SOURCE_TRUTH §2).
+    row.update(prose_answers(acf.get("description_ar")))
+    for col, yes in project_answers(features).items():
+        row.setdefault(col, yes)
     return row, category.lower()
 
 
-def _verify_gone(ad_number: str) -> tuple[str, str]:
-    """Absence NEVER deactivates on its own. A unit is gone when the source says so — either the
-    post is deleted, or its own unit_status has left 'available'. Anything else is UNKNOWN."""
+# The amenity columns search reads (listing_extra_attrs); prose may answer only these.
+_PROSE_COLS = ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "private_entrance")
+
+
+def prose_answers(description: Optional[str]) -> dict[str, bool]:
+    said = normalize.prose_amenities(normalize.html_block_lines(description))
+    return {c: v for c, v in said.items() if c in _PROSE_COLS}
+
+
+# The project's `feature` terms are its build spec, shared by every unit (195 of 195 projects carry one list,
+# and no project mixes unit types: 2,235 apartments, 939 floors, 253 villas, 101 town houses, 2026-10-18).
+# A BUILDING trait the spec names holds for every unit in it: the lifts («مصاعد», «مصعد», «مصاعد إيطالية») and
+# the installed air conditioning («تكييف مخفي», «تكييف سبليت»). A UNIT trait does not: «غرفة خادمة», «غرفة سائق»,
+# «مواقف خاصة» and «مطبخ» describe some of the project's units, not each one (backlog 467), so they are never
+# read from this list. YES or nothing, through the shared matcher («تأسيس مصعد» stays NULL).
+_PROJECT_COLS = ("elevator", "air_conditioner")
+# A term about the building's COMMON areas is not the unit: «ممرات مكيفة» (air-conditioned corridors) said AC = yes
+# for 54 units whose spec names no unit air conditioning (🔬 2026-10-18, caught on the first crawl and reverted).
+_COMMON_AREA = re.compile(r"ممرات|ممر |لوبي|ردهة|ردهات|المدخل|مداخل")
+
+
+def project_answers(features: list[str]) -> dict[str, bool]:
+    unit_terms = [f for f in (features or []) if not _COMMON_AREA.search(f)]
+    said = normalize.prose_amenities("\n".join(unit_terms))
+    return {c: v for c, v in said.items() if c in _PROJECT_COLS}
+
+
+def _page_gone(path: str) -> tuple[bool, str]:
+    """Read one public rakez page under the shared law: True only on the source's own 404/410 with a
+    body. A REST 401 is about our access, never a death (LISTING_LIVENESS.md §1), so wherever REST
+    says "not public" the verdict rests on the public page instead. Measured 2026-09-28:
+      · /?p=<unit id> — WordPress resolves it for a published unit (200, on to the home page) and
+        answers «Page Not Found - Rakez» 404 for one that is not: RKZ72729/68882/71559/69002 (REST
+        401 rest_forbidden) → 404; three published units → 200.
+      · /ar/project/<id>/ — THE LISTING'S OWN URL: project 59832 (REST 401) → 404 while 28 of its
+        units still say «available»; project 70543 (also REST 401) → 200, so REST alone decides
+        nothing."""
+    try:
+        r = cc.get(f"{SITE}{path}", headers=HEADERS, timeout=30, allow_redirects=True)
+        status, body = r.status_code, r.text or ""
+    except Exception as e:
+        return False, f"raised {type(e).__name__}"
+    said = decide(status, body, False, lambda st, _b, _m: "gone" if st in (404, 410) else None)
+    return bool(said and said[0] == "gone"), f"HTTP {status}"
+
+
+def _verify_gone(ad_number: str, en_projects: dict[int, dict],
+                 bridge: dict[int, Optional[dict]]) -> tuple[str, str]:
+    """Absence NEVER deactivates on its own. A unit is gone when the source says so — the post is
+    deleted or unpublished, its own unit_status has left 'available', or its project's own terms
+    exclude it exactly as the crawl does (`_project_exclusion`, over this run's project records).
+    Anything else is UNKNOWN."""
     uid = ad_number.replace("RKZ", "")
     try:
         r = cc.get(f"{REST}/unit/{uid}", headers=HEADERS, timeout=30)
@@ -450,16 +695,71 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
         if isinstance(body, dict) and body.get("code") == "rest_post_invalid_id":
             return "gone", "REST 404 rest_post_invalid_id — the unit was deleted at source"
         return "unknown", "404 without rest_post_invalid_id"
+    if r.status_code == 401 and isinstance(body, dict) and body.get("code") == "rest_forbidden":
+        gone, how = _page_gone(f"/?p={uid}")
+        return ("gone" if gone else "unknown"), (
+            f"REST 401 rest_forbidden and its public page /?p={uid} answers {how}"
+            + (" — unpublished at source" if gone else ""))
     if r.status_code == 200 and isinstance(body, dict):
         if str(body.get("id")) != str(uid):
             return "unknown", f"id mismatch: asked {uid}, got {body.get('id')}"
         st = _unit_status(body.get("acf") or {})
         if st == INGESTIBLE_UNIT_STATUS:
-            return "live", "REST 200 unit_status=available"
+            pid = (body.get("acf") or {}).get("unit_project")
+            if not isinstance(pid, int):
+                return "unknown", "REST 200 unit_status=available but bound to no project"
+            if pid not in en_projects:
+                gone, how = _page_gone(f"/ar/project/{pid}/")
+                return ("gone" if gone else "unknown"), (
+                    f"REST 200 unit_status=available; project {pid} is not published and the "
+                    f"listing's own page /ar/project/{pid}/ answers {how}")
+            why = _project_exclusion(en_projects[pid], bridge.get(pid))
+            if why:
+                return "gone", f"REST 200 unit_status=available, but its {why} — excluded exactly as the crawl excludes it"
+            return "live", "REST 200 unit_status=available in an included project"
         if st in ("reserved", "sold-out"):
             return "gone", f"REST 200 but unit_status={st} — no longer purchasable"
         return "unknown", f"unrecognised unit_status={st!r}"
     return "unknown", f"REST {r.status_code}"
+
+
+class _LazyBridge(dict):
+    """project id → its Arabic record, bridged the first time a unit asks. The crawl bridges every
+    project its units reference up front; the daily direct check only meets the projects of the rows
+    it reads."""
+
+    def __init__(self, s: cc.Session, ar_projects: dict[int, dict]):
+        super().__init__()
+        self._s, self._ar = s, ar_projects
+
+    def get(self, en_id, default=None):
+        if en_id not in self:
+            ar_id = arabic_project_id(self._s, en_id)
+            self[en_id] = self._ar.get(ar_id) if ar_id else None
+        return self[en_id]
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for a caller with no crawl of its own (the daily direct check,
+    scrapers/common/fleet_liveness.py). Since `_verify_gone` judges a unit by its project's terms it
+    needs the project records; called with the ad number alone it raised, so every control read
+    UNKNOWN and the site went unchecked from 2026-09-29. The records are read on the first call (never
+    at import or construction), and if they cannot be read whole every answer is UNKNOWN."""
+    state: dict = {}
+
+    def verify(ad_number: str) -> tuple[str, str]:
+        if not state:
+            s = session()
+            INCOMPLETE.clear()
+            en, ar = fetch_projects(s), fetch_projects(s, lang="ar")
+            state["why"] = (f"project records unreadable ({'; '.join(INCOMPLETE) or 'none returned'})"
+                            if INCOMPLETE or not en or not ar else "")
+            state["en"], state["bridge"] = en, _LazyBridge(s, ar)
+        if state["why"]:
+            return "unknown", state["why"]
+        return _verify_gone(ad_number, state["en"], state["bridge"])
+
+    return verify
 
 
 def main() -> int:
@@ -469,6 +769,7 @@ def main() -> int:
     args = p.parse_args()
 
     s = session()
+    INCOMPLETE.clear()
     run_id = None if args.limit_test else db.begin_run("rakez")
     res_rows: list[dict] = []
     com_rows: list[dict] = []
@@ -497,6 +798,12 @@ def main() -> int:
             raise RuntimeError("fetched units but ZERO Arabic projects — nothing could be typed or "
                                f"located in Arabic. {LAST_FETCH_NOTE}")
         print(f"Rakez: {len(units)} units, {len(en_projects)} projects, {len(tree)} location terms")
+        # Backlog #507 (2026-10-14): the project page prints a larger area than acf.area for the same
+        # unit (#1 of project 26260: page 176 m², acf.area 144; #7 of 67515: 220.68 vs 169). Print
+        # the whole raw record of those units so the run log shows which field the page renders.
+        for u in units:
+            if u.get("id") in AREA_PROBE_UNIT_IDS:
+                print(f"  #507 probe unit {u['id']} acf={ {k: v for k, v in (u.get('acf') or {}).items() if k != 'description_ar'} }")
 
         if args.limit_test:
             units = units[: args.limit_test]
@@ -529,13 +836,25 @@ def main() -> int:
                 f"the Arabic bridge resolved 0 of {len(needed)} projects — REST answered but "
                 f"/ar/project/<id>/ did not, so every unit is untypeable and unlocatable")
 
+        # The pins, from the site's map feed (module docstring of MAP_FEED). Listed, never guessed:
+        # a project the feed does not map stays NULL and is named in the log.
+        pins = fetch_project_pins(s)
+        if pins is None:
+            print(f"  ⚠ {LAST_FETCH_NOTE_PINS[0]} — no pin written this run; stored pins are kept")
+            pinned, unpinned = 0, []
+        else:
+            unpinned = [i for i in needed if not pins.get(i)]
+            pinned = len(needed) - len(unpinned)
+            print(f"  map feed: {len(pins)} mapped projects; pin for {pinned}/{len(needed)} projects units reference"
+                  + (f"; not on the map: {unpinned[:50]}" if unpinned else ""))
+
         for u in units:
             acf = u.get("acf") or {}
             if _unit_status(acf) != INGESTIBLE_UNIT_STATUS:
                 skipped_status += 1
                 continue
             en_id = acf.get("unit_project")
-            row, cat = map_unit(u, en_projects.get(en_id), bridge.get(en_id), tree)
+            row, cat = map_unit(u, en_projects.get(en_id), bridge.get(en_id), tree, pins)
             if not row:
                 skipped_project += 1
                 continue
@@ -566,8 +885,11 @@ def main() -> int:
         pruned = 0
         for tbl, rows in (("rakez_residential_listings", res_rows),
                           ("rakez_commercial_listings", com_rows)):
+            if INCOMPLETE:
+                print(f"⚠ {tbl}: enumeration incomplete — no prune: {INCOMPLETE}")
+                continue
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source="Rakez",
-                                verify_gone=_verify_gone)
+                                verify_gone=lambda ad: _verify_gone(ad, en_projects, bridge))
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped — kept existing active")
             else:
@@ -579,7 +901,10 @@ def main() -> int:
                              rows_upserted=len(res_rows) + len(com_rows),
                              notes=(f"pruned={pruned} superseded={superseded} "
                                     f"not_available={skipped_status} excluded={skipped_project} "
-                                    f"bridged={bridged}/{len(needed)}"),
+                                    f"bridged={bridged}/{len(needed)} "
+                                    f"pins={'feed unread' if pins is None else f'{pinned}/{len(needed)} projects'}"
+                                    + (f" INCOMPLETE: {'; '.join(INCOMPLETE)}" if INCOMPLETE else ""))[:300],
+                             degraded=bool(INCOMPLETE),
                              check_tables=["rakez_residential_listings",
                                            "rakez_commercial_listings"])
         return 0 if healthy else 1

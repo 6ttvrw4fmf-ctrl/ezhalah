@@ -1,0 +1,70 @@
+# Weekly refresh of the site picker's measured coverage (owner 2026-10-10: the picker map and each site's
+# «where it covers» line are LISTINGS-based and must stay accurate as sites post in new regions).
+# Re-runs scripts/generate-platform-picker-coverage.ts against production through the PUBLIC anon RPC
+# (the same read a customer makes, paced below the sustained ceiling) and, if the snapshot moved, opens
+# a PR — the normal green-CI train merges it. Read-only on the database; no secrets needed.
+name: Picker coverage refresh
+
+on:
+  schedule:
+    - cron: "17 3 * * 0" # Sundays 03:17 UTC (Saturday 20:17 Arizona) — a quiet hour for the API
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: picker-coverage-refresh
+  cancel-in-progress: false
+
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs and robotPass.mjs send it only to our own
+  # database and front door, so our robots keep working once the back door closes. Empty on fork PRs = unchanged.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  refresh:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Re-measure every site's listing regions
+        run: node --experimental-strip-types scripts/generate-platform-picker-coverage.ts
+      - name: Open a PR when the snapshot moved
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- src/data/platformPickerCoverage.json; then
+            echo "Coverage unchanged — nothing to open."
+            exit 0
+          fi
+          branch="bot/picker-coverage-$(date -u +%Y%m%d)"
+          git config user.name "ezhalah-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add src/data/platformPickerCoverage.json
+          git commit -m "Picker coverage: weekly re-measure ($(date -u +%Y-%m-%d))"
+          git push -u origin "$branch"
+          gh pr create --head "$branch" --title "Picker coverage: weekly re-measure $(date -u +%Y-%m-%d)" \
+            --body "Automatic weekly refresh of \`src/data/platformPickerCoverage.json\` (the picker map + each site's coverage line), re-measured from production through the public RPC. Merge on green."
+
+      # ── Failure→alert bridge (issue #1349): unattended, so a red run must reach a human. The picker's
+      # coverage is search surface → 🧪 Search & Matching QA. `always()` so a failing run still gets here.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind search_live_check_failed
+          --workflow picker-coverage-refresh.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

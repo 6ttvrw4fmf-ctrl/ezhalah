@@ -34,7 +34,17 @@ export type ContractRow = {
   upstream_job: string;
   downstream_job: string;
   min_gap_minutes: number;
+  /**
+   * Advisory-lock key both jobs take (`pg_advisory_xact_lock(hashtext(key))`) before their work. When set, the
+   * consumer BLOCKS until the producer commits, so the wall-clock gap is not what orders them — the lock is.
+   * Production checks the real commands (`cron_contract_lock_satisfied`, migration 2026-10-13); the mirror
+   * declares the same dependency in `lock_dependencies`, and a row that claims a lock nobody declares is a finding.
+   */
+  satisfied_by_lock?: string | null;
 };
+
+/** One lock dependency the mirror declares: which producer and consumer take which advisory key. */
+export type LockDependency = { key: string; producer: string; consumer: string };
 
 /** jobname → cron expression, as `cron.job.schedule` stores it. */
 export type Schedules = Record<string, string>;
@@ -61,7 +71,7 @@ export const hourlyMinute = (schedule: string): number | null =>
  *     no dependencies are otherwise indistinguishable — and the empty reading would certify silence
  *     as health.
  */
-export function orderingProblems(contract: ContractRow[], schedules: Schedules): string[] {
+export function orderingProblems(contract: ContractRow[], schedules: Schedules, locks: LockDependency[] = []): string[] {
   const problems: string[] = [];
 
   if (!Array.isArray(contract) || contract.length === 0) {
@@ -77,6 +87,17 @@ export function orderingProblems(contract: ContractRow[], schedules: Schedules):
     if (up === undefined || dn === undefined) {
       problems.push(`${c.upstream_job} -> ${c.downstream_job}: `
         + `${up === undefined ? c.upstream_job : c.downstream_job} has no declared schedule`);
+      continue;
+    }
+
+    // A declared lock replaces the gap only when the mirror declares the same dependency on the same two
+    // jobs; a lock the row claims and nobody declares is a finding, never a pass (the detector asks the real
+    // commands the same question).
+    if (c.satisfied_by_lock != null && c.satisfied_by_lock !== '') {
+      const l = (Array.isArray(locks) ? locks : []).find((x) => x && x.key === c.satisfied_by_lock);
+      if (l && l.producer === c.upstream_job && l.consumer === c.downstream_job) continue;
+      problems.push(`${c.upstream_job} -> ${c.downstream_job}: declares advisory lock `
+        + `'${c.satisfied_by_lock}' but the mirror's lock_dependencies does not declare that key on these two jobs`);
       continue;
     }
 
@@ -166,6 +187,10 @@ export function mirrorDriftProblems(mirror: ContractRow[], live: unknown): strin
     if (m.min_gap_minutes !== l.min_gap_minutes) {
       problems.push(`"${k}": mirror says ${m.min_gap_minutes} min, production says `
         + `${l.min_gap_minutes} min`);
+    }
+    if ((m.satisfied_by_lock ?? null) !== (l.satisfied_by_lock ?? null)) {
+      problems.push(`"${k}": mirror says satisfied_by_lock ${JSON.stringify(m.satisfied_by_lock ?? null)}, `
+        + `production says ${JSON.stringify(l.satisfied_by_lock ?? null)}`);
     }
   }
   for (const k of mirrorBy.keys()) {

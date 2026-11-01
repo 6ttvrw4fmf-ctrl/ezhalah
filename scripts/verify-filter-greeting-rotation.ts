@@ -15,9 +15,33 @@
 //
 //   node --experimental-strip-types scripts/verify-filter-greeting-rotation.ts   (wired into `npm test`)
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { pickFilterGreetingOpening, setFilterGreetingsCache, __testing } from '../src/data/filterGreetingRotation.ts';
+import { pickEnglishFilterGreetingOpening, __englishTesting } from '../src/data/filterGreetingRotation.ts';
+
+if (__englishTesting.ENGLISH_OPENINGS.length !== __testing.BAKED.length
+  || !__testing.BAKED.every((row, i) => __englishTesting.ENGLISH_OPENINGS[i].endsWith(`${row.emoji}, `))) {
+  throw new Error('Every Arabic Filter greeting must have an English translation with the same emoji');
+}
+const oldRandom = Math.random;
+const seenEnglish = new Set<string>();
+try {
+  for (let i = 0; i < __testing.BAKED.length; i++) {
+    Math.random = () => (i + 0.1) / __testing.BAKED.length;
+    seenEnglish.add(pickEnglishFilterGreetingOpening());
+  }
+} finally { Math.random = oldRandom; }
+if (seenEnglish.size !== 11) throw new Error('All eleven English Filter greetings must be reachable');
+
+let previousEnglish = '';
+for (let i = 0; i < 30; i++) {
+  const opening = pickEnglishFilterGreetingOpening();
+  if (opening === previousEnglish || /[\u0600-\u06ff]/.test(opening) || !/\p{Extended_Pictographic}/u.test(opening)) {
+    throw new Error('English Filter openings must rotate without adjacent repeats and include an emoji, without Arabic');
+  }
+  previousEnglish = opening;
+}
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -38,8 +62,10 @@ console.log('\nFilter-search bubble opening rotates; the rest of the sentence ne
 // their FIRST Filter search, they must already see a random one of the 100 openings, never the
 // retired «ارحب إزهله 👋» text. The picker no longer has a fallback string — it uses the baked list
 // at import time, so a fresh module import (i.e. a fresh session) is what's exercised right here.
-check('the baked list carries the full owner-authored pool (60 rows, trimmed from 100 on 2026-09-26)',
-  __testing.BAKED.length === 60, `got ${__testing.BAKED.length}`);
+check('the baked list carries the owner\'s short pool (11 rows: 60 → 11 on 2026-10-11, «just 2 words with an emoji»)',
+  __testing.BAKED.length === 11, `got ${__testing.BAKED.length}`);
+check('every baked greeting is at most 2 words (owner 2026-10-11: «just 2 words with an emoji»)',
+  __testing.BAKED.every((r: { greeting: string; emoji: string }) => r.greeting.trim().split(/\s+/).length <= 2));
 check('every baked row has a non-empty greeting and emoji (no silent blanks in the picker output)',
   __testing.BAKED.every((r: { greeting: string; emoji: string }) => r.greeting && r.emoji));
 check('no baked row leaks the retired "إزهله" brand word into the greeting half (safety against a bad edit)',
@@ -91,7 +117,7 @@ check('a single-row pool still returns that row\'s opening on every call (no cra
 // Table/RPC creation is checked against the ORIGINAL migration — that structure has never changed.
 // The AR row content is checked against the LATEST migration that replaces the ar rows: the rows
 // themselves are edited-without-a-deploy data (owner rule 2026-09-18), and the pool was trimmed
-// 100 -> 60 on 2026-09-26 (supabase/migrations/20260926054537_filter_greetings_trimmed_to_60.sql).
+// 100 -> 60 on 2026-09-26, then 60 -> 11 on 2026-10-11 (supabase/migrations/20261011081754_filter_greetings_eleven_short_saudi.sql).
 // Re-pointing this at the newest seed, rather than re-editing the original migration's historical
 // text, is the same rule verify-migration-content-parity.ts enforces fleet-wide: a committed
 // migration must stay a byte-exact record of what production executed.
@@ -106,12 +132,16 @@ const enCount = (migration.match(/\n {2}\('en', \d+, /g) ?? []).length;
 check('exactly 100 English rows are seeded (stored for future English support, per owner instruction)',
   enCount === 100, `saw ${enCount}`);
 
-const arSeedMigration = read('supabase/migrations/20260926054537_filter_greetings_trimmed_to_60.sql');
+// The NEWEST migration that replaces the ar rows — found by name order, so the next owner edit needs no re-pointing here.
+const arSeedFile = readdirSync(join(root, 'supabase/migrations')).filter((f) => f.endsWith('.sql')).sort().reverse()
+  .find((f) => /delete from public\.ui_filter_greetings where lang = 'ar';/.test(read(`supabase/migrations/${f}`)))!;
+const arSeedMigration = read(`supabase/migrations/${arSeedFile}`);
+check('the newest AR-seeding migration is the owner\'s 2026-10-24 wording update', arSeedFile === '20261024071112_filter_greetings_without_allah.sql', `found ${arSeedFile}`);
 check('the AR-seeding migration deletes the old pool before inserting the new one (sort_order stays unique)',
   /delete from public\.ui_filter_greetings where lang = 'ar';/.test(arSeedMigration));
 const arCount = (arSeedMigration.match(/\n {2}\('ar', \d+, /g) ?? []).length;
-check('exactly 60 Arabic rows are seeded (the owner\'s 2026-09-26 trim of the original 100)',
-  arCount === 60, `saw ${arCount}`);
+check('exactly 11 Arabic rows are seeded (the owner\'s 2026-10-11 cut)',
+  arCount === 11, `saw ${arCount}`);
 
 // The BAKED list must equal the LATEST AR-seeding migration's rows in the SAME order — otherwise the
 // code shipped and the server-edited-copy shipped different pools, and a user could see two different
@@ -167,8 +197,8 @@ check('the English key text is untouched (no {opening} added there — English s
   i18nSrc.includes('"I\'m looking for {what}{detail} {verb} in {place}{price}": \'{opening}'));
 
 const agentSrc = read('src/app/agent.tsx');
-check('the SEPARATE AI-chat opening greeting (agent.tsx greetingText) is byte-exact untouched — this rotation must never touch it',
-  agentSrc.includes("'ارحب، أنا إزهله. قلّي وش العقار اللي تدور عليه، وأنا أبحث لك بين المنصات العقارية وأطابق الخيارات مع طلبك لين نلقى اللي يناسبك… إزهلها وفالك الطيب.'"));
+check('the separate owner-approved static welcome (2026-10-03) stays outside this rotation',
+  agentSrc.includes("'وش العقار اللي في بالك؟\\nقل لنا مواصفاته، وإزهله.'"));
 check('filterGreetingRotation is never imported by agent.tsx — the rotation has exactly one call site',
   !agentSrc.includes('filterGreetingRotation'));
 

@@ -204,6 +204,25 @@ def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[st
     return None
 
 
+DIRECT_ALIVE_ORACLE = "mizlaj.detail_fetch.inertia_listing_available_flags"
+
+
+def detail_proves_live(row: Optional[dict], listing: Optional[dict]) -> bool:
+    """True only when the crawl's OWN read of this listing's page is a direct live read (2026-10-27).
+
+    The crawl fetches every /guest/listings/<slug> page each run and writes a row only when that page
+    states the measured available triple (held_reason is None: is_sold False, is_reserved False,
+    deleted_at null). Recording it costs zero requests (db.mark_direct_alive). The one check added:
+    the page's own props.listing.id is THIS row's id (ad_number MZ<id>) — measured 2026-10-27, the
+    live page shk-1765m2-llbyaa-altayf-lmirqyh6 carries id 62 = MZ62; a removed listing
+    (aakar-42659m2-llaygar-alryad-BeHUFnTO) and a made-up slug answer 404 and never reach a row."""
+    if not isinstance(row, dict) or not isinstance(listing, dict) or row.get("active") is not True:
+        return False
+    if held_reason(listing) is not None or listing.get("id") in (None, ""):
+        return False
+    return row.get("ad_number") == f"MZ{listing['id']}"
+
+
 _probe = http_liveness.LivenessProbe(
     platform="mizlaj",
     signal=_signal,
@@ -313,6 +332,32 @@ def fetch_detail(s: cc.Session, slug: str) -> Optional[dict]:
         if isinstance(listing, dict) and "data" in listing and isinstance(listing["data"], dict):
             listing = listing["data"]  # tolerate an Inertia resource wrapper
         return listing if isinstance(listing, dict) else None
+    return None
+
+
+# ── availability: the listing page's OWN flags (crawler audit 2026-10-02) ──────────────────────
+# Every /guest/listings/<slug> page carries is_sold / is_reserved / deleted_at in props.listing.
+# Measured on all 34 live pages 2026-10-02: is_sold False ×34, is_reserved False ×34, deleted_at
+# null ×34 — so that triple is the one state known to mean "on the market", and until now none of
+# the three was read: a listing sold or reserved in place kept being upserted ACTIVE. Any other
+# value has never been observed, so it is not declared gone either: the row is simply NOT WRITTEN
+# this run (never re-asserted alive) and counted in the run notes. Its lifecycle stays with
+# prune_unseen + the 404/410 oracle (_probe), which cannot deactivate a page that still answers 200.
+# An unreadable page (no props.listing) is the same: could-not-read is never "available". This
+# also closes the map-data-mode hole where a row whose page fetch FAILED was written from the list
+# record alone. NOT used: listing_status_id (28 ×31, 31 ×2, 35 ×1 — opaque ids, no label published).
+_AVAILABLE_FLAGS = {"is_sold": False, "is_reserved": False, "deleted_at": None}
+
+
+def held_reason(listing: Optional[dict]) -> Optional[str]:
+    """None when the page itself states the measured available state; else why the row is held."""
+    if not isinstance(listing, dict):
+        return "page_unreadable"
+    for key, available in _AVAILABLE_FLAGS.items():
+        if key not in listing:
+            return f"{key}_missing"
+        if listing[key] is not available:
+            return key
     return None
 
 
@@ -609,20 +654,32 @@ def main() -> int:
     res: list[dict] = []
     com: list[dict] = []
     seen = 0
+    held: dict[str, int] = {}          # held_reason → count (not upserted, not declared gone)
     try:
         for md in md_rows:
             slug = md.get("slug")
             if not slug:
                 continue
             listing = fetch_detail(s, slug)
+            why = held_reason(listing)
+            if why:
+                held[why] = held.get(why, 0) + 1
+                continue
             row, cat = map_listing(md, listing)
             if not row:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
+            if detail_proves_live(row, listing):
+                db.mark_direct_alive(row, oracle=DIRECT_ALIVE_ORACLE)
             (com if cat == "commercial" else res).append(row)
             seen += 1
 
+        if held:
+            print(f"  held, page does not state the available flags (not upserted, not guessed): {held}")
+            if not (res or com):
+                # fail closed: not one page states the flags → the status source is unreadable.
+                raise RuntimeError(f"no listing page states is_sold/is_reserved/deleted_at: {held}")
         if res:
             db.upsert_mizlaj_residential_batch(res)
         if com:
@@ -661,7 +718,7 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ Mizlaj: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["mizlaj_residential_listings", "mizlaj_commercial_listings"])
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}" + (f" held={held}" if held else ""), check_tables=["mizlaj_residential_listings", "mizlaj_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

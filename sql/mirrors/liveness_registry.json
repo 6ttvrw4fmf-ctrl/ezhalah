@@ -7,8 +7,8 @@
   },
   {
     "platform": "abaad",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -19,43 +19,49 @@
   },
   {
     "platform": "abralosol",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "abwbna",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "akariyoun",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "alajlan",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "albdah",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "albukaeri",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "aldarim",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "alhoshan",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -67,20 +73,20 @@
   },
   {
     "platform": "aljassim",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "alkhaas",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "almotmkenah",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -91,8 +97,8 @@
   },
   {
     "platform": "alobid",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -109,14 +115,14 @@
   },
   {
     "platform": "alsaedan",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "alshawaf",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -127,32 +133,32 @@
   },
   {
     "platform": "alta",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "amaall",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "amlakalahsa",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "aouj",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "aqalemhajer",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -163,8 +169,8 @@
   },
   {
     "platform": "aqaralriyadh",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -175,8 +181,8 @@
   },
   {
     "platform": "aqaratikom",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -187,98 +193,116 @@
   },
   {
     "platform": "aqargate",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "aqarmonthly",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 24,
     "grace": 3
   },
   {
     "platform": "aqarnajran",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "arkaan",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "arsh",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "ashab",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "awal",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "azdad",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "azure",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "bahadhabab",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "bossbih",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "compoundin",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "dallali",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "daraa",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "daryusuf",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "dealapp",
     "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 96,
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "dwelleo",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "eaqartabuk",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "earthapp",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -289,38 +313,38 @@
   },
   {
     "platform": "ebriza",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "ego",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "eightfloor",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "eilmalriyada",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "erapulse",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "expattrusted",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -331,8 +355,8 @@
   },
   {
     "platform": "fahadalshahri",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -343,74 +367,80 @@
   },
   {
     "platform": "flow",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "fursaghyr",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "gathern",
     "strategy": "DIRECT_REVISIT",
-    "sla_hours": 96,
+    "sla_hours": 24,
     "grace": 3
   },
   {
     "platform": "goldendeal",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "gomenassat",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "gudai",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "hajer",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "haraj",
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "hasaad",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "hazim",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "holoul",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "ialqarawi",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "ibaax",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -421,32 +451,32 @@
   },
   {
     "platform": "jazwtn",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "jurash",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "justsa",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "ksaaqar",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "livingcompound",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -457,32 +487,38 @@
   },
   {
     "platform": "macsaib",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "manafe",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "manzo",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "maqam",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "maqrat",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "marksa",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -499,26 +535,26 @@
   },
   {
     "platform": "mobasher",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "moftah",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "muajarh",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "muhaysini",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -529,26 +565,26 @@
   },
   {
     "platform": "mustqr",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "nafithh",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "nawafeth",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "nofodh",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -559,86 +595,92 @@
   },
   {
     "platform": "nufouth",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "october",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "opensooq",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "qmra",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "raghdan",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "rakez",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "ramzalqasim",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "rawaf",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "rawasidark",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "razre",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "reinvest",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "remal",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "remaxsa",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "rightcompound",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "ryadah",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -649,27 +691,27 @@
   },
   {
     "platform": "sadiqeltajer",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "safa",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "safera",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "sakan",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
-    "grace": 3
+    "grace": 1
   },
   {
     "platform": "sakani",
@@ -685,8 +727,8 @@
   },
   {
     "platform": "satel",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -697,67 +739,103 @@
   },
   {
     "platform": "shatri",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "shmoualshmal",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "sirdab",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "snam",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "sodasyat",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "sokok",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "souq24",
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "sqcc",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "squares",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "sukna",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "superoffice",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "shomou",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "maktab",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "suwar",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "tamyaz",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "tawia",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "therc",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -769,50 +847,56 @@
   },
   {
     "platform": "tuba",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "villassa",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "vmksa",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "wadod",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "wahadat",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
+    "platform": "wajaf",
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "wasalt",
     "strategy": "DIRECT_REVISIT",
-    "sla_hours": 96,
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "wslnaa",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "SOURCE_LIST_PRESENCE",
+    "sla_hours": 48,
     "grace": 3
   },
   {
     "platform": "yameen",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   }
 ]

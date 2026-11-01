@@ -33,10 +33,20 @@ check(
   "Farm's query only pulls raw 'Farm' (Agriculture Plot not folded back in)",
   CLEAN_TO_QUERY['Farm'].rawTypes.length === 1 && CLEAN_TO_QUERY['Farm'].rawTypes[0] === 'Farm',
 );
+// Agriculture Plot's query may also carry the SELLER'S OWN word for an agricultural plot (owner 2026-10-10:
+// an Aqar plot whose «نوع العقار» is silent is typed from its own description and stored as that word —
+// «أرض زراعي» / «أرض زراعية» — so the card shows it). What must never happen is the alias to Farm.
+const FARM_FORMS = ['Farm', 'مزرعة', 'مزرعه'];
+const agriQueryIsClean = (raws: string[]) => raws.includes('Agriculture Plot')
+  && !raws.some((r) => FARM_FORMS.includes(r))
+  && raws.every((r) => normalizeType(r, 'res').clean === 'Agriculture Plot');
 check(
-  "Agriculture Plot's query only pulls raw 'Agriculture Plot' (not aliased to Farm)",
-  CLEAN_TO_QUERY['Agriculture Plot'].rawTypes.length === 1 && CLEAN_TO_QUERY['Agriculture Plot'].rawTypes[0] === 'Agriculture Plot',
+  "Agriculture Plot's query pulls raw 'Agriculture Plot' + only agricultural-plot words — never a Farm form",
+  agriQueryIsClean(CLEAN_TO_QUERY['Agriculture Plot'].rawTypes),
 );
+const mustCatch = (what: string, caught: boolean) => check(`MUTATION: catches ${what}`, caught);
+mustCatch("'Farm' added to Agriculture Plot's query", !agriQueryIsClean([...CLEAN_TO_QUERY['Agriculture Plot'].rawTypes, 'Farm']));
+mustCatch("«مزرعة» added to Agriculture Plot's query", !agriQueryIsClean([...CLEAN_TO_QUERY['Agriculture Plot'].rawTypes, 'مزرعة']));
 check("EN_TO_AR['Farm'] is مزرعة", EN_TO_AR['Farm'] === 'مزرعة');
 check("EN_TO_AR['Agriculture Plot'] is أرض زراعية", EN_TO_AR['Agriculture Plot'] === 'أرض زراعية');
 

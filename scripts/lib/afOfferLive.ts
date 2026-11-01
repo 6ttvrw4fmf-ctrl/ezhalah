@@ -4,7 +4,7 @@
 //
 //     for (let i = 0; i < 40 && !btn; i++) { btn = await page.evaluate(CLICK_LEAF, CTA); … 400ms }
 //
-// a 16-second poll for «خلّنا نحدد الطلب أكثر». On 2026-09-03 that window ran out in CI on
+// a 16-second poll for «🎯 دقّق مع الذكاء». On 2026-09-03 that window ran out in CI on
 // verify-af-remove-last-pill-live and the journey reported the offer ABSENT on a الرياض/شقة/Buy
 // baseline of 10,665 listings — far above INTERVIEW_STOP_AT, so R11.1 could not have hidden it.
 // Production was fine: the same journey passed three times locally against the same bundle, and
@@ -38,7 +38,7 @@
 // has already paid that price once (see HAS_TURN_SRC).
 
 import { resultsSentenceAtStartSource } from '../../e2e/lib/resultsSentence.mjs';
-import { clickWitnessed, isStable, MAX_CLICK_ATTEMPTS } from './liveClick.ts';
+import { clickWitnessed, dismissStrayOverlay, isStable, MAX_CLICK_ATTEMPTS } from './liveClick.ts';
 
 /** Find the offer, scroll it into view inside its own scroll container, and hand back a clickable
  *  viewport point. Runs in the page.
@@ -146,7 +146,7 @@ const HAS_TURN_SRC = (src: string) =>
 /** The shipped Results-Found pool, as a regex source the page can compile. */
 const HEADLINE_AT_START = resultsSentenceAtStartSource();
 
-export const AF_OFFER_CTA = 'خلّنا نحدد الطلب أكثر';
+export const AF_OFFER_CTA = '🎯 دقّق مع الذكاء';
 
 /** The app's own testID on the offer (src/app/agent.tsx:4103) — the join key, never the label. */
 export const AF_OFFER_TESTID = 'results-narrow';
@@ -221,6 +221,8 @@ export async function openAfOffer(
         // The page moved under the pointer anyway. Say what took the click, let the conversation
         // settle, and measure again — never report a tap that the CTA did not receive.
         lastHit = w.hit;
+        // The miss most likely opened a listing: close it, or it takes every retry that follows.
+        await dismissStrayOverlay(page);
         prev = null;                            // re-establish stability before spending another click
         // A miss means the turn is still moving. Let the reveal cascade breathe rather than spending
         // the bounded attempts inside one second — the six of them should cover the settle, not race it.

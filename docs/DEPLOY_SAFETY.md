@@ -152,6 +152,16 @@ production deploy. Use it as the rollback target if a future deploy needs to be 
 | Known gaps (unrelated, not a regression) | `log-click` edge function still not deployed (client-side click tracking silently no-ops — this deploy's `clicks.ts` is the OLDER pre-existing version, since click/session work was deliberately excluded from PR #42's scope); custom domain `ezhalah.com` does not point to this project — neither affects the UI baseline |
 | Main has since moved further | `origin/main` is at `fb6107b` (this same PR's baseline-table doc update, #46) — no code change ahead of what's live as of this entry. |
 
+### 2026-10-03 — All lands in one place + «الأراضي» + New Listings Engineer tools (CURRENT LIVE)
+
+| Field | Value |
+|---|---|
+| Vercel deployment ID | `dpl_FnpD3dYAfv35EW27jKw9aanLBbsS` |
+| Bundle hash | `entry-bf80ad88731c01a1fdb6157373a235cb.js` |
+| Deployed from | `main` @ `2e2414a5` (#5674 lands cross-macro shortcut, #5675 label «الأراضي», #5673 tools + migration 20261003022851), via `scripts/safe-deploy.sh` (MCP-held lock `claude-lands-2026-10-03`) from a clean worktree; pre- and post-deploy drift gates green. |
+| Verified post-deploy | Alias serves the emitted entry (md5 = filename). Real-user test on production: تجاري → «الأراضي» shows أرض تجارية · أرض صناعية · أرض سكنية; أرض سكنية + الرياض → 4,668 results with land cards; Advanced Filter opened on that scope, asked street width then direction, option count 229 == final result count 229, cards marked «مطابق لطلبك» with width ≥ 20 m and facing north. |
+| Rollback target | the row above this one (`dpl_5XGrpw6FLcEUWNYm1ge6rUsFgmY9`) is stale; the previous live deployment is the one before `dpl_FnpD3dYA…` in the Vercel dashboard. |
+
 ### 2026-07-10 incident #2: clean-main build had no Supabase env → all search dead (P0)
 
 **Symptom:** every search (residential AND commercial, all filters) showed «يجري تحميل الإعلانات — حاول مرة ثانية بعد لحظات» ("loading, try again") and rendered zero cards. App-wide.

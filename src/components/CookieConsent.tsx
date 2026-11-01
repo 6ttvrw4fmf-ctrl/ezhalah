@@ -13,7 +13,9 @@
 //              (2) "Only necessary" → 'necessary', same exit animation
 //              (3) ANY tap outside the card (city dropdown, filter button, «بحث», sidebar…) → 'all'
 //                  (owner 2026-09-13: "when he taps on the button in the filter it goes away, and
-//                   when it goes away, it means that he agrees").
+//                   when it goes away, it means that he agrees"). EXCEPT the ☰ menu button and the
+//                  language switch (owner 2026-10-17: the card must not disappear when the page is
+//                  translated to English) — both carry data-consent-keep and leave the card up.
 //   never     for signed-in users, on native. The tap-outside listener is gated on `visible`, which
 //             is itself gated on `user == null` — a signed-in user's app is completely untouched.
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -26,11 +28,16 @@ import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { colors, radius, font } from '@/theme/tokens';
 import {
   shouldShowCookieBanner,
+  earlyTapConsent,
   setCookieConsent,
   type CookieConsent as Consent,
 } from '@/lib/cookieConsent';
 import { useForeignPromptInsets, dockedEdgeOffset } from '@/lib/bottomPromptInset';
 import { runAfterAnimation } from '@/lib/afterAnimation';
+
+const SYSTEM_FONT = Platform.OS === 'web'
+  ? 'ui-sans-serif, -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif'
+  : undefined;
 
 const COPY = {
   ar: {
@@ -49,12 +56,14 @@ const COPY = {
   },
   en: {
     title: 'Cookie Policy',
+    // A faithful translation of the Arabic above (owner 2026-10-16) — the English card used to say
+    // something different (pixels, server-to-server, no mention of the platform traffic we measure).
     body:
-      'Ezhalah uses cookies, pixels, SDKs, APIs, local storage, and server-to-server integrations for ' +
-      'the correct functioning of our app, including keeping you signed in, saving your searches and ' +
-      'conversations, and diagnosing crashes. With your permission, we also use these technologies to ' +
-      'understand how the app is used and to improve our services. Ezhalah does not serve third-party ' +
-      'ads and does not sell your personal data.',
+      'Ezhalah uses cookies and technologies such as SDKs, APIs and caching to run the platform ' +
+      'properly, keep you signed in, save your preferences, diagnose faults and improve the service. ' +
+      'We also measure the searches, clicks and visits Ezhalah sends to real-estate platforms, and we ' +
+      'may share aggregated traffic statistics with them without sharing any data that identifies you. ' +
+      'We do not sell your personal data or use it to show third-party ads.',
     all: 'Allow all',
     necessary: 'Only necessary',
   },
@@ -89,17 +98,29 @@ export default function CookieConsent() {
   // foreign prompt's way before — the root's reservation protects everything ELSE, not this card.)
   const foreignInset = useForeignPromptInsets();
 
+  // A tap that landed BEFORE the card rose (e.g. «English» while the session restore was settling).
+  // Owner 2026-10-16: it counts as agreement, so the card never rises afterwards — see earlyTapConsent.
+  const [tappedEarly, setTappedEarly] = useState(false);
+
   const visible = shouldShowCookieBanner({
     isWeb: Platform.OS === 'web',
     authChecked,
     user,
     consent,
+    tappedBeforeShown: tappedEarly,
   });
 
   const choose = useCallback((c: Consent) => {
     setCookieConsent(c);
     setConsent(c);
   }, []);
+
+  useEffect(() => {
+    const c = earlyTapConsent({
+      isWeb: Platform.OS === 'web', authChecked, user, consent, tappedBeforeShown: tappedEarly,
+    });
+    if (c) choose(c);
+  }, [tappedEarly, authChecked, user, consent, choose]);
 
   // A search dismisses the card and counts as ALLOW ALL (owner: "no selection = allow all").
   useEffect(() => {
@@ -115,18 +136,27 @@ export default function CookieConsent() {
   // click handler, so the same tap still fires the filter/search/sign-in action; the card just
   // disappears. `once` is intentionally NOT set: a tap on the card's OWN body (not a button) must
   // return early WITHOUT consuming the one-shot, or a subsequent tap outside would find no listener
-  // to dismiss it. Removal is handled by the effect's own cleanup when `visible` flips to false.
+  // to dismiss it. Removal is handled by the effect's own cleanup once a choice exists.
+  // The listener is live from the first client render, not only while the card is up (owner
+  // 2026-10-16): a tap before the card rose is remembered in `tappedEarly` and resolved by
+  // earlyTapConsent once the restore proves the visitor signed out. A known signed-in user gets none.
   useEffect(() => {
-    if (Platform.OS !== 'web' || !visible) return;
+    if (Platform.OS !== 'web' || consent != null || (authChecked && user != null)) return;
     const onDocClick = (e: Event) => {
       const card = document.querySelector('[data-testid="cookie-consent"]');
       // A click on the card itself is handled by its own onPress — never treat it as an outside tap.
       if (card && e.target instanceof Node && card.contains(e.target)) return;
-      choose('all');
+      // LANGUAGE AND THE MENU THAT HOLDS IT ARE NOT AGREEMENT (owner 2026-10-17: «we don't want it to disappear when it's
+      // translated into English»). Opening the ☰ menu and switching language leave the card up (it re-renders in the new
+      // language); the Filter, «بحث», the city field and every other tap still count as before. The controls opt in with
+      // data-consent-keep, so a new control can never exempt itself by accident.
+      if (e.target instanceof Element && e.target.closest('[data-consent-keep]')) return;
+      if (visible) choose('all');
+      else setTappedEarly(true);
     };
     document.addEventListener('click', onDocClick, true);
     return () => document.removeEventListener('click', onDocClick, true);
-  }, [visible, choose]);
+  }, [visible, consent, authChecked, user, choose]);
 
   // EXIT ANIMATION — owner 2026-09-13: "I want to feel like an animation when I click «السماح بالكل»".
   // A soft 220 ms fade+slide-down when the card goes away (from a button tap OR a tap outside),
@@ -175,6 +205,9 @@ export default function CookieConsent() {
 
   const c = isRTL ? COPY.ar : COPY.en;
   const textAlign = isRTL ? 'right' : 'left';
+  // Poppins is not loaded on the web, so English fell back to Times New Roman. Same repair as
+  // ModeSwitch: English uses the page's system stack; Arabic keeps what it has.
+  const en = !isRTL && SYSTEM_FONT ? { fontFamily: SYSTEM_FONT } : null;
 
   return (
     <Animated.View
@@ -213,10 +246,10 @@ export default function CookieConsent() {
     >
       <View style={[st.headRow, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
         <Image source={require('../../assets/images/cookies-green.png')} style={st.icon} contentFit="contain" />
-        <Text style={[st.title, { textAlign }]}>{c.title}</Text>
+        <Text style={[st.title, { textAlign }, en && { ...en, fontWeight: '600' }]}>{c.title}</Text>
       </View>
 
-      <Text style={[st.body, { textAlign, writingDirection: isRTL ? 'rtl' : 'ltr' }]}>{c.body}</Text>
+      <Text style={[st.body, { textAlign, writingDirection: isRTL ? 'rtl' : 'ltr' }, en]}>{c.body}</Text>
 
       <View style={[st.btnRow, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
         <Pressable
@@ -225,7 +258,7 @@ export default function CookieConsent() {
           dataSet={{ testid: 'cookie-allow-all' }}
           style={({ pressed }) => [st.btn, st.btnPrimary, pressed && st.pressed]}
         >
-          <Text style={[st.btnText, st.btnPrimaryText]}>{c.all}</Text>
+          <Text style={[st.btnText, st.btnPrimaryText, en && { ...en, fontWeight: '600' }]}>{c.all}</Text>
         </Pressable>
         <Pressable
           onPress={() => choose('necessary')}
@@ -233,7 +266,7 @@ export default function CookieConsent() {
           dataSet={{ testid: 'cookie-only-necessary' }}
           style={({ pressed }) => [st.btn, st.btnGhost, pressed && st.pressed]}
         >
-          <Text style={[st.btnText, st.btnGhostText]}>{c.necessary}</Text>
+          <Text style={[st.btnText, st.btnGhostText, en && { ...en, fontWeight: '600' }]}>{c.necessary}</Text>
         </Pressable>
       </View>
     </Animated.View>
@@ -263,7 +296,7 @@ const st = StyleSheet.create({
   body: { marginTop: 10, fontFamily: font.family.regular, fontSize: 12.5, lineHeight: 19, color: colors.muted },
   btnRow: { marginTop: 16, gap: 8, justifyContent: 'flex-end' },
   btn: { paddingVertical: 9, paddingHorizontal: 16, borderRadius: 11, borderWidth: 1 },
-  btnPrimary: { backgroundColor: colors.primary, borderColor: colors.primary },
+  btnPrimary: { backgroundColor: colors.selFill, borderColor: colors.primary },
   btnGhost: { backgroundColor: colors.surface, borderColor: colors.line },
   btnText: { fontFamily: font.family.semibold, fontSize: 13 },
   btnPrimaryText: { color: colors.onFill },

@@ -10,6 +10,7 @@
 // LINE-BASED ON PURPOSE. A brace/paren walker desynchronises on these files: regex literals are full
 // of (, [ and { that are DATA, not code (`[^\d]{0,16}?`, `(?![a-z])`). Every slice asserts it ended
 // where expected, so a reformat fails loudly here instead of silently lifting the wrong text.
+import { pathToFileURL } from "node:url";
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -52,7 +53,7 @@ export async function liftSymbols(
   // reject the `export` statements in the lifted declarations. The .mts extension is unambiguous ESM.
   const out = join(dir, "lifted.mts");
   writeFileSync(out, parts.join("\n\n"));
-  const mod = await import(out);
+  const mod = await import(pathToFileURL(out).href); // a file URL, so a Windows path (C:…) imports too
   for (const n of exportNames) {
     if (mod[n] === undefined) throw new Error(`liftSymbols: ${n} was not produced by the lift`);
   }

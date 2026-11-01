@@ -30,8 +30,11 @@
 // WHY IT IS LIVE. The two numbers only exist together in a payload the production function returns.
 // A source-text reading of the SQL would prove a string is present, never that the numbers agree —
 // and this repo has been burned by that shape often enough to have a name for it. So this executes
-// the REAL production function, through the publishable (anon) key, and compares what it actually
-// returned. Excluded from `npm test` for the reason every live check is: production being
+// the REAL production payload, through the publishable (anon) key, and compares what it actually
+// returned. Since 2026-09-27 it reads the payload the hourly detector (cron job 42) saved into
+// public.price_fidelity_snapshot, not the function itself: price_fidelity() plans v2 and is no
+// longer public API. A snapshot older than SNAPSHOT_MAX_AGE_H fails, because a stale copy proves
+// nothing about production now. Excluded from `npm test` for the reason every live check is: production being
 // momentarily unhealthy must not fail an unrelated PR.
 //
 // WATCHED TO FAIL AGAINST THE REAL DEFECT, not only against a synthetic one. At 2026-09-05T05:32Z
@@ -60,8 +63,10 @@ import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
 const { url: SUPA, key: KEY } = resolvePublicSupabase();
 
-/** Detector functions whose payload carries a total beside a breakdown. Anon-callable, read-only. */
-const DETECTORS = ['price_fidelity'];
+/** Detector payloads that carry a total beside a breakdown: function name → anon-readable snapshot table. */
+const DETECTORS: Record<string, string> = { price_fidelity: 'price_fidelity_snapshot' };
+/** Job 42 saves hourly; 3 h tolerates one missed run plus a slow one. */
+const SNAPSHOT_MAX_AGE_H = 3;
 
 /** Scalar keys that name "how many of the thing the breakdown breaks down". */
 const TOTAL_KEYS = ['mismatches', 'total', 'rows', 'count', 'violations', 'affected'];
@@ -155,16 +160,20 @@ mustCatch('two competing total keys as UNPAIRABLE', unpairable({ mismatches: 3, 
 mustCatch('a payload with no breakdown at all as UNPAIRABLE', unpairable({ mismatches: 3 }));
 
 // ── LIVE — the real production function, through the publishable key ─────────────────────────────
-for (const fn of DETECTORS) {
+for (const [fn, table] of Object.entries(DETECTORS)) {
   let payload: unknown;
   try {
-    const r = await fetch(`${SUPA}/rest/v1/rpc/${fn}`, {
-      method: 'POST',
-      headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
-      body: '{}',
+    const r = await fetch(`${SUPA}/rest/v1/${table}?select=payload,taken_at&id=eq.1`, {
+      headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
     });
     if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 200)}`);
-    payload = await r.json();
+    const [row] = (await r.json()) as { payload: unknown; taken_at: string }[];
+    if (!row) throw new Error(`${table} has no row — job 42 has not saved a payload yet`);
+    const ageH = (Date.now() - Date.parse(row.taken_at)) / 3.6e6;
+    if (!(ageH <= SNAPSHOT_MAX_AGE_H)) {
+      throw new Error(`${table} was saved ${ageH.toFixed(1)} h ago (max ${SNAPSHOT_MAX_AGE_H} h) — is cron job 42 running?`);
+    }
+    payload = row.payload;
   } catch (e) {
     // A live check that cannot reach production has proven NOTHING. Say so and fail — it is out of
     // `npm test` precisely so this cannot redden an unrelated PR.

@@ -1,8 +1,4 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
--- Re-verified 2026-09-27 (migration 20260811130514_sql_mirror_live_drift_detector): UNCHANGED.
---   md5(pg_get_functiondef) in production = e94517e6c07ddb44ac946fe64b1b7ee0, identical to this file.
---   Stamped for verify-sql-mirrors-not-stale (B2): the previous same-day stamp named no version at or
---   after this migration, so nothing proved it was re-checked AFTER it. Nothing in the body was edited.
 -- Refreshed 2026-08-10 (structured-beats-prose P0). TWO lines were inverted:
 --     NEW.furnished    := coalesce(safe_bool(p->>'furnished'), NEW.furnished)   -- prose WON
 --     NEW.floor_number := safe_int(p->>'floor_number')                          -- no coalesce at all
@@ -18,7 +14,18 @@
 --   already recorded below — nothing about this trigger moved. It still fully owns the Buy total
 --   (`NEW.price_total := parsed_price`), which is why fixing aqar_parse was the correct write-path
 --   fix rather than a data-only repair.
--- Verified byte-exact; md5 of everything below this header block: e94517e6c07ddb44ac946fe64b1b7ee0
+-- Re-verified 2026-09-27: UNCHANGED. Migration 20260927070718 (price_fidelity snapshot) names
+--   trg_aqar_parse only inside mon_detect_price_fidelity's alert text, so the staleness guard wants a
+--   fresh stamp. md5 of pg_get_functiondef from production = e94517e6…, identical to the one below.
+-- Refreshed 2026-10-18: TWO in-place edits, both applied on production and re-derived from it here.
+--   20261018234721: the Buy total is written only when the row's own price_evidence unit is NOT
+--     per_meter (aqar's headline can BE the per-metre rate; the enricher's headline_is_rate() then sends
+--     AUTHORITATIVE_NULL and this trigger used to put the rate straight back as the total — 6891249).
+--   20261018235847: NEW.direction := public.aqar_facade(p->>'direction') — the facade is a CLOSED choice
+--     (the four directions, the diagonals, two/three/four streets); anything else is NULL, never prose.
+-- Re-verified 2026-10-19 (UTC): UNCHANGED. Migration 20261019003500 registers this digest in
+--   ops_sql_mirror_expected (it still held the 2026-08-11 one), so the staleness guard wants a fresh stamp.
+-- Verified byte-exact; md5 of everything below this header block: 947fd49be1e4914667714cd5da89a6fb
 CREATE OR REPLACE FUNCTION public.trg_aqar_parse()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -35,7 +42,7 @@ begin
     return NEW;
   end;
 
-  NEW.direction       := p->>'direction';
+  NEW.direction       := public.aqar_facade(p->>'direction');
   NEW.last_update     := coalesce(p->>'last_update', NEW.last_update);
   NEW.date_added      := coalesce(p->>'date_added', NEW.date_added);
   NEW.license_number  := p->>'license_number';
@@ -53,7 +60,8 @@ begin
 
   if NEW.transaction_type='Buy' then
     parsed_price := public.safe_bigint(p->>'price');
-    if parsed_price is not null then
+    if parsed_price is not null
+       and coalesce(NEW.source_capture->'price_evidence'->>'unit', '') <> 'per_meter' then
       NEW.price_total := parsed_price;         -- trigger fully owns Buy total (source-parsed)
     end if;
     -- FIDELITY GUARD (2026-07-28, P0): the Python enrich fallback pattern `(\d{6,9})` before a bare

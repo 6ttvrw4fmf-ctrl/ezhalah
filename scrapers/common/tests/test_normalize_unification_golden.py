@@ -133,13 +133,14 @@ WASALT_TYPE_APPROVED_CHANGES = {           # owner approval 2026-07-16
     "Duplex": "Duplex",                    # was folded to Villa
     "Studio": "Studio",                    # was folded to Apartment
     "Small apartment (studio)": "Studio",  # was folded to Apartment
+    "Townhouse": "تاون هاوس",                 # owner approval 2026-10-12: keeps its own name (search files it under Duplex)
 }
 WASALT_CITY_APPROVED_CHANGES = {           # owner approval 2026-07-16: keep the precise town
     "Sarat Ubaida": "Sarat Abidah",        # was folded to Khamis Mushait
     "Baljurashi": "Baljurashi",            # was folded to Al Baha
     "Al-Aqiq": "Al Aqiq",                  # was folded to Al Baha
 }
-ALDARIM_TYPE_APPROVED_CHANGES = {"duplex": "Duplex"}   # owner approval 2026-07-16: was Villa fold
+ALDARIM_TYPE_APPROVED_CHANGES = {"duplex": "Duplex", "townhouse": "تاون هاوس"}   # 2026-07-16: duplex was a Villa fold; 2026-10-12: a town house keeps its own name
 MUSTQR_TYPE_APPROVED_CHANGES = {
     "دوبلكس": "Duplex",                    # owner approval 2026-07-16: was Villa fold
     "بيت": "Villa", "حوش": "Villa",        # owner approval 2026-07-20: House folded into Villa (PR#165)

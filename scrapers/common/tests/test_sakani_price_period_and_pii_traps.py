@@ -487,11 +487,56 @@ def test_enumeration_walks_pages_and_demands_the_rich_row(monkeypatch):
         R.enumerate_rent(_Session([_page([RICH_24858], with_rich=False)]))
 
 
+def test_a_challenged_page_gets_fresh_sessions_and_the_walk_goes_on(monkeypatch):
+    # 2026-10-30 16:16 UTC: sale page 69 drew the challenge and the whole night was thrown away
+    monkeypatch.setattr(R.time, "sleep", lambda *_: None)
+    first = [{**RICH_24858, "resource_id": 30000 + i} for i in range(R.PAGE_SIZE)]
+    walled = _Session([_page(first)] + [_CHALLENGE] * 4)            # page 2: challenge on all 4 tries
+    fresh = _Session([_page([RICH_23577])])                           # a fresh session reads page 2
+    monkeypatch.setattr(R, "_walk_renew", lambda: fresh)
+    monkeypatch.setattr(R, "_oracle_sess", None)
+    units = R.enumerate_rent(walled)
+    assert [u[1]["resource_id"] for u in units][-1] == 23577 and len(units) == R.PAGE_SIZE + 1
+    assert fresh.calls[0][1]["page[number]"] == 2 and R._oracle_sess is fresh
+
+
+def test_a_page_still_walled_after_fresh_sessions_keeps_what_was_read(monkeypatch):
+    import pytest
+    monkeypatch.setattr(R.time, "sleep", lambda *_: None)
+    first = [{**RICH_24858, "resource_id": 30000 + i} for i in range(R.PAGE_SIZE)]
+    monkeypatch.setattr(R, "_walk_renew", lambda: _Session([_CHALLENGE] * 4))
+    with pytest.raises(R.WalkIncomplete) as w:
+        R.enumerate_rent(_Session([_page(first)] + [_CHALLENGE] * 4))
+    assert len(w.value.units) == R.PAGE_SIZE
+    # page 1 walled is still a blocked walk: no rows to keep, the run fails closed
+    with pytest.raises(RuntimeError) as w1:
+        R.enumerate_rent(_Session([_CHALLENGE] * 4))
+    assert not isinstance(w1.value, R.WalkIncomplete)
+
+
+def test_an_incomplete_walk_writes_what_it_read_and_never_prunes(monkeypatch):
+    calls = _stub_db(monkeypatch)
+
+    def partway(s):
+        raise R.WalkIncomplete("rent catalogue page 2 unreadable (challenge/transport) — walk aborted",
+                               list(_UNITS))
+    monkeypatch.setattr(R, "enumerate_rent", partway)
+    monkeypatch.setattr(R, "fetch_detail", lambda s, uid: _DETAILS[uid])
+    monkeypatch.setattr(R, "district_names", lambda s, cid, cache: {"500001063": "الشعلة"})
+    monkeypatch.setattr(R, "_controls_live", lambda ads: True)
+    monkeypatch.setattr(sys, "argv", ["run.py"])
+    assert R.main() == 0
+    assert calls["batch"][0] == ("sakani_residential_listings", ["SKI24858", "SKI23577"])
+    assert calls["prune"] == []
+    assert "rent_walk_incompletex1" in calls["end_run"][0][1]["notes"]
+
+
 # ==================================== 6. main() =================================================
 def _stub_db(monkeypatch):
-    calls = {"batch": [], "end_run": [], "prune": [], "retire": []}
+    calls = {"batch": [], "end_run": [], "prune": [], "retire": [], "alive": []}
     db = types.SimpleNamespace(
         begin_run=lambda platform: 77,
+        mark_direct_alive=lambda row, *, oracle: calls["alive"].append((row["ad_number"], oracle)) or row,
         _wasalt_batch=lambda table, rows: calls["batch"].append((table, [r["ad_number"] for r in rows])),
         retire_superseded_siblings=lambda **kw: calls["retire"].append(kw) or 0,
         prune_unseen=lambda table, seen, source=None, **kw: calls["prune"].append((table, sorted(seen), kw)) or 0,
@@ -501,6 +546,11 @@ def _stub_db(monkeypatch):
     monkeypatch.setattr(R.time, "sleep", lambda *_: None)
     monkeypatch.setattr(R, "session", lambda: object())
     monkeypatch.setattr(R, "_oracle_sess", None)
+    monkeypatch.setattr(R, "_walk_renew", None)       # main() sets it; restored after each test
+    # The sale walk (backlog 864) answers one off-plan project here: it is read, never written.
+    monkeypatch.setattr(R, "enumerate_sale", lambda s: [(
+        {"resource_id": 900, "resource_type": "projects"},
+        {"resource_id": 900, "resource_type": "projects", "publish": True})])
     return calls
 
 
@@ -529,9 +579,9 @@ def test_main_tallies_every_skip_into_end_run_and_prunes_only_behind_the_control
     assert calls["prune"] == []                              # control failed → nothing pruned
     run_id, kw = calls["end_run"][0]
     assert run_id == 77 and kw["ok"] is True
-    assert kw["rows_seen"] == 5 and kw["rows_upserted"] == 2
-    assert kw["degraded"] is True                            # 2 of 5 rows index-only (> 20 %)
-    for tally in ("purpose_salex1", "city_not_in_catalogx1", "detail_missx2", "detail_not_foundx1", "pruned=0"):
+    assert kw["rows_seen"] == 6 and kw["rows_upserted"] == 2
+    assert kw["degraded"] is True                            # 2 of 6 rows index-only (> 20 %)
+    for tally in ("sale_project_offplanx1", "purpose_salex1", "city_not_in_catalogx1", "detail_missx2", "detail_not_foundx1", "pruned=0"):
         assert tally in kw["notes"], (tally, kw["notes"])
     assert kw["check_tables"] == ["sakani_residential_listings", "sakani_commercial_listings"]
 
@@ -592,3 +642,29 @@ def test_session_asks_for_arabic_json_and_never_sets_a_user_agent(monkeypatch):
     assert s.headers["Accept-Language"] == "ar" and s.headers["Accept"] == "application/json"
     assert "User-Agent" not in s.headers and "user-agent" not in s.headers
     assert seen["url"].startswith(R.SEARCH) and seen["order"][0] == "safari17_0" and seen["proxies"] == R._PROXIES
+
+
+def test_the_crawl_stamps_its_own_id_matched_live_detail_read_and_nothing_else(monkeypatch):
+    """2026-09-29: the crawl reads every unit's own DETAIL record, the oracle's exact read, and threw
+    it away — 0 of 280 rows ever verified, and the daily direct check could only redo it through the
+    proxy. A published rent record stamps; an index-only row, a sale record or another unit's record
+    does not."""
+    calls = _stub_db(monkeypatch)
+    monkeypatch.setattr(R, "enumerate_rent", lambda s: list(_UNITS))
+    monkeypatch.setattr(R, "fetch_detail", lambda s, uid: _DETAILS[uid])
+    monkeypatch.setattr(R, "district_names", lambda s, cid, cache: {"500001063": "الشعلة"})
+    monkeypatch.setattr(R, "_controls_live", lambda ads: False)
+    monkeypatch.setattr(sys, "argv", ["run.py"])
+    assert R.main() == 0
+    assert calls["alive"] == [("SKI24858", "sakani.detail_api.published_rent")]
+
+
+def test_a_detail_record_counts_only_when_it_is_this_units_own():
+    class _S:
+        def __init__(self, body): self.body = body
+        def get(self, url, params=None, timeout=None):
+            return _Resp(200, json.dumps(self.body), "application/json")
+    other = {"data": {"id": "11111", "type": "market_units", "attributes": DETAIL_24858}}
+    assert R.fetch_detail(_S(other), "24858") == ("miss", None), "another unit's record is no detail"
+    own = {"data": {"id": "24858", "type": "market_units", "attributes": DETAIL_24858}}
+    assert R.fetch_detail(_S(own), "24858") == ("ok", DETAIL_24858)

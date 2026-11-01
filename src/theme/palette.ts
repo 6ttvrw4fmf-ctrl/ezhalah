@@ -7,39 +7,46 @@
 //   • tokens.ts: on web the static `colors` every screen already imports becomes a live
 //     `var(--ez-*)` over these values (+html.tsx injects both palettes + a pre-hydration boot),
 //     so ALL module-scope StyleSheets re-skin instantly — the whole app, not opt-in surfaces.
-// DARK stays green-tinted by design — never a generic gray theme.
+// Owner 2026-10-24: sky/dusk backdrop, neutral surfaces and plum controls; source logos keep their colors.
 
 export const lightColors = {
-  primary: '#2f7247', // primary green
-  dark: '#1d4a37', // dark green
-  hoverRow: '#1d4a37', // SIDEBAR hover fill — the dark green («محادثة جديدة»'s interaction color)
-  tint: '#eef6f0', // light-green tint
-  tintFill: '#e9f4ec', // agent box fill
-  userBubble: '#d7eede', // user chat bubble — light green
-  userBubbleText: '#1d4a37', // user chat bubble text — dark green (legible on light green)
-  tintLine: '#d8ebdd', // tint border
-  ink: '#15201b', // primary text
-  body: '#34403a', // body text
-  muted: '#7b8a82', // muted text
-  mutedBlue: '#6b7a86', // hero subtitle
-  line: '#e2e8e4', // hairline
-  fieldLine: '#e7ebe8', // field/card border
-  pickLine: '#dde6e0', // pick-box border (unselected)
-  chipFill: '#eef6f0', // start-here suggestion chip fill
-  chipLine: '#d6e8db', // start-here chip border
-  chipIcon: '#16432f', // chip icon glyph
-  exFill: '#1d4a37', // ai-empty example chip fill (dark green)
-  exIcon: '#79c79c', // ai-empty example chip icon
-  paper: '#fbfbfa', // screen background
-  surface: '#ffffff', // cards / sheets BACKGROUND (text-on-green is onFill, never this)
-  surface2: '#f1f3f1', // secondary chips: close buttons, tracks, quiet hover fills
-  segTrack: '#f1f3f1', // segmented-control track
-  accentLeaf: '#2fb672', // bright "AI" accent
+  skyTop: '#C7E6F7',
+  skyBottom: '#E8F3FA',
+  primary: '#493953',
+  dark: '#322B3B',
+  hoverRow: '#322B3B',
+  tint: '#F1EEF4',
+  tintFill: '#F1EEF4',
+  userBubble: '#E9E1EF',
+  userBubbleText: '#33293F',
+  tintLine: '#DDD5E4',
+  ink: '#24232B',
+  body: '#3F3C48',
+  muted: '#62616D',
+  mutedBlue: '#5F6875',
+  line: '#E0DEE6',
+  fieldLine: '#DEDCE4',
+  pickLine: '#D8D4DF',
+  chipFill: '#F1EEF4',
+  chipLine: '#DDD5E4',
+  chipIcon: '#493953',
+  exFill: '#493953',
+  exIcon: '#D4C5E2',
+  paper: '#F7FAFC',
+  surface: '#ffffff', // cards / sheets BACKGROUND (text-on-fill is onFill, never this)
+  surface2: '#F1F0F4',
+  segTrack: '#F1F0F4',
+  accentLeaf: '#756084',
   amberBg: '#fdf6ec',
   amberInk: '#92591a',
+  // The ad page's hazard note («قد يكون الإعلان حُذف أو بيع», owner 2026-10-10): a warmer amber than the
+  // banner family above, with its own hairline — one note, read before the button.
+  hazardBg: '#fff7e3',
+  hazardLine: '#f1d38a',
+  hazardInk: '#6b4a00',
   whatsApp: '#25d366',
-  onFill: '#ffffff', // text/icons ON solid green fills — white in BOTH themes
-  selFill: '#2f7247', // SELECTED control fill (white text) — deeper than dark-theme primary
+  onFill: '#ffffff', // text/icons ON solid control fills — white in BOTH themes
+  selFill: '#493953',
   // ENCOURAGED-ACTION gold (owner 2026-09-20, SHINY revision): the results-row "narrow it down"
   // CTA. A flat fill read as dull, so this is a diagonal metallic gradient (light highlight → deep
   // base, GoldShineButton in CardReveal.tsx) plus a periodic light sweep across it. Same values in
@@ -53,6 +60,11 @@ export const lightColors = {
   goldLightHover: '#f0c94a', // both stops deepen slightly on hover/press
   goldDeepHover: '#a86f08',
   goldOnFill: '#2a1d06',
+  // SILVER (owner 2026-10-17): the card ring + «اضغط هنا» strip of a listing that does NOT open inside
+  // Ezhalah; gold is reserved for the sites that do. Same metallic read as the gold pair.
+  silverLight: '#f4f6f8',
+  silverDeep: '#9aa6b2',
+  silverOnFill: '#1f2a33',
   danger: '#c0392b', // destructive text/icons
   dangerBg: '#fbe8e6', // destructive tinted fill
   dangerLine: '#f3cfca', // destructive tinted border
@@ -61,57 +73,57 @@ export const lightColors = {
   rnplInk: '#3868c8',
   aqsatBg: '#ecedfb', // instalments (أقساط) banner fill — indigo family
   aqsatLine: '#c9ccf2',
-  scrim: 'rgba(8,18,12,0.45)', // modal/overlay backdrop
+  scrim: 'rgba(26,25,35,0.45)', // modal/overlay backdrop
 } as const;
 
 export type PaletteKey = keyof typeof lightColors;
 
-// Dark appearance — PR#1206's palette (deep green-black paper, warm green-tinted neutrals),
-// extended with the same semantic keys the full-app sweep added to light.
+// Dusk appearance: muted blue sky, charcoal-plum panels and warm ivory copy.
 export const darkColors: Record<PaletteKey, string> = {
-  // NEUTRAL CHARCOAL, not green-black (owner 2026-08-30). The previous dark palette tinted every
-  // surface green (#0f1712 paper, #161f19 cards) and read as "too dark/green, not polished". This is
-  // the ChatGPT-class treatment: neutral gray grounds, clear white primary text, softer gray secondary
-  // text, subtle dividers — and Ezhalah green survives ONLY as the accent (primary, selected fills,
-  // chip icons, the AI leaf), never as the ground. Every key below flows to `var(--ez-*)` on web, so
-  // this file IS the dark redesign; no component carries its own dark hex.
-  primary: '#3f9a63', // brand green, lifted for legibility on neutral dark
-  dark: '#2b6f4c', // interaction fill (hover/press)
-  // SIDEBAR hover fill in dark (owner 2026-09-03): a MUTED deep green-gray — clearly visible on the
-  // charcoal panel, keeps white text/icons legible, still Ezhalah green, never bright/neon.
-  hoverRow: '#26483f',
-  tint: '#1e2320', // agent box fill — near-neutral with the faintest warm-green cast
-  tintFill: '#1c211e',
-  userBubble: '#2f2f2f', // user bubble — neutral gray (green must not dominate)
-  userBubbleText: '#ececec',
-  tintLine: '#2c332e',
-  ink: '#ececec', // primary text — clear white
-  body: '#c9cbc9', // body text
-  muted: '#8f938f', // secondary text — softer gray
-  mutedBlue: '#9aa3ab',
-  line: '#2e2e2e', // hairline dividers — subtle, not invisible
-  fieldLine: '#343434', // input / card borders
-  pickLine: '#3b3b3b', // unselected pick-box border
-  chipFill: '#262626',
-  chipLine: '#3a3a3a',
-  chipIcon: '#8fd0a8',
-  exFill: '#1f3a2c', // example chips keep the green accent fill
-  exIcon: '#79c79c',
-  paper: '#171717', // screen background — charcoal
-  surface: '#212121', // raised cards / menu panels
-  surface2: '#2a2a2a', // secondary chips, tracks, quiet hover fills
-  segTrack: '#2a2a2a',
-  accentLeaf: '#2fb672',
+  skyTop: '#354E6A',
+  skyBottom: '#40566E',
+  primary: '#D5C5E2',
+  dark: '#493953',
+  // Muted plum hover fill keeps white text/icons legible on the charcoal panel.
+  hoverRow: '#594660',
+  tint: '#302B39',
+  tintFill: '#302B39',
+  userBubble: '#393242',
+  userBubbleText: '#F5F2ED',
+  tintLine: '#51465D',
+  ink: '#F5F2ED',
+  body: '#DDD8E2',
+  muted: '#D5CEDA',
+  mutedBlue: '#C1C9D5',
+  line: '#45404F',
+  fieldLine: '#514B5D',
+  pickLine: '#5D5669',
+  chipFill: '#342F3D',
+  chipLine: '#51465D',
+  chipIcon: '#D5C5E2',
+  exFill: '#493953',
+  exIcon: '#DDCFE8',
+  paper: '#20222C',
+  surface: '#25232D',
+  surface2: '#332E3C',
+  segTrack: '#332E3C',
+  accentLeaf: '#C4B2D4',
   amberBg: '#2b2416',
   amberInk: '#e3b56f',
+  hazardBg: '#2b2416',
+  hazardLine: '#5a4414',
+  hazardInk: '#f0cf7a',
   whatsApp: '#25d366',
   onFill: '#ffffff',
-  selFill: '#2f7247', // selected control fill — brand green as ACCENT
+  selFill: '#675477',
   goldLight: '#ffd966',
   goldDeep: '#c8860d',
   goldLightHover: '#f0c94a',
   goldDeepHover: '#a86f08',
   goldOnFill: '#2a1d06',
+  silverLight: '#e6eaef',
+  silverDeep: '#7f8a96',
+  silverOnFill: '#161d24',
   danger: '#e46a5e',
   dangerBg: '#3a1e19',
   dangerLine: '#562a23',
@@ -149,6 +161,8 @@ export function buildThemeCss(): string {
     // subtree root beats every :root block above for everything inside it — both dark paths.
     `[data-ez-light]{${decl(lightColors)}color-scheme:light;}`,
     TAP_TARGET_CSS,
+    TAP44_DOWN_CSS,
+    COMPOSER_PLACEHOLDER_CSS,
   ].join('\n');
 }
 
@@ -200,6 +214,18 @@ export const TAP_TARGET_CSS =
   + `transform:translate(-50%,-50%);width:100%;height:100%;`
   + `min-width:${TAP_TARGET_MIN}px;min-height:${TAP_TARGET_MIN}px;z-index:-1;}`;
 
+/** A SECOND, DIRECTIONAL marker (🦅 Falcon 2026-10-16): the floor grows DOWN from the control's top edge
+ *  instead of out from its centre. For a short control parked just under another one, a centred 44px
+ *  box reaches UP into its neighbour's own visual area. Measured on production at 375px: the agent
+ *  composer's «شاهين 2.2» line (24px tall, 3px under the 34px mic) grew 10px up and took the mic's
+ *  bottom edge — a press on the mic opened the model menu (journey-sweep tap-targets-meet-44, red
+ *  daily). Stacking the row above it only moved the theft onto the model line's top edge (the mic's
+ *  own floor grows 5px down); growing the model line downward fixes both: all five probe points then
+ *  resolve to their own control, and the extra area lands on the disclaimer text, not a control.
+ *  Used WITH TAP44 (it only re-anchors the same overlay); a separate rule so TAP_TARGET_CSS stays one. */
+export const TAP44_DOWN = { tap44Down: '1' } as const;
+export const TAP44_DOWN_CSS = '[data-tap44-down]::after{top:0;transform:translate(-50%,0);}';
+
 /** The opt-in marker, spread into a control's `dataSet`. It lives beside the rule that implements
  *  it so the attribute and the CSS can never drift apart, and so a barrier can import both.
  *  Opt-in rather than a blanket `[role="button"]` rule: which controls grow stays a reviewed
@@ -207,3 +233,27 @@ export const TAP_TARGET_CSS =
  *      dataSet={{ ...TAP44 }}                      // or
  *      dataSet={{ ...TAP44, testid: 'voice-mic' }} // alongside an existing testid  */
 export const TAP44 = { tap44: '1' } as const;
+
+/** The AI-chat composer's empty-box hint stays on ONE line and ends in an ellipsis (owner 2026-10-05).
+ *  With the typed text sharing a line with the mic and Send, the old long hint «اكتب العقار اللي تبحث عنه في
+ *  السعودية...» wrapped to two lines on a phone (since 2026-10-17 the hint is the short «اكتب عقارك وإزهله...»), which made the box taller and lifted typed text above
+ *  the buttons. `text-overflow` trails at the END of the line in the field's own direction, so in Arabic
+ *  the dots sit on the left, after the words. Opt-in by marker, like TAP44. */
+export const COMPOSER_INPUT = { composerInput: '1' } as const;
+export const COMPOSER_PLACEHOLDER_CSS =
+  '[data-composer-input]::placeholder{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}';
+
+// THE GOLD BUZZER (owner 2026-10-10) — the one control allowed to leave the green: the pill that carries
+// the source's logo inside the in-app ad page's «اضغط هنا للتواصل» bar. A deliberate brand exception for
+// this single control; same values in both themes (gold reads on light and on charcoal alike).
+export const BUZZER_GOLD = {
+  light: '#fff3b0', // radial centre
+  mid: '#f6d365',
+  deep: '#e0a526',
+  dark: '#b07a10', // radial edge
+  ring: '#f9e08a', // inner light ring
+  rim: 'rgba(122,82,8,0.55)', // dark-gold outer ring
+  shade: 'rgba(176,122,16,0.55)', // drop shadow
+  glow: 'rgba(246,211,101,0.45)', // warm glow, resting
+  glowPeak: 'rgba(255,214,90,0.95)', // warm glow, pulse peak (brighter — owner 2026-10-10 «make it shiny»)
+} as const;
