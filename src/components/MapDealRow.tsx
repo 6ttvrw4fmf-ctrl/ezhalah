@@ -222,7 +222,7 @@ const s = StyleSheet.create({
   swapBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.tintLine, alignItems: 'center', justifyContent: 'center' },
   routeFail: { fontSize: 12.5, color: colors.muted, marginTop: 8, paddingHorizontal: 6 },
   // zIndex above the swap button and the «إلى» field: the From list dropped UNDER them (seen live 2026-11-01).
-  hits: { position: 'absolute', zIndex: 10, elevation: 10, top: 52, left: 0, right: 0, backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.tintLine, padding: 6, ...cardShadow, shadowOpacity: 0.14, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 6 },
+  hits: { position: 'absolute', zIndex: 10, top: 52, left: 0, right: 0, backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.tintLine, padding: 6, ...cardShadow, shadowOpacity: 0.14, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 6 },
   hit: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10 },
   hitT: { fontSize: 14, fontWeight: '700', color: colors.ink },
   hitSub: { fontSize: 12, color: colors.muted, marginTop: 1 },
