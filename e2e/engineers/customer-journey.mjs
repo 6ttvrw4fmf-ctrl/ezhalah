@@ -81,6 +81,11 @@ const COUNT_WATCH = arg('count-watch') ? Math.min(6, parseInt(arg('count-watch')
 if (MODE !== 'normal' && MODE !== 'af') { console.error("need --mode normal|af"); process.exit(2); }
 const SAMPLE = arg('sample') ? Math.min(8, parseInt(arg('sample'), 10)) : null;     // politeness cap
 const LISTINGS = arg('listings') ? JSON.parse(arg('listings')) : null;
+// --absent id,id: listing ids a lifecycle run HID that must not be on screen in the same search
+// (owner 2026-10-30: a hide is proven on the live site — the dead card gone from the cards). With it,
+// a normal journey pages through every result («عرض المزيد», same cap) after finding its card and
+// records every card id it could reach next to the search's own count; any absent id on screen FAILS.
+const ABSENT = new Set((arg('absent') || '').split(',').map((x) => x.trim()).filter(Boolean));
 if (!SAMPLE && !Array.isArray(LISTINGS)) { console.error("need --sample N or --listings '<json>'"); process.exit(2); }
 const MAX_PER_RUN = 12;                                   // hard politeness cap (<= 40 rule, with margin)
 const LOAD_MORE_MAX = 8;
@@ -338,6 +343,33 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
       // the search's own row count is already in result.evidence.search; it is never judged against the
       // number of cards on screen (scripts/live-card-count-sites.txt)
       if (!found) throw new Error(`card not found after ${LOAD_MORE_MAX} «عرض المزيد» presses`);
+      if (ABSENT.size) {
+        step('page through every result for --absent');
+        const revealEvery = async () => {                 // revealAll stops at our own card; this does not
+          let prev = -1;
+          for (let i = 0; i < 40; i++) {
+            const now = await all.count();
+            if (now === prev) return;
+            prev = now;
+            await all.last().scrollIntoViewIfNeeded().catch(() => {});
+            await page.mouse.wheel(0, 4000);
+            await page.waitForTimeout(1000);
+          }
+        };
+        for (let p = presses; p < LOAD_MORE_MAX; p++) {
+          await revealEvery();
+          const more = page.locator('[data-testid="results-load-more"]');
+          if (!(await more.count())) break;
+          await more.last().scrollIntoViewIfNeeded(); await more.last().click();
+          await page.waitForTimeout(2000);
+        }
+        await revealEvery();
+        const ids = await all.evaluateAll((els) => els.map((e) => (e.getAttribute('data-testid') || '').replace('card-listing-', '')));
+        const seenIds = [...new Set(ids)];
+        result.evidence.reachableCards = seenIds.length;
+        result.evidence.absentSeen = seenIds.filter((id) => ABSENT.has(id));
+        if (result.evidence.absentSeen.length) throw new Error(`hidden listing(s) still on screen: ${result.evidence.absentSeen.join(',')}`);
+      }
       // innerText is "" for a card the browser has not painted yet (the phone result list, 2026-10-24:
       // every card read empty, so a price check could never pass); textContent still has the words.
       const text = ((await card.first().innerText()) || (await card.first().textContent()) || '')
