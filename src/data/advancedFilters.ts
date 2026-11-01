@@ -158,7 +158,7 @@ const AGE_QUESTION: AdvancedQuestion = {
 // multi-type intersection mutation-provable. The cohort DATA moved with it, unchanged. Buy+Rent
 // combined gating (q.dealCombined — owner feature 2026-08-20) lives there too, intersecting with
 // the multi-type/multi-period dimensions rather than being bolted on separately — see afCohorts.ts.
-import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope } from '@/lib/afCohorts';
+import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope, shortStaysAskTier } from '@/lib/afCohorts';
 // Merge picked strict amenity tokens (kitchen/parking/elevator/furnished/rnpl) into q.amenities.
 function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
   return keys.length ? { ...q, amenities: [...new Set([...(q.amenities ?? []), ...keys])] } : q;
@@ -236,7 +236,9 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
   titleKey: 'What amenities matter to you?',
   descriptionKey: 'Results update as you choose',
   selection: 'multi',
-  eligibility: (q) => cohortAllows(q, 'amenities'),
+  // Short stays never ASK this card (owner 2026-10-31): COMFORT_QUESTION / OUTDOORS_QUESTION below are
+  // its two halves there; a typed chat sentence may still use it (cohortAllows keeps it certified).
+  eligibility: (q) => cohortAllows(q, 'amenities') && !isShortStaysScope(q),
   async resolveOptions(q) {
     const defs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
       { key: 'kitchen',  labelKey: 'Kitchen',  count: (c) => c.cnt_kitchen },
@@ -277,9 +279,6 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
     // cohorts' cards are unchanged.
     // Multi-type safe: only when EVERY selected type is Villa — a Villa+Apartment scope must not be
     // offered a chip that only villa ads carry. (owner 2026-08-20 intersection rule.)
-    // Short stays (owner 2026-10-31): the residential chips for the whole pool, whatever type is in
-    // scope — mirrors certifiedAmenityKeys(). No villa extras, no commercial trio, no «مفروشة».
-    if (isShortStaysScope(q)) return guidedOptions(await fetchApartmentGuidedCounts(q), defs, (c) => c.cnt_amen_unknown);
     const scope = scopeCleanTypes(q);
     if (scope.length > 0 && scope.every((ty) => ty === 'Villa')) {
       defs.push({ key: 'car_entrance', labelKey: 'Car entrance', count: (c) => c.cnt_car_entrance });
@@ -495,9 +494,50 @@ const UNIT_SUBTYPE_QUESTION: AdvancedQuestion = {
   apply: (q, keys) => (keys.length ? { ...q, unitSubtypes: [...keys] } : q),
 };
 
+// ── SHORT STAYS: the amenities card in two halves (owner 2026-10-31) ──────────────────────────────
+// «إقامات قصيرة» asks exactly three questions, in this order: 🚽 bathrooms → 🔑 comfort → 🏊 fun &
+// outdoors (afCohorts.ts SHORT_STAYS_QUESTIONS; rankQuestions() below keeps the order). Both halves
+// write the ONE q.amenities bag through addAmenities, exactly like AMENITIES_QUESTION, so the card
+// evidence («مطابق لطلبك»), the receipt chips and the re-entry carry work unchanged. The chip keys are
+// INLINED here (these objects are lifted by barriers and cannot import a list) and mirrored by
+// SHORT_STAYS_COMFORT_KEYS / SHORT_STAYS_OUTDOORS_KEYS; verify-short-stays-one-cohort.ts pins them
+// equal. Every key already has its count path (cnt_<key>) and its p_amenities slug — the owner's
+// remaining chips (self check-in, Wi-Fi, bills included, grill, kids' play area, jacuzzi, outdoor
+// seating) join one at a time once the free word reader and the count exist for each.
+const COMFORT_QUESTION: AdvancedQuestion = {
+  id: 'comfort',
+  titleKey: '🔑 Comfort — what matters to you?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'comfort'),
+  async resolveOptions(q) {
+    return guidedOptions(await fetchApartmentGuidedCounts(q), [
+      { key: 'elevator',     labelKey: 'Elevator',     count: (c) => c.cnt_elevator },
+      { key: 'parking',      labelKey: 'Parking',      count: (c) => c.cnt_parking },
+      { key: 'laundry_room', labelKey: 'Laundry room', count: (c) => c.cnt_laundry_room },
+    ], (c) => c.cnt_amen_unknown);
+  },
+  apply: addAmenities,
+};
+const OUTDOORS_QUESTION: AdvancedQuestion = {
+  id: 'outdoors',
+  titleKey: '🏊 Fun & outdoors — what matters to you?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'outdoors'),
+  async resolveOptions(q) {
+    return guidedOptions(await fetchApartmentGuidedCounts(q), [
+      { key: 'pool',   labelKey: 'Pool',   count: (c) => c.cnt_pool },
+      { key: 'garden', labelKey: 'Garden', count: (c) => c.cnt_garden },
+    ], (c) => c.cnt_amen_unknown);
+  },
+  apply: addAmenities,
+};
+
 export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
   RNPL_QUESTION, AGE_QUESTION, AMENITIES_QUESTION, BATHROOMS_QUESTION, FURNISHED_QUESTION,
   STREET_WIDTH_QUESTION, DIRECTION_QUESTION, RATING_QUESTION, UNIT_SUBTYPE_QUESTION,
+  COMFORT_QUESTION, OUTDOORS_QUESTION,
 ];
 
 // ── THE SCOPE PREFIX: CATEGORY → GROUP → TYPE → the pool above (owner 2026-08-23) ────────────────
@@ -597,8 +637,11 @@ export async function rankQuestions(q: SearchQuery, askedIds: ReadonlySet<string
   // Ask-first tier wins ONLY among questions that already cleared the usefulness gates above
   // (scoreQuestion returned non-null); within a tier, the contextual score decides. So installments
   // opens the interview whenever it is genuinely useful, and silently steps aside when it is not.
+  // Short stays (owner 2026-10-31): a FIXED order — bathrooms → comfort → outdoors — instead of the
+  // contextual score; still only among questions that cleared the gates above.
+  const tier = isShortStaysScope(q) ? shortStaysAskTier : askTier;
   const sorted = ranked.sort((a, b) =>
-    askTier(b.question.id) - askTier(a.question.id) || b.score - a.score);
+    tier(b.question.id) - tier(a.question.id) || b.score - a.score);
   // The array is still the array (every existing consumer keeps working); `probeFailed` rides along
   // as a non-enumerable property so the batch's provenance cannot be silently dropped by a .map()
   // or a spread on the way to the decision that depends on it.

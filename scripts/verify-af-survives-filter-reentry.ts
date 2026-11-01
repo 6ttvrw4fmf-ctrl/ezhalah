@@ -68,6 +68,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const QUESTION_CONSTS = [
   'RNPL_QUESTION', 'AGE_QUESTION', 'AMENITIES_QUESTION', 'BATHROOMS_QUESTION', 'FURNISHED_QUESTION',
   'STREET_WIDTH_QUESTION', 'DIRECTION_QUESTION', 'RATING_QUESTION', 'UNIT_SUBTYPE_QUESTION',
+  'COMFORT_QUESTION', 'OUTDOORS_QUESTION',   // the short-stays halves of the amenities card (owner 2026-10-31)
 ];
 const lifted = await liftSymbols(
   join(ROOT, 'src/data/advancedFilters.ts'),
@@ -188,6 +189,9 @@ console.log('\n── 3. EVERY question, on a cohort the registry itself certifi
 const ANSWER_KEYS: Record<string, string[]> = {
   property_age: ['upto5'], amenities: ['elevator'], rnpl: ['rnpl'], bathrooms: ['3'],
   furnished: ['no'], street_width: ['20'], direction: ['شمال'], rating: ['9.0_rc10'], unit_subtype: ['استديو'],
+  // The two short-stays halves of the amenities card (owner 2026-10-31) — certified by the short-stays
+  // rule in cohortAllows(), not by a COHORT_QUESTIONS leg, so certifiedScopeFor() names their scope.
+  comfort: ['elevator'], outdoors: ['pool'],
 };
 const LEGS = {
   Buy: { deal: 'Buy' as const, rentPeriod: 'annual' as const },
@@ -196,6 +200,9 @@ const LEGS = {
 };
 /** The first (type, deal-leg) the registry certifies this question for. */
 function certifiedScopeFor(id: string): SearchQuery | null {
+  if (id === 'comfort' || id === 'outdoors') {
+    return { ...SHOP, ...LEGS.RentMonthly, category: 'Residential', typeGroups: groupsOf(['Apartment']), types: ['Apartment'] };
+  }
   for (const [type, cfg] of Object.entries(COHORT_QUESTIONS)) {
     for (const leg of ['RentAnnual', 'Buy', 'RentMonthly'] as const) {
       if (!(cfg[leg] ?? []).includes(id)) continue;
@@ -560,8 +567,8 @@ const amenityWriters = ADVANCED.filter((q) => {
   const probe: SearchQuery = { ...SHOP };
   return !same(q.apply(probe, ANSWER_KEYS[q.id]).amenities, probe.amenities);
 }).map((q) => q.id).sort();
-assert(same(amenityWriters, ['amenities', 'rnpl']),
-  `exactly two questions write amenity tokens, and afCarry handles both by name (found: ${amenityWriters.join(', ')})`);
+assert(same(amenityWriters, ['amenities', 'comfort', 'outdoors', 'rnpl']),
+  `exactly four questions write amenity tokens — the card, its two short-stays halves (token-filtered by afCarry's AMENITY_BAG_QUESTION_IDS) and rnpl (found: ${amenityWriters.join(', ')})`);
 assert(!certifiedAmenityKeys(certifiedScopeFor('rnpl')!).includes('rnpl'),
   '«rnpl» is deliberately absent from certifiedAmenityKeys — token-filtering it would drop a certified answer');
 assert(certifiedFacets(certifiedScopeFor('rnpl')!, [rnplFacet]).length === 1,
@@ -595,6 +602,9 @@ for (const [type, cfg] of Object.entries(COHORT_QUESTIONS)) {
       category: (CLEAN_MACRO[type] ?? 'Residential') as SearchQuery['category'],
       typeGroups: groupsOf([type]), types: [type],
     };
+    // Short stays (owner 2026-10-31): the generic card is not ASKED there — its two halves are (comfort /
+    // outdoors, pinned by verify-short-stays-one-cohort.ts) — so an unasked card's option list is no offer.
+    if (!(lifted.AMENITIES_QUESTION as { eligibility: (q: SearchQuery) => boolean }).eligibility(scope)) continue;
     const offered = await offeredKeys(scope);
     const certified = new Set(certifiedAmenityKeys(scope));
     const orphans = offered.filter((k) => !certified.has(k));

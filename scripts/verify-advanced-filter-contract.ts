@@ -63,7 +63,9 @@ check('the orchestrator re-ranks after every answer and tracks asked questions (
 // scoreQuestion, and scoreQuestion still returns null on every gate.
 check('installments is ask-first via a TIER applied in the sort, never by bypassing the gates',
   /ASK_FIRST_TIER/.test(advSrc)
-  && /askTier\(b\.question\.id\) - askTier\(a\.question\.id\) \|\| b\.score - a\.score/.test(advSrc)
+  // 2026-10-31: `tier` is askTier everywhere but short stays, where it is the owner's fixed order (shortStaysAskTier).
+  && /const tier = isShortStaysScope\(q\) \? shortStaysAskTier : askTier;/.test(advSrc)
+  && /tier\(b\.question\.id\) - tier\(a\.question\.id\) \|\| b\.score - a\.score/.test(advSrc)
   && !/ASK_FIRST_TIER|askTier/.test(advSrc.slice(advSrc.indexOf('export function scoreQuestion'), advSrc.indexOf('export type RankedQuestion'))));
 // NARROWING GATE — UPDATED 2026-08-25 (owner decision of that date; it supersedes the 2026-08-22
 // `count < N` wording this check used to pin, which had itself superseded the 2026-08-11 8%-90%

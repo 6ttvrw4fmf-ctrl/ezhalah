@@ -531,6 +531,12 @@ const AR: Record<string, string> = {
   'Do you prefer listings with installment options?': 'تفضّل عقارات تتيح التقسيط / الدفع لاحقًا؟',
   'Offers installments': 'يقبل التقسيط',
   'What amenities matter to you?': 'وش المميزات المهمة لك؟',
+  // Short stays: the amenities card in two halves (owner 2026-10-31) — the question titles and the
+  // summary-line labels («• الراحة: مصعد»).
+  '🔑 Comfort — what matters to you?': '🔑 الراحة — وش المهم لك؟',
+  '🏊 Fun & outdoors — what matters to you?': '🏊 الترفيه والخارج — وش المهم لك؟',
+  'Comfort': 'الراحة',
+  'Fun & outdoors': 'الترفيه والخارج',
   'Do you prefer it furnished?': 'تفضلها مفروشة؟',
   'Unfurnished': 'غير مفروشة',
   'Driver room': 'غرفة سائق',

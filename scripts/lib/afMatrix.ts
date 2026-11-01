@@ -118,6 +118,7 @@ export function recorder(): { row: Record<string, unknown>; reads: Set<string> }
 const QUESTION_CONSTS = [
   'RNPL_QUESTION', 'AGE_QUESTION', 'AMENITIES_QUESTION', 'BATHROOMS_QUESTION', 'FURNISHED_QUESTION',
   'STREET_WIDTH_QUESTION', 'DIRECTION_QUESTION', 'RATING_QUESTION', 'UNIT_SUBTYPE_QUESTION',
+  'COMFORT_QUESTION', 'OUTDOORS_QUESTION',   // the short-stays halves of the amenities card (owner 2026-10-31)
 ];
 
 export async function loadLifted(root: string): Promise<Lifted> {
@@ -250,6 +251,8 @@ const ladder = (col: string, cnt: string, params: Record<string, unknown>, n: nu
 export function optionMeaning(field: string, key: string): Meaning | null {
   switch (field) {
     case 'rnpl': return key === 'rnpl' ? bool('rent_now_pay_later', 'cnt_rnpl', { p_amenities: ['rnpl'] }) : null;
+    // comfort / outdoors (owner 2026-10-31): the short-stays halves of the amenities card — same tokens, same meaning.
+    case 'comfort': case 'outdoors':
     case 'amenities': return AMENITY_COL[key] ? bool(AMENITY_COL[key], `cnt_${key}`, { p_amenities: [key] }) : null;
     case 'bathrooms': return /^[1-4]$/.test(key) ? ladder('bathrooms', `cnt_bath${key}`, { p_bath_min: Number(key) }, Number(key)) : null;
     case 'street_width': return /^(15|20|25|30)$/.test(key) ? ladder('street_width_m', `cnt_stw${key}`, { p_street_width_min: Number(key) }, Number(key)) : null;
@@ -329,6 +332,7 @@ export function fieldMeaning(field: string): FieldMeaning | null {
     paramsBoth: (a, b) => ({ ...a, ...b }),
   });
   switch (field) {
+    case 'comfort': case 'outdoors':   // the short-stays halves of the amenities card (owner 2026-10-31)
     case 'amenities': return { ...single('cnt_total_base', ['cnt_amen_unknown']), combine: 'and',
       paramsBoth: (a, b) => ({ p_amenities: [...(a.p_amenities as string[]), ...(b.p_amenities as string[])] }) };
     case 'direction': return {
