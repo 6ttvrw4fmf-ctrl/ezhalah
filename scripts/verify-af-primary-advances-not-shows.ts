@@ -3,7 +3,7 @@
 // DEFECT (production, found 2026-08-23). On a SINGLE-select AF question the green primary button
 // read «عرض N نتيجة» ("Show N results"). Tapping it showed nothing: the overlay simply moved on to
 // the next question and no results turn was ever produced. Repro that caught it — إيجار / الرياض /
-// شقة → «خلّنا نحدد الطلب أكثر» → Q1 «تفضل تدفع الإيجار على دفعات؟» → Q2 «كم عمر العقار تقريباً؟»
+// شقة → «🎯 دقّق مع الذكاء» → Q1 «تفضل تدفع الإيجار على دفعات؟» → Q2 «كم عمر العقار تقريباً؟»
 // (single) → pick «جديد» → primary reads «عرض 1,848 نتيجة» → tap → card is still open, now titled
 // «تفضلها مفروشة؟», chat still holds only the original «لقينا 10,589 إعلان يطابق طلبك.».
 //

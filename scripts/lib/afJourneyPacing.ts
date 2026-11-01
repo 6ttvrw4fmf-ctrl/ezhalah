@@ -411,7 +411,7 @@ export async function awaitAfStep(
  * WHY IT EXISTS (routine #5, 2026-09-20, ops_incident #340/#338). Two live AF journeys typed
  * `await page.waitForTimeout(6000)` between the last message and the results read:
  *
- *   verify-af-agent-cta-live.ts:144       before reading/clicking «خلّنا نحدد الطلب أكثر»
+ *   verify-af-agent-cta-live.ts:144       before reading/clicking «🎯 دقّق مع الذكاء»
  *   verify-af-remove-last-pill-live.ts:519 before counting the revealed cards
  *
  * 6,000 ms is BELOW the live searching beat (SEARCH_MIN_MS 10,000 + LOADER_EXIT_MS 450), so the read

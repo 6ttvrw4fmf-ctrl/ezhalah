@@ -390,26 +390,68 @@ def _strip_wa(w: str) -> str:
     return w
 
 
+# «يوجد» / «توجد» ASSERTS what follows: «بدون سطح يوجد مكيفات» = no roof, there ARE air conditioners. A negator
+# may touch it («لا يوجد»), but no catalogue word before it can carry an earlier «بدون» across it (🔬 2026-11-01:
+# 12 aqar ads served AC unknown against their own yes box, ops_text_facts_conflicts).
+_AFFIRM = frozenset(_n(w) for w in ("يوجد", "توجد"))
+
+
 def _negated_before(prev: list[str]) -> Optional[int]:
     """How many words back the negation starts, or None. A list of catalogue words may sit in between."""
     j = len(prev)
+    affirmed = False
     for _ in range(3):
         if j >= 1 and (prev[j - 1] in _NEG1 or _strip_wa(prev[j - 1]) in _NEG1):
             return len(prev) - (j - 1)
         if j >= 2 and (" ".join(prev[j - 2:j]) in _NEG2 or (_strip_wa(prev[j - 2]) + " " + prev[j - 1]) in _NEG2):
             return len(prev) - (j - 2)
+        if affirmed:
+            return None
         if j >= 1 and _strip_wa(prev[j - 1]) in _LIST_WORDS | {"اي", "وجود", "يوجد"}:
+            affirmed = _strip_wa(prev[j - 1]) in _AFFIRM
             j -= 1
             continue
         return None
     return None
 
 
+# The NEXT label of a REGA licence block is not a descriptor of this word: «… ماء، كهرباء النزاعات: لا يوجد» says the
+# ad has no DISPUTES, not no electricity (🔬 2026-11-01: 12 dealapp/aqar ads, ops_text_facts_conflicts).
+_FORM_LABELS = frozenset(_n(w) for w in ("النزاعات", "نزاعات", "الالتزامات", "التزامات", "الحقوق", "القيود", "الرهن",
+                                          "الرهون", "الضمانات"))
+# Whether a RENT includes the bill is not whether the unit has the supply: «لا يشمل الكهرباء», «الماء: غير شامل»,
+# «المياه متوفرة (غير مشمولة)» (🔬 2026-11-01: ~35 ads served electricity / water unknown against a yes box).
+_BILLING = tuple(_n(w) for w in ("شامل", "مشمول", "يشمل", "تشمل"))
+
+
+# A TRAILING «غير شامل» on any fact is about the price, not the thing: «مطبخ راكب (غير شامل)», «مصعد غير شامل»,
+# «مؤثثة بالكامل غير شامل», «صرف صحي (غير شامل)» — the thing is named, what the rent covers is not our question.
+# A LEADING «لا يشمل» is a bill only on a utility («لا يشمل الأثاث» stays an honest unfurnished).
+_BILL_FACTS = _NEEDS_CUE | {"sanitation"}
+
+
+def _billing_not_supply(fact: str, prev: list[str], nxt: list[str]) -> bool:
+    for skip in (0, 1):
+        w = nxt[skip:]
+        if skip and (not nxt or _strip_wa(nxt[0]) in _LIST_WORDS):
+            break
+        if len(w) >= 2 and _strip_wa(w[0]) == "غير" and _starts(w[1], _BILLING):
+            return True
+    if fact not in _BILL_FACTS:
+        return False
+    p = [_strip_wa(x) if x.startswith("و") else x for x in prev[-3:]]
+    if len(p) >= 2 and p[-2] == "لا" and _starts(p[-1], _BILLING):
+        return True
+    if len(p) >= 3 and p[-3] == "لا" and _starts(p[-2], _BILLING) and _strip_wa(prev[-1]) in _LIST_WORDS:
+        return True                          # «لا يشمل الماء والكهرباء» — the bill list reaches the second utility
+    return False
+
+
 def _negated_after(nxt: list[str], fact: str) -> int:
     """How many words after the token belong to a post-negation («غير راكب», «لا», «لا يوجد», «0»), else 0."""
     for skip in (0, 1):                      # one descriptor may sit between: «مطبخ عربي غير راكب», «الضمانات ومدتها لا يوجد»
         w = nxt[skip:]
-        if skip and (not nxt or _strip_wa(nxt[0]) in _LIST_WORDS or nxt[0].isdigit()):
+        if skip and (not nxt or _strip_wa(nxt[0]) in _LIST_WORDS or nxt[0].isdigit() or nxt[0] in _FORM_LABELS):
             break
         if len(w) >= 2 and w[0] == "غير" and _starts(w[1], _POST_NOT + tuple(_n(x) for x in _POST_NOT_FACT.get(fact, ()))):
             return skip + 2
@@ -491,6 +533,8 @@ def _judge(fact: str, t: str, s: int, e: int, forced: Optional[bool], n_words: i
         return forced, ws, we
     if fact in _WHO_MAY_RENT and any(_strip_wa(w).startswith("ممنوع") for w in gp[-3:]):
         return False, ws, we                         # «ممنوع العزاب»: the bare word's own no (the forced regex agrees)
+    if _billing_not_supply(fact, prev, nxt):
+        return None, s, e
     if head in ("un", "غير") or head.endswith("غير"):
         return False, ws, we
     back = _negated_before(prev)
@@ -801,6 +845,19 @@ def selftest() -> None:
         ("مطبخ راكب ومكيفات راكبة", {"kitchen": True, "air_conditioner": True}, ()),
         ("بدون مكيفات ومطبخ", {"air_conditioner": False, "kitchen": False}, ()),
         ("بدون عمولة ومطبخ راكب", {"kitchen": True}, ()),
+        # 🔬 2026-11-01 (ops_text_facts_conflicts): «يوجد» asserts; a REGA label is not a descriptor; a bill is not a supply
+        ("بدون سطح يوجد مكيفات", {"air_conditioner": True, "roof": False}, ()),
+        ("الخدمات: ماء، كهرباء النزاعات: لا يوجد", {"electricity": True}, ()),
+        ("شقة للايجار لا يشمل الكهرباء والماء", {}, ("electricity", "water_supply")),
+        ("لا يشمل الماء والكهرباء", {}, ("electricity", "water_supply")),
+        ("الماء: غير شامل", {}, ("water_supply",)),
+        ("المياه متوفرة (غير مشمولة)", {}, ("water_supply",)),
+        ("لا يوجد كهرباء", {"electricity": False}, ()),
+        ("مياه لا يوجد", {"water_supply": False}, ()),
+        ("مطبخ راكب (غير شامل)", {}, ("kitchen",)),
+        ("وصرف صحي (غير شامل)", {}, ("sanitation",)),
+        ("بدون سطح يوجد موقف", {"parking": True}, ()),
+        ("شقة غير مفروشة", {"furnished": False}, ()),
         ("unfurnished apartment", {"furnished": False}, ()),
         ("مصعد مؤسس", {}, ("elevator",)),
         ("تأسيس مسبح", {}, ("pool",)),

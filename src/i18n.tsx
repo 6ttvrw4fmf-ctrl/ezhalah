@@ -487,7 +487,7 @@ const AR: Record<string, string> = {
   '"{city}" isn\'t a city I recognize, I\'ll still search using your other answers.':
     '«{city}» ليست مدينة أعرفها، سأظل أبحث باستخدام إجاباتك الأخرى.',
 
-  // Advanced-filter question engine («خلّنا نحدد الطلب أكثر») — عمر العقار is the first field built on
+  // Advanced-filter question engine («🎯 دقّق مع الذكاء») — عمر العقار is the first field built on
   // this reusable card; new fields add their own strings here, never touch this block's wording.
   'How old is the property?': 'كم عمر العقار تقريباً؟',
   'New construction': 'جديد',
@@ -963,7 +963,7 @@ const AR: Record<string, string> = {
     'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي بحث جديد؟ افتح القائمة ☰ فوق واختر «بحث».',
   'I showed you the first {n} listings. For a new search, open the menu and choose Search.':
     'عرضت لك أول {n} إعلانات. تبي بحث جديد؟ افتح القائمة ☰ فوق واختر «بحث».',
-  // …and the narrow-only pair: «عرض المزيد» is not rendered but «خلّنا نحدد الطلب أكثر» is, so the
+  // …and the narrow-only pair: «عرض المزيد» is not rendered but «🎯 دقّق مع الذكاء» is, so the
   // sentence invites exactly the one button that exists.
   'I showed you the first {shown} of {total} matching listings. Want help finding more precise ones?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أساعدك توصل لنتائج أدق؟',
   'I showed you the first {n} listings. Want help finding more precise ones?': 'عرضت لك أول {n} إعلانات. تبي أساعدك توصل لنتائج أدق؟',
@@ -972,10 +972,10 @@ const AR: Record<string, string> = {
   'We found {total} listings matching your search, and showed you {shown}. Want help finding more precise ones?': 'لقينا {total} إعلان يطابق طلبك، وعرضنا لك {shown} منها. تبي أساعدك نلقى نتائج أدق؟',
   'We found {total} listings matching your search, and showed you {shown}.': 'لقينا {total} إعلان يطابق طلبك، وعرضنا لك {shown} منها.',
   'I can show you 100 listings at a time.': 'أقدر أعرض لك 100 إعلان في كل مرة.',
-  'Let’s narrow it down': 'خلّنا نحدد الطلب أكثر',
+  '🎯 Refine with AI': '🎯 دقّق مع الذكاء',
   // COMPLETED-ROUND RECEIPT (owner 2026-08-24) — replaces the action buttons on the results turn a
   // finished Advanced Filter round was opened from. A record of what happened, never a control.
-  'Continued with the advanced filter': 'تابع المستخدم باستخدام التصفية المتقدمة',
+  'Continued with 🎯 Refine with AI': 'تابع المستخدم عبر 🎯 دقّق مع الذكاء',
   // Read Aloud closing note (owner request, 2026-08-23 — "read the note... and say the button
   // also"): spoken ONLY when the matching buttons are actually on screen (agent.tsx gates this the
   // same way), naming the exact same button label(s) so it can never mention an action that isn't

@@ -3,7 +3,7 @@
 //
 // WHY THIS EXISTS
 // ---------------
-// Six live browser journeys across two runs (2026-08-23) tapped «خلّنا نحدد الطلب أكثر» on broad
+// Six live browser journeys across two runs (2026-08-23) tapped «🎯 دقّق مع الذكاء» on broad
 // Rent and Buy searches and NEVER got the Advanced Filter card — every one fell through to the
 // legacy district refine chips. Nothing was broken in the gate that decides it. The cause is a
 // composition of three separately-correct rules:

@@ -383,7 +383,7 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
     step(`open AF (targets: ${targets.map((t) => t.kind === 'amenity' ? t.token : 'furnished=yes').join(', ')})`);
     // A round asks at most AF_ROUND_MAX_QUESTIONS (4) questions, so a chip the listing can answer
     // (e.g. AC on annual-rent apartments, behind rnpl/furnished/age/bathrooms) is often only offered
-    // in ROUND 2. A customer who did not see it presses «خلّنا نحدد الطلب أكثر» again; so do we
+    // in ROUND 2. A customer who did not see it presses «🎯 دقّق مع الذكاء» again; so do we
     // (2026-10-06: ksaaqar AC read UNKNOWN for that reason alone). Up to 3 rounds.
     const answered = [];
     let nAF = searches.length;
@@ -413,12 +413,12 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
         await narrow.last().click();
         opened = true;
       } else {
-        opened = await tap('خلّنا نحدد الطلب أكثر', 500).then(() => true)
+        opened = await tap('🎯 دقّق مع الذكاء', 500).then(() => true)
           .catch(() => tap('نحدد الطلب أكثر', 500).then(() => true).catch(() => false));
       }
     }
     if (!opened && round > 1) { step(`round ${round}: no further narrowing offered`); break; }
-    if (!opened) throw new Error('AF entry (results-narrow / «خلّنا نحدد الطلب أكثر») never rendered');
+    if (!opened) throw new Error('AF entry (results-narrow / «🎯 دقّق مع الذكاء») never rendered');
     step(`AF entry clicked (round ${round})`);
     await page.waitForTimeout(3500);
 

@@ -1064,7 +1064,7 @@ first press, up to `SECOND_PAGE_CAP` (500) or the true end on the second, and th
 (owner 2026-09-14, PR #2618). This supersedes the 2026-09-11 Task 4 rev. 2 "the SECOND press DRAINS
 every remaining page" rule this paragraph described until 2026-09-14, which had itself superseded the
 2026-08-29 "clean 100-batches 100 → 200 → 300 …" shape and, before that, the 2026-08-20 lifetime cap.
-«خلّنا نحدد الطلب أكثر» is offered alongside, never instead of, continued browsing — and at the cap
+«🎯 دقّق مع الذكاء» is offered alongside, never instead of, continued browsing — and at the cap
 it is the user's ONLY forward path, so it must be on screen.
 
 **The cap is a mount-safety bound, not a preference (ops_incident #212).** The results list is

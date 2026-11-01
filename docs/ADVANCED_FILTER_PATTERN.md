@@ -1,4 +1,4 @@
-# Reusable advanced-filter pattern («خلّنا نحدد الطلب أكثر»)
+# Reusable advanced-filter pattern («🎯 دقّق مع الذكاء»)
 
 The Property Age (عمر العقار) filter for Apartments is the **reference implementation** for every
 future advanced-filter question. This doc is the playbook: copy it to add a new advanced question
@@ -8,14 +8,14 @@ type. Do not re-derive the mechanics — reuse them.
 ## The flow (fixed, owner-locked)
 
 ```
-normal search → first 10 cards → «عرض المزيد» / «خلّنا نحدد الطلب أكثر»
-   → (only «خلّنا نحدد الطلب أكثر», only in an eligible scope)
+normal search → first 10 cards → «عرض المزيد» / «🎯 دقّق مع الذكاء»
+   → (only «🎯 دقّق مع الذكاء», only in an eligible scope)
    → loading state → dynamic question card (options + live counts, unknown-count disclosed)
    → user picks ONE strict option → refreshed cards that ALL match that option
 ```
 
 The age question is NOT a home-screen filter. It appears **only after** a search has returned
-cards, and only from the «خلّنا نحدد الطلب أكثر» button.
+cards, and only from the «🎯 دقّق مع الذكاء» button.
 
 ## Core principles (permanent)
 

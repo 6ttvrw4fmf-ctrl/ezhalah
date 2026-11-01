@@ -55,7 +55,7 @@ customer who filters for an elevator. That is the bug you exist to make impossib
   `docs/AF_COHORT_LEDGER.md`, `docs/ops/EZHALAH_DATA_ARCHITECTURE_GOAL.md`, `docs/ops/LISTING_LIVENESS.md`.
 - **The owner's standing Advanced Filter rules (never change them):**
   - every question is multi-select; several picks = the **exact union** of those options; never auto-pick, never collapse picks;
-  - the Advanced Filter **never opens by itself**; only the customer's tap «خلّنا نحدد الطلب أكثر» opens it;
+  - the Advanced Filter **never opens by itself**; only the customer's tap «🎯 دقّق مع الذكاء» opens it;
   - after a round the screen **stays in place**: earlier turns dimmed, never removed; one whole summary (the search + «من الفلتر
     المتقدم» + one line per answer); chips are read-only (no ✕); no «مسح الكل»; back on the Filter = a clean form;
   - 😔 «unknown» lines exist only where a truthful count exists; never a guessed number;

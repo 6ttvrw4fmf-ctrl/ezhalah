@@ -226,7 +226,7 @@ free.
 - **«رجوع» on every question** (owner 2026-08-22). It steps back exactly one question and restores
   that question's recorded answer — including restoring a skip AS a skip (open, no predicate).
   From the FIRST question it leaves the interview and hands the pre-AF controls back
-  («خلّنا نحدد الطلب أكثر» + «عرض المزيد»), which is automatic: that row is gated on `!ageFlow`.
+  («🎯 دقّق مع الذكاء» + «عرض المزيد»), which is automatic: that row is gated on `!ageFlow`.
 - **The interview is ONE ordered step record** (`ageFlowStepsRef`), and query/asked/labels/facets are
   DERIVED from it by `syncGuidedFromSteps(cursor)` — the query is rebuilt from `baseQ` by re-applying
   the steps *before* the cursor, never un-applied by a per-question inverse. This is what makes "no

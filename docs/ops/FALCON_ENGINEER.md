@@ -73,7 +73,7 @@ apply in full: approval removes the question, never the guard.
    tab; phone: the sheet), every other site in a new tab; back keeps the search.
 
 **Advanced Filter.**
-12. Never opens by itself (only the customer's tap «خلّنا نحدد الطلب أكثر»). Every question is multi-select; several picks =
+12. Never opens by itself (only the customer's tap «🎯 دقّق مع الذكاء»). Every question is multi-select; several picks =
    the exact union; never auto-pick, never collapse picks.
 13. After a round the screen stays in place: earlier turns dimmed, never removed; one whole summary; read-only chips (no ✕);
    no «مسح الكل»; back on the Filter = a clean form. 😔 «unknown» only where a truthful count exists.

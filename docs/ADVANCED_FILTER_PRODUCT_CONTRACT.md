@@ -188,7 +188,7 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 
 ---
 
-## 4. The offer button («خلّنا نحدد الطلب أكثر»)
+## 4. The offer button («🎯 دقّق مع الذكاء»)
 
 ### 4.1 Manual only, never auto-popup
 
@@ -341,7 +341,7 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
   button appears again — the user may run another round.
   *(2026-09-20 → 2026-10-05: for two weeks a completed round CLOSED the chat at any total
   (`afRoundEndsChat`); the owner reinstated this rule on 2026-10-05 — «if there are still more than 25
-  ads and a useful question left, show «خلّنا نحدد الطلب أكثر» again; it never pops up by itself». The
+  ads and a useful question left, show «🎯 دقّق مع الذكاء» again; it never pops up by itself». The
   «never re-opens itself» half (no timer, a tap only) stays.)*
 - **R6.3.5** — **The reader stays in place** (owner 2026-10-03). When a round starts its search,
   earlier turns are DIMMED, never hidden, so the thread keeps its height and nothing collapses

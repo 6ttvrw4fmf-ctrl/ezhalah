@@ -91,7 +91,7 @@ function Shell({ children, onClose, countChip, pills }: {
         <View style={[s.bar, isRTL && { flexDirection: 'row-reverse', justifyContent: 'flex-end' }]}>
           <View style={s.titleWrap}>
             <View style={s.brandMark}><Ionicons name="sparkles" size={18} color={colors.primary} /></View>
-            <Text style={s.barTitle} numberOfLines={1}>{t('Ezhalah AI Agent')}</Text>
+            <Text style={s.barTitle} numberOfLines={1}>{t('🎯 Refine with AI')}</Text>
           </View>
           <View style={s.barSide}>
             {countChip != null ? <View testID="af-count-chip"><AnimatedCount value={countChip} /></View> : null}

@@ -7,7 +7,7 @@
 //  1. THE RECEIPT WAS LATE BY A WHOLE SEARCH. `setAfReceipt` runs synchronously inside finishGuided,
 //     but the card renders in the `else` of `showActionsRow` — and that flag only drops when
 //     `chatCompleted` flips, which happens in runRefine's onFetched, ~10s later. So the spent turn
-//     kept «عرض المزيد / خلّنا نحدد الطلب أكثر» for the entire new search. Never a timer: a gate
+//     kept «عرض المزيد / 🎯 دقّق مع الذكاء» for the entire new search. Never a timer: a gate
 //     resolving late. The fix gates `showActionsRow` on the receipt itself, which ALSO shortens the
 //     closing note in the same frame (it is derived from the same flag) — so the note can never
 //     offer «تبي أعرض لك المزيد؟» under a row that is gone (§42 visible-output contract).
@@ -142,7 +142,7 @@ check('the retired label keys are gone from i18n',
   !i18n.includes('Your choices: {summary}') && !i18n.includes('Skipped: {summary}')
   && !i18n.includes('اختياراتك'));
 check("the card's heading is still translated",
-  i18n.includes("'Continued with the advanced filter': 'تابع المستخدم باستخدام التصفية المتقدمة'"));
+  i18n.includes("'Continued with 🎯 Refine with AI': 'تابع المستخدم عبر 🎯 دقّق مع الذكاء'"));
 
 // ── F. MUTATION PROOFS ──────────────────────────────────────────────────────────────────────────
 const mustCatch = (what: string, caught: boolean) =>
