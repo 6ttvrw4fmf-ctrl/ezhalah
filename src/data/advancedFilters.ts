@@ -42,6 +42,7 @@ export {
 export type AdvancedQuestion = {
   id: string;                                   // stable identity, e.g. 'property_age'
   titleKey: string;                             // i18n key — the headline
+  lineKey?: string;                             // i18n key for the summary line when the id's default label is not this card's (yearly «Space»)
   descriptionKey?: string;                      // i18n key — optional one-line subtitle
   brandImage?: string;                          // optional asset TOKEN (e.g. 'ejari-rnpl') — the card's
                                                 // own registry maps it to an image and owns the slot/style
@@ -547,6 +548,7 @@ const SPACE_QUESTION: AdvancedQuestion = {
 const SPACE_YEARLY_QUESTION: AdvancedQuestion = {
   id: 'space',
   titleKey: '🏠 Space: what matters to you?',
+  lineKey: 'Space',
   descriptionKey: 'Results update as you choose',
   selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'space') && !isShortStaysScope(q),

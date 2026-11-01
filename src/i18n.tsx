@@ -547,6 +547,7 @@ const AR: Record<string, string> = {
   '✨ Fun: what matters to you?': '✨ الترفيه: وش الي يسعدك؟',
   'Comfort': 'الراحة',
   'Space & safety': 'المساحة والأمان',
+  'Space': 'المساحة',
   'Fun': 'الترفيه',
   'Washing machine': 'غسالة ملابس',
   'Do you prefer it furnished?': 'تفضلها مفروشة؟',

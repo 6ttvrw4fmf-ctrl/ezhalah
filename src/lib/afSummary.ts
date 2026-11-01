@@ -38,7 +38,9 @@ const AMENITY_EMOJI: Record<string, string> = {
 
 // `total` = the size of the set this question was asked against (what the pick is checked against) — only the
 // Advanced Filter round's search beat reads it; the summary sentences never do.
-export type AfFacet = { id: string; keys: string[]; labels: string[]; total?: number };
+// `line` (optional): the question's OWN summary-line label key when two questions share an id — the
+// yearly «🏠 Space» card and the short-stays «🏠 Space & safety» card are both `space` (2026-11-01).
+export type AfFacet = { id: string; keys: string[]; labels: string[]; total?: number; line?: string };
 
 // ONE committed facet → its finished, reader-facing item(s). Shared by the summary and the round
 // log, so an answer is worded identically wherever it appears; a multi-select facet explodes into
@@ -191,7 +193,7 @@ export function withAdvancedLines(base: string, facets: AfFacet[], translate: (k
   const order: string[] = [];
   const byLabel = new Map<string, { or: boolean; values: string[] }>();
   for (const f of facets) {
-    const label = translate(AF_LINE_LABEL[f.id] ?? AF_LINE_FALLBACK);
+    const label = translate(f.line ?? AF_LINE_LABEL[f.id] ?? AF_LINE_FALLBACK);
     let e = byLabel.get(label);
     if (!e) { e = { or: f.id === 'direction', values: [] }; byLabel.set(label, e); order.push(label); }
     for (const v of f.labels) if (!e.values.includes(v)) e.values.push(v);

@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { withAdvancedLines } from '../src/lib/afSummary.ts';
 import { cardPlan, cohortAllows, certifiedAmenityKeys, COHORT_CARDS, CARD_IDS, AMENITY_BAG_QUESTION_IDS, groupAskTier, groupAskTierFor } from '../src/lib/afCohorts.ts';
 import type { SearchQuery } from '../src/data/search.ts';
 
@@ -107,6 +108,13 @@ check('a Buy-only scope asks AGE before bathrooms (every locked Buy list: age �
 check('a rent or mixed scope keeps bathrooms before age (Floor Rent + Buy: bathrooms · age)',
   groupAskTier('bathrooms', rentBuyQ) > groupAskTier('property_age', rentBuyQ)
   && groupAskTier('bathrooms', Q({ deal: 'Rent', types: ['Apartment'] })) > groupAskTier('property_age', Q({ deal: 'Rent', types: ['Apartment'] })));
+{
+  const lines = withAdvancedLines('base', [{ id: 'space', keys: ['majlis'], labels: ['🛋️ مجلس'], line: 'Space' }], (k) => k);
+  check('the yearly «🏠 Space» card prints its OWN summary line («Space»), not the short-stays «Space & safety» that shares its id',
+    /• Space: 🛋️ مجلس/.test(lines) && !/Space & safety/.test(lines), lines);
+  const ss = withAdvancedLines('base', [{ id: 'space', keys: ['majlis'], labels: ['🛋️ مجلس'] }], (k) => k);
+  check('…while a facet without its own line keeps the id\'s default label (short stays: «Space & safety»)', /• Space & safety: /.test(ss), ss);
+}
 check('groupAskTierFor(q) is the same ranking, curried for rankQuestions',
   groupAskTierFor(buyQ)('property_age') === groupAskTier('property_age', buyQ) && groupAskTierFor(buyQ)('bathrooms') === groupAskTier('bathrooms', buyQ));
 check('every chip in every list is a lower_snake token (a p_amenities slug)', Object.values(COHORT_CARDS).every((deals) =>
