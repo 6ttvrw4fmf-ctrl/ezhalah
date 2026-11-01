@@ -544,7 +544,7 @@ const AR: Record<string, string> = {
   // summary-line labels («• الراحة: مصعد»).
   '🔑 Comfort: what matters to you?': '🔑 الراحة: وش الي يريحك؟',
   '🏠 Space & safety: what matters to you?': '🏠 المساحة والأمان: وش الي يطمنك؟',
-  '✨ Fun: what matters to you?': '✨ الترفيه: وش الي يفرحك؟',
+  '✨ Fun: what matters to you?': '✨ الترفيه: وش الي يسعدك؟',
   'Comfort': 'الراحة',
   'Space & safety': 'المساحة والأمان',
   'Fun': 'الترفيه',
