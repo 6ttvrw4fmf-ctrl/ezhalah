@@ -12,9 +12,12 @@
 //        taps (default 150 — «twice fast» is the shape the Sentry event came from) · --phone (mobile emulation)
 //        · --settle ms to wait after the last tap (default 2500) · --json (machine output only) · --selftest.
 //
-// Verdict: PASS when the page loaded, every tap found its target, and the browser reported 0 uncaught exceptions,
-// 0 unhandled rejections and 0 console errors; FAIL otherwise, with each message. UNKNOWN is impossible here on
-// purpose: a page that did not load is a FAIL (a failed fetch is not an empty answer). Exit code = 0 on PASS.
+// Verdict: PASS when the page loaded, every tap found its target, and the browser reported 0 uncaught exceptions and
+// 0 unhandled rejections — the two shapes Sentry's `onerror` / `onunhandledrejection` would have sent; FAIL otherwise,
+// with each message. `console.error` lines are REPORTED as warnings, never the verdict (measured on the first PR run,
+// 41311890931: a clean /map printed 11 of them, all third-party — Google One Tap's FedCM with no account on the robot,
+// Cloudflare Turnstile's `data:,` CSP probe, React's `%c%d font-size:0` console trick); `--strict-console` makes them
+// fail too. UNKNOWN is impossible here on purpose: a page that did not load is a FAIL. Exit code = 0 on PASS.
 import '../../scripts/lib/robotPass.mjs'; // robot pass: our own robot is never blocked by the network guard (docs/ops/SCRAPE_GUARD.md)
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
@@ -38,9 +41,10 @@ export const selectorFor = (t) => {
   return null; // text targets are found by exact innerText (see CLICK_LEAF)
 };
 
-/** The verdict from what the browser reported. Pure, self-tested: ANY message is a FAIL. */
-export const verdictFor = ({ loaded, missedTaps, errors }) =>
-  loaded && missedTaps.length === 0 && errors.length === 0 ? 'PASS' : 'FAIL';
+/** The verdict from what the browser reported. Pure, self-tested: ANY error is a FAIL; a console warning is not,
+ *  unless `strict` asks for it. */
+export const verdictFor = ({ loaded, missedTaps, errors, warnings = [], strict = false }) =>
+  loaded && missedTaps.length === 0 && errors.length === 0 && (!strict || warnings.length === 0) ? 'PASS' : 'FAIL';
 
 if (has('selftest')) {
   const assert = (await import('node:assert/strict')).default;
@@ -55,6 +59,10 @@ if (has('selftest')) {
   assert.equal(verdictFor({ loaded: true, missedTaps: [], errors: ['InvalidStateError'] }), 'FAIL', 'one error fails');
   assert.equal(verdictFor({ loaded: true, missedTaps: ['tab:x'], errors: [] }), 'FAIL', 'a tap that found nothing fails');
   assert.equal(verdictFor({ loaded: false, missedTaps: [], errors: [] }), 'FAIL', 'a page that did not load is never PASS');
+  assert.equal(verdictFor({ loaded: true, missedTaps: [], errors: [], warnings: ['console.error: [GSI_LOGGER] …'] }), 'PASS',
+    'a third-party console.error is reported, not the verdict (run 41311890931)');
+  assert.equal(verdictFor({ loaded: true, missedTaps: [], errors: [], warnings: ['console.error: x'], strict: true }), 'FAIL',
+    '--strict-console makes a console error fail');
   console.log('page-probe self-check: OK');
   process.exit(0);
 }
@@ -77,6 +85,7 @@ const REPEAT = Math.max(1, Number(arg('repeat', 2)) || 1);
 const GAP = Math.max(0, Number(arg('gap', 150)) || 0);
 const SETTLE = Math.max(0, Number(arg('settle', 2500)) || 0);
 const PHONE = has('phone');
+const STRICT = has('strict-console');
 const JSON_ONLY = has('json');
 const OUT_DIR = process.env.PROBE_OUT_DIR || path.join(os.tmpdir(), 'page-probe');
 const log = (...m) => { if (!JSON_ONLY) console.log(...m); };
@@ -102,6 +111,7 @@ const browser = await chromium.launch({
     ...(CONTAINER && process.env.HTTPS_PROXY ? [`--proxy-server=${process.env.HTTPS_PROXY}`] : [])],
 });
 const errors = [];
+const warnings = [];
 const missedTaps = [];
 let loaded = false;
 let screenshot = null;
@@ -120,7 +130,7 @@ try {
   });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`pageerror: ${String(e?.message || e).slice(0, 300)}`));
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(`console.error: ${m.text().slice(0, 300)}`); });
+  page.on('console', (m) => { if (m.type() === 'error') warnings.push(`console.error: ${m.text().slice(0, 300)}`); });
   log(`▶ page probe — ${URL_} · ${TAPS.map((t) => `${t.kind}:${t.value}`).join(' → ')} × ${REPEAT} · gap ${GAP} ms${PHONE ? ' · phone' : ''}`);
   const resp = await page.goto(URL_, { waitUntil: 'domcontentloaded', timeout: 60000 });
   loaded = !!resp && resp.status() < 400;
@@ -145,7 +155,7 @@ try {
   await page.waitForTimeout(SETTLE);
   const rejections = await page.evaluate(() => window.__probeRejections || []).catch(() => []);
   for (const r of rejections) errors.push(`unhandledrejection: ${String(r).slice(0, 300)}`);
-  if (errors.length || missedTaps.length) {
+  if (errors.length || missedTaps.length || (STRICT && warnings.length)) {
     fs.mkdirSync(OUT_DIR, { recursive: true });
     screenshot = path.join(OUT_DIR, `probe-${Date.now()}.png`);
     await page.screenshot({ path: screenshot, fullPage: false }).catch(() => { screenshot = null; });
@@ -155,8 +165,8 @@ try {
 } finally {
   await browser.close().catch(() => {});
 }
-const verdict = verdictFor({ loaded, missedTaps, errors });
-const out = { url: URL_, taps: TAPS, repeat: REPEAT, gapMs: GAP, phone: PHONE, loaded, missedTaps, errors, screenshot, status: verdict };
+const verdict = verdictFor({ loaded, missedTaps, errors, warnings, strict: STRICT });
+const out = { url: URL_, taps: TAPS, repeat: REPEAT, gapMs: GAP, phone: PHONE, loaded, missedTaps, errors, warnings, screenshot, status: verdict };
 console.log(JSON.stringify(out));
-log(`SUMMARY page-probe ${verdict} · loaded=${loaded} · taps missed=${missedTaps.length} · errors=${errors.length}`);
+log(`SUMMARY page-probe ${verdict} · loaded=${loaded} · taps missed=${missedTaps.length} · errors=${errors.length} · console warnings=${warnings.length}${STRICT ? ' (strict)' : ''}`);
 process.exit(verdict === 'PASS' ? 0 : 1);
