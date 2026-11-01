@@ -13,6 +13,7 @@ import { classifyPlace, placeSubtitle, dedupePlaces, sortByKind, isAreaKind, KIN
 const root = join(import.meta.dirname, '..');
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok ? '' : ' — ' + detail}`); if (!ok) failed++; };
+const mustCatch = (label: string, caught: boolean) => { console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${label}`); if (!caught) failed++; };
 
 // Real Places, as MapKit JS resolved them on 2026-11-01 (fields: name, locality, subLocality, administrativeArea, thoroughfare, poi, span).
 const CASES: [string, PlaceFacts, PlaceKind][] = [
@@ -77,9 +78,11 @@ check('order: city → region → district → street → landmarks (stable)', o
 check('isAreaKind: region/city/district are areas, a mall is not', isAreaKind('region') && isAreaKind('city') && isAreaKind('district') && !isAreaKind('mall') && !isAreaKind('street'));
 
 // Mutations: the rules can fail.
-check('(mutation) a Store named without «mall» is NOT a mall', classifyPlace({ name: 'Adidas', locality: 'Riyadh', poi: 'Store' }) === 'place');
-check('(mutation) a sub-locality named like its city is the city, not a district', classifyPlace({ name: 'جدة', locality: 'جدة', subLocality: 'جدة', span: 0.3 }) === 'city');
-check('(mutation) a region needs no locality', classifyPlace({ name: 'منطقة مكة', locality: 'مكة', administrativeArea: 'منطقة مكة', span: 3 }) !== 'region');
+mustCatch('a Store named without «mall» being called a mall', classifyPlace({ name: 'Adidas', locality: 'Riyadh', poi: 'Store' }) !== 'mall');
+mustCatch('a sub-locality named like its city being called a district', classifyPlace({ name: 'جدة', locality: 'جدة', subLocality: 'جدة', span: 0.3 }) !== 'district');
+mustCatch('a place WITH a locality being called a region on its span alone', classifyPlace({ name: 'منطقة مكة', locality: 'مكة', administrativeArea: 'منطقة مكة', span: 3 }) !== 'region');
+mustCatch('a dedupe that drops two same-named cities far apart', dedupePlaces([{ name: 'x', coordinate: { latitude: 24.7, longitude: 46.6 } }, { name: 'x', coordinate: { latitude: 21.5, longitude: 39.2 } }]).length === 2);
+mustCatch('a sort that lets a landmark above a city', sortByKind([{ kind: 'mall' as PlaceKind }, { kind: 'city' as PlaceKind }])[0].kind === 'city');
 
 // Wiring: the web map resolves rows through this module and the field shows the tag; the native stub shares the type.
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
