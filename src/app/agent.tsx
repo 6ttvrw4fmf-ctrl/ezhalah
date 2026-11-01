@@ -4711,7 +4711,8 @@ export default function Agent() {
                             for every answer, scope or not: nothing on this row removes anything. */}
                         {guidedPills.facets.map((f, i) => (
                           <View key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill}>
-                            <Text style={s.guidedPillTx}>{buildAfSummaryItems([f], rfLang).join(rfLang === 'ar' ? '، ' : ', ')}</Text>
+                            {/* Dark pill with a check mark (owner 2026-11-01): the answers the user GOT. */}
+                            <Text style={s.guidedPillTx}>{`✓ ${buildAfSummaryItems([f], rfLang).join(rfLang === 'ar' ? '، ' : ', ')}`}</Text>
                           </View>
                         ))}
                       </View>
@@ -5511,10 +5512,10 @@ const s = StyleSheet.create({
   // (not fontFamily) matches the idiom of every other text style in this sheet.
   guidedPillRow: { flexWrap: 'wrap', gap: 8, alignItems: 'center' },
   guidedPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.tint,
+    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.primary,
     borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5,
   },
-  guidedPillTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
+  guidedPillTx: { fontSize: 12.5, fontWeight: '600', color: '#fff' },
   // Completed-round receipt (owner 2026-08-24): a quiet record where the buttons used to be — same
   // tinted surface as the pills, no border emphasis, nothing that reads as pressable.
   afReceipt: { gap: 3, marginTop: 4, alignSelf: 'stretch', backgroundColor: colors.tint, borderRadius: radius.chip, paddingHorizontal: 12, paddingVertical: 9 },

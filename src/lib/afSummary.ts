@@ -26,6 +26,7 @@ const AMENITY_EMOJI: Record<string, string> = {
   private_entrance: '🚪', maid_room: '🧹', driver_room: '🚘',
   car_entrance: '🚗', sanitation: '🚰', furnished: '🛋️',
   electricity: '⚡', water_supply: '💧',
+  laundry_room: '🧺', pool: '🏊', garden: '🌳', gym: '🏋️', balcony: '🌅', majlis: '🛋️',
 };
 
 // `total` = the size of the set this question was asked against (what the pick is checked against) — only the
@@ -49,6 +50,12 @@ function facetItems(f: AfFacet, locale: 'ar' | 'en' = 'ar'): string[] {
       case 'amenities':
         for (let i = 0; i < f.keys.length; i++)
           items.push(`${f.labels[i]} ${AMENITY_EMOJI[f.keys[i]] ?? '✅'}`);
+        break;
+      // The short-stays halves (owner 2026-11-01): their chip labels already carry the emoji in front
+      // («🛗 مصعد», guidedOptions' `emoji`), so the item is the label as the user saw it.
+      case 'comfort':
+      case 'outdoors':
+        for (const l of f.labels) items.push(l);
         break;
       // SCOPE tiers (owner 2026-08-23) — multi-select like amenities, so each picked group/type is
       // its own item. Without these they would fall through `default:` and print as bare labels.
