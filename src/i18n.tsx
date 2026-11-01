@@ -300,7 +300,7 @@ const AR: Record<string, string> = {
   'Explore': 'استكشاف',
   'Satellite': 'قمر صناعي',
   'Quiet': 'هادئ',
-  'Region, city, landmark or district': 'منطقة، مدينة، معلم أو حي',
+  'Region, city, landmark, district or street': 'منطقة، مدينة، معلم، حي أو شارع',
   ', ': '، ',
   'Transaction': 'نوع الصفقة',
   'to rent': 'للإيجار',
