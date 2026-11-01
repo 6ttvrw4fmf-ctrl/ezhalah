@@ -1,0 +1,67 @@
+# Owner 2026-11-01 («fully automate those engineers»): a merged app fix reaches customers without a person.
+# This file only DISPATCHES deploy-frontend.yml, so the deploy lock, the preflight and the 10% canary (it rolls back
+# by itself when a guardian journey regresses) all still decide. It runs once for a given main commit, so a failed
+# deploy is not retried until something new lands, and it stops and goes red after 3 failed deploys in a row.
+name: Auto-deploy merged app fixes
+
+on:
+  schedule:
+    - cron: '40 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: auto-deploy-merged-fixes
+  cancel-in-progress: false
+
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): the alert bridge below talks to our own database.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  dispatch:
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Dispatch a deploy when app files changed since the last good one
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          runs=$(gh run list -w deploy-frontend.yml --branch main --limit 30 --json status,conclusion,headSha)
+          head=$(git rev-parse HEAD)
+          if [ "$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")" != 0 ]; then
+            echo "A deploy is running — next pass."; exit 0
+          fi
+          if [ "$(jq --arg h "$head" '[.[] | select(.headSha == $h)] | length' <<<"$runs")" != 0 ]; then
+            echo "$head was already tried."; exit 0
+          fi
+          good=$(jq -r 'first(.[] | select(.conclusion == "success") | .headSha) // ""' <<<"$runs")
+          [ -n "$good" ] || { echo "::error::no successful deploy in the last 30 runs"; exit 1; }
+          changed=$(git diff --name-only "$good" "$head" -- src public assets api middleware.ts app.json babel.config.js metro.config.js package.json package-lock.json vercel.json)
+          [ -n "$changed" ] || { echo "No app files changed since $good."; exit 0; }
+          if [ "$(jq '[limit(3; .[])] | all(.conclusion == "failure")' <<<"$runs")" = true ]; then
+            echo "::error::the last 3 deploys failed — not dispatching a 4th."; exit 1
+          fi
+          printf '%s\n' "$changed"
+          gh workflow run deploy-frontend.yml --ref main -f confirm=DEPLOY -f "reason=auto: app files changed since ${good:0:7}"
+
+      # Unattended, so a red run must reach alert_event (same bridge as engineer-automerge.yml).
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind barrier_check_failed
+          --workflow auto-deploy-merged-fixes.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

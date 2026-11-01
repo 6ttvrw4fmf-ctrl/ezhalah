@@ -6,8 +6,9 @@
 # door): the gate re-reads the PR right before merging and refuses unless every required check on main is
 # exactly SUCCESS, the branch is up to date and mergeable, and the file list still matches. 2026-10-31 (owner,
 # «8 or better»): the lanes widened to scrapers/, scripts/, e2e/, docs/ and .github/workflows/ — everything the
-# engineers ship except the app screens (src/, public/), package files, the database (supabase/ other than a
-# mirror) and the merge gate itself, which still wait for a person. Drafts and forks are never considered. A green scrapers-only PR that is merely BEHIND main is
+# engineers ship except package files, the database (supabase/ other than a mirror) and the merge gate itself,
+# which still wait for a person. 2026-11-01 (owner, «fully automate those engineers»): src/ and public/ joined the
+# lanes; auto-deploy-merged-fixes.yml ships them through the 10% canary, which rolls back by itself. Drafts and forks are never considered. A green scrapers-only PR that is merely BEHIND main is
 # brought up to date HERE (gh pr update-branch) and merged on a later pass: measured 2026-10-18 (backlog
 # 671), main merged every ~5-20 min, so AF's PR #7482 sat green-but-BEHIND from 10:45 to 13:10, was
 # updated by hand at 13:12 and was BEHIND again by 13:35 — a 9-minute CI cannot win that race by hand,
@@ -74,9 +75,9 @@ jobs:
             # lifecycle+barrier, #9600/#9449 rulebooks, #9607) waited a whole day for a person and capped every score.
             # The merge GATE itself never auto-merges: engineer-automerge.yml, scripts/safe-pr-merge.ts and the secret
             # handshake (scripts/lib/gateFetch.mjs, scripts/lib/robotPass.mjs) still need a person, so a robot cannot
-            # widen its own door. src/, public/, package files and supabase/ (other than a mirror) stay with a person.
+            # widen its own door. Package files and supabase/ (other than a mirror) stay with a person.
             outside=$(printf '%s\n' "$files" \
-              | grep -vE '^(scrapers|scripts|e2e|docs|\.github/workflows)/' \
+              | grep -vE '^(scrapers|scripts|e2e|docs|src|public|\.github/workflows)/' \
               ; printf '%s\n' "$files" \
               | grep -E '^(\.github/workflows/engineer-automerge\.yml|scripts/safe-pr-merge\.ts|scripts/lib/gateFetch\.mjs|scripts/lib/robotPass\.mjs)$' \
               ; true)
