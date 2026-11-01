@@ -794,10 +794,11 @@ used to end on.
   migration `20261031205445_silent_rent_period_judged_by_price`).** PERIOD = SOURCE when the ad states one:
   never overruled. When the source prints no period, the index trigger `enforce_rent_period_judgment()`
   (BEFORE INSERT OR UPDATE on `search_listings_ar`, so every sync and every write passes through it) labels
-  the row from the raw figure the site printed via `judge_silent_rent_period_ar()`: under 7,000 → شهري,
-  15,000 and above → سنوي, 7,000–14,999 → stays NULL (borderline, never a guess; 427 served rows on
-  2026-10-31). gathern / aqarmonthly are monthly-only, so a silent row there is شهري. The shown price is
-  always the source's figure; `rent_period_judged = true` marks every judged row; the raw platform tables
+  the row from the raw figure the site printed via `judge_silent_rent_period_ar(p, type_ar)` (bands corrected the same
+  night, `20261031215442`): under 300 = placeholder → NULL; 300–7,999 on a home or business type = a
+  per-month figure, stored as سنوي ×12 (no monthly button exists on mixed sites); 15,000 and above → سنوي;
+  anything else → stays NULL (borderline, never a guess). gathern / aqarmonthly are monthly-only, so a
+  silent row there is شهري. The source's own figure is always kept; `rent_period_judged = true` marks every judged row; the raw platform tables
   are never written. Why: 13,436 served priced rents (aqar 4,194, haraj 2,948, muhaysini 2,736, nofodh
   1,009, dwelleo 918, wajaf …) sat with NULL and were reachable from NO rent button (wajaf 22222374, a
   180,000 Buraidah warehouse, answered total=0). Guard: `mon_detect_priced_rent_unreachable()` on the
