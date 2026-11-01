@@ -1,0 +1,42 @@
+name: Load place shapes (OSM boundaries → place_shapes)
+
+# Loads data/place-shapes.json.gz (district / city / region boundaries from OpenStreetMap, © OpenStreetMap
+# contributors, ODbL) into public.place_shapes through place_shapes_upsert(). Manual: run it after the data file
+# changes. Idempotent (upsert by osm id). Reads nothing from production, writes one table nothing else writes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true = count the rows, write nothing"
+        required: false
+        default: "false"
+
+concurrency:
+  group: place-shapes-load
+  cancel-in-progress: false
+
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs sends it only to our own database.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
+jobs:
+  load:
+    name: Upsert place_shapes
+    runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Load
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/load-place-shapes.ts --dry-run
+          else
+            node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/load-place-shapes.ts
+          fi
