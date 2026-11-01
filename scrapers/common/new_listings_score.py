@@ -228,6 +228,11 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                         break
         elif kind == "number":
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)
+            # ONE hall is written as the bare noun: haraj 21839188 «غرفة وصالة», 21839193 «4 غرف وصالة كبيره» (score run
+            # 41009231494, 2026-10-30, backlog 1090) store living_rooms 1; the room line's «4» read as the hall count.
+            if (name == "living_rooms" and out[name] != MATCH and stored.get(col) is not None
+                    and float(stored.get(col)) == 1 and any(SINGLE_HALL.search(x) for x in lines)):
+                out[name] = MATCH
         elif kind == "bool":
             out[name] = _cmp_bool(stored.get(col), lines, kw)
         elif kind == "district":
@@ -236,7 +241,19 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             out[name] = _cmp_valued(stored.get(col), SITE_DEAL_MENU.sub("", whole), DEAL_KW)
         else:
             out[name] = _cmp_word(stored.get(col), whole, kw)
+            # haraj's REGA licence block prints the facade in English («واجهة العقار: Eastern», 21831096, backlog 1090).
+            if name == "direction_ar" and out[name] == MISMATCH and stored.get(col):
+                en = FACADE_EN.get(norm(str(stored.get(col))))
+                if en and any(re.search(kw, x) and re.search(en, x, re.I) for x in lines):
+                    out[name] = MATCH
     return out
+
+
+# «صالة» alone (with «و» / «ال» glued on) is one hall; never «صالات» / «صالتين», never a figure right before it.
+SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صاله(?![\u0621-\u064A])")
+# The four plain facades in English, as a REGA licence block prints them; a compound facade stays Arabic-only.
+FACADE_EN = {"شرق": r"\beast(?:ern)?\b", "غرب": r"\bwest(?:ern)?\b",
+             "شمال": r"\bnorth(?:ern)?\b", "جنوب": r"\bsouth(?:ern)?\b"}
 
 
 _UNIT_TAIL = r"\s*(?:م2|م²|متر|m²|m2|ريال|ر\.س)?\s*"
@@ -266,6 +283,10 @@ WORD_NUMBERS = {"ثلاث": 3, "ثلاثه": 3, "اربع": 4, "اربعه": 4, 
                 "سبع": 7, "سبعه": 7, "ثمان": 8, "ثماني": 8, "ثمانيه": 8, "تسع": 9, "تسعه": 9, "عشر": 10, "عشره": 10}
 WORD_NUMBER = re.compile(r"(?<![\u0621-\u064A])(" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
                          + r")(?![\u0621-\u064A])")
+
+EN_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+              "ten": 10, "eleven": 11, "twelve": 12}
+EN_NUMBER = re.compile(r"(?<![A-Za-z])(" + "|".join(EN_NUMBERS) + r")(?![A-Za-z])", re.I)
 
 WORDED_VALUE_LINE = re.compile(r"^\s*(" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
                                + r")\s*(?:سنوات|سنين|سنه|غرف|غرفه|صالات|دورات مياه)?\s*$")
@@ -316,6 +337,9 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # a stated age, so the night scored it a MISMATCH. Only a line that is nothing but the worded figure counts.
         worded |= {WORD_NUMBERS[m.group(1)] for i in kw_hits if i + 1 < len(lines)
                    for m in [WORDED_VALUE_LINE.match(lines[i + 1])] if m}
+        # haraj's REGA licence block writes the figure in English: «عمر العقار: Nine Year» (21839193, stored 9; branch
+        # re-score 41284494062, 2026-11-01). An English number word on the keyword's own line states that figure too.
+        worded |= {EN_NUMBERS[m.group(1).lower()] for i in kw_hits for m in EN_NUMBER.finditer(lines[i])}
         if any(ONE_WORD.search(lines[i]) for i in kw_hits):
             worded.add(1)
         if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
