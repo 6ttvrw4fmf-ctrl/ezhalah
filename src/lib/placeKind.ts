@@ -41,12 +41,20 @@ export const KIND_RANK: Record<PlaceKind, number> = {
 
 const norm = (s?: string) => (s ?? '').trim().replace(/^(حي|حى)\s+/u, '').replace(/\s+district$/i, '').replace(/^al[- ]/i, '').replace(/^ال/u, '').toLowerCase();
 const same = (a?: string, b?: string) => !!a && !!b && norm(a) === norm(b);
+/** Letter folding for matching what the user typed: ة/ه, ى/ي and the hamza forms of ا are one letter to a typist. */
+const fold = (s: string) => norm(s).replace(/ة/gu, 'ه').replace(/ى/gu, 'ي').replace(/[أإآ]/gu, 'ا');
 
 const DISTRICT_NAME = /^(حي|حى)\s/u;
 const MOSQUE_NAME = /^(مسجد|جامع|مصلى)\s|\b(mosque|masjid)\b|الحرم (المكي|النبوي)|المسجد (الحرام|النبوي)/iu;
 const MALL_NAME = /مول|\bmall\b|\bcentre\b|\bcenter\b|سنتر/iu;
 const STREET_NAME = /^(طريق|شارع|الطريق|كورنيش|ممر|الدائري)\s|\b(road|street|st\.?|rd\.?|avenue|ave\.?|highway|boulevard|ring)\b/iu;
 const REGION_NAME = /^(منطقة|المنطقة)\s|\b(region|province)\b/iu;
+/** A name TITLED like a street («شارع التحلية», "King Fahd Road") is the street to the person who typed it, whatever
+ *  Apple filed the pin under (Tahlia's rows are user-submitted shop pins whose thoroughfare is the road's official name). */
+const STREET_TITLED = /^(طريق|شارع|الطريق|كورنيش|الدائري)\s|\b(road|street|rd|st|avenue|ave|highway|boulevard)\.?$/iu;
+/** A user-written DESCRIPTION, not a place name («طريق الملك فهد اللي دايم زحمه», «كيو في نهاية شارع التحلية»). */
+const NOISE_NAME = /(^|\s)(اللي|الي|جنب|عند|قدام|ورا|وراء|بجوار|بجانب|مقابل|قريب|دايم)(\s|$)|في نهاي/u;
+export const isNoiseName = (name?: string) => NOISE_NAME.test((name ?? '').trim());
 
 const POI_KIND: Record<string, PlaceKind> = {
   Airport: 'airport', Hospital: 'hospital', Hotel: 'hotel', School: 'school', University: 'university',
@@ -59,6 +67,7 @@ export function classifyPlace(f: PlaceFacts): PlaceKind {
   const name = (f.name ?? '').trim();
   if (DISTRICT_NAME.test(name)) return 'district';
   if (MOSQUE_NAME.test(name)) return 'mosque';
+  if (STREET_TITLED.test(name)) return 'street';
   if (f.poi) {
     if (f.poi === 'Store') return MALL_NAME.test(name) ? 'mall' : 'place';
     return POI_KIND[f.poi] ?? 'place';
@@ -97,8 +106,13 @@ export function dedupePlaces<T extends { name: string; subtitle?: string; coordi
   return kept;
 }
 
-export function sortByKind<T extends { kind?: PlaceKind }>(rows: T[]): T[] {
-  return rows.map((r, i) => ({ r, i })).sort((a, b) => (KIND_RANK[a.r.kind ?? 'place'] - KIND_RANK[b.r.kind ?? 'place']) || a.i - b.i).map(({ r }) => r);
+/** Order: what the user TYPED first — a name that starts with the query, then one that contains it, then the rest
+ *  (owner 2026-11-01: «when user types it let the map take him»; «برج المملكة» must not sit under districts called
+ *  «البرج») — and inside each tier city → region → district → street → landmarks, stable. */
+export function sortByKind<T extends { kind?: PlaceKind; name?: string }>(rows: T[], query = ''): T[] {
+  const q = fold(query);
+  const tier = (r: T) => { if (!q) return 0; const n = fold(r.name ?? ''); return n.startsWith(q) ? 0 : n.includes(q) ? 1 : 2; };
+  return rows.map((r, i) => ({ r, i, t: tier(r) })).sort((a, b) => (a.t - b.t) || (KIND_RANK[a.r.kind ?? 'place'] - KIND_RANK[b.r.kind ?? 'place']) || a.i - b.i).map(({ r }) => r);
 }
 
 /** A landmark-like kind is marked with a pin and a soft circle; an area with an outline. */
