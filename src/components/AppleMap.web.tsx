@@ -303,7 +303,9 @@ export function flyToPlace(p: PlaceSuggestion) {
     const c = place ? place.coordinate : p.coordinate;
     live.history.push(m.region);
     const region = data?.boundingRegion;
-    if (region) m.setRegionAnimated(region, true);
+    // An area's outline must be SEEN: the view is a quarter wider than Apple's bounding region, so the outline sits
+    // inside the screen instead of on its edges (walked live 2026-11-01: «حي النرجس» flew right but showed no frame).
+    if (region) m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(region.center.latitude, region.center.longitude), new mk.CoordinateSpan(region.span.latitudeDelta * 1.3, region.span.longitudeDelta * 1.3)), true);
     else if (c) m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(c.latitude, c.longitude), new mk.CoordinateSpan(0.08, 0.08)), true);
     // MARK WHAT WAS SEARCHED (owner 2026-10-31: «create something around it so they know the landmark or district
     // they searched»). A landmark (Apple gives it a point-of-interest category) gets a brand pin with its name and a
