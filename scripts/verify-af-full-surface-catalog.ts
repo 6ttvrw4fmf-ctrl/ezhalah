@@ -25,6 +25,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { COHORT_QUESTIONS } from '../src/lib/afCohorts.ts';
+import { CHIP_DEFS } from '../src/lib/afChips.ts';
 import { npmTestRuns } from './lib/testRegistry.ts';
 
 const root = join(import.meta.dirname, '..');
@@ -48,6 +49,8 @@ console.log('\nverify-af-full-surface-catalog: the sweep can never be narrower t
 // ── 1. every certified question id has a catalog arm ─────────────────────────────────────────────
 const certifiedIds = [...new Set(Object.values(COHORT_QUESTIONS).flatMap((cfg) => Object.values(cfg ?? {}).flat()))].sort();
 const catalogArms = [...sweep.matchAll(/case '([a-z_]+)': return/g)].map((m) => m[1]);
+// a themed card's chips are the real cardKeys() — every CHIP_DEFS token the cards can offer is a cnt_<token> column
+const CHIP_TOKENS = Object.keys(CHIP_DEFS);
 check('every question id any cohort certifies has an optionsFor() arm in the sweep',
   certifiedIds.every((id) => catalogArms.includes(id)),
   `missing: ${certifiedIds.filter((id) => !catalogArms.includes(id)).join(', ') || 'none'} · certified: ${certifiedIds.join(', ')}`);
@@ -62,6 +65,8 @@ const catalogCols = [...new Set([
   ...[...sweep.matchAll(/col: `cnt_(bath|stw)\$\{n\}`/g)].flatMap((m) => (m[1] === 'bath' ? [1, 2, 3, 4].map((n) => `cnt_bath${n}`) : [15, 20, 25, 30].map((n) => `cnt_stw${n}`))),
   ...[...sweep.matchAll(/'cnt_(sub_[a-z]+|dir_[a-z]+)'/g)].map((m) => `cnt_${m[1]}`),
   'cnt_kitchen', 'cnt_parking', 'cnt_elevator', 'cnt_ac', 'cnt_private_entrance', 'cnt_maid_room', 'cnt_driver_room', 'cnt_car_entrance', 'cnt_sanitation', 'cnt_electricity', 'cnt_water_supply', 'cnt_furnished',
+  ...CHIP_TOKENS.map((k) => `cnt_${k}`),
+  ...[4, 8, 12, 20].map((n) => `cnt_apts${n}`), 'cnt_has_shops',
 ])];
 check('every cnt_* column the catalog reads is a real GuidedCounts / AgeOptionCounts column',
   catalogCols.every((c) => knownCols.has(c)),
@@ -87,7 +92,9 @@ const clauseCols = new Set([...clause.matchAll(/\bs\.([a-z_]+)\b/g)].map((m) => 
 const amenityCols = [...sweep.matchAll(/AMENITY_COL: Record<string, string> = \{([\s\S]*?)\};/g)][0]?.[1] ?? '';
 const amenityColNames = [...amenityCols.matchAll(/: '([a-z_]+)'/g)].map((m) => m[1]);
 const rich = [...(sweep.match(/RICH_TOKENS = \[([^\]]*)\]/)?.[1] ?? '').matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
-const allPredCols = [...new Set([...predCols, ...amenityColNames, ...rich])];
+// the card chips read their own column (token = column, `ac` → air_conditioner); separate_meters reads the two meters
+const chipCols = CHIP_TOKENS.flatMap((k) => (k === 'separate_meters' ? ['separate_electricity_meter', 'separate_water_meter'] : [k === 'ac' ? 'air_conditioner' : k]));
+const allPredCols = [...new Set([...predCols, ...amenityColNames, ...rich, ...chipCols, 'apartments_count', 'shops_count'])];
 check('every column a catalog predicate reads is a column af_eligibility_clause() filters (same column, both evaluators)',
   allPredCols.every((c) => clauseCols.has(c)),
   `not in the clause: ${allPredCols.filter((c) => !clauseCols.has(c)).join(', ') || 'none'}`);

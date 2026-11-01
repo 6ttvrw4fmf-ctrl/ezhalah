@@ -12,7 +12,8 @@
 -- WHAT CHANGES (every live body md5-guarded; every needle must occur exactly once or nothing changes)
 --   1. listing_rich_attrs.<key> NULL boxes; search_listings_ar.<key> boolean / smallint (served).
 --   2. text_facts_af_columns() = 60 keys; text_facts_af_num_columns() = 3; text_facts_all_quoted per-key bounds;
---      listing_text_facts_af / ops_text_facts_vs_index / text_facts_apply_slice over the full list; sync_listing_rich_attrs merged_list learns af_rule_b_num for the numeric keys.
+--      listing_text_facts_af / ops_text_facts_vs_index / text_facts_apply_slice over the full list;
+--      sync_listing_rich_attrs merged_list learns af_rule_b_num for the numeric keys.
 --   3. af_eligibility_clause() whitelist + one arm per token; top_cities_by_deal_ar (its copy); rebuild_af_filter_rpcs(); parity 0.
 --   4. apartment_guided_counts_ar template: s.<col> in the scoped CTE, cnt_<token> (+ cnt_apts_unknown, cnt_shops_unknown).
 --   5. location_search_candidates_ar template packs every new column into af_canon (the card's proof; a second

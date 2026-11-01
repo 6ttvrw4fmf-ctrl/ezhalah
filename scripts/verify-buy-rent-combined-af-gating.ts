@@ -59,7 +59,9 @@ check('EXECUTED — non-vacuous: a question certified for ALL THREE legs IS stil
   cohortAllows(Q({ dealCombined: true, types: ['Apartment'] }), 'amenities') === true
   && cohortAllows(Q({ dealCombined: true, types: ['Apartment'] }), 'bathrooms') === true,
   'kills the always-false mutant — intersection must keep the genuinely shared surface');
-const combinedFn = /function cohortAllowsCombined\([^)]*\)[^{]*\{\s*return\s*\(cfg\.Buy\s*\?\?\s*\[\]\)\.includes\(id\)\s*&&\s*\(cfg\.RentAnnual\s*\?\?\s*\[\]\)\.includes\(id\)\s*&&\s*\(cfg\.RentMonthly\s*\?\?\s*\[\]\)\.includes\(id\)/;
+// 2026-10-31: a GROUP type (one with COHORT_CARDS — Apartments & Co-living) first drops the legs it has no cohort
+// for (Floor has no short-stay market; Rent + Buy on Floor is Rent ∩ Buy); every other type keeps the strict 3-way rule.
+const combinedFn = /function cohortAllowsCombined\([^)]*\)[^{]*\{[\s\S]{0,600}?return\s*\(cfg\.Buy\s*\?\?\s*\[\]\)\.includes\(id\)\s*&&\s*\(cfg\.RentAnnual\s*\?\?\s*\[\]\)\.includes\(id\)\s*&&\s*\(cfg\.RentMonthly\s*\?\?\s*\[\]\)\.includes\(id\)/;
 check('cohortAllowsCombined requires membership in Buy AND RentAnnual AND RentMonthly (all three legs)',
   combinedFn.test(af));
 
@@ -71,7 +73,7 @@ check('cohortAllowsCombined requires membership in Buy AND RentAnnual AND RentMo
 // fallback certify against a single leg while searching both, the exact fall-through this check's
 // own comment above warns about. The regex still REQUIRES q.dealCombined in the condition and still
 // pins the ordering, so neither can regress.
-const dealCombinedBranch = /if\s*\(q\.dealCombined(?:\s*\|\|\s*q\.bothDeals)?\)\s*return\s*cohortAllowsCombined\(cfg,\s*id\)/;
+const dealCombinedBranch = /if\s*\(q\.dealCombined(?:\s*\|\|\s*q\.bothDeals)?\)\s*return\s*cohortAllowsCombined\(cfg,\s*id(?:,\s*type)?\)/;
 check('cohortAllows routes q.dealCombined to cohortAllowsCombined',
   dealCombinedBranch.test(af));
 check('…and q.bothDeals routes there too — the search sends p_deal null for both',
@@ -116,8 +118,19 @@ check('Apartment 3-way intersection is non-empty (amenities + bathrooms genuinel
 const room = COHORT_QUESTIONS.Room;
 check('Room has no Buy entry in COHORT_QUESTIONS (so combined mode mechanically offers it zero questions)',
   room !== undefined && room.Buy === undefined && (room.RentAnnual ?? []).length > 0);
-check('EXECUTED — combined mode on Room offers nothing, even for a question in its RentAnnual list',
-  cohortAllows(Q({ dealCombined: true, types: ['Room'] }), 'amenities') === false);
+// 2026-10-31: Room is a GROUP type, so its missing Buy leg is an empty leg, not a veto — combined mode offers its
+// RentAnnual ∩ RentMonthly surface (amenities) and still refuses an Annual-only question (rnpl).
+check('EXECUTED — combined mode on Room (a group type) offers its Annual ∩ Monthly surface, never an Annual-only question',
+  cohortAllows(Q({ dealCombined: true, types: ['Room'] }), 'amenities') === true
+  && cohortAllows(Q({ dealCombined: true, types: ['Room'] }), 'rnpl') === false);
+check('EXECUTED — Floor (a group type, no short-stay leg) with Rent + Buy asks bathrooms and age (Rent ∩ Buy), not nothing',
+  cohortAllows(Q({ dealCombined: true, types: ['Floor'] }), 'bathrooms') === true
+  && cohortAllows(Q({ dealCombined: true, types: ['Floor'] }), 'property_age') === true
+  && cohortAllows(Q({ dealCombined: true, types: ['Floor'] }), 'rnpl') === false);
+// A NON-group type keeps the strict rule: Duplex is certified for Buy only, so combined mode offers it nothing.
+check('EXECUTED — combined mode on Duplex (Buy-only, not a group type) offers nothing, even for a question in its Buy list',
+  COHORT_QUESTIONS.Duplex?.Buy?.includes('bathrooms') === true
+  && cohortAllows(Q({ dealCombined: true, types: ['Duplex'] }), 'bathrooms') === false);
 
 // ── property_age (AGE_QUESTION) UNIFIED 2026-09-01: it used to bypass cohortAllows entirely via its
 // own gate (src/lib/ageFilterTypes.ts, deleted). Now AGE_QUESTION's eligibility IS

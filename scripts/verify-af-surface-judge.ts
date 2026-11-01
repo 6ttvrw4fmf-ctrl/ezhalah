@@ -68,6 +68,11 @@ mustReject('a row check that covered fewer rows than the set it judged', judgeOp
   check('AND fails if any conjunct fails', !rowSatisfies({ a: true, b: false }, { kind: 'and', preds: [{ kind: 'true', col: 'a' }, { kind: 'true', col: 'b' }] })
     && rowSatisfies({ a: true, b: true }, { kind: 'and', preds: [{ kind: 'true', col: 'a' }, { kind: 'true', col: 'b' }] }));
   check('IN matches any listed spelling (a «…ي» direction variant)', rowSatisfies({ d: 'شمال شرقي' }, { kind: 'in', col: 'd', vs: ['شمال شرق', 'شمال شرقي'] }));
+  check('OR holds when any disjunct holds, and not when none does (a NULL beside a TRUE still passes)',
+    rowSatisfies({ a: true, b: null }, { kind: 'or', preds: [{ kind: 'true', col: 'a' }, { kind: 'true', col: 'b' }] })
+    && !rowSatisfies({ a: false, b: null }, { kind: 'or', preds: [{ kind: 'true', col: 'a' }, { kind: 'true', col: 'b' }] })
+    && !rowSatisfies({ a: false, b: false }, { kind: 'or', preds: [{ kind: 'true', col: 'a' }, { kind: 'true', col: 'b' }] }));
+  check('strictCols of an OR is empty (no single NULL excludes the row)', strictCols({ kind: 'or', preds: [{ kind: 'true', col: 'a' }, { kind: 'true', col: 'b' }] }).length === 0);
   check('strictCols lists every column an AND reads, once', JSON.stringify(strictCols({ kind: 'and', preds: [{ kind: 'true', col: 'a' }, { kind: 'true', col: 'a' }, { kind: 'gte', col: 'b', n: 1 }] })) === '["a","b"]');
 }
 

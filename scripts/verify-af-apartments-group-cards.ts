@@ -3,7 +3,8 @@
 // src/lib/afCohorts.ts against the owner's own worked examples — never a regex over the file — and proves each guard
 // with a mutant copy of the module that must FAIL it.
 //   node --experimental-strip-types scripts/verify-af-apartments-group-cards.ts   (in `npm test`)
-import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -102,27 +103,42 @@ check('every chip in every list is a lower_snake token (a p_amenities slug)', Ob
   Object.values(deals).every((cards) => Object.values(cards!).every((keys) => keys!.every((k) => /^[a-z_0-9]+$/.test(k))))));
 
 console.log('\n§4 mutation proofs\n');
+// A mutant is the REAL afCohorts.ts with one line broken, written to a TEMP dir (never into src/, which is shared
+// by concurrent sessions — AGENTS.md) with its two relative imports pointed back at the real modules.
 const SRC_PATH = join(ROOT, 'src/lib/afCohorts.ts');
 const SRC = readFileSync(SRC_PATH, 'utf8');
-async function mutant(from: string, to: string): Promise<typeof cardPlan> {
-  if (!SRC.includes(from)) throw new Error(`mutation anchor missing: ${from.slice(0, 70)}`);
-  const f = join(ROOT, `src/lib/.afCohorts.mutant-${Math.random().toString(36).slice(2)}.ts`);
-  writeFileSync(f, SRC.replace(from, to));
-  try { return ((await import(`${pathToFileURL(f).href}?m=${Math.random()}`)) as { cardPlan: typeof cardPlan }).cardPlan; }
-  finally { unlinkSync(f); }
+const abs = (rel: string) => JSON.stringify(pathToFileURL(join(ROOT, 'src/lib', rel)).href);
+async function mutant(...edits: Array<[from: string, to: string]>): Promise<typeof cardPlan> {
+  let src = SRC;
+  for (const [from, to] of edits) {
+    if (!src.includes(from)) throw new Error(`mutation anchor missing: ${from.slice(0, 70)}`);
+    src = src.replace(from, to);
+  }
+  src = src.replace("from '../data/propertyTypes.ts'", `from ${abs('../data/propertyTypes.ts')}`)
+    .replace("from './searchDefaults.ts'", `from ${abs('./searchDefaults.ts')}`);
+  const f = join(mkdtempSync(join(tmpdir(), 'af-cards-')), 'afCohorts.ts');
+  writeFileSync(f, src);
+  return ((await import(`${pathToFileURL(f).href}?m=${Math.random()}`)) as { cardPlan: typeof cardPlan }).cardPlan;
 }
-const union = await mutant("    .map((id) => ({ id, keys: (primary[id] ?? []).filter((k) => unions.every((u) => u!.has(k))) }))",
-  "    .map((id) => ({ id, keys: [...(primary[id] ?? [])] }))");
+const union = await mutant(["    .map((id) => ({ id, keys: (primary[id] ?? []).filter((k) => unions.every((u) => u!.has(k))) }))",
+  "    .map((id) => ({ id, keys: [...(primary[id] ?? [])] }))"]);
 mustCatch('UNION instead of intersection (bills included offered on Apartment + Floor)', keysOf(union(Q({ deal: 'Rent', types: ['Apartment', 'Floor'] }))).has('bills_included'));
-const noPool = await mutant("  if (legs.length === 1) return kept;", "  return kept;");
+const noPool = await mutant(["  if (legs.length === 1) return kept;", "  return kept;"]);
 mustCatch('a mixed scope that never pools its small cards (the owner\'s all-three-deals example breaks)', flat(noPool(three)) !== flat(cardPlan(three)));
-const anyLeg = await mutant("  if (unions.some((u) => !u)) return [];", "  ");
+// The real mutant: a leg with NO lists (Villa) is skipped by the intersection instead of certifying nothing — both the
+// guard and the per-chip test must read null as «no constraint» for Villa + Apartment to inherit the apartment chips.
+const anyLeg = await mutant(["  if (unions.some((u) => !u)) return [];", "  "],
+  ["unions.every((u) => u!.has(k))", "unions.every((u) => !u || u.has(k))"]);
 mustCatch('a leg with no lists certifying nothing is read as «no constraint» (Villa + Apartment would get apartment chips)',
   anyLeg(Q({ deal: 'Rent', types: ['Apartment', 'Villa'] })).length > 0);
-const monthlyVeto = await mutant("    .filter((deal) => !COHORT_CARDS[type] || COHORT_QUESTIONS[type]?.[deal])", "    .filter(() => true)");
+const monthlyVeto = await mutant(["    .filter((deal) => !COHORT_CARDS[type] || COHORT_QUESTIONS[type]?.[deal])", "    .filter(() => true)"]);
 mustCatch('Floor\'s empty short-stay leg vetoing its Rent ∩ Buy list', monthlyVeto(floorBoth).length === 0);
-const wrongShort = await mutant("  const types = shortStays ? ['Apartment'] : scopeCleanTypes(q);", "  const types = scopeCleanTypes(q);");
-mustCatch('short stays on the group box intersecting Floor / Building (no pool at all)', wrongShort(Q({ deal: 'Rent', rentPeriod: 'monthly', typeGroups: ['Apartments & Co-living'] })).length === 0);
+const wrongShort = await mutant(["  const types = shortStays ? ['Apartment'] : scopeCleanTypes(q);", "  const types = scopeCleanTypes(q);"]);
+// On «Apartments & Co-living» the monthly-veto rule already skips Floor / Building, so the discriminating box is one
+// whose members have NO cohort at all (Vacation & Rural: Chalet, Camp…) — the real plan is the one pool, the mutant nothing.
+mustCatch('short stays on a group box intersecting its members instead of reading the one pool (Vacation & Rural → nothing)',
+  wrongShort(Q({ deal: 'Rent', rentPeriod: 'monthly', typeGroups: ['Vacation & Rural'] })).length === 0
+  && cardPlan(Q({ deal: 'Rent', rentPeriod: 'monthly', typeGroups: ['Vacation & Rural'] })).length === 3);
 
 console.log(failed === 0 ? '\n✅ the Apartments & Co-living cards are the owner\'s lists, combined by intersection.\n' : `\n❌ ${failed} check(s) failed.\n`);
 process.exit(failed === 0 ? 0 : 1);

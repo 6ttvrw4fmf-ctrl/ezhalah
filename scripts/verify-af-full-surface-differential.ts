@@ -62,7 +62,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, intersectChips } from '../src/lib/afCohorts.ts';
+import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, intersectChips, cardKeys, CARD_IDS } from '../src/lib/afCohorts.ts';
 import { typeArForTypes, CLEAN_MACRO } from '../src/data/propertyTypes.ts';
 import { buildOracleQS, CANONICAL_DIRECTIONS } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
@@ -175,6 +175,12 @@ const AMENITY_COL: Record<string, string> = {
 // but NO chip on the card: predicate-only cases — the click set must still be exact.
 const RICH_TOKENS = ['gym', 'pool', 'garden', 'balcony', 'laundry_room', 'optical_fibers', 'separate_electricity_meter', 'separate_water_meter', 'majlis'];
 const amenity = (key: string): Opt => ({ key: `amenities:${key}`, col: `cnt_${key}`, countRpc: 'guided', params: { p_amenities: [key] }, pred: { kind: 'true', col: AMENITY_COL[key] } });
+// A themed-card chip (owner 2026-10-31, migration 20261101100930): a column token (token = column, `ac` aside) or the
+// one derived chip a card may carry — separate_meters = either meter true. Counted as cnt_<token>, sent as p_amenities.
+const chipPred = (key: string): Pred => key === 'separate_meters'
+  ? { kind: 'or', preds: [{ kind: 'true', col: 'separate_electricity_meter' }, { kind: 'true', col: 'separate_water_meter' }] }
+  : { kind: 'true', col: AMENITY_COL[key] ?? key };
+const cardChip = (qid: string, key: string): Opt => ({ key: `${qid}:${key}`, col: `cnt_${key}`, countRpc: 'guided', params: { p_amenities: [key] }, pred: chipPred(key) });
 const DIR_COL: Record<string, string> = { 'شمال': 'cnt_dir_n', 'جنوب': 'cnt_dir_s', 'شرق': 'cnt_dir_e', 'غرب': 'cnt_dir_w', 'شمال شرق': 'cnt_dir_ne', 'شمال غرب': 'cnt_dir_nw', 'جنوب شرق': 'cnt_dir_se', 'جنوب غرب': 'cnt_dir_sw' };
 
 /** Which amenity chips the card renders for this scope — AMENITIES_QUESTION.resolveOptions, restated. */
@@ -191,10 +197,28 @@ function amenityChipKeys(types: string[], q: any): string[] {
   return defs;
 }
 
+// every card id afCohorts declares has an arm below (a new CARD_IDS entry without one is caught at start-up)
+const CARD_ARMS = ['comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun'];
+if (CARD_IDS.some((id) => !CARD_ARMS.includes(id))) throw new Error(`optionsFor() has no arm for card(s): ${CARD_IDS.filter((id) => !CARD_ARMS.includes(id)).join(', ')}`);
 function optionsFor(qid: string, types: string[], q: any): Opt[] | null {
   switch (qid) {
     case 'rnpl': return [{ key: 'rnpl', col: 'cnt_rnpl', countRpc: 'guided', params: { p_amenities: ['rnpl'] }, pred: { kind: 'true', col: 'rent_now_pay_later' } }];
     case 'amenities': return amenityChipKeys(types, q).map(amenity);
+    // the ten themed cards: exactly the chips the real plan offers on this scope (cardKeys reads COHORT_CARDS)
+    case 'comfort': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'space': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'safety': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'perks': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'build': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'extras': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'who': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'features': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'services': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    case 'fun': return cardKeys(q, qid).map((k) => cardChip(qid, k));
+    // the Residential Building ladders (owner 2026-10-31): apts4/8/12/20 = apartments_count >= n; has_shops = shops_count >= 1
+    case 'apartments': return ([['apts4', 4], ['apts8', 8], ['apts12', 12], ['apts20', 20]] as const)
+      .map(([tok, n]) => ({ key: `apartments:${tok}`, col: `cnt_${tok}`, countRpc: 'guided', params: { p_amenities: [tok] }, pred: { kind: 'gte', col: 'apartments_count', n } }));
+    case 'shops': return [{ key: 'shops:has_shops', col: 'cnt_has_shops', countRpc: 'guided', params: { p_amenities: ['has_shops'] }, pred: { kind: 'gte', col: 'shops_count', n: 1 } }];
     case 'bathrooms': return [1, 2, 3, 4].map((n) => ({ key: `bathrooms:${n}+`, col: `cnt_bath${n}`, countRpc: 'guided', params: { p_bath_min: n }, pred: { kind: 'gte', col: 'bathrooms', n } }));
     case 'furnished': return [
       { key: 'furnished:yes', col: 'cnt_furnished', countRpc: 'guided', params: { p_furnished: true }, pred: { kind: 'true', col: 'furnished' } },
@@ -319,7 +343,7 @@ async function oracleCount(body: Record<string, unknown>, extraQs = ''): Promise
   );
   return contentRangeTotal(p);
 }
-const strictColsOf = (p: Pred): string[] => (p.kind === 'and' ? [...new Set(p.preds.flatMap(strictColsOf))] : [p.col]);
+const strictColsOf = (p: Pred): string[] => (p.kind === 'and' ? [...new Set(p.preds.flatMap(strictColsOf))] : p.kind === 'or' ? [] : [p.col]);
 
 // ── a tiny semaphore ─────────────────────────────────────────────────────────────────────────────
 let inFlight = 0; const waiters: Array<() => void> = [];

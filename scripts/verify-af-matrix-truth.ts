@@ -52,9 +52,10 @@
 // asserted, never just logged.
 import { join } from 'node:path';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { windowBetween } from './lib/sourceWindow.ts';
 import { stripComments } from './lib/stripComments.ts';
 import {
-  loadLifted, buildMatrix, recorder, allScopes, MODES, tableAllows, inMode, optionMeaning, fieldMeaning, sortedJson, paramsAcross,
+  loadLifted, buildMatrix, recorder, allScopes, MODES, tableAllows, tableOffers, BAG_IDS, QUESTION_CONSTS, inMode, optionMeaning, fieldMeaning, sortedJson, paramsAcross,
   type Cell, type Mode, type Scope,
 } from './lib/afMatrix.ts';
 import { sanitizeForFilterRestore, AF_PREDICATE_FIELDS } from '../src/lib/searchDefaults.ts';
@@ -86,13 +87,27 @@ console.log(`\nAF matrix: ${allScopes().length} scopes × ${MODES.length} modes 
 // (جديد · حتى سنتين · حتى ٥ · حتى ٩) instead of 5 buckets, and its upper rungs can fail the narrowing gate.
 assert(nFields >= 149 && nOptions >= 855, `the matrix did not shrink below the measured floor (149 fields / 855 options; now ${nFields} / ${nOptions})`);
 assert(L.questions.length >= 9, `the real pool was lifted (${L.questions.length} questions)`);
+// COMPLETENESS OF THE LIFT: every `*_QUESTION` const the file declares is in QUESTION_CONSTS (a new const nobody
+// lifted would leave ADVANCED_QUESTIONS referencing an undefined name — a crash, not a silent gap — but the
+// pool's membership is also asserted, so a const defined and never listed in the pool is caught too).
+{
+  const advSrc = readFileSync(join(ROOT, 'src/data/advancedFilters.ts'), 'utf8');
+  // the scope prefix (GROUP_QUESTION / TYPE_QUESTION, owner 2026-08-23) is declared AFTER the pool and is not part of it
+  // the window starts at the first question const (AGE_QUESTION, which the regex re-finds) and ends at the pool
+  const poolSrc = windowBetween(advSrc, 'const AGE_QUESTION: AdvancedQuestion', 'export const ADVANCED_QUESTIONS', 'advancedFilters.ts');
+  const declared = [...poolSrc.matchAll(/^const ([A-Z_]+_QUESTION): AdvancedQuestion = \{/gm)].map((m) => m[1]);
+  assert(same([...new Set(declared)].sort(), [...QUESTION_CONSTS].sort()),
+    `QUESTION_CONSTS lists every *_QUESTION const in advancedFilters.ts (file: [${declared}], lifted: [${QUESTION_CONSTS}])`);
+  const pool = windowBetween(advSrc, 'export const ADVANCED_QUESTIONS', '\n];', 'advancedFilters.ts');
+  assert(declared.every((c) => pool.includes(c)), `every declared question const is in ADVANCED_QUESTIONS (missing: ${declared.filter((c) => !pool.includes(c))})`);
+}
 
 // ── §1 gate == table; no cohort ⇒ nothing ────────────────────────────────────────────────────────
 section('§1 the gate agrees with the certification TABLE on every (type, mode, question)');
 const IDS = L.questions.map((q) => q.id);
 for (const cell of cells) {
   const offered = new Set(cell.fields.map((f) => f.question.id));
-  const expected = new Set(IDS.filter((id) => cell.scope.types.every((t) => tableAllows(t, cell.mode, id))));
+  const expected = tableOffers(cell.scope.types, cell.mode, cell.query, IDS);
   // direction/unit_subtype refuse to re-ask once committed; on a bare scope that guard is inert.
   assert(same([...offered].sort(), [...expected].sort()),
     `${cell.scope.kind} ${cell.scope.label} / ${cell.mode.mode}: pool offers [${[...offered]}] but the table certifies [${[...expected]}]`);
@@ -256,15 +271,15 @@ for (const cell of certified.filter((c) => c.scope.kind === 'type')) {
         // the Filter screen's own edits, written onto the raw store: mode toggles and the type row
         const moved = inMode({ ...stored, category: t.scope.category, typeGroups: groupsOf(t.scope.types), types: t.scope.types } as SearchQuery, t.mode);
         const back = reconcileCommittedAf(moved, L.questions);
-        const listedFor = (id: string) => t.scope.types.every((ty) => tableAllows(ty, t.mode, id));
-        const listed = listedFor(f.question.id);
-        // amenities are certified per TOKEN: kept iff a card in the new cell that writes the amenities bag
-        // (the card, or its short-stays parts comfort / space / fun — owner 2026-10-31 / 11-01) can offer the token
-        const BAG = ['amenities', 'comfort', 'space', 'fun'];
-        const keep = BAG.includes(f.question.id)
-          ? BAG.some((id) => listedFor(id) && offeredKeys(t.scope, t.mode, id).has(o.key))
+        const tq = inMode({ ...t.scope.query, typeGroups: groupsOf(t.scope.types), types: t.scope.types } as SearchQuery, t.mode);
+        const offers = tableOffers(t.scope.types, t.mode, tq, IDS, 'certified');
+        const listed = offers.has(f.question.id);
+        // amenities are certified per TOKEN: kept iff a question in the new cell that writes the amenities bag
+        // (the card, the themed cards, the two Residential Building ladders — owner 2026-10-31 / 11-01) can offer the token
+        const keep = BAG_IDS.has(f.question.id)
+          ? [...BAG_IDS].some((id) => offers.has(id) && offeredKeys(t.scope, t.mode, id).has(o.key))
           : listed;
-        const want = keep ? L.rpcAdvancedFilterParams(f.question.apply(inMode({ ...t.scope.query, typeGroups: groupsOf(t.scope.types), types: t.scope.types } as SearchQuery, t.mode), [o.key])) : {};
+        const want = keep ? L.rpcAdvancedFilterParams(f.question.apply(tq, [o.key])) : {};
         assert(same(L.rpcAdvancedFilterParams(back), want) && (back.afFacets?.length ?? 0) === (keep ? 1 : 0),
           `${cell.scope.label}/${cell.mode.mode} ${f.question.id}=${o.key} → ${t.scope.label}/${t.mode.mode}: expected ${keep ? 'KEPT' : 'DROPPED'} (table ${listed ? 'lists' : 'does not list'} it), got ${JSON.stringify(L.rpcAdvancedFilterParams(back))} with ${back.afFacets?.length ?? 0} chip(s)`);
       }

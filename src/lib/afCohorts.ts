@@ -563,6 +563,18 @@ const RESIDENTIAL_AMENITY_BASE = [
 const VILLA_ONLY_AMENITIES = ['car_entrance', 'sanitation'] as const;
 
 export function certifiedAmenityKeys(q: SearchQuery): string[] {
+  // A scope whose cards exist (the Apartments & Co-living lists, owner 2026-10-31) certifies EXACTLY the chips its
+  // cards offer — the typed chat sentence, the cards and the re-entry carry are held to one vocabulary — plus the
+  // Residential Building ladders where those questions are certified (apts4/8/12/20, has_shops are p_amenities
+  // tokens too). This comes BEFORE the generic-amenities gate: on the group box with Buy, Room has no Buy list, so
+  // `amenities` is uncertified while the cards still offer comfort + safety; the carry must keep those answers.
+  const plan = cardPlan(q);
+  if (plan.length) {
+    const keys = new Set(plan.flatMap((c) => c.keys));
+    if (cohortAllows(q, 'apartments')) for (const k of ['apts4', 'apts8', 'apts12', 'apts20']) keys.add(k);
+    if (cohortAllows(q, 'shops')) keys.add('has_shops');
+    return [...keys];
+  }
   // Not certified for this cohort at all ⇒ no amenity token is applicable. Never fall through to a
   // base list here: that would let an uncertified cohort acquire constraints the AF path refuses.
   if (!cohortAllows(q, 'amenities')) return [];
@@ -570,10 +582,6 @@ export function certifiedAmenityKeys(q: SearchQuery): string[] {
   // whatever type is in scope — a «Vacation & Rural» group would otherwise intersect Rest House's
   // utility trio with Chalet's nothing and offer no chip at all.
   if (isShortStaysScope(q)) return [...SHORT_STAYS_COMFORT_KEYS, ...SHORT_STAYS_SPACE_KEYS, ...SHORT_STAYS_FUN_KEYS];
-  // A scope whose cards exist (the Apartments & Co-living lists, owner 2026-10-31) certifies EXACTLY the chips its
-  // cards offer — the typed chat sentence and the cards are held to one vocabulary.
-  const plan = cardPlan(q);
-  if (plan.length) return [...new Set(plan.flatMap((c) => c.keys))];
   // No empty-scope guard here on purpose: cohortAllows() already returns false when scopeCleanTypes
   // is empty, so a second check is dead code — it cannot change behaviour and cannot be tested. (A
   // mutation removing it was provably EQUIVALENT, which is what exposed it as redundant.)
