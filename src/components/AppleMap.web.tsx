@@ -331,7 +331,9 @@ export function flyToPlace(p: PlaceSuggestion) {
     }
     const circle = () => {
       if (live.markSeq !== seq) return;
-      const radius = region ? Math.max(120, Math.min(600, region.span.latitudeDelta * 111_000 * 0.35)) : 250;
+      // A fixed 120 m: the circle says «here», it is not a boundary (walked live 2026-11-01: Apple's region for a school
+      // made a 600 m ring that read as a fake area).
+      const radius = 120;
       live.mark.overlay = new mk.CircleOverlay(new mk.Coordinate(c.latitude, c.longitude), radius, { style: style(0.12, 1.5), enabled: false });
       m.addOverlay(live.mark.overlay);
     };
