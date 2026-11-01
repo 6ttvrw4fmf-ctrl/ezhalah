@@ -3,7 +3,8 @@
 import { StyleSheet, View } from 'react-native';
 import { colors } from '@/theme/tokens';
 
-export type PlaceSuggestion = { displayLines: string[]; coordinate?: { latitude: number; longitude: number } };
+import type { PlaceKind } from '@/lib/placeKind';
+export type PlaceSuggestion = { displayLines: string[]; coordinate?: { latitude: number; longitude: number }; kind?: PlaceKind; subtitle?: string; name?: string };
 export async function suggestPlaces(_q: string, _language: string): Promise<PlaceSuggestion[]> { return []; }
 export function flyToPlace(_p: PlaceSuggestion) {}
 export function clearPlaceMark() {}
