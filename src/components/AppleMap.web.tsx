@@ -31,7 +31,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { classifyPlace, placeSubtitle, dedupePlaces, sortByKind, isAreaKind, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
+import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 
 const MAPKIT_SRC = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js';
@@ -85,7 +85,11 @@ type Coord = { latitude: number; longitude: number };
 type Shape = { style: { fillOpacity: number; strokeOpacity: number; lineWidth: number }; data: Region; points: unknown[] };
 /** An Apple autocomplete row, plus what suggestPlaces() learned about it: its kind (city / district / mosque …),
  *  a clean subtitle and the name Apple's Place carries. `kind` is absent when the row could not be resolved in time. */
-export type PlaceSuggestion = { displayLines: string[]; coordinate?: Coord; kind?: PlaceKind; subtitle?: string; name?: string };
+export type PlaceSuggestion = { displayLines: string[]; coordinate?: Coord; kind?: PlaceKind; subtitle?: string; name?: string; locality?: string; apple?: unknown };
+/** What Search.search() accepts: Apple's OWN autocomplete result (an instance it type-checks), never a copy of it. A row
+ *  suggestPlaces() built by spreading keeps the original under `apple`; without it MapKit throws «`query` passed to
+ *  `Search.search()` is neither a string nor SearchAutocompleteResult» and the map never moves (seen live 2026-11-01). */
+const appleQuery = (p: PlaceSuggestion): PlaceSuggestion => (p.apple ?? p) as PlaceSuggestion;
 type MKRegion = { center: Coord; span: { latitudeDelta: number; longitudeDelta: number } };
 type MKPlace = {
   coordinate: Coord; name?: string; pointOfInterestCategory?: string;
@@ -196,7 +200,7 @@ export function clearRoute() {
 
 const resolvePlace = (p: PlaceSuggestion): Promise<Coord | null> => new Promise((resolve) => {
   if (!live.search) return resolve(p.coordinate ?? null);
-  live.search.search(p, (err, data) => resolve((!err && data?.places?.[0]?.coordinate) || p.coordinate || null));
+  live.search.search(appleQuery(p), (err, data) => resolve((!err && data?.places?.[0]?.coordinate) || p.coordinate || null));
 });
 
 /** «مسار» — Apple's driving route from one place to another, drawn in the brand colour with a soft band around it
@@ -280,24 +284,28 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
         thoroughfare: p.thoroughfare, poi: p.pointOfInterestCategory, span: p.region?.span?.latitudeDelta,
       };
       const kind = classifyPlace(facts);
-      resolve({ ...r, name: facts.name, kind, subtitle: placeSubtitle(facts, kind, country), coordinate: p.coordinate ?? r.coordinate });
+      resolve({ ...r, apple: r.apple ?? r, name: facts.name, kind, subtitle: placeSubtitle(facts, kind, country), locality: p.locality, coordinate: p.coordinate ?? r.coordinate });
     });
   });
   const resolved = await Promise.all(rows.slice(0, 8).map(resolve1));
-  const named = resolved.map((r) => ({ ...r, name: r.name ?? r.displayLines[0] }));
-  return sortByKind(dedupePlaces(named)).slice(0, 6);
+  const named = resolved.map((r) => ({ ...r, apple: r.apple ?? r, name: r.name ?? r.displayLines[0] }));
+  // A user-written description («طريق الملك فهد اللي دايم زحمه») is not a place; what was typed sorts first.
+  const places = named.filter((r) => !isNoiseName(r.name));
+  return sortByKind(dropAreaShadows(dedupePlaces(places.length ? places : named)), query).slice(0, 6);
 }
 
 /** Glide the map to a suggestion: Apple's bounding region for it when it has one, else a town-sized view around it. */
 export function flyToPlace(p: PlaceSuggestion) {
   const mk = mapkitOf(); const m = live.map;
   if (!mk || !m || !live.search) return;
-  live.search.search(p, (err, data) => {
+  live.search.search(appleQuery(p), (err, data) => {
     const place = !err && data?.places?.[0];
     const c = place ? place.coordinate : p.coordinate;
     live.history.push(m.region);
     const region = data?.boundingRegion;
-    if (region) m.setRegionAnimated(region, true);
+    // An area's outline must be SEEN: the view is a quarter wider than Apple's bounding region, so the outline sits
+    // inside the screen instead of on its edges (walked live 2026-11-01: «حي النرجس» flew right but showed no frame).
+    if (region) m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(region.center.latitude, region.center.longitude), new mk.CoordinateSpan(region.span.latitudeDelta * 1.3, region.span.longitudeDelta * 1.3)), true);
     else if (c) m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(c.latitude, c.longitude), new mk.CoordinateSpan(0.08, 0.08)), true);
     // MARK WHAT WAS SEARCHED (owner 2026-10-31: «create something around it so they know the landmark or district
     // they searched»). A landmark (Apple gives it a point-of-interest category) gets a brand pin with its name and a
