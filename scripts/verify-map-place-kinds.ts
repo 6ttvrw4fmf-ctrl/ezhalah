@@ -8,7 +8,7 @@
 //   node --experimental-strip-types scripts/verify-map-place-kinds.ts   (discovered by `npm test`)
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { classifyPlace, placeSubtitle, dedupePlaces, sortByKind, isAreaKind, KIND_LABEL, type PlaceFacts, type PlaceKind } from '../src/lib/placeKind.ts';
+import { isNoiseName, classifyPlace, placeSubtitle, dedupePlaces, sortByKind, isAreaKind, KIND_LABEL, type PlaceFacts, type PlaceKind } from '../src/lib/placeKind.ts';
 
 const root = join(import.meta.dirname, '..');
 let failed = 0;
@@ -84,6 +84,27 @@ mustCatch('a place WITH a locality being called a region on its span alone', cla
 mustCatch('a dedupe that drops two same-named cities far apart', dedupePlaces([{ name: 'x', coordinate: { latitude: 24.7, longitude: 46.6 } }, { name: 'x', coordinate: { latitude: 21.5, longitude: 39.2 } }]).length === 2);
 mustCatch('a sort that lets a landmark above a city', sortByKind([{ kind: 'mall' as PlaceKind }, { kind: 'city' as PlaceKind }])[0].kind === 'city');
 
+// What the user TYPED comes first (live 2026-11-01: «برج المملكة» listed under two districts called «حي البرج»).
+const typed = sortByKind([
+  { kind: 'district' as PlaceKind, name: 'حي البرج' }, { kind: 'district' as PlaceKind, name: 'حي البرج' },
+  { kind: 'street' as PlaceKind, name: 'برج' }, { kind: 'hotel' as PlaceKind, name: 'برج المملكه طريق الملك فهد الرياض' }, { kind: 'hotel' as PlaceKind, name: 'برج المملكة العليا' },
+], 'برج المملكة');
+check('order: a name starting with the typed text leads, then one containing it, then the rest', typed.map((r) => r.name).join('|') === 'برج المملكه طريق الملك فهد الرياض|برج المملكة العليا|حي البرج|حي البرج|برج', typed.map((r) => r.name).join('|'));
+check('order: ة and ه, ى and ي are one letter to the typist', sortByKind([{ name: 'الرياض' }, { name: 'الروضة' }], 'الروضه')[0].name === 'الروضة' && sortByKind([{ name: 'الرياض' }, { name: 'حى الروضه' }], 'الروضة')[0].name === 'حى الروضه' && sortByKind([{ name: 'الرياض' }, { name: 'مصلي العيد' }], 'مصلى')[0].name === 'مصلي العيد');
+check('order: the city still leads a district with the same typed name', sortByKind([{ kind: 'district' as PlaceKind, name: 'حي الرياض' }, { kind: 'city' as PlaceKind, name: 'الرياض' }], 'الرياض')[0].kind === 'city');
+mustCatch('a sort that leaves the typed landmark under an unrelated district', sortByKind([{ kind: 'district' as PlaceKind, name: 'حي البرج' }, { kind: 'hotel' as PlaceKind, name: 'برج المملكة العليا' }], 'برج المملكة')[0].kind === 'hotel');
+// A street-TITLED name is the street, whatever Apple filed the pin under (Tahlia's rows are Store / Landmark pins).
+check('street: «شارع التحلية» filed as a Store is still the street', classifyPlace({ name: 'شارع التحلية', locality: 'الرياض', subLocality: 'حي العليا', thoroughfare: 'طريق الامير محمد بن عبدالعزيز', poi: 'Store', span: 0.009 }) === 'street');
+check('street: "King Fahd Road" filed as a Landmark is still the street', classifyPlace({ name: 'King Fahd Road', locality: 'Riyadh', poi: 'Landmark' }) === 'street');
+check('street: a gym NAMED AFTER the street is not the street', classifyPlace({ name: 'جيمنيشن شارع التحلية السيدات', locality: 'جدة', poi: 'FitnessCenter' }) === 'place');
+mustCatch('a Store pin titled «شارع …» being called a place', classifyPlace({ name: 'شارع التحلية', locality: 'الرياض', poi: 'Store' }) !== 'place');
+// A user-written description is dropped; real names, even long ones, stay.
+check('noise: «طريق الملك فهد اللي دايم زحمه» is a description', isNoiseName('طريق الملك فهد اللي دايم زحمه'));
+check('noise: «كيو في نهايه شارع التحليه» is a description', isNoiseName('كيو في نهايه شارع التحليه'));
+check('noise: «مستشفى الملك فيصل التخصصي ومركز الأبحاث» is a name', !isNoiseName('مستشفى الملك فيصل التخصصي ومركز الأبحاث'));
+check('noise: «جامعة الملك فهد للبترول والمعادن» is a name', !isNoiseName('جامعة الملك فهد للبترول والمعادن'));
+mustCatch('a description row being kept', !isNoiseName('شارع التحليه اللي بين التربية و الاداره') === false);
+
 // Wiring: the web map resolves rows through this module and the field shows the tag; the native stub shares the type.
 const web = readFileSync(join(root, 'src/components/AppleMap.web.tsx'), 'utf8');
 const field = readFileSync(join(root, 'src/components/MapDealRow.tsx'), 'utf8');
@@ -103,6 +124,7 @@ check('appleQuery() hands Apple\'s own instance back when the row kept it', appl
 const searchCalls = web.split('\n').filter((l) => /^\s*(live\.)?search\.search\(/.test(l) && !/search\.search\(r,/.test(l));
 check('AppleMap.web.tsx: every search() on a picked row passes appleQuery(p)', searchCalls.length >= 2 && searchCalls.every((l) => /\.search\(appleQuery\(p\)/.test(l)), searchCalls.filter((l) => !/appleQuery\(p\)/.test(l)).join(' | '));
 check('AppleMap.web.tsx: every row suggestPlaces() builds keeps Apple\'s result under `apple`', (web.match(/apple: r\.apple \?\? r/g) || []).length >= 2);
+check('AppleMap.web.tsx: descriptions are filtered and the typed text orders the list', /isNoiseName\(r\.name\)/.test(web) && /sortByKind\(dedupePlaces\([^)]*\), query\)/.test(web));
 check('MapDealRow.tsx: the row shows t(KIND_LABEL[kind]) and the clean subtitle', /t\(KIND_LABEL\[p\.kind\]\)/.test(field) && /p\.subtitle \?\? p\.displayLines\[1\]/.test(field));
 check('i18n: every tag label is translated', (Object.values(KIND_LABEL)).every((k) => new RegExp(`^\\s*'${k}':\\s*'[^']+'`, 'm').test(i18n)), Object.values(KIND_LABEL).filter((k) => !new RegExp(`^\\s*'${k}':`, 'm').test(i18n)).join(','));
 

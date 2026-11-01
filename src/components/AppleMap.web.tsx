@@ -31,7 +31,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { classifyPlace, placeSubtitle, dedupePlaces, sortByKind, isAreaKind, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
+import { classifyPlace, placeSubtitle, dedupePlaces, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 
 const MAPKIT_SRC = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js';
@@ -289,7 +289,9 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
   });
   const resolved = await Promise.all(rows.slice(0, 8).map(resolve1));
   const named = resolved.map((r) => ({ ...r, apple: r.apple ?? r, name: r.name ?? r.displayLines[0] }));
-  return sortByKind(dedupePlaces(named)).slice(0, 6);
+  // A user-written description («طريق الملك فهد اللي دايم زحمه») is not a place; what was typed sorts first.
+  const places = named.filter((r) => !isNoiseName(r.name));
+  return sortByKind(dedupePlaces(places.length ? places : named), query).slice(0, 6);
 }
 
 /** Glide the map to a suggestion: Apple's bounding region for it when it has one, else a town-sized view around it. */
