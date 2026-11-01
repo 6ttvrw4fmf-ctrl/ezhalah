@@ -17,6 +17,10 @@ concurrency:
   group: auto-deploy-merged-fixes
   cancel-in-progress: false
 
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): the alert bridge below talks to our own database.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   dispatch:
     runs-on: ubuntu-latest
