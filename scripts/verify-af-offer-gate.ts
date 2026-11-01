@@ -71,8 +71,8 @@ const opts = (...counts: number[]): AdvancedOption[] =>
 console.log('\nAF offer/ask gates — one shared predicate; a round is offered only when it can pay for itself\n');
 
 // ── 1. The owner's own numbers, EXECUTED ─────────────────────────────────────────────────────────
-check(`MEANINGFUL_NARROWING_FRACTION is the owner's 10% (got ${MEANINGFUL_NARROWING_FRACTION})`,
-  MEANINGFUL_NARROWING_FRACTION === 0.1,
+check(`MEANINGFUL_NARROWING_FRACTION is the owner's 5% (10% until 2026-11-01; got ${MEANINGFUL_NARROWING_FRACTION})`,
+  MEANINGFUL_NARROWING_FRACTION === 0.05,
   'src/lib/afRanking.ts — the owner set this threshold on 2026-08-24 and extended it to the ask gate '
   + 'on 2026-08-25; changing it needs their decision');
 
@@ -87,8 +87,10 @@ check(`INTERVIEW_STOP_AT is 25 (got ${INTERVIEW_STOP_AT}) — owner 2026-09-20 (
 check('N=100, best option yields 90 (exactly 10% removed) ⇒ OFFERED',
   offersMeaningfulNarrowing(100, opts(90, 99)) === true,
   'the 10% boundary is inclusive; a `>` here would silently drop the owner\'s own worked example');
-check('N=100, best option yields 94 (6% removed) ⇒ HIDDEN — a round that moves 100→94 is not worth a tap',
-  offersMeaningfulNarrowing(100, opts(94, 99)) === false);
+check('N=100, best option yields 96 (4% removed) ⇒ HIDDEN — a round that moves 100→96 is not worth a tap',
+  offersMeaningfulNarrowing(100, opts(96, 99)) === false);
+check('N=100, best option yields 95 (exactly 5% removed, the 2026-11-01 line) ⇒ OFFERED',
+  offersMeaningfulNarrowing(100, opts(95, 99)) === true);
 
 // "Example at N=27: an option yielding 24 qualifies" — it both clears 10% (3 of 27) and finishes
 // the job (24 ≤ 25). BOTH clauses fire, which is the common case.
@@ -121,12 +123,12 @@ check('no options at all ⇒ HIDDEN (a failed/empty probe must never leave a liv
 // the check below sweeps for AGREEMENT rather than for a one-way implication.
 {
   const N = 1000;
-  const sub10 = opts(950, 970);  // best removal 50 = 5% — the gym shape at scale
-  check('a sub-10% question does NOT earn an offer…',
+  const sub10 = opts(970, 980);  // best removal 30 = 3% — the gym shape at scale (sub-5% since 2026-11-01)
+  check('a sub-5% question does NOT earn an offer…',
     offersMeaningfulNarrowing(N, sub10) === false);
   check('…and scoreQuestion no longer asks it either — both gates read the SAME predicate',
     scoreQuestion('street_width', 'single', { options: sub10, unknownCount: 0, total: N }) === null,
-    "owner 2026-08-25: asking about a 5% cut wastes the user's tap; before this date it was asked");
+    "owner 2026-08-25: asking about a cut under the line wastes the user's tap; before this date it was asked");
 }
 // THE SMALL-SLICE HALF IS UNTOUCHED — the permanent part of the 2026-08-22 rule. street_width «30m+»
 // at 60 of 1,874 is a 3.2% SHARE but a 96.8% CUT: exactly the question that used to vanish, and the

@@ -118,10 +118,10 @@ mustCatch('the mirror of it: «at N=26, k=25 does NOT qualify» — it does, by 
   claimIsWrong({ total: 26, count: 25, qualifies: false, file: 'x', line: 1 }) !== null);
 
 // Both directions, so the checker is not simply failing everything or passing everything.
-mustCatch('a TRUE claim being falsely reported as wrong (exactly 10% removed qualifies)',
-  claimIsWrong({ total: 1000, count: 900, qualifies: true, file: 'x', line: 1 }) === null);
-mustCatch('a TRUE rejection being falsely reported as wrong (just under 10%, above the escape line)',
-  claimIsWrong({ total: 1000, count: 901, qualifies: false, file: 'x', line: 1 }) === null);
+mustCatch('a TRUE claim being falsely reported as wrong (exactly 5% removed qualifies)',
+  claimIsWrong({ total: 1000, count: 950, qualifies: true, file: 'x', line: 1 }) === null);
+mustCatch('a TRUE rejection being falsely reported as wrong (just under 5%, above the escape line)',
+  claimIsWrong({ total: 1000, count: 951, qualifies: false, file: 'x', line: 1 }) === null);
 mustCatch('an inverted claim about a near-no-op option (k=N removes nothing, so it cannot qualify)',
   claimIsWrong({ total: 1000, count: 1000, qualifies: true, file: 'x', line: 1 }) !== null);
 

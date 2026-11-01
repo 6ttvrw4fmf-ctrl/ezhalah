@@ -70,7 +70,7 @@ check('installments is ask-first via a TIER applied in the sort, never by bypass
 // NARROWING GATE — UPDATED 2026-08-25 (owner decision of that date; it supersedes the 2026-08-22
 // `count < N` wording this check used to pin, which had itself superseded the 2026-08-11 8%-90%
 // band). The gate now includes an option only when answering it can actually move the set —
-// `optionNarrowsMeaningfully(count, N)`: removes ≥10% of the scope, or lands at/under the target.
+// `optionNarrowsMeaningfully(count, N)`: removes ≥5% of the scope (10% until 2026-11-01), or lands at/under the target.
 // The owner's case: at N=100 an option matching 100 or 98 listings is not worth a tap. It is
 // ONE-SIDED — a SMALL slice (8 of 100) is still an excellent question and is never dropped, which is
 // what the 2026-08-22 rule was protecting. scripts/verify-af-narrowing-gate.ts mutation-proves the

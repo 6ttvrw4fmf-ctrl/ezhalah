@@ -95,8 +95,8 @@ mustReject('a row check that covered fewer rows than the set it judged', judgeOp
   check('boundary report: no row on the threshold is reported as NOT exercised (never counted as a pass)', !boundaryReport([{ c: 4 }], { kind: 'gte', col: 'c', n: 2 }).exercised);
   check('MUTATION — a row below the threshold is a violation', boundaryReport([{ c: 1 }], { kind: 'gte', col: 'c', n: 2 }).violations === 1);
   check('render gate: below the 5-listing floor never renders', !optionWouldRender(4, 1000) && optionWouldRender(5, 1000));
-  check('render gate: an option that removes < 10% and leaves > 25 does not render (I: 47 of 50)', !optionWouldRender(47, 50) && optionWouldRender(45, 50));
-  check('render gate: an option that reaches ≤ 25 renders regardless of the 10% rule (H: 26 → 25)', optionWouldRender(25, 26));
+  check('render gate: an option that removes < 5% and leaves > 25 does not render (I: 48 of 50; 47 of 50 = 6% renders)', !optionWouldRender(48, 50) && optionWouldRender(47, 50));
+  check('render gate: an option that reaches ≤ 25 renders regardless of the 5% rule (H: 26 → 25)', optionWouldRender(25, 26));
 }
 
 // ── a verdict must describe ONE state of the index ───────────────────────────────────────────────

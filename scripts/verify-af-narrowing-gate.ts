@@ -140,14 +140,16 @@ check('…but the lopsided one is still INCLUDED, not dropped — selectivity ne
     // N,    k,     expect, why
     [100, 100, false, 'the gym: 100/100 have it, 0% cut'],
     [100, 98, false, "the owner's 'same if 98/100 have it' — 2% cut"],
-    [100, 91, false, '9% cut — the first count past the line'],
-    [100, 90, true, 'EXACTLY 10% removed QUALIFIES — the boundary is ≥, never >'],
+    [100, 96, false, '4% cut — the first count past the line (5% since 2026-11-01)'],
+    [100, 95, true, 'EXACTLY 5% removed QUALIFIES — the boundary is ≥, never >'],
+    [100, 90, true, '10% cut — the old line, still well inside'],
     [100, 80, true, '20% cut'],
     [100, 8, true, 'SMALL SLICE: 8% share is a 92% CUT — the 2026-08-22 protection'],
     [1874, 60, true, 'the owner’s own 2026-08-22 repro: 3.2% share, 96.8% cut'],
     [1874, 1820, false, '97.1% share, 2.9% cut — the gym at scale'],
     [60, 54, true, '0.9×60 = 54 exactly; an exact 10% cut must not fall to float rounding'],
-    [60, 56, false, '6.7% cut'],
+    [60, 58, false, '3.3% cut'],
+    [60, 57, true, '5% of 60 = 3 exactly; an exact 5% cut must not fall to float rounding'],
     [27, 25, true, `only 7.4% removed, but it LANDS at ≤${INTERVIEW_STOP_AT} — the escape clause (owner 2026-09-20: 25)`],
     [26, 26, false, 'no-op even at the smallest askable scope'],
     [10000, 10000, false, 'k === N is rejected at every scale, not just small ones'],
@@ -158,7 +160,7 @@ check('…but the lopsided one is still INCLUDED, not dropped — selectivity ne
     if (optionNarrowsMeaningfully(k, N_) === expect) continue;
     bad++; if (!firstBad) firstBad = `N=${N_} k=${k} expected ${expect} (${why})`;
   }
-  check(`the predicate's ${cases.length}-case boundary table holds (10% inclusive · k=N rejected · ≤${INTERVIEW_STOP_AT} escape · small slices ask)`,
+  check(`the predicate's ${cases.length}-case boundary table holds (5% inclusive · k=N rejected · ≤${INTERVIEW_STOP_AT} escape · small slices ask)`,
     bad === 0, `${bad} wrong, first ${firstBad}`);
 }
 
@@ -169,32 +171,33 @@ check('…but the lopsided one is still INCLUDED, not dropped — selectivity ne
 // 2026-08-11 two-sided band ("also drop anything under 8% of N") from creeping back in — a band would
 // pass every fixture in §1-§5 and still re-break the owner's Villa repro at some other N.
 //
-// The oracle is EXACT INTEGER arithmetic (10·(N−k) ≥ N), independent of the shipped float form, so
-// this also pins that no 0.9×N rounding hazard exists at any scope size the app can reach.
+// The oracle is EXACT INTEGER arithmetic (20·(N−k) ≥ N — the 5% line, owner 2026-11-01; 10·(N−k) ≥ N
+// before), independent of the shipped float form, so this also pins that no 0.95×N rounding hazard
+// exists at any scope size the app can reach.
 {
   let smallRejected = 0; let firstSmall = '';
   let disagreements = 0; let firstDis = '';
-  const oracle = (k: number, N_: number) => 10 * (N_ - k) >= N_ || k <= INTERVIEW_STOP_AT;
+  const oracle = (k: number, N_: number) => 20 * (N_ - k) >= N_ || k <= INTERVIEW_STOP_AT;
   for (let N_ = 26; N_ <= 1500; N_ += 1) {
     for (let k = 0; k <= N_; k += 1) {
       const got = optionNarrowsMeaningfully(k, N_);
       if (got !== oracle(k, N_)) { disagreements++; if (!firstDis) firstDis = `N=${N_} k=${k}`; }
-      // "removes ≥10%" in exact integers — every such option MUST be asked, forever.
-      if (10 * (N_ - k) >= N_ && !got) { smallRejected++; if (!firstSmall) firstSmall = `N=${N_} k=${k}`; }
+      // "removes ≥5%" in exact integers — every such option MUST be asked, forever.
+      if (20 * (N_ - k) >= N_ && !got) { smallRejected++; if (!firstSmall) firstSmall = `N=${N_} k=${k}`; }
     }
   }
   // …and again at the float-boundary counts only, far past where exhaustive is affordable.
   for (let N_ = 1501; N_ <= 200000; N_ += 7) {
-    for (const k of [Math.floor(N_ * 0.9), Math.ceil(N_ * 0.9), N_ - Math.ceil(N_ / 10), N_ - Math.floor(N_ / 10)]) {
+    for (const k of [Math.floor(N_ * 0.95), Math.ceil(N_ * 0.95), N_ - Math.ceil(N_ / 20), N_ - Math.floor(N_ / 20)]) {
       if (k < 0 || k > N_) continue;
       if (optionNarrowsMeaningfully(k, N_) !== oracle(k, N_)) { disagreements++; if (!firstDis) firstDis = `N=${N_} k=${k}`; }
-      if (10 * (N_ - k) >= N_ && !optionNarrowsMeaningfully(k, N_)) { smallRejected++; if (!firstSmall) firstSmall = `N=${N_} k=${k}`; }
+      if (20 * (N_ - k) >= N_ && !optionNarrowsMeaningfully(k, N_)) { smallRejected++; if (!firstSmall) firstSmall = `N=${N_} k=${k}`; }
     }
   }
-  check('no option that removes ≥10% is EVER rejected — the gate is one-sided, small slices always ask',
+  check('no option that removes ≥5% is EVER rejected — the gate is one-sided, small slices always ask',
     smallRejected === 0,
     `${smallRejected} rejection(s), first ${firstSmall} — this is the 2026-08-11 two-sided band coming back`);
-  check('the shipped float form matches EXACT integer arithmetic at every count (no 0.9×N rounding hazard)',
+  check('the shipped float form matches EXACT integer arithmetic at every count (no 0.95×N rounding hazard)',
     disagreements === 0, `${disagreements} disagreement(s), first ${firstDis}`);
   check(`the ≤${INTERVIEW_STOP_AT} escape survives: a 3.8%-cut option that LANDS at the target still asks`,
     optionNarrowsMeaningfully(25, 26) === true,
