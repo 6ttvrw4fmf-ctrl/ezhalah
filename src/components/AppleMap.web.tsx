@@ -74,6 +74,8 @@ type MKMap = {
   region: { center: Coord; span: { latitudeDelta: number; longitudeDelta: number } };
   addOverlay: (o: unknown) => void;
   removeOverlay: (o: unknown) => void;
+  addAnnotation: (a: unknown) => void;
+  removeAnnotation: (a: unknown) => void;
   convertPointOnPageToCoordinate: (p: DOMPoint) => Coord;
   setRegionAnimated: (r: unknown, animate?: boolean) => void;
   addEventListener: (name: string, fn: (e: { overlay?: { data?: Region } }) => void) => void;
@@ -81,9 +83,10 @@ type MKMap = {
 type Coord = { latitude: number; longitude: number };
 type Shape = { style: { fillOpacity: number; strokeOpacity: number; lineWidth: number }; data: Region; points: unknown[] };
 export type PlaceSuggestion = { displayLines: string[]; coordinate?: Coord };
+type MKRegion = { center: Coord; span: { latitudeDelta: number; longitudeDelta: number } };
 type MKSearch = {
   autocomplete: (q: string, cb: (err: unknown, data: { results: PlaceSuggestion[] }) => void) => number;
-  search: (q: string | PlaceSuggestion, cb: (err: unknown, data: { boundingRegion?: unknown; places: { coordinate: Coord }[] }) => void) => number;
+  search: (q: string | PlaceSuggestion, cb: (err: unknown, data: { boundingRegion?: MKRegion; places: { coordinate: Coord; name?: string; pointOfInterestCategory?: string }[] }) => void) => number;
 };
 type MapKit = {
   init: (o: { authorizationCallback: (done: (token: string) => void) => void; language?: string }) => void;
@@ -95,6 +98,8 @@ type MapKit = {
   Style: new (o: { strokeColor?: string; strokeOpacity?: number; fillColor?: string; fillOpacity?: number; lineWidth?: number }) => unknown;
   PolygonOverlay: new (points: unknown[] | unknown[][], o?: { style?: unknown; data?: unknown; enabled?: boolean }) => Shape;
   PolylineOverlay: new (points: unknown[], o?: { style?: unknown; enabled?: boolean }) => Shape;
+  CircleOverlay: new (center: unknown, radius: number, o?: { style?: unknown; enabled?: boolean }) => unknown;
+  MarkerAnnotation: new (coord: unknown, o?: { title?: string; color?: string; glyphColor?: string; animates?: boolean }) => unknown;
   Search: new (o: { region?: unknown; language?: string; limitToCountries?: string; includePointsOfInterest?: boolean }) => MKSearch;
   addEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
   removeEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
@@ -171,7 +176,15 @@ function initOnce(mk: MapKit, language: string) {
 // ── The page's search field talks to the map through this (MapDealRow's MapSearchBar) ─────────────────────────
 // One map per page, so one handle: the mounted map registers itself; the field asks Apple for places and flies there.
 // `history`: the views left behind by a jump (a search pick, a region tap) so «رجوع» can return to them.
-const live: { map: MKMap | null; search: MKSearch | null; lang: string; history: unknown[] } = { map: null, search: null, lang: '', history: [] };
+const live: { map: MKMap | null; search: MKSearch | null; lang: string; history: unknown[]; mark: { overlay?: unknown; pin?: unknown } } = { map: null, search: null, lang: '', history: [], mark: {} };
+
+/** Remove the highlight of the last searched place (the field's ✕, or a new search). */
+export function clearPlaceMark() {
+  const m = live.map;
+  if (m && live.mark.overlay) m.removeOverlay(live.mark.overlay);
+  if (m && live.mark.pin) m.removeAnnotation(live.mark.pin);
+  live.mark = {};
+}
 
 /** Apple Maps' own place suggestions (owner 2026-10-31: «this search connected to Apple Maps, like how a user
  *  searches in Apple Maps»), limited to Saudi Arabia, in the UI language. Resolves [] when MapKit is unavailable:
@@ -204,8 +217,29 @@ export function flyToPlace(p: PlaceSuggestion) {
     const place = !err && data?.places?.[0];
     const c = place ? place.coordinate : p.coordinate;
     live.history.push(m.region);
-    if (data?.boundingRegion) m.setRegionAnimated(data.boundingRegion, true);
+    const region = data?.boundingRegion;
+    if (region) m.setRegionAnimated(region, true);
     else if (c) m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(c.latitude, c.longitude), new mk.CoordinateSpan(0.08, 0.08)), true);
+    // MARK WHAT WAS SEARCHED (owner 2026-10-31: «create something around it so they know the landmark or district
+    // they searched»). A landmark (Apple gives it a point-of-interest category) gets a brand pin with its name and a
+    // soft circle; a district / city / region (no category) gets a quiet outline of the area Apple returns, in the
+    // same brand tone as the region outlines. One mark at a time.
+    clearPlaceMark();
+    if (!c) return;
+    const style = (fillOpacity: number, lineWidth: number) => new mk.Style({ strokeColor: lightColors.primary, strokeOpacity: 0.85, lineWidth, fillColor: lightColors.primary, fillOpacity });
+    if (place && place.pointOfInterestCategory) {
+      const radius = region ? Math.max(120, Math.min(600, region.span.latitudeDelta * 111_000 * 0.35)) : 250;
+      live.mark.overlay = new mk.CircleOverlay(new mk.Coordinate(c.latitude, c.longitude), radius, { style: style(0.12, 1.5), enabled: false });
+      live.mark.pin = new mk.MarkerAnnotation(new mk.Coordinate(c.latitude, c.longitude), { title: place.name ?? p.displayLines[0], color: lightColors.primary, animates: true });
+      m.addOverlay(live.mark.overlay);
+      m.addAnnotation(live.mark.pin);
+    } else if (region) {
+      const { center, span } = region;
+      const n = center.latitude + span.latitudeDelta / 2, s0 = center.latitude - span.latitudeDelta / 2;
+      const e = center.longitude + span.longitudeDelta / 2, w = center.longitude - span.longitudeDelta / 2;
+      live.mark.overlay = new mk.PolygonOverlay([[n, w], [n, e], [s0, e], [s0, w]].map(([la, lo]) => new mk.Coordinate(la, lo)), { style: style(0.06, 1.6), enabled: false });
+      m.addOverlay(live.mark.overlay);
+    }
   });
 }
 
