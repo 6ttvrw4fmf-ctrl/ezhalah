@@ -14,6 +14,12 @@
       "active_rows": 9,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 9 of 9 rows carried photo_urls (the whole catalogue). TINY: one listing is ~11 points; floor set one listing below the observation."
     },
+    "abaad": {
+      "floor_pct": 90,
+      "today_pct": 93.4,
+      "active_rows": 380,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 355 of 380 active rows carry photo_urls; each checked row byte-matches the source API's own images[] (/api/v1/estate/get-estate/all), no URL repeats across 3,137. The 25 photo-less rows are photo-less AT SOURCE (images: [] for ids 750/852/938/746/788). Floor today-minus-three."
+    },
     "abeea": {
       "floor_pct": 97,
       "today_pct": 100,
@@ -96,6 +102,12 @@
       "active_rows": 17,
       "reason": "PHOTOS ARE BROKEN AT THE SOURCE (run.py docstring): every image is app/thumbnail.php?i=…, which answers 200 with a body that is not an image (naturalWidth 0 in a real Chrome, 5/5), so run.py writes photo_urls NULL and keeps the count in additional_info. Measured 2026-09-24 over a live crawl: 0 of 17 mapped rows. Re-measure when the thumbnail endpoint serves real images."
     },
+    "alsaedan": {
+      "floor_pct": 90,
+      "today_pct": 93.3,
+      "active_rows": 326,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 304 of 326 carry photo_urls. 303 of them share their images with sibling units — BY DESIGN: the unit page itself shows its PROJECT's cover (deem-11/18.jpg on unit 3212's own page), flagged additional_info.photo_is_project_cover (owner ruling 2026-09-24). The 22 photo-less rows are sama-najd land plots with zero images at source (unit 4715). Floor today-minus-three."
+    },
     "alshawaf": {
       "floor_pct": 55,
       "today_pct": 62.0,
@@ -172,6 +184,12 @@
       "today_pct": 99,
       "active_rows": 1762
     },
+    "aqarnajran": {
+      "imageless_at_source": true,
+      "today_pct": 0.0,
+      "active_rows": 39,
+      "reason": "THE SOURCE PUBLISHES NO IMAGES: all 41 posts from /wp-json/wp/v2/posts carry 0 <img> tags — every post body is a plain بند/تفاصيل table. Measured 2026-09-27 on production: 0 of 39 active rows. Re-measure if the office starts attaching photos."
+    },
     "arkaan": {
       "floor_pct": 97,
       "today_pct": 100,
@@ -204,6 +222,12 @@
       "today_pct": 72.7,
       "active_rows": 99,
       "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 72 of 99 rows carried photo_urls (the first 99 of 1,485). The office posts many cards with the site placeholder, which the scraper refuses; sample error ~±4.5 points, so the floor keeps that margin."
+    },
+    "compoundin": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 186,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 186 of 186 carry photo_urls. 175 share images with sibling units, correctly: one compound page hosts every unit card under ONE compound gallery (arc-compound: 66 units, 17 distinct photos), filtered to /uploads/properties/. Floor today-minus-three."
     },
     "dallali": {
       "floor_pct": 85,
@@ -250,6 +274,12 @@
       "active_rows": 204,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 203 of 204 rows carried photo_urls (the whole catalogue). Floor follows today-minus-about-three."
     },
+    "ego": {
+      "floor_pct": 90,
+      "today_pct": 93.9,
+      "active_rows": 33,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 31 of 33 carry photo_urls, matching the source API's own photo fields (unit 2440). Ids 2409 and 2417 publish no photo at source (all four photo fields null). TINY: one listing is ~3 points; floor set one listing below the observation."
+    },
     "eightfloor": {
       "floor_pct": 50,
       "today_pct": 100.0,
@@ -278,6 +308,12 @@
       "today_pct": 100.0,
       "active_rows": 2,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 2 of 2 rows carried photo_urls (the whole catalogue). TINY: one listing is ~50 points; floor set one listing below the observation."
+    },
+    "fahadalshahri": {
+      "floor_pct": 80,
+      "today_pct": 100.0,
+      "active_rows": 5,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 5 of 5 carry photo_urls, found on each listing's own WooCommerce product page. TINY: one listing is 20 points; floor set one listing below the observation."
     },
     "fkralemar": {
       "floor_pct": 90,
@@ -312,6 +348,12 @@
       "today_pct": 98.9,
       "active_rows": 92,
       "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 91 of 92 rows carried photo_urls (the first 92 mapped of ~145). Floor follows today-minus-about-three."
+    },
+    "gudai": {
+      "floor_pct": 91,
+      "today_pct": 100.0,
+      "active_rows": 12,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 12 of 12 carry photo_urls — BUT every row also carried the site HEADER LOGO (output-onlinepngtools-4-e1772490357840.png) until scrapers/common/inblaj_platform.py photos() was scoped to the swiper gallery in this change; re-parsing all 12 live pages with the fix drops exactly that logo and leaves each row 1-2 real photos, so coverage stays 12/12. TINY: one listing is ~8 points; floor set one listing below the observation."
     },
     "hajer": {
       "floor_pct": 57,
@@ -369,6 +411,12 @@
       "today_pct": 100.0,
       "active_rows": 78,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 78 of 78 rows carried photo_urls (the whole catalogue). Floor follows today-minus-about-three."
+    },
+    "ksaaqar": {
+      "floor_pct": 80,
+      "today_pct": 83.7,
+      "active_rows": 1364,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 1141 of 1364 carry photo_urls, anchored on the ad's own .img-box (the related-ads .category-img-box widget is excluded). Photo-less rows checked are photo-less AT SOURCE: 0 .img-box on each page. Floor today-minus-three."
     },
     "livingcompound": {
       "floor_pct": 90,
@@ -441,6 +489,12 @@
       "active_rows": 11,
       "note": "Declared 2026-09-27 (wave-3 batch 4). MEASURED ON THE PRODUCTION ROWS THEMSELVES after the first crawl: 11 of 11 active rows carry photo_urls (100.0%). TINY: one listing is ~9.1 points; floor set one listing below the observation."
     },
+    "muhaysini": {
+      "floor_pct": 96,
+      "today_pct": 99.9,
+      "active_rows": 2819,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 2816 of 2819 carry photo_urls, matching the source API's own mediaFiles[].filePath (property 1442); no URL repeats across 8,432. Floor today-minus-about-three."
+    },
     "muktamel": {
       "floor_pct": 97,
       "today_pct": 100,
@@ -462,6 +516,12 @@
       "today_pct": 33.3,
       "active_rows": 9,
       "note": "Declared 2026-09-27 (wave 3b). MEASURED ON THE PRODUCTION ROWS after the first crawl: 3 of 9 carry photo_urls. Checked on source: the other ads have no #big gallery; images elsewhere on the page are the «إعلانات مشابهة» strip and dot thumbnails (e.g. #157, #151), correctly excluded. TINY: one listing is ~11.1 points; floor set one listing below."
+    },
+    "nofodh": {
+      "floor_pct": 49,
+      "today_pct": 52.8,
+      "active_rows": 2533,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 1337 of 2533 carry photo_urls, each from the listing's OWN folder /listings/<id>_<hash>/ (the regex is scoped to the id after an earlier sibling-leak fix). A MIXED SITE: the photo-less rows checked (347845, 343182, 356908, 546811, 101694) are live listings whose detail page carries no photo at all. Floor today-minus-three."
     },
     "nowaisiry": {
       "floor_pct": 97,
@@ -518,6 +578,18 @@
       "today_pct": 70.3,
       "active_rows": 101
     },
+    "razre": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 57,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 57 of 57 carry photo_urls. 47 share one wixstatic set, correctly: the source's project page (onepro-1/55) lists its units under the project's own gallery, which is what each unit shows. Floor today-minus-three (~2 listings)."
+    },
+    "reinvest": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 782,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 782 of 782 carry photo_urls; both checked rows' full sets appear verbatim on their own pages, no URL repeats across 4,405. Floor today-minus-three."
+    },
     "remal": {
       "floor_pct": 89,
       "today_pct": 91.7,
@@ -539,6 +611,24 @@
       "floor_pct": 84,
       "today_pct": 87.1,
       "active_rows": 85
+    },
+    "sadiqeltajer": {
+      "floor_pct": 96,
+      "today_pct": 99.8,
+      "active_rows": 1505,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 1502 of 1505 carry photo_urls in the page's own swiper gallery. 5 land ads share one photo pair — the OFFICE reuses it in each ad's own gallery (alt text = the ad's title), so it is the source's, not a leak. Floor today-minus-about-three."
+    },
+    "safa": {
+      "floor_pct": 56,
+      "today_pct": 58.5,
+      "active_rows": 41,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 24 of 41 carry photo_urls from the source ERP's own product.image gallery. The 17 photo-less units return no gallery from the per-unit /unit/details endpoint; the card's main_image is deliberately NOT used (units 12715 and 12766 serve a byte-identical generic photo). SMALL: one listing is ~2.4 points; floor set one listing below the observation."
+    },
+    "safera": {
+      "floor_pct": 88,
+      "today_pct": 100.0,
+      "active_rows": 9,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 9 of 9 carry photo_urls — BUT every row also carried the office's branding (3 header «سفيرة العقارات» logos + the footer logo, none named «logo») until scrapers/common/inblaj_platform.py photos() was scoped to the swiper gallery in this change; re-parsing all 9 live pages with the fix drops exactly those 4 and leaves each row 1-13 real photos, so coverage stays 9/9. TINY: one listing is ~11 points; floor set one listing below the observation."
     },
     "sakan": {
       "floor_pct": 90,
@@ -591,6 +681,12 @@
       "active_rows": 8,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 8 of 8 rows carried photo_urls (8 mapped of the 11 the site itself counts; the rest are skipped by run.py's own gates). TINY: one listing is ~12 points; floor set one listing below the observation."
     },
+    "sokok": {
+      "floor_pct": 0,
+      "today_pct": 0.0,
+      "active_rows": 398,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 0 of 398 carry photo_urls, and this is NOT imageless_at_source: the source DOES show photos (Inertia props.piece.images[]), but only as Oracle object-storage URLs presigned for 3600 s — the unsigned path 404s (private bucket) — so nothing storable exists and run.py writes NULL by design (docstring point 6). Measured 2026-09-27: pieces in one block return byte-identical image keys, so the images are BLOCK-level, not each plot's own. Floor 0 until the gated object-storage mirror exists; raise it then."
+    },
     "souq24": {
       "floor_pct": 28,
       "today_pct": 31.8,
@@ -601,6 +697,12 @@
       "today_pct": 100.0,
       "active_rows": 16,
       "note": "Declared 2026-09-26 (missed at onboarding in PR #4578). MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: 16 of 16 active rows carry photo_urls (100%). TINY: one listing is ~6 points; floor set one listing below the observation."
+    },
+    "sukna": {
+      "floor_pct": 69,
+      "today_pct": 72.4,
+      "active_rows": 290,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 210 of 290 carry photo_urls from each unit's own images[] (type floor_plan excluded). The photo-less units checked (685, 697, 715, 671, 683) publish ONLY a floor plan in their own API record. Floor today-minus-three."
     },
     "suwar": {
       "floor_pct": 90,
@@ -624,6 +726,12 @@
       "today_pct": 18.3,
       "active_rows": 104,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 19 of 104 rows carried photo_urls (the whole catalogue) (86 of the site's 105 cards show only an Unsplash stock photo, which run.py refuses as a listing photo — those rows honestly carry none). Floor follows today-minus-about-three."
+    },
+    "tuba": {
+      "floor_pct": 94,
+      "today_pct": 97.8,
+      "active_rows": 4417,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 4417 of 4417 carried photo_urls, BUT 99 of them carried ONLY the site's stock placeholder (login_asset/images/homepageimages/property_image.jpeg), which is also all their own detail page shows. scrapers/tuba/run.py now refuses it in this change, so true coverage is 4318/4417 = 97.8% once re-crawled; the floor is set from THAT, not from the inflated 100. Floor today-minus-about-three."
     },
     "villassa": {
       "floor_pct": 90,
@@ -653,6 +761,12 @@
       "floor_pct": 90,
       "today_pct": 93.3,
       "active_rows": 51500
+    },
+    "wslnaa": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 58,
+      "note": "Declared 2026-09-27 after the live ratchet (unparseable since #4607, fixed in #4789) named it undeclared. MEASURED ON THE PRODUCTION ROWS THEMSELVES through the anon REST key: 58 of 58 carry photo_urls, from the source's own properties.bySlug images[]. Units in one building share that building's photos, correctly. 9 rows also carry alolaya-building-opt_4091e302.jpg, which the SOURCE lists in each of those ads' own images[] (some of them are in Al Olaya) — kept as source truth, not stripped. Floor today-minus-three (~2 listings)."
     },
     "yameen": {
       "floor_pct": 90,

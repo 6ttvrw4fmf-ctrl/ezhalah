@@ -779,3 +779,20 @@ def test_a_broken_rega_payload_costs_the_field_not_the_row():
                                        "response_data": "{not json"}})
     assert row["price_annual"] == 12000 and row["license_number"] == "7200707974"
     assert row["street_width_m"] is None and row["ad_source"] is None
+
+
+# ── THE PLACEHOLDER: the site's stock «no photo» image is served IN `gallery` ────────────────────
+# Measured 2026-09-27: 99 of 4,417 active rows (e.g. /property/apartment-for-rent-in-jeddah-1618)
+# carried ONLY this file, and their own detail page shows only it. Not the listing's photo.
+_PLACEHOLDER = "https://tuba.com.sa/login_asset/images/homepageimages/property_image.jpeg"
+
+
+def test_a_gallery_of_only_the_stock_placeholder_is_photo_less():
+    row, _ = _row({**APARTMENT_SALE, "gallery": [{"path": _PLACEHOLDER}]})
+    assert row["photo_urls"] is None
+
+
+def test_the_placeholder_is_dropped_and_the_listings_own_photos_kept():
+    own = "https://tuba.com.sa/storage/18794/260513225909-d077cd.webp"
+    row, _ = _row({**APARTMENT_SALE, "gallery": [{"path": _PLACEHOLDER}, {"path": own}]})
+    assert row["photo_urls"] == [own]
