@@ -97,6 +97,7 @@ type MKPlace = {
   locality?: string; subLocality?: string; administrativeArea?: string; thoroughfare?: string; region?: MKRegion;
 };
 type MKSearch = {
+  region?: unknown;
   autocomplete: (q: string, cb: (err: unknown, data: { results: PlaceSuggestion[] }) => void) => number;
   search: (q: string | PlaceSuggestion, cb: (err: unknown, data: { boundingRegion?: MKRegion; places: MKPlace[] }) => void) => number;
 };
@@ -264,6 +265,11 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
     live.lang = language;
   }
   const search = live.search!;
+  // NEAR WHERE THE USER IS LOOKING (walked live 2026-11-01: «ماكدونالدز» with the map on Riyadh gave ONE row, in
+  // Madinah, because a country-limited autocomplete with no region picks nationally; with the map's region it gave
+  // fifteen Riyadh branches). Apple ranks around `region`, so the search follows the map: a chain or a common name
+  // lists the nearby ones first, and a city or region name is still found wherever it is.
+  if (live.map) search.region = live.map.region;
   const rows = await new Promise<PlaceSuggestion[]>((resolve) => {
     // Only real PLACES: Apple also returns query completions («adidas · Search Nearby») that carry no coordinate and
     // land nowhere (owner 2026-11-01 saw one in the route fields).
