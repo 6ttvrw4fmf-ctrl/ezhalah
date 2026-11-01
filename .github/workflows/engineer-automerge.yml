@@ -51,12 +51,21 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
+          # ONE baseline PR at a time (owner session 2026-11-01): every deploy opens a deploy/baseline-* PR and 139 had piled up,
+          # hiding engineer PRs from this list. Only the newest records what is live, so older ones are closed, never merged:
+          # merging an older one would move the recorded baseline backwards. The newest is a docs/ PR and merges below.
+          gh pr list --repo "$REPO" --state open --limit 300 --json number,createdAt,headRefName \
+            -q '[.[] | select(.headRefName|startswith("deploy/baseline-"))] | sort_by(.createdAt) | reverse | .[1:][] | .number' \
+            | while read -r old; do
+                gh pr close "$old" --repo "$REPO" --delete-branch --comment "Closed by engineer-automerge: a newer deploy/baseline PR records what is live." \
+                  || echo "#$old: close refused — next pass"
+              done
           # --limit 200, not 50 (🔧 2026-11-01): the deploy robot opens a deploy/baseline-* PR per deploy and ~85 of them were
           # open, so the 50 newest PRs were almost all baselines and every engineer PR older than ~2 days fell out of the
           # robot's window — #8855 (green barrier), #8818 / #8790 (one-line docs), #8954 (scripts) sat 5–6 days unseen.
           prs=$(gh pr list --repo "$REPO" --state open --limit 200 \
                   --json number,headRefName,isDraft,isCrossRepository,title \
-                  -q '.[] | select((.headRefName|test("^(claude|nle|lifecycle|af|scraping|qa|kit|fix|mirror|docs)[/-]")) and (.isDraft|not) and (.isCrossRepository|not)) | "\(.number)\t\(.title)"')
+                  -q '.[] | select((.headRefName|test("^(claude|nle|lifecycle|af|scraping|qa|kit|fix|mirror|docs|deploy)[/-]")) and (.isDraft|not) and (.isCrossRepository|not)) | "\(.number)\t\(.title)"')
           while IFS=$'\t' read -r pr title <&3; do
             [ -n "$pr" ] || continue
             files=$(gh pr view "$pr" --repo "$REPO" --json files -q '.files[].path')
