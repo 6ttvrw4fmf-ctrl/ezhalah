@@ -686,7 +686,7 @@ else. `minOptionsFor()` is now uniform (`single === multi === 1`); every other c
 | `INTERVIEW_STOP_AT` | `25` | **frozen, unchanged** |
 | `MIN_USEFUL_QUESTIONS_TO_SHOW` | `1` | **frozen, unchanged** |
 | `MIN_REAL_OPTION_COUNT` | `5` | **frozen, unchanged** (now pinned by a barrier — it was not before) |
-| `AF_ROUND_MAX_QUESTIONS` | `4` | **frozen, unchanged** |
+| `AF_ROUND_MAX_QUESTIONS` | `7` | **raised 4 → 7 (owner 2026-11-01)** |
 | `MIN_OPTIONS_MULTI` | `1` | unchanged |
 | `MIN_OPTIONS_SINGLE` | ~~`2`~~ → `1` | **THIS amendment** |
 

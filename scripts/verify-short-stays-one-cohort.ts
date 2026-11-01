@@ -138,7 +138,7 @@ console.log('\n── 4. the cards: chat-only ids never asked; the three cards r
   check('every question that writes the amenities bag is token-filtered on re-entry (AMENITY_BAG_QUESTION_IDS = amenities + 10 cards + apartments + shops = 13)',
     ['amenities', ...CARD_IDS, 'apartments', 'shops'].every((id) => AMENITY_BAG_QUESTION_IDS.has(id)) && AMENITY_BAG_QUESTION_IDS.size === 13);
   check('rankQuestions sorts by shortStaysAskTier on short stays (and by groupAskTier where cards exist)',
-    /const tier = isShortStaysScope\(q\) \? shortStaysAskTier : hasCards\(q\) \? groupAskTier : askTier;/.test(src));
+    /const tier = isShortStaysScope\(q\) \? shortStaysAskTier : hasCards\(q\) \? groupAskTierFor\(q\) : askTier;/.test(src));
   check('no chip key appears on two short-stays cards', new Set(all).size === all.length);
 }
 

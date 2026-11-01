@@ -192,7 +192,7 @@ export async function trendingDistrict(plan) {
  * HOW A ROUND ENDS, and why this journey walks it (owner R8.3.1, 2026-08-28). The question footer
  * offers exactly متابعة / تخطي / رجوع. There is NO «عرض النتائج» anywhere inside the AF flow — the
  * owner removed that early-exit in PR #1216, and `scripts/verify-af-footer-buttons.ts` pins its
- * removal. A round ends by WALKING its questions (up to AF_ROUND_MAX_QUESTIONS = 4, R6.1.1); only
+ * removal. A round ends by WALKING its questions (up to AF_ROUND_MAX_QUESTIONS = 7, R6.1.1); only
  * then does a new results turn land and a candidates request fire.
  *
  * This journey used to click «عرض النتائج», then fall back to a single «متابعة». Against a
@@ -297,10 +297,10 @@ async function afAnswerRound(page, name, requests, before, served) {
   let advanced = await page.locator('[data-testid="af-confirm"]').first()
     .click({ timeout: 9000 }).then(() => true).catch(() => false);
   if (!advanced) { note(`${name}: «متابعة» not clickable — harness, skipped`); return null; }
-  // Bounded skip-out, the same shape verify-af-live-truth.ts uses: AF_ROUND_MAX_QUESTIONS is 4,
-  // so 8 hops cannot loop forever even if a click is swallowed. Break when the card is gone (the
+  // Bounded skip-out, the same shape verify-af-live-truth.ts uses: AF_ROUND_MAX_QUESTIONS is 7,
+  // so 12 hops cannot loop forever even if a click is swallowed. Break when the card is gone (the
   // round ended) or when it is open with no تخطي (the intro/mining state has no question to skip).
-  for (let hop = 0; hop < 8; hop++) {
+  for (let hop = 0; hop < 12; hop++) {
     await sleep(5000);
     const open = await page.evaluate(() => !!document.querySelector('[data-testid="af-card"]'));
     if (!open) break;

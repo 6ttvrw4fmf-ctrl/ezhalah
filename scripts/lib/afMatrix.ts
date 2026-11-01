@@ -161,7 +161,7 @@ export const QUESTION_HELPER_SYMBOLS = [
 export const afLiftImports = (root: string): string => {
   const href = (p: string) => JSON.stringify(pathToFileURL(join(root, p)).href);
   return [
-    `import { cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope, shortStaysAskTier, cardKeys, groupAskTier, hasCards, isCardId } from ${href('src/lib/afCohorts.ts')};`,
+    `import { cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope, shortStaysAskTier, cardKeys, groupAskTierFor, hasCards, isCardId } from ${href('src/lib/afCohorts.ts')};`,
     `import { CHIP_DEFS } from ${href('src/lib/afChips.ts')};`,
   ].join('\n');
 };

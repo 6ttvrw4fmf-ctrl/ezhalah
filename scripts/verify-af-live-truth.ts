@@ -586,10 +586,10 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     // footer is متابعة/تخطي/رجوع only, and a round ends when its questions are exhausted. So when
     // the card is still open after the committing confirm above, walk it out by SKIPPING the
     // remaining questions (skip = commitGuidedStep([]) — the same ONE commit path, recorded as
-    // no-preference, changing no filters). Bounded: AF_ROUND_MAX_QUESTIONS is 4, so 8 attempts can
+    // no-preference, changing no filters). Bounded: AF_ROUND_MAX_QUESTIONS is 7, so 12 attempts can
     // never loop forever even if a click is swallowed once or twice. The capture was armed before
     // that confirm, so a search it already fired is still held here rather than discarded.
-    for (let hop = 0; hop < 8; hop++) {
+    for (let hop = 0; hop < 12; hop++) {
       const open = await page.evaluate(() => !!document.querySelector('[data-testid="af-card"]'));
       if (!open) break;
       const skip = await page.evaluate(() => !!document.querySelector('[data-testid="af-skip"]'));
