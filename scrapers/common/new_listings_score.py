@@ -228,6 +228,11 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                         break
         elif kind == "number":
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)
+            # ONE hall is written as the bare noun: haraj 21839188 «غرفة وصالة», 21839193 «4 غرف وصالة كبيره» (score run
+            # 41009231494, 2026-10-30, backlog 1090) store living_rooms 1; the room line's «4» read as the hall count.
+            if (name == "living_rooms" and out[name] != MATCH and stored.get(col) is not None
+                    and float(stored.get(col)) == 1 and any(SINGLE_HALL.search(x) for x in lines)):
+                out[name] = MATCH
         elif kind == "bool":
             out[name] = _cmp_bool(stored.get(col), lines, kw)
         elif kind == "district":
@@ -236,7 +241,19 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
             out[name] = _cmp_valued(stored.get(col), SITE_DEAL_MENU.sub("", whole), DEAL_KW)
         else:
             out[name] = _cmp_word(stored.get(col), whole, kw)
+            # haraj's REGA licence block prints the facade in English («واجهة العقار: Eastern», 21831096, backlog 1090).
+            if name == "direction_ar" and out[name] == MISMATCH and stored.get(col):
+                en = FACADE_EN.get(norm(str(stored.get(col))))
+                if en and any(re.search(kw, x) and re.search(en, x, re.I) for x in lines):
+                    out[name] = MATCH
     return out
+
+
+# «صالة» alone (with «و» / «ال» glued on) is one hall; never «صالات» / «صالتين», never a figure right before it.
+SINGLE_HALL = re.compile(r"(?<![\u0621-\u064A\d])(?<!\d )(?:و|ب)?(?:ال)?صاله(?![\u0621-\u064A])")
+# The four plain facades in English, as a REGA licence block prints them; a compound facade stays Arabic-only.
+FACADE_EN = {"شرق": r"\beast(?:ern)?\b", "غرب": r"\bwest(?:ern)?\b",
+             "شمال": r"\bnorth(?:ern)?\b", "جنوب": r"\bsouth(?:ern)?\b"}
 
 
 _UNIT_TAIL = r"\s*(?:م2|م²|متر|m²|m2|ريال|ر\.س)?\s*"
