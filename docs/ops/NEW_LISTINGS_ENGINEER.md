@@ -314,8 +314,8 @@ catch it the same day, before wrong data piles up across the whole catalog.
    the price (owner 2026-09-28, widened to every site 2026-10-03, built 2026-10-31, migration
    `20261031205445`).** A stated period is never overruled. A rental that states no period gets its
    label from `judge_silent_rent_period_ar()` in the index trigger `enforce_rent_period_judgment()`:
-   a raw figure under 7,000 = شهري, 15,000 and above = سنوي, 7,000–14,999 stays NULL (borderline,
-   never a guess); gathern / aqarmonthly are monthly-only, so a silent row there is شهري. The shown
+   (`20261031215442`) under 300 = NULL; 300–7,999 on a home or business type = a per-month figure, stored
+   سنوي ×12; 15,000 and above = سنوي; anything else stays NULL (borderline, never a guess); gathern / aqarmonthly are monthly-only, so a silent row there is شهري. The shown
    price is always the source's figure; `search_listings_ar.rent_period_judged = true` marks the
    judged rows, and the raw platform tables are never written. Never default to yearly by platform
    name, never label the borderline, never put a label on the card. The guard is
