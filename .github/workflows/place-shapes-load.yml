@@ -16,6 +16,10 @@ concurrency:
   group: place-shapes-load
   cancel-in-progress: false
 
+env:
+  # Secret handshake (docs/ops/SCRAPE_GUARD.md): scripts/lib/gateFetch.mjs sends it only to our own database.
+  EZ_GATE_SECRET: ${{ secrets.EZ_GATE_SECRET }}
+
 jobs:
   load:
     name: Upsert place_shapes

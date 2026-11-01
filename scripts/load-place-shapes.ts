@@ -5,6 +5,7 @@
 // service key there, by design). Idempotent: rows are keyed by (osm_type, osm_id) and upserted.
 //
 //   node --experimental-strip-types scripts/load-place-shapes.ts [--dry-run] [--chunk 150]
+import './lib/gateFetch.mjs'; // secret handshake for our own database calls (docs/ops/SCRAPE_GUARD.md)
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
