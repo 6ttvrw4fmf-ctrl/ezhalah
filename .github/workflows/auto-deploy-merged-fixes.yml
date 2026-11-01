@@ -31,7 +31,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          runs=$(gh run list --workflow deploy-frontend.yml --branch main --limit 30 --json status,conclusion,headSha)
+          runs=$(gh run list -w deploy-frontend.yml --branch main --limit 30 --json status,conclusion,headSha)
           head=$(git rev-parse HEAD)
           if [ "$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")" != 0 ]; then
             echo "A deploy is running — next pass."; exit 0
