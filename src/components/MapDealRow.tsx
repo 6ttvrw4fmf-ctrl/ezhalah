@@ -12,6 +12,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { suggestPlaces, flyToPlace, clearPlaceMark, routeBetween, type PlaceSuggestion } from '@/components/AppleMap';
+import { KIND_LABEL, type PlaceKind } from '@/lib/placeKind';
+
+const KIND_ICON: Record<PlaceKind, keyof typeof Ionicons.glyphMap> = {
+  region: 'map-outline', city: 'business-outline', district: 'home-outline', street: 'navigate-outline',
+  mosque: 'moon-outline', mall: 'storefront-outline', hospital: 'medkit-outline', airport: 'airplane-outline', hotel: 'bed-outline',
+  school: 'school-outline', university: 'school-outline', park: 'leaf-outline', station: 'train-outline', landmark: 'flag-outline', place: 'location-outline',
+};
 
 export type MapDeal = 'buy' | 'rent' | 'short';
 const DEALS: { id: MapDeal; label: string }[] = [
@@ -37,7 +44,7 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
     const h = setTimeout(() => { suggestPlaces(q, locale).then((r) => { if (seq.current === id) setHits(r); }); }, 220);
     return () => clearTimeout(h);
   }, [q, locale, value]);
-  const pick = (p: PlaceSuggestion) => { setQ(p.displayLines[0]); setHits([]); setFocused(false); onPick(p); };
+  const pick = (p: PlaceSuggestion) => { setQ(p.name ?? p.displayLines[0]); setHits([]); setFocused(false); onPick(p); };
   const open = focused && hits.length > 0;
   return (
     <View style={s.searchWrap}>
@@ -65,11 +72,16 @@ function PlaceField({ value, placeholder, onPick, onClear, dot, testID, autoFocu
       {open ? (
         <View style={s.hits} testID={`${testID}-hits`}>
           {hits.slice(0, 6).map((p, i) => (
-            <Pressable key={i} style={({ hovered }: any) => [s.hit, hovered && s.optionHover]} onPress={() => pick(p)} accessibilityRole="button">
-              <Ionicons name="location-outline" size={16} color={colors.primary} />
+            <Pressable key={i} style={({ hovered }: any) => [s.hit, hovered && s.optionHover]} onPress={() => pick(p)} accessibilityRole="button" testID={`${testID}-hit-${p.kind ?? 'unknown'}`}>
+              <Ionicons name={KIND_ICON[p.kind ?? 'place']} size={16} color={colors.primary} />
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.hitT} numberOfLines={1}>{p.displayLines[0]}</Text>
-                {p.displayLines[1] ? <Text style={s.hitSub} numberOfLines={1}>{p.displayLines[1]}</Text> : null}
+                <View style={s.hitTop}>
+                  <Text style={s.hitT} numberOfLines={1}>{p.name ?? p.displayLines[0]}</Text>
+                  {/* The kind tag (owner 2026-11-01): «مدينة» / «الحي» / «مسجد» … in the UI language, so six rows named
+                      «الرياض» read as a city, a region, a district and three villages. No tag when Apple did not resolve the row. */}
+                  {p.kind ? <Text style={s.hitKind} numberOfLines={1}>{t(KIND_LABEL[p.kind])}</Text> : null}
+                </View>
+                {(p.subtitle ?? p.displayLines[1]) ? <Text style={s.hitSub} numberOfLines={1}>{p.subtitle ?? p.displayLines[1]}</Text> : null}
               </View>
             </Pressable>
           ))}
@@ -226,7 +238,9 @@ const s = StyleSheet.create({
   // zIndex above the swap button and the «إلى» field: the From list dropped UNDER them (seen live 2026-11-01).
   hits: { position: 'absolute', zIndex: 10, top: 52, left: 0, right: 0, backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.tintLine, padding: 6, ...cardShadow, shadowOpacity: 0.14, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 6 },
   hit: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10 },
-  hitT: { fontSize: 14, fontWeight: '700', color: colors.ink },
+  hitT: { fontSize: 14, fontWeight: '700', color: colors.ink, flexShrink: 1 },
+  hitTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  hitKind: { fontSize: 10.5, fontWeight: '700', color: colors.primary, backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 1, includeFontPadding: false },
   hitSub: { fontSize: 12, color: colors.muted, marginTop: 1 },
   search: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 38, paddingHorizontal: 12, borderRadius: radius.pill, backgroundColor: GLASS, borderWidth: 1, borderColor: colors.tintLine, marginTop: 10 },
   searchInput: { flex: 1, minWidth: 0, fontSize: 16, /* ≥16px: iOS Safari zooms into any smaller input (verify-input-font-no-ios-zoom) */ color: colors.ink, paddingVertical: 0, ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}) },

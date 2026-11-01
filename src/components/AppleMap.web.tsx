@@ -31,6 +31,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
+import { classifyPlace, placeSubtitle, dedupePlaces, sortByKind, isAreaKind, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 
 const MAPKIT_SRC = 'https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js';
@@ -82,11 +83,17 @@ type MKMap = {
 };
 type Coord = { latitude: number; longitude: number };
 type Shape = { style: { fillOpacity: number; strokeOpacity: number; lineWidth: number }; data: Region; points: unknown[] };
-export type PlaceSuggestion = { displayLines: string[]; coordinate?: Coord };
+/** An Apple autocomplete row, plus what suggestPlaces() learned about it: its kind (city / district / mosque …),
+ *  a clean subtitle and the name Apple's Place carries. `kind` is absent when the row could not be resolved in time. */
+export type PlaceSuggestion = { displayLines: string[]; coordinate?: Coord; kind?: PlaceKind; subtitle?: string; name?: string };
 type MKRegion = { center: Coord; span: { latitudeDelta: number; longitudeDelta: number } };
+type MKPlace = {
+  coordinate: Coord; name?: string; pointOfInterestCategory?: string;
+  locality?: string; subLocality?: string; administrativeArea?: string; thoroughfare?: string; region?: MKRegion;
+};
 type MKSearch = {
   autocomplete: (q: string, cb: (err: unknown, data: { results: PlaceSuggestion[] }) => void) => number;
-  search: (q: string | PlaceSuggestion, cb: (err: unknown, data: { boundingRegion?: MKRegion; places: { coordinate: Coord; name?: string; pointOfInterestCategory?: string }[] }) => void) => number;
+  search: (q: string | PlaceSuggestion, cb: (err: unknown, data: { boundingRegion?: MKRegion; places: MKPlace[] }) => void) => number;
 };
 type MapKit = {
   init: (o: { authorizationCallback: (done: (token: string) => void) => void; language?: string }) => void;
@@ -249,11 +256,36 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
     live.search = new mk.Search({ language, limitToCountries: 'SA', includePointsOfInterest: true });
     live.lang = language;
   }
-  return new Promise((resolve) => {
+  const search = live.search!;
+  const rows = await new Promise<PlaceSuggestion[]>((resolve) => {
     // Only real PLACES: Apple also returns query completions («adidas · Search Nearby») that carry no coordinate and
     // land nowhere (owner 2026-11-01 saw one in the route fields).
-    live.search!.autocomplete(query, (err, data) => resolve(err || !data ? [] : data.results.filter((r) => r.displayLines?.length && r.coordinate)));
+    search.autocomplete(query, (err, data) => resolve(err || !data ? [] : data.results.filter((r) => r.displayLines?.length && r.coordinate)));
   });
+  // SAY WHAT KIND OF PLACE EACH ROW IS (owner 2026-11-01: «identify between landmarks, cities and like this»): the
+  // autocomplete row carries two lines and nothing else, so each of the top rows is resolved to Apple's Place (one
+  // round trip, in parallel, ~200 ms measured) and classified in src/lib/placeKind.ts — then duplicates (the same
+  // mall's hotel, cafés and restaurants) collapse, places sort city → region → district → street → landmark, and the
+  // subtitle names WHERE it is instead of a plus-code address. A row Apple does not resolve within the budget keeps
+  // its two lines and no tag — never dropped, never a fake kind.
+  const country = language === 'ar' ? 'المملكة العربية السعودية' : 'Saudi Arabia';
+  const resolve1 = (r: PlaceSuggestion) => new Promise<PlaceSuggestion>((resolve) => {
+    const timer = setTimeout(() => resolve(r), 1500);
+    search.search(r, (err, data) => {
+      clearTimeout(timer);
+      const p = !err && data?.places?.[0];
+      if (!p) return resolve(r);
+      const facts: PlaceFacts = {
+        name: p.name ?? r.displayLines[0], locality: p.locality, subLocality: p.subLocality, administrativeArea: p.administrativeArea,
+        thoroughfare: p.thoroughfare, poi: p.pointOfInterestCategory, span: p.region?.span?.latitudeDelta,
+      };
+      const kind = classifyPlace(facts);
+      resolve({ ...r, name: facts.name, kind, subtitle: placeSubtitle(facts, kind, country), coordinate: p.coordinate ?? r.coordinate });
+    });
+  });
+  const resolved = await Promise.all(rows.slice(0, 8).map(resolve1));
+  const named = resolved.map((r) => ({ ...r, name: r.name ?? r.displayLines[0] }));
+  return sortByKind(dedupePlaces(named)).slice(0, 6);
 }
 
 /** Glide the map to a suggestion: Apple's bounding region for it when it has one, else a town-sized view around it. */
@@ -274,10 +306,11 @@ export function flyToPlace(p: PlaceSuggestion) {
     clearPlaceMark();
     if (!c) return;
     const style = (fillOpacity: number, lineWidth: number) => new mk.Style({ strokeColor: lightColors.primary, strokeOpacity: 0.85, lineWidth, fillColor: lightColors.primary, fillOpacity });
-    if (place && place.pointOfInterestCategory) {
+    const landmark = p.kind ? !isAreaKind(p.kind) && p.kind !== 'street' : !!(place && place.pointOfInterestCategory);
+    if (landmark) {
       const radius = region ? Math.max(120, Math.min(600, region.span.latitudeDelta * 111_000 * 0.35)) : 250;
       live.mark.overlay = new mk.CircleOverlay(new mk.Coordinate(c.latitude, c.longitude), radius, { style: style(0.12, 1.5), enabled: false });
-      live.mark.pin = new mk.MarkerAnnotation(new mk.Coordinate(c.latitude, c.longitude), { title: place.name ?? p.displayLines[0], color: lightColors.primary, animates: true });
+      live.mark.pin = new mk.MarkerAnnotation(new mk.Coordinate(c.latitude, c.longitude), { title: (place ? place.name : undefined) ?? p.name ?? p.displayLines[0], color: lightColors.primary, animates: true });
       m.addOverlay(live.mark.overlay);
       m.addAnnotation(live.mark.pin);
     } else if (region) {
