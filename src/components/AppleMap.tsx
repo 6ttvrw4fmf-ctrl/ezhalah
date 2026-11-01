@@ -7,8 +7,10 @@ export type PlaceSuggestion = { displayLines: string[]; coordinate?: { latitude:
 export async function suggestPlaces(_q: string, _language: string): Promise<PlaceSuggestion[]> { return []; }
 export function flyToPlace(_p: PlaceSuggestion) {}
 export function clearPlaceMark() {}
+export async function routeBetween(_a: PlaceSuggestion, _b: PlaceSuggestion): Promise<boolean> { return false; }
+export function clearRoute() {}
 
-export default function AppleMap(_: { full?: boolean; onExpand?: () => void; onClose?: () => void }) {
+export default function AppleMap(_: { full?: boolean; onExpand?: () => void; onClose?: () => void; onRoute?: () => void }) {
   return <View style={s.frame} />;
 }
 

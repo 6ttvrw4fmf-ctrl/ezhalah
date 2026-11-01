@@ -14,7 +14,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ModeSwitch from '@/components/ModeSwitch';
 import AppleMap from '@/components/AppleMap';
-import MapDealRow, { MapSearchBar } from '@/components/MapDealRow';
+import MapDealRow, { MapSearchBar, MapRouteFields } from '@/components/MapDealRow';
 import HeroBackground from '@/components/HeroBackground';
 import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
 import ShareSheet from '@/components/ShareSheet';
@@ -49,6 +49,8 @@ export default function MapRoute() {
   // within his screen without leaving»): the compact box pans and zooms in place, and its ⤢ button lifts the SAME
   // map over the whole screen (no remount: the map, its zoom and any drawing stay); its X brings the page back.
   const [full, setFull] = useState(false);
+  // «مسار» (owner 2026-10-31): the search field becomes «من» / «إلى» until the ✕; a drawn route stays on the map.
+  const [routeMode, setRouteMode] = useState(false);
   const shareScale = useRef(new RNAnimated.Value(1)).current;
   const shareSpring = (toValue: number) =>
     RNAnimated.spring(shareScale, { toValue, useNativeDriver: false, speed: 40, bounciness: 6 }).start();
@@ -120,9 +122,9 @@ export default function MapRoute() {
         <ModeSwitch active="map" onSwitch={(to) => router.replace(to === 'filter' ? '/' : '/agent')} t={t} />
       </View>
       {/* Transaction + filter row above the map (owner 2026-10-31, Zillow's «For sale ▾ | Filters», Ezhalah-themed). */}
-      <View style={s.dealWrap}><MapSearchBar onPick={() => setFull(true)} /><MapDealRow /></View>
+      <View style={s.dealWrap}>{routeMode ? <MapRouteFields onClose={() => setRouteMode(false)} onRouted={() => setFull(true)} /> : <MapSearchBar onPick={() => setFull(true)} />}<MapDealRow /></View>
       <View style={full ? [s.bodyFull, { paddingTop: insets.top + 8, paddingBottom: Math.max(insets.bottom, 8) }] : [s.body, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-        <AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} />
+        <AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} onRoute={() => { setRouteMode(true); setFull(false); }} />
       </View>
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}

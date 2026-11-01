@@ -99,6 +99,7 @@ type MapKit = {
   PolygonOverlay: new (points: unknown[] | unknown[][], o?: { style?: unknown; data?: unknown; enabled?: boolean }) => Shape;
   PolylineOverlay: new (points: unknown[], o?: { style?: unknown; enabled?: boolean }) => Shape;
   CircleOverlay: new (center: unknown, radius: number, o?: { style?: unknown; enabled?: boolean }) => unknown;
+  Directions: (new (o?: { language?: string }) => { route: (req: { origin: unknown; destination: unknown; transportType?: unknown }, cb: (err: unknown, data: { routes: { polyline: { points: Coord[] }; distance: number }[] }) => void) => number }) & { Transport: { Automobile: unknown } };
   MarkerAnnotation: new (coord: unknown, o?: { title?: string; color?: string; glyphColor?: string; animates?: boolean }) => unknown;
   Search: new (o: { region?: unknown; language?: string; limitToCountries?: string; includePointsOfInterest?: boolean }) => MKSearch;
   addEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
@@ -176,7 +177,51 @@ function initOnce(mk: MapKit, language: string) {
 // ── The page's search field talks to the map through this (MapDealRow's MapSearchBar) ─────────────────────────
 // One map per page, so one handle: the mounted map registers itself; the field asks Apple for places and flies there.
 // `history`: the views left behind by a jump (a search pick, a region tap) so «رجوع» can return to them.
-const live: { map: MKMap | null; search: MKSearch | null; lang: string; history: unknown[]; mark: { overlay?: unknown; pin?: unknown } } = { map: null, search: null, lang: '', history: [], mark: {} };
+const live: { map: MKMap | null; search: MKSearch | null; lang: string; history: unknown[]; mark: { overlay?: unknown; pin?: unknown }; route: unknown[]; onRoute?: (on: boolean) => void } = { map: null, search: null, lang: '', history: [], mark: {}, route: [] };
+
+/** Remove the drawn route (band, line, end pins). */
+export function clearRoute() {
+  const m = live.map;
+  if (m) for (const o of live.route) { if ((o as { coordinate?: unknown }).coordinate) m.removeAnnotation(o); else m.removeOverlay(o); }
+  live.route = [];
+  live.onRoute?.(false);
+}
+
+const resolvePlace = (p: PlaceSuggestion): Promise<Coord | null> => new Promise((resolve) => {
+  if (!live.search) return resolve(p.coordinate ?? null);
+  live.search.search(p, (err, data) => resolve((!err && data?.places?.[0]?.coordinate) || p.coordinate || null));
+});
+
+/** «مسار» — Apple's driving route from one place to another, drawn in the brand colour with a soft band around it
+ *  (the search area along the way), end pins, and the map fitted to it. Resolves false when Apple has no route. */
+export async function routeBetween(from: PlaceSuggestion, to: PlaceSuggestion): Promise<boolean> {
+  const mk = mapkitOf(); const m = live.map;
+  if (!mk || !m) return false;
+  const [a, b] = await Promise.all([resolvePlace(from), resolvePlace(to)]);
+  if (!a || !b) return false;
+  const directions = new mk.Directions({ language: mk.language });
+  return new Promise((resolve) => {
+    directions.route({ origin: new mk.Coordinate(a.latitude, a.longitude), destination: new mk.Coordinate(b.latitude, b.longitude), transportType: mk.Directions.Transport.Automobile }, (err, data) => {
+      const route = !err && data?.routes?.[0];
+      if (!route || !route.polyline?.points?.length) return resolve(false);
+      clearRoute();
+      clearPlaceMark();
+      const pts = route.polyline.points.map((c) => new mk.Coordinate(c.latitude, c.longitude));
+      const band = new mk.PolylineOverlay(pts, { style: new mk.Style({ strokeColor: lightColors.primary, strokeOpacity: 0.18, lineWidth: 28 }), enabled: false });
+      const line = new mk.PolylineOverlay(pts, { style: new mk.Style({ strokeColor: lightColors.primary, strokeOpacity: 0.95, lineWidth: 4 }), enabled: false });
+      const pinA = new mk.MarkerAnnotation(new mk.Coordinate(a.latitude, a.longitude), { title: from.displayLines[0], color: lightColors.primary });
+      const pinB = new mk.MarkerAnnotation(new mk.Coordinate(b.latitude, b.longitude), { title: to.displayLines[0], color: '#c84646' });
+      m.addOverlay(band); m.addOverlay(line); m.addAnnotation(pinA); m.addAnnotation(pinB);
+      live.route = [band, line, pinA, pinB];
+      const lats = route.polyline.points.map((c) => c.latitude), lngs = route.polyline.points.map((c) => c.longitude);
+      const s0 = Math.min(...lats), n = Math.max(...lats), w = Math.min(...lngs), e = Math.max(...lngs);
+      live.history.push(m.region);
+      m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate((s0 + n) / 2, (w + e) / 2), new mk.CoordinateSpan(Math.max((n - s0) * 1.3, 0.02), Math.max((e - w) * 1.3, 0.02))), true);
+      live.onRoute?.(true);
+      resolve(true);
+    });
+  });
+}
 
 /** Remove the highlight of the last searched place (the field's ✕, or a new search). */
 export function clearPlaceMark() {
@@ -263,7 +308,7 @@ const regionView = (mk: MapKit, r: Region) => {
 /** `onExpand` (compact box): the ⤢ button top-left opens the map full screen; the box itself pans and zooms in place
  *  (owner 2026-10-31: «zoom in within his screen without leaving»). `full` + `onClose`: the full-screen map, with its
  *  close button top-left. */
-export default function AppleMap({ full = false, onExpand, onClose }: { full?: boolean; onExpand?: () => void; onClose?: () => void }) {
+export default function AppleMap({ full = false, onExpand, onClose, onRoute }: { full?: boolean; onExpand?: () => void; onClose?: () => void; onRoute?: () => void }) {
   const { t, locale } = useI18n();
   const hostRef = useRef<View>(null);
   const localeRef = useRef(locale);
@@ -276,6 +321,8 @@ export default function AppleMap({ full = false, onExpand, onClose }: { full?: b
   const [sketch, setSketch] = useState<Shape | null>(null);
   const [hasShape, setHasShape] = useState(false);
   const [zoomed, setZoomed] = useState(false);
+  const [routeOn, setRouteOn] = useState(false);
+  useEffect(() => { live.onRoute = setRouteOn; return () => { if (live.onRoute === setRouteOn) live.onRoute = undefined; }; }, []);
   const [failed, setFailed] = useState(false);
   // Map style (owner 2026-10-31, Zillow's layers button): the modes Apple's web MapKit offers — standard, satellite
   // with labels (hybrid), and muted. Driving / transit / traffic exist only in Apple's own apps, not on the web.
@@ -535,6 +582,16 @@ export default function AppleMap({ full = false, onExpand, onClose }: { full?: b
           <Ionicons name="close" size={22} color={colors.ink} />
         </Pressable>
       ) : null}
+      <View style={s.topRight} pointerEvents="box-none">
+      {/* «مسار» beside «رسم» (owner 2026-10-31: from here to here, visible before anyone types). With a route drawn it
+          becomes «إزالة المسار ✕». */}
+      {onRoute && !failed && !drawing ? (
+        <Pressable style={[s.drawBtn, routeOn && s.boundaryBtn]} onPress={routeOn ? clearRoute : onRoute} accessibilityRole="button" accessibilityLabel={t(routeOn ? 'Remove route' : 'Route')} testID="map-route-btn">
+          {routeOn ? null : <Ionicons name="navigate-outline" size={15} color={colors.ink} />}
+          <Text style={[s.wholeT, routeOn && s.boundaryT]}>{t(routeOn ? 'Remove route' : 'Route')}</Text>
+          {routeOn ? <Ionicons name="close" size={17} color={colors.primary} /> : null}
+        </Pressable>
+      ) : null}
       {/* «رسم» top-right, like Zillow's Draw. Once a boundary is applied it becomes Zillow's «Remove Boundary ✕»
           (owner 2026-10-31: «see how it shows remove boundary»). No «كل المملكة» button any more (owner: «remove
           this whole kingdom»): pinch / scroll zooms back out, as on any map. */}
@@ -545,6 +602,7 @@ export default function AppleMap({ full = false, onExpand, onClose }: { full?: b
           {hasShape ? <Ionicons name="close" size={17} color={colors.primary} /> : null}
         </Pressable>
       ) : null}
+      </View>
       {/* + / − above the layers button, same column. */}
       {!failed && !drawing ? (
         <View style={[s.zoomCol, locale === 'ar' && s.zoomColAr]} testID="map-zoom">
@@ -579,8 +637,9 @@ const s = StyleSheet.create({
   frame: { flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
   host: { flex: 1 },
   wholeT: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },
+  topRight: { position: 'absolute', top: 12, right: 12, flexDirection: 'row', gap: 8 },
   drawBtn: {
-    position: 'absolute', top: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 999,
+    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 999,
     paddingHorizontal: 14, height: 36, borderWidth: 1, borderColor: colors.tintLine,
   },
   zoomCol: { position: 'absolute', right: 12, bottom: 62, width: 40, backgroundColor: colors.surface, borderRadius: 20, borderWidth: 1, borderColor: colors.tintLine, alignItems: 'center', overflow: 'hidden' },
