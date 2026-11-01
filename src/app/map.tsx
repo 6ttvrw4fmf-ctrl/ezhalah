@@ -120,7 +120,7 @@ export default function MapRoute() {
         <ModeSwitch active="map" onSwitch={(to) => router.replace(to === 'filter' ? '/' : '/agent')} t={t} />
       </View>
       {/* Transaction + filter row above the map (owner 2026-10-31, Zillow's «For sale ▾ | Filters», Ezhalah-themed). */}
-      <View style={s.dealWrap}><MapSearchBar /><MapDealRow /></View>
+      <View style={s.dealWrap}><MapSearchBar onPick={() => setFull(true)} /><MapDealRow /></View>
       <View style={full ? [s.bodyFull, { paddingTop: insets.top + 8, paddingBottom: Math.max(insets.bottom, 8) }] : [s.body, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} />
       </View>
