@@ -333,7 +333,7 @@ const shape = (r: ReturnType<typeof scoreQuestion>) =>
   const agentSrc = readFileSync(join(root, 'src', 'app', 'agent.tsx'), 'utf8');
   check('§7.1 rankQuestions sorts by exactly (ask-tier desc, then score desc) — the comparator §7 models',
     // 2026-10-31: `tier` is askTier on every scope but short stays, where it is the owner's fixed order
-    // (shortStaysAskTier: bathrooms → comfort → outdoors) — the same (tier desc, then score desc) shape.
+    // (shortStaysAskTier: bathrooms → comfort → space → fun) — the same (tier desc, then score desc) shape.
     /const tier = isShortStaysScope\(q\) \? shortStaysAskTier : askTier;/.test(advSrc)
       && /tier\(b\.question\.id\)\s*-\s*tier\(a\.question\.id\)\s*\|\|\s*b\.score\s*-\s*a\.score/.test(advSrc),
     'the production comparator in advancedFilters.ts is no longer the one this section reasons about');

@@ -54,7 +54,8 @@ function facetItems(f: AfFacet, locale: 'ar' | 'en' = 'ar'): string[] {
       // The short-stays halves (owner 2026-11-01): their chip labels already carry the emoji in front
       // («🛗 مصعد», guidedOptions' `emoji`), so the item is the label as the user saw it.
       case 'comfort':
-      case 'outdoors':
+      case 'space':
+      case 'fun':
         for (const l of f.labels) items.push(l);
         break;
       // SCOPE tiers (owner 2026-08-23) — multi-select like amenities, so each picked group/type is
@@ -148,7 +149,8 @@ export const AF_LINE_LABEL: Record<string, string> = {
   bathrooms: 'Bathrooms',
   amenities: 'Features',
   comfort: 'Comfort',
-  outdoors: 'Fun & outdoors',
+  space: 'Space & safety',
+  fun: 'Fun',
   furnished: 'Furnishing',
   property_age: 'Property age',
   rnpl: 'Payment',
@@ -196,7 +198,8 @@ const SKIPPED_QUESTION: Record<string, string> = {
   rnpl: 'التقسيط',
   amenities: 'المميزات',
   comfort: 'الراحة',
-  outdoors: 'الترفيه والخارج',
+  space: 'المساحة والأمان',
+  fun: 'الترفيه',
   bathrooms: 'دورات المياه',
   furnished: 'الفرش',
   street_width: 'عرض الشارع',

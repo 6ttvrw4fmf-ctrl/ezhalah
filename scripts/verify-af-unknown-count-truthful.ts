@@ -148,8 +148,9 @@ const MUST_READ_COLUMN: Array<[string, string, string]> = [
   ['RATING_QUESTION', 'const UNIT_SUBTYPE_QUESTION', 'cnt_rating_unknown'],
   ['UNIT_SUBTYPE_QUESTION', 'const COMFORT_QUESTION', 'cnt_sub_unknown'],
   // The short-stays halves of the amenities card (owner 2026-10-31) read the same amenity unknown column.
-  ['COMFORT_QUESTION', 'const OUTDOORS_QUESTION', 'cnt_amen_unknown'],
-  ['OUTDOORS_QUESTION', 'export const ADVANCED_QUESTIONS', 'cnt_amen_unknown'],
+  ['COMFORT_QUESTION', 'const SPACE_QUESTION', 'cnt_amen_unknown'],
+  ['SPACE_QUESTION', 'const FUN_QUESTION', 'cnt_amen_unknown'],
+  ['FUN_QUESTION', 'export const ADVANCED_QUESTIONS', 'cnt_amen_unknown'],
   ['RNPL_QUESTION', 'const AMENITIES_QUESTION', 'cnt_rnpl_unknown'],
 ];
 const columnProblems = (src: string): string[] => {

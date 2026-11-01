@@ -17,10 +17,10 @@ export { isShortStaysScope };
 // that differ by type, and here they do not. Measured 2026-10-31 over all 18,963 short-stay ads:
 // bathrooms known on 18,741 (98.8 %, every type ≥ 82 %); amenity chips are positive-only tokens.
 // The three ASKED questions, in the owner's order (decision 3): 🚽 bathrooms → 🔑 comfort → 🏊 fun &
-// outdoors. No property type (decision 1), no rating (decision 2 — Aqar Monthly has no rating, so a
-// rating floor would hide all of its ads). `comfort` and `outdoors` are the generic amenities card
-// split in two (owner 2026-10-31, «Exactly 3 questions, in this order»); both write q.amenities.
-export const SHORT_STAYS_QUESTIONS = ['bathrooms', 'comfort', 'outdoors'] as const;
+// space & safety → ✨ fun (locked 2026-11-01). No property type (decision 1), no rating (decision 2 — Aqar Monthly has no rating, so a
+// rating floor would hide all of its ads). `comfort`, `space` and `fun` are the generic amenities card
+// split by theme (owner 2026-10-31 / 2026-11-01); all three write q.amenities.
+export const SHORT_STAYS_QUESTIONS = ['bathrooms', 'comfort', 'space', 'fun'] as const;
 // Certified for a TYPED sentence only («فيها مصعد», «تقييم ٩ وفوق», «استديو»): the chat keeps using
 // them as today (afIntents.ts gates on cohortAllows), the card never asks them on short stays.
 export const SHORT_STAYS_CHAT_ONLY = ['amenities', 'rating', 'unit_subtype'] as const;
@@ -36,12 +36,18 @@ export function shortStaysAskTier(id: string): number {
 // (cnt_<key> in apartment_guided_counts_ar) and its p_amenities slug. The owner's full lists (self
 // check-in, Wi-Fi, bills included, grill, kids' play area, jacuzzi, outdoor seating) join one chip at
 // a time, each with its free-word-reader words and count first (docs/ops/AI_FACTS_READER.md).
-// COMFORT_QUESTION / OUTDOORS_QUESTION in advancedFilters.ts inline the same keys (they are lifted by
+// COMFORT_QUESTION / SPACE_QUESTION / FUN_QUESTION in advancedFilters.ts inline the same keys (they are lifted by
 // barriers and cannot import these); verify-short-stays-one-cohort.ts pins the two copies equal.
-export const SHORT_STAYS_COMFORT_KEYS = ['elevator', 'parking', 'laundry_room'] as const;
-export const SHORT_STAYS_OUTDOORS_KEYS = ['pool', 'garden'] as const;
+// The owner's locked lists (2026-11-01), today's data-backed subset of each:
+//   🔑 comfort        — self check-in · Wi-Fi · washing machine · bills included · elevator · parking · private entrance
+//   🏠 space & safety — majlis · balcony · private roof · soundproof · cameras · cleaning service
+//   ✨ fun            — pool · gym · jacuzzi · smart TV / cinema · billiards
+// «washing machine» rides the existing laundry_room fact (owner: «+ existing laundry_room»).
+export const SHORT_STAYS_COMFORT_KEYS = ['elevator', 'parking', 'private_entrance', 'laundry_room'] as const;
+export const SHORT_STAYS_SPACE_KEYS = ['majlis', 'balcony'] as const;
+export const SHORT_STAYS_FUN_KEYS = ['pool', 'gym'] as const;
 // Every question that writes the one q.amenities bag and is token-filtered on re-entry (afCarry.ts).
-export const AMENITY_BAG_QUESTION_IDS: ReadonlySet<string> = new Set(['amenities', 'comfort', 'outdoors']);
+export const AMENITY_BAG_QUESTION_IDS: ReadonlySet<string> = new Set(['amenities', 'comfort', 'space', 'fun']);
 
 // Which amenity chips are safe for a MULTI-TYPE scope: the intersection of every selected type's
 // certified chip list. Returns null when no selected type has a cohort chip list (the caller then
@@ -382,7 +388,7 @@ export function certifiedAmenityKeys(q: SearchQuery): string[] {
   // Short stays (owner 2026-10-31): the chips the two short-stays cards offer, for the whole pool,
   // whatever type is in scope — a «Vacation & Rural» group would otherwise intersect Rest House's
   // utility trio with Chalet's nothing and offer no chip at all.
-  if (isShortStaysScope(q)) return [...SHORT_STAYS_COMFORT_KEYS, ...SHORT_STAYS_OUTDOORS_KEYS];
+  if (isShortStaysScope(q)) return [...SHORT_STAYS_COMFORT_KEYS, ...SHORT_STAYS_SPACE_KEYS, ...SHORT_STAYS_FUN_KEYS];
   // No empty-scope guard here on purpose: cohortAllows() already returns false when scopeCleanTypes
   // is empty, so a second check is dead code — it cannot change behaviour and cannot be tested. (A
   // mutation removing it was provably EQUIVALENT, which is what exposed it as redundant.)

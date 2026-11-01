@@ -259,8 +259,8 @@ for (const cell of certified.filter((c) => c.scope.kind === 'type')) {
         const listedFor = (id: string) => t.scope.types.every((ty) => tableAllows(ty, t.mode, id));
         const listed = listedFor(f.question.id);
         // amenities are certified per TOKEN: kept iff a card in the new cell that writes the amenities bag
-        // (the card, or its short-stays halves comfort / outdoors — owner 2026-10-31) can offer the token
-        const BAG = ['amenities', 'comfort', 'outdoors'];
+        // (the card, or its short-stays parts comfort / space / fun — owner 2026-10-31 / 11-01) can offer the token
+        const BAG = ['amenities', 'comfort', 'space', 'fun'];
         const keep = BAG.includes(f.question.id)
           ? BAG.some((id) => listedFor(id) && offeredKeys(t.scope, t.mode, id).has(o.key))
           : listed;

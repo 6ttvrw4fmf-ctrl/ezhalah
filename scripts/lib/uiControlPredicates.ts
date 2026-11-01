@@ -99,7 +99,8 @@ export const AF_QUESTION_FIELDS: Record<string, string[]> = {
   amenities: [],
   // Its two short-stays halves (owner 2026-10-31) offer a subset of the same chip keys — same judgement.
   comfort: [],
-  outdoors: [],
+  space: [],
+  fun: [],
   street_width: ['street_width_m'],
   direction: ['direction_ar'],
   // The 9.0+rc10 rung sets BOTH ratingMin and reviewsMin (advancedFilters.ts RATING_QUESTION.apply),

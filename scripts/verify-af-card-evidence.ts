@@ -56,7 +56,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const QUESTION_CONSTS = [
   'RNPL_QUESTION', 'AGE_QUESTION', 'AMENITIES_QUESTION', 'BATHROOMS_QUESTION', 'FURNISHED_QUESTION',
   'STREET_WIDTH_QUESTION', 'DIRECTION_QUESTION', 'RATING_QUESTION', 'UNIT_SUBTYPE_QUESTION',
-  'COMFORT_QUESTION', 'OUTDOORS_QUESTION',   // the short-stays halves of the amenities card (owner 2026-10-31)
+  'COMFORT_QUESTION', 'SPACE_QUESTION', 'FUN_QUESTION',   // the short-stays parts of the amenities card (owner 2026-10-31 / 11-01)
 ];
 type Opt = { key: string; labelKey: string };
 type Question = {
@@ -125,7 +125,7 @@ console.log('\n── T1. completeness: every certified question has an evidence
 assert(cohorts.length > 0 && certified.length >= 9, `the real registry yielded ${certified.length} certified question ids across ${cohorts.length} cohorts`);
 for (const id of certified) assert(id in AF_EVIDENCE, `certified question «${id}» has an evidence def`);
 for (const id of Object.keys(AF_EVIDENCE)) assert(certified.includes(id), `evidence def «${id}» is a certified question (no phantom def)`);
-// The two short-stays halves of the amenities card (comfort / outdoors, owner 2026-10-31) are certified by
+// The short-stays parts of the amenities card (comfort / space / fun, owner 2026-10-31 / 11-01) are certified by
 // the short-stays rule, not by a COHORT_QUESTIONS leg, and write the ONE `amenities` field — whose evidence
 // is the amenities def. They have no def of their own (a second owner of `amenities` would break the
 // partition rule above), so the order is compared over the certified pool.
