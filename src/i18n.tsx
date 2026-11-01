@@ -542,9 +542,9 @@ const AR: Record<string, string> = {
   'What amenities matter to you?': 'وش المميزات المهمة لك؟',
   // Short stays: the amenities card in two halves (owner 2026-10-31) — the question titles and the
   // summary-line labels («• الراحة: مصعد»).
-  '🔑 Comfort: what matters to you?': '🔑 الراحة: وش المهم لك؟',
-  '🏠 Space & safety: what matters to you?': '🏠 المساحة والأمان: وش المهم لك؟',
-  '✨ Fun: what matters to you?': '✨ الترفيه: وش المهم لك؟',
+  '🔑 Comfort: what matters to you?': '🔑 الراحة: وش الي يريحك؟',
+  '🏠 Space & safety: what matters to you?': '🏠 المساحة والأمان: وش الي يطمنك؟',
+  '✨ Fun: what matters to you?': '✨ الترفيه: وش الي يسعدك؟',
   'Comfort': 'الراحة',
   'Space & safety': 'المساحة والأمان',
   'Fun': 'الترفيه',
