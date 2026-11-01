@@ -46,6 +46,10 @@ export const PARTY_GAP_MS = 6000;
 /** The home headline listens for this to shine (2 passes) while the party plays. */
 export const NAME_PARTY_EVENT = 'ezhalah:name-party';
 export const SHINE_MS = 4800;
+// THE SHINE NEVER HIDES THE WORDS (owner 2026-11-01: the headline was blank on iPhone after sign-in, «I don't get the fact»).
+// It used to paint a dark-green gradient THROUGH see-through letters (background-clip:text + transparent text): on the dark
+// theme that read as nothing, and iPhone Safari can leave such text unpainted altogether. It is now a gold glow ON the
+// letters (color + text-shadow), which every browser paints. Guard: scripts/verify-headline-shine-never-hides-text.ts.
 
 
 const CSS = `
@@ -71,8 +75,8 @@ const CSS = `
 [data-ezh-shake="b"]{animation:ezhShakeB .26s}
 @keyframes ezhShakeA{0%{transform:translateX(0)}33%{transform:translateX(-6px)}66%{transform:translateX(6px)}100%{transform:translateX(0)}}
 @keyframes ezhShakeB{0%{transform:translateX(0)}33%{transform:translateX(-6px)}66%{transform:translateX(6px)}100%{transform:translateX(0)}}
-[data-ezh-shine="on"]{background-image:linear-gradient(100deg,#2f7247 30%,#5fae7c 45%,#d8b14a 50%,#5fae7c 55%,#2f7247 70%)!important;background-size:250% 100%!important;-webkit-background-clip:text!important;background-clip:text!important;-webkit-text-fill-color:transparent;color:transparent!important;animation:ezhShine 2.4s ease-in-out 2}
-@keyframes ezhShine{from{background-position:110% 0}to{background-position:-10% 0}}
+[data-ezh-shine="on"]{animation:ezhShine 2.4s ease-in-out 2}
+@keyframes ezhShine{0%,100%{text-shadow:0 0 0 rgba(216,177,74,0)}50%{color:#d8b14a;text-shadow:0 0 14px rgba(216,177,74,.6)}}
 [data-ezh-shine="on"] [data-ezh-emoji]{-webkit-text-fill-color:initial!important;color:initial!important}
 [data-ezh-emoji="party"]{display:inline-block;transform-origin:50% 70%;animation:ezhParty .5s ease-in-out infinite}
 @keyframes ezhParty{0%,100%{transform:rotate(-14deg) scale(1)}25%{transform:rotate(16deg) scale(1.18)}50%{transform:rotate(-10deg) scale(1.05)}75%{transform:rotate(12deg) scale(1.2)}}
