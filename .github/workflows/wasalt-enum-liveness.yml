@@ -80,7 +80,7 @@ jobs:
         run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
   enum:
-    name: Enum ${{ matrix.slug }} ${{ matrix.deal }}
+    name: Enum ${{ matrix.slug }} ${{ matrix.deal }} ${{ matrix.first }}
     needs: stamp
     # PILOT skip (run strike against the last completed enum) OR the one-time repair dispatch —
     # either way the 4.5h enum has no reason to run.
@@ -101,7 +101,14 @@ jobs:
       # A slice missing here is never enumerated, so every live listing in it would be counted
       # "unseen by the enum" and struck — the category-level version of the same failure the rollup
       # guard catches at the shard-count level. COMMERCIAL HAS ITS OWN 7 SLUGS; leaving them out was
-      # a real bug caught in review. 34 shards total; keep --shards-expected below in step.
+      # a real bug caught in review. 35 shards total; keep --shards-expected below in step.
+      #
+      # ROOM HAS NO FILTER ON THE SITE (read in a real browser 2026-11-01: wasalt.sa's Type menu has no
+      # Room, and propertyTypeData=room returns the whole list). So the room shards are the only walk
+      # that sees the types with no slug: Room (101 live), House, Complex, Gas Station, Farming Land.
+      # They must stay whole-list walks. room/sale is ~1,870 pages, 303+ min, and passed the 330-min
+      # cap on 10-21, 10-29 and 10-31, which threw away all 34 shards' strikes. Two jobs, overlapping
+      # by 10 pages so an ad sliding down during the walk is still read.
       matrix:
         include:
           - { type: residential, slug: apartment, deal: sale }
@@ -120,7 +127,8 @@ jobs:
           - { type: residential, slug: chalet, deal: rent }
           - { type: residential, slug: farm, deal: sale }
           - { type: residential, slug: farm, deal: rent }
-          - { type: residential, slug: room, deal: sale }
+          - { type: residential, slug: room, deal: sale, first: 1, last: 1000 }
+          - { type: residential, slug: room, deal: sale, first: 990, last: 2000 }
           - { type: residential, slug: room, deal: rent }
           - { type: residential, slug: duplex, deal: sale }
           - { type: residential, slug: duplex, deal: rent }
@@ -179,7 +187,7 @@ jobs:
           # is a FLOOR: it counts rendered HTML, and scripts are deliberately not blocked because
           # the challenge needs them. Re-measure before raising --pages or the cadence.
           exec xvfb-run -a python -m scrapers.wasalt.run \
-            --type ${{ matrix.type }} --slug ${{ matrix.slug }} --deal ${{ matrix.deal }} --pages 2000
+            --type ${{ matrix.type }} --slug ${{ matrix.slug }} --deal ${{ matrix.deal }} --start-page ${{ matrix.first || 1 }} --pages ${{ matrix.last || 2000 }}
 
   rollup:
     name: Roll the shards up into one enumeration
@@ -205,12 +213,12 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           # No proxy and no browser: this step only reads scrape_runs and writes one row.
-          # --shards-expected must equal the matrix size (residential 10 + commercial 7, x2 deals = 34).
+          # --shards-expected must equal the matrix size (residential 10 + commercial 7, x2 deals = 34, + room/sale's second part = 35).
           # It is re-checked
           # against the DB rather than against CI, because a job can succeed having written nothing.
           exec python -m scrapers.wasalt.liveness \
             --mode enum-rollup \
-            --shards-expected 34 \
+            --shards-expected 35 \
             --since "${{ needs.stamp.outputs.at }}" \
             ${{ inputs.dry_run && '--dry-run' || '' }}
 

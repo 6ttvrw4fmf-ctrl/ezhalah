@@ -747,7 +747,7 @@ def rotate_route(s) -> None:
         s.rotate()
 
 
-def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[int, int, bool, bool]:
+def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int, start_page: int = 1) -> tuple[int, int, bool, bool]:
     """Sweep one type-slug × deal. Returns (upserted, source_count, page1_valid, truncated).
 
     `truncated` is True when the crawl stopped early because a page failed to fetch/parse
@@ -783,7 +783,7 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[
     truncated = False
     skipped: list[int] = []
     empty_run = 0
-    for page in range(1, pages + 1):
+    for page in range(start_page, pages + 1):
         pg_count, pg_total, props, valid = fetch_page(s, deal, cat, slug, page)
         if not props and valid and page < pages and upserted < count:
             # A VALID page with no listings BEFORE the last page the source itself announced is not
@@ -868,6 +868,7 @@ def main() -> int:
     p.add_argument("--type", choices=["residential", "commercial"], default="residential")
     p.add_argument("--slug", default="apartment")
     p.add_argument("--pages", type=int, default=3)
+    p.add_argument("--start-page", type=int, default=1, help="first page of this walk (one long list split over two CI jobs)")
     p.add_argument("--all", action="store_true", help="sweep every type × sale+rent")
     args = p.parse_args()
 
@@ -900,7 +901,7 @@ def main() -> int:
                         any_truncated = any_truncated or trunc
         else:
             total, src_count, page1_valid, any_truncated = scrape_slice(
-                s, args.deal, args.type, args.slug, max_pages=args.pages)
+                s, args.deal, args.type, args.slug, max_pages=args.pages, start_page=args.start_page)
             # A single-category run may legitimately be empty: Wasalt itself can carry zero
             # listings for a slug (farm has zero, always has). That is only believable when the
             # app actually answered (page1_valid: parsed __NEXT_DATA__) AND its own count said 0 —

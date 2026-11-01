@@ -32,7 +32,7 @@ def _expected_slices() -> set[tuple[str, str, str]]:
 # lines are a fixed shape this repo writes itself. The pattern is anchored to that shape so a
 # malformed entry fails to match (and trips the count check) rather than being silently skipped.
 _SLICE_RE = re.compile(
-    r"^\s*-\s*\{\s*type:\s*(\w+),\s*slug:\s*([\w-]+),\s*deal:\s*(\w+)\s*\}\s*$", re.M)
+    r"^\s*-\s*\{\s*type:\s*(\w+),\s*slug:\s*([\w-]+),\s*deal:\s*(\w+)(?:,\s*first:\s*(\d+),\s*last:\s*(\d+))?\s*\}\s*$", re.M)
 
 
 def _matrix_slices() -> list[dict]:
@@ -40,8 +40,8 @@ def _matrix_slices() -> list[dict]:
     # scope to the enum job's matrix block so an unrelated future `- { … }` elsewhere can't leak in
     start = text.index("matrix:", text.index("name: Enum "))
     end = text.index("\n  rollup:", start)
-    return [{"type": t, "slug": sl, "deal": d}
-            for t, sl, d in _SLICE_RE.findall(text[start:end])]
+    return [{"type": t, "slug": sl, "deal": d, "first": f, "last": la}
+            for t, sl, d, f, la in _SLICE_RE.findall(text[start:end])]
 
 
 def test_matrix_covers_exactly_the_slices_runpy_knows():
@@ -53,7 +53,24 @@ def test_matrix_covers_exactly_the_slices_runpy_knows():
     extra = got_set - expected     # harmless but a sign of drift
     assert not missing, f"slices NEVER enumerated (their live listings would be struck): {sorted(missing)}"
     assert not extra, f"matrix has slices run.py does not know: {sorted(extra)}"
-    assert len(got) == len(got_set), "duplicate slice in the matrix"
+    whole = [(e["type"], e["slug"], e["deal"]) for e in _matrix_slices() if not e["first"]]
+    assert len(whole) == len(set(whole)), "duplicate slice in the matrix"
+
+
+def test_a_split_slice_leaves_no_gap_between_its_parts():
+    """A page no part walks is a page whose ads are unseen and struck. The parts must start at page 1,
+    overlap, and reach the 2000-page ceiling every whole slice has."""
+    parts = sorted((int(e["first"]), int(e["last"])) for e in _matrix_slices() if e["first"])
+    assert parts, "room/sale is no longer split: it passed the 330-min cap on 10-21, 10-29 and 10-31"
+    assert parts[0][0] == 1 and parts[-1][1] == 2000, parts
+    assert all(b[0] <= a[1] for a, b in zip(parts, parts[1:])), f"gap between parts: {parts}"
+
+
+def test_a_part_walks_from_its_start_page():
+    from pathlib import Path as _P
+    run = (_P(__file__).resolve().parents[2] / "wasalt/run.py").read_text()
+    assert "for page in range(start_page, pages + 1):" in run
+    assert "start_page=args.start_page" in run
 
 
 def test_both_tables_are_represented():
