@@ -31,6 +31,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
+import { placeShapeAt } from '@/data/placeShape';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 
@@ -188,7 +189,7 @@ function initOnce(mk: MapKit, language: string) {
 // ── The page's search field talks to the map through this (MapDealRow's MapSearchBar) ─────────────────────────
 // One map per page, so one handle: the mounted map registers itself; the field asks Apple for places and flies there.
 // `history`: the views left behind by a jump (a search pick, a region tap) so «رجوع» can return to them.
-const live: { map: MKMap | null; search: MKSearch | null; lang: string; history: unknown[]; mark: { overlay?: unknown; pin?: unknown }; route: unknown[]; onRoute?: (on: boolean) => void } = { map: null, search: null, lang: '', history: [], mark: {}, route: [] };
+const live: { map: MKMap | null; search: MKSearch | null; lang: string; history: unknown[]; mark: { overlay?: unknown; pin?: unknown; shapes?: unknown[] }; markSeq: number; route: unknown[]; onRoute?: (on: boolean) => void } = { map: null, search: null, lang: '', history: [], mark: {}, markSeq: 0, route: [] };
 
 /** Remove the drawn route (band, line, end pins). */
 export function clearRoute() {
@@ -239,7 +240,9 @@ export function clearPlaceMark() {
   const m = live.map;
   if (m && live.mark.overlay) m.removeOverlay(live.mark.overlay);
   if (m && live.mark.pin) m.removeAnnotation(live.mark.pin);
+  if (m) for (const o of live.mark.shapes ?? []) m.removeOverlay(o);
   live.mark = {};
+  live.markSeq++;
 }
 
 /** Apple Maps' own place suggestions (owner 2026-10-31: «this search connected to Apple Maps, like how a user
@@ -321,12 +324,30 @@ export function flyToPlace(p: PlaceSuggestion) {
       live.mark.pin = new mk.MarkerAnnotation(new mk.Coordinate(c.latitude, c.longitude), { title: (place ? place.name : undefined) ?? p.name ?? p.displayLines[0], color: lightColors.primary, animates: true });
       m.addOverlay(live.mark.overlay);
       m.addAnnotation(live.mark.pin);
-    } else if (region) {
-      const { center, span } = region;
-      const n = center.latitude + span.latitudeDelta / 2, s0 = center.latitude - span.latitudeDelta / 2;
-      const e = center.longitude + span.longitudeDelta / 2, w = center.longitude - span.longitudeDelta / 2;
-      live.mark.overlay = new mk.PolygonOverlay([[n, w], [n, e], [s0, e], [s0, w]].map(([la, lo]) => new mk.Coordinate(la, lo)), { style: style(0.06, 1.6), enabled: false });
-      m.addOverlay(live.mark.overlay);
+    } else {
+      // THE REAL BOUNDARY (owner 2026-11-01: «create a boundary around it, don't make just a square — it's like an
+      // area»): the place's actual shape from place_shapes (OpenStreetMap), fitted into view with a little air; Apple's
+      // bounding rectangle only when the point lies in no shape of that kind, or the fetch failed. A later pick wins:
+      // the sequence number drops a shape that arrives after the mark was cleared.
+      const seq = live.markSeq;
+      const rectangle = () => {
+        if (!region || live.markSeq !== seq) return;
+        const { center, span } = region;
+        const n = center.latitude + span.latitudeDelta / 2, s0 = center.latitude - span.latitudeDelta / 2;
+        const e = center.longitude + span.longitudeDelta / 2, w = center.longitude - span.longitudeDelta / 2;
+        live.mark.overlay = new mk.PolygonOverlay([[n, w], [n, e], [s0, e], [s0, w]].map(([la, lo]) => new mk.Coordinate(la, lo)), { style: style(0.06, 1.6), enabled: false });
+        m.addOverlay(live.mark.overlay);
+      };
+      const kind = p.kind && isAreaKind(p.kind) ? p.kind : null;
+      if (!kind) return rectangle();
+      placeShapeAt(c.latitude, c.longitude, kind).then((shape) => {
+        if (live.markSeq !== seq) return;
+        if (!shape || shape === 'unknown') return rectangle();
+        live.mark.shapes = shape.rings.map((poly) => new mk.PolygonOverlay(poly.map((ring) => ring.map(([lng, lat]) => new mk.Coordinate(lat, lng))), { style: style(0.08, 2), enabled: false }));
+        for (const o of live.mark.shapes) m.addOverlay(o);
+        const { n, s: s0, e, w } = shape.bbox;
+        m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate((n + s0) / 2, (e + w) / 2), new mk.CoordinateSpan(Math.max((n - s0) * 1.3, 0.01), Math.max((e - w) * 1.3, 0.01))), true);
+      });
     }
   });
 }
