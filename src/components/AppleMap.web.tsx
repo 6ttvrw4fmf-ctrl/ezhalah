@@ -170,7 +170,8 @@ function initOnce(mk: MapKit, language: string) {
 
 // ── The page's search field talks to the map through this (MapDealRow's MapSearchBar) ─────────────────────────
 // One map per page, so one handle: the mounted map registers itself; the field asks Apple for places and flies there.
-const live: { map: MKMap | null; search: MKSearch | null; lang: string } = { map: null, search: null, lang: '' };
+// `history`: the views left behind by a jump (a search pick, a region tap) so «رجوع» can return to them.
+const live: { map: MKMap | null; search: MKSearch | null; lang: string; history: unknown[] } = { map: null, search: null, lang: '', history: [] };
 
 /** Apple Maps' own place suggestions (owner 2026-10-31: «this search connected to Apple Maps, like how a user
  *  searches in Apple Maps»), limited to Saudi Arabia, in the UI language. Resolves [] when MapKit is unavailable:
@@ -202,6 +203,7 @@ export function flyToPlace(p: PlaceSuggestion) {
   live.search.search(p, (err, data) => {
     const place = !err && data?.places?.[0];
     const c = place ? place.coordinate : p.coordinate;
+    live.history.push(m.region);
     if (data?.boundingRegion) m.setRegionAnimated(data.boundingRegion, true);
     else if (c) m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(c.latitude, c.longitude), new mk.CoordinateSpan(0.08, 0.08)), true);
   });
@@ -239,6 +241,7 @@ export default function AppleMap({ full = false, onExpand, onClose }: { full?: b
   const [drawing, setDrawing] = useState(false);
   const [sketch, setSketch] = useState<Shape | null>(null);
   const [hasShape, setHasShape] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
   const [failed, setFailed] = useState(false);
   // Map style (owner 2026-10-31, Zillow's layers button): the modes Apple's web MapKit offers — standard, satellite
   // with labels (hybrid), and muted. Driving / transit / traffic exist only in Apple's own apps, not on the web.
@@ -324,6 +327,7 @@ export default function AppleMap({ full = false, onExpand, onClose }: { full?: b
           if (!r || !map) return;
           chosen = (e.overlay as typeof chosen) ?? null;
           paint();
+          live.history.push(map.region);
           map.setRegionAnimated(regionView(mk, r), true);
         });
         // The home view MapKit actually settled on (it widens the requested span to the box's shape).
@@ -332,6 +336,7 @@ export default function AppleMap({ full = false, onExpand, onClose }: { full?: b
           if (!map) return;
           const lat = map.region.span.latitudeDelta;
           if (!homeLatDelta) homeLatDelta = lat;
+          setZoomed(lat < homeLatDelta * 0.85);
           const ratio = lat / homeLatDelta;
           // Zooming out: squared so the drop is quick: 1.2× out → ~70%, 2× out → ~25%, then the floor.
           // Zooming in: linear from IN_FADE_START down to 0 at IN_FADE_END — Apple's own lines take over.
@@ -380,6 +385,13 @@ export default function AppleMap({ full = false, onExpand, onClose }: { full?: b
     if (!mk || !m) return;
     const { center, span } = m.region;
     m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(center.latitude, center.longitude), new mk.CoordinateSpan(span.latitudeDelta * f, span.longitudeDelta * f)), true);
+  };
+  const goBack = () => {
+    const mk = mapkitOf(); const m = mapRef.current;
+    const el = hostRef.current as unknown as HTMLElement | null;
+    if (!mk || !m || !el) return;
+    const prev = live.history.pop();
+    m.setRegionAnimated(prev ?? ksaRegion(mk, el), true);
   };
   const gestures = (on: boolean) => {
     const m = mapRef.current;
@@ -460,6 +472,13 @@ export default function AppleMap({ full = false, onExpand, onClose }: { full?: b
     <View style={s.frame}>
       <View ref={hostRef} style={s.host} />
       {/* Compact: ⤢ top-left opens the map full screen; the box itself pans and zooms in place. */}
+      {/* «رجوع» under the top-left button, only once zoomed in (owner 2026-10-31: «a button that allows the user to go
+          back»): returns to the view before the last jump, and with none left, to the whole Kingdom. */}
+      {zoomed && !failed && !drawing ? (
+        <Pressable style={s.backBtn} onPress={goBack} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Back')} testID="map-back">
+          <Ionicons name="arrow-undo-outline" size={19} color={colors.ink} />
+        </Pressable>
+      ) : null}
       {onExpand && !failed && !drawing ? (
         <Pressable style={s.closeBtn} onPress={onExpand} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('Full screen')} testID="map-open-full">
           <Ionicons name="expand-outline" size={20} color={colors.ink} />
@@ -546,6 +565,10 @@ const s = StyleSheet.create({
   drawBarOff: { opacity: 0.35 },
   hint: { position: 'absolute', top: 60, left: 0, right: 0, alignItems: 'center' },
   hintT: { fontFamily: font.family.medium, fontSize: 13, color: colors.ink, backgroundColor: colors.surface, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, overflow: 'hidden', borderWidth: 1, borderColor: colors.tintLine },
+  backBtn: {
+    position: 'absolute', top: 56, left: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
+  },
   closeBtn: {
     position: 'absolute', top: 12, left: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.tintLine,
