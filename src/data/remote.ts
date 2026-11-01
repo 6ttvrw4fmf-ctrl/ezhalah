@@ -7,6 +7,7 @@ import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
+import { honestTotal } from '@/lib/honestTotal';
 import { scopeCrossesMacro } from '@/lib/searchDefaults';
 import { normalizeType, queryForSelection, queryForTypes, storedRawTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
 import { effectiveTypes, effectiveGroups, bedroomTokens } from './search';
@@ -1876,6 +1877,10 @@ export async function fetchListingsForQuery(
     const region = (ar?.region) || CITY_TO_REGION[canonCity] || canonCity;
     ranked.push({ l, platform: c.platform, city: canonCity, region, district: canonDistrict, rank: c.rank, source_table: c.source_table });
   }
+  // The count follows the cards (🔧 1153, 2026-11-01): a row the raw hydration dropped (hidden at source since the
+  // last :22 sync, or index↔raw drift) is still inside the index's total_count — subtract this page's drops so the
+  // number on screen never exceeds the cards a customer can reach. Never adds, never below zero (src/lib/honestTotal.ts).
+  pageTotal = honestTotal(pageTotal, cleanCands.length, ranked.length);
   const USE_RELATION_TABLE = true;
   // multiType → spread across the picked clean types (cleanType diversity key). True for a genuine
   // multi-select AND for a subgroup box like «مرافق خدمية» that expands to 5 member types, so its results
