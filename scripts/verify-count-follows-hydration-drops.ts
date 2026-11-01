@@ -16,6 +16,8 @@ const check = (name: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `\n      ${detail}` : ''}`);
   if (!ok) failed++;
 };
+// The mutation proof: a deliberately broken helper must be CAUGHT by this barrier's own predicate.
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
 
 console.log('\nThe results count follows the cards a customer can reach\n');
 
@@ -29,9 +31,9 @@ check('a non-finite total reads 0, not NaN', honestTotal(NaN, 1, 1) === 0 && hon
 
 // mutation: the pre-fix behaviour (the index total untouched) must be caught by the measured case
 const preFix = (total: number, _c: number, _h: number) => total;
-check('(mutation) the pre-fix total (index count untouched) is caught on the measured case', preFix(47, 47, 46) !== 46);
+mustCatch('the pre-fix total (index count untouched) on the measured case', preFix(47, 47, 46) !== 46);
 const addsBack = (total: number, c: number, h: number) => total + (h - c);
-check('(mutation) a helper that could ADD when hydration exceeds candidates is caught', addsBack(10, 2, 5) !== honestTotal(10, 2, 5));
+mustCatch('a helper that could ADD when hydration exceeds candidates', addsBack(10, 2, 5) !== honestTotal(10, 2, 5));
 
 // wiring: the fetch really applies it after the hydration loop, before the diversity stage
 const remote = readFileSync(join(ROOT, 'src/data/remote.ts'), 'utf8');
