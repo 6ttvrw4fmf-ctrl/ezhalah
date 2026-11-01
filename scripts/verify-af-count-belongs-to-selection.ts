@@ -1,7 +1,7 @@
 // The number the Advanced Filter shows must belong to the selection the Advanced Filter shows.
 //
 // DEFECT (production, found 2026-08-24 during the full AF certification). Live repro: جدة /
-// «شراء»+«إيجار» together / سكني / group «الشقق والسكن المشترك» → «خلّنا نحدد الطلب أكثر» → the TYPE
+// «شراء»+«إيجار» together / سكني / group «الشقق والسكن المشترك» → «🎯 دقّق مع الذكاء» → the TYPE
 // tier opens on a scope of 27,378. The user ticks «شقة», whose own option row reads 25,030. The
 // header chip and the green primary button BOTH kept reading «27,378» — polled 8× over 12s, stable.
 // The backend was never wrong: the captured `apartment_guided_counts_ar` call for that selection

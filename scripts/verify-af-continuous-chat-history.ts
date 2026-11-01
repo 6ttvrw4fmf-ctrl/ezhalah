@@ -76,7 +76,7 @@ check('«تحديد أكثر» is offered by the newest turn only',
 // Read Aloud must describe the buttons that are actually there — it reads the SAME two flags, so a
 // history turn is never spoken as if it still had actions.
 check('the spoken closing note names the same two latest-turn-aware flags',
-  /const spokenActionLabels = \[hasMore && replyT\('Load more'\), canNarrowFurther && replyT\('Let’s narrow it down'\)\]/.test(agent),
+  /const spokenActionLabels = \[hasMore && replyT\('Load more'\), canNarrowFurther && replyT\('🎯 Refine with AI'\)\]/.test(agent),
   'agent.tsx: reading rc.hasMore instead of hasMore would announce buttons an old turn does not render');
 
 // ── 2. THE HONESTY BOUNDARY: latest-only touches the BUTTONS and nothing else ────────────────────
@@ -158,7 +158,7 @@ check('only a round that committed something leaves a receipt at all',
   /if \(carry && roundCommitted\) setAfReceipt/.test(agent),
   'agent.tsx: a skip-everything round changes nothing, so its turn must keep the buttons — a receipt there leaves the user no way back into the interview');
 check('the receipt heading is translated with the owner\'s exact wording',
-  /'Continued with the advanced filter': 'تابع المستخدم باستخدام التصفية المتقدمة'/.test(i18n),
+  /'Continued with 🎯 Refine with AI': 'تابع المستخدم عبر 🎯 دقّق مع الذكاء'/.test(i18n),
   'src/i18n.tsx: Arabic is the product language — an untranslated key renders the English source string');
 // The body is NOT translated, by design: buildAfRoundLog writes finished Arabic, exactly as
 // buildAfSummary always did. The label keys it used to sit under are retired, and a retired key left

@@ -340,7 +340,7 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
   // INTERSECT, never replace (bug fix 2026-08-04). Every option's `count` is defined by the contract as
   // "exactly what Search returns if picked", and it is computed WITH the previous answer applied — so an
   // answer that relaxes the previous one would deliver a set larger than the number the user tapped.
-  // Live pre-fix repro: narrow to «٣+» (1,117 results) → re-open «خلّنا نحدد الطلب أكثر» → the «١+» pill
+  // Live pre-fix repro: narrow to «٣+» (1,117 results) → re-open «🎯 دقّق مع الذكاء» → the «١+» pill
   // reads 1,117 → tapping it installed bathMin=1 and returned 2,984, of which 1,867 had FEWER bathrooms
   // than the user had asked for (breaking strict-options too, not just count honesty). Math.max keeps
   // the card monotone: the answer can only ever narrow, so the pill's number always holds.

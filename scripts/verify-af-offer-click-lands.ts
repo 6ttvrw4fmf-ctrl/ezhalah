@@ -227,7 +227,7 @@ const FAST = { timeoutMs: 400, pollMs: 5 };
 //
 // Measured on production 2026-09-25 (الرياض/شراء/شقة desktop, fleet healthy): after removing the
 // last AF pill, `[data-testid="results-narrow"]` AND an exact `textContent` leaf for
-// «خلّنا نحدد الطلب أكثر» were present at EVERY 3 s sample for the full 60 s budget, while the click
+// «🎯 دقّق مع الذكاء» were present at EVERY 3 s sample for the full 60 s budget, while the click
 // probe returned null on every poll — the offer renders under a reveal cascade that was still
 // mounting cards (90 → 150 during the window). `openAfOffer` counted `ctaSeen` off the CLICK probe,
 // so it read 0, and returned `reason: 'absent'` — the one verdict in this file that blames Advanced
