@@ -208,8 +208,8 @@ const AR: Record<string, string> = {
   // Owner feedback (2026-08-22): trimmed — the old wording ("Both: we show monthly and yearly
   // together") re-explained what selecting both buttons already makes obvious. Kept only the one
   // fact worth surfacing: mixed results carry mixed price units.
-  'Each listing shows its own price basis (monthly or yearly).':
-    'كل إعلان يوضّح أساس سعره (شهري أو سنوي).',
+  'Short stays show no price (it depends on the dates); yearly listings show the yearly price.':
+    'الإقامات القصيرة بلا سعر (يعتمد على التواريخ)، والإعلانات السنوية تعرض السعر السنوي.',
   // Monthly Advanced Filter (2026-08-18)
   'What rating would you prefer?': 'كم التقييم اللي تفضله؟',
   '9.5+': '9.5+',
@@ -445,8 +445,8 @@ const AR: Record<string, string> = {
   'Property group?': 'مجموعة العقار؟',
   // Period-flip price clear note (audit item 3): the unit of a typed price inverted, so keeping the
   // number would silently mean something else — cleared + explained instead.
-  'Price limits were cleared because the price unit changed (monthly ↔ yearly) — please re-enter them.':
-    'تم مسح حدود السعر لأن وحدة السعر تغيّرت (شهري ↔ سنوي) — الرجاء إدخالها من جديد.',
+  'Price limits were cleared because the price unit changed (short stays ↔ yearly) — please re-enter them.':
+    'تم مسح حدود السعر لأن نوع الإيجار تغيّر (إقامات قصيرة ↔ سنوي) — الرجاء إدخالها من جديد.',
   // Same clear+explain precedent for the شراء/إيجار toggle (owner feature 2026-08-20).
   'Price limits were cleared because Buy/Rent changed which budget they meant — please re-enter them.':
     'تم مسح حدود السعر لأن التبديل بين الشراء والإيجار غيّر المقصود بالميزانية — الرجاء إدخالها من جديد.',

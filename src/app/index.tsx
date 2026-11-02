@@ -1615,11 +1615,12 @@ export default function Home() {
                     // Owner feedback (2026-08-22): drop the "this means you want both, so you get
                     // both" framing — selecting both buttons is already self-explanatory. Keep only
                     // the one genuinely non-obvious fact: mixed results show mixed price units.
-                    : rentPeriod === 'both' ? 'Each listing shows its own price basis (monthly or yearly).'
+                    // No monthly pool — short stays (owner 2026-11-02): they carry no price; yearly ones show the yearly price.
+                    : rentPeriod === 'both' ? 'Short stays show no price (it depends on the dates); yearly listings show the yearly price.'
                     : 'Yearly: the displayed price is the yearly price.')}
                 </Text>
                 {periodPriceCleared && !query.priceMin && !query.priceMax && !query.priceInput ? (
-                  <Text style={[s.rangeNote, x.rangeNote, s.rangeNoteWarn]}>{t('Price limits were cleared because the price unit changed (monthly ↔ yearly) — please re-enter them.')}</Text>
+                  <Text style={[s.rangeNote, x.rangeNote, s.rangeNoteWarn]}>{t('Price limits were cleared because the price unit changed (short stays ↔ yearly) — please re-enter them.')}</Text>
                 ) : null}
               </Reveal>
             )}
