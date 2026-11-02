@@ -159,7 +159,7 @@ const AGE_QUESTION: AdvancedQuestion = {
 // multi-type intersection mutation-provable. The cohort DATA moved with it, unchanged. Buy+Rent
 // combined gating (q.dealCombined — owner feature 2026-08-20) lives there too, intersecting with
 // the multi-type/multi-period dimensions rather than being bolted on separately — see afCohorts.ts.
-import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, scopeDeals, intersectChips, isShortStaysScope, shortStaysAskTier, cardKeys, groupAskTierFor, hasCards } from '@/lib/afCohorts';
+import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, scopeDeals, intersectChips, isShortStaysScope, shortStaysAskTier, shortStaysAskTierFor, cardKeys, groupAskTierFor, hasCards, streetWidthRungs } from '@/lib/afCohorts';
 // Merge picked strict amenity tokens (kitchen/parking/elevator/furnished/rnpl) into q.amenities.
 function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
   return keys.length ? { ...q, amenities: [...new Set([...(q.amenities ?? []), ...keys])] } : q;
@@ -228,8 +228,13 @@ const RNPL_QUESTION: AdvancedQuestion = {
   selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'rnpl'),
   async resolveOptions(q) {
-    return guidedOptions(await fetchApartmentGuidedCounts(q),
-      [{ key: 'rnpl', labelKey: 'Offers installments', count: (c) => c.cnt_rnpl }], (c) => c.cnt_rnpl_unknown);
+    // Two chips (owner 2026-11-01): the site's own «إيجار بالتقسيط» box, and the ad's words about monthly / split
+    // payments (text fact split_payments, migration «countryside_group_advanced_filter_chips»); either or both; a chip at 0 hides.
+    const chips: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
+      { key: 'rnpl', labelKey: 'Offers installments', count: (c) => c.cnt_rnpl },
+      { key: 'split_payments', labelKey: 'Monthly / split payments', count: (c) => (c as unknown as Record<string, number>).cnt_split_payments },
+    ];
+    return guidedOptions(await fetchApartmentGuidedCounts(q), chips, (c) => c.cnt_rnpl_unknown);
   },
   apply: addAmenities,
 };
@@ -374,13 +379,15 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
 // Furnished preference — single-select (تفضلها مفروشة؟), Rent-only like the furnished chip. TRUE
 // tri-state: «مفروشة» = confirmed furnished, «غير مفروشة» = confirmed unfurnished (explicit source
 // no — cnt_unfurnished counts furnished IS FALSE), Skip = no preference (unknowns stay eligible).
+// Not asked where a card already carries the «furnished» chip: the apartments comfort card, Office «ready to work», the
+// retail box «space» (2026-11-02); the typed sentence stays certified through cohortAllows.
 const FURNISHED_QUESTION: AdvancedQuestion = {
   id: 'furnished',
   titleKey: 'Do you prefer it furnished?',
   selection: 'single',
   // Where the comfort card carries «furnished» as a chip (owner 2026-10-31: «Furnished is a chip here, not its own
   // question»), the separate question is not asked; the typed «مفروشة» keeps its certification through cohortAllows.
-  eligibility: (q) => cohortAllows(q, 'furnished') && !cardKeys(q, 'comfort').includes('furnished'),
+  eligibility: (q) => cohortAllows(q, 'furnished') && !['comfort', 'ready', 'cspace'].some((id) => cardKeys(q, id).includes('furnished')),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
       { key: 'yes', labelKey: 'Furnished',   count: (c) => c.cnt_furnished },
@@ -410,12 +417,15 @@ const STREET_WIDTH_QUESTION: AdvancedQuestion = {
   eligibility: (q) => cohortAllows(q, 'street_width'),
   async resolveOptions(q) {
     const floor = q.streetWidthMin ?? 0;
-    const rungs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
-      { key: '15', labelKey: '15 m or wider', count: (c) => c.cnt_stw15 },
-      { key: '20', labelKey: '20 m or wider', count: (c) => c.cnt_stw20 },
-      { key: '25', labelKey: '25 m or wider', count: (c) => c.cnt_stw25 },
-      { key: '30', labelKey: '30 m or wider', count: (c) => c.cnt_stw30 },
-    ];
+    // the rungs are the scope's own ladder (owner lists 2026-11-01: plots 15/20/30/40/60, retail 15/20/30/40, countryside
+    // 15/20/30, everything else 15/20/25/30); each rung reads its own cnt_stw<n> column — never a neighbour's
+    const STW_COUNT: Record<number, (c: GuidedCounts) => number> = {
+      10: (c) => c.cnt_stw10, 15: (c) => c.cnt_stw15, 20: (c) => c.cnt_stw20, 25: (c) => c.cnt_stw25,
+      30: (c) => c.cnt_stw30, 40: (c) => c.cnt_stw40, 60: (c) => c.cnt_stw60,
+    };
+    const rungs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = streetWidthRungs(q)
+      .filter((n) => STW_COUNT[n])
+      .map((n) => ({ key: String(n), labelKey: `${n} m or wider`, count: STW_COUNT[n] }));
     return guidedOptions(await fetchApartmentGuidedCounts(q), rungs.filter((r) => parseInt(r.key, 10) > floor), (c) => c.cnt_stw_unknown);
   },
   // Several «or wider» rungs = the narrowest picked one (their union).
@@ -637,6 +647,347 @@ const PAPERS_QUESTION: AdvancedQuestion = {
   async resolveOptions(q) { return cardOptions(q, 'papers'); },
   apply: addAmenities,
 };
+// The countryside, land and commercial cards (owner lists 2026-11-01, built 2026-11-02): chips from COHORT_CARDS / GROUP_LISTS.
+const WATER_QUESTION: AdvancedQuestion = {
+  id: 'water',
+  titleKey: '🏊 Water: what matters to you?',
+  lineKey: 'Water',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'water'),
+  async resolveOptions(q) { return cardOptions(q, 'water'); },
+  apply: addAmenities,
+};
+const GAMES_QUESTION: AdvancedQuestion = {
+  id: 'games',
+  titleKey: '🎮 Games: what matters to you?',
+  lineKey: 'Games',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'games'),
+  async resolveOptions(q) { return cardOptions(q, 'games'); },
+  apply: addAmenities,
+};
+const CAMP_LIFE_QUESTION: AdvancedQuestion = {
+  id: 'camp_life',
+  titleKey: '🔥 Camp life: what matters to you?',
+  lineKey: 'Camp life',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'camp_life'),
+  async resolveOptions(q) { return cardOptions(q, 'camp_life'); },
+  apply: addAmenities,
+};
+const WATER_LAND_QUESTION: AdvancedQuestion = {
+  id: 'water_land',
+  titleKey: '💧 Water & land: what matters to you?',
+  lineKey: 'Water & land',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'water_land'),
+  async resolveOptions(q) { return cardOptions(q, 'water_land'); },
+  apply: addAmenities,
+};
+const LAND_PAPERS_QUESTION: AdvancedQuestion = {
+  id: 'land_papers',
+  titleKey: '📄 Land & papers: what matters to you?',
+  lineKey: 'Land & papers',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'land_papers'),
+  async resolveOptions(q) { return cardOptions(q, 'land_papers'); },
+  apply: addAmenities,
+};
+const POWER_QUESTION: AdvancedQuestion = {
+  id: 'power',
+  titleKey: '💧 Water & power: what matters to you?',
+  lineKey: 'Water & power',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'power'),
+  async resolveOptions(q) { return cardOptions(q, 'power'); },
+  apply: addAmenities,
+};
+const CROPS_QUESTION: AdvancedQuestion = {
+  id: 'crops',
+  titleKey: '🌴 Crops: what matters to you?',
+  lineKey: 'Crops',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'crops'),
+  async resolveOptions(q) { return cardOptions(q, 'crops'); },
+  apply: addAmenities,
+};
+const ANIMALS_QUESTION: AdvancedQuestion = {
+  id: 'animals',
+  titleKey: '🐑 Animals: what matters to you?',
+  lineKey: 'Animals',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'animals'),
+  async resolveOptions(q) { return cardOptions(q, 'animals'); },
+  apply: addAmenities,
+};
+const BUILDINGS_QUESTION: AdvancedQuestion = {
+  id: 'buildings',
+  titleKey: '🏡 Buildings: what matters to you?',
+  lineKey: 'Buildings',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'buildings'),
+  async resolveOptions(q) { return cardOptions(q, 'buildings'); },
+  apply: addAmenities,
+};
+const PLOT_QUESTION: AdvancedQuestion = {
+  id: 'plot',
+  titleKey: '📐 Plot: what matters to you?',
+  lineKey: 'Plot',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'plot'),
+  async resolveOptions(q) { return cardOptions(q, 'plot'); },
+  apply: addAmenities,
+};
+const DEAL_PAPERS_QUESTION: AdvancedQuestion = {
+  id: 'deal_papers',
+  titleKey: '📄 Papers & deal: what matters to you?',
+  lineKey: 'Papers & deal',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'deal_papers'),
+  async resolveOptions(q) { return cardOptions(q, 'deal_papers'); },
+  apply: addAmenities,
+};
+const LAND_QUESTION: AdvancedQuestion = {
+  id: 'land',
+  titleKey: '🧱 Land: what matters to you?',
+  lineKey: 'Land',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'land'),
+  async resolveOptions(q) { return cardOptions(q, 'land'); },
+  apply: addAmenities,
+};
+const LOCATION_QUESTION: AdvancedQuestion = {
+  id: 'location',
+  titleKey: '📍 Location: what matters to you?',
+  lineKey: 'Location',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'location'),
+  async resolveOptions(q) { return cardOptions(q, 'location'); },
+  apply: addAmenities,
+};
+const CSPACE_QUESTION: AdvancedQuestion = {
+  id: 'cspace',
+  titleKey: '🏢 Space: what matters to you?',
+  lineKey: 'Space',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'cspace'),
+  async resolveOptions(q) { return cardOptions(q, 'cspace'); },
+  apply: addAmenities,
+};
+const CSERVICES_QUESTION: AdvancedQuestion = {
+  id: 'cservices',
+  titleKey: '⚙️ Services: what matters to you?',
+  lineKey: 'Services',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'cservices'),
+  async resolveOptions(q) { return cardOptions(q, 'cservices'); },
+  apply: addAmenities,
+};
+const BUSINESS_QUESTION: AdvancedQuestion = {
+  id: 'business',
+  titleKey: '📄 Business: what matters to you?',
+  lineKey: 'Business',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'business'),
+  async resolveOptions(q) { return cardOptions(q, 'business'); },
+  apply: addAmenities,
+};
+const OFFICE_KIND_QUESTION: AdvancedQuestion = {
+  id: 'office_kind',
+  titleKey: '🏢 Office kind: what matters to you?',
+  lineKey: 'Office kind',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'office_kind'),
+  async resolveOptions(q) { return cardOptions(q, 'office_kind'); },
+  apply: addAmenities,
+};
+const READY_QUESTION: AdvancedQuestion = {
+  id: 'ready',
+  titleKey: '🛋️ Ready to work: what matters to you?',
+  lineKey: 'Ready to work',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'ready'),
+  async resolveOptions(q) { return cardOptions(q, 'ready'); },
+  apply: addAmenities,
+};
+const BUILDING_QUESTION: AdvancedQuestion = {
+  id: 'building',
+  titleKey: '⚙️ Building: what matters to you?',
+  lineKey: 'Building',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'building'),
+  async resolveOptions(q) { return cardOptions(q, 'building'); },
+  apply: addAmenities,
+};
+const TRUCKS_QUESTION: AdvancedQuestion = {
+  id: 'trucks',
+  titleKey: '🚛 Trucks & loading: what matters to you?',
+  lineKey: 'Trucks & loading',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'trucks'),
+  async resolveOptions(q) { return cardOptions(q, 'trucks'); },
+  apply: addAmenities,
+};
+const LOC_PAPERS_QUESTION: AdvancedQuestion = {
+  id: 'loc_papers',
+  titleKey: '📍 Location & papers: what matters to you?',
+  lineKey: 'Location & papers',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'loc_papers'),
+  async resolveOptions(q) { return cardOptions(q, 'loc_papers'); },
+  apply: addAmenities,
+};
+const INSIDE_QUESTION: AdvancedQuestion = {
+  id: 'inside',
+  titleKey: '🏬 Inside the building: what matters to you?',
+  lineKey: 'Inside the building',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'inside'),
+  async resolveOptions(q) { return cardOptions(q, 'inside'); },
+  apply: addAmenities,
+};
+const INVESTMENT_QUESTION: AdvancedQuestion = {
+  id: 'investment',
+  titleKey: '💰 Investment: what matters to you?',
+  lineKey: 'Investment',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'investment'),
+  async resolveOptions(q) { return cardOptions(q, 'investment'); },
+  apply: addAmenities,
+};
+const HOTEL_QUESTION: AdvancedQuestion = {
+  id: 'hotel',
+  titleKey: '🛎️ Hotel: what matters to you?',
+  lineKey: 'Hotel',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'hotel'),
+  async resolveOptions(q) { return cardOptions(q, 'hotel'); },
+  apply: addAmenities,
+};
+const STATION_QUESTION: AdvancedQuestion = {
+  id: 'station',
+  titleKey: '⛽ On site: what matters to you?',
+  lineKey: 'On site',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'station'),
+  async resolveOptions(q) { return cardOptions(q, 'station'); },
+  apply: addAmenities,
+};
+const DEAL_LOC_QUESTION: AdvancedQuestion = {
+  id: 'deal_loc',
+  titleKey: '💰 Deal & location: what matters to you?',
+  lineKey: 'Deal & location',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'deal_loc'),
+  async resolveOptions(q) { return cardOptions(q, 'deal_loc'); },
+  apply: addAmenities,
+};
+const SPACE_PAPERS_QUESTION: AdvancedQuestion = {
+  id: 'space_papers',
+  titleKey: '🏢 Space & papers: what matters to you?',
+  lineKey: 'Space & papers',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'space_papers'),
+  async resolveOptions(q) { return cardOptions(q, 'space_papers'); },
+  apply: addAmenities,
+};
+const SERVICES_BUSINESS_QUESTION: AdvancedQuestion = {
+  id: 'services_business',
+  titleKey: '⚙️ Services & business: what matters to you?',
+  lineKey: 'Services & business',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'services_business'),
+  async resolveOptions(q) { return cardOptions(q, 'services_business'); },
+  apply: addAmenities,
+};
+const WORKSHOP_QUESTION: AdvancedQuestion = {
+  id: 'workshop',
+  titleKey: '🔧 Space & services: what matters to you?',
+  lineKey: 'Space & services',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'workshop'),
+  async resolveOptions(q) { return cardOptions(q, 'workshop'); },
+  apply: addAmenities,
+};
+const LOC_BUSINESS_QUESTION: AdvancedQuestion = {
+  id: 'loc_business',
+  titleKey: '📍 Location & business: what matters to you?',
+  lineKey: 'Location & business',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'loc_business'),
+  async resolveOptions(q) { return cardOptions(q, 'loc_business'); },
+  apply: addAmenities,
+};
+const BUILDING_PAPERS_QUESTION: AdvancedQuestion = {
+  id: 'building_papers',
+  titleKey: '🏗️ Building & papers: what matters to you?',
+  lineKey: 'Building & papers',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'building_papers'),
+  async resolveOptions(q) { return cardOptions(q, 'building_papers'); },
+  apply: addAmenities,
+};
+const FACTORY_QUESTION: AdvancedQuestion = {
+  id: 'factory',
+  titleKey: '🏭 Building: what matters to you?',
+  lineKey: 'Factory building',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'factory'),
+  async resolveOptions(q) { return cardOptions(q, 'factory'); },
+  apply: addAmenities,
+};
+const LOC_SAFETY_QUESTION: AdvancedQuestion = {
+  id: 'loc_safety',
+  titleKey: '📍 Location & safety: what matters to you?',
+  lineKey: 'Location & safety',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'loc_safety'),
+  async resolveOptions(q) { return cardOptions(q, 'loc_safety'); },
+  apply: addAmenities,
+};
+const PAPERS_C_QUESTION: AdvancedQuestion = {
+  id: 'papers_c',
+  titleKey: '📄 Papers: what matters to you?',
+  lineKey: 'Papers',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'papers_c'),
+  async resolveOptions(q) { return cardOptions(q, 'papers_c'); },
+  apply: addAmenities,
+};
 const WHO_QUESTION: AdvancedQuestion = {
   id: 'who',
   titleKey: '👤 Who is it for?',
@@ -712,7 +1063,9 @@ export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
   STREET_WIDTH_QUESTION, DIRECTION_QUESTION, RATING_QUESTION, UNIT_SUBTYPE_QUESTION,
   APARTMENTS_QUESTION, SHOPS_QUESTION,
   COMFORT_QUESTION, SPACE_QUESTION, SPACE_YEARLY_QUESTION, SAFETY_QUESTION, PERKS_QUESTION, BUILD_QUESTION,
-  EXTRAS_QUESTION, WHO_QUESTION, FEATURES_QUESTION, OUTDOORS_QUESTION, SMART_QUESTION, PAPERS_QUESTION, SERVICES_QUESTION, FUN_QUESTION,
+  EXTRAS_QUESTION, WHO_QUESTION, FEATURES_QUESTION, OUTDOORS_QUESTION, SMART_QUESTION, PAPERS_QUESTION,
+  WATER_QUESTION, GAMES_QUESTION, CAMP_LIFE_QUESTION, WATER_LAND_QUESTION, LAND_PAPERS_QUESTION, POWER_QUESTION, CROPS_QUESTION, ANIMALS_QUESTION, BUILDINGS_QUESTION, PLOT_QUESTION, DEAL_PAPERS_QUESTION, LAND_QUESTION, LOCATION_QUESTION, CSPACE_QUESTION, CSERVICES_QUESTION, BUSINESS_QUESTION, OFFICE_KIND_QUESTION, READY_QUESTION, BUILDING_QUESTION, TRUCKS_QUESTION, LOC_PAPERS_QUESTION, INSIDE_QUESTION, INVESTMENT_QUESTION, HOTEL_QUESTION, STATION_QUESTION, DEAL_LOC_QUESTION, SPACE_PAPERS_QUESTION, SERVICES_BUSINESS_QUESTION, WORKSHOP_QUESTION, LOC_BUSINESS_QUESTION, BUILDING_PAPERS_QUESTION, FACTORY_QUESTION, LOC_SAFETY_QUESTION, PAPERS_C_QUESTION,
+  SERVICES_QUESTION, FUN_QUESTION,
 ];
 
 // ── THE SCOPE PREFIX: CATEGORY → GROUP → TYPE → the pool above (owner 2026-08-23) ────────────────
@@ -815,7 +1168,7 @@ export async function rankQuestions(q: SearchQuery, askedIds: ReadonlySet<string
   // Short stays (owner 2026-10-31): a FIXED order — bathrooms → comfort → space → fun — instead of the
   // contextual score; still only among questions that cleared the gates above.
   // Short stays and the Apartments & Co-living lists ask in the owner's numbered order; every other scope keeps askTier.
-  const tier = isShortStaysScope(q) ? shortStaysAskTier : hasCards(q) ? groupAskTierFor(q) : askTier;
+  const tier = isShortStaysScope(q) ? shortStaysAskTierFor(q) : hasCards(q) ? groupAskTierFor(q) : askTier;
   const sorted = ranked.sort((a, b) =>
     tier(b.question.id) - tier(a.question.id) || b.score - a.score);
   // The array is still the array (every existing consumer keeps working); `probeFailed` rides along

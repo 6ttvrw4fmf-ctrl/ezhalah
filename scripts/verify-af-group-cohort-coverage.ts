@@ -105,8 +105,8 @@ const UNCERTIFIED_IN_SHIPPED_GROUPS = [
   // were audited the same day and did NOT earn a cohort: Camp (4 rows rent-annual / 28 monthly, 0
   // fresh), Chalet (passes every DB gate but HALF of 24 source-adjudicated rows now have both
   // structured keys null on the live page), Staff Housing (3 rows / 1), Service Facilities (40 rows
-  // total across six unrelated raw types, largest 11).
-  'Camp', 'Chalet', 'Service Facilities', 'Staff Housing',
+  // total across six unrelated raw types, largest 11). Camp and Chalet earned their cohorts on 2026-11-02 (owner lists 2026-11-01).
+  'Service Facilities', 'Staff Housing',
 ].sort();
 
 // ── BASELINE 2: how many cohort-gated questions each shipped group allows, per shape ─────────────
@@ -130,14 +130,19 @@ const EXPECTED: Record<string, Record<string, number>> = {
   'Apartments & Co-living': { Buy: 2, 'Rent/Annual': 3, 'Rent/Monthly': 7, 'Rent/both': 2, 'Buy+Rent': 2 },
   // Buy 0 -> 1 on 2026-08-23: Duplex certified with its one source-verified field (bathrooms).
   // 2026-11-02 (owner approved the Villas & Houses group lists; Duplex shares them — recomputed by EXECUTING cohortAllows):
-  'Villas & Houses': { Buy: 6, 'Rent/Annual': 7, 'Rent/Monthly': 7, 'Rent/both': 3, 'Buy+Rent': 3 },
-  'Vacation & Rural': { Buy: 0, 'Rent/Annual': 0, 'Rent/Monthly': 7, 'Rent/both': 0, 'Buy+Rent': 0 },
-  'Residential Plots': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 7, 'Rent/both': 0, 'Buy+Rent': 0 },
+  // 2026-11-02 (owner lists 2026-11-01, the countryside / land / commercial groups — recomputed by EXECUTING cohortAllows):
+  //   Villas & Houses Rent/Monthly 7 -> 5 (the villa short-stay row: rating · bathrooms · amenities · outdoors · comfort),
+  //   Rent/both 3 -> 4. Vacation & Rural: the group box has its OWN lists (GROUP_LISTS) — Rent/Monthly 6, and the
+  //   Rent/both / Buy+Rent chip intersections leave one card. Residential Plots = Residential Land's own lists (Buy 4,
+  //   Rent/Annual 3; no short stays). Retail / Industrial: group lists + mixed-mode card intersections.
+  'Villas & Houses': { Buy: 6, 'Rent/Annual': 7, 'Rent/Monthly': 5, 'Rent/both': 4, 'Buy+Rent': 3 },
+  'Vacation & Rural': { Buy: 0, 'Rent/Annual': 0, 'Rent/Monthly': 6, 'Rent/both': 1, 'Buy+Rent': 1 },
+  'Residential Plots': { Buy: 4, 'Rent/Annual': 3, 'Rent/Monthly': 0, 'Rent/both': 3, 'Buy+Rent': 3 },
   // Buy 1 -> 2, Rent/Annual 1 -> 2 on 2026-09-01: same property_age unification — every member of
   // this group (Office, Shop, Showroom) certifies property_age for both deals.
-  'Retail & Workspace': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
-  // 0 -> 1 on both deals: Factory certified with street_width. Capped at 1 by Warehouse ∩ Workshop.
-  'Industrial & Logistics': { Buy: 1, 'Rent/Annual': 1, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
+  'Retail & Workspace': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0, 'Rent/both': 2, 'Buy+Rent': 1 },
+  // 2026-11-02: the Industrial & Logistics box = the Warehouse lists (owner 2026-11-01).
+  'Industrial & Logistics': { Buy: 2, 'Rent/Annual': 3, 'Rent/Monthly': 0, 'Rent/both': 3, 'Buy+Rent': 3 },
   'Commercial Buildings & Facilities': { Buy: 0, 'Rent/Annual': 0, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
   'Commercial & Industrial Plots': { Buy: 2, 'Rent/Annual': 0, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
 };
@@ -221,17 +226,18 @@ const CEILING: Record<string, Record<string, number>> = {
   // gained a Buy list), Rent/Monthly 2 -> 4 (amenities · comfort · space · fun, shared by Apartment, Room and Studio).
   'Apartments & Co-living': { Buy: 4, 'Rent/Annual': 2, 'Rent/Monthly': 4 },
   // 2026-11-02: Duplex shares the villa lists, so the ceiling is the villa lists themselves (Buy 8, Rent 9; Monthly 6 = Villa's monthly row).
-  'Villas & Houses': { Buy: 6, 'Rent/Annual': 7, 'Rent/Monthly': 6 },
-  'Vacation & Rural': { Buy: 2, 'Rent/Annual': 3, 'Rent/Monthly': 0 },
-  'Residential Plots': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0 },
+  // 2026-11-02: the countryside / land / commercial lists (owner 2026-11-01) — recomputed with the same method.
+  'Villas & Houses': { Buy: 6, 'Rent/Annual': 7, 'Rent/Monthly': 4 },
+  'Vacation & Rural': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 4 },
+  'Residential Plots': { Buy: 4, 'Rent/Annual': 3, 'Rent/Monthly': 0 },
   'Retail & Workspace': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0 },
-  'Industrial & Logistics': { Buy: 1, 'Rent/Annual': 1, 'Rent/Monthly': 0 },
-  'Commercial Buildings & Facilities': { Buy: 3, 'Rent/Annual': 2, 'Rent/Monthly': 0 },
+  'Industrial & Logistics': { Buy: 2, 'Rent/Annual': 3, 'Rent/Monthly': 0 },
+  'Commercial Buildings & Facilities': { Buy: 2, 'Rent/Annual': 3, 'Rent/Monthly': 0 },
   // 2026-10-03: Residential Land joined this group as a cross-macro shortcut (owner: all lands in one
   // place). It is the only member certified for Rent/Annual (street_width + direction), so the best-case
   // ceiling for that shape rose 0 → 2; the ACTUAL matrix above stays 0 until the two commercial lands
   // certify an annual-rent cohort.
-  'Commercial & Industrial Plots': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0 },
+  'Commercial & Industrial Plots': { Buy: 2, 'Rent/Annual': 3, 'Rent/Monthly': 0 },
 };
 const DEAL_KEYS: Array<[string, 'Buy' | 'RentAnnual' | 'RentMonthly']> = [
   ['Buy', 'Buy'], ['Rent/Annual', 'RentAnnual'], ['Rent/Monthly', 'RentMonthly'],

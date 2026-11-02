@@ -1195,14 +1195,17 @@ try {
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
   await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
+  // 2026-11-02: Factory earned the owner's commercial lists (street width, building, location & safety on both deals), so the
+  // 0-question scope is now the «مرافق خدمية» box (Service Facilities: a filter-only grouping with no cohort — the one type
+  // scripts/verify-af-group-cohort-coverage.ts still holds at the uncertified baseline, beside Staff Housing).
   await tap('تجاري');
-  await tap('الصناعة واللوجستيات'); await page.waitForTimeout(300);
-  await tap('مصنع'); await page.waitForTimeout(300);
+  await tap('المباني والمرافق'); await page.waitForTimeout(300);
+  await tap('مرافق خدمية'); await page.waitForTimeout(300);
   await tap('إيجار'); await page.waitForTimeout(300); // Buy is on by default; add Rent → combined
   await pickCity('الرياض');
   await tap('بحث');
   const jZeroStart = await waitForCount(45000);
-  check('[J0] 0-question scope (Factory/Buy+Rent-combined/الرياض) lands with a real start count', Number.isFinite(jZeroStart), `start=${jZeroStart}`);
+  check('[J0] 0-question scope (Service Facilities/Buy+Rent-combined/الرياض) lands with a real start count', Number.isFinite(jZeroStart), `start=${jZeroStart}`);
   let jZeroOpened = false;
   for (let i = 0; i < 4 && !jZeroOpened; i++) {
     await tap('🎯 دقّق مع الذكاء الاصطناعي').catch(() => {});

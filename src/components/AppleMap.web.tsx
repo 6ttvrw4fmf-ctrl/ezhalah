@@ -32,6 +32,7 @@ import { Image as XImage } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
+import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, paddedBox, pinColor, pinHead, bubbleText, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 
@@ -83,7 +84,8 @@ type MKMap = {
   removeAnnotation: (a: unknown) => void;
   convertPointOnPageToCoordinate: (p: DOMPoint) => Coord;
   setRegionAnimated: (r: unknown, animate?: boolean) => void;
-  addEventListener: (name: string, fn: (e: { overlay?: { data?: Region } }) => void) => void;
+  addEventListener: (name: string, fn: (e: { overlay?: { data?: Region }; annotation?: { data?: { pin?: PinRow } } }) => void) => void;
+  removeEventListener: (name: string, fn: (e: unknown) => void) => void;
 };
 type Coord = { latitude: number; longitude: number };
 type Shape = { style: { fillOpacity: number; strokeOpacity: number; lineWidth: number }; data: Region; points: unknown[] };
@@ -117,6 +119,8 @@ type MapKit = {
   CircleOverlay: new (center: unknown, radius: number, o?: { style?: unknown; enabled?: boolean }) => unknown;
   Directions: (new (o?: { language?: string }) => { route: (req: { origin: unknown; destination: unknown; transportType?: unknown }, cb: (err: unknown, data: { routes: { polyline: { points: Coord[] }; distance: number }[] }) => void) => number }) & { Transport: { Automobile: unknown } };
   MarkerAnnotation: new (coord: unknown, o?: { title?: string; color?: string; glyphColor?: string; animates?: boolean }) => unknown;
+  Annotation: new (coord: unknown, factory: (coord: unknown, o: { data?: unknown }) => HTMLElement, o?: { data?: unknown; anchorOffset?: unknown; calloutEnabled?: boolean; size?: { width: number; height: number } }) => unknown;
+  DOMPoint?: unknown;
   Search: new (o: { region?: unknown; language?: string; limitToCountries?: string; includePointsOfInterest?: boolean }) => MKSearch;
   addEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
   removeEventListener: (name: string, fn: (e: { status?: string }) => void) => void;
@@ -306,6 +310,17 @@ export async function suggestPlaces(q: string, uiLanguage: string): Promise<Plac
   return sortByKind(dropAreaShadows(dedupePlaces(places.length ? places : named)), query).slice(0, 6);
 }
 
+/** HOW MANY PINS A FILTER LEAVES IN THE CURRENT VIEW (the popup's button): one coarse count-cell read over the
+ *  visible rectangle, summed. null when the fetch failed or no map is up — the button then shows no number. */
+export async function countPinsInView(filter: PinFilter): Promise<number | null> {
+  const m = live.map;
+  if (!m) return null;
+  const { center, span } = m.region;
+  const rows = await fetchMapPins(paddedBox(center, span), Math.max(0.01, span.latitudeDelta / 4), filter, 5000);
+  if (rows === 'unknown') return null;
+  return rows.reduce((a, r) => a + r.n, 0);
+}
+
 /** Glide the map to a suggestion: Apple's bounding region for it when it has one, else a town-sized view around it. */
 export function flyToPlace(p: PlaceSuggestion) {
   const mk = mapkitOf(); const m = live.map;
@@ -356,7 +371,7 @@ const regionView = (mk: MapKit, r: Region) => {
 /** `onExpand` (compact box): the ⤢ button top-left opens the map full screen; the box itself pans and zooms in place
  *  (owner 2026-10-31: «zoom in within his screen without leaving»). `full` + `onClose`: the full-screen map, with its
  *  close button top-left. */
-export default function AppleMap({ full = false, onExpand, onClose, onRoute }: { full?: boolean; onExpand?: () => void; onClose?: () => void; onRoute?: () => void }) {
+export default function AppleMap({ full = false, onExpand, onClose, onRoute, pins, onPinSelect }: { full?: boolean; onExpand?: () => void; onClose?: () => void; onRoute?: () => void; pins?: PinFilter; onPinSelect?: (row: PinRow) => void }) {
   const { t, locale } = useI18n();
   const hostRef = useRef<View>(null);
   const localeRef = useRef(locale);
@@ -367,11 +382,16 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute }: {
   const ptsRef = useRef<Coord[]>([]);
   const [drawing, setDrawing] = useState(false);
   const [sketch, setSketch] = useState<Shape | null>(null);
+  const [poly, setPoly] = useState<PinFilter['poly']>(null);  // the applied drawn boundary, as the pin query's polygon
   const [hasShape, setHasShape] = useState(false);
   const [zoomed, setZoomed] = useState(false);
   const [routeOn, setRouteOn] = useState(false);
   useEffect(() => { live.onRoute = setRouteOn; return () => { if (live.onRoute === setRouteOn) live.onRoute = undefined; }; }, []);
   const [failed, setFailed] = useState(false);
+  // Bumped once the MapKit map object exists: the pin layer below mounts before MapKit has loaded, and an effect that
+  // returned early then must run again (measured live 2026-11-02: a fresh /map load drew no pin or bubble until the
+  // deal changed, because nothing re-ran the layer once the map was there).
+  const [mapReady, setMapReady] = useState(0);
   // Map style (owner 2026-10-31, Zillow's layers button): the modes Apple's web MapKit offers — standard, satellite
   // with labels (hybrid), and muted. Driving / transit / traffic exist only in Apple's own apps, not on the web.
   const [layersOpen, setLayersOpen] = useState(false);
@@ -419,6 +439,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute }: {
       });
       mapRef.current = map;
       live.map = map;
+      setMapReady((n) => n + 1);
 
       // The 13 regions: boundaries + names, and click-to-zoom. Drawn QUIETLY so they blend into Apple's map rather
       // than sit on top of it (owner 2026-10-30: «blending in with Apple Maps, I don't want it very bright»): thin,
@@ -504,6 +525,83 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute }: {
     if (mk && initialized && mk.language !== locale) mk.language = locale;
   }, [locale]);
 
+  // EVERY PROPERTY PIN (owner 2026-11-02: «display all property pins … always show the price as the head of the
+  // pin»). One bounded read of map_pins_ar() per settled view, for the padded visible rectangle only: exact points
+  // from city zoom inward (a shared spot = one gold head with its count), count bubbles when zoomed out. The
+  // answer replaces the layer whole; a view that moved on before the answer came is dropped (sequence number); a
+  // failed fetch keeps what is on screen (A FAILED FETCH IS NOT AN EMPTY ANSWER — an empty map must never read as
+  // «no listings here»). Tapping a bubble zooms into it; tapping a pin hands its row up (the card sheet).
+  const pinFilter: PinFilter | undefined = pins ? { ...pins, poly: poly ?? pins.poly ?? null } : undefined;
+  const pinsKey = JSON.stringify(pinFilter ?? null);
+  const [pinCount, setPinCount] = useState<number | null>(null);
+  const onPinSelectRef = useRef(onPinSelect); onPinSelectRef.current = onPinSelect;
+  useEffect(() => {
+    const mk = mapkitOf(); const m = mapRef.current;
+    if (!mk || !m || !pinFilter) return;
+    const pins = pinFilter;
+    let seq = 0; let timer: ReturnType<typeof setTimeout> | null = null; let mine: unknown[] = [];
+    const loc = localeRef.current === 'ar' ? 'ar' : 'en';
+    const element = (row: PinRow, cell: number) => {
+      const el = document.createElement('div');
+      const color = cell > 0 ? '#5B4A6B' : pinColor(row);
+      el.setAttribute('data-testid', cell > 0 ? 'map-bubble' : 'map-pin');
+      el.style.cssText = `font:600 12px/1 -apple-system,system-ui,sans-serif;color:#fff;background:${color};border:2px solid #fff;` +
+        (cell > 0
+          ? 'border-radius:999px;min-width:34px;height:34px;padding:0 9px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.35)'
+          : 'border-radius:14px;padding:7px 10px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.35);position:relative');
+      el.textContent = cell > 0 ? bubbleText(row.n, loc) : pinHead(row, loc);
+      if (cell === 0) {
+        const tip = document.createElement('div');
+        tip.style.cssText = `position:absolute;left:50%;bottom:-7px;width:0;height:0;margin-left:-6px;border-left:6px solid transparent;border-right:6px solid transparent;border-top:7px solid ${color}`;
+        el.appendChild(tip);
+      }
+      return el;
+    };
+    const clear = () => { for (const a of mine) m.removeAnnotation(a); mine = []; };
+    const load = async () => {
+      const my = ++seq;
+      const { center, span } = m.region;
+      const cell = cellForSpan(span.latitudeDelta);
+      let rows = await fetchMapPins(paddedBox(center, span), cell, pins);
+      if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
+      // DENSE VIEW: the exact-point read hit its cap, so pins would silently show a PART of the listings (downtown
+      // Riyadh holds thousands in one city-zoom view). Never a partial set — read the same view again as a fine bubble
+      // grid, where every listing is counted, and draw bubbles until the user zooms closer.
+      let drawCell = cell;
+      if (cell === 0 && rows.length >= PIN_LIMIT) {
+        drawCell = fineCellForSpan(span.latitudeDelta);
+        rows = await fetchMapPins(paddedBox(center, span), drawCell, pins);
+        if (my !== seq || rows === 'unknown' || mapRef.current !== m) return;
+      }
+      // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
+      rows.sort((a, b) => a.n - b.n);
+      setPinCount(rows.reduce((a, r) => a + r.n, 0));
+      clear();
+      mine = rows.map((row) => new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, drawCell), {
+        data: { pin: row, cell: drawCell }, calloutEnabled: false, anchorOffset: drawCell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(0, -8),
+      }));
+      for (const a of mine) m.addAnnotation(a);
+    };
+    const onRegion = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { void load(); }, 220); };
+    const onSelect = (e: { annotation?: { data?: { pin?: PinRow; cell?: number } } }) => {
+      const d = e.annotation?.data; if (!d?.pin) return;
+      if (d.cell && d.cell > 0) {
+        live.history.push(m.region);
+        m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(d.pin.lat, d.pin.lng), new mk.CoordinateSpan(d.cell * 2.2, d.cell * 2.2)), true);
+      } else onPinSelectRef.current?.(d.pin);
+    };
+    m.addEventListener('region-change-end', onRegion);
+    m.addEventListener('select', onSelect);
+    void load();
+    return () => {
+      seq++; if (timer) clearTimeout(timer);
+      m.removeEventListener('region-change-end', onRegion as unknown as (e: unknown) => void);
+      m.removeEventListener('select', onSelect as unknown as (e: unknown) => void);
+      if (mapRef.current === m) clear();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinsKey, failed, mapReady]);
+
   // Full screen ⇄ compact: MapKit sizes its canvas on window resize; nudge it once the box has changed.
   useEffect(() => {
     const id = requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
@@ -541,6 +639,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute }: {
   };
   // Apply keeps the boundary and leaves the map exactly where it is — like Zillow, it does NOT fly to the shape
   // (owner 2026-10-31: «drawing just creates a boundary, it doesn't take you there»).
+  // THE DRAWN SHAPE FILTERS THE PINS (owner 2026-11-02: «when I draw then I click apply … show me listings inside
+  // that area … strictly inside what the user draws»): Apply turns the sketch into a GeoJSON polygon the pin query
+  // keeps points strictly inside of (point-in-polygon in the database); Remove drops it and every pin returns.
   const applyDrawing = () => {
     const m = mapRef.current;
     const shape = sketchRef.current;
@@ -548,11 +649,12 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute }: {
     if (shapeRef.current) m.removeOverlay(shapeRef.current);
     shapeRef.current = shape; sketchRef.current = null;
     setHasShape(true); setSketch(null); setDrawing(false); gestures(true);
+    setPoly(polygonOf(shape.points as { latitude: number; longitude: number }[]));
   };
   const removeDrawing = () => {
     const m = mapRef.current;
     if (m && shapeRef.current) m.removeOverlay(shapeRef.current);
-    shapeRef.current = null; setHasShape(false);
+    shapeRef.current = null; setHasShape(false); setPoly(null);
   };
   useEffect(() => {
     if (!drawing) return;
@@ -706,12 +808,17 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute }: {
           <Text style={s.groundSoon}>{t('Coming soon')}</Text>
         </View>
       ) : null}
+      {hasShape && !drawing && pinCount !== null ? (
+        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') })}</Text></View>
+      ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>
   );
 }
 
 const s = StyleSheet.create({
+  countPill: { position: 'absolute', left: 12, bottom: 12, backgroundColor: 'rgba(36,35,43,0.86)', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  countPillT: { color: '#fff', fontSize: 13, fontWeight: '700' },
   frame: { flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
   host: { flex: 1 },
   wholeT: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },

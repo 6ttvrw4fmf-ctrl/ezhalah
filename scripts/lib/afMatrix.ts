@@ -23,7 +23,8 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { liftSymbols } from './liftSymbols.ts';
-import { COHORT_QUESTIONS, COHORT_CARDS, shortStaysAsks, cardPlan, cardKeys, isCardId, AMENITY_BAG_QUESTION_IDS } from '../../src/lib/afCohorts.ts';
+import { COHORT_QUESTIONS, COHORT_CARDS, GROUP_LISTS, shortStaysAsks, cardPlan, cardKeys, isCardId, AMENITY_BAG_QUESTION_IDS } from '../../src/lib/afCohorts.ts';
+import { effectiveTypes, effectiveGroups } from '../../src/lib/searchDefaults.ts';
 import { CLEAN_MACRO, ALL_CLEAN_TYPES, HIERARCHY, UNBOXED_TYPES, groupsOf, groupMembers } from '../../src/data/propertyTypes.ts';
 import type { SearchQuery } from '../../src/data/search.ts';
 
@@ -54,7 +55,10 @@ export const MODES: Mode[] = [
 export function tableAllows(type: string, mode: Mode, id: string): boolean {
   // Short stays (owner 2026-10-31): ONE pool, so every residential type certifies exactly the asked
   // set (SHORT_STAYS_QUESTIONS) in the plain monthly mode — rating / unit_subtype are chat-only there.
-  if (mode.mode === 'RentMonthly' && CLEAN_MACRO[type] === 'Residential') return shortStaysAsks(id);
+  // 2026-11-01/02: only the Apartments & Co-living types are the POOL; Villa / Chalet / Rest House / Camp carry their own
+  // RentMonthly lists in COHORT_QUESTIONS (read below like any other leg).
+  if (mode.mode === 'RentMonthly' && ['Apartment', 'Floor', 'Studio', 'Room', 'Residential Building'].includes(type)) return shortStaysAsks(id);
+  if (mode.mode === 'RentMonthly' && (id === 'rating' || id === 'unit_subtype')) return false; // chat-only on short stays everywhere
   const cfg = COHORT_QUESTIONS[type];
   if (!cfg) return false;
   // Apartments & Co-living (owner 2026-10-31): a group type (one with COHORT_CARDS) ignores a deal it has no cohort
@@ -74,7 +78,28 @@ export function tableAllows(type: string, mode: Mode, id: string): boolean {
  */
 export function tableOffers(types: string[], mode: Mode, query: SearchQuery, ids: Iterable<string>, view: 'asked' | 'certified' = 'asked'): Set<string> {
   const out = new Set<string>();
-  for (const id of ids) if (!isCardId(id) && types.every((t) => tableAllows(t, mode, id))) out.add(id);
+  // A GROUP box with its OWN lists (owner 2026-11-01, GROUP_LISTS): the table is that list, intersected over the mode's
+  // legs the group has (a deal with no list contributes no leg); chat-only ids never show on short stays.
+  const groups = effectiveGroups(query);
+  const box = !effectiveTypes(query).length && groups.length === 1 && GROUP_LISTS[groups[0]] ? GROUP_LISTS[groups[0]] : null;
+  if (box) {
+    const legs = mode.legs.filter((l) => box.questions[l]);
+    for (const id of ids) {
+      if (isCardId(id) || !legs.length) continue;
+      if (mode.mode === 'RentMonthly' && (id === 'rating' || id === 'unit_subtype')) continue;
+      if (legs.every((l) => (box.questions[l] ?? []).includes(id))) out.add(id);
+    }
+  } else {
+    // a CARD type with no cohort for any of the mode's legs contributes no leg (Duplex on short stays): it never vetoes
+    // …except the Apartments & Co-living POOL on short stays (owner 2026-10-31): a pool type votes its pool list (tableAllows)
+    const POOL = ['Apartment', 'Floor', 'Studio', 'Room', 'Residential Building'];
+    // …and only where the pool builds LEGS (short stays via scopeLegs, or a mixed mode): on plain Buy / Annual the
+    // per-type branch of cohortAllows() intersects every selected type, so a card type with no list there VETOES
+    // (Room on the Apartments group's Buy: no non-card id survives its empty leg — verify-af-group-cohort-coverage).
+    const skipsEmptyLeg = mode.mode === 'RentMonthly' || mode.legs.length > 1;
+    const voting = types.filter((t) => (mode.mode === 'RentMonthly' && POOL.includes(t)) || !skipsEmptyLeg || !(COHORT_CARDS[t] && mode.legs.every((l) => !COHORT_QUESTIONS[t]?.[l])));
+    for (const id of ids) if (!isCardId(id) && voting.length > 0 && voting.every((t) => tableAllows(t, mode, id))) out.add(id);
+  }
   const plan = cardPlan(query);
   for (const c of plan) out.add(c.id);
   // the asking rules only: a committed «furnished» or amenities answer stays CERTIFIED (and is carried) on a scope
@@ -150,6 +175,7 @@ export const QUESTION_CONSTS = [
   // the themed cards (owner 2026-10-31 / 11-01): two consts carry id 'space' (short stays / yearly wording)
   'COMFORT_QUESTION', 'SPACE_QUESTION', 'SPACE_YEARLY_QUESTION', 'SAFETY_QUESTION', 'PERKS_QUESTION', 'BUILD_QUESTION',
   'OUTDOORS_QUESTION', 'SMART_QUESTION', 'PAPERS_QUESTION',
+  'WATER_QUESTION', 'GAMES_QUESTION', 'CAMP_LIFE_QUESTION', 'WATER_LAND_QUESTION', 'LAND_PAPERS_QUESTION', 'POWER_QUESTION', 'CROPS_QUESTION', 'ANIMALS_QUESTION', 'BUILDINGS_QUESTION', 'PLOT_QUESTION', 'DEAL_PAPERS_QUESTION', 'LAND_QUESTION', 'LOCATION_QUESTION', 'CSPACE_QUESTION', 'CSERVICES_QUESTION', 'BUSINESS_QUESTION', 'OFFICE_KIND_QUESTION', 'READY_QUESTION', 'BUILDING_QUESTION', 'TRUCKS_QUESTION', 'LOC_PAPERS_QUESTION', 'INSIDE_QUESTION', 'INVESTMENT_QUESTION', 'HOTEL_QUESTION', 'STATION_QUESTION', 'DEAL_LOC_QUESTION', 'SPACE_PAPERS_QUESTION', 'SERVICES_BUSINESS_QUESTION', 'WORKSHOP_QUESTION', 'LOC_BUSINESS_QUESTION', 'BUILDING_PAPERS_QUESTION', 'FACTORY_QUESTION', 'LOC_SAFETY_QUESTION', 'PAPERS_C_QUESTION',
   'EXTRAS_QUESTION', 'WHO_QUESTION', 'FEATURES_QUESTION', 'SERVICES_QUESTION', 'FUN_QUESTION',
   'APARTMENTS_QUESTION', 'SHOPS_QUESTION',   // the Residential Building ladders
 ];
@@ -162,7 +188,7 @@ export const QUESTION_HELPER_SYMBOLS = [
 export const afLiftImports = (root: string): string => {
   const href = (p: string) => JSON.stringify(pathToFileURL(join(root, p)).href);
   return [
-    `import { cohortAllows, scopeCleanTypes, scopeDeals, intersectChips, isShortStaysScope, shortStaysAskTier, cardKeys, groupAskTierFor, hasCards, isCardId } from ${href('src/lib/afCohorts.ts')};`,
+    `import { cohortAllows, scopeCleanTypes, scopeDeals, intersectChips, isShortStaysScope, shortStaysAskTier, cardKeys, groupAskTierFor, hasCards, isCardId, streetWidthRungs } from ${href('src/lib/afCohorts.ts')};`,
     `import { CHIP_DEFS } from ${href('src/lib/afChips.ts')};`,
   ].join('\n');
 };
@@ -276,6 +302,109 @@ const AMENITY_COL: Record<string, string> = {
   // Villas & Houses (migration 20261102055240): seven text facts, column name = token
   women_majlis: 'women_majlis', outdoor_kitchen: 'outdoor_kitchen', outdoor_diwaniya: 'outdoor_diwaniya',
   waterfall: 'waterfall', well: 'well', irrigation: 'irrigation', sports_court: 'sports_court',
+  split_payments: 'split_payments',
+  heated_pool: 'heated_pool',
+  kids_pool: 'kids_pool',
+  water_slide: 'water_slide',
+  sea_view: 'sea_view',
+  football_pitch: 'football_pitch',
+  playstation: 'playstation',
+  inflatable_games: 'inflatable_games',
+  sound_system: 'sound_system',
+  fire_pit: 'fire_pit',
+  bait_shaar: 'bait_shaar',
+  mandi_pit: 'mandi_pit',
+  outdoor_seating: 'outdoor_seating',
+  tent: 'tent',
+  dunes_view: 'dunes_view',
+  women_section: 'women_section',
+  two_sections: 'two_sections',
+  events_hall: 'events_hall',
+  privacy_screen: 'privacy_screen',
+  trees: 'trees',
+  for_families: 'for_families',
+  for_youth: 'for_youth',
+  for_events: 'for_events',
+  for_newlyweds: 'for_newlyweds',
+  quad_bikes: 'quad_bikes',
+  horses_stable: 'horses_stable',
+  camels: 'camels',
+  toilets_on_site: 'toilets_on_site',
+  lighting: 'lighting',
+  artesian_well: 'artesian_well',
+  solar_power: 'solar_power',
+  palms: 'palms',
+  fruit_trees: 'fruit_trees',
+  fodder_crops: 'fodder_crops',
+  greenhouses: 'greenhouses',
+  producing_farm: 'producing_farm',
+  animal_pens: 'animal_pens',
+  poultry: 'poultry',
+  farm_house: 'farm_house',
+  farm_rest_house: 'farm_rest_house',
+  workers_housing: 'workers_housing',
+  fence: 'fence',
+  main_road: 'main_road',
+  good_soil: 'good_soil',
+  corner_plot: 'corner_plot',
+  three_streets: 'three_streets',
+  ready_to_build: 'ready_to_build',
+  raised_plot: 'raised_plot',
+  residential_commercial: 'residential_commercial',
+  all_services: 'all_services',
+  asphalt: 'asphalt',
+  street_lights: 'street_lights',
+  approved_plan: 'approved_plan',
+  direct_owner: 'direct_owner',
+  inside_project: 'inside_project',
+  floors_allowed: 'floors_allowed',
+  grant_land: 'grant_land',
+  no_services: 'no_services',
+  mezzanine: 'mezzanine',
+  pantry: 'pantry',
+  glass_front: 'glass_front',
+  frontage: 'frontage',
+  in_mall: 'in_mall',
+  in_tower: 'in_tower',
+  license: 'license',
+  food_allowed: 'food_allowed',
+  takeover: 'takeover',
+  first_tenant: 'first_tenant',
+  internet: 'internet',
+  civil_defense: 'civil_defense',
+  high_ceiling: 'high_ceiling',
+  hangar: 'hangar',
+  insulated_panel: 'insulated_panel',
+  cold_storage: 'cold_storage',
+  concrete_floor: 'concrete_floor',
+  loading_dock: 'loading_dock',
+  big_gate: 'big_gate',
+  truck_access: 'truck_access',
+  crane: 'crane',
+  racks: 'racks',
+  office_inside: 'office_inside',
+  heavy_power: 'heavy_power',
+  industrial_area: 'industrial_area',
+  car_service: 'car_service',
+  meeting_room: 'meeting_room',
+  reception: 'reception',
+  coworking: 'coworking',
+  private_office: 'private_office',
+  central_ac: 'central_ac',
+  shops_inside: 'shops_inside',
+  offices_inside: 'offices_inside',
+  apartments_inside: 'apartments_inside',
+  staff_housing_inside: 'staff_housing_inside',
+  restaurant_cafe: 'restaurant_cafe',
+  car_wash: 'car_wash',
+  market: 'market',
+  earning_income: 'earning_income',
+  stars_mentioned: 'stars_mentioned',
+  rooms_suites: 'rooms_suites',
+  oil_change: 'oil_change',
+  pumps: 'pumps',
+  mosque: 'mosque',
+  building_rules: 'building_rules',
 };
 // The 6 DERIVED tokens (same migration): one p_amenities slug standing for a predicate over other columns.
 //   separate_meters → (separate_electricity_meter OR separate_water_meter) — SQL three-valued: a row is KNOWN-NOT only
@@ -286,6 +415,9 @@ const METERS = ['separate_electricity_meter', 'separate_water_meter'];
 const EITHER_COLS: Record<string, string[]> = {
   separate_meters: METERS, garden_yard: ['garden', 'yard'], jacuzzi_sauna: ['jacuzzi', 'sauna'],
   cameras_smart_home: ['cameras', 'smart_home'], water_tank_well: ['water_tank', 'well'], smart_home_entry: ['smart_home', 'smart_entry'],
+  camels_horses: ['camels', 'horses_stable'],
+  palm_fruit_trees: ['palms', 'fruit_trees'],
+  pool_gym: ['pool', 'gym'],
 };
 const eitherOf = (token: string): Meaning => {
   const C = EITHER_COLS[token];
@@ -331,11 +463,13 @@ const ladder = (col: string, cnt: string, params: Record<string, unknown>, n: nu
 
 export function optionMeaning(field: string, key: string): Meaning | null {
   switch (field) {
-    case 'rnpl': return key === 'rnpl' ? bool('rent_now_pay_later', 'cnt_rnpl', { p_amenities: ['rnpl'] }) : null;
+    case 'rnpl': return key === 'rnpl' ? bool('rent_now_pay_later', 'cnt_rnpl', { p_amenities: ['rnpl'] })
+      : key === 'split_payments' ? bool('split_payments', 'cnt_split_payments', { p_amenities: ['split_payments'] }) : null; // owner 2026-11-01: two chips
     // The themed cards (owner 2026-10-31 / 11-01) are the amenities card split by theme — same tokens, same meaning,
     // plus the one derived chip (separate_meters) a card may carry.
     case 'comfort': case 'space': case 'safety': case 'perks': case 'build': case 'extras': case 'who': case 'features': case 'services': case 'fun':
     case 'outdoors': case 'smart': case 'papers':
+    case 'water': case 'games': case 'camp_life': case 'water_land': case 'land_papers': case 'power': case 'crops': case 'animals': case 'buildings': case 'plot': case 'deal_papers': case 'land': case 'location': case 'cspace': case 'cservices': case 'business': case 'office_kind': case 'ready': case 'building': case 'trucks': case 'loc_papers': case 'inside': case 'investment': case 'hotel': case 'station': case 'deal_loc': case 'space_papers': case 'services_business': case 'workshop': case 'loc_business': case 'building_papers': case 'factory': case 'loc_safety': case 'papers_c':
     case 'amenities':
       if (EITHER_COLS[key]) return eitherOf(key);
       return AMENITY_COL[key] ? bool(AMENITY_COL[key], `cnt_${key}`, { p_amenities: [key] }) : null;
@@ -343,7 +477,7 @@ export function optionMeaning(field: string, key: string): Meaning | null {
     case 'apartments': return APTS_RUNG[key] ? ladder('apartments_count', `cnt_${key}`, { p_amenities: [key] }, APTS_RUNG[key]) : null;
     case 'shops': return key === 'has_shops' ? ladder('shops_count', 'cnt_has_shops', { p_amenities: ['has_shops'] }, 1) : null;
     case 'bathrooms': return /^[1-6]$/.test(key) ? ladder('bathrooms', `cnt_bath${key}`, { p_bath_min: Number(key) }, Number(key)) : null; // 5+/6+: the villa ladders (20261102055240)
-    case 'street_width': return /^(15|20|25|30)$/.test(key) ? ladder('street_width_m', `cnt_stw${key}`, { p_street_width_min: Number(key) }, Number(key)) : null;
+    case 'street_width': return /^(10|15|20|25|30|40|60)$/.test(key) ? ladder('street_width_m', `cnt_stw${key}`, { p_street_width_min: Number(key) }, Number(key)) : null;
     case 'furnished':
       if (key === 'yes') return bool('furnished', 'cnt_furnished', { p_furnished: true });
       if (key === 'no') return { ...bool('furnished', 'cnt_unfurnished', { p_furnished: false }), rest: 'furnished=is.false', notMatching: 'furnished=is.true', satisfies: (r) => r.furnished === false };
@@ -422,6 +556,7 @@ export function fieldMeaning(field: string): FieldMeaning | null {
   switch (field) {
     case 'comfort': case 'space': case 'safety': case 'perks': case 'build': case 'extras': case 'who': case 'features': case 'services': case 'fun':
     case 'outdoors': case 'smart': case 'papers':
+    case 'water': case 'games': case 'camp_life': case 'water_land': case 'land_papers': case 'power': case 'crops': case 'animals': case 'buildings': case 'plot': case 'deal_papers': case 'land': case 'location': case 'cspace': case 'cservices': case 'business': case 'office_kind': case 'ready': case 'building': case 'trucks': case 'loc_papers': case 'inside': case 'investment': case 'hotel': case 'station': case 'deal_loc': case 'space_papers': case 'services_business': case 'workshop': case 'loc_business': case 'building_papers': case 'factory': case 'loc_safety': case 'papers_c':
     case 'amenities': return { ...single('cnt_total_base', ['cnt_amen_unknown']), combine: 'and',
       paramsBoth: (a, b) => ({ p_amenities: [...(a.p_amenities as string[]), ...(b.p_amenities as string[])] }) };
     // «How many apartments?» is a single-select «at least» ladder like bathrooms (its apply keeps the first key);
@@ -452,7 +587,9 @@ export function fieldMeaning(field: string): FieldMeaning | null {
       paramsBoth: (a, b) => ({ p_age_buckets: Object.keys(AGE).filter((k) => sameParams(AGE[k].params, a) || sameParams(AGE[k].params, b)) }) };
     // «😔 on every question» (owner 2026-10-03): these read a DB IS NULL column (migration 20261003184909),
     // so «did not mention» means exactly that column — never a subtraction over the rungs.
-    case 'rnpl': return single('cnt_total_base', ['cnt_rnpl_unknown']);
+    // two chips since 2026-11-02 (the site's installment box + the ad's «دفعات» words): a multi-select bag like shops/amenities
+    case 'rnpl': return { ...single('cnt_total_base', ['cnt_rnpl_unknown']), combine: 'and',
+      paramsBoth: (a, b) => ({ p_amenities: [...(a.p_amenities as string[]), ...(b.p_amenities as string[])] }) };
     case 'bathrooms': return { ...single('cnt_total_base', ['cnt_bath_unknown']), combine: 'or', restBoth: lowerRung,
       paramsBoth: (a, b) => ({ p_bath_min: Math.min(Number(a.p_bath_min), Number(b.p_bath_min)) }) };
     case 'street_width': return { ...single('cnt_total_base', ['cnt_stw_unknown']), combine: 'or', restBoth: lowerRung,

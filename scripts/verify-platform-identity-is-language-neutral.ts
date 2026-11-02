@@ -228,7 +228,13 @@ const brokenDistinctCount = (rows: ReadonlyArray<{ source?: string | null }>) =>
   const renderers = files
     .filter((f) => /<(Memo)?ResultCard[\s/>]/.test(readFileSync(f, 'utf8')))
     .map((f) => f.replace(root + '/', ''));
-  check(renderers.length === 1, 'exactly ONE screen renders result cards (Filter/Agent/AF share it)',
+  // THE MAP'S PIN SHEET IS THE ONE DELIBERATE SECOND RENDERER (owner 2026-11-02: «when user clicks it shows … property
+  // card … I scroll down I see the others», Zillow-style). It is NAMED here, not waved through: the list below is
+  // the complete set, so a third results path still fails, and the sheet loads its cards through fetchListingCards()
+  // — the same finalize() path — never its own query (pinned in verify-map-pins-every-listing.ts).
+  const allowedRenderers = ['src/app/agent.tsx', 'src/components/MapPinSheet.tsx'];
+  check(renderers.length > 0 && renderers.every((f) => allowedRenderers.includes(f)) && renderers.includes('src/app/agent.tsx'),
+    'only the named screens render result cards (the results screen, and the map pin sheet the owner asked for)',
     renderers.length === 0 ? 'matched NO files — the pattern is wrong, not the code' : renderers.join(', '));
 
   // (b) that screen derives the platform term from the shared counter, never a literal or a local Set.

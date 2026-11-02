@@ -154,9 +154,13 @@ export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onR
   );
 }
 
-export default function MapDealRow() {
+export default function MapDealRow({ deals: dealsProp, onDeals, onFilter, filterOn = false }: { deals?: MapDeal[]; onDeals?: (d: MapDeal[]) => void; onFilter?: () => void; filterOn?: boolean } = {}) {
   const { t, isRTL } = useI18n();
-  const [deals, setDeals] = useState<MapDeal[]>(['buy']);
+  // THE DEAL BUTTON DRIVES THE PINS (owner 2026-11-02: «when the user clicks buy or rent or short stays he sees the
+  // option»): the choice lives in the map screen when it passes `deals`, so the pin layer reads the same state.
+  const [dealsLocal, setDealsLocal] = useState<MapDeal[]>(['buy']);
+  const deals = dealsProp ?? dealsLocal;
+  const setDeals = (f: (d: MapDeal[]) => MapDeal[]) => { const next = f(deals); setDealsLocal(next); onDeals?.(next); };
   const [open, setOpen] = useState(false);
   // Untick only while another stays ticked: the map always has at least one deal.
   const toggle = (id: MapDeal) => setDeals((d) => (d.includes(id) ? (d.length > 1 ? d.filter((x) => x !== id) : d) : DEALS.filter((x) => x.id === id || d.includes(x.id)).map((x) => x.id)));
@@ -180,14 +184,15 @@ export default function MapDealRow() {
       </Pressable>
       {/* «تصفية» beside it — the filter sheet is the next step; the button is here so the row is complete. */}
       <Pressable
-        style={({ pressed, hovered }: any) => [s.btn, hovered && s.btnHover, pressed && s.btnPressed]}
+        style={({ pressed, hovered }: any) => [s.btn, filterOn && s.btnActive, hovered && s.btnHover, pressed && s.btnPressed]}
+        onPress={onFilter}
         accessibilityRole="button"
         accessibilityLabel={t('Filter')}
         testID="map-filter-btn"
       >
-        <Ionicons name="options-outline" size={17} color={colors.ink} />
-        <Text style={s.btnText}>{t('Filter')}</Text>
-        <Ionicons name="chevron-down" size={15} color={colors.ink} />
+        <Ionicons name="options-outline" size={17} color={filterOn ? colors.primary : colors.ink} />
+        <Text style={[s.btnText, filterOn && s.btnTextActive]}>{t('Filter')}</Text>
+        <Ionicons name="chevron-down" size={15} color={filterOn ? colors.primary : colors.ink} />
       </Pressable>
 
       {/* The popup: a small card under the row, not a full-screen sheet. A transparent Modal so a tap anywhere

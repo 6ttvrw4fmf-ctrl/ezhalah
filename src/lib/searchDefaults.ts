@@ -42,7 +42,7 @@ export function scopeCrossesMacro(q: SearchQuery): boolean {
 // showed NO card evidence for it — an R12A.1 hole (a committed AF predicate invisible on the card).
 // verify-af-card-evidence.ts pins registry ⇔ gate over this set. Typed readonly string[] so callers'
 // `.includes(someString)` type-checks.
-export const RNPL_TOKENS: readonly string[] = ['rnpl', 'rent_now_pay_later'];
+export const RNPL_TOKENS: readonly string[] = ['rnpl', 'rent_now_pay_later', 'split_payments'];
 
 export const AF_PREDICATE_FIELDS = [
   'ageMin', 'ageMax', 'isNewConstruction', 'amenities', 'bathMin',

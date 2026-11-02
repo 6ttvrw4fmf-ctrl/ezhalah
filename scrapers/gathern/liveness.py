@@ -378,6 +378,25 @@ def fingerprint_read(status: int, alt, url: str) -> int:
     return status
 
 
+def fresh_read(status: int, url: str, session_factory=None) -> int:
+    """A read that is STILL no verdict after every other reader, re-read once under a brand-new
+    session (2026-11-02, ♻️, backlog 1147/1148). Returns 200, 404 or 410 from that read; anything
+    else leaves `status` untouched. A verdict the run already reached is never second-guessed.
+
+    Why: the hourly sweep reads ~1,500 units on ONE long-lived session, and gathern sends that
+    session home (307 -> /ar?error=500) for a growing set of units, on /view/ AND /ar/view/, under
+    both fingerprints and through the proxy. Those units read «transient» every hour and were never
+    read again: 178 served units past 26 h on 11-02 (57 the day before). lifecycle-spot-check
+    41434405092 read 43 of them from a FRESH session with the same gl.probe and controls 5/5 live:
+    33 answered their own 404, 8 opened live, 2 still landed home. The run's controls at both ends
+    and the three-readings-6-h-apart rule still decide every hide; this only lets the unit be read."""
+    if status not in (0, HOME_LANDED):
+        return status
+    new = (session_factory or (lambda: proxied_session(False)))()
+    got = probe(new, url)
+    return got if got in (200, 404, 410) else status
+
+
 def proxied_session(use_proxy: bool):
     """gathern's own detail session, optionally routed through the shared Saudi residential proxy.
 
@@ -1063,6 +1082,8 @@ def main() -> int:
             return 1
 
     seen = dead = alive = transient = killed = struck = 0
+    fresh_reads = 0
+    fresh_verdicts: dict[int, int] = {}
     alive_ids: list[int] = []
     kill_pending: list[tuple[int, int]] = []  # (row id, new_missing) — flipped ONLY after the cap gate
     # Strikes are DEFERRED for the same reason kills are, but against a different failure: the cap
@@ -1108,6 +1129,10 @@ def main() -> int:
                 continue
             seen += 1
             status = fingerprint_read(fallback_read(probe(s, url), fb, url), alt, url)
+            if status in (0, HOME_LANDED):
+                status = fresh_read(status, url)
+                fresh_reads += 1
+                fresh_verdicts[status] = fresh_verdicts.get(status, 0) + 1
             mc_before = int(row.get("missing_count") or 0)
             action, new_missing = classify(status, row.get("missing_count"), args.grace)
             evidence = {
@@ -1287,7 +1312,8 @@ def main() -> int:
              f"applied_strikes={applied_strikes} alive={alive} transient={transient} "
              f"kill_cap={kill_cap} [{cap_src}] alive_rate={alive_rate:.3f} trusted={trusted} "
              f"proxy={bool(args.proxy)} canary={c_alive}/{c_probed} canary_statuses[{c_hist}] "
-             f"close_canary={p_alive}/{p_probed} close_statuses[{p_hist}] canary_ok={canary_ok}")
+             f"close_canary={p_alive}/{p_probed} close_statuses[{p_hist}] canary_ok={canary_ok} "
+             f"fresh_reread={fresh_reads} fresh_verdicts[{','.join(f'{k}x{v}' for k, v in sorted(fresh_verdicts.items()))}]")
     if trust_quarantine:
         # trust_quarantine_reason() is kept exactly as main wrote it; the only change is WHICH
         # canary result it is handed. It now receives the BRACKETED verdict (open AND close), not

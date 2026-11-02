@@ -41,13 +41,15 @@ check("Villa/Buy certifies its own car_entrance/sanitation", villaBuy.includes("
 // Office certifies amenities for RentAnnual but NOT for Buy — verified by executing the real gate,
 // not assumed. The commercial side renders EXACTLY its COHORT_CHIPS utilities and no residential token.
 const office = certifiedAmenityKeys(Q({ type: "Office", category: "Commercial", deal: "Rent", rentPeriod: "annual" }));
-eq("Office/RentAnnual certifies EXACTLY its utility trio",
-  [...office].sort(), ["electricity", "sanitation", "water_supply"]);
-check("a residential token is NOT certified for Office", !office.includes("elevator"));
+// 2026-11-02: Office carries the owner's commercial cards (2026-11-01) — meeting room, reception, co-working… —
+// and never a dwelling-only token (maid room, driver room).
+check("Office/RentAnnual certifies its own cards' chips (meeting_room, coworking)", office.includes("meeting_room") && office.includes("coworking"));
+check("a dwelling-only token is NOT certified for Office", !office.includes("maid_room") && !office.includes("driver_room"));
 // Rest House is a RESIDENTIAL-macro type with a commercial-style chip list plus kitchen.
-eq("Rest House/RentAnnual certifies its kitchen + utilities",
-  [...certifiedAmenityKeys(Q({ type: "Rest House" }))].sort(),
-  ["electricity", "kitchen", "sanitation", "water_supply"]);
+// 2026-11-02: Rest House carries the owner's countryside cards (2026-11-01) — majlis, بيت شعر, events hall… — the old
+// utility trio is no longer its list.
+const restHouse = certifiedAmenityKeys(Q({ type: "Rest House" }));
+check("Rest House/RentAnnual certifies its own cards' chips (majlis, bait_shaar, kitchen)", restHouse.includes("majlis") && restHouse.includes("bait_shaar") && restHouse.includes("kitchen"));
 
 console.log("\n── gym-bug-class sweep (owner 2026-08-31): 8 rich columns that existed but were never wired ──");
 // "أبي شقة فيها نادي وحمامين" applied nothing because "gym" was not in the model's vocabulary, not in
@@ -88,8 +90,10 @@ console.log("\n── UNKNOWN stays UNKNOWN: an uncertified cohort is EMPTY, nev
 // These cohorts genuinely do not list 'amenities' in COHORT_QUESTIONS — confirmed by executing the
 // gate. (An earlier version of this test used Apartment/RentMonthly on the strength of a stale header
 // comment; Monthly AF shipped 2026-08-18 and that cohort IS certified. Test the data, not the prose.)
-eq("Office/Buy certifies NOTHING (certified for RentAnnual only)",
-  certifiedAmenityKeys(Q({ type: "Office", category: "Commercial", deal: "Buy", rentPeriod: undefined })), []);
+// 2026-11-02: Office/Buy uses the Retail & Workspace group's buy list (owner 2026-11-01).
+check("Office/Buy certifies the retail buy list (mezzanine, license), nothing residential",
+  certifiedAmenityKeys(Q({ type: "Office", category: "Commercial", deal: "Buy", rentPeriod: undefined })).includes("mezzanine")
+  && !certifiedAmenityKeys(Q({ type: "Office", category: "Commercial", deal: "Buy", rentPeriod: undefined })).includes("maid_room"));
 // Residential Building/Buy gained the features + build cards (owner 2026-10-31); Duplex/Buy (bathrooms only) is now
 // the residential cohort that genuinely lists no amenities — the gate must return EMPTY there, never the base set.
 eq("Room/Buy certifies NOTHING (no Buy cohort at all; Duplex carries the villa lists since 2026-11-02)",
