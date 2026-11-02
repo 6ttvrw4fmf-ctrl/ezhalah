@@ -101,7 +101,7 @@ eq("...and surfaced for the clarification path, not swallowed", p2.rejected, ["c
 const p3 = partitionRequestedAmenities(Q({ type: "Apartment" }), ["elevatorr", "ELEVATOR", "  parking  "]);
 eq("a near-miss is NEVER fuzzy-matched into a real token", p3.rejected, ["elevatorr"]);
 eq("case and whitespace normalise (that is not fuzzy matching)", p3.certified, ["elevator", "parking"]);
-const p4 = partitionRequestedAmenities(Q({ type: "Duplex", deal: "Buy", rentPeriod: undefined }), ["elevator"]);
+const p4 = partitionRequestedAmenities(Q({ type: "Chalet", deal: "Buy", rentPeriod: undefined }), ["elevator"]); // Chalet: no cohort at all (Duplex got the villa lists on 2026-11-02)
 eq("an uncertified COHORT rejects even a real token", p4.certified, []);
 eq("...and routes it to clarification", p4.rejected, ["elevator"]);
 eq("empty request stays empty", partitionRequestedAmenities(Q({ type: "Apartment" }), []).certified, []);
