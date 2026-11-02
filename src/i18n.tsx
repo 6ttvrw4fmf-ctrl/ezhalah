@@ -671,6 +671,8 @@ const AR: Record<string, string> = {
   '2+': '+٢',
   '3+': '+٣',
   '4+': '+٤',
+  '5+': '+٥', // villa ladders (owner 2026-11-01)
+  '6+': '+٦',
   'Show {count} apartments': 'عرض {count} شقة',
   'No preference': 'لا يهمني',
   // Advanced Filter Design Contract (2026-07-20): generic footer + subtitle shared by every question.
