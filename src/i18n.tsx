@@ -446,7 +446,7 @@ const AR: Record<string, string> = {
   // Period-flip price clear note (audit item 3): the unit of a typed price inverted, so keeping the
   // number would silently mean something else — cleared + explained instead.
   'Price limits were cleared because the price unit changed (short stays ↔ yearly) — please re-enter them.':
-    'تم مسح حدود السعر لأن نوع الإيجار تغيّر (إقامات قصيرة ↔ سنوي) — الرجاء إدخالها من جديد.',
+    'تم مسح حدود السعر لأن وحدة السعر تغيّرت (إقامات قصيرة ↔ سنوي) — الرجاء إدخالها من جديد.',
   // Same clear+explain precedent for the شراء/إيجار toggle (owner feature 2026-08-20).
   'Price limits were cleared because Buy/Rent changed which budget they meant — please re-enter them.':
     'تم مسح حدود السعر لأن التبديل بين الشراء والإيجار غيّر المقصود بالميزانية — الرجاء إدخالها من جديد.',
