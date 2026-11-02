@@ -39,6 +39,15 @@ def test_english_facade_is_the_arabic_direction():
     assert _cmp({"direction_ar": "شمال"}, "<p>واجهة العقار: Northern</p>", "direction_ar") == S.MATCH
 
 
+def test_english_compound_facade_is_the_arabic_direction():
+    # haraj 22820527 (2026-11-02): «واجهة العقار: South west», stored «جنوب غرب» / served «جنوب غربي».
+    body = "<p>واجهة العقار: South west عدد الغرف: لا يوجد</p>"
+    assert _cmp({"direction_ar": "جنوب غرب"}, body, "direction_ar") == S.MATCH
+    assert _cmp({"direction_ar": "جنوب غربي"}, body, "direction_ar") == S.MATCH
+    assert _cmp({"direction_ar": "شمال شرقي"}, body, "direction_ar") == S.MISMATCH
+    assert _cmp({"direction_ar": "جنوب شرق"}, "<p>واجهة العقار: Southeast</p>", "direction_ar") == S.MATCH
+
+
 def test_english_number_word_on_the_age_line():
     body = "<p>نوع العقار: Apartment عمر العقار: Nine Year مساحة العقار: 494</p>"
     assert _cmp({"property_age": 9}, body, "property_age") == S.MATCH

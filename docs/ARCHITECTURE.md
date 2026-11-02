@@ -794,10 +794,11 @@ used to end on.
   migration `20261031205445_silent_rent_period_judged_by_price`).** PERIOD = SOURCE when the ad states one:
   never overruled. When the source prints no period, the index trigger `enforce_rent_period_judgment()`
   (BEFORE INSERT OR UPDATE on `search_listings_ar`, so every sync and every write passes through it) labels
-  the row from the raw figure the site printed via `judge_silent_rent_period_ar()`: under 7,000 → شهري,
-  15,000 and above → سنوي, 7,000–14,999 → stays NULL (borderline, never a guess; 427 served rows on
-  2026-10-31). gathern / aqarmonthly are monthly-only, so a silent row there is شهري. The shown price is
-  always the source's figure; `rent_period_judged = true` marks every judged row; the raw platform tables
+  the row from the raw figure the site printed via `judge_silent_rent_period_ar(p, type_ar)` (bands corrected the same
+  night, `20261031215442`): under 300 = placeholder → NULL; 300–7,999 on a home or business type = a
+  per-month figure, stored as سنوي ×12 (no monthly button exists on mixed sites); 15,000 and above → سنوي;
+  anything else → stays NULL (borderline, never a guess). gathern / aqarmonthly are monthly-only, so a
+  silent row there is شهري. The source's own figure is always kept; `rent_period_judged = true` marks every judged row; the raw platform tables
   are never written. Why: 13,436 served priced rents (aqar 4,194, haraj 2,948, muhaysini 2,736, nofodh
   1,009, dwelleo 918, wajaf …) sat with NULL and were reachable from NO rent button (wajaf 22222374, a
   180,000 Buraidah warehouse, answered total=0). Guard: `mon_detect_priced_rent_unreachable()` on the
@@ -1379,6 +1380,41 @@ migration-drift-guard rule in `AGENTS.md`).
   combined by key-level INTERSECTION in code (`cardPlan()`), never by a hand-written list; a chip exists only where
   its `cnt_<token>` count exists (migration 20261101100930). The lists, the contract, the pipeline and how it is
   built: `docs/ops/ADVANCED_FILTER_APARTMENTS_GROUP.md`. Changing a list is a product decision.
+
+- **The Villas & Houses group of «🎯 Refine with AI» has owner-LOCKED chip lists (2026-11-01, built 2026-11-02)** —
+  ONE pair of lists at group level (Villa = Duplex), Buy: age → bathrooms 3+…6+ → street width → direction → 🏠 space ·
+  🌳 outdoors & fun · 🧱 build, safety & papers; Rent: installments → bathrooms 2+…5+ → age → 🔑 comfort · 🏠 space ·
+  🌳 outdoors · ✨ extras & smart. Merged chips (garden & yard, jacuzzi & sauna, cameras & smart home, tank & well,
+  smart home & entry) match when EITHER fact is true (migration 20261102055240). `docs/ops/ADVANCED_FILTER_VILLAS_GROUP.md`.
+
+- **Every remaining group of «🎯 Refine with AI» has owner-LOCKED chip lists too (handoff 2026-11-01, built 2026-11-02):**
+  «الاستراحات والريف» (Rest house, Chalet, Camp, Farm, Agricultural land — the group box with no type has its OWN short-stay /
+  annual / buy lists, each type its own), Residential land, and the whole Commercial side (Retail & Workspace = Office / Shop /
+  Showroom, Industrial & Logistics = Warehouse / Workshop / Factory, Buildings & Facilities = Commercial building / Hotel /
+  Gas station, Commercial & Industrial plots). Street width offers each scope's own rungs (plots 15/20/30/40/60 m+, retail
+  15/20/30/40, countryside 15/20/30, else 15/20/25/30). The Apartments & Co-living types stay ONE short-stays pool; Villa,
+  Chalet, Rest house, Camp and the countryside box carry their own short-stay lists. **Commercial is never combined with
+  residential** (the Filter holds one category; a cross-category scope certifies nothing). Migrations 20261102100954
+  (58 countryside / land facts + camels_horses, palm_fruit_trees) and 20261102101415 (45 commercial facts + pool_gym + the
+  three street-width rungs + 11 cohort rows). `docs/ops/ADVANCED_FILTER_COUNTRYSIDE_GROUP.md`; guard
+  `scripts/verify-af-remaining-groups-cards.ts`. Changing a list is a product decision.
+
+- **Owner rules for every chip list (handoff 2026-11-01, recorded 2026-11-02):**
+  1. Whatever the AI reads must help matching — nothing it finds in a description sits unused (AI teaches → free word
+     reader → filter value; or an index-level correction sampled against the source). Source tables untouched.
+  2. Land with no services is Raw land, shown in BOTH places: «خام» / «بدون خدمات» / «لا يوجد كهرباء/مياه» also under
+     «Raw land», keeps its own type, chip «🚧 No services yet», never «All services». Read «لا يوجد» only as the value of
+     the services field, never across aqar's form labels. (Not built yet.)
+  3. «Villa» ads that call themselves تاون هاوس are townhouses; Duplex + Townhouse become ONE type «Duplex & Townhouse».
+     (Not built yet; needs its own owner go.)
+  4. One payment question on every rent list, «💳 Rent now, pay later / split payments», two chips; under the provider
+     logos a disclaimer: Ezhalah does not guarantee the payment method or the provider — confirm with the lister
+     (owner 2026-11-02, `af-payment-note`). Both chips live since 2026-11-02 (split_payments is a text fact; picking both
+     narrows to listings with both, like every chip card).
+  5. No «Nearby» / «suitable for» chips — the seller's opinion; the map shows what's near. «On a main road» is a fact
+     about the plot and stays.
+  6. A chip says only what the ad says · Skip on every question · pick many · a chip at 0 hides itself · source tables
+     untouched.
 
 ---
 

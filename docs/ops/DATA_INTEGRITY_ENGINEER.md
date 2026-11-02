@@ -522,7 +522,7 @@ The owner's rule, verbatim from that migration:
 
 > **2026-10-31 — the owner's silent-period rule is BUILT (migration `20261031205445`).** The index
 > trigger `enforce_rent_period_judgment()` judges a silent rent period from the raw figure the site
-> printed (under 7,000 = شهري, 15,000+ = سنوي, 7,000–14,999 stays NULL) and marks it in
+> printed (`20261031215442`: under 300 NULL; 300–7,999 on a home/business type = per-month, stored سنوي ×12; 15,000+ = سنوي; else NULL) and marks it in
 > `search_listings_ar.rent_period_judged`; a stated period is never overruled; gathern / aqarmonthly
 > are شهري. Guard: `mon_detect_priced_rent_unreachable()` (repairs, then P1). The paragraphs below
 > describe the 2026-08-18 design and stay as history; where they disagree, the trigger wins.

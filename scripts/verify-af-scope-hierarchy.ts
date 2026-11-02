@@ -22,7 +22,7 @@ import {
   SCOPE_GROUP_ID, SCOPE_TYPE_ID, SCOPE_QUESTION_IDS, isScopeQuestionId,
   unresolvedScopeTiers, scopeCandidates, applyScopeAnswer, nextScopeTier,
 } from '../src/lib/afPlan.ts';
-import { cohortAllows, scopeCleanTypes } from '../src/lib/afCohorts.ts';
+import { cohortAllows, scopeCleanTypes, GROUP_LISTS } from '../src/lib/afCohorts.ts';
 import { deriveGuided, type GuidedStep } from '../src/lib/afSteps.ts';
 import { HIERARCHY, groupsFor, groupMembers, groupOf, groupsOf, CLEAN_MACRO, offeredUnder } from '../src/data/propertyTypes.ts';
 import { effectiveGroups, effectiveTypes, scopeCrossesMacro } from '../src/lib/searchDefaults.ts';
@@ -68,12 +68,15 @@ const members = groupMembers('Villas & Houses');
 check('a group can never offer MORE than its weakest member (intersection, by definition)',
   allowed(groupOnly).length <= Math.min(...members.map((t) => allowed(RENT({ types: [t] })).length)),
   `group=${allowed(groupOnly).length} members=${JSON.stringify(members.map((t) => [t, allowed(RENT({ types: [t] })).length]))}`);
-check('«Villas & Houses» group-only is BELOW the useful floor — the defect, still reproducible',
-  allowed(groupOnly).length < 2, `got ${JSON.stringify(allowed(groupOnly))}`);
-check('…while resolving it to «Villa» clears that floor — the fix',
+// 2026-11-02: the owner closed THIS group's defect by decision, not by engine change — Duplex shares the villa
+// lists (afCohorts.ts COHORT_QUESTIONS/COHORT_CARDS), so the group box itself clears the floor. The SHAPE still
+// holds: the group never exceeds its weakest member, and resolving to «Villa» can only keep or widen the offer.
+check('«Villas & Houses» group-only now CLEARS the useful floor (owner 2026-11-02: Duplex shares the villa lists)',
+  allowed(groupOnly).length >= 2, `got ${JSON.stringify(allowed(groupOnly))}`);
+check('…and resolving it to «Villa» still clears it',
   allowed(villaResolved).length >= 2, `Villa=${JSON.stringify(allowed(villaResolved))}`);
-check('resolving to a certified member STRICTLY increases what can be asked',
-  allowed(villaResolved).length > allowed(groupOnly).length);
+check('resolving to a member never asks LESS than the group did',
+  allowed(villaResolved).length >= allowed(groupOnly).length);
 // CERTIFYING THE SIBLING IS NOT A SUBSTITUTE FOR ASKING. Measured after PR #995 certified Duplex/Buy:
 // «Villas & Houses» on Buy moved 0 → 1 question and is STILL blocked. The intersection is bounded by
 // the weakest member, so each new certification can only add what EVERY member already shares — which
@@ -82,6 +85,7 @@ for (const macro of ['Residential', 'Commercial'] as const)
   for (const g of HIERARCHY[macro]) {
     const q = RENT({ category: macro, typeGroups: [g.group] });
     const mem = groupMembers(g.group);
+    if (GROUP_LISTS[g.group]) continue; // owner 2026-11-01: the box has its OWN list (GROUP_LISTS), not the members' intersection
     check(`«${g.group}» group offering never exceeds any single member's`,
       mem.every((t) => allowed(q).length <= allowed(RENT({ category: macro, types: [t] })).length));
   }
@@ -208,9 +212,12 @@ check('isScopeQuestionId recognises both and nothing else',
 // change is DETECTED here, so nobody can trade a missing question for silent row amputation.
 {
   const someUnion = (q: SearchQuery, id: string) => scopeCleanTypes(q).some((t) => cohortAllows({ ...q, types: [t] } as SearchQuery, id));
-  const realIntersect = cohortAllows(bothTypes, 'bathrooms');
-  const mutatedUnion = someUnion(bothTypes, 'bathrooms');
-  check('MUTATION: a .some()/union gate would offer «bathrooms» to Villa+Duplex — and is caught here',
+  // Villa + Room: Villa asks bathrooms on rent, Room never does (82 of 2,145 known) — so the honest intersection
+  // is false while a union would say true. (Villa + Duplex no longer disagree: Duplex shares the villa lists, 2026-11-02.)
+  const disagreeing = RENT({ types: ['Villa', 'Room'] });
+  const realIntersect = cohortAllows(disagreeing, 'bathrooms');
+  const mutatedUnion = someUnion(disagreeing, 'bathrooms');
+  check('MUTATION: a .some()/union gate would offer «bathrooms» to Villa+Room — and is caught here',
     realIntersect === false && mutatedUnion === true,
     `intersection=${realIntersect} union=${mutatedUnion} — if these are equal this proof has gone blind`);
 }

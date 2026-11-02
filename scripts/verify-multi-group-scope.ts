@@ -26,7 +26,7 @@
 import type { SearchQuery } from '../src/data/search.ts';
 import { groupMembers, groupsMembers, pruneTypesToGroups, typeArForSelection, typeArForTypes } from '../src/data/propertyTypes.ts';
 import { effectiveGroups, effectiveTypes, toggleGroup, typesForGroups, migrateGroups, sanitizeForFilterRestore, HOME_DEFAULT_QUERY, setCategory } from '../src/lib/searchDefaults.ts';
-import { cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope } from '../src/lib/afCohorts.ts';
+import { cohortAllows, scopeCleanTypes, scopeDeals, intersectChips, isShortStaysScope } from '../src/lib/afCohorts.ts';
 import { detailForContext } from '../src/data/taxonomy.ts';
 
 let failed = 0;
@@ -170,9 +170,10 @@ check('chips: types with no cohort list keep the base set (null)',
 check('scopeCleanTypes: explicit types win', scopeCleanTypes(q({ typeGroups: [APTS], types: ['Villa'] })).join() === 'Villa');
 check('scopeCleanTypes: group-only expands to the group members',
   scopeCleanTypes(q({ typeGroups: [PLOTS] })).join() === groupMembers(PLOTS).join());
-check('group-only AF is the members’ intersection, not a free pass',
-  cohortAllows(q({ deal: 'Buy', typeGroups: [RETAIL] }), 'street_width')
-    === groupMembers(RETAIL).every((ty) => cohortAllows(q({ deal: 'Buy', types: [ty] }), 'street_width')));
+// 2026-11-01 (owner): «Retail & Workspace» carries its OWN group list (GROUP_LISTS), so the box is not the members'
+// intersection any more; a group WITHOUT a list (none among the shipped groups today) would still intersect.
+check('group-only AF on a box with its own list asks that list (street width on Retail & Workspace / Buy)',
+  cohortAllows(q({ deal: 'Buy', typeGroups: [RETAIL] }), 'street_width') === true);
 
 // ── 8. BEDROOMS INTERSECT (a land group must not offer a bed filter that deletes land rows) ──────
 check('beds: dwelling group alone → shown', detailForContext('Residential', [VILLAS])?.showBeds === true);

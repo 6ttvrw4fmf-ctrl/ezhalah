@@ -69,8 +69,8 @@ const summaryProblems = (compose: Composer): string[] => {
 const sumReal = summaryProblems(withAdvancedLines);
 check('the summary continues the same list — «نوع العقار المحدد: شقة», «دورات المياه: +١», «المميزات: المطبخ، مصعد» — no heading, no emoji',
   sumReal.length === 0, sumReal.join('\n      '));
-check('the chips BELOW the summary keep their emoji — شقة 🏡 · +١ حمامات 🚿 · المطبخ 🍳، مصعد 🛗',
-  round1.map((f) => buildAfSummaryItems([f]).join('، ')).join(' · ') === 'شقة 🏡 · +١ حمامات 🚿 · المطبخ 🍳، مصعد 🛗');
+check('the chips BELOW the summary keep their emoji — 🏡 شقة · 🚿 +١ حمامات · 🍳 المطبخ، 🛗 مصعد',
+  round1.map((f) => buildAfSummaryItems([f]).join('، ')).join(' · ') === '🏡 شقة · 🚿 +١ حمامات · 🍳 المطبخ، 🛗 مصعد');
 check('the same answer twice is listed once (dedupe at the finished item)',
   buildAfSummaryItems([...round1, round1[1]]).length === buildAfSummaryItems(round1).length);
 

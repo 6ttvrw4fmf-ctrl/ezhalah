@@ -1,4 +1,9 @@
 -- MIRROR of the LIVE production TABLE public.af_cohort_registry. NOT a migration — this file is
+-- Re-verified 2026-11-02 (migration 20261102101415_commercial_group_advanced_filter_chips): CHANGED — ELEVEN rows added
+--   (owner lists 2026-11-01): استراحة / شاليه / مخيم on إيجار شهري, شاليه on بيع, شاليه / مزرعة / أرض زراعية / فندق /
+--   أرض تجارية / أرض صناعية / دوبلكس on إيجار سنوي.
+--   Production ROWS md5 with the recipe below = 8f80664ae6ea0f6e8f371d63813804d8, 78 rows, 0 disabled.
+--   File body md5 (verify-sql-mirrors-not-stale): 94531264c88d33f8aff0f03579568137
 -- Re-verified 2026-11-01 (migration 20261101110658_studio_buy_and_short_stays_cohorts_certified): CHANGED — SIX rows
 --   added — Studio (استوديو / ستوديو / شقَّة صغيرة (استوديو)) on بيع (no period) and on إيجار شهري: the Apartments &
 --   Co-living lists (owner handoff 2026-10-31).
@@ -50,19 +55,25 @@
 --     mirror (and any cohort that newly lost its certification) needs re-checking — never that the
 --     barrier should be loosened.
 insert into public.af_cohort_registry (deal_ar, rent_period_ar, type_ar, enabled) values
+  ('إيجار', 'سنوي', 'أرض تجارية', true),
+  ('إيجار', 'سنوي', 'أرض زراعية', true),
   ('إيجار', 'سنوي', 'أرض سكنية', true),
+  ('إيجار', 'سنوي', 'أرض صناعية', true),
   ('إيجار', 'سنوي', 'استراحة', true),
   ('إيجار', 'سنوي', 'استوديو', true),
   ('إيجار', 'سنوي', 'برج', true),
   ('إيجار', 'سنوي', 'بيت', true),
   ('إيجار', 'سنوي', 'تاون هاوس', true),
   ('إيجار', 'سنوي', 'درايف ثرو', true),
+  ('إيجار', 'سنوي', 'دوبلكس', true),
   ('إيجار', 'سنوي', 'دور', true),
   ('إيجار', 'سنوي', 'ستوديو', true),
+  ('إيجار', 'سنوي', 'شاليه', true),
   ('إيجار', 'سنوي', 'شقة', true),
   ('إيجار', 'سنوي', 'شقَّة صغيرة (استوديو)', true),
   ('إيجار', 'سنوي', 'عمارة', true),
   ('إيجار', 'سنوي', 'غرفة', true),
+  ('إيجار', 'سنوي', 'فندق', true),
   ('إيجار', 'سنوي', 'فيلا', true),
   ('إيجار', 'سنوي', 'كشك', true),
   ('إيجار', 'سنوي', 'مبنى تجاري', true),
@@ -70,18 +81,22 @@ insert into public.af_cohort_registry (deal_ar, rent_period_ar, type_ar, enabled
   ('إيجار', 'سنوي', 'مجمع سكني', true),
   ('إيجار', 'سنوي', 'محطة وقود', true),
   ('إيجار', 'سنوي', 'محل', true),
+  ('إيجار', 'سنوي', 'مزرعة', true),
   ('إيجار', 'سنوي', 'مستودع', true),
   ('إيجار', 'سنوي', 'مصنع', true),
   ('إيجار', 'سنوي', 'معرض', true),
   ('إيجار', 'سنوي', 'مكاتب مشتركة', true),
   ('إيجار', 'سنوي', 'مكتب', true),
   ('إيجار', 'سنوي', 'ورشة', true),
+  ('إيجار', 'شهري', 'استراحة', true),
   ('إيجار', 'شهري', 'استوديو', true),
   ('إيجار', 'شهري', 'ستوديو', true),
+  ('إيجار', 'شهري', 'شاليه', true),
   ('إيجار', 'شهري', 'شقة', true),
   ('إيجار', 'شهري', 'شقَّة صغيرة (استوديو)', true),
   ('إيجار', 'شهري', 'غرفة', true),
   ('إيجار', 'شهري', 'فيلا', true),
+  ('إيجار', 'شهري', 'مخيم', true),
   ('بيع', NULL, 'أرض', true),
   ('بيع', NULL, 'أرض تجارية', true),
   ('بيع', NULL, 'أرض خام', true),
@@ -91,12 +106,13 @@ insert into public.af_cohort_registry (deal_ar, rent_period_ar, type_ar, enabled
   ('بيع', NULL, 'استراحة', true),
   ('بيع', NULL, 'استوديو', true),
   ('بيع', NULL, 'برج', true),
-  ('بيع', NULL, 'ستوديو', true),
   ('بيع', NULL, 'بيت', true),
   ('بيع', NULL, 'تاون هاوس', true),
   ('بيع', NULL, 'درايف ثرو', true),
   ('بيع', NULL, 'دوبلكس', true),
   ('بيع', NULL, 'دور', true),
+  ('بيع', NULL, 'ستوديو', true),
+  ('بيع', NULL, 'شاليه', true),
   ('بيع', NULL, 'شقة', true),
   ('بيع', NULL, 'شقَّة صغيرة (استوديو)', true),
   ('بيع', NULL, 'عمارة', true),

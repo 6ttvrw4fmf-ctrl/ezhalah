@@ -153,6 +153,19 @@ def _region_hint(licence_location: Optional[str]) -> Any:
     return REGION_EN_TO_ID.get(re.sub(r"(?i)\s*region$", "", head))
 
 
+# The seller's own title saying the deal is DONE (2026-11-02, ♻️, backlog 1167, owner «fix everything»):
+# «(تم البيع)», «تم التأجير», «تم الإيجار». Measured that morning: 29 served haraj ads titled «… (تم البيع)»
+# and 23 «… (تم التأجير)», every one a closed deal still shown — the post stays up with the word added, so
+# the page is 200 and the own-page oracle read it «live» (stamped 07:32 UTC). Only the explicit «تم …»
+# phrase counts: a bare «مؤجر» / «مؤجرة» is an income property FOR SALE, never a removal.
+_SELLER_CLOSED = re.compile(r"(?<![\u0621-\u064A])تم\s*(?:ال)?(?:بيع|تأجير|ايجار|إيجار)")
+
+
+def seller_closed_title(title: Optional[str]) -> bool:
+    """True when the post's own title says the sale or rent is done («تم البيع», «تم التأجير»)."""
+    return bool(_SELLER_CLOSED.search(title or ""))
+
+
 def is_catalogue_title(title: Optional[str]) -> bool:
     """A title whose first unit word is a plural («شقق تمليك فاخرة … 3و4و5 غرف») is several units — a
     catalogue, never a listing — licensed or not (owner real-user check 2026-10-17: HRJ11190739649 and
@@ -212,6 +225,8 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
     facts = {"district_raw_ar": p["district_ar"], "city_raw_ar": p["city_ar"]}
     if verdict != "offer":
         return None, "", f"not_offer_{verdict}", facts
+    if seller_closed_title(ld.get("name")):
+        return None, "", "seller_closed", facts       # «تم البيع» / «تم التأجير»: a done deal (2026-11-02)
     if not p["rega_block"]:
         # Owner 2026-10-17 (reverses 10-16's licensed-only): an OFFER without REGA's block is a listing too,
         # read from the seller's own words only (prose.py). Its licence fields stay NULL.
@@ -610,6 +625,8 @@ def _signal(status, body, moved):
     # (HRJ11190645357 «طلب شقه للايجار مستعجل» was stored before the classifier knew «طلب»): positive own-page
     # evidence, removed through the same strike path, never a private deactivation.
     if classify(ld.get("name"), P.strip_person_lines(desc))[0] in ("request", "other"):
+        return "gone"
+    if seller_closed_title(ld.get("name")):  # the seller titled it «تم البيع» / «تم التأجير» (2026-11-02)
         return "gone"
     if is_catalogue_title(ld.get("name")):    # several units in one post was never one listing (2026-10-17)
         return "gone"

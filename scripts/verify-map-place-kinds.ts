@@ -67,6 +67,13 @@ const redSea = [
 ];
 const d = dedupePlaces(redSea);
 check('dedupe: Red Sea Mall ×4 → 1, Lego kept', d.length === 2 && d[0].kind === 'mall' && d[1].name.startsWith('Lego'), JSON.stringify(d.map((r) => r.name)));
+const branches = dedupePlaces([
+  { name: 'ستاربكس', subtitle: 'حي العليا، الرياض', locality: 'الرياض', coordinate: { latitude: 24.69, longitude: 46.685 }, kind: 'place' as PlaceKind },
+  { name: 'ستاربكس', subtitle: 'حي الجنادرية، الرياض', locality: 'الرياض', coordinate: { latitude: 24.83, longitude: 46.86 }, kind: 'place' as PlaceKind },
+  { name: 'ستاربكس', subtitle: 'حي العليا، الرياض', locality: 'الرياض', coordinate: { latitude: 24.6905, longitude: 46.6852 }, kind: 'place' as PlaceKind },
+]);
+check('dedupe: a chain\'s branches in different districts of one town all stay; the one 60 m away folds', branches.length === 2, JSON.stringify(branches.map((r) => r.subtitle)));
+mustCatch('a dedupe that folds a chain\'s branches across a town', dedupePlaces([{ name: 'c', locality: 't', kind: 'place' as PlaceKind, subtitle: 'a' }, { name: 'c', locality: 't', kind: 'place' as PlaceKind, subtitle: 'b' }]).length === 2);
 check('dedupe: two cities sharing a name far apart both stay', dedupePlaces([
   { name: 'الرياض', subtitle: 'منطقة الرياض', coordinate: { latitude: 24.7, longitude: 46.68 } },
   { name: 'الرياض', subtitle: 'الخرج', coordinate: { latitude: 24.52, longitude: 47.21 } },
@@ -153,6 +160,13 @@ const field = readFileSync(join(root, 'src/components/MapDealRow.tsx'), 'utf8');
 const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
 check('AppleMap.web.tsx: suggestPlaces classifies, dedupes and sorts', /classifyPlace\(facts\)/.test(web) && /sortByKind\(dropAreaShadows\(dedupePlaces\(/.test(web) && /placeSubtitle\(facts, kind, country\)/.test(web));
 check('AppleMap.web.tsx: an unresolved row is kept with its two lines (timeout → resolve(r))', /setTimeout\(\(\) => resolve\(r\), \d+\)/.test(web));
+check('AppleMap.web.tsx: autocomplete ranks around the map\'s region (a chain lists nearby branches, walked live 2026-11-01)', /if \(live\.map\) search\.region = live\.map\.region;/.test(web));
+const row = readFileSync(join(root, 'src/components/MapDealRow.tsx'), 'utf8');
+check('MapDealRow.tsx: a pick BLURS the field so the phone keyboard closes (owner 2026-11-02)', /inputRef\.current\?\.blur\(\); onPick\(p\);/.test(row) && /ref=\{inputRef\}/.test(row));
+check('AppleMap.web.tsx: a short compact box (keyboard up) hides draw, zoom and layers, keeps ⤢ and ↶', /const boxPx = e\.nativeEvent\.layout\.height; setShort\(boxPx < 280\);/.test(web) && /const roomy = full \|\| !short;/.test(web) && (web.match(/roomy && !failed && !drawing/g) ?? []).length === 2 && /\{roomy \? <View style=\{s\.topRight\}/.test(web));
+const mascot = readFileSync(join(root, 'assets/images/soil-mascot.svg'), 'utf8');
+check('soil-mascot.svg has no white backing rectangle and frames the figure tightly (owner 2026-11-02: «white box, looks square»)', !/<rect/.test(mascot) && /viewBox="0 0 167 192"/.test(mascot));
+check('AppleMap.web.tsx: the ground mascot is portrait-sized so it fills its round button', /groundMascot: \{ width: 30, height: 34 \}/.test(web));
 check('AppleMap.web.tsx: the mark follows the kind (pin for a landmark, outline for an area)', /isAreaKind\(p\.kind\)/.test(web));
 check('AppleMap.web.tsx: the view is wider than the outline, so the outline is seen', /region\.span\.latitudeDelta \* 1\.3, region\.span\.longitudeDelta \* 1\.3/.test(web));
 // PICKING A ROW MUST FLY (seen live 2026-11-01): Search.search() accepts only Apple's own SearchAutocompleteResult

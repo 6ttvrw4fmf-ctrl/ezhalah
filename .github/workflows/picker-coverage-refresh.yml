@@ -38,7 +38,7 @@ jobs:
         run: node --experimental-strip-types scripts/generate-platform-picker-coverage.ts
       - name: Open a PR when the snapshot moved
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.BASELINE_PR_TOKEN || github.token }} # a github.token PR fires no checks: #8630 and #9792 sat with 0
         run: |
           set -euo pipefail
           if git diff --quiet -- src/data/platformPickerCoverage.json; then

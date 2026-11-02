@@ -1,5 +1,13 @@
 # ♻️ LIFECYCLE ENGINEER — Ezhalah
 
+> **👑 OWNER ORDER 2026-11-01 — «FIX A LOT» (permanent; wins over your routine prompt's «ONLY 3 JOBS» and «src/ needs a person»; the law files still win).**
+> 1. **The 3 jobs come first, then keep fixing until your time is up.** Finish your 3 jobs and their proofs, then take the next job. Never end early while your queue holds work you can finish and prove in your slot.
+> 2. **Biggest group first.** After the 3 jobs, read `select kind, count(*) from ops_engineer_alert_queue where engineer = '<your lane>' group by 1 order by 2 desc`. One root-cause fix that clears a whole kind beats ten single rows. An alert closes only when the detector stops re-raising it.
+> 3. **Every fix needs a guard and a live proof.** The root is fixed, a detector or barrier stops it coming back, and a customer search on the live site proves it. Rule «a detector repairs before it raises» applies.
+> 4. **The robot lands and ships app fixes.** `src/` and `public/` PRs merge on green and `auto-deploy-merged-fixes.yml` ships them hourly through the 10% canary. Do not put them in LINE 1. Package files, `supabase/` other than a mirror, and the merge gate still need a person.
+> 5. **Ratings stay computed, never softened.** Every report carries «🚨 Alerts: N → M». A night your queue grew rates 7 at most, unless the growth is routed with evidence.
+
+
 > **🔢 THE SITE COUNT MOVES BY ITSELF (owner, 2026-10-27 — «a new website goes up, the number changes»).** The
 > «نبحث في N منصة» number and the logo strip both come from ONE list, `loader_active_platforms_ar()`: a site
 > counts and shows its logo only while it is active in `platform_registry` AND has at least one
@@ -1183,6 +1191,20 @@ or rewrite another engineer's work, and never start a big change in another engi
 - **2026-10-17 (♻️):** never dispatch a diagnostic workflow on your PR's branch head and then merge:
   its red run attaches to the head commit and the merge gate refuses ANY non-success check. Push the
   next commit (the lesson line) after the diagnostics, or dispatch them on a scratch branch.
+
+- **2026-11-02 (♻️):** a feed sighting un-hid every own-page «gone» hide on every site. `db._wasalt_batch` reset
+  `missing_count = 0 / active = true` for any row the list still served, so a hide made on the ad's own page
+  lasted until the next crawl (nowaisiry NW4538 hidden 10-31, back 11-01, dead on the 11-02 score; muhaysini
+  MHS42/MHS2213 killed 3/3 every ~3 days since 10-17). `db.page_gone_holds` now keeps a hidden row hidden while
+  its newest probe-ledger reading is GONE and newer than its last alive stamp (#9959). When a hide «does not
+  stick», read the ledger against `last_seen_at` before suspecting the checker.
+- **2026-11-02 (♻️):** a long-lived session is a reader, and it can go blind. Gathern's hourly sweep reads
+  ~1,500 units on one session; gathern sent that session home for a growing set of units, so 178 served units
+  read «transient» for 26+ h while a fresh session read 33 of 43 of them 404 (spot-check 41434405092). The
+  proxy fallback could not help: it only takes a 200. A unit still without a verdict is now re-read once on a
+  fresh session (`liveness.fresh_read`, #9959). When «transient» grows while controls stay 10/10, compare a
+  fresh-session read of the same ids before touching anything else. And a seller's own «(تم البيع)» /
+  «(تم التأجير)» in a 200 title is a removal (haraj, 52 served, #9960).
 
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the

@@ -874,11 +874,76 @@ def mark_presence_unproven(row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+# The contract owns the alive column's name (it alone may WRITE it); this module only reads it here.
+_ALIVE_COL = next(iter(direct_alive_patch(now_iso="")))
+
+
+def page_gone_holds(hidden: list[dict[str, Any]], probes: list[dict[str, Any]]) -> dict[str, tuple[int, bool]]:
+    """Which HIDDEN rows a feed sighting must leave hidden: those whose newest own-page reading in
+    `ops_stale_inactivation_probe` is GONE and newer than their last proven-alive stamp.
+
+    The same predicate `ops_lifecycle_false_resurrection()` (alert `false_resurrection`) applies to
+    rows that are already active again, so a row held here is exactly a row that detector would raise
+    the moment the upsert revived it. Pure: `hidden` = stored rows (ad_number, missing_count,
+    last_verified_alive_at) that are active=false; `probes` = their ledger rows (ad_number, verdict,
+    probed_at)."""
+    newest: dict[str, dict[str, Any]] = {}
+    for p in probes:
+        a, t = p.get("ad_number"), str(p.get("probed_at") or "")
+        if a and t and (a not in newest or t > str(newest[a].get("probed_at") or "")):
+            newest[a] = p
+    out: dict[str, tuple[int, bool]] = {}
+    for h in hidden:
+        p = newest.get(h.get("ad_number"))
+        if not p or p.get("verdict") != "GONE":
+            continue
+        gone_at = datetime.fromisoformat(str(p["probed_at"]).replace("Z", "+00:00"))
+        alive = h.get(_ALIVE_COL)
+        if alive and datetime.fromisoformat(str(alive).replace("Z", "+00:00")) >= gone_at:
+            continue
+        out[h["ad_number"]] = (int(h.get("missing_count") or 0), False)
+    return out
+
+
+def _page_gone_holds_for(table: str, ads: list[str]) -> dict[str, tuple[int, bool]]:
+    """Read what `page_gone_holds` needs for one batch: two indexed reads, only for rows that are
+    hidden. A failed read holds nothing (today's behaviour) and says so loudly — it never blocks
+    ingestion."""
+    hidden: list[dict[str, Any]] = []
+    probes: list[dict[str, Any]] = []
+    try:
+        c = sb()
+        for i in range(0, len(ads), 200):
+            hidden += _execute(c.table(table).select(f"ad_number,missing_count,{_ALIVE_COL}")
+                               .eq("active", False).in_("ad_number", ads[i:i + 200]),
+                               what=f"{table} hidden-row lookup").data or []
+        ha = [h["ad_number"] for h in hidden]
+        for i in range(0, len(ha), 200):
+            probes += _execute(c.table("ops_stale_inactivation_probe").select("ad_number,verdict,probed_at")
+                               .eq("source_table", table).in_("ad_number", ha[i:i + 200]),
+                               what="ops_stale_inactivation_probe lookup").data or []
+    except Exception as exc:  # noqa: BLE001 — never let a guard break ingestion; say it did not run
+        print(f"{table}: page-gone hold lookup FAILED ({type(exc).__name__}: {exc}); this batch may "
+              f"revive hidden rows whose own page read gone", flush=True)
+        return {}
+    return page_gone_holds(hidden, probes)
+
+
 def _wasalt_batch(table: str, rows: list[dict[str, Any]],
                   strikes: Optional[dict[str, tuple[int, bool]]] = None) -> None:
     if not rows:
         return
     now = datetime.now(timezone.utc).isoformat()
+    # A FEED SIGHTING NEVER UNDOES AN OWN-PAGE «GONE» (2026-11-02, ♻️; rulebook protection 4: «only
+    # the ad's own page can undo a hide»). Every crawl funnels through here, and the line below
+    # used to reset missing_count = 0 / active = true for any row the site's list still served, so
+    # an ad hidden because its own page read gone came back at the next crawl: nowaisiry NW4538
+    # (hidden 10-31 on two CI 404 reads, revived by the 11-01 crawl, then a dead ad on the 11-02
+    # dead-visible score) and NW4437, muhaysini MHS42 / MHS2213 (killed 3/3 on HTTP 400 every ~3
+    # days since 10-17 and revived by every crawl). gathern has its own page-strike hold (`strikes`);
+    # this is the same rule for every site, keyed on the probe ledger. A row whose own page THIS
+    # crawl read live (the direct-alive marker) is not held.
+    page_holds = _page_gone_holds_for(table, [r["ad_number"] for r in rows if r.get("ad_number")])
     # The REGISTRY decides whether a sighting is proof of life, not 300 call sites: the platform's
     # registered policy (wasalt, and the SOURCE_LIST_PRESENCE sites admitted one by one) either
     # declares presence_is_positive_evidence or presence_patch() returns nothing. Imported lazily:
@@ -897,6 +962,8 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]],
         # scraper that deliberately flags a row inactive (e.g. dealapp's مباع/مؤجر "sold" badge)
         # still wins, and _sanitize_price below can still force a price-typo row inactive.
         held = (strikes or {}).get(r["ad_number"])
+        if not held and not r.get(_DIRECT_ALIVE_KEY):
+            held = page_holds.get(r["ad_number"])
         if held:
             # The listing's OWN PAGE has it under strike (a direct read) and the caller could not
             # read that page live. A feed sighting is weaker evidence than the page, so it may

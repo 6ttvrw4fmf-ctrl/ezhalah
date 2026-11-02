@@ -67,7 +67,7 @@ from curl_cffi import requests as cc
 
 from scrapers.common import db
 from scrapers.common import normalize as N
-from scrapers.common.arabic_location import to_catalog
+from scrapers.common.arabic_location import catalog_district, to_catalog
 from scrapers.common.http_liveness import LivenessProbe
 
 BASE = "https://arkaanalaqar.com"
@@ -366,6 +366,22 @@ def _street_width(raw: Optional[str]) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+# «الرابية بالهفوف», «الهدا بالاحساء»: the site glues «ب + the town» onto the district (🆕 2026-11-02). Served as is,
+# 55 + 15 ads sat under a district no picker offers, while الهفوف's list holds «حي الرابية» / «حي الهدا», so a
+# customer picking either never found them. The town words go only when what remains is THAT town's own catalogue
+# district; «… بالمبرز» (another catalogue town: the owner's sub-city placement, backlog 659/894) and a plan
+# («مخطط الرياض بالاحساء») stay exactly as published.
+_TOWN_SUFFIX = re.compile(r"^(?P<base>.+?)\s*-?\s+ب(?:ال)?(?:هفوف|احساء|أحساء)$")
+
+
+def town_suffix_folded(hood: Optional[str]) -> Optional[str]:
+    m = _TOWN_SUFFIX.match(hood or "")
+    if not m or "مخطط" in m.group("base"):
+        return hood
+    hofuf, _ = to_catalog("الهفوف", region_hint=5)   # الشرقية: a second «الهفوف» (501) sits in region 1
+    return catalog_district(hofuf, m.group("base")) or hood
+
+
 def _leading_int(raw: Optional[str]) -> Optional[int]:
     """First number of a spec value («500 م²» → 500, «1,000 م²» → 1000). No number → None."""
     if not raw:
@@ -453,7 +469,7 @@ def map_listing(item: dict[str, Any], detail: dict[str, Any]) -> Optional[tuple[
     # ── location ── city is the constant الأحساء (single-city source); district is per-listing.
     addr = (ld.get("contentLocation") or {}).get("address") or {}
     city_ar = (addr.get("addressLocality") or "").strip() or None
-    district_ar = (item["hood"] or "").strip() or None
+    district_ar = town_suffix_folded((item["hood"] or "").strip() or None)
     city = N.map_city(city_ar) if city_ar else None
     region = N.region_for_city(city)
     city_id, region_id = to_catalog(city_ar, region_hint=region)

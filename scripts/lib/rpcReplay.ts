@@ -116,6 +116,13 @@ function extractPatches(sql: string): { anchor: string; replacement: string }[] 
     }
   }
 
+  // (d) INLINE DOLLAR-QUOTED — `replace(d, $x$needle$x$, $x$replacement$x$)` (20261102051729). A needle that
+  // itself contains quotes reads far more safely dollar-quoted than ''-escaped inside a declaration.
+  const dollarRe =
+    /\breplace\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*,\s*\$([A-Za-z_]*)\$([\s\S]*?)\$\1\$\s*,\s*\$([A-Za-z_]*)\$([\s\S]*?)\$\3\$\s*\)/g;
+  let q: RegExpExecArray | null;
+  while ((q = dollarRe.exec(sql))) out.push({ anchor: q[2], replacement: q[4] });
+
   const callRe = /\breplace\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g;
   let c: RegExpExecArray | null;
   const seen = new Set<string>();

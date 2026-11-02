@@ -102,7 +102,28 @@ NEW_BOOL = ("majlis", "roof", "warranty", "water_tank", "well", "annex", "two_en
             "self_checkin", "wifi", "bills_included", "jacuzzi", "smart_tv", "billiards", "cleaning_service",
             "soundproof", "cameras", "guard", "smart_entry", "smart_home", "central_gas", "sauna", "kids_play_area",
             "nursery", "free_maintenance", "intercom", "fire_system", "ev_charger", "central_vacuum", "insulation",
-            "dining_majlis", "own_bathroom", "fridge", "whole_floor", "singles", "families")
+            "dining_majlis", "own_bathroom", "fridge", "whole_floor", "singles", "families",
+            # the villa facts (owner 2026-11-01) — read by the word checker, saved like corner_plot until their chips' migration
+            # adds them to text_facts_af_columns() (well already rides NEW_BOOL above)
+            "women_majlis", "irrigation", "sports_court", "outdoor_kitchen", "outdoor_diwaniya", "waterfall",
+            # GROUP A — countryside / short stays / villa extras (owner handoff 2026-11-01): read by the word checker,
+            # saved like corner_plot until the chips' migration adds them to text_facts_af_columns()
+            "split_payments", "heated_pool", "kids_pool", "water_slide", "sea_view", "football_pitch", "playstation",
+            "inflatable_games", "sound_system", "fire_pit", "bait_shaar", "mandi_pit", "outdoor_seating", "tent", "dunes_view",
+            "women_section", "two_sections", "events_hall", "privacy_screen", "trees", "for_families", "for_youth", "for_events",
+            "for_newlyweds", "quad_bikes", "horses_stable", "camels", "toilets_on_site", "lighting", "artesian_well",
+            "solar_power", "palms", "fruit_trees", "fodder_crops", "greenhouses", "producing_farm", "animal_pens", "poultry",
+            "farm_house", "farm_rest_house", "workers_housing", "fence", "main_road", "good_soil",
+            # GROUP B — residential land (owner handoff 2026-11-01)
+            "three_streets", "ready_to_build", "raised_plot", "residential_commercial", "all_services", "asphalt",
+            "street_lights", "approved_plan", "direct_owner", "inside_project", "floors_allowed", "grant_land", "no_services",
+            # GROUP C — commercial (owner handoff 2026-11-01); own_toilet rides the existing own_bathroom
+            "mezzanine", "pantry", "glass_front", "frontage", "in_mall", "in_tower", "license", "food_allowed", "takeover",
+            "first_tenant", "internet", "civil_defense", "high_ceiling", "hangar", "insulated_panel", "cold_storage",
+            "concrete_floor", "loading_dock", "big_gate", "truck_access", "crane", "racks", "office_inside", "heavy_power",
+            "industrial_area", "car_service", "meeting_room", "reception", "coworking", "private_office", "central_ac",
+            "shops_inside", "offices_inside", "apartments_inside", "staff_housing_inside", "restaurant_cafe", "car_wash",
+            "market", "earning_income", "stars_mentioned", "rooms_suites", "oil_change", "pumps", "mosque", "building_rules")
 BOOL_FACTS = frozenset(EXISTING_BOOL + NEW_BOOL)
 NUM_FACTS = frozenset(("street_width_m", "floors", "apartments_count", "shops_count", "property_age_years"))
 TEXT_FACTS = frozenset(("boundaries",))
