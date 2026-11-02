@@ -455,7 +455,8 @@ AF_COLUMNS = ("furnished", "elevator", "parking", "kitchen", "air_conditioner", 
 # «يحدها 2 شارع», two widths or two bearings, so one ad hands over at most one width. apartments_count and shops_count
 # (owner 2026-10-31) ride the same path: the checker's _COUNT_RES readers emit one agreed count per ad, as a number
 # with its quote, exactly like the width.
-AF_NUM_COLUMNS = ("street_width_m", "apartments_count", "shops_count")
+# bathrooms (backlog 1168, owner 2026-11-02): the count the ad's own words state («ثلاث دورات مياه»), a blank box only.
+AF_NUM_COLUMNS = ("street_width_m", "apartments_count", "shops_count", "bathrooms")
 
 
 def overlay_row(table: str, r: dict[str, Any], run_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -580,6 +581,9 @@ def selftest() -> None:
                           title="عمارة للبيع", body="عدد الشقق 12، محلين، سطح مستقل، واي فاي، شامل الكهرباء والماء"), "facts-words-t")
     assert bldg["facts"].get("apartments_count") == {"v": 12.0, "q": "عدد الشقق 12"}, bldg
     assert bldg["facts"].get("shops_count") == {"v": 2.0, "q": "محلين"}, bldg
+    flat, _ = overlay_row("aqar_residential_listings", dict(id=12, ad_number="A12", src_hash="0" * 32,
+                          title="شقة للإيجار", body="ثلاث غرف نوم وثلاث دورات مياه ومطبخ راكب"), "t")
+    assert flat["facts"].get("bathrooms") == {"v": 3.0, "q": "وثلاث دورات مياه"}, flat
     assert all(bldg["facts"].get(k, {}).get("v") is True for k in ("roof", "wifi", "bills_included")), bldg
     short, _ = overlay_row("aqar_residential_listings", dict(id=8, ad_number="A8", src_hash="0" * 32,
                            title="", body="مصعد"), "facts-words-t")
