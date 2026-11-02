@@ -24,6 +24,9 @@ let fail = 0;
 const p = problem(files);
 if (p) { console.error(`✗ ${p}`); fail++; } else console.log('✓ check_scraper_freshness dates a row-less site by its last ok run');
 const mutant = [...files, { name: '29991231000000_m.sql', text: "create or replace function public.check_scraper_freshness() returns setof record as $f$ begin hs := coalesce(latest, 'epoch'); end $f$;" }];
-if (problem(mutant) === null) { console.error('✗ mutation NOT caught: a later rewrite without the no-row branch'); fail++; }
-else console.log('✓ mutation caught: a later rewrite without the no-row branch');
+const mustCatch = (label: string, caught: boolean) => {
+  if (!caught) { console.error(`✗ mutation NOT caught: ${label}`); fail++; }
+  else console.log(`✓ mutation caught: ${label}`);
+};
+mustCatch('a later rewrite without the no-row branch', problem(mutant) !== null);
 process.exit(fail ? 1 : 0);

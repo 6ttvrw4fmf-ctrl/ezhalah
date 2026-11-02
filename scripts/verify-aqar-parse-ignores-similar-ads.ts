@@ -64,8 +64,9 @@ const mutants: [string, F[]][] = [
   ['a later trigger rewrite drops the guard', [...files, { name: '29991231000001_y.sql',
     text: `create or replace function public.trg_aqar_parse() returns trigger as $f$ begin if p <> 'per_meter' then null; end if; end $f$;` }]],
 ];
-for (const [label, fs] of mutants) {
-  if (problems(fs).length === 0) { console.error(`✗ mutation NOT caught: ${label}`); fail++; }
+const mustCatch = (label: string, caught: boolean) => {
+  if (!caught) { console.error(`✗ mutation NOT caught: ${label}`); fail++; }
   else console.log(`✓ mutation caught: ${label}`);
-}
+};
+for (const [label, fs] of mutants) mustCatch(label, problems(fs).length > 0);
 process.exit(fail ? 1 : 0);
