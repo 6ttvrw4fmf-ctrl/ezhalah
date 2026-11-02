@@ -1059,13 +1059,19 @@ try {
   const jStart = await waitForCount(45000);
   check(`[J] 1-question scope (Duplex/Buy/الهفوف) lands with a real start count ABOVE the ${INTERVIEW_STOP_AT} stop line`, Number.isFinite(jStart) && jStart > INTERVIEW_STOP_AT, `start=${jStart}`);
 
+  // 2026-11-02: Duplex/Buy follows the owner's Villas & Houses list (age, bathrooms, street width, facing, three cards),
+  // so opening the interview probes ~8 questions before the card can show — a 7-second window read a busy CI as "never
+  // opened" (3 of 5 runs that day). Tap, then poll for up to 40 s the way Journey I does; re-tap only every 5 s.
   let jOpened = false;
-  for (let i = 0; i < 6 && !jOpened; i++) {
-    await tap('🎯 دقّق مع الذكاء الاصطناعي').catch(() => {});
-    await page.waitForTimeout(1200);
+  const jOpenDeadline = Date.now() + 40000;
+  let jLastTap = 0;
+  while (!jOpened && Date.now() < jOpenDeadline) {
+    if (Date.now() - jLastTap >= 5000) { await tap('🎯 دقّق مع الذكاء الاصطناعي').catch(() => {}); jLastTap = Date.now(); }
+    await page.waitForTimeout(500);
     jOpened = await afPresent();
   }
-  check('[J] Advanced Filter OPENS for a cohort with exactly ONE useful question (the 1-question fix)', jOpened);
+  check('[J] Advanced Filter OPENS for a cohort with exactly ONE useful question (the 1-question fix)', jOpened,
+    `af-card never appeared within 40s of the first tap — see the JOURNEY I note: a probe-timeout artefact under load reads as a declined plan`);
 
   let jTitles = [];
   let jAnswered = null;                 // the option testid actually clicked, or null if none was offered
