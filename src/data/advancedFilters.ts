@@ -342,7 +342,11 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
     // and (pre-fix) deliver 2,984 — see the apply() note below. Dropping them leaves only the rungs
     // that mean something; when none do, `minOptionsFor('single')` retires the question entirely.
     const floor = q.bathMin ?? 0;
-    const rungs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
+    // THE LADDER IS PER SCOPE (owner's villa lists 2026-11-01): a villa / duplex scope offers 3+ · 4+ · 5+ · 6+ on Buy and
+    // 2+ · 3+ · 4+ · 5+ on rent (mixed deals: 3+ · 4+ · 5+); every other scope keeps 1+ … 4+. cnt_bath5/6 exist since
+    // migration 20261102055240; a rung with no ads hides itself like any option.
+    const [lo, hi] = bathroomLadder(q);
+    const ALL_RUNGS: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
       { key: '1', labelKey: '1+', count: (c) => c.cnt_bath1 },
       { key: '2', labelKey: '2+', count: (c) => c.cnt_bath2 },
       { key: '3', labelKey: '3+', count: (c) => c.cnt_bath3 },
@@ -350,11 +354,8 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
       { key: '5', labelKey: '5+', count: (c) => c.cnt_bath5 },
       { key: '6', labelKey: '6+', count: (c) => c.cnt_bath6 },
     ];
-    // THE LADDER IS PER SCOPE (owner's villa lists 2026-11-01): a villa / duplex scope offers 3+ · 4+ · 5+ · 6+ on Buy and
-    // 2+ · 3+ · 4+ · 5+ on rent (mixed deals: 3+ · 4+ · 5+); every other scope keeps 1+ … 4+. cnt_bath5/6 exist since
-    // migration 20261102055240; a rung with no ads hides itself like any option.
-    const [lo, hi] = bathroomLadder(q);
-    return guidedOptions(await fetchApartmentGuidedCounts(q), rungs.filter((d) => { const n = parseInt(d.key, 10); return n > floor && n >= lo && n <= hi; }), (c) => c.cnt_bath_unknown);
+    const rungs = ALL_RUNGS.filter((d) => { const n = parseInt(d.key, 10); return n >= lo && n <= hi; });
+    return guidedOptions(await fetchApartmentGuidedCounts(q), rungs.filter((d) => parseInt(d.key, 10) > floor), (c) => c.cnt_bath_unknown);
   },
   // INTERSECT, never replace (bug fix 2026-08-04). Every option's `count` is defined by the contract as
   // "exactly what Search returns if picked", and it is computed WITH the previous answer applied — so an
