@@ -85,18 +85,34 @@ back to Rent). #9739 makes the `sync` job check out `main` for a main-ref run (g
 dispatched after the merge, never by that nightly. This container cannot open ezhalah.com (proxy refuses it):
 every customer proof is the CI `customer-journey.yml` run.
 
-**Owed → first thing next run (11-01):**
-- **daryusuf 1133/1139:** the 11-01 nightly's daryusuf job (run 41272812432, job 124751175863, commit c1c2445,
-  which HAS the 06a6856 fix) was still queued at 06:20. Read `daryusuf_residential_listings` 13109421/13109370:
-  transaction_type must be Buy with price_total. Then customer-journey.yml with
-  `[{"platform":"daryusuf","source_table":"daryusuf_residential_listings","listing_id":13109421}]` must PASS
-  (بيع · المدينة المنورة · المطار · فيلا · ر.س 1,480,000).
-- **ksaaqar 1134 area:** targeted run `source=souq24,ksaaqar` dispatched 06:18 on d32dffc → 12226358 area_m2
-  must read 2713. Its price 29,000,000,000 is source-verified (ops_price_source_verified, reread 41276260022).
-  The filter-count mismatch on that band is routed to repair (backlog 1141).
-- **souq24 1111 pins:** the same targeted run → pin_coverage_by_platform() souq24 0/46 → most of 46, one card's pin
-  = the page's «الحصول على الإتجاه» link; then raise its floor in data/pin-sources.json. A later nightly souq24
-  job on an OLD commit would rewrite additional_info without the pin: re-read coverage after it, too.
+**NEW (11-02): NEVER NULL A PRICE FROM A CAPTURE'S TEXT — RE-READ THE LIVE PAYLOAD FIRST.** On 11-02 I blanked 32 aqar
+prices because the stored figure appeared only inside «إعلانات مشابهة» in `source_capture`. That capture was taken
+while the ad was CLOSED. A `recover_stubs` run without `--include-price` refreshes the capture but keeps the price,
+so the capture and the price disagreed for an innocent reason. The live re-read (`aqar-stub-recovery.yml`
+`ads=… include_price=true`) showed only 2 of the 32 really were neighbour prices; about 22 were the ads' own and
+were blank for ~1 h. Order: (1) re-enrich the cohort from the live payload, (2) repair only what that read
+contradicts, (3) then the proof. The function fixes (20261102051729: `aqar_parse` head stops at «إعلانات
+مشابهة»; `trg_aqar_parse` never writes over `authoritative_absent`) stand, watched by
+`mon_detect_aqar_price_over_authoritative_absent`.
+
+**NEW (11-02): `scripts/lib/rpcReplay.ts` now reads an inline dollar-quoted needle edit** (`replace(d, $x$…$x$,
+$x$…$x$)`). A needle-edit migration that touches a function a replay barrier pins (aqar_parse) must also refresh
+`sql/mirrors/<fn>.sql` (md5 = production `pg_get_functiondef`) and `ops_sql_mirror_expected` in a companion.
+
+**Owed → first thing next run (11-02):**
+- **1174 souq24 harvest retry** (merged #9899, c97c51b; targeted souq24 run dispatched 06:25 UTC): once merged, the next souq24 crawl's notes must not say «browse harvest
+  incomplete» on a lone transport_Timeout; alert 12223 clears 72 h after 11-01 10:46 (≈ 11-04 10:46 UTC).
+- **1175 alhumaidan freshness** (20261102054212): no alhumaidan row in `scraper_freshness_alerts` after the 06:10
+  and later crons; alert 4194 resolves ~24 h after the last legacy row (≈ 11-03 00:10 UTC).
+- **aqar 22 restored prices:** served after the 11-02 06:22 sync; commercial 296740/14881483 re-read: aqar's payload
+  publishes no price today, so NULL is source truth.
+- Self-clearing, dated: aqar_liveness kills 12320 (#9794 ok 33/33 on 11-02; clears ≈ 11-04 11:38), shomou
+  11912 (≈ 11-02 08:56), manzo 12026 (≈ 11-02 18:43), albukaeri/superoffice/nowaisiry enumeration_incomplete
+  (clean runs since 10-31/11-01).
+- Not a capture bug (leave the alert to adjudication): superoffice 24 rows = 3 branches × the 8-office window
+  robots.txt allows (`Disallow: /api`); the 184 «baseline» is the old site. dealapp enumeration_incomplete:
+  every active row was seen ≤ 5 days ago and 93 % were verified alive ≤ 3 days ago. The shard guard's
+  denominator is the gap, not lost data.
 - Kept: 575/612 photo floors · 564 gathern redirects · 565 almuteb 503 · 613 wasalt 13746442.
 
 **CHANGED (10-25): a targeted `small-sources-sync` dispatch (`source=<slug>[,<slug>…]`) now creates ONLY those jobs**
