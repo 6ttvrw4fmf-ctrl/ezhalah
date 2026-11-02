@@ -1689,6 +1689,7 @@ const AR: Record<string, string> = {
   '{n} listings': '{n} إعلاناً',
   '{n} listings at this spot': '{n} إعلانات في هذا الموقع',
   '{n} listings inside the boundary': '{n} إعلان داخل الحدود',
+  '{n} listings here': '{n} إعلان في هذه المنطقة',
   'Show listings': 'عرض الإعلانات',
   'Show {n} listings': 'عرض {n} إعلان',
   'SAR': 'ر.س',

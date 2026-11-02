@@ -32,7 +32,7 @@ import { Image as XImage } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font } from '@/theme/tokens';
 import { lightColors } from '@/theme/palette';
-import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, paddedBox, pinColor, pinHead, bubbleText, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
+import { fetchMapPins, cellForSpan, fineCellForSpan, PIN_LIMIT, paddedBox, pinColor, dotColor, pinHead, polygonOf, type PinFilter, type PinRow } from '@/data/mapPins';
 import { classifyPlace, placeSubtitle, dedupePlaces, dropAreaShadows, sortByKind, isAreaKind, isNoiseName, type PlaceKind, type PlaceFacts } from '@/lib/placeKind';
 import { useI18n } from '@/i18n';
 
@@ -544,20 +544,42 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     const pins = pinFilter;
     let seq = 0; let timer: ReturnType<typeof setTimeout> | null = null; let mine: unknown[] = [];
     const loc = localeRef.current === 'ar' ? 'ar' : 'en';
+    // What a tap does: a bubble zooms into its cell, a pin hands its row up (the card sheet). Called from the element's
+    // OWN pointer handlers — on a phone MapKit's `select` never fired for a touch on a custom annotation (owner
+    // 2026-11-02: «when I click it doesn't show»; reproduced with a synthetic touch tap: no sheet) — and from
+    // MapKit's `select` for a mouse, deduped by time so one tap is never two picks.
+    let lastPick = 0;
+    const pick = (row: PinRow, cell: number) => {
+      lastPick = Date.now();
+      if (cell > 0) {
+        live.history.push(m.region);
+        m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(row.lat, row.lng), new mk.CoordinateSpan(cell * 2.2, cell * 2.2)), true);
+      } else onPinSelectRef.current?.(row);
+    };
+    // SMALL heads (owner 2026-11-02: «the pin is so so big»): 11 px text, a slim pill. ZOOMED OUT, A CELL IS A DOT
+    // (owner 2026-11-02, Zillow: «pins don't show the price unless you zoom in»): a 14 px deal-coloured dot, no number;
+    // the count of what is in view sits in the pill at the bottom of the map instead.
     const element = (row: PinRow, cell: number) => {
       const el = document.createElement('div');
-      const color = cell > 0 ? '#5B4A6B' : pinColor(row);
+      const color = cell > 0 ? dotColor(row) : pinColor(row);
       el.setAttribute('data-testid', cell > 0 ? 'map-bubble' : 'map-pin');
-      el.style.cssText = `font:600 12px/1 -apple-system,system-ui,sans-serif;color:#fff;background:${color};border:2px solid #fff;` +
+      el.style.cssText = `font:600 11px/1 -apple-system,system-ui,sans-serif;color:#fff;background:${color};border:1.5px solid #fff;cursor:pointer;touch-action:none;` +
         (cell > 0
-          ? 'border-radius:999px;min-width:34px;height:34px;padding:0 9px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.35)'
-          : 'border-radius:14px;padding:7px 10px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.35);position:relative');
-      el.textContent = cell > 0 ? bubbleText(row.n, loc) : pinHead(row, loc);
+          ? 'border-radius:50%;width:14px;height:14px;box-shadow:0 1px 3px rgba(0,0,0,.4)'
+          : 'border-radius:10px;padding:4px 7px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35);position:relative');
+      el.textContent = cell > 0 ? '' : pinHead(row, loc);
       if (cell === 0) {
         const tip = document.createElement('div');
-        tip.style.cssText = `position:absolute;left:50%;bottom:-7px;width:0;height:0;margin-left:-6px;border-left:6px solid transparent;border-right:6px solid transparent;border-top:7px solid ${color}`;
+        tip.style.cssText = `position:absolute;left:50%;bottom:-5px;width:0;height:0;margin-left:-4px;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid ${color}`;
         el.appendChild(tip);
       }
+      // A tap = pointer down and up within 10 px (a drag that starts on a head still pans the map).
+      let down: { x: number; y: number } | null = null;
+      el.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY }; });
+      el.addEventListener('pointerup', (e) => {
+        const d = down; down = null;
+        if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 10) { e.stopPropagation(); pick(row, cell); }
+      });
       return el;
     };
     const clear = () => { for (const a of mine) m.removeAnnotation(a); mine = []; };
@@ -581,17 +603,15 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       setPinCount(rows.reduce((a, r) => a + r.n, 0));
       clear();
       mine = rows.map((row) => new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, drawCell), {
-        data: { pin: row, cell: drawCell }, calloutEnabled: false, anchorOffset: drawCell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(0, -8),
+        data: { pin: row, cell: drawCell }, calloutEnabled: false, anchorOffset: drawCell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(0, -6),
       }));
       for (const a of mine) m.addAnnotation(a);
     };
     const onRegion = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { void load(); }, 220); };
     const onSelect = (e: { annotation?: { data?: { pin?: PinRow; cell?: number } } }) => {
       const d = e.annotation?.data; if (!d?.pin) return;
-      if (d.cell && d.cell > 0) {
-        live.history.push(m.region);
-        m.setRegionAnimated(new mk.CoordinateRegion(new mk.Coordinate(d.pin.lat, d.pin.lng), new mk.CoordinateSpan(d.cell * 2.2, d.cell * 2.2)), true);
-      } else onPinSelectRef.current?.(d.pin);
+      if (Date.now() - lastPick < 600) return;   // the element's own tap handler already picked it
+      pick(d.pin, d.cell ?? 0);
     };
     m.addEventListener('region-change-end', onRegion);
     m.addEventListener('select', onSelect);
@@ -811,8 +831,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
           <Text style={s.groundSoon}>{t('Coming soon')}</Text>
         </View>
       ) : null}
-      {hasShape && !drawing && pinCount !== null ? (
-        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{t('{n} listings inside the boundary', { n: pinCount.toLocaleString('en-US') })}</Text></View>
+      {/* Zillow's «Only N matching results»: what the view (or the drawn boundary) holds, since the dots carry no number. */}
+      {!drawing && pinCount !== null ? (
+        <View style={s.countPill} pointerEvents="none" testID="map-pin-count"><Text style={s.countPillT}>{t(hasShape ? '{n} listings inside the boundary' : '{n} listings here', { n: pinCount.toLocaleString('en-US') })}</Text></View>
       ) : null}
       {failed ? <View style={s.failed} pointerEvents="none"><View style={s.failedPill}><Text style={s.failedT}>{t('The map could not load')}</Text></View></View> : null}
     </View>
