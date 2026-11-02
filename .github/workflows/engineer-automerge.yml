@@ -18,6 +18,15 @@ name: Engineer auto-merge (engineer lanes)
 on:
   schedule:
     - cron: '*/15 * * * *'
+  # THE SCHEDULE IS NOT A HEARTBEAT (🔧 2026-11-02). GitHub delays or drops `schedule` runs on a busy repo:
+  # this one fired at 22:40, 01:51 and 09:12 UTC and then not once in the next six hours, while every pass
+  # that merged anything was a hand dispatch from an engineer session. A green PR that nobody dispatches
+  # for sits. So the robot also runs when the slowest required check — the web runtime smoke — finishes
+  # on any branch: a PR whose last check just went green is looked at within a minute, and a run that
+  # changes nothing costs ~60 s. The concurrency group below queues at most one extra pass.
+  workflow_run:
+    workflows: ['Web runtime smoke']
+    types: [completed]
   workflow_dispatch:
 
 permissions:
