@@ -93,6 +93,10 @@ check('AppleMap.web.tsx fetches the padded visible box with the zoom cell and dr
 check('AppleMap.web.tsx re-runs the pin layer once the map object exists (mapReady bumped where live.map is set, in the deps)',
   /live\.map = map;\n\s*setMapReady\(\(n\) => n \+ 1\);/.test(web) && /\}, \[pinsKey, failed, mapReady\]\);/.test(web) && /if \(!mk \|\| !m \|\| !pinFilter\) return;/.test(web));
 check('AppleMap.web.tsx adds the biggest count last so it sits on top', /rows\.sort\(\(a, b\) => a\.n - b\.n\);\n\s*setPinCount\(/.test(web));
+// AN INVISIBLE OUTLINE IS NOT CLICKABLE (measured live 2026-11-02, phone: a tap between two pins in central Riyadh flew
+// the map out to the whole region because the faded-out polygon took the tap). The region select bails when fade is 0.
+check('AppleMap.web.tsx ignores a region tap once its outline has faded to nothing', /const r = e\.overlay\?\.data;[\s\S]{0,600}?if \(!r \|\| !map \|\| fade <= 0\) return;/.test(web));
+mustCatch('a region select that fires while the outline is invisible', !/if \(!r \|\| !map\) return;\n\s*chosen =/.test(web));
 // NEVER A PARTIAL SET OF PINS: an exact-point read that hit PIN_LIMIT is re-read as a fine bubble grid (every listing
 // counted), and the bubbles are drawn with THAT cell (element, data and anchor all follow drawCell).
 check('AppleMap.web.tsx falls back to a fine bubble grid when the exact read hit its cap, and draws with that cell',
