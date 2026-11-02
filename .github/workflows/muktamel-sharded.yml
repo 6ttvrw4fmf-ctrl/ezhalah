@@ -136,6 +136,7 @@ jobs:
     name: Bridge fleet result to alert_event
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     needs: crawl
+    timeout-minutes: 10
     if: always()
     steps:
       - uses: actions/checkout@v4

@@ -228,7 +228,7 @@ jobs:
     # Runs after a successful enum, OR standalone when skip_enum=true (pilot). The strike step's own
     # coverage guard still refuses if the last enum is >36h old or below the row floor, so skipping
     # here never bypasses the safety — it only avoids re-running the 4.5h enum for a repeat pilot.
-    if: ${{ always() && ((needs.enum.result == 'success' && needs.rollup.result == 'success') || inputs.skip_enum) }}
+    if: ${{ !cancelled() && ((needs.enum.result == 'success' && needs.rollup.result == 'success') || inputs.skip_enum) }}
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 350
     steps:

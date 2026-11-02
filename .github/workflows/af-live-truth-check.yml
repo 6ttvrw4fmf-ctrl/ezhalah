@@ -345,7 +345,7 @@ jobs:
   # between jobs inside the same file keeps it green — and deleting one would still turn it red.
   af-rest-oracles:
     needs: [gate, af-truth, af-card-state]
-    if: always() && needs.gate.outputs.shipped == 'yes'
+    if: ${{ !cancelled() && needs.gate.outputs.shipped == 'yes' }}  # never always: a job-level always keeps running after a run cancel (2026-11-02)
     name: The REST-only AF oracles (predicate, strict parity, guided carry, chips)
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # Measured: the four steps total ~15s of work. 10 covers that plus checkout and npm ci with
@@ -460,7 +460,7 @@ jobs:
   # browser jobs concluded; attendance still requires EVERY job to have concluded success.
   af-surface-region:
     needs: [gate, af-truth, af-card-state]
-    if: always() && needs.gate.outputs.shipped == 'yes'
+    if: ${{ !cancelled() && needs.gate.outputs.shipped == 'yes' }}  # never always: a job-level always keeps running after a run cancel (2026-11-02)
     name: Every certified AF option shows DB truth and clicks to exactly that set (region)
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # THE TWO SWEEPS GET A JOB EACH (2026-09-03). They are independent scopes and each is an
@@ -506,7 +506,7 @@ jobs:
   # on the gate so a failed sibling never skips coverage (attendance still needs every one of them).
   af-surface-city:
     needs: [gate, af-surface-region]
-    if: always() && needs.gate.outputs.shipped == 'yes'
+    if: ${{ !cancelled() && needs.gate.outputs.shipped == 'yes' }}  # never always: a job-level always keeps running after a run cancel (2026-11-02)
     name: …and the same option surface inside a CITY scope (جدة), single-type stages
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 90
@@ -549,7 +549,7 @@ jobs:
     # its dependency fails, and a skipped browser job is lost coverage on the surface it exists to
     # protect. Attendance still requires EVERY job to have concluded success.
     needs: [gate, af-truth]
-    if: always() && needs.gate.outputs.shipped == 'yes'
+    if: ${{ !cancelled() && needs.gate.outputs.shipped == 'yes' }}  # never always: a job-level always keeps running after a run cancel (2026-11-02)
     name: The rendered card, the removed pill and the scope change all tell one truth
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     # 45 → 60 on 2026-09-03: two more browser journeys (the §12A card-evidence pair) live here now.
@@ -614,7 +614,7 @@ jobs:
   # journeys rather than inside their 30-minute budget. Offline twin: scripts/verify-af-matrix-truth.ts.
   af-matrix:
     needs: [gate, af-surface-city]
-    if: always() && needs.gate.outputs.shipped == 'yes'
+    if: ${{ !cancelled() && needs.gate.outputs.shipped == 'yes' }}  # never always: a job-level always keeps running after a run cancel (2026-11-02)
     name: Every certified AF option shows, sends, applies, returns and carries one truth
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 50

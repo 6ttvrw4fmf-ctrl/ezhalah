@@ -128,6 +128,7 @@ jobs:
   # failed — but it can no longer make the run look red on its own.
   cleanup:
     needs: [setup, race, assert]
+    timeout-minutes: 10
     if: always()
     runs-on: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && vars.EZ_RUNNER) || 'ubuntu-latest' }}
     steps:
