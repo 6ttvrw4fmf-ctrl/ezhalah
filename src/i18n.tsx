@@ -487,7 +487,7 @@ const AR: Record<string, string> = {
   '"{city}" isn\'t a city I recognize, I\'ll still search using your other answers.':
     '«{city}» ليست مدينة أعرفها، سأظل أبحث باستخدام إجاباتك الأخرى.',
 
-  // Advanced-filter question engine («🎯 دقّق مع الذكاء») — عمر العقار is the first field built on
+  // Advanced-filter question engine («🎯 دقّق مع الذكاء الاصطناعي») — عمر العقار is the first field built on
   // this reusable card; new fields add their own strings here, never touch this block's wording.
   'How old is the property?': 'كم عمر العقار تقريباً؟',
   'New construction': 'جديد',
@@ -964,7 +964,7 @@ const AR: Record<string, string> = {
     'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي بحث جديد؟ افتح القائمة ☰ فوق واختر «بحث».',
   'I showed you the first {n} listings. For a new search, open the menu and choose Search.':
     'عرضت لك أول {n} إعلانات. تبي بحث جديد؟ افتح القائمة ☰ فوق واختر «بحث».',
-  // …and the narrow-only pair: «عرض المزيد» is not rendered but «🎯 دقّق مع الذكاء» is, so the
+  // …and the narrow-only pair: «عرض المزيد» is not rendered but «🎯 دقّق مع الذكاء الاصطناعي» is, so the
   // sentence invites exactly the one button that exists.
   'I showed you the first {shown} of {total} matching listings. Want help finding more precise ones?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أساعدك توصل لنتائج أدق؟',
   'I showed you the first {n} listings. Want help finding more precise ones?': 'عرضت لك أول {n} إعلانات. تبي أساعدك توصل لنتائج أدق؟',
@@ -973,10 +973,10 @@ const AR: Record<string, string> = {
   'We found {total} listings matching your search, and showed you {shown}. Want help finding more precise ones?': 'لقينا {total} إعلان يطابق طلبك، وعرضنا لك {shown} منها. تبي أساعدك نلقى نتائج أدق؟',
   'We found {total} listings matching your search, and showed you {shown}.': 'لقينا {total} إعلان يطابق طلبك، وعرضنا لك {shown} منها.',
   'I can show you 100 listings at a time.': 'أقدر أعرض لك 100 إعلان في كل مرة.',
-  '🎯 Refine with AI': '🎯 دقّق مع الذكاء',
+  '🎯 Refine with AI': '🎯 دقّق مع الذكاء الاصطناعي',
   // COMPLETED-ROUND RECEIPT (owner 2026-08-24) — replaces the action buttons on the results turn a
   // finished Advanced Filter round was opened from. A record of what happened, never a control.
-  'Continued with 🎯 Refine with AI': 'تابع المستخدم عبر 🎯 دقّق مع الذكاء',
+  'Continued with 🎯 Refine with AI': 'تابع المستخدم عبر 🎯 دقّق مع الذكاء الاصطناعي',
   // Read Aloud closing note (owner request, 2026-08-23 — "read the note... and say the button
   // also"): spoken ONLY when the matching buttons are actually on screen (agent.tsx gates this the
   // same way), naming the exact same button label(s) so it can never mention an action that isn't
@@ -1657,7 +1657,7 @@ const AR: Record<string, string> = {
   // The Advanced Filter card's note and its reader (owner 2026-11-01). No emoji.
   "Counts come from the ads' own words": 'الأرقام من كلام الإعلانات نفسها',
   'How it works?': 'كيف يشتغل؟',
-  'How Refine with AI works': 'كيف يشتغل دقّق مع الذكاء؟',
+  'How Refine with AI works': 'كيف يشتغل دقّق مع الذكاء الاصطناعي؟',
   'Please turn off your VPN': 'فضلاً أوقف الـ VPN',
   'Ezhalah is not available over VPN, Tor or server networks. Turn off your VPN and try again.': 'إزهله غير متاح عبر شبكات VPN أو Tor أو الخوادم. أوقف الـ VPN وحاول مرة ثانية.',
   'Terms of Use': 'شروط الاستخدام',

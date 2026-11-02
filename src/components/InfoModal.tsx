@@ -74,7 +74,7 @@ type Kind = 'support' | 'about' | 'legal' | 'afhow';
 export default function InfoModal() {
   const { modal, closeModal } = useApp();
   if (!modal) return null;
-  // 'af-how' is «كيف يشتغل دقّق مع الذكاء؟» (owner 2026-11-01): the Advanced Filter card's note, read in
+  // 'af-how' is «كيف يشتغل دقّق مع الذكاء الاصطناعي؟» (owner 2026-11-01): the Advanced Filter card's note, read in
   // this same host as the Terms reader — white card, eagle, ✕ top-right in both languages.
   const kind: Kind = modal === 'privacy' ? 'legal' : modal === 'af-how' ? 'afhow' : modal;
   return <Sheet kind={kind} legalTab={modal === 'privacy' ? 'privacy' : 'terms'} onClose={closeModal} />;
@@ -507,7 +507,7 @@ function AboutBody({ t, reduced, gripRef, drag }: {
   );
 }
 
-// ————————————————————————————— «كيف يشتغل دقّق مع الذكاء؟» ————————————————————————————————
+// ————————————————————————————— «كيف يشتغل دقّق مع الذكاء الاصطناعي؟» ————————————————————————————————
 // The Advanced Filter card's note, opened from its «كيف يشتغل؟» link (owner 2026-11-01). Same reading
 // dialog as the Terms: the eagle lockup, then the owner's five sections (src/data/afHowItWorks.ts),
 // rendered with the legal reader's own styles so the two popups look like one family. No tabs, no
