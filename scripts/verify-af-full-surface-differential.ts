@@ -212,7 +212,9 @@ const CARD_ARMS = ['comfort', 'space', 'safety', 'perks', 'build', 'extras', 'wh
 if (CARD_IDS.some((id) => !CARD_ARMS.includes(id))) throw new Error(`optionsFor() has no arm for card(s): ${CARD_IDS.filter((id) => !CARD_ARMS.includes(id)).join(', ')}`);
 function optionsFor(qid: string, types: string[], q: any): Opt[] | null {
   switch (qid) {
-    case 'rnpl': return [{ key: 'rnpl', col: 'cnt_rnpl', countRpc: 'guided', params: { p_amenities: ['rnpl'] }, pred: { kind: 'true', col: 'rent_now_pay_later' } }];
+    // two chips since 2026-11-02: the site's installment box, and the ad's own «دفعات» words (a text fact, 20261102100954)
+    case 'rnpl': return [{ key: 'rnpl', col: 'cnt_rnpl', countRpc: 'guided', params: { p_amenities: ['rnpl'] }, pred: { kind: 'true', col: 'rent_now_pay_later' } },
+      { key: 'split_payments', col: 'cnt_split_payments', countRpc: 'guided', params: { p_amenities: ['split_payments'] }, pred: { kind: 'true', col: 'split_payments' } }];
     case 'amenities': return amenityChipKeys(types, q).map(amenity);
     // the ten themed cards: exactly the chips the real plan offers on this scope (cardKeys reads COHORT_CARDS)
     case 'comfort': return cardKeys(q, qid).map((k) => cardChip(qid, k));
