@@ -161,6 +161,9 @@ const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
 check('AppleMap.web.tsx: suggestPlaces classifies, dedupes and sorts', /classifyPlace\(facts\)/.test(web) && /sortByKind\(dropAreaShadows\(dedupePlaces\(/.test(web) && /placeSubtitle\(facts, kind, country\)/.test(web));
 check('AppleMap.web.tsx: an unresolved row is kept with its two lines (timeout → resolve(r))', /setTimeout\(\(\) => resolve\(r\), \d+\)/.test(web));
 check('AppleMap.web.tsx: autocomplete ranks around the map\'s region (a chain lists nearby branches, walked live 2026-11-01)', /if \(live\.map\) search\.region = live\.map\.region;/.test(web));
+const row = readFileSync(join(root, 'src/components/MapDealRow.tsx'), 'utf8');
+check('MapDealRow.tsx: a pick BLURS the field so the phone keyboard closes (owner 2026-11-02)', /inputRef\.current\?\.blur\(\); onPick\(p\);/.test(row) && /ref=\{inputRef\}/.test(row));
+check('AppleMap.web.tsx: a short compact box (keyboard up) hides draw, zoom and layers, keeps ⤢ and ↶', /setShort\(e\.nativeEvent\.layout\.height < 280\)/.test(web) && /const roomy = full \|\| !short;/.test(web) && (web.match(/roomy && !failed && !drawing/g) ?? []).length === 2 && /\{roomy \? <View style=\{s\.topRight\}/.test(web));
 check('AppleMap.web.tsx: the mark follows the kind (pin for a landmark, outline for an area)', /isAreaKind\(p\.kind\)/.test(web));
 check('AppleMap.web.tsx: the view is wider than the outline, so the outline is seen', /region\.span\.latitudeDelta \* 1\.3, region\.span\.longitudeDelta \* 1\.3/.test(web));
 // PICKING A ROW MUST FLY (seen live 2026-11-01): Search.search() accepts only Apple's own SearchAutocompleteResult

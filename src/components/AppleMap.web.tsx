@@ -604,8 +604,13 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute }: {
     };
   }, [drawing]);
 
+  // A SHORT COMPACT BOX KEEPS ONLY ⤢ AND ↶ (owner 2026-11-02, phone: «doesn't look nice on a phone»): with the
+  // keyboard up the box is ~120 px tall and «رسم», + / − and the layers button piled on top of each other. Under
+  // 280 px those three hide; the full-screen map never is that short.
+  const [short, setShort] = useState(false);
+  const roomy = full || !short;
   return (
-    <View style={s.frame}>
+    <View style={s.frame} onLayout={(e) => setShort(e.nativeEvent.layout.height < 280)}>
       <View ref={hostRef} style={s.host} />
       {/* Compact: ⤢ top-left opens the map full screen; the box itself pans and zooms in place. */}
       {/* «رجوع» under the top-left button, only once zoomed in (owner 2026-10-31: «a button that allows the user to go
@@ -637,7 +642,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute }: {
           <Ionicons name="close" size={22} color={colors.ink} />
         </Pressable>
       ) : null}
-      <View style={s.topRight} pointerEvents="box-none">
+      {roomy ? <View style={s.topRight} pointerEvents="box-none">
       {/* «مسار» beside «رسم» (owner 2026-10-31: from here to here, visible before anyone types). With a route drawn it
           becomes «إزالة المسار ✕». */}
       {onRoute && !failed && !drawing ? (
@@ -657,9 +662,9 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute }: {
           {hasShape ? <Ionicons name="close" size={17} color={colors.primary} /> : null}
         </Pressable>
       ) : null}
-      </View>
+      </View> : null}
       {/* + / − above the layers button, same column. */}
-      {!failed && !drawing ? (
+      {roomy && !failed && !drawing ? (
         <View style={[s.zoomCol, locale === 'ar' && s.zoomColAr]} testID="map-zoom">
           <Pressable style={s.zoomBtn} onPress={() => zoomBy(0.5)} accessibilityRole="button" accessibilityLabel={t('Zoom in')}><Ionicons name="add" size={22} color={colors.ink} /></Pressable>
           <View style={s.zoomRule} />
@@ -668,7 +673,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute }: {
       ) : null}
       {/* Layers, far bottom-right (owner 2026-10-31: «far down right»). In English Apple's mark is bottom-LEFT and the
           corner is free; in Arabic the mark sits bottom-RIGHT, inside the map image, so the button lifts above it. */}
-      {!failed && !drawing ? (
+      {roomy && !failed && !drawing ? (
         <Pressable style={[s.layersBtn, locale === 'ar' && s.layersBtnAr]} onPress={() => setLayersOpen((o) => !o)} accessibilityRole="button" accessibilityLabel={t('Map layers')} testID="map-layers-btn">
           <Ionicons name="layers-outline" size={20} color={colors.ink} />
         </Pressable>
