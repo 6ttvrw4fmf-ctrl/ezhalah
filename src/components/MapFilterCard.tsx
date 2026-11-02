@@ -126,7 +126,7 @@ const s = StyleSheet.create({
   range: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: colors.tintLine, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: colors.surface },
   rangeOn: { borderColor: colors.primary },
   rangeSmall: { fontSize: 12, color: colors.muted },
-  input: { flex: 1, minWidth: 40, fontSize: 15, color: colors.ink, paddingVertical: 0, textAlign: 'center' },
+  input: { flex: 1, minWidth: 0, fontSize: 16, color: colors.ink, paddingVertical: 0, textAlign: 'center' },
   icon: { width: 18, height: 18 },
   reset: { alignSelf: 'center', paddingVertical: 8 },
   resetT: { color: colors.primary, fontWeight: '700' },
