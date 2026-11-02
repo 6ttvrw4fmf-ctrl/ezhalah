@@ -159,7 +159,7 @@ export default function MapRoute() {
         {/* «مسار» is built but HIDDEN (2026-11-01): Apple's directions return ZERO routes anywhere in Saudi Arabia on MapKit JS
           (measured live: Jeddah→Riyadh, inside Riyadh, walking — all 0; the same call routes in the UAE, the UK, the US).
           Pass `onRoute` again once a routing provider that covers the Kingdom is chosen (ROUTE_PROVIDER_READY). */}
-      {M && <M.AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} onRoute={ROUTE_PROVIDER_READY ? () => { setRouteMode(true); setFull(false); } : undefined} pins={{ deals, ...pinFilterOf(mapFilter) }} onPinSelect={(row) => { setPinRow(row); setFull(true); }} />}
+      {M && <M.AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} onRoute={ROUTE_PROVIDER_READY ? () => { setRouteMode(true); setFull(false); } : undefined} pins={{ deals, ...pinFilterOf(mapFilter) }} onPinSelect={(row) => { setPinRow(row); }} />}
       {pinRow ? <MapPinSheet row={pinRow} onClose={() => setPinRow(null)} /> : null}
       </View>
       {filterOpen && M ? <MapFilterCard value={mapFilter} onClose={() => setFilterOpen(false)} onApply={(f) => { setMapFilter(f); setFilterOpen(false); setPinRow(null); }} countPins={(f) => M.countPinsInView({ deals, ...pinFilterOf(f) })} /> : null}

@@ -136,7 +136,11 @@ check('the map screen feeds the deal button into the pins and clears the sheet o
 check('the Filter button opens the centered filter card; Apply feeds the pins and counts in view', /onFilter=\{\(\) => setFilterOpen\(true\)\} filterOn=\{isNarrowed\(mapFilter\)\}/.test(screen) && /<MapFilterCard value=\{mapFilter\}/.test(screen) && /countPins=\{\(f\) => M\.countPinsInView\(\{ deals, \.\.\.pinFilterOf\(f\) \}\)\}/.test(screen));
 const cardSrc = readFileSync(join(root, 'src/components/MapFilterCard.tsx'), 'utf8');
 check('the filter card is the site\'s own tiles (OptionBox + the same icons), X top right, no transaction section', /<OptionBox compact key=\{cat\} label=\{t\(cat\)\} img=\{categoryImg\(cat\)\}/.test(cardSrc) && /img=\{groupImg\(g\.group\)\}/.test(cardSrc) && /img=\{BED_IMG\[opt\]\}/.test(cardSrc) && /testID="map-filter-close"/.test(cardSrc) && !/DEALS|MapDeal\b/.test(cardSrc));
-check('a tapped pin opens the card sheet inside the map (Zillow-style), full screen', /onPinSelect=\{\(row\) => \{ setPinRow\(row\); setFull\(true\); \}\}/.test(screen) && /<MapPinSheet row=\{pinRow\} onClose=/.test(screen));
+// A tap must NOT resize the map (owner 2026-11-02: «when I click it then I see the others, it's weird»): switching to
+// full screen on the tap re-laid the map out, reloaded the pins and reshuffled them around the tapped one. The sheet
+// opens over the map exactly as it is.
+check('a tapped pin opens the card sheet over the map AS IT IS (no full-screen switch on the tap)', /onPinSelect=\{\(row\) => \{ setPinRow\(row\); \}\}/.test(screen) && /<MapPinSheet row=\{pinRow\} onClose=/.test(screen));
+mustCatch('a tap that flips the map to full screen (the reshuffle the owner saw)', !/onPinSelect=\{[^}]*setFull\(true\)/.test(screen));
 const sheet = readFileSync(join(root, 'src/components/MapPinSheet.tsx'), 'utf8');
 check('the sheet loads every listing through fetchListingCards (the search\'s own card path) and opens with openListing', /fetchListingCards\(table, ids\)/.test(sheet) && /openListing\(l\)/.test(sheet) && /<ResultCard listing=\{l\}/.test(sheet));
 check('the sheet says a failed load is a failed load, never «no listings»', /if \(!all\.length && \(row\.ids\?\.length \?\? 0\) > 0\) setFailed\(true\);/.test(sheet));
