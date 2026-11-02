@@ -324,6 +324,9 @@ export function flyToPlace(p: PlaceSuggestion) {
     if (!c) return;
     const style = (fillOpacity: number, lineWidth: number, strokeOpacity = 0.85) => new mk.Style({ strokeColor: lightColors.primary, strokeOpacity, lineWidth, fillColor: lightColors.primary, fillOpacity });
     const landmark = p.kind ? !isAreaKind(p.kind) && p.kind !== 'street' : !!(place && place.pointOfInterestCategory);
+    // A STREET draws nothing (owner 2026-11-02: «for street don't draw»): the map flies to it and Apple's own labels
+    // say where it runs; a line is not an area, and a frame around it read as a fake boundary.
+    if (p.kind === 'street') return;
     // THE REAL BOUNDARY ON EVERY PICK (owner 2026-11-01: «create a boundary around it, don't make just a square»,
     // then «whenever you choose something … anything»): the place's actual shape from place_shapes (OpenStreetMap) —
     // a district / city / region outline, or a named site's footprint (mall, hospital, airport, park, hotel …) —
