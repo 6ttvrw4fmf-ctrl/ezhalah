@@ -62,6 +62,11 @@ const TOP_CLEAR = CLOSE_INSET + CLOSE_SIZE + CLOSE_GAP;
 const SUPPORT_MAX_W = 540;
 const ABOUT_MAX_W = 760;
 const LEGAL_MAX_W = 640;
+// «كيف يشتغل؟» opens at the Advanced Filter QUESTION CARD's own width and height, not the Terms reader's
+// (owner 2026-11-02: «i dont like how its very big … make it the same size»). 380 = AdvancedQuestionCard
+// `card.maxWidth`; the text scrolls inside, the box never grows past the card's footprint.
+const AF_HOW_MAX_W = 380;
+const AF_HOW_MAX_H = 640;
 const ABOUT_MAX_H = 700;
 
 const EAGLE = require('../../assets/images/logo-cloud-green-static.svg'); // About/Terms always show the green-lit cloud eagle (owner 2026-10-24)
@@ -142,8 +147,8 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
   // moves the card and still leaves the × under the prompt (ops_incident #670 — see centredDialogBox).
   const dialogBox = centredDialogBox(height, 16, insets, promptInsets, 48);
   const availH = dialogBox.availHeight;
-  const maxH = Math.min(availH, about ? ABOUT_MAX_H : 720);
-  const maxW = about ? ABOUT_MAX_W : kind === 'legal' || kind === 'afhow' ? LEGAL_MAX_W : SUPPORT_MAX_W;
+  const maxH = Math.min(availH, about ? ABOUT_MAX_H : kind === 'afhow' ? AF_HOW_MAX_H : 720);
+  const maxW = about ? ABOUT_MAX_W : kind === 'afhow' ? AF_HOW_MAX_W : kind === 'legal' ? LEGAL_MAX_W : SUPPORT_MAX_W;
 
   return (
     <View
@@ -509,7 +514,7 @@ function AboutBody({ t, reduced, gripRef, drag }: {
 
 // ————————————————————————————— «كيف يشتغل دقّق مع الذكاء الاصطناعي؟» ————————————————————————————————
 // The Advanced Filter card's note, opened from its «كيف يشتغل؟» link (owner 2026-11-01). Same reading
-// dialog as the Terms: the eagle lockup, then the owner's five sections (src/data/afHowItWorks.ts),
+// dialog as the Terms: the eagle lockup, then the owner's six sections (src/data/afHowItWorks.ts),
 // rendered with the legal reader's own styles so the two popups look like one family. No tabs, no
 // emoji, no contact address.
 function HowItWorksBody({ t }: { t: Tr }) {
@@ -519,8 +524,8 @@ function HowItWorksBody({ t }: { t: Tr }) {
     <View testID="af-how-it-works">
       <View style={s.head}>
         <View style={s.legalLockup}>
-          <XImage source={EAGLE} style={s.legalEagle} contentFit="contain" />
-          <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr]}>{t('How Refine with AI works')}</Text>
+          <XImage source={EAGLE} style={s.afHowEagle} contentFit="contain" />
+          <Text style={[s.h, s.legalTitle, s.afHowTitle, !isRTL && s.textLtr]}>{t('How Refine with AI works')}</Text>
         </View>
       </View>
       <View style={s.bodyPad}>
@@ -665,6 +670,8 @@ const s = StyleSheet.create({
   // cancelled back to 0 on this specific usage so the clearance is never reserved twice.
   legalLockup: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: CLOSE_CLEAR },
   legalEagle: { width: 44, height: 44 }, // big and sharp enough to read as our logo (owner 2026-10-25; was 20 px)
+  afHowEagle: { width: 34, height: 34 },
+  afHowTitle: { fontSize: 18, lineHeight: 26 }, // the question card's title scale, not the Terms reader's 22
   legalTitle: { paddingRight: 0, flexShrink: 1 },
 
   // ——— «تواصل مع الدعم» form (owner 2026-09-02; spacing/inputs 2026-09-03) ———

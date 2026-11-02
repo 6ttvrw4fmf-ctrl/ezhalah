@@ -1664,6 +1664,7 @@ const AR: Record<string, string> = {
   'Terms & Privacy': 'الشروط والخصوصية',
   // The Advanced Filter card's note and its reader (owner 2026-11-01). No emoji.
   "Counts come from the ads' own words": 'الأرقام من كلام الإعلانات نفسها',
+  'Skip and you get more questions and options': 'تخطى وبنسألك أسئلة وخيارات أكثر',
   'How it works?': 'كيف يشتغل؟',
   'How Refine with AI works': 'كيف يشتغل دقّق مع الذكاء الاصطناعي؟',
   'Please turn off your VPN': 'فضلاً أوقف الـ VPN',
