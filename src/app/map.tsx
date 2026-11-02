@@ -14,7 +14,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ModeSwitch from '@/components/ModeSwitch';
 import AppleMap from '@/components/AppleMap';
-import MapDealRow, { MapSearchBar, MapRouteFields } from '@/components/MapDealRow';
+import MapDealRow, { MapSearchBar, MapRouteFields, type MapDeal } from '@/components/MapDealRow';
 import HeroBackground from '@/components/HeroBackground';
 import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
 import ShareSheet from '@/components/ShareSheet';
@@ -51,6 +51,8 @@ export default function MapRoute() {
   // within his screen without leaving»): the compact box pans and zooms in place, and its ⤢ button lifts the SAME
   // map over the whole screen (no remount: the map, its zoom and any drawing stay); its X brings the page back.
   const [full, setFull] = useState(false);
+  // The transaction the pins show (owner 2026-11-02): Buy by default, as the deal button says.
+  const [deals, setDeals] = useState<MapDeal[]>(['buy']);
   // «مسار» (owner 2026-10-31): the search field becomes «من» / «إلى» until the ✕; a drawn route stays on the map.
   const [routeMode, setRouteMode] = useState(false);
   const shareScale = useRef(new RNAnimated.Value(1)).current;
@@ -124,12 +126,12 @@ export default function MapRoute() {
         <ModeSwitch active="map" onSwitch={(to) => router.replace(to === 'filter' ? '/' : '/agent')} t={t} />
       </View>
       {/* Transaction + filter row above the map (owner 2026-10-31, Zillow's «For sale ▾ | Filters», Ezhalah-themed). */}
-      <View style={s.dealWrap}>{routeMode ? <MapRouteFields onClose={() => setRouteMode(false)} onRouted={() => setFull(true)} /> : <MapSearchBar onPick={() => setFull(true)} />}<MapDealRow /></View>
+      <View style={s.dealWrap}>{routeMode ? <MapRouteFields onClose={() => setRouteMode(false)} onRouted={() => setFull(true)} /> : <MapSearchBar onPick={() => setFull(true)} />}<MapDealRow deals={deals} onDeals={setDeals} /></View>
       <View style={full ? [s.bodyFull, { paddingTop: insets.top + 8, paddingBottom: Math.max(insets.bottom, 8) }] : [s.body, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         {/* «مسار» is built but HIDDEN (2026-11-01): Apple's directions return ZERO routes anywhere in Saudi Arabia on MapKit JS
           (measured live: Jeddah→Riyadh, inside Riyadh, walking — all 0; the same call routes in the UAE, the UK, the US).
           Pass `onRoute` again once a routing provider that covers the Kingdom is chosen (ROUTE_PROVIDER_READY). */}
-      <AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} onRoute={ROUTE_PROVIDER_READY ? () => { setRouteMode(true); setFull(false); } : undefined} />
+      <AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} onRoute={ROUTE_PROVIDER_READY ? () => { setRouteMode(true); setFull(false); } : undefined} pins={{ deals }} />
       </View>
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}

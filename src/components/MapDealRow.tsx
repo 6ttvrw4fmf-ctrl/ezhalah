@@ -154,9 +154,13 @@ export function MapRouteFields({ onClose, onRouted }: { onClose: () => void; onR
   );
 }
 
-export default function MapDealRow() {
+export default function MapDealRow({ deals: dealsProp, onDeals }: { deals?: MapDeal[]; onDeals?: (d: MapDeal[]) => void } = {}) {
   const { t, isRTL } = useI18n();
-  const [deals, setDeals] = useState<MapDeal[]>(['buy']);
+  // THE DEAL BUTTON DRIVES THE PINS (owner 2026-11-02: «when the user clicks buy or rent or short stays he sees the
+  // option»): the choice lives in the map screen when it passes `deals`, so the pin layer reads the same state.
+  const [dealsLocal, setDealsLocal] = useState<MapDeal[]>(['buy']);
+  const deals = dealsProp ?? dealsLocal;
+  const setDeals = (f: (d: MapDeal[]) => MapDeal[]) => { const next = f(deals); setDealsLocal(next); onDeals?.(next); };
   const [open, setOpen] = useState(false);
   // Untick only while another stays ticked: the map always has at least one deal.
   const toggle = (id: MapDeal) => setDeals((d) => (d.includes(id) ? (d.length > 1 ? d.filter((x) => x !== id) : d) : DEALS.filter((x) => x.id === id || d.includes(x.id)).map((x) => x.id)));
