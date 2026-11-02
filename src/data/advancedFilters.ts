@@ -858,8 +858,8 @@ const LOC_PAPERS_QUESTION: AdvancedQuestion = {
 };
 const INSIDE_QUESTION: AdvancedQuestion = {
   id: 'inside',
-  titleKey: '🏬 What\'s inside: what matters to you?',
-  lineKey: 'What\'s inside',
+  titleKey: '🏬 Inside the building: what matters to you?',
+  lineKey: 'Inside the building',
   descriptionKey: 'Results update as you choose',
   selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'inside'),

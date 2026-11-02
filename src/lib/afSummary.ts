@@ -240,7 +240,7 @@ export const AF_LINE_LABEL: Record<string, string> = {
   building: 'Building',
   trucks: 'Trucks & loading',
   loc_papers: 'Location & papers',
-  inside: 'What\'s inside',
+  inside: 'Inside the building',
   investment: 'Investment',
   hotel: 'Hotel',
   station: 'On site',
