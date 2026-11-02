@@ -102,3 +102,29 @@ export function pinsFrom(result: { data: unknown; error: unknown }): PinRow[] | 
   if (result.error || !Array.isArray(result.data)) return 'unknown';
   return (result.data as PinRow[]).filter((r) => typeof r.lat === 'number' && typeof r.lng === 'number' && typeof r.n === 'number');
 }
+
+/** THE SHEET'S IDS, grouped by table in the RPC's order (newest first). A malformed entry is skipped, never thrown on. */
+export function idsByTable(row: { ids: { t: string; i: number }[] | null }): Map<string, number[]> {
+  const m = new Map<string, number[]>();
+  for (const k of row.ids ?? []) {
+    if (!k || typeof k.t !== 'string' || typeof k.i !== 'number') continue;
+    const a = m.get(k.t) ?? []; a.push(k.i); m.set(k.t, a);
+  }
+  return m;
+}
+
+/** Cards back from several tables, put back in the RPC's order; a card the RPC did not name sorts last. */
+export function orderLike<T extends { sourceTable?: string; id: number }>(row: { ids: { t: string; i: number }[] | null }, cards: T[]): T[] {
+  const rank = new Map<string, number>();
+  (row.ids ?? []).forEach((k, i) => { if (k) rank.set(`${k.t}#${k.i}`, i); });
+  return [...cards].sort((a, b) => (rank.get(`${a.sourceTable}#${a.id}`) ?? 1e9) - (rank.get(`${b.sourceTable}#${b.id}`) ?? 1e9));
+}
+
+/** A drawn overlay's points → a closed GeoJSON polygon ([lng, lat] rings), or null when too small to be an area. */
+export function polygonOf(points: { latitude: number; longitude: number }[]): PinFilter['poly'] {
+  const ring = points.filter((p) => p && Number.isFinite(p.latitude) && Number.isFinite(p.longitude)).map((p) => [p.longitude, p.latitude]);
+  if (ring.length < 3) return null;
+  const [x0, y0] = ring[0]; const [xn, yn] = ring[ring.length - 1];
+  if (x0 !== xn || y0 !== yn) ring.push([x0, y0]);
+  return { type: 'Polygon', coordinates: [ring] };
+}

@@ -14,10 +14,13 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ModeSwitch from '@/components/ModeSwitch';
 import type { MapDeal } from '@/components/MapDealRow';
+import MapPinSheet from '@/components/MapPinSheet';
+import MapFilterCard, { EMPTY_MAP_FILTER, pinFilterOf, isNarrowed, type MapFilterState } from '@/components/MapFilterCard';
 // ALWAYS FAST (owner 2026-10-27): the MapKit glue and the deal row load on the first visit to the map screen, as their own
 // chunk — they are not part of the first download the home page pays for (scripts/web-bundle-budget.mjs).
 type MapModules = {
   AppleMap: typeof import('@/components/AppleMap').default;
+  countPinsInView: typeof import('@/components/AppleMap').countPinsInView;
   MapDealRow: typeof import('@/components/MapDealRow').default;
   MapSearchBar: typeof import('@/components/MapDealRow').MapSearchBar;
   MapRouteFields: typeof import('@/components/MapDealRow').MapRouteFields;
@@ -27,12 +30,13 @@ function useMapModules(): MapModules | null {
   useEffect(() => {
     let on = true;
     Promise.all([import('@/components/AppleMap'), import('@/components/MapDealRow')]).then(([a, d]) => {
-      if (on) setMods({ AppleMap: a.default, MapDealRow: d.default, MapSearchBar: d.MapSearchBar, MapRouteFields: d.MapRouteFields });
+      if (on) setMods({ AppleMap: a.default, countPinsInView: a.countPinsInView, MapDealRow: d.default, MapSearchBar: d.MapSearchBar, MapRouteFields: d.MapRouteFields });
     });
     return () => { on = false; };
   }, []);
   return mods;
 }
+import type { PinRow } from '@/lib/mapPins';
 import HeroBackground from '@/components/HeroBackground';
 import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
 import ShareSheet from '@/components/ShareSheet';
@@ -72,6 +76,11 @@ export default function MapRoute() {
   const [full, setFull] = useState(false);
   // The transaction the pins show (owner 2026-11-02): Buy by default, as the deal button says.
   const [deals, setDeals] = useState<MapDeal[]>(['buy']);
+  // The tapped pin's row (owner 2026-11-02, Zillow-style card sheet); a deal change or a close clears it.
+  const [pinRow, setPinRow] = useState<PinRow | null>(null);
+  // The map's filter (owner 2026-11-02: the site's filter in a centered popup; pins show exactly what is kept).
+  const [mapFilter, setMapFilter] = useState<MapFilterState>(EMPTY_MAP_FILTER);
+  const [filterOpen, setFilterOpen] = useState(false);
   // «مسار» (owner 2026-10-31): the search field becomes «من» / «إلى» until the ✕; a drawn route stays on the map.
   const [routeMode, setRouteMode] = useState(false);
   const shareScale = useRef(new RNAnimated.Value(1)).current;
@@ -145,13 +154,15 @@ export default function MapRoute() {
         <ModeSwitch active="map" onSwitch={(to) => router.replace(to === 'filter' ? '/' : '/agent')} t={t} />
       </View>
       {/* Transaction + filter row above the map (owner 2026-10-31, Zillow's «For sale ▾ | Filters», Ezhalah-themed). */}
-      {M && <View style={s.dealWrap}>{routeMode ? <M.MapRouteFields onClose={() => setRouteMode(false)} onRouted={() => setFull(true)} /> : <M.MapSearchBar onPick={() => setFull(true)} />}<M.MapDealRow deals={deals} onDeals={setDeals} /></View>}
+      {M && <View style={s.dealWrap}>{routeMode ? <M.MapRouteFields onClose={() => setRouteMode(false)} onRouted={() => setFull(true)} /> : <M.MapSearchBar onPick={() => setFull(true)} />}<M.MapDealRow deals={deals} onDeals={(d) => { setDeals(d); setPinRow(null); }} onFilter={() => setFilterOpen(true)} filterOn={isNarrowed(mapFilter)} /></View>}
       <View style={full ? [s.bodyFull, { paddingTop: insets.top + 8, paddingBottom: Math.max(insets.bottom, 8) }] : [s.body, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         {/* «مسار» is built but HIDDEN (2026-11-01): Apple's directions return ZERO routes anywhere in Saudi Arabia on MapKit JS
           (measured live: Jeddah→Riyadh, inside Riyadh, walking — all 0; the same call routes in the UAE, the UK, the US).
           Pass `onRoute` again once a routing provider that covers the Kingdom is chosen (ROUTE_PROVIDER_READY). */}
-      {M && <M.AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} onRoute={ROUTE_PROVIDER_READY ? () => { setRouteMode(true); setFull(false); } : undefined} pins={{ deals }} />}
+      {M && <M.AppleMap full={full} onExpand={full ? undefined : () => setFull(true)} onClose={full ? () => setFull(false) : undefined} onRoute={ROUTE_PROVIDER_READY ? () => { setRouteMode(true); setFull(false); } : undefined} pins={{ deals, ...pinFilterOf(mapFilter) }} onPinSelect={(row) => { setPinRow(row); setFull(true); }} />}
+      {pinRow ? <MapPinSheet row={pinRow} onClose={() => setPinRow(null)} /> : null}
       </View>
+      {filterOpen && M ? <MapFilterCard value={mapFilter} onClose={() => setFilterOpen(false)} onApply={(f) => { setMapFilter(f); setFilterOpen(false); setPinRow(null); }} countPins={(f) => M.countPinsInView({ deals, ...pinFilterOf(f) })} /> : null}
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
     </View>
