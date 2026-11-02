@@ -545,6 +545,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
     if (!mk || !m || !pinFilter) return;
     const pins = pinFilter;
     let seq = 0; let timer: ReturnType<typeof setTimeout> | null = null; let mine: unknown[] = [];
+    const keyed = new Map<string, unknown>();   // the annotations on the map, by what they show — a pan keeps what stays
     const loc = localeRef.current === 'ar' ? 'ar' : 'en';
     // What a tap does: a bubble zooms into its cell, a pin hands its row up (the card sheet). Called from the element's
     // OWN pointer handlers — on a phone MapKit's `select` never fired for a touch on a custom annotation (owner
@@ -584,7 +585,7 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       });
       return el;
     };
-    const clear = () => { for (const a of mine) m.removeAnnotation(a); mine = []; };
+    const clear = () => { for (const a of mine) m.removeAnnotation(a); mine = []; keyed.clear(); };
     // EVERY SPOT, AT ANY ZOOM (owner 2026-11-02: «even when I am zoomed out they all show»): zoomed out with no
     // narrowing (deal only), the dots feed — every pinned listing's 1 km cell, downloaded once — is painted on a canvas
     // over the map: all 23k spots in a few ms, where 23k annotations would freeze a phone. The canvas is hidden while
@@ -654,11 +655,20 @@ export default function AppleMap({ full = false, onExpand, onClose, onRoute, pin
       // Smallest first, so the biggest count (or the gold shared spot) is added last and sits on top of its neighbours.
       rows.sort((a, b) => a.n - b.n);
       setPinCount(rows.reduce((a, r) => a + r.n, 0));
-      clear();
-      mine = rows.map((row) => new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, drawCell), {
-        data: { pin: row, cell: drawCell }, calloutEnabled: false, anchorOffset: drawCell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(0, -6),
-      }));
-      for (const a of mine) m.addAnnotation(a);
+      // KEEP WHAT STAYS (owner 2026-11-02: «so slow and glitchy»): a pan used to remove every pin and add them all back,
+      // a visible flicker on every move. Only the pins that left the view go and only the new ones come; a pin whose
+      // head would change (count, deal, price, cell size) is replaced.
+      const keyOf = (r: PinRow) => `${drawCell}|${r.lat}|${r.lng}|${r.n}|${r.deal}|${r.price ?? ''}`;
+      const next = new Map<string, PinRow>(); for (const row of rows) next.set(keyOf(row), row);
+      for (const [k, a] of keyed) if (!next.has(k)) { m.removeAnnotation(a); keyed.delete(k); }
+      for (const [k, row] of next) {
+        if (keyed.has(k)) continue;
+        const a = new mk.Annotation(new mk.Coordinate(row.lat, row.lng), () => element(row, drawCell), {
+          data: { pin: row, cell: drawCell }, calloutEnabled: false, anchorOffset: drawCell > 0 ? undefined : new (window as unknown as { DOMPoint: new (x: number, y: number) => unknown }).DOMPoint(0, -6),
+        });
+        keyed.set(k, a); m.addAnnotation(a);
+      }
+      mine = [...keyed.values()];
     };
     const onRegion = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { void load(); }, 220); };
     const onSelect = (e: { annotation?: { data?: { pin?: PinRow; cell?: number } } }) => {
