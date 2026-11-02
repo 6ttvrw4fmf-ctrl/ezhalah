@@ -93,7 +93,7 @@ eq("Office/Buy certifies NOTHING (certified for RentAnnual only)",
 // Residential Building/Buy gained the features + build cards (owner 2026-10-31); Duplex/Buy (bathrooms only) is now
 // the residential cohort that genuinely lists no amenities — the gate must return EMPTY there, never the base set.
 eq("Room/Buy certifies NOTHING (no Buy cohort at all; Duplex carries the villa lists since 2026-11-02)",
-  certifiedAmenityKeys(Q({ type: "Duplex", deal: "Buy", rentPeriod: undefined })), []);
+  certifiedAmenityKeys(Q({ type: "Room", deal: "Buy", rentPeriod: undefined })), []);
 check("Residential Building/Buy certifies exactly its two cards' chips (features · build), e.g. basement and electronic_deed",
   ['basement', 'electronic_deed', 'elevator'].every((t) => certifiedAmenityKeys(Q({ type: "Residential Building", deal: "Buy", rentPeriod: undefined })).includes(t))
   && !certifiedAmenityKeys(Q({ type: "Residential Building", deal: "Buy", rentPeriod: undefined })).includes('kitchen'));
