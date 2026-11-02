@@ -109,7 +109,10 @@ export function placeSubtitle(f: PlaceFacts, kind: PlaceKind, country: string): 
 /** Collapse Apple's several entries for one place: same name within ~250 m, or same name + same subtitle. */
 export function dedupePlaces<T extends { name: string; subtitle?: string; kind?: PlaceKind; locality?: string; coordinate?: { latitude: number; longitude: number } }>(rows: T[]): T[] {
   const kept: T[] = [];
-  const sameTown = (k: T, r: T) => !!k.locality && same(k.locality, r.locality) && !isAreaKind(k.kind) && !isAreaKind(r.kind) && k.kind !== 'street' && r.kind !== 'street';
+  // Same name in the same town folds a landmark's facets (a mall's hotel) — never a CHAIN's branches: a café, a
+  // restaurant or a shop (kind 'place') in another district is another branch, and the typist wants to see them
+  // (walked live 2026-11-01: fourteen Riyadh «ستاربكس» collapsed to one). Branches within ~250 m still fold.
+  const sameTown = (k: T, r: T) => !!k.locality && same(k.locality, r.locality) && !isAreaKind(k.kind) && !isAreaKind(r.kind) && k.kind !== 'street' && r.kind !== 'street' && k.kind !== 'place' && r.kind !== 'place';
   for (const r of rows) {
     const dup = kept.some((k) => (same(k.name, r.name) && (
       (k.subtitle && k.subtitle === r.subtitle) || sameTown(k, r) ||
