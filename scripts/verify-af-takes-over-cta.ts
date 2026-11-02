@@ -3,7 +3,7 @@
 // Owner 2026-08-21: "before AF is entered → show the normal CTA; user selects Advanced Filter → hide
 // those two buttons; show the AF question flow instead. Do not keep both visible at the same time."
 //
-// The two buttons are «Load more» and «🎯 دقّق مع الذكاء» (the AF launcher itself), rendered in one
+// The two buttons are «Load more» and «🎯 دقّق مع الذكاء الاصطناعي» (the AF launcher itself), rendered in one
 // row under a results turn. That row was gated ONLY on `(hasMore || canNarrowFurther)`. The AF card is
 // an ABSOLUTE overlay (StyleSheet.absoluteFill) drawn on top, so the row kept rendering — and stayed
 // reachable — underneath the flow the user had just opened. `ageFlow` is non-null for every AF phase

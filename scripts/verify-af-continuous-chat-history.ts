@@ -158,7 +158,7 @@ check('only a round that committed something leaves a receipt at all',
   /if \(carry && roundCommitted\) setAfReceipt/.test(agent),
   'agent.tsx: a skip-everything round changes nothing, so its turn must keep the buttons — a receipt there leaves the user no way back into the interview');
 check('the receipt heading is translated with the owner\'s exact wording',
-  /'Continued with 🎯 Refine with AI': 'تابع المستخدم عبر 🎯 دقّق مع الذكاء'/.test(i18n),
+  /'Continued with 🎯 Refine with AI': 'تابع المستخدم عبر 🎯 دقّق مع الذكاء الاصطناعي'/.test(i18n),
   'src/i18n.tsx: Arabic is the product language — an untranslated key renders the English source string');
 // The body is NOT translated, by design: buildAfRoundLog writes finished Arabic, exactly as
 // buildAfSummary always did. The label keys it used to sit under are retired, and a retired key left

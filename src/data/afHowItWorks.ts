@@ -1,4 +1,4 @@
-// «كيف يشتغل دقّق مع الذكاء؟» — the owner's text (2026-11-01), typed and approved line by line in chat.
+// «كيف يشتغل دقّق مع الذكاء الاصطناعي؟» — the owner's text (2026-11-01), typed and approved line by line in chat.
 // Opened from the short note on every Advanced Filter question card («الأرقام من كلام الإعلانات نفسها ·
 // كيف يشتغل؟») in the same popup host as the Terms & Privacy reader: white card, Ezhalah eagle, ✕ pinned
 // top-right in both languages, NO emoji anywhere in this text (owner: «no emojis or anything»).
