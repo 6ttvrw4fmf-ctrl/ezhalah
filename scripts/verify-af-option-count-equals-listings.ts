@@ -26,6 +26,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './lib/stripComments.ts';
 import { loadLifted, buildMatrix, recorder } from './lib/afMatrix.ts';
+import { CARD_IDS } from '../src/lib/afCohorts.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -72,8 +73,12 @@ const remote = stripComments(read('src/data/remote.ts'));
 // This is the assertion that stops the sweep from becoming a vacuous pass. A new chip added to the
 // AF with no row in the sweep's option table is a chip nothing proves.
 {
+  // 20261101100930 built its sweep rows PROGRAMMATICALLY from its `_apt_tokens` table (string_agg over the table, then
+  // a replace into the sweep body) — production carries them (61 rows measured 2026-11-02, roof/yard included) but a
+  // literal scan of the SQL text does not see them. Read that table's token column the same way production did.
+  const programmatic = [...sweep.matchAll(/\(\d+,'([a-z_0-9]+)','(?:bool|derived)'/g)].map((m) => m[1]);
   const sweptTokens = new Set(
-    [...sweep.matchAll(/p_amenities:=array\[''([a-z_]+)''\]/g)].map((m) => m[1]),
+    [...sweep.matchAll(/p_amenities:=array\[''([a-z_]+)''\]/g)].map((m) => m[1]).concat(programmatic),
   );
   check(sweptTokens.size >= 10, `the sweep applies a plausible number of amenity tokens (${sweptTokens.size})`);
 
@@ -84,19 +89,25 @@ const remote = stripComments(read('src/data/remote.ts'));
   const L = await loadLifted(root);
   const rec = recorder();
   const cells = await buildMatrix(L, { guided: rec.row, age: rec.row });
+  // Since the themed cards (comfort, space, …, afCohorts.ts CARD_IDS) replaced the generic card on every scope that
+  // has lists — Apartments & Co-living 2026-11-01, Villas & Houses 2026-11-02 — the residential chips are offered
+  // THROUGH those cards; the generic card survives only on list-less cohorts (commercial, rest house). Both kinds
+  // are amenity chips reading cnt_<token>, so both are held to the sweep's column.
+  const isChipCard = (id: string) => id === 'amenities' || (CARD_IDS as readonly string[]).includes(id);
   const chipKeys = [...new Set(cells.flatMap((c) =>
-    c.fields.filter((f) => f.question.id === 'amenities').flatMap((f) => f.options.map((o) => o.key))))].sort();
+    c.fields.filter((f) => isChipCard(f.question.id)).flatMap((f) => f.options.map((o) => o.key))))].sort();
   // …and the COLUMN each chip reads (recorded by executing the card on a recorder row) must be the
   // column the sweep compares for that token — a chip reading cnt_pool under key gym would pass the
   // key check and prove the wrong number. Pairs come from the sweep's own option rows.
   const sweptCol = new Map([...sweep.matchAll(/\('amenity:([a-z_]+)','(cnt_[a-z_0-9]+)'/g)].map((m) => [m[1], m[2]]));
   const chipCol = new Map(cells.flatMap((c) =>
-    c.fields.filter((f) => f.question.id === 'amenities').flatMap((f) => f.options.map((o) => [o.key, String(o.count)] as const))));
+    c.fields.filter((f) => isChipCard(f.question.id)).flatMap((f) => f.options.map((o) => [o.key, String(o.count)] as const))));
+  for (const t of programmatic) if (!sweptCol.has(t)) sweptCol.set(t, `cnt_${t}`);
   for (const [k, col] of chipCol) {
     if (k === 'furnished') continue;
     check(sweptCol.get(k) === col, `AF chip "${k}" reads ${col}, and the sweep proves that same column (${sweptCol.get(k) ?? 'no row'})`);
   }
-  check(chipKeys.length >= 12, `found the AF amenity chip keys by executing the card over every cohort (${chipKeys.length})`, chipKeys.join(','));
+  check(chipKeys.length >= 12, `found the AF amenity chip keys by executing the cards over every cohort (${chipKeys.length})`, chipKeys.join(','));
 
   for (const k of chipKeys) {
     if (k === 'furnished') {
@@ -113,7 +124,7 @@ const remote = stripComments(read('src/data/remote.ts'));
   // proving something about a filter that matches nothing.
   const vocab = clause.match(/where tok not in \(([^)]*)\)/);
   check(!!vocab, 'the clause mirror still carries the amenity vocabulary guard');
-  const clauseTokens = new Set(vocab ? [...vocab[1].matchAll(/''([a-z_]+)''/g)].map((m) => m[1]) : []);
+  const clauseTokens = new Set(vocab ? [...vocab[1].matchAll(/''([a-z_0-9]+)''/g)].map((m) => m[1]) : []);
   for (const t of sweptTokens) {
     check(clauseTokens.has(t), `swept token "${t}" exists in the deployed clause vocabulary`);
   }

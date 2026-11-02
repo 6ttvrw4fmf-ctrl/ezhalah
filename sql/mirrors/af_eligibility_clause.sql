@@ -1,4 +1,7 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-11-02 (migration 20261102055240, the Villas & Houses group — owner lists 2026-11-01, approved 2026-11-02):
+--   CHANGED — the amenity whitelist gains the 12 villa tokens between ''has_shops'' and ''furnished'' (7 boolean text
+--   facts + 5 merged EITHER predicates) and one arm each; everything else byte-identical.
 -- Re-verified 2026-11-01 (migration 20261101100930, the Apartments & Co-living group — owner handoff 2026-10-31):
 --   CHANGED — the amenity whitelist gains the 45 group tokens between ''majlis'' and ''furnished'' (39 boolean
 --   text-fact columns roof … families + 6 derived: separate_meters = (separate_electricity_meter or
@@ -7,7 +10,7 @@
 --   migration's format('           and (not (%L = any(p_amenities)) or %s)', token, pred) wrote it. Rebuilt by
 --   rebuild_af_filter_rpcs(); top_cities_by_deal_ar carries the byte-identical copy. Body below = the previous body
 --   plus exactly those edits, applied to this file with the same replace the migration ran on production:
---   Recorded md5 of pg_get_functiondef: 126242b981111b6879a3f27c162478b7
+--   Recorded md5 of pg_get_functiondef: a0a75c9727a6131321840156e5cbf276   (2026-11-02, migration 20261102055240; before it: 126242b981111b6879a3f27c162478b7)
 --   (length 15,487; the previous text hashed 62539dd9f79949bfbb7842182e72e4f7, 11,546.) NOT YET registered in ops_sql_mirror_expected —
 --   af_eligibility_clause.sql sits in verify-mirror-md5-is-registered.ts UNREGISTERED_MIRROR_BASELINE.
 -- Re-verified 2026-10-26 (migration 20261026011638_majlis_advanced_filter_amenity):
@@ -337,7 +340,7 @@ AS $function$ select E'
       and (p_has_license is null or (p_has_license and s.license_number is not null))
       and (p_amenities is null or (
                not exists (select 1 from unnest(p_amenities) tok
-                           where tok not in (''elevator'',''parking'',''kitchen'',''ac'',''maid_room'',''driver_room'',''private_entrance'',''car_entrance'',''sanitation'',''electricity'',''water_supply'',''gym'',''pool'',''garden'',''balcony'',''laundry_room'',''optical_fibers'',''separate_electricity_meter'',''separate_water_meter'',''majlis'',''roof'',''two_entrances'',''annex'',''yard'',''garage'',''grill'',''storage'',''water_tank'',''warranty'',''electronic_deed'',''basement'',''self_checkin'',''wifi'',''bills_included'',''jacuzzi'',''smart_tv'',''billiards'',''cleaning_service'',''soundproof'',''cameras'',''guard'',''smart_entry'',''smart_home'',''central_gas'',''sauna'',''kids_play_area'',''nursery'',''free_maintenance'',''intercom'',''fire_system'',''ev_charger'',''central_vacuum'',''insulation'',''dining_majlis'',''own_bathroom'',''fridge'',''whole_floor'',''singles'',''families'',''separate_meters'',''apts4'',''apts8'',''apts12'',''apts20'',''has_shops'',''furnished'',''rnpl'',''rent_now_pay_later''))
+                           where tok not in (''elevator'',''parking'',''kitchen'',''ac'',''maid_room'',''driver_room'',''private_entrance'',''car_entrance'',''sanitation'',''electricity'',''water_supply'',''gym'',''pool'',''garden'',''balcony'',''laundry_room'',''optical_fibers'',''separate_electricity_meter'',''separate_water_meter'',''majlis'',''roof'',''two_entrances'',''annex'',''yard'',''garage'',''grill'',''storage'',''water_tank'',''warranty'',''electronic_deed'',''basement'',''self_checkin'',''wifi'',''bills_included'',''jacuzzi'',''smart_tv'',''billiards'',''cleaning_service'',''soundproof'',''cameras'',''guard'',''smart_entry'',''smart_home'',''central_gas'',''sauna'',''kids_play_area'',''nursery'',''free_maintenance'',''intercom'',''fire_system'',''ev_charger'',''central_vacuum'',''insulation'',''dining_majlis'',''own_bathroom'',''fridge'',''whole_floor'',''singles'',''families'',''separate_meters'',''apts4'',''apts8'',''apts12'',''apts20'',''has_shops'',''women_majlis'',''outdoor_kitchen'',''outdoor_diwaniya'',''waterfall'',''well'',''irrigation'',''sports_court'',''garden_yard'',''jacuzzi_sauna'',''cameras_smart_home'',''water_tank_well'',''smart_home_entry'',''furnished'',''rnpl'',''rent_now_pay_later''))
            and (not (''elevator''         = any(p_amenities)) or s.elevator)
            and (not (''parking''          = any(p_amenities)) or s.parking)
            and (not (''kitchen''          = any(p_amenities)) or s.kitchen)
@@ -403,6 +406,18 @@ AS $function$ select E'
            and (not (''apts12'' = any(p_amenities)) or s.apartments_count >= 12)
            and (not (''apts20'' = any(p_amenities)) or s.apartments_count >= 20)
            and (not (''has_shops'' = any(p_amenities)) or s.shops_count >= 1)
+           and (not (''women_majlis'' = any(p_amenities)) or s.women_majlis)
+           and (not (''outdoor_kitchen'' = any(p_amenities)) or s.outdoor_kitchen)
+           and (not (''outdoor_diwaniya'' = any(p_amenities)) or s.outdoor_diwaniya)
+           and (not (''waterfall'' = any(p_amenities)) or s.waterfall)
+           and (not (''well'' = any(p_amenities)) or s.well)
+           and (not (''irrigation'' = any(p_amenities)) or s.irrigation)
+           and (not (''sports_court'' = any(p_amenities)) or s.sports_court)
+           and (not (''garden_yard'' = any(p_amenities)) or (s.garden or s.yard))
+           and (not (''jacuzzi_sauna'' = any(p_amenities)) or (s.jacuzzi or s.sauna))
+           and (not (''cameras_smart_home'' = any(p_amenities)) or (s.cameras or s.smart_home))
+           and (not (''water_tank_well'' = any(p_amenities)) or (s.water_tank or s.well))
+           and (not (''smart_home_entry'' = any(p_amenities)) or (s.smart_home or s.smart_entry))
            and (not (''furnished''        = any(p_amenities)) or s.furnished)
            and (not (''rnpl''             = any(p_amenities) or ''rent_now_pay_later'' = any(p_amenities)) or s.rent_now_pay_later)))
       and ((p_street_width_min is null and p_street_width_max is null)

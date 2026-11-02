@@ -34,4 +34,12 @@ export const CHIP_DEFS: Record<string, { labelKey: string; emoji: string }> = {
   fridge: { labelKey: 'Fridge', emoji: '🧊' }, whole_floor: { labelKey: 'Whole floor', emoji: '🏢' },
   singles: { labelKey: 'Singles', emoji: '👤' }, families: { labelKey: 'Families', emoji: '👨‍👩‍👧' },
   separate_meters: { labelKey: 'Separate meters', emoji: '⚡' },
+  // Villas & Houses (owner lists 2026-11-01): seven new text facts and five merged chips (EITHER fact is true).
+  women_majlis: { labelKey: "Women's majlis", emoji: '👩' }, outdoor_kitchen: { labelKey: 'Outdoor kitchen', emoji: '🍳' },
+  outdoor_diwaniya: { labelKey: 'Outdoor diwaniya', emoji: '🏕️' }, waterfall: { labelKey: 'Waterfall', emoji: '💦' },
+  well: { labelKey: 'Well', emoji: '🪣' }, irrigation: { labelKey: 'Garden irrigation', emoji: '💧' },
+  sports_court: { labelKey: 'Sports court', emoji: '🎾' },
+  garden_yard: { labelKey: 'Garden & yard', emoji: '🌳' }, jacuzzi_sauna: { labelKey: 'Jacuzzi & sauna', emoji: '🛁' },
+  cameras_smart_home: { labelKey: 'Cameras & smart home', emoji: '📹' }, water_tank_well: { labelKey: 'Water tank & well', emoji: '💧' },
+  smart_home_entry: { labelKey: 'Smart home & entry', emoji: '🏠' },
 };

@@ -75,7 +75,7 @@ const BAG_PROBE: Record<string, string> = { apartments: 'apts8', shops: 'has_sho
 const lifted = await liftSymbols(
   join(ROOT, 'src/data/advancedFilters.ts'),
   [
-    { header: 'function addAmenities' },
+    { header: 'function addAmenities' }, { header: 'export function bathroomLadder' },
     { header: 'const AGE_LADDER', endsWith: /^\];$/ },
     { header: 'const DIRECTION_DEFS', endsWith: /^\];$/ },
     ...QUESTION_HELPER_SYMBOLS,
@@ -170,6 +170,9 @@ const HAND: Record<string, { row: AfCanon; text: string; not: AfCanon }> = {
   'bathrooms:2': { row: { bathrooms: 3 }, text: '3 حمامات', not: { bathrooms: 1 } },
   'bathrooms:3': { row: { bathrooms: 4 }, text: '4 حمامات', not: { bathrooms: 2 } },
   'bathrooms:4': { row: { bathrooms: 5 }, text: '5 حمامات', not: { bathrooms: 3 } },
+  // the villa ladders (owner 2026-11-01): 5+ and 6+ exist since migration 20261102055240
+  'bathrooms:5': { row: { bathrooms: 6 }, text: '6 حمامات', not: { bathrooms: 4 } },
+  'bathrooms:6': { row: { bathrooms: 7 }, text: '7 حمامات', not: { bathrooms: 5 } },
   'street_width:15': { row: { street_width_m: 18 }, text: 'عرض الشارع 18 م', not: { street_width_m: 12 } },
   'street_width:20': { row: { street_width_m: 25 }, text: 'عرض الشارع 25 م', not: { street_width_m: 15 } },
   'street_width:25': { row: { street_width_m: 25 }, text: 'عرض الشارع 25 م', not: { street_width_m: 20 } },
@@ -205,7 +208,7 @@ function expected(id: string, opt: Opt): { row: AfCanon; text: string; not: AfCa
     // a bag question's chip: a column token as above, a derived token on the columns its predicate reads;
     // the evidence speaks with the amenities def's label (AMENITY_LABEL), the chip's own voice or the Floor voice
     case 'comfort': case 'space': case 'safety': case 'perks': case 'build': case 'extras': case 'who':
-    case 'features': case 'services': case 'fun': case 'apartments': case 'shops': {
+    case 'features': case 'services': case 'fun': case 'outdoors': case 'smart': case 'papers': case 'apartments': case 'shops': {
       const text = t(AMENITY_LABEL[opt.key] ?? '');
       const col = AMENITY_COL[opt.key];
       if (col) return { row: { [col]: true }, text, not: { [col]: false } };
@@ -213,6 +216,10 @@ function expected(id: string, opt: Opt): { row: AfCanon; text: string; not: AfCa
         case 'separate_meters': return { row: { separate_electricity_meter: true, separate_water_meter: false }, text, not: { separate_electricity_meter: false, separate_water_meter: false } };
         case 'has_shops': return { row: { shops_count: 1 }, text, not: { shops_count: 0 } };
         default: {
+          // the villa merged chips (owner 2026-11-01): EITHER fact true ⇒ chip; both known-false ⇒ not
+          const either = DERIVED_TOKEN[opt.key];
+          if (either && either.reads.length === 2 && !/^apts/.test(opt.key))
+            return { row: { [either.reads[0]]: true, [either.reads[1]]: false }, text, not: { [either.reads[0]]: false, [either.reads[1]]: false } };
           const n = /^apts(\d+)$/.exec(opt.key);
           return n ? { row: { apartments_count: Number(n[1]) }, text, not: { apartments_count: Number(n[1]) - 1 } } : null;
         }
@@ -524,7 +531,7 @@ console.log('\n── T4. injection: one carrier, one prop, comparator, strip on
   const mirror = readFileSync(join(ROOT, 'sql/mirrors/af_canon_select.sql'), 'utf8');
   const packed = new Set([...mirror.matchAll(/'([a-z_]+)',\s*s\.[a-z_]+/g)].map((m) => m[1]));
   // 29 (+majlis 2026-10-26) + 41 (the 39 apartment-chip booleans + apartments_count + shops_count, migration 20261101100930)
-  assert(packed.size === 70, `the mirror packs 70 canonical columns (found ${packed.size})`);
+  assert(packed.size === 77, `the mirror packs 77 canonical columns (found ${packed.size})`);
 
   // (a) every column any def declares it reads must be packed
   const q = emptyQuery() as any;

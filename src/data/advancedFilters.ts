@@ -159,7 +159,7 @@ const AGE_QUESTION: AdvancedQuestion = {
 // multi-type intersection mutation-provable. The cohort DATA moved with it, unchanged. Buy+Rent
 // combined gating (q.dealCombined — owner feature 2026-08-20) lives there too, intersecting with
 // the multi-type/multi-period dimensions rather than being bolted on separately — see afCohorts.ts.
-import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope, shortStaysAskTier, cardKeys, groupAskTierFor, hasCards } from '@/lib/afCohorts';
+import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, scopeDeals, intersectChips, isShortStaysScope, shortStaysAskTier, cardKeys, groupAskTierFor, hasCards } from '@/lib/afCohorts';
 // Merge picked strict amenity tokens (kitchen/parking/elevator/furnished/rnpl) into q.amenities.
 function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
   return keys.length ? { ...q, amenities: [...new Set([...(q.amenities ?? []), ...keys])] } : q;
@@ -318,6 +318,16 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
   apply: addAmenities,
 };
 
+/** [lowest rung, highest rung] of the bathrooms ladder for this scope — villas start higher (owner 2026-11-01). */
+export function bathroomLadder(q: SearchQuery): [number, number] {
+  const types = scopeCleanTypes(q);
+  const villas = types.length > 0 && types.every((ty) => ty === 'Villa' || ty === 'Duplex') && !isShortStaysScope(q);
+  if (!villas) return [1, 4];
+  const deals = scopeDeals(q);
+  if (deals.length === 1 && deals[0] === 'Buy') return [3, 6];
+  if (deals.length === 1) return [2, 5];
+  return [3, 5];
+}
 // Minimum bathrooms — single ladder; STRICT (>= N, unknown-bathroom listings excluded). Skip = "Any".
 const BATHROOMS_QUESTION: AdvancedQuestion = {
   id: 'bathrooms',
@@ -332,12 +342,19 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
     // and (pre-fix) deliver 2,984 — see the apply() note below. Dropping them leaves only the rungs
     // that mean something; when none do, `minOptionsFor('single')` retires the question entirely.
     const floor = q.bathMin ?? 0;
-    const rungs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
+    // THE LADDER IS PER SCOPE (owner's villa lists 2026-11-01): a villa / duplex scope offers 3+ · 4+ · 5+ · 6+ on Buy and
+    // 2+ · 3+ · 4+ · 5+ on rent (mixed deals: 3+ · 4+ · 5+); every other scope keeps 1+ … 4+. cnt_bath5/6 exist since
+    // migration 20261102055240; a rung with no ads hides itself like any option.
+    const [lo, hi] = bathroomLadder(q);
+    const ALL_RUNGS: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }> = [
       { key: '1', labelKey: '1+', count: (c) => c.cnt_bath1 },
       { key: '2', labelKey: '2+', count: (c) => c.cnt_bath2 },
       { key: '3', labelKey: '3+', count: (c) => c.cnt_bath3 },
       { key: '4', labelKey: '4+', count: (c) => c.cnt_bath4 },
+      { key: '5', labelKey: '5+', count: (c) => c.cnt_bath5 },
+      { key: '6', labelKey: '6+', count: (c) => c.cnt_bath6 },
     ];
+    const rungs = ALL_RUNGS.filter((d) => { const n = parseInt(d.key, 10); return n >= lo && n <= hi; });
     return guidedOptions(await fetchApartmentGuidedCounts(q), rungs.filter((d) => parseInt(d.key, 10) > floor), (c) => c.cnt_bath_unknown);
   },
   // INTERSECT, never replace (bug fix 2026-08-04). Every option's `count` is defined by the contract as
@@ -592,6 +609,34 @@ const EXTRAS_QUESTION: AdvancedQuestion = {
   async resolveOptions(q) { return cardOptions(q, 'extras'); },
   apply: addAmenities,
 };
+// The Villas & Houses cards (owner 2026-11-01/02): 🌳 outdoors & fun, ✨ extras & smart, 🧱 build, safety & papers.
+const OUTDOORS_QUESTION: AdvancedQuestion = {
+  id: 'outdoors',
+  titleKey: '🌳 Outdoors & fun: what matters to you?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'outdoors'),
+  async resolveOptions(q) { return cardOptions(q, 'outdoors'); },
+  apply: addAmenities,
+};
+const SMART_QUESTION: AdvancedQuestion = {
+  id: 'smart',
+  titleKey: '✨ Extras & smart: what matters to you?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'smart'),
+  async resolveOptions(q) { return cardOptions(q, 'smart'); },
+  apply: addAmenities,
+};
+const PAPERS_QUESTION: AdvancedQuestion = {
+  id: 'papers',
+  titleKey: '🧱 Build, safety & papers: what matters to you?',
+  descriptionKey: 'Results update as you choose',
+  selection: 'multi',
+  eligibility: (q) => cohortAllows(q, 'papers'),
+  async resolveOptions(q) { return cardOptions(q, 'papers'); },
+  apply: addAmenities,
+};
 const WHO_QUESTION: AdvancedQuestion = {
   id: 'who',
   titleKey: '👤 Who is it for?',
@@ -667,7 +712,7 @@ export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
   STREET_WIDTH_QUESTION, DIRECTION_QUESTION, RATING_QUESTION, UNIT_SUBTYPE_QUESTION,
   APARTMENTS_QUESTION, SHOPS_QUESTION,
   COMFORT_QUESTION, SPACE_QUESTION, SPACE_YEARLY_QUESTION, SAFETY_QUESTION, PERKS_QUESTION, BUILD_QUESTION,
-  EXTRAS_QUESTION, WHO_QUESTION, FEATURES_QUESTION, SERVICES_QUESTION, FUN_QUESTION,
+  EXTRAS_QUESTION, WHO_QUESTION, FEATURES_QUESTION, OUTDOORS_QUESTION, SMART_QUESTION, PAPERS_QUESTION, SERVICES_QUESTION, FUN_QUESTION,
 ];
 
 // ── THE SCOPE PREFIX: CATEGORY → GROUP → TYPE → the pool above (owner 2026-08-23) ────────────────

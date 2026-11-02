@@ -860,6 +860,7 @@ export type GuidedCounts = {
   cnt_bath2: number;
   cnt_bath3: number;
   cnt_bath4: number;
+  cnt_bath5: number; cnt_bath6: number; // villa ladders (owner 2026-11-01: Buy 3+…6+, Rent 2+…5+)
   // Cohort expansion 2026-08-15: direction + street-width counts (ResBldg/Apartment-Buy questions).
   cnt_dir_n: number; cnt_dir_s: number; cnt_dir_e: number; cnt_dir_w: number;
   cnt_dir_ne: number; cnt_dir_nw: number; cnt_dir_se: number; cnt_dir_sw: number;
@@ -894,6 +895,10 @@ export type GuidedCounts = {
   cnt_kids_play_area: number; cnt_nursery: number; cnt_free_maintenance: number; cnt_intercom: number; cnt_fire_system: number;
   cnt_ev_charger: number; cnt_central_vacuum: number; cnt_insulation: number; cnt_dining_majlis: number; cnt_own_bathroom: number;
   cnt_fridge: number; cnt_whole_floor: number; cnt_singles: number; cnt_families: number;
+  // Villas & Houses (owner lists 2026-11-01): seven text facts + five merged chips
+  cnt_women_majlis: number; cnt_outdoor_kitchen: number; cnt_outdoor_diwaniya: number; cnt_waterfall: number;
+  cnt_well: number; cnt_irrigation: number; cnt_sports_court: number;
+  cnt_garden_yard: number; cnt_jacuzzi_sauna: number; cnt_cameras_smart_home: number; cnt_water_tank_well: number; cnt_smart_home_entry: number;
   cnt_separate_meters: number; cnt_apts4: number; cnt_apts8: number; cnt_apts12: number; cnt_apts20: number; cnt_has_shops: number;
   cnt_apts_unknown: number; cnt_shops_unknown: number;
 };

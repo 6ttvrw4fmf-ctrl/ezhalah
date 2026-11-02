@@ -109,6 +109,10 @@ export const AF_QUESTION_FIELDS: Record<string, string[]> = {
   features: [],
   services: [],
   fun: [],
+  // the Villas & Houses cards (owner lists 2026-11-01, built 2026-11-02) — chip keys, judged by name like the others
+  outdoors: [],
+  smart: [],
+  papers: [],
   apartments: [],
   shops: [],
   street_width: ['street_width_m'],

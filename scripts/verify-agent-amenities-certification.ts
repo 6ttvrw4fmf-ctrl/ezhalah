@@ -34,7 +34,10 @@ check("villa-only tokens are NOT certified for Apartment",
   !aptAnnual.includes("car_entrance") && !aptAnnual.includes("sanitation"),
   `got ${JSON.stringify(aptAnnual)}`);
 const villa = certifiedAmenityKeys(Q({ type: "Villa" }));
-check("Villa certifies its own car_entrance/sanitation", villa.includes("car_entrance") && villa.includes("sanitation"));
+// 2026-11-02: Villa certifies EXACTLY its cards' chips (owner lists 2026-11-01) — car entrance and sewage sit on the
+// Buy «build, safety & papers» card; the rent comfort card carries car_entrance too.
+const villaBuy = certifiedAmenityKeys(Q({ type: "Villa", deal: "Buy", rentPeriod: undefined }));
+check("Villa/Buy certifies its own car_entrance/sanitation", villaBuy.includes("car_entrance") && villaBuy.includes("sanitation"));
 // Office certifies amenities for RentAnnual but NOT for Buy — verified by executing the real gate,
 // not assumed. The commercial side renders EXACTLY its COHORT_CHIPS utilities and no residential token.
 const office = certifiedAmenityKeys(Q({ type: "Office", category: "Commercial", deal: "Rent", rentPeriod: "annual" }));
@@ -57,8 +60,17 @@ const RICH_TOKENS = [
 // 2026-10-31: Apartment/RentAnnual certifies EXACTLY the chips of the owner's cards (cardPlan — pinned by
 // verify-af-apartments-group-cards.ts), so the rich-set sweep is held on Villa/RentAnnual, the residential base
 // cohort that still carries all eight (separate_*_meter ride the Apartment cards as the derived «separate_meters»).
+// 2026-11-02: Villa carries cards too (owner lists 2026-11-01), so no residential cohort returns the generic base any
+// more. Each rich token must still be certified on SOME residential card cohort — the two meters ride every card as the
+// derived «separate_meters» (EITHER meter), garden on the villa cards as «garden_yard» (EITHER) and on Apartment as itself.
+const residentialCards = [
+  certifiedAmenityKeys(Q({ type: "Apartment" })), villa, certifiedAmenityKeys(Q({ type: "Floor" })),
+  certifiedAmenityKeys(Q({ type: "Apartment", deal: "Buy", rentPeriod: undefined })), villaBuy,
+];
+const RIDES_AS: Record<string, string> = { separate_electricity_meter: "separate_meters", separate_water_meter: "separate_meters" };
 for (const tok of RICH_TOKENS) {
-  check(`Villa/RentAnnual (the residential base) certifies "${tok}"`, villa.includes(tok), `got ${JSON.stringify(villa)}`);
+  check(`some residential card cohort certifies "${tok}" (or its derived carrier)`,
+    residentialCards.some((keys) => keys.includes(tok) || keys.includes(RIDES_AS[tok] ?? "")), `got villa=${JSON.stringify(villa)}`);
   check(`"${tok}" is NOT certified for Office (residential-only token)`, !office.includes(tok));
 }
 check('Apartment/RentAnnual certifies the gym-bug tokens its cards carry (gym, pool, garden, balcony, optical_fibers) and the derived separate_meters',
@@ -80,8 +92,8 @@ eq("Office/Buy certifies NOTHING (certified for RentAnnual only)",
   certifiedAmenityKeys(Q({ type: "Office", category: "Commercial", deal: "Buy", rentPeriod: undefined })), []);
 // Residential Building/Buy gained the features + build cards (owner 2026-10-31); Duplex/Buy (bathrooms only) is now
 // the residential cohort that genuinely lists no amenities — the gate must return EMPTY there, never the base set.
-eq("Duplex/Buy certifies NOTHING (bathrooms is its only certified question)",
-  certifiedAmenityKeys(Q({ type: "Duplex", deal: "Buy", rentPeriod: undefined })), []);
+eq("Room/Buy certifies NOTHING (no Buy cohort at all; Duplex carries the villa lists since 2026-11-02)",
+  certifiedAmenityKeys(Q({ type: "Room", deal: "Buy", rentPeriod: undefined })), []);
 check("Residential Building/Buy certifies exactly its two cards' chips (features · build), e.g. basement and electronic_deed",
   ['basement', 'electronic_deed', 'elevator'].every((t) => certifiedAmenityKeys(Q({ type: "Residential Building", deal: "Buy", rentPeriod: undefined })).includes(t))
   && !certifiedAmenityKeys(Q({ type: "Residential Building", deal: "Buy", rentPeriod: undefined })).includes('kitchen'));
@@ -101,7 +113,7 @@ eq("...and surfaced for the clarification path, not swallowed", p2.rejected, ["c
 const p3 = partitionRequestedAmenities(Q({ type: "Apartment" }), ["elevatorr", "ELEVATOR", "  parking  "]);
 eq("a near-miss is NEVER fuzzy-matched into a real token", p3.rejected, ["elevatorr"]);
 eq("case and whitespace normalise (that is not fuzzy matching)", p3.certified, ["elevator", "parking"]);
-const p4 = partitionRequestedAmenities(Q({ type: "Duplex", deal: "Buy", rentPeriod: undefined }), ["elevator"]);
+const p4 = partitionRequestedAmenities(Q({ type: "Chalet", deal: "Buy", rentPeriod: undefined }), ["elevator"]); // Chalet: no cohort at all (Duplex got the villa lists on 2026-11-02)
 eq("an uncertified COHORT rejects even a real token", p4.certified, []);
 eq("...and routes it to clarification", p4.rejected, ["elevator"]);
 eq("empty request stays empty", partitionRequestedAmenities(Q({ type: "Apartment" }), []).certified, []);

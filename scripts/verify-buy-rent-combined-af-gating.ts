@@ -127,10 +127,12 @@ check('EXECUTED — Floor (a group type, no short-stay leg) with Rent + Buy asks
   cohortAllows(Q({ dealCombined: true, types: ['Floor'] }), 'bathrooms') === true
   && cohortAllows(Q({ dealCombined: true, types: ['Floor'] }), 'property_age') === true
   && cohortAllows(Q({ dealCombined: true, types: ['Floor'] }), 'rnpl') === false);
-// A NON-group type keeps the strict rule: Duplex is certified for Buy only, so combined mode offers it nothing.
-check('EXECUTED — combined mode on Duplex (Buy-only, not a group type) offers nothing, even for a question in its Buy list',
-  COHORT_QUESTIONS.Duplex?.Buy?.includes('bathrooms') === true
-  && cohortAllows(Q({ dealCombined: true, types: ['Duplex'] }), 'bathrooms') === false);
+// Duplex shares the villa lists since 2026-11-02 (owner), so combined mode offers exactly Buy ∩ RentAnnual:
+// bathrooms (both lists) yes, direction (Buy only) no.
+check('EXECUTED — combined mode on Duplex offers only what its Buy AND Rent lists share',
+  COHORT_QUESTIONS.Duplex?.Buy?.includes('direction') === true
+  && cohortAllows(Q({ dealCombined: true, types: ['Duplex'] }), 'bathrooms') === true
+  && cohortAllows(Q({ dealCombined: true, types: ['Duplex'] }), 'direction') === false);
 
 // ── property_age (AGE_QUESTION) UNIFIED 2026-09-01: it used to bypass cohortAllows entirely via its
 // own gate (src/lib/ageFilterTypes.ts, deleted). Now AGE_QUESTION's eligibility IS

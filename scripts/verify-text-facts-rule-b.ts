@@ -58,6 +58,15 @@ const latestFile = (needle: string): string => {
 const COLS_SRC = latestFile('function public.text_facts_af_columns()') || STORE;
 const VIEW_SRC = latestFile('create or replace view public.listing_text_facts_af as') || STORE;
 const SLICE_SRC = latestFile('function public.text_facts_apply_slice(') || MERGE;
+// Migrations AFTER the applier's last full definition may extend it by REPLACE from a token table (20261102055240
+// builds `public.af_rule_b(r.%1$I, tf.%1$I) as %1$I` per bool token and verifies the rebuilt body merges the last one).
+// Their token rows are part of what production's applier merges, so they are read here too.
+const sliceDefFile = readdirSync(MIG).filter((f) => f.endsWith('.sql')).sort()
+  .filter((f) => readFileSync(join(MIG, f), 'utf8').includes('function public.text_facts_apply_slice(')).pop() ?? '';
+const SLICE_PATCHES = readdirSync(MIG).filter((f) => f.endsWith('.sql') && f > sliceDefFile).sort()
+  .map((f) => readFileSync(join(MIG, f), 'utf8'))
+  .filter((t) => t.includes('text_facts_apply_slice') && /af_rule_b\(r\.%1\$I, tf\.%1\$I\) as %1\$I/.test(t))
+  .flatMap((t) => [...t.matchAll(/\(\d+,'([a-z_]+)','bool'/g)].map((m) => m[1]));
 const SQL_COLS = sqlAfColumns(COLS_SRC);
 const PY_COLS = pyAfColumns(WORDS);
 
@@ -106,7 +115,7 @@ check('sync_search_listings_ar COMPARES af_rule_b for the same 8 (no hourly flip
   GROUP1.every((c) => compared.has(c)), GROUP1.filter((c) => !compared.has(c)).join(','));
 check('sync_listing_rich_attrs merges every text_facts_af_columns() column it has, in the diff and the write',
   /a\.attname = any \(public\.text_facts_af_columns\(\)\)/.test(MERGE) && /\$f\$, merged_list, p_source_table, diff_list\);/.test(MERGE));
-const slice = sliceMerged(SLICE_SRC);
+const slice = new Set([...sliceMerged(SLICE_SRC), ...SLICE_PATCHES]);
 check('the batched switch flip (text_facts_apply_slice) merges every boolean column', SQL_COLS.every((c) => slice.has(c)),
   SQL_COLS.filter((c) => !slice.has(c)).join(','));
 check('both live bodies are md5-guarded in the same step as the edit', (MERGE.match(/moved since this migration was written/g) ?? []).length === 2);

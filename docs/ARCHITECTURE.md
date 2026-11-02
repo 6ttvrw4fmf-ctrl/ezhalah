@@ -1381,6 +1381,28 @@ migration-drift-guard rule in `AGENTS.md`).
   its `cnt_<token>` count exists (migration 20261101100930). The lists, the contract, the pipeline and how it is
   built: `docs/ops/ADVANCED_FILTER_APARTMENTS_GROUP.md`. Changing a list is a product decision.
 
+- **The Villas & Houses group of «🎯 Refine with AI» has owner-LOCKED chip lists (2026-11-01, built 2026-11-02)** —
+  ONE pair of lists at group level (Villa = Duplex), Buy: age → bathrooms 3+…6+ → street width → direction → 🏠 space ·
+  🌳 outdoors & fun · 🧱 build, safety & papers; Rent: installments → bathrooms 2+…5+ → age → 🔑 comfort · 🏠 space ·
+  🌳 outdoors · ✨ extras & smart. Merged chips (garden & yard, jacuzzi & sauna, cameras & smart home, tank & well,
+  smart home & entry) match when EITHER fact is true (migration 20261102055240). `docs/ops/ADVANCED_FILTER_VILLAS_GROUP.md`.
+
+- **Owner rules for every chip list (handoff 2026-11-01, recorded 2026-11-02):**
+  1. Whatever the AI reads must help matching — nothing it finds in a description sits unused (AI teaches → free word
+     reader → filter value; or an index-level correction sampled against the source). Source tables untouched.
+  2. Land with no services is Raw land, shown in BOTH places: «خام» / «بدون خدمات» / «لا يوجد كهرباء/مياه» also under
+     «Raw land», keeps its own type, chip «🚧 No services yet», never «All services». Read «لا يوجد» only as the value of
+     the services field, never across aqar's form labels. (Not built yet.)
+  3. «Villa» ads that call themselves تاون هاوس are townhouses; Duplex + Townhouse become ONE type «Duplex & Townhouse».
+     (Not built yet; needs its own owner go.)
+  4. One payment question on every rent list, «💳 Rent now, pay later / split payments», two chips; under the provider
+     logos a disclaimer: Ezhalah does not guarantee the payment method or the provider — confirm with the lister
+     (owner 2026-11-02, `af-payment-note`). The split-payments chip is not built yet.
+  5. No «Nearby» / «suitable for» chips — the seller's opinion; the map shows what's near. «On a main road» is a fact
+     about the plot and stays.
+  6. A chip says only what the ad says · Skip on every question · pick many · a chip at 0 hides itself · source tables
+     untouched.
+
 ---
 
 ## 21. Open questions / decisions still pending

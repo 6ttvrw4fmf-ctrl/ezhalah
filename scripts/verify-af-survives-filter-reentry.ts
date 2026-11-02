@@ -71,7 +71,7 @@ const lifted = await liftSymbols(
   join(ROOT, 'src/data/advancedFilters.ts'),
   // addAmenities is a plain function two questions use as their whole apply(); the rest are object
   // literals whose members are all lazily evaluated, so apply() needs no prelude at all.
-  [{ header: 'function addAmenities' }, { header: 'const AGE_LADDER', endsWith: /^\];$/ }, ...QUESTION_HELPER_SYMBOLS, ...QUESTION_CONSTS.map((header) => ({ header: `const ${header}` }))],
+  [{ header: 'function addAmenities' }, { header: 'export function bathroomLadder' }, { header: 'const AGE_LADDER', endsWith: /^\];$/ }, ...QUESTION_HELPER_SYMBOLS, ...QUESTION_CONSTS.map((header) => ({ header: `const ${header}` }))],
   ['addAmenities', ...QUESTION_CONSTS],
   // §12 also CALLS AMENITIES_QUESTION.resolveOptions, to read the token set the card can offer from
   // the question itself rather than hand-listing it here. Its cohort logic is imported REAL; only
@@ -191,6 +191,7 @@ const ANSWER_KEYS: Record<string, string[]> = {
   // Building ladders, which write one p_amenities token each.
   comfort: ['elevator'], space: ['majlis'], fun: ['pool'], safety: ['cameras'], perks: ['gym'], build: ['warranty'],
   extras: ['storage'], who: ['singles'], features: ['basement'], services: ['sanitation'],
+  outdoors: ['pool'], smart: ['elevator'], papers: ['warranty'], // the Villas & Houses cards (owner 2026-11-01/02)
   apartments: ['apts8'], shops: ['has_shops'],
 };
 const LEGS = {

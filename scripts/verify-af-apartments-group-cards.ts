@@ -54,8 +54,9 @@ check('Buy → Residential Building: age · street width · direction · apartme
 check('Annual rent → Residential Building: no direction, no furnished question; features · services',
   !cohortAllows(Q({ deal: 'Rent', types: ['Residential Building'] }), 'direction')
   && cardPlan(Q({ deal: 'Rent', types: ['Residential Building'] })).map((c) => c.id).sort().join() === 'features,services');
-check('Villa is untouched (no cards; its own cohort list still asks)', cardPlan(Q({ deal: 'Rent', types: ['Villa'] })).length === 0
-  && cohortAllows(Q({ deal: 'Rent', types: ['Villa'] }), 'bathrooms') && cohortAllows(Q({ deal: 'Rent', types: ['Villa'] }), 'amenities'));
+// (Villa carried no cards when this was written; it got the owner's group lists on 2026-11-02 — verify-af-villas-group-cards.ts.)
+check('Rest House is untouched (no cards; its own cohort list still asks)', cardPlan(Q({ deal: 'Rent', types: ['Rest House'] })).length === 0
+  && cohortAllows(Q({ deal: 'Rent', types: ['Rest House'] }), 'amenities'));
 
 console.log('\n§2 the owner\'s worked examples (intersection, never union)\n');
 const aptFloor = cardPlan(Q({ deal: 'Rent', types: ['Apartment', 'Floor'] }));
@@ -143,12 +144,12 @@ const union = await mutant(["    .map((id) => ({ id, keys: (primary[id] ?? []).f
 mustCatch('UNION instead of intersection (bills included offered on Apartment + Floor)', keysOf(union(Q({ deal: 'Rent', types: ['Apartment', 'Floor'] }))).has('bills_included'));
 const noPool = await mutant(["  if (legs.length === 1) return kept;", "  return kept;"]);
 mustCatch('a mixed scope that never pools its small cards (the owner\'s all-three-deals example breaks)', flat(noPool(three)) !== flat(cardPlan(three)));
-// The real mutant: a leg with NO lists (Villa) is skipped by the intersection instead of certifying nothing — both the
-// guard and the per-chip test must read null as «no constraint» for Villa + Apartment to inherit the apartment chips.
+// The real mutant: a leg with NO lists (Rest House) is skipped by the intersection instead of certifying nothing — both the
+// guard and the per-chip test must read null as «no constraint» for Rest House + Apartment to inherit the apartment chips.
 const anyLeg = await mutant(["  if (unions.some((u) => !u)) return [];", "  "],
   ["unions.every((u) => u!.has(k))", "unions.every((u) => !u || u.has(k))"]);
-mustCatch('a leg with no lists certifying nothing is read as «no constraint» (Villa + Apartment would get apartment chips)',
-  anyLeg(Q({ deal: 'Rent', types: ['Apartment', 'Villa'] })).length > 0);
+mustCatch('a leg with no lists certifying nothing is read as «no constraint» (Rest House + Apartment would get apartment chips)',
+  anyLeg(Q({ deal: 'Rent', types: ['Apartment', 'Rest House'] })).length > 0);
 const monthlyVeto = await mutant(["    .filter((deal) => !COHORT_CARDS[type] || COHORT_QUESTIONS[type]?.[deal])", "    .filter(() => true)"]);
 mustCatch('Floor\'s empty short-stay leg vetoing its Rent ∩ Buy list', monthlyVeto(floorBoth).length === 0);
 const wrongShort = await mutant(["  const types = shortStays ? ['Apartment'] : scopeCleanTypes(q);", "  const types = scopeCleanTypes(q);"]);

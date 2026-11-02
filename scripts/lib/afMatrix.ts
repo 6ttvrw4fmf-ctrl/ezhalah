@@ -149,6 +149,7 @@ export const QUESTION_CONSTS = [
   'STREET_WIDTH_QUESTION', 'DIRECTION_QUESTION', 'RATING_QUESTION', 'UNIT_SUBTYPE_QUESTION',
   // the themed cards (owner 2026-10-31 / 11-01): two consts carry id 'space' (short stays / yearly wording)
   'COMFORT_QUESTION', 'SPACE_QUESTION', 'SPACE_YEARLY_QUESTION', 'SAFETY_QUESTION', 'PERKS_QUESTION', 'BUILD_QUESTION',
+  'OUTDOORS_QUESTION', 'SMART_QUESTION', 'PAPERS_QUESTION',
   'EXTRAS_QUESTION', 'WHO_QUESTION', 'FEATURES_QUESTION', 'SERVICES_QUESTION', 'FUN_QUESTION',
   'APARTMENTS_QUESTION', 'SHOPS_QUESTION',   // the Residential Building ladders
 ];
@@ -161,7 +162,7 @@ export const QUESTION_HELPER_SYMBOLS = [
 export const afLiftImports = (root: string): string => {
   const href = (p: string) => JSON.stringify(pathToFileURL(join(root, p)).href);
   return [
-    `import { cohortAllows, scopeCleanTypes, intersectChips, isShortStaysScope, shortStaysAskTier, cardKeys, groupAskTierFor, hasCards, isCardId } from ${href('src/lib/afCohorts.ts')};`,
+    `import { cohortAllows, scopeCleanTypes, scopeDeals, intersectChips, isShortStaysScope, shortStaysAskTier, cardKeys, groupAskTierFor, hasCards, isCardId } from ${href('src/lib/afCohorts.ts')};`,
     `import { CHIP_DEFS } from ${href('src/lib/afChips.ts')};`,
   ].join('\n');
 };
@@ -175,6 +176,7 @@ export async function loadLifted(root: string): Promise<Lifted> {
       { header: 'const AGE_LADDER', endsWith: /^\];$/ },
       { header: 'const DIRECTION_DEFS', endsWith: /^\];$/ },
       { header: 'function addAmenities' },
+      { header: 'export function bathroomLadder' },
       ...QUESTION_HELPER_SYMBOLS,
       ...QUESTION_CONSTS.map((h) => ({ header: `const ${h}` })),
       { header: 'export const ADVANCED_QUESTIONS', endsWith: /^\];$/ },
@@ -271,19 +273,30 @@ const AMENITY_COL: Record<string, string> = {
   nursery: 'nursery', free_maintenance: 'free_maintenance', intercom: 'intercom', fire_system: 'fire_system', ev_charger: 'ev_charger',
   central_vacuum: 'central_vacuum', insulation: 'insulation', dining_majlis: 'dining_majlis', own_bathroom: 'own_bathroom',
   fridge: 'fridge', whole_floor: 'whole_floor', singles: 'singles', families: 'families',
+  // Villas & Houses (migration 20261102055240): seven text facts, column name = token
+  women_majlis: 'women_majlis', outdoor_kitchen: 'outdoor_kitchen', outdoor_diwaniya: 'outdoor_diwaniya',
+  waterfall: 'waterfall', well: 'well', irrigation: 'irrigation', sports_court: 'sports_court',
 };
 // The 6 DERIVED tokens (same migration): one p_amenities slug standing for a predicate over other columns.
 //   separate_meters → (separate_electricity_meter OR separate_water_meter) — SQL three-valued: a row is KNOWN-NOT only
 //   when both meters are false; one false beside a NULL is UNKNOWN (the OR is NULL) and must never be served.
 //   apts4/8/12/20 → apartments_count >= n (a nested «at least» ladder, single-select); has_shops → shops_count >= 1.
 const METERS = ['separate_electricity_meter', 'separate_water_meter'];
-const separateMeters = (): Meaning => ({
-  params: { p_amenities: ['separate_meters'] }, cntCol: 'cnt_separate_meters', cols: METERS,
-  rest: `or=(${METERS.map((c) => `${c}.is.true`).join(',')})`,
-  notMatching: METERS.map((c) => `${c}=is.false`).join('&'),
-  unknown: `or=(and(${METERS[0]}.is.null,${METERS[1]}.not.is.true),and(${METERS[1]}.is.null,${METERS[0]}.not.is.true))`,
-  satisfies: (r) => METERS.some((c) => r[c] === true),
-});
+// Every «EITHER column» token: separate_meters (20261101100930) and the five villa merged chips (20261102055240).
+const EITHER_COLS: Record<string, string[]> = {
+  separate_meters: METERS, garden_yard: ['garden', 'yard'], jacuzzi_sauna: ['jacuzzi', 'sauna'],
+  cameras_smart_home: ['cameras', 'smart_home'], water_tank_well: ['water_tank', 'well'], smart_home_entry: ['smart_home', 'smart_entry'],
+};
+const eitherOf = (token: string): Meaning => {
+  const C = EITHER_COLS[token];
+  return {
+    params: { p_amenities: [token] }, cntCol: `cnt_${token}`, cols: C,
+    rest: `or=(${C.map((c) => `${c}.is.true`).join(',')})`,
+    notMatching: C.map((c) => `${c}=is.false`).join('&'),
+    unknown: `or=(and(${C[0]}.is.null,${C[1]}.not.is.true),and(${C[1]}.is.null,${C[0]}.not.is.true))`,
+    satisfies: (r) => C.some((c) => r[c] === true),
+  };
+};
 const APTS_RUNG: Record<string, number> = { apts4: 4, apts8: 8, apts12: 12, apts20: 20 };
 const DIR_COL: Record<string, string> = {
   'شمال': 'cnt_dir_n', 'جنوب': 'cnt_dir_s', 'شرق': 'cnt_dir_e', 'غرب': 'cnt_dir_w',
@@ -322,13 +335,14 @@ export function optionMeaning(field: string, key: string): Meaning | null {
     // The themed cards (owner 2026-10-31 / 11-01) are the amenities card split by theme — same tokens, same meaning,
     // plus the one derived chip (separate_meters) a card may carry.
     case 'comfort': case 'space': case 'safety': case 'perks': case 'build': case 'extras': case 'who': case 'features': case 'services': case 'fun':
+    case 'outdoors': case 'smart': case 'papers':
     case 'amenities':
-      if (key === 'separate_meters') return separateMeters();
+      if (EITHER_COLS[key]) return eitherOf(key);
       return AMENITY_COL[key] ? bool(AMENITY_COL[key], `cnt_${key}`, { p_amenities: [key] }) : null;
     // The Residential Building ladders (owner 2026-10-31): one token per rung, the predicate on the ad's own number.
     case 'apartments': return APTS_RUNG[key] ? ladder('apartments_count', `cnt_${key}`, { p_amenities: [key] }, APTS_RUNG[key]) : null;
     case 'shops': return key === 'has_shops' ? ladder('shops_count', 'cnt_has_shops', { p_amenities: ['has_shops'] }, 1) : null;
-    case 'bathrooms': return /^[1-4]$/.test(key) ? ladder('bathrooms', `cnt_bath${key}`, { p_bath_min: Number(key) }, Number(key)) : null;
+    case 'bathrooms': return /^[1-6]$/.test(key) ? ladder('bathrooms', `cnt_bath${key}`, { p_bath_min: Number(key) }, Number(key)) : null; // 5+/6+: the villa ladders (20261102055240)
     case 'street_width': return /^(15|20|25|30)$/.test(key) ? ladder('street_width_m', `cnt_stw${key}`, { p_street_width_min: Number(key) }, Number(key)) : null;
     case 'furnished':
       if (key === 'yes') return bool('furnished', 'cnt_furnished', { p_furnished: true });
@@ -407,6 +421,7 @@ export function fieldMeaning(field: string): FieldMeaning | null {
   });
   switch (field) {
     case 'comfort': case 'space': case 'safety': case 'perks': case 'build': case 'extras': case 'who': case 'features': case 'services': case 'fun':
+    case 'outdoors': case 'smart': case 'papers':
     case 'amenities': return { ...single('cnt_total_base', ['cnt_amen_unknown']), combine: 'and',
       paramsBoth: (a, b) => ({ p_amenities: [...(a.p_amenities as string[]), ...(b.p_amenities as string[])] }) };
     // «How many apartments?» is a single-select «at least» ladder like bathrooms (its apply keeps the first key);

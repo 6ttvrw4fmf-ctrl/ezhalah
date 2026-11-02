@@ -80,6 +80,9 @@ function facetItems(f: AfFacet, locale: 'ar' | 'en' = 'ar'): string[] {
       case 'who':
       case 'features':
       case 'services':
+      case 'outdoors':
+      case 'smart':
+      case 'papers':
       case 'apartments':
       case 'shops':
         for (const l of f.labels) items.push(l);
@@ -179,6 +182,9 @@ export const AF_LINE_LABEL: Record<string, string> = {
   fun: 'Fun',
   safety: 'Safety & smart',
   perks: 'Building perks',
+  outdoors: 'Outdoors & fun',
+  smart: 'Extras & smart',
+  papers: 'Build, safety & papers',
   build: 'Build & services',
   extras: 'Extras',
   who: 'Who it is for',
@@ -237,6 +243,9 @@ const SKIPPED_QUESTION: Record<string, string> = {
   fun: 'الترفيه',
   safety: 'الأمان والذكاء',
   perks: 'مميزات المبنى',
+  outdoors: 'الخارج والترفيه',
+  smart: 'الإضافات والذكاء',
+  papers: 'البناء والأمان والأوراق',
   build: 'البناء والخدمات',
   extras: 'الإضافات',
   who: 'لمين السكن',

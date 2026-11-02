@@ -430,7 +430,9 @@ AF_COLUMNS = ("furnished", "elevator", "parking", "kitchen", "air_conditioner", 
               "self_checkin", "wifi", "bills_included", "jacuzzi", "smart_tv", "billiards", "cleaning_service",
               "soundproof", "cameras", "guard", "smart_entry", "smart_home", "central_gas", "sauna", "kids_play_area",
               "nursery", "free_maintenance", "intercom", "fire_system", "ev_charger", "central_vacuum", "insulation",
-              "dining_majlis", "own_bathroom", "fridge", "whole_floor", "singles", "families")
+              "dining_majlis", "own_bathroom", "fridge", "whole_floor", "singles", "families",
+              # … and the 7 Villas & Houses facts (owner lists 2026-11-01, built 2026-11-02), in the migration's order
+              "women_majlis", "outdoor_kitchen", "outdoor_diwaniya", "waterfall", "well", "irrigation", "sports_court")
 # The NUMERIC index columns an ad's text may fill — public.text_facts_af_num_columns(), same order. Rule B for
 # numbers (owner 2026-10-25, handoff decision #1): the number fills a BLANK box only, the site's own number is never
 # replaced. The DB CHECK admits a JSON number 4..150 with its quote; the checker already refuses a corner plot,

@@ -30,7 +30,7 @@ export type AfIntentId =
   | 'rating' | 'rnpl' | 'unit_subtype' | 'furnished' | 'amenities'
   // The Apartments & Co-living cards and the Residential Building ladders (owner 2026-10-31): bag questions whose
   // tokens the amenity path certifies per token (partitionRequestedAmenities); listed so the registry is COMPLETE.
-  | 'comfort' | 'space' | 'safety' | 'perks' | 'build' | 'extras' | 'who' | 'features' | 'services' | 'fun'
+  | 'comfort' | 'space' | 'safety' | 'perks' | 'build' | 'extras' | 'who' | 'features' | 'services' | 'fun' | 'outdoors' | 'smart' | 'papers'
   | 'apartments' | 'shops';
 
 export type AfIntent = {
@@ -220,6 +220,10 @@ export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
     // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
     id: 'perks', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q,
   },
+  // The Villas & Houses cards (owner 2026-11-01/02) — same shape, registry-only.
+  outdoors: { id: 'outdoors', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  smart: { id: 'smart', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
+  papers: { id: 'papers', vocabulary: [], canonicalize: () => null, apply: (q) => q, clear: (q) => q },
   build: {
     // A themed card writes the one q.amenities bag; its tokens are certified per token by the amenity path
     // (certifiedAmenityKeys = the cards' own chips), so this entry only completes the registry.
@@ -274,7 +278,7 @@ export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
 
 /** Ids the generic apply loop owns. amenities is handled by its own per-token gate. */
 // Bag intents have no canonical value of their own: the amenity path certifies their tokens one by one.
-export const BAG_INTENT_IDS: ReadonlySet<string> = new Set(['amenities', 'comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun']);
+export const BAG_INTENT_IDS: ReadonlySet<string> = new Set(['amenities', 'comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun', 'outdoors', 'smart', 'papers']);
 export const GENERIC_INTENT_IDS: AfIntentId[] =
   (Object.keys(AF_INTENTS) as AfIntentId[]).filter((id) => !BAG_INTENT_IDS.has(id));
 

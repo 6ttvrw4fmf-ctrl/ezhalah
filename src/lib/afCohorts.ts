@@ -49,7 +49,8 @@ export function shortStaysAskTier(id: string): number {
 // its cnt_<token> and its af_canon column (migration 20261101100930). Nothing else is planned by hand: every
 // combination a user can make is computed by cardPlan() below, never by a hand-written list.
 export type CohortDeal = 'RentAnnual' | 'Buy' | 'RentMonthly';
-export const CARD_IDS = ['comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun'] as const;
+// outdoors / smart / papers: the Villas & Houses cards (owner lists 2026-11-01, approved 2026-11-02).
+export const CARD_IDS = ['comfort', 'space', 'safety', 'perks', 'build', 'extras', 'who', 'features', 'services', 'fun', 'outdoors', 'smart', 'papers'] as const;
 export type CardId = (typeof CARD_IDS)[number];
 type CardLists = Partial<Record<CardId, readonly string[]>>;
 // Short stays = Gathern + Aqar Monthly, one pool for the whole group (owner 2026-10-31): Studio, serviced
@@ -65,7 +66,30 @@ const APARTMENT_BUY_CARDS: CardLists = {
   safety: ['cameras', 'guard', 'smart_entry', 'smart_home', 'intercom', 'fire_system', 'ev_charger'],
   build: ['warranty', 'water_tank', 'central_gas', 'separate_meters', 'central_vacuum', 'pool', 'gym'],
 };
+// ── «Villas & Houses» (owner's locked lists 2026-11-01, approved for build 2026-11-02; docs/ops/ADVANCED_FILTER_VILLAS_GROUP.md)
+// GROUP-level lists: Villa and Duplex (تاون هاوس rides Duplex, بيت/قصر ride Villa) share ONE pair of lists, so the
+// group box with no type picked intersects to the full lists. Merged chips (garden_yard, jacuzzi_sauna, cameras_smart_home,
+// water_tank_well, smart_home_entry) match when EITHER fact is true; women_majlis, outdoor_kitchen, outdoor_diwaniya,
+// waterfall, well, irrigation, sports_court are new word-reader facts — a chip with 0 ads in scope hides itself.
+//   Buy  🏠 space · 🌳 outdoors & fun · 🧱 build, safety & papers (kitchen/AC/laundry/storage dropped: almost every villa has them)
+//   Rent 🔑 comfort · 🏠 space · 🌳 outdoors · ✨ extras & smart (street width / direction not asked on rent)
+// Questions: Buy age → bathrooms → street width → direction → space → outdoors → papers (no installments: 0 ads);
+// Rent installments → bathrooms → age → comfort → space → outdoors → smart.
+const VILLA_BUY_CARDS: CardLists = {
+  space: ['majlis', 'women_majlis', 'dining_majlis', 'maid_room', 'driver_room', 'annex', 'roof', 'elevator'],
+  outdoors: ['pool', 'garden_yard', 'grill', 'outdoor_kitchen', 'outdoor_diwaniya', 'waterfall', 'garage', 'jacuzzi_sauna'],
+  papers: ['warranty', 'sanitation', 'water_tank_well', 'separate_meters', 'electronic_deed', 'basement', 'two_entrances', 'car_entrance', 'cameras_smart_home'],
+};
+const VILLA_RENT_CARDS: CardLists = {
+  comfort: ['kitchen', 'ac', 'furnished', 'parking', 'car_entrance', 'private_entrance', 'laundry_room'],
+  space: ['majlis', 'women_majlis', 'dining_majlis', 'maid_room', 'driver_room', 'annex', 'roof'],
+  outdoors: ['pool', 'garden_yard', 'grill', 'irrigation', 'garage', 'storage', 'balcony'],
+  smart: ['elevator', 'gym', 'jacuzzi_sauna', 'sports_court', 'smart_home_entry', 'central_gas', 'cameras'],
+};
+const VILLA_CARDS: Partial<Record<CohortDeal, CardLists>> = { Buy: VILLA_BUY_CARDS, RentAnnual: VILLA_RENT_CARDS, RentMonthly: SHORT_STAYS_CARDS };
 export const COHORT_CARDS: Record<string, Partial<Record<CohortDeal, CardLists>>> = {
+  Villa: VILLA_CARDS,
+  Duplex: VILLA_CARDS, // shares the villa lists (owner 2026-11-02): 850 Buy / 76 Rent ads, chips self-hide at 0
   Apartment: {
     RentAnnual: {
       comfort: ['kitchen', 'ac', 'parking', 'elevator', 'furnished', 'private_entrance', 'bills_included'],
@@ -198,11 +222,11 @@ export function cardKeys(q: SearchQuery, id: string): string[] {
 // facing → apartments → shops → the cards, comfort first, fun last. A tier only reorders questions that already
 // cleared the usefulness gates; it never forces one (afRanking.ts). Scopes without cards keep askTier().
 const GROUP_ASK_ORDER = ['rnpl', 'bathrooms', 'property_age', 'street_width', 'direction', 'apartments', 'shops',
-  'comfort', 'space', 'who', 'extras', 'safety', 'perks', 'build', 'features', 'services', 'fun'] as const;
+  'comfort', 'space', 'who', 'outdoors', 'extras', 'safety', 'smart', 'perks', 'build', 'papers', 'features', 'services', 'fun'] as const;
 // Every locked Buy list (Apartment, Floor, Building) opens with age, then bathrooms (owner 2026-10-31 / 2026-11-01).
 // A Buy-only scope asks in that order; a rent or mixed scope (Rent + Buy on a Floor: bathrooms · age) keeps the rent order.
 const BUY_ASK_ORDER = ['rnpl', 'property_age', 'bathrooms', 'street_width', 'direction', 'apartments', 'shops',
-  'comfort', 'space', 'who', 'extras', 'safety', 'perks', 'build', 'features', 'services', 'fun'] as const;
+  'comfort', 'space', 'who', 'outdoors', 'extras', 'safety', 'smart', 'perks', 'build', 'papers', 'features', 'services', 'fun'] as const;
 export function groupAskTier(id: string, q?: SearchQuery): number {
   const order: readonly string[] = q && scopeDeals(q).join() === 'Buy' ? BUY_ASK_ORDER : GROUP_ASK_ORDER;
   const i = order.indexOf(id);
@@ -293,11 +317,23 @@ export const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: str
   // plus the villa staples. Buy: NO rnpl (yes=0), NO furnished (yes below floor), and AC is
   // deliberately absent from the amenity data on Buy (aqar dropped it from بيع forms — chip
   // gates itself out). بيت rides the same search with no interview (n=3–51); تاون هاوس moved to Duplex (owner 2026-10-12).
+  // 2026-11-02 (owner's locked lists of 2026-11-01): the CARDS replace the generic amenities question — Buy: age →
+  // bathrooms → street width → direction → space → outdoors → papers; Rent: installments → bathrooms → age → comfort →
+  // space → outdoors → smart. `amenities`/`furnished` stay
+  // listed for the typed chat sentence, exactly as the Apartment row does. Duplex (below) shares these lists.
   Villa: {
-    RentAnnual: ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished', 'street_width', 'direction'],
-    Buy: ['property_age', 'amenities', 'bathrooms', 'street_width', 'direction'],
+    RentAnnual: ['rnpl', 'bathrooms', 'property_age', 'comfort', 'space', 'outdoors', 'smart', 'amenities', 'furnished'],
+    Buy: ['property_age', 'bathrooms', 'street_width', 'direction', 'space', 'outdoors', 'papers', 'amenities'],
     // Monthly 2026-08-18: n=362, 245 rated; bathrooms 92% known; parking 57% (elevator 5% self-gates).
-    RentMonthly: ['rating', 'bathrooms', 'amenities'],
+    // The short-stays cards ride here like the Apartment row, so a 'both'-periods scope still intersects to cards.
+    RentMonthly: ['rating', 'bathrooms', 'amenities', 'comfort', 'space', 'fun'],
+  },
+  // Duplex: the villa lists, shared (owner 2026-11-02) — the «Villas & Houses» box with no type picked is Villa ∩
+  // Duplex, and the owner wants that box to open the full villa interview. Its own counts are small (850 Buy /
+  // 76 Rent, rnpl 0), so chips and questions below the usefulness gates hide themselves per scope.
+  Duplex: {
+    RentAnnual: ['rnpl', 'bathrooms', 'property_age', 'comfort', 'space', 'outdoors', 'smart', 'amenities', 'furnished'],
+    Buy: ['property_age', 'bathrooms', 'street_width', 'direction', 'space', 'outdoors', 'papers', 'amenities'],
   },
   // Commercial + rural + land cohorts (2026-08-16 overnight profiling, fresh-band designed).
   // AC is fresh-DEAD on commercial (aqar form change) and is deliberately enabled NOWHERE here
@@ -340,9 +376,6 @@ export const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: str
   // Logistics» is capped at 1 by Warehouse ∩ Workshop no matter what Factory carries, and «Villas &
   // Houses» needs a SECOND supported Duplex field it does not have. See
   // scripts/verify-af-group-cohort-coverage.ts for the pinned per-group matrix.
-  Duplex: {
-    Buy: ['bathrooms'],
-  },
   Factory: {
     RentAnnual: ['street_width'],
     Buy: ['street_width'],
